@@ -1,0 +1,468 @@
+// P2 Files & Diff（RFC §8.4）：拿 cwd 的最终 git diff（vs HEAD 的增删），与工具足迹对照。
+// 用 execFile（非 exec，无 shell 注入）。非 git 仓 / 出错 → 返回空，不连累 UI。
+import { execFile } from 'node:child_process'
+import { copyFile, mkdir, mkdtemp, open, realpath, rm, stat, utimes } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
+import { promisify } from 'node:util'
+import type { DiffFile, TurnDiffReason, TurnDiffSnapshot } from '../../shared/trace.js'
+
+const pexecFile = promisify(execFile)
+const TURN_DIFF_DEADLINE_MS = 5_000
+const TURN_DIFF_PATCH_DEADLINE_MS = 2_000
+const TURN_DIFF_PATCH_MAX_BYTES = 1024 * 1024
+const TURN_DIFF_PATCH_MAX_FILES = 80
+const GIT_MAX_BUFFER = 16 * 1024 * 1024
+
+class GitDeadlineError extends Error {}
+
+interface GitCommandOptions {
+  cwd: string
+  env?: NodeJS.ProcessEnv
+  deadline: number
+  allowExitOne?: boolean
+}
+
+async function gitCommand(args: string[], options: GitCommandOptions): Promise<string> {
+  const timeout = options.deadline - Date.now()
+  if (timeout <= 0) throw new GitDeadlineError('Git snapshot deadline exceeded')
+  try {
+    const { stdout } = await pexecFile('git', args, {
+      cwd: options.cwd,
+      env: options.env,
+      timeout,
+      killSignal: 'SIGKILL',
+      maxBuffer: GIT_MAX_BUFFER
+    })
+    return stdout
+  } catch (error) {
+    const e = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string }
+    const exitCode = (error as { code?: unknown }).code
+    if (e.killed || e.signal === 'SIGKILL' || e.code === 'ETIMEDOUT') throw new GitDeadlineError('Git snapshot deadline exceeded')
+    if (options.allowExitOne && exitCode === 1) return ''
+    throw error
+  }
+}
+
+function reasonOf(error: unknown): TurnDiffReason {
+  return error instanceof GitDeadlineError ? 'deadline' : 'git_error'
+}
+
+function filterDriverOverrides(config: string): string[] {
+  const names = new Set<string>()
+  for (const line of config.split('\n')) {
+    const key = line.trim().split(/\s+/, 1)[0]
+    const match = /^filter\.(.+)\.(?:clean|process|required)$/i.exec(key)
+    if (match?.[1]) names.add(match[1])
+  }
+  return [...names].flatMap((name) => [
+    '-c', `filter.${name}.clean=`,
+    '-c', `filter.${name}.process=`,
+    '-c', `filter.${name}.required=false`
+  ])
+}
+
+function snapshotGitArgs(filterOverrides: string[], command: string[]): string[] {
+  return ['--no-optional-locks', '-c', 'core.fsmonitor=false', ...filterOverrides, ...command]
+}
+
+async function copyIndexWithTimestamps(source: string, target: string): Promise<void> {
+  // Git 用 index mtime 判定 racy-clean。普通 copy 会把 mtime 改成“现在”，可能漏掉
+  // 本轮开始前已存在、但尺寸/mtime 恰好与 index entry 相同的内容变化。
+  const sourceStat = await stat(source)
+  await copyFile(source, target)
+  // 向下截到毫秒，宁可让 Git 多 hash 一次，也不能因浮点进位把副本写成“比源 index 更新”。
+  await utimes(target, Math.floor(sourceStat.atimeMs) / 1_000, Math.floor(sourceStat.mtimeMs) / 1_000)
+}
+
+async function loadSnapshotOverrides(cwd: string, tempDir: string, deadline: number): Promise<string[]> {
+  const filterConfig = await gitCommand(['config', '--get-regexp', '^filter\\..*\\.(clean|process|required)$'], {
+    cwd,
+    deadline,
+    allowExitOne: true
+  })
+  return [...filterDriverOverrides(filterConfig), '-c', `core.hooksPath=${join(tempDir, 'hooks-disabled')}`]
+}
+
+async function writeSnapshotTree(options: {
+  cwd: string
+  pathspec: string[]
+  env: NodeJS.ProcessEnv
+  deadline: number
+  filterOverrides: string[]
+  sourceIndex: string
+  targetIndex: string
+}): Promise<string> {
+  const { cwd, pathspec, env, deadline, filterOverrides, sourceIndex, targetIndex } = options
+  let copied = false
+  try {
+    await copyIndexWithTimestamps(sourceIndex, targetIndex)
+    copied = true
+  } catch {}
+
+  try {
+    // 从 HEAD 重建逻辑内容，清掉真实 index 中与观测无关的 staged/unmerged 状态；
+    // really-refresh 再强制核对 assume-unchanged，避免它让 add 漏掉真实改动。
+    await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', '--reset', 'HEAD']), { cwd, env, deadline })
+    await gitCommand(snapshotGitArgs(filterOverrides, ['update-index', '--really-refresh']), {
+      cwd,
+      env,
+      deadline,
+      allowExitOne: true
+    })
+    await gitCommand(snapshotGitArgs(filterOverrides, ['add', '-A', '--', ...pathspec]), { cwd, env, deadline })
+    return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
+  } catch (error) {
+    if (!copied || error instanceof GitDeadlineError) throw error
+    await rm(targetIndex, { force: true })
+    await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', 'HEAD']), { cwd, env, deadline })
+    await gitCommand(snapshotGitArgs(filterOverrides, ['add', '-A', '--', ...pathspec]), { cwd, env, deadline })
+    return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
+  }
+}
+
+export interface GitTurnDiffCapture {
+  beforeAt: string
+  captureMs: number
+  status: 'ready' | 'unavailable' | 'timeout' | 'failed'
+  reason?: TurnDiffReason
+  repoRoot?: string
+  scope?: string
+  beforeTree?: string
+  tempDir?: string
+  objectDir?: string
+  alternateObjectDirs?: string
+  filterOverrides?: string[]
+  pathspec?: string[]
+  finishPromise?: Promise<TurnDiffSnapshot>
+}
+
+function capturePathspec(repoRoot: string, scope: string, excludedPaths: string[]): string[] {
+  const scopeRoot = scope === '.' ? repoRoot : resolve(repoRoot, scope)
+  const exclusions = excludedPaths.flatMap((path) => {
+    const absolute = resolve(path)
+    const fromScope = relative(scopeRoot, absolute)
+    if (fromScope.startsWith('..') || isAbsolute(fromScope)) return []
+    const fromRoot = relative(repoRoot, absolute).split('\\').join('/')
+    return fromRoot && !fromRoot.startsWith('..') ? [`:(top,exclude,literal)${fromRoot}`] : []
+  })
+  const literalScope = scope === '.' ? '.' : `:(top,literal)${scope.split('\\').join('/')}`
+  return [literalScope, ...new Set(exclusions)]
+}
+
+function terminalSnapshot(
+  capture: GitTurnDiffCapture,
+  status: TurnDiffSnapshot['status'],
+  reason: TurnDiffReason | undefined,
+  files: DiffFile[],
+  afterAt: string,
+  finishMs: number,
+  cleanup: TurnDiffSnapshot['cleanup']
+): TurnDiffSnapshot {
+  return {
+    version: 1,
+    status,
+    ...(reason ? { reason } : {}),
+    files,
+    ...(capture.repoRoot ? { repoRoot: capture.repoRoot } : {}),
+    ...(capture.scope != null ? { scope: capture.scope } : {}),
+    beforeAt: capture.beforeAt,
+    afterAt,
+    captureMs: capture.captureMs + finishMs,
+    cleanup
+  }
+}
+
+async function cleanupCapture(capture: GitTurnDiffCapture): Promise<TurnDiffSnapshot['cleanup']> {
+  if (!capture.tempDir) return 'ok'
+  const dir = capture.tempDir
+  capture.tempDir = undefined
+  try {
+    await rm(dir, { recursive: true, force: true })
+    return 'ok'
+  } catch {
+    return 'failed'
+  }
+}
+
+export async function beginGitTurnDiff(
+  cwd: string,
+  deadlineMs = TURN_DIFF_DEADLINE_MS,
+  captureRoot?: string,
+  excludedPaths: string[] = []
+): Promise<GitTurnDiffCapture> {
+  const started = Date.now()
+  const beforeAt = new Date(started).toISOString()
+  const deadline = started + deadlineMs
+  let tempDir: string | undefined
+  try {
+    const canonicalCwd = await realpath(cwd)
+    let inside: string
+    try {
+      inside = (await gitCommand(['rev-parse', '--is-inside-work-tree'], { cwd: canonicalCwd, deadline })).trim()
+    } catch (error) {
+      if (error instanceof GitDeadlineError) throw error
+      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
+    }
+    if (inside !== 'true') return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
+    let head = ''
+    try {
+      head = (await gitCommand(['rev-parse', '--verify', 'HEAD'], { cwd: canonicalCwd, deadline })).trim()
+    } catch (error) {
+      if (error instanceof GitDeadlineError) throw error
+    }
+    if (!head) return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
+    const repoRoot = (await gitCommand(['rev-parse', '--show-toplevel'], { cwd: canonicalCwd, deadline })).trim()
+    const commonDirRaw = (await gitCommand(['rev-parse', '--git-common-dir'], { cwd: canonicalCwd, deadline })).trim()
+    const commonDir = isAbsolute(commonDirRaw) ? commonDirRaw : resolve(canonicalCwd, commonDirRaw)
+    const indexPathRaw = (await gitCommand(['rev-parse', '--git-path', 'index'], { cwd: canonicalCwd, deadline })).trim()
+    const indexPath = isAbsolute(indexPathRaw) ? indexPathRaw : resolve(canonicalCwd, indexPathRaw)
+    const scope = relative(repoRoot, canonicalCwd) || '.'
+    if (scope.startsWith('..')) throw new Error('Selected cwd is outside the Git worktree')
+    const canonicalExcludedPaths = await Promise.all(excludedPaths.map(async (path) => {
+      try {
+        return await realpath(path)
+      } catch {
+        return resolve(path)
+      }
+    }))
+    const pathspec = capturePathspec(repoRoot, scope, canonicalExcludedPaths)
+    if (captureRoot) await mkdir(captureRoot, { recursive: true, mode: 0o700 })
+    tempDir = await mkdtemp(join(captureRoot ?? tmpdir(), 'scry-turn-diff-'))
+    const filterOverrides = await loadSnapshotOverrides(canonicalCwd, tempDir, deadline)
+    const objectDir = join(tempDir, 'objects')
+    await mkdir(objectDir)
+    const alternateObjectDirs = [join(commonDir, 'objects'), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
+      .filter((value): value is string => !!value)
+      .join(delimiter)
+    const beforeIndex = join(tempDir, 'before.index')
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      GIT_INDEX_FILE: beforeIndex,
+      GIT_OBJECT_DIRECTORY: objectDir,
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateObjectDirs
+    }
+    const beforeTree = await writeSnapshotTree({
+      cwd: repoRoot,
+      pathspec,
+      env,
+      deadline,
+      filterOverrides,
+      sourceIndex: indexPath,
+      targetIndex: beforeIndex
+    })
+    return {
+      beforeAt,
+      captureMs: Date.now() - started,
+      status: 'ready',
+      repoRoot,
+      scope,
+      beforeTree,
+      tempDir,
+      objectDir,
+      alternateObjectDirs,
+      filterOverrides,
+      pathspec
+    }
+  } catch (error) {
+    if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
+    const reason = reasonOf(error)
+    return {
+      beforeAt,
+      captureMs: Date.now() - started,
+      status: reason === 'deadline' ? 'timeout' : 'failed',
+      reason
+    }
+  }
+}
+
+async function finishGitTurnDiffImpl(capture: GitTurnDiffCapture, deadlineMs: number): Promise<TurnDiffSnapshot> {
+  const started = Date.now()
+  const afterAt = new Date(started).toISOString()
+  if (capture.status !== 'ready' || !capture.repoRoot || !capture.scope || !capture.beforeTree || !capture.tempDir || !capture.objectDir) {
+    return terminalSnapshot(
+      capture,
+      capture.status === 'ready' ? 'failed' : capture.status,
+      capture.reason ?? (capture.status === 'ready' ? 'git_error' : undefined),
+      [],
+      afterAt,
+      0,
+      await cleanupCapture(capture)
+    )
+  }
+  const deadline = started + deadlineMs
+  let status: TurnDiffSnapshot['status'] = 'captured'
+  let reason: TurnDiffReason | undefined
+  let files: DiffFile[] = []
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      GIT_INDEX_FILE: join(capture.tempDir, 'after.index'),
+      GIT_OBJECT_DIRECTORY: capture.objectDir,
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs
+    }
+    const pathspec = capture.pathspec ?? [capture.scope]
+    // 配置可能在本轮中变化；finish 前重扫，避免新加入的 clean/process filter 执行副作用命令。
+    const filterOverrides = await loadSnapshotOverrides(capture.repoRoot, capture.tempDir, deadline)
+    capture.filterOverrides = filterOverrides
+    const afterIndex = join(capture.tempDir, 'after.index')
+    const afterTree = await writeSnapshotTree({
+      cwd: capture.repoRoot,
+      pathspec,
+      env,
+      deadline,
+      filterOverrides,
+      sourceIndex: join(capture.tempDir, 'before.index'),
+      targetIndex: afterIndex
+    })
+    const stdout = await gitCommand(
+      snapshotGitArgs(filterOverrides, [
+        'diff',
+        '--no-renames',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--numstat',
+        '-z',
+        capture.beforeTree,
+        afterTree,
+        '--',
+        ...pathspec
+      ]),
+      { cwd: capture.repoRoot, env, deadline }
+    )
+    files = await captureTurnPatches(capture, env, afterTree, parseNumstat(stdout, capture.repoRoot))
+  } catch (error) {
+    reason = reasonOf(error)
+    status = reason === 'deadline' ? 'timeout' : 'failed'
+  }
+  const finishMs = Date.now() - started
+  const cleanup = await cleanupCapture(capture)
+  return terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup)
+}
+
+async function readPatchPrefix(path: string, maxBytes: number): Promise<{ patch: string; truncated: boolean; bytes: number }> {
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(Math.max(0, maxBytes) + 1)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    const bytes = Math.min(bytesRead, maxBytes)
+    return {
+      patch: new StringDecoder('utf8').write(buffer.subarray(0, bytes)),
+      truncated: bytesRead > maxBytes,
+      bytes
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+async function captureTurnPatches(
+  capture: GitTurnDiffCapture,
+  env: NodeJS.ProcessEnv,
+  afterTree: string,
+  files: DiffFile[]
+): Promise<DiffFile[]> {
+  if (!capture.repoRoot || !capture.beforeTree || !capture.tempDir) return files
+  const deadline = Date.now() + TURN_DIFF_PATCH_DEADLINE_MS
+  const filterOverrides = capture.filterOverrides ?? []
+  let remainingBytes = TURN_DIFF_PATCH_MAX_BYTES
+  let deadlineReached = false
+  const out: DiffFile[] = []
+
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index]
+    if (file.binary) {
+      out.push({ ...file, patchStatus: 'binary' })
+      continue
+    }
+    if (index >= TURN_DIFF_PATCH_MAX_FILES || remainingBytes <= 0) {
+      out.push({ ...file, patchStatus: 'unavailable', patchReason: 'budget' })
+      continue
+    }
+    if (deadlineReached || Date.now() >= deadline) {
+      deadlineReached = true
+      out.push({ ...file, patchStatus: 'unavailable', patchReason: 'deadline' })
+      continue
+    }
+
+    const patchPath = join(capture.tempDir, `patch-${index}.diff`)
+    const relPath = relative(capture.repoRoot, file.path).split('\\').join('/')
+    try {
+      await gitCommand(
+        snapshotGitArgs(filterOverrides, [
+          'diff',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--no-color',
+          '--unified=3',
+          `--output=${patchPath}`,
+          capture.beforeTree,
+          afterTree,
+          '--',
+          `:(top,literal)${relPath}`
+        ]),
+        { cwd: capture.repoRoot, env, deadline }
+      )
+      const captured = await readPatchPrefix(patchPath, remainingBytes)
+      remainingBytes -= captured.bytes
+      if (!captured.patch) {
+        out.push({ ...file, patchStatus: 'unavailable', patchReason: 'git_error' })
+      } else {
+        out.push({
+          ...file,
+          patch: captured.patch,
+          patchStatus: captured.truncated ? 'truncated' : 'captured'
+        })
+      }
+    } catch (error) {
+      const reason = reasonOf(error) === 'deadline' ? 'deadline' : 'git_error'
+      if (reason === 'deadline') deadlineReached = true
+      out.push({ ...file, patchStatus: 'unavailable', patchReason: reason })
+    }
+  }
+  return out
+}
+
+export function finishGitTurnDiff(capture: GitTurnDiffCapture, deadlineMs = TURN_DIFF_DEADLINE_MS): Promise<TurnDiffSnapshot> {
+  capture.finishPromise ??= finishGitTurnDiffImpl(capture, deadlineMs)
+  return capture.finishPromise
+}
+
+export async function cancelGitTurnDiff(capture: GitTurnDiffCapture): Promise<void> {
+  await cleanupCapture(capture)
+}
+
+// `git diff --numstat -z` 的输出：每条 `added\tdeleted\tpath\0`（二进制文件增删为 `-`）。
+// 必须用 -z，否则 Git 会按 core.quotePath 把中文路径转成 `\345\...` 这类 C-style/octal 字符串。
+// 路径相对 repo root → 拼成绝对路径，便于和工具足迹（绝对 file_path）对照。
+export function parseNumstat(stdout: string, repoRoot: string): DiffFile[] {
+  const out: DiffFile[] = []
+  const records = stdout.includes('\0') ? stdout.split('\0') : stdout.split('\n')
+  for (const record of records) {
+    if (!record.trim()) continue
+    const firstTab = record.indexOf('\t')
+    const secondTab = firstTab < 0 ? -1 : record.indexOf('\t', firstTab + 1)
+    if (firstTab < 0 || secondTab < 0) continue
+    const addedRaw = record.slice(0, firstTab)
+    const deletedRaw = record.slice(firstTab + 1, secondTab)
+    const rel = record.slice(secondTab + 1)
+    const binary = addedRaw === '-' || deletedRaw === '-'
+    const added = binary ? 0 : Number(addedRaw) || 0
+    const deleted = binary ? 0 : Number(deletedRaw) || 0
+    out.push({ path: join(repoRoot, rel), added, deleted, ...(binary ? { binary: true } : {}) })
+  }
+  return out
+}
+
+export async function gitNumstat(cwd: string): Promise<DiffFile[]> {
+  try {
+    const { stdout: rootOut } = await pexecFile('git', ['-C', cwd, 'rev-parse', '--show-toplevel'])
+    const repoRoot = rootOut.trim()
+    const { stdout } = await pexecFile('git', ['-C', cwd, 'diff', '--numstat', '-z', 'HEAD', '--', '.'])
+    return parseNumstat(stdout, repoRoot)
+  } catch {
+    return [] // 非 git 仓 / git 不可用 / 无 HEAD：静默空
+  }
+}

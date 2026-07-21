@@ -1,0 +1,30 @@
+appId: com.scry.app
+productName: Scry
+directories:
+  output: dist
+  buildResources: build
+
+asar: true
+# SDK 是 ESM(.mjs) 且运行时要 spawn，从 asar 内 import/spawn 有坑 → 解包成真实文件。
+# 体积小(排除平台二进制后只剩 ~7MB 的 .mjs/.d.ts)。
+asarUnpack:
+  - node_modules/@anthropic-ai/claude-agent-sdk/**
+  # better-sqlite3 是原生模块，.node 二进制必须解包到 asar 外才能 spawn/dlopen 加载
+  - node_modules/better-sqlite3/**
+  - node_modules/bindings/**
+
+# 选 B：不内嵌 SDK 自带的平台原生 claude 二进制(每个 ~216MB)，app 驱动本机已装的 claude。
+# 仅用负向 pattern → 保留 electron-builder 默认 files(含 out/ 与 node_modules)，只剔除这些包。
+# 已实测：平台包缺席下 SDK 仍能 import 并驱动本机 claude。
+files:
+  - "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-*/**"
+  - "!node_modules/@anthropic-ai/claude-agent-sdk-linux-*/**"
+  - "!node_modules/@anthropic-ai/claude-agent-sdk-win32-*/**"
+
+mac:
+  category: public.app-category.developer-tools
+  # 本地试跑：dir 目标最快(只出 .app 不打 dmg)，identity:null 跳过 Developer ID 签名(ad-hoc)。
+  # 分发(dmg/公证)后续再加。
+  target:
+    - dir
+  identity: null

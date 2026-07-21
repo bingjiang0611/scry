@@ -1,0 +1,138 @@
+import { describe, expect, it } from 'vitest'
+import type { TraceEvent } from '@shared/trace'
+import type { AgentQuestionRequest } from '@shared/runtime'
+import { applyTraceBatch, type Turn } from '../format'
+import {
+  buildAgentStartRequest,
+  clearSessionTurns,
+  markTurnDone,
+  markTurnError,
+  mergeActiveRun,
+  parsedSessionTurns,
+  removePendingQuestion,
+  replayPendingQuestionDeltas,
+  upsertPendingQuestion
+} from './useAgentSession'
+
+const ev = (id: string, runId = 'r1'): TraceEvent => ({
+  id,
+  runId,
+  ts: '',
+  kind: 'model',
+  stage: 'text',
+  text: id
+})
+
+const image = {
+  kind: 'image' as const,
+  name: 'shot.png',
+  mimeType: 'image/png' as const,
+  dataBase64: 'aGVsbG8=',
+  size: 5
+}
+
+const questionRequest = (runId: string, questionId: string): AgentQuestionRequest => ({
+  runId,
+  questionId,
+  questions: [
+    {
+      question: '继续？',
+      header: '确认',
+      multiSelect: false,
+      options: [
+        { label: '继续', description: '继续执行' },
+        { label: '停止', description: '不再执行' }
+      ]
+    }
+  ]
+})
+
+describe('useAgentSession state reducers', () => {
+  it('builds preload start payloads with selected runtime metadata intact', () => {
+    expect(
+      buildAgentStartRequest('  run probe  ', {
+        agentId: 'qoder',
+        backend: 'local',
+        runtimeProvider: 'qoder_cli',
+        attachments: [image]
+      })
+    ).toEqual({
+      prompt: 'run probe',
+      agentId: 'qoder',
+      backend: 'local',
+      runtimeProvider: 'qoder_cli',
+      attachments: [image]
+    })
+    expect(buildAgentStartRequest('   ', { agentId: 'claude', attachments: [image] })).toEqual({
+      prompt: '',
+      agentId: 'claude',
+      attachments: [image]
+    })
+    expect(buildAgentStartRequest('   ', { agentId: 'codex', runtimeProvider: 'codex_cli' })).toBeNull()
+  })
+
+  it('restores an active run and preserves locally buffered trace extras', () => {
+    const restored: Turn = { runId: 'r1', userText: 'prompt', items: [ev('remote')], done: false }
+    const prev: Turn[] = [
+      { runId: 'r1', userText: 'prompt', attachments: [image], items: [ev('remote'), ev('local')], done: false }
+    ]
+
+    expect(mergeActiveRun([], restored)).toEqual([restored])
+    expect(mergeActiveRun(prev, restored)[0].items.map((item) => item.id)).toEqual(['remote', 'local'])
+    expect(mergeActiveRun(prev, restored)[0].attachments).toEqual([image])
+  })
+
+  it('flushes trace batches before turnDone and marks the turn complete', () => {
+    const turns = applyTraceBatch([], [ev('a')], new Set<string>())
+    expect(markTurnDone(turns, 'r1')[0]).toMatchObject({ done: true, items: [{ id: 'a' }] })
+  })
+
+  it('records turn errors with the hint used by the UI', () => {
+    const turns: Turn[] = [{ runId: 'r1', userText: 'prompt', items: [], done: false }]
+    expect(markTurnError(turns, { runId: 'r1', message: 'boom', hint: 'retry' })[0]).toMatchObject({
+      done: true,
+      error: 'boom',
+      errorHint: 'retry'
+    })
+  })
+
+  it('clearTurns drops residual events from runs that were cleared', () => {
+    const cleared = new Set<string>()
+    const next = clearSessionTurns([{ runId: 'r1', userText: 'old', items: [], done: false }], cleared)
+
+    expect(next).toEqual([])
+    expect(applyTraceBatch(next, [ev('late', 'r1'), ev('fresh', 'r2')], cleared).map((turn) => turn.runId)).toEqual(['r2'])
+  })
+
+  it('replaces the timeline with parsed history turns', () => {
+    const turns = parsedSessionTurns('s1', [{ userText: 'hello', attachments: [image], items: [ev('a', 'archived')] }])
+
+    expect(turns).toEqual([{ runId: 's1-0', userText: 'hello', attachments: [image], items: [ev('a', 'archived')], done: true }])
+  })
+
+  it('deduplicates pending questions and rejects stale close events by run', () => {
+    const question = questionRequest('r1', 'tool-1')
+    const pending = upsertPendingQuestion(upsertPendingQuestion([], question), question)
+
+    expect(pending).toHaveLength(1)
+    expect(removePendingQuestion(pending, { runId: 'stale', questionId: 'tool-1' })).toEqual(pending)
+    expect(removePendingQuestion(pending, { runId: 'r1', questionId: 'tool-1' })).toEqual([])
+  })
+
+  it('replays question events received while the active-run snapshot is loading', () => {
+    const first = questionRequest('r1', 'tool-1')
+    const openedAfterSnapshot = questionRequest('r1', 'tool-2')
+
+    expect(
+      replayPendingQuestionDeltas([first], [
+        { kind: 'open', request: openedAfterSnapshot },
+        { kind: 'closed', event: { runId: 'r1', questionId: 'tool-1' } }
+      ])
+    ).toEqual([openedAfterSnapshot])
+    expect(
+      replayPendingQuestionDeltas([first], [
+        { kind: 'closed', event: { runId: 'r1', questionId: 'tool-1' } }
+      ])
+    ).toEqual([])
+  })
+})

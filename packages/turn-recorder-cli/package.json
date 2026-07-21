@@ -1,0 +1,27 @@
+{
+  "name": "@scry/turn-recorder",
+  "version": "0.2.0",
+  "description": "Provider-neutral local top-level turn recorder for AI coding agents",
+  "type": "module",
+  "bin": {
+    "scry": "dist/cli/scry.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "author": "bingjiang0611",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bingjiang0611/scry.git",
+    "directory": "packages/turn-recorder-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/bingjiang0611/scry/issues"
+  },
+  "homepage": "https://github.com/bingjiang0611/scry/tree/main/packages/turn-recorder-cli#readme"
+}

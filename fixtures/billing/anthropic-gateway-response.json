@@ -1,0 +1,119 @@
+{
+  "accountLabel": "fixture-anthropic-compatible-gateway",
+  "responses": [
+    {
+      "id": "msg_gateway_fixture_001",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-opus-4-8",
+      "price_version_id": "price:anthropic:claude-opus-4-8:2026-07",
+      "created_at": "2026-07-02T10:00:00.000Z",
+      "session_id": "fixture-session",
+      "run_id": "fixture-run",
+      "project_key": "/fixture/sample-workspace",
+      "usage": {
+        "input_tokens": 1200,
+        "output_tokens": 320,
+        "cache_read_input_tokens": 640,
+        "cache_creation_input_tokens": 128,
+        "cost_usd": 0.0825,
+        "currency": "USD"
+      },
+      "stop_reason": "end_turn"
+    },
+    {
+      "id": "msg_gateway_fixture_002",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-opus-4-8",
+      "price_version_id": "price:anthropic:claude-opus-4-8:2026-07",
+      "created_at": "2026-07-02T10:03:00.000Z",
+      "session_id": "fixture-session",
+      "run_id": "fixture-run-2",
+      "project_key": "/fixture/sample-workspace",
+      "usage": {
+        "input_tokens": 820,
+        "output_tokens": 180,
+        "cache_read_input_tokens": 256,
+        "cache_creation_input_tokens": 0,
+        "cost_usd": 0.045,
+        "currency": "USD"
+      },
+      "stop_reason": "end_turn"
+    }
+  ],
+  "priceVersions": [
+    {
+      "id": "price:anthropic:claude-opus-4-8:2026-07",
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "currency": "USD",
+      "inputPerMillion": 15,
+      "outputPerMillion": 75,
+      "cacheReadPerMillion": 1.5,
+      "cacheWritePerMillion": 18.75,
+      "effectiveFrom": 1782864000000,
+      "source": "fixture-contract"
+    }
+  ],
+  "teamLabels": [
+    {
+      "id": "team:fixture-sample-workspace",
+      "projectKey": "/fixture/sample-workspace",
+      "team": "platform",
+      "owner": "billing",
+      "workflow": "workflow-orchestrator",
+      "source": "fixture"
+    }
+  ],
+  "gatewayPolicies": [
+    {
+      "id": "gateway-policy:fixture",
+      "provider": "anthropic-compatible",
+      "label": "fixture gateway policy",
+      "source": "gateway-config-import",
+      "budgetUsd": 25,
+      "rpm": 120,
+      "tpm": 200000,
+      "config": {
+        "budget": "read-only",
+        "rateLimit": "read-only",
+        "secretFields": "redacted"
+      }
+    }
+  ],
+  "retentionPolicy": {
+    "id": "retention:local-default",
+    "rawPayloadMode": "aggregate-only",
+    "retentionDays": 30,
+    "redactionMode": "secrets-and-prompts",
+    "exportMode": "redacted"
+  },
+  "contractPrices": [
+    {
+      "id": "contract:anthropic:claude-opus-4-8:2026-07",
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "currency": "USD",
+      "inputPerMillion": 12,
+      "outputPerMillion": 60,
+      "cacheReadPerMillion": 1.2,
+      "cacheWritePerMillion": 15,
+      "effectiveFrom": 1782864000000,
+      "source": "contract-import-fixture"
+    }
+  ],
+  "chargebackEntries": [
+    {
+      "id": "chargeback:fixture-sample-workspace",
+      "team": "platform",
+      "projectKey": "/fixture/sample-workspace",
+      "owner": "billing",
+      "workflow": "workflow-orchestrator",
+      "cost": 0.1275,
+      "currency": "USD",
+      "source": "gateway_reported",
+      "confidence": "provider_reported"
+    }
+  ]
+}
