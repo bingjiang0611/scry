@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "0.1",
+  "tools": [
+    {
+      "serverName": "drift-tools",
+      "toolName": "read_file",
+      "canonicalHash": "sha256:previous-approved-definition"
+    }
+  ]
+}

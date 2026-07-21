@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "safe-docs": {
+      "command": "/usr/local/bin/safe-docs-mcp",
+      "args": ["--workspace", "/Users/example/project/docs"],
+      "env": {
+        "SAFE_MODE": "1"
+      },
+      "roots": ["/Users/example/project/docs"],
+      "tools": [
+        {
+          "name": "search_docs",
+          "description": "Search project documentation within the configured docs directory.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "query": { "type": "string" }
+            },
+            "required": ["query"]
+          }
+        }
+      ]
+    }
+  }
+}

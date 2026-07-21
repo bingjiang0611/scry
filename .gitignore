@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+dist-electron/
+packages/turn-recorder-cli/dist/
+*.log
+.DS_Store
+.claude/
+.local/
+.vite/
+docs/ui-audit/screenshots/

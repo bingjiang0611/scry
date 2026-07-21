@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "rootDir": "src/cli",
+    "outDir": "out/cli",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/cli/**/*"],
+  "exclude": ["src/cli/**/*.test.ts", "src/cli/scry.ts"]
+}

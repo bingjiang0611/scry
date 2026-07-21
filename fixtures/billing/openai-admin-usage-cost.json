@@ -1,0 +1,30 @@
+{
+  "provider": "openai",
+  "usage": [
+    {
+      "start_time": "2026-07-01T00:00:00Z",
+      "end_time": "2026-07-02T00:00:00Z",
+      "model": "gpt-5",
+      "project_id": "proj_fixture",
+      "api_key_id": "key_fixture",
+      "input_tokens": 120000,
+      "input_cached_tokens": 40000,
+      "output_tokens": 18000,
+      "output_reasoning_tokens": 6000,
+      "num_model_requests": 42
+    }
+  ],
+  "costs": [
+    {
+      "start_time": "2026-07-01T00:00:00Z",
+      "end_time": "2026-07-02T00:00:00Z",
+      "line_item": "Completions",
+      "project_id": "proj_fixture",
+      "api_key_id": "key_fixture",
+      "amount": {
+        "value": 2.75,
+        "currency": "usd"
+      }
+    }
+  ]
+}

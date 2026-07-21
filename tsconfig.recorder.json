@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "packages/turn-recorder-cli/dist",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/cli/scry.ts",
+    "src/core/turn-recorder/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/main/danger.ts",
+    "src/main/normalize.ts"
+  ],
+  "exclude": ["src/**/*.test.ts"]
+}
