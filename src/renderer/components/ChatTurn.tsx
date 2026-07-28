@@ -11,6 +11,7 @@ import {
 } from '@shared/runtime'
 import { AskUserQuestionInline, AskUserQuestionResult } from './AskUserQuestionDialog'
 import {
+  aggregateCalls,
   aggregateHooks,
   aggregateFiles,
   basename,
@@ -18,6 +19,7 @@ import {
   fmtTok,
   hookCancellationDetail,
   hookCommandLabel,
+  logicalCallEventsForTurn,
   parseUserMessage,
   resultTokenTotal,
   toolArg,
@@ -648,10 +650,12 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
 // 蓝本 .turn-footer：in / out / cache·r / cache·w / dur / api / tools / files / err，分组用 .sep 隔。
 function TurnFooter({ items }: { items: TraceEvent[] }) {
   const result = items.find((e) => e.kind === 'harness' && e.stage === 'result')
-  const calls = items.filter((e) => e.stage !== 'tool_result')
-  const tools = calls.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent').length
-  const reads = calls.filter((e) => e.fileOp === 'read').length
-  const writes = calls.filter((e) => e.fileOp === 'write' || e.fileOp === 'edit').length
+  const calls = logicalCallEventsForTurn(items)
+  const tools = aggregateCalls(calls).totalCalls
+  const reads = calls.filter((e) => e.stage !== 'tool_result' && e.fileOp === 'read').length
+  const writes = calls.filter(
+    (e) => e.stage !== 'tool_result' && (e.fileOp === 'write' || e.fileOp === 'edit')
+  ).length
   const errs = items.filter((e) => e.stage === 'tool_result' && e.isError).length
   if (!result && tools === 0) return null
   const stat = (lbl: string, val: ReactNode, cls = ''): ReactNode => (
@@ -720,7 +724,10 @@ function AssistantTurnImpl({
     turnDiff?.status === 'failed'
   const toolItems = items.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
   const maxDur = Math.max(1, ...toolItems.map((e) => e.durationMs ?? 0))
-  const toolN = items.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent').length
+  const toolN = useMemo(
+    () => aggregateCalls(logicalCallEventsForTurn(items)).totalCalls,
+    [items]
+  )
   const errs = turn.error ? 1 : items.filter((e) => e.isError && e.stage !== 'tool_result').length
   const runtime = runtimeTitleForTurn(turn)
   // P1：subagent 内部步骤（parentToolUseId 指向父 Task tool_use）按父分组，折叠进父 Task 卡

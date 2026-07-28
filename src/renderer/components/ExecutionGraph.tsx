@@ -6,8 +6,17 @@ import {
   type CSSProperties,
   type ReactNode
 } from 'react'
-import type { TraceEvent } from '@shared/trace'
-import { aggregateCalls, basename, fmtTok, parseUserMessage, toolArg, toolDisplayName } from '../format'
+import { mcpCallsForEvent, type TraceEvent } from '@shared/trace'
+import {
+  aggregateCalls,
+  basename,
+  fmtTok,
+  parseUserMessage,
+  resultTokenTotal,
+  toolArg,
+  toolDisplayName
+} from '../format'
+import { logicalCallEventsForTurn } from '../../shared/logical-calls'
 import type { Turn } from '../format'
 import { Icon } from './primitives/Icon'
 import { PaneSplitter } from './PaneSplitter'
@@ -51,6 +60,13 @@ function GLine({
 }) {
   const t = gtypeOf(ev)
   const err = ev.isError === true
+  const mcpCalls = ev.isMcp ? mcpCallsForEvent(ev) : []
+  const mcpServers = [...new Set(mcpCalls.map((call) => call.server))]
+  const displayName = mcpCalls.length > 0 ? mcpServers.join(' · ') : toolDisplayName(ev)
+  const displayArg =
+    mcpCalls.length > 0
+      ? `${mcpCalls.map((call) => call.action ?? call.tool).join(' · ')}${mcpCalls.length > 1 ? ` · ${mcpCalls.length} 次调用` : ''}`
+      : toolArg(ev)
   const w = ev.durationMs != null && maxDur > 0 ? Math.max(2, Math.round((ev.durationMs / maxDur) * 100)) : 0
   return (
     <div className={`gline ${selectedId === ev.id ? 'selected' : ''}`} onClick={() => onSelect(ev)}>
@@ -58,8 +74,8 @@ function GLine({
         <span className="st" />
         {t.label}
       </span>
-      <span className={`gname ${err ? 'err' : ''}`}>{toolDisplayName(ev)}</span>
-      <span className="gargs">{toolArg(ev)}</span>
+      <span className={`gname ${err ? 'err' : ''}`}>{displayName}</span>
+      <span className="gargs">{displayArg}</span>
       <span className="gmeta">
         {w > 0 && (
           <span className="latbar">
@@ -92,7 +108,7 @@ function TurnBlock({
   const items = useMemo(() => {
     const results = new Map<string, TraceEvent>()
     for (const e of turn.items) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
-    return turn.items
+    return logicalCallEventsForTurn(turn.items)
       .filter((e) => e.stage !== 'tool_result')
       .map((e) => {
         const r = e.toolUseId ? results.get(e.toolUseId) : undefined
@@ -131,7 +147,7 @@ function TurnBlock({
 
   const result = turn.items.find((e) => e.kind === 'harness' && e.stage === 'result')
   const running = !turn.done && !turn.error
-  const toolN = calls.length
+  const toolN = aggregateCalls(calls).totalCalls
   const parsedUser = parseUserMessage(turn.userText)
   const preview = parsedUser.command ?? (parsedUser.injectedSkill ? `Skill · ${parsedUser.injectedSkill}` : parsedUser.body) ?? ''
 
@@ -151,8 +167,8 @@ function TurnBlock({
               <b>{fmtDur(result.durationMs)}</b>
             </span>
           )}
-          {result && <span>{fmtTok((result.tokensIn ?? 0) + (result.tokensOut ?? 0) + (result.cacheReadTokens ?? 0) + (result.cacheCreationTokens ?? 0))} tok</span>}
-          <span>{toolN} tools</span>
+          {result && <span>{fmtTok(resultTokenTotal(result))} tok</span>}
+          <span>{toolN} calls</span>
           {running ? (
             <span style={{ color: 'var(--warn)' }}>
               <span className="sdot warn" /> 运行中
@@ -182,7 +198,7 @@ function TurnBlock({
                   LLM
                 </span>
                 <span className="gname">{grp.mid === '(no-msg)' ? 'llm_request' : grp.mid.replace(/^msg_/, '').slice(0, 14)}</span>
-                <span className="gargs">{grp.items.length} 个调用</span>
+                <span className="gargs">{aggregateCalls(grp.items).totalCalls} 个调用</span>
               </div>
             </div>
           </div>
@@ -406,9 +422,10 @@ export function ExecutionGraph({
     [turns, selectedId]
   )
   const all = useMemo(() => turns.flatMap((t) => t.items), [turns])
-  const calls = useMemo(() => aggregateCalls(all), [all])
+  const logicalCalls = useMemo(() => turns.flatMap((turn) => logicalCallEventsForTurn(turn.items)), [turns])
+  const calls = useMemo(() => aggregateCalls(logicalCalls), [logicalCalls])
   const results = all.filter((e) => e.kind === 'harness' && e.stage === 'result')
-  const totalTokens = results.reduce((s, e) => s + (e.tokensIn ?? 0) + (e.tokensOut ?? 0) + (e.cacheReadTokens ?? 0) + (e.cacheCreationTokens ?? 0), 0)
+  const totalTokens = results.reduce((sum, event) => sum + resultTokenTotal(event), 0)
   const dangers = all.filter((e) => e.danger && e.stage !== 'tool_result')
   const agents = calls.agents
   const v = verdictState(turns, busy)
@@ -432,7 +449,7 @@ export function ExecutionGraph({
               {v.judge}
             </div>
             <div className="since">
-              {results.length} 轮完成 · {calls.toolTotal} 次工具调用{dangers.length > 0 ? ` · ${dangers.length} 处危险` : ''}
+              {results.length} 轮完成 · {calls.totalCalls} 次调用{dangers.length > 0 ? ` · ${dangers.length} 处危险` : ''}
             </div>
           </div>
           <div className="verdict-right">
@@ -447,9 +464,9 @@ export function ExecutionGraph({
             <div className="verdict-pillar ok">
               <div className="nm">
                 <span className="sdot" />
-                tools
+                calls
               </div>
-              <div className="v">{calls.toolTotal} calls</div>
+              <div className="v">{calls.totalCalls}</div>
               <div className="sub">{toolSub}</div>
             </div>
             <div className="verdict-pillar ok">

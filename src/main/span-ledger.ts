@@ -121,6 +121,11 @@ export const DDL_V7 = [
   `CREATE INDEX IF NOT EXISTS idx_spans_mcp_time_duration ON spans(mcp_server, ts_start, duration_ms)`
 ]
 
+export const UPSERT_SESSION_REF_SQL = `INSERT INTO session_refs (
+  scry_session_id, provider_id, runtime_provider, cwd, external_session_id, preview, created_ts, updated_ts
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(scry_session_id) DO UPDATE SET updated_ts=excluded.updated_ts`
+
 export const SPAN_COLS = [
   'id', 'session_id', 'run_id', 'message_id', 'tool_use_id', 'parent_tool_use_id', 'graph_parent_id', 'agent_id',
   'ts_start', 'ts_end', 'duration_ms', 'duration_api_ms', 'kind', 'stage', 'name', 'tool', 'mcp_server', 'is_error',

@@ -46,9 +46,13 @@ export interface SessionMeta {
 }
 
 export interface ParsedTurn {
+  runId?: string
   userText: string
   attachments?: AgentInputAttachment[]
   items: TraceEvent[]
+  done?: boolean
+  error?: string
+  errorHint?: string
 }
 
 export interface ProjectMeta {

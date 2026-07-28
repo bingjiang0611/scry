@@ -37,6 +37,7 @@ import {
   ANALYTICS_TOOLS_SQL,
   ANALYTICS_DANGER_SQL,
   ANALYTICS_MCP_SQL,
+  UPSERT_SESSION_REF_SQL,
   buildAnalyticsStats,
   type AnalyticsResultRow,
   type AnalyticsToolRow,
@@ -155,12 +156,16 @@ export function recordTurn(args: {
       ? scrySessionId(args.providerId, args.cwd, args.sessionId)
       : undefined
     if (internalSessionId && args.sessionId && args.cwd && args.providerId && args.runtimeProvider) {
-      db.prepare(
-        `INSERT INTO session_refs (
-           scry_session_id, provider_id, runtime_provider, cwd, external_session_id, preview, created_ts, updated_ts
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(scry_session_id) DO UPDATE SET preview=excluded.preview, updated_ts=excluded.updated_ts`
-      ).run(internalSessionId, args.providerId, args.runtimeProvider, args.cwd, args.sessionId, args.userText.slice(0, 200), ts, ts)
+      db.prepare(UPSERT_SESSION_REF_SQL).run(
+        internalSessionId,
+        args.providerId,
+        args.runtimeProvider,
+        args.cwd,
+        args.sessionId,
+        args.userText.slice(0, 200),
+        ts,
+        ts
+      )
     }
 
     const rows = spanRowsFromItems({ runId: args.runId, sessionId: internalSessionId, cwd: args.cwd, items: args.items, nowMs: ts })

@@ -1,14 +1,18 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename } from 'node:path'
-import type { TraceEvent } from '../shared/trace'
+import { mcpCallsForEvent, mcpPayloadFailed, type TraceEvent } from '../shared/trace'
 import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMimeType } from '../shared/runtime'
 import type { ParsedTurn as TranscriptTurn } from './normalize'
 import type { TraceArchive } from './transcript-archive'
 
 export interface LoadedSessionTurn {
+  runId?: string
   userText: string
   attachments?: AgentInputAttachment[]
   items: TraceEvent[]
+  done?: boolean
+  error?: string
+  errorHint?: string
 }
 
 const ATTACHMENT_MARKER = 'Scry pasted image attachments:'
@@ -53,9 +57,13 @@ export function restoreTraceArchiveTurn(turn: TraceArchive['turns'][number]): Lo
   const recovered = recoverAttachmentsFromPrompt(turn.userText)
   const attachments = turn.attachments?.length ? turn.attachments : recovered
   return {
+    runId: turn.runId,
     userText: cleanAttachmentPrompt(turn.userText),
     attachments: attachments.length > 0 ? attachments : undefined,
-    items: turn.items
+    items: turn.items,
+    done: turn.done,
+    error: turn.error,
+    errorHint: turn.errorHint
   }
 }
 
@@ -92,6 +100,28 @@ function keepLastTurnDiff(items: TraceEvent[]): TraceEvent[] {
   return items.filter(
     (event, index) => event.kind !== 'harness' || event.stage !== 'turn_diff' || last.get(event.runId) === index
   )
+}
+
+function normalizeHistoricalMcpResults(items: TraceEvent[]): TraceEvent[] {
+  const toolUseById = new Map<string, TraceEvent>()
+  return items.map((event) => {
+    if (event.toolUseId && event.stage !== 'tool_result') toolUseById.set(event.toolUseId, event)
+    if (event.stage !== 'tool_result' || !event.toolUseId) return event
+    const toolUse = toolUseById.get(event.toolUseId)
+    if (!toolUse?.isMcp && !event.isMcp) return event
+    const source = toolUse ?? event
+    const mcpCalls = mcpCallsForEvent(source)
+    const first = mcpCalls[0]
+    return {
+      ...event,
+      isMcp: true,
+      mcpServer: source.mcpServer ?? first?.server ?? event.mcpServer,
+      mcpAction: source.mcpAction ?? first?.action ?? event.mcpAction,
+      mcpTool: source.mcpTool ?? first?.tool ?? event.mcpTool,
+      ...(mcpCalls.length > 0 ? { mcpCalls } : {}),
+      isError: event.isError === true || mcpPayloadFailed(event.output ?? event.text)
+    }
+  })
 }
 
 function eventTime(event: TraceEvent): number | null {
@@ -204,8 +234,8 @@ function reconcileHookEvidence(
 }
 
 function mergeTraceItems(transcriptItems: TraceEvent[], archiveItems: TraceEvent[]): TraceEvent[] {
-  if (archiveItems.length === 0) return keepLastTurnDiff(transcriptItems)
-  if (transcriptItems.length === 0) return keepLastTurnDiff(archiveItems)
+  if (archiveItems.length === 0) return normalizeHistoricalMcpResults(keepLastTurnDiff(transcriptItems))
+  if (transcriptItems.length === 0) return normalizeHistoricalMcpResults(keepLastTurnDiff(archiveItems))
 
   const reconciled = reconcileHookEvidence(transcriptItems, archiveItems)
   const merged = reconciled.transcriptItems.map((event, index) => ({ event, index }))
@@ -216,7 +246,7 @@ function mergeTraceItems(transcriptItems: TraceEvent[], archiveItems: TraceEvent
     seen.add(key)
     merged.push({ event, index: merged.length })
   }
-  return keepLastTurnDiff(merged
+  return normalizeHistoricalMcpResults(keepLastTurnDiff(merged
     .sort((a, b) => {
       const at = eventTime(a.event)
       const bt = eventTime(b.event)
@@ -225,26 +255,30 @@ function mergeTraceItems(transcriptItems: TraceEvent[], archiveItems: TraceEvent
       if (at == null && bt != null) return 1
       return a.index - b.index
     })
-    .map((entry) => entry.event))
+    .map((entry) => entry.event)))
 }
 
 function mergeTurnWithArchive(transcriptTurn: LoadedSessionTurn, archiveTurn: LoadedSessionTurn): LoadedSessionTurn {
   return {
+    runId: archiveTurn.runId,
     userText: transcriptTurn.userText,
     attachments: archiveTurn.attachments?.length ? archiveTurn.attachments : transcriptTurn.attachments,
-    items: mergeTraceItems(transcriptTurn.items, archiveTurn.items)
+    items: mergeTraceItems(transcriptTurn.items, archiveTurn.items),
+    done: archiveTurn.done,
+    error: archiveTurn.error,
+    errorHint: archiveTurn.errorHint
   }
 }
 
 export function mergeSessionTurns(transcriptTurns: TranscriptTurn[], archive: TraceArchive | null): LoadedSessionTurn[] {
   const restoredArchive = (archive?.turns ?? []).map(restoreTraceArchiveTurn).map((turn) => ({
     ...turn,
-    items: keepLastTurnDiff(turn.items)
+    items: normalizeHistoricalMcpResults(keepLastTurnDiff(turn.items))
   }))
   const merged: LoadedSessionTurn[] = transcriptTurns.map((turn) => ({
     userText: cleanAttachmentPrompt(turn.userText),
     attachments: recoverAttachmentsFromPrompt(turn.userText),
-    items: turn.items
+    items: normalizeHistoricalMcpResults(turn.items)
   }))
   for (const turn of merged) {
     if (turn.attachments?.length === 0) delete turn.attachments

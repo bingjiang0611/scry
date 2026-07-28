@@ -123,7 +123,7 @@ describe('transcript archive mirror', () => {
     expect(existsSync(traceArchivePath(userDataDir, cwd, sessionId, 'codex'))).toBe(false)
   })
 
-  it('archive 保留本轮 numstat，但不持久化 transient 源码 patch', () => {
+  it('archive 保留已限长的 patch，使历史 Review 与实时会话一致', () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
     const cwd = '/Users/me/project'
@@ -170,8 +170,14 @@ describe('transcript archive mirror', () => {
     ).toBe(true)
 
     const file = readTraceArchive({ cwd, sessionId, userDataDir, providerId: 'codex' })!.turns[0].items[0].turnDiff!.files[0]
-    expect(file).toEqual({ path: '/repo/a.ts', added: 1, deleted: 1 })
-    expect(readFileSync(traceArchivePath(userDataDir, cwd, sessionId, 'codex'), 'utf8')).not.toContain('-old')
+    expect(file).toEqual({
+      path: '/repo/a.ts',
+      added: 1,
+      deleted: 1,
+      patch: '-old\n+new\n',
+      patchStatus: 'captured'
+    })
+    expect(readFileSync(traceArchivePath(userDataDir, cwd, sessionId, 'codex'), 'utf8')).toContain('-old')
   })
 
   it('损坏的 turn_diff archive 降级为 failed，合法文件行做非负整数清洗', () => {

@@ -689,12 +689,13 @@ export function App() {
     knownRunId?: string
   ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
+    const switchingSession = activeSessionIdRef.current !== sessionId
     let runId = knownRunId
     if (!runId) {
       const activeRuns = await window.scry.activeRuns()
       runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId)?.runId
     }
-    session.clearTurns()
+    if (switchingSession) session.clearTurns()
     setQueuedPrompts([])
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
@@ -717,7 +718,7 @@ export function App() {
       return
     }
     if (runId) {
-      session.clearTurns()
+      if (switchingSession) session.clearTurns()
     }
     await window.scry.focusRun(null)
     if (!externalSessionId) return

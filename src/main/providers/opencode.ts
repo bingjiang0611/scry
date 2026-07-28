@@ -1,7 +1,14 @@
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import { capabilityReady, capabilityUnknown, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
 import type { BillingProvider } from '../../shared/billing'
-import { classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace'
+import {
+  classifyTool,
+  fileOpOf,
+  mcpPayloadFailed,
+  parseMcp,
+  type ParsedMcp,
+  type TraceEvent
+} from '../../shared/trace'
 import { resolveRuntimeCliBin } from '../claude-locate'
 import { OpenCodeServerManager, type OpenCodeHookFrame } from './opencode-server'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
@@ -21,6 +28,7 @@ interface OpenCodeEventState {
   starts: Set<string>
   results: Set<string>
   mcpServers: Set<string>
+  mcpByToolUseId: Map<string, ParsedMcp>
 }
 
 const eventStates = new WeakMap<ProviderRunRequest, OpenCodeEventState>()
@@ -28,7 +36,12 @@ const eventStates = new WeakMap<ProviderRunRequest, OpenCodeEventState>()
 const eventState = (request: ProviderRunRequest): OpenCodeEventState => {
   const existing = eventStates.get(request)
   if (existing) return existing
-  const created = { starts: new Set<string>(), results: new Set<string>(), mcpServers: new Set<string>() }
+  const created = {
+    starts: new Set<string>(),
+    results: new Set<string>(),
+    mcpServers: new Set<string>(),
+    mcpByToolUseId: new Map<string, ParsedMcp>()
+  }
   eventStates.set(request, created)
   return created
 }
@@ -124,6 +137,8 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
     const normalized = normalizeOpenCodeTool(request, String(part.tool ?? ''), isPartTool ? toolState.input : part.input)
     const { toolName, input } = normalized
     const classified = classifyTool(toolName, input)
+    const mcp = parseMcp(toolName, input)
+    if (mcp.isMcp) eventState(request).mcpByToolUseId.set(toolUseId, mcp)
     request.emit(newEvent(request.runId, {
       kind: classified.kind,
       stage: `${classified.kind}:${classified.name}`,
@@ -131,7 +146,7 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
       name: classified.name,
       toolUseId,
       input,
-      ...parseMcp(toolName, input),
+      ...mcp,
       ...fileOpOf(toolName, input)
     }))
   }
@@ -140,12 +155,16 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
     eventState(request).results.add(toolUseId)
     const failed = type.endsWith('failed') || status === 'error'
     const value = isPartTool ? (failed ? toolState.error : toolState.output) : (part.result ?? part.content ?? part.error ?? null)
+    const output = typeof value === 'string' ? value : JSON.stringify(value)
+    const mcp = eventState(request).mcpByToolUseId.get(toolUseId)
+    eventState(request).mcpByToolUseId.delete(toolUseId)
     request.emit(newEvent(request.runId, {
       kind: 'tool',
       stage: 'tool_result',
       toolUseId,
-      output: typeof value === 'string' ? value : JSON.stringify(value),
-      isError: failed
+      output,
+      ...(mcp ?? {}),
+      isError: failed || (mcp?.isMcp === true && mcpPayloadFailed(output))
     }))
   }
 }

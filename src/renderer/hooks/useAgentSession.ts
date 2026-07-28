@@ -96,17 +96,37 @@ export function replayPendingQuestionDeltas(
 
 export const parsedSessionTurns = (sessionId: string, parsed: ParsedTurn[]): Turn[] =>
   parsed.map((turn, index) => {
-    const restored: Turn = { runId: `${sessionId}-${index}`, userText: turn.userText, items: turn.items, done: true }
+    const restored: Turn = {
+      runId: turn.runId ?? `${sessionId}-${index}`,
+      userText: turn.userText,
+      items: turn.items,
+      done: turn.done ?? true
+    }
     if (turn.attachments) restored.attachments = turn.attachments
+    if (turn.error) restored.error = turn.error
+    if (turn.errorHint) restored.errorHint = turn.errorHint
     return restored
   })
+
+function isReplaceablePartialTurn(sessionId: string, turn: Turn, activeRun: ActiveRun): boolean {
+  if (turn.runId === activeRun.runId) return true
+  const syntheticIndex = turn.runId.slice(`${sessionId}-`.length)
+  const syntheticRunId = turn.runId.startsWith(`${sessionId}-`) && /^\d+$/.test(syntheticIndex)
+  if (turn.userText !== activeRun.userText || !syntheticRunId) return false
+  return !turn.items.some(
+    (event) => event.kind === 'harness' && (event.stage === 'result' || event.stage === 'turn_diff')
+  )
+}
 
 export function sessionTurnsWithActiveRun(sessionId: string, parsed: ParsedTurn[], activeRun?: ActiveRun | null): Turn[] {
   const turns = parsedSessionTurns(sessionId, parsed)
   if (!activeRun || activeRun.done) return turns
   const activeTurn: Turn = { ...activeRun }
-  const last = turns.length - 1
-  if (last >= 0 && turns[last].userText === activeRun.userText) turns[last] = activeTurn
+  const exact = turns.findIndex((turn) => turn.runId === activeRun.runId)
+  if (exact >= 0) turns[exact] = activeTurn
+  else if (turns.length > 0 && isReplaceablePartialTurn(sessionId, turns[turns.length - 1], activeRun)) {
+    turns[turns.length - 1] = activeTurn
+  }
   else turns.push(activeTurn)
   return turns
 }

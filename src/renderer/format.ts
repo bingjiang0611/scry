@@ -1,6 +1,7 @@
 // renderer 共享的纯逻辑：常量 / 视图类型 / 格式化与投影 helper。无 React 依赖，给各组件复用。
 import {
   maskSecrets,
+  mcpCallsForEvent,
   type TraceEvent,
   type DiffFile,
   type HookConfiguredCommand,
@@ -8,7 +9,8 @@ import {
   type ModelUsageRow
 } from '@shared/trace'
 import type { AgentInputAttachment } from '@shared/runtime'
-export { logicalCallEventsForTurn } from '@shared/logical-calls'
+import { logicalCallEventsForTurn } from '@shared/logical-calls'
+export { logicalCallEventsForTurn }
 
 // 视觉升级：值改成 Icon 名（蓝本 SVG 图标），消费处用 <Icon name={...}>。
 export const AGENT_ICON: Record<string, string> = {
@@ -244,18 +246,18 @@ export function aggregateCalls(items: TraceEvent[]): CallBreakdown {
       const n = e.name ?? 'agent'
       agents.set(n, (agents.get(n) ?? 0) + 1)
     } else if (e.kind === 'tool' && e.isMcp) {
-      const server = e.mcpServer ?? '?'
-      const tool = e.mcpTool ?? e.tool ?? ''
-      const action = e.mcpAction ?? ((e.tool ?? '').split('__').slice(2).join('__') || tool) // mcp__server__action → action
-      let g = mcpMap.get(server)
-      if (!g) {
-        g = { server, total: 0, actions: [] }
-        mcpMap.set(server, g)
+      const refs = mcpCallsForEvent(e)
+      for (const ref of refs) {
+        let g = mcpMap.get(ref.server)
+        if (!g) {
+          g = { server: ref.server, total: 0, actions: [] }
+          mcpMap.set(ref.server, g)
+        }
+        g.total++
+        const a = g.actions.find((x) => x.tool === ref.tool)
+        if (a) a.count++
+        else g.actions.push({ action: ref.action, tool: ref.tool, count: 1 })
       }
-      g.total++
-      const a = g.actions.find((x) => x.tool === tool)
-      if (a) a.count++
-      else g.actions.push({ action, tool, count: 1 })
     } else if (e.kind === 'tool') {
       const n = e.tool ?? e.stage
       tools.set(n, (tools.get(n) ?? 0) + 1)
@@ -713,7 +715,7 @@ export interface RichSegment {
   turnEnd: number
   cost: number
   totalTokens: number
-  apiMs: number
+  apiMs: number | null
   tools: number
   reads: number
   writes: number
@@ -730,7 +732,7 @@ export interface RichSegment {
 export interface SegmentReport {
   segments: RichSegment[]
   sessionTurns: number
-  totalApiMs: number
+  totalApiMs: number | null
   totalCost: number
   totalTokens: number
   skillSwitches: number
@@ -817,18 +819,16 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
   let skillSwitches = 0
   let subagents = 0
   const turnCtx: TurnCtx[] = turns.map((t) => {
-    const items = t.items.filter((e) => e.stage !== 'tool_result')
+    const items = logicalCallEventsForTurn(t.items)
     const skillEv = items.find((e) => e.kind === 'skill')
     if (skillEv) {
       const nm = skillEv.name ?? 'skill'
       if (nm !== activeSkill) skillSwitches++
       activeSkill = nm
     }
-    const agentEv = items.find((e) => e.kind === 'agent')
-    if (agentEv) {
-      subagents++
-      return { kind: 'subagent', name: agentEv.name ?? 'subagent' }
-    }
+    subagents += items.filter((e) => e.kind === 'agent').length
+    // Provider 目前没有子 agent 独立 usage。不能因为本轮出现 Task/Agent，
+    // 就把父轮的全部 Token/API 归到该子 agent；子 agent 只作为调用明细计数。
     if (activeSkill) return { kind: 'skill', name: activeSkill }
     const mcp = items.filter((e) => e.isMcp).length
     const other = items.filter((e) => e.kind === 'tool' && !e.isMcp).length
@@ -844,25 +844,36 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
     else groups.push({ ctx: c, idx: [i] })
   })
 
-  const totalApiMs = turns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + (r.durationApiMs ?? 0), 0), 0)
+  const apiValues = turns.flatMap((turn) =>
+    resultsOf(turn).map((result) => result.durationApiMs).filter((value): value is number => value != null)
+  )
+  const totalApiMs = apiValues.length > 0 ? apiValues.reduce((sum, value) => sum + value, 0) : null
   const totalCost = turns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + (r.costUsd ?? 0), 0), 0)
   const totalTokens = turns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + resultTokenTotal(r), 0), 0)
 
-  const actLabel = (e: TraceEvent): SegAct => {
-    if (e.kind === 'agent') return { label: e.name ?? 'Task', count: 0, agent: true }
-    if (e.isMcp) return { label: `mcp:${e.mcpServer ?? '?'}`, count: 0, mcp: true }
-    if (e.tool === 'Read') return { label: 'R', op: 'r', count: 0 }
-    if (e.tool === 'Write') return { label: 'W', op: 'w', count: 0 }
-    if (e.tool === 'Edit' || e.tool === 'MultiEdit' || e.tool === 'NotebookEdit') return { label: 'E', op: 'e', count: 0 }
-    return { label: e.tool ?? e.kind, count: 0 }
+  const actLabels = (e: TraceEvent): SegAct[] => {
+    if (e.kind === 'agent') return [{ label: e.name ?? 'Task', count: 0, agent: true }]
+    if (e.isMcp) {
+      const servers = mcpCallsForEvent(e).map((call) => call.server)
+      return servers.map((server) => ({ label: `mcp:${server}`, count: 0, mcp: true }))
+    }
+    if (e.tool === 'Read') return [{ label: 'R', op: 'r', count: 0 }]
+    if (e.tool === 'Write') return [{ label: 'W', op: 'w', count: 0 }]
+    if (e.tool === 'Edit' || e.tool === 'MultiEdit' || e.tool === 'NotebookEdit') return [{ label: 'E', op: 'e', count: 0 }]
+    return [{ label: e.tool ?? e.kind, count: 0 }]
   }
 
   const segments: RichSegment[] = groups.map((g) => {
     const segTurns = g.idx.map((i) => turns[i])
-    const items = segTurns.flatMap((t) => t.items).filter((e) => e.stage !== 'tool_result')
+    const items = segTurns.flatMap((t) => logicalCallEventsForTurn(t.items))
     const cost = segTurns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + (r.costUsd ?? 0), 0), 0)
     const totalTokensForSegment = segTurns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + resultTokenTotal(r), 0), 0)
-    const apiMs = segTurns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + (r.durationApiMs ?? 0), 0), 0)
+    const segmentApiValues = segTurns.flatMap((turn) =>
+      resultsOf(turn).map((result) => result.durationApiMs).filter((value): value is number => value != null)
+    )
+    const apiMs = segmentApiValues.length > 0
+      ? segmentApiValues.reduce((sum, value) => sum + value, 0)
+      : null
     const actMap = new Map<string, SegAct>()
     let reads = 0
     let writes = 0
@@ -871,13 +882,15 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
     let dangers = 0
     const readFiles = new Map<string, number>()
     const filesSet = new Set<string>()
-    for (const e of items) {
+    for (const e of items.filter((event) => event.stage !== 'tool_result')) {
       if (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') {
-        tools++
-        const a = actLabel(e)
-        const cur = actMap.get(a.label) ?? a
-        cur.count++
-        actMap.set(a.label, cur)
+        const acts = actLabels(e)
+        tools += acts.length
+        for (const act of acts) {
+          const cur = actMap.get(act.label) ?? act
+          cur.count++
+          actMap.set(act.label, cur)
+        }
       }
       if (e.fileOp === 'read' && e.filePath) {
         reads++
@@ -910,7 +923,7 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
       edits,
       errors,
       dangers,
-      pct: totalApiMs > 0 ? (apiMs / totalApiMs) * 100 : 0,
+      pct: totalApiMs != null && totalApiMs > 0 && apiMs != null ? (apiMs / totalApiMs) * 100 : 0,
       acts: [...actMap.values()].sort((a, b) => b.count - a.count),
       files: [...filesSet].map(basename).slice(0, 4),
       repeatReads,
@@ -988,6 +1001,7 @@ export interface BillingTurnRow {
   tokensOut: number
   cacheReadTokens: number
   cacheCreationTokens: number
+  promptTokens: number
   contextTokens?: number
   contextWindow?: number
   contextPct?: number
@@ -1043,7 +1057,7 @@ export interface BillingAnalysis {
   tokensOut: number
   cacheReadTokens: number
   cacheCreationTokens: number
-  apiMs: number
+  apiMs: number | null
   resultTurns: number
   knownCostResultCount: number
   missingCostResultCount: number
@@ -1098,7 +1112,8 @@ function modelCostSource(mu: ModelUsageRow): { costSource: string; confidence: s
 function eventNameForEvidence(e: TraceEvent): { kind: BillingEvidenceRow['kind']; name: string; method: AttributionMethod } | null {
   if (e.stage === 'tool_result') return null
   if (e.kind === 'skill') return { kind: 'skill', name: safeReportLabel(e.name ?? 'skill'), method: 'turn_allocated' }
-  if (e.kind === 'agent') return { kind: 'agent', name: safeReportLabel(e.name ?? 'Task'), method: 'turn_allocated' }
+  // Provider 没有子 agent 独立 usage 时，不能把父 turn 的全部 Token/费用算给子 agent。
+  if (e.kind === 'agent') return { kind: 'agent', name: safeReportLabel(e.name ?? 'Task'), method: 'unattributed' }
   if (e.kind === 'hook') return { kind: 'hook', name: safeReportLabel(e.hookName ?? e.name ?? 'Hook'), method: 'heuristic' }
   if (e.kind === 'tool' && e.isMcp) return { kind: 'mcp', name: safeReportLabel(`mcp:${e.mcpServer ?? '?'}`), method: 'turn_allocated' }
   if (e.kind === 'tool') return { kind: 'tool', name: safeReportLabel(e.tool ?? e.stage), method: 'turn_allocated' }
@@ -1155,9 +1170,11 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
     const contextTokens = r?.contextTokens
     const tokensTotal = resultTokenTotal(r)
     const tokenKnown = hasTokenUsage(r)
-    const toolCount = t.items.filter(
-      (e) => e.stage !== 'tool_result' && (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
-    ).length
+    const cacheAccounting = tokenCacheAccounting(r)
+    const promptTokens =
+      (r?.tokensIn ?? 0) +
+      (cacheAccounting === 'separate' ? (r?.cacheReadTokens ?? 0) + (r?.cacheCreationTokens ?? 0) : 0)
+    const toolCount = aggregateCalls(logicalCallEventsForTurn(t.items)).totalCalls
     const errorCount = t.items.filter((e) => e.stage === 'tool_result' && e.isError).length
     return {
       turnNo: i + 1,
@@ -1171,6 +1188,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
       tokensOut: r?.tokensOut ?? 0,
       cacheReadTokens: r?.cacheReadTokens ?? 0,
       cacheCreationTokens: r?.cacheCreationTokens ?? 0,
+      promptTokens,
       contextTokens,
       contextWindow,
       contextPct:
@@ -1194,7 +1212,10 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
   const totalTokens = results.reduce((sum, event) => sum + resultTokenTotal(event), 0)
   const knownTokenResultCount = results.filter(hasTokenUsage).length
   const missingTokenResultCount = Math.max(0, results.length - knownTokenResultCount)
-  const apiMs = results.reduce((s, e) => s + (e.durationApiMs ?? 0), 0)
+  const apiValues = results
+    .map((event) => event.durationApiMs)
+    .filter((duration): duration is number => duration != null)
+  const apiMs = apiValues.length > 0 ? apiValues.reduce((sum, duration) => sum + duration, 0) : null
 
   const modelMap = new Map<string, BillingModelRow>()
   for (const r of results) {
@@ -1271,6 +1292,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
       row.count++
       if (!row.turnIds.has(t.runId)) {
         row.turnIds.add(t.runId)
+        if (meta.method === 'unattributed') continue
         if (allTurnRows[i]?.costKnown) {
           row.relatedCost += turnCost
           row.costKnownTurns++
@@ -1329,14 +1351,11 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
 
   const repeatInTurn = turns
     .map((t, i) => {
-      const per = new Map<string, number>()
-      for (const e of t.items) {
-        if (e.stage === 'tool_result') continue
-        if (e.kind !== 'tool' && !e.isMcp) continue
-        const name = e.isMcp ? `mcp:${e.mcpServer ?? '?'}` : (e.tool ?? e.stage)
-        per.set(name, (per.get(name) ?? 0) + 1)
-      }
-      const top = [...per.entries()].sort((a, b) => b[1] - a[1])[0]
+      const calls = aggregateCalls(logicalCallEventsForTurn(t.items))
+      const top = [
+        ...calls.tools.map((tool) => [tool.name, tool.count] as const),
+        ...calls.mcp.map((group) => [`mcp:${group.server}`, group.total] as const)
+      ].sort((a, b) => b[1] - a[1])[0]
       return top ? { turn: allTurnRows[i], name: top[0], count: top[1] } : null
     })
     .filter((x): x is { turn: BillingTurnRow; name: string; count: number } => !!x && x.count >= 8)[0]
@@ -1370,17 +1389,43 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
     })
   }
 
-  const subagent = allTurnRows.find((r, i) => turns[i].items.some((e) => e.kind === 'agent') && (r.toolCount >= 20 || r.tokensTotal >= 100_000))
+  const subagent = turns
+    .map((turn, index) => {
+      const logical = logicalCallEventsForTurn(turn.items).filter(
+        (event) => event.stage !== 'tool_result' && (event.kind === 'tool' || event.kind === 'skill' || event.kind === 'agent')
+      )
+      const roots = logical.filter((event) => event.kind === 'agent')
+      if (roots.length === 0) return null
+      const descendantIds = new Set(roots.flatMap((event) => event.toolUseId ? [event.toolUseId] : []))
+      const descendants: TraceEvent[] = []
+      let changed = true
+      while (changed) {
+        changed = false
+        for (const event of logical) {
+          if (roots.includes(event) || descendants.includes(event)) continue
+          const linkedByParent = event.parentToolUseId != null && descendantIds.has(event.parentToolUseId)
+          if (linkedByParent) {
+            descendants.push(event)
+            if (event.toolUseId && !descendantIds.has(event.toolUseId)) {
+              descendantIds.add(event.toolUseId)
+              changed = true
+            }
+          }
+        }
+      }
+      return descendants.length >= 20
+        ? { row: allTurnRows[index], calls: descendants.length, evidence: roots[0] }
+        : null
+    })
+    .filter((candidate): candidate is { row: BillingTurnRow; calls: number; evidence: TraceEvent } => candidate != null)
+    .sort((left, right) => right.calls - left.calls)[0]
   if (subagent) {
-    const subagentTokenText = subagent.result
-      ? fmtKnownTokens(subagent.tokensTotal, subagent.tokenKnown ? 1 : 0, subagent.tokenKnown ? 0 : 1)
-      : '等待 result'
     signals.push({
-      severity: subagent.tokensTotal >= 250_000 || subagent.toolCount >= 40 ? 'bad' : 'warn',
-      title: `子 agent 消耗 ${subagent.toolCount} 工具`,
-      detail: `TURN ${String(subagent.turnNo).padStart(2, '0')} · ${subagentTokenText}`,
+      severity: subagent.calls >= 40 ? 'bad' : 'warn',
+      title: `子 agent 调用 ${subagent.calls} 次`,
+      detail: `TURN ${String(subagent.row.turnNo).padStart(2, '0')} · Provider 未上报子 agent 独立 Token/API`,
       action: '确认子 agent 是否仍在必要范围内',
-      evidence: subagent.result
+      evidence: subagent.evidence
     })
   }
 
@@ -1432,7 +1477,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
 export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts: { sessionId?: string | null } = {}): string {
   const billing = analyzeBilling(turns)
   const all = turns.flatMap((t) => t.items)
-  const calls = aggregateCalls(all)
+  const calls = aggregateCalls(turns.flatMap((turn) => logicalCallEventsForTurn(turn.items)))
   const { structured } = aggregateFiles(all)
   const cov = fileWriteCoverage(all)
   const segs = aggregateSegments(all)
