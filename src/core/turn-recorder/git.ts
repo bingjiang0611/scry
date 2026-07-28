@@ -130,6 +130,8 @@ export interface GitTurnDiffCapture {
   repoRoot?: string
   scope?: string
   beforeTree?: string
+  baselineClean?: boolean
+  indexPath?: string
   tempDir?: string
   objectDir?: string
   alternateObjectDirs?: string
@@ -228,14 +230,34 @@ export async function beginGitTurnDiff(
       }
     }))
     const pathspec = capturePathspec(repoRoot, scope, canonicalExcludedPaths)
+    const baselineClean = !(await gitCommand(
+      snapshotGitArgs([], ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...pathspec]),
+      { cwd: repoRoot, deadline }
+    ))
     if (captureRoot) await mkdir(captureRoot, { recursive: true, mode: 0o700 })
     tempDir = await mkdtemp(join(captureRoot ?? tmpdir(), 'scry-turn-diff-'))
-    const filterOverrides = await loadSnapshotOverrides(canonicalCwd, tempDir, deadline)
     const objectDir = join(tempDir, 'objects')
     await mkdir(objectDir)
     const alternateObjectDirs = [join(commonDir, 'objects'), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
       .filter((value): value is string => !!value)
       .join(delimiter)
+    if (baselineClean) {
+      return {
+        beforeAt,
+        captureMs: Date.now() - started,
+        status: 'ready',
+        repoRoot,
+        scope,
+        beforeTree: head,
+        baselineClean,
+        indexPath,
+        tempDir,
+        objectDir,
+        alternateObjectDirs,
+        pathspec
+      }
+    }
+    const filterOverrides = await loadSnapshotOverrides(canonicalCwd, tempDir, deadline)
     const beforeIndex = join(tempDir, 'before.index')
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -259,6 +281,8 @@ export async function beginGitTurnDiff(
       repoRoot,
       scope,
       beforeTree,
+      baselineClean,
+      indexPath,
       tempDir,
       objectDir,
       alternateObjectDirs,
@@ -313,7 +337,9 @@ async function finishGitTurnDiffImpl(capture: GitTurnDiffCapture, deadlineMs: nu
       env,
       deadline,
       filterOverrides,
-      sourceIndex: join(capture.tempDir, 'before.index'),
+      sourceIndex: capture.baselineClean
+        ? capture.indexPath ?? join(capture.tempDir, 'missing.index')
+        : join(capture.tempDir, 'before.index'),
       targetIndex: afterIndex
     })
     const stdout = await gitCommand(

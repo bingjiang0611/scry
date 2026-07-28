@@ -8,6 +8,7 @@ import {
   type ModelUsageRow
 } from '@shared/trace'
 import type { AgentInputAttachment } from '@shared/runtime'
+export { logicalCallEventsForTurn } from '@shared/logical-calls'
 
 // 视觉升级：值改成 Icon 名（蓝本 SVG 图标），消费处用 <Icon name={...}>。
 export const AGENT_ICON: Record<string, string> = {
@@ -283,60 +284,6 @@ export function aggregateCalls(items: TraceEvent[]): CallBreakdown {
     totalCalls,
     toolTotal: totalCalls
   }
-}
-
-function skillSource(ev: TraceEvent): string | undefined {
-  const input = ev.input as Record<string, unknown> | undefined
-  return typeof input?.source === 'string' ? input.source : undefined
-}
-
-function isSkillPathEvidence(ev: TraceEvent): boolean {
-  const source = skillSource(ev)
-  return source === 'skill_file' || source === 'skill_path_in_bash' || source === 'skill_path_in_command'
-}
-
-// Skill trace 同时承载真实调用、注入和内部文件路径证据。所有 renderer 统计必须先走
-// 同一套去重，避免“每轮调用是 1、Skill 段落却是 3”的口径分裂。
-export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
-  const skillEvents = new Map<string, TraceEvent[]>()
-  for (const ev of items) {
-    if (ev.kind !== 'skill' || ev.stage === 'tool_result') continue
-    const name = ev.name ?? 'Skill'
-    const events = skillEvents.get(name)
-    if (events) events.push(ev)
-    else skillEvents.set(name, [ev])
-  }
-
-  const kept = new Set<TraceEvent>()
-  for (const events of skillEvents.values()) {
-    const direct = events.filter((ev) => skillSource(ev) !== 'skill_injection' && !isSkillPathEvidence(ev))
-    if (direct.length > 0) {
-      const identities = new Set<string>()
-      for (const ev of direct) {
-        const identity = ev.toolUseId
-          ? `tool:${ev.toolUseId}`
-          : ev.messageId
-            ? `message:${ev.messageId}`
-            : 'anonymous'
-        if (identities.has(identity)) continue
-        identities.add(identity)
-        kept.add(ev)
-      }
-      continue
-    }
-    kept.add(events.find((ev) => skillSource(ev) === 'skill_injection') ?? events[0])
-  }
-
-  const callIdentities = new Set<string>()
-  return items.filter((ev) => {
-    if (ev.kind === 'skill') return ev.stage === 'tool_result' || kept.has(ev)
-    if (ev.stage === 'tool_result' || (ev.kind !== 'tool' && ev.kind !== 'agent')) return true
-    if (!ev.toolUseId) return true
-    const identity = `${ev.kind}:${ev.toolUseId}`
-    if (callIdentities.has(identity)) return false
-    callIdentities.add(identity)
-    return true
-  })
 }
 
 export interface HookScriptRow {

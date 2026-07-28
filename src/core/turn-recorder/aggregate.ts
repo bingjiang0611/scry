@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { logicalCallEventsForTurn } from '../../shared/logical-calls.js'
 import type { TraceEvent } from '../../shared/trace.js'
 import {
   available,
@@ -125,28 +126,56 @@ export function aggregateTurnEvidence(args: {
   userText?: string
   events: TraceEvent[]
   source?: string
-  observable?: { assistant?: boolean; tools?: boolean; hooks?: boolean; usage?: boolean; diff?: boolean }
+  observable?: {
+    assistant?: boolean
+    tools?: boolean
+    skills?: boolean
+    mcps?: boolean
+    hooks?: boolean
+    usage?: boolean
+    files?: boolean
+    errors?: boolean
+    diff?: boolean
+  }
 }): TurnEvidence {
   const source = args.source ?? 'trace_events'
-  const observable = { assistant: true, tools: true, hooks: true, usage: true, diff: true, ...args.observable }
+  const observable = {
+    assistant: true,
+    tools: true,
+    skills: true,
+    mcps: true,
+    hooks: true,
+    usage: true,
+    files: true,
+    errors: true,
+    diff: true,
+    ...args.observable
+  }
   const resultById = new Map<string, TraceEvent>()
   for (const event of args.events) {
     if (event.stage === 'tool_result' && event.toolUseId) resultById.set(event.toolUseId, event)
   }
 
-  const starts = args.events.filter((event) =>
+  const logicalEvents = logicalCallEventsForTurn(args.events)
+  const starts = logicalEvents.filter((event) =>
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
   )
-  const tools = starts.filter((event) => event.kind !== 'skill').map((event) => callFromEvent(event, resultById))
+  // reportAgentTurns 的 Tool / Skill / MCP 是互斥列。Agent 暂无独立列，因此归入 Tool；
+  // MCP 不能同时再出现在 Tool 中，否则看板总调用会重复相加。
+  const tools = starts
+    .filter((event) => event.kind === 'agent' || (event.kind === 'tool' && !event.isMcp))
+    .map((event) => callFromEvent(event, resultById))
   const skills = starts.filter((event) => event.kind === 'skill').map((event) => callFromEvent(event, resultById))
-  const mcps = starts.filter((event) => event.isMcp).map((event) => callFromEvent(event, resultById))
+  const mcps = starts.filter((event) => event.kind === 'tool' && event.isMcp).map((event) => callFromEvent(event, resultById))
   const hooks = aggregateHooks(args.events)
   const assistantText = args.events
     .filter((event) => event.kind === 'model' && event.stage === 'text' && event.text)
     .map((event) => event.text)
     .join('')
   const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
-  for (const event of starts) if (event.filePath && event.fileOp) fileMap.set(event.filePath, event.fileOp)
+  for (const event of args.events) {
+    if (event.stage !== 'tool_result' && event.filePath && event.fileOp) fileMap.set(event.filePath, event.fileOp)
+  }
   const diffs = args.events.flatMap((event) => {
     const diff = event.turnDiff
     if (!diff) return []
@@ -174,15 +203,15 @@ export function aggregateTurnEvidence(args: {
         ? available({ text: assistantText, textHash: hash(assistantText) }, [source])
         : partial({}, [source], 'assistant text was not present in captured events'),
     tools: observable.tools ? available(tools, [source]) : unavailable('provider tool events were not observable', [source]),
-    skills: observable.tools ? available(skills, [source]) : unavailable('provider skill events were not observable', [source]),
-    mcps: observable.tools ? available(mcps, [source]) : unavailable('provider MCP events were not observable', [source]),
+    skills: observable.skills ? available(skills, [source]) : unavailable('provider skill events were not observable', [source]),
+    mcps: observable.mcps ? available(mcps, [source]) : unavailable('provider MCP events were not observable', [source]),
     hooks: observable.hooks ? available(hooks, [source]) : unavailable('provider hook runtime events were not observable', [source]),
     usage: !observable.usage
       ? unavailable('provider usage was not observable', [source])
       : usage
         ? available(usage, [source])
         : unavailable('no authoritative usage event was captured', [source]),
-    files: observable.tools
+    files: observable.files
       ? available([...fileMap].map(([path, operation]) => ({ path, operation })), [source])
       : unavailable('provider file events were not observable', [source]),
     diff: !observable.diff
@@ -201,6 +230,6 @@ export function aggregateTurnEvidence(args: {
                 omissionReason: 'no repository snapshot was captured'
               },
     dangerousOperations: observable.tools ? available(dangers, [source]) : unavailable('tool evidence was unavailable', [source]),
-    errors: available(errors, [source])
+    errors: observable.errors ? available(errors, [source]) : unavailable('provider error events were not observable', [source])
   }
 }

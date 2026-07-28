@@ -49,4 +49,18 @@ describe('aggregateTurnEvidence', () => {
       { id: 'native', ts: '2026-01-01T00:00:03.000Z', runId: 'r', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5 }
     ] }).usage.value).toMatchObject({ inputTokens: 10, outputTokens: 5 })
   })
+
+  it('Tool、Skill、MCP 使用互斥口径，并共享 Skill 去重规则', () => {
+    const events: TraceEvent[] = [
+      { id: 'bash', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', name: 'Bash', toolUseId: 'bash-1' },
+      { id: 'mcp', ts: '2026-01-01T00:00:00.100Z', runId: 'r', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', name: 'Bash', toolUseId: 'mcp-1', isMcp: true, mcpServer: 'coop', mcpAction: 'query' },
+      { id: 'skill-injected', ts: '2026-01-01T00:00:00.200Z', runId: 'r', kind: 'skill', stage: 'skill:rate-workflow', tool: 'Skill', name: 'rate-workflow', input: { source: 'skill_injection' } },
+      { id: 'skill-path', ts: '2026-01-01T00:00:00.300Z', runId: 'r', kind: 'skill', stage: 'skill:rate-workflow', tool: 'Skill', name: 'rate-workflow', toolUseId: 'read-skill', input: { source: 'skill_path_in_command' } }
+    ]
+    const evidence = aggregateTurnEvidence({ events })
+
+    expect(evidence.tools.value?.map((call) => call.id)).toEqual(['bash-1'])
+    expect(evidence.mcps.value?.map((call) => call.id)).toEqual(['mcp-1'])
+    expect(evidence.skills.value?.map((call) => call.name)).toEqual(['rate-workflow'])
+  })
 })

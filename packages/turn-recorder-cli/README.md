@@ -41,3 +41,11 @@ scry recorder restart --workspace "$PWD"
 ```
 
 创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/export/verify` 仍可只读已有数据。
+
+## 数据口径
+
+- `Tool`、`Skill`、`MCP` 是互斥列；同一次 MCP 不会再重复计入 Tool。
+- Codex 的顶层轮次会合并其子 Agent rollout，但 Token 和最终回复只取顶层权威值，避免重复累计。
+- 无调用记为 `available + []`；Provider 未暴露的数据记为 `unavailable`，不会伪装成 0。Codex rollout 不包含原生 Hook 运行时事件，因此 Hook 通常为 `unavailable`。
+- Codex 会从 rollout 恢复 slash prompt、Usage、文件修改及常见并行工具调用；若子 Agent rollout 缺失，相关字段降级为 `partial`。
+- Recorder 只保证新生成记录使用当前口径；已经上传的旧版本记录不会被自动重写。

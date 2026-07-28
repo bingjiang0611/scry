@@ -399,7 +399,7 @@ describe('Codex rollout recorder evidence', () => {
 
     const [record] = await listRecords(join(root, '.scry'))
     expect(record.tools.value).toEqual([
-      expect.objectContaining({ id: 'call-1', name: 'exec_command', status: 'success' })
+      expect.objectContaining({ id: 'call-1', name: 'Bash', status: 'success' })
     ])
     expect(record.skills.value).toEqual([
       expect.objectContaining({ name: 'rate-workflow' })
@@ -418,6 +418,151 @@ describe('Codex rollout recorder evidence', () => {
         reasoningTokens: 3
       }
     })
+  })
+
+  it('还原 slash prompt、展开 Codex exec，并把子 agent 调用并入父轮但不重复 usage', async () => {
+    const root = await workspace()
+    const parent = join(root, 'rollout-parent.jsonl')
+    const childId = '019fa774-618b-75b3-aed1-7f1dd8eb02f2'
+    const child = join(root, `rollout-child-${childId}.jsonl`)
+    const row = (timestamp: string, type: string, payload: Record<string, unknown>) => ({ timestamp, type, payload })
+    const parentLines = [
+      row('2026-07-19T12:00:00.000Z', 'event_msg', { type: 'task_started', turn_id: 'parent-turn' }),
+      row('2026-07-19T12:00:00.010Z', 'event_msg', { type: 'user_message', message: '84441877' }),
+      row('2026-07-19T12:00:00.020Z', 'response_item', {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: '<skill><name>rate-workflow</name></skill>' }]
+      }),
+      row('2026-07-19T12:00:00.100Z', 'response_item', {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'exec-1',
+        input: `const a = await tools.exec_command({"cmd":"printf ok && sed -n '1,40p' .claude/skills/rate-workflow/SKILL.md /Users/test/.claude/skills/browser-use/SKILL.md"}); const b = await tools.exec_command({"cmd":"mcporter call coop.query --args '{}'"});`
+      }),
+      row('2026-07-19T12:00:00.200Z', 'response_item', {
+        type: 'custom_tool_call_output',
+        call_id: 'exec-1',
+        output: 'ok'
+      }),
+      row('2026-07-19T12:00:00.250Z', 'response_item', {
+        type: 'function_call',
+        name: 'spawn_agent',
+        call_id: 'agent-1',
+        arguments: JSON.stringify({ task_name: 'review', message: 'review it' })
+      }),
+      row('2026-07-19T12:00:00.260Z', 'response_item', {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'exec-map',
+        input: `const cmds = ["printf one", "printf two"]; const rs = await Promise.all(cmds.map(cmd => tools.exec_command({cmd,workdir:"/repo",yield_time_ms:10000})));`
+      }),
+      row('2026-07-19T12:00:00.270Z', 'response_item', {
+        type: 'custom_tool_call_output',
+        call_id: 'exec-map',
+        output: 'one\ntwo'
+      }),
+      row('2026-07-19T12:00:00.300Z', 'event_msg', {
+        type: 'sub_agent_activity',
+        kind: 'started',
+        event_id: 'agent-1',
+        agent_thread_id: childId,
+        agent_path: '/root/review'
+      }),
+      row('2026-07-19T12:00:00.310Z', 'response_item', {
+        type: 'custom_tool_call',
+        name: 'apply_patch',
+        call_id: 'patch-1',
+        input: '*** Begin Patch\n*** Add File: /repo/new.txt\n+new\n*** End Patch\n'
+      }),
+      row('2026-07-19T12:00:00.320Z', 'response_item', {
+        type: 'custom_tool_call_output',
+        call_id: 'patch-1',
+        output: 'Done!'
+      }),
+      row('2026-07-19T12:00:00.330Z', 'event_msg', {
+        type: 'patch_apply_end',
+        call_id: 'patch-1',
+        turn_id: 'parent-turn',
+        changes: ['/repo/new.txt']
+      }),
+      row('2026-07-19T12:00:00.900Z', 'event_msg', {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_input_tokens: 80,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 5
+          }
+        }
+      }),
+      row('2026-07-19T12:00:01.000Z', 'event_msg', {
+        type: 'task_complete',
+        turn_id: 'parent-turn',
+        last_agent_message: 'done'
+      })
+    ]
+    const childLines = [
+      row('2026-07-19T12:00:00.310Z', 'event_msg', { type: 'task_started', turn_id: 'child-turn' }),
+      row('2026-07-19T12:00:00.400Z', 'response_item', {
+        type: 'function_call',
+        name: 'exec_command',
+        call_id: 'child-bash',
+        arguments: JSON.stringify({ cmd: 'git status --short' })
+      }),
+      row('2026-07-19T12:00:00.500Z', 'response_item', {
+        type: 'function_call_output',
+        call_id: 'child-bash',
+        output: 'clean'
+      }),
+      row('2026-07-19T12:00:00.600Z', 'event_msg', {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: 900,
+            output_tokens: 90,
+            cached_input_tokens: 700,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 10
+          }
+        }
+      }),
+      row('2026-07-19T12:00:00.700Z', 'event_msg', { type: 'task_complete', turn_id: 'child-turn' })
+    ]
+    await writeFile(parent, `${parentLines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await writeFile(child, `${childLines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: '84441877', turn_id: 'parent-turn', rollout_path: parent })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', { turn_id: 'parent-turn', rollout_path: parent, timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.user.value?.text).toBe('/rate-workflow 84441877')
+    expect(record.tools.value?.map((call) => [call.name, call.id])).toEqual([
+      ['Bash', 'exec-1:1'],
+      ['review', 'agent-1'],
+      ['Bash', 'exec-map:1'],
+      ['Bash', 'exec-map:2'],
+      ['Edit', 'patch-1'],
+      ['Bash', 'child-bash']
+    ])
+    expect(record.mcps.value).toEqual([
+      expect.objectContaining({ id: 'exec-1:2', name: 'Bash', mcp: expect.objectContaining({ server: 'coop', action: 'query' }) })
+    ])
+    expect(record.skills.value?.map((call) => call.name)).toEqual(['rate-workflow', 'browser-use'])
+    expect(record.files.value).toEqual([{ path: '/repo/new.txt', operation: 'edit' }])
+    expect(record.usage.value).toMatchObject({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, reasoningTokens: 5 })
   })
 
   it('未知 transcript 格式不会把 Skill/Hook/Usage 伪装为 exact 空', async () => {
