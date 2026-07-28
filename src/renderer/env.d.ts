@@ -35,7 +35,9 @@ export interface DetectedAgent {
 
 export interface SessionMeta {
   sessionId: string
-  externalSessionId: string
+  runId?: string
+  externalSessionId?: string
+  pending?: boolean
   providerId: SessionProviderId
   runtimeProvider?: RuntimeProvider
   mtime: number
@@ -61,6 +63,8 @@ export type { McpMeta, SkillMeta }
 declare global {
   interface Window {
     scry: {
+      rendererReady?(): void
+      detectFast?(): Promise<DetectedAgent[]>
       detect(): Promise<DetectedAgent[]>
       providerDescriptors(): Promise<ProviderDescriptor[]>
       recentFolders(): Promise<string[]>
@@ -89,11 +93,14 @@ declare global {
       deleteSession(context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<boolean>
       start(request: AgentStartRequest): Promise<{ runId: string }>
       activeRun(): Promise<ActiveRun | null>
+      activeRuns(): Promise<ActiveRun[]>
+      focusRun(runId: string | null): Promise<boolean>
+      adoptActiveRun(runId: string): Promise<ActiveRun | null>
       answerQuestion(response: AgentQuestionResponse): Promise<boolean>
-      stop(): Promise<boolean>
+      stop(runId: string): Promise<boolean>
       onTrace(cb: (ev: TraceEvent) => void): () => void
       onTurnDone(cb: (e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; stopped?: boolean }) => void): () => void
-      onSession(cb: (e: { runId: string; sessionId: string; externalSessionId?: string; providerId?: string }) => void): () => void
+      onSession(cb: (e: { runId: string; sessionId: string; previousSessionId?: string; externalSessionId?: string; providerId?: string; pending?: boolean }) => void): () => void
       onQuestion(cb: (request: AgentQuestionRequest) => void): () => void
       onQuestionClosed(cb: (event: { runId: string; questionId: string }) => void): () => void
       onError(cb: (e: { runId: string; message: string; category?: string; hint?: string }) => void): () => void

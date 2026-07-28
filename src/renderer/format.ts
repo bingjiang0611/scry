@@ -1,5 +1,12 @@
 // renderer 共享的纯逻辑：常量 / 视图类型 / 格式化与投影 helper。无 React 依赖，给各组件复用。
-import { maskSecrets, type TraceEvent, type DiffFile, type McpLiveStatus, type ModelUsageRow } from '@shared/trace'
+import {
+  maskSecrets,
+  type TraceEvent,
+  type DiffFile,
+  type HookConfiguredCommand,
+  type McpLiveStatus,
+  type ModelUsageRow
+} from '@shared/trace'
 import type { AgentInputAttachment } from '@shared/runtime'
 
 // 视觉升级：值改成 Icon 名（蓝本 SVG 图标），消费处用 <Icon name={...}>。
@@ -112,12 +119,38 @@ export function fmtTok(n?: number | null): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
-function usageTokenTotal(input = 0, output = 0, cacheRead = 0, cacheCreation = 0): number {
-  return input + output + cacheRead + cacheCreation
+type TokenCacheAccounting = 'separate' | 'input_includes_cache'
+
+function tokenCacheAccounting(e: Pick<TraceEvent, 'providerId' | 'runtimeProvider' | 'billingProvider'> | undefined): TokenCacheAccounting {
+  if (
+    e?.providerId === 'codex' ||
+    e?.runtimeProvider === 'codex_cli' ||
+    e?.billingProvider === 'codex' ||
+    e?.billingProvider === 'openai'
+  ) {
+    return 'input_includes_cache'
+  }
+  return 'separate'
 }
 
-function resultTokenTotal(e: TraceEvent | undefined): number {
-  return usageTokenTotal(e?.tokensIn ?? 0, e?.tokensOut ?? 0, e?.cacheReadTokens ?? 0, e?.cacheCreationTokens ?? 0)
+function usageTokenTotal(
+  input = 0,
+  output = 0,
+  cacheRead = 0,
+  cacheCreation = 0,
+  accounting: TokenCacheAccounting = 'separate'
+): number {
+  return input + output + (accounting === 'separate' ? cacheRead + cacheCreation : 0)
+}
+
+export function resultTokenTotal(e: TraceEvent | undefined): number {
+  return usageTokenTotal(
+    e?.tokensIn ?? 0,
+    e?.tokensOut ?? 0,
+    e?.cacheReadTokens ?? 0,
+    e?.cacheCreationTokens ?? 0,
+    tokenCacheAccounting(e)
+  )
 }
 
 function hasTokenUsage(e: TraceEvent | undefined): boolean {
@@ -188,7 +221,12 @@ export interface CallBreakdown {
   skills: CallCount[] // kind=skill
   agents: CallCount[] // kind=agent（子 agent / Task）
   mcp: McpGroup[] // kind=tool && isMcp，按 server 分组
-  toolTotal: number // 全部 tool_use 数（tool+skill+agent+mcp，已排除 tool_result）
+  ordinaryToolTotal: number
+  skillTotal: number
+  agentTotal: number
+  mcpTotal: number
+  totalCalls: number // 四类逻辑调用之和
+  toolTotal: number // 兼容旧调用方：等于 totalCalls；新 UI 不应把它标成“工具”
 }
 
 export function aggregateCalls(items: TraceEvent[]): CallBreakdown {
@@ -196,17 +234,14 @@ export function aggregateCalls(items: TraceEvent[]): CallBreakdown {
   const skills = new Map<string, number>()
   const agents = new Map<string, number>()
   const mcpMap = new Map<string, McpGroup>()
-  let toolTotal = 0
   for (const e of items) {
     if (e.stage === 'tool_result') continue // 工具结果不是一次调用，跳过
     if (e.kind === 'skill') {
       const n = e.name ?? 'skill'
       skills.set(n, (skills.get(n) ?? 0) + 1)
-      toolTotal++
     } else if (e.kind === 'agent') {
       const n = e.name ?? 'agent'
       agents.set(n, (agents.get(n) ?? 0) + 1)
-      toolTotal++
     } else if (e.kind === 'tool' && e.isMcp) {
       const server = e.mcpServer ?? '?'
       const tool = e.mcpTool ?? e.tool ?? ''
@@ -220,11 +255,9 @@ export function aggregateCalls(items: TraceEvent[]): CallBreakdown {
       const a = g.actions.find((x) => x.tool === tool)
       if (a) a.count++
       else g.actions.push({ action, tool, count: 1 })
-      toolTotal++
     } else if (e.kind === 'tool') {
       const n = e.tool ?? e.stage
       tools.set(n, (tools.get(n) ?? 0) + 1)
-      toolTotal++
     }
   }
   const toRows = (m: Map<string, number>): CallCount[] =>
@@ -233,7 +266,77 @@ export function aggregateCalls(items: TraceEvent[]): CallBreakdown {
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
   const mcp = [...mcpMap.values()].sort((a, b) => b.total - a.total)
   for (const g of mcp) g.actions.sort((a, b) => b.count - a.count || a.action.localeCompare(b.action))
-  return { tools: toRows(tools), skills: toRows(skills), agents: toRows(agents), mcp, toolTotal }
+  const ordinaryToolTotal = [...tools.values()].reduce((sum, count) => sum + count, 0)
+  const skillTotal = [...skills.values()].reduce((sum, count) => sum + count, 0)
+  const agentTotal = [...agents.values()].reduce((sum, count) => sum + count, 0)
+  const mcpTotal = mcp.reduce((sum, group) => sum + group.total, 0)
+  const totalCalls = ordinaryToolTotal + skillTotal + agentTotal + mcpTotal
+  return {
+    tools: toRows(tools),
+    skills: toRows(skills),
+    agents: toRows(agents),
+    mcp,
+    ordinaryToolTotal,
+    skillTotal,
+    agentTotal,
+    mcpTotal,
+    totalCalls,
+    toolTotal: totalCalls
+  }
+}
+
+function skillSource(ev: TraceEvent): string | undefined {
+  const input = ev.input as Record<string, unknown> | undefined
+  return typeof input?.source === 'string' ? input.source : undefined
+}
+
+function isSkillPathEvidence(ev: TraceEvent): boolean {
+  const source = skillSource(ev)
+  return source === 'skill_file' || source === 'skill_path_in_bash' || source === 'skill_path_in_command'
+}
+
+// Skill trace 同时承载真实调用、注入和内部文件路径证据。所有 renderer 统计必须先走
+// 同一套去重，避免“每轮调用是 1、Skill 段落却是 3”的口径分裂。
+export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
+  const skillEvents = new Map<string, TraceEvent[]>()
+  for (const ev of items) {
+    if (ev.kind !== 'skill' || ev.stage === 'tool_result') continue
+    const name = ev.name ?? 'Skill'
+    const events = skillEvents.get(name)
+    if (events) events.push(ev)
+    else skillEvents.set(name, [ev])
+  }
+
+  const kept = new Set<TraceEvent>()
+  for (const events of skillEvents.values()) {
+    const direct = events.filter((ev) => skillSource(ev) !== 'skill_injection' && !isSkillPathEvidence(ev))
+    if (direct.length > 0) {
+      const identities = new Set<string>()
+      for (const ev of direct) {
+        const identity = ev.toolUseId
+          ? `tool:${ev.toolUseId}`
+          : ev.messageId
+            ? `message:${ev.messageId}`
+            : 'anonymous'
+        if (identities.has(identity)) continue
+        identities.add(identity)
+        kept.add(ev)
+      }
+      continue
+    }
+    kept.add(events.find((ev) => skillSource(ev) === 'skill_injection') ?? events[0])
+  }
+
+  const callIdentities = new Set<string>()
+  return items.filter((ev) => {
+    if (ev.kind === 'skill') return ev.stage === 'tool_result' || kept.has(ev)
+    if (ev.stage === 'tool_result' || (ev.kind !== 'tool' && ev.kind !== 'agent')) return true
+    if (!ev.toolUseId) return true
+    const identity = `${ev.kind}:${ev.toolUseId}`
+    if (callIdentities.has(identity)) return false
+    callIdentities.add(identity)
+    return true
+  })
 }
 
 export interface HookScriptRow {
@@ -257,6 +360,20 @@ export interface HookScriptRow {
   lastCancelled?: TraceEvent
   unsuccessful: TraceEvent[]
   failureSummary?: string
+  instances: HookInstanceRow[]
+}
+
+export interface HookInstanceRow {
+  key: string
+  hookId?: string
+  command?: string
+  source?: HookConfiguredCommand['source']
+  sourcePath?: string
+  configuredCommands: HookConfiguredCommand[]
+  outcome?: string
+  durationMs?: number
+  isError: boolean
+  last: TraceEvent
 }
 
 export interface HookGroup {
@@ -270,6 +387,7 @@ export interface HookGroup {
   errors: number
   cancelled: number
   toolCalls: number
+  triggerRuns: number | null
   last?: TraceEvent
   scripts: HookScriptRow[]
 }
@@ -348,6 +466,13 @@ function cleanCommandToken(raw: string): string {
 
 export function hookCommandLabel(command: string | undefined): string | undefined {
   if (!command) return undefined
+  const expectedMarker = command.match(/--expected-marker(?:=|\s+)(?:"([^"]+)"|'([^']+)'|([^\s'"]+))/)
+  const marker = expectedMarker?.[1] ?? expectedMarker?.[2] ?? expectedMarker?.[3]
+  if (marker) return basename(cleanCommandToken(marker))
+  const nestedScript = command.match(
+    /(?:^|[\s"'`;])([^\s"'`;]*\.(?:py|sh|mjs|cjs|js|ts))(?=$|[\s"'`;])/i
+  )?.[1]
+  if (nestedScript) return basename(cleanCommandToken(nestedScript))
   const tokens = command.match(/"[^"]+"|'[^']+'|`[^`]+`|\S+/g) ?? []
   const runners = new Set(['bash', 'sh', 'zsh', 'python', 'python3', 'node', 'npx', 'uv', 'env'])
   for (const raw of tokens) {
@@ -360,17 +485,35 @@ export function hookCommandLabel(command: string | undefined): string | undefine
   return command.trim().slice(0, 80)
 }
 
-type HookScriptDraft = Omit<HookScriptRow, 'logicalRuns' | 'pending'> & {
+type HookScriptDraft = Omit<HookScriptRow, 'logicalRuns' | 'pending' | 'instances'> & {
   pendingKeys: Set<string>
   responseKeys: Set<string>
+  instanceMap: Map<string, HookInstanceRow>
 }
 
-type HookGroupDraft = Omit<HookGroup, 'logicalRuns' | 'responses' | 'pending' | 'scripts'> & {
+type HookGroupDraft = Omit<HookGroup, 'logicalRuns' | 'responses' | 'pending' | 'triggerRuns' | 'scripts'> & {
   scripts: Map<string, HookScriptDraft>
 }
 
 function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+}
+
+function hookSource(value: unknown): HookConfiguredCommand['source'] | undefined {
+  return value === 'user' || value === 'project' || value === 'local' || value === 'plugin' ? value : undefined
+}
+
+function mergedConfiguredCommands(
+  previous: HookConfiguredCommand[],
+  current: HookConfiguredCommand[] | undefined
+): HookConfiguredCommand[] {
+  const seen = new Set<string>()
+  return [...previous, ...(current ?? [])].filter((candidate) => {
+    const key = `${candidate.source}\0${candidate.sourcePath}\0${candidate.command}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function hookEventFailureSummary(e: TraceEvent): string | undefined {
@@ -399,16 +542,20 @@ function hookTriggerSubject(event: string, trigger: string): string {
   return trigger.startsWith(prefix) ? trigger.slice(prefix.length) : trigger
 }
 
-function toolCallsForHook(items: TraceEvent[], event: string, trigger: string): number {
+function hookRunIdentity(event: TraceEvent): string {
+  return `${event.runId}\u0000${event.hookId ?? event.id}`
+}
+
+function triggerRunsForHook(items: TraceEvent[], event: string, trigger: string): number | null {
   const subject = hookTriggerSubject(event, trigger)
-  if (!subject || subject === trigger) return 0
+  if (!subject || subject === trigger) return null
   const calls = new Set<string>()
   for (const item of items) {
     if (item.kind !== 'tool' && item.kind !== 'skill' && item.kind !== 'agent') continue
     if (item.stage === 'tool_result' || (item.tool ?? item.name) !== subject) continue
     calls.add(item.toolUseId ?? item.id)
   }
-  return calls.size
+  return calls.size > 0 ? calls.size : null
 }
 
 export function aggregateHooks(items: TraceEvent[]): HookSummary {
@@ -421,7 +568,7 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
     if (!command || !e.hookId) continue
     const event = e.hookEvent ?? e.name ?? 'Hook'
     const trigger = e.hookName ?? e.tool ?? 'hook'
-    const runKey = `${event}\u0000${trigger}\u0000${e.hookId}`
+    const runKey = `${event}\u0000${trigger}\u0000${hookRunIdentity(e)}`
     const commands = commandsByRun.get(runKey) ?? new Set<string>()
     commands.add(command)
     commandsByRun.set(runKey, commands)
@@ -438,7 +585,9 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
     }
 
     const explicitCommand = hookCommandFromEvent(e)
-    const runCommands = e.hookId ? commandsByRun.get(`${event}\u0000${trigger}\u0000${e.hookId}`) : undefined
+    const runCommands = e.hookId
+      ? commandsByRun.get(`${event}\u0000${trigger}\u0000${hookRunIdentity(e)}`)
+      : undefined
     const command = explicitCommand ?? (runCommands?.size === 1 ? [...runCommands][0] : undefined)
     const label = hookCommandLabel(command) ?? trigger
     const scriptKey = `${groupKey}\u0000${command ?? label}`
@@ -458,15 +607,35 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
         cancelled: 0,
         unsuccessful: [],
         pendingKeys: new Set(),
-        responseKeys: new Set()
+        responseKeys: new Set(),
+        instanceMap: new Map()
       }
       group.scripts.set(scriptKey, script)
     }
 
+    const instanceKey = hookRunIdentity(e)
+    const input = e.input as Record<string, unknown> | undefined
+    const previousInstance = script.instanceMap.get(instanceKey)
+    script.instanceMap.set(instanceKey, {
+      key: instanceKey,
+      hookId: e.hookId ?? previousInstance?.hookId,
+      command: command ?? previousInstance?.command,
+      source: hookSource(input?.source) ?? previousInstance?.source,
+      sourcePath: stringField(input?.sourcePath) ?? previousInstance?.sourcePath,
+      configuredCommands: mergedConfiguredCommands(
+        previousInstance?.configuredCommands ?? [],
+        e.hookConfiguredCommands
+      ),
+      outcome: e.hookOutcome ?? previousInstance?.outcome,
+      durationMs: e.durationMs ?? previousInstance?.durationMs,
+      isError: previousInstance?.isError === true || e.isError === true || e.hookOutcome === 'error' || e.hookOutcome === 'failure',
+      last: e
+    })
+
     group.rawEvents++
     script.rawEvents++
     if (e.stage === 'hook_response') {
-      const responseKey = e.hookId ?? e.id
+      const responseKey = hookRunIdentity(e)
       const firstResponse = !script.responseKeys.has(responseKey)
       script.responseKeys.add(responseKey)
       script.outcome = e.hookOutcome
@@ -480,7 +649,7 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
         script.unsuccessful.push(e)
       }
     } else {
-      script.pendingKeys.add(e.hookId ?? e.id)
+      script.pendingKeys.add(hookRunIdentity(e))
       if (e.stage === 'hook_started') script.started++
       else script.progress++
     }
@@ -500,14 +669,26 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
         const pending = [...s.pendingKeys].filter((key) => !s.responseKeys.has(key)).length
         const logicalRuns = new Set([...s.pendingKeys, ...s.responseKeys]).size
         const responses = s.responseKeys.size
-        const { pendingKeys: _pendingKeys, responseKeys: _responseKeys, ...row } = s
-        return { ...row, responses, pending, logicalRuns }
+        const instances = [...s.instanceMap.values()].sort(
+          (a, b) => Date.parse(a.last.ts) - Date.parse(b.last.ts) || a.key.localeCompare(b.key)
+        )
+        const { pendingKeys: _pendingKeys, responseKeys: _responseKeys, instanceMap: _instanceMap, ...row } = s
+        return { ...row, responses, pending, logicalRuns, instances }
       })
       .sort((a, b) => b.logicalRuns - a.logicalRuns || b.rawEvents - a.rawEvents || a.label.localeCompare(b.label))
     const responses = scripts.reduce((sum, s) => sum + s.responses, 0)
     const pending = scripts.reduce((sum, s) => sum + s.pending, 0)
     const logicalRuns = responses + pending
-    return { ...g, toolCalls: toolCallsForHook(items, g.event, g.trigger), scripts, responses, pending, logicalRuns }
+    const triggerRuns = triggerRunsForHook(items, g.event, g.trigger)
+    return {
+      ...g,
+      toolCalls: triggerRuns ?? 0,
+      triggerRuns,
+      scripts,
+      responses,
+      pending,
+      logicalRuns
+    }
   })
 
   finalized.sort(
@@ -1045,7 +1226,10 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
       cacheCreationTokens: r?.cacheCreationTokens ?? 0,
       contextTokens,
       contextWindow,
-      contextPct: contextTokens && contextWindow ? Math.round((contextTokens / contextWindow) * 100) : undefined,
+      contextPct:
+        contextTokens != null && contextWindow != null && contextWindow > 0
+          ? Math.round((contextTokens / contextWindow) * 100)
+          : undefined,
       model: model?.model,
       toolCount,
       errorCount,
@@ -1060,7 +1244,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
   const tokensOut = results.reduce((s, e) => s + (e.tokensOut ?? 0), 0)
   const cacheReadTokens = results.reduce((s, e) => s + (e.cacheReadTokens ?? 0), 0)
   const cacheCreationTokens = results.reduce((s, e) => s + (e.cacheCreationTokens ?? 0), 0)
-  const totalTokens = usageTokenTotal(tokensIn, tokensOut, cacheReadTokens, cacheCreationTokens)
+  const totalTokens = results.reduce((sum, event) => sum + resultTokenTotal(event), 0)
   const knownTokenResultCount = results.filter(hasTokenUsage).length
   const missingTokenResultCount = Math.max(0, results.length - knownTokenResultCount)
   const apiMs = results.reduce((s, e) => s + (e.durationApiMs ?? 0), 0)
@@ -1090,7 +1274,18 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
       prev.tokensOut += mu.outputTokens ?? 0
       prev.cacheReadTokens += mu.cacheReadTokens ?? 0
       prev.cacheCreationTokens += mu.cacheCreationTokens ?? 0
-      prev.totalTokens = usageTokenTotal(prev.tokensIn, prev.tokensOut, prev.cacheReadTokens, prev.cacheCreationTokens)
+      const accounting = tokenCacheAccounting({
+        providerId: r.providerId,
+        runtimeProvider: r.runtimeProvider,
+        billingProvider: mu.billingProvider ?? r.billingProvider
+      })
+      prev.totalTokens = usageTokenTotal(
+        prev.tokensIn,
+        prev.tokensOut,
+        prev.cacheReadTokens,
+        prev.cacheCreationTokens,
+        accounting
+      )
       prev.contextWindow = prev.contextWindow ?? mu.contextWindow
       modelMap.set(mu.model, prev)
     }

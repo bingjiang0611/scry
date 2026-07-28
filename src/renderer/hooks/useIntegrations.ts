@@ -20,6 +20,8 @@ export async function authoritativeRefreshAfterToggle<T>(
 
 export function useIntegrations(cwd: string | null) {
   const [agents, setAgents] = useState<DetectedAgent[]>([])
+  const [agentsHydrated, setAgentsHydrated] = useState(false)
+  const [agentsScanning, setAgentsScanning] = useState(true)
   const [selectedId, setSelectedId] = useState('claude')
   const [backend, setBackend] = useState<'local' | 'api'>('local')
   const [skills, setSkills] = useState<SkillMeta[]>([])
@@ -57,10 +59,17 @@ export function useIntegrations(cwd: string | null) {
   )
 
   const rescan = useCallback((): void => {
-    window.scry.detect().then((detected) => {
-      setAgents(detected)
-      setSelectedId((current) => (detected.length && !detected.find((agent) => agent.id === current) ? detected[0].id : current))
-    })
+    setAgentsScanning(true)
+    window.scry
+      .detect()
+      .then((detected) => {
+        setAgents(detected)
+        setSelectedId((current) =>
+          detected.length && !detected.find((agent) => agent.id === current) ? detected[0].id : current
+        )
+      })
+      .catch(() => {})
+      .finally(() => setAgentsScanning(false))
   }, [])
 
   const loadUsage = useCallback((): void => {
@@ -246,18 +255,37 @@ export function useIntegrations(cwd: string | null) {
   }, [loadGitDiff])
 
   useEffect(() => {
+    let cancelled = false
+    const fast = typeof window.scry.detectFast === 'function' ? window.scry.detectFast() : Promise.resolve([])
+    void fast
+      .then((detected) => {
+        if (!cancelled && detected.length > 0) setAgents(detected)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled) return
+        setAgentsHydrated(true)
+        rescan()
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [rescan])
+
+  useEffect(() => {
     const timers = [
-      window.setTimeout(rescan, 80),
       window.setTimeout(loadUsage, 260),
       window.setTimeout(loadStats, 900),
       window.setTimeout(loadBillingState, 980),
       window.setTimeout(loadDiag, 1100)
     ]
     return () => timers.forEach((id) => window.clearTimeout(id))
-  }, [loadBillingState, loadDiag, loadStats, loadUsage, rescan])
+  }, [loadBillingState, loadDiag, loadStats, loadUsage])
 
   return {
     agents,
+    agentsHydrated,
+    agentsScanning,
     selectedAgent,
     selectedId,
     selectedProviderId,

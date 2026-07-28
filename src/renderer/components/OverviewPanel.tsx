@@ -1,6 +1,6 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
-import type { TraceEvent, DbStats, Diagnostics, DiffFile, McpLiveStatus } from '@shared/trace'
+import type { TraceEvent, DbStats, Diagnostics, DiffFile, HookConfiguredCommand, McpLiveStatus } from '@shared/trace'
 import type { BillingGuardianState } from '@shared/billing'
 import type { RuntimeProvider } from '@shared/runtime'
 import type { McpMeta } from '../env'
@@ -17,9 +17,11 @@ import {
   fileWriteCoverage,
   fmtTok,
   hookCancellationDetail,
+  hookCommandLabel,
+  logicalCallEventsForTurn,
   resultOf
 } from '../format'
-import type { BillingTurnRow, HookScriptRow, Turn } from '../format'
+import type { BillingTurnRow, HookInstanceRow, HookScriptRow, Turn } from '../format'
 import { Icon } from './primitives/Icon'
 import { McpTrustPanel, type McpGuardReport } from './McpTrustPanel'
 import { TurnTimingDetails } from './TurnTimingDetails'
@@ -54,36 +56,49 @@ function hookBadgeText(h: {
   pending: number
   logicalRuns: number
   cancelled: number
+  unsuccessful: TraceEvent[]
   outcome?: string
   exitCode?: number
   lastError?: TraceEvent
   lastCancelled?: TraceEvent
 }): string {
   const cancellation = hookCancellationDetail(h.lastCancelled)
-  const base = cancellation
-    ? h.cancelled < h.responses
-      ? '部分取消'
-      : cancellation.kind === 'timeout'
-        ? '超时终止'
-        : cancellation.kind === 'suspected-timeout' ? '疑似超时' : '已取消'
-    : hookStatusText(h)
+  const failed = Math.max(h.errors, h.unsuccessful.filter((event) => event.hookOutcome !== 'cancelled').length)
+  const cancellationLabel =
+    cancellation?.kind === 'timeout'
+      ? '超时'
+      : cancellation?.kind === 'suspected-timeout'
+        ? '疑似超时'
+        : '取消'
+  const base =
+    failed > 0
+      ? `失败 ${failed}`
+      : h.cancelled > 0
+        ? `${h.cancelled < h.responses ? '取消' : cancellationLabel} ${h.cancelled}`
+        : h.pending > 0
+          ? `运行中 ${h.pending}`
+          : h.responses > 0
+            ? `成功 ${h.responses}`
+            : hookStatusText(h)
   const errorInput = h.lastError?.input as Record<string, unknown> | undefined
   const errorExit =
     h.errors > 0 && h.lastError
       ? h.lastError.hookExitCode ?? (typeof errorInput?.exitCode === 'number' ? errorInput.exitCode : undefined)
       : undefined
-  const code = h.errors > 0 ? errorExit ?? h.exitCode : h.cancelled > 0 ? undefined : h.exitCode
+  const code = h.errors > 0 ? errorExit ?? h.exitCode : undefined
   const exit = code != null ? ` · ${code}` : ''
-  const count = h.logicalRuns > 1 ? ` · ${h.logicalRuns}×` : ''
-  return `${base}${exit}${count}`
+  return `${base}${exit}`
 }
 
 function hookDetailText(h: HookScriptRow): string {
-  const parts = [`raw ${h.rawEvents}`]
-  if (h.started > 0) parts.push(`started ${h.started}`)
-  if (h.progress > 0) parts.push(`progress ${h.progress}`)
-  if (h.responses > 0) parts.push(`response ${h.responses}`)
-  if (h.cancelled > 0) parts.push(`cancelled ${h.cancelled}`)
+  const failed = Math.max(h.errors, h.unsuccessful.filter((event) => event.hookOutcome !== 'cancelled').length)
+  const succeeded = Math.max(0, h.responses - h.cancelled - failed)
+  const parts: string[] = []
+  if (succeeded > 0) parts.push(`成功 ${succeeded}`)
+  if (h.cancelled > 0) parts.push(`取消 ${h.cancelled}`)
+  if (failed > 0) parts.push(`失败 ${failed}`)
+  if (h.pending > 0) parts.push(`未结束 ${h.pending}`)
+  if (h.progress > 0) parts.push(`进度通知 ${h.progress}`)
   return parts.join(' · ')
 }
 
@@ -102,6 +117,84 @@ function hookCancellationTitle(h: HookScriptRow): string | undefined {
 function hookFailureText(h: HookScriptRow): string | undefined {
   if (h.errors <= 0) return undefined
   return h.failureSummary ?? '最近失败事件未提供 stdout、stderr 或 content；只能看到 hook outcome / exit code。'
+}
+
+function hookConfigScopeLabel(source: HookConfiguredCommand['source']): string {
+  return source === 'user' ? '用户' : source === 'project' ? '项目' : source === 'local' ? '本地' : '插件'
+}
+
+function uniqueConfiguredCommands(instances: HookInstanceRow[]): HookConfiguredCommand[] {
+  const seen = new Set<string>()
+  return instances
+    .flatMap((instance) => instance.configuredCommands)
+    .filter((candidate) => {
+      const key = `${candidate.source}\0${candidate.sourcePath}\0${candidate.command}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+function instanceConfiguredCommands(instance: HookInstanceRow): HookConfiguredCommand[] {
+  if (instance.command) return []
+  if (instance.sourcePath) {
+    const samePath = instance.configuredCommands.filter((candidate) => candidate.sourcePath === instance.sourcePath)
+    if (samePath.length > 0) return samePath
+  }
+  if (instance.source) {
+    const sameSource = instance.configuredCommands.filter((candidate) => candidate.source === instance.source)
+    if (sameSource.length > 0) return sameSource
+  }
+  return instance.configuredCommands
+}
+
+function hookInstanceLabel(instance: HookInstanceRow): string {
+  if (instance.command) return hookCommandLabel(instance.command) ?? 'command'
+  const candidates = instanceConfiguredCommands(instance)
+  if (candidates.length === 1) return hookCommandLabel(candidates[0].command) ?? 'command'
+  return '命令未逐实例上报'
+}
+
+function hookInstanceTone(instance: HookInstanceRow): 'ok' | 'warn' | 'bad' {
+  if (instance.isError || instance.outcome === 'error' || instance.outcome === 'failure') return 'bad'
+  if (instance.outcome === 'cancelled') return 'warn'
+  if (instance.outcome === 'success') return 'ok'
+  return 'warn'
+}
+
+function hookInstanceStatus(instance: HookInstanceRow): string {
+  if (instance.isError || instance.outcome === 'error' || instance.outcome === 'failure') return '失败'
+  if (instance.outcome === 'cancelled') return '取消'
+  if (instance.outcome === 'success') return '成功'
+  return '运行中'
+}
+
+function hookDispatchLabel(command: string): string {
+  return command.includes('global-hook-bridge.py') ? '桥接' : '直连'
+}
+
+interface LogicalHookRow {
+  name: string
+  deliveries: string[]
+}
+
+function logicalHookRows(commands: HookConfiguredCommand[], runtimeCommand?: string): LogicalHookRow[] {
+  const rows = new Map<string, Set<string>>()
+  const add = (name: string, delivery: string): void => {
+    const deliveries = rows.get(name) ?? new Set<string>()
+    deliveries.add(delivery)
+    rows.set(name, deliveries)
+  }
+  if (runtimeCommand) add(hookCommandLabel(runtimeCommand) ?? 'command', '运行时')
+  for (const candidate of commands) {
+    add(
+      hookCommandLabel(candidate.command) ?? 'command',
+      `${hookConfigScopeLabel(candidate.source)}${candidate.pluginId ? ` · ${candidate.pluginId.split('@')[0]}` : ''}${candidate.source === 'plugin' ? '' : ` ${hookDispatchLabel(candidate.command)}`}`
+    )
+  }
+  return [...rows.entries()]
+    .map(([name, deliveries]) => ({ name, deliveries: [...deliveries] }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function fmtShare(part: number, total: number): string | null {
@@ -189,51 +282,7 @@ function turnCallRowsFromMap(map: Map<string, number>): TurnCallItem[] {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
 
-function skillSource(ev: TraceEvent): string | undefined {
-  const input = ev.input as Record<string, unknown> | undefined
-  return typeof input?.source === 'string' ? input.source : undefined
-}
-
-function isSkillPathEvidence(ev: TraceEvent): boolean {
-  const source = skillSource(ev)
-  return source === 'skill_file' || source === 'skill_path_in_bash' || source === 'skill_path_in_command'
-}
-
-// Skill trace 同时承载“调用”与“当前工作流分段”两种证据。调用统计优先采用
-// 原生/Provider 明确事件；没有明确事件时，注入文本或路径推断只兜底计一次。
-export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
-  const skillEvents = new Map<string, TraceEvent[]>()
-  for (const ev of items) {
-    if (ev.kind !== 'skill' || ev.stage === 'tool_result') continue
-    const name = ev.name ?? 'Skill'
-    const events = skillEvents.get(name)
-    if (events) events.push(ev)
-    else skillEvents.set(name, [ev])
-  }
-
-  const kept = new Set<TraceEvent>()
-  for (const events of skillEvents.values()) {
-    const direct = events.filter((ev) => skillSource(ev) !== 'skill_injection' && !isSkillPathEvidence(ev))
-    if (direct.length > 0) {
-      const identities = new Set<string>()
-      for (const ev of direct) {
-        const identity = ev.toolUseId
-          ? `tool:${ev.toolUseId}`
-          : ev.messageId
-            ? `message:${ev.messageId}`
-            : 'anonymous'
-        if (identities.has(identity)) continue
-        identities.add(identity)
-        kept.add(ev)
-      }
-      continue
-    }
-
-    kept.add(events.find((ev) => skillSource(ev) === 'skill_injection') ?? events[0])
-  }
-
-  return items.filter((ev) => ev.kind !== 'skill' || ev.stage === 'tool_result' || kept.has(ev))
-}
+export { logicalCallEventsForTurn } from '../format'
 
 function turnCallLabel(ev: TraceEvent, kind: TurnCallKind): string {
   if (kind === 'mcp') {
@@ -381,9 +430,10 @@ export function OverviewPanel({
   const ctx = useMemo(() => {
     for (let i = results.length - 1; i >= 0; i--) {
       const r = results[i]
-      const win = r.modelUsage?.[0]?.contextWindow
-      const model = r.modelUsage?.[0]?.model
-      if (r.contextTokens && win)
+      const modelRow = r.modelUsage?.find((row) => row.contextWindow != null && row.contextWindow > 0)
+      const win = modelRow?.contextWindow
+      const model = modelRow?.model
+      if (r.contextTokens != null && win != null && win > 0)
         return { used: r.contextTokens, win, pct: Math.round((r.contextTokens / win) * 100), model }
     }
     return null
@@ -430,10 +480,9 @@ export function OverviewPanel({
       })
   }, [turns])
   const dangers = useMemo(() => all.filter((e) => e.danger && e.stage !== 'tool_result'), [all])
-  const segments = useMemo(() => aggregateSegments(all), [all])
+  const segments = useMemo(() => aggregateSegments(logicalCallEvents), [logicalCallEvents])
   const billing = useMemo(() => analyzeBilling(turns), [turns])
   const hasSkillSeg = segments.some((s) => s.skill !== '（无 skill）')
-  const mcpTotal = calls.mcp.reduce((s, g) => s + g.total, 0)
   const { structured } = useMemo(() => aggregateFiles(all), [all])
   const coverage = useMemo(() => fileWriteCoverage(all), [all])
   // TOP TOOLS：tool + mcp 合并排名（前 6），配 mini-bar。
@@ -473,7 +522,12 @@ export function OverviewPanel({
     vstate = 'warn'
     judge = `完成 · ${dangers.length} 处可疑操作`
   }
-  const toolSub = calls.tools.slice(0, 2).map((t) => `${t.name} ${t.count}`).join(' · ') || (mcpTotal > 0 ? `mcp ${mcpTotal}` : '—')
+  const callSub = [
+    `工具 ${calls.ordinaryToolTotal}`,
+    `MCP ${calls.mcpTotal}`,
+    `Skill ${calls.skillTotal}`,
+    `子Agent ${calls.agentTotal}`
+  ].join(' · ')
   const diffAdd = gitDiff.reduce((s, d) => s + d.added, 0)
   const diffDel = gitDiff.reduce((s, d) => s + d.deleted, 0)
 
@@ -579,8 +633,8 @@ export function OverviewPanel({
               </>
             ) : (
               <>
-                <div className="v">暂无 result</div>
-                <div className="sub">发起并完成一轮后显示真实上下文占用</div>
+                <div className="v">暂无上下文数据</div>
+                <div className="sub">仅在 Provider 同时上报上下文占用与模型窗口时显示</div>
               </>
             )}
           </div>
@@ -604,7 +658,7 @@ export function OverviewPanel({
               {judge}
             </div>
             <div className="since">
-              {results.length} 轮完成 · {calls.toolTotal} 次工具调用
+              {results.length} 轮完成 · {calls.totalCalls} 次调用
               {dangers.length > 0 ? ` · ${dangers.length} 处危险（审计放行）` : ''}
             </div>
           </div>
@@ -632,10 +686,10 @@ export function OverviewPanel({
             <div className="verdict-pillar">
               <div className="nm">
                 <span className="sdot" />
-                工具
+                调用
               </div>
-              <div className="v">{calls.toolTotal}</div>
-              <div className="sub">{toolSub}</div>
+              <div className="v">{calls.totalCalls}</div>
+              <div className="sub">{callSub}</div>
             </div>
             {dangers.length > 0 ? (
               <button
@@ -972,7 +1026,7 @@ export function OverviewPanel({
       {isOverviewTab && topTools.rows.length > 0 && (
         <div className="panel-section top-tools-section">
           <h4>
-            TOP TOOLS<span className="more">本会话 · {calls.toolTotal} 次</span>
+            TOP TOOLS<span className="more">工具 {calls.ordinaryToolTotal} · MCP {calls.mcpTotal}</span>
           </h4>
           {topTools.rows.map((t) => {
             const c = topToolColor(t.name)
@@ -1004,7 +1058,7 @@ export function OverviewPanel({
           <h4>
             HOOKS
             <span className="more">
-              本会话 · {hookSummary.logicalRuns} runs · {hookSummary.rawEvents} events
+              本会话 · 处理器 {hookSummary.logicalRuns} 实例 · 生命周期 {hookSummary.rawEvents} 条
             </span>
           </h4>
           {hookSummary.groups.length === 0 ? (
@@ -1025,7 +1079,8 @@ export function OverviewPanel({
                     </span>
                     <span className="dim hook-name">{h.trigger}</span>
                     <span className="dim hook-count">
-                      {h.logicalRuns} runs · {h.rawEvents} events
+                      {h.triggerRuns == null ? '触发次数未单独上报' : `触发 ${h.triggerRuns} 次`}
+                      {' · '}处理器 {h.logicalRuns} 实例 · 生命周期 {h.rawEvents} 条
                     </span>
                   </div>
                   {h.scripts.map((s) => {
@@ -1033,39 +1088,127 @@ export function OverviewPanel({
                     const target = s.lastError ?? s.lastCancelled ?? s.last
                     const failure = hookFailureText(s)
                     const cancellationTitle = hookCancellationTitle(s)
+                    const configuredCommands = uniqueConfiguredCommands(s.instances)
+                    const logicalHandlers = logicalHookRows(configuredCommands, s.command)
                     return (
-                      <div className="hook-script" key={s.key}>
-                        <div
+                      <details className="hook-script overview-hook-script" key={s.key}>
+                        <summary
                           className="callrow hook-row indent"
-                          onClick={() => target && onSelect(target)}
-                          title={cancellationTitle ?? s.command ?? '点查看最近一次 hook 事件'}
+                          title={cancellationTitle ?? '点查看 Hook 执行详情'}
                         >
                           <span className={`sdot ${scriptTone}`} />
-                          <span className="fname hook-command" title={s.command ?? s.label}>
-                            {s.label}
-                          </span>
+                          <span className="fname hook-command">{s.label}</span>
                           <span className="dim hook-detail">{hookDetailText(s)}</span>
                           <span className={`hook-status ${scriptTone}`}>{hookBadgeText(s)}</span>
+                          <Icon name="chevronRight" className="hook-row-chev" />
+                        </summary>
+                        <div className="turn-hook-detail overview-hook-detail">
+                          <div className="hook-actual-block">
+                            <div className="hook-detail-label">处理器实例 · {s.instances.length} 个</div>
+                            <div className="hook-instance-list">
+                              {s.instances.map((instance, index) => {
+                                const instanceTone = hookInstanceTone(instance)
+                                const sourcePath = instance.sourcePath ? basename(instance.sourcePath) : undefined
+                                return (
+                                  <button
+                                    type="button"
+                                    className="hook-instance"
+                                    key={instance.key}
+                                    onClick={() => onSelect(instance.last)}
+                                    title="查看这次 Hook 的原始事件"
+                                  >
+                                    <span className="hook-instance-index">{String(index + 1).padStart(2, '0')}</span>
+                                    <span className="hook-instance-main">
+                                      <strong>{hookInstanceLabel(instance)}</strong>
+                                      <span className="hook-instance-source">
+                                        {instance.source ? hookConfigScopeLabel(instance.source) : '来源未上报'}
+                                        {sourcePath ? ` · ${sourcePath}` : ''}
+                                      </span>
+                                    </span>
+                                    {instance.durationMs != null && (
+                                      <span className="hook-instance-duration">{formatTurnDuration(instance.durationMs)}</span>
+                                    )}
+                                    <span className={`hook-run-status ${instanceTone}`}>
+                                      {hookInstanceStatus(instance)}
+                                    </span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {logicalHandlers.length > 0 && (
+                            <div className="hook-logical-block">
+                              <div className="hook-detail-label">逻辑 Hook · {logicalHandlers.length} 个</div>
+                              <div className="hook-logical-list">
+                                {logicalHandlers.map((handler) => (
+                                  <div className="hook-logical-row" key={handler.name}>
+                                    <code>{handler.name}</code>
+                                    <span>
+                                      {handler.deliveries.length} 条投递 · {handler.deliveries.join(' / ')}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {configuredCommands.length > 0 && (
+                            <details className="hook-config-deliveries">
+                              <summary>
+                                当前配置 · {configuredCommands.length} 条投递路径
+                                <Icon name="chevronRight" />
+                              </summary>
+                              <p className="hook-configured-note">
+                                这是当前配置反查，不代表本轮每条路径都实际执行。
+                              </p>
+                              <div className="hook-configured-list">
+                                {configuredCommands.map((candidate, index) => (
+                                  <div
+                                    className="hook-configured-command"
+                                    key={`${candidate.source}:${candidate.pluginId ?? ''}:${candidate.matcher ?? ''}:${candidate.command}:${index}`}
+                                  >
+                                    <span className={`hook-config-scope ${candidate.source}`}>
+                                      {hookConfigScopeLabel(candidate.source)}
+                                      {candidate.pluginId ? ` · ${candidate.pluginId.split('@')[0]}` : ''}
+                                    </span>
+                                    <code>{hookCommandLabel(candidate.command) ?? 'command'}</code>
+                                    {(candidate.matcher || candidate.timeoutSeconds != null) && (
+                                      <span className="hook-config-matcher">
+                                        {candidate.matcher ? `matcher ${candidate.matcher}` : ''}
+                                        {candidate.matcher && candidate.timeoutSeconds != null ? ' · ' : ''}
+                                        {candidate.timeoutSeconds != null ? `timeout ${candidate.timeoutSeconds}s` : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+
+                          {logicalHandlers.length === 0 && configuredCommands.length === 0 && (
+                            <div className="dim">Provider 未上报具体 command，当前配置也没有可匹配项。</div>
+                          )}
+
+                          {failure && (
+                            <button
+                              type="button"
+                              className="hook-failure"
+                              onClick={() => target && onSelect(target)}
+                              title={failure}
+                            >
+                              <span>最近失败</span>
+                              <code>{failure}</code>
+                            </button>
+                          )}
                         </div>
-                        {failure && (
-                          <button
-                            type="button"
-                            className="hook-failure"
-                            onClick={() => target && onSelect(target)}
-                            title={failure}
-                          >
-                            <span>最近失败</span>
-                            <code>{failure}</code>
-                          </button>
-                        )}
-                      </div>
+                      </details>
                     )
                   })}
                 </div>
               )
             })
           )}
-          <div className="psrc">来自 SDK hook_* / transcript hook_success / hook_cancelled / hook_additional_context</div>
         </div>
       )}
 

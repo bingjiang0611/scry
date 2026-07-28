@@ -58,6 +58,30 @@ describe('ProviderRegistry', () => {
     })
   })
 
+  it('routes Hook trust inspection through the selected provider facet', async () => {
+    const inspect = vi.fn().mockResolvedValue({
+      cwd: '/repo',
+      hooks: [],
+      warnings: [],
+      errors: []
+    })
+    const base: ProviderAdapter = {
+      ...adapter('codex'),
+      hookTrust: {
+        inspect
+      }
+    }
+    const registry = new ProviderRegistry([base])
+
+    await expect(registry.inspectHookTrust({ providerId: 'codex', cwd: '/repo' })).resolves.toEqual({
+      cwd: '/repo',
+      hooks: [],
+      warnings: [],
+      errors: []
+    })
+    expect(inspect).toHaveBeenCalledWith({ providerId: 'codex', cwd: '/repo' })
+  })
+
   it('keeps disabled providers visible but unavailable and blocks runs', async () => {
     const registry = new ProviderRegistry([adapter('codex')], { disabledProviders: new Set(['codex']) })
     await expect(registry.describe()).resolves.toEqual([

@@ -61,4 +61,63 @@ describe('app-store', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('先用 runId 立即展示启动中会话，拿到原生 sessionId 后原位升级且不重复', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.recordPending({
+        providerId: 'claude',
+        runtimeProvider: 'claude_sdk',
+        runId: 'run-1',
+        cwd: '/repo',
+        prompt: 'inspect hooks'
+      })
+
+      expect(store.listProjects()[0].sessions).toEqual([
+        expect.objectContaining({
+          sessionId: 'run-1',
+          runId: 'run-1',
+          pending: true,
+          preview: 'inspect hooks'
+        })
+      ])
+
+      store.record({
+        providerId: 'claude',
+        runtimeProvider: 'claude_sdk',
+        runId: 'run-1',
+        externalSessionId: 'session-1',
+        cwd: '/repo',
+        prompt: 'inspect hooks'
+      })
+
+      expect(store.listProjects()[0].sessions).toEqual([
+        expect.objectContaining({
+          sessionId: 'session-1',
+          runId: 'run-1',
+          externalSessionId: 'session-1'
+        })
+      ])
+
+      store.record({
+        providerId: 'claude',
+        runtimeProvider: 'claude_sdk',
+        runId: 'run-2',
+        externalSessionId: 'session-1',
+        cwd: '/repo',
+        prompt: 'continue'
+      })
+
+      expect(store.listProjects()[0].sessions).toEqual([
+        expect.objectContaining({
+          sessionId: 'session-1',
+          runId: 'run-2',
+          externalSessionId: 'session-1'
+        })
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

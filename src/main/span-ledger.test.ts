@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { canonicalCostWhere, canonicalUsdCostWhere, DDL_V4, MODEL_USAGE_COLS, spanRowsFromItems, SPAN_COLS, sqlInsert, USAGE_LEDGER_COLS } from './span-ledger'
+import { ANALYTICS_RESULTS_SQL, buildAnalyticsStats, canonicalCostWhere, canonicalUsdCostWhere, DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V6, DDL_V7, MODEL_USAGE_COLS, nearestRank, spanRowsFromItems, SPAN_COLS, sqlInsert, TOTALS_SQL, USAGE_LEDGER_COLS } from './span-ledger'
 import { usageLedgerObjectToRow } from './billing-ledger'
 import type { TraceEvent } from '../shared/trace'
 import type { UsageLedgerObject } from '../shared/billing'
@@ -127,6 +127,118 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     ]
     const kinds = spanRowsFromItems({ runId: 'run-1', items, nowMs: 1 }).spans.map((r) => asSpan(r).kind)
     expect(kinds).toEqual(['skill', 'agent'])
+  })
+})
+
+describe('Analytics v7（四 Provider 口径 + 窗口聚合）', () => {
+  const now = new Date(2026, 6, 22, 12).getTime()
+  const daysAgo = (days: number): number => new Date(2026, 6, 22 - days, 10).getTime()
+
+  it('按 Provider 分母计算 cache reuse，不给 OpenCode/Qoder 制造比例', () => {
+    const stats = buildAnalyticsStats({
+      nowMs: now,
+      results: [
+        { tsStart: daysAgo(0), providerId: 'claude', inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 20 },
+        { tsStart: daysAgo(0), providerId: 'codex', inputTokens: 100, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: null },
+        { tsStart: daysAgo(0), providerId: 'opencode', inputTokens: 50, outputTokens: 10, cacheReadTokens: 25, cacheWriteTokens: 5 },
+        { tsStart: daysAgo(0), providerId: 'qoder', inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null }
+      ],
+      tools: [], dangers: [], mcp: []
+    })
+    const cache = Object.fromEntries(stats.cacheReuse!.map((row) => [row.providerId, row]))
+    expect(cache.claude).toMatchObject({ denominator: 'separate_input', comparableTurns: 1, reuseRate: 0.4 })
+    expect(cache.codex).toMatchObject({ denominator: 'input_includes_cache', comparableTurns: 1, reuseRate: 0.3 })
+    expect(cache.opencode).toMatchObject({ denominator: 'upstream_dependent', comparableTurns: 0, reuseRate: null, cacheReadTokens: 25 })
+    expect(cache.qoder).toMatchObject({ denominator: 'unknown', comparableTurns: 0, reuseRate: null, inputTokens: null })
+  })
+
+  it('按本地日补齐 30/90 天并保留字段级 coverage、环比和 danger 能力边界', () => {
+    const stats = buildAnalyticsStats({
+      nowMs: now,
+      results: [
+        { tsStart: daysAgo(0), providerId: 'claude', inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 20 },
+        { tsStart: daysAgo(0), providerId: 'qoder', inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null },
+        { tsStart: daysAgo(30), providerId: 'claude', inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }
+      ],
+      tools: [{ tsStart: daysAgo(0) }, { tsStart: daysAgo(30) }],
+      dangers: [{ tsStart: daysAgo(0), level: 'danger' }, { tsStart: daysAgo(1), level: 'warn' }],
+      mcp: []
+    })
+    expect(stats.tokenDaily).toHaveLength(30)
+    expect(stats.dangerDaily).toHaveLength(90)
+    expect(stats.tokenDaily!.at(-1)).toMatchObject({ turns: 2, input: 100, output: 20, inputKnownTurns: 1, outputKnownTurns: 1 })
+    expect(stats.comparison).toMatchObject({
+      current: { tokens: 120, tokenKnownTurns: 1, turns: 2, toolCalls: 1, danger: 1 },
+      previous: { tokens: 60, tokenKnownTurns: 1, turns: 1, toolCalls: 1, danger: 0 },
+      change: { tokensPct: null, turnsPct: 100, toolCallsPct: 0, dangerPct: null }
+    })
+    const coverage = Object.fromEntries(stats.providerCoverage!.map((row) => [row.providerId, row]))
+    expect(coverage.claude).toMatchObject({ turns: 1, inputKnownTurns: 1, dangerCoverage: 'classified' })
+    expect(coverage.qoder).toMatchObject({ turns: 1, inputKnownTurns: 0, dangerCoverage: 'classified' })
+    expect(coverage.codex.dangerCoverage).toBe('unsupported')
+    expect(coverage.opencode.dangerCoverage).toBe('unsupported')
+  })
+
+  it('nearest-rank P50/P95 只使用完成的 MCP duration 样本', () => {
+    expect(nearestRank([40, 10, 30, 20], 0.5)).toBe(20)
+    expect(nearestRank([40, 10, 30, 20], 0.95)).toBe(40)
+    expect(nearestRank([], 0.5)).toBeNull()
+    const stats = buildAnalyticsStats({
+      nowMs: now, results: [], tools: [], dangers: [],
+      mcp: [10, 20, 30, 40].map((durationMs, index) => ({ server: 'docs', durationMs, isError: index === 3 ? 1 : 0 }))
+    })
+    expect(stats.mcpLatency).toEqual([{ server: 'docs', calls: 4, p50Ms: 20, p95Ms: 40, errors: 1 }])
+  })
+
+  it('只有前后窗口 Token coverage 都完整时才给环比', () => {
+    const complete = buildAnalyticsStats({
+      nowMs: now,
+      results: [
+        { tsStart: daysAgo(0), providerId: 'codex', inputTokens: 100, outputTokens: 20, cacheReadTokens: 10, cacheWriteTokens: null },
+        { tsStart: daysAgo(30), providerId: 'codex', inputTokens: 50, outputTokens: 10, cacheReadTokens: 5, cacheWriteTokens: null }
+      ],
+      tools: [], dangers: [], mcp: []
+    })
+    expect(complete.comparison?.change.tokensPct).toBe(100)
+  })
+
+  sqliteIt('v7 索引与 session_refs join 保留四 Provider 身份和 NULL', () => {
+    const db = new nodeSqlite!.DatabaseSync(':memory:')
+    try {
+      for (const stmt of [...DDL_V1, ...DDL_V2, ...DDL_V3, ...DDL_V6, ...DDL_V7]) db.prepare(stmt).run()
+      const insertSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
+      const insertRef = db.prepare(`INSERT INTO session_refs (
+        scry_session_id, provider_id, runtime_provider, cwd, external_session_id, preview, created_ts, updated_ts
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      for (const [index, providerId] of (['claude', 'codex', 'qoder', 'opencode'] as const).entries()) {
+        const sessionId = `session-${providerId}`
+        insertRef.run(sessionId, providerId, `${providerId}-runtime`, '/repo', `external-${providerId}`, '', 1, 1)
+        const row = spanRowsFromItems({
+          runId: `run-${providerId}`,
+          sessionId,
+          cwd: '/repo',
+          nowMs: index + 1,
+          items: [ev({
+            id: `result-${providerId}`,
+            runId: `run-${providerId}`,
+            ts: new Date(index + 1).toISOString(),
+            kind: 'harness',
+            stage: 'result',
+            tokensIn: providerId === 'qoder' ? undefined : 10,
+            tokensOut: providerId === 'qoder' ? undefined : 2,
+            cacheReadTokens: providerId === 'qoder' ? undefined : 1
+          })]
+        }).spans[0]
+        insertSpan.run(...row)
+      }
+      const rows = db.prepare(ANALYTICS_RESULTS_SQL).all(0, 10) as Array<{ providerId: string; inputTokens: number | null }>
+      expect(rows.map((row) => row.providerId)).toHaveLength(4)
+      expect(rows.map((row) => row.providerId)).toEqual(expect.arrayContaining(['claude', 'codex', 'qoder', 'opencode']))
+      expect(rows.find((row) => row.providerId === 'qoder')?.inputTokens).toBeNull()
+      expect(db.prepare(TOTALS_SQL).all()).toEqual([{ cost: null, tin: 30, tout: 6, turns: 4, toolCalls: 0, dangerEvents: 0 }])
+    } finally {
+      db.close()
+    }
   })
 })
 

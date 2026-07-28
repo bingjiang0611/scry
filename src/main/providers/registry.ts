@@ -11,6 +11,7 @@ import {
   type SkillMeta
 } from '../../shared/provider'
 import type { ProviderAdapter, ProviderRunHandle, ProviderRunRequest } from './types'
+import type { CodexHookInspection } from '../codex-hook-trust'
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>()
@@ -96,6 +97,12 @@ export class ProviderRegistry {
   account(context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>> {
     return this.disabled<AccountSnapshot>(context) ?? this.get(context.providerId).account?.read(context) ??
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的账户用量接口'))
+  }
+
+  inspectHookTrust(context: ProviderContext): Promise<CodexHookInspection> {
+    const facet = this.get(context.providerId).hookTrust
+    if (!facet) throw new Error(`provider does not expose Hook trust state: ${context.providerId}`)
+    return facet.inspect(context)
   }
 
   async dispose(): Promise<void> {

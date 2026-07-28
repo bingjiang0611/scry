@@ -1,6 +1,7 @@
 // P0 账本核心（纯逻辑，无 electron/Database 依赖，便于单测 + headless 集成验证）。
 // db.ts 只负责 electron 路径 + 预编译语句执行；本文件负责 schema、TraceEvent→行映射、查询 SQL。
-import { type TraceEvent, maskSecrets } from '../shared/trace'
+import { type DbStats, type TraceEvent, maskSecrets } from '../shared/trace'
+import type { ProviderId } from '../shared/provider'
 
 // v1（旧）：保留建表兼容旧库，P0 起不再写/读。
 export const DDL_V1 = [
@@ -114,6 +115,12 @@ export const DDL_V6 = [
   `CREATE INDEX IF NOT EXISTS idx_session_refs_provider_cwd ON session_refs(provider_id, cwd, updated_ts)`
 ]
 
+// v7（Analytics）：最近 30/60/90 天窗口查询只增加索引，不回填或重写历史事实。
+export const DDL_V7 = [
+  `CREATE INDEX IF NOT EXISTS idx_spans_time ON spans(ts_start)`,
+  `CREATE INDEX IF NOT EXISTS idx_spans_mcp_time_duration ON spans(mcp_server, ts_start, duration_ms)`
+]
+
 export const SPAN_COLS = [
   'id', 'session_id', 'run_id', 'message_id', 'tool_use_id', 'parent_tool_use_id', 'graph_parent_id', 'agent_id',
   'ts_start', 'ts_end', 'duration_ms', 'duration_api_ms', 'kind', 'stage', 'name', 'tool', 'mcp_server', 'is_error',
@@ -160,7 +167,10 @@ export const sqlInsert = (table: string, cols: readonly string[]): string =>
 
 // 跨会话聚合查询（从 spans/model_usage）。result span 持 cost/token（modelUsage 聚合，非顶层 usage）。
 export const TOTALS_SQL = `SELECT SUM(cost_usd) cost, SUM(tokens_in) tin,
-  SUM(tokens_out) tout, COUNT(*) turns FROM spans WHERE kind='harness' AND stage='result'`
+  SUM(tokens_out) tout, COUNT(*) turns,
+  (SELECT COUNT(*) FROM spans WHERE kind IN ('tool','skill','agent')) toolCalls,
+  (SELECT COUNT(*) FROM spans WHERE danger_level IS NOT NULL) dangerEvents
+  FROM spans WHERE kind='harness' AND stage='result'`
 export const TOP_TOOLS_SQL = `SELECT tool, COUNT(*) n, SUM(CASE WHEN mcp_server IS NOT NULL THEN 1 ELSE 0 END) mcp
   FROM spans WHERE kind IN ('tool','skill','agent') AND tool IS NOT NULL GROUP BY tool ORDER BY n DESC LIMIT 8`
 export const BY_CWD_SQL = `SELECT cwd, SUM(cost_usd) cost, COUNT(*) turns
@@ -176,6 +186,187 @@ export const TOOL_STATS_SQL = `SELECT tool, COUNT(*) n, CAST(AVG(duration_ms) AS
 export const DANGER_TREND_SQL = `SELECT danger_reason reason, danger_level level, COUNT(*) n
   FROM spans WHERE danger_level IS NOT NULL
   GROUP BY danger_reason, danger_level ORDER BY (danger_level='danger') DESC, n DESC LIMIT 10`
+
+export const ANALYTICS_RESULTS_SQL = `SELECT s.ts_start tsStart, r.provider_id providerId,
+  s.tokens_in inputTokens, s.tokens_out outputTokens,
+  s.cache_read_tokens cacheReadTokens, s.cache_creation_tokens cacheWriteTokens
+  FROM spans s LEFT JOIN session_refs r ON r.scry_session_id=s.session_id
+  WHERE s.kind='harness' AND s.stage='result' AND s.ts_start>=? AND s.ts_start<?`
+export const ANALYTICS_TOOLS_SQL = `SELECT ts_start tsStart FROM spans
+  WHERE kind IN ('tool','skill','agent') AND ts_start>=? AND ts_start<?`
+export const ANALYTICS_DANGER_SQL = `SELECT ts_start tsStart, danger_level level FROM spans
+  WHERE danger_level IS NOT NULL AND ts_start>=? AND ts_start<?`
+export const ANALYTICS_MCP_SQL = `SELECT mcp_server server, duration_ms durationMs, is_error isError FROM spans
+  WHERE mcp_server IS NOT NULL AND duration_ms IS NOT NULL AND duration_ms>=0 AND ts_start>=? AND ts_start<?`
+
+export interface AnalyticsResultRow {
+  tsStart: number
+  providerId: string | null
+  inputTokens: number | null
+  outputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+}
+export interface AnalyticsToolRow { tsStart: number }
+export interface AnalyticsDangerRow { tsStart: number; level: string }
+export interface AnalyticsMcpRow { server: string; durationMs: number; isError: number }
+
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode']
+const localDay = (ms: number): string => {
+  const date = new Date(ms)
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+const startOfLocalDay = (ms: number): number => {
+  const d = new Date(ms)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+const percentChange = (current: number | null, previous: number | null): number | null =>
+  current == null || previous == null || previous === 0 ? null : ((current - previous) / previous) * 100
+const sumKnown = (rows: AnalyticsResultRow[], key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'): number | null => {
+  const known = rows.filter((row) => row[key] != null)
+  return known.length ? known.reduce((sum, row) => sum + (row[key] ?? 0), 0) : null
+}
+
+export function nearestRank(values: number[], percentile: number): number | null {
+  if (!values.length) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const rank = Math.max(1, Math.ceil(Math.min(1, Math.max(0, percentile)) * sorted.length))
+  return sorted[rank - 1]
+}
+
+export function buildAnalyticsStats(args: {
+  nowMs: number
+  results: AnalyticsResultRow[]
+  tools: AnalyticsToolRow[]
+  dangers: AnalyticsDangerRow[]
+  mcp: AnalyticsMcpRow[]
+}): Pick<DbStats, 'tokenDaily' | 'dangerDaily' | 'comparison' | 'cacheReuse' | 'mcpLatency' | 'providerCoverage'> {
+  const today = startOfLocalDay(args.nowMs)
+  const currentStart = new Date(new Date(today).setDate(new Date(today).getDate() - 29)).getTime()
+  const previousStart = new Date(new Date(today).setDate(new Date(today).getDate() - 59)).getTime()
+  const tomorrow = new Date(new Date(today).setDate(new Date(today).getDate() + 1)).getTime()
+  const dangerStart = new Date(new Date(today).setDate(new Date(today).getDate() - 89)).getTime()
+  const currentResults = args.results.filter((row) => row.tsStart >= currentStart && row.tsStart < tomorrow)
+  const previousResults = args.results.filter((row) => row.tsStart >= previousStart && row.tsStart < currentStart)
+
+  const tokenDaily = Array.from({ length: 30 }, (_, i) => {
+    const start = new Date(new Date(currentStart).setDate(new Date(currentStart).getDate() + i)).getTime()
+    const end = new Date(new Date(start).setDate(new Date(start).getDate() + 1)).getTime()
+    const rows = currentResults.filter((row) => row.tsStart >= start && row.tsStart < end)
+    return {
+      day: localDay(start),
+      input: sumKnown(rows, 'inputTokens'),
+      output: sumKnown(rows, 'outputTokens'),
+      cacheRead: sumKnown(rows, 'cacheReadTokens'),
+      cacheWrite: sumKnown(rows, 'cacheWriteTokens'),
+      turns: rows.length,
+      inputKnownTurns: rows.filter((row) => row.inputTokens != null).length,
+      outputKnownTurns: rows.filter((row) => row.outputTokens != null).length,
+      cacheReadKnownTurns: rows.filter((row) => row.cacheReadTokens != null).length,
+      cacheWriteKnownTurns: rows.filter((row) => row.cacheWriteTokens != null).length
+    }
+  })
+  const dangerDaily = Array.from({ length: 90 }, (_, i) => {
+    const start = new Date(new Date(dangerStart).setDate(new Date(dangerStart).getDate() + i)).getTime()
+    const end = new Date(new Date(start).setDate(new Date(start).getDate() + 1)).getTime()
+    const rows = args.dangers.filter((row) => row.tsStart >= start && row.tsStart < end)
+    return { day: localDay(start), danger: rows.filter((row) => row.level === 'danger').length, warn: rows.filter((row) => row.level === 'warn').length }
+  })
+
+  const windowSummary = (results: AnalyticsResultRow[], from: number, to: number) => {
+    const complete = results.filter((row) => row.inputTokens != null && row.outputTokens != null)
+    const tokens = complete.length ? complete.reduce((sum, row) => sum + (row.inputTokens ?? 0) + (row.outputTokens ?? 0), 0) : null
+    return {
+      tokens,
+      tokenKnownTurns: complete.length,
+      turns: results.length,
+      toolCalls: args.tools.filter((row) => row.tsStart >= from && row.tsStart < to).length,
+      danger: args.dangers.filter((row) => row.tsStart >= from && row.tsStart < to && row.level === 'danger').length
+    }
+  }
+  const current = windowSummary(currentResults, currentStart, tomorrow)
+  const previous = windowSummary(previousResults, previousStart, currentStart)
+
+  const providerCoverage = PROVIDERS.map((providerId) => {
+    const rows = currentResults.filter((row) => row.providerId === providerId)
+    return {
+      providerId,
+      turns: rows.length,
+      inputKnownTurns: rows.filter((row) => row.inputTokens != null).length,
+      outputKnownTurns: rows.filter((row) => row.outputTokens != null).length,
+      cacheReadKnownTurns: rows.filter((row) => row.cacheReadTokens != null).length,
+      cacheWriteKnownTurns: rows.filter((row) => row.cacheWriteTokens != null).length,
+      dangerCoverage: (providerId === 'claude' || providerId === 'qoder' ? 'classified' : 'unsupported') as 'classified' | 'unsupported'
+    }
+  })
+  const cacheReuse = PROVIDERS.map((providerId) => {
+    const rows = currentResults.filter((row) => row.providerId === providerId)
+    const denominator: NonNullable<DbStats['cacheReuse']>[number]['denominator'] = providerId === 'claude'
+      ? 'separate_input'
+      : providerId === 'codex'
+        ? 'input_includes_cache'
+        : providerId === 'opencode'
+          ? 'upstream_dependent'
+          : 'unknown'
+    const comparable = providerId === 'claude'
+      ? rows.filter((row) => row.inputTokens != null && row.cacheReadTokens != null && row.cacheWriteTokens != null)
+      : providerId === 'codex'
+        ? rows.filter((row) => row.inputTokens != null && row.cacheReadTokens != null)
+        : []
+    const numerator = comparable.reduce((sum, row) => sum + (row.cacheReadTokens ?? 0), 0)
+    const divisor = providerId === 'claude'
+      ? comparable.reduce((sum, row) => sum + (row.inputTokens ?? 0) + (row.cacheReadTokens ?? 0) + (row.cacheWriteTokens ?? 0), 0)
+      : providerId === 'codex'
+        ? comparable.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0)
+        : 0
+    return {
+      providerId,
+      turns: rows.length,
+      inputTokens: sumKnown(rows, 'inputTokens'),
+      cacheReadTokens: sumKnown(rows, 'cacheReadTokens'),
+      cacheWriteTokens: sumKnown(rows, 'cacheWriteTokens'),
+      inputKnownTurns: rows.filter((row) => row.inputTokens != null).length,
+      cacheReadKnownTurns: rows.filter((row) => row.cacheReadTokens != null).length,
+      cacheWriteKnownTurns: rows.filter((row) => row.cacheWriteTokens != null).length,
+      comparableTurns: comparable.length,
+      reuseRate: divisor > 0 ? numerator / divisor : null,
+      denominator
+    }
+  })
+
+  const mcpGroups = new Map<string, AnalyticsMcpRow[]>()
+  for (const row of args.mcp) mcpGroups.set(row.server, [...(mcpGroups.get(row.server) ?? []), row])
+  const mcpLatency = [...mcpGroups.entries()].map(([server, rows]) => ({
+    server,
+    calls: rows.length,
+    p50Ms: nearestRank(rows.map((row) => row.durationMs), 0.5),
+    p95Ms: nearestRank(rows.map((row) => row.durationMs), 0.95),
+    errors: rows.filter((row) => row.isError === 1).length
+  })).sort((a, b) => b.calls - a.calls || a.server.localeCompare(b.server))
+
+  return {
+    tokenDaily,
+    dangerDaily,
+    comparison: {
+      current,
+      previous,
+      change: {
+        tokensPct: current.tokenKnownTurns === current.turns && previous.tokenKnownTurns === previous.turns
+          ? percentChange(current.tokens, previous.tokens)
+          : null,
+        turnsPct: percentChange(current.turns, previous.turns),
+        toolCallsPct: percentChange(current.toolCalls, previous.toolCalls),
+        dangerPct: percentChange(current.danger, previous.danger)
+      }
+    },
+    cacheReuse,
+    mcpLatency,
+    providerCoverage
+  }
+}
 
 export const canonicalCostWhere = (a = 'usage_ledger'): string => `(
   ${a}.cost IS NOT NULL AND (

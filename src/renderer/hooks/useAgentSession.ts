@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { TraceEvent } from '@shared/trace'
+import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, AgentStartRequest } from '@shared/runtime'
 import { applyTraceBatch } from '../format'
 import type { ParsedTurn } from '../env'
@@ -15,6 +15,10 @@ interface TurnErrorEvent {
   message: string
   hint?: string
 }
+
+type RunLifecycleDelta =
+  | { kind: 'done'; event: TurnDoneEvent }
+  | { kind: 'error'; event: TurnErrorEvent }
 
 interface AgentSessionCallbacks {
   onTurnDone?: (event: TurnDoneEvent) => void
@@ -43,6 +47,16 @@ export const markTurnError = (prev: Turn[], event: TurnErrorEvent): Turn[] =>
   prev.map((turn) =>
     turn.runId === event.runId ? { ...turn, done: true, error: event.message, errorHint: event.hint } : turn
   )
+
+export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta[]): Turn[] =>
+  deltas.reduce(
+    (turns, delta) =>
+      delta.kind === 'done' ? markTurnDone(turns, delta.event.runId) : markTurnError(turns, delta.event),
+    prev
+  )
+
+export const currentVisibleRunId = (turns: Turn[]): string | null =>
+  [...turns].reverse().find((turn) => !turn.done && !turn.error)?.runId ?? null
 
 export function clearSessionTurns(prev: Turn[], clearedRuns: Set<string>): Turn[] {
   prev.forEach((turn) => clearedRuns.add(turn.runId))
@@ -87,6 +101,16 @@ export const parsedSessionTurns = (sessionId: string, parsed: ParsedTurn[]): Tur
     return restored
   })
 
+export function sessionTurnsWithActiveRun(sessionId: string, parsed: ParsedTurn[], activeRun?: ActiveRun | null): Turn[] {
+  const turns = parsedSessionTurns(sessionId, parsed)
+  if (!activeRun || activeRun.done) return turns
+  const activeTurn: Turn = { ...activeRun }
+  const last = turns.length - 1
+  if (last >= 0 && turns[last].userText === activeRun.userText) turns[last] = activeTurn
+  else turns.push(activeTurn)
+  return turns
+}
+
 export function buildAgentStartRequest(text: string, options: Omit<AgentStartRequest, 'prompt'> = {}): AgentStartRequest | null {
   const prompt = text.trim()
   const attachments = options.attachments ?? []
@@ -101,12 +125,17 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [pendingQuestions, setPendingQuestions] = useState<AgentQuestionRequest[]>([])
   const clearedRuns = useRef<Set<string>>(new Set())
+  const focusedRunIdRef = useRef<string | null>(null)
+  const focusLifecycleDeltasRef = useRef<{ runId: string; deltas: RunLifecycleDelta[] } | null>(null)
+  const focusQuestionDeltasRef = useRef<{ runId: string; deltas: PendingQuestionDelta[] } | null>(null)
+  const pendingStartLifecycleRef = useRef<RunLifecycleDelta[] | null>(null)
   const traceBuf = useRef<TraceEvent[]>([])
   const rafId = useRef<number | null>(null)
   const callbacksRef = useRef(callbacks)
 
   callbacksRef.current = callbacks
 
+  const currentRunId = useMemo(() => currentVisibleRunId(turns), [turns])
   const busy = useMemo(() => restoring || running || turns.some((turn) => !turn.done && !turn.error), [restoring, running, turns])
 
   const flushTrace = useCallback((): void => {
@@ -117,45 +146,102 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     setTurns((prev) => applyTraceBatch(prev, buf, clearedRuns.current))
   }, [])
 
-  const clearTurns = useCallback((): void => {
+  const prepareRunFocus = useCallback((runId: string): void => {
+    focusedRunIdRef.current = runId
+    clearedRuns.current.delete(runId)
+    focusLifecycleDeltasRef.current = { runId, deltas: [] }
+    focusQuestionDeltasRef.current = { runId, deltas: [] }
+  }, [])
+
+  const clearTurns = useCallback((_options: { preserveRunning?: boolean } = {}): void => {
     setTurns((prev) => clearSessionTurns(prev, clearedRuns.current))
+    focusedRunIdRef.current = null
+    focusLifecycleDeltasRef.current = null
+    focusQuestionDeltasRef.current = null
     setSelected(null)
     setPendingQuestions([])
     setRunning(false)
   }, [])
 
-  const replaceWithParsedSession = useCallback((sessionId: string, parsed: ParsedTurn[]): void => {
-    setTurns(parsedSessionTurns(sessionId, parsed))
-    setSelected(null)
-    setPendingQuestions([])
-    setRunning(false)
-  }, [])
+  const replaceWithParsedSession = useCallback(
+    (
+      sessionId: string,
+      parsed: ParsedTurn[],
+      options: { activeRun?: ActiveRun | null } = {}
+    ): void => {
+      const activeRun = options.activeRun && !options.activeRun.done ? options.activeRun : null
+      focusedRunIdRef.current = activeRun?.runId ?? null
+      if (activeRun) clearedRuns.current.delete(activeRun.runId)
+      const lifecycleDeltas =
+        activeRun && focusLifecycleDeltasRef.current?.runId === activeRun.runId
+          ? focusLifecycleDeltasRef.current.deltas
+          : []
+      const questionDeltas =
+        activeRun && focusQuestionDeltasRef.current?.runId === activeRun.runId
+          ? focusQuestionDeltasRef.current.deltas
+          : []
+      setTurns((prev) => {
+        const snapshot = sessionTurnsWithActiveRun(sessionId, parsed, activeRun)
+        if (!activeRun) return snapshot
+        const local = prev.find((turn) => turn.runId === activeRun.runId)
+        const merged = local ? mergeActiveRun([local], activeRun)[0] : activeRun
+        return replayRunLifecycleDeltas(
+          snapshot.map((turn) => (turn.runId === activeRun.runId ? merged : turn)),
+          lifecycleDeltas
+        )
+      })
+      setSelected(null)
+      setPendingQuestions(
+        replayPendingQuestionDeltas(activeRun?.pendingQuestions ?? [], questionDeltas)
+      )
+      const terminal = lifecycleDeltas.some((delta) => delta.event.runId === activeRun?.runId)
+      setRunning(Boolean(activeRun && !terminal))
+      focusLifecycleDeltasRef.current = null
+      focusQuestionDeltasRef.current = null
+    },
+    []
+  )
 
-  const send = useCallback(async (text: string, options: Omit<AgentStartRequest, 'prompt'> = {}): Promise<void> => {
+  const send = useCallback(async (
+    text: string,
+    options: Omit<AgentStartRequest, 'prompt'> = {}
+  ): Promise<string | null> => {
     const request = buildAgentStartRequest(text, options)
-    if (!request) return
+    if (!request) return null
+    focusedRunIdRef.current = null
+    pendingStartLifecycleRef.current = []
     setRunning(true)
     let runId: string
     try {
       runId = (await window.scry.start(request)).runId
     } catch (error) {
+      pendingStartLifecycleRef.current = null
       setRunning(false)
       throw error
     }
+    focusedRunIdRef.current = runId
+    const lifecycleDeltas = (pendingStartLifecycleRef.current ?? []).filter((delta) => delta.event.runId === runId)
+    pendingStartLifecycleRef.current = null
     setTurns((prev) => {
       const index = prev.findIndex((turn) => turn.runId === runId)
       if (index === -1) {
-        return [...prev, { runId, userText: request.prompt, attachments: request.attachments, items: [], done: false }]
+        return replayRunLifecycleDeltas(
+          [...prev, { runId, userText: request.prompt, attachments: request.attachments, items: [], done: false }],
+          lifecycleDeltas
+        )
       }
       const next = [...prev]
       next[index] = { ...next[index], userText: request.prompt, attachments: request.attachments }
-      return next
+      return replayRunLifecycleDeltas(next, lifecycleDeltas)
     })
+    if (lifecycleDeltas.length > 0) setRunning(false)
+    return runId
   }, [])
 
   const stopRun = useCallback(async (): Promise<void> => {
-    await window.scry.stop()
-  }, [])
+    if (!currentRunId) return
+    await window.scry.stop(currentRunId)
+  }, [currentRunId])
 
   const answerQuestion = useCallback(async (response: AgentQuestionResponse): Promise<void> => {
     if (typeof window.scry.answerQuestion !== 'function') throw new Error('当前 Scry preload 不支持回答 Claude 提问，请重启应用')
@@ -167,16 +253,43 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   useEffect(() => {
     let questionSnapshot: AgentQuestionRequest[] | null = null
     let hydratingQuestions = true
+    let hydratedRun: ActiveRun | null = null
+    let hydratingLifecycle = true
     const questionDeltas: PendingQuestionDelta[] = []
+    const lifecycleDeltas: RunLifecycleDelta[] = []
     const receiveQuestionDelta = (delta: PendingQuestionDelta): void => {
+      const runId = delta.kind === 'open' ? delta.request.runId : delta.event.runId
+      if (clearedRuns.current.has(runId)) return
       if (hydratingQuestions) {
         questionDeltas.push(delta)
         return
       }
+      if (focusedRunIdRef.current == null) focusedRunIdRef.current = runId
+      if (focusedRunIdRef.current !== runId) return
+      if (focusQuestionDeltasRef.current?.runId === runId) {
+        focusQuestionDeltasRef.current.deltas.push(delta)
+      }
       setPendingQuestions((prev) => replayPendingQuestionDeltas(prev, [delta]))
+    }
+    const receiveLifecycleDelta = (delta: RunLifecycleDelta): void => {
+      const runId = delta.event.runId
+      if (hydratingLifecycle) lifecycleDeltas.push(delta)
+      if (pendingStartLifecycleRef.current) pendingStartLifecycleRef.current.push(delta)
+      if (focusLifecycleDeltasRef.current?.runId === runId) {
+        focusLifecycleDeltasRef.current.deltas.push(delta)
+      }
+      if (clearedRuns.current.has(runId)) return
+      if (focusedRunIdRef.current == null) focusedRunIdRef.current = runId
+      if (focusedRunIdRef.current !== runId) return
+      setTurns((prev) => replayRunLifecycleDeltas(prev, [delta]))
+      setPendingQuestions((prev) => removePendingQuestion(prev, delta.event))
+      setRunning(false)
     }
 
     const offTrace = window.scry.onTrace((event) => {
+      if (clearedRuns.current.has(event.runId)) return
+      if (focusedRunIdRef.current == null) focusedRunIdRef.current = event.runId
+      if (focusedRunIdRef.current !== event.runId) return
       traceBuf.current.push(event)
       if (rafId.current == null) rafId.current = requestAnimationFrame(flushTrace)
     })
@@ -193,30 +306,43 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     window.scry
       .activeRun()
       .then((run) => {
+        hydratedRun = !run || run.done ? null : run
         questionSnapshot = !run || run.done ? [] : run.pendingQuestions ?? []
         if (!run || run.done) return
+        focusedRunIdRef.current = run.runId
+        clearedRuns.current.delete(run.runId)
         setTurns((prev) => mergeActiveRun(prev, run))
         setRunning(true)
       })
       .finally(() => {
+        hydratingLifecycle = false
         hydratingQuestions = false
-        setPendingQuestions((prev) => replayPendingQuestionDeltas(questionSnapshot ?? prev, questionDeltas))
+        const runId = hydratedRun?.runId
+        const currentLifecycle = runId ? lifecycleDeltas.filter((delta) => delta.event.runId === runId) : []
+        const currentQuestions = runId
+          ? questionDeltas.filter((delta) =>
+              (delta.kind === 'open' ? delta.request.runId : delta.event.runId) === runId
+            )
+          : []
+        if (currentLifecycle.length > 0) {
+          setTurns((prev) => replayRunLifecycleDeltas(prev, currentLifecycle))
+          setRunning(false)
+        }
+        setPendingQuestions((prev) =>
+          replayPendingQuestionDeltas(questionSnapshot ?? prev, currentQuestions)
+        )
         setRestoring(false)
       })
 
     const offDone = window.scry.onTurnDone((event) => {
       flushTrace()
-      setTurns((prev) => markTurnDone(prev, event.runId))
-      setPendingQuestions((prev) => removePendingQuestion(prev, event))
-      setRunning(false)
+      receiveLifecycleDelta({ kind: 'done', event })
       callbacksRef.current.onTurnDone?.(event)
     })
 
     const offError = window.scry.onError((event) => {
       flushTrace()
-      setTurns((prev) => markTurnError(prev, event))
-      setPendingQuestions((prev) => removePendingQuestion(prev, event))
-      setRunning(false)
+      receiveLifecycleDelta({ kind: 'error', event })
       callbacksRef.current.onError?.(event)
     })
 
@@ -235,12 +361,14 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     selected,
     setSelected,
     pendingQuestions,
+    currentRunId,
     running,
     restoring,
     busy,
     send,
     answerQuestion,
     stopRun,
+    prepareRunFocus,
     clearTurns,
     replaceWithParsedSession
   }

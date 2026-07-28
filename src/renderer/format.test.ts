@@ -11,6 +11,8 @@ import {
   buildSessionReport,
   fileWriteCoverage,
   hookCancellationDetail,
+  hookCommandLabel,
+  logicalCallEventsForTurn,
   parseUserMessage,
   resultOf,
   updateMcpLiveAfterToggle
@@ -90,7 +92,14 @@ describe('aggregateCalls', () => {
     const r = aggregateCalls(items)
     expect(r.skills).toEqual([{ name: 'workflow-orchestrator', count: 1 }])
     expect(r.agents).toEqual([{ name: 'Explore', count: 1 }])
-    expect(r.toolTotal).toBe(6) // 1 skill + 1 agent + 4 mcp（mcp 也算 tool_use）
+    expect(r).toMatchObject({
+      ordinaryToolTotal: 0,
+      skillTotal: 1,
+      agentTotal: 1,
+      mcpTotal: 4,
+      totalCalls: 6
+    })
+    expect(r.toolTotal).toBe(6) // 兼容旧调用方：全部逻辑调用
     // mcp 按 server total 降序：tracker(3) 在 oauth(1) 前
     expect(r.mcp.map((g) => g.server)).toEqual(['tracker', 'oauth'])
     const tracker = r.mcp.find((g) => g.server === 'tracker')!
@@ -132,9 +141,30 @@ describe('aggregateCalls', () => {
     ])
   })
 
+  it('同一 toolUseId 映射出多个 fileChange 事件时只算一次调用', () => {
+    const logical = logicalCallEventsForTurn([
+      ev({ id: 'edit-a', kind: 'tool', stage: 'tool:Edit', tool: 'Edit', toolUseId: 'call-1', filePath: '/repo/a.ts' }),
+      ev({ id: 'edit-b', kind: 'tool', stage: 'tool:Edit', tool: 'Edit', toolUseId: 'call-1', filePath: '/repo/b.ts' })
+    ])
+
+    expect(logical).toHaveLength(1)
+    expect(aggregateCalls(logical)).toMatchObject({ ordinaryToolTotal: 1, totalCalls: 1 })
+  })
+
   it('空输入返回全空、toolTotal=0', () => {
     const r = aggregateCalls([])
-    expect(r).toEqual({ tools: [], skills: [], agents: [], mcp: [], toolTotal: 0 })
+    expect(r).toEqual({
+      tools: [],
+      skills: [],
+      agents: [],
+      mcp: [],
+      ordinaryToolTotal: 0,
+      skillTotal: 0,
+      agentTotal: 0,
+      mcpTotal: 0,
+      totalCalls: 0,
+      toolTotal: 0
+    })
   })
 })
 
@@ -165,7 +195,9 @@ describe('aggregateHooks', () => {
         hookName: 'PreToolUse:Bash',
         hookCommand: '.claude/scripts/branch-check-hook.sh',
         hookOutcome: 'success',
-        hookExitCode: 0
+        hookExitCode: 0,
+        durationMs: 241,
+        input: { source: 'project', sourcePath: '/repo/.codex/hooks.json' }
       }),
       ev({
         kind: 'hook',
@@ -198,7 +230,8 @@ describe('aggregateHooks', () => {
       logicalRuns: 2,
       responses: 2,
       errors: 1,
-      toolCalls: 1
+      toolCalls: 1,
+      triggerRuns: 1
     })
     expect(r.groups[0].scripts.map((s) => s.label)).toEqual(['branch-check-hook.sh', 'trace_prompt.py'])
     expect(r.groups[0].scripts[0]).toMatchObject({
@@ -207,7 +240,16 @@ describe('aggregateHooks', () => {
       responses: 1,
       started: 1,
       progress: 1,
-      exitCode: 0
+      exitCode: 0,
+      instances: [
+        expect.objectContaining({
+          hookId: 'hk-1',
+          source: 'project',
+          sourcePath: '/repo/.codex/hooks.json',
+          durationMs: 241,
+          outcome: 'success'
+        })
+      ]
     })
     expect(r.groups[0].scripts[1]).toMatchObject({
       label: 'trace_prompt.py',
@@ -216,7 +258,45 @@ describe('aggregateHooks', () => {
     })
     expect(r.groups[0].scripts[1].unsuccessful.map((event) => event.hookId)).toEqual(['hk-2'])
     expect(r.groups[0].scripts[1].lastError?.hookId).toBe('hk-2')
-    expect(r.groups[1]).toMatchObject({ event: 'SessionStart', logicalRuns: 1, pending: 1 })
+    expect(r.groups[1]).toMatchObject({ event: 'SessionStart', logicalRuns: 1, pending: 1, triggerRuns: null })
+  })
+
+  it('全局桥接命令优先用 expected-marker 展示逻辑脚本短名', () => {
+    const command =
+      'python3 /Users/example/.local/share/rate-native-agent-hooks/global-hook-bridge.py --target codex --event UserPromptSubmit --expected-marker .claude/hooks/trace_prompt.py'
+
+    expect(hookCommandLabel(command)).toBe('trace_prompt.py')
+  })
+
+  it('同一个 app-server hookId 在不同用户轮复用时按 run 分成两个处理器实例', () => {
+    const items = ['run-1', 'run-2'].flatMap((runId) => [
+      ev({
+        id: `${runId}-start`,
+        runId,
+        kind: 'hook',
+        stage: 'hook_started',
+        hookId: 'user-prompt-submit:2:path',
+        hookEvent: 'UserPromptSubmit',
+        hookName: 'UserPromptSubmit:command',
+        hookCommand: 'python3 .claude/hooks/trace_prompt.py'
+      }),
+      ev({
+        id: `${runId}-response`,
+        runId,
+        kind: 'hook',
+        stage: 'hook_response',
+        hookId: 'user-prompt-submit:2:path',
+        hookEvent: 'UserPromptSubmit',
+        hookName: 'UserPromptSubmit:command',
+        hookCommand: 'python3 .claude/hooks/trace_prompt.py',
+        hookOutcome: 'success'
+      })
+    ])
+
+    const summary = aggregateHooks(items)
+    expect(summary).toMatchObject({ logicalRuns: 2, responses: 2, rawEvents: 4 })
+    expect(summary.groups[0].scripts[0]).toMatchObject({ logicalRuns: 2, responses: 2, rawEvents: 4 })
+    expect(summary.groups[0].scripts[0].instances).toHaveLength(2)
   })
 
   it('cancelled 单独计数，并只在有可靠证据时区分超时', () => {
@@ -334,6 +414,23 @@ describe('aggregateSegments（P1 按 skill 切段）', () => {
   it('纯子 agent 无 skill：不混入普通工具数', () => {
     const segs = aggregateSegments([ev({ kind: 'agent', stage: 'agent:general-purpose', name: 'general-purpose' })])
     expect(segs).toEqual([{ skill: '（无 skill）', tools: 0, agents: 1, reads: 0, writes: 0, errors: 0 }])
+  })
+
+  it('与调用明细共用 Skill 去重：注入与内部文件证据只切一个段，嵌套 Skill 保留', () => {
+    const items = [
+      ev({ id: 'root-injection', kind: 'skill', stage: 'skill:root', name: 'root', input: { source: 'skill_injection' } }),
+      ev({
+        id: 'root-file',
+        kind: 'skill',
+        stage: 'skill:root',
+        name: 'root',
+        input: { source: 'skill_file', path: '/repo/.claude/skills/root/phases/00.md' }
+      }),
+      ev({ id: 'nested', kind: 'skill', stage: 'skill:nested', name: 'nested', toolUseId: 'nested-call' })
+    ]
+    const logical = logicalCallEventsForTurn(items)
+    expect(logical.filter((event) => event.kind === 'skill').map((event) => event.name)).toEqual(['root', 'nested'])
+    expect(aggregateSegments(logical).map((segment) => segment.skill)).toEqual(['root', 'nested'])
   })
 })
 
@@ -474,6 +571,39 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     expect(b.signals.map((s) => s.title)).toContain('上下文 90%')
     expect(b.signals.some((s) => s.title.includes('高 Token 轮次'))).toBe(true)
     expect(b.signals.some((s) => s.title.includes('突增'))).toBe(false)
+  })
+
+  it('Codex input 已含 cached input，总 Token 不重复加 cache', () => {
+    const b = analyzeBilling([
+      {
+        runId: 'codex',
+        userText: 'codex',
+        done: true,
+        items: [
+          ev({
+            id: 'codex-result',
+            kind: 'harness',
+            stage: 'result',
+            providerId: 'codex',
+            runtimeProvider: 'codex_cli',
+            tokensIn: 100,
+            tokensOut: 20,
+            cacheReadTokens: 80,
+            modelUsage: [{
+              model: 'gpt-5',
+              inputTokens: 100,
+              outputTokens: 20,
+              cacheReadTokens: 80,
+              billingProvider: 'codex'
+            }]
+          })
+        ]
+      }
+    ])
+
+    expect(b.totalTokens).toBe(120)
+    expect(b.allTurnRows[0].tokensTotal).toBe(120)
+    expect(b.models[0].totalTokens).toBe(120)
   })
 
   it('有其他轮次作基线时才把相对异常称为 Token 突增', () => {

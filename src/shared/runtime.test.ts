@@ -42,6 +42,13 @@ describe('runtime frontdoor mapping', () => {
     })
   })
 
+  it('keeps an explicit cwd instead of reading mutable navigation state later', () => {
+    expect(normalizeAgentStartRequest({ prompt: 'hi', cwd: '/repo/a' })).toMatchObject({
+      prompt: 'hi',
+      cwd: '/repo/a'
+    })
+  })
+
   it('accepts a provider-only start without inventing a conflicting agent identity', () => {
     expect(normalizeAgentStartRequest({ prompt: 'hi', providerId: 'opencode' })).toMatchObject({
       providerId: 'opencode',

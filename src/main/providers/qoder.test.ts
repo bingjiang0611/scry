@@ -1,7 +1,10 @@
+import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 
-const sdk = vi.hoisted(() => ({ query: vi.fn(), close: vi.fn() }))
+const sdk = vi.hoisted(() => ({ query: vi.fn(), close: vi.fn(), spawn: vi.fn() }))
+
+vi.mock('node:child_process', () => ({ spawn: sdk.spawn }))
 
 vi.mock('@qoder-ai/qoder-agent-sdk', () => ({
   qodercliAuth: () => ({ type: 'qodercli' }),
@@ -105,6 +108,194 @@ describe('Qoder provider adapter', () => {
       costUsd: undefined,
       runtimeMetadata: expect.objectContaining({ reportedZeroUsage: true })
     })
+  })
+
+  it('bridges AskUserQuestion answers through the Qoder SDK permission callback', async () => {
+    const close = vi.fn().mockResolvedValue(undefined)
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+      close,
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const requestUserInput = vi.fn(async (request) => ({
+      runId: request.runId,
+      questionId: request.questionId,
+      behavior: 'answered' as const,
+      answers: { '选择流程？': '全量' }
+    }))
+
+    const run = createQoderAdapter().run({
+      runId: 'run-question',
+      prompt: 'ask',
+      attachments: [],
+      emit: vi.fn(),
+      requestUserInput
+    })
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool as (
+      tool: string,
+      input: Record<string, unknown>,
+      options: { signal: AbortSignal; toolUseID: string }
+    ) => Promise<Record<string, unknown>>
+    const input = {
+      questions: [
+        {
+          question: '选择流程？',
+          header: '流程',
+          multiSelect: false,
+          options: [
+            { label: '全量', description: '完整执行' },
+            { label: '快速', description: '缩短流程' }
+          ]
+        }
+      ]
+    }
+
+    await expect(
+      canUseTool('AskUserQuestion', input, { signal: new AbortController().signal, toolUseID: 'tool-1' })
+    ).resolves.toMatchObject({
+      behavior: 'allow',
+      updatedInput: { answers: { '选择流程？': '全量' } },
+      decisionClassification: 'user_temporary'
+    })
+    await expect(
+      canUseTool('Bash', { command: 'pwd' }, { signal: new AbortController().signal, toolUseID: 'tool-2' })
+    ).resolves.toEqual({ behavior: 'allow' })
+    expect(requestUserInput).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 'run-question', questionId: 'tool-1' }),
+      expect.any(AbortSignal)
+    )
+    await run.promise
+  })
+
+  it('returns a non-interrupting Qoder denial when the user cancels a question', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const run = createQoderAdapter().run({
+      runId: 'run-question-cancel',
+      prompt: 'ask',
+      attachments: [],
+      emit: vi.fn(),
+      requestUserInput: async (request) => ({
+        runId: request.runId,
+        questionId: request.questionId,
+        behavior: 'cancelled'
+      })
+    })
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool
+
+    await expect(
+      canUseTool(
+        'AskUserQuestion',
+        {
+          questions: [
+            {
+              question: '继续？',
+              header: '确认',
+              multiSelect: false,
+              options: [
+                { label: '继续', description: '继续执行' },
+                { label: '停止', description: '不再执行' }
+              ]
+            }
+          ]
+        },
+        { signal: new AbortController().signal, toolUseID: 'tool-1' }
+      )
+    ).resolves.toMatchObject({
+      behavior: 'deny',
+      interrupt: false,
+      decisionClassification: 'user_reject'
+    })
+    await run.promise
+  })
+
+  it('rejects a run when the Qoder child exits but the SDK stream never settles', async () => {
+    vi.useFakeTimers()
+    try {
+      const child = Object.assign(new EventEmitter(), { pid: 123, kill: vi.fn() })
+      sdk.spawn.mockReturnValue(child)
+      const close = vi.fn().mockResolvedValue(undefined)
+      sdk.query.mockImplementation(({ options }) => {
+        options.spawnQoderCLIProcess({
+          command: '/bin/qodercli',
+          args: [],
+          cwd: '/repo',
+          env: {},
+          signal: new AbortController().signal
+        })
+        return {
+          async *[Symbol.asyncIterator]() {
+            await new Promise(() => {})
+          },
+          close,
+          interrupt: vi.fn().mockResolvedValue(undefined)
+        }
+      })
+
+      const run = createQoderAdapter().run({
+        runId: 'run-exit',
+        prompt: 'work',
+        cwd: '/repo',
+        attachments: [],
+        emit: vi.fn()
+      })
+      const rejected = expect(run.promise).rejects.toThrow('Qoder CLI 已退出，但 SDK 事件流未结束')
+      child.emit('exit', 143, null)
+      await vi.advanceTimersByTimeAsync(1000)
+
+      await rejected
+      expect(close).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a structured Qoder failure when the CLI exits with code 1 afterwards', async () => {
+    const child = Object.assign(new EventEmitter(), { pid: 124, kill: vi.fn() })
+    sdk.spawn.mockReturnValue(child)
+    const close = vi.fn().mockRejectedValue(new Error('Qoder CLI process exited with code 1'))
+    sdk.query.mockImplementation(({ options }) => {
+      options.spawnQoderCLIProcess({
+        command: '/bin/qodercli',
+        args: [],
+        cwd: '/repo',
+        env: {},
+        signal: new AbortController().signal
+      })
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: 'result',
+            subtype: 'error_during_execution',
+            errors: ['Unknown slash command: /rate-workflow']
+          }
+          child.emit('exit', 1, null)
+          throw new Error('Qoder CLI process exited with code 1')
+        },
+        close,
+        interrupt: vi.fn().mockResolvedValue(undefined)
+      }
+    })
+
+    const events: TraceEvent[] = []
+    const result = await createQoderAdapter().run({
+      runId: 'run-provider-failure',
+      prompt: '/rate-workflow',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event) => events.push(event)
+    }).promise
+
+    expect(result.stopped).toBe(false)
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'harness',
+      stage: 'result',
+      text: 'Unknown slash command: /rate-workflow',
+      isError: true
+    }))
   })
 
   it('parses every same-name Qoder hook script from the current process log', () => {

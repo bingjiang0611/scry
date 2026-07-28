@@ -21,6 +21,7 @@ export function Sidebar({
   activeCwd,
   activeSessionId = null,
   activeProviderId,
+  runningRunIds = new Set<string>(),
   version = '0.1.0',
   skillCount,
   mcpOnline,
@@ -40,15 +41,16 @@ export function Sidebar({
   activeCwd: string | null
   activeSessionId?: string | null
   activeProviderId?: SessionProviderId
+  runningRunIds?: ReadonlySet<string>
   version?: string
   skillCount?: number
   mcpOnline?: number
   mcpTotal?: number
   onNewChat: () => void
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string) => void
   onSkills: () => void
   onMcp: () => void
-  onDelete: (cwd: string, sessionId: string, providerId: SessionProviderId) => void
+  onDelete: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string) => void
   onDiagnostics?: () => void
   diagnosticsActive?: boolean
   onAnalytics?: () => void
@@ -56,7 +58,14 @@ export function Sidebar({
 }) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [ctx, setCtx] = useState<{ x: number; y: number; cwd: string; sessionId: string; providerId: SessionProviderId } | null>(null)
+  const [ctx, setCtx] = useState<{
+    x: number
+    y: number
+    cwd: string
+    sessionId: string
+    providerId: SessionProviderId
+    externalSessionId?: string
+  } | null>(null)
   const toggle = (cwd: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -125,27 +134,39 @@ export function Sidebar({
               </div>
               {open && (
                 <div className="sb-sess-list">
-                  {p.sessions.map((s) => (
-                    <div
-                      key={`${s.providerId}:${s.sessionId}`}
-                      className={`sb-sess ${s.sessionId === activeSessionId && s.providerId === activeProviderId ? 'active' : ''}`}
-                      title={`${s.preview}${s.preview ? '\n' : ''}${activeTimeTitle(s.mtime)}`}
-                      onClick={() => onPick(p.cwd, s.sessionId, s.providerId)}
-                      onContextMenu={(e) => {
-                        e.preventDefault()
-                        setCtx({ x: e.clientX, y: e.clientY, cwd: p.cwd, sessionId: s.sessionId, providerId: s.providerId })
-                      }}
-                    >
-                      <span className="sb-sesstext">
-                        <span className="sb-provider">{s.providerId === 'legacy_unknown' ? '历史?' : s.providerId}</span>
-                        {s.preview || '(无预览)'}
-                        {s.count > 1 && <span className="sb-count"> ×{s.count}</span>}
-                      </span>
-                      <span className="sb-sesstime" title={activeTimeTitle(s.mtime)}>
-                        活跃 {relTime(s.mtime)}
-                      </span>
-                    </div>
-                  ))}
+                  {p.sessions.map((s) => {
+                    const active = s.sessionId === activeSessionId && s.providerId === activeProviderId
+                    const running = Boolean(s.runId && runningRunIds.has(s.runId))
+                    return (
+                      <div
+                        key={`${s.providerId}:${s.sessionId}`}
+                        className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
+                        title={`${s.preview}${s.preview ? '\n' : ''}${activeTimeTitle(s.mtime)}${running ? '\n正在运行' : ''}`}
+                        onClick={() => onPick(p.cwd, s.sessionId, s.providerId, s.externalSessionId, s.runId)}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          setCtx({
+                            x: e.clientX,
+                            y: e.clientY,
+                            cwd: p.cwd,
+                            sessionId: s.sessionId,
+                            providerId: s.providerId,
+                            externalSessionId: s.externalSessionId
+                          })
+                        }}
+                      >
+                        <span className="sb-sesstext">
+                          <span className="sb-provider">{s.providerId === 'legacy_unknown' ? '历史?' : s.providerId}</span>
+                          {s.preview || '(无预览)'}
+                          {s.count > 1 && <span className="sb-count"> ×{s.count}</span>}
+                        </span>
+                        <span className="sb-sesstime" title={activeTimeTitle(s.mtime)}>
+                          活跃 {relTime(s.mtime)}
+                        </span>
+                        {running && <span className="sb-running" role="status" aria-label="正在运行" />}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -181,7 +202,7 @@ export function Sidebar({
             <div
               className="ctxitem del"
               onClick={() => {
-                onDelete(ctx.cwd, ctx.sessionId, ctx.providerId)
+                onDelete(ctx.cwd, ctx.sessionId, ctx.providerId, ctx.externalSessionId)
                 setCtx(null)
               }}
             >

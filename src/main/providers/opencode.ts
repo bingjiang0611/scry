@@ -177,7 +177,15 @@ async function mcpSnapshot(client: OpencodeClient, context: ProviderContext): Pr
 
 export function createOpenCodeAdapter(): ProviderAdapter {
   const executable = (): string | undefined => process.env.SCRY_OPENCODE_PATH?.trim() || resolveRuntimeCliBin('opencode')
-  const manager = new OpenCodeServerManager(executable)
+  const managers = new Map<string, OpenCodeServerManager>()
+  const managerFor = (cwd: string): OpenCodeServerManager => {
+    let manager = managers.get(cwd)
+    if (!manager) {
+      manager = new OpenCodeServerManager(executable)
+      managers.set(cwd, manager)
+    }
+    return manager
+  }
   let lastOkAt: number | undefined
   let lastErrorAt: number | undefined
   let lastError: string | undefined
@@ -185,7 +193,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
   const clientFor = async (context: ProviderContext): Promise<OpencodeClient> => {
     if (!context.cwd) throw new Error('OpenCode 需要工作目录')
     try {
-      const state = await manager.ensure(context.cwd)
+      const state = await managerFor(context.cwd).ensure(context.cwd)
       lastOkAt = Date.now()
       lastError = undefined
       return state.client
@@ -201,8 +209,14 @@ export function createOpenCodeAdapter(): ProviderAdapter {
     runtimeProvider: 'opencode_server',
     describe: async () => {
       const path = executable()
-      const bridge = manager.hookBridge
-      const bridgeError = bridge.enabled && manager.state && !bridge.ready ? bridge.error ?? 'OpenCode Hook bridge not ready' : undefined
+      const states = [...managers.values()].map((manager) => ({ manager, state: manager.state }))
+      const current = states.find(({ state }) => state != null)
+      const degradedBridge = states
+        .map(({ manager, state }) => ({ bridge: manager.hookBridge, state }))
+        .find(({ bridge, state }) => bridge.enabled && state && !bridge.ready)
+      const bridgeError = degradedBridge
+        ? degradedBridge.bridge.error ?? 'OpenCode Hook bridge not ready'
+        : undefined
       return {
         id: 'opencode',
         label: 'OpenCode',
@@ -214,8 +228,8 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         health: {
           state: !path ? 'unavailable' : lastError || bridgeError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'server SDK',
-          cwd: manager.state?.cwd,
-          pid: manager.state?.pid,
+          cwd: current?.state?.cwd,
+          pid: current?.state?.pid,
           lastOkAt,
           lastErrorAt,
           lastError: lastError ?? bridgeError
@@ -230,14 +244,21 @@ export function createOpenCodeAdapter(): ProviderAdapter {
       const context: ProviderContext = { providerId: 'opencode', cwd: request.cwd, externalSessionId }
       const promise = (async () => {
         client = await clientFor(context)
+        if (stopped) return { externalSessionId, stopped }
         if (!externalSessionId) {
           const session = await unwrap<{ id: string }>(client.session.create({ directory: request.cwd }))
           externalSessionId = session.id
           request.onExternalSessionId?.(session.id)
         }
+        if (stopped) {
+          await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
+          return { externalSessionId, stopped }
+        }
         const subscription = await client.event.subscribe({ directory: request.cwd })
         stream = subscription.stream as AsyncGenerator<unknown>
-        const unsubscribeHook = manager.onHook((frame) => emitOpenCodeHookFrame(request, frame, externalSessionId!))
+        const unsubscribeHook = managerFor(request.cwd!).onHook((frame) =>
+          emitOpenCodeHookFrame(request, frame, externalSessionId!)
+        )
         const events = (async () => {
           try {
             for await (const event of stream!) emitOpenCodeEvent(request, event, externalSessionId!)
@@ -368,6 +389,9 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         }
       }
     },
-    dispose: () => manager.close()
+    dispose: () => {
+      for (const manager of managers.values()) manager.close()
+      managers.clear()
+    }
   }
 }

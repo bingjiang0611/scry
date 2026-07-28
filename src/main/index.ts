@@ -4,7 +4,7 @@ import { basename, dirname, extname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { getClaudeVersion } from './agent-runner'
-import { detectAgents, shellEnv } from './claude-locate'
+import { detectAgents, detectAgentsFast, shellEnv } from './claude-locate'
 import { AgentRuntimeError, runtimeFailureTrace } from './cli-runtime'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
@@ -29,8 +29,15 @@ import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import { createBuiltInProviderAdapters } from './providers'
 import { appendCoalescedTrace } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
-import { attachConfiguredHookCommands, loadClaudeHookConfig } from './hook-config'
+import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
+import { RunRegistry } from './run-registry'
+import {
+  codexHookFingerprint,
+  createCodexHookGrantStore,
+  hooksRequiringBypass,
+  type CodexHookInspection
+} from './codex-hook-trust'
 
 // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
 // AI_AGENT 等环境变量，会让 SDK 驱动的 claude 子进程认证错乱（误判为嵌套会话 → Not logged in）。
@@ -91,6 +98,7 @@ function attachmentPrompt(prompt: string, attachments: PreparedAttachment[]): st
 
 // 每个 cwd 维护各自的会话（换目录 = 换会话）
 const sessionByContext = new Map<string, string>()
+const sessionRevisionByContext = new Map<string, number>()
 let currentCwd: string | undefined
 
 const homeDir = homedir()
@@ -104,8 +112,102 @@ const providerRegistry = new ProviderRegistry(
   createBuiltInProviderAdapters(homeDir, process.env.SCRY_PROVIDER_TRANSPORTS),
   { disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS) }
 )
+const codexHookGrantStore = () => createCodexHookGrantStore(app.getPath('userData'))
 
 const providerContextKey = (providerId: ProviderId, cwd: string): string => `${providerId}\0${cwd}`
+
+function codexHookInspectionError(cwd: string, message: string, nextAction: string): AgentRuntimeError {
+  return new AgentRuntimeError(message, {
+    provider: 'codex_cli',
+    stage: 'capability',
+    cwd,
+    nextAction
+  })
+}
+
+function codexHookSourceSummary(inspection: CodexHookInspection): string {
+  const counts = new Map<string, number>()
+  for (const hook of inspection.hooks.filter((item) => item.enabled)) {
+    const source = hook.source === 'project' ? '项目级' : hook.source === 'user' ? '用户级' : hook.source
+    counts.set(source, (counts.get(source) ?? 0) + 1)
+  }
+  return [...counts.entries()].map(([source, count]) => `${source} ${count}`).join('，')
+}
+
+async function resolveCodexHookBypass(cwd: string): Promise<boolean> {
+  if (process.env.SCRY_CODEX_BYPASS_HOOK_TRUST?.trim() === '1') return true
+
+  let inspection: CodexHookInspection
+  try {
+    inspection = await providerRegistry.inspectHookTrust({ providerId: 'codex', cwd })
+  } catch (error) {
+    throw codexHookInspectionError(
+      cwd,
+      `Codex Hook 预检失败：${String((error as Error).message)}`,
+      '确认 Codex CLI 可用并重试；Scry 不会在无法校验 Hook 指纹时自动绕过信任'
+    )
+  }
+  if (inspection.errors.length > 0) {
+    throw codexHookInspectionError(
+      cwd,
+      `Codex Hook 配置读取失败：${inspection.errors.join('；')}`,
+      '修复 Codex hooks/list 报告的配置错误后重试'
+    )
+  }
+
+  const pending = hooksRequiringBypass(inspection.hooks)
+  if (pending.length === 0) return false
+
+  const fingerprint = codexHookFingerprint(inspection.hooks)
+  const store = codexHookGrantStore()
+  if (store.isGranted(cwd, fingerprint)) return true
+
+  const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
+  const detail = [
+    `仓库：${cwd}`,
+    `启用 Hook：${enabledCount} 个（${codexHookSourceSummary(inspection)}）`,
+    `其中未信任或已修改：${pending.length} 个`,
+    '',
+    '允许后，Scry 仅为这个仓库、这组 Hook 指纹启动带 --dangerously-bypass-hook-trust 的 Codex app-server。',
+    '以后同一组 Hook 自动放行；任何 Hook 增删或内容 hash 变化都会重新询问。',
+    '这是 Scry 的本地授权，不会修改 Codex 自身的 Hook 信任库。',
+    ...(inspection.warnings.length > 0 ? ['', `Codex 警告：${inspection.warnings.join('；')}`] : [])
+  ].join('\n')
+  const options = {
+    type: 'warning' as const,
+    title: '授权当前仓库的 Codex Hook',
+    message: `Codex 已发现 ${pending.length} 个未信任或已修改的 Hook`,
+    detail,
+    buttons: ['允许当前 Hook 并启动', '取消'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  }
+  const result = win && !win.isDestroyed()
+    ? await dialog.showMessageBox(win, options)
+    : await dialog.showMessageBox(options)
+  if (result.response !== 0) {
+    throw codexHookInspectionError(
+      cwd,
+      '已取消 Codex Hook 授权',
+      '如需执行当前仓库 Hook，请再次发送任务并在授权对话框中选择允许'
+    )
+  }
+  try {
+    store.grant(cwd, fingerprint, enabledCount)
+  } catch (error) {
+    throw codexHookInspectionError(
+      cwd,
+      `Codex Hook 授权保存失败：${String((error as Error).message)}`,
+      '检查 Scry userData 目录写权限后重试'
+    )
+  }
+  return true
+}
+
+function bumpSessionRevision(key: string): void {
+  sessionRevisionByContext.set(key, (sessionRevisionByContext.get(key) ?? 0) + 1)
+}
 
 function setCurrentCwd(dir: string): void {
   if (dir !== currentCwd) {
@@ -177,12 +279,18 @@ function createWindow(): void {
     webPreferences: { preload: join(__dirname, '../preload/index.mjs'), sandbox: false }
   })
   let windowShown = false
+  const onIpcMessage = (_event: unknown, channel: string): void => {
+    if (channel === 'app:rendererReady') showWindow()
+  }
   const showWindow = (): void => {
     if (windowShown || !win || win.isDestroyed()) return
     windowShown = true
+    win.webContents.removeListener('ipc-message', onIpcMessage)
     win.show()
   }
-  win.once('ready-to-show', showWindow)
+  // ready-to-show 只代表第一帧能画，React 还没恢复 workspace/active run；此时 show 会先闪欢迎页。
+  // Renderer 在关键快照稳定后主动发 app:rendererReady。保留超时兜底，避免 renderer 异常时窗口永久不可见。
+  win.webContents.on('ipc-message', onIpcMessage)
   setTimeout(showWindow, 2500)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -191,8 +299,15 @@ function createWindow(): void {
   }
 }
 
+ipcMain.handle('agent:detectFast', () => {
+  const supported = new Set(['claude', 'codex', 'qoder', 'opencode'])
+  return detectAgentsFast().filter((agent) => supported.has(agent.id))
+})
+
 ipcMain.handle('agent:detect', async () => {
-  const [detected, descriptors] = await Promise.all([detectAgents(), providerRegistry.describe()])
+  // 先异步完成 PATH/版本探测，让 descriptor 的同步 fallback 命中已知路径，避免阻塞主进程。
+  const detected = await detectAgents()
+  const descriptors = await providerRegistry.describe()
   const found = new Map(detected.map((agent) => [agent.id, agent]))
   return descriptors
     .map((descriptor) => {
@@ -251,7 +366,12 @@ ipcMain.handle('agent:setCwd', (_e, dir: string) => {
 })
 
 ipcMain.handle('agent:newSession', (_event, context: ProviderContext) => {
-  if (context?.providerId && currentCwd) sessionByContext.delete(providerContextKey(context.providerId, currentCwd))
+  const cwd = context?.cwd ?? currentCwd
+  if (context?.providerId && cwd) {
+    const key = providerContextKey(context.providerId, cwd)
+    bumpSessionRevision(key)
+    sessionByContext.delete(key)
+  }
   return true
 })
 
@@ -316,11 +436,18 @@ ipcMain.handle('agent:loadSession', (_e, payload: ProviderContext) => {
   }
   if (!fp && !archived) return null
   setCurrentCwd(payload.cwd)
-  sessionByContext.set(providerContextKey(payload.providerId, payload.cwd), payload.externalSessionId)
+  const key = providerContextKey(payload.providerId, payload.cwd)
+  bumpSessionRevision(key)
+  sessionByContext.set(key, payload.externalSessionId)
   recentStore().push(payload.cwd)
   const merged = mergeSessionTurns(turns, archived)
-  if (payload.providerId !== 'claude') return merged
-  const hookConfig = loadClaudeHookConfig(payload.cwd, homeDir)
+  const hookConfig =
+    payload.providerId === 'claude'
+      ? loadClaudeHookConfig(payload.cwd, homeDir)
+      : payload.providerId === 'codex'
+        ? loadCodexHookConfig(payload.cwd, homeDir)
+        : null
+  if (!hookConfig) return merged
   return merged.map((turn) => ({
     ...turn,
     items: turn.items.map((event) => attachConfiguredHookCommands(event, hookConfig))
@@ -346,7 +473,7 @@ ipcMain.handle(
   }
 )
 
-let active: {
+interface RunControl {
   runId: string
   providerId: ProviderId
   interrupt: () => void
@@ -355,26 +482,31 @@ let active: {
   getExternalSessionId: () => string | undefined
   runtimeProvider: RuntimeProvider
   runState: ActiveRun
+  adoptSession: () => void
+  cleanupProvisional: () => void
   finalizeTurnDiff: () => Promise<void>
   cancelTurnDiff: () => Promise<void>
-} | null = null
-// B1：缓冲当前 run 的事件流，供 renderer 重挂（HMR/窗口 reload）时拉回在途 trace。
-let liveRun: ActiveRun | null = null
+}
+
+// 每个 run 独立持有 Provider handle、问题与 diff 生命周期；focused 只表示当前 UI 正在看谁。
+const runs = new RunRegistry<ActiveRun, RunControl>()
 const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) => {
   if (change.kind === 'open') {
-    if (liveRun?.runId === change.request.runId) {
-      liveRun.pendingQuestions = [
-        ...(liveRun.pendingQuestions ?? []).filter((item) => item.questionId !== change.request.questionId),
+    const run = runs.get(change.request.runId)?.state
+    if (run) {
+      run.pendingQuestions = [
+        ...(run.pendingQuestions ?? []).filter((item) => item.questionId !== change.request.questionId),
         change.request
       ]
     }
-    win?.webContents.send('agent:userQuestion', change.request)
+    if (runs.isFocused(change.request.runId)) win?.webContents.send('agent:userQuestion', change.request)
     return
   }
-  if (liveRun?.runId === change.runId) {
-    liveRun.pendingQuestions = (liveRun.pendingQuestions ?? []).filter((item) => item.questionId !== change.questionId)
+  const run = runs.get(change.runId)?.state
+  if (run) {
+    run.pendingQuestions = (run.pendingQuestions ?? []).filter((item) => item.questionId !== change.questionId)
   }
-  win?.webContents.send('agent:userQuestionClosed', change)
+  if (runs.isFocused(change.runId)) win?.webContents.send('agent:userQuestionClosed', change)
 })
 // 性能：把 onTrace 逐条 IPC 合批——流式期每 token 一条 IPC（每秒上百）→ 缓冲 ~16ms 一批数组发。
 // 保序（FIFO buffer）、不丢（done/error 前 flushTraceSend 强制清空）。
@@ -397,7 +529,7 @@ function queueTrace(ev: TraceEvent): void {
 
 ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
   const request = normalizeAgentStartRequest(payload)
-  const cwd = currentCwd
+  const cwd = request.cwd ?? currentCwd
   const providerId = request.providerId
   const adapter = providerRegistry.get(providerId)
   const runtimeProvider = adapter.runtimeProvider
@@ -417,17 +549,43 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '不要手工覆盖 runtimeProvider；由 Provider adapter descriptor 选择原生 transport'
     })
   }
+  const contextKey = cwd ? providerContextKey(providerId, cwd) : undefined
+  let contextRevision = contextKey ? (sessionRevisionByContext.get(contextKey) ?? 0) : 0
+  const resume = contextKey ? sessionByContext.get(contextKey) : undefined
+  if (
+    resume &&
+    runs.activeStates().some(
+      (run) =>
+        run.providerId === providerId &&
+        run.cwd === cwd &&
+        (run.externalSessionId ?? run.sessionId) === resume
+    )
+  ) {
+    throw new AgentRuntimeError('同一会话已有一轮正在运行', {
+      provider: runtimeProvider,
+      stage: 'frontdoor',
+      cwd,
+      nextAction: '等待当前轮完成，或新建独立会话后并行运行'
+    })
+  }
+  const bypassHookTrust = providerId === 'codex' && cwd
+    ? await resolveCodexHookBypass(cwd)
+    : false
   const runId = `run-${Date.now().toString(36)}-${runSeq++}`
   const unavailableCapture = (): GitTurnDiffCapture => {
     const beforeAt = new Date().toISOString()
     return { beforeAt, captureMs: 0, status: 'unavailable', reason: 'not_git' }
   }
-  const turnDiffCapture = cwd ? await beginGitTurnDiff(cwd) : unavailableCapture()
-  const resume = cwd ? sessionByContext.get(providerContextKey(providerId, cwd)) : undefined
+  const turnDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
   const attachments = prepareRunAttachments(runId, request.attachments)
   const displayPrompt = request.prompt
   const runtimePrompt = attachmentPrompt(displayPrompt, attachments)
-  const hookConfig = providerId === 'claude' && cwd ? loadClaudeHookConfig(cwd, homeDir) : null
+  const hookConfig =
+    providerId === 'claude' && cwd
+      ? loadClaudeHookConfig(cwd, homeDir)
+      : providerId === 'codex' && cwd
+        ? loadCodexHookConfig(cwd, homeDir)
+        : null
   let observedSessionId = resume
   const runState: ActiveRun = {
     runId,
@@ -440,6 +598,10 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
     items: [],
     done: false
   }
+  const cleanupProvisional = (): void => {
+    if (!cwd || resume || runState.externalSessionId) return
+    appSessionStore().remove({ providerId, cwd, externalSessionId: runId })
+  }
   const emit = (rawEvent: TraceEvent): void => {
     const ev = hookConfig ? attachConfiguredHookCommands(rawEvent, hookConfig) : rawEvent
     if (ev.kind === 'harness' && ev.stage === 'result') {
@@ -450,12 +612,33 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       )
     }
     appendCoalescedTrace(runState.items, ev)
-    if (liveRun === runState) queueTrace(ev) // 迟到旧 run 只归档到自己的 state，不污染当前 UI
+    if (runs.isFocused(runId)) queueTrace(ev) // 后台 run 继续归档，只把当前会话 trace 推给 UI。
   }
-  liveRun = runState
+  if (cwd) {
+    if (resume) {
+      // 续接同一原生 session 时也要把侧栏元数据的 runId 更新为本轮，否则切走再点回会拿到上一轮的 stale runId。
+      appSessionStore().record({
+        providerId,
+        runtimeProvider,
+        runId,
+        externalSessionId: resume,
+        cwd,
+        prompt: displayPrompt
+      })
+      win?.webContents.send('agent:session', {
+        runId,
+        sessionId: resume,
+        externalSessionId: resume,
+        providerId
+      })
+    } else {
+      appSessionStore().recordPending({ providerId, runtimeProvider, runId, cwd, prompt: displayPrompt })
+      win?.webContents.send('agent:session', { runId, sessionId: runId, providerId, pending: true })
+    }
+  }
   let turnDiffPromise: Promise<void> | null = null
   const finalizeTurnDiff = (): Promise<void> => {
-    turnDiffPromise ??= finishGitTurnDiff(turnDiffCapture).then((turnDiff) => {
+    turnDiffPromise ??= turnDiffCapture.then((capture) => finishGitTurnDiff(capture)).then((turnDiff) => {
       const event: TraceEvent = {
         id: `d-${evSeq++}`,
         ts: new Date().toISOString(),
@@ -467,7 +650,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         turnDiff
       }
       appendCoalescedTrace(runState.items, event)
-      if (liveRun === runState) queueTrace(event)
+      if (runs.isFocused(runId)) queueTrace(event)
       if (turnDiff.status === 'failed' || turnDiff.status === 'timeout') {
         console.warn('[scry] turn diff capture degraded:', runId, turnDiff.reason, turnDiff.captureMs)
       }
@@ -486,67 +669,99 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
   const publishSessionId = (sessionId: string | undefined): void => {
     if (!sessionId) return
     observedSessionId = sessionId
-    if (cwd) sessionByContext.set(providerContextKey(providerId, cwd), sessionId)
+    if (contextKey && (sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
+      sessionByContext.set(contextKey, sessionId)
+    }
     if (runState.sessionId === sessionId) return
     runState.sessionId = sessionId
     runState.externalSessionId = sessionId
-    if (liveRun !== runState) return
-    win?.webContents.send('agent:session', { runId, sessionId, externalSessionId: sessionId, providerId })
+    if (cwd) {
+      appSessionStore().record({ providerId, runtimeProvider, runId, externalSessionId: sessionId, cwd, prompt: displayPrompt })
+    }
+    win?.webContents.send('agent:session', {
+      runId,
+      sessionId,
+      previousSessionId: runId,
+      externalSessionId: sessionId,
+      providerId
+    })
   }
   let h: {
     promise: Promise<{ externalSessionId?: string; stopped?: boolean }>
     interrupt: () => void
     getExternalSessionId: () => string | undefined
-  }
-  try {
+  } | null = null
+  let interrupted = false
+  const runtimePromise = turnDiffCapture.then(async () => {
+    if (interrupted) return { stopped: true }
     h = providerRegistry.run(providerId, {
       runId,
       prompt: runtimePrompt,
       cwd,
       resume,
       attachments,
+      bypassHookTrust,
       emit,
       onExternalSessionId: publishSessionId,
       requestUserInput: (question, signal) => userQuestionBroker.request(question, signal)
     })
-  } catch (err) {
-    h = {
-      promise: Promise.reject(err),
-      interrupt: () => {},
-      getExternalSessionId: () => undefined
-    }
-  }
-  active = {
+    if (interrupted) h.interrupt()
+    return h.promise
+  })
+  const control: RunControl = {
     runId,
     providerId,
-    interrupt: h.interrupt,
+    interrupt: () => {
+      interrupted = true
+      h?.interrupt()
+    },
     cwd,
     resume,
-    getExternalSessionId: h.getExternalSessionId,
+    getExternalSessionId: () => h?.getExternalSessionId(),
     runtimeProvider,
     runState,
+    adoptSession: () => {
+      if (!contextKey) return
+      bumpSessionRevision(contextKey)
+      contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
+      if (observedSessionId) sessionByContext.set(contextKey, observedSessionId)
+      else sessionByContext.delete(contextKey)
+    },
+    cleanupProvisional,
     finalizeTurnDiff,
-    cancelTurnDiff: () => cancelGitTurnDiff(turnDiffCapture)
+    cancelTurnDiff: async () => cancelGitTurnDiff(await turnDiffCapture)
   }
-  h.promise
+  runs.register(runState, control)
+  runtimePromise
     .then(async (r) => {
       publishSessionId(r.externalSessionId)
       // Diff 是附加观测数据：立即开始采集，但不能阻塞用户看到 turnDone。
       // 归档仍等待它完成，保证历史回放最终包含 turn_diff。
       const turnDiffDone = finalizeTurnDiff()
       if (r.externalSessionId && cwd) {
-        appSessionStore().record({ providerId, runtimeProvider, externalSessionId: r.externalSessionId, cwd, prompt: displayPrompt })
+        appSessionStore().record({
+          providerId,
+          runtimeProvider,
+          runId,
+          externalSessionId: r.externalSessionId,
+          cwd,
+          prompt: displayPrompt
+        })
       }
       mirrorSessionTranscript(providerId, cwd, r.externalSessionId ?? resume)
+      const alreadyDone = runState.done
       runState.done = true
+      cleanupProvisional()
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
-      win?.webContents.send('agent:turnDone', {
-        runId,
-        sessionId: r.externalSessionId,
-        externalSessionId: r.externalSessionId,
-        providerId,
-        stopped: r.stopped
-      })
+      if (!alreadyDone) {
+        win?.webContents.send('agent:turnDone', {
+          runId,
+          sessionId: r.externalSessionId,
+          externalSessionId: r.externalSessionId,
+          providerId,
+          stopped: r.stopped
+        })
+      }
       await turnDiffDone
       archiveTraceTurn({
         providerId,
@@ -559,7 +774,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         items: runState.items,
         done: true
       })
-      // B2：把这一轮的 turn + tool_calls 结构化落 sqlite（liveRun 已缓冲全部事件）
+      // B2：把这一轮的 turn + tool_calls 结构化落 sqlite（runState 已缓冲全部事件）
       recordTurn({
         runId,
         sessionId: r.externalSessionId,
@@ -572,12 +787,14 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       })
     })
     .catch(async (err) => {
+      const alreadyDone = runState.done
+      const stopped = interrupted || alreadyDone
       const runtimeErr = err instanceof AgentRuntimeError ? err : null
       const message = String(err?.message ?? err)
       const classified = runtimeErr ? { category: runtimeErr.brief.stage, hint: runtimeErr.brief.nextAction } : classifyError(message)
       const { category, hint } = classified
       if (!runState.done) {
-        if (runtimeErr) {
+        if (!stopped && runtimeErr) {
           const result = runState.items.find((ev) => ev.kind === 'harness' && ev.stage === 'result')
           if (result) {
             result.isError = true
@@ -586,34 +803,40 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
           } else {
             const failure = { ...runtimeFailureTrace(runId, runtimeErr), providerId, runtimeProvider }
             appendCoalescedTrace(runState.items, failure)
-            if (liveRun === runState) queueTrace(failure)
+            if (runs.isFocused(runId)) queueTrace(failure)
           }
         }
         runState.done = true
-        runState.error = message
-        runState.errorHint = hint
+        if (!stopped) {
+          runState.error = message
+          runState.errorHint = hint
+        }
       }
+      cleanupProvisional()
       const turnDiffDone = finalizeTurnDiff()
-      mirrorSessionTranscript(providerId, cwd, h.getExternalSessionId() ?? resume)
+      mirrorSessionTranscript(providerId, cwd, h?.getExternalSessionId() ?? resume)
       flushTraceSend()
-      win?.webContents.send('agent:error', { runId, message, category, hint })
+      if (stopped) {
+        if (!alreadyDone) win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId })
+      } else {
+        win?.webContents.send('agent:error', { runId, message, category, hint })
+      }
       await turnDiffDone
       archiveTraceTurn({
         providerId,
         runtimeProvider,
         cwd,
-        sessionId: h.getExternalSessionId() ?? resume,
+        sessionId: h?.getExternalSessionId() ?? resume,
         runId,
         userText: displayPrompt,
         attachments,
         items: runState.items,
         done: true,
-        error: message,
-        errorHint: hint
+        ...(stopped ? {} : { error: message, errorHint: hint })
       })
       recordTurn({
         runId,
-        sessionId: h.getExternalSessionId() ?? resume,
+        sessionId: h?.getExternalSessionId() ?? resume,
         cwd,
         userText: displayPrompt,
         items: runState.items,
@@ -624,13 +847,22 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
     })
     .finally(() => {
       userQuestionBroker.cancelRun(runId)
-      if (active?.runId === runId) active = null
+      runs.remove(runId)
     })
   return { runId }
 })
 
-// B1：renderer 重挂时拉回在途 run 的快照（done 的不返回 done 态由 renderer 自行判断是否恢复）
-ipcMain.handle('agent:activeRun', (): ActiveRun | null => liveRun)
+// Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
+ipcMain.handle('agent:activeRun', (): ActiveRun | null => runs.focusedState())
+ipcMain.handle('agent:activeRuns', (): ActiveRun[] => runs.activeStates())
+ipcMain.handle('agent:focusRun', (_event, runId: string | null): boolean => runs.focus(runId))
+ipcMain.handle('agent:adoptActiveRun', (_event, runId: string): ActiveRun | null => {
+  const entry = runs.get(runId)
+  if (!entry || entry.state.done) return null
+  entry.control.adoptSession()
+  runs.focus(runId)
+  return entry.state
+})
 ipcMain.handle('agent:answerQuestion', (event, response: unknown) => {
   if (!win || event.sender.id !== win.webContents.id) return false
   return userQuestionBroker.answer(response)
@@ -659,25 +891,26 @@ ipcMain.handle('agent:diagnostics', () => {
   return { claudeVersion: getClaudeVersion(), sdkVersion, settingSources: '默认（SDK 加载 user/project/local）' }
 })
 
-ipcMain.handle('agent:stop', () => {
-  const stopping = active
-  active?.interrupt()
-  if (stopping) userQuestionBroker.cancelRun(stopping.runId)
+ipcMain.handle('agent:stop', (_event, runId: string) => {
+  const entry = runs.get(runId)
+  if (!entry || entry.state.done) return false
+  const stopping = entry.control
+  stopping.interrupt()
+  userQuestionBroker.cancelRun(stopping.runId)
   // A2：强制超时兜底——若 SDK 2s 内没结束（interrupt 卡住），强制通知 renderer 结束，防 UI 永久卡在运行态
-  if (stopping) {
-    setTimeout(async () => {
-      if (active?.runId === stopping.runId) {
-        // 观测采集不能破坏“2 秒强制停止”兜底；结果完成后仍会增量写回 live trace。
-        void stopping.finalizeTurnDiff()
-        if (active?.runId !== stopping.runId) return
-        stopping.runState.done = true
-        mirrorSessionTranscript(stopping.providerId, stopping.cwd, stopping.getExternalSessionId() ?? stopping.resume)
-        flushTraceSend()
-        win?.webContents.send('agent:turnDone', { runId: stopping.runId, stopped: true })
-        active = null
-      }
-    }, 2000)
-  }
+  setTimeout(async () => {
+    const current = runs.get(stopping.runId)
+    if (current?.control !== stopping || current.state.done) return
+    // 观测采集不能破坏“2 秒强制停止”兜底；结果完成后仍会增量写回 live trace。
+    void stopping.finalizeTurnDiff()
+    if (runs.get(stopping.runId)?.control !== stopping) return
+    stopping.runState.done = true
+    stopping.cleanupProvisional()
+    mirrorSessionTranscript(stopping.providerId, stopping.cwd, stopping.getExternalSessionId() ?? stopping.resume)
+    flushTraceSend()
+    win?.webContents.send('agent:turnDone', { runId: stopping.runId, stopped: true, providerId: stopping.providerId })
+    // 控制器保留到 Provider promise 真正 settle，避免迟到 reject/error 找不到自身状态或误命中其他 run。
+  }, 2000)
   return true
 })
 
@@ -700,9 +933,12 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
-  if (active) userQuestionBroker.cancelRun(active.runId)
-  if (active) mirrorSessionTranscript(active.providerId, active.cwd, active.getExternalSessionId() ?? active.resume)
-  if (active) void active.cancelTurnDiff()
+  for (const run of runs.activeControls()) {
+    userQuestionBroker.cancelRun(run.runId)
+    mirrorSessionTranscript(run.providerId, run.cwd, run.getExternalSessionId() ?? run.resume)
+    void run.cancelTurnDiff()
+    run.interrupt()
+  }
   void providerRegistry.dispose()
 })
 

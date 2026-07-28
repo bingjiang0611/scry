@@ -4,16 +4,21 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createRef, type ComponentProps } from 'react'
-import type { TraceEvent } from '@shared/trace'
+import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentQuestionRequest } from '@shared/runtime'
 import type { Turn } from '../format'
+import type { ParsedTurn } from '../env'
 import {
   App,
+  activeRunForSession,
+  applyNewConversationEffects,
+  applySessionCapturedEffects,
   applyTurnDoneEffects,
   chatBottomDistance,
   defaultNewConversationCwd,
   enqueuePrompt,
   isChatNearBottom,
+  restoreActiveSessionSelection,
   scrollChatToBottomIfNeeded,
   scrollChatTargetIntoView,
   takeNextQueuedPrompt
@@ -112,6 +117,22 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
 })
 
 describe('ViewChrome 顶栏', () => {
+  it('完整探测尚未结束时显示检测中，而不是过早宣告未安装', () => {
+    const html = renderToStaticMarkup(
+      <ViewChrome
+        cwd={null}
+        view="chat"
+        agent={undefined}
+        agentScanning
+        showPanel
+        onView={() => {}}
+        onTogglePanel={() => {}}
+      />
+    )
+    expect(html).toContain('正在检测 agent…')
+    expect(html).not.toContain('未检测到 agent')
+  })
+
   it('聊天页只保留视图切换，不再渲染 all/tool/skill/mcp 过滤 tab', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
@@ -136,6 +157,137 @@ describe('ViewChrome 顶栏', () => {
 })
 
 describe('App turnDone 集成契约：session 完成后刷新派生状态', () => {
+  it('捕获新 sessionId 后立即刷新左侧项目树', () => {
+    const calls: string[] = []
+
+    applySessionCapturedEffects(
+      { runId: 'run-1', sessionId: 'session-1', previousSessionId: 'run-1' },
+      {
+        activeSessionId: 'run-1',
+        setActiveSessionId: (sessionId) => calls.push(`session:${sessionId}`),
+        loadProjects: () => calls.push('loadProjects')
+      }
+    )
+
+    expect(calls).toEqual(['session:session-1', 'loadProjects'])
+  })
+
+  it('只把匹配 cwd/provider/session 的未完成 run 恢复到所选会话', () => {
+    const run = {
+      runId: 'run-1',
+      providerId: 'claude' as const,
+      cwd: '/repo/a',
+      externalSessionId: 'session-1',
+      userText: 'work',
+      items: [],
+      done: false
+    }
+
+    expect(activeRunForSession(run, '/repo/a', 'session-1', 'claude')).toBe(run)
+    expect(activeRunForSession([{ ...run, runId: 'other', externalSessionId: 'other' }, run], '/repo/a', 'session-1', 'claude')).toBe(run)
+    expect(activeRunForSession({ ...run, externalSessionId: undefined }, '/repo/a', 'run-1', 'claude')).toEqual({
+      ...run,
+      externalSessionId: undefined
+    })
+    expect(activeRunForSession(run, '/repo/b', 'session-1', 'claude')).toBeNull()
+    expect(activeRunForSession({ ...run, done: true }, '/repo/a', 'session-1', 'claude')).toBeNull()
+  })
+
+  it('恢复 live run 时先加载同一 session 的已停止历史轮次', async () => {
+    const calls: string[] = []
+    const archived: ParsedTurn[] = [{ userText: '第一轮（已停止）', items: [] }]
+    const activeRun: ActiveRun = {
+      runId: 'run-2',
+      providerId: 'claude' as const,
+      cwd: '/repo/a',
+      externalSessionId: 'session-1',
+      userText: '第二轮（运行中）',
+      items: [],
+      done: false
+    }
+    let replacement: { sessionId: string; parsed: ParsedTurn[]; activeRun: ActiveRun } | undefined
+
+    const restored = await restoreActiveSessionSelection(
+      {
+        runId: activeRun.runId,
+        sessionId: 'session-1',
+        externalSessionId: 'session-1',
+        cwd: '/repo/a',
+        providerId: 'claude'
+      },
+      {
+        prepareRunFocus: (runId) => calls.push(`prepare:${runId}`),
+        adoptActiveRun: async (runId) => {
+          calls.push(`adopt:${runId}`)
+          return activeRun
+        },
+        loadSession: async (context) => {
+          calls.push(`load:${context.externalSessionId}`)
+          return archived
+        },
+        replaceWithParsedSession: (sessionId, parsed, options) => {
+          replacement = { sessionId, parsed, activeRun: options.activeRun }
+        }
+      }
+    )
+
+    expect(restored).toBe(true)
+    expect(calls).toEqual(['prepare:run-2', 'adopt:run-2', 'load:session-1'])
+    expect(replacement).toEqual({ sessionId: 'session-1', parsed: archived, activeRun })
+  })
+
+  it('后台会话捕获或完成时只刷新列表，不抢走当前会话高亮', () => {
+    const calls: string[] = []
+    const effects = {
+      activeSessionId: 'visible-session',
+      setActiveSessionId: (sessionId: string) => calls.push(`session:${sessionId}`),
+      loadProjects: () => calls.push('loadProjects')
+    }
+
+    applySessionCapturedEffects({ sessionId: 'background-session' }, effects)
+    applyTurnDoneEffects(
+      { sessionId: 'background-session' },
+      { ...effects, refreshAfterTurn: () => calls.push('refreshAfterTurn') }
+    )
+
+    expect(calls).toEqual(['loadProjects', 'refreshAfterTurn', 'loadProjects'])
+  })
+
+  it('新建会话脱离后台 run 后，session 捕获和完成都不抢走空白草稿', () => {
+    const calls: string[] = []
+    const effects = {
+      activeSessionId: null,
+      setActiveSessionId: (sessionId: string) => calls.push(`session:${sessionId}`),
+      loadProjects: () => calls.push('loadProjects')
+    }
+
+    applySessionCapturedEffects(
+      { runId: 'background-run', sessionId: 'session-1', previousSessionId: 'background-run' },
+      effects
+    )
+    applyTurnDoneEffects(
+      { runId: 'background-run', sessionId: 'session-1' },
+      { ...effects, refreshAfterTurn: () => calls.push('refreshAfterTurn') }
+    )
+
+    expect(calls).toEqual(['loadProjects', 'refreshAfterTurn', 'loadProjects'])
+  })
+
+  it('原生 sessionId 到达后把当前 provisional runId 原位升级', () => {
+    const calls: string[] = []
+
+    applySessionCapturedEffects(
+      { runId: 'run-1', sessionId: 'session-1', previousSessionId: 'run-1' },
+      {
+        activeSessionId: 'run-1',
+        setActiveSessionId: (sessionId) => calls.push(sessionId),
+        loadProjects: () => {}
+      }
+    )
+
+    expect(calls).toEqual(['session-1'])
+  })
+
   it('SDK 返回 sessionId 时先记录 active session，再刷新 integrations 和项目列表', () => {
     const calls: string[] = []
 
@@ -198,6 +350,36 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('data-project-path="/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace"')
     expect(html).toContain('/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace')
   })
+
+  it('仅给真实 active run 对应的会话展示运行中标识', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[
+          {
+            cwd: '/Users/example/project',
+            name: 'project',
+            mtime: 2,
+            sessions: [
+              { sessionId: 's1', runId: 'run-active', providerId: 'claude', mtime: 2, preview: '运行中', count: 1 },
+              { sessionId: 's2', runId: 'run-done', providerId: 'claude', mtime: 1, preview: '已结束', count: 1 }
+            ]
+          }
+        ]}
+        activeCwd="/Users/example/project"
+        runningRunIds={new Set(['run-active'])}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onSkills={() => {}}
+        onMcp={() => {}}
+        onDelete={() => {}}
+      />
+    )
+
+    expect(html).toContain('class="sb-sess running"')
+    expect(html).toContain('role="status"')
+    expect(html).toContain('aria-label="正在运行"')
+    expect(html.match(/class="sb-running"/g)).toHaveLength(1)
+  })
 })
 
 describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
@@ -214,6 +396,32 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).not.toContain('$0.1234')
     expect(html).toContain('1.5k') // in = fmtTok(tokensIn 1500)
     expect(html).toContain('turn-footer')
+  })
+
+  it('Codex turn 头部总 Token 不重复加上已包含在 input 内的 cache read', () => {
+    const codexUsageTurn: Turn = {
+      runId: 'codex-cache-accounting',
+      userText: 'inspect',
+      done: true,
+      items: [
+        ev({
+          id: 'codex-result',
+          kind: 'harness',
+          stage: 'result',
+          providerId: 'codex',
+          runtimeProvider: 'codex_cli',
+          tokensIn: 139_269,
+          tokensOut: 767,
+          cacheReadTokens: 110_336
+        })
+      ]
+    }
+    const codexUsageHtml = renderToStaticMarkup(
+      <AssistantTurn turn={codexUsageTurn} selectedId={null} onSelect={() => {}} />
+    )
+
+    expect(codexUsageHtml).toContain('tok <b>140.0k</b>')
+    expect(codexUsageHtml).not.toContain('tok <b>250.4k</b>')
   })
 
   it('footer 不把继承 tool/file 字段的 tool_result 重复计数', () => {
@@ -389,11 +597,11 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('1 个处理器实例')
     expect(html).toContain('branch-check-hook.sh')
     expect(html).toContain('PreToolUse')
-    expect(html).toContain('success')
+    expect(html).toContain('成功 1')
     expect(html.match(/class="turn-hook-row"/g)).toHaveLength(1)
     expect(html).not.toContain('Hook 执行')
     expect(html).not.toContain('执行命令')
-    expect(html).toContain('$CLAUDE_PROJECT_DIR/.claude/scripts/branch-check-hook.sh')
+    expect(html).not.toContain('$CLAUDE_PROJECT_DIR/.claude/scripts/branch-check-hook.sh')
     expect(html.match(/branch ok/g)).toHaveLength(1)
     expect(html).not.toContain('hook_response')
   })
@@ -441,8 +649,8 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(turnHtml).toContain('未成功的 Hook · 1')
     expect(turnHtml).toContain('trace_pre.py')
     expect(turnHtml).not.toContain('hook-run-status ok">cancelled')
-    expect(overviewHtml).toContain('hook-status warn">疑似超时')
-    expect(overviewHtml).toContain('cancelled 1')
+    expect(overviewHtml).toContain('hook-status warn">疑似超时 1')
+    expect(overviewHtml).toContain('取消 1')
     expect(overviewHtml).toContain('疑似超时：5.5s / 当前配置上限 5.0s')
     expect(overviewHtml).not.toContain('疑似超时 · 0')
   })
@@ -471,6 +679,24 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(tool).toBeGreaterThan(firstText)
     expect(secondText).toBeGreaterThan(tool)
     expect(streamingHtml).not.toContain('临时草稿')
+  })
+
+  it('兼容合并旧 Codex text 增量，避免每个 token 各占一行', () => {
+    const codexTurn: Turn = {
+      runId: 'run-codex-legacy-stream',
+      userText: '/rate-workflow 84441907',
+      done: false,
+      items: [
+        ev({ id: 'codex-1', kind: 'model', stage: 'text', text: '我', providerId: 'codex', runtimeProvider: 'codex_cli' }),
+        ev({ id: 'codex-2', kind: 'model', stage: 'text', text: '将按 `rate', providerId: 'codex', runtimeProvider: 'codex_cli' }),
+        ev({ id: 'codex-3', kind: 'model', stage: 'text', text: '-workflow` 执行。', providerId: 'codex', runtimeProvider: 'codex_cli' })
+      ]
+    }
+
+    const html = renderToStaticMarkup(<AssistantTurn turn={codexTurn} selectedId={null} onSelect={() => {}} />)
+
+    expect(html.match(/class="model-text md/g)).toHaveLength(1)
+    expect(html).toContain('我将按 <code>rate-workflow</code> 执行。')
   })
 
   it('Hook 缺少上游命令时明确标记数据边界', () => {
@@ -526,6 +752,9 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(hookHtml).toContain('hook-sender')
     expect(hookHtml).toContain('matcher Grep|Read')
     expect(hookHtml).toContain('当前配置无法完整解释实际数量')
+    expect(hookHtml).not.toContain('$CLAUDE_PROJECT_DIR/.claude/hooks/trace_pre.py')
+    expect(hookHtml).not.toContain('/Users/me/.masko-desktop/hooks/hook-sender')
+    expect(hookHtml).not.toContain('/Users/me/.claude/settings.json')
   })
 
   it('Hook 隐藏生命周期事件，并按 hookId 列出命令未上报的取消实例', () => {
@@ -838,6 +1067,28 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(defaultNewConversationCwd(null, [{ cwd: '/new', name: 'new', mtime: 2, sessions: [] }], ['/old'])).toBe('/new')
     expect(defaultNewConversationCwd(null, [], ['/old'])).toBe('/old')
     expect(defaultNewConversationCwd('/current', [], ['/old'])).toBe('/current')
+  })
+
+  it('新建会话只脱离正在运行的会话，不调用 stop', async () => {
+    const calls: string[] = []
+
+    await applyNewConversationEffects({
+      cwd: '/repo',
+      defaultCwd: '/repo',
+      running: true,
+      clearTurns: (options) => calls.push(`clear:${String(options?.preserveRunning)}`),
+      activateCwd: async () => {},
+      chooseFolder: async () => null,
+      newSession: async () => {
+        calls.push('newSession')
+        return true
+      },
+      setActiveSessionId: (sessionId) => calls.push(`active:${String(sessionId)}`),
+      setView: (view) => calls.push(`view:${view}`),
+      focusComposer: () => calls.push('focus')
+    })
+
+    expect(calls).toEqual(['clear:undefined', 'newSession', 'active:null', 'view:chat', 'focus'])
   })
 
   it('剪贴板图片提取会去重 files/items 里的同一张图', () => {
@@ -1402,9 +1653,46 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('已占 44%')
   })
 
+  it('CONTEXT 缺少占用或窗口任一字段时保持未知，不拼出假比例', () => {
+    const missingWindow: Turn = {
+      runId: 'missing-window',
+      userText: 'x',
+      done: true,
+      items: [
+        ev({
+          id: 'missing-window-result',
+          kind: 'harness',
+          stage: 'result',
+          contextTokens: 50_000,
+          modelUsage: [{ model: 'unknown-window' }]
+        })
+      ]
+    }
+    const missingContext: Turn = {
+      runId: 'missing-context',
+      userText: 'x',
+      done: true,
+      items: [
+        ev({
+          id: 'missing-context-result',
+          kind: 'harness',
+          stage: 'result',
+          modelUsage: [{ model: 'known-window', contextWindow: 200_000 }]
+        })
+      ]
+    }
+    const unknownHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[missingWindow, missingContext]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(unknownHtml).toContain('暂无上下文数据')
+    expect(unknownHtml).not.toContain('50.0k / 200.0k')
+    expect(unknownHtml).not.toContain('已占 25%')
+  })
+
   it('TOP TOOLS 段：tool+mcp 合并排名 + mini-bar', () => {
     expect(html).toContain('TOP TOOLS')
-    expect(html).toContain('本会话 · 3 次') // tool_use 计数（Bash/Write/Read 各 1）
+    expect(html).toContain('工具 3 · MCP 0') // 普通工具与 MCP 分开，不混入 Skill/子Agent
     expect(html).toContain('mini-bar')
     expect(html).toContain('Read')
   })
@@ -1540,11 +1828,98 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
 
   it('HOOKS 段：展示本会话实际触发的 hook', () => {
     expect(html).toContain('HOOKS')
-    expect(html).toContain('1 runs · 1 events')
+    expect(html).toContain('处理器 1 实例 · 生命周期 1 条')
+    expect(html).toContain('触发次数未单独上报')
     expect(html).toContain('PreToolUse')
     expect(html).toContain('PreToolUse:Edit')
     expect(html).toContain('branch-check-hook.sh')
-    expect(html).toContain('success')
+    expect(html).toContain('成功 1')
+    expect(html).toContain('处理器实例 · 1 个')
+    expect(html).toContain('逻辑 Hook · 1 个')
+    expect(html).toContain('1 条投递 · 运行时')
+    expect(html).not.toContain('$CLAUDE_PROJECT_DIR/.claude/scripts/branch-check-hook.sh')
+    expect(html).not.toContain('来自 SDK hook_*')
+  })
+
+  it('HOOKS 段：区分实际执行、逻辑 Hook 与当前配置投递，并隐藏长路径', () => {
+    const configuredCommands = [
+      {
+        command:
+          'python3 /Users/example/.local/share/rate-native-agent-hooks/global-hook-bridge.py --event UserPromptSubmit --group-index 0 --expected-marker .claude/hooks/trace_prompt.py',
+        source: 'user' as const,
+        sourcePath: '/Users/example/.codex/hooks.json',
+        timeoutSeconds: 10
+      },
+      {
+        command:
+          'python3 /Users/example/.local/share/rate-native-agent-hooks/global-hook-bridge.py --event UserPromptSubmit --group-index 1 --expected-marker .claude/hooks/scry-recorder.sh',
+        source: 'user' as const,
+        sourcePath: '/Users/example/.codex/hooks.json',
+        timeoutSeconds: 20
+      },
+      {
+        command:
+          'sh -c \'CLAUDE_PROJECT_DIR="$PWD"; python3 $CLAUDE_PROJECT_DIR/.claude/hooks/trace_prompt.py\'',
+        source: 'project' as const,
+        sourcePath: '/repo/.codex/hooks.json',
+        timeoutSeconds: 5
+      },
+      {
+        command:
+          'sh -c \'CLAUDE_PROJECT_DIR="$PWD"; $CLAUDE_PROJECT_DIR/.claude/hooks/scry-recorder.sh\'',
+        source: 'project' as const,
+        sourcePath: '/repo/.codex/hooks.json',
+        timeoutSeconds: 15
+      }
+    ]
+    const configuredTurn: Turn = {
+      ...turn,
+      items: ['user-1', 'project-1', 'project-2'].flatMap((hookId, index) => {
+        const source = index === 0 ? 'user' : 'project'
+        const sourcePath = source === 'user' ? '/Users/example/.codex/hooks.json' : '/repo/.codex/hooks.json'
+        return [
+          ev({
+            id: `${hookId}-start`,
+            kind: 'hook',
+            stage: 'hook_started',
+            hookId,
+            hookEvent: 'UserPromptSubmit',
+            hookName: 'UserPromptSubmit:command',
+            hookConfiguredCommands: configuredCommands,
+            input: { source, sourcePath }
+          }),
+          ev({
+            id: `${hookId}-response`,
+            kind: 'hook',
+            stage: 'hook_response',
+            hookId,
+            hookEvent: 'UserPromptSubmit',
+            hookName: 'UserPromptSubmit:command',
+            hookOutcome: 'success',
+            hookConfiguredCommands: configuredCommands,
+            durationMs: 100 + index,
+            input: { source, sourcePath }
+          })
+        ]
+      })
+    }
+    const configuredHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[configuredTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(configuredHtml).toContain('UserPromptSubmit:command')
+    expect(configuredHtml).toContain('处理器实例 · 3 个')
+    expect(configuredHtml).toContain('逻辑 Hook · 2 个')
+    expect(configuredHtml).toContain('当前配置 · 4 条投递路径')
+    expect(configuredHtml).toContain('命令未逐实例上报')
+    expect(configuredHtml).toContain('trace_prompt.py')
+    expect(configuredHtml).toContain('scry-recorder.sh')
+    expect(configuredHtml).toContain('2 条投递 · 用户 桥接 / 项目 直连')
+    expect(configuredHtml).toContain('hooks.json')
+    expect(configuredHtml).not.toContain('/Users/example/.local/share')
+    expect(configuredHtml).not.toContain('/Users/example/.codex/hooks.json')
+    expect(configuredHtml).not.toContain('/repo/.codex/hooks.json')
+    expect(configuredHtml).not.toContain('global-hook-bridge.py')
   })
 
   it('HOOKS 段：失败 hook 行内展示最近失败原因', () => {
@@ -1572,7 +1947,46 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     )
     expect(failedHtml).toContain('最近失败')
     expect(failedHtml).toContain('exit 2: branch mismatch: expected feature/x')
-    expect(failedHtml).toContain('error · 2')
+    expect(failedHtml).toContain('失败 1 · 2')
+  })
+
+  it('HOOKS 段：部分取消时分开展示成功和取消数量，不把总执行数冒充取消数', () => {
+    const items: TraceEvent[] = []
+    for (let i = 0; i < 447; i++) {
+      items.push(ev({
+        id: `hook-start-${i}`,
+        kind: 'hook',
+        stage: 'hook_started',
+        hookId: `hook-${i}`,
+        hookName: 'PostToolUse:Bash',
+        hookEvent: 'PostToolUse'
+      }))
+      items.push(ev({
+        id: `hook-response-${i}`,
+        kind: 'hook',
+        stage: 'hook_response',
+        hookId: `hook-${i}`,
+        hookName: 'PostToolUse:Bash',
+        hookEvent: 'PostToolUse',
+        hookOutcome: i < 21 ? 'cancelled' : 'success',
+        hookExitCode: 0
+      }))
+    }
+    const partialHtml = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[{ runId: 'hook-partial', userText: '执行 Bash', done: true, items }]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+      />
+    )
+
+    expect(partialHtml).toContain('处理器 447 实例 · 生命周期 894 条')
+    expect(partialHtml).toContain('成功 426 · 取消 21')
+    expect(partialHtml).toContain('hook-status warn">取消 21')
+    expect(partialHtml).not.toContain('部分取消 · 447×')
+    expect(partialHtml).not.toContain('成功 426 · 0')
   })
 
   it('GIT DIFF 段：独立成段 + 工具足迹对照（check 碰过 / alert 未碰）', () => {
@@ -2018,6 +2432,13 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
     expect(turnCallHtml).not.toContain('tracker.call')
   })
 
+  it('会话总调用拆分为工具、MCP、Skill、子 Agent，四项之和等于总数', () => {
+    expect(html).toContain('4 次调用')
+    expect(html).toContain('调用</div><div class="v">4</div>')
+    expect(html).toContain('工具 1 · MCP 1 · Skill 1 · 子Agent 1')
+    expect(html).toContain('TOP TOOLS<span class="more">工具 1 · MCP 1</span>')
+  })
+
   it('诊断不在总览展示', () => {
     expect(html).not.toContain('诊断')
     expect(html).not.toContain('SDK 版本')
@@ -2137,6 +2558,16 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
     expect(html).toContain('1.0.2')
   })
 
+  it('诊断页不展示 SDK、runtime capability、settingSources 和 node/electron 项', () => {
+    expect(html).not.toContain('<span class="k">sdk</span>')
+    expect(html).not.toContain('<span class="k">runtime capability</span>')
+    expect(html).not.toContain('<span class="k">settingSources</span>')
+    expect(html).not.toContain('<span class="k">node / electron</span>')
+    expect(html).not.toContain('runtime caps')
+    expect(html).not.toContain('settingSources')
+    expect(html).not.toContain('^0.3.186')
+  })
+
   it('MCP 有 failed → 判决 warn + 需重连', () => {
     expect(html).toContain('judgement warn')
     expect(html).toContain('weread')
@@ -2191,7 +2622,7 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
     expect(unknown).not.toContain('全部连通')
   })
 
-  it('runtime capability warning 会把 Qoder MCP disconnected 独立展示为需关注', () => {
+  it('runtime capability warning 仍参与系统判决，但不再单独展示诊断项', () => {
     const warningHtml = renderToStaticMarkup(
       <DiagnosticsView
         agents={[
@@ -2236,11 +2667,11 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
       />
     )
     expect(warningHtml).toContain('judgement warn')
-    expect(warningHtml).toContain('runtime caps')
-    expect(warningHtml).toContain('runtime capability warning')
     expect(warningHtml).toContain('qoder_cli')
     expect(warningHtml).toContain('dry_alpha')
     expect(warningHtml).toContain('disconnected')
+    expect(warningHtml).not.toContain('runtime caps')
+    expect(warningHtml).not.toContain('runtime capability warning')
     expect(warningHtml).not.toContain('运行正常')
   })
 })
@@ -2319,11 +2750,12 @@ describe('Skill/MCP 操作能力渲染', () => {
 
 import { AnalyticsView } from './AnalyticsView'
 
-describe('AnalyticsView 渲染：真实聚合 + 诚实时间序列缺口', () => {
+describe('AnalyticsView 渲染：时间序列 + 四 Provider 覆盖', () => {
   const html = renderToStaticMarkup(
     <AnalyticsView
       projects={[{ cwd: '/a/scry', name: 'scry', mtime: 0, sessions: [{ sessionId: 's1', externalSessionId: 's1', providerId: 'claude', mtime: 0, preview: 'x', count: 1 }] }]}
       stats={{
+        status: 'ready',
         totals: { cost: 12.47, tin: 3000000, tout: 420000, turns: 847 },
         topTools: [{ tool: 'Bash', n: 624, mcp: 0 }],
         byCwd: [{ cwd: '/a/scry', cost: 5.42, turns: 300 }],
@@ -2335,7 +2767,22 @@ describe('AnalyticsView 渲染：真实聚合 + 诚实时间序列缺口', () =>
           { tool: 'Bash', n: 624, avgMs: 680, errors: 19 },
           { tool: 'mcp__obsidian__search', n: 84, avgMs: 1200, errors: 2 }
         ],
-        dangerTrend: [{ reason: 'git push', level: 'danger', n: 3 }]
+        dangerTrend: [{ reason: 'git push', level: 'danger', n: 3 }],
+        tokenDaily: Array.from({ length: 30 }, (_, i) => ({ day: `2026-07-${String(i + 1).padStart(2, '0')}`, input: i * 100, output: i * 10, cacheRead: 0, cacheWrite: 0, turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1 })),
+        dangerDaily: Array.from({ length: 90 }, (_, i) => ({ day: `day-${i}`, danger: i === 89 ? 1 : 0, warn: 0 })),
+        comparison: {
+          current: { tokens: 120000, tokenKnownTurns: 4, turns: 5, toolCalls: 42, danger: 1 },
+          previous: { tokens: 100000, tokenKnownTurns: 4, turns: 4, toolCalls: 40, danger: 0 },
+          change: { tokensPct: 20, turnsPct: 25, toolCallsPct: 5, dangerPct: null }
+        },
+        cacheReuse: [
+          { providerId: 'claude', turns: 2, inputTokens: 100, cacheReadTokens: 80, cacheWriteTokens: 20, inputKnownTurns: 2, cacheReadKnownTurns: 2, cacheWriteKnownTurns: 2, comparableTurns: 2, reuseRate: 0.4, denominator: 'separate_input' },
+          { providerId: 'codex', turns: 1, inputTokens: 100, cacheReadTokens: 30, cacheWriteTokens: null, inputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 0, comparableTurns: 1, reuseRate: 0.3, denominator: 'input_includes_cache' },
+          { providerId: 'qoder', turns: 1, inputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, inputKnownTurns: 0, cacheReadKnownTurns: 0, cacheWriteKnownTurns: 0, comparableTurns: 0, reuseRate: null, denominator: 'unknown' },
+          { providerId: 'opencode', turns: 1, inputTokens: 80, cacheReadTokens: 20, cacheWriteTokens: 4, inputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, comparableTurns: 0, reuseRate: null, denominator: 'upstream_dependent' }
+        ],
+        mcpLatency: [{ server: 'obsidian', calls: 84, p50Ms: 900, p95Ms: 2200, errors: 2 }],
+        providerCoverage: (['claude', 'codex', 'qoder', 'opencode'] as const).map((providerId) => ({ providerId, turns: 1, inputKnownTurns: providerId === 'qoder' ? 0 : 1, outputKnownTurns: providerId === 'qoder' ? 0 : 1, cacheReadKnownTurns: providerId === 'qoder' ? 0 : 1, cacheWriteKnownTurns: providerId === 'claude' || providerId === 'opencode' ? 1 : 0, dangerCoverage: providerId === 'claude' || providerId === 'qoder' ? 'classified' as const : 'unsupported' as const }))
       }}
     />
   )
@@ -2358,9 +2805,22 @@ describe('AnalyticsView 渲染：真实聚合 + 诚实时间序列缺口', () =>
     expect(html).toContain('mcp:obsidian')
   })
 
-  it('时间序列/百分位/环比诚实标注需后端，不编', () => {
-    expect(html).toContain('部分实现')
-    expect(html).toContain('未建不编')
-    expect(html).toContain('无 P50/P95')
+  it('渲染 30/90 天、环比、P50/P95 与四 Provider coverage', () => {
+    expect(html).toContain('最近 30 天')
+    expect(html).toContain('最近 90 天')
+    expect(html).toContain('+20.0%')
+    expect(html).toContain('900ms')
+    expect(html).toContain('2.2s')
+    expect(html).toContain('Claude')
+    expect(html).toContain('OpenCode')
+    expect(html).toContain('unsupported')
+  })
+
+  it('cache 只展示可证明比例，不伪造 per-tool token share 或 Markdown 星号', () => {
+    expect(html).toContain('40.0%')
+    expect(html).toContain('30.0%')
+    expect(html).toContain('上游分母不可证明')
+    expect(html).toContain('不估算 per-tool Token share')
+    expect(html).not.toContain('**')
   })
 })

@@ -8,6 +8,7 @@ import { join } from 'node:path'
 
 export const QODER_NODE_BIN = `${homedir()}/.nvm/versions/node/v22.22.1/bin`
 export const QODER_NPM_BIN = `${QODER_NODE_BIN}/qodercli`
+export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex'
 
 // GUI app 从 Finder/Dock 启动走 launchd，PATH 极简（/usr/bin:/bin），不 source 用户的 .zshrc，
 // nvm/cargo 等版本管理器装的工具全找不到（macOS 经典坑）。正解：spawn 用户的「登录+交互」shell
@@ -112,16 +113,71 @@ function nvmBins(): string[] {
   }
 }
 
+function executableOnProcessPath(bin: string): string | undefined {
+  for (const dir of (process.env.PATH ?? '').split(':')) {
+    if (!dir) continue
+    const path = join(dir, bin)
+    if (existsSync(path)) return path
+  }
+  return undefined
+}
+
+function firstExisting(paths: Array<string | undefined>): string | undefined {
+  return paths.find((path): path is string => !!path && existsSync(path))
+}
+
+function fastAgentPath(id: string, bin: string): string | undefined {
+  const onProcessPath = executableOnProcessPath(bin)
+  if (id === 'claude') {
+    const configured = process.env.SCRY_CLAUDE_PATH?.trim()
+    return firstExisting([configured, `${homedir()}/.local/bin/claude`, onProcessPath])
+  }
+  if (id === 'codex') {
+    const configured = process.env.SCRY_CODEX_PATH?.trim()
+    return firstExisting([configured, onProcessPath, CODEX_APP_BIN])
+  }
+  if (id === 'qoder') return firstExisting([qoderPathFromEnv(), onProcessPath, QODER_NPM_BIN])
+  if (id === 'opencode') {
+    const configured = process.env.SCRY_OPENCODE_PATH?.trim()
+    return firstExisting([
+      configured,
+      onProcessPath,
+      `${homedir()}/.opencode/bin/opencode`,
+      '/opt/homebrew/bin/opencode',
+      '/usr/local/bin/opencode'
+    ])
+  }
+  return onProcessPath
+}
+
 function enrichedPath(): string {
   // shell 真实 PATH 放最前 → 解析顺序和用户终端一致；其后是进程 PATH + 常见位置兜底
   //（nvmBins 排在 ~/.local/bin 前，兜底时也优先 nvm 装的较新 claude）。
-  const extra = ['/usr/local/bin', '/opt/homebrew/bin', ...nvmBins(), `${homedir()}/.local/bin`]
+  const extra = ['/usr/local/bin', '/opt/homebrew/bin', ...nvmBins(), `${homedir()}/.local/bin`, `${homedir()}/.opencode/bin`]
   return [shellPath(), process.env.PATH ?? '', ...extra].filter(Boolean).join(':')
 }
 
 async function enrichedPathAsync(): Promise<string> {
-  const extra = ['/usr/local/bin', '/opt/homebrew/bin', ...nvmBins(), `${homedir()}/.local/bin`]
+  const extra = ['/usr/local/bin', '/opt/homebrew/bin', ...nvmBins(), `${homedir()}/.local/bin`, `${homedir()}/.opencode/bin`]
   return [await shellPathAsync(), process.env.PATH ?? '', ...extra].filter(Boolean).join(':')
+}
+
+function versionProbePath(): string {
+  // version 探测拿到的是绝对 executable；这里只需保证 npm shim 的 node 可解析，不能再为 --version
+  // 启动昂贵的登录 shell。非标准安装仍由完整 PATH fallback 负责发现。
+  return [
+    process.env.PATH ?? '',
+    QODER_NODE_BIN,
+    ...nvmBins(),
+    `${homedir()}/.local/bin`,
+    `${homedir()}/.opencode/bin`,
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin'
+  ]
+    .filter(Boolean)
+    .join(':')
 }
 
 function which(bin: string): string {
@@ -168,7 +224,7 @@ async function appBundleVersionAsync(path: string): Promise<string | undefined> 
 async function tryVersionAsync(path: string, args: string[] = ['--version']): Promise<string | undefined> {
   const out = (
     await execFileText(path, args, {
-      env: runtimeCliEnv({ ...(process.env as Record<string, string>), PATH: await enrichedPathAsync() }),
+      env: runtimeCliEnv({ ...(process.env as Record<string, string>), PATH: versionProbePath() }),
       timeout: 5000
     })
   )
@@ -196,8 +252,6 @@ export interface DetectedAgent {
 const KNOWN_AGENTS: Array<{ id: string; name: string; bin: string }> = [
   { id: 'claude', name: 'Claude Code', bin: 'claude' },
   { id: 'codex', name: 'Codex', bin: 'codex' },
-  { id: 'cursor', name: 'Cursor Agent', bin: 'cursor-agent' },
-  { id: 'gemini', name: 'Gemini CLI', bin: 'gemini' },
   { id: 'qoder', name: 'Qoder CLI', bin: 'qodercli' },
   { id: 'opencode', name: 'OpenCode', bin: 'opencode' }
 ]
@@ -235,16 +289,63 @@ async function resolveQoderBinAsync(): Promise<string | undefined> {
   return selectQoderBinCandidate({ configured, onPath, npmExists: existsSync(QODER_NPM_BIN) })
 }
 
+export function selectCodexBinCandidate(args: {
+  configured?: string
+  configuredExists?: boolean
+  onPath?: string
+  appBin?: string
+  appBinExists?: boolean
+}): string | undefined {
+  if (args.configured && args.configuredExists) return args.configured
+  if (args.onPath) return args.onPath
+  return args.appBinExists ? (args.appBin ?? CODEX_APP_BIN) : undefined
+}
+
+function resolveCodexBin(): string | undefined {
+  const configured = process.env.SCRY_CODEX_PATH?.trim()
+  return selectCodexBinCandidate({
+    configured,
+    configuredExists: !!configured && existsSync(configured),
+    onPath: which('codex'),
+    appBinExists: existsSync(CODEX_APP_BIN)
+  })
+}
+
+async function resolveCodexBinAsync(): Promise<string | undefined> {
+  const configured = process.env.SCRY_CODEX_PATH?.trim()
+  return selectCodexBinCandidate({
+    configured,
+    configuredExists: !!configured && existsSync(configured),
+    onPath: await whichAsync('codex'),
+    appBinExists: existsSync(CODEX_APP_BIN)
+  })
+}
+
 export async function detectAgents(): Promise<DetectedAgent[]> {
   const found = await Promise.all(
     KNOWN_AGENTS.map(async (a): Promise<DetectedAgent | null> => {
       const path =
-        a.id === 'qoder' ? await resolveQoderBinAsync() : a.id === 'claude' ? await resolveClaudeBinAsync() : await whichAsync(a.bin)
+        a.id === 'qoder'
+          ? await resolveQoderBinAsync()
+          : a.id === 'claude'
+            ? await resolveClaudeBinAsync()
+            : a.id === 'codex'
+              ? await resolveCodexBinAsync()
+              : await whichAsync(a.bin)
       if (!path) return null
       return { ...a, path, version: await agentVersionAsync(a.id, path) }
     })
   )
   return found.filter((a): a is DetectedAgent => a !== null)
+}
+
+// 冷启动首屏只需要知道“可执行文件是否存在”。版本命令可能各耗时数秒，不能让四个
+// Provider 互相等待后才一起变绿；完整 detectAgents() 会在后台继续补齐版本和 descriptor。
+export function detectAgentsFast(): DetectedAgent[] {
+  return KNOWN_AGENTS.flatMap((agent) => {
+    const path = fastAgentPath(agent.id, agent.bin)
+    return path ? [{ ...agent, path }] : []
+  })
 }
 
 // 解析「驱动用」的 claude 二进制路径，交给 SDK 的 pathToClaudeCodeExecutable。
@@ -290,10 +391,11 @@ async function resolveClaudeBinAsync(): Promise<string | undefined> {
 
 export function resolveRuntimeCliBin(agentId: 'codex' | 'qoder' | 'opencode'): string | undefined {
   if (agentId === 'qoder') return resolveQoderBin()
-  const configured = agentId === 'opencode' ? process.env.SCRY_OPENCODE_PATH?.trim() : process.env.SCRY_CODEX_PATH?.trim()
+  if (agentId === 'codex') return resolveCodexBin()
+  const configured = process.env.SCRY_OPENCODE_PATH?.trim()
   if (configured && existsSync(configured)) return configured
   const onPath = which(agentId)
-  return onPath || undefined
+  return onPath || firstExisting([`${homedir()}/.opencode/bin/opencode`, '/opt/homebrew/bin/opencode', '/usr/local/bin/opencode'])
 }
 
 export function runtimeCliEnv(base: Record<string, string> = shellEnv()): Record<string, string> {

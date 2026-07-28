@@ -34,12 +34,18 @@ export interface ModelResponsePhase {
   kind: 'response' | 'final' | 'tail' | 'unsegmented'
   tailMode?: 'cleanup' | 'unknown'
   observedMs?: number
+  toolMs?: number
+  timedTools: number
   callsAfterResponse: TimedTurnCall[]
 }
 
 export interface TurnTimingBreakdown {
   wallMs?: number
   apiMs?: number
+  apiSource: TimingSource
+  apiObservation?: 'phase' | 'residual'
+  timedApiPhases: number
+  totalApiPhases: number
   totalCalls: number
   timedCalls: number
   cumulativeCallMs: number
@@ -325,6 +331,8 @@ export function buildTurnTimingBreakdown(
         messageId: group.messageId,
         kind: isFinalResponse ? 'final' : 'response',
         observedMs: observedGap(phaseStart, group.responseAt),
+        toolMs: intervalUnionMs(group.calls),
+        timedTools: group.calls.filter((call) => call.durationMs != null).length,
         callsAfterResponse: group.calls
       })
     })
@@ -339,6 +347,7 @@ export function buildTurnTimingBreakdown(
         kind: 'tail',
         tailMode: lastGroup.calls.length === 0 ? 'cleanup' : 'unknown',
         observedMs: tailMs,
+        timedTools: 0,
         callsAfterResponse: []
       })
     }
@@ -347,6 +356,8 @@ export function buildTurnTimingBreakdown(
       id: 'response:unsegmented',
       sequence: 1,
       kind: 'unsegmented',
+      toolMs: intervalUnionMs(mainCalls),
+      timedTools: mainCalls.filter((call) => call.durationMs != null).length,
       callsAfterResponse: mainCalls
     })
   }
@@ -354,9 +365,38 @@ export function buildTurnTimingBreakdown(
   const timedCalls = calls.filter((call) => call.durationMs != null)
   const cumulativeCallMs = timedCalls.reduce((sum, call) => sum + (call.durationMs ?? 0), 0)
   const occupiedCallMs = intervalUnionMs(timedCalls)
+  const residualApiMs =
+    wallMs != null && occupiedCallMs != null
+      ? Math.max(0, wallMs - occupiedCallMs)
+      : undefined
+  const unsegmentedPhase = phases.find((phase) => phase.kind === 'unsegmented')
+  if (unsegmentedPhase && unsegmentedPhase.observedMs == null && residualApiMs != null) {
+    // 没有 messageId 时无法还原逐次请求边界。仅把整轮非工具占用余量作为观测估计，
+    // UI 必须明确标成 residual，不能伪装成 SDK API 原值。
+    unsegmentedPhase.observedMs = residualApiMs
+  }
+
+  const apiPhases = phases.filter((phase) => phase.kind !== 'tail')
+  const timedApiPhases = apiPhases.filter((phase) => phase.observedMs != null)
+  const providerApiMs = finiteDuration(resultEvent?.durationApiMs)
+  const observedApiMs =
+    timedApiPhases.length > 0
+      ? timedApiPhases.reduce((sum, phase) => sum + (phase.observedMs ?? 0), 0)
+      : undefined
   return {
     wallMs,
-    apiMs: finiteDuration(resultEvent?.durationApiMs),
+    apiMs: providerApiMs ?? observedApiMs,
+    apiSource: providerApiMs != null ? 'provider' : observedApiMs != null ? 'observed' : 'unknown',
+    apiObservation:
+      providerApiMs != null
+        ? undefined
+        : unsegmentedPhase?.observedMs != null
+          ? 'residual'
+          : observedApiMs != null
+            ? 'phase'
+            : undefined,
+    timedApiPhases: timedApiPhases.length,
+    totalApiPhases: apiPhases.length,
     totalCalls: calls.length,
     timedCalls: timedCalls.length,
     cumulativeCallMs,

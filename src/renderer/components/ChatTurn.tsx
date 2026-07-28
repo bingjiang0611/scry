@@ -19,6 +19,7 @@ import {
   hookCancellationDetail,
   hookCommandLabel,
   parseUserMessage,
+  resultTokenTotal,
   toolArg,
   toolDisplayName,
   toolMeta
@@ -483,17 +484,20 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
         {summary.groups.flatMap((group) =>
           group.scripts.map((script) => {
             const cancellation = hookCancellationDetail(script.lastCancelled)
-            const unsuccessfulErrors = script.unsuccessful.filter((event) => event.hookOutcome !== 'cancelled').length
-            const hasErrors = script.errors > 0 || unsuccessfulErrors > 0
+            const unsuccessfulErrors = Math.max(
+              script.errors,
+              script.unsuccessful.filter((event) => event.hookOutcome !== 'cancelled').length
+            )
+            const hasErrors = unsuccessfulErrors > 0
             const tone = hasErrors ? 'bad' : script.cancelled > 0 ? 'warn' : script.responses > 0 ? 'ok' : 'warn'
             const cancellationLabel = cancellation?.kind === 'timeout'
-              ? '超时终止'
+              ? '超时'
               : cancellation?.kind === 'suspected-timeout' ? '疑似超时' : '已取消'
             const status = hasErrors
-              ? 'error'
+              ? `失败 ${unsuccessfulErrors}`
               : script.cancelled > 0
-                ? script.cancelled < script.responses ? '部分取消' : cancellationLabel
-                : script.responses > 0 ? script.outcome ?? 'success' : 'started'
+                ? script.cancelled < script.responses ? `取消 ${script.cancelled}` : `${cancellationLabel} ${script.cancelled}`
+                : script.responses > 0 ? `成功 ${script.responses}` : `运行中 ${script.pending}`
             const statusDetail = cancellation
               ? `${script.cancelled < script.responses ? '部分取消；最近一次：' : ''}${cancellationStatus(cancellation)}`
               : status
@@ -533,7 +537,7 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
               .join(' · ')
             return (
               <details className="turn-hook-item" key={script.key}>
-                <summary className="turn-hook-row" title={script.command ?? group.trigger}>
+                <summary className="turn-hook-row" title={group.trigger}>
                   <span className={`sdot ${tone}`} />
                   <span className="hook-script-name">{script.label}</span>
                   <span className="hook-event-name">{group.event}</span>
@@ -579,7 +583,7 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
                                 <strong>{issueLabel}</strong>
                               </div>
                               {issueCommand ? (
-                                <code>{issueCommand}</code>
+                                <code>{issueLabel}</code>
                               ) : (
                                 <p>
                                   运行时未上报命令，无法可靠映射到{candidateCount > 0 ? `下方 ${candidateCount} 条当前配置` : '具体脚本'}。
@@ -604,11 +608,11 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
                       )}
                       <div className="hook-configured-list">
                         {configuredCommands.map((candidate, index) => (
-                          <div className="hook-configured-command" key={`${candidate.source}:${candidate.pluginId ?? ''}:${candidate.matcher ?? ''}:${candidate.command}:${index}`} title={candidate.sourcePath}>
+                          <div className="hook-configured-command" key={`${candidate.source}:${candidate.pluginId ?? ''}:${candidate.matcher ?? ''}:${candidate.command}:${index}`}>
                             <span className={`hook-config-scope ${candidate.source}`}>
                               {scopeLabel(candidate.source)}{candidate.pluginId ? ` · ${candidate.pluginId.split('@')[0]}` : ''}
                             </span>
-                            <code>{candidate.command}</code>
+                            <code>{hookCommandLabel(candidate.command) ?? 'command'}</code>
                             {(candidate.matcher || candidate.timeoutSeconds != null) && (
                               <span className="hook-config-matcher">
                                 {candidate.matcher ? `matcher ${candidate.matcher}` : ''}
@@ -769,7 +773,7 @@ function AssistantTurnImpl({
         ) : (
           <span className="mini">
             <span className="m cost">
-              tok <b>{result ? fmtTok((result.tokensIn ?? 0) + (result.tokensOut ?? 0) + (result.cacheReadTokens ?? 0) + (result.cacheCreationTokens ?? 0)) : '—'}</b>
+              tok <b>{result ? fmtTok(resultTokenTotal(result)) : '—'}</b>
             </span>
             <span className="m">
               tools <b>{toolN}</b>
@@ -791,7 +795,8 @@ function AssistantTurnImpl({
       )}
       {hookSummary.groups.length > 0 && <HooksSummary summary={hookSummary} />}
       {(() => {
-        // C1：只合并连续 text_delta；遇到可见事件就落成独立段，保留模型说明与工具调用的真实顺序。
+        // C1：合并连续 text_delta；旧版 Codex 曾把每个流式增量误标成 text，这里兼容已在途的旧事件。
+        // 遇到可见事件就落成独立段，保留模型说明与工具调用的真实顺序。
         // 完整 text 块只替换当前尚未落盘的流式片段，避免整轮进度被拼成一个超长段落。
         const out: ReactNode[] = []
         let live = ''
@@ -809,7 +814,11 @@ function AssistantTurnImpl({
         for (const ev of items) {
           if (ev.kind === 'harness') continue
           if (ev.parentToolUseId) continue // subagent 子步骤：在父 Task 卡下折叠渲染，不在主流平铺
-          if (ev.kind === 'model' && ev.stage === 'text_delta') {
+          const isStreamFragment =
+            ev.kind === 'model' &&
+            (ev.stage === 'text_delta' ||
+              (ev.stage === 'text' && (ev.providerId === 'codex' || ev.runtimeProvider === 'codex_cli')))
+          if (isStreamFragment) {
             if (!live) liveKey = ev.id
             live += ev.text ?? ''
             continue
@@ -865,7 +874,7 @@ function AssistantTurnImpl({
             )
           }
         }
-        flushLive(true)
+        flushLive(!turn.done)
         return out
       })()}
       {unmatchedPendingQuestions.map((request) => (
