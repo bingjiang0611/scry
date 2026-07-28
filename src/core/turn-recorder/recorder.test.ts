@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { handleRecorderHook, mergeTurnTraceEvents } from './recorder'
-import { commitRecord, exportRecords, listRecords, readHealth, verifyStore } from './store'
+import { commitRecord, exportRecords, listRecords, readHealth, safeKey, verifyStore } from './store'
 
 const roots: string[] = []
 const pexecFile = promisify(execFile)
@@ -104,6 +104,27 @@ describe('turn recorder state machine', () => {
       { turnIndex: 2, status: 'completed', user: { value: { text: 'same' } } }
     ])
   })
+
+  it('cold-direct fallback 等待正在处理的同 session 事件，不误记 dropped', async () => {
+    const root = await workspace()
+    const lock = join(root, '.scry', 'locks', 'sessions', 'codex', `${safeKey('c1')}.lock`)
+    await mkdir(lock, { recursive: true })
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now() }))
+    const release = new Promise<void>((resolve) => {
+      setTimeout(() => void rm(lock, { recursive: true, force: true }).then(() => resolve()), 2_100)
+    })
+
+    const result = await handleRecorderHook({
+      provider: 'codex',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('c1', { prompt: 'one' })
+    })
+    await release
+
+    expect(result.status).toBe('started')
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ droppedEvents: 0 })
+  }, 10_000)
 
   it('Codex 相同 prompt 的失败 attempt 与重试按 task lifecycle 分成两轮', async () => {
     const root = await workspace()

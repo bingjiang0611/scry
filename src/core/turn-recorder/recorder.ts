@@ -82,6 +82,8 @@ interface TranscriptRead {
 
 const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
+// Turn boundaries may synchronously snapshot Git for up to 5s; fallback delivery must outwait the original holder.
+const SESSION_LOCK_WAIT_MS = 10_000
 
 function stringAt(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -894,7 +896,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       open.closingAt = timestampOf(input.payload)
       await writeJsonAtomic(openPath(root), open, { sync: false })
       return finalizeOpenTurn(enablement, open, input.payload, 'completed')
-    })
+    }, { waitMs: SESSION_LOCK_WAIT_MS })
     const pending = START_EVENTS.has(input.event) || END_EVENTS.has(input.event)
       ? await pendingHealth(enablement.dataRoot)
       : undefined
@@ -953,8 +955,10 @@ export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv 
   for (const item of await runtimeSessions(enablement.dataRoot)) {
     const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
     if (!open || open.status !== 'closing') continue
-    const result = await withDirectoryLock(sessionLock(enablement.dataRoot, item.provider, open.sessionId), () =>
-      finalizeOpenTurn(enablement, open, { timestamp: open.closingAt ?? new Date().toISOString() }, 'completed')
+    const result = await withDirectoryLock(
+      sessionLock(enablement.dataRoot, item.provider, open.sessionId),
+      () => finalizeOpenTurn(enablement, open, { timestamp: open.closingAt ?? new Date().toISOString() }, 'completed'),
+      { waitMs: SESSION_LOCK_WAIT_MS }
     )
     if (result.status === 'pending') pending++
     else recovered++
