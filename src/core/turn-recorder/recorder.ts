@@ -7,6 +7,7 @@ import { disabled, partial, type AgentTurnRecord } from '../../shared/turn-recor
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
+import { turnChangeHints } from './change-journal.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff, finishGitTurnDiff, type GitTurnDiffCapture } from './git.js'
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
@@ -1254,7 +1255,10 @@ async function finalizeOpenTurn(
       }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
-  const diffs = await Promise.all(open.captures.map(async ({ capture }) => finishGitTurnDiff(capture, 5_000)))
+  const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events)
+  const diffs = await Promise.all(open.captures.map(async ({ repository, capture }) =>
+    finishGitTurnDiff(capture, undefined, turnChangeHints(repository, mergedEvents))
+  ))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,
@@ -1263,7 +1267,7 @@ async function finalizeOpenTurn(
     stage: 'turn_diff',
     turnDiff
   }))
-  const events = dedupeTraceEvents([...mergeTurnTraceEvents(storedEvents, transcript.events), ...diffEvents])
+  const events = dedupeTraceEvents([...mergedEvents, ...diffEvents])
   const hasUsage = events.some((event) => event.kind === 'harness' && event.stage === 'result')
   const hasToolEvidence = events.some((event) =>
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)

@@ -90,6 +90,17 @@ export type TurnDiffStatus = 'captured' | 'unavailable' | 'timeout' | 'failed'
 export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error'
 export type TurnDiffPatchStatus = 'captured' | 'truncated' | 'binary' | 'unavailable'
 export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget'
+export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
+
+export interface TurnDiffCollection {
+  strategy: 'targeted' | 'full_fallback'
+  evidence: 'git_status' | 'git_status+structured' | 'fallback'
+  candidatePathCount: number
+  discoveryMs: number
+  targetedMs?: number
+  fallbackMs?: number
+  fallbackReason?: TurnDiffFallbackReason
+}
 
 export interface TurnDiffSnapshot {
   version: 1
@@ -102,6 +113,7 @@ export interface TurnDiffSnapshot {
   afterAt: string
   captureMs: number
   cleanup: 'ok' | 'failed'
+  collection?: TurnDiffCollection
 }
 
 function nonNegativeInteger(value: unknown): number | null {
@@ -143,6 +155,39 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
   const reason = ['not_git', 'no_head', 'deadline', 'git_error'].includes(String(raw.reason))
     ? (raw.reason as TurnDiffReason)
     : undefined
+  const collectionRaw = raw.collection && typeof raw.collection === 'object'
+    ? raw.collection as Record<string, unknown>
+    : undefined
+  const candidatePathCount = nonNegativeInteger(collectionRaw?.candidatePathCount)
+  const discoveryMs = nonNegativeInteger(collectionRaw?.discoveryMs)
+  const targetedMs = nonNegativeInteger(collectionRaw?.targetedMs)
+  const fallbackMs = nonNegativeInteger(collectionRaw?.fallbackMs)
+  const fallbackReason = ['forced', 'discovery_failed', 'candidate_limit', 'git_semantics', 'targeted_failed']
+    .includes(String(collectionRaw?.fallbackReason))
+    ? collectionRaw?.fallbackReason as TurnDiffFallbackReason
+    : undefined
+  const collectionShapeValid =
+    (collectionRaw?.strategy === 'targeted' &&
+      (collectionRaw.evidence === 'git_status' || collectionRaw.evidence === 'git_status+structured') &&
+      fallbackReason == null) ||
+    (collectionRaw?.strategy === 'full_fallback' &&
+      collectionRaw.evidence === 'fallback' &&
+      fallbackReason != null)
+  const collection =
+    collectionRaw &&
+    collectionShapeValid &&
+    candidatePathCount != null &&
+    discoveryMs != null
+      ? {
+          strategy: collectionRaw.strategy as TurnDiffCollection['strategy'],
+          evidence: collectionRaw.evidence as TurnDiffCollection['evidence'],
+          candidatePathCount,
+          discoveryMs,
+          ...(targetedMs != null ? { targetedMs } : {}),
+          ...(fallbackMs != null ? { fallbackMs } : {}),
+          ...(fallbackReason ? { fallbackReason } : {})
+        }
+      : undefined
   return {
     version: 1,
     status: raw.status as TurnDiffStatus,
@@ -153,7 +198,8 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     beforeAt: raw.beforeAt,
     afterAt: raw.afterAt,
     captureMs,
-    cleanup: raw.cleanup
+    cleanup: raw.cleanup,
+    ...(collection ? { collection } : {})
   }
 }
 

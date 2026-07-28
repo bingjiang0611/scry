@@ -29,6 +29,7 @@ import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import { createBuiltInProviderAdapters } from './providers'
 import { appendCoalescedTrace } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
+import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
@@ -577,6 +578,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
     return { beforeAt, captureMs: 0, status: 'unavailable', reason: 'not_git' }
   }
   const turnDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
+  const turnChangeJournal = cwd ? new TurnChangeJournal(cwd) : null
   const attachments = prepareRunAttachments(runId, request.attachments)
   const displayPrompt = request.prompt
   const runtimePrompt = attachmentPrompt(displayPrompt, attachments)
@@ -604,6 +606,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   const emit = (rawEvent: TraceEvent): void => {
     const ev = hookConfig ? attachConfiguredHookCommands(rawEvent, hookConfig) : rawEvent
+    turnChangeJournal?.record(ev)
     if (ev.kind === 'harness' && ev.stage === 'result') {
       appendUsage(
         app.getPath('userData'),
@@ -638,32 +641,44 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   let turnDiffPromise: Promise<void> | null = null
   const finalizeTurnDiff = (): Promise<void> => {
-    turnDiffPromise ??= turnDiffCapture.then((capture) => finishGitTurnDiff(capture)).then((turnDiff) => {
-      const event: TraceEvent = {
-        id: `d-${evSeq++}`,
-        ts: new Date().toISOString(),
-        runId,
-        kind: 'harness',
-        stage: 'turn_diff',
-        providerId,
-        runtimeProvider,
-        turnDiff
-      }
-      appendCoalescedTrace(runState.items, event)
-      if (runs.isFocused(runId)) queueTrace(event)
-      if (turnDiff.status === 'failed' || turnDiff.status === 'timeout') {
-        console.warn('[scry] turn diff capture degraded:', runId, turnDiff.reason, turnDiff.captureMs)
-      }
-      const patchUnavailable = turnDiff.files.filter((file) => file.patchStatus === 'unavailable')
-      if (patchUnavailable.length > 0) {
-        console.warn(
-          '[scry] turn diff patch partially unavailable:',
+    turnDiffPromise ??= turnDiffCapture
+      .then((capture) => finishGitTurnDiff(capture, undefined, turnChangeJournal?.snapshot()))
+      .then((turnDiff) => {
+        const event: TraceEvent = {
+          id: `d-${evSeq++}`,
+          ts: new Date().toISOString(),
           runId,
-          patchUnavailable.length,
-          [...new Set(patchUnavailable.map((file) => file.patchReason))]
-        )
-      }
-    })
+          kind: 'harness',
+          stage: 'turn_diff',
+          providerId,
+          runtimeProvider,
+          turnDiff
+        }
+        appendCoalescedTrace(runState.items, event)
+        if (runs.isFocused(runId)) queueTrace(event)
+        if (turnDiff.status === 'failed' || turnDiff.status === 'timeout') {
+          console.warn('[scry] turn diff capture degraded:', runId, turnDiff.reason, turnDiff.captureMs)
+        }
+        if (turnDiff.collection?.strategy === 'full_fallback' && turnDiff.collection.fallbackReason !== 'forced') {
+          console.warn(
+            '[scry] turn diff used full fallback:',
+            runId,
+            turnDiff.collection.fallbackReason,
+            turnDiff.collection.candidatePathCount,
+            turnDiff.collection.discoveryMs,
+            turnDiff.collection.targetedMs
+          )
+        }
+        const patchUnavailable = turnDiff.files.filter((file) => file.patchStatus === 'unavailable')
+        if (patchUnavailable.length > 0) {
+          console.warn(
+            '[scry] turn diff patch partially unavailable:',
+            runId,
+            patchUnavailable.length,
+            [...new Set(patchUnavailable.map((file) => file.patchReason))]
+          )
+        }
+      })
     return turnDiffPromise
   }
   const publishSessionId = (sessionId: string | undefined): void => {

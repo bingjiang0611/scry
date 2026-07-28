@@ -1,5 +1,5 @@
 import type { ProviderId } from './provider.js'
-import type { DangerLevel, DiffFile, TurnDiffReason, TurnDiffStatus } from './trace.js'
+import type { DangerLevel, DiffFile, TurnDiffCollection, TurnDiffReason, TurnDiffStatus } from './trace.js'
 
 export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
 export type EvidenceStatus = 'available' | 'partial' | 'disabled' | 'unavailable'
@@ -66,6 +66,7 @@ export interface TurnDiffSnapshotRecord {
   afterAt: string
   captureMs: number
   cleanup: 'ok' | 'failed'
+  collection?: TurnDiffCollection
 }
 
 export interface TurnDanger {

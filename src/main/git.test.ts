@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, it, expect } from 'vitest'
-import { beginGitTurnDiff, finishGitTurnDiff, gitNumstat, parseNumstat } from './git'
+import { beginGitTurnDiff, finishGitTurnDiff, gitNumstat, parseNumstat, parsePorcelainPaths } from './git'
 
 const pexecFile = promisify(execFile)
 
@@ -64,6 +64,20 @@ describe('parseNumstat（P2 git diff）', () => {
   })
 })
 
+describe('parsePorcelainPaths（定向候选发现）', () => {
+  it('解析普通、未跟踪与 rename 的两端路径', () => {
+    expect(parsePorcelainPaths(
+      ' M src/a.ts\0?? 新文件.md\0R  src/new.ts\0src/old.ts\0',
+      '/repo'
+    )).toEqual([
+      '/repo/src/a.ts',
+      '/repo/新文件.md',
+      '/repo/src/new.ts',
+      '/repo/src/old.ts'
+    ])
+  })
+})
+
 describe('每轮 Git 工作树快照', () => {
   async function initRepo(): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), 'scry-turn-diff-test-'))
@@ -95,6 +109,11 @@ describe('每轮 Git 工作树快照', () => {
       const result = await finishGitTurnDiff(capture)
 
       expect(result.status).toBe('captured')
+      expect(result.collection).toMatchObject({
+        strategy: 'targeted',
+        evidence: 'git_status',
+        candidatePathCount: 3
+      })
       expect(result.files).toHaveLength(2)
       expect(result.files[0]).toMatchObject({
         path: join(canonicalRoot, 'a.txt'),
@@ -117,6 +136,112 @@ describe('每轮 Git 工作树快照', () => {
       await rm(root, { recursive: true, force: true })
     }
   }, 30_000)
+
+  it('结构化路径作为交叉证据，但 Git status 仍补齐 Bash 写入', async () => {
+    const root = await initRepo()
+    try {
+      await writeFile(join(root, 'a.txt'), 'base\n')
+      await writeFile(join(root, 'b.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      const capture = await beginGitTurnDiff(root)
+      await writeFile(join(root, 'a.txt'), 'structured\n')
+      await writeFile(join(root, 'b.txt'), 'opaque bash write\n')
+      const result = await finishGitTurnDiff(capture, 20_000, {
+        structuredPaths: [
+          join(root, 'a.txt'),
+          join(root, '..', 'outside', '.gitignore')
+        ]
+      })
+
+      expect(result.status).toBe('captured')
+      expect(result.collection).toMatchObject({
+        strategy: 'targeted',
+        evidence: 'git_status+structured',
+        candidatePathCount: 2
+      })
+      expect(result.files.map((file) => file.path).sort()).toEqual([
+        join(await realpath(root), 'a.txt'),
+        join(await realpath(root), 'b.txt')
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('Git 语义控制文件变化时回退全量快照', async () => {
+    const root = await initRepo()
+    try {
+      await writeFile(join(root, '.gitignore'), 'generated.json\n')
+      await writeFile(join(root, 'base.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      await writeFile(join(root, 'generated.json'), '{"ready":true}\n')
+
+      const capture = await beginGitTurnDiff(root)
+      await writeFile(join(root, '.gitignore'), '')
+      const result = await finishGitTurnDiff(capture)
+
+      expect(result.status).toBe('captured')
+      expect(result.collection).toMatchObject({
+        strategy: 'full_fallback',
+        fallbackReason: 'git_semantics'
+      })
+      expect(result.files.map((file) => file.path).sort()).toEqual([
+        join(await realpath(root), '.gitignore'),
+        join(await realpath(root), 'generated.json')
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('运行时开关可强制使用旧全量行为', async () => {
+    const root = await initRepo()
+    try {
+      await writeFile(join(root, 'base.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      const capture = await beginGitTurnDiff(root)
+      await writeFile(join(root, 'base.txt'), 'changed\n')
+      const result = await finishGitTurnDiff(capture, 20_000, { forceFull: true })
+
+      expect(result.status).toBe('captured')
+      expect(result.collection).toMatchObject({
+        strategy: 'full_fallback',
+        fallbackReason: 'forced'
+      })
+      expect(result.files).toHaveLength(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('候选过多时不构造超长定向命令，自动回退全量', async () => {
+    const root = await initRepo()
+    try {
+      await writeFile(join(root, 'base.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      const capture = await beginGitTurnDiff(root)
+      const result = await finishGitTurnDiff(capture, 20_000, {
+        structuredPaths: Array.from({ length: 1_001 }, (_, index) => join(root, `candidate-${index}.txt`))
+      })
+
+      expect(result.status).toBe('captured')
+      expect(result.collection).toMatchObject({
+        strategy: 'full_fallback',
+        fallbackReason: 'candidate_limit',
+        candidatePathCount: 1_001
+      })
+      expect(result.files).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
 
   it('选择子目录时不统计 sibling，并支持同仓并发快照隔离', async () => {
     const root = await initRepo()
