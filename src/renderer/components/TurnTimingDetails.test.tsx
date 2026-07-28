@@ -9,7 +9,7 @@ function event(partial: Partial<TraceEvent> & Pick<TraceEvent, 'id' | 'kind' | '
 }
 
 describe('TurnTimingDetails', () => {
-  it('展示 SDK API 合计、类型聚合，以及模型 API / 工具调用两类时间线', () => {
+  it('展示 SDK API 合计、去重调用耗时、类型累计，以及模型 API / 工具调用两类时间线', () => {
     const read = event({ id: 'read', kind: 'tool', stage: 'tool:Read', tool: 'Read', toolUseId: 'read', messageId: 'msg-1' })
     const write = event({
       id: 'write',
@@ -35,10 +35,13 @@ describe('TurnTimingDetails', () => {
     expect(html).toContain('模型 API 合计')
     expect(html).toContain('4.2s')
     expect(html).toContain('2/2')
+    expect(html).toContain('调用耗时')
+    expect(html).toContain('去重墙钟')
     expect(html).toContain('按类型累计')
+    expect(html).toContain('累计 6.0s · 无重叠')
     expect(html).toContain('Read')
     expect(html).toContain('Write')
-    expect(html).toContain('模型 / 工具时间线')
+    expect(html).toContain('耗时归因时间线')
     expect(html).toContain('模型 API')
     expect(html).toContain('工具调用')
     expect(html).toContain('>~0.0s</b>')
@@ -101,15 +104,16 @@ describe('TurnTimingDetails', () => {
       <TurnTimingDetails timing={buildTurnTimingBreakdown(items, [main, inferred, nested])} />
     )
 
-    expect(html).toContain('模型 API 合计')
+    expect(html).toContain('模型 API')
+    expect(html).not.toContain('模型 API 观测')
     expect(html).toContain('未采集')
     expect(html).toContain('未绑定模型响应')
     expect(html).toContain('workflow-orchestrator')
     expect(html).toContain('子 Agent 内部调用')
-    expect(html).toContain('不与主会话模型响应串联')
+    expect(html).toContain('主指标“调用耗时”会合并父子 Agent 的重叠区间')
   })
 
-  it('无逐次响应边界时展示墙钟减工具占用的 API 观测余量', () => {
+  it('无逐次响应边界时展示墙钟减调用占用的未归因耗时', () => {
     const bash = event({
       id: 'bash',
       kind: 'tool',
@@ -127,10 +131,46 @@ describe('TurnTimingDetails', () => {
       <TurnTimingDetails timing={buildTurnTimingBreakdown(items, [bash])} />
     )
 
-    expect(html).toContain('模型 API 合计')
+    expect(html).toContain('未归因耗时')
     expect(html).toContain('~7.0s')
-    expect(html).toContain('~观测余量 · tools 1/1')
-    expect(html).toContain('aria-label="整轮模型 API 观测余量约 7.0s"')
+    expect(html).toContain('~估算 · 已计时 1/1')
+    expect(html).toContain('aria-label="整轮未归因耗时约 7.0s"')
     expect(html).toContain('aria-label="1 次工具调用，耗时约 3.0s"')
+    expect(html).not.toContain('模型 API 合计')
+  })
+
+  it('调用耗时按区间去重，并在类型累计旁明确并行重叠', () => {
+    const parent = event({
+      id: 'parent',
+      kind: 'agent',
+      stage: 'agent:Task',
+      name: 'reviewer',
+      toolUseId: 'parent',
+      ts: '2026-07-18T00:00:00.000Z'
+    })
+    const nested = event({
+      id: 'nested',
+      kind: 'tool',
+      stage: 'tool:Bash',
+      tool: 'Bash',
+      toolUseId: 'nested',
+      parentToolUseId: 'parent',
+      ts: '2026-07-18T00:00:02.000Z'
+    })
+    const items = [
+      parent,
+      nested,
+      event({ id: 'nested-result', kind: 'tool', stage: 'tool_result', toolUseId: 'nested', ts: '2026-07-18T00:00:08.000Z' }),
+      event({ id: 'parent-result', kind: 'tool', stage: 'tool_result', toolUseId: 'parent', ts: '2026-07-18T00:00:10.000Z' }),
+      event({ id: 'result', kind: 'harness', stage: 'result', ts: '2026-07-18T00:00:20.000Z', durationMs: 20_000 })
+    ]
+    const html = renderToStaticMarkup(
+      <TurnTimingDetails timing={buildTurnTimingBreakdown(items, [parent, nested])} />
+    )
+
+    expect(html).toContain('调用耗时')
+    expect(html).toContain('>10s</b>')
+    expect(html).toContain('累计 16s · 重叠 6.0s')
+    expect(html).toContain('主指标“调用耗时”会合并父子 Agent 的重叠区间')
   })
 })
