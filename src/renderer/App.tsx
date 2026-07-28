@@ -893,7 +893,6 @@ export function App() {
             <main className="welcome-pane">
               <div className="welcome-inner">
                 <div className="wc-brand">
-                  <span className="logo">a</span>
                   <h1>Scry</h1>
                   <span className="ver">v0.1.0</span>
                 </div>

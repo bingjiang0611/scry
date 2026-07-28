@@ -225,19 +225,6 @@ body.pane-resizing * {
   font: 600 13px/1 var(--font-ui);
   letter-spacing: -0.005em;
 }
-.sb-brand .logo {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  background: var(--panel2);
-  border: 1px solid var(--accent-line);
-  display: grid;
-  place-items: center;
-  color: var(--fg);
-  font: 700 11px/1 var(--font-mono);
-  letter-spacing: 0;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
-}
 .sb-brand .name {
   color: var(--fg);
 }
@@ -899,17 +886,6 @@ body.pane-resizing * {
   gap: 12px;
   margin-bottom: 28px;
 }
-.wc-brand .logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  background: var(--panel2);
-  border: 1px solid var(--accent-line);
-  display: grid;
-  place-items: center;
-  color: var(--fg);
-  font: 700 18px/1 var(--font-mono);
-}
 .wc-brand h1 {
   font: 600 22px/1 var(--font-ui);
   letter-spacing: -0.015em;
@@ -917,7 +893,7 @@ body.pane-resizing * {
 .wc-brand .ver {
   font: 11.5px/1 var(--font-mono);
   color: var(--dim2);
-  margin-left: 6px;
+  margin-left: 0;
 }
 .wc-hero h2 {
   font: 600 30px/1.2 var(--font-ui);
@@ -5976,14 +5952,6 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--border3);
 }
 
-.sb-brand .logo,
-.wc-brand .logo {
-  background: var(--panel2);
-  border: 1px solid var(--accent-line);
-  color: var(--accent);
-  box-shadow: none;
-}
-
 .sb-brand .ver,
 .wc-brand .ver {
   color: var(--dim3);
@@ -6209,10 +6177,6 @@ textarea:focus-visible,
 
 .wc-brand {
   margin-bottom: 30px;
-}
-
-.wc-brand .logo {
-  border-radius: var(--r-md);
 }
 
 .wc-hero h2 {
