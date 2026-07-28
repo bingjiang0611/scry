@@ -105,6 +105,7 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).toContain('opencode')
     expect(html).toContain('最近工作目录')
     expect(html).toContain('纵览')
+    expect(html).not.toContain('class="logo"')
   })
 
   it('左右 splitter 的 aria contract 保留，避免 shell 化后拖拽控件丢失', () => {

@@ -81,7 +81,6 @@ export function Sidebar({
   return (
     <aside className="sidebar" id={id}>
       <div className="sb-brand">
-        <span className="logo">a</span>
         <span className="name">Scry</span>
         <span className="ver">{version}</span>
       </div>
