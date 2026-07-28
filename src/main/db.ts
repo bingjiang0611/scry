@@ -14,6 +14,7 @@ import {
   DDL_V4,
   DDL_V5,
   DDL_V6,
+  DDL_V7,
   SPAN_COLS,
   MODEL_USAGE_COLS,
   FILE_OP_COLS,
@@ -32,6 +33,15 @@ import {
   BY_MODEL_SQL,
   TOOL_STATS_SQL,
   DANGER_TREND_SQL,
+  ANALYTICS_RESULTS_SQL,
+  ANALYTICS_TOOLS_SQL,
+  ANALYTICS_DANGER_SQL,
+  ANALYTICS_MCP_SQL,
+  buildAnalyticsStats,
+  type AnalyticsResultRow,
+  type AnalyticsToolRow,
+  type AnalyticsDangerRow,
+  type AnalyticsMcpRow,
   canonicalUsdCostWhere,
   sqlInsert,
   spanRowsFromItems
@@ -115,6 +125,10 @@ function migrate(d: Database.Database): void {
     for (const stmt of DDL_V6) d.prepare(stmt).run()
     d.pragma('user_version = 6')
     v = 6
+  }
+  if (v < 7) {
+    for (const stmt of DDL_V7) d.prepare(stmt).run()
+    d.pragma('user_version = 7')
   }
 }
 
@@ -667,26 +681,47 @@ export function importBillingFixture(): BillingFixtureImportResult {
 }
 
 const EMPTY: DbStats = {
+  status: 'unavailable',
   totals: { cost: null, tin: null, tout: null, turns: 0 },
   topTools: [],
   byCwd: [],
   byModel: [],
   toolStats: [],
-  dangerTrend: []
+  dangerTrend: [],
+  tokenDaily: [],
+  dangerDaily: [],
+  comparison: {
+    current: { tokens: null, tokenKnownTurns: 0, turns: 0, toolCalls: 0, danger: 0 },
+    previous: { tokens: null, tokenKnownTurns: 0, turns: 0, toolCalls: 0, danger: 0 },
+    change: { tokensPct: null, turnsPct: null, toolCallsPct: null, dangerPct: null }
+  },
+  cacheReuse: [],
+  mcpLatency: [],
+  providerCoverage: []
 }
 
 export function statsQuery(): DbStats {
   if (!db) return EMPTY
   try {
+    const now = Date.now()
+    const resultStart = now - 62 * 24 * 60 * 60 * 1000
+    const dangerStart = now - 92 * 24 * 60 * 60 * 1000
     const totals = db.prepare(TOTALS_SQL).get() as DbStats['totals']
     const topTools = db.prepare(TOP_TOOLS_SQL).all() as DbStats['topTools']
     const byCwd = db.prepare(BY_CWD_SQL).all() as DbStats['byCwd']
     const byModel = db.prepare(BY_MODEL_SQL).all() as DbStats['byModel']
     const toolStats = db.prepare(TOOL_STATS_SQL).all() as DbStats['toolStats']
     const dangerTrend = db.prepare(DANGER_TREND_SQL).all() as DbStats['dangerTrend']
-    return { totals, topTools, byCwd, byModel, toolStats, dangerTrend }
+    const analytics = buildAnalyticsStats({
+      nowMs: now,
+      results: db.prepare(ANALYTICS_RESULTS_SQL).all(resultStart, now + 1) as AnalyticsResultRow[],
+      tools: db.prepare(ANALYTICS_TOOLS_SQL).all(resultStart, now + 1) as AnalyticsToolRow[],
+      dangers: db.prepare(ANALYTICS_DANGER_SQL).all(dangerStart, now + 1) as AnalyticsDangerRow[],
+      mcp: db.prepare(ANALYTICS_MCP_SQL).all(dangerStart, now + 1) as AnalyticsMcpRow[]
+    })
+    return { status: 'ready', totals, topTools, byCwd, byModel, toolStats, dangerTrend, ...analytics }
   } catch (e) {
     console.warn('[scry] statsQuery 失败:', (e as Error)?.message)
-    return EMPTY
+    return { ...EMPTY, status: 'query_error' }
   }
 }

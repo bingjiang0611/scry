@@ -82,6 +82,115 @@ describe('turn recorder state machine', () => {
     expect((await listRecords(join(root, '.scry'))).map((record) => [record.generation, record.turnIndex])).toEqual([[1, 1], [2, 2]])
   })
 
+  it('Codex 连续两轮输入相同 prompt 时按不同时间边界分别记录', async () => {
+    const root = await workspace()
+    await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: root, payload: payload('c1', { prompt: 'same' }) })
+    const next = await handleRecorderHook({
+      provider: 'codex',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('c1', { prompt: 'same', timestamp: '2026-07-19T12:00:02.000Z' })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', { timestamp: '2026-07-19T12:00:03.000Z' })
+    })
+
+    expect(next.status).toBe('started')
+    expect(await listRecords(join(root, '.scry'))).toMatchObject([
+      { turnIndex: 1, status: 'interrupted', user: { value: { text: 'same' } } },
+      { turnIndex: 2, status: 'completed', user: { value: { text: 'same' } } }
+    ])
+  })
+
+  it('Codex 相同 prompt 的失败 attempt 与重试按 task lifecycle 分成两轮', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'same', turn_id: 'attempt-1' })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', {
+        prompt: 'same',
+        turn_id: 'attempt-1',
+        timestamp: '2026-07-19T12:00:01.000Z',
+        status: 'failed',
+        error: 'stream disconnected'
+      })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', {
+        prompt: 'same',
+        turn_id: 'attempt-2',
+        timestamp: '2026-07-19T12:00:02.000Z'
+      })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', {
+        turn_id: 'attempt-2',
+        timestamp: '2026-07-19T12:00:03.000Z'
+      })
+    })
+
+    expect(await listRecords(join(root, '.scry'))).toMatchObject([
+      { providerTurnId: 'attempt-1', turnIndex: 1, status: 'failed' },
+      { providerTurnId: 'attempt-2', turnIndex: 2, status: 'completed' }
+    ])
+  })
+
+  it('历史 providerTurnId 延迟重放不会终止当前轮或制造新轮', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'one', turn_id: 'turn-1' })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', { turn_id: 'turn-1', timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'two', turn_id: 'turn-2', timestamp: '2026-07-19T12:00:02.000Z' })
+    })
+    const replay = await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'one', turn_id: 'turn-1', timestamp: '2026-07-19T12:00:03.000Z' })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', { turn_id: 'turn-2', timestamp: '2026-07-19T12:00:04.000Z' })
+    })
+
+    expect(replay.status).toBe('duplicate')
+    expect((await listRecords(join(root, '.scry'))).map((record) => [record.providerTurnId, record.status])).toEqual([
+      ['turn-1', 'completed'],
+      ['turn-2', 'completed']
+    ])
+  })
+
   it('新 prompt 到来时把未结束旧轮提交为 interrupted', async () => {
     const root = await workspace()
     await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: root, payload: payload('c1', { prompt: 'one' }) })
@@ -117,6 +226,38 @@ describe('turn recorder state machine', () => {
     expect(result.status).toBe('orphan')
     expect(await listRecords(join(root, '.scry'))).toEqual([])
   })
+
+  it('重复上报同一 toolUseId 时正式记录只保留一次逻辑调用', async () => {
+    const root = await workspace()
+    await handleRecorderHook({ provider: 'codex', event: 'turn.started', workspace: root, payload: payload('c1', { prompt: 'dedupe', turn_id: 't1' }) })
+    for (const timestamp of ['2026-07-19T12:00:00.100Z', '2026-07-19T12:00:00.200Z']) {
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'PreToolUse:Bash',
+        workspace: root,
+        payload: payload('c1', { timestamp, turn_id: 't1', tool_name: 'Bash', tool_use_id: 'call-1', tool_input: { command: 'printf ok' } })
+      })
+    }
+    for (const timestamp of ['2026-07-19T12:00:00.300Z', '2026-07-19T12:00:00.400Z']) {
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'PostToolUse:Bash',
+        workspace: root,
+        payload: payload('c1', { timestamp, turn_id: 't1', tool_name: 'Bash', tool_use_id: 'call-1', tool_response: 'ok' })
+      })
+    }
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', { timestamp: '2026-07-19T12:00:01.000Z', turn_id: 't1' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ id: 'call-1', status: 'success' })
+    ])
+  })
 })
 
 describe('lifecycle/transcript merge', () => {
@@ -133,6 +274,204 @@ describe('lifecycle/transcript merge', () => {
       event({ id: 'transcript-usage', ts: '2026-01-01T00:00:01Z', kind: 'harness', stage: 'result', text: 'transcript assistant usage', tokensIn: 9 })
     ]
     expect(mergeTurnTraceEvents(lifecycle, transcript).map((item) => item.id)).toEqual(['transcript-tool', 'transcript-text', 'transcript-usage'])
+  })
+
+  it('同一 toolUseId 的 lifecycle 重放不因 timestamp 不同重复计数', () => {
+    const event = (overrides: Partial<TraceEvent>): TraceEvent => ({ id: 'id', ts: '2026-01-01T00:00:00Z', runId: 'r', kind: 'tool', stage: 'tool:Bash', ...overrides })
+    const lifecycle = [
+      event({ id: 'start-1', toolUseId: 't1', tool: 'Bash' }),
+      event({ id: 'start-2', ts: '2026-01-01T00:00:00.250Z', toolUseId: 't1', tool: 'Bash' }),
+      event({ id: 'result-1', ts: '2026-01-01T00:00:01Z', stage: 'tool_result', toolUseId: 't1', tool: 'Bash' }),
+      event({ id: 'result-2', ts: '2026-01-01T00:00:01.250Z', stage: 'tool_result', toolUseId: 't1', tool: 'Bash' })
+    ]
+
+    expect(mergeTurnTraceEvents(lifecycle, []).map((item) => item.id)).toEqual(['start-1', 'result-1'])
+  })
+})
+
+describe('Codex rollout recorder evidence', () => {
+  it('解析 task/token_count/tool/skill/hook，未观测项不伪造 exact 空数组', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'rollout.jsonl')
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'codex-turn-1' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'run workflow' } },
+      {
+        timestamp: '2026-07-19T12:00:00.100Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'exec_command',
+          call_id: 'call-1',
+          arguments: JSON.stringify({ cmd: "sed -n '1,120p' .codex/skills/rate-workflow/SKILL.md" })
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.200Z',
+        type: 'response_item',
+        payload: { type: 'function_call_output', call_id: 'call-1', output: 'ok' }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.300Z',
+        type: 'event_msg',
+        payload: {
+          type: 'hook_started',
+          hook_id: 'hook-1',
+          hook_event: 'UserPromptSubmit',
+          hook_name: 'trace_prompt.py',
+          command: 'python3 .claude/hooks/trace_prompt.py'
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.400Z',
+        type: 'event_msg',
+        payload: {
+          type: 'hook_response',
+          hook_id: 'hook-1',
+          hook_event: 'UserPromptSubmit',
+          hook_name: 'trace_prompt.py',
+          command: 'python3 .claude/hooks/trace_prompt.py',
+          outcome: 'success',
+          exit_code: 0
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.500Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            last_token_usage: {
+              input_tokens: 120,
+              cached_input_tokens: 80,
+              cache_write_input_tokens: 7,
+              output_tokens: 11,
+              reasoning_output_tokens: 3
+            }
+          }
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:01.000Z',
+        type: 'event_msg',
+        payload: { type: 'task_complete', turn_id: 'codex-turn-1', last_agent_message: 'done' }
+      }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'run workflow', turn_id: 'codex-turn-1', rollout_path: rollout })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', {
+        turn_id: 'codex-turn-1',
+        rollout_path: rollout,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ id: 'call-1', name: 'exec_command', status: 'success' })
+    ])
+    expect(record.skills.value).toEqual([
+      expect.objectContaining({ name: 'rate-workflow' })
+    ])
+    expect(record.hooks.value).toEqual([
+      expect.objectContaining({ id: 'hook-1', event: 'UserPromptSubmit', status: 'success' })
+    ])
+    expect(record.usage).toMatchObject({
+      status: 'available',
+      quality: 'exact',
+      value: {
+        inputTokens: 120,
+        outputTokens: 11,
+        cacheReadTokens: 80,
+        cacheCreationTokens: 7,
+        reasoningTokens: 3
+      }
+    })
+  })
+
+  it('未知 transcript 格式不会把 Skill/Hook/Usage 伪装为 exact 空', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'unknown.jsonl')
+    await writeFile(transcript, '{"type":"unknown"}\n')
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'unknown', turn_id: 'unknown-turn', rollout_path: transcript })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', { turn_id: 'unknown-turn', rollout_path: transcript })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.skills).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
+    expect(record.hooks).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
+    expect(record.usage).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
+  })
+
+  it('token_count 使用累计值做轮间差分，不重复累计 last_token_usage', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'cumulative-rollout.jsonl')
+    const line = (timestamp: string, type: string, payload: Record<string, unknown>) => ({ timestamp, type, payload })
+    const token = (input: number, output: number, cache: number) => ({
+      type: 'token_count',
+      info: {
+        total_token_usage: {
+          input_tokens: input,
+          output_tokens: output,
+          cached_input_tokens: cache,
+          cache_write_input_tokens: 0,
+          reasoning_output_tokens: 0
+        },
+        // Deliberately repeated/noisy; authoritative per-turn usage comes from cumulative deltas.
+        last_token_usage: { input_tokens: input, output_tokens: output, cached_input_tokens: cache }
+      }
+    })
+    const lines = [
+      line('2026-07-19T12:00:00.000Z', 'event_msg', { type: 'task_started', turn_id: 't1' }),
+      line('2026-07-19T12:00:00.100Z', 'event_msg', token(100, 10, 80)),
+      line('2026-07-19T12:00:01.000Z', 'event_msg', { type: 'task_complete', turn_id: 't1' }),
+      line('2026-07-19T12:00:02.000Z', 'event_msg', { type: 'task_started', turn_id: 't2' }),
+      line('2026-07-19T12:00:02.100Z', 'event_msg', token(250, 25, 200)),
+      line('2026-07-19T12:00:03.000Z', 'event_msg', { type: 'task_complete', turn_id: 't2' })
+    ]
+    await writeFile(rollout, `${lines.map((item) => JSON.stringify(item)).join('\n')}\n`)
+
+    for (const [turnId, start, end] of [
+      ['t1', '2026-07-19T12:00:00.000Z', '2026-07-19T12:00:01.000Z'],
+      ['t2', '2026-07-19T12:00:02.000Z', '2026-07-19T12:00:03.000Z']
+    ]) {
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'turn.started',
+        workspace: root,
+        payload: payload('c1', { prompt: turnId, turn_id: turnId, rollout_path: rollout, timestamp: start })
+      })
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'turn/completed',
+        workspace: root,
+        payload: payload('c1', { turn_id: turnId, rollout_path: rollout, timestamp: end })
+      })
+    }
+
+    expect((await listRecords(join(root, '.scry'))).map((record) => record.usage.value)).toEqual([
+      expect.objectContaining({ inputTokens: 100, outputTokens: 10, cacheReadTokens: 80 }),
+      expect.objectContaining({ inputTokens: 150, outputTokens: 15, cacheReadTokens: 120 })
+    ])
   })
 })
 

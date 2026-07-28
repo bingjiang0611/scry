@@ -199,6 +199,20 @@ export function loadClaudeHookConfig(
   return { rules: result }
 }
 
+export function loadCodexHookConfig(cwd: string, homeDir: string): ClaudeHookConfig {
+  const files: Array<{ source: HookConfiguredCommand['source']; path: string }> = [
+    { source: 'user', path: join(homeDir, '.codex', 'hooks.json') },
+    { source: 'project', path: join(cwd, '.codex', 'hooks.json') }
+  ]
+  const result: ConfiguredRule[] = []
+  const seen = new Set<string>()
+  for (const file of files) {
+    const settings = readJson(file.path)
+    if (settings) addHookRules(settings, file.source, file.path, result, seen)
+  }
+  return { rules: result }
+}
+
 export function configuredHookCommands(event: TraceEvent, config: ClaudeHookConfig): HookConfiguredCommand[] {
   if (event.kind !== 'hook') return []
   const hookEvent = event.hookEvent ?? event.name

@@ -382,6 +382,10 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
   }
   if (m.type === 'result') {
     const u = (m.usage as Record<string, number> | undefined) ?? {}
+    const resultText = typeof m.result === 'string' && m.result.trim() ? m.result : undefined
+    const resultErrors = Array.isArray(m.errors)
+      ? m.errors.filter((error): error is string => typeof error === 'string' && !!error.trim())
+      : []
     // probe 实测：modelUsage 是会话级更完整的 SDK usage 聚合，顶层 usage.input_tokens 会少算（只末轮）。
     // 故 token 从 modelUsage 求和；缺 modelUsage 时退回顶层 usage。美元成本只保留 SDK 原始值，不再按公开价补估算。
     const mu = m.modelUsage as
@@ -436,7 +440,7 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
       base(ctx, {
         kind: 'harness',
         stage: 'result',
-        text: (m.result as string | undefined) ?? (m.subtype as string | undefined),
+        text: resultText ?? (resultErrors.length > 0 ? resultErrors.join('\n') : undefined) ?? (m.subtype as string | undefined),
         costUsd: resultCostUsd,
         costSource: resultCostSource,
         costConfidence: resultCostConfidence,

@@ -88,8 +88,6 @@ export function DiagnosticsView({
   const mcpUnknown = mcps.length > 0 && !mcpKnown
   const mcpPartial = mcpLive.length > 0 && mcps.length > mcpLive.length
   const sessionCount = projects.reduce((s, p) => s + p.sessions.length, 0)
-  const sdkKnown = !!diag?.sdkVersion && diag.sdkVersion !== 'unknown'
-
   // 危险审计（观测，不拦截）：本会话 danger 标记 + 跨会话趋势
   const sessionDangers = useMemo(
     () => turns.flatMap((t) => t.items).filter((e) => e.danger && e.stage !== 'tool_result'),
@@ -171,7 +169,7 @@ export function DiagnosticsView({
       <div className="d-hero">
         <div>
           <h2>Diagnostics</h2>
-          <div className="sub">环境 / SDK settingSources / SQLite / 安全审计 · 出问题先看这里</div>
+          <div className="sub">Provider / MCP / SQLite / 安全审计 · 出问题先看这里</div>
         </div>
         <div className="right">
           <button className="btn" onClick={onReprobe}>
@@ -180,10 +178,10 @@ export function DiagnosticsView({
         </div>
       </div>
 
-      <div className="d-pane" style={{ padding: 0, overflow: 'visible', flex: 'none' }}>
+      <div className="d-content">
         {/* System verdict */}
-        <div className="verdict" style={{ maxWidth: 1180, margin: '22px auto 0', padding: '0 32px' }}>
-          <div className={`verdict-card full ${vstate}`} style={{ margin: 0 }}>
+        <div className="d-verdict-wrap">
+          <div className={`verdict-card full ${vstate}`}>
             <div className="verdict-left">
               <div className="lbl">SYSTEM VERDICT</div>
               <div className={`judgement ${vstate}`}>
@@ -200,16 +198,8 @@ export function DiagnosticsView({
                   <span className="sdot" />
                   agent cli
                 </div>
-                <div className="v">{agents.length ? `${agents.length} Provider ready` : '未检测'}</div>
-                <div className="sub">{agents.map((agent) => `${agent.name} · ${agent.transport ?? 'native'}`).join(' · ') || '—'}</div>
-              </div>
-              <div className={`verdict-pillar ${sdkKnown ? 'ok' : 'warn'}`}>
-                <div className="nm">
-                  <span className="sdot" />
-                  sdk
-                </div>
-                <div className="v">{diag?.sdkVersion ?? '—'}</div>
-                <div className="sub">settingSources {diag?.settingSources ?? '—'}</div>
+                <div className="v">{agents.length ? `${agents.length} 个 Provider` : '未检测'}</div>
+                <div className="sub">{agents.map((agent) => agent.name).join(' · ') || '—'}</div>
               </div>
               <div className={`verdict-pillar ${mcpNeedsProbe ? 'warn' : mcpTotal > 0 ? 'ok' : ''}`}>
                 <div className="nm">
@@ -219,22 +209,12 @@ export function DiagnosticsView({
                 <div className="v">{mcpVerdictValue}</div>
                 <div className="sub">{mcpVerdictSub}</div>
               </div>
-              <div className={`verdict-pillar ${runtimeNeedsAttention ? 'warn' : ''}`}>
-                <div className="nm">
-                  <span className="sdot" />
-                  runtime caps
-                </div>
-                <div className="v">{runtimeNeedsAttention ? `${runtimeWarnings.length} warning` : '无告警'}</div>
-                <div className="sub">
-                  {runtimeNeedsAttention ? firstRuntimeWarningLabel : 'CLI runtime capability 未报告异常'}
-                </div>
-              </div>
               <div className="verdict-pillar">
                 <div className="nm">
                   <span className="sdot" />
                   ledger
                 </div>
-                <div className="v">{usage?.turns ?? stats?.totals.turns ?? 0} turns</div>
+                <div className="v">{usage?.turns ?? stats?.totals.turns ?? 0} 轮</div>
                 <div className="sub">
                   {sessionCount} 会话 · db 健康未暴露
                 </div>
@@ -248,63 +228,26 @@ export function DiagnosticsView({
           <div className="col">
             <div className="d-card">
               <div className="h">
-                <h3>Runtime · environment</h3>
-                <span className="sub">app launch 时探测</span>
+                <h3>运行环境</h3>
+                <span className="sub">App 启动时探测</span>
               </div>
               <div className="b">
                 {agents.map((agent) => (
                   <div className="d-row" key={agent.id}>
                     <span className="k">{agent.name}</span>
-                    <span className="v path">{agent.path}</span>
+                    <span className="v path" title={agent.path}>{agent.path}</span>
                     <span className="badge">
                       <span className={`sdot ${agent.health?.state === 'degraded' ? 'warn' : 'ok'}`} />
                       {agent.version ?? agent.transport ?? 'ready'}
                     </span>
                   </div>
                 ))}
-                <div className="d-row">
-                  <span className="k">sdk</span>
-                  <span className="v">@anthropic-ai/claude-agent-sdk</span>
-                  <span className="badge">
-                    <span className={`sdot ${sdkKnown ? 'ok' : 'off'}`} />
-                    {sdkKnown ? `${diag!.sdkVersion} ok` : '—'}
-                  </span>
-                </div>
-                <div className="d-row">
-                  <span className="k">runtime capability</span>
-                  <span className={`v ${runtimeNeedsAttention ? 'warn' : 'ok'}`}>
-                    {runtimeNeedsAttention
-                      ? runtimeWarnings
-                          .map((w) => `runtime capability warning · ${w.runtimeProvider} ${w.kind} ${w.name}: ${w.observed ?? w.reason}`)
-                          .join('；')
-                      : '无 runtime capability warning'}
-                  </span>
-                  <span className="badge">
-                    <span className={`sdot ${runtimeNeedsAttention ? 'warn' : 'ok'}`} />
-                    {runtimeNeedsAttention ? `${runtimeWarnings.length} warning` : 'ok'}
-                  </span>
-                </div>
-                <div className="d-row">
-                  <span className="k">settingSources</span>
-                  <span className="v">{diag?.settingSources ?? '（发个任务后捕获）'}</span>
-                  <span className="badge">
-                    <span className={`sdot ${diag ? 'ok' : 'off'}`} />
-                    {diag ? 'resolved' : '待探测'}
-                  </span>
-                </div>
-                <div className="d-row">
-                  <span className="k">node / electron</span>
-                  <span className="v path">renderer 不暴露 · 见主进程</span>
-                  <span className="badge">
-                    <span className="sdot off" />—
-                  </span>
-                </div>
               </div>
             </div>
 
             <div className="d-card">
               <div className="h">
-                <h3>SQLite · ledger</h3>
+                <h3>账本与用量</h3>
                 <span className="sub">better-sqlite3 · WAL · 跨会话统计源（健康状态未暴露给 renderer）</span>
               </div>
               <div className="d-stat-row">
@@ -347,22 +290,22 @@ export function DiagnosticsView({
 
           {/* RIGHT */}
           <div className="col">
-            <div className="d-card" style={{ borderColor: 'rgba(255,107,107,0.22)' }}>
+            <div className={`d-card danger-audit-card ${trendTotal || sessionDangers.length ? 'has-findings' : ''}`}>
               <div className="h">
-                <h3>Danger · 安全审计</h3>
-                <span className="sub">观测·不拦截（P3 观测态）</span>
+                <h3>安全审计</h3>
+                <span className="sub">仅观测，不拦截</span>
                 <span className="hright">本会话 {sessionDangers.length} · 跨会话 {trendTotal}</span>
               </div>
               <div className="danger-summary">
                 <div className="cell">
                   <div className="lbl">高危 · 跨会话</div>
                   <div className="v bad">{trendHi}</div>
-                  <div className="sub">rm-rf / sudo / git push / 远程脚本</div>
+                  <div className="sub">跨会话累计标记</div>
                 </div>
                 <div className="cell">
                   <div className="lbl">可疑 · 跨会话</div>
                   <div className="v warn">{trendWarn}</div>
-                  <div className="sub">跨项目写 / MCP 写</div>
+                  <div className="sub">跨会话累计标记</div>
                 </div>
                 <div className="cell">
                   <div className="lbl">处置</div>
@@ -397,7 +340,7 @@ export function DiagnosticsView({
 
             <div className="d-card">
               <div className="h">
-                <h3>File-op · 覆盖盲点</h3>
+                <h3>文件追踪盲点</h3>
                 <span className="sub">仅结构化工具精确</span>
               </div>
               <div className="b">
@@ -445,7 +388,7 @@ export function DiagnosticsView({
           </div>
         </div>
         <div className="d-foot">
-          <b>诊断包（导出功能未实现）</b> 拟包含：env / settingSources / SQLite 元数据 / danger 审计 / MCP 状态。
+          <b>诊断包（导出功能未实现）</b> 拟包含：env / SQLite 元数据 / danger 审计 / MCP 状态。
           <br />
           不含任何 prompt 内容、文件原文、tool 输出、secret。
         </div>

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { configuredHookCommands, loadClaudeHookConfig } from './hook-config'
+import { configuredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import type { TraceEvent } from '../shared/trace'
 
 const roots: string[] = []
@@ -127,5 +127,39 @@ describe('Claude Hook 配置反查', () => {
     const commands = configuredHookCommands(hookEvent('PreToolUse:Edit'), loadClaudeHookConfig(cwd, home))
 
     expect(commands).toEqual([])
+  })
+})
+
+describe('Codex Hook 配置反查', () => {
+  it('合并 user/project hooks.json，让未上报 command 的运行事件可展示候选命令', () => {
+    const home = mkdtempSync(join(tmpdir(), 'scry-codex-hook-home-'))
+    const cwd = mkdtempSync(join(tmpdir(), 'scry-codex-hook-project-'))
+    roots.push(home, cwd)
+    mkdirSync(join(home, '.codex'), { recursive: true })
+    mkdirSync(join(cwd, '.codex'), { recursive: true })
+    writeFileSync(join(home, '.codex', 'hooks.json'), JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: 'user-prompt-a.py', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: 'user-prompt-b.py', timeout: 20 }] }
+        ]
+      }
+    }))
+    writeFileSync(join(cwd, '.codex', 'hooks.json'), JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'project-prompt.sh' }] }]
+      }
+    }))
+
+    const commands = configuredHookCommands(
+      hookEvent('UserPromptSubmit:command'),
+      loadCodexHookConfig(cwd, home)
+    )
+
+    expect(commands.map(({ command, source, timeoutSeconds }) => ({ command, source, timeoutSeconds }))).toEqual([
+      { command: 'user-prompt-a.py', source: 'user', timeoutSeconds: 10 },
+      { command: 'user-prompt-b.py', source: 'user', timeoutSeconds: 20 },
+      { command: 'project-prompt.sh', source: 'project', timeoutSeconds: undefined }
+    ])
   })
 })

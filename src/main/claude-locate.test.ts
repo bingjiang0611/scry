@@ -1,12 +1,17 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   QODER_NODE_BIN,
   appBundleRootForExecutable,
+  detectAgentsFast,
   isAcceptedQoderPath,
   normalizeAgentVersion,
   runtimeCliEnv,
   sanitizeNestedAgentEnv,
   selectClaudeBinCandidate,
+  selectCodexBinCandidate,
   selectQoderBinCandidate
 } from './claude-locate'
 
@@ -60,6 +65,69 @@ describe('runtime CLI discovery constraints', () => {
         onPath: '/Users/example/.nvm/bin/claude'
       })
     ).toBe('/Users/example/.local/bin/claude')
+  })
+
+  it('falls back to the Codex executable embedded in ChatGPT when it is absent from PATH', () => {
+    expect(
+      selectCodexBinCandidate({
+        configured: '/custom/codex',
+        configuredExists: true,
+        onPath: '/usr/local/bin/codex',
+        appBin: '/Applications/ChatGPT.app/Contents/Resources/codex',
+        appBinExists: true
+      })
+    ).toBe('/custom/codex')
+    expect(
+      selectCodexBinCandidate({
+        onPath: '/usr/local/bin/codex',
+        appBin: '/Applications/ChatGPT.app/Contents/Resources/codex',
+        appBinExists: true
+      })
+    ).toBe('/usr/local/bin/codex')
+    expect(
+      selectCodexBinCandidate({
+        appBin: '/Applications/ChatGPT.app/Contents/Resources/codex',
+        appBinExists: true
+      })
+    ).toBe('/Applications/ChatGPT.app/Contents/Resources/codex')
+  })
+
+  it('marks configured CLIs as detected without waiting for version subprocesses', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-fast-detect-'))
+    const previous = {
+      SCRY_CLAUDE_PATH: process.env.SCRY_CLAUDE_PATH,
+      SCRY_CODEX_PATH: process.env.SCRY_CODEX_PATH,
+      SCRY_QODERCLI_PATH: process.env.SCRY_QODERCLI_PATH,
+      SCRY_OPENCODE_PATH: process.env.SCRY_OPENCODE_PATH
+    }
+    try {
+      const configured = Object.fromEntries(
+        ['claude', 'codex', 'qodercli', 'opencode'].map((name) => {
+          const path = join(dir, name)
+          writeFileSync(path, '')
+          return [name, path]
+        })
+      )
+      process.env.SCRY_CLAUDE_PATH = configured.claude
+      process.env.SCRY_CODEX_PATH = configured.codex
+      process.env.SCRY_QODERCLI_PATH = configured.qodercli
+      process.env.SCRY_OPENCODE_PATH = configured.opencode
+
+      expect(detectAgentsFast()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'claude', path: configured.claude }),
+          expect.objectContaining({ id: 'codex', path: configured.codex }),
+          expect.objectContaining({ id: 'qoder', path: configured.qodercli }),
+          expect.objectContaining({ id: 'opencode', path: configured.opencode })
+        ])
+      )
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('prepends Node 22 bin to runtime PATH so npm qodercli can resolve env node', () => {

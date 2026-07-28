@@ -11,6 +11,7 @@ import type {
 } from '../../shared/provider'
 import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, RuntimeProvider } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
+import type { CodexHookInspection } from '../codex-hook-trust'
 
 export interface ProviderRunResult {
   externalSessionId?: string
@@ -30,6 +31,7 @@ export interface ProviderRunRequest {
   cwd?: string
   resume?: string
   attachments: AgentInputAttachment[]
+  bypassHookTrust?: boolean
   emit: (event: TraceEvent) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
@@ -62,6 +64,10 @@ export interface AccountFacet {
   read(context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>>
 }
 
+export interface HookTrustFacet {
+  inspect(context: ProviderContext): Promise<CodexHookInspection>
+}
+
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
@@ -71,5 +77,6 @@ export interface ProviderAdapter {
   readonly mcp?: McpFacet
   readonly commands?: CommandsFacet
   readonly account?: AccountFacet
+  readonly hookTrust?: HookTrustFacet
   dispose?(): Promise<void> | void
 }

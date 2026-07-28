@@ -7,6 +7,7 @@ export function useWorkspaceState() {
   const [recent, setRecent] = useState<string[]>([])
   const [projects, setProjects] = useState<ProjectMeta[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [hydrated, setHydrated] = useState(false)
 
   const loadProjects = useCallback((): void => {
     window.scry.listProjects().then(setProjects)
@@ -43,8 +44,16 @@ export function useWorkspaceState() {
   }, [])
 
   useEffect(() => {
-    loadProjects()
-    refreshRecent()
+    let cancelled = false
+    void Promise.allSettled([window.scry.listProjects(), window.scry.recentFolders()]).then(([nextProjects, nextRecent]) => {
+      if (cancelled) return
+      if (nextProjects.status === 'fulfilled') setProjects(nextProjects.value)
+      if (nextRecent.status === 'fulfilled') setRecent(nextRecent.value)
+      setHydrated(true)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [loadProjects, refreshRecent])
 
   return {
@@ -55,6 +64,7 @@ export function useWorkspaceState() {
     setProjects,
     activeSessionId,
     setActiveSessionId,
+    hydrated,
     loadProjects,
     refreshRecent,
     chooseFolder,

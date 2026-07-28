@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
+import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import { isSupportedImageMimeType, runtimeProviderForAgentId, type AgentInputAttachment, type RuntimeProvider } from '@shared/runtime'
-import type { SessionProviderId } from '@shared/provider'
+import type { ProviderId, SessionProviderId } from '@shared/provider'
 import { basename, relTime } from './format'
 import { AppShell } from './components/AppShell'
 import { Sidebar } from './components/Sidebar'
@@ -18,7 +18,7 @@ import { OverviewPanel } from './components/OverviewPanel'
 import { SkillsModal, McpModal } from './components/Modals'
 import { TurnDiffReviewPanel, type TurnDiffReview } from './components/TurnDiffReviewPanel'
 import { firstSessionInProject } from './session-selection'
-import type { ProjectMeta } from './env'
+import type { ParsedTurn, ProjectMeta } from './env'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { useIntegrations } from './hooks/useIntegrations'
@@ -164,22 +164,95 @@ export function clipboardAttachmentToDraft(attachment: AgentInputAttachment): Dr
 }
 
 interface TurnDoneEffects {
+  activeSessionId?: string | null
   setActiveSessionId: (sessionId: string) => void
   refreshAfterTurn: () => void
   loadProjects: () => void
 }
 
-export function applyTurnDoneEffects(event: { sessionId?: string }, effects: TurnDoneEffects): void {
-  if (event.sessionId) effects.setActiveSessionId(event.sessionId)
+export function applyTurnDoneEffects(event: { runId?: string; sessionId?: string }, effects: TurnDoneEffects): void {
+  if (
+    event.sessionId &&
+    (effects.activeSessionId === event.sessionId ||
+      effects.activeSessionId === event.runId)
+  ) {
+    effects.setActiveSessionId(event.sessionId)
+  }
   effects.refreshAfterTurn()
   effects.loadProjects()
 }
 
 export function applySessionCapturedEffects(
-  event: { sessionId?: string },
-  effects: { setActiveSessionId: (sessionId: string) => void }
+  event: { runId?: string; sessionId?: string; previousSessionId?: string },
+  effects: {
+    activeSessionId?: string | null
+    setActiveSessionId: (sessionId: string) => void
+    loadProjects: () => void
+  }
 ): void {
-  if (event.sessionId) effects.setActiveSessionId(event.sessionId)
+  if (
+    event.sessionId &&
+    (effects.activeSessionId === event.sessionId ||
+      effects.activeSessionId === event.runId ||
+      effects.activeSessionId === event.previousSessionId)
+  ) {
+    effects.setActiveSessionId(event.sessionId)
+  }
+  effects.loadProjects()
+}
+
+export function activeRunForSession(
+  activeRuns: ActiveRun[] | ActiveRun | null,
+  cwd: string,
+  sessionId: string,
+  providerId: SessionProviderId
+): ActiveRun | null {
+  const runs = Array.isArray(activeRuns) ? activeRuns : activeRuns ? [activeRuns] : []
+  return (
+    runs.find((run) => {
+      if (run.done) return false
+      const runSessionId = run.externalSessionId ?? run.sessionId
+      return run.cwd === cwd && (run.runId === sessionId || runSessionId === sessionId) && run.providerId === providerId
+    }) ?? null
+  )
+}
+
+export async function restoreActiveSessionSelection(
+  args: {
+    runId?: string
+    sessionId: string
+    externalSessionId?: string
+    cwd: string
+    providerId: ProviderId
+  },
+  effects: {
+    prepareRunFocus: (runId: string) => void
+    adoptActiveRun: (runId: string) => Promise<ActiveRun | null>
+    loadSession: (context: {
+      providerId: ProviderId
+      cwd: string
+      externalSessionId: string
+    }) => Promise<ParsedTurn[] | null>
+    replaceWithParsedSession: (
+      sessionId: string,
+      parsed: ParsedTurn[],
+      options: { activeRun: ActiveRun }
+    ) => void
+  }
+): Promise<boolean> {
+  if (!args.runId) return false
+  effects.prepareRunFocus(args.runId)
+  const activeRun = await effects.adoptActiveRun(args.runId)
+  if (!activeRun) return false
+  const parsed = args.externalSessionId
+    ? await effects.loadSession({
+        providerId: args.providerId,
+        cwd: args.cwd,
+        externalSessionId: args.externalSessionId
+      })
+    : null
+  effects.replaceWithParsedSession(args.sessionId, parsed ?? [], { activeRun })
+  return true
 }
 
 export function defaultNewConversationCwd(
@@ -196,8 +269,7 @@ interface NewConversationEffects {
   cwd: string | null
   defaultCwd: string | null
   running: boolean
-  stopRun: () => Promise<void>
-  clearTurns: () => void
+  clearTurns: (options?: { preserveRunning?: boolean }) => void
   activateCwd: (cwd: string) => Promise<void>
   chooseFolder: () => Promise<string | null>
   newSession: () => Promise<boolean>
@@ -207,7 +279,6 @@ interface NewConversationEffects {
 }
 
 export async function applyNewConversationEffects(effects: NewConversationEffects): Promise<void> {
-  if (effects.running) await effects.stopRun()
   effects.clearTurns()
   let nextCwd = effects.cwd
   if (!nextCwd && effects.defaultCwd) {
@@ -226,18 +297,56 @@ export function App() {
   const [input, setInput] = useState('')
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachment[]>([])
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([])
+  const [activeRunHydrated, setActiveRunHydrated] = useState(false)
   const workspace = useWorkspaceState()
   const { cwd, setCwd, recent, projects, activeSessionId, setActiveSessionId, loadProjects, chooseFolder } = workspace
+  const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
+  const terminalRunIdsRef = useRef(new Set<string>())
+  const markRunStarted = useCallback((runId: string): void => {
+    terminalRunIdsRef.current.delete(runId)
+    setRunningRunIds((prev) => {
+      if (prev.has(runId)) return prev
+      const next = new Set(prev)
+      next.add(runId)
+      return next
+    })
+  }, [])
+  const markRunFinished = useCallback((runId: string): void => {
+    terminalRunIdsRef.current.add(runId)
+    setRunningRunIds((prev) => {
+      if (!prev.has(runId)) return prev
+      const next = new Set(prev)
+      next.delete(runId)
+      return next
+    })
+  }, [])
+  const cwdRef = useRef(cwd)
+  const activeSessionIdRef = useRef(activeSessionId)
+  cwdRef.current = cwd
+  activeSessionIdRef.current = activeSessionId
+  const selectSessionId = useCallback(
+    (sessionId: string | null): void => {
+      activeSessionIdRef.current = sessionId
+      setActiveSessionId(sessionId)
+    },
+    [setActiveSessionId]
+  )
   const integrations = useIntegrations(cwd)
   const session = useAgentSession({
     onTurnDone: (event) => {
+      markRunFinished(event.runId)
       applyTurnDoneEffects(event, {
-        setActiveSessionId,
+        activeSessionId: activeSessionIdRef.current,
+        setActiveSessionId: selectSessionId,
         refreshAfterTurn: integrations.refreshAfterTurn,
         loadProjects
       })
     },
-    onError: () => integrations.loadGitDiff()
+    onError: (event) => {
+      markRunFinished(event.runId)
+      integrations.loadGitDiff()
+      loadProjects()
+    }
   })
   const [showPanel, setShowPanel] = useState(true)
   const sidebarPane = useResizablePane({
@@ -311,23 +420,55 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
     const offSession =
       typeof window.scry.onSession === 'function'
         ? window.scry.onSession((event) => {
-            applySessionCapturedEffects(event, { setActiveSessionId })
+            markRunStarted(event.runId)
+            applySessionCapturedEffects(event, {
+              activeSessionId: activeSessionIdRef.current,
+              setActiveSessionId: selectSessionId,
+              loadProjects
+            })
           })
         : () => {}
-    window.scry.activeRun().then((run) => {
-      if (!run || run.done) return
-      applySessionCapturedEffects(run, { setActiveSessionId })
-      if (run.providerId) integrations.setSelectedId(run.providerId)
-      if (run.cwd && run.cwd !== cwd) {
-        setCwd(run.cwd)
-        void window.scry.setCwd(run.cwd)
-      }
-    })
-    return offSession
-  }, [cwd, integrations.setSelectedId, setActiveSessionId, setCwd])
+    window.scry
+      .activeRuns()
+      .then((runs) => {
+        setRunningRunIds((prev) => {
+          const next = new Set(prev)
+          for (const run of runs) {
+            if (!run.done && !terminalRunIdsRef.current.has(run.runId)) next.add(run.runId)
+          }
+          return next
+        })
+      })
+      .catch(() => {})
+    window.scry
+      .activeRun()
+      .then((run) => {
+        if (cancelled || !run || run.done) return
+        selectSessionId(run.externalSessionId ?? run.sessionId ?? run.runId)
+        loadProjects()
+        if (run.providerId) integrations.setSelectedId(run.providerId)
+        if (run.cwd && run.cwd !== cwdRef.current) {
+          setCwd(run.cwd)
+          void window.scry.setCwd(run.cwd)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setActiveRunHydrated(true)
+      })
+    return () => {
+      cancelled = true
+      offSession()
+    }
+  }, [integrations.setSelectedId, loadProjects, markRunStarted, selectSessionId, setCwd])
+
+  useEffect(() => {
+    if (workspace.hydrated && activeRunHydrated && integrations.agentsHydrated) window.scry.rendererReady?.()
+  }, [activeRunHydrated, integrations.agentsHydrated, workspace.hydrated])
 
   const pickSlash = (cmd: SlashCmd): void => {
     // 填入 "/name "，让用户补参数或直接 Enter 发送（有空白后 slashToken 变 null，菜单自然关闭）
@@ -400,15 +541,17 @@ export function App() {
   const startPrompt = useCallback(
     async (text: string, attachments: AgentInputAttachment[] = []): Promise<void> => {
       shouldStickToBottomRef.current = true
-      await session.send(text, {
+      const runId = await session.send(text, {
+        cwd: cwdRef.current ?? undefined,
         providerId: integrations.selectedProviderId,
         agentId: integrations.selectedId,
         backend: integrations.backend,
         runtimeProvider: runtimeProviderForAgentId(integrations.selectedId),
         attachments
       })
+      if (runId && activeSessionIdRef.current == null) selectSessionId(runId)
     },
-    [integrations.backend, integrations.selectedId, session.send]
+    [integrations.backend, integrations.selectedId, selectSessionId, session.send]
   )
 
   useEffect(() => {
@@ -496,17 +639,23 @@ export function App() {
   const pickRecent = async (dir: string): Promise<void> => {
     const firstSession = firstSessionInProject(projects, dir)
     if (firstSession) {
-      await pickSession(dir, firstSession.sessionId, firstSession.providerId)
+      await pickSession(
+        dir,
+        firstSession.sessionId,
+        firstSession.providerId,
+        firstSession.externalSessionId,
+        firstSession.runId
+      )
       return
     }
-    if (session.busy) await session.stopRun()
+    await window.scry.focusRun(null)
     await window.scry.setCwd(dir)
     setCwd(dir)
     session.clearTurns()
     setQueuedPrompts([])
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
-    setActiveSessionId(null)
+    selectSessionId(null)
     setView('chat')
   }
 
@@ -514,11 +663,11 @@ export function App() {
     setQueuedPrompts([])
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
+    await window.scry.focusRun(null)
     await applyNewConversationEffects({
       cwd,
       defaultCwd: defaultNewConversationCwd(cwd, projects, recent),
-      running: session.running,
-      stopRun: session.stopRun,
+      running: false,
       clearTurns: session.clearTurns,
       activateCwd: async (dir) => {
         await window.scry.setCwd(dir)
@@ -526,30 +675,65 @@ export function App() {
       },
       chooseFolder,
       newSession: () => window.scry.newSession(integrations.providerContext),
-      setActiveSessionId,
+      setActiveSessionId: selectSessionId,
       setView,
       focusComposer: () => window.setTimeout(() => taRef.current?.focus(), 0)
     })
   }
 
-  const pickSession = async (projectCwd: string, sessionId: string, providerId: SessionProviderId): Promise<void> => {
+  const pickSession = async (
+    projectCwd: string,
+    sessionId: string,
+    providerId: SessionProviderId,
+    externalSessionId?: string,
+    knownRunId?: string
+  ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
-    if (session.running) await session.stopRun() // 切到历史会话前先停在跑的任务
+    let runId = knownRunId
+    if (!runId) {
+      const activeRuns = await window.scry.activeRuns()
+      runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId)?.runId
+    }
     session.clearTurns()
     setQueuedPrompts([])
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
-    setActiveSessionId(sessionId)
+    selectSessionId(sessionId)
     setView('chat')
     await window.scry.setCwd(projectCwd)
     setCwd(projectCwd)
     integrations.setSelectedId(providerId)
-    const parsed = await window.scry.loadSession({ providerId, cwd: projectCwd, externalSessionId: sessionId })
-    if (parsed) session.replaceWithParsedSession(sessionId, parsed)
+    if (
+      await restoreActiveSessionSelection(
+        { runId, sessionId, externalSessionId, cwd: projectCwd, providerId },
+        {
+          prepareRunFocus: session.prepareRunFocus,
+          adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
+          loadSession: (context) => window.scry.loadSession(context),
+          replaceWithParsedSession: session.replaceWithParsedSession
+        }
+      )
+    ) {
+      return
+    }
+    if (runId) {
+      session.clearTurns()
+    }
+    await window.scry.focusRun(null)
+    if (!externalSessionId) return
+    const parsed = await window.scry.loadSession({ providerId, cwd: projectCwd, externalSessionId })
+    session.replaceWithParsedSession(sessionId, parsed ?? [], {
+      activeRun: null
+    })
   }
 
-  const deleteSession = async (projectCwd: string, sessionId: string, providerId: SessionProviderId): Promise<void> => {
-    await window.scry.deleteSession({ providerId, cwd: projectCwd, externalSessionId: sessionId })
+  const deleteSession = async (
+    projectCwd: string,
+    sessionId: string,
+    providerId: SessionProviderId,
+    externalSessionId?: string
+  ): Promise<void> => {
+    await window.scry.deleteSession({ providerId, cwd: projectCwd, externalSessionId: externalSessionId ?? sessionId })
     // 乐观移除：只删这一条、保持其余顺序，不全量重扫重排（避免删除后列表顺序跳动）
     workspace.removeSessionFromProjects(projectCwd, sessionId, providerId)
   }
@@ -641,6 +825,7 @@ export function App() {
           activeCwd={cwd}
           activeSessionId={activeSessionId}
           activeProviderId={integrations.selectedProviderId}
+          runningRunIds={runningRunIds}
           skillCount={integrations.skills.length}
           mcpOnline={integrations.mcpLive.filter((live) => live.status === 'connected').length}
           mcpTotal={integrations.mcps.length}
@@ -695,6 +880,7 @@ export function App() {
           cwd={cwd}
           view={view}
           agent={integrations.selectedAgent}
+          agentScanning={integrations.agentsScanning}
           showPanel={panelVisible}
           canTogglePanel={view === 'chat'}
           onView={setView}
@@ -734,15 +920,18 @@ export function App() {
                       <>
                         {providerLabels.map(([id, label]) => {
                           const agent = integrations.agents.find((candidate) => candidate.id === id)
+                          const checking = !agent && integrations.agentsScanning
                           return (
                             <span className={`stat-pill ${agent ? 'ok' : ''}`} key={id}>
-                              <span className={`sdot ${agent ? 'ok' : 'off'}`} />
+                              <span className={`sdot ${agent ? 'ok' : checking ? 'checking' : 'off'}`} />
                               <span>{label}</span>
                               {agent ? (
                                 <>
                                   <b>{agent.version ?? '已检测'}</b>
                                   <span className="sub" title={agent.path}>· {basename(agent.path)}</span>
                                 </>
+                              ) : checking ? (
+                                <span className="sub">检测中…</span>
                               ) : (
                                 <span className="sub">未检测到</span>
                               )}

@@ -40,6 +40,7 @@ interface SessionState {
   lastGeneration: number
   lastTurnIndex: number
   lastCommittedRecordId?: string
+  committedProviderTurnIds?: string[]
 }
 
 interface OpenTurnState {
@@ -72,6 +73,11 @@ interface TranscriptRead {
   stable: boolean
   observed: boolean
   events: TraceEvent[]
+  observable: {
+    tools: boolean
+    hooks: boolean
+    usage: boolean
+  }
 }
 
 const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
@@ -155,6 +161,11 @@ function toolUseIdOf(payload: Record<string, unknown>): string | undefined {
   return stringAt(payload, 'tool_use_id', 'toolUseId', 'call_id', 'callId', 'id')
 }
 
+function providerTurnIdOf(payload: Record<string, unknown>): string | undefined {
+  return stringAt(payload, 'turn_id', 'turnId')
+    ?? stringAt(nestedRecord(payload, 'task') ?? {}, 'turn_id', 'turnId', 'id')
+}
+
 function usageTrace(payload: Record<string, unknown>, runId: string, at: string): TraceEvent | null {
   const usage = nestedRecord(payload, 'usage') ?? nestedRecord(nestedRecord(payload, 'result') ?? {}, 'usage')
   if (!usage) return null
@@ -175,23 +186,35 @@ function usageTrace(payload: Record<string, unknown>, runId: string, at: string)
   }
 }
 
-function inferredSkillEvents(toolName: string, input: Record<string, unknown>, runId: string, at: string): TraceEvent[] {
-  const candidates: string[] = []
-  if (toolName === 'Read' && typeof input.file_path === 'string') candidates.push(input.file_path)
-  if (toolName === 'Bash' && typeof input.command === 'string') candidates.push(...input.command.split(/\s+/))
+function stringsIn(value: unknown, out: string[] = []): string[] {
+  if (typeof value === 'string') out.push(value)
+  else if (Array.isArray(value)) value.forEach((item) => stringsIn(item, out))
+  else if (value && typeof value === 'object') Object.values(value as Record<string, unknown>).forEach((item) => stringsIn(item, out))
+  return out
+}
+
+function inferredSkillEvents(
+  _toolName: string,
+  input: Record<string, unknown>,
+  runId: string,
+  at: string,
+  toolUseId?: string
+): TraceEvent[] {
+  const candidates = stringsIn(input)
   const names = new Set<string>()
   for (const candidate of candidates) {
-    const match = /(?:^|\/)(?:\.claude|\.codex|\.agents)?\/?skills\/([^/\s]+)(?:\/SKILL\.md)?/.exec(candidate)
-    if (match?.[1]) names.add(match[1])
+    const pattern = /(?:^|[/\s"'`])(?:\.claude|\.codex|\.agents)\/skills\/([^/\s"'`]+)(?:\/SKILL\.md)?/g
+    for (const match of candidate.matchAll(pattern)) if (match[1]) names.add(match[1])
   }
   return [...names].map((name) => ({
-    id: `skill-${stableHash(`${name}\0${at}`).slice(0, 16)}`,
+    id: `skill-${stableHash(`${name}\0${toolUseId ?? at}`).slice(0, 16)}`,
     ts: at,
     runId,
     kind: 'skill' as const,
     stage: `skill:${name}`,
     tool: 'Skill',
     name,
+    toolUseId,
     input: { source: 'tool_path' }
   }))
 }
@@ -214,7 +237,7 @@ function lifecycleTraceEvents(args: {
       const mcp = parseMcp(toolName, input)
       const file = fileOpOf(toolName, input)
       const danger = classifyDanger(toolName, input)
-      out.push(...inferredSkillEvents(toolName, input, args.runId, at))
+      out.push(...inferredSkillEvents(toolName, input, args.runId, at, toolUseId))
       out.push({
         id: toolUseId ?? `tool-${stableHash([args.event, args.payload]).slice(0, 16)}`,
         ts: at,
@@ -252,29 +275,318 @@ function lifecycleTraceEvents(args: {
   return out
 }
 
-async function stableTranscript(path: string, runId: string, promptHash?: string): Promise<TranscriptRead> {
+interface ParsedTranscriptTurn {
+  providerTurnId?: string
+  userText: string
+  events: TraceEvent[]
+  observable: TranscriptRead['observable']
+}
+
+function callInput(payload: Record<string, unknown>): Record<string, unknown> {
+  const raw = payload.arguments ?? payload.input
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
+  if (typeof raw !== 'string') return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+  } catch {
+    // Custom Codex tools may persist their JavaScript source verbatim.
+  }
+  return { raw }
+}
+
+function textContent(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value
+  if (!Array.isArray(value)) return undefined
+  const text = value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const row = item as Record<string, unknown>
+    const candidate = row.text ?? row.content
+    return typeof candidate === 'string' ? [candidate] : []
+  }).join('')
+  return text || undefined
+}
+
+function codexHookEvent(payload: Record<string, unknown>, runId: string, at: string): TraceEvent | null {
+  const type = stringAt(payload, 'type')
+  if (!type || !/^hook_(?:started|progress|response|success|cancelled|additional_context)$/.test(type)) return null
+  const outcome = stringAt(payload, 'outcome')
+    ?? (type === 'hook_started' ? 'started' : type === 'hook_progress' || type === 'hook_additional_context' ? 'progress' : type === 'hook_cancelled' ? 'cancelled' : 'success')
+  const exitCode = typeof payload.exit_code === 'number' ? payload.exit_code : typeof payload.exitCode === 'number' ? payload.exitCode : undefined
+  const hookId = stringAt(payload, 'hook_id', 'hookId', 'tool_use_id', 'toolUseId')
+  const hookName = stringAt(payload, 'hook_name', 'hookName', 'name') ?? 'hook'
+  const hookEvent = stringAt(payload, 'hook_event', 'hookEvent', 'event') ?? 'Hook'
+  return {
+    id: `codex-hook-${stableHash([hookId, type, outcome, at]).slice(0, 16)}`,
+    ts: at,
+    runId,
+    kind: 'hook',
+    stage: type === 'hook_started' ? 'hook_started' : type === 'hook_progress' || type === 'hook_additional_context' ? 'hook_progress' : 'hook_response',
+    tool: hookName,
+    name: hookEvent,
+    hookId,
+    hookName,
+    hookEvent,
+    hookCommand: stringAt(payload, 'command', 'hook_command', 'hookCommand'),
+    hookOutcome: outcome,
+    hookExitCode: exitCode,
+    isError: outcome === 'error' || (exitCode != null && exitCode !== 0)
+  }
+}
+
+function parseCodexRollout(content: string, runId: string): { recognized: boolean; turns: ParsedTranscriptTurn[] } {
+  const turns: ParsedTranscriptTurn[] = []
+  let current: ParsedTranscriptTurn | undefined
+  let sawCodexLine = false
+  type UsageCounters = Required<Pick<TraceEvent, 'tokensIn' | 'tokensOut' | 'cacheReadTokens' | 'cacheCreationTokens' | 'reasoningTokens'>>
+  const emptyUsage = (): UsageCounters => ({
+    tokensIn: 0,
+    tokensOut: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    reasoningTokens: 0
+  })
+  let cumulativeUsage = emptyUsage()
+  let turnUsageBaseline = emptyUsage()
+  let latestTurnCumulative: UsageCounters | undefined
+  let usage: Required<Pick<TraceEvent, 'tokensIn' | 'tokensOut' | 'cacheReadTokens' | 'cacheCreationTokens' | 'reasoningTokens'>> = {
+    tokensIn: 0,
+    tokensOut: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    reasoningTokens: 0
+  }
+  let usageObserved = false
+  let lastAssistant: string | undefined
+
+  const finishUsage = (at: string): void => {
+    if (!current || !usageObserved) return
+    const finalUsage = latestTurnCumulative
+      ? {
+          tokensIn: Math.max(0, latestTurnCumulative.tokensIn - turnUsageBaseline.tokensIn),
+          tokensOut: Math.max(0, latestTurnCumulative.tokensOut - turnUsageBaseline.tokensOut),
+          cacheReadTokens: Math.max(0, latestTurnCumulative.cacheReadTokens - turnUsageBaseline.cacheReadTokens),
+          cacheCreationTokens: Math.max(0, latestTurnCumulative.cacheCreationTokens - turnUsageBaseline.cacheCreationTokens),
+          reasoningTokens: Math.max(0, latestTurnCumulative.reasoningTokens - turnUsageBaseline.reasoningTokens)
+        }
+      : usage
+    current.events.push({
+      id: `codex-usage-${stableHash([current.providerTurnId, finalUsage]).slice(0, 16)}`,
+      ts: at,
+      runId,
+      kind: 'harness',
+      stage: 'result',
+      ...finalUsage
+    })
+    current.observable.usage = true
+  }
+
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue
+    let row: Record<string, unknown>
+    try {
+      row = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const type = stringAt(row, 'type')
+    const payload = nestedRecord(row, 'payload') ?? {}
+    const at = timestampOf(row)
+    if (type === 'session_meta' || type === 'turn_context' || type === 'event_msg' || type === 'response_item') sawCodexLine = true
+    if (type === 'event_msg' && payload.type === 'task_started') {
+      current = {
+        providerTurnId: stringAt(payload, 'turn_id', 'turnId'),
+        userText: '',
+        events: [],
+        observable: { tools: true, hooks: false, usage: false }
+      }
+      turns.push(current)
+      turnUsageBaseline = { ...cumulativeUsage }
+      latestTurnCumulative = undefined
+      usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
+      usageObserved = false
+      lastAssistant = undefined
+      continue
+    }
+    if (!current) continue
+
+    const hook = codexHookEvent(payload, runId, at)
+    if (hook) {
+      current.events.push(hook)
+      current.observable.hooks = true
+      continue
+    }
+
+    if (type === 'event_msg' && payload.type === 'user_message') {
+      current.userText = stringAt(payload, 'message', 'text', 'prompt') ?? textContent(payload.content) ?? current.userText
+      continue
+    }
+    if (type === 'event_msg' && payload.type === 'token_count') {
+      const info = nestedRecord(payload, 'info') ?? {}
+      const last = nestedRecord(info, 'last_token_usage')
+      const total = nestedRecord(info, 'total_token_usage')
+      if (total) {
+        const number = (key: string): number => typeof total[key] === 'number' && Number.isFinite(total[key]) ? total[key] as number : 0
+        latestTurnCumulative = {
+          tokensIn: number('input_tokens'),
+          tokensOut: number('output_tokens'),
+          cacheReadTokens: number('cached_input_tokens'),
+          cacheCreationTokens: number('cache_write_input_tokens'),
+          reasoningTokens: number('reasoning_output_tokens')
+        }
+        cumulativeUsage = { ...latestTurnCumulative }
+        usageObserved = true
+      }
+      if (last) {
+        const add = (key: string): number => typeof last[key] === 'number' && Number.isFinite(last[key]) ? last[key] as number : 0
+        usage.tokensIn += add('input_tokens')
+        usage.tokensOut += add('output_tokens')
+        usage.cacheReadTokens += add('cached_input_tokens')
+        usage.cacheCreationTokens += add('cache_write_input_tokens')
+        usage.reasoningTokens += add('reasoning_output_tokens')
+        usageObserved = true
+      }
+      continue
+    }
+    if (type === 'event_msg' && payload.type === 'agent_message') {
+      lastAssistant = stringAt(payload, 'message', 'text') ?? textContent(payload.content) ?? lastAssistant
+      continue
+    }
+    if (type === 'event_msg' && payload.type === 'task_complete') {
+      finishUsage(at)
+      const assistant = stringAt(payload, 'last_agent_message', 'lastAgentMessage') ?? lastAssistant
+      if (assistant) current.events.push({
+        id: `codex-assistant-${stableHash([current.providerTurnId, assistant]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'model',
+        stage: 'text',
+        text: assistant
+      })
+      if (payload.error != null) current.events.push({
+        id: `codex-error-${stableHash([current.providerTurnId, payload.error]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'harness',
+        stage: 'task_error',
+        text: summarize(payload.error),
+        output: summarize(payload.error),
+        isError: true
+      })
+      continue
+    }
+    if (type !== 'response_item') continue
+
+    const itemType = stringAt(payload, 'type')
+    if (itemType === 'message' && stringAt(payload, 'role') === 'assistant') {
+      lastAssistant = textContent(payload.content) ?? lastAssistant
+      continue
+    }
+    if (itemType === 'agent_message') {
+      lastAssistant = stringAt(payload, 'message', 'text') ?? textContent(payload.content) ?? lastAssistant
+      continue
+    }
+
+    const isCall = itemType === 'custom_tool_call' || itemType === 'function_call' || itemType === 'tool_search_call'
+    if (isCall) {
+      const tool = stringAt(payload, 'name') ?? itemType
+      const toolUseId = stringAt(payload, 'call_id', 'callId', 'id')
+      const input = callInput(payload)
+      const cls = classifyTool(tool, input)
+      const mcp = parseMcp(tool, input)
+      const file = fileOpOf(tool, input)
+      const danger = classifyDanger(tool, input)
+      current.events.push(...inferredSkillEvents(tool, input, runId, at, toolUseId))
+      current.events.push({
+        id: `codex-tool-${stableHash([toolUseId, tool]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: cls.kind,
+        stage: `${cls.kind}:${cls.name}`,
+        tool,
+        name: cls.name,
+        toolUseId,
+        input,
+        ...mcp,
+        ...file,
+        ...(danger ? { danger } : {})
+      })
+      continue
+    }
+
+    const isOutput = itemType === 'custom_tool_call_output' || itemType === 'function_call_output' || itemType === 'tool_search_output'
+    if (isOutput) {
+      const toolUseId = stringAt(payload, 'call_id', 'callId', 'id')
+      const output = summarize(payload.output ?? payload.result ?? payload.tools)
+      current.events.push({
+        id: `codex-result-${stableHash([toolUseId, output]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'tool',
+        stage: 'tool_result',
+        toolUseId,
+        text: output,
+        output,
+        isError: payload.error != null || payload.status === 'failed'
+      })
+    }
+  }
+  return { recognized: sawCodexLine && turns.length > 0, turns }
+}
+
+async function stableTranscript(
+  path: string,
+  runId: string,
+  provider: ProviderId,
+  promptHash?: string,
+  providerTurnId?: string
+): Promise<TranscriptRead> {
   let previous = -1
   for (let attempt = 0; attempt < 3; attempt++) {
     let size: number
     try {
       size = (await stat(path)).size
     } catch {
-      return { stable: true, observed: false, events: [] }
+      return { stable: true, observed: false, events: [], observable: { tools: false, hooks: false, usage: false } }
     }
     if (size === previous) {
       const content = await readFile(path, 'utf8')
+      if (provider === 'codex') {
+        const parsed = parseCodexRollout(content, runId)
+        const direct = providerTurnId ? parsed.turns.find((turn) => turn.providerTurnId === providerTurnId) : undefined
+        const matching = promptHash
+          ? [...parsed.turns].reverse().find((turn) => createHash('sha256').update(turn.userText).digest('hex') === promptHash)
+          : undefined
+        const turn = direct ?? matching ?? parsed.turns.at(-1)
+        return {
+          stable: true,
+          observed: parsed.recognized,
+          events: turn?.events ?? [],
+          observable: turn?.observable ?? { tools: false, hooks: false, usage: false }
+        }
+      }
       const turns = parseTranscriptToTurns(content, {
         runId,
         newId: () => `transcript-${randomUUID()}`,
         now: () => new Date().toISOString()
       })
       const matching = promptHash ? [...turns].reverse().find((turn) => createHash('sha256').update(turn.userText).digest('hex') === promptHash) : undefined
-      return { stable: true, observed: true, events: (matching ?? turns.at(-1))?.items ?? [] }
+      const events = (matching ?? turns.at(-1))?.items ?? []
+      return {
+        stable: true,
+        observed: turns.length > 0,
+        events,
+        observable: {
+          tools: turns.length > 0,
+          hooks: events.some((event) => event.kind === 'hook'),
+          usage: events.some((event) => event.kind === 'harness' && event.stage === 'result')
+        }
+      }
     }
     previous = size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  return { stable: false, observed: true, events: [] }
+  return { stable: false, observed: true, events: [], observable: { tools: false, hooks: false, usage: false } }
 }
 
 async function readStoredEvents(path: string): Promise<TraceEvent[]> {
@@ -290,7 +602,23 @@ async function readStoredEvents(path: string): Promise<TraceEvent[]> {
 function dedupeTraceEvents(events: TraceEvent[]): TraceEvent[] {
   const seen = new Set<string>()
   return events.filter((event) => {
-    const key = stableHash({ kind: event.kind, stage: event.stage, toolUseId: event.toolUseId, hookId: event.hookId, tool: event.tool, text: event.text, ts: event.ts })
+    const logicalToolKey = event.kind === 'skill'
+      ? { lifecycle: `skill:${event.name ?? event.tool ?? 'unknown'}` }
+      : event.toolUseId
+      ? {
+          lifecycle: event.stage === 'tool_result' ? 'result' : 'start',
+          toolUseId: event.toolUseId
+        }
+      : undefined
+    const key = stableHash(logicalToolKey ?? {
+      kind: event.kind,
+      stage: event.stage,
+      hookId: event.hookId,
+      hookOutcome: event.hookOutcome,
+      tool: event.tool,
+      text: event.text,
+      ts: event.ts
+    })
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -357,7 +685,7 @@ async function beginOpenTurn(
     ...(enablement.config.capture.prompt && prompt ? { prompt } : {}),
     ...(promptHash ? { promptHash } : {}),
     ...(transcriptPathOf(payload) ? { transcriptPath: transcriptPathOf(payload) } : {}),
-    ...(stringAt(payload, 'turn_id', 'turnId') ? { providerTurnId: stringAt(payload, 'turn_id', 'turnId') } : {}),
+    ...(providerTurnIdOf(payload) ? { providerTurnId: providerTurnIdOf(payload) } : {}),
     captures
   }
   await writeJsonAtomic(openPath(root), open, { sync: false })
@@ -407,7 +735,9 @@ async function finalizeOpenTurn(
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const runId = `${open.provider}:${open.sessionId}:${open.generation}`
-  const transcript = open.transcriptPath ? await stableTranscript(open.transcriptPath, runId, open.promptHash) : { stable: true, observed: false, events: [] }
+  const transcript = open.transcriptPath
+    ? await stableTranscript(open.transcriptPath, runId, open.provider, open.promptHash, open.providerTurnId)
+    : { stable: true, observed: false, events: [], observable: { tools: false, hooks: false, usage: false } }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
   const diffs = await Promise.all(open.captures.map(async ({ capture }) => finishGitTurnDiff(capture, 3_000)))
@@ -421,15 +751,19 @@ async function finalizeOpenTurn(
   }))
   const events = dedupeTraceEvents([...mergeTurnTraceEvents(storedEvents, transcript.events), ...diffEvents])
   const hasUsage = events.some((event) => event.kind === 'harness' && event.stage === 'result')
+  const hasToolEvidence = events.some((event) =>
+    event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
+  )
+  const hasHookEvidence = events.some((event) => event.kind === 'hook')
   const evidence = aggregateTurnEvidence({
     userText: open.prompt,
     events,
     source: transcript.observed ? 'provider_transcript+lifecycle_hooks' : 'lifecycle_hooks',
     observable: {
       assistant: transcript.observed || events.some((event) => event.kind === 'model' && event.stage === 'text'),
-      tools: true,
-      hooks: enablement.config.capture.hooks && transcript.observed,
-      usage: hasUsage,
+      tools: hasToolEvidence || transcript.observable.tools,
+      hooks: enablement.config.capture.hooks && (hasHookEvidence || transcript.observable.hooks),
+      usage: hasUsage || transcript.observable.usage,
       diff: enablement.config.capture.diff
     }
   })
@@ -468,7 +802,14 @@ async function finalizeOpenTurn(
   }
   const committed = await commitRecord(enablement.dataRoot, draft)
   const session = await nextSessionState(enablement.dataRoot, root, open.provider, open.sessionId)
-  await writeJsonAtomic(statePath(root), { ...session, lastCommittedRecordId: committed.record.recordId }, { sync: false })
+  const committedProviderTurnIds = open.providerTurnId
+    ? [...new Set([...(session.committedProviderTurnIds ?? []), open.providerTurnId])].slice(-200)
+    : session.committedProviderTurnIds
+  await writeJsonAtomic(statePath(root), {
+    ...session,
+    lastCommittedRecordId: committed.record.recordId,
+    ...(committedProviderTurnIds ? { committedProviderTurnIds } : {})
+  }, { sync: false })
   await rm(openPath(root), { force: true })
   await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
   return { status: committed.status, record: committed.record }
@@ -476,6 +817,22 @@ async function finalizeOpenTurn(
 
 function isSynthetic(payload: Record<string, unknown>): boolean {
   return payload.isMeta === true || payload.synthetic === true || stringAt(payload, 'source') === 'synthetic'
+}
+
+async function isCommittedProviderTurn(
+  dataRoot: string,
+  root: string,
+  provider: ProviderId,
+  sessionId: string,
+  providerTurnId: string
+): Promise<boolean> {
+  const state = await readJson<SessionState>(statePath(root))
+  if (state?.committedProviderTurnIds?.includes(providerTurnId)) return true
+  return (await listRecords(dataRoot)).some((record) =>
+    record.provider.id === provider &&
+    record.sessionId === sessionId &&
+    record.providerTurnId === providerTurnId
+  )
 }
 
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
@@ -491,15 +848,18 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     const result = await withDirectoryLock(sessionLock(enablement.dataRoot, input.provider, sessionId), async () => {
       const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
       let open = await readJson<OpenTurnState>(openPath(root))
+      const incomingProviderTurnId = providerTurnIdOf(input.payload)
       if (START_EVENTS.has(input.event)) {
-        const prompt = promptOf(input.payload)
-        const promptHash = prompt ? createHash('sha256').update(prompt).digest('hex') : undefined
-        const providerTurnId = stringAt(input.payload, 'turn_id', 'turnId')
+        const providerTurnId = incomingProviderTurnId
         const startFingerprint = stableHash({ event: input.event, payload: input.payload })
+        if (
+          providerTurnId &&
+          providerTurnId !== open?.providerTurnId &&
+          await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, providerTurnId)
+        ) return { status: 'duplicate' as const }
         if (open && (
           open.startFingerprint === startFingerprint ||
-          (providerTurnId && open.providerTurnId === providerTurnId) ||
-          (open.status === 'open' && open.promptHash && open.promptHash === promptHash)
+          (providerTurnId && open.providerTurnId === providerTurnId)
         )) return { status: 'duplicate' as const }
         if (open) {
           const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
@@ -514,6 +874,15 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       }
       if (!open) {
         if (END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
+        const orphanId = stableHash({ event: input.event, payload: input.payload })
+        await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
+        await updateHealth(enablement.dataRoot, { increment: { orphanEvents: 1 } })
+        return { status: 'orphan' as const }
+      }
+      if (incomingProviderTurnId && open.providerTurnId && incomingProviderTurnId !== open.providerTurnId) {
+        if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
+          return { status: 'duplicate' as const }
+        }
         const orphanId = stableHash({ event: input.event, payload: input.payload })
         await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
         await updateHealth(enablement.dataRoot, { increment: { orphanEvents: 1 } })

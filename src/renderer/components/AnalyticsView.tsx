@@ -1,282 +1,196 @@
-// Analytics 全屏（蓝本 analytics.html）：跨会话聚合仪表盘。数据全来自本地 SQLite statsQuery（DbStats）。
-// 诚实红线：statsQuery 返回的是**聚合**（totals/topTools/byCwd/byModel/toolStats/dangerTrend），
-// **没有 per-day 时间序列、百分位、per-tool token、cache 命中率、环比**——所以蓝本的「Token 30天线 /
-// danger 90天热力图 / +18.4% 环比 / P50/P95 / per-tool token share」这些**不编**，用 proposal banner 诚实标注需后端 rollup。
 import { useMemo } from 'react'
 import type { DbStats } from '@shared/trace'
 import type { ProjectMeta } from '../env'
 import { basename } from '../format'
 import { Icon } from './primitives/Icon'
 
-function fmtTokM(n: number | null): string {
-  if (n == null) return '未提供'
+function fmtTok(n: number | null): string {
+  if (n == null) return 'unknown'
   if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
   return String(n)
 }
-function modelColor(m: string): string {
-  if (m.includes('sonnet')) return 'var(--accent)'
-  if (m.includes('haiku')) return 'var(--ok)'
-  if (m.includes('opus')) return 'var(--user)'
-  return 'var(--edit)'
-}
-function fmtMs(ms: number): string {
+function fmtMs(ms: number | null): string {
+  if (ms == null) return 'unknown'
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
 }
+function fmtPct(value: number | null): string {
+  if (value == null) return '无基线'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+}
+function modelColor(model: string): string {
+  if (model.includes('sonnet')) return 'var(--accent)'
+  if (model.includes('haiku')) return 'var(--ok)'
+  if (model.includes('opus')) return 'var(--user)'
+  return 'var(--edit)'
+}
 
-export function AnalyticsView({
-  stats,
-  projects
-}: {
-  stats: DbStats | null
-  projects: ProjectMeta[]
-}) {
-  const empty =
-    !stats ||
-    (stats.topTools.length === 0 && stats.byModel.length === 0 && stats.byCwd.length === 0 && stats.totals.turns === 0)
+const providerLabel = { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode' } as const
+
+export function AnalyticsView({ stats, projects }: { stats: DbStats | null; projects: ProjectMeta[] }) {
+  const tokenDaily = stats?.tokenDaily ?? []
+  const dangerDaily = stats?.dangerDaily ?? []
+  const cacheReuse = stats?.cacheReuse ?? []
+  const mcpLatency = stats?.mcpLatency ?? []
+  const providerCoverage = stats?.providerCoverage ?? []
+  const comparison = stats?.comparison
+  const status = stats?.status ?? (stats ? 'ready' : 'unavailable')
+  const empty = !stats || (stats.topTools.length === 0 && stats.byModel.length === 0 && stats.byCwd.length === 0 && stats.totals.turns === 0)
 
   const derived = useMemo(() => {
     if (!stats) return null
     const tokens = stats.totals.tin == null && stats.totals.tout == null ? null : (stats.totals.tin ?? 0) + (stats.totals.tout ?? 0)
-    const toolCalls = stats.toolStats.reduce((s, t) => s + t.n, 0) || stats.topTools.reduce((s, t) => s + t.n, 0)
-    const dangerN = stats.dangerTrend.reduce((s, d) => s + d.n, 0)
-    // model donut：按 token 占比生成 conic-gradient
+    const toolCalls = stats.totals.toolCalls ?? (stats.toolStats.reduce((sum, tool) => sum + tool.n, 0) || stats.topTools.reduce((sum, tool) => sum + tool.n, 0))
+    const dangerN = stats.totals.dangerEvents ?? stats.dangerTrend.reduce((sum, item) => sum + item.n, 0)
     const models = [...stats.byModel].sort((a, b) => (b.tin ?? 0) + (b.tout ?? 0) - ((a.tin ?? 0) + (a.tout ?? 0)))
-    const modelTokenSum = models.reduce((s, m) => s + (m.tin ?? 0) + (m.tout ?? 0), 0) || 1
+    const modelTokenSum = models.reduce((sum, model) => sum + (model.tin ?? 0) + (model.tout ?? 0), 0) || 1
     let acc = 0
-    const stops = models
-      .map((m) => {
-        const from = (acc / modelTokenSum) * 100
-        acc += (m.tin ?? 0) + (m.tout ?? 0)
-        const to = (acc / modelTokenSum) * 100
-        return `${modelColor(m.model)} ${from}% ${to}%`
-      })
-      .join(', ')
-    const conic = models.length ? `conic-gradient(${stops})` : 'var(--border3)'
-    // top tools（含 mcp）按调用数
+    const stops = models.map((model) => {
+      const from = (acc / modelTokenSum) * 100
+      acc += (model.tin ?? 0) + (model.tout ?? 0)
+      return `${modelColor(model.model)} ${from}% ${(acc / modelTokenSum) * 100}%`
+    }).join(', ')
     const tools = [...stats.toolStats].sort((a, b) => b.n - a.n)
-    const maxToolN = Math.max(1, ...tools.map((t) => t.n))
-    // mcp 按 server 汇总
-    const mcpMap = new Map<string, { calls: number; ms: number; errors: number }>()
-    for (const t of stats.toolStats) {
-      if (!t.tool.startsWith('mcp')) continue
-      const server = t.tool.split('__')[1] ?? t.tool
-      const cur = mcpMap.get(server) ?? { calls: 0, ms: 0, errors: 0 }
-      cur.calls += t.n
-      cur.ms += t.avgMs * t.n
-      cur.errors += t.errors
-      mcpMap.set(server, cur)
+    const maxToolN = Math.max(1, ...tools.map((tool) => tool.n))
+    const maxCwdTurns = Math.max(1, ...stats.byCwd.map((cwd) => cwd.turns))
+    const proj = [...stats.byCwd].sort((a, b) => b.turns - a.turns).map((cwd) => ({
+      cwd: cwd.cwd,
+      name: basename(cwd.cwd),
+      turns: cwd.turns,
+      sessions: projects.find((project) => project.cwd === cwd.cwd)?.sessions.length ?? null
+    }))
+    const dmax = Math.max(1, ...stats.dangerTrend.map((item) => item.n))
+    const dailyTotals = tokenDaily.map((day) => day.turns === 0 ? 0 : day.input != null && day.output != null ? day.input + day.output : null)
+    const maxDaily = Math.max(1, ...dailyTotals.map((value) => value ?? 0))
+    const maxDanger = Math.max(1, ...dangerDaily.map((day) => day.danger + day.warn))
+    return {
+      tokens,
+      toolCalls,
+      dangerN,
+      models,
+      conic: models.length ? `conic-gradient(${stops})` : 'var(--border3)',
+      tools,
+      maxToolN,
+      proj,
+      maxCwdTurns,
+      dmax,
+      dailyTotals,
+      maxDaily,
+      maxDanger
     }
-    const mcp = [...mcpMap.entries()].map(([server, v]) => ({ server, calls: v.calls, avgMs: v.ms / Math.max(1, v.calls), errors: v.errors })).sort((a, b) => b.calls - a.calls)
-    // project 维度当前只有 turns，没有 token 明细；不伪造 token。
-    const maxCwdTurns = Math.max(1, ...stats.byCwd.map((c) => c.turns))
-    const proj = [...stats.byCwd]
-      .sort((a, b) => b.turns - a.turns)
-      .map((c) => ({
-        cwd: c.cwd,
-        name: basename(c.cwd),
-        turns: c.turns,
-        sessions: projects.find((p) => p.cwd === c.cwd)?.sessions.length ?? null
-      }))
-    const dmax = Math.max(1, ...stats.dangerTrend.map((d) => d.n))
-    return { tokens, toolCalls, dangerN, models, conic, tools, maxToolN, mcp, proj, maxCwdTurns, dmax }
-  }, [stats, projects])
+  }, [stats, projects, tokenDaily, dangerDaily])
+
+  if (status === 'unavailable' || status === 'query_error') {
+    return (
+      <main className="a-pane">
+        <div className="a-status"><Icon name="alert" /><div><b>统计暂不可用</b><span>{status === 'query_error' ? 'SQLite 查询失败；详细原因已写入本地日志。' : 'SQLite 尚未初始化，Scry 其他功能不受影响。'}</span></div></div>
+      </main>
+    )
+  }
 
   return (
     <main className="a-pane">
-      <div className="proposal-banner">
-        <Icon name="alert" />
-        <div>
-          <b>部分实现</b> · 跨会话**聚合**来自本地 SQLite statsQuery（真实）。
-          <span>
-            {' '}
-            按天时间序列（Token 30天线 / danger 90天热力）· 环比 % · cache 命中率 · per-tool token share · MCP
-            P50/P95 —— statsQuery 只返回聚合、无 per-day/百分位数据，需后端 rollup，**未建不编**。
-          </span>
-        </div>
-      </div>
-
       <div className="a-hero">
         <h2>Analytics · 跨会话分析</h2>
-        <div className="sub">所有数字来自本地 SQLite · 不上传 · 全时段聚合（暂无范围过滤）</div>
+        <div className="sub">本地 SQLite · 30/60/90 天有界聚合 · unknown 不按 0 计算</div>
       </div>
 
-      {empty || !derived ? (
-        <div className="a-gap">还没有跨会话数据——发几个任务、跑几个会话后再看这里。</div>
-      ) : (
-        <>
-          <div className="kpi-strip">
-            <div className="kpi">
-              <div className="lbl">total token</div>
-              <div className="val accent">{fmtTokM(derived.tokens)}</div>
-              <div className="sub">全部会话累计</div>
+      {empty || !derived ? <div className="a-gap">还没有跨会话数据——完成几个 Provider 会话后再看这里。</div> : <>
+        <div className="kpi-strip">
+          <div className="kpi"><div className="lbl">observed token</div><div className="val accent">{fmtTok(derived.tokens)}</div><div className="sub">Provider reported · 全时段已知值</div></div>
+          <div className="kpi"><div className="lbl">turns</div><div className="val">{stats.totals.turns}</div><div className="sub">30d {comparison?.current.turns ?? 0} · {fmtPct(comparison?.change.turnsPct ?? null)}</div></div>
+          <div className="kpi"><div className="lbl">30d token</div><div className="val">{fmtTok(comparison?.current.tokens ?? null)}</div><div className="sub"><span className="a-delta">{fmtPct(comparison?.change.tokensPct ?? null)}</span> · {comparison?.current.tokenKnownTurns ?? 0}/{comparison?.current.turns ?? 0} 完整</div></div>
+          <div className="kpi"><div className="lbl">tools</div><div className="val">{derived.toolCalls.toLocaleString()}</div><div className="sub">30d {comparison?.current.toolCalls ?? 0} · {fmtPct(comparison?.change.toolCallsPct ?? null)}</div></div>
+          <div className="kpi"><div className="lbl">danger 触发</div><div className="val bad">{derived.dangerN}</div><div className="sub">30d {comparison?.current.danger ?? 0} · {fmtPct(comparison?.change.dangerPct ?? null)}</div></div>
+        </div>
+
+        <div className="a-wide-grid">
+          <section className="d-card a-time-card">
+            <div className="h"><h3>Token · 最近 30 天</h3><span className="sub">input + output · Provider reported</span></div>
+            <div className="a-token-chart" aria-label="最近 30 天 Token 趋势">
+              {tokenDaily.map((day, index) => {
+                const total = derived.dailyTotals[index]
+                const missing = total == null
+                return <div className="a-token-day" key={day.day} title={`${day.day} · token ${fmtTok(total)} · input ${fmtTok(day.input)} (${day.inputKnownTurns}/${day.turns}) · output ${fmtTok(day.output)} (${day.outputKnownTurns}/${day.turns})`}>
+                  <i className={missing ? 'missing' : ''} style={{ height: missing ? '100%' : `${Math.max(total === 0 ? 2 : 5, ((total ?? 0) / derived.maxDaily) * 100)}%` }} />
+                  {(index === 0 || index === 14 || index === 29) && <span>{day.day.slice(5)}</span>}
+                </div>
+              })}
             </div>
-            <div className="kpi">
-              <div className="lbl">turns</div>
-              <div className="val">{stats!.totals.turns}</div>
-              <div className="sub">SDK result 落库</div>
+            <div className="a-chart-note">缺字段显示斜纹，不用 0 补齐；无会话的日期为真实 0。</div>
+          </section>
+
+          <section className="d-card a-time-card">
+            <div className="h"><h3>Danger · 最近 90 天</h3><span className="sub">Claude/Qoder classified · Codex/OpenCode unsupported</span></div>
+            <div className="a-heatmap" aria-label="最近 90 天危险操作热力图">
+              {dangerDaily.map((day) => {
+                const total = day.danger + day.warn
+                return <i key={day.day} className={day.danger ? 'danger' : day.warn ? 'warn' : ''} style={{ opacity: total ? 0.35 + (total / derived.maxDanger) * 0.65 : 1 }} title={`${day.day} · danger ${day.danger} · warn ${day.warn}`} />
+              })}
             </div>
-            <div className="kpi">
-              <div className="lbl">tokens · all</div>
-              <div className="val">{fmtTokM(stats!.totals.tin)}→{fmtTokM(stats!.totals.tout)}</div>
-              <div className="sub">in {fmtTokM(stats!.totals.tin)} · out {fmtTokM(stats!.totals.tout)}</div>
-            </div>
-            <div className="kpi">
-              <div className="lbl">tools</div>
-              <div className="val">{derived.toolCalls.toLocaleString()}</div>
-              <div className="sub">
-                avg {stats!.totals.turns ? (derived.toolCalls / stats!.totals.turns).toFixed(2) : '0'} / turn
-              </div>
-            </div>
-            <div className="kpi">
-              <div className="lbl">danger 触发</div>
-              <div className="val bad">{derived.dangerN}</div>
-              <div className="sub">观测·未拦截</div>
-            </div>
+            <div className="a-chart-note">热力格只表示已分类事件；unsupported Provider 不解释为“0 危险”。</div>
+          </section>
+        </div>
+
+        <div className="a-grid">
+          <div className="col">
+            <section className="d-card">
+              <div className="h"><h3>Top Tools</h3><span className="sub">调用分布，不是 Token 份额</span></div>
+              <div className="a-tool-head"><span>tool</span><span className="num">calls</span><span className="num">avg dur</span><span className="num">fail%</span><span>dist</span></div>
+              {derived.tools.slice(0, 10).map((tool) => {
+                const isMcp = tool.tool.startsWith('mcp')
+                const failPct = tool.n ? (tool.errors / tool.n) * 100 : 0
+                return <div className="a-tool-row" key={tool.tool}>
+                  <span className={`nm ${isMcp ? 'mcp' : ''}`} title={tool.tool}>{isMcp ? `mcp:${tool.tool.split('__')[1]}` : tool.tool}</span>
+                  <span className="num">{tool.n}</span><span className="num">{fmtMs(tool.avgMs)}</span><span className={`num ${failPct >= 5 ? 'warn' : ''}`}>{failPct.toFixed(1)}%</span>
+                  <span className="dist"><i style={{ width: `${Math.round((tool.n / derived.maxToolN) * 100)}%` }} /></span>
+                </div>
+              })}
+              <div className="a-chart-note">四个 Provider 均未提供 tool-level Token 归因，因此不估算 per-tool Token share。</div>
+            </section>
+
+            {mcpLatency.length > 0 && <section className="d-card">
+              <div className="h"><h3>MCP · 最近 90 天延迟</h3><span className="sub">仅已完成调用 · nearest-rank</span></div>
+              <div className="a-mcp-head"><span>server</span><span>calls</span><span>P50</span><span>P95</span><span>fail%</span></div>
+              {mcpLatency.map((server) => <div className="a-mcp-row" key={server.server}><span className="nm">{server.server}</span><span>{server.calls}</span><span>{fmtMs(server.p50Ms)}</span><span>{fmtMs(server.p95Ms)}</span><span className={server.errors ? 'warn' : ''}>{server.calls ? ((server.errors / server.calls) * 100).toFixed(1) : '0.0'}%</span></div>)}
+            </section>}
+
+            <section className="d-card">
+              <div className="h"><h3>Cache Token · 最近 30 天</h3><span className="sub">按 Provider 语义计算</span></div>
+              {cacheReuse.map((row) => {
+                const formula = row.denominator === 'separate_input' ? 'read / (input + read + write)' : row.denominator === 'input_includes_cache' ? 'cached input / input' : '上游分母不可证明'
+                return <div className="a-cache-row" key={row.providerId}>
+                  <b>{providerLabel[row.providerId]}</b><strong>{row.reuseRate == null ? 'unknown' : `${(row.reuseRate * 100).toFixed(1)}%`}</strong>
+                  <span>read {fmtTok(row.cacheReadTokens)} · write {fmtTok(row.cacheWriteTokens)} · comparable {row.comparableTurns}/{row.turns}</span><em>{formula}</em>
+                </div>
+              })}
+            </section>
           </div>
 
-          <div className="a-grid">
-            {/* LEFT */}
-            <div className="col">
-              <div className="d-card">
-                <div className="h">
-                  <h3>Top Tools</h3>
-                  <span className="sub">{derived.toolCalls.toLocaleString()} 次调用 · 全时段</span>
-                </div>
-                <div className="a-tool-head">
-                  <span>tool</span>
-                  <span className="num" style={{ textAlign: 'right' }}>calls</span>
-                  <span className="num" style={{ textAlign: 'right' }}>avg dur</span>
-                  <span className="num" style={{ textAlign: 'right' }}>fail%</span>
-                  <span>dist</span>
-                </div>
-                {derived.tools.slice(0, 10).map((t) => {
-                  const isMcp = t.tool.startsWith('mcp')
-                  const failPct = t.n ? (t.errors / t.n) * 100 : 0
-                  return (
-                    <div className="a-tool-row" key={t.tool}>
-                      <span className={`nm ${isMcp ? 'mcp' : ''}`} title={t.tool}>
-                        {isMcp ? `mcp:${t.tool.split('__')[1]}` : t.tool}
-                      </span>
-                      <span className="num">{t.n}</span>
-                      <span className="num">{fmtMs(t.avgMs)}</span>
-                      <span className={`num ${failPct >= 5 ? 'warn' : ''}`}>{failPct.toFixed(1)}%</span>
-                      <span className="dist">
-                        <i style={{ width: `${Math.round((t.n / derived.maxToolN) * 100)}%` }} />
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
+          <div className="col">
+            {derived.models.length > 0 && <section className="d-card">
+              <div className="h"><h3>Model · token 分布</h3><span className="sub">输入 + 输出</span></div>
+              <div className="a-donutwrap"><div className="a-donut" style={{ background: derived.conic }}><div className="center"><div className="t">{fmtTok(derived.tokens)}</div><div className="u">TOKENS</div></div></div><div className="a-legend">{derived.models.map((model) => <div className="item" key={model.model}><span className="sw" style={{ background: modelColor(model.model) }} />{model.model}<b>{fmtTok(model.tin == null && model.tout == null ? null : (model.tin ?? 0) + (model.tout ?? 0))}</b></div>)}</div></div>
+            </section>}
 
-              {derived.mcp.length > 0 && (
-                <div className="d-card">
-                  <div className="h">
-                    <h3>MCP · 延迟 + 失败率</h3>
-                    <span className="sub">avg（无 P50/P95：需 per-call rollup）</span>
-                  </div>
-                  <div className="a-tool-head" style={{ gridTemplateColumns: '1fr 54px 66px 52px 1fr' }}>
-                    <span>server</span>
-                    <span className="num" style={{ textAlign: 'right' }}>calls</span>
-                    <span className="num" style={{ textAlign: 'right' }}>avg</span>
-                    <span className="num" style={{ textAlign: 'right' }}>fail%</span>
-                    <span />
-                  </div>
-                  {derived.mcp.map((m) => {
-                    const failPct = m.calls ? (m.errors / m.calls) * 100 : 0
-                    return (
-                      <div className="a-tool-row" key={m.server}>
-                        <span className="nm mcp">{m.server}</span>
-                        <span className="num">{m.calls}</span>
-                        <span className="num">{fmtMs(m.avgMs)}</span>
-                        <span className={`num ${failPct >= 5 ? 'warn' : ''}`}>{failPct.toFixed(1)}%</span>
-                        <span />
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+            <section className="d-card">
+              <div className="h"><h3>Provider · 最近 30 天覆盖</h3><span className="sub">known / turns · 已映射 {providerCoverage.reduce((sum, row) => sum + row.turns, 0)}/{comparison?.current.turns ?? 0}</span></div>
+              <div className="a-coverage-head"><span>Provider</span><span>in</span><span>out</span><span>cache R</span><span>cache W</span><span>danger</span></div>
+              {providerCoverage.map((row) => <div className="a-coverage-row" key={row.providerId}><b>{providerLabel[row.providerId]}</b><span>{row.inputKnownTurns}/{row.turns}</span><span>{row.outputKnownTurns}/{row.turns}</span><span>{row.cacheReadKnownTurns}/{row.turns}</span><span>{row.cacheWriteKnownTurns}/{row.turns}</span><em className={row.dangerCoverage}>{row.dangerCoverage}</em></div>)}
+            </section>
 
-            {/* RIGHT */}
-            <div className="col">
-              {derived.models.length > 0 && (
-                <div className="d-card">
-                  <div className="h">
-                    <h3>Model · token 分布</h3>
-                    <span className="sub">按输入+输出 token 占比</span>
-                  </div>
-                  <div className="a-donutwrap">
-                    <div className="a-donut" style={{ background: derived.conic }}>
-                      <div className="center">
-                        <div className="t">{fmtTokM(derived.tokens)}</div>
-                        <div className="u">TOKENS</div>
-                      </div>
-                    </div>
-                    <div className="a-legend">
-                      {derived.models.map((m) => (
-                        <div className="item" key={m.model}>
-                          <span className="sw" style={{ background: modelColor(m.model) }} />
-                          {m.model}
-                          <b>{fmtTokM(m.tin == null && m.tout == null ? null : (m.tin ?? 0) + (m.tout ?? 0))}</b>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
+            {derived.proj.length > 0 && <section className="d-card">
+              <div className="h"><h3>Project · turns</h3><span className="sub">工作目录聚合</span></div>
+              {derived.proj.map((project) => <div className="a-proj-row" key={project.cwd}><span className="nm">{project.name}</span><span className="num">{project.sessions ?? project.turns}</span><span className="num cost">{project.turns}</span><span className="bar"><i style={{ width: `${Math.round((project.turns / derived.maxCwdTurns) * 100)}%` }} /></span></div>)}
+            </section>}
 
-              {derived.proj.length > 0 && (
-                <div className="d-card">
-                  <div className="h">
-                    <h3>Project · turns</h3>
-                    <span className="sub">按工作目录聚合；项目级 token 未落库</span>
-                  </div>
-                  <div className="a-tool-head" style={{ gridTemplateColumns: '1fr 60px 70px 1fr' }}>
-                    <span>project</span>
-                    <span className="num" style={{ textAlign: 'right' }}>{derived.proj.some((p) => p.sessions != null) ? 'sessions' : 'turns'}</span>
-                    <span className="num" style={{ textAlign: 'right' }}>turns</span>
-                    <span />
-                  </div>
-                  {derived.proj.map((p) => (
-                    <div className="a-proj-row" key={p.cwd}>
-                      <span className="nm">{p.name}</span>
-                      <span className="num">{p.sessions != null ? p.sessions : p.turns}</span>
-                      <span className="num cost">{p.turns}</span>
-                      <span className="bar">
-                        <i style={{ width: `${Math.round((p.turns / derived.maxCwdTurns) * 100)}%` }} />
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {stats!.dangerTrend.length > 0 && (
-                <div className="d-card">
-                  <div className="h">
-                    <h3>Danger · 跨会话趋势</h3>
-                    <span className="sub">观测标记聚合（非日历热力：需 per-day）</span>
-                  </div>
-                  {stats!.dangerTrend.slice(0, 8).map((d) => (
-                    <div className="a-dbar" key={`${d.level}-${d.reason}`}>
-                      <span className="nm" title={d.reason}>
-                        {d.reason}
-                      </span>
-                      <span className="n">{d.n}</span>
-                      <span className="bar">
-                        <i
-                          className={d.level === 'danger' ? 'danger' : 'warn'}
-                          style={{ width: `${Math.round((d.n / derived.dmax) * 100)}%` }}
-                        />
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            {stats.dangerTrend.length > 0 && <section className="d-card">
+              <div className="h"><h3>Danger · 原因分布</h3><span className="sub">全时段 classified 事件</span></div>
+              {stats.dangerTrend.slice(0, 8).map((item) => <div className="a-dbar" key={`${item.level}-${item.reason}`}><span className="nm" title={item.reason}>{item.reason}</span><span className="n">{item.n}</span><span className="bar"><i className={item.level === 'danger' ? 'danger' : 'warn'} style={{ width: `${Math.round((item.n / derived.dmax) * 100)}%` }} /></span></div>)}
+            </section>}
           </div>
-        </>
-      )}
+        </div>
+      </>}
     </main>
   )
 }

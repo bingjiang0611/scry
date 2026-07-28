@@ -42,7 +42,7 @@ describe('Codex provider adapter', () => {
       id: 'codex',
       runtimeProvider: 'codex_cli',
       transport: 'app-server',
-      capabilities: { skills: 'manage', mcp: 'read', commands: 'none', account: 'read' }
+      capabilities: { skills: 'manage', mcp: 'read', commands: 'read', account: 'read' }
     })
   })
 
@@ -63,6 +63,133 @@ describe('Codex provider adapter', () => {
     await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
 
     expect(appServer.options).toContainEqual(expect.objectContaining({ cwd: '/isolated-copy' }))
+  })
+
+  it('uses full host access without approvals for new and resumed Codex threads', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method, params) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-new' } }
+      if (method === 'thread/resume') return { thread: { id: (params as { threadId: string }).threadId } }
+      if (method === 'turn/start') return { turn: { id: `turn-${(params as { threadId: string }).threadId}` } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const adapter = createCodexAdapter()
+
+    const newRun = adapter.run({
+      runId: 'run-new',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: () => {}
+    })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('turn/completed', {
+      threadId: 'thread-new',
+      turnId: 'turn-thread-new',
+      turn: { status: 'completed' }
+    })
+    await newRun.promise
+
+    expect(appServer.request).toHaveBeenCalledWith('thread/start', {
+      cwd: '/repo',
+      approvalPolicy: 'never',
+      sandbox: 'danger-full-access'
+    })
+
+    const resumedRun = adapter.run({
+      runId: 'run-resumed',
+      prompt: 'continue',
+      cwd: '/repo',
+      resume: 'thread-existing',
+      attachments: [],
+      emit: () => {}
+    })
+    await vi.waitFor(() => {
+      expect(appServer.request).toHaveBeenCalledWith(
+        'turn/start',
+        expect.objectContaining({ threadId: 'thread-existing' })
+      )
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-existing',
+      turnId: 'turn-thread-existing',
+      turn: { status: 'completed' }
+    })
+    await resumedRun.promise
+
+    expect(appServer.request).toHaveBeenCalledWith('thread/resume', {
+      threadId: 'thread-existing',
+      cwd: '/repo',
+      excludeTurns: true,
+      approvalPolicy: 'never',
+      sandbox: 'danger-full-access'
+    })
+  })
+
+  it('reads Codex Hook trust metadata before a run', async () => {
+    appServer.request.mockResolvedValue({
+      data: [{
+        cwd: '/isolated-copy',
+        hooks: [{
+          key: 'project-hook',
+          eventName: 'preToolUse',
+          source: 'project',
+          sourcePath: '/isolated-copy/.codex/hooks.json',
+          enabled: true,
+          currentHash: 'sha256:current',
+          trustStatus: 'untrusted'
+        }],
+        warnings: ['warning'],
+        errors: []
+      }]
+    })
+
+    await expect(
+      createCodexAdapter().hookTrust!.inspect({ providerId: 'codex', cwd: '/isolated-copy' })
+    ).resolves.toEqual({
+      cwd: '/isolated-copy',
+      hooks: [{
+        key: 'project-hook',
+        eventName: 'preToolUse',
+        source: 'project',
+        sourcePath: '/isolated-copy/.codex/hooks.json',
+        enabled: true,
+        currentHash: 'sha256:current',
+        trustStatus: 'untrusted'
+      }],
+      warnings: ['warning'],
+      errors: []
+    })
+    expect(appServer.request).toHaveBeenCalledWith('hooks/list', { cwds: ['/isolated-copy'] })
+  })
+
+  it('exposes enabled Codex Skills as slash-command aliases', async () => {
+    appServer.request.mockResolvedValue({
+      data: [{
+        cwd: '/isolated-copy',
+        skills: [
+          { name: 'rate-workflow', path: '/skill/rate-workflow/SKILL.md', description: 'Run the workflow', enabled: true },
+          { name: 'disabled-skill', path: '/skill/disabled/SKILL.md', enabled: false }
+        ]
+      }]
+    })
+
+    await expect(
+      createCodexAdapter().commands!.list({ providerId: 'codex', cwd: '/isolated-copy' })
+    ).resolves.toMatchObject({
+      state: 'ready',
+      mode: 'read',
+      data: [{
+        name: 'rate-workflow',
+        description: 'Run the workflow',
+        source: 'skill'
+      }]
+    })
   })
 
   it('reads the Codex account without forcing a token refresh', async () => {
@@ -135,6 +262,81 @@ describe('Codex provider adapter', () => {
     }
   })
 
+  it('starts only the approved run with Hook trust bypassed', async () => {
+    const previous = process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
+    delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
+    try {
+      appServer.onNotification.mockReturnValue(() => {})
+      appServer.request.mockImplementation(async (method) => {
+        if (method === 'account/read') return { account: { type: 'chatgpt' } }
+        if (method === 'thread/start') return { thread: { id: 'thread-approved' } }
+        throw new Error(`unexpected request: ${method}`)
+      })
+      const handle = createCodexAdapter().run({
+        runId: 'run-approved',
+        prompt: 'inspect',
+        cwd: '/isolated-copy',
+        attachments: [],
+        bypassHookTrust: true,
+        emit: () => {}
+      })
+      handle.interrupt()
+
+      await expect(handle.promise).resolves.toMatchObject({
+        externalSessionId: 'thread-approved',
+        stopped: true
+      })
+      expect(appServer.options).toContainEqual(
+        expect.objectContaining({
+          cwd: '/isolated-copy',
+          args: ['--dangerously-bypass-hook-trust', 'app-server']
+        })
+      )
+    } finally {
+      if (previous === undefined) delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
+      else process.env.SCRY_CODEX_BYPASS_HOOK_TRUST = previous
+    }
+  })
+
+  it('ignores other-thread notifications and an early stop does not start a turn', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    let resolveThread: (value: unknown) => void = () => {}
+    const threadStarted = new Promise((resolve) => {
+      resolveThread = resolve
+    })
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return threadStarted
+      if (method === 'turn/start') throw new Error('turn/start must not run after early stop')
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-target',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(notify).toBeTypeOf('function'))
+    notify?.('item/started', {
+      threadId: 'thread-other',
+      turnId: 'turn-other',
+      item: { id: 'other', type: 'commandExecution', command: 'pwd' }
+    })
+    handle.interrupt()
+    resolveThread({ thread: { id: 'thread-target' } })
+
+    await expect(handle.promise).resolves.toMatchObject({ externalSessionId: 'thread-target', stopped: true })
+    expect(events).toEqual([])
+    expect(appServer.request).not.toHaveBeenCalledWith('turn/start', expect.anything())
+  })
+
   it('sends an explicit $skill mention as native Codex skill input and records it', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     appServer.onNotification.mockImplementation((listener) => {
@@ -178,6 +380,9 @@ describe('Codex provider adapter', () => {
         })
       )
     })
+    notify?.('item/agentMessage/delta', {
+      threadId: 'thread-1', turnId: 'turn-1', delta: '正在检查'
+    })
     notify?.('thread/tokenUsage/updated', {
       threadId: 'thread-1', turnId: 'turn-1',
       tokenUsage: { last: { inputTokens: 10, cachedInputTokens: 3, outputTokens: 4, reasoningOutputTokens: 2, totalTokens: 14 } }
@@ -188,11 +393,60 @@ describe('Codex provider adapter', () => {
     expect(events).toContainEqual(
       expect.objectContaining({ kind: 'skill', stage: 'skill:scry-e2e-audit', tool: 'Skill', name: 'scry-e2e-audit' })
     )
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: 'model', stage: 'text_delta', text: '正在检查' })
+    )
     expect(events).toContainEqual(expect.objectContaining({
       kind: 'harness', stage: 'result', billingProvider: 'openai', accountLabel: 'OpenAI API key',
       modelUsage: [expect.objectContaining({ model: 'gpt-test', inputTokens: 10, billingProvider: 'openai' })],
       runtimeMetadata: expect.objectContaining({ authMode: 'apiKey', model: 'gpt-test', serviceTier: 'default' })
     }))
+  })
+
+  it('translates a slash Skill alias into native Codex skill input', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-slash' } }
+      if (method === 'skills/list') {
+        return {
+          data: [{
+            cwd: '/isolated-copy',
+            skills: [{ name: 'rate-workflow', path: '/skill/rate-workflow/SKILL.md', enabled: true }]
+          }]
+        }
+      }
+      if (method === 'turn/start') return { turn: { id: 'turn-slash' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+
+    const handle = createCodexAdapter().run({
+      runId: 'run-slash',
+      prompt: '/rate-workflow 84441907',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: () => {}
+    })
+
+    await vi.waitFor(() => {
+      expect(appServer.request).toHaveBeenCalledWith(
+        'turn/start',
+        expect.objectContaining({
+          input: [
+            { type: 'skill', name: 'rate-workflow', path: '/skill/rate-workflow/SKILL.md' },
+            { type: 'text', text: '84441907', text_elements: [] }
+          ]
+        })
+      )
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-slash', turnId: 'turn-slash', turn: { status: 'completed' }
+    })
+    await handle.promise
   })
 
   it('does not guess Codex subscription billing when account detection fails', async () => {
@@ -237,6 +491,425 @@ describe('Codex provider adapter', () => {
       stage: 'runtime:telemetry_degraded',
       runtimeMetadata: expect.objectContaining({ capability: 'billing_identity' })
     }))
+  })
+
+  it('derives turn usage from session cumulative totals without adding cache twice', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt', planType: 'pro' } }
+      if (method === 'thread/resume') {
+        return { thread: { id: 'thread-usage' }, model: 'gpt-test', modelProvider: 'openai' }
+      }
+      if (method === 'turn/start') return { turn: { id: 'turn-usage' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-usage',
+      prompt: 'continue',
+      cwd: '/isolated-copy',
+      resume: 'thread-usage',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('thread/tokenUsage/updated', {
+      threadId: 'thread-usage',
+      turnId: 'turn-usage',
+      tokenUsage: {
+        total: {
+          inputTokens: 1100,
+          cachedInputTokens: 660,
+          cacheWriteInputTokens: 0,
+          outputTokens: 110,
+          reasoningOutputTokens: 11,
+          totalTokens: 1210
+        },
+        last: {
+          inputTokens: 100,
+          cachedInputTokens: 60,
+          cacheWriteInputTokens: 0,
+          outputTokens: 10,
+          reasoningOutputTokens: 1,
+          totalTokens: 110
+        },
+        modelContextWindow: 200_000
+      }
+    })
+    const finalUsage = {
+      total: {
+        inputTokens: 1400,
+        cachedInputTokens: 850,
+        cacheWriteInputTokens: 0,
+        outputTokens: 160,
+        reasoningOutputTokens: 16,
+        totalTokens: 1560
+      },
+      last: {
+        inputTokens: 200,
+        cachedInputTokens: 125,
+        cacheWriteInputTokens: 0,
+        outputTokens: 30,
+        reasoningOutputTokens: 3,
+        totalTokens: 230
+      },
+      modelContextWindow: 200_000
+    }
+    notify?.('thread/tokenUsage/updated', {
+      threadId: 'thread-usage', turnId: 'turn-usage', tokenUsage: finalUsage
+    })
+    // Codex can repeat token_count notifications; unchanged cumulative totals must not inflate this turn.
+    notify?.('thread/tokenUsage/updated', {
+      threadId: 'thread-usage', turnId: 'turn-usage', tokenUsage: finalUsage
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-usage',
+      turn: { id: 'turn-usage', status: 'completed', error: null }
+    })
+    await handle.promise
+
+    expect(events.find((event) => event.kind === 'harness' && event.stage === 'result')).toMatchObject({
+      tokensIn: 400,
+      tokensOut: 60,
+      cacheReadTokens: 250,
+      reasoningTokens: 6,
+      contextTokens: 200,
+      modelUsage: [{
+        model: 'gpt-test',
+        inputTokens: 400,
+        outputTokens: 60,
+        cacheReadTokens: 250,
+        reasoningTokens: 6,
+        contextWindow: 200_000
+      }]
+    })
+  })
+
+  it('records plan updates, collaboration calls, and child-agent tools with stable agent identity', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-root' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-root' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-collab',
+      prompt: 'delegate',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('turn/plan/updated', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      explanation: 'parallelize',
+      plan: [{ step: 'inspect', status: 'inProgress' }]
+    })
+    notify?.('item/started', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      item: {
+        id: 'spawn-1',
+        type: 'collabAgentToolCall',
+        tool: 'spawnAgent',
+        status: 'inProgress',
+        senderThreadId: 'thread-root',
+        receiverThreadIds: ['thread-child'],
+        prompt: 'inspect provider',
+        model: 'gpt-test',
+        reasoningEffort: 'high',
+        agentsStates: {}
+      }
+    })
+    notify?.('item/started', {
+      threadId: 'thread-child',
+      turnId: 'turn-child',
+      item: {
+        id: 'child-command',
+        type: 'commandExecution',
+        command: 'pwd',
+        cwd: '/isolated-copy',
+        status: 'inProgress'
+      }
+    })
+    notify?.('thread/tokenUsage/updated', {
+      threadId: 'thread-child',
+      turnId: 'turn-child',
+      tokenUsage: {
+        total: { inputTokens: 9_999, outputTokens: 999, totalTokens: 10_998 },
+        last: { inputTokens: 9_999, outputTokens: 999, totalTokens: 10_998 }
+      }
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-child',
+      turn: { id: 'turn-child', status: 'completed', error: null }
+    })
+    const childPrematurelyFinishedRoot = await Promise.race([
+      handle.promise.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10))
+    ])
+    expect(childPrematurelyFinishedRoot).toBe(false)
+    notify?.('item/started', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      item: {
+        id: 'wait-1',
+        type: 'collabAgentToolCall',
+        tool: 'wait',
+        status: 'inProgress',
+        senderThreadId: 'thread-root',
+        receiverThreadIds: ['thread-child'],
+        prompt: null,
+        model: null,
+        reasoningEffort: null,
+        agentsStates: { 'thread-child': { status: 'running', message: null } }
+      }
+    })
+    notify?.('thread/tokenUsage/updated', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      tokenUsage: {
+        total: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+        last: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
+      }
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-root',
+      turn: { id: 'turn-root', status: 'completed', error: null }
+    })
+    await handle.promise
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'harness',
+        stage: 'plan_snapshot',
+        input: expect.objectContaining({ explanation: 'parallelize' })
+      }),
+      expect.objectContaining({
+        kind: 'agent',
+        tool: 'Agent',
+        toolUseId: 'spawn-1',
+        name: 'inspect provider',
+        input: expect.objectContaining({
+          senderThreadId: 'thread-root',
+          receiverThreadIds: ['thread-child'],
+          prompt: 'inspect provider'
+        })
+      }),
+      expect.objectContaining({
+        kind: 'tool',
+        tool: 'Bash',
+        toolUseId: 'child-command',
+        agentId: 'thread-child',
+        parentToolUseId: 'spawn-1'
+      }),
+      expect.objectContaining({
+        kind: 'tool',
+        tool: 'collaboration:wait',
+        toolUseId: 'wait-1',
+        input: expect.objectContaining({ receiverThreadIds: ['thread-child'] })
+      })
+    ]))
+    expect(events.find((event) => event.kind === 'harness' && event.stage === 'result')).toMatchObject({
+      tokensIn: 10,
+      tokensOut: 2
+    })
+  })
+
+  it('records one update_plan call when app-server also emits a plan ThreadItem snapshot', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-plan' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-plan' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-plan',
+      prompt: 'plan',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('turn/plan/updated', {
+      threadId: 'thread-plan',
+      turnId: 'turn-plan',
+      explanation: 'inspect then verify',
+      plan: [
+        { step: 'inspect', status: 'inProgress' },
+        { step: 'verify', status: 'pending' }
+      ]
+    })
+    const item = { id: 'plan-1', type: 'plan', text: '1. inspect\n2. verify' }
+    notify?.('item/started', {
+      threadId: 'thread-plan',
+      turnId: 'turn-plan',
+      item
+    })
+    notify?.('item/completed', {
+      threadId: 'thread-plan',
+      turnId: 'turn-plan',
+      item
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-plan',
+      turn: { id: 'turn-plan', status: 'completed', error: null }
+    })
+    await handle.promise
+
+    expect(events.filter((event) => event.stage === 'tool:update_plan')).toEqual([
+      expect.objectContaining({
+        kind: 'tool',
+        tool: 'update_plan',
+        toolUseId: 'plan:turn-plan:1',
+        input: expect.objectContaining({ explanation: 'inspect then verify' })
+      })
+    ])
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'tool',
+      stage: 'tool_result',
+      tool: 'update_plan',
+      toolUseId: 'plan:turn-plan:1'
+    }))
+  })
+
+  it('classifies mcporter calls as MCP while keeping mcporter list as a management command', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-mcp' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-mcp' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-mcp',
+      prompt: 'inspect MCP',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('item/started', {
+      threadId: 'thread-mcp',
+      turnId: 'turn-mcp',
+      item: {
+        id: 'mcp-call',
+        type: 'commandExecution',
+        command: '/bin/zsh -lc \\"mcporter call coop.query_workitem_detail --args \'{\\\\"id\\\\":\\\\"1\\\\"}\'\\"',
+        cwd: '/isolated-copy'
+      }
+    })
+    notify?.('item/started', {
+      threadId: 'thread-mcp',
+      turnId: 'turn-mcp',
+      item: {
+        id: 'mcp-list',
+        type: 'commandExecution',
+        command: 'mcporter list',
+        cwd: '/isolated-copy'
+      }
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-mcp',
+      turn: { id: 'turn-mcp', status: 'completed', error: null }
+    })
+    await handle.promise
+
+    expect(events.find((event) => event.toolUseId === 'mcp-call')).toMatchObject({
+      tool: 'Bash',
+      isMcp: true,
+      mcpServer: 'coop',
+      mcpAction: 'query_workitem_detail',
+      mcpTool: 'mcporter:coop.query_workitem_detail'
+    })
+    expect(events.find((event) => event.toolUseId === 'mcp-list')).toMatchObject({
+      tool: 'Bash',
+      runtimeMetadata: { mcpManagementAction: 'list' }
+    })
+    expect(events.find((event) => event.toolUseId === 'mcp-list')?.isMcp).not.toBe(true)
+  })
+
+  it('keeps a failed Codex turn as an error result with the upstream failure detail', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-failed' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-failed' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-failed',
+      prompt: 'inspect',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('error', {
+      threadId: 'thread-failed',
+      turnId: 'turn-failed',
+      willRetry: false,
+      error: {
+        message: 'stream disconnected before completion',
+        codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+        additionalDetails: 'connection reset'
+      }
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-failed',
+      turn: {
+        id: 'turn-failed',
+        status: 'failed',
+        error: {
+          message: 'stream disconnected before completion',
+          codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+          additionalDetails: 'connection reset'
+        }
+      }
+    })
+    await expect(handle.promise).resolves.toMatchObject({ externalSessionId: 'thread-failed' })
+
+    expect(events.find((event) => event.kind === 'harness' && event.stage === 'result')).toMatchObject({
+      isError: true,
+      text: 'stream disconnected before completion',
+      output: 'stream disconnected before completion',
+      runtimeMetadata: expect.objectContaining({
+        turnStatus: 'failed',
+        turnError: expect.objectContaining({ message: 'stream disconnected before completion' })
+      })
+    })
   })
 
   it('records an implicit Skill invocation when Codex reads its SKILL.md', async () => {
@@ -313,7 +986,8 @@ describe('Codex provider adapter', () => {
       handlerType: 'command',
       status: 'running',
       statusMessage: 'Checking tool',
-      sourcePath: '/isolated-copy/.codex/hooks.json',
+      source: 'project',
+      sourcePath: '/Users/baobingjiang/IdeaProjects/rate-native/.codex/hooks.json',
       scope: 'turn',
       durationMs: null,
       entries: []
@@ -343,7 +1017,11 @@ describe('Codex provider adapter', () => {
           hookEvent: 'PreToolUse',
           hookOutcome: 'success',
           durationMs: 12,
-          isError: false
+          isError: false,
+          input: expect.objectContaining({
+            sourcePath: '/isolated-copy/.codex/hooks.json',
+            originalSourcePath: '/Users/baobingjiang/IdeaProjects/rate-native/.codex/hooks.json'
+          })
         })
       ])
     )

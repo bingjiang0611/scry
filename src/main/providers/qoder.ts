@@ -4,6 +4,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { capabilityReady, capabilityUnknown, type AccountSnapshot, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
+import { normalizeAgentQuestionRequest } from '../../shared/runtime'
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
@@ -39,7 +40,12 @@ function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
   }
 }
 
-function qoderOptions(cwd: string | undefined, resume?: string, onPid?: (pid: number) => void): Record<string, unknown> {
+function qoderOptions(
+  cwd: string | undefined,
+  resume?: string,
+  onPid?: (pid: number) => void,
+  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void
+): Record<string, unknown> {
   const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!executable) throw new Error('Qoder CLI 未找到')
   return {
@@ -59,6 +65,7 @@ function qoderOptions(cwd: string | undefined, resume?: string, onPid?: (pid: nu
           spawnQoderCLIProcess: (options: { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal: AbortSignal }) => {
             const child = spawn(options.command, options.args, { cwd: options.cwd, env: options.env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'] })
             if (child.pid) onPid(child.pid)
+            child.once('exit', (code, signal) => onExit?.(code, signal))
             options.signal.addEventListener('abort', () => child.kill('SIGTERM'), { once: true })
             return child
           }
@@ -283,46 +290,116 @@ export function createQoderAdapter(): ProviderAdapter {
       let externalSessionId = request.resume
       let q: Query | undefined
       let qoderPid: number | undefined
+      let streamSettled = false
+      let exitTimer: ReturnType<typeof setTimeout> | undefined
+      let rejectUnexpectedExit: (error: Error) => void = () => {}
+      const unexpectedExit = new Promise<never>((_resolve, reject) => {
+        rejectUnexpectedExit = reject
+      })
+      let providerFailureSeen = false
       let streamedText = ''
       const sdkHooks: TraceEvent[] = []
       const ctx: NormalizeCtx = { runId: request.runId, cwd: request.cwd, newId, now: () => new Date().toISOString() }
       const promise = (async () => {
         q = query({
           prompt: request.prompt,
-          options: { ...qoderOptions(request.cwd, request.resume, (pid) => { qoderPid = pid }), abortController: controller } as never
+          options: {
+            ...qoderOptions(
+              request.cwd,
+              request.resume,
+              (pid) => { qoderPid = pid },
+              (code, signal) => {
+                if (stopped || streamSettled) return
+                exitTimer = setTimeout(() => {
+                  rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
+                }, 1000)
+              }
+            ),
+            ...(request.requestUserInput
+              ? {
+                  canUseTool: async (
+                    toolName: string,
+                    input: Record<string, unknown>,
+                    permission: { signal: AbortSignal; toolUseID: string; agentID?: string }
+                  ) => {
+                    if (toolName !== 'AskUserQuestion') return { behavior: 'allow' as const }
+                    const question = normalizeAgentQuestionRequest(
+                      request.runId,
+                      permission.toolUseID,
+                      input,
+                      permission.agentID
+                    )
+                    if (!question) {
+                      return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
+                    }
+                    const response = await request.requestUserInput!(question, permission.signal)
+                    if (response.behavior === 'cancelled') {
+                      return {
+                        behavior: 'deny' as const,
+                        message: '用户取消了提问',
+                        interrupt: false,
+                        decisionClassification: 'user_reject' as const
+                      }
+                    }
+                    return {
+                      behavior: 'allow' as const,
+                      updatedInput: { ...input, answers: response.answers },
+                      decisionClassification: 'user_temporary' as const
+                    }
+                  }
+                }
+              : {}),
+            abortController: controller
+          } as never
         })
         let statuses: McpServerStatus[] | undefined
         try {
-          for await (const message of q) {
-            const raw = message as unknown as Record<string, unknown>
-            if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
-              externalSessionId = raw.session_id
-              request.onExternalSessionId?.(raw.session_id)
-            }
-            if (raw.type === 'system' && raw.subtype === 'init' && Array.isArray(raw.mcp_servers)) {
-              statuses = (raw.mcp_servers as Array<{ name: string; status: McpServerStatus['status'] }>).map((server) => ({
-                name: server.name,
-                status: server.status
-              }))
-            }
-            for (const rawEvent of normalizeSdkMessage(message, ctx)) {
-              const event = qoderTrace(rawEvent)
-              if (event.kind === 'hook') sdkHooks.push(event)
-              if (event.kind === 'model' && event.stage === 'text_delta') {
-                streamedText += event.text ?? ''
-                request.emit(event)
-              } else if (event.kind === 'model' && event.stage === 'text' && streamedText) {
-                const full = event.text ?? ''
-                const remainder = full.startsWith(streamedText) ? full.slice(streamedText.length) : full
-                streamedText = ''
-                if (remainder) request.emit({ ...event, text: remainder })
-              } else {
-                request.emit(event)
-              }
-            }
+          try {
+            await Promise.race([
+              (async () => {
+                for await (const message of q!) {
+                  const raw = message as unknown as Record<string, unknown>
+                  if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
+                    externalSessionId = raw.session_id
+                    request.onExternalSessionId?.(raw.session_id)
+                  }
+                  if (raw.type === 'system' && raw.subtype === 'init' && Array.isArray(raw.mcp_servers)) {
+                    statuses = (raw.mcp_servers as Array<{ name: string; status: McpServerStatus['status'] }>).map((server) => ({
+                      name: server.name,
+                      status: server.status
+                    }))
+                  }
+                  for (const rawEvent of normalizeSdkMessage(message, ctx)) {
+                    const event = qoderTrace(rawEvent)
+                    if (event.kind === 'harness' && event.stage === 'result' && event.isError) providerFailureSeen = true
+                    if (event.kind === 'hook') sdkHooks.push(event)
+                    if (event.kind === 'model' && event.stage === 'text_delta') {
+                      streamedText += event.text ?? ''
+                      request.emit(event)
+                    } else if (event.kind === 'model' && event.stage === 'text' && streamedText) {
+                      const full = event.text ?? ''
+                      const remainder = full.startsWith(streamedText) ? full.slice(streamedText.length) : full
+                      streamedText = ''
+                      if (remainder) request.emit({ ...event, text: remainder })
+                    } else {
+                      request.emit(event)
+                    }
+                  }
+                }
+              })(),
+              unexpectedExit
+            ])
+          } catch (error) {
+            if (!providerFailureSeen) throw error
           }
         } finally {
-          await q.close()
+          streamSettled = true
+          if (exitTimer) clearTimeout(exitTimer)
+          try {
+            await q.close()
+          } catch (error) {
+            if (!providerFailureSeen) throw error
+          }
         }
         if (process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0' && qoderPid) {
           try {

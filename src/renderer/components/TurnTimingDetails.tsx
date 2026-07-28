@@ -23,6 +23,11 @@ function timingSource(call: TimedTurnCall): string {
   return '未计时'
 }
 
+function phaseToolSource(timed: number, total: number): string {
+  if (timed === 0) return '未计时'
+  return timed < total ? `~观测 · ${timed}/${total}` : '~观测'
+}
+
 function metric(label: string, value: string, source?: string, title?: string): ReactNode {
   return (
     <div className="turn-timing-metric" title={title}>
@@ -79,6 +84,16 @@ export function TurnTimingDetails({
   const hasTimedCalls = timing.timedCalls > 0
   const coverage = timing.totalCalls > 0 ? `${timing.timedCalls}/${timing.totalCalls}` : '—'
   const modelPhases = timing.phases.filter((phase) => phase.kind !== 'tail')
+  const apiSource =
+    timing.apiSource === 'provider'
+      ? 'SDK'
+      : timing.apiSource === 'observed'
+        ? timing.apiObservation === 'residual'
+          ? `~观测余量 · tools ${coverage}`
+          : timing.timedApiPhases < timing.totalApiPhases
+            ? `~观测 · ${timing.timedApiPhases}/${timing.totalApiPhases}`
+            : '~观测'
+        : '未采集'
   return (
     <div
       className="turn-call-timing"
@@ -93,9 +108,13 @@ export function TurnTimingDetails({
         {metric('整轮墙钟', durationText(timing.wallMs), timing.wallMs == null ? '未上报' : '运行时')}
         {metric(
           '模型 API 合计',
-          durationText(timing.apiMs),
-          timing.apiMs == null ? '未上报' : 'SDK',
-          '整轮所有模型 API 活跃时间合计；不是某一次模型调用，也不是纯推理耗时。'
+          `${timing.apiSource === 'observed' && timing.apiMs != null ? '~' : ''}${durationText(timing.apiMs)}`,
+          apiSource,
+          timing.apiSource === 'provider'
+            ? 'Provider / SDK 上报的整轮模型 API 活跃时间合计。'
+            : timing.apiObservation === 'residual'
+              ? 'Provider 未上报 API 耗时且缺少逐次响应边界；当前值为整轮墙钟减去工具实际占用区间的余量，包含少量运行时开销。'
+              : 'Provider 未上报 API 耗时；当前值按工具结束到下一次模型响应之间的事件时间戳观测区间累计。'
         )}
         {metric(
           '调用累计',
@@ -132,11 +151,11 @@ export function TurnTimingDetails({
       {modelPhases.length > 0 && (
         <div className="turn-timing-block">
           <div className="turn-timing-block-title">
-            <span>模型等待时间线</span>
+            <span>模型 / 工具时间线</span>
           </div>
           <div className="turn-timing-timeline">
             {modelPhases.map((phase) => {
-              const value = waitSeconds(phase.observedMs)
+              const apiValue = waitSeconds(phase.observedMs)
               const phaseName = phase.kind === 'final'
                 ? '最终模型响应'
                 : phase.kind === 'unsegmented'
@@ -144,17 +163,28 @@ export function TurnTimingDetails({
                   : `第 ${phase.sequence} 次模型响应`
               const accessibleLabel = phase.observedMs == null
                 ? `${phaseName}等待时间未采集`
-                : `${phaseName}前观测间隔 ${value}`
+                : phase.kind === 'unsegmented'
+                  ? `整轮模型 API 观测余量约 ${apiValue}`
+                  : `${phaseName}前 API 观测耗时约 ${apiValue}`
+              const toolValue = phase.toolMs == null ? '—' : `${durationText(phase.toolMs)}`
+              const toolCount = phase.callsAfterResponse.length
               return (
                 <div className="turn-timing-phase" key={phase.id}>
                   <div className="turn-timing-api" role="group" title={accessibleLabel} aria-label={accessibleLabel}>
-                    <b aria-hidden="true">{value}</b>
+                    <span>模型 API</span>
+                    <b aria-hidden="true">{phase.observedMs == null ? '—' : `~${apiValue}`}</b>
                   </div>
-                  {phase.callsAfterResponse.length > 0 && (
-                    <div className="turn-timing-batch">
-                      {phase.callsAfterResponse.map((call) => (
-                        <div key={`${phase.id}:${call.event.id}:${call.order}`}>{callRow(call, onOpenCall)}</div>
-                      ))}
+                  {toolCount > 0 && (
+                    <div
+                      className="turn-timing-tool-batch"
+                      role="group"
+                      title={`${toolCount} 次工具调用；${phase.timedTools} 次可计时`}
+                      aria-label={`${toolCount} 次工具调用，耗时${phase.toolMs == null ? '未计时' : `约 ${toolValue}`}`}
+                    >
+                      <span>工具调用</span>
+                      <em>{toolCount} 次</em>
+                      <b>{phase.toolMs == null ? '—' : `~${toolValue}`}</b>
+                      <small>{phaseToolSource(phase.timedTools, toolCount)}</small>
                     </div>
                   )}
                 </div>

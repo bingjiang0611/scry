@@ -1,6 +1,6 @@
 {
-  "name": "@scry/turn-recorder",
-  "version": "0.2.0",
+  "name": "@ali/scry-turn-recorder",
+  "version": "0.2.1",
   "description": "Provider-neutral local top-level turn recorder for AI coding agents",
   "type": "module",
   "bin": {

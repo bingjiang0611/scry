@@ -18,6 +18,7 @@ export type RuntimeFailureStage =
 
 export interface AgentStartRequest {
   prompt: string
+  cwd?: string
   providerId?: ProviderId
   agentId?: string
   backend?: RuntimeBackend
@@ -60,6 +61,7 @@ export type AgentQuestionResponse =
 
 export interface NormalizedAgentStartRequest {
   prompt: string
+  cwd?: string
   providerId: ProviderId
   agentId: string
   backend: RuntimeBackend
@@ -179,6 +181,7 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   const expectedRuntime = runtimeProviderForProviderId(providerId)
   return {
     prompt: payload.prompt,
+    ...(typeof payload.cwd === 'string' && payload.cwd.trim() ? { cwd: payload.cwd } : {}),
     providerId,
     agentId,
     backend: payload.backend ?? 'local',

@@ -12,6 +12,7 @@ import type { RuntimeProvider } from '../shared/runtime'
 
 export interface AppSession {
   sessionId: string
+  runId?: string
   externalSessionId?: string
   providerId?: SessionProviderId
   runtimeProvider?: RuntimeProvider
@@ -22,7 +23,9 @@ export interface AppSession {
 
 export interface SessionMeta {
   sessionId: string
-  externalSessionId: string
+  runId?: string
+  externalSessionId?: string
+  pending?: boolean
   providerId: SessionProviderId
   runtimeProvider?: RuntimeProvider
   mtime: number
@@ -84,19 +87,53 @@ export function createAppSessionStore(
   const file = join(userDataDir, 'app-sessions.json')
   const load = (): AppSession[] =>
     readJson<AppSession[]>(file, []).map((session) => {
-      const externalSessionId = session.externalSessionId ?? session.sessionId
+      const externalSessionId = session.externalSessionId ?? (session.runId ? undefined : session.sessionId)
       return {
         ...session,
-        sessionId: externalSessionId,
+        sessionId: session.sessionId || externalSessionId || session.runId || '',
         externalSessionId,
-        providerId: session.providerId ?? inferProvider?.({ cwd: session.cwd, externalSessionId }) ?? 'legacy_unknown'
+        providerId:
+          session.providerId ??
+          (externalSessionId ? inferProvider?.({ cwd: session.cwd, externalSessionId }) : undefined) ??
+          'legacy_unknown'
       }
     })
   const save = (list: AppSession[]): void => writeJson(file, list)
 
+  const recordPending = (args: {
+    providerId: ProviderId
+    runtimeProvider: RuntimeProvider
+    runId: string
+    cwd: string
+    prompt: string
+  }): void => {
+    if (!args.runId || !args.cwd) return
+    const list = load()
+    const now = Date.now()
+    const ex = list.find(
+      (session) =>
+        session.runId === args.runId &&
+        session.providerId === args.providerId &&
+        session.cwd === args.cwd
+    )
+    if (ex) ex.ts = now
+    else
+      list.push({
+        sessionId: args.runId,
+        runId: args.runId,
+        providerId: args.providerId,
+        runtimeProvider: args.runtimeProvider,
+        cwd: args.cwd,
+        preview: args.prompt.slice(0, 80),
+        ts: now
+      })
+    save(list)
+  }
+
   const record = (args: {
     providerId: ProviderId
     runtimeProvider: RuntimeProvider
+    runId?: string
     externalSessionId: string
     cwd: string
     prompt: string
@@ -107,10 +144,16 @@ export function createAppSessionStore(
       (session) =>
         session.providerId === args.providerId &&
         session.cwd === args.cwd &&
-        session.externalSessionId === args.externalSessionId
+        ((args.runId && session.runId === args.runId) || session.externalSessionId === args.externalSessionId)
     )
     const now = Date.now()
-    if (ex) ex.ts = now
+    if (ex) {
+      ex.sessionId = args.externalSessionId
+      ex.externalSessionId = args.externalSessionId
+      ex.runId = args.runId ?? ex.runId
+      ex.runtimeProvider = args.runtimeProvider
+      ex.ts = now
+    }
     else
       list.push({
         sessionId: args.externalSessionId,
@@ -129,8 +172,9 @@ export function createAppSessionStore(
       .filter((session) => session.cwd === cwd && (!providerId || session.providerId === providerId))
       .sort((a, b) => b.ts - a.ts)
       .map((session) => ({
-        sessionId: session.externalSessionId!,
-        externalSessionId: session.externalSessionId!,
+        sessionId: session.sessionId,
+        ...(session.runId ? { runId: session.runId } : {}),
+        ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
         providerId: session.providerId!,
         runtimeProvider: session.runtimeProvider,
         mtime: session.ts,
@@ -151,8 +195,9 @@ export function createAppSessionStore(
           cwd,
           name: baseName(cwd),
           sessions: sessions.map((session) => ({
-            sessionId: session.externalSessionId!,
-            externalSessionId: session.externalSessionId!,
+            sessionId: session.sessionId,
+            ...(session.runId ? { runId: session.runId } : {}),
+            ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
             providerId: session.providerId!,
             runtimeProvider: session.runtimeProvider,
             mtime: session.ts,
@@ -172,10 +217,10 @@ export function createAppSessionStore(
           !(
             session.providerId === args.providerId &&
             session.cwd === args.cwd &&
-            session.externalSessionId === args.externalSessionId
+            (session.sessionId === args.externalSessionId || session.externalSessionId === args.externalSessionId)
           )
       )
     )
 
-  return { load, save, record, listSessions, listProjects, remove }
+  return { load, save, recordPending, record, listSessions, listProjects, remove }
 }

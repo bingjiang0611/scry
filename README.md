@@ -11,7 +11,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 - 汇总 token、cost、duration、tool/MCP 调用与文件读写足迹。
 - 提供对话、执行拓扑、分段分析、账单卫士、MCP 信任和诊断视图。
 - 通过 Provider adapter 接入 Claude、Codex、Qoder 和 OpenCode；各 Provider 的可用能力取决于本机 CLI/SDK 与登录状态。
-- 提供独立的 `@scry/turn-recorder` CLI，在本地记录顶层 agent turn。
+- 提供独立的 `@ali/scry-turn-recorder` CLI，在本地记录顶层 agent turn。
 
 ## 安全与数据边界
 
@@ -62,11 +62,11 @@ npm run build
 
 ## 独立轮次记录 CLI
 
-`@scry/turn-recorder` 与 Electron App 共用 turn record、Trace 聚合和 Git Diff Core，但不依赖 Electron、SQLite 或 Provider SDK。它只在本地写 `.scry/`：
+`@ali/scry-turn-recorder` 与 Electron App 共用 turn record、Trace 聚合和 Git Diff Core，但不依赖 Electron、SQLite 或 Provider SDK。它只在本地写 `.scry/`：
 
 ```bash
 npm run pack:cli
-npm install -g ./scry-turn-recorder-0.2.0.tgz
+npm install -g ./ali-scry-turn-recorder-0.2.0.tgz
 scry doctor --workspace /path/to/workspace
 ```
 

@@ -29,7 +29,7 @@ Agent 不在提示词或工具调用中主动执行 CLI。Claude/Qoder/Codex 的
 - 新增 `src/shared/turn-record.ts`：版本化 `AgentTurnRecord` 公共合同。
 - 新增 `src/core/turn-recorder/`：配置、open-turn 状态机、payload 归一、pending store、聚合、commit、export、health、恢复和嵌套 Git Diff。
 - 新增 `src/cli/scry.ts` 及 recorder/turns/doctor 命令。
-- 修改 `package.json`、新增独立 CLI tsconfig 和 `packages/turn-recorder-cli`，生成无 Electron、无原生 SQLite、零运行时依赖的 `@scry/turn-recorder` 包；现有 `mcpguard` 不迁移、不回归。
+- 修改 `package.json`、新增独立 CLI tsconfig 和 `packages/turn-recorder-cli`，生成无 Electron、无原生 SQLite、零运行时依赖的 `@ali/scry-turn-recorder` 包；现有 `mcpguard` 不迁移、不回归。
 - Electron 完成一轮时调用同一 Core 的纯聚合 API，把 `TurnEvidence` 随既有 archive 保存；正式 `.scry/records` 提交只由外部生命周期 Recorder 执行，renderer/IPC 与既有 archive/SQLite 保持不变。
 
 ### 3.2 sample-workspace

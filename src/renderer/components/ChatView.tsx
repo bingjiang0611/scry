@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import type { DetectedAgent } from '../env'
@@ -129,6 +129,20 @@ export function ChatView({
 }: ChatViewProps) {
   const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
   const slashMatches = filterSlashCommands(input, slashCmds)
+  const slashMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!slashOpen) return
+    const dismissOnOutsidePointer = (event: PointerEvent): void => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (slashMenuRef.current?.contains(target) || textareaRef.current?.contains(target)) return
+      onHideSlash()
+    }
+    document.addEventListener('pointerdown', dismissOnOutsidePointer, true)
+    return () => document.removeEventListener('pointerdown', dismissOnOutsidePointer, true)
+  }, [onHideSlash, slashOpen, textareaRef])
+
   return (
     <>
       <div className="body">
@@ -159,7 +173,7 @@ export function ChatView({
           <WorkdirPicker cwd={cwd} recent={recent} onChoose={onChooseFolder} onPick={onPickRecent} />
         </div>
         {slashOpen && (
-          <div className="slash-menu">
+          <div className="slash-menu" ref={slashMenuRef}>
             <div className="slash-head">
               <span>Commands{slashLoading ? ' · 读取中…' : ''}</span>
               {!slashLoading && slashCmds.length === 0 && (

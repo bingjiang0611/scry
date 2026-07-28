@@ -52,7 +52,7 @@ export interface ActiveRun {
   errorHint?: string
 }
 
-// 斜杠命令：来自 SDK 的 query.supportedCommands()（含内置命令 + skill），供 composer 的 / 命令面板。
+// 斜杠命令：来自各 Provider 的命令目录；可包含原生命令或 Scry 映射的 Skill 别名，供 composer 的 / 命令面板。
 export interface SlashCmd {
   name: string
   description: string
@@ -180,7 +180,8 @@ export interface ModelUsageRow {
 
 // B2/P0/P2：sqlite 跨会话分析结果（从 spans/model_usage 聚合），跨 main/preload/renderer 共用。
 export interface DbStats {
-  totals: { cost: number | null; tin: number | null; tout: number | null; turns: number }
+  status?: 'ready' | 'unavailable' | 'query_error'
+  totals: { cost: number | null; tin: number | null; tout: number | null; turns: number; toolCalls?: number; dangerEvents?: number }
   topTools: { tool: string; n: number; mcp: number }[]
   byCwd: { cwd: string; cost: number | null; turns: number }[]
   byModel: { model: string; tin: number | null; tout: number | null; cost: number | null }[]
@@ -188,6 +189,48 @@ export interface DbStats {
   toolStats: { tool: string; n: number; avgMs: number; errors: number }[]
   // P3 跨会话危险审计趋势：哪些危险操作最频繁（从 spans.danger_* 聚合）。
   dangerTrend: { reason: string; level: string; n: number }[]
+  // Analytics v7：字段可选以兼容 dev/HMR 中旧 preload；main 的当前实现始终返回完整形状。
+  tokenDaily?: {
+    day: string
+    input: number | null
+    output: number | null
+    cacheRead: number | null
+    cacheWrite: number | null
+    turns: number
+    inputKnownTurns: number
+    outputKnownTurns: number
+    cacheReadKnownTurns: number
+    cacheWriteKnownTurns: number
+  }[]
+  dangerDaily?: { day: string; danger: number; warn: number }[]
+  comparison?: {
+    current: { tokens: number | null; tokenKnownTurns: number; turns: number; toolCalls: number; danger: number }
+    previous: { tokens: number | null; tokenKnownTurns: number; turns: number; toolCalls: number; danger: number }
+    change: { tokensPct: number | null; turnsPct: number | null; toolCallsPct: number | null; dangerPct: number | null }
+  }
+  cacheReuse?: {
+    providerId: ProviderId
+    turns: number
+    inputTokens: number | null
+    cacheReadTokens: number | null
+    cacheWriteTokens: number | null
+    inputKnownTurns: number
+    cacheReadKnownTurns: number
+    cacheWriteKnownTurns: number
+    comparableTurns: number
+    reuseRate: number | null
+    denominator: 'separate_input' | 'input_includes_cache' | 'upstream_dependent' | 'unknown'
+  }[]
+  mcpLatency?: { server: string; calls: number; p50Ms: number | null; p95Ms: number | null; errors: number }[]
+  providerCoverage?: {
+    providerId: ProviderId
+    turns: number
+    inputKnownTurns: number
+    outputKnownTurns: number
+    cacheReadKnownTurns: number
+    cacheWriteKnownTurns: number
+    dangerCoverage: 'classified' | 'unsupported'
+  }[]
 }
 
 export interface TraceEvent {
@@ -272,9 +315,13 @@ function parseDirectMcpTool(toolName: string): { isMcp: boolean; mcpServer?: str
 }
 
 function parseMcporterCommand(command: string): { isMcp: boolean; mcpServer?: string; mcpAction?: string; mcpTool?: string } {
-  const direct = /(?:^|[\s;&|])(?:[^\s"';&|]*\/)?mcporter\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/.exec(command)
-  const variable = /\bmcporter\b/.test(command)
-    ? /(?:^|[\s;&|])["']?\$[A-Za-z_][A-Za-z0-9_]*["']?\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/.exec(command)
+  // Codex app-server 会把 shell 包装后的命令保存成
+  // `/bin/zsh -lc \"mcporter call ...\"`。先还原仅用于包裹命令的转义引号，
+  // 否则 `\"mcporter` 前没有空白，无法识别为 MCP 调用。
+  const normalized = command.replace(/\\(["'`])/g, '$1')
+  const direct = /(?:^|[\s;&|"'`])(?:[^\s"';&|]*\/)?mcporter\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/.exec(normalized)
+  const variable = /\bmcporter\b/.test(normalized)
+    ? /(?:^|[\s;&|"'`])["']?\$[A-Za-z_][A-Za-z0-9_]*["']?\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/.exec(normalized)
     : null
   const m = direct ?? variable
   if (!m) return { isMcp: false }

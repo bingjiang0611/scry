@@ -34,13 +34,24 @@ describe('buildTurnTimingBreakdown', () => {
     ]
 
     const timing = buildTurnTimingBreakdown(items, [read, write])
-    expect(timing).toMatchObject({ wallMs: 12_000, apiMs: 4_200, totalCalls: 2, timedCalls: 2, cumulativeCallMs: 5_500 })
+    expect(timing).toMatchObject({
+      wallMs: 12_000,
+      apiMs: 4_200,
+      apiSource: 'provider',
+      timedApiPhases: 2,
+      totalApiPhases: 2,
+      totalCalls: 2,
+      timedCalls: 2,
+      cumulativeCallMs: 5_500
+    })
     expect(timing.aggregates).toEqual([
       { category: 'Read', count: 1, timedCount: 1, totalMs: 3000, averageMs: 3000, maxMs: 3000 },
       { category: 'Write', count: 1, timedCount: 1, totalMs: 2500, averageMs: 2500, maxMs: 2500 }
     ])
     expect(timing.phases[0].observedMs).toBe(0)
     expect(timing.phases[1].observedMs).toBe(2000)
+    expect(timing.phases[0]).toMatchObject({ toolMs: 3000, timedTools: 1 })
+    expect(timing.phases[1]).toMatchObject({ toolMs: 4000, timedTools: 1 })
     expect(timing.phases[0].callsAfterResponse[0].durationSource).toBe('observed')
     expect(timing.phases[1].callsAfterResponse[0].durationSource).toBe('provider')
   })
@@ -66,6 +77,7 @@ describe('buildTurnTimingBreakdown', () => {
 
     const timing = buildTurnTimingBreakdown(items, [read, grep])
     expect(timing.phases[0].callsAfterResponse.map((call) => call.category)).toEqual(['Read', 'Grep'])
+    expect(timing.phases[0].toolMs).toBe(5000)
     expect(timing.cumulativeCallMs).toBe(8000)
     expect(timing.occupiedCallMs).toBe(5000)
     expect(timing.overlapCallMs).toBe(3000)
@@ -300,7 +312,61 @@ describe('buildTurnTimingBreakdown', () => {
     })
 
     const timing = buildTurnTimingBreakdown([archivedResult, transcriptUsage], [], archivedResult)
-    expect(timing).toMatchObject({ wallMs: 10_000, apiMs: 4200 })
+    expect(timing).toMatchObject({ wallMs: 10_000, apiMs: 4200, apiSource: 'provider' })
+  })
+
+  it('Provider 未上报 API 耗时时回退到可确认的模型响应观测区间', () => {
+    const bash = event({
+      id: 'bash',
+      kind: 'tool',
+      stage: 'tool:Bash',
+      tool: 'Bash',
+      toolUseId: 'bash',
+      messageId: 'msg-1',
+      ts: '2026-07-18T00:00:02.000Z'
+    })
+    const items = [
+      bash,
+      event({ id: 'bash-result', kind: 'tool', stage: 'tool_result', toolUseId: 'bash', ts: '2026-07-18T00:00:05.000Z' }),
+      event({ id: 'final', kind: 'model', stage: 'text', messageId: 'msg-2', ts: '2026-07-18T00:00:09.000Z' }),
+      event({ id: 'result', kind: 'harness', stage: 'result', ts: '2026-07-18T00:00:10.000Z', durationMs: 10_000 })
+    ]
+
+    const timing = buildTurnTimingBreakdown(items, [bash])
+    expect(timing).toMatchObject({
+      apiMs: 6000,
+      apiSource: 'observed',
+      apiObservation: 'phase',
+      timedApiPhases: 2,
+      totalApiPhases: 2
+    })
+  })
+
+  it('缺少 messageId 时用整轮非工具余量估计 API，不伪造成原生值', () => {
+    const bash = event({
+      id: 'bash',
+      kind: 'tool',
+      stage: 'tool:Bash',
+      tool: 'Bash',
+      toolUseId: 'bash',
+      ts: '2026-07-18T00:00:02.000Z'
+    })
+    const items = [
+      bash,
+      event({ id: 'bash-result', kind: 'tool', stage: 'tool_result', toolUseId: 'bash', ts: '2026-07-18T00:00:05.000Z' }),
+      event({ id: 'result', kind: 'harness', stage: 'result', ts: '2026-07-18T00:00:10.000Z', durationMs: 10_000 })
+    ]
+
+    const timing = buildTurnTimingBreakdown(items, [bash])
+    expect(timing).toMatchObject({
+      wallMs: 10_000,
+      apiMs: 7000,
+      apiSource: 'observed',
+      apiObservation: 'residual',
+      timedApiPhases: 1,
+      totalApiPhases: 1
+    })
+    expect(timing.phases[0]).toMatchObject({ kind: 'unsegmented', observedMs: 7000, toolMs: 3000 })
   })
 
   it('倒序结果时间不污染 lifecycle；非法 result duration 会回退到调用原生 duration', () => {

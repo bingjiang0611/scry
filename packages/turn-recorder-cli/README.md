@@ -1,4 +1,4 @@
-# @scry/turn-recorder
+# @ali/scry-turn-recorder
 
 Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用，在工作区的 `.scry/` 下写入顶层用户轮次记录；CLI 本身不上传数据，也不依赖 Electron 或原生模块。
 

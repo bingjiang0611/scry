@@ -7,6 +7,7 @@ interface ViewChromeProps {
   cwd: string | null
   view: AppView
   agent: DetectedAgent | undefined
+  agentScanning?: boolean
   showPanel: boolean
   canTogglePanel?: boolean
   onView: (view: AppView) => void
@@ -17,6 +18,7 @@ export function ViewChrome({
   cwd,
   view,
   agent,
+  agentScanning = false,
   showPanel,
   canTogglePanel = true,
   onView,
@@ -47,7 +49,8 @@ export function ViewChrome({
           </button>
         ) : (
           <button className="tb-pill agent-pill">
-            <span className="dot off" /> <span className="agent-name">未检测到 agent</span>
+            <span className={`dot ${agentScanning ? 'checking' : 'off'}`} />{' '}
+            <span className="agent-name">{agentScanning ? '正在检测 agent…' : '未检测到 agent'}</span>
           </button>
         )}
         {!cwd && (

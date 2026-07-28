@@ -24,7 +24,9 @@ import type { ParsedTurn } from '../main/normalize'
 
 export interface SessionMeta {
   sessionId: string
-  externalSessionId: string
+  runId?: string
+  externalSessionId?: string
+  pending?: boolean
   providerId: SessionProviderId
   runtimeProvider?: RuntimeProvider
   mtime: number
@@ -40,6 +42,8 @@ export interface ProjectMeta {
 }
 
 const api = {
+  rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
+  detectFast: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detectFast'),
   detect: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detect'),
   providerDescriptors: (): Promise<ProviderDescriptor[]> => ipcRenderer.invoke('agent:providerDescriptors'),
   recentFolders: (): Promise<string[]> => ipcRenderer.invoke('agent:recentFolders'),
@@ -76,8 +80,11 @@ const api = {
     ipcRenderer.invoke('agent:deleteSession', context),
   start: (request: AgentStartRequest): Promise<{ runId: string }> => ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
+  activeRuns: (): Promise<ActiveRun[]> => ipcRenderer.invoke('agent:activeRuns'),
+  focusRun: (runId: string | null): Promise<boolean> => ipcRenderer.invoke('agent:focusRun', runId),
+  adoptActiveRun: (runId: string): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:adoptActiveRun', runId),
   answerQuestion: (response: AgentQuestionResponse): Promise<boolean> => ipcRenderer.invoke('agent:answerQuestion', response),
-  stop: (): Promise<boolean> => ipcRenderer.invoke('agent:stop'),
+  stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('agent:stop', runId),
   onTrace: (cb: (ev: TraceEvent) => void): (() => void) => {
     // main 合批发数组（性能）→ 这里拆回逐条 cb，渲染侧契约不变（仍是「每事件一次 cb」）
     const l = (_: unknown, evs: TraceEvent[]): void => {
@@ -91,8 +98,8 @@ const api = {
     ipcRenderer.on('agent:turnDone', l)
     return () => ipcRenderer.removeListener('agent:turnDone', l)
   },
-  onSession: (cb: (e: { runId: string; sessionId: string; externalSessionId?: string; providerId?: string }) => void): (() => void) => {
-    const l = (_: unknown, e: { runId: string; sessionId: string; externalSessionId?: string; providerId?: string }): void => cb(e)
+  onSession: (cb: (e: { runId: string; sessionId: string; previousSessionId?: string; externalSessionId?: string; providerId?: string; pending?: boolean }) => void): (() => void) => {
+    const l = (_: unknown, e: { runId: string; sessionId: string; previousSessionId?: string; externalSessionId?: string; providerId?: string; pending?: boolean }): void => cb(e)
     ipcRenderer.on('agent:session', l)
     return () => ipcRenderer.removeListener('agent:session', l)
   },

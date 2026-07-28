@@ -147,6 +147,23 @@ describe('normalizeSdkMessage', () => {
     })
   })
 
+  it('保留 Qoder result errors 中的具体失败原因', () => {
+    const evs = normalizeSdkMessage(
+      {
+        type: 'result',
+        subtype: 'error_during_execution',
+        errors: ['Unknown slash command: /rate-workflow', 'Use /rate-native-rate-workflow instead']
+      },
+      ctx()
+    )
+    expect(evs[0]).toMatchObject({
+      kind: 'harness',
+      stage: 'result',
+      text: 'Unknown slash command: /rate-workflow\nUse /rate-native-rate-workflow instead',
+      isError: true
+    })
+  })
+
   it('P0：result 有 modelUsage 时 token 从 per-model 聚合（顶层 usage 会少算）+ cache/api 字段', () => {
     const evs = normalizeSdkMessage(
       {
