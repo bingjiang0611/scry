@@ -31,7 +31,8 @@ const KIND_GRAD: Record<RichSegment['kind'], string> = {
   subagent: 'rgba(201,139,255,0.16)'
 }
 
-function fmtDur(ms: number): string {
+function fmtDur(ms: number | null | undefined): string {
+  if (ms == null) return '—'
   const s = ms / 1000
   if (s < 60) return `${s.toFixed(1)}s`
   const m = Math.floor(s / 60)
@@ -56,7 +57,9 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
 
   // 4 KPI：最高 token 段 / 最慢段 / 最多工具 / 效率最差
   const tokenHeaviest = [...segments].sort((a, b) => b.totalTokens - a.totalTokens)[0]
-  const slowest = [...segments].sort((a, b) => b.apiMs - a.apiMs)[0]
+  const slowest = [...segments]
+    .filter((segment) => segment.apiMs != null)
+    .sort((a, b) => (b.apiMs ?? 0) - (a.apiMs ?? 0))[0]
   const mostTools = [...segments].sort((a, b) => b.tools - a.tools)[0]
   const worst = [...segments].filter((s) => s.effFactor > 1).sort((a, b) => b.effFactor - a.effFactor)[0]
   const tokenPct = (s: RichSegment): number => (rep.totalTokens > 0 ? Math.round((s.totalTokens / rep.totalTokens) * 100) : 0)
@@ -64,7 +67,7 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
   return (
     <main className="seg-pane">
       <div className="seg-note">
-        <Icon name="info" /> 本会话按 turn 粒度切段（token/api 真实归集）· 精确 active_skill 跨 turn 追踪与跨会话段分析待后端 PR#7
+        <Icon name="info" /> 本会话按 turn 粒度切段；Token/API 只归到 turn context，子 agent 无独立 usage 时不伪造归属。
       </div>
 
       <div className="seg-shell">
@@ -80,7 +83,7 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
                 key={i}
                 className={KIND_CLASS[s.kind]}
                 style={{ width: `${Math.max(s.pct, 3)}%` }}
-                title={`${s.name} 段 · ${s.pct.toFixed(0)}%`}
+                title={`${s.name} 段${rep.totalApiMs == null ? ' · API 未上报' : ` · ${s.pct.toFixed(0)}%`}`}
               >
                 {s.pct >= 8 ? `${s.kind === 'baseline' ? '基线' : s.name} · ${s.pct.toFixed(0)}%` : ''}
               </div>
@@ -114,9 +117,9 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
           </div>
           <div>
             <div className="lbl">最慢段</div>
-            <div className="val">{fmtDur(slowest.apiMs)}</div>
+            <div className="val">{fmtDur(slowest?.apiMs)}</div>
             <div className="sub">
-              {slowest.name} · {slowest.tools} 工具
+              {slowest ? `${slowest.name} · ${slowest.tools} 调用` : 'Provider 未上报 API 耗时'}
             </div>
           </div>
           <div>
@@ -156,7 +159,7 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
               </div>
               <h3>{s.name}</h3>
               <div className="when">
-                {turnRange(s)} · <b>{fmtDur(s.apiMs)}</b> · {s.pct.toFixed(0)}%
+                {turnRange(s)} · <b>{fmtDur(s.apiMs)}</b>{rep.totalApiMs == null ? '' : ` · ${s.pct.toFixed(0)}%`}
               </div>
             </div>
 

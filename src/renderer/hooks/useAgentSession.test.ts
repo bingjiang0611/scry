@@ -118,9 +118,13 @@ describe('useAgentSession state reducers', () => {
   })
 
   it('replaces the timeline with parsed history turns', () => {
-    const turns = parsedSessionTurns('s1', [{ userText: 'hello', attachments: [image], items: [ev('a', 'archived')] }])
+    const turns = parsedSessionTurns('s1', [
+      { runId: 'archived-run', userText: 'hello', attachments: [image], items: [ev('a', 'archived')], done: true }
+    ])
 
-    expect(turns).toEqual([{ runId: 's1-0', userText: 'hello', attachments: [image], items: [ev('a', 'archived')], done: true }])
+    expect(turns).toEqual([
+      { runId: 'archived-run', userText: 'hello', attachments: [image], items: [ev('a', 'archived')], done: true }
+    ])
   })
 
   it('restores the selected live run without duplicating its partial transcript turn', () => {
@@ -143,6 +147,33 @@ describe('useAgentSession state reducers', () => {
 
     expect(turns.map((turn) => turn.runId)).toEqual(['s1-0', 'live-run'])
     expect(turns[1].items.map((item) => item.id)).toEqual(['live'])
+  })
+
+  it('keeps an interrupted archived turn when a resumed run uses the same prompt', () => {
+    const activeRun: ActiveRun = {
+      runId: 'resumed-run',
+      cwd: '/repo',
+      externalSessionId: 's1',
+      userText: '继续',
+      items: [ev('live', 'resumed-run')],
+      done: false
+    }
+    const turns = sessionTurnsWithActiveRun(
+      's1',
+      [
+        {
+          runId: 'interrupted-run',
+          userText: '继续',
+          items: [ev('interrupted', 'interrupted-run')],
+          done: true,
+          error: 'Request interrupted by user'
+        }
+      ],
+      activeRun
+    )
+
+    expect(turns.map((turn) => turn.runId)).toEqual(['interrupted-run', 'resumed-run'])
+    expect(turns[0]).toMatchObject({ done: true, error: 'Request interrupted by user' })
   })
 
   it('deduplicates pending questions and rejects stale close events by run', () => {

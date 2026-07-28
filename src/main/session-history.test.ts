@@ -40,6 +40,7 @@ describe('session history merge', () => {
     )
 
     expect(turns).toHaveLength(1)
+    expect(turns[0]).toMatchObject({ runId: 'run-command', done: true })
     expect(turns[0].items.map((item) => item.id)).toEqual(['transcript-command', 'archive-command'])
   })
 
@@ -334,6 +335,135 @@ describe('session history merge', () => {
     expect(turns[0].items.find((item) => item.stage === 'turn_diff')).toMatchObject({
       id: 'diff-new',
       turnDiff: { files: [{ added: 3 }] }
+    })
+  })
+
+  it('四 Provider 历史归档回放时重新识别 MCP 业务失败并补齐工具身份', () => {
+    const archive: TraceArchive = {
+      version: 2,
+      cwd: '/repo',
+      sessionId: 'sess',
+      providerId: 'codex',
+      turns: [
+        {
+          runId: 'run-mcp',
+          userText: '读取文档',
+          items: [
+            {
+              id: 'mcp-use',
+              ts: '2026-07-14T00:00:00.000Z',
+              runId: 'run-mcp',
+              kind: 'tool',
+              stage: 'tool:Bash',
+              tool: 'Bash',
+              toolUseId: 'call-1',
+              input: { command: 'mcporter call ding-doc.fetch --args \'{"url":"bad"}\'' },
+              isMcp: true,
+              mcpServer: 'ding-doc',
+              mcpAction: 'fetch',
+              mcpTool: 'mcp__ding-doc__fetch'
+            },
+            {
+              id: 'mcp-result',
+              ts: '2026-07-14T00:00:01.000Z',
+              runId: 'run-mcp',
+              kind: 'tool',
+              stage: 'tool_result',
+              toolUseId: 'call-1',
+              output: '{"success":false,"code":"INVALID_URL"}',
+              isError: false
+            }
+          ],
+          done: true,
+          ts: 1
+        }
+      ]
+    }
+
+    const items = mergeSessionTurns([], archive)[0].items
+    expect(items[1]).toMatchObject({
+      id: 'mcp-result',
+      isMcp: true,
+      mcpServer: 'ding-doc',
+      mcpAction: 'fetch',
+      mcpTool: 'mcp__ding-doc__fetch',
+      mcpCalls: [{ server: 'ding-doc', action: 'fetch', tool: 'mcporter:ding-doc.fetch' }],
+      isError: true
+    })
+  })
+
+  it('四 Provider 历史归档回放时不把成功 MCP 结果误判成失败', () => {
+    const archive: TraceArchive = {
+      version: 2,
+      cwd: '/repo',
+      sessionId: 'sess',
+      providerId: 'opencode',
+      turns: [
+        {
+          runId: 'run-mcp',
+          userText: '读取文档',
+          items: [
+            {
+              id: 'mcp-use',
+              ts: '2026-07-14T00:00:00.000Z',
+              runId: 'run-mcp',
+              kind: 'tool',
+              stage: 'tool:mcp__ding-doc__fetch',
+              tool: 'mcp__ding-doc__fetch',
+              toolUseId: 'call-1',
+              isMcp: true,
+              mcpServer: 'ding-doc',
+              mcpAction: 'fetch',
+              mcpTool: 'mcp__ding-doc__fetch'
+            },
+            {
+              id: 'mcp-result',
+              ts: '2026-07-14T00:00:01.000Z',
+              runId: 'run-mcp',
+              kind: 'tool',
+              stage: 'tool_result',
+              toolUseId: 'call-1',
+              output: '{"success":true,"data":{"error":"正文中的普通字段"}}',
+              isError: false
+            }
+          ],
+          done: true,
+          ts: 1
+        }
+      ]
+    }
+
+    expect(mergeSessionTurns([], archive)[0].items[1]).toMatchObject({
+      isMcp: true,
+      mcpServer: 'ding-doc',
+      isError: false
+    })
+  })
+
+  it('恢复 archive 的运行身份与终止状态，供续跑时区分同文案的不同轮次', () => {
+    const archive: TraceArchive = {
+      version: 2,
+      cwd: '/repo',
+      sessionId: 'sess',
+      providerId: 'claude',
+      turns: [
+        {
+          runId: 'interrupted-run',
+          userText: '继续',
+          items: [],
+          done: true,
+          error: 'Request interrupted by user',
+          errorHint: '可以继续发送',
+          ts: 1
+        }
+      ]
+    }
+
+    expect(mergeSessionTurns([], archive)[0]).toMatchObject({
+      runId: 'interrupted-run',
+      done: true,
+      error: 'Request interrupted by user',
+      errorHint: '可以继续发送'
     })
   })
 })

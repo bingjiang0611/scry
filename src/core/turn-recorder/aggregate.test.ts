@@ -63,4 +63,55 @@ describe('aggregateTurnEvidence', () => {
     expect(evidence.mcps.value?.map((call) => call.id)).toEqual(['mcp-1'])
     expect(evidence.skills.value?.map((call) => call.name)).toEqual(['rate-workflow'])
   })
+
+  it('同一个 shell lifecycle 中的多个 MCP 操作分别进入 evidence', () => {
+    const evidence = aggregateTurnEvidence({
+      events: [{
+        id: 'mcp',
+        ts: '2026-01-01T00:00:00.100Z',
+        runId: 'r',
+        kind: 'tool',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        name: 'Bash',
+        toolUseId: 'mcp-1',
+        isMcp: true,
+        mcpCalls: [
+          { server: 'coop', action: 'query', tool: 'mcporter:coop.query' },
+          { server: 'group-env', action: 'list', tool: 'mcporter:group-env.list' }
+        ]
+      }]
+    })
+    expect(evidence.tools.value).toEqual([])
+    expect(evidence.mcps.value).toEqual([
+      expect.objectContaining({ id: 'mcp-1', mcp: { server: 'coop', action: 'query', tool: 'mcporter:coop.query' } }),
+      expect.objectContaining({ id: 'mcp-1', mcp: { server: 'group-env', action: 'list', tool: 'mcporter:group-env.list' } })
+    ])
+  })
+
+  it('旧历史事件从 shell command 回填多个 MCP evidence', () => {
+    const evidence = aggregateTurnEvidence({
+      events: [{
+        id: 'mcp',
+        ts: '2026-01-01T00:00:00.100Z',
+        runId: 'r',
+        kind: 'tool',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        name: 'Bash',
+        toolUseId: 'mcp-1',
+        isMcp: true,
+        input: {
+          command: "mcporter call coop.get_sub_workitem --args '{}' && mcporter call coop.get_workitem_comments --args '{}'"
+        },
+        mcpServer: 'coop',
+        mcpAction: 'get_sub_workitem',
+        mcpTool: 'mcporter:coop.get_sub_workitem'
+      }]
+    })
+    expect(evidence.mcps.value).toEqual([
+      expect.objectContaining({ mcp: { server: 'coop', action: 'get_sub_workitem', tool: 'mcporter:coop.get_sub_workitem' } }),
+      expect.objectContaining({ mcp: { server: 'coop', action: 'get_workitem_comments', tool: 'mcporter:coop.get_workitem_comments' } })
+    ])
+  })
 })

@@ -1,7 +1,15 @@
 // 把 Claude Agent SDK 的 message stream（和 subagent transcript 行）归一化成统一 TraceEvent。
 // 纯函数、不依赖 electron/SDK 运行时 —— 便于 vitest 单测（见 normalize.test.ts）。
 
-import { type TraceEvent, type TraceKind, type ModelUsageRow, classifyTool, parseMcp, fileOpOf } from '../shared/trace.js'
+import {
+  type TraceEvent,
+  type TraceKind,
+  type ModelUsageRow,
+  classifyTool,
+  parseMcp,
+  mcpPayloadFailed,
+  fileOpOf
+} from '../shared/trace.js'
 import { classifyDanger } from './danger.js'
 
 export interface NormalizeCtx {
@@ -349,6 +357,7 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
           const toolUseId = String(b.tool_use_id)
           const started = ctx.toolUseById?.get(toolUseId)
           ctx.toolUseById?.delete(toolUseId)
+          const output = typeof b.content === 'string' ? b.content : JSON.stringify(b.content)
           out.push(
             base(ctx, {
               kind: 'tool',
@@ -360,10 +369,12 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
               mcpServer: started?.mcpServer,
               mcpAction: started?.mcpAction,
               mcpTool: started?.mcpTool,
+              mcpCalls: started?.mcpCalls,
               fileOp: started?.fileOp,
               filePath: started?.filePath,
-              text: typeof b.content === 'string' ? b.content : JSON.stringify(b.content),
-              isError: b.is_error === true
+              text: output,
+              output,
+              isError: b.is_error === true || (started?.isMcp === true && mcpPayloadFailed(output))
             })
           )
         }

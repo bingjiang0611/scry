@@ -443,6 +443,66 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(footer).not.toContain('<span class="lbl">tools</span> <b>2</b>')
   })
 
+  it('turn 顶部与 footer 共用逻辑调用口径，不把 Skill 内部路径证据重复计数', () => {
+    const ordinaryTools = Array.from({ length: 40 }, (_, index) =>
+      ev({
+        id: `tool-${index}`,
+        kind: 'tool',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        toolUseId: `tool-${index}`
+      })
+    )
+    const logicalCountTurn: Turn = {
+      runId: 'logical-call-count',
+      userText: '/rate-workflow 84441907',
+      done: true,
+      items: [
+        ...ordinaryTools,
+        ev({
+          id: 'root-skill',
+          kind: 'skill',
+          stage: 'skill:rate-workflow',
+          tool: 'Skill',
+          name: 'rate-workflow',
+          toolUseId: 'skill-root',
+          input: { source: 'tool_use' }
+        }),
+        ev({
+          id: 'root-skill-path',
+          kind: 'skill',
+          stage: 'skill:rate-workflow',
+          tool: 'Skill',
+          name: 'rate-workflow',
+          toolUseId: 'read-root-skill',
+          input: { source: 'skill_path_in_command' }
+        }),
+        ...['intake', 'status', 'archive'].map((name) =>
+          ev({
+            id: `skill-${name}`,
+            kind: 'skill',
+            stage: `skill:${name}`,
+            tool: 'Skill',
+            name,
+            toolUseId: `skill-${name}`,
+            input: { source: 'tool_use' }
+          })
+        ),
+        ev({ id: 'logical-result', kind: 'harness', stage: 'result', tokensIn: 1, tokensOut: 1 })
+      ]
+    }
+
+    const logicalHtml = renderToStaticMarkup(
+      <AssistantTurn turn={logicalCountTurn} selectedId={null} onSelect={() => {}} />
+    )
+    const header = logicalHtml.match(/<div class="who">[\s\S]*?<\/div>/)?.[0] ?? ''
+    const footer = logicalHtml.match(/<div class="turn-footer">[\s\S]*?<\/div>/)?.[0] ?? ''
+
+    expect(header).toContain('tools <b>44</b>')
+    expect(header).not.toContain('tools <b>45</b>')
+    expect(footer).toContain('<span class="lbl">tools</span> <b>44</b>')
+  })
+
   it('who 头渲染头像 + runid', () => {
     expect(html).toContain('Agent')
     expect(html).toContain('run · r1') // turn.runId
@@ -1715,6 +1775,36 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('Read')
   })
 
+  it('每轮调用段把一条 shell 中的多个 MCP 调用分别计数', () => {
+    const multiMcpTurn: Turn = {
+      runId: 'multi-mcp-turn',
+      userText: '查询工单详情',
+      done: true,
+      items: [
+        ev({
+          id: 'multi-mcp-shell',
+          runId: 'multi-mcp-turn',
+          kind: 'tool',
+          stage: 'tool:Bash',
+          tool: 'Bash',
+          isMcp: true,
+          mcpCalls: [
+            { server: 'coop', action: 'query_workitem_detail', tool: 'mcporter:coop.query_workitem_detail' },
+            { server: 'coop', action: 'get_workitem_comments', tool: 'mcporter:coop.get_workitem_comments' }
+          ]
+        }),
+        ev({ id: 'multi-mcp-result', runId: 'multi-mcp-turn', kind: 'harness', stage: 'result' })
+      ]
+    }
+    const multiMcpHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[multiMcpTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+    const turnCalls = multiMcpHtml.slice(multiMcpHtml.indexOf('turn-call-list'), multiMcpHtml.indexOf('按每轮逻辑调用聚合'))
+
+    expect(turnCalls).toContain('2 次调用')
+    expect(turnCalls).toContain('turn-call-count">2</span>')
+  })
+
   it('每轮 Skill 调用把注入和内部文件证据折叠为一次，同时保留嵌套 Skill', () => {
     const skillEvidenceTurn: Turn = {
       runId: 'skill-evidence',
@@ -2480,6 +2570,62 @@ describe('ExecutionGraph 渲染：调用拓扑树', () => {
     expect(html).toContain('verdict-card full') // 顶部 full verdict 卡
     expect(html).toContain('调整拓扑详情面板宽度') // 右侧详情面板可拖拽
     expect(html).toContain('aria-hidden="true"') // TURN 箭头只做方向提示，不再点击折叠
+  })
+
+  it('Turn 与会话汇总共用 Provider-aware Token 和逻辑调用口径', () => {
+    const t: Turn = {
+      runId: 'run-codex',
+      userText: '/rate-workflow 1',
+      done: true,
+      items: [
+        ev({
+          id: 'skill',
+          kind: 'skill',
+          stage: 'skill:rate-workflow',
+          name: 'rate-workflow',
+          toolUseId: 'skill-1',
+          input: { source: 'tool_use' }
+        }),
+        ev({
+          id: 'skill-path',
+          kind: 'skill',
+          stage: 'skill:rate-workflow',
+          name: 'rate-workflow',
+          toolUseId: 'read-skill',
+          input: { source: 'skill_path_in_command' }
+        }),
+        ev({
+          id: 'multi-mcp',
+          kind: 'tool',
+          stage: 'tool:Bash',
+          tool: 'Bash',
+          toolUseId: 'mcp-1',
+          isMcp: true,
+          mcpCalls: [
+            { server: 'coop', action: 'query', tool: 'mcporter:coop.query' },
+            { server: 'group-env', action: 'list', tool: 'mcporter:group-env.list' }
+          ]
+        }),
+        ev({
+          id: 'codex-result',
+          kind: 'harness',
+          stage: 'result',
+          providerId: 'codex',
+          tokensIn: 100,
+          tokensOut: 20,
+          cacheReadTokens: 80
+        })
+      ]
+    }
+    const html = renderToStaticMarkup(<ExecutionGraph turns={[t]} selectedId={null} onSelect={() => {}} />)
+
+    expect(html).toContain('120 tok')
+    expect(html).not.toContain('200 tok')
+    expect(html).toContain('3 calls')
+    expect(html).not.toContain('4 calls')
+    expect(html).toContain('3 个调用')
+    expect(html).toContain('coop · group-env')
+    expect(html).toContain('query · list · 2 次调用')
   })
 
   it('空会话出占位', () => {

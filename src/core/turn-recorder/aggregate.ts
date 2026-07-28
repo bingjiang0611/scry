@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { logicalCallEventsForTurn } from '../../shared/logical-calls.js'
-import type { TraceEvent } from '../../shared/trace.js'
+import { mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import {
   available,
   partial,
@@ -27,7 +27,11 @@ function outputSummary(value: string | undefined): string | undefined {
   return value.length <= 500 ? value : `${value.slice(0, 500)}…`
 }
 
-function callFromEvent(event: TraceEvent, resultById: Map<string, TraceEvent>): TurnCall {
+function callFromEvent(
+  event: TraceEvent,
+  resultById: Map<string, TraceEvent>,
+  mcpRef?: McpCallRef
+): TurnCall {
   const result = event.toolUseId ? resultById.get(event.toolUseId) : undefined
   const completedAt = result?.ts
   const started = Date.parse(event.ts)
@@ -45,7 +49,13 @@ function callFromEvent(event: TraceEvent, resultById: Map<string, TraceEvent>): 
     ...(result?.isError ? { error: outputSummary(result.output ?? result.text) ?? 'tool failed' } : {}),
     ...(event.fileOp && event.filePath ? { file: { operation: event.fileOp, path: event.filePath } } : {}),
     ...(event.isMcp
-      ? { mcp: { server: event.mcpServer, action: event.mcpAction, tool: event.mcpTool } }
+      ? {
+          mcp: {
+            server: mcpRef?.server ?? event.mcpServer,
+            action: mcpRef?.action ?? event.mcpAction,
+            tool: mcpRef?.tool ?? event.mcpTool
+          }
+        }
       : {})
   }
 }
@@ -166,7 +176,12 @@ export function aggregateTurnEvidence(args: {
     .filter((event) => event.kind === 'agent' || (event.kind === 'tool' && !event.isMcp))
     .map((event) => callFromEvent(event, resultById))
   const skills = starts.filter((event) => event.kind === 'skill').map((event) => callFromEvent(event, resultById))
-  const mcps = starts.filter((event) => event.kind === 'tool' && event.isMcp).map((event) => callFromEvent(event, resultById))
+  const mcps = starts
+    .filter((event) => event.kind === 'tool' && event.isMcp)
+    .flatMap((event) => {
+      const refs = mcpCallsForEvent(event)
+      return refs.map((ref) => callFromEvent(event, resultById, ref))
+    })
   const hooks = aggregateHooks(args.events)
   const assistantText = args.events
     .filter((event) => event.kind === 'model' && event.stage === 'text' && event.text)

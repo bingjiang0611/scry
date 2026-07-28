@@ -821,8 +821,20 @@ describe('Codex provider adapter', () => {
       item: {
         id: 'mcp-call',
         type: 'commandExecution',
-        command: '/bin/zsh -lc \\"mcporter call coop.query_workitem_detail --args \'{\\\\"id\\\\":\\\\"1\\\\"}\'\\"',
+        command: '/bin/zsh -lc \\"mcporter call coop.query_workitem_detail --args \'{\\\\"id\\\\":\\\\"1\\\\"}\' && mcporter call group-env.list --args \'{}\'\\"',
         cwd: '/isolated-copy'
+      }
+    })
+    notify?.('item/completed', {
+      threadId: 'thread-mcp',
+      turnId: 'turn-mcp',
+      item: {
+        id: 'mcp-call',
+        type: 'commandExecution',
+        command: 'mcporter call coop.query_workitem_detail && mcporter call group-env.list',
+        cwd: '/isolated-copy',
+        aggregatedOutput: '{"success":false,"error":"invalid payload"}',
+        status: 'completed'
       }
     })
     notify?.('item/started', {
@@ -846,7 +858,15 @@ describe('Codex provider adapter', () => {
       isMcp: true,
       mcpServer: 'coop',
       mcpAction: 'query_workitem_detail',
-      mcpTool: 'mcporter:coop.query_workitem_detail'
+      mcpTool: 'mcporter:coop.query_workitem_detail',
+      mcpCalls: [
+        { server: 'coop', action: 'query_workitem_detail', tool: 'mcporter:coop.query_workitem_detail' },
+        { server: 'group-env', action: 'list', tool: 'mcporter:group-env.list' }
+      ]
+    })
+    expect(events.find((event) => event.toolUseId === 'mcp-call' && event.stage === 'tool_result')).toMatchObject({
+      isError: true,
+      output: '{"success":false,"error":"invalid payload"}'
     })
     expect(events.find((event) => event.toolUseId === 'mcp-list')).toMatchObject({
       tool: 'Bash',

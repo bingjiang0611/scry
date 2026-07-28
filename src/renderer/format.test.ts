@@ -141,6 +141,48 @@ describe('aggregateCalls', () => {
     ])
   })
 
+  it('一个 shell lifecycle 内的多个 MCP 操作分别计数，但不重复计普通 Bash', () => {
+    const r = aggregateCalls([
+      ev({
+        kind: 'tool',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        isMcp: true,
+        mcpServer: 'coop',
+        mcpAction: 'query',
+        mcpTool: 'mcporter:coop.query',
+        mcpCalls: [
+          { server: 'coop', action: 'query', tool: 'mcporter:coop.query' },
+          { server: 'group-env', action: 'list', tool: 'mcporter:group-env.list' }
+        ]
+      })
+    ])
+    expect(r).toMatchObject({ ordinaryToolTotal: 0, mcpTotal: 2, totalCalls: 2 })
+    expect(r.mcp.map((group) => group.server)).toEqual(['coop', 'group-env'])
+  })
+
+  it('旧历史事件缺少 mcpCalls 时从原始 command 恢复完整 MCP 计数', () => {
+    const r = aggregateCalls([
+      ev({
+        kind: 'tool',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        isMcp: true,
+        input: {
+          command: "mcporter call coop.get_sub_workitem --args '{}' && mcporter call coop.get_workitem_comments --args '{}'"
+        },
+        mcpServer: 'coop',
+        mcpAction: 'get_sub_workitem',
+        mcpTool: 'mcporter:coop.get_sub_workitem'
+      })
+    ])
+    expect(r).toMatchObject({ ordinaryToolTotal: 0, mcpTotal: 2, totalCalls: 2 })
+    expect(r.mcp[0].actions).toEqual([
+      { action: 'get_sub_workitem', tool: 'mcporter:coop.get_sub_workitem', count: 1 },
+      { action: 'get_workitem_comments', tool: 'mcporter:coop.get_workitem_comments', count: 1 }
+    ])
+  })
+
   it('同一 toolUseId 映射出多个 fileChange 事件时只算一次调用', () => {
     const logical = logicalCallEventsForTurn([
       ev({ id: 'edit-a', kind: 'tool', stage: 'tool:Edit', tool: 'Edit', toolUseId: 'call-1', filePath: '/repo/a.ts' }),
@@ -603,6 +645,7 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
 
     expect(b.totalTokens).toBe(120)
     expect(b.allTurnRows[0].tokensTotal).toBe(120)
+    expect(b.allTurnRows[0].promptTokens).toBe(100)
     expect(b.models[0].totalTokens).toBe(120)
   })
 
@@ -806,16 +849,62 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     ])
   })
 
-  it('subagent runaway 在 token 口径下不显示 $0.0000', () => {
+  it('subagent runaway 只统计可归属的子调用，不把父轮 Token 归给子 agent', () => {
     const items: TraceEvent[] = [
-      ev({ id: 'agent', kind: 'agent', stage: 'agent:Explore', name: 'Explore', tool: 'Task' }),
-      ...Array.from({ length: 19 }, (_, i) => ev({ id: `tool-${i}`, kind: 'tool', stage: 'tool:Read', tool: 'Read' })),
+      ev({
+        id: 'agent',
+        kind: 'agent',
+        stage: 'agent:Explore',
+        name: 'Explore',
+        tool: 'Task',
+        toolUseId: 'agent-root',
+        agentId: 'provider-session-agent'
+      }),
+      ...Array.from({ length: 20 }, (_, i) =>
+        ev({
+          id: `tool-${i}`,
+          kind: 'tool',
+          stage: 'tool:Read',
+          tool: 'Read',
+          parentToolUseId: 'agent-root'
+        })
+      ),
+      ev({
+        id: 'child-text',
+        kind: 'model',
+        stage: 'text_delta',
+        parentToolUseId: 'agent-root',
+        text: 'child response'
+      }),
+      ev({
+        id: 'child-retry',
+        kind: 'harness',
+        stage: 'runtime:retry',
+        parentToolUseId: 'agent-root',
+        text: 'Reconnecting...'
+      }),
+      ...Array.from({ length: 25 }, (_, i) =>
+        ev({
+          id: `parent-tool-${i}`,
+          kind: 'tool',
+          stage: 'tool:Bash',
+          tool: 'Bash',
+          agentId: 'provider-session-agent'
+        })
+      ),
       ev({ id: 'result-missing-cost', kind: 'harness', stage: 'result', tokensIn: 1000, tokensOut: 200 })
     ]
     const b = analyzeBilling([{ runId: 'subagent', userText: 'run subagent', items, done: true }])
-    const signal = b.signals.find((s) => s.title.startsWith('子 agent 消耗'))
-    expect(signal?.detail).toContain('1.2k tok')
-    expect(signal?.detail).not.toContain('$0.0000')
+    const signal = b.signals.find((s) => s.title.startsWith('子 agent 调用'))
+    expect(signal).toMatchObject({
+      title: '子 agent 调用 20 次',
+      detail: 'TURN 01 · Provider 未上报子 agent 独立 Token/API'
+    })
+    expect(b.evidence.find((row) => row.kind === 'agent')).toMatchObject({
+      relatedTokens: 0,
+      relatedCost: 0,
+      attributionMethod: 'unattributed'
+    })
   })
 
   it('模型用量按 token 展示，不把未知成本显示成 $0.0000', () => {
@@ -958,7 +1047,7 @@ describe('aggregateSegmentsRich：按 turn 切活跃段 + cost/api 归集（segm
     ]),
     // turn3 无新 skill → carry-forward 仍 git-commit（应与 turn2 合段）
     turn('t3', [ev({ id: 'c1', tool: 'Bash' }), result(0.02, 3000)]),
-    // turn4 subagent
+    // turn4 有 subagent，但 Provider 没有独立 usage，不能把整轮切成“子 agent 用量段”
     turn('t4', [
       ev({ id: 'd0', kind: 'agent', stage: 'agent:gp', name: 'general-purpose', tool: 'Agent' }),
       result(0.05, 6400)
@@ -966,27 +1055,52 @@ describe('aggregateSegmentsRich：按 turn 切活跃段 + cost/api 归集（segm
   ]
   const rep = aggregateSegmentsRich(turns)
 
-  it('切成 3 段：baseline / skill(git-commit 跨 turn 合并) / subagent', () => {
-    expect(rep.segments.map((s) => s.kind)).toEqual(['baseline', 'skill', 'subagent'])
+  it('子 agent 只进调用明细，不吞掉整轮 Token/API 归属', () => {
+    expect(rep.segments.map((s) => s.kind)).toEqual(['baseline', 'skill'])
     expect(rep.segments[1].name).toBe('git-commit')
     expect(rep.segments[1].turnStart).toBe(2)
-    expect(rep.segments[1].turnEnd).toBe(3) // turn2+turn3 合并
+    expect(rep.segments[1].turnEnd).toBe(4) // turn2+turn3+turn4 保持父轮 skill context
+    expect(rep.segments[1].acts).toContainEqual(expect.objectContaining({ label: 'general-purpose', agent: true, count: 1 }))
   })
 
   it('per-segment cost = 段内 turn result.costUsd 之和（真实归集）', () => {
     expect(rep.segments[0].cost).toBeCloseTo(0.05)
-    expect(rep.segments[1].cost).toBeCloseTo(0.14) // 0.12 + 0.02
+    expect(rep.segments[1].cost).toBeCloseTo(0.19) // 0.12 + 0.02 + 0.05
     expect(rep.totalCost).toBeCloseTo(0.24)
   })
 
   it('% = 段 api / 总 api；cost vs base 增幅', () => {
     expect(rep.totalApiMs).toBe(32600)
-    expect(rep.segments[1].pct).toBeCloseTo((17800 / 32600) * 100, 1)
-    expect(rep.segments[1].costDeltaVsBase).toBe(180) // round(0.14/0.05-1)*100
+    expect(rep.segments[1].pct).toBeCloseTo((24200 / 32600) * 100, 1)
+    expect(rep.segments[1].costDeltaVsBase).toBe(280) // round(0.19/0.05-1)*100
   })
 
   it('skillSwitches / subagents 计数', () => {
     expect(rep.skillSwitches).toBe(1)
     expect(rep.subagents).toBe(1)
+  })
+
+  it('tool_result 不重复进入分段调用与文件计数', () => {
+    const report = aggregateSegmentsRich([
+      turn('paired', [
+        ev({ id: 'read-start', tool: 'Read', toolUseId: 'read-1', fileOp: 'read', filePath: '/x/a.ts' }),
+        ev({ id: 'read-result', tool: 'Read', toolUseId: 'read-1', stage: 'tool_result', fileOp: 'read', filePath: '/x/a.ts' })
+      ])
+    ])
+    expect(report.segments[0]).toMatchObject({ tools: 1, reads: 1 })
+    expect(report.segments[0].acts).toContainEqual(expect.objectContaining({ label: 'R', count: 1 }))
+  })
+
+  it('Provider 不上报 API 耗时时保持 unknown，不显示假 0.0s', () => {
+    const turns = [
+      turn('unknown-api', [
+        ev({ id: 'read', tool: 'Read' }),
+        ev({ id: 'result-unknown-api', kind: 'harness', stage: 'result', tokensIn: 1, tokensOut: 1 })
+      ])
+    ]
+    const unknown = aggregateSegmentsRich(turns)
+    expect(unknown.totalApiMs).toBeNull()
+    expect(unknown.segments[0].apiMs).toBeNull()
+    expect(analyzeBilling(turns).apiMs).toBeNull()
   })
 })

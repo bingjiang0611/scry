@@ -114,15 +114,23 @@ describe('turn recorder state machine', () => {
       setTimeout(() => void rm(lock, { recursive: true, force: true }).then(() => resolve()), 2_100)
     })
 
-    const result = await handleRecorderHook({
-      provider: 'codex',
-      event: 'UserPromptSubmit',
-      workspace: root,
-      payload: payload('c1', { prompt: 'one' })
-    })
+    const [first, retry] = await Promise.all([
+      handleRecorderHook({
+        provider: 'codex',
+        event: 'UserPromptSubmit',
+        workspace: root,
+        payload: payload('c1', { prompt: 'one' })
+      }),
+      handleRecorderHook({
+        provider: 'codex',
+        event: 'UserPromptSubmit',
+        workspace: root,
+        payload: payload('c1', { prompt: 'one' })
+      })
+    ])
     await release
 
-    expect(result.status).toBe('started')
+    expect([first.status, retry.status].sort()).toEqual(['duplicate', 'started'])
     expect(await readHealth(join(root, '.scry'))).toMatchObject({ droppedEvents: 0 })
   }, 10_000)
 
@@ -311,6 +319,86 @@ describe('lifecycle/transcript merge', () => {
 })
 
 describe('Codex rollout recorder evidence', () => {
+  it('双 hook 入口重放同一 Codex tool lifecycle 时按 call_id 只记录一次', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'duplicate-lifecycle-rollout.jsonl')
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'codex-turn-1' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'inspect' } },
+      {
+        timestamp: '2026-07-19T12:00:00.100Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'exec_command',
+          call_id: 'call-1',
+          arguments: JSON.stringify({ cmd: 'git status --short' })
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.300Z',
+        type: 'response_item',
+        payload: { type: 'function_call_output', call_id: 'call-1', output: 'clean' }
+      },
+      {
+        timestamp: '2026-07-19T12:00:01.000Z',
+        type: 'event_msg',
+        payload: { type: 'task_complete', turn_id: 'codex-turn-1', last_agent_message: 'done' }
+      }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'inspect', turn_id: 'codex-turn-1', rollout_path: rollout })
+    })
+    for (const timestamp of ['2026-07-19T12:00:00.110Z', '2026-07-19T12:00:00.120Z']) {
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'PreToolUse:Bash',
+        workspace: root,
+        payload: payload('c1', {
+          timestamp,
+          turn_id: 'codex-turn-1',
+          tool_name: 'Bash',
+          tool_use_id: 'call-1',
+          tool_input: { command: 'git status --short' }
+        })
+      })
+    }
+    for (const timestamp of ['2026-07-19T12:00:00.310Z', '2026-07-19T12:00:00.320Z']) {
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'PostToolUse:Bash',
+        workspace: root,
+        payload: payload('c1', {
+          timestamp,
+          turn_id: 'codex-turn-1',
+          tool_name: 'Bash',
+          tool_use_id: 'call-1',
+          tool_response: 'clean'
+        })
+      })
+    }
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', {
+        turn_id: 'codex-turn-1',
+        rollout_path: rollout,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ id: 'call-1', name: 'Bash', status: 'success' })
+    ])
+  })
+
   it('解析 task/token_count/tool/skill/hook，未观测项不伪造 exact 空数组', async () => {
     const root = await workspace()
     const rollout = join(root, 'rollout.jsonl')

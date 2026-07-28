@@ -8,7 +8,7 @@ import {
   type ProviderContext,
   type SkillMeta
 } from '../../shared/provider'
-import { parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
+import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import type { CodexHookInspection, CodexHookMetadata, CodexHookTrustStatus } from '../codex-hook-trust'
 import { CodexAppServerClient } from './codex-app-server'
@@ -204,6 +204,7 @@ function traceFromItem(
     const command = String(item.command ?? '')
     const input = { command, cwd: item.cwd }
     const mcp = parseMcp('Bash', input)
+    const output = completed ? String(item.aggregatedOutput ?? '') : undefined
     const managementAction = /\bmcporter\s+list(?:\s|$)/.test(command) ? 'list' : undefined
     const identity = { agentId: context.agentId, parentToolUseId: context.parentToolUseId }
     const events = [
@@ -213,9 +214,9 @@ function traceFromItem(
             stage: 'tool_result',
             tool: 'Bash',
             toolUseId: id,
-            output: String(item.aggregatedOutput ?? ''),
+            output,
             durationMs: usageNumber(item.durationMs),
-            isError: item.status === 'failed',
+            isError: item.status === 'failed' || (mcp.isMcp && mcpPayloadFailed(output ?? item.aggregatedOutput)),
             ...identity,
             ...mcp,
             ...(managementAction ? { runtimeMetadata: { mcpManagementAction: managementAction } } : {})

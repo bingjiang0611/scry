@@ -35,6 +35,12 @@ export interface HookConfiguredCommand {
   timeoutSeconds?: number
 }
 
+export interface McpCallRef {
+  server: string
+  action: string
+  tool: string
+}
+
 // B1：进行中 run 的快照（main 缓冲、renderer 重挂时拉取恢复，避免 reload/HMR 丢失在途 trace）。
 // 与 renderer 的 Turn 结构一致（结构化类型，可互赋）。
 export interface ActiveRun {
@@ -301,6 +307,9 @@ export interface TraceEvent {
   mcpServer?: string
   mcpAction?: string
   mcpTool?: string
+  // 一个 shell tool_use 可能串行执行多个 mcporter call。首个调用保留在上方兼容字段，
+  // 完整列表供调用统计/MCP 明细使用；runtime tool 本身仍只有一个 lifecycle。
+  mcpCalls?: McpCallRef[]
   fileOp?: FileOp
   filePath?: string
   text?: string
@@ -352,26 +361,65 @@ export function classifyTool(
   return { kind: 'tool', name: toolName }
 }
 
-function parseDirectMcpTool(toolName: string): { isMcp: boolean; mcpServer?: string; mcpAction?: string; mcpTool?: string } {
+export interface ParsedMcp {
+  isMcp: boolean
+  mcpServer?: string
+  mcpAction?: string
+  mcpTool?: string
+  mcpCalls?: McpCallRef[]
+}
+
+function parsedMcp(calls: McpCallRef[]): ParsedMcp {
+  const first = calls[0]
+  if (!first) return { isMcp: false }
+  return {
+    isMcp: true,
+    mcpServer: first.server,
+    mcpAction: first.action,
+    mcpTool: first.tool,
+    mcpCalls: calls
+  }
+}
+
+function parseDirectMcpTool(toolName: string): ParsedMcp {
   if (toolName.startsWith('mcp__')) {
     const parts = toolName.split('__')
-    return { isMcp: true, mcpServer: parts[1], mcpAction: parts.slice(2).join('__') || undefined, mcpTool: toolName }
+    const server = parts[1]
+    const action = parts.slice(2).join('__')
+    if (server && action) return parsedMcp([{ server, action, tool: toolName }])
   }
   return { isMcp: false }
 }
 
-function parseMcporterCommand(command: string): { isMcp: boolean; mcpServer?: string; mcpAction?: string; mcpTool?: string } {
+function matchesFor(
+  source: string,
+  pattern: RegExp
+): Array<{ index: number; call: McpCallRef }> {
+  return [...source.matchAll(pattern)].flatMap((match) => {
+    const server = match[1]
+    const action = match[2]
+    return server && action
+      ? [{ index: match.index ?? 0, call: { server, action, tool: `mcporter:${server}.${action}` } }]
+      : []
+  })
+}
+
+function parseMcporterCommand(command: string): ParsedMcp {
   // Codex app-server 会把 shell 包装后的命令保存成
   // `/bin/zsh -lc \"mcporter call ...\"`。先还原仅用于包裹命令的转义引号，
   // 否则 `\"mcporter` 前没有空白，无法识别为 MCP 调用。
   const normalized = command.replace(/\\(["'`])/g, '$1')
-  const direct = /(?:^|[\s;&|"'`])(?:[^\s"';&|]*\/)?mcporter\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/.exec(normalized)
+  const direct = matchesFor(
+    normalized,
+    /(?:^|[\s;&|"'`])(?:[^\s"';&|]*\/)?mcporter\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/g
+  )
   const variable = /\bmcporter\b/.test(normalized)
-    ? /(?:^|[\s;&|"'`])["']?\$[A-Za-z_][A-Za-z0-9_]*["']?\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/.exec(normalized)
-    : null
-  const m = direct ?? variable
-  if (!m) return { isMcp: false }
-  return { isMcp: true, mcpServer: m[1], mcpAction: m[2], mcpTool: `mcporter:${m[1]}.${m[2]}` }
+    ? matchesFor(
+        normalized,
+        /(?:^|[\s;&|"'`])["']?\$[A-Za-z_][A-Za-z0-9_]*["']?\s+call\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_.:-]+)/g
+      )
+    : []
+  return parsedMcp([...direct, ...variable].sort((a, b) => a.index - b.index).map((match) => match.call))
 }
 
 // MCP 工具识别：
@@ -380,11 +428,77 @@ function parseMcporterCommand(command: string): { isMcp: boolean; mcpServer?: st
 export function parseMcp(
   toolName: string,
   input?: Record<string, unknown>
-): { isMcp: boolean; mcpServer?: string; mcpAction?: string; mcpTool?: string } {
+): ParsedMcp {
   const direct = parseDirectMcpTool(toolName)
   if (direct.isMcp) return direct
   if (toolName === 'Bash' && typeof input?.command === 'string') return parseMcporterCommand(input.command)
   return { isMcp: false }
+}
+
+// 旧会话归档只保存了首个 MCP 的兼容字段，但仍保留原始 shell command。
+// 读取时从 command 重新补齐完整调用列表，保证 Claude/Codex/Qoder/OpenCode 的
+// 实时流、历史回放和 turn recorder 使用同一套逻辑调用语义。
+export function mcpCallsForEvent(
+  event: Pick<TraceEvent, 'isMcp' | 'tool' | 'input' | 'mcpCalls' | 'mcpServer' | 'mcpAction' | 'mcpTool'>
+): McpCallRef[] {
+  if (event.mcpCalls?.length) return event.mcpCalls
+  const parsed = parseMcp(
+    event.tool ?? '',
+    event.input && typeof event.input === 'object' && !Array.isArray(event.input)
+      ? event.input as Record<string, unknown>
+      : undefined
+  )
+  if (parsed.mcpCalls?.length) return parsed.mcpCalls
+  if (!event.isMcp) return []
+  return [{
+    server: event.mcpServer ?? '?',
+    action: event.mcpAction ?? ((event.tool ?? '').split('__').slice(2).join('__') || event.mcpTool || event.tool || ''),
+    tool: event.mcpTool ?? event.tool ?? ''
+  }]
+}
+
+function payloadObjectFailed(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const payload = value as Record<string, unknown>
+  if (payload.success === false || payload.ok === false) return true
+  if (typeof payload.status === 'string' && /^(?:error|failed|failure)$/i.test(payload.status)) return true
+  return payload.error != null && payload.error !== false && payload.error !== ''
+}
+
+function payloadEnvelopeFailed(value: unknown): boolean {
+  if (payloadObjectFailed(value)) return true
+  if (!Array.isArray(value)) return false
+  return value.some((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+    const envelope = item as Record<string, unknown>
+    if (envelope.type !== 'text' || typeof envelope.text !== 'string') return false
+    try {
+      return payloadObjectFailed(JSON.parse(envelope.text))
+    } catch {
+      return false
+    }
+  })
+}
+
+// mcporter 可能在 shell exit=0 时返回业务失败 JSON。只检查完整 JSON 或逐行 JSON 的
+// 顶层状态字段，避免把任意工具输出正文里的 “error” 单词误判成失败。
+export function mcpPayloadFailed(output: unknown): boolean {
+  if (payloadEnvelopeFailed(output)) return true
+  if (typeof output !== 'string') return false
+  const text = output.trim()
+  if (!text) return false
+  const candidates = [text, ...text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)]
+  for (const candidate of candidates) {
+    const jsonObject = candidate.startsWith('{') && candidate.endsWith('}')
+    const jsonArray = candidate.startsWith('[') && candidate.endsWith(']')
+    if (!jsonObject && !jsonArray) continue
+    try {
+      if (payloadEnvelopeFailed(JSON.parse(candidate))) return true
+    } catch {
+      // 非完整 JSON 行不是权威失败证据。
+    }
+  }
+  return false
 }
 
 // 文件足迹：只有结构化文件工具带 file_path。

@@ -1,6 +1,14 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
-import type { TraceEvent, DbStats, Diagnostics, DiffFile, HookConfiguredCommand, McpLiveStatus } from '@shared/trace'
+import {
+  mcpCallsForEvent,
+  type TraceEvent,
+  type DbStats,
+  type Diagnostics,
+  type DiffFile,
+  type HookConfiguredCommand,
+  type McpLiveStatus
+} from '@shared/trace'
 import type { BillingGuardianState } from '@shared/billing'
 import type { RuntimeProvider } from '@shared/runtime'
 import type { McpMeta } from '../env'
@@ -203,7 +211,7 @@ function fmtShare(part: number, total: number): string | null {
 }
 
 function highTokenTurnCacheHitRate(t: BillingTurnRow): string {
-  return fmtShare(t.cacheReadTokens, t.tokensIn + t.cacheReadTokens + t.cacheCreationTokens) ?? '—'
+  return fmtShare(t.cacheReadTokens, t.promptTokens) ?? '—'
 }
 
 function highTokenTurnIoTokens(t: BillingTurnRow): string {
@@ -456,6 +464,12 @@ export function OverviewPanel({
           const kind = turnCallKind(ev)
           if (!kind) continue
           firstEvent ??= ev
+          if (kind === 'mcp') {
+            for (const call of mcpCallsForEvent(ev)) {
+              addTurnCall(maps.mcp, call.action ? `${call.server}.${call.action}` : call.server)
+            }
+            continue
+          }
           addTurnCall(maps[kind], turnCallLabel(ev, kind))
         }
         const groups: Record<TurnCallKind, TurnCallItem[]> = {
@@ -790,7 +804,7 @@ export function OverviewPanel({
             </div>
             <div>
               <span>API 耗时</span>
-              <b>{(billing.apiMs / 1000).toFixed(1)}s</b>
+              <b>{billing.apiMs == null ? '—' : `${(billing.apiMs / 1000).toFixed(1)}s`}</b>
             </div>
           </div>
           <div className="billing-coverage">

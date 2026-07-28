@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { ANALYTICS_RESULTS_SQL, buildAnalyticsStats, canonicalCostWhere, canonicalUsdCostWhere, DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V6, DDL_V7, MODEL_USAGE_COLS, nearestRank, spanRowsFromItems, SPAN_COLS, sqlInsert, TOTALS_SQL, USAGE_LEDGER_COLS } from './span-ledger'
+import { ANALYTICS_RESULTS_SQL, buildAnalyticsStats, canonicalCostWhere, canonicalUsdCostWhere, DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V6, DDL_V7, MODEL_USAGE_COLS, nearestRank, spanRowsFromItems, SPAN_COLS, sqlInsert, TOTALS_SQL, UPSERT_SESSION_REF_SQL, USAGE_LEDGER_COLS } from './span-ledger'
 import { usageLedgerObjectToRow } from './billing-ledger'
 import type { TraceEvent } from '../shared/trace'
 import type { UsageLedgerObject } from '../shared/billing'
 
-type SqliteStmt = { run: (...p: unknown[]) => unknown; all: (...p: unknown[]) => unknown }
+type SqliteStmt = {
+  run: (...p: unknown[]) => unknown
+  get: (...p: unknown[]) => unknown
+  all: (...p: unknown[]) => unknown
+}
 type SqliteDb = { prepare: (s: string) => SqliteStmt; close: () => void }
 type NodeSqlite = { DatabaseSync: new (p: string) => SqliteDb }
 
@@ -200,6 +204,24 @@ describe('Analytics v7（四 Provider 口径 + 窗口聚合）', () => {
       tools: [], dangers: [], mcp: []
     })
     expect(complete.comparison?.change.tokensPct).toBe(100)
+  })
+
+  sqliteIt('session_refs 首轮 preview 稳定，续跑只刷新时间', () => {
+    const db = new nodeSqlite!.DatabaseSync(':memory:')
+    try {
+      for (const stmt of [...DDL_V1, ...DDL_V2, ...DDL_V3, ...DDL_V6, ...DDL_V7]) db.prepare(stmt).run()
+      const upsert = db.prepare(UPSERT_SESSION_REF_SQL)
+      upsert.run('s1', 'codex', 'codex_cli', '/repo', 'external', 'first prompt', 1, 1)
+      upsert.run('s1', 'codex', 'codex_cli', '/repo', 'external', 'resume prompt', 2, 2)
+
+      expect(db.prepare('SELECT preview, created_ts createdAt, updated_ts updatedAt FROM session_refs').get()).toEqual({
+        preview: 'first prompt',
+        createdAt: 1,
+        updatedAt: 2
+      })
+    } finally {
+      db.close()
+    }
   })
 
   sqliteIt('v7 索引与 session_refs join 保留四 Provider 身份和 NULL', () => {

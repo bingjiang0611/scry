@@ -102,6 +102,29 @@ describe('normalizeSdkMessage', () => {
     })
   })
 
+  it('一个 Bash 内的多个 mcporter call 全部保留', () => {
+    const evs = normalizeSdkMessage(
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: 'tu-multi-mcp',
+            name: 'Bash',
+            input: {
+              command: 'mcporter call coop.query --args \'{}\' && mcporter call group-env.list --args \'{}\''
+            }
+          }]
+        }
+      },
+      ctx()
+    )
+    expect(evs[0].mcpCalls).toEqual([
+      { server: 'coop', action: 'query', tool: 'mcporter:coop.query' },
+      { server: 'group-env', action: 'list', tool: 'mcporter:group-env.list' }
+    ])
+  })
+
   it('Task → agent kind，Skill → skill kind', () => {
     const task = normalizeSdkMessage(
       {
@@ -302,6 +325,44 @@ describe('normalizeSdkMessage', () => {
       mcpServer: 'scry-e2e',
       mcpAction: 'repo_tree',
       isError: false
+    })
+  })
+
+  it('Claude/Qoder MCP 即使 shell exit 0，业务 success=false 仍标记失败', () => {
+    const c = ctx()
+    normalizeSdkMessage(
+      {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'tool_use',
+            id: 'mcp-failed',
+            name: 'Bash',
+            input: { command: 'mcporter call coop.query --args \'{}\'' }
+          }]
+        }
+      },
+      c
+    )
+    const result = normalizeSdkMessage(
+      {
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'mcp-failed',
+            content: '{"success":false,"error":"permission denied"}',
+            is_error: false
+          }]
+        }
+      },
+      c
+    )[0]
+    expect(result).toMatchObject({
+      toolUseId: 'mcp-failed',
+      isMcp: true,
+      output: '{"success":false,"error":"permission denied"}',
+      isError: true
     })
   })
 

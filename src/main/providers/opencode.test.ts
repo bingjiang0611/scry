@@ -84,6 +84,53 @@ describe('OpenCode provider adapter', () => {
     ]))
   })
 
+  it('保留 OpenCode shell bridge 的多 MCP 调用并识别业务失败', () => {
+    const events: TraceEvent[] = []
+    const request = {
+      runId: 'run-mcp-shell',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event: TraceEvent) => events.push(event)
+    } satisfies ProviderRunRequest
+    const part = {
+      type: 'tool',
+      callID: 'mcp-shell',
+      tool: 'bash',
+      state: {
+        status: 'running',
+        input: { command: 'mcporter call coop.query --args \'{}\' && mcporter call group-env.list --args \'{}\'' }
+      }
+    }
+    emitOpenCodeEvent(
+      request,
+      { type: 'message.part.updated', properties: { sessionID: 'session-mcp-shell', part } },
+      'session-mcp-shell'
+    )
+    emitOpenCodeEvent(
+      request,
+      {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-mcp-shell',
+          part: {
+            ...part,
+            state: { ...part.state, status: 'completed', output: '{"success":false,"error":"denied"}' }
+          }
+        }
+      },
+      'session-mcp-shell'
+    )
+    expect(events[0]).toMatchObject({
+      isMcp: true,
+      mcpCalls: [
+        { server: 'coop', action: 'query' },
+        { server: 'group-env', action: 'list' }
+      ]
+    })
+    expect(events[1]).toMatchObject({ stage: 'tool_result', isMcp: true, isError: true })
+  })
+
   it('maps versioned plugin frames to hook events and rejects another session', () => {
     const events: TraceEvent[] = []
     const request = {
