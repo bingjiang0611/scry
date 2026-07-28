@@ -15,19 +15,9 @@ export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex
 // 捞它的真实 PATH——nvm 在 .zshrc 里、只有交互 shell 才 source，这样 app 解析 claude 和用户终端
 // 完全一致（优先用户日常那个版本）。sentinel 包裹，过滤 shell 启动打印的 banner 等杂项。缓存一次。
 let shellPathCache: string | null = null
-let shellPathPromise: Promise<string> | null = null
 function shellPath(): string {
-  if (shellPathCache !== null) return shellPathCache
-  shellPathCache = ''
-  // Finder/launchd 启动时 SHELL 可能为空 → 兜底 /bin/zsh（macOS 默认），否则拿不到登录 PATH
-  const shell = process.env.SHELL || '/bin/zsh'
-  try {
-    const out = execFileSync(shell, ['-lic', 'echo __AS_PATH__=$PATH'], { encoding: 'utf8', timeout: 5000 })
-    shellPathCache = out.match(/__AS_PATH__=(.+)/)?.[1]?.trim() ?? ''
-  } catch {
-    shellPathCache = '' // 捞不到就退回 nvmBins/常见位置兜底
-  }
-  return shellPathCache
+  if (shellPathCache === null) void warmShellEnv()
+  return shellPathCache ?? ''
 }
 
 function execFileText(
@@ -44,14 +34,9 @@ function execFileText(
 
 async function shellPathAsync(): Promise<string> {
   if (shellPathCache !== null) return shellPathCache
-  if (shellPathPromise) return shellPathPromise
-  const shell = process.env.SHELL || '/bin/zsh'
-  shellPathPromise = execFileText(shell, ['-lic', 'echo __AS_PATH__=$PATH'], { timeout: 2500 }).then((out) => {
-    shellPathCache = out.match(/__AS_PATH__=(.+)/)?.[1]?.trim() ?? ''
-    shellPathPromise = null
-    return shellPathCache
-  })
-  return shellPathPromise
+  const env = await warmShellEnv()
+  shellPathCache = env.PATH ?? ''
+  return shellPathCache
 }
 
 // app 启动方式不同，进程环境差异巨大：从终端 `npm run dev` 继承完整环境；从 Finder/launchd 打开的
@@ -60,6 +45,37 @@ async function shellPathAsync(): Promise<string> {
 // 解法：捞用户登录+交互 shell 的完整环境，spawn claude 时显式传入，让它拿到与终端等价的环境。
 // 清掉嵌套会话污染（CLAUDECODE 等）。缓存一次。
 let shellEnvCache: Record<string, string> | null = null
+let shellEnvPromise: Promise<Record<string, string>> | null = null
+
+function fallbackShellEnv(): Record<string, string> {
+  return sanitizeNestedAgentEnv({
+    ...(process.env as Record<string, string>),
+    PATH: versionProbePath()
+  })
+}
+
+export function warmShellEnv(): Promise<Record<string, string>> {
+  if (shellEnvCache) return Promise.resolve(shellEnvCache)
+  if (shellEnvPromise) return shellEnvPromise
+  const shell = process.env.SHELL || '/bin/zsh'
+  shellEnvPromise = execFileText(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: 2500 }).then((raw) => {
+    const out = fallbackShellEnv()
+    const s = raw.indexOf('__AS_ENV_S__')
+    const e = raw.indexOf('__AS_ENV_E__')
+    if (s >= 0 && e > s) {
+      for (const line of raw.slice(s + '__AS_ENV_S__'.length, e).split('\n')) {
+        const i = line.indexOf('=')
+        if (i > 0) out[line.slice(0, i)] = line.slice(i + 1)
+      }
+    }
+    shellEnvCache = sanitizeNestedAgentEnv(out)
+    shellPathCache = shellEnvCache.PATH ?? ''
+    shellEnvPromise = null
+    return shellEnvCache
+  })
+  return shellEnvPromise
+}
+
 export function sanitizeNestedAgentEnv(input: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = { ...input }
   for (const k of Object.keys(out)) {
@@ -80,27 +96,8 @@ export function sanitizeNestedAgentEnv(input: Record<string, string>): Record<st
 
 export function shellEnv(): Record<string, string> {
   if (shellEnvCache) return shellEnvCache
-  const out: Record<string, string> = { ...(process.env as Record<string, string>) }
-  // Finder/launchd 启动时 SHELL 常为空 → 兜底 /bin/zsh，否则拿不到登录环境 → claude "Not logged in"
-  const shell = process.env.SHELL || '/bin/zsh'
-  try {
-    const raw = execFileSync(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], {
-      encoding: 'utf8',
-      timeout: 5000
-    })
-    const s = raw.indexOf('__AS_ENV_S__')
-    const e = raw.indexOf('__AS_ENV_E__')
-    if (s >= 0 && e > s) {
-      for (const line of raw.slice(s + '__AS_ENV_S__'.length, e).split('\n')) {
-        const i = line.indexOf('=')
-        if (i > 0) out[line.slice(0, i)] = line.slice(i + 1)
-      }
-    }
-  } catch {
-    /* 捞不到就退回 process.env */
-  }
-  shellEnvCache = sanitizeNestedAgentEnv(out)
-  return shellEnvCache
+  void warmShellEnv()
+  return fallbackShellEnv()
 }
 
 // nvm 各版本 bin（shell 捞 PATH 失败时兜底）。claude 常 symlink 在这里；版本号动态，glob 所有版本。
@@ -325,13 +322,14 @@ export async function detectAgents(): Promise<DetectedAgent[]> {
   const found = await Promise.all(
     KNOWN_AGENTS.map(async (a): Promise<DetectedAgent | null> => {
       const path =
-        a.id === 'qoder'
+        fastAgentPath(a.id, a.bin) ??
+        (a.id === 'qoder'
           ? await resolveQoderBinAsync()
           : a.id === 'claude'
             ? await resolveClaudeBinAsync()
             : a.id === 'codex'
               ? await resolveCodexBinAsync()
-              : await whichAsync(a.bin)
+              : await whichAsync(a.bin))
       if (!path) return null
       return { ...a, path, version: await agentVersionAsync(a.id, path) }
     })

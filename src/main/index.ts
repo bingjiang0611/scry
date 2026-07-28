@@ -4,7 +4,7 @@ import { basename, dirname, extname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { getClaudeVersion } from './agent-runner'
-import { detectAgents, detectAgentsFast, shellEnv } from './claude-locate'
+import { detectAgents, detectAgentsFast, shellEnv, warmShellEnv } from './claude-locate'
 import { AgentRuntimeError, runtimeFailureTrace } from './cli-runtime'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
@@ -870,8 +870,14 @@ ipcMain.handle('agent:answerQuestion', (event, response: unknown) => {
 
 // B2：sqlite 跨会话分析（工具频率 / 按目录花费），纯文件做不到的结构化查询
 ipcMain.handle('agent:stats', () => statsQuery())
-ipcMain.handle('agent:billingState', () => billingStateQuery())
-ipcMain.handle('agent:syncBillingAdmin', () => syncBillingAdmin())
+ipcMain.handle('agent:billingState', async () => {
+  await warmShellEnv()
+  return billingStateQuery()
+})
+ipcMain.handle('agent:syncBillingAdmin', async () => {
+  await warmShellEnv()
+  return syncBillingAdmin()
+})
 ipcMain.handle('agent:importBillingFixture', () => importBillingFixture())
 
 // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
@@ -920,6 +926,7 @@ ipcMain.handle('agent:usageStats', (_event, context?: ProviderContext) =>
 )
 
 app.whenReady().then(() => {
+  void warmShellEnv()
   try {
     migrateLegacyUserData(app.getPath('appData'), app.getPath('userData'))
   } catch (e) {

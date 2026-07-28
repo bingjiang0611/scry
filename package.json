@@ -28,6 +28,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "pack": "npm run build && electron-builder --dir",
+    "install:mac": "npm run pack && node scripts/install-macos.mjs",
     "dist": "npm run build && electron-builder"
   },
   "dependencies": {
