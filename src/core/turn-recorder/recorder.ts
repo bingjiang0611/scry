@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile, readdir, rm, stat } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
-import { disabled, type AgentTurnRecord } from '../../shared/turn-record.js'
+import { disabled, partial, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
@@ -72,11 +72,17 @@ interface StoredLifecycleEvent {
 interface TranscriptRead {
   stable: boolean
   observed: boolean
+  complete?: boolean
+  userText?: string
   events: TraceEvent[]
   observable: {
     tools: boolean
+    skills: boolean
+    mcps: boolean
     hooks: boolean
     usage: boolean
+    files: boolean
+    errors: boolean
   }
 }
 
@@ -205,7 +211,9 @@ function inferredSkillEvents(
   const candidates = stringsIn(input)
   const names = new Set<string>()
   for (const candidate of candidates) {
-    const pattern = /(?:^|[/\s"'`])(?:\.claude|\.codex|\.agents)\/skills\/([^/\s"'`]+)(?:\/SKILL\.md)?/g
+    // 只有真正读取 skill 入口文件才算调用证据；仅 rg 某个 skill 目录或引用其 references
+    // 不能证明 agent 使用了该 skill，否则会把代码搜索误报成 Skill 调用。
+    const pattern = /(?:^|[/\s"'`])(?:\.claude|\.codex|\.agents)\/skills\/([^/\s"'`]+)\/SKILL\.md/g
     for (const match of candidate.matchAll(pattern)) if (match[1]) names.add(match[1])
   }
   return [...names].map((name) => ({
@@ -217,7 +225,7 @@ function inferredSkillEvents(
     tool: 'Skill',
     name,
     toolUseId,
-    input: { source: 'tool_path' }
+    input: { source: 'skill_path_in_command' }
   }))
 }
 
@@ -280,8 +288,11 @@ function lifecycleTraceEvents(args: {
 interface ParsedTranscriptTurn {
   providerTurnId?: string
   userText: string
+  startedAt?: string
+  completedAt?: string
   events: TraceEvent[]
   observable: TranscriptRead['observable']
+  childThreads: Array<{ sessionId: string; parentToolUseId?: string; name?: string }>
 }
 
 function callInput(payload: Record<string, unknown>): Record<string, unknown> {
@@ -297,6 +308,158 @@ function callInput(payload: Record<string, unknown>): Record<string, unknown> {
   return { raw }
 }
 
+interface NormalizedCodexCall {
+  tool: string
+  input: Record<string, unknown>
+  suffix?: string
+}
+
+function balancedCallArgument(source: string, openIndex: number): string | undefined {
+  let depth = 0
+  let quote = ''
+  let escaped = false
+  for (let index = openIndex; index < source.length; index++) {
+    const char = source[index]
+    if (quote) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === quote) quote = ''
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char
+      continue
+    }
+    if (char === '(' || char === '{' || char === '[') depth++
+    else if (char === ')' || char === '}' || char === ']') {
+      depth--
+      if (depth === 0) return source.slice(openIndex + 1, index).trim()
+    }
+  }
+  return undefined
+}
+
+function literalArgument(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+    if (typeof parsed === 'string') return { raw: parsed }
+  } catch {
+    // JavaScript variables/expressions are still useful as bounded evidence, but are not evaluated.
+  }
+  return { raw: value }
+}
+
+function codexToolName(name: string, input: Record<string, unknown>): NormalizedCodexCall | null {
+  if (name === 'wait' || name === 'write_stdin') return null
+  if (['list_agents', 'send_message', 'followup_task', 'interrupt_agent'].includes(name)) return null
+  if (name === 'wait_agent') {
+    const timeoutMs = typeof input.timeout_ms === 'number' ? input.timeout_ms : undefined
+    if (timeoutMs != null && timeoutMs < 5_000) return null
+    return { tool: 'collaboration:wait', input }
+  }
+  if (name === 'exec_command') {
+    const command = typeof input.cmd === 'string' ? input.cmd : typeof input.command === 'string' ? input.command : undefined
+    return {
+      tool: 'Bash',
+      input: {
+        ...(command ? { command } : {}),
+        ...(typeof input.workdir === 'string' ? { cwd: input.workdir } : {}),
+        ...(typeof input.yield_time_ms === 'number' ? { yieldTimeMs: input.yield_time_ms } : {})
+      }
+    }
+  }
+  if (name === 'apply_patch') {
+    return { tool: 'Edit', input: { patch: input.raw ?? input.patch ?? input } }
+  }
+  if (name === 'spawn_agent') {
+    return {
+      tool: 'Agent',
+      input: {
+        ...input,
+        subagent_type: input.task_name ?? input.taskName,
+        description: input.task_name ?? input.taskName
+      }
+    }
+  }
+  const collaboration = /^collaboration[._:-](.+)$/.exec(name)?.[1] ?? (
+    name === 'wait_agent' ? name : undefined
+  )
+  if (collaboration) {
+    const camel = collaboration.replace(/_([a-z])/g, (_match, char: string) => char.toUpperCase())
+    return { tool: `collaboration:${camel}`, input }
+  }
+  if (name === 'update_plan') return { tool: 'update_plan', input }
+  return { tool: name, input }
+}
+
+function staticCommandMaps(source: string): Map<number, NormalizedCodexCall[]> {
+  const arrays = new Map<string, string[]>()
+  const arrayPattern = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(\[(?:\s*"(?:\\.|[^"\\])*"\s*,?)*\])\s*;/g
+  for (const match of source.matchAll(arrayPattern)) {
+    try {
+      const values = JSON.parse(match[2]) as unknown
+      if (Array.isArray(values) && values.every((value) => typeof value === 'string')) arrays.set(match[1], values)
+    } catch {
+      // Only literal string arrays are safe to expand without evaluating JavaScript.
+    }
+  }
+
+  const expansions = new Map<number, NormalizedCodexCall[]>()
+  const mapPattern = /\b([A-Za-z_$][\w$]*)\.map\(\s*([A-Za-z_$][\w$]*)\s*=>\s*tools\.exec_command\s*\(/g
+  for (const match of source.matchAll(mapPattern)) {
+    const commands = arrays.get(match[1])
+    if (!commands) continue
+    const openIndex = (match.index ?? 0) + match[0].length - 1
+    const argument = balancedCallArgument(source, openIndex)
+    if (!argument || !new RegExp(`(?:^|[{,]\\s*)${match[2]}(?:\\s*[,}])`).test(argument)) continue
+    const common: Record<string, unknown> = {}
+    for (const key of ['workdir'] as const) {
+      const value = new RegExp(`\\b${key}\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`).exec(argument)?.[1]
+      if (value) {
+        try {
+          common[key] = JSON.parse(value) as string
+        } catch {
+          // Ignore malformed optional metadata; the command remains authoritative.
+        }
+      }
+    }
+    for (const key of ['yield_time_ms', 'max_output_tokens'] as const) {
+      const value = new RegExp(`\\b${key}\\s*:\\s*(\\d+)`).exec(argument)?.[1]
+      if (value) common[key] = Number(value)
+    }
+    expansions.set(openIndex, commands.map((cmd) => codexToolName('exec_command', { cmd, ...common })!))
+  }
+  return expansions
+}
+
+function nestedCodexCalls(source: string): NormalizedCodexCall[] {
+  const calls: NormalizedCodexCall[] = []
+  const mapped = staticCommandMaps(source)
+  const pattern = /\btools\.([A-Za-z0-9_:.]+)\s*\(/g
+  for (const match of source.matchAll(pattern)) {
+    const openIndex = (match.index ?? 0) + match[0].length - 1
+    const expanded = mapped.get(openIndex)
+    if (expanded) {
+      for (const call of expanded) calls.push({ ...call, suffix: String(calls.length + 1) })
+      continue
+    }
+    const argument = balancedCallArgument(source, openIndex)
+    if (argument == null) continue
+    const normalized = codexToolName(match[1], literalArgument(argument))
+    if (normalized) calls.push({ ...normalized, suffix: String(calls.length + 1) })
+  }
+  return calls
+}
+
+function normalizedCodexCalls(payload: Record<string, unknown>): NormalizedCodexCall[] {
+  const name = stringAt(payload, 'name') ?? ''
+  const input = callInput(payload)
+  if (name === 'exec' && typeof input.raw === 'string') return nestedCodexCalls(input.raw)
+  const normalized = codexToolName(name || stringAt(payload, 'type') || 'unknown', input)
+  return normalized ? [normalized] : []
+}
+
 function textContent(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) return value
   if (!Array.isArray(value)) return undefined
@@ -307,6 +470,39 @@ function textContent(value: unknown): string | undefined {
     return typeof candidate === 'string' ? [candidate] : []
   }).join('')
   return text || undefined
+}
+
+function outputText(value: unknown): string | undefined {
+  const text = stringsIn(value).join('\n')
+  return text || summarize(value)
+}
+
+function outputFailed(payload: Record<string, unknown>, output: string | undefined): boolean {
+  return payload.error != null ||
+    payload.status === 'failed' ||
+    /\b(?:Script failed|Script error|tool failed|exit code [1-9]\d*)\b/i.test(output ?? '')
+}
+
+function rejectedBeforeExecution(output: string | undefined): boolean {
+  return /CreateProcess[\s\S]*Rejected|rejected:[\s\S]*(?:not permitted|permission|denied)/i.test(output ?? '')
+}
+
+function skillInjection(text: string | undefined): string | undefined {
+  if (!text) return undefined
+  return /<skill>\s*<name>([A-Za-z0-9_-]+)<\/name>/i.exec(text)?.[1]
+}
+
+function explicitSkillEvent(name: string, runId: string, at: string): TraceEvent {
+  return {
+    id: `skill-injection-${stableHash([name, at]).slice(0, 16)}`,
+    ts: at,
+    runId,
+    kind: 'skill',
+    stage: `skill:${name}`,
+    tool: 'Skill',
+    name,
+    input: { source: 'skill_injection' }
+  }
 }
 
 function codexHookEvent(payload: Record<string, unknown>, runId: string, at: string): TraceEvent | null {
@@ -360,6 +556,9 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
   }
   let usageObserved = false
   let lastAssistant: string | undefined
+  let injectedSkill: string | undefined
+  let logicalIdsByOuterCall = new Map<string, string[]>()
+  let toolById = new Map<string, string>()
 
   const finishUsage = (at: string): void => {
     if (!current || !usageObserved) return
@@ -383,6 +582,77 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
     current.observable.usage = true
   }
 
+  const addToolCall = (payload: Record<string, unknown>, at: string): void => {
+    if (!current) return
+    const outerId = stringAt(payload, 'call_id', 'callId', 'id') ?? `call-${stableHash([payload, at]).slice(0, 16)}`
+    const calls = normalizedCodexCalls(payload)
+    const logicalIds: string[] = []
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index]
+      const toolUseId = calls.length === 1 ? outerId : `${outerId}:${call.suffix ?? index + 1}`
+      const cls = classifyTool(call.tool, call.input)
+      const mcp = parseMcp(call.tool, call.input)
+      const file = fileOpOf(call.tool, call.input)
+      const danger = classifyDanger(call.tool, call.input)
+      current.events.push(...inferredSkillEvents(call.tool, call.input, runId, at, toolUseId))
+      current.events.push({
+        id: `codex-tool-${stableHash([toolUseId, call.tool]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: cls.kind,
+        stage: `${cls.kind}:${cls.name}`,
+        tool: call.tool,
+        name: cls.name,
+        toolUseId,
+        input: call.input,
+        ...mcp,
+        ...file,
+        ...(danger ? { danger } : {})
+      })
+      logicalIds.push(toolUseId)
+      toolById.set(toolUseId, call.tool)
+    }
+    if (logicalIds.length) {
+      logicalIdsByOuterCall.set(outerId, logicalIds)
+      current.observable.tools = true
+      current.observable.mcps = true
+      current.observable.errors = true
+      if (current.events.some((event) => event.kind === 'skill')) current.observable.skills = true
+    }
+  }
+
+  const addToolOutput = (payload: Record<string, unknown>, at: string): void => {
+    if (!current) return
+    const outerId = stringAt(payload, 'call_id', 'callId', 'id')
+    if (!outerId) return
+    const ids = logicalIdsByOuterCall.get(outerId) ?? [outerId]
+    const output = outputText(payload.output ?? payload.result ?? payload.tools ?? payload.error)
+    if (rejectedBeforeExecution(output)) {
+      const rejected = new Set(ids)
+      current.events = current.events.filter((event) => !event.toolUseId || !rejected.has(event.toolUseId))
+      for (const id of ids) {
+        toolById.delete(id)
+      }
+      logicalIdsByOuterCall.delete(outerId)
+      return
+    }
+    const failed = outputFailed(payload, output)
+    for (const toolUseId of ids) {
+      current.events.push({
+        id: `codex-result-${stableHash([toolUseId, output]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'tool',
+        stage: 'tool_result',
+        tool: toolById.get(toolUseId),
+        toolUseId,
+        text: output,
+        output,
+        isError: failed
+      })
+    }
+  }
+
   for (const line of content.split('\n')) {
     if (!line.trim()) continue
     let row: Record<string, unknown>
@@ -399,8 +669,18 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       current = {
         providerTurnId: stringAt(payload, 'turn_id', 'turnId'),
         userText: '',
+        startedAt: at,
         events: [],
-        observable: { tools: true, hooks: false, usage: false }
+        observable: {
+          tools: true,
+          skills: true,
+          mcps: true,
+          hooks: false,
+          usage: false,
+          files: false,
+          errors: true
+        },
+        childThreads: []
       }
       turns.push(current)
       turnUsageBaseline = { ...cumulativeUsage }
@@ -408,6 +688,9 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
       usageObserved = false
       lastAssistant = undefined
+      injectedSkill = undefined
+      logicalIdsByOuterCall = new Map()
+      toolById = new Map()
       continue
     }
     if (!current) continue
@@ -421,6 +704,74 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
 
     if (type === 'event_msg' && payload.type === 'user_message') {
       current.userText = stringAt(payload, 'message', 'text', 'prompt') ?? textContent(payload.content) ?? current.userText
+      continue
+    }
+    if (type === 'event_msg' && payload.type === 'sub_agent_activity') {
+      const sessionId = stringAt(payload, 'agent_thread_id', 'agentThreadId')
+      const parentToolUseId = stringAt(payload, 'event_id', 'eventId')
+      const name = stringAt(payload, 'agent_path', 'agentPath')?.replace(/^\/root\//, '')
+      if (sessionId && !current.childThreads.some((child) => child.sessionId === sessionId)) {
+        current.childThreads.push({ sessionId, parentToolUseId, name })
+      }
+      if (payload.kind === 'started') {
+        current.events.push({
+          id: `codex-agent-${stableHash([sessionId, parentToolUseId, at]).slice(0, 16)}`,
+          ts: at,
+          runId,
+          kind: 'agent',
+          stage: `agent:${name ?? 'subagent'}`,
+          tool: 'Agent',
+          toolUseId: parentToolUseId,
+          agentId: sessionId,
+          name: name ?? 'subagent',
+          input: { source: 'sub_agent_activity', sessionId }
+        })
+      }
+      continue
+    }
+    if (type === 'event_msg' && payload.type === 'patch_apply_end') {
+      const outerId = stringAt(payload, 'call_id', 'callId')
+      if (outerId) {
+        const ids = logicalIdsByOuterCall.get(outerId) ?? [outerId]
+        const output = outputText(payload.stdout ?? payload.stderr)
+        for (const toolUseId of ids) {
+          current.events.push({
+            id: `codex-patch-result-${stableHash([toolUseId, at]).slice(0, 16)}`,
+            ts: at,
+            runId,
+            kind: 'tool',
+            stage: 'tool_result',
+            tool: toolById.get(toolUseId) ?? 'Edit',
+            toolUseId,
+            text: output,
+            output,
+            isError: payload.success === false
+          })
+        }
+      }
+      const rawChanges = payload.changes
+      const changes: Array<[string, Record<string, unknown>]> = Array.isArray(rawChanges)
+        ? rawChanges.flatMap((path) => typeof path === 'string' ? [[path, {}] as [string, Record<string, unknown>]] : [])
+        : rawChanges && typeof rawChanges === 'object'
+          ? Object.entries(rawChanges as Record<string, unknown>).map(([path, rawChange]) => [
+              path,
+              rawChange && typeof rawChange === 'object' && !Array.isArray(rawChange)
+                ? rawChange as Record<string, unknown>
+                : {}
+            ])
+          : []
+      for (const [path] of changes) {
+        current.events.push({
+          id: `codex-file-${stableHash([path, at]).slice(0, 16)}`,
+          ts: at,
+          runId,
+          kind: 'harness',
+          stage: 'file_op',
+          filePath: path,
+          fileOp: 'edit'
+        })
+      }
+      current.observable.files = current.observable.files || changes.length > 0
       continue
     }
     if (type === 'event_msg' && payload.type === 'token_count') {
@@ -456,6 +807,7 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
     }
     if (type === 'event_msg' && payload.type === 'task_complete') {
       finishUsage(at)
+      current.completedAt = at
       const assistant = stringAt(payload, 'last_agent_message', 'lastAgentMessage') ?? lastAssistant
       if (assistant) current.events.push({
         id: `codex-assistant-${stableHash([current.providerTurnId, assistant]).slice(0, 16)}`,
@@ -480,6 +832,22 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
     if (type !== 'response_item') continue
 
     const itemType = stringAt(payload, 'type')
+    if (itemType === 'message' && stringAt(payload, 'role') === 'user') {
+      const text = textContent(payload.content)
+      const skill = skillInjection(text)
+      if (skill) {
+        injectedSkill = skill
+        current.events.push(explicitSkillEvent(skill, runId, at))
+        current.observable.skills = true
+      } else if (
+        text &&
+        !/^\s*(?:<recommended_plugins>|# AGENTS\.md instructions|<environment_context>)/.test(text) &&
+        !current.userText
+      ) {
+        current.userText = text
+      }
+      continue
+    }
     if (itemType === 'message' && stringAt(payload, 'role') === 'assistant') {
       lastAssistant = textContent(payload.content) ?? lastAssistant
       continue
@@ -489,51 +857,119 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       continue
     }
 
-    const isCall = itemType === 'custom_tool_call' || itemType === 'function_call' || itemType === 'tool_search_call'
+    const isCall = itemType === 'custom_tool_call' || itemType === 'function_call'
     if (isCall) {
-      const tool = stringAt(payload, 'name') ?? itemType
-      const toolUseId = stringAt(payload, 'call_id', 'callId', 'id')
-      const input = callInput(payload)
-      const cls = classifyTool(tool, input)
-      const mcp = parseMcp(tool, input)
-      const file = fileOpOf(tool, input)
-      const danger = classifyDanger(tool, input)
-      current.events.push(...inferredSkillEvents(tool, input, runId, at, toolUseId))
-      current.events.push({
-        id: `codex-tool-${stableHash([toolUseId, tool]).slice(0, 16)}`,
-        ts: at,
-        runId,
-        kind: cls.kind,
-        stage: `${cls.kind}:${cls.name}`,
-        tool,
-        name: cls.name,
-        toolUseId,
-        input,
-        ...mcp,
-        ...file,
-        ...(danger ? { danger } : {})
-      })
+      addToolCall(payload, at)
       continue
     }
 
-    const isOutput = itemType === 'custom_tool_call_output' || itemType === 'function_call_output' || itemType === 'tool_search_output'
+    const isOutput = itemType === 'custom_tool_call_output' || itemType === 'function_call_output'
     if (isOutput) {
-      const toolUseId = stringAt(payload, 'call_id', 'callId', 'id')
-      const output = summarize(payload.output ?? payload.result ?? payload.tools)
-      current.events.push({
-        id: `codex-result-${stableHash([toolUseId, output]).slice(0, 16)}`,
-        ts: at,
-        runId,
-        kind: 'tool',
-        stage: 'tool_result',
-        toolUseId,
-        text: output,
-        output,
-        isError: payload.error != null || payload.status === 'failed'
-      })
+      addToolOutput(payload, at)
     }
   }
+  for (const turn of turns) {
+    const injection = turn.events.find((event) =>
+      event.kind === 'skill' &&
+      (event.input as Record<string, unknown> | undefined)?.source === 'skill_injection'
+    )
+    const skill = injection?.name ?? (turn === current ? injectedSkill : undefined)
+    if (skill && turn.userText && !turn.userText.startsWith('/')) turn.userText = `/${skill} ${turn.userText}`
+  }
   return { recognized: sawCodexLine && turns.length > 0, turns }
+}
+
+function overlapsTurn(parent: ParsedTranscriptTurn, child: ParsedTranscriptTurn): boolean {
+  const parentStart = Date.parse(parent.startedAt ?? '')
+  const parentEnd = Date.parse(parent.completedAt ?? '')
+  const childStart = Date.parse(child.startedAt ?? '')
+  const childEnd = Date.parse(child.completedAt ?? child.startedAt ?? '')
+  if (![parentStart, parentEnd, childStart, childEnd].every(Number.isFinite)) return true
+  return childStart <= parentEnd && childEnd >= parentStart
+}
+
+async function codexChildRollout(parentPath: string, sessionId: string): Promise<string | undefined> {
+  const dayDir = dirname(parentPath)
+  const findIn = async (dir: string): Promise<string | undefined> => {
+    try {
+      const names = await readdir(dir)
+      const name = names.find((candidate) => candidate.endsWith(`-${sessionId}.jsonl`) || candidate === `${sessionId}.jsonl`)
+      return name ? join(dir, name) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const sameDay = await findIn(dayDir)
+  if (sameDay) return sameDay
+  // A long parent turn can cross midnight. Bound the fallback to sibling day directories in the same month.
+  const monthDir = dirname(dayDir)
+  try {
+    const days = await readdir(monthDir, { withFileTypes: true })
+    for (const day of days) {
+      if (!day.isDirectory() || join(monthDir, day.name) === dayDir) continue
+      const found = await findIn(join(monthDir, day.name))
+      if (found) return found
+    }
+  } catch {
+    // Missing/legacy session layout remains partial evidence, never a recorder failure.
+  }
+  return undefined
+}
+
+async function codexTurnWithChildren(
+  turn: ParsedTranscriptTurn,
+  transcriptPath: string,
+  runId: string,
+  seen = new Set<string>()
+): Promise<{ events: TraceEvent[]; complete: boolean; observable: TranscriptRead['observable'] }> {
+  const events = [...turn.events]
+  const observable = { ...turn.observable }
+  let complete = true
+  for (const child of turn.childThreads) {
+    if (seen.has(child.sessionId)) continue
+    seen.add(child.sessionId)
+    const childPath = await codexChildRollout(transcriptPath, child.sessionId)
+    if (!childPath) {
+      complete = false
+      continue
+    }
+    let parsed: ReturnType<typeof parseCodexRollout>
+    try {
+      parsed = parseCodexRollout(await readFile(childPath, 'utf8'), runId)
+    } catch {
+      complete = false
+      continue
+    }
+    const childTurns = parsed.turns.filter((candidate) => overlapsTurn(turn, candidate))
+    if (!parsed.recognized || childTurns.length === 0) {
+      complete = false
+      continue
+    }
+    for (const childTurn of childTurns) {
+      const nested = await codexTurnWithChildren(childTurn, childPath, runId, seen)
+      complete = complete && nested.complete
+      observable.skills = observable.skills || nested.observable.skills
+      observable.mcps = observable.mcps || nested.observable.mcps
+      observable.hooks = observable.hooks || nested.observable.hooks
+      observable.files = observable.files || nested.observable.files
+      observable.errors = observable.errors || nested.observable.errors
+      events.push(...nested.events.flatMap((event): TraceEvent[] => {
+        // Root usage and assistant response are authoritative for the user turn; child usage/text must not be added again.
+        if (event.kind === 'model' || (event.kind === 'harness' && event.stage === 'result')) return []
+        return [{
+          ...event,
+          agentId: event.agentId ?? child.sessionId,
+          parentToolUseId: event.parentToolUseId ?? child.parentToolUseId,
+          runtimeMetadata: {
+            ...event.runtimeMetadata,
+            childTranscript: childPath,
+            childAgent: child.name ?? child.sessionId
+          }
+        }]
+      }))
+    }
+  }
+  return { events, complete, observable }
 }
 
 async function stableTranscript(
@@ -549,7 +985,21 @@ async function stableTranscript(
     try {
       size = (await stat(path)).size
     } catch {
-      return { stable: true, observed: false, events: [], observable: { tools: false, hooks: false, usage: false } }
+      return {
+        stable: true,
+        observed: false,
+        complete: true,
+        events: [],
+        observable: {
+          tools: false,
+          skills: false,
+          mcps: false,
+          hooks: false,
+          usage: false,
+          files: false,
+          errors: false
+        }
+      }
     }
     if (size === previous) {
       const content = await readFile(path, 'utf8')
@@ -557,14 +1007,34 @@ async function stableTranscript(
         const parsed = parseCodexRollout(content, runId)
         const direct = providerTurnId ? parsed.turns.find((turn) => turn.providerTurnId === providerTurnId) : undefined
         const matching = promptHash
-          ? [...parsed.turns].reverse().find((turn) => createHash('sha256').update(turn.userText).digest('hex') === promptHash)
+          ? [...parsed.turns].reverse().find((turn) => {
+              const candidates = [turn.userText, turn.userText.replace(/^\/[A-Za-z0-9_-]+\s*/, '')]
+              return candidates.some((candidate) => createHash('sha256').update(candidate).digest('hex') === promptHash)
+            })
           : undefined
         const turn = direct ?? matching ?? parsed.turns.at(-1)
+        const enriched = turn
+          ? await codexTurnWithChildren(turn, path, runId)
+          : {
+              events: [],
+              complete: false,
+              observable: {
+                tools: false,
+                skills: false,
+                mcps: false,
+                hooks: false,
+                usage: false,
+                files: false,
+                errors: false
+              }
+            }
         return {
           stable: true,
           observed: parsed.recognized,
-          events: turn?.events ?? [],
-          observable: turn?.observable ?? { tools: false, hooks: false, usage: false }
+          complete: enriched.complete,
+          ...(turn?.userText ? { userText: turn.userText } : {}),
+          events: enriched.events,
+          observable: enriched.observable
         }
       }
       const turns = parseTranscriptToTurns(content, {
@@ -577,18 +1047,38 @@ async function stableTranscript(
       return {
         stable: true,
         observed: turns.length > 0,
+        complete: true,
+        ...((matching ?? turns.at(-1))?.userText ? { userText: (matching ?? turns.at(-1))?.userText } : {}),
         events,
         observable: {
           tools: turns.length > 0,
+          skills: turns.length > 0,
+          mcps: turns.length > 0,
           hooks: events.some((event) => event.kind === 'hook'),
-          usage: events.some((event) => event.kind === 'harness' && event.stage === 'result')
+          usage: events.some((event) => event.kind === 'harness' && event.stage === 'result'),
+          files: events.some((event) => !!event.filePath && !!event.fileOp),
+          errors: turns.length > 0
         }
       }
     }
     previous = size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  return { stable: false, observed: true, events: [], observable: { tools: false, hooks: false, usage: false } }
+  return {
+    stable: false,
+    observed: true,
+    complete: false,
+    events: [],
+    observable: {
+      tools: false,
+      skills: false,
+      mcps: false,
+      hooks: false,
+      usage: false,
+      files: false,
+      errors: false
+    }
+  }
 }
 
 async function readStoredEvents(path: string): Promise<TraceEvent[]> {
@@ -605,7 +1095,15 @@ function dedupeTraceEvents(events: TraceEvent[]): TraceEvent[] {
   const seen = new Set<string>()
   return events.filter((event) => {
     const logicalToolKey = event.kind === 'skill'
-      ? { lifecycle: `skill:${event.name ?? event.tool ?? 'unknown'}` }
+      ? event.toolUseId
+        ? { lifecycle: 'skill', name: event.name ?? event.tool ?? 'unknown', toolUseId: event.toolUseId }
+        : {
+            lifecycle: 'skill',
+            name: event.name ?? event.tool ?? 'unknown',
+            messageId: event.messageId,
+            source: (event.input as Record<string, unknown> | undefined)?.source,
+            id: event.id
+          }
       : event.toolUseId
       ? {
           lifecycle: event.stage === 'tool_result' ? 'result' : 'start',
@@ -739,10 +1237,24 @@ async function finalizeOpenTurn(
   const runId = `${open.provider}:${open.sessionId}:${open.generation}`
   const transcript = open.transcriptPath
     ? await stableTranscript(open.transcriptPath, runId, open.provider, open.promptHash, open.providerTurnId)
-    : { stable: true, observed: false, events: [], observable: { tools: false, hooks: false, usage: false } }
+    : {
+        stable: true,
+        observed: false,
+        complete: true,
+        events: [],
+        observable: {
+          tools: false,
+          skills: false,
+          mcps: false,
+          hooks: false,
+          usage: false,
+          files: false,
+          errors: false
+        }
+      }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
-  const diffs = await Promise.all(open.captures.map(async ({ capture }) => finishGitTurnDiff(capture, 3_000)))
+  const diffs = await Promise.all(open.captures.map(async ({ capture }) => finishGitTurnDiff(capture, 5_000)))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,
@@ -758,17 +1270,33 @@ async function finalizeOpenTurn(
   )
   const hasHookEvidence = events.some((event) => event.kind === 'hook')
   const evidence = aggregateTurnEvidence({
-    userText: open.prompt,
+    userText: transcript.userText ?? open.prompt,
     events,
     source: transcript.observed ? 'provider_transcript+lifecycle_hooks' : 'lifecycle_hooks',
     observable: {
       assistant: transcript.observed || events.some((event) => event.kind === 'model' && event.stage === 'text'),
       tools: hasToolEvidence || transcript.observable.tools,
+      skills: events.some((event) => event.kind === 'skill') || transcript.observable.skills,
+      mcps: events.some((event) => event.kind === 'tool' && event.isMcp) || transcript.observable.mcps,
       hooks: enablement.config.capture.hooks && (hasHookEvidence || transcript.observable.hooks),
       usage: hasUsage || transcript.observable.usage,
+      files: events.some((event) => !!event.filePath && !!event.fileOp) || transcript.observable.files,
+      errors: hasToolEvidence || transcript.observable.errors,
       diff: enablement.config.capture.diff
     }
   })
+  if (transcript.complete === false) {
+    const source = evidence.tools.source
+    const reason = 'one or more child agent transcripts were unavailable'
+    if (evidence.tools.value) evidence.tools = partial(evidence.tools.value, source, reason)
+    if (evidence.skills.value) evidence.skills = partial(evidence.skills.value, source, reason)
+    if (evidence.mcps.value) evidence.mcps = partial(evidence.mcps.value, source, reason)
+    if (evidence.files.value) evidence.files = partial(evidence.files.value, source, reason)
+    if (evidence.errors.value) evidence.errors = partial(evidence.errors.value, source, reason)
+    if (evidence.dangerousOperations.value) {
+      evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)
+    }
+  }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
   if (!enablement.config.capture.assistant) evidence.assistant = disabled('assistant capture disabled by config')
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
