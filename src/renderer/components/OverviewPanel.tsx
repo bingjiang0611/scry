@@ -1474,8 +1474,12 @@ export function OverviewPanel({
 
       {isOverviewTab && (
         <div className="panel-section">
-          <h4 className="clickable" onClick={() => setFilesFolded((v) => !v)}>
-            文件足迹（全会话 · 结构化工具）
+          <h4
+            className="clickable"
+            title="R/W/E 来自结构化文件工具；~R 来自 cat、sed、rg 等只读 Bash 命令推断，其他间接文件访问仍可能未统计"
+            onClick={() => setFilesFolded((v) => !v)}
+          >
+            文件足迹（全会话 · 工具证据）
             <span className="more">
               {structured.length} files <Icon name={filesFolded ? 'chevronRight' : 'chevronDown'} />
             </span>
@@ -1485,10 +1489,16 @@ export function OverviewPanel({
               {coverage.written > 0 && (
                 <div className="covrow">
                   改 {coverage.written} · 先读 {coverage.readBefore}/{coverage.written}
+                  {coverage.inferredReadBefore > 0 && (
+                    <span className="dim">（含 ~{coverage.inferredReadBefore} Bash 推断）</span>
+                  )}
                   {coverage.blind.length > 0 && (
-                    <span className="cov-warn" title={coverage.blind.join('\n')}>
+                    <span
+                      className="cov-warn"
+                      title={`以下文件首次修改前没有捕获到 Read 或可识别的只读 Bash 证据；仍可能存在未识别的间接读取：\n${coverage.blind.join('\n')}`}
+                    >
                       {' '}
-                      · <Icon name="alert" /> {coverage.blind.length} 未先读
+                      · <Icon name="alert" /> {coverage.blind.length} 无先读证据
                     </span>
                   )}
                 </div>
@@ -1504,7 +1514,12 @@ export function OverviewPanel({
                   <span className={`fbadge ${fileBadge(f).toLowerCase()}`}>{fileBadge(f)}</span>
                   <span className="fname">{basename(f.path)}</span>
                   <span className="dim fops">
-                    {[f.read && `R${f.read}`, f.write && `W${f.write}`, f.edit && `E${f.edit}`].filter(Boolean).join(' ')}
+                    {[
+                      f.read - f.inferredRead > 0 && `R${f.read - f.inferredRead}`,
+                      f.inferredRead > 0 && `~R${f.inferredRead}`,
+                      f.write && `W${f.write}`,
+                      f.edit && `E${f.edit}`
+                    ].filter(Boolean).join(' ')}
                   </span>
                 </div>
               ))}

@@ -10,7 +10,9 @@ import {
 } from '@shared/trace'
 import type { AgentInputAttachment } from '@shared/runtime'
 import { logicalCallEventsForTurn } from '@shared/logical-calls'
+import { inferredReadPaths } from './file-evidence'
 export { logicalCallEventsForTurn }
+export { bashReadFiles } from './file-evidence'
 
 // 视觉升级：值改成 Icon 名（蓝本 SVG 图标），消费处用 <Icon name={...}>。
 export const AGENT_ICON: Record<string, string> = {
@@ -34,32 +36,41 @@ export const KIND_ICON: Record<string, string> = {
 export interface FileRow {
   path: string
   read: number
+  inferredRead: number
   write: number
   edit: number
 }
 
-// P2 Files（RFC §8.4）：写/改文件的「读覆盖」——第一次写入前有没有先读。
+// P2 Files（RFC §8.4）：写/改文件的「读覆盖」——第一次写入前有没有读取证据。
 // tool_result 会继承 fileOp/filePath，必须排除；写后补读不反向洗掉盲改风险。
 export interface FileCoverage {
   written: number // 写或改过的文件数
   readBefore: number // 第一次写或改之前已读过的文件数
-  blind: string[] // 第一次写或改之前未读过的文件路径（风险）
+  inferredReadBefore: number // readBefore 中仅由 Bash 只读命令推断的文件数
+  blind: string[] // 第一次写或改之前没有读取证据的文件路径（仍可能存在未识别的间接读取）
 }
 
 export function fileWriteCoverage(items: TraceEvent[]): FileCoverage {
-  const read = new Set<string>()
+  const candidatePaths = [...new Set(items.flatMap((event) => event.filePath ? [event.filePath] : []))]
+  const exactRead = new Set<string>()
+  const inferredRead = new Set<string>()
   const written = new Set<string>()
   const covered = new Set<string>()
+  const inferredCovered = new Set<string>()
   const pending = new Map<string, TraceEvent[]>()
   const applyCompleted = (event: TraceEvent): void => {
-    if (!event.fileOp || !event.filePath) return
-    if (event.fileOp === 'read') {
-      read.add(event.filePath)
-      return
+    if (event.fileOp && event.filePath) {
+      if (event.fileOp === 'read') {
+        exactRead.add(event.filePath)
+      } else if (!written.has(event.filePath)) {
+        written.add(event.filePath)
+        if (exactRead.has(event.filePath) || inferredRead.has(event.filePath)) {
+          covered.add(event.filePath)
+          if (!exactRead.has(event.filePath)) inferredCovered.add(event.filePath)
+        }
+      }
     }
-    if (written.has(event.filePath)) return
-    written.add(event.filePath)
-    if (read.has(event.filePath)) covered.add(event.filePath)
+    for (const path of inferredReadPaths(event, candidatePaths)) inferredRead.add(path)
   }
   for (const event of items) {
     if (event.stage === 'tool_result') {
@@ -70,7 +81,10 @@ export function fileWriteCoverage(items: TraceEvent[]): FileCoverage {
       for (const started of completed) applyCompleted(started)
       continue
     }
-    if (!event.fileOp || !event.filePath) continue
+    const hasFileEvidence =
+      !!(event.fileOp && event.filePath) ||
+      inferredReadPaths(event, candidatePaths).length > 0
+    if (!hasFileEvidence) continue
     if (!event.toolUseId) {
       // CLI 的 file_op 是完成态事实，不另发 tool_result。
       applyCompleted(event)
@@ -81,7 +95,12 @@ export function fileWriteCoverage(items: TraceEvent[]): FileCoverage {
     pending.set(event.toolUseId, sameCall)
   }
   const blind = [...written].filter((path) => !covered.has(path))
-  return { written: written.size, readBefore: covered.size, blind }
+  return {
+    written: written.size,
+    readBefore: covered.size,
+    inferredReadBefore: inferredCovered.size,
+    blind
+  }
 }
 
 export interface Turn {
@@ -962,20 +981,39 @@ export function parseUserMessage(text: string): ParsedUserMsg {
 export function aggregateFiles(items: TraceEvent[]): { structured: FileRow[]; bash: string[] } {
   const m = new Map<string, FileRow>()
   const bash = new Set<string>()
+  const failedToolUseIds = new Set(
+    items
+      .filter((event) => event.stage === 'tool_result' && event.isError && event.toolUseId)
+      .map((event) => event.toolUseId as string)
+  )
   for (const e of items) {
     if (e.stage === 'tool_result') continue
     if (e.fileOp && e.filePath) {
       let r = m.get(e.filePath)
       if (!r) {
-        r = { path: e.filePath, read: 0, write: 0, edit: 0 }
+        r = { path: e.filePath, read: 0, inferredRead: 0, write: 0, edit: 0 }
         m.set(e.filePath, r)
       }
       if (e.fileOp === 'read') r.read++
       else if (e.fileOp === 'write') r.write++
       else r.edit++
-    } else if (e.tool === 'Bash') {
+    }
+    if (e.tool === 'Bash') {
       const inp = e.input as Record<string, unknown> | undefined
       if (typeof inp?.command === 'string') bashFiles(inp.command).forEach((f) => bash.add(f))
+    }
+  }
+  const candidates = [...m.keys()]
+  for (const event of items) {
+    if (event.stage === 'tool_result' || failedToolUseIds.has(event.toolUseId ?? '') || event.isError) continue
+    for (const path of inferredReadPaths(event, candidates)) {
+      let row = m.get(path)
+      if (!row) {
+        row = { path, read: 0, inferredRead: 0, write: 0, edit: 0 }
+        m.set(path, row)
+      }
+      row.read++
+      row.inferredRead++
     }
   }
   for (const k of m.keys()) bash.delete(k)
@@ -1522,7 +1560,9 @@ export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts
   if (segs.some((s) => s.skill !== '（无 skill）'))
     L.push(`- **段落(按 skill)**：${segs.map((s) => `${s.skill} ${s.tools} 工具`).join(' · ')}`)
   if (cov.written > 0)
-    L.push(`- **文件（结构化工具）**：改 ${cov.written}（先读 ${cov.readBefore}/${cov.written}${cov.blind.length ? `，首写前未读 ${cov.blind.length}` : ''}）`)
+    L.push(
+      `- **文件（工具证据）**：改 ${cov.written}（先读 ${cov.readBefore}/${cov.written}${cov.inferredReadBefore ? `，其中 ${cov.inferredReadBefore} 个仅有 Bash 推断` : ''}${cov.blind.length ? `，无先读证据 ${cov.blind.length}` : ''}）`
+    )
   if (gitDiff.length)
     L.push(`- **git diff**：${gitDiff.length} 文件${diffUntouched.length ? `（${diffUntouched.length} 未经工具标记）` : ''}`)
   if (dangers.length)
@@ -1532,7 +1572,10 @@ export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts
 
   // 从真实数据派生的优化提示（有就列，没有不编）
   const hints: string[] = []
-  if (cov.blind.length) hints.push(`${cov.blind.length} 个文件首次写入前未读（先写风险）：${cov.blind.map(basename).join('、')}`)
+  if (cov.blind.length)
+    hints.push(
+      `${cov.blind.length} 个文件首次写入前无读取证据（可能仍有未识别的 Bash/MCP 读取）：${cov.blind.map(basename).join('、')}`
+    )
   if (toolErrors > 0) hints.push(`工具失败 ${toolErrors} 次，检查报错卡片`)
   if (diffUntouched.length) hints.push(`${diffUntouched.length} 个文件被改但不在工具足迹里（Bash/MCP 盲区）`)
   if (dangers.length) hints.push(`${dangers.length} 处危险操作（审计放行，未拦截）`)

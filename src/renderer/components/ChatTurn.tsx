@@ -376,7 +376,7 @@ function FilesSummary({
         : turnDiff?.reason === 'no_head'
           ? 'Git 仓库尚无 HEAD'
           : undefined
-  const structuredScope = '仅统计 Read/Write/Edit 等结构化文件工具；不含 Bash/MCP/Hook 间接文件操作'
+  const structuredScope = 'R/W/E 来自结构化文件工具；~R 来自 cat、sed、rg 等只读 Bash 命令推断；其他 Bash/MCP/Hook 间接文件操作仍可能未统计'
   return (
     <details className={diffMode ? 'files-summary diff' : 'files-summary'} open>
       <summary
@@ -389,7 +389,7 @@ function FilesSummary({
           ? '本轮开始/结束 Git 工作树快照的净变化；同目录外部并发修改也会计入，ignored 文件不统计'
           : `${structuredScope}${turnDiff ? `；精确行数不可用：${turnDiff.reason ?? turnDiff.status}` : ''}`}
       >
-        <Icon name="file" /> {diffMode ? '本轮改动' : '本轮文件（结构化工具）'}
+        <Icon name="file" /> {diffMode ? '本轮改动' : '本轮文件（工具证据）'}
         {diffMode ? (
           <>
             <span className="fh-file-count">{diffFiles.length} files</span>
@@ -459,10 +459,11 @@ function FilesSummary({
               <div className="file-row" key={f.path} title={f.path}>
                 <span className={`op ${fileBadge(f).toLowerCase()}`}>{fileBadge(f)}</span>
                 <span className="path">{basename(f.path)}</span>
+                {f.inferredRead > 0 && <span className="dim">~R{f.inferredRead}</span>}
               </div>
             ))
           ) : (
-            <div className="files-empty">暂无结构化文件工具足迹</div>
+            <div className="files-empty">暂无文件工具证据</div>
           )
         )}
       </div>
