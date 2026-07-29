@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { capabilityReady, capabilityUnknown, type AccountSnapshot, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
 import { normalizeAgentQuestionRequest } from '../../shared/runtime'
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
-import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
+import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
 
@@ -53,7 +53,7 @@ function qoderOptions(
     cwd,
     resume,
     pathToQoderCLIExecutable: executable,
-    env: runtimeCliEnv(shellEnv()),
+    env: runtimeCliEnv(),
     permissionMode: 'bypassPermissions',
     allowDangerouslySkipPermissions: true,
     includePartialMessages: true,

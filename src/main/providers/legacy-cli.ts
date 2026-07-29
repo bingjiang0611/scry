@@ -3,7 +3,7 @@ import type { ProviderId } from '../../shared/provider'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
 import { assertRuntimeCliSurface, runCliAgent } from '../cli-runtime'
-import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
+import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
 
 type LegacyProviderId = Extract<ProviderId, 'codex' | 'qoder'>
@@ -72,7 +72,7 @@ export function createLegacyCliAdapter(providerId: LegacyProviderId): ProviderAd
         runtimeProvider,
         executablePath: path,
         cwd: request.cwd,
-        env: runtimeCliEnv(shellEnv()),
+        env: runtimeCliEnv(),
         timeoutMs: 30 * 60_000,
         onSessionId: request.onExternalSessionId,
         capabilityMetadata: { transport: 'legacy-cli-jsonl', degraded: true, resumeSupported: false }

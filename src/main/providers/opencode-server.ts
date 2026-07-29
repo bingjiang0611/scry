@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
-import { runtimeCliEnv, shellEnv } from '../claude-locate'
+import { runtimeCliEnv } from '../claude-locate'
 
 const HOOK_PREFIX = 'SCRY_OPENCODE_HOOK\t'
 const MAX_HOOK_FRAME = 64 * 1024
@@ -120,7 +120,7 @@ export class OpenCodeServerManager {
     const child = spawn(executable, ['serve', '--hostname=127.0.0.1', `--port=${port}`], {
       cwd,
       env: {
-        ...runtimeCliEnv(shellEnv()),
+        ...runtimeCliEnv(),
         OPENCODE_CONFIG_CONTENT: JSON.stringify(hookPlugin ? { plugin: [pathToFileURL(hookPlugin).href] } : {})
       },
       stdio: ['pipe', 'pipe', 'pipe']

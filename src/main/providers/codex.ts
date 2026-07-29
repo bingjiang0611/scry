@@ -9,7 +9,7 @@ import {
   type SkillMeta
 } from '../../shared/provider'
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
-import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
+import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import type { CodexHookInspection, CodexHookMetadata, CodexHookTrustStatus } from '../codex-hook-trust'
 import { CodexAppServerClient } from './codex-app-server'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
@@ -444,7 +444,7 @@ export function createCodexAdapter(): ProviderAdapter {
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
     const args = bypass ? ['--dangerously-bypass-hook-trust', 'app-server'] : undefined
-    const client = new CodexAppServerClient({ command: path, args, cwd, env: runtimeCliEnv(shellEnv()) })
+    const client = new CodexAppServerClient({ command: path, args, cwd, env: runtimeCliEnv() })
     clients.set(key, client)
     lastClient = client
     return client

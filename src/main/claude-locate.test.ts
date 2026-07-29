@@ -9,6 +9,7 @@ import {
   isAcceptedQoderPath,
   normalizeAgentVersion,
   resolveCommandOnPath,
+  resolveRecorderCliPath,
   runtimeCliEnv,
   sanitizeNestedAgentEnv,
   selectClaudeBinCandidate,
@@ -155,6 +156,35 @@ describe('runtime CLI discovery constraints', () => {
         .toBe('/missing/explicit/scry')
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps an explicitly empty SCRY_CLI_PATH authoritative instead of falling back', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-cli-disabled-'))
+    try {
+      const discovered = join(dir, 'scry')
+      writeFileSync(discovered, '#!/bin/sh\n')
+      chmodSync(discovered, 0o755)
+      expect(runtimeCliEnv({ PATH: dir, SCRY_CLI_PATH: '' }).SCRY_CLI_PATH).toBe('')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps provider-only PATH entries out of recorder CLI fallback resolution', () => {
+    const providerDir = mkdtempSync(join(tmpdir(), 'scry-provider-path-'))
+    const fallbackDir = mkdtempSync(join(tmpdir(), 'scry-recorder-fallback-'))
+    try {
+      const providerScry = join(providerDir, 'scry')
+      const fallbackScry = join(fallbackDir, 'scry')
+      for (const path of [providerScry, fallbackScry]) {
+        writeFileSync(path, '#!/bin/sh\n')
+        chmodSync(path, 0o755)
+      }
+      expect(resolveRecorderCliPath({ PATH: providerDir }, '/usr/bin:/bin', fallbackDir)).toBe(fallbackScry)
+    } finally {
+      rmSync(providerDir, { recursive: true, force: true })
+      rmSync(fallbackDir, { recursive: true, force: true })
     }
   })
 
