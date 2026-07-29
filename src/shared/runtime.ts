@@ -42,6 +42,7 @@ export interface AgentQuestionPrompt {
 export interface AgentQuestionRequest {
   runId: string
   questionId: string
+  providerId?: ProviderId
   agentId?: string
   questions: AgentQuestionPrompt[]
 }

@@ -50,6 +50,19 @@ describe('AskUserQuestionInline', () => {
     expect(html).not.toContain('dangerouslySetInnerHTML')
   })
 
+  it('shows the provider that owns the pending question', () => {
+    const html = renderToStaticMarkup(
+      <AskUserQuestionInline
+        request={{ ...request, providerId: 'qoder' }}
+        queuedCount={1}
+        onRespond={async () => {}}
+      />
+    )
+
+    expect(html).toContain('Qoder 需要你的选择')
+    expect(html).not.toContain('Claude 需要你的选择')
+  })
+
   it('keeps completed answers visible and raw evidence available', () => {
     const html = renderToStaticMarkup(
       <AskUserQuestionResult

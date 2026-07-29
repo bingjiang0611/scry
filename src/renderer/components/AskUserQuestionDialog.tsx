@@ -1,6 +1,14 @@
 import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
+import type { ProviderId } from '@shared/provider'
 import { Markdown } from './Markdown'
+
+const providerLabels = {
+  claude: 'Claude',
+  codex: 'Codex',
+  qoder: 'Qoder',
+  opencode: 'OpenCode'
+} satisfies Record<ProviderId, string>
 
 export interface QuestionDraft {
   selected: string[]
@@ -139,7 +147,7 @@ export function AskUserQuestionInline({
     >
       <header className="question-dialog-head">
         <div>
-          <h3 id={titleId}>Claude 需要你的选择</h3>
+          <h3 id={titleId}>{providerLabels[request.providerId ?? 'claude']} 需要你的选择</h3>
           <p>{request.questions.length} 个问题 · 回答后继续当前任务</p>
         </div>
         {queuedCount > 1 && <span className="question-queue">还有 {queuedCount - 1} 组待回答</span>}
