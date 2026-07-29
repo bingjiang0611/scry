@@ -1999,7 +1999,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     )
 
     expect(configuredHtml).toContain('UserPromptSubmit:command')
-    expect(configuredHtml).toContain('处理器实例 · 3 个')
+    expect(configuredHtml).toContain('处理器实例 · 3 个 · 合并为 1 组')
+    expect(configuredHtml).toContain('hook-instance-index">3×')
+    expect(configuredHtml).toContain('均 0.1s')
+    expect(configuredHtml.match(/class="hook-instance"/g)).toHaveLength(1)
     expect(configuredHtml).toContain('逻辑 Hook · 2 个')
     expect(configuredHtml).toContain('当前配置 · 4 条投递路径')
     expect(configuredHtml).toContain('命令未逐实例上报')
@@ -2011,6 +2014,63 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(configuredHtml).not.toContain('/Users/example/.codex/hooks.json')
     expect(configuredHtml).not.toContain('/repo/.codex/hooks.json')
     expect(configuredHtml).not.toContain('global-hook-bridge.py')
+  })
+
+  it('HOOKS 段：处理器实例仅按名称和状态分组，耗时取已上报实例的平均值', () => {
+    const configuredCommands = [
+      {
+        command: 'python3 /repo/.claude/hooks/event_router.py',
+        source: 'project' as const,
+        sourcePath: '/repo/.codex/project-hooks.json'
+      },
+      {
+        command: 'python3 /repo/.claude/hooks/audit.py',
+        source: 'local' as const,
+        sourcePath: '/repo/.codex/local-hooks.json'
+      }
+    ]
+    const groupedTurn: Turn = {
+      ...turn,
+      items: [
+        ['router-success-1', 'project', '/repo/.codex/project-hooks.json', 'success', 100],
+        ['router-success-2', 'project', '/repo/.codex/project-hooks.json', 'success', 300],
+        ['router-success-3', 'project', '/repo/.codex/project-hooks.json', 'success', undefined],
+        ['router-failure', 'project', '/repo/.codex/project-hooks.json', 'error', 900],
+        ['audit-success', 'local', '/repo/.codex/local-hooks.json', 'success', undefined]
+      ].map(([id, source, sourcePath, outcome, durationMs]) =>
+        ev({
+          id: String(id),
+          kind: 'hook',
+          stage: 'hook_response',
+          hookId: String(id),
+          hookEvent: 'PostToolUse',
+          hookName: 'PostToolUse:command',
+          hookOutcome: String(outcome),
+          hookConfiguredCommands: configuredCommands,
+          durationMs: typeof durationMs === 'number' ? durationMs : undefined,
+          isError: outcome === 'error',
+          input: { source, sourcePath }
+        })
+      )
+    }
+    const groupedHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[groupedTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(groupedHtml).toContain('处理器实例 · 5 个 · 合并为 3 组')
+    expect(groupedHtml.match(/class="hook-instance"/g)).toHaveLength(3)
+    expect(groupedHtml).toContain('hook-instance-index">3×')
+    expect(groupedHtml).toContain('event_router.py')
+    expect(groupedHtml).toContain('audit.py')
+    expect(groupedHtml).toContain('均 0.2s')
+    expect(groupedHtml).toContain('均 0.9s')
+    expect(groupedHtml).toContain('3 个实例中 2 个上报耗时')
+    expect(groupedHtml.match(/hook-run-status ok">成功/g)).toHaveLength(2)
+    expect(groupedHtml.match(/hook-run-status bad">失败/g)).toHaveLength(1)
+    const auditStart = groupedHtml.indexOf('<strong>audit.py')
+    const auditRow = groupedHtml.slice(auditStart, groupedHtml.indexOf('</button>', auditStart))
+    expect(auditRow).not.toContain('hook-instance-duration')
+    expect(auditRow).not.toContain('均 0.0s')
   })
 
   it('HOOKS 段：失败 hook 行内展示最近失败原因', () => {
