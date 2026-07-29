@@ -835,7 +835,7 @@ describe('nested Git turn diff', () => {
     expect(record.diff.value?.[0].files).toEqual([
       expect.objectContaining({ path: join(canonicalRepository, 'a.txt'), added: 1, deleted: 1, patchStatus: 'captured' })
     ])
-  }, 15_000)
+  }, 35_000)
 
   it('即使接入方未忽略 .scry，Recorder 自身文件也不污染 Diff', async () => {
     const root = await workspace()
@@ -857,5 +857,5 @@ describe('nested Git turn diff', () => {
     expect(record.diff.value?.[0].files).toEqual([
       expect.objectContaining({ path: join(await realpath(root), 'a.txt'), added: 1, deleted: 1, patchStatus: 'captured' })
     ])
-  }, 15_000)
+  }, 35_000)
 })

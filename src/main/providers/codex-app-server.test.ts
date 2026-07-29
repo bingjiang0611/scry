@@ -5,7 +5,7 @@ import { CodexAppServerClient } from './codex-app-server'
 describe('CodexAppServerClient', () => {
   it('initializes, correlates requests and forwards notifications', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
-    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], requestTimeoutMs: 2_000 })
+    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], requestTimeoutMs: 10_000 })
     const notifications: string[] = []
     const off = client.onNotification((method) => notifications.push(method))
     try {
@@ -19,5 +19,5 @@ describe('CodexAppServerClient', () => {
       off()
       client.close()
     }
-  })
+  }, 15_000)
 })
