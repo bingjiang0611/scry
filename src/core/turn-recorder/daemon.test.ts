@@ -1,4 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer as createNetServer } from 'node:net'
+import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -64,10 +66,52 @@ describe('turn recorder daemon', () => {
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     try {
-      await expect(listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })).rejects.toThrow('socket is already active')
+      await expect(listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })).rejects.toThrow('owned by live process')
       await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: true })
     } finally {
       await daemon.close()
+    }
+  })
+
+  it('daemon 整个生命周期保留所有权标记，关闭后只清理自己的标记', async () => {
+    const root = await workspace()
+    const socket = socketPath(root)
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socket }
+    const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
+    const markerPath = `${socket}.owner.json`
+    const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
+    expect(marker).toMatchObject({
+      schemaVersion: 1,
+      pid: process.pid,
+      state: 'running',
+      socketPath: socket
+    })
+    await daemon.close()
+    await expect(access(markerPath)).rejects.toThrow()
+  })
+
+  it('Socket 仍在但无响应时拒绝 unlink，避免把活进程变成孤儿', async () => {
+    const root = await workspace()
+    const socket = socketPath(root)
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socket }
+    const connections = new Set<Socket>()
+    const blocker = createNetServer((connection) => {
+      connections.add(connection)
+      connection.once('close', () => connections.delete(connection))
+    })
+    await new Promise<void>((resolvePromise, reject) => {
+      blocker.once('error', reject)
+      blocker.listen(socket, resolvePromise)
+    })
+    try {
+      await expect(listenRecorderDaemon({ workspace: root, idleMs: 5_000, env }))
+        .rejects.toThrow('ownership cannot be proven stale')
+      await expect(access(socket)).resolves.toBeUndefined()
+    } finally {
+      for (const connection of connections) connection.destroy()
+      await new Promise<void>((resolvePromise) => blocker.close(() => resolvePromise()))
+      await rm(socket, { force: true })
+      await rm(`${socket}.owner.json`, { force: true })
     }
   })
 
