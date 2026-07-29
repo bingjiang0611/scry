@@ -529,6 +529,7 @@ function queueTrace(ev: TraceEvent): void {
 }
 
 ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
+  await warmShellEnv()
   const request = normalizeAgentStartRequest(payload)
   const cwd = request.cwd ?? currentCwd
   const providerId = request.providerId

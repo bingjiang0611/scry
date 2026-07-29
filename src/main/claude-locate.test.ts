@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -8,6 +8,7 @@ import {
   detectAgentsFast,
   isAcceptedQoderPath,
   normalizeAgentVersion,
+  resolveCommandOnPath,
   runtimeCliEnv,
   sanitizeNestedAgentEnv,
   selectClaudeBinCandidate,
@@ -130,12 +131,39 @@ describe('runtime CLI discovery constraints', () => {
     }
   })
 
-  it('prepends Node 22 bin to runtime PATH so npm qodercli can resolve env node', () => {
-    expect(runtimeCliEnv({ PATH: '/usr/bin:/bin' }).PATH?.split(':').slice(0, 3)).toEqual([
-      QODER_NODE_BIN,
-      '/usr/bin',
-      '/bin'
-    ])
+  it('pins scry from the original PATH before prepending the Qoder Node directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-cli-path-'))
+    try {
+      const scry = join(dir, 'scry')
+      writeFileSync(scry, '#!/bin/sh\n')
+      chmodSync(scry, 0o755)
+      const env = runtimeCliEnv({ PATH: `${dir}:/usr/bin:/bin` })
+      expect(env.SCRY_CLI_PATH).toBe(scry)
+      expect(env.PATH?.split(':').slice(0, 4)).toEqual([QODER_NODE_BIN, dir, '/usr/bin', '/bin'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps an explicit SCRY_CLI_PATH authoritative even when another scry is discoverable', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-cli-explicit-'))
+    try {
+      const discovered = join(dir, 'scry')
+      writeFileSync(discovered, '#!/bin/sh\n')
+      chmodSync(discovered, 0o755)
+      expect(runtimeCliEnv({ PATH: dir, SCRY_CLI_PATH: '/missing/explicit/scry' }).SCRY_CLI_PATH)
+        .toBe('/missing/explicit/scry')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves Windows npm command shims through PATHEXT', () => {
+    expect(resolveCommandOnPath('scry', 'C:\\Tools;C:\\Node', {
+      platform: 'win32',
+      pathExt: '.EXE;.CMD',
+      isRunnable: (path) => path === 'C:\\Node\\scry.CMD'
+    })).toBe('C:\\Node\\scry.CMD')
   })
 
   it('strips outer Codex/Claude harness env from runtime CLI children without deleting user config/auth env', () => {
