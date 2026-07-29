@@ -299,9 +299,6 @@ export function ChatView({
           }}
         />
         <div className="composer-bottom">
-          <button className="plus" title="附件（二期）">
-            <Icon name="plus" />
-          </button>
           <div className="spacer" />
           <CliPicker
             agents={agents}
