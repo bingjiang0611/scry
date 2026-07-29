@@ -1509,6 +1509,8 @@ body.pane-resizing * {
 .hook-instance-index {
   color: var(--dim3);
   font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .hook-instance-main {
   display: grid;
@@ -1526,6 +1528,10 @@ body.pane-resizing * {
 .hook-instance-duration {
   color: var(--dim2);
   font-size: 9px;
+}
+.hook-instance-duration {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .hook-instance .hook-run-status {
   padding: 1px 5px;

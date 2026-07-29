@@ -177,6 +177,64 @@ function hookInstanceStatus(instance: HookInstanceRow): string {
   return '运行中'
 }
 
+interface HookInstanceDisplayGroup {
+  key: string
+  label: string
+  status: string
+  tone: 'ok' | 'warn' | 'bad'
+  count: number
+  averageDurationMs?: number
+  timedCount: number
+  sources: string[]
+  last: TraceEvent
+}
+
+function hookInstanceSourceLabel(instance: HookInstanceRow): string {
+  const sourcePath = instance.sourcePath ? basename(instance.sourcePath) : undefined
+  return `${instance.source ? hookConfigScopeLabel(instance.source) : '来源未上报'}${sourcePath ? ` · ${sourcePath}` : ''}`
+}
+
+function groupHookInstances(instances: HookInstanceRow[]): HookInstanceDisplayGroup[] {
+  const groups = new Map<
+    string,
+    Omit<HookInstanceDisplayGroup, 'averageDurationMs' | 'sources'> & {
+      durationTotalMs: number
+      sources: Set<string>
+    }
+  >()
+
+  for (const instance of instances) {
+    const label = hookInstanceLabel(instance)
+    const status = hookInstanceStatus(instance)
+    const key = `${label}\0${status}`
+    const group = groups.get(key) ?? {
+      key,
+      label,
+      status,
+      tone: hookInstanceTone(instance),
+      count: 0,
+      timedCount: 0,
+      durationTotalMs: 0,
+      sources: new Set<string>(),
+      last: instance.last
+    }
+    group.count++
+    group.last = instance.last
+    group.sources.add(hookInstanceSourceLabel(instance))
+    if (instance.durationMs != null && Number.isFinite(instance.durationMs) && instance.durationMs >= 0) {
+      group.durationTotalMs += instance.durationMs
+      group.timedCount++
+    }
+    groups.set(key, group)
+  }
+
+  return [...groups.values()].map(({ durationTotalMs, sources, ...group }) => ({
+    ...group,
+    averageDurationMs: group.timedCount > 0 ? durationTotalMs / group.timedCount : undefined,
+    sources: [...sources]
+  }))
+}
+
 function hookDispatchLabel(command: string): string {
   return command.includes('global-hook-bridge.py') ? '桥接' : '直连'
 }
@@ -1104,6 +1162,7 @@ export function OverviewPanel({
                     const cancellationTitle = hookCancellationTitle(s)
                     const configuredCommands = uniqueConfiguredCommands(s.instances)
                     const logicalHandlers = logicalHookRows(configuredCommands, s.command)
+                    const displayedInstances = groupHookInstances(s.instances)
                     return (
                       <details className="hook-script overview-hook-script" key={s.key}>
                         <summary
@@ -1118,33 +1177,36 @@ export function OverviewPanel({
                         </summary>
                         <div className="turn-hook-detail overview-hook-detail">
                           <div className="hook-actual-block">
-                            <div className="hook-detail-label">处理器实例 · {s.instances.length} 个</div>
+                            <div className="hook-detail-label">
+                              处理器实例 · {s.instances.length} 个
+                              {displayedInstances.length < s.instances.length && ` · 合并为 ${displayedInstances.length} 组`}
+                            </div>
                             <div className="hook-instance-list">
-                              {s.instances.map((instance, index) => {
-                                const instanceTone = hookInstanceTone(instance)
-                                const sourcePath = instance.sourcePath ? basename(instance.sourcePath) : undefined
+                              {displayedInstances.map((instance) => {
+                                const averageDuration = formatTurnDuration(instance.averageDurationMs)
+                                const timingTitle =
+                                  instance.timedCount === instance.count
+                                    ? `平均耗时：${averageDuration}`
+                                    : `平均耗时：${averageDuration}（${instance.count} 个实例中 ${instance.timedCount} 个上报耗时）`
                                 return (
                                   <button
                                     type="button"
                                     className="hook-instance"
                                     key={instance.key}
                                     onClick={() => onSelect(instance.last)}
-                                    title="查看这次 Hook 的原始事件"
+                                    title="查看该组最近一次 Hook 的原始事件"
                                   >
-                                    <span className="hook-instance-index">{String(index + 1).padStart(2, '0')}</span>
+                                    <span className="hook-instance-index">{instance.count}×</span>
                                     <span className="hook-instance-main">
-                                      <strong>{hookInstanceLabel(instance)}</strong>
-                                      <span className="hook-instance-source">
-                                        {instance.source ? hookConfigScopeLabel(instance.source) : '来源未上报'}
-                                        {sourcePath ? ` · ${sourcePath}` : ''}
+                                      <strong>{instance.label}</strong>
+                                      <span className="hook-instance-source">{instance.sources.join(' / ')}</span>
+                                    </span>
+                                    {averageDuration && (
+                                      <span className="hook-instance-duration" title={timingTitle}>
+                                        均 {averageDuration}
                                       </span>
-                                    </span>
-                                    {instance.durationMs != null && (
-                                      <span className="hook-instance-duration">{formatTurnDuration(instance.durationMs)}</span>
                                     )}
-                                    <span className={`hook-run-status ${instanceTone}`}>
-                                      {hookInstanceStatus(instance)}
-                                    </span>
+                                    <span className={`hook-run-status ${instance.tone}`}>{instance.status}</span>
                                   </button>
                                 )
                               })}
