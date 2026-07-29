@@ -15,7 +15,9 @@ import type { CodexHookInspection } from '../codex-hook-trust'
 
 export interface ProviderRunResult {
   externalSessionId?: string
+  providerTurnId?: string
   stopped?: boolean
+  status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
   mcp?: McpSnapshot
 }
 
@@ -23,6 +25,7 @@ export interface ProviderRunHandle {
   promise: Promise<ProviderRunResult>
   interrupt: () => void
   getExternalSessionId: () => string | undefined
+  getProviderTurnId?: () => string | undefined
 }
 
 export interface ProviderRunRequest {

@@ -12,7 +12,7 @@ import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from 
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import type { CodexHookInspection, CodexHookMetadata, CodexHookTrustStatus } from '../codex-hook-trust'
 import { CodexAppServerClient } from './codex-app-server'
-import type { ProviderAdapter, ProviderRunRequest } from './types'
+import type { ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 
 const CODEX_THREAD_ACCESS = {
   approvalPolicy: 'never',
@@ -60,6 +60,18 @@ const newEvent = (runId: string, fields: Omit<TraceEvent, 'id' | 'runId' | 'ts'>
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+
+function canonicalTurnStatus(
+  nativeStatus: unknown,
+  stopped: boolean
+): NonNullable<ProviderRunResult['status']> {
+  if (nativeStatus === 'completed') return 'completed'
+  if (nativeStatus === 'failed') return 'failed'
+  if (nativeStatus === 'cancelled' || nativeStatus === 'canceled') return 'cancelled'
+  if (nativeStatus === 'interrupted') return 'interrupted'
+  if (stopped) return 'interrupted'
+  return 'failed'
+}
 
 function mcpStatus(value: unknown): McpLiveStatus[] {
   const data = Array.isArray(record(value).data) ? (record(value).data as unknown[]) : []
@@ -444,7 +456,12 @@ export function createCodexAdapter(): ProviderAdapter {
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
     const args = bypass ? ['--dangerously-bypass-hook-trust', 'app-server'] : undefined
-    const client = new CodexAppServerClient({ command: path, args, cwd, env: runtimeCliEnv(shellEnv()) })
+    const client = new CodexAppServerClient({
+      command: path,
+      args,
+      cwd,
+      env: runtimeCliEnv(shellEnv(), { managedRecorder: true })
+    })
     clients.set(key, client)
     lastClient = client
     return client
@@ -606,13 +623,13 @@ export function createCodexAdapter(): ProviderAdapter {
       let lastTurnError: Record<string, unknown> | undefined
       let planUpdateSeq = 0
       const childAgents = new Map<string, { parentToolUseId?: string; name?: string }>()
-      let finish: ((value: { externalSessionId?: string; stopped?: boolean; mcp?: McpSnapshot }) => void) | undefined
+      let finish: ((value: ProviderRunResult) => void) | undefined
 
-      const done = new Promise<{ externalSessionId?: string; stopped?: boolean; mcp?: McpSnapshot }>((resolve) => {
+      const done = new Promise<ProviderRunResult>((resolve) => {
         finish = resolve
       })
 
-      const promise = (async () => {
+      const promise = (async (): Promise<ProviderRunResult> => {
         try {
           const appServer = getClient(runRequest.cwd, runRequest.bypassHookTrust)
           await appServer.start()
@@ -795,7 +812,12 @@ export function createCodexAdapter(): ProviderAdapter {
                   ...(effectiveError ? { turnError: effectiveError } : {})
                 }
               }))
-              finish?.({ externalSessionId, stopped })
+              finish?.({
+                externalSessionId,
+                providerTurnId: turnId,
+                stopped,
+                status: canonicalTurnStatus(turn.status, stopped)
+              })
             } else if (method === 'error') {
               const message = String(record(params.error).message ?? params.message ?? 'Codex app-server error')
               if (!isRoot) {
@@ -874,7 +896,7 @@ export function createCodexAdapter(): ProviderAdapter {
             }))
           }
           runRequest.onExternalSessionId?.(externalSessionId)
-          if (stopped) return { externalSessionId, stopped: true }
+          if (stopped) return { externalSessionId, stopped: true, status: 'interrupted' }
           const input: unknown[] = []
           const mention = explicitSkillMention(runRequest.prompt)
           const skill = mention
@@ -914,7 +936,12 @@ export function createCodexAdapter(): ProviderAdapter {
               runRequest.cwd,
               runRequest.bypassHookTrust
             ).catch(() => {})
-            return { externalSessionId, stopped: true }
+            return {
+              externalSessionId,
+              providerTurnId: turnId,
+              stopped: true,
+              status: 'interrupted'
+            }
           }
           return await done
         } finally {
@@ -934,7 +961,12 @@ export function createCodexAdapter(): ProviderAdapter {
         }
       }
 
-      return { promise, interrupt, getExternalSessionId: () => externalSessionId }
+      return {
+        promise,
+        interrupt,
+        getExternalSessionId: () => externalSessionId,
+        getProviderTurnId: () => turnId
+      }
     },
     skills,
     commands: {

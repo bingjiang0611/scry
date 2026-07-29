@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { logicalCallEventsForTurn } from '../../shared/logical-calls.js'
+import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared/logical-calls.js'
 import { mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import {
   available,
@@ -97,6 +97,40 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   }
 }
 
+function assistantTextFrom(events: TraceEvent[]): string {
+  const output: string[] = []
+  let run: TraceEvent[] = []
+  let runKey: string | undefined
+
+  const flush = (): void => {
+    if (!run.length) return
+    const deltas = run
+      .filter((event) => event.stage === 'text_delta')
+      .map((event) => event.text ?? '')
+      .join('')
+    for (const event of run) {
+      const text = event.text ?? ''
+      if (event.stage === 'text' && deltas && text === deltas) continue
+      output.push(text)
+    }
+    run = []
+    runKey = undefined
+  }
+
+  for (const event of events) {
+    if (event.kind !== 'model' || !['text', 'text_delta'].includes(event.stage) || event.text == null) {
+      flush()
+      continue
+    }
+    const key = JSON.stringify([event.messageId ?? null, event.agentId ?? null, event.parentToolUseId ?? null])
+    if (runKey !== undefined && runKey !== key) flush()
+    runKey = key
+    run.push(event)
+  }
+  flush()
+  return output.join('')
+}
+
 function aggregateHooks(events: TraceEvent[]): TurnHookCall[] {
   const groups = new Map<string, TraceEvent[]>()
   for (const event of events.filter((item) => item.kind === 'hook' && !isRecorderHook(item))) {
@@ -183,10 +217,7 @@ export function aggregateTurnEvidence(args: {
       return refs.map((ref) => callFromEvent(event, resultById, ref))
     })
   const hooks = aggregateHooks(args.events)
-  const assistantText = args.events
-    .filter((event) => event.kind === 'model' && event.stage === 'text' && event.text)
-    .map((event) => event.text)
-    .join('')
+  const assistantText = assistantTextFrom(args.events)
   const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
   for (const event of args.events) {
     if (event.stage !== 'tool_result' && event.filePath && event.fileOp) fileMap.set(event.filePath, event.fileOp)
@@ -202,7 +233,7 @@ export function aggregateTurnEvidence(args: {
     event.danger ? [{ ...event.danger, tool: event.tool, toolUseId: event.toolUseId }] : []
   )
   const errors = args.events.flatMap((event) =>
-    event.isError
+    isOverviewToolErrorEvent(event)
       ? [{ message: outputSummary(event.output ?? event.text) ?? `${event.tool ?? event.stage} failed`, source: event.stage, toolUseId: event.toolUseId }]
       : []
   )

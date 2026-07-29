@@ -5,6 +5,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, posix, win32 } from 'node:path'
+import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
 
 export const QODER_NODE_BIN = `${homedir()}/.nvm/versions/node/v22.22.1/bin`
 export const QODER_NPM_BIN = `${QODER_NODE_BIN}/qodercli`
@@ -429,13 +430,40 @@ export function resolveRuntimeCliBin(agentId: 'codex' | 'qoder' | 'opencode'): s
   return onPath || firstExisting([`${homedir()}/.opencode/bin/opencode`, '/opt/homebrew/bin/opencode', '/usr/local/bin/opencode'])
 }
 
-export function runtimeCliEnv(base: Record<string, string> = shellEnv()): Record<string, string> {
+export function runtimeCliEnv(
+  base: Record<string, string> = shellEnv(),
+  options: { managedRecorder?: boolean } = {}
+): Record<string, string> {
   const originalPath = base.PATH ?? process.env.PATH ?? ''
   const configuredScry = base.SCRY_CLI_PATH?.trim()
   const scryCliPath = configuredScry || resolveCommandOnPath('scry', originalPath)
+  if (options.managedRecorder) {
+    if (!scryCliPath) {
+      throw new Error(`Scry managed recorder requires scry CLI ${RECORDER_VERSION}`)
+    }
+    let actualVersion = ''
+    try {
+      actualVersion = execFileSync(scryCliPath, ['--version'], {
+        encoding: 'utf8',
+        timeout: 1_500,
+        env: base
+      }).trim()
+    } catch {
+      throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
+    }
+    if (actualVersion !== RECORDER_VERSION) {
+      throw new Error(
+        `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}`
+      )
+    }
+  }
   return sanitizeNestedAgentEnv({
     ...base,
     ...(scryCliPath ? { SCRY_CLI_PATH: scryCliPath } : {}),
+    ...(options.managedRecorder ? {
+      SCRY_RECORDER_MANAGED: '1',
+      SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION
+    } : {}),
     PATH: [QODER_NODE_BIN, base.PATH ?? process.env.PATH ?? ''].filter(Boolean).join(delimiter)
   })
 }

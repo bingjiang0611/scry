@@ -1,5 +1,9 @@
 import type { TraceEvent } from './trace.js'
 
+export function isOverviewToolErrorEvent(event: TraceEvent): boolean {
+  return event.stage === 'tool_result' && event.isError === true
+}
+
 function skillSource(event: TraceEvent): string | undefined {
   const input = event.input as Record<string, unknown> | undefined
   return typeof input?.source === 'string' ? input.source : undefined

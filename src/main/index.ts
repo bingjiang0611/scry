@@ -10,7 +10,15 @@ import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
 import { billingStateQuery, importBillingFixture, initDb, recordTurn, setBillingEnvProvider, statsQuery, syncBillingAdmin } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, type GitTurnDiffCapture } from './git'
-import { deleteTranscriptCopies, inferTraceArchiveProvider, mirrorTranscript, readTraceArchive, resolveTranscriptPath, upsertTraceArchiveTurn } from './transcript-archive'
+import {
+  deleteTranscriptCopies,
+  inferTraceArchiveProvider,
+  mirrorTranscript,
+  readTraceArchive,
+  resolveTranscriptPath,
+  upsertTraceArchiveTurn,
+  type TraceArchiveTurn
+} from './transcript-archive'
 import { mergeSessionTurns } from './session-history'
 import { createAppSessionStore, createRecentFoldersStore } from './app-store'
 import { scanMcp } from '../cli/mcpguard-core'
@@ -29,6 +37,7 @@ import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import { createBuiltInProviderAdapters } from './providers'
 import { appendCoalescedTrace } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
+import { managedRecorderMode, recoverManagedRecorderTurns } from '../core/turn-recorder/managed'
 import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
@@ -39,6 +48,13 @@ import {
   hooksRequiringBypass,
   type CodexHookInspection
 } from './codex-hook-trust'
+import {
+  canonicalTurnTiming,
+  commitManagedTraceTurn,
+  persistManagedTraceProgress,
+  recoverManagedTraceProgress,
+  recoverManagedTraceTurns
+} from './managed-turn-commit'
 
 // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
 // AI_AGENT 等环境变量，会让 SDK 驱动的 claude 子进程认证错乱（误判为嵌套会话 → Not logged in）。
@@ -223,20 +239,26 @@ function mirrorSessionTranscript(providerId: ProviderId, cwd: string | undefined
   if (!ok) console.warn('[scry] transcript mirror skipped:', cwd, sessionId)
 }
 
-function archiveTraceTurn(args: {
+interface ArchiveTraceTurnArgs {
   providerId: ProviderId
   runtimeProvider: RuntimeProvider
   cwd: string | undefined
   sessionId: string | undefined
+  providerTurnId?: string
   runId: string
   userText: string
   attachments?: AgentInputAttachment[]
   items: TraceEvent[]
   done: boolean
+  status: 'completed' | 'failed' | 'cancelled' | 'interrupted'
   error?: string
   errorHint?: string
-}): void {
-  if (!args.cwd || !args.sessionId) return
+}
+
+function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
+  turn: TraceArchiveTurn
+  timing: ReturnType<typeof canonicalTurnTiming>
+} {
   const persistedItems = args.items.map((event) => {
     const { hookConfiguredCommands: _currentConfig, ...persisted } = event
     return persisted
@@ -246,24 +268,88 @@ function archiveTraceTurn(args: {
     events: persistedItems,
     source: 'scry_provider_adapter'
   })
+  const timing = canonicalTurnTiming(persistedItems)
+  return {
+    timing,
+    turn: {
+      runId: args.runId,
+      ...(args.providerTurnId ? { providerTurnId: args.providerTurnId } : {}),
+      userText: args.userText,
+      attachments: args.attachments,
+      items: persistedItems,
+      turnEvidence,
+      done: args.done,
+      status: args.status,
+      error: args.error,
+      errorHint: args.errorHint,
+      ...(timing ?? {}),
+      ts: timing ? Date.parse(timing.completedAt) : Date.now()
+    }
+  }
+}
+
+async function persistManagedCompletionProgress(args: ArchiveTraceTurnArgs): Promise<void> {
+  if (args.providerId !== 'codex' || !args.cwd) return
+  const mode = await managedRecorderMode(args.cwd)
+  if (mode.status === 'disabled') return
+  if (!args.sessionId) throw new Error('managed recorder requires an authoritative Codex session id')
+  if (!args.providerTurnId) throw new Error('managed recorder requires an authoritative Codex turn id')
+  const { turn, timing } = buildTraceArchiveTurn(args)
+  if (!timing) throw new Error('managed recorder requires authoritative Codex result timing')
+  await persistManagedTraceProgress({
+    cwd: args.cwd,
+    sessionId: args.sessionId,
+    providerTurnId: args.providerTurnId,
+    providerId: args.providerId,
+    runtimeProvider: args.runtimeProvider,
+    userDataDir: app.getPath('userData'),
+    turn,
+    timing,
+    status: args.status
+  })
+}
+
+async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
+  if (!args.cwd) return
+  if (!args.sessionId) {
+    if (args.providerId === 'codex' && (await managedRecorderMode(args.cwd)).status === 'enabled') {
+      throw new Error('managed recorder requires an authoritative Codex session id')
+    }
+    return
+  }
+  const { turn, timing } = buildTraceArchiveTurn(args)
+  if (args.providerId === 'codex') {
+    const mode = await managedRecorderMode(args.cwd)
+    if (mode.status === 'enabled' && !timing) {
+      throw new Error('managed recorder requires authoritative Codex result timing')
+    }
+    if (mode.status === 'enabled' && !args.providerTurnId) {
+      throw new Error('managed recorder requires an authoritative Codex turn id')
+    }
+    if (timing) {
+      await commitManagedTraceTurn({
+        cwd: args.cwd,
+        sessionId: args.sessionId,
+        providerTurnId: args.providerTurnId ?? '',
+        providerId: args.providerId,
+        runtimeProvider: args.runtimeProvider,
+        userDataDir: app.getPath('userData'),
+        turn,
+        timing,
+        status: args.status
+      })
+      return
+    }
+  }
   const ok = upsertTraceArchiveTurn({
     cwd: args.cwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
     runtimeProvider: args.runtimeProvider,
     userDataDir: app.getPath('userData'),
-    turn: {
-      runId: args.runId,
-      userText: args.userText,
-      attachments: args.attachments,
-      items: persistedItems,
-      turnEvidence,
-      done: args.done,
-      error: args.error,
-      errorHint: args.errorHint
-    }
+    turn
   })
-  if (!ok) console.warn('[scry] trace archive skipped:', args.cwd, args.sessionId)
+  if (!ok) throw new Error(`trace archive write failed for ${args.runId}`)
 }
 
 // 注：原来扫 ~/.claude/projects 列举 transcript 的逻辑（readHeadPreview/readCwd/collectSessions）
@@ -571,6 +657,24 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '等待当前轮完成，或新建独立会话后并行运行'
     })
   }
+  if (providerId === 'codex' && cwd) {
+    const progressRecovery = await recoverManagedTraceProgress(app.getPath('userData'), { cwd, waitMs: 250 })
+    const journalRecovery = await recoverManagedTraceTurns(app.getPath('userData'), { cwd, waitMs: 250 })
+    const recorderRecovery = resume
+      ? await recoverManagedRecorderTurns(cwd, process.env, { sessionId: resume })
+      : await recoverManagedRecorderTurns(cwd)
+    // 同一轮可能同时留下 progress、journal 与 recorder open；三层计数不能相加，
+    // 否则会把一个待恢复 turn 报成三轮。这里只需要 fail closed。
+    const pending = Math.max(progressRecovery.pending, journalRecovery.pending, recorderRecovery.pending)
+    if (pending > 0) {
+      throw new AgentRuntimeError(`Scry 精确记录仍有 ${pending} 轮待恢复`, {
+        provider: runtimeProvider,
+        stage: 'frontdoor',
+        cwd,
+        nextAction: '保留当前工作区与 Scry Test 数据目录，先运行 scry doctor 并修复 pending canonical journal'
+      })
+    }
+  }
   const bypassHookTrust = providerId === 'codex' && cwd
     ? await resolveCodexHookBypass(cwd)
     : false
@@ -704,9 +808,15 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
     })
   }
   let h: {
-    promise: Promise<{ externalSessionId?: string; stopped?: boolean }>
+    promise: Promise<{
+      externalSessionId?: string
+      providerTurnId?: string
+      stopped?: boolean
+      status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+    }>
     interrupt: () => void
     getExternalSessionId: () => string | undefined
+    getProviderTurnId?: () => string | undefined
   } | null = null
   let interrupted = false
   const runtimePromise = turnDiffCapture.then(async () => {
@@ -752,6 +862,20 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
   runtimePromise
     .then(async (r) => {
       publishSessionId(r.externalSessionId)
+      const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
+      const completionArchiveArgs: ArchiveTraceTurnArgs = {
+        providerId,
+        runtimeProvider,
+        cwd,
+        sessionId: r.externalSessionId ?? resume,
+        providerTurnId: r.providerTurnId,
+        runId,
+        userText: displayPrompt,
+        attachments,
+        items: runState.items,
+        done: true,
+        status: completionStatus
+      }
       // Diff 是附加观测数据：立即开始采集，但不能阻塞用户看到 turnDone。
       // 归档仍等待它完成，保证历史回放最终包含 turn_diff。
       const turnDiffDone = finalizeTurnDiff()
@@ -770,7 +894,24 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       runState.done = true
       cleanupProvisional()
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
-      if (!alreadyDone) {
+      try {
+        // Provider 已完成时先落一份 durable canonical snapshot。若 App 在等待 Git diff
+        // 期间崩溃，下一次启动仍能用同一用户输入、模型输出、调用与权威 result timing
+        // 恢复 archive/CLI；diff 会明确记为 unavailable，而不是伪造零值。
+        await persistManagedCompletionProgress(completionArchiveArgs)
+      } catch (error) {
+        const message = `模型已完成，但 Scry 精确记录快照失败：${String((error as Error).message)}`
+        runState.error = message
+        runState.errorHint = '不要开始下一轮；保留 managed-turn-progress 与 workspace/.scry 后重试恢复'
+        win?.webContents.send('agent:error', {
+          runId,
+          message,
+          category: 'recording',
+          hint: runState.errorHint
+        })
+        return
+      }
+      if (providerId !== 'codex' && !alreadyDone) {
         win?.webContents.send('agent:turnDone', {
           runId,
           sessionId: r.externalSessionId,
@@ -780,17 +921,20 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         })
       }
       await turnDiffDone
-      archiveTraceTurn({
-        providerId,
-        runtimeProvider,
-        cwd,
-        sessionId: r.externalSessionId ?? resume,
-        runId,
-        userText: displayPrompt,
-        attachments,
-        items: runState.items,
-        done: true
-      })
+      try {
+        await archiveTraceTurn(completionArchiveArgs)
+      } catch (error) {
+        const message = `模型已完成，但 Scry 精确记录提交失败：${String((error as Error).message)}`
+        runState.error = message
+        runState.errorHint = '不要开始下一轮；保留 managed-turn-commits 与 workspace/.scry 后重试恢复'
+        win?.webContents.send('agent:error', {
+          runId,
+          message,
+          category: 'recording',
+          hint: runState.errorHint
+        })
+        return
+      }
       // B2：把这一轮的 turn + tool_calls 结构化落 sqlite（runState 已缓冲全部事件）
       recordTurn({
         runId,
@@ -802,6 +946,15 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         runtimeProvider,
         billingProvider: [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')?.billingProvider
       })
+      if (providerId === 'codex' && !alreadyDone) {
+        win?.webContents.send('agent:turnDone', {
+          runId,
+          sessionId: r.externalSessionId,
+          externalSessionId: r.externalSessionId,
+          providerId,
+          stopped: r.stopped
+        })
+      }
     })
     .catch(async (err) => {
       const alreadyDone = runState.done
@@ -833,24 +986,41 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       const turnDiffDone = finalizeTurnDiff()
       mirrorSessionTranscript(providerId, cwd, h?.getExternalSessionId() ?? resume)
       flushTraceSend()
-      if (stopped) {
+      if (stopped && providerId !== 'codex') {
         if (!alreadyDone) win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId })
       } else {
         win?.webContents.send('agent:error', { runId, message, category, hint })
       }
       await turnDiffDone
-      archiveTraceTurn({
-        providerId,
-        runtimeProvider,
-        cwd,
-        sessionId: h?.getExternalSessionId() ?? resume,
-        runId,
-        userText: displayPrompt,
-        attachments,
-        items: runState.items,
-        done: true,
-        ...(stopped ? {} : { error: message, errorHint: hint })
-      })
+      let exactRecorded = true
+      try {
+        await archiveTraceTurn({
+          providerId,
+          runtimeProvider,
+          cwd,
+          sessionId: h?.getExternalSessionId() ?? resume,
+          providerTurnId: h?.getProviderTurnId?.(),
+          runId,
+          userText: displayPrompt,
+          attachments,
+          items: runState.items,
+          done: true,
+          status: stopped ? 'interrupted' : 'failed',
+          ...(stopped ? {} : { error: message, errorHint: hint })
+        })
+      } catch (archiveError) {
+        exactRecorded = false
+        console.error('[scry] exact turn archive failed:', archiveError)
+        if (providerId === 'codex') {
+          const recordingMessage = `Scry 精确记录提交失败：${String((archiveError as Error).message)}`
+          win?.webContents.send('agent:error', {
+            runId,
+            message: recordingMessage,
+            category: 'recording',
+            hint: '不要开始下一轮；保留 managed-turn-commits 与 workspace/.scry 后重试恢复'
+          })
+        }
+      }
       recordTurn({
         runId,
         sessionId: h?.getExternalSessionId() ?? resume,
@@ -861,6 +1031,9 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         runtimeProvider,
         billingProvider: [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')?.billingProvider
       })
+      if (stopped && providerId === 'codex' && !alreadyDone && exactRecorded) {
+        win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId })
+      }
     })
     .finally(() => {
       userQuestionBroker.cancelRun(runId)
@@ -924,6 +1097,12 @@ ipcMain.handle('agent:stop', (_event, runId: string) => {
   setTimeout(async () => {
     const current = runs.get(stopping.runId)
     if (current?.control !== stopping || current.state.done) return
+    if (stopping.providerId === 'codex') {
+      // Managed Codex 必须等 Provider settle 后再归档并提交同一份 canonical evidence。
+      // 提前 turnDone 会允许下一轮覆盖唯一 open identity，因此此处宁可保持 stopping。
+      void stopping.finalizeTurnDiff()
+      return
+    }
     // 观测采集不能破坏“2 秒强制停止”兜底；结果完成后仍会增量写回 live trace。
     void stopping.finalizeTurnDiff()
     if (runs.get(stopping.runId)?.control !== stopping) return
@@ -949,6 +1128,13 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('[scry] legacy userData migration skipped:', (e as Error)?.message)
   }
+  void recoverManagedTraceProgress(app.getPath('userData'))
+    .then(async (progress) => {
+      if (progress.pending > 0) console.warn('[scry] managed turn progress recovery pending:', progress)
+      const journals = await recoverManagedTraceTurns(app.getPath('userData'))
+      if (journals.pending > 0) console.warn('[scry] managed turn recovery pending:', journals)
+    })
+    .catch((error) => console.warn('[scry] managed turn startup recovery failed:', error))
   createWindow()
   setTimeout(() => initDb(), 800)
   app.on('activate', () => {

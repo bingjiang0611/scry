@@ -9,15 +9,26 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { turnChangeHints } from './change-journal.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
-import { beginGitTurnDiff, finishGitTurnDiff, type GitTurnDiffCapture } from './git.js'
+import { beginGitTurnDiff, finishGitTurnDiff } from './git.js'
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { recoverManagedRecorderTurns } from './managed.js'
+import {
+  SESSION_LOCK_WAIT_MS,
+  recorderOpenPath as openPath,
+  recorderPendingHealth,
+  recorderSessionLock as sessionLock,
+  recorderSessionRoot as sessionRoot,
+  recorderStatePath as statePath,
+  recorderTurnRoot as turnRoot,
+  type RecorderOpenTurnState as OpenTurnState,
+  type RecorderSessionState as SessionState
+} from './runtime-state.js'
 import {
   RECORDER_VERSION,
   clearRuntimeTurn,
   commitRecord,
   listRecords,
   recordError,
-  safeKey,
   stableHash,
   updateHealth
 } from './store.js'
@@ -28,38 +39,13 @@ export interface RecorderHookInput {
   workspace: string
   payload: Record<string, unknown>
   env?: NodeJS.ProcessEnv
+  managed?: boolean
 }
 
 export interface RecorderHookResult {
   status: 'disabled' | 'ignored' | 'started' | 'recorded' | 'committed' | 'duplicate' | 'pending' | 'orphan'
   reason?: string
   record?: AgentTurnRecord
-}
-
-interface SessionState {
-  schemaVersion: 1
-  lastGeneration: number
-  lastTurnIndex: number
-  lastCommittedRecordId?: string
-  committedProviderTurnIds?: string[]
-}
-
-interface OpenTurnState {
-  schemaVersion: 1
-  provider: ProviderId
-  sessionId: string
-  generation: number
-  turnIndex: number
-  status: 'open' | 'closing'
-  startedAt: string
-  closingAt?: string
-  prompt?: string
-  promptHash?: string
-  startFingerprint: string
-  transcriptPath?: string
-  transcriptStartOffset?: number
-  providerTurnId?: string
-  captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }
 
 interface StoredLifecycleEvent {
@@ -91,8 +77,6 @@ interface TranscriptRead {
 
 const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
-// Turn boundaries may synchronously snapshot Git for up to 5s; fallback delivery must outwait the original holder.
-const SESSION_LOCK_WAIT_MS = 10_000
 const TRANSCRIPT_REWIND_BYTES = 4 * 1024 * 1024
 const MAX_TRANSCRIPT_READ_BYTES = 32 * 1024 * 1024
 
@@ -134,26 +118,6 @@ function promptOf(payload: Record<string, unknown>): string | undefined {
 function timestampOf(payload: Record<string, unknown>): string {
   const value = stringAt(payload, 'timestamp', 'ts', 'created_at', 'createdAt')
   return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString()
-}
-
-function sessionRoot(dataRoot: string, provider: ProviderId, sessionId: string): string {
-  return join(dataRoot, 'runtime', provider, safeKey(sessionId))
-}
-
-function turnRoot(root: string, generation: number): string {
-  return join(root, 'turns', String(generation).padStart(8, '0'))
-}
-
-function openPath(root: string): string {
-  return join(root, 'open.json')
-}
-
-function statePath(root: string): string {
-  return join(root, 'session.json')
-}
-
-function sessionLock(dataRoot: string, provider: ProviderId, sessionId: string): string {
-  return join(dataRoot, 'locks', 'sessions', provider, `${safeKey(sessionId)}.lock`)
 }
 
 function summarize(value: unknown, max = 500): string | undefined {
@@ -1349,7 +1313,8 @@ async function beginOpenTurn(
   provider: ProviderId,
   sessionId: string,
   event: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  managedByScry = false
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
@@ -1360,7 +1325,9 @@ async function beginOpenTurn(
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
   const captureDir = join(turnRoot(root, generation), 'captures')
-  const repositories = enablement.config.capture.diff ? await discoverRepositories(enablement.workspaceRoot, enablement.config) : []
+  const repositories = !managedByScry && enablement.config.capture.diff
+    ? await discoverRepositories(enablement.workspaceRoot, enablement.config)
+    : []
   const captures = await Promise.all(repositories.map(async (repository) => ({
     repository,
     capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
@@ -1379,11 +1346,27 @@ async function beginOpenTurn(
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
     ...(providerTurnIdOf(payload) ? { providerTurnId: providerTurnIdOf(payload) } : {}),
+    ...(managedByScry ? { managedByScry: true } : {}),
     captures
   }
   await writeJsonAtomic(openPath(root), open, { sync: false })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex }, { sync: false })
   return open
+}
+
+async function quarantineOpenTurn(
+  dataRoot: string,
+  root: string,
+  open: OpenTurnState,
+  reason: 'managed_replaced' | 'legacy_migration'
+): Promise<void> {
+  await writeJsonAtomic(join(turnRoot(root, open.generation), 'pending-open.json'), {
+    ...open,
+    quarantinedAt: new Date().toISOString(),
+    reason
+  }, { sync: false })
+  await rm(openPath(root), { force: true })
+  await updateHealth(dataRoot, { lastError: { at: new Date().toISOString(), message: `recorder turn quarantined: ${reason}` } })
 }
 
 async function storeLifecycleEvent(enablement: Extract<RecorderEnablement, { enabled: true }>, open: OpenTurnState, event: string, payload: Record<string, unknown>): Promise<void> {
@@ -1601,22 +1584,42 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
           (providerTurnId && open.providerTurnId === providerTurnId)
         )) return { status: 'duplicate' as const }
         if (open) {
-          const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
-          open.status = 'closing'
-          open.closingAt ??= timestampOf(input.payload)
-          await writeJsonAtomic(openPath(root), open, { sync: false })
-          await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+          if (open.managedByScry && !input.managed) {
+            return { status: 'recorded' as const, reason: 'managed lifecycle start ignored' }
+          }
+          if (open.managedByScry || input.managed) {
+            await quarantineOpenTurn(
+              enablement.dataRoot,
+              root,
+              open,
+              open.managedByScry ? 'managed_replaced' : 'legacy_migration'
+            )
+          } else {
+            const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
+            open.status = 'closing'
+            open.closingAt ??= timestampOf(input.payload)
+            await writeJsonAtomic(openPath(root), open, { sync: false })
+            await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+          }
         }
-        open = await beginOpenTurn(enablement, input.provider, sessionId, input.event, input.payload)
-        await storeLifecycleEvent(enablement, open, input.event, input.payload)
+        open = await beginOpenTurn(enablement, input.provider, sessionId, input.event, input.payload, input.managed === true)
+        if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
         return { status: 'started' as const }
       }
       if (!open) {
         if (END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
+        if (input.managed) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
         const orphanId = stableHash({ event: input.event, payload: input.payload })
         await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
         await updateHealth(enablement.dataRoot, { increment: { orphanEvents: 1 } })
         return { status: 'orphan' as const }
+      }
+      if (open.managedByScry) {
+        if (!END_EVENTS.has(input.event)) return { status: 'recorded' as const }
+        open.status = 'closing'
+        open.closingAt = timestampOf(input.payload)
+        await writeJsonAtomic(openPath(root), open, { sync: false })
+        return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
       }
       if (incomingProviderTurnId && open.providerTurnId && incomingProviderTurnId !== open.providerTurnId) {
         if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
@@ -1667,17 +1670,7 @@ async function runtimeSessions(dataRoot: string): Promise<Array<{ provider: Prov
 }
 
 async function pendingHealth(dataRoot: string): Promise<{ pendingCount: number; oldestPendingAgeMs: number }> {
-  let pendingCount = 0
-  let oldestPendingAgeMs = 0
-  const now = Date.now()
-  for (const item of await runtimeSessions(dataRoot)) {
-    const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
-    if (!open || open.status !== 'closing') continue
-    pendingCount++
-    const started = Date.parse(open.closingAt ?? open.startedAt)
-    if (Number.isFinite(started)) oldestPendingAgeMs = Math.max(oldestPendingAgeMs, Math.max(0, now - started))
-  }
-  return { pendingCount, oldestPendingAgeMs }
+  return recorderPendingHealth(dataRoot)
 }
 
 export async function refreshRecorderPendingHealth(dataRoot: string): Promise<void> {
@@ -1689,9 +1682,15 @@ export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv 
   if (!enablement.enabled) return { recovered: 0, pending: 0 }
   let recovered = 0
   let pending = 0
+  let managedPresent = false
   for (const item of await runtimeSessions(enablement.dataRoot)) {
     const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
-    if (!open || open.status !== 'closing') continue
+    if (!open) continue
+    if (open.managedByScry) {
+      managedPresent = true
+      continue
+    }
+    if (open.status !== 'closing') continue
     const result = await withDirectoryLock(
       sessionLock(enablement.dataRoot, item.provider, open.sessionId),
       () => finalizeOpenTurn(
@@ -1705,6 +1704,11 @@ export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv 
     )
     if (result.status === 'pending') pending++
     else recovered++
+  }
+  if (managedPresent) {
+    const managed = await recoverManagedRecorderTurns(workspace, env)
+    recovered += managed.recovered
+    pending += managed.pending
   }
   await updateHealth(enablement.dataRoot, {
     ...(await pendingHealth(enablement.dataRoot)),

@@ -79,7 +79,13 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
     const payload = source.trim() ? JSON.parse(source) as Record<string, unknown> : {}
     const event = flag(args, 'event')
     if (!event) throw new Error('--event is required')
-    const result = await handleRecorderHook({ provider: providerOf(args), event, workspace, payload })
+    const result = await handleRecorderHook({
+      provider: providerOf(args),
+      event,
+      workspace,
+      payload,
+      managed: args.flags.has('managed')
+    })
     if (args.flags.has('start-daemon') && result.status !== 'disabled') {
       const scriptPath = process.argv[1]
       if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
