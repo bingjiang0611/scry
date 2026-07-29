@@ -718,7 +718,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       bypassHookTrust,
       emit,
       onExternalSessionId: publishSessionId,
-      requestUserInput: (question, signal) => userQuestionBroker.request(question, signal)
+      requestUserInput: (question, signal) => userQuestionBroker.request({ ...question, providerId }, signal)
     })
     if (interrupted) h.interrupt()
     return h.promise
