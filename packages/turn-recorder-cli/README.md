@@ -10,6 +10,10 @@ scry turns export --workspace "$PWD" --after 0 --limit 100
 
 Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，首事件由 `scry recorder hook --start-daemon` 直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。Agent、skill 和用户提示词不应主动调用这些记录命令。
 
+Scry 启动的 Codex 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
+身份，Scry App 在 result、Hook 与 diff 全部收齐后，把 trace archive 使用的同一份
+canonical evidence 两阶段提交到 CLI record；managed turn 禁止回退 rollout 近似重建。
+
 如果 Provider 启动器会改写 `PATH`，应先从用户原始环境解析 `scry` 的绝对路径并通过 `SCRY_CLI_PATH` 传给 hook。hook 在该变量存在时只能执行指定路径；路径失效时应 fail-open 跳过本次记录，不能回退到改写后的 `PATH`。未设置该变量的旧集成可继续使用 `command -v scry`。
 
 后台 recorder 不依赖 Scry App 常开，每个 workspace 独立运行，空闲 30 分钟自动退出：

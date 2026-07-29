@@ -5,7 +5,7 @@ import { normalizeTurnDiffSnapshot, type TraceEvent } from '../shared/trace'
 import type { AgentInputAttachment } from '../shared/runtime'
 import { providerIdForRuntime, type RuntimeProvider } from '../shared/runtime'
 import type { ProviderId } from '../shared/provider'
-import type { TurnEvidence } from '../shared/turn-record'
+import type { AgentTurnRecord, TurnEvidence } from '../shared/turn-record'
 
 // Claude Code transcript 目录编码：路径里的 / . _ 都换成 -
 export function encodeCwd(cwd: string): string {
@@ -26,13 +26,18 @@ export function archivedTranscriptPath(userDataDir: string, cwd: string, session
 
 export interface TraceArchiveTurn {
   runId: string
+  providerTurnId?: string
   userText: string
   attachments?: AgentInputAttachment[]
   items: TraceEvent[]
   done: boolean
+  status?: AgentTurnRecord['status']
   error?: string
   errorHint?: string
   turnEvidence?: TurnEvidence
+  startedAt?: string
+  completedAt?: string
+  durationMs?: number
   ts: number
 }
 
