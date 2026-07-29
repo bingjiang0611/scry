@@ -46,7 +46,7 @@ async function shellPathAsync(): Promise<string> {
 // 清掉嵌套会话污染（CLAUDECODE 等）。缓存一次。
 let shellEnvCache: Record<string, string> | null = null
 let shellEnvPromise: Promise<Record<string, string>> | null = null
-const SHELL_ENV_TIMEOUT_MS = 15_000
+const SHELL_ENV_TIMEOUT_MS = 30_000
 
 function fallbackShellEnv(): Record<string, string> {
   return sanitizeNestedAgentEnv({
@@ -63,14 +63,15 @@ export function warmShellEnv(): Promise<Record<string, string>> {
     const out = fallbackShellEnv()
     const s = raw.indexOf('__AS_ENV_S__')
     const e = raw.indexOf('__AS_ENV_E__')
-    if (s >= 0 && e > s) {
+    const capturedLoginEnv = s >= 0 && e > s
+    if (capturedLoginEnv) {
       for (const line of raw.slice(s + '__AS_ENV_S__'.length, e).split('\n')) {
         const i = line.indexOf('=')
         if (i > 0) out[line.slice(0, i)] = line.slice(i + 1)
       }
     }
     shellEnvCache = sanitizeNestedAgentEnv(out)
-    shellPathCache = shellEnvCache.PATH ?? ''
+    shellPathCache = capturedLoginEnv ? shellEnvCache.PATH ?? '' : ''
     shellEnvPromise = null
     return shellEnvCache
   })
@@ -429,13 +430,45 @@ export function resolveRuntimeCliBin(agentId: 'codex' | 'qoder' | 'opencode'): s
   return onPath || firstExisting([`${homedir()}/.opencode/bin/opencode`, '/opt/homebrew/bin/opencode', '/usr/local/bin/opencode'])
 }
 
-export function runtimeCliEnv(base: Record<string, string> = shellEnv()): Record<string, string> {
-  const originalPath = base.PATH ?? process.env.PATH ?? ''
-  const configuredScry = base.SCRY_CLI_PATH?.trim()
-  const scryCliPath = configuredScry || resolveCommandOnPath('scry', originalPath)
+function recorderFallbackSearchPath(env: Record<string, string>): string {
+  const npmPrefix = env.npm_config_prefix ?? env.NPM_CONFIG_PREFIX
+  const directories = process.platform === 'win32'
+    ? [
+        env.APPDATA ? join(env.APPDATA, 'npm') : undefined,
+        env.PNPM_HOME,
+        npmPrefix
+      ]
+    : [
+        env.PNPM_HOME,
+        npmPrefix ? join(npmPrefix, 'bin') : undefined,
+        join(homedir(), '.local', 'bin'),
+        join(homedir(), '.npm-global', 'bin'),
+        '/opt/homebrew/bin',
+        '/usr/local/bin'
+      ]
+  return directories.filter((directory): directory is string => !!directory).join(delimiter)
+}
+
+export function resolveRecorderCliPath(
+  env: Record<string, string>,
+  trustedPath: string,
+  fallbackPath: string = recorderFallbackSearchPath(env)
+): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(env, 'SCRY_CLI_PATH')) {
+    return env.SCRY_CLI_PATH?.trim() ?? ''
+  }
+  return resolveCommandOnPath('scry', trustedPath) ?? resolveCommandOnPath('scry', fallbackPath)
+}
+
+export function runtimeCliEnv(base?: Record<string, string>): Record<string, string> {
+  const runtimeBase = base ?? shellEnv()
+  const originalPath = base
+    ? runtimeBase.PATH ?? process.env.PATH ?? ''
+    : shellPathCache || process.env.PATH || ''
+  const scryCliPath = resolveRecorderCliPath(runtimeBase, originalPath)
   return sanitizeNestedAgentEnv({
-    ...base,
-    ...(scryCliPath ? { SCRY_CLI_PATH: scryCliPath } : {}),
-    PATH: [QODER_NODE_BIN, base.PATH ?? process.env.PATH ?? ''].filter(Boolean).join(delimiter)
+    ...runtimeBase,
+    SCRY_CLI_PATH: scryCliPath ?? '',
+    PATH: [QODER_NODE_BIN, runtimeBase.PATH ?? process.env.PATH ?? ''].filter(Boolean).join(delimiter)
   })
 }
