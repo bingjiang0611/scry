@@ -8,6 +8,7 @@ import {
   analyzeBilling,
   applyTraceBatch,
   bashFiles,
+  bashReadFiles,
   buildSessionReport,
   fileWriteCoverage,
   hookCancellationDetail,
@@ -488,7 +489,12 @@ describe('fileWriteCoverage（P2 写覆盖 / 只写不读）', () => {
       ev({ id: 'read-b', stage: 'file:read', tool: 'FileOp', fileOp: 'read', filePath: '/b.ts' }),
       ev({ id: 'read-c', stage: 'file:read', tool: 'FileOp', fileOp: 'read', filePath: '/c.ts' })
     ]
-    expect(fileWriteCoverage(items)).toEqual({ written: 2, readBefore: 1, blind: ['/b.ts'] })
+    expect(fileWriteCoverage(items)).toEqual({
+      written: 2,
+      readBefore: 1,
+      inferredReadBefore: 0,
+      blind: ['/b.ts']
+    })
   })
 
   it('以结果完成顺序判定先读，并排除失败的 Read/Write', () => {
@@ -500,7 +506,12 @@ describe('fileWriteCoverage（P2 写覆盖 / 只写不读）', () => {
       ev({ id: 'failed-write-use', stage: 'tool:Write', tool: 'Write', toolUseId: 'failed-write', fileOp: 'write', filePath: '/b.ts' }),
       ev({ id: 'failed-write-result', stage: 'tool_result', toolUseId: 'failed-write', isError: true })
     ]
-    expect(fileWriteCoverage(items)).toEqual({ written: 1, readBefore: 0, blind: ['/a.ts'] })
+    expect(fileWriteCoverage(items)).toEqual({
+      written: 1,
+      readBefore: 0,
+      inferredReadBefore: 0,
+      blind: ['/a.ts']
+    })
   })
 
   it('并行 Read/Edit 只在 Read 先完成时算先读', () => {
@@ -510,14 +521,93 @@ describe('fileWriteCoverage（P2 写覆盖 / 只写不读）', () => {
     ]
     const editFirst = [...uses, ev({ id: 'edit-result', stage: 'tool_result', toolUseId: 'edit' }), ev({ id: 'read-result', stage: 'tool_result', toolUseId: 'read' })]
     const readFirst = [...uses, ev({ id: 'read-result', stage: 'tool_result', toolUseId: 'read' }), ev({ id: 'edit-result', stage: 'tool_result', toolUseId: 'edit' })]
-    expect(fileWriteCoverage(editFirst)).toEqual({ written: 1, readBefore: 0, blind: ['/a.ts'] })
-    expect(fileWriteCoverage(readFirst)).toEqual({ written: 1, readBefore: 1, blind: [] })
+    expect(fileWriteCoverage(editFirst)).toEqual({
+      written: 1,
+      readBefore: 0,
+      inferredReadBefore: 0,
+      blind: ['/a.ts']
+    })
+    expect(fileWriteCoverage(readFirst)).toEqual({
+      written: 1,
+      readBefore: 1,
+      inferredReadBefore: 0,
+      blind: []
+    })
+  })
+
+  it('把成功的 Codex 只读 Bash 作为推断先读，并按 cwd 对齐结构化路径', () => {
+    const items = [
+      ev({
+        id: 'bash-read',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        toolUseId: 'bash-read',
+        input: { command: `/bin/zsh -lc 'sed -n "1,30p" src/a.ts'`, cwd: '/repo' }
+      }),
+      ev({ id: 'bash-read-result', stage: 'tool_result', toolUseId: 'bash-read', isError: false }),
+      ev({
+        id: 'edit',
+        stage: 'tool:Edit',
+        tool: 'Edit',
+        toolUseId: 'edit',
+        fileOp: 'edit',
+        filePath: '/repo/src/a.ts'
+      }),
+      ev({ id: 'edit-result', stage: 'tool_result', toolUseId: 'edit', isError: false })
+    ]
+    expect(fileWriteCoverage(items)).toEqual({
+      written: 1,
+      readBefore: 1,
+      inferredReadBefore: 1,
+      blind: []
+    })
+  })
+
+  it('失败或晚完成的 Bash 读取不能洗掉无先读证据', () => {
+    const started = ev({
+      id: 'bash-read',
+      stage: 'tool:Bash',
+      tool: 'Bash',
+      toolUseId: 'bash-read',
+      input: { command: 'cat /repo/src/a.ts' }
+    })
+    const edit = ev({
+      id: 'edit',
+      stage: 'tool:Edit',
+      tool: 'Edit',
+      toolUseId: 'edit',
+      fileOp: 'edit',
+      filePath: '/repo/src/a.ts'
+    })
+    expect(fileWriteCoverage([
+      started,
+      edit,
+      ev({ id: 'edit-result', stage: 'tool_result', toolUseId: 'edit', isError: false }),
+      ev({ id: 'bash-result', stage: 'tool_result', toolUseId: 'bash-read', isError: false })
+    ])).toEqual({
+      written: 1,
+      readBefore: 0,
+      inferredReadBefore: 0,
+      blind: ['/repo/src/a.ts']
+    })
+    expect(fileWriteCoverage([
+      started,
+      ev({ id: 'bash-result', stage: 'tool_result', toolUseId: 'bash-read', isError: true }),
+      edit,
+      ev({ id: 'edit-result', stage: 'tool_result', toolUseId: 'edit', isError: false })
+    ])).toEqual({
+      written: 1,
+      readBefore: 0,
+      inferredReadBefore: 0,
+      blind: ['/repo/src/a.ts']
+    })
   })
 
   it('全是只读：written=0', () => {
     expect(fileWriteCoverage([ev({ stage: 'file:read', tool: 'FileOp', fileOp: 'read', filePath: '/x' })])).toEqual({
       written: 0,
       readBefore: 0,
+      inferredReadBefore: 0,
       blind: []
     })
   })
@@ -529,7 +619,32 @@ describe('aggregateFiles（结构化文件工具足迹）', () => {
       ev({ id: 'read', stage: 'tool:Read', tool: 'Read', toolUseId: 'read-1', fileOp: 'read', filePath: '/a.ts' }),
       ev({ id: 'read-result', stage: 'tool_result', tool: 'Read', toolUseId: 'read-1', fileOp: 'read', filePath: '/a.ts' })
     ])
-    expect(structured).toEqual([{ path: '/a.ts', read: 1, write: 0, edit: 0 }])
+    expect(structured).toEqual([{ path: '/a.ts', read: 1, inferredRead: 0, write: 0, edit: 0 }])
+  })
+
+  it('把 Bash 推断读取并入文件行，用 ~R 证据计数且跳过失败命令', () => {
+    const { structured } = aggregateFiles([
+      ev({
+        id: 'read',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        toolUseId: 'read',
+        input: { command: 'cat src/a.ts', cwd: '/repo' }
+      }),
+      ev({ id: 'read-result', stage: 'tool_result', toolUseId: 'read', isError: false }),
+      ev({
+        id: 'failed',
+        stage: 'tool:Bash',
+        tool: 'Bash',
+        toolUseId: 'failed',
+        input: { command: 'cat src/failed.ts', cwd: '/repo' }
+      }),
+      ev({ id: 'failed-result', stage: 'tool_result', toolUseId: 'failed', isError: true }),
+      ev({ id: 'edit', stage: 'tool:Edit', tool: 'Edit', fileOp: 'edit', filePath: '/repo/src/a.ts' })
+    ])
+    expect(structured).toEqual([
+      { path: '/repo/src/a.ts', read: 1, inferredRead: 1, write: 0, edit: 1 }
+    ])
   })
 })
 
@@ -546,6 +661,25 @@ describe('bashFiles（Bash 文件推断）', () => {
     expect(fs).toContain('src/x.ts')
     expect(fs).not.toContain('-n')
     expect(fs.some((f) => f.startsWith('http'))).toBe(false)
+  })
+})
+
+describe('bashReadFiles（Codex 只读 Bash 推断）', () => {
+  it('识别 shell 包装、管道和常见只读命令', () => {
+    expect(
+      bashReadFiles(`/bin/zsh -lc 'cat docs/a.md; sed -n "1,20p" src/a.ts | rg needle src/b.ts'`)
+    ).toEqual(['docs/a.md', 'src/a.ts', 'src/b.ts'])
+    expect(bashReadFiles('cat "docs/My File.md"')).toEqual(['docs/My File.md'])
+  })
+
+  it('不把改写、目录枚举或任意路径参数冒充读取', () => {
+    expect(bashReadFiles('sed -i.bak "s/a/b/" src/a.ts')).toEqual([])
+    expect(bashReadFiles('echo hi > out.txt; ls src/a.ts; rg --files src')).toEqual([])
+    expect(
+      bashReadFiles(`rg -n 'PlatformLogEnum.STAT' src -g 'PlatformLogUtil.java' -g '*.java'`)
+    ).toEqual([])
+    expect(bashReadFiles(`rg -n needle src/renderer`)).toEqual([])
+    expect(bashReadFiles(`rg -n needle /Users/me/.zsh_history`)).toEqual(['/Users/me/.zsh_history'])
   })
 })
 
@@ -962,7 +1096,7 @@ describe('buildSessionReport（Session Token 用量报告）', () => {
     expect(md).not.toContain('工具 Bash：出现 1 次 · 所在轮次 token 1.2k tok · 同轮关联')
     expect(md).not.toContain('归因方法=按轮次关联(turn_allocated)')
     expect(md).toContain('[高危] rm 递归强删') // 危险审计（视觉升级后报告文本用 [高危]/[可疑]）
-    expect(md).toContain('首次写入前未读') // 首写前未读提示（blind.txt write-only）
+    expect(md).toContain('首次写入前无读取证据')
     expect(md).toContain('工具失败 1 次')
     expect(md).not.toContain('$0.5000')
   })

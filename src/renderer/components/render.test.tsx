@@ -528,13 +528,14 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(qoderHtml).toContain('run · run-qoder')
   })
 
-  it('结构化文件工具足迹渲染出文件名', () => {
-    expect(html).toContain('本轮文件（结构化工具）')
+  it('文件工具证据同时渲染结构化操作与 Bash 推断读取', () => {
+    expect(html).toContain('本轮文件（工具证据）')
     expect(html).toContain('probe.txt')
     const filesHtml = html.match(/<details class="files-summary"[\s\S]*?<\/details>/)?.[0] ?? ''
     expect(filesHtml).not.toContain('Bash 触及')
-    expect(filesHtml).not.toContain('bash-only.txt')
-    expect(filesHtml).toContain('<span class="fh-total">1</span>')
+    expect(filesHtml).toContain('bash-only.txt')
+    expect(filesHtml).toContain('~R1')
+    expect(filesHtml).toContain('<span class="fh-total">2</span>')
   })
 
   it('有 turn_diff 时增强同一张卡，展示逐文件与汇总 +/- 行数', () => {
@@ -646,7 +647,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     }
     const timeoutHtml = renderToStaticMarkup(<AssistantTurn turn={timeoutTurn} selectedId={null} onSelect={() => {}} />)
 
-    expect(timeoutHtml).toContain('本轮文件（结构化工具）')
+    expect(timeoutHtml).toContain('本轮文件（工具证据）')
     expect(timeoutHtml).toContain('Git 差异采集超时')
     expect(timeoutHtml).not.toContain('± —')
     expect(timeoutHtml).toContain('精确行数不可用：deadline')
@@ -2423,7 +2424,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('文件足迹')
     expect(html).toContain('probe.txt')
     expect(html).not.toContain('Bash 触及')
-    expect(html).not.toContain('bash-only.txt')
+    expect(html).toContain('bash-only.txt')
+    expect(html).toContain('~R1')
   })
 
   it('总览不渲染 sqlite 跨会话工具和目录排行', () => {
