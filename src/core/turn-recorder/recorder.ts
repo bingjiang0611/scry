@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, readdir, rm, stat } from 'node:fs/promises'
+import { open as openFile, readdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
@@ -57,6 +57,7 @@ interface OpenTurnState {
   promptHash?: string
   startFingerprint: string
   transcriptPath?: string
+  transcriptStartOffset?: number
   providerTurnId?: string
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }
@@ -91,6 +92,8 @@ const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'
 const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
 // Turn boundaries may synchronously snapshot Git for up to 5s; fallback delivery must outwait the original holder.
 const SESSION_LOCK_WAIT_MS = 10_000
+const TRANSCRIPT_REWIND_BYTES = 4 * 1024 * 1024
+const MAX_TRANSCRIPT_READ_BYTES = 32 * 1024 * 1024
 
 function stringAt(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -936,7 +939,10 @@ async function codexTurnWithChildren(
     }
     let parsed: ReturnType<typeof parseCodexRollout>
     try {
-      parsed = parseCodexRollout(await readFile(childPath, 'utf8'), runId)
+      const childSize = (await stat(childPath)).size
+      const childTranscript = await readTranscriptWindow(childPath, childSize)
+      parsed = parseCodexRollout(childTranscript.content, runId)
+      complete = complete && !childTranscript.truncated
     } catch {
       complete = false
       continue
@@ -973,14 +979,132 @@ async function codexTurnWithChildren(
   return { events, complete, observable }
 }
 
+async function transcriptStartOffset(path: string): Promise<number | undefined> {
+  try {
+    return Math.max(0, (await stat(path)).size - TRANSCRIPT_REWIND_BYTES)
+  } catch {
+    return undefined
+  }
+}
+
+async function readTranscriptWindow(
+  path: string,
+  endOffset: number,
+  preferredStartOffset = 0
+): Promise<{ content: string; truncated: boolean }> {
+  const boundedEnd = Math.max(0, endOffset)
+  const preferredStart = Math.max(0, Math.min(preferredStartOffset, boundedEnd))
+  const start = Math.max(preferredStart, boundedEnd - MAX_TRANSCRIPT_READ_BYTES)
+  const length = boundedEnd - start
+  if (length === 0) return { content: '', truncated: false }
+  const handle = await openFile(path, 'r')
+  const buffer = Buffer.allocUnsafe(length)
+  let bytesRead = 0
+  try {
+    while (bytesRead < length) {
+      const result = await handle.read(buffer, bytesRead, length - bytesRead, start + bytesRead)
+      if (result.bytesRead === 0) break
+      bytesRead += result.bytesRead
+    }
+  } finally {
+    await handle.close()
+  }
+  let content = buffer.subarray(0, bytesRead).toString('utf8')
+  let truncated = start > preferredStart
+  if (start > 0) {
+    const firstNewline = content.indexOf('\n')
+    if (firstNewline >= 0) content = content.slice(firstNewline + 1)
+    else {
+      content = ''
+      truncated = true
+    }
+  }
+  return { content, truncated }
+}
+
+async function parseTranscriptSnapshot(args: {
+  path: string
+  endOffset: number
+  startOffset?: number
+  stable: boolean
+  runId: string
+  provider: ProviderId
+  promptHash?: string
+  providerTurnId?: string
+}): Promise<TranscriptRead> {
+  const snapshot = await readTranscriptWindow(args.path, args.endOffset, args.startOffset)
+  if (args.provider === 'codex') {
+    const parsed = parseCodexRollout(snapshot.content, args.runId)
+    const direct = args.providerTurnId ? parsed.turns.find((turn) => turn.providerTurnId === args.providerTurnId) : undefined
+    const matching = args.promptHash
+      ? [...parsed.turns].reverse().find((turn) => {
+          const candidates = [turn.userText, turn.userText.replace(/^\/[A-Za-z0-9_-]+\s*/, '')]
+          return candidates.some((candidate) => createHash('sha256').update(candidate).digest('hex') === args.promptHash)
+        })
+      : undefined
+    const turn = direct ?? matching ?? parsed.turns.at(-1)
+    const enriched = turn
+      ? await codexTurnWithChildren(turn, args.path, args.runId)
+      : {
+          events: [],
+          complete: false,
+          observable: {
+            tools: false,
+            skills: false,
+            mcps: false,
+            hooks: false,
+            usage: false,
+            files: false,
+            errors: false
+          }
+        }
+    return {
+      stable: args.stable,
+      observed: parsed.recognized,
+      complete: args.stable && !snapshot.truncated && enriched.complete,
+      ...(turn?.userText ? { userText: turn.userText } : {}),
+      events: enriched.events,
+      observable: enriched.observable
+    }
+  }
+  const turns = parseTranscriptToTurns(snapshot.content, {
+    runId: args.runId,
+    newId: () => `transcript-${randomUUID()}`,
+    now: () => new Date().toISOString()
+  })
+  const matching = args.promptHash
+    ? [...turns].reverse().find((turn) => createHash('sha256').update(turn.userText).digest('hex') === args.promptHash)
+    : undefined
+  const turn = matching ?? turns.at(-1)
+  const events = turn?.items ?? []
+  return {
+    stable: args.stable,
+    observed: turns.length > 0,
+    complete: args.stable && !snapshot.truncated,
+    ...(turn?.userText ? { userText: turn.userText } : {}),
+    events,
+    observable: {
+      tools: turns.length > 0,
+      skills: turns.length > 0,
+      mcps: turns.length > 0,
+      hooks: events.some((event) => event.kind === 'hook'),
+      usage: events.some((event) => event.kind === 'harness' && event.stage === 'result'),
+      files: events.some((event) => !!event.filePath && !!event.fileOp),
+      errors: turns.length > 0
+    }
+  }
+}
+
 async function stableTranscript(
   path: string,
   runId: string,
   provider: ProviderId,
   promptHash?: string,
-  providerTurnId?: string
+  providerTurnId?: string,
+  startOffset?: number
 ): Promise<TranscriptRead> {
   let previous = -1
+  let latestSize = -1
   for (let attempt = 0; attempt < 3; attempt++) {
     let size: number
     try {
@@ -1002,84 +1126,23 @@ async function stableTranscript(
         }
       }
     }
+    latestSize = size
     if (size === previous) {
-      const content = await readFile(path, 'utf8')
-      if (provider === 'codex') {
-        const parsed = parseCodexRollout(content, runId)
-        const direct = providerTurnId ? parsed.turns.find((turn) => turn.providerTurnId === providerTurnId) : undefined
-        const matching = promptHash
-          ? [...parsed.turns].reverse().find((turn) => {
-              const candidates = [turn.userText, turn.userText.replace(/^\/[A-Za-z0-9_-]+\s*/, '')]
-              return candidates.some((candidate) => createHash('sha256').update(candidate).digest('hex') === promptHash)
-            })
-          : undefined
-        const turn = direct ?? matching ?? parsed.turns.at(-1)
-        const enriched = turn
-          ? await codexTurnWithChildren(turn, path, runId)
-          : {
-              events: [],
-              complete: false,
-              observable: {
-                tools: false,
-                skills: false,
-                mcps: false,
-                hooks: false,
-                usage: false,
-                files: false,
-                errors: false
-              }
-            }
-        return {
-          stable: true,
-          observed: parsed.recognized,
-          complete: enriched.complete,
-          ...(turn?.userText ? { userText: turn.userText } : {}),
-          events: enriched.events,
-          observable: enriched.observable
-        }
-      }
-      const turns = parseTranscriptToTurns(content, {
-        runId,
-        newId: () => `transcript-${randomUUID()}`,
-        now: () => new Date().toISOString()
-      })
-      const matching = promptHash ? [...turns].reverse().find((turn) => createHash('sha256').update(turn.userText).digest('hex') === promptHash) : undefined
-      const events = (matching ?? turns.at(-1))?.items ?? []
-      return {
-        stable: true,
-        observed: turns.length > 0,
-        complete: true,
-        ...((matching ?? turns.at(-1))?.userText ? { userText: (matching ?? turns.at(-1))?.userText } : {}),
-        events,
-        observable: {
-          tools: turns.length > 0,
-          skills: turns.length > 0,
-          mcps: turns.length > 0,
-          hooks: events.some((event) => event.kind === 'hook'),
-          usage: events.some((event) => event.kind === 'harness' && event.stage === 'result'),
-          files: events.some((event) => !!event.filePath && !!event.fileOp),
-          errors: turns.length > 0
-        }
-      }
+      return parseTranscriptSnapshot({ path, endOffset: size, startOffset, stable: true, runId, provider, promptHash, providerTurnId })
     }
     previous = size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  return {
+  return parseTranscriptSnapshot({
+    path,
+    endOffset: Math.max(0, latestSize),
+    startOffset,
     stable: false,
-    observed: true,
-    complete: false,
-    events: [],
-    observable: {
-      tools: false,
-      skills: false,
-      mcps: false,
-      hooks: false,
-      usage: false,
-      files: false,
-      errors: false
-    }
-  }
+    runId,
+    provider,
+    promptHash,
+    providerTurnId
+  })
 }
 
 async function readStoredEvents(path: string): Promise<TraceEvent[]> {
@@ -1168,6 +1231,8 @@ async function beginOpenTurn(
   const turnIndex = session.lastTurnIndex + 1
   const prompt = promptOf(payload)
   const promptHash = prompt ? createHash('sha256').update(prompt).digest('hex') : undefined
+  const transcriptPath = transcriptPathOf(payload)
+  const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
   const captureDir = join(turnRoot(root, generation), 'captures')
   const repositories = enablement.config.capture.diff ? await discoverRepositories(enablement.workspaceRoot, enablement.config) : []
   const captures = await Promise.all(repositories.map(async (repository) => ({
@@ -1185,7 +1250,8 @@ async function beginOpenTurn(
     startFingerprint: stableHash({ event, payload }),
     ...(enablement.config.capture.prompt && prompt ? { prompt } : {}),
     ...(promptHash ? { promptHash } : {}),
-    ...(transcriptPathOf(payload) ? { transcriptPath: transcriptPathOf(payload) } : {}),
+    ...(transcriptPath ? { transcriptPath } : {}),
+    ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
     ...(providerTurnIdOf(payload) ? { providerTurnId: providerTurnIdOf(payload) } : {}),
     captures
   }
@@ -1215,6 +1281,10 @@ async function storeLifecycleEvent(enablement: Extract<RecorderEnablement, { ena
   const transcriptPath = transcriptPathOf(payload)
   if (transcriptPath && transcriptPath !== open.transcriptPath) {
     open.transcriptPath = transcriptPath
+    open.transcriptStartOffset = await transcriptStartOffset(transcriptPath)
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+  } else if (transcriptPath && open.transcriptStartOffset == null) {
+    open.transcriptStartOffset = await transcriptStartOffset(transcriptPath)
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
 }
@@ -1237,7 +1307,14 @@ async function finalizeOpenTurn(
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const runId = `${open.provider}:${open.sessionId}:${open.generation}`
   const transcript = open.transcriptPath
-    ? await stableTranscript(open.transcriptPath, runId, open.provider, open.promptHash, open.providerTurnId)
+    ? await stableTranscript(
+        open.transcriptPath,
+        runId,
+        open.provider,
+        open.promptHash,
+        open.providerTurnId,
+        open.transcriptStartOffset
+      )
     : {
         stable: true,
         observed: false,
@@ -1291,12 +1368,14 @@ async function finalizeOpenTurn(
   })
   if (transcript.complete === false) {
     const source = evidence.tools.source
-    const reason = 'one or more child agent transcripts were unavailable'
+    const reason = 'transcript snapshot was incomplete or one or more child agent transcripts were unavailable'
     if (evidence.tools.value) evidence.tools = partial(evidence.tools.value, source, reason)
     if (evidence.skills.value) evidence.skills = partial(evidence.skills.value, source, reason)
     if (evidence.mcps.value) evidence.mcps = partial(evidence.mcps.value, source, reason)
     if (evidence.files.value) evidence.files = partial(evidence.files.value, source, reason)
     if (evidence.errors.value) evidence.errors = partial(evidence.errors.value, source, reason)
+    if (evidence.usage.value) evidence.usage = partial(evidence.usage.value, source, reason)
+    if (evidence.hooks.value) evidence.hooks = partial(evidence.hooks.value, source, reason)
     if (evidence.dangerousOperations.value) {
       evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)
     }
@@ -1427,7 +1506,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       open.status = 'closing'
       open.closingAt = timestampOf(input.payload)
       await writeJsonAtomic(openPath(root), open, { sync: false })
-      return finalizeOpenTurn(enablement, open, input.payload, 'completed')
+      return finalizeOpenTurn(enablement, open, input.payload, 'completed', { allowUnstableTranscript: true })
     }, { waitMs: SESSION_LOCK_WAIT_MS })
     const pending = START_EVENTS.has(input.event) || END_EVENTS.has(input.event)
       ? await pendingHealth(enablement.dataRoot)
@@ -1489,7 +1568,13 @@ export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv 
     if (!open || open.status !== 'closing') continue
     const result = await withDirectoryLock(
       sessionLock(enablement.dataRoot, item.provider, open.sessionId),
-      () => finalizeOpenTurn(enablement, open, { timestamp: open.closingAt ?? new Date().toISOString() }, 'completed'),
+      () => finalizeOpenTurn(
+        enablement,
+        open,
+        { timestamp: open.closingAt ?? new Date().toISOString() },
+        'completed',
+        { allowUnstableTranscript: true }
+      ),
       { waitMs: SESSION_LOCK_WAIT_MS }
     )
     if (result.status === 'pending') pending++

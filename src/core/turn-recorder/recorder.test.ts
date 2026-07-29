@@ -1,11 +1,11 @@
-import { access, appendFile, mkdir, mkdtemp, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'
+import { access, appendFile, mkdir, mkdtemp, open as openFile, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
-import { handleRecorderHook, mergeTurnTraceEvents } from './recorder'
+import { handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
 import { commitRecord, exportRecords, listRecords, readHealth, safeKey, verifyStore } from './store'
 
 const roots: string[] = []
@@ -229,16 +229,16 @@ describe('turn recorder state machine', () => {
     expect((await listRecords(join(root, '.scry'))).map((record) => record.status)).toEqual(['interrupted', 'completed'])
   })
 
-  it('closing 轮的 transcript 仍在变化时，新 prompt 也不会被吞掉', async () => {
+  it('transcript 仍在变化时以有界快照提交，不留下 pending 也不吞下一轮', async () => {
     const root = await workspace()
     const transcript = join(root, 'session.jsonl')
     await writeFile(transcript, '')
     await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: payload('s1', { prompt: 'one', transcript_path: transcript }) })
     const timer = setInterval(() => void appendFile(transcript, '{}\n'), 10)
     try {
-      const pending = await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: payload('s1', { timestamp: '2026-07-19T12:00:01.000Z' }) })
-      expect(pending.status).toBe('pending')
-      expect(await readHealth(join(root, '.scry'))).toMatchObject({ pendingCount: 1 })
+      const committed = await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: payload('s1', { timestamp: '2026-07-19T12:00:01.000Z' }) })
+      expect(committed.status).toBe('committed')
+      expect(await readHealth(join(root, '.scry'))).toMatchObject({ pendingCount: 0 })
       const next = await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: payload('s1', { prompt: 'two', timestamp: '2026-07-19T12:00:02.000Z' }) })
       expect(next.status).toBe('started')
     } finally {
@@ -508,6 +508,70 @@ describe('Codex rollout recorder evidence', () => {
     })
   })
 
+  it('超过 2 GiB 的稀疏 rollout 只读取当前轮窗口，不整体载入文件', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'large-rollout.jsonl')
+    const sparseSize = 2 * 1024 * 1024 * 1024 + 1024
+    const handle = await openFile(rollout, 'w')
+    try {
+      await handle.truncate(sparseSize)
+      await handle.write('\n', sparseSize - 1)
+    } finally {
+      await handle.close()
+    }
+    const line = (timestamp: string, type: string, value: Record<string, unknown>): string =>
+      JSON.stringify({ timestamp, type, payload: value })
+    await appendFile(rollout, `${[
+      line('2026-07-19T12:00:00.000Z', 'event_msg', { type: 'task_started', turn_id: 'large-turn' }),
+      line('2026-07-19T12:00:00.010Z', 'event_msg', { type: 'user_message', message: 'large transcript' })
+    ].join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('large-session', {
+        prompt: 'large transcript',
+        turn_id: 'large-turn',
+        rollout_path: rollout
+      })
+    })
+    await appendFile(rollout, `${[
+      line('2026-07-19T12:00:00.100Z', 'response_item', {
+        type: 'function_call',
+        name: 'exec_command',
+        call_id: 'large-call',
+        arguments: JSON.stringify({ cmd: 'printf ok' })
+      }),
+      line('2026-07-19T12:00:00.200Z', 'response_item', {
+        type: 'function_call_output',
+        call_id: 'large-call',
+        output: 'ok'
+      }),
+      line('2026-07-19T12:00:01.000Z', 'event_msg', {
+        type: 'task_complete',
+        turn_id: 'large-turn',
+        last_agent_message: 'done'
+      })
+    ].join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('large-session', {
+        turn_id: 'large-turn',
+        rollout_path: rollout,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record).toMatchObject({ sessionId: 'large-session', providerTurnId: 'large-turn', status: 'completed' })
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ id: 'large-call', name: 'Bash', status: 'success' })
+    ])
+  }, 15_000)
+
   it('还原 slash prompt、展开 Codex exec，并把子 agent 调用并入父轮但不重复 usage', async () => {
     const root = await workspace()
     const parent = join(root, 'rollout-parent.jsonl')
@@ -730,6 +794,29 @@ describe('Codex rollout recorder evidence', () => {
 })
 
 describe('record store cursor and recovery semantics', () => {
+  it('recover 强制收敛 closing 运行态，不把它无限保留为 pending', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('recover-me', { prompt: 'recover' })
+    })
+    const open = join(root, '.scry', 'runtime', 'claude', safeKey('recover-me'), 'open.json')
+    const state = JSON.parse(await readFile(open, 'utf8')) as Record<string, unknown>
+    await writeFile(open, JSON.stringify({
+      ...state,
+      status: 'closing',
+      closingAt: '2026-07-19T12:00:01.000Z'
+    }))
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
+      { sessionId: 'recover-me', status: 'completed' }
+    ])
+    await expect(readHealth(join(root, '.scry'))).resolves.toMatchObject({ pendingCount: 0 })
+  })
+
   it('跨 session 使用全局 sequence，分页 snapshot 不漏晚提交', async () => {
     const root = await workspace()
     await completeTurn(root, 'a')

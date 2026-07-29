@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { chmod, mkdir, rm } from 'node:fs/promises'
+import { chmod, mkdir, rm, stat } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
-import { handleRecorderHook, recorderEnablement } from './recorder.js'
+import { handleRecorderHook, recoverRecorder, recorderEnablement } from './recorder.js'
 import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { RECORDER_VERSION } from './store.js'
 
@@ -13,7 +14,11 @@ const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_SOCKET_BYTES = 100
 const STARTING_TTL_MS = 10_000
+const STOP_WAIT_MS = 1_000
+const OWNER_WAIT_MS = 3_000
+const READY_WAIT_MS = 5_000
 const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode'])
+const OWNER_TOKEN_ENV = 'SCRY_RECORDER_OWNER_TOKEN'
 
 export interface RecorderDaemonStatus {
   running: boolean
@@ -38,6 +43,16 @@ interface DaemonRequestResult {
   body: Record<string, unknown>
 }
 
+interface DaemonOwner {
+  schemaVersion: 1
+  pid: number
+  instanceId: string
+  state: 'starting' | 'running'
+  createdAt: number
+  recorderVersion: string
+  socketPath: string
+}
+
 function positiveInt(value: string | undefined, fallback: number, min: number, max: number): number {
   if (!value || !/^\d+$/.test(value)) return fallback
   const parsed = Number(value)
@@ -54,8 +69,52 @@ function processAlive(pid: number | undefined): boolean {
   }
 }
 
-function startingPath(socketPath: string): string {
+function ownerPath(socketPath: string): string {
+  return `${socketPath}.owner.json`
+}
+
+function legacyStartingPath(socketPath: string): string {
   return join(dirname(socketPath), 'daemon-starting.json')
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitForProcessExit(pid: number, deadlineMs: number): Promise<boolean> {
+  const deadline = Date.now() + deadlineMs
+  while (processAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25))
+  }
+  return !processAlive(pid)
+}
+
+async function waitForOwner(path: string, instanceId: string, deadlineMs: number): Promise<DaemonOwner | null> {
+  const deadline = Date.now() + deadlineMs
+  do {
+    const owner = await readJson<DaemonOwner>(path)
+    if (owner?.instanceId === instanceId && processAlive(owner.pid)) return owner
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10))
+  } while (Date.now() < deadline)
+  return null
+}
+
+async function removeOwnedMarker(path: string, instanceId: string): Promise<void> {
+  const current = await readJson<DaemonOwner>(path)
+  if (current?.instanceId === instanceId) await rm(path, { force: true })
+}
+
+async function stopOwner(owner: DaemonOwner): Promise<void> {
+  if (!processAlive(owner.pid)) return
+  try { process.kill(owner.pid, 'SIGTERM') } catch { return }
+  if (await waitForProcessExit(owner.pid, STOP_WAIT_MS)) return
+  try { process.kill(owner.pid, 'SIGKILL') } catch { return }
+  await waitForProcessExit(owner.pid, STOP_WAIT_MS)
 }
 
 export function recorderSocketPath(workspace: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -211,35 +270,54 @@ export async function startRecorderDaemon(args: {
       await stopRecorderDaemon(enablement.workspaceRoot, env)
       if (!await waitForSocketRelease(socketPath, 1_000)) throw new Error('previous recorder daemon did not stop within 1000ms')
     }
-    const markerPath = startingPath(socketPath)
-    const marker = await readJson<{ pid?: number; createdAt?: number }>(markerPath)
-    if (processAlive(marker?.pid) && Date.now() - (marker?.createdAt ?? 0) <= STARTING_TTL_MS) {
+    const markerPath = ownerPath(socketPath)
+    const marker = await readJson<DaemonOwner>(markerPath)
+    if (
+      marker &&
+      marker.state === 'starting' &&
+      processAlive(marker.pid) &&
+      Date.now() - marker.createdAt <= STARTING_TTL_MS
+    ) {
       if (args.waitForReady === false) {
         return { started: false, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
       }
-      const status = await waitForDaemon(enablement.workspaceRoot, env, 2_000)
+      const status = await waitForDaemon(enablement.workspaceRoot, env, READY_WAIT_MS)
       if (status) return { started: false, status }
       throw new Error('recorder daemon is still starting')
     }
-    const markerPid = marker?.pid
-    if (markerPid && processAlive(markerPid)) {
-      try { process.kill(markerPid, 'SIGTERM') } catch {}
+    if (marker) {
+      await stopOwner(marker)
+      if (processAlive(marker.pid)) throw new Error(`previous recorder daemon process ${marker.pid} did not stop`)
     }
     await rm(markerPath, { force: true })
+    await rm(legacyStartingPath(socketPath), { force: true })
     await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 })
+    const instanceId = randomUUID()
     const child = spawn(process.execPath, [args.scriptPath, 'recorder', 'serve', '--workspace', enablement.workspaceRoot, '--socket', socketPath], {
       cwd: enablement.workspaceRoot,
       detached: true,
-      env: { ...env, SCRY_RECORDER_SOCKET: socketPath },
+      env: { ...env, SCRY_RECORDER_SOCKET: socketPath, [OWNER_TOKEN_ENV]: instanceId },
       stdio: 'ignore'
     })
-    if (child.pid) await writeJsonAtomic(markerPath, { pid: child.pid, createdAt: Date.now() }, { sync: false })
+    const childPid = child.pid
     child.unref()
+    const launchedOwner = await waitForOwner(markerPath, instanceId, OWNER_WAIT_MS)
+    if (!launchedOwner) {
+      if (childPid && processAlive(childPid)) {
+        try { process.kill(childPid, 'SIGTERM') } catch {}
+      }
+      throw new Error(`recorder daemon did not publish its owner marker within ${OWNER_WAIT_MS}ms`)
+    }
     if (args.waitForReady === false) {
       return { started: true, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
     }
-    const status = await waitForDaemon(enablement.workspaceRoot, env, 2_000)
-    if (!status) throw new Error('recorder daemon did not become ready within 2000ms')
+    const status = await waitForDaemon(enablement.workspaceRoot, env, READY_WAIT_MS)
+    if (!status) {
+      await stopOwner(launchedOwner)
+      await removeOwnedMarker(markerPath, instanceId)
+      await rm(socketPath, { force: true })
+      throw new Error(`recorder daemon did not become ready within ${READY_WAIT_MS}ms`)
+    }
     return { started: true, status }
   }, { waitMs: 3_000 })
 }
@@ -248,14 +326,22 @@ export async function stopRecorderDaemon(workspace: string, env: NodeJS.ProcessE
   const socketPath = recorderSocketPath(workspace, env)
   try {
     const response = await daemonRequest(socketPath, { method: 'POST', path: '/v1/stop', timeoutMs: 1_000 })
-    return response.statusCode === 200 && response.body.ok === true
+    if (response.statusCode !== 200 || response.body.ok !== true) return false
+    const markerPath = ownerPath(socketPath)
+    const marker = await readJson<DaemonOwner>(markerPath)
+    if (marker?.pid !== process.pid) {
+      if (marker && !await waitForProcessExit(marker.pid, STOP_WAIT_MS)) await stopOwner(marker)
+      if (marker && !processAlive(marker.pid)) await removeOwnedMarker(markerPath, marker.instanceId)
+    }
+    return true
   } catch {
-    const markerPath = startingPath(socketPath)
-    const marker = await readJson<{ pid?: number }>(markerPath)
-    const markerPid = marker?.pid
-    if (!markerPid || !processAlive(markerPid)) return false
-    try { process.kill(markerPid, 'SIGTERM') } catch { return false }
-    await rm(markerPath, { force: true })
+    const markerPath = ownerPath(socketPath)
+    const marker = await readJson<DaemonOwner>(markerPath)
+    if (!marker || !processAlive(marker.pid)) return false
+    await stopOwner(marker)
+    if (processAlive(marker.pid)) return false
+    await removeOwnedMarker(markerPath, marker.instanceId)
+    await rm(socketPath, { force: true })
     return true
   }
 }
@@ -270,6 +356,8 @@ export async function listenRecorderDaemon(args: {
   const enablement = await recorderEnablement(args.workspace, env)
   if (!enablement.enabled) throw new Error(`recorder is disabled: ${enablement.reason}`)
   const socketPath = args.socketPath ?? recorderSocketPath(enablement.workspaceRoot, env)
+  const instanceId = env[OWNER_TOKEN_ENV]?.trim() || randomUUID()
+  const markerPath = ownerPath(socketPath)
   const idleMs = args.idleMs ?? positiveInt(env.SCRY_RECORDER_IDLE_MS, DEFAULT_IDLE_MS, 1_000, MAX_IDLE_MS)
   const startedAt = new Date().toISOString()
   const daemonLog = join(dirname(socketPath), 'logs', 'daemon.log')
@@ -280,11 +368,37 @@ export async function listenRecorderDaemon(args: {
   let closing: Promise<void> | undefined
 
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 })
+  const previousOwner = await readJson<DaemonOwner>(markerPath)
+  if (previousOwner && processAlive(previousOwner.pid)) {
+    throw new Error(`recorder daemon socket is owned by live process ${previousOwner.pid}: ${socketPath}`)
+  }
+  if (previousOwner && !processAlive(previousOwner.pid)) {
+    await rm(markerPath, { force: true })
+  }
+  const owner: DaemonOwner = {
+    schemaVersion: 1,
+    pid: process.pid,
+    instanceId,
+    state: 'starting',
+    createdAt: Date.now(),
+    recorderVersion: RECORDER_VERSION,
+    socketPath
+  }
+  await writeJsonAtomic(markerPath, owner, { sync: false })
+  const socketExisted = await pathExists(socketPath)
   try {
     await daemonRequest(socketPath, { method: 'GET', path: '/v1/status', timeoutMs: 250 })
     throw new Error(`recorder daemon socket is already active: ${socketPath}`)
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('recorder daemon socket is already active:')) throw error
+    if (error instanceof Error && error.message.startsWith('recorder daemon socket is already active:')) {
+      await removeOwnedMarker(markerPath, instanceId)
+      throw error
+    }
+    const code = (error as NodeJS.ErrnoException).code
+    if (socketExisted && code !== 'ENOENT' && code !== 'ECONNREFUSED') {
+      await removeOwnedMarker(markerPath, instanceId)
+      throw new Error(`recorder daemon socket is unresponsive and ownership cannot be proven stale: ${socketPath}`)
+    }
   }
   await rm(socketPath, { force: true })
 
@@ -339,19 +453,25 @@ export async function listenRecorderDaemon(args: {
       server.close(() => resolvePromise())
     }).finally(async () => {
       await rm(socketPath, { force: true }).catch(() => undefined)
+      await removeOwnedMarker(markerPath, instanceId).catch(() => undefined)
     })
     return closing
   }
 
-  await new Promise<void>((resolvePromise, reject) => {
-    server.once('error', reject)
-    server.listen(socketPath, () => {
-      server.off('error', reject)
-      resolvePromise()
+  try {
+    await new Promise<void>((resolvePromise, reject) => {
+      server.once('error', reject)
+      server.listen(socketPath, () => {
+        server.off('error', reject)
+        resolvePromise()
+      })
     })
-  })
-  await chmod(socketPath, 0o600)
-  await rm(startingPath(socketPath), { force: true })
+    await chmod(socketPath, 0o600)
+    await writeJsonAtomic(markerPath, { ...owner, state: 'running' }, { sync: false })
+  } catch (error) {
+    await removeOwnedMarker(markerPath, instanceId)
+    throw error
+  }
   idleTimer = setTimeout(() => void close(), idleMs)
   return { socketPath, closed, close }
 }
@@ -362,6 +482,7 @@ export async function serveRecorderDaemon(args: {
   env?: NodeJS.ProcessEnv
 }): Promise<void> {
   const handle = await listenRecorderDaemon(args)
+  void recoverRecorder(args.workspace, args.env).catch(() => undefined)
   const shutdown = (): void => { void handle.close() }
   process.once('SIGTERM', shutdown)
   process.once('SIGINT', shutdown)
