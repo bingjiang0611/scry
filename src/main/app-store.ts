@@ -77,7 +77,12 @@ export function createRecentFoldersStore(userDataDir: string) {
   const file = join(userDataDir, 'recent-folders.json')
   const load = (): string[] => readJson<string[]>(file, [])
   const push = (dir: string): void => writeJson(file, [dir, ...load().filter((d) => d !== dir)].slice(0, 8))
-  return { load, push }
+  const remove = (dir: string): string[] => {
+    const next = load().filter((d) => d !== dir)
+    writeJson(file, next)
+    return next
+  }
+  return { load, push, remove }
 }
 
 export function createAppSessionStore(

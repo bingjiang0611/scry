@@ -299,7 +299,17 @@ export function App() {
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([])
   const [activeRunHydrated, setActiveRunHydrated] = useState(false)
   const workspace = useWorkspaceState()
-  const { cwd, setCwd, recent, projects, activeSessionId, setActiveSessionId, loadProjects, chooseFolder } = workspace
+  const {
+    cwd,
+    setCwd,
+    recent,
+    projects,
+    activeSessionId,
+    setActiveSessionId,
+    loadProjects,
+    chooseFolder,
+    removeRecentFolder
+  } = workspace
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const terminalRunIdsRef = useRef(new Set<string>())
   const markRunStarted = useCallback((runId: string): void => {
@@ -1051,6 +1061,7 @@ export function App() {
             }}
             onChooseFolder={chooseFolder}
             onPickRecent={pickRecent}
+            onRemoveRecent={removeRecentFolder}
             onRetrySlash={retrySlash}
             onPickSlash={pickSlash}
             onSlashSel={setSlashSel}

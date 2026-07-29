@@ -2322,6 +2322,66 @@ body.pane-resizing * {
 .wdmenu {
   left: 0;
 }
+.wdrecent-list {
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.wdrecent-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+}
+.wdrecent-pick {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding-right: 42px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.wdrecent-pick span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wdrecent-remove {
+  position: absolute;
+  right: 6px;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+.wdrecent-row:hover .wdrecent-pick,
+.wdrecent-row:focus-within .wdrecent-pick {
+  background: var(--panel3);
+}
+.wdrecent-row:hover .wdrecent-remove,
+.wdrecent-row:focus-within .wdrecent-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+.wdrecent-remove:hover {
+  background: var(--border2);
+  color: var(--fg);
+}
+.wdrecent-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
 .climenu {
   right: 0;
 }

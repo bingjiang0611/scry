@@ -36,6 +36,7 @@ interface ChatViewProps {
   onInput: (value: string) => void
   onChooseFolder: () => void
   onPickRecent: (cwd: string) => void
+  onRemoveRecent: (cwd: string) => void
   onRetrySlash: () => void
   onPickSlash: (cmd: SlashCmd) => void
   onSlashSel: (index: number | ((index: number) => number)) => void
@@ -113,6 +114,7 @@ export function ChatView({
   onInput,
   onChooseFolder,
   onPickRecent,
+  onRemoveRecent,
   onRetrySlash,
   onPickSlash,
   onSlashSel,
@@ -170,7 +172,13 @@ export function ChatView({
 
       <div className="composer">
         <div className="composer-top">
-          <WorkdirPicker cwd={cwd} recent={recent} onChoose={onChooseFolder} onPick={onPickRecent} />
+          <WorkdirPicker
+            cwd={cwd}
+            recent={recent}
+            onChoose={onChooseFolder}
+            onPick={onPickRecent}
+            onRemove={onRemoveRecent}
+          />
         </div>
         {slashOpen && (
           <div className="slash-menu" ref={slashMenuRef}>

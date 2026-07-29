@@ -8,12 +8,14 @@ export function WorkdirPicker({
   cwd,
   recent,
   onChoose,
-  onPick
+  onPick,
+  onRemove
 }: {
   cwd: string | null
   recent: string[]
   onChoose: () => void
   onPick: (d: string) => void
+  onRemove: (d: string) => void
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -34,19 +36,33 @@ export function WorkdirPicker({
             <Icon name="folder" /> Choose folder
           </div>
           {recent.length > 0 && <div className="mhdr">Recent folders</div>}
-          {recent.map((d) => (
-            <div
-              key={d}
-              className="mitem"
-              title={d}
-              onClick={() => {
-                setOpen(false)
-                onPick(d)
-              }}
-            >
-              <Icon name="clock" /> {basename(d)}
-            </div>
-          ))}
+          <div className="wdrecent-list">
+            {recent.map((d) => (
+              <div key={d} className="wdrecent-row">
+                <button
+                  type="button"
+                  className="mitem wdrecent-pick"
+                  title={d}
+                  onClick={() => {
+                    setOpen(false)
+                    onPick(d)
+                  }}
+                >
+                  <Icon name="clock" />
+                  <span>{basename(d)}</span>
+                </button>
+                <button
+                  type="button"
+                  className="wdrecent-remove"
+                  title="Remove from recent folders"
+                  aria-label={`Remove ${d} from recent folders`}
+                  onClick={() => onRemove(d)}
+                >
+                  <Icon name="x" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

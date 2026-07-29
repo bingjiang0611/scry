@@ -47,6 +47,7 @@ const api = {
   detect: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detect'),
   providerDescriptors: (): Promise<ProviderDescriptor[]> => ipcRenderer.invoke('agent:providerDescriptors'),
   recentFolders: (): Promise<string[]> => ipcRenderer.invoke('agent:recentFolders'),
+  removeRecentFolder: (dir: string): Promise<string[]> => ipcRenderer.invoke('agent:removeRecentFolder', dir),
   chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:chooseFolder'),
   clipboardImage: (): Promise<AgentInputAttachment | null> => ipcRenderer.invoke('agent:clipboardImage'),
   setCwd: (dir: string): Promise<string> => ipcRenderer.invoke('agent:setCwd', dir),

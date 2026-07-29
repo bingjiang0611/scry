@@ -965,6 +965,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         onInput={() => {}}
         onChooseFolder={() => {}}
         onPickRecent={() => {}}
+        onRemoveRecent={() => {}}
         onRetrySlash={() => {}}
         onPickSlash={() => {}}
         onSlashSel={() => {}}
@@ -1018,6 +1019,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         onInput={() => {}}
         onChooseFolder={() => {}}
         onPickRecent={() => {}}
+        onRemoveRecent={() => {}}
         onRetrySlash={() => {}}
         onPickSlash={() => {}}
         onSlashSel={() => {}}
@@ -1066,6 +1068,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         onInput={() => {}}
         onChooseFolder={() => {}}
         onPickRecent={() => {}}
+        onRemoveRecent={() => {}}
         onRetrySlash={() => {}}
         onPickSlash={() => {}}
         onSlashSel={() => {}}

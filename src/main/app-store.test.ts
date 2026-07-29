@@ -19,6 +19,19 @@ describe('app-store', () => {
     }
   })
 
+  it('recent folders 可以只移除历史记录', () => {
+    const dir = tempDir()
+    try {
+      const store = createRecentFoldersStore(dir)
+      store.push('/repo-a')
+      store.push('/repo-b')
+      expect(store.remove('/repo-a')).toEqual(['/repo-b'])
+      expect(store.load()).toEqual(['/repo-b'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('app sessions 只按 app 自己记录的 cwd 分组', () => {
     const dir = tempDir()
     try {

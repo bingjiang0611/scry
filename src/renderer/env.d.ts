@@ -72,6 +72,7 @@ declare global {
       detect(): Promise<DetectedAgent[]>
       providerDescriptors(): Promise<ProviderDescriptor[]>
       recentFolders(): Promise<string[]>
+      removeRecentFolder(dir: string): Promise<string[]>
       chooseFolder(): Promise<string | null>
       clipboardImage(): Promise<AgentInputAttachment | null>
       setCwd(dir: string): Promise<string>

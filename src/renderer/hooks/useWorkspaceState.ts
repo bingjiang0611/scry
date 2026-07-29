@@ -17,6 +17,10 @@ export function useWorkspaceState() {
     window.scry.recentFolders().then(setRecent)
   }, [])
 
+  const removeRecentFolder = useCallback(async (dir: string): Promise<void> => {
+    setRecent(await window.scry.removeRecentFolder(dir))
+  }, [])
+
   const chooseFolder = useCallback(async (): Promise<string | null> => {
     const dir = await window.scry.chooseFolder()
     if (dir) {
@@ -67,6 +71,7 @@ export function useWorkspaceState() {
     hydrated,
     loadProjects,
     refreshRecent,
+    removeRecentFolder,
     chooseFolder,
     removeSessionFromProjects
   }

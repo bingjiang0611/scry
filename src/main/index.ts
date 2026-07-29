@@ -334,6 +334,7 @@ ipcMain.handle('agent:detect', async () => {
 ipcMain.handle('agent:providerDescriptors', () => providerRegistry.describe())
 
 ipcMain.handle('agent:recentFolders', () => recentStore().load())
+ipcMain.handle('agent:removeRecentFolder', (_event, dir: string) => recentStore().remove(dir))
 
 ipcMain.handle('agent:chooseFolder', async () => {
   const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
