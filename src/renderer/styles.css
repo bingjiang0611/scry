@@ -2252,19 +2252,6 @@ body.pane-resizing * {
   gap: 8px;
   margin-top: 8px;
 }
-.plus {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: transparent;
-  border: 1px solid var(--border2);
-  color: var(--dim);
-  font-size: 17px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
 .send {
   background: var(--accent);
   color: var(--bg);
@@ -7877,7 +7864,6 @@ textarea:focus-visible,
     color: var(--fg);
   }
 
-  .plus:hover,
   .modal-x:hover,
   .modal-refresh:hover {
     color: var(--fg);
