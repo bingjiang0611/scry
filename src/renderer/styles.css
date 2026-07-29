@@ -5477,14 +5477,35 @@ button.turn-timing-call {
 .tool-row .kindtag.mcp { background: var(--mcp); }
 .tool-row .kindtag.agent { background: var(--agent); }
 .tool-row .arg {
+  flex: 1 1 0;
+  min-width: 0;
   font: 12px/1 var(--font-mono); color: var(--dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 460px;
 }
-.tool-row .meta { margin-left: auto; display: flex; align-items: center; gap: 8px; font: 11px/1 var(--font-mono); color: var(--dim2); }
-.tool-row .meta .dur { color: var(--dim2); }
-.tool-row .meta .tok { color: var(--dim2); }
+.tool-row .meta {
+  flex: 0 0 200px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 11px/1 var(--font-mono);
+  color: var(--dim2);
+}
+.tool-row .meta .dur {
+  flex: 0 0 6ch;
+  color: var(--dim2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tool-row .meta .tok {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tool-row .meta .bar {
-  width: 54px;
+  flex: 0 0 54px;
   height: 4px;
   border-radius: 999px;
   overflow: hidden;
