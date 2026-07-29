@@ -298,6 +298,45 @@ describe('Qoder provider adapter', () => {
     }))
   })
 
+  it('promotes the Qoder SDK hook name to its runtime command', async () => {
+    const command = '"${QODER_PLUGIN_ROOT}/bin/qodersec-launch.cmd" ensure-deps --hook-event SessionStart'
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'system',
+          subtype: 'hook_response',
+          hook_id: 'hook-1',
+          hook_name: command,
+          hook_event: 'SessionStart',
+          outcome: 'error',
+          exit_code: 1,
+          stdout: '',
+          stderr: 'dependency failed',
+          output: 'dependency failed'
+        }
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const events: TraceEvent[] = []
+
+    await createQoderAdapter().run({
+      runId: 'run-hook-command',
+      prompt: 'work',
+      attachments: [],
+      emit: (event) => events.push(event)
+    }).promise
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'hook',
+      stage: 'hook_response',
+      hookName: command,
+      hookCommand: command,
+      hookOutcome: 'error',
+      runtimeMetadata: expect.objectContaining({ source: 'qoder_sdk' })
+    }))
+  })
+
   it('parses every same-name Qoder hook script from the current process log', () => {
     const log = [
       '2026-07-11T11:24:25.363+08:00 INFO  [session=s1 turn=t1 tool=tool1] hook.started hook_name="PreToolUse:Skill" hook_event_name="PreToolUse" source="project" hook_index=1 display_text="project-hook"',

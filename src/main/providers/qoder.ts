@@ -175,6 +175,13 @@ function qoderMcpSnapshot(statuses: McpServerStatus[]): McpSnapshot {
 }
 
 function qoderTrace(event: TraceEvent): TraceEvent {
+  if (event.kind === 'hook') {
+    return {
+      ...event,
+      hookCommand: event.hookCommand ?? event.hookName,
+      runtimeMetadata: { ...(event.runtimeMetadata ?? {}), source: 'qoder_sdk' }
+    }
+  }
   if (event.kind !== 'harness' || event.stage !== 'result') return event
   const reportedTokens = [event.tokensIn, event.tokensOut, event.cacheReadTokens, event.cacheCreationTokens, event.reasoningTokens]
   const reportedZeroUsage = reportedTokens.some((value) => value != null) && reportedTokens.every((value) => value == null || value === 0)
