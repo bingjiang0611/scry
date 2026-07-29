@@ -2,9 +2,9 @@
 // 供 app 的 CLI 选择器（参考 open-design 的 Local CLI 下拉）。
 
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join, posix, win32 } from 'node:path'
 
 export const QODER_NODE_BIN = `${homedir()}/.nvm/versions/node/v22.22.1/bin`
 export const QODER_NPM_BIN = `${QODER_NODE_BIN}/qodercli`
@@ -46,6 +46,7 @@ async function shellPathAsync(): Promise<string> {
 // 清掉嵌套会话污染（CLAUDECODE 等）。缓存一次。
 let shellEnvCache: Record<string, string> | null = null
 let shellEnvPromise: Promise<Record<string, string>> | null = null
+const SHELL_ENV_TIMEOUT_MS = 15_000
 
 function fallbackShellEnv(): Record<string, string> {
   return sanitizeNestedAgentEnv({
@@ -58,7 +59,7 @@ export function warmShellEnv(): Promise<Record<string, string>> {
   if (shellEnvCache) return Promise.resolve(shellEnvCache)
   if (shellEnvPromise) return shellEnvPromise
   const shell = process.env.SHELL || '/bin/zsh'
-  shellEnvPromise = execFileText(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: 2500 }).then((raw) => {
+  shellEnvPromise = execFileText(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: SHELL_ENV_TIMEOUT_MS }).then((raw) => {
     const out = fallbackShellEnv()
     const s = raw.indexOf('__AS_ENV_S__')
     const e = raw.indexOf('__AS_ENV_E__')
@@ -110,13 +111,45 @@ function nvmBins(): string[] {
   }
 }
 
-function executableOnProcessPath(bin: string): string | undefined {
-  for (const dir of (process.env.PATH ?? '').split(':')) {
-    if (!dir) continue
-    const path = join(dir, bin)
-    if (existsSync(path)) return path
+function runnableFile(path: string, platform: NodeJS.Platform): boolean {
+  try {
+    const file = statSync(path)
+    return file.isFile() && (platform === 'win32' || (file.mode & 0o111) !== 0)
+  } catch {
+    return false
+  }
+}
+
+export function resolveCommandOnPath(
+  command: string,
+  pathValue: string,
+  options: {
+    platform?: NodeJS.Platform
+    pathExt?: string
+    isRunnable?: (path: string) => boolean
+  } = {}
+): string | undefined {
+  const platform = options.platform ?? process.platform
+  const pathApi = platform === 'win32' ? win32 : posix
+  const extensions =
+    platform === 'win32' && !pathApi.extname(command)
+      ? (options.pathExt ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+      : ['']
+  const names = platform === 'win32' ? [command, ...extensions.map((extension) => `${command}${extension}`)] : [command]
+  const isRunnable = options.isRunnable ?? ((path: string) => runnableFile(path, platform))
+  for (const rawDir of pathValue.split(pathApi.delimiter)) {
+    const dir = rawDir.replace(/^"(.*)"$/, '$1')
+    if (!dir || !pathApi.isAbsolute(dir)) continue
+    for (const name of names) {
+      const path = pathApi.join(dir, name)
+      if (isRunnable(path)) return path
+    }
   }
   return undefined
+}
+
+function executableOnProcessPath(bin: string): string | undefined {
+  return resolveCommandOnPath(bin, process.env.PATH ?? '')
 }
 
 function firstExisting(paths: Array<string | undefined>): string | undefined {
@@ -397,8 +430,12 @@ export function resolveRuntimeCliBin(agentId: 'codex' | 'qoder' | 'opencode'): s
 }
 
 export function runtimeCliEnv(base: Record<string, string> = shellEnv()): Record<string, string> {
+  const originalPath = base.PATH ?? process.env.PATH ?? ''
+  const configuredScry = base.SCRY_CLI_PATH?.trim()
+  const scryCliPath = configuredScry || resolveCommandOnPath('scry', originalPath)
   return sanitizeNestedAgentEnv({
     ...base,
-    PATH: [QODER_NODE_BIN, base.PATH ?? process.env.PATH ?? ''].filter(Boolean).join(':')
+    ...(scryCliPath ? { SCRY_CLI_PATH: scryCliPath } : {}),
+    PATH: [QODER_NODE_BIN, base.PATH ?? process.env.PATH ?? ''].filter(Boolean).join(delimiter)
   })
 }

@@ -65,8 +65,8 @@ npm run build
 `@ali/scry-turn-recorder` 与 Electron App 共用 turn record、Trace 聚合和 Git Diff Core，但不依赖 Electron、SQLite 或 Provider SDK。它只在本地写 `.scry/`：
 
 ```bash
-npm run pack:cli
-npm install -g ./ali-scry-turn-recorder-0.2.0.tgz
+npm run build:cli
+npm install -g ./packages/turn-recorder-cli
 scry doctor --workspace /path/to/workspace
 ```
 
