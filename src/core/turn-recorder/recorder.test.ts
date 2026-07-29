@@ -316,6 +316,40 @@ describe('lifecycle/transcript merge', () => {
 
     expect(mergeTurnTraceEvents(lifecycle, []).map((item) => item.id)).toEqual(['start-1', 'result-1'])
   })
+
+  it('完整 transcript 使用不同 call id 时仍压掉 lifecycle 的同轮调用', () => {
+    const event = (overrides: Partial<TraceEvent>): TraceEvent => ({ id: 'id', ts: '2026-01-01T00:00:00Z', runId: 'r', kind: 'tool', stage: 'tool:Bash', ...overrides })
+    const lifecycle = [
+      event({ id: 'life-start', toolUseId: 'exec-1', tool: 'Bash' }),
+      event({ id: 'life-result', stage: 'tool_result', toolUseId: 'exec-1', tool: 'Bash' })
+    ]
+    const transcript = [
+      event({ id: 'rollout-start', toolUseId: 'call_1', tool: 'Bash' }),
+      event({ id: 'rollout-result', stage: 'tool_result', toolUseId: 'call_1', tool: 'Bash' })
+    ]
+
+    expect(mergeTurnTraceEvents(lifecycle, transcript).map((item) => item.id)).toEqual([
+      'rollout-start',
+      'rollout-result'
+    ])
+  })
+
+  it('transcript 尚有异步调用未完成时保留 lifecycle 尾部证据', () => {
+    const event = (overrides: Partial<TraceEvent>): TraceEvent => ({ id: 'id', ts: '2026-01-01T00:00:00Z', runId: 'r', kind: 'tool', stage: 'tool:Bash', ...overrides })
+    const lifecycle = [
+      event({ id: 'life-start', toolUseId: 'exec-tail', tool: 'Bash' }),
+      event({ id: 'life-result', stage: 'tool_result', toolUseId: 'exec-tail', tool: 'Bash' })
+    ]
+    const transcript = [
+      event({ id: 'rollout-start', toolUseId: 'call_pending', tool: 'Bash' })
+    ]
+
+    expect(mergeTurnTraceEvents(lifecycle, transcript, false).map((item) => item.id)).toEqual([
+      'life-start',
+      'life-result',
+      'rollout-start'
+    ])
+  })
 })
 
 describe('Codex rollout recorder evidence', () => {
@@ -506,6 +540,237 @@ describe('Codex rollout recorder evidence', () => {
         reasoningTokens: 3
       }
     })
+  })
+
+  it('真实 Stop 早于 task_complete 时按完整 rollout 去重，并恢复 namespace、逐项错误、skill 与 usage', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'early-stop-rollout.jsonl')
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'early-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'inspect' } },
+      {
+        timestamp: '2026-07-19T12:00:00.100Z',
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'call_exec',
+          input: `const calls = [
+  ["mcporter call coop.query --args '{}'", "mcp"],
+  ["sed -n '1,20p' /opt/codex/plugins/chrome/skills/control-chrome/SKILL.md", "skill"]
+];
+const rs = await Promise.all(calls.map(([cmd]) => tools.exec_command({ cmd })));
+rs.forEach((r, i) => text(\`RESULT \${i + 1}\\n\${JSON.stringify(r)}\`));`
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.200Z',
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call_output',
+          call_id: 'call_exec',
+          output: [
+            { type: 'input_text', text: 'RESULT 1\n{"exit_code":0,"output":"ok"}' },
+            { type: 'input_text', text: 'RESULT 2\n{"exit_code":2,"output":"missing"}' }
+          ]
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.300Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'js',
+          namespace: 'mcp__node_repl',
+          call_id: 'call_js',
+          arguments: '{"code":"nodeRepl.write(true)"}'
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.400Z',
+        type: 'response_item',
+        payload: { type: 'function_call_output', call_id: 'call_js', output: 'true' }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.500Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 250,
+              cached_input_tokens: 200,
+              cache_write_input_tokens: 0,
+              output_tokens: 25,
+              reasoning_output_tokens: 5
+            },
+            last_token_usage: {
+              input_tokens: 250,
+              cached_input_tokens: 200,
+              cache_write_input_tokens: 0,
+              output_tokens: 25,
+              reasoning_output_tokens: 5
+            }
+          }
+        }
+      }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('early-session', { prompt: 'inspect', turn_id: 'early-turn', rollout_path: rollout })
+    })
+    for (const [index, timestamp] of ['2026-07-19T12:00:00.110Z', '2026-07-19T12:00:00.120Z', '2026-07-19T12:00:00.310Z'].entries()) {
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'PreToolUse:Bash',
+        workspace: root,
+        payload: payload('early-session', {
+          timestamp,
+          turn_id: 'early-turn',
+          tool_name: 'Bash',
+          tool_use_id: `exec-${index + 1}`,
+          tool_input: {}
+        })
+      })
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'PostToolUse:Bash',
+        workspace: root,
+        payload: payload('early-session', {
+          timestamp,
+          turn_id: 'early-turn',
+          tool_name: 'Bash',
+          tool_use_id: `exec-${index + 1}`,
+          tool_response: 'ok'
+        })
+      })
+    }
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('early-session', {
+        turn_id: 'early-turn',
+        rollout_path: rollout,
+        timestamp: '2026-07-19T12:00:00.600Z'
+      })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ name: 'Bash', status: 'failed' })
+    ])
+    expect(record.mcps.value).toEqual([
+      expect.objectContaining({ mcp: expect.objectContaining({ server: 'coop', action: 'query' }) }),
+      expect.objectContaining({ mcp: expect.objectContaining({ server: 'node_repl', action: 'js' }) })
+    ])
+    expect(record.skills.value).toEqual([
+      expect.objectContaining({ name: 'control-chrome' })
+    ])
+    expect(record.errors.value).toHaveLength(1)
+    expect(record.usage.value).toMatchObject({
+      inputTokens: 250,
+      outputTokens: 25,
+      cacheReadTokens: 200,
+      reasoningTokens: 5
+    })
+  })
+
+  it('把异步 code-mode 的 wait 输出关联回原始逻辑调用', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'async-code-mode-rollout.jsonl')
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'async-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'inspect async' } },
+      {
+        timestamp: '2026-07-19T12:00:00.100Z',
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'call_exec',
+          input: `const cmds = ["printf ok", "jq broken"];
+const rs = await Promise.all(cmds.map(cmd => tools.exec_command({ cmd })));
+rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.200Z',
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call_output',
+          call_id: 'call_exec',
+          output: 'Script running with cell ID 44\nWall time 11.0 seconds\nOutput:\n'
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.300Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'wait',
+          call_id: 'call_wait',
+          arguments: '{"cell_id":"44","yield_time_ms":30000}'
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.400Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call_output',
+          call_id: 'call_wait',
+          output: [
+            { type: 'input_text', text: 'Script completed\nWall time 0.0 seconds\nOutput:\n' },
+            { type: 'input_text', text: 'R1\nok' },
+            { type: 'input_text', text: 'R2\njq: error (at input.json:1): broken query' }
+          ]
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.500Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 20,
+              cached_input_tokens: 10,
+              cache_write_input_tokens: 0,
+              output_tokens: 5,
+              reasoning_output_tokens: 1
+            }
+          }
+        }
+      },
+      { timestamp: '2026-07-19T12:00:00.600Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'async-turn' } }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('async-session', { prompt: 'inspect async', turn_id: 'async-turn', rollout_path: rollout })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('async-session', { turn_id: 'async-turn', rollout_path: rollout })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ status: 'success', outputSummary: 'ok' }),
+      expect.objectContaining({ status: 'failed', outputSummary: 'jq: error (at input.json:1): broken query' })
+    ])
+    expect(record.errors.value).toEqual([
+      expect.objectContaining({ message: 'jq: error (at input.json:1): broken query' })
+    ])
   })
 
   it('超过 2 GiB 的稀疏 rollout 只读取当前轮窗口，不整体载入文件', async () => {
@@ -763,8 +1028,7 @@ describe('Codex rollout recorder evidence', () => {
       line('2026-07-19T12:00:00.100Z', 'event_msg', token(100, 10, 80)),
       line('2026-07-19T12:00:01.000Z', 'event_msg', { type: 'task_complete', turn_id: 't1' }),
       line('2026-07-19T12:00:02.000Z', 'event_msg', { type: 'task_started', turn_id: 't2' }),
-      line('2026-07-19T12:00:02.100Z', 'event_msg', token(250, 25, 200)),
-      line('2026-07-19T12:00:03.000Z', 'event_msg', { type: 'task_complete', turn_id: 't2' })
+      line('2026-07-19T12:00:02.100Z', 'event_msg', token(250, 25, 200))
     ]
     await writeFile(rollout, `${lines.map((item) => JSON.stringify(item)).join('\n')}\n`)
 
