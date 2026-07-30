@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import { isSupportedImageMimeType, runtimeProviderForAgentId, type AgentInputAttachment, type RuntimeProvider } from '@shared/runtime'
 import type { ProviderId, SessionProviderId } from '@shared/provider'
+import type { WorkspaceEntry } from '@shared/workspace'
 import { basename, relTime } from './format'
 import { AppShell } from './components/AppShell'
 import { Sidebar } from './components/Sidebar'
@@ -17,6 +18,7 @@ import { ViewChrome, type AppView } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
 import { SkillsModal, McpModal } from './components/Modals'
 import { TurnDiffReviewPanel, type TurnDiffReview } from './components/TurnDiffReviewPanel'
+import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspacePanel'
 import { firstSessionInProject } from './session-selection'
 import type { ParsedTurn, ProjectMeta } from './env'
 import { useResizablePane } from './hooks/useResizablePane'
@@ -35,6 +37,8 @@ const PANEL_MIN = 280
 const PANEL_MAX = 560
 const REVIEW_PANEL_MIN = 420
 const REVIEW_PANEL_MAX = 960
+const WORKSPACE_PANEL_MIN = 420
+const WORKSPACE_PANEL_MAX = 900
 const CHAT_BOTTOM_STICKY_PX = 32
 
 interface ChatScrollBox {
@@ -76,6 +80,12 @@ export function scrollChatTargetIntoView(
 ): void {
   const top = Math.max(0, chat.scrollTop + target.getBoundingClientRect().top - chat.getBoundingClientRect().top - 16)
   chat.scrollTo({ top, behavior })
+}
+
+export function appendWorkspaceReference(input: string, token: string): string {
+  const trimmed = input.trimEnd()
+  if (` ${trimmed} `.includes(` ${token} `)) return input
+  return `${trimmed}${trimmed ? ' ' : ''}${token} `
 }
 
 function latestSessionRuntimeProvider(turns: Array<{ items: TraceEvent[] }>): RuntimeProvider | undefined {
@@ -307,9 +317,25 @@ export function App() {
     activeSessionId,
     setActiveSessionId,
     loadProjects,
-    chooseFolder,
+    chooseFolder: chooseFolderRaw,
     removeRecentFolder
   } = workspace
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [workspaceDirty, setWorkspaceDirty] = useState(false)
+  const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
+  const confirmWorkspaceTransition = useCallback(
+    (): boolean => !workspaceDirty || window.confirm('当前文件有未保存修改。放弃修改并继续吗？'),
+    [workspaceDirty]
+  )
+  const chooseFolder = useCallback(async (): Promise<string | null> => {
+    if (!confirmWorkspaceTransition()) return null
+    const dir = await chooseFolderRaw()
+    if (dir) {
+      setWorkspaceOpen(false)
+      setWorkspaceDirty(false)
+    }
+    return dir
+  }, [chooseFolderRaw, confirmWorkspaceTransition])
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const terminalRunIdsRef = useRef(new Set<string>())
   const markRunStarted = useCallback((runId: string): void => {
@@ -345,6 +371,7 @@ export function App() {
   const session = useAgentSession({
     onTurnDone: (event) => {
       markRunFinished(event.runId)
+      setWorkspaceRefreshKey((current) => current + 1)
       applyTurnDoneEffects(event, {
         activeSessionId: activeSessionIdRef.current,
         setActiveSessionId: selectSessionId,
@@ -354,6 +381,7 @@ export function App() {
     },
     onError: (event) => {
       markRunFinished(event.runId)
+      setWorkspaceRefreshKey((current) => current + 1)
       integrations.loadGitDiff()
       loadProjects()
     }
@@ -378,6 +406,13 @@ export function App() {
     defaultWidth: 720,
     min: REVIEW_PANEL_MIN,
     max: REVIEW_PANEL_MAX,
+    side: 'right'
+  })
+  const workspacePane = useResizablePane({
+    id: 'workspace-panel',
+    defaultWidth: 620,
+    min: WORKSPACE_PANEL_MIN,
+    max: WORKSPACE_PANEL_MAX,
     side: 'right'
   })
   const [turnDiffReview, setTurnDiffReview] = useState<TurnDiffReview | null>(null)
@@ -658,6 +693,7 @@ export function App() {
       )
       return
     }
+    if (dir !== cwd && !confirmWorkspaceTransition()) return
     await window.scry.focusRun(null)
     await window.scry.setCwd(dir)
     setCwd(dir)
@@ -699,6 +735,7 @@ export function App() {
     knownRunId?: string
   ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
+    if (projectCwd !== cwd && !confirmWorkspaceTransition()) return
     const switchingSession = activeSessionIdRef.current !== sessionId
     let runId = knownRunId
     if (!runId) {
@@ -759,24 +796,32 @@ export function App() {
     if (cached.length === 0) integrations.pullMcpLive()
   }
 
-  const activeRightPane = turnDiffReview ? reviewPane : overviewPane
+  const activeRightPane = turnDiffReview ? reviewPane : workspaceOpen ? workspacePane : overviewPane
   const appStyle: AppStyle = {
     '--sidebar-w': `${sidebarPane.visibleWidth}px`,
     '--overview-panel-w': `${activeRightPane.visibleWidth}px`
   }
-  const rightPanelOpen = view === 'chat' && (showPanel || turnDiffReview != null)
+  const rightPanelOpen = view === 'chat' && (showPanel || workspaceOpen || turnDiffReview != null)
   const panelVisible = rightPanelOpen && !activeRightPane.collapsed
   const panelRuntimeProvider = useMemo(
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
     [integrations.selectedId, session.turns]
   )
   useEffect(() => {
-    if (rightPanelOpen && !turnDiffReview) void integrations.loadMcpLive()
-  }, [integrations.loadMcpLive, rightPanelOpen, turnDiffReview])
+    if (rightPanelOpen && showPanel && !workspaceOpen && !turnDiffReview) void integrations.loadMcpLive()
+  }, [integrations.loadMcpLive, rightPanelOpen, showPanel, turnDiffReview, workspaceOpen])
   const toggleOverviewPanel = (): void => {
     if (view !== 'chat') return
     if (turnDiffReview) {
       setTurnDiffReview(null)
+      return
+    }
+    if (workspaceOpen) {
+      if (!confirmWorkspaceTransition()) return
+      setWorkspaceOpen(false)
+      setWorkspaceDirty(false)
+      overviewPane.restore()
+      setShowPanel(true)
       return
     }
     if (!showPanel || overviewPane.collapsed) {
@@ -786,12 +831,36 @@ export function App() {
     }
     setShowPanel(false)
   }
+  const toggleWorkspacePanel = (): void => {
+    if (view !== 'chat' || !cwd) return
+    if (!workspaceOpen || workspacePane.collapsed) {
+      if (turnDiffReview && !confirmWorkspaceTransition()) return
+      setTurnDiffReview(null)
+      workspacePane.restore()
+      setWorkspaceOpen(true)
+      return
+    }
+    if (!confirmWorkspaceTransition()) return
+    setWorkspaceOpen(false)
+    setWorkspaceDirty(false)
+  }
+  const changeView = (next: AppView): void => {
+    if (next !== 'chat' && workspaceOpen) {
+      if (!confirmWorkspaceTransition()) return
+      setWorkspaceOpen(false)
+      setWorkspaceDirty(false)
+    }
+    setView(next)
+  }
   const openTurnDiffReview = useCallback(
     (turn: { runId: string; userText: string }, turnDiff: TurnDiffSnapshot, initialPath?: string): void => {
+      if (workspaceOpen && !confirmWorkspaceTransition()) return
+      setWorkspaceOpen(false)
+      setWorkspaceDirty(false)
       reviewPane.restore()
       setTurnDiffReview({ runId: turn.runId, userText: turn.userText, turnDiff, initialPath })
     },
-    [reviewPane.restore]
+    [confirmWorkspaceTransition, reviewPane.restore, workspaceOpen]
   )
   useEffect(() => {
     setTurnDiffReview(null)
@@ -820,6 +889,10 @@ export function App() {
       return next
     })
   }
+  const addWorkspaceReference = useCallback((entry: WorkspaceEntry): void => {
+    setInput((current) => appendWorkspaceReference(current, workspaceReferenceToken(entry)))
+    window.setTimeout(() => taRef.current?.focus(), 0)
+  }, [])
   const stopRun = async (): Promise<void> => {
     setQueuedPrompts([])
     await session.stopRun()
@@ -828,7 +901,7 @@ export function App() {
   return (
     <AppShell
       style={appStyle}
-      rightPanelMode={turnDiffReview ? 'review' : 'overview'}
+      rightPanelMode={turnDiffReview ? 'review' : workspaceOpen ? 'workspace' : 'overview'}
       sidebar={
         <Sidebar
           id="sidebar-pane"
@@ -845,9 +918,9 @@ export function App() {
           onSkills={openSkills}
           onMcp={openMcp}
           onDelete={deleteSession}
-          onDiagnostics={() => setView('diagnostics')}
+          onDiagnostics={() => changeView('diagnostics')}
           diagnosticsActive={view === 'diagnostics'}
-          onAnalytics={() => setView('analytics')}
+          onAnalytics={() => changeView('analytics')}
           analyticsActive={view === 'analytics'}
         />
       }
@@ -892,10 +965,12 @@ export function App() {
           view={view}
           agent={integrations.selectedAgent}
           agentScanning={integrations.agentsScanning}
-          showPanel={panelVisible}
+          showPanel={panelVisible && !workspaceOpen && !turnDiffReview}
           canTogglePanel={view === 'chat'}
-          onView={setView}
+          showWorkspace={workspaceOpen && panelVisible}
+          onView={changeView}
           onTogglePanel={toggleOverviewPanel}
+          onToggleWorkspace={toggleWorkspacePanel}
         />
 
         {(!cwd || view !== 'chat') && (
@@ -1087,8 +1162,8 @@ export function App() {
             className="panel-resizer"
             label="调整右侧面板宽度"
             controls="overview-pane"
-            min={turnDiffReview ? REVIEW_PANEL_MIN : PANEL_MIN}
-            max={turnDiffReview ? REVIEW_PANEL_MAX : PANEL_MAX}
+            min={turnDiffReview ? REVIEW_PANEL_MIN : workspaceOpen ? WORKSPACE_PANEL_MIN : PANEL_MIN}
+            max={turnDiffReview ? REVIEW_PANEL_MAX : workspaceOpen ? WORKSPACE_PANEL_MAX : PANEL_MAX}
             value={activeRightPane.width}
             collapsed={activeRightPane.collapsed}
             active={activeRightPane.resizing}
@@ -1100,6 +1175,17 @@ export function App() {
       rightPanel={
         rightPanelOpen && turnDiffReview ? (
           <TurnDiffReviewPanel review={turnDiffReview} onClose={() => setTurnDiffReview(null)} />
+        ) : rightPanelOpen && workspaceOpen && cwd ? (
+          <WorkspacePanel
+            cwd={cwd}
+            refreshKey={workspaceRefreshKey}
+            onDirtyChange={setWorkspaceDirty}
+            onAddReference={addWorkspaceReference}
+            onClose={() => {
+              setWorkspaceOpen(false)
+              setWorkspaceDirty(false)
+            }}
+          />
         ) : rightPanelOpen ? (
           <OverviewPanel
             turns={session.turns}

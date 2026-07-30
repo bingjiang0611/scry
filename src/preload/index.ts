@@ -21,6 +21,16 @@ import type {
 } from '../shared/provider'
 import type { DetectedAgent } from '../main/claude-locate'
 import type { ParsedTurn } from '../main/normalize'
+import type {
+  WorkspaceCreateRequest,
+  WorkspaceEntry,
+  WorkspaceFileSnapshot,
+  WorkspaceListRequest,
+  WorkspaceListResult,
+  WorkspacePathRequest,
+  WorkspaceRenameRequest,
+  WorkspaceWriteRequest
+} from '../shared/workspace'
 
 export interface SessionMeta {
   sessionId: string
@@ -50,6 +60,12 @@ const api = {
   removeRecentFolder: (dir: string): Promise<string[]> => ipcRenderer.invoke('agent:removeRecentFolder', dir),
   chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:chooseFolder'),
   clipboardImage: (): Promise<AgentInputAttachment | null> => ipcRenderer.invoke('agent:clipboardImage'),
+  workspaceList: (request: WorkspaceListRequest): Promise<WorkspaceListResult> => ipcRenderer.invoke('workspace:list', request),
+  workspaceRead: (request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:read', request),
+  workspaceWrite: (request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:write', request),
+  workspaceCreate: (request: WorkspaceCreateRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:create', request),
+  workspaceRename: (request: WorkspaceRenameRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:rename', request),
+  workspaceTrash: (request: WorkspacePathRequest): Promise<true> => ipcRenderer.invoke('workspace:trash', request),
   setCwd: (dir: string): Promise<string> => ipcRenderer.invoke('agent:setCwd', dir),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   listSessions: (context: ProviderContext): Promise<SessionMeta[]> => ipcRenderer.invoke('agent:listSessions', context),
