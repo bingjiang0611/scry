@@ -80,6 +80,33 @@ describe('Qoder provider adapter', () => {
     expect(sdk.close).toHaveBeenCalledOnce()
   })
 
+  it('reads model efforts from the native Qoder catalog', async () => {
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getAvailableModels: vi.fn().mockResolvedValue([{
+        value: 'performance',
+        displayName: 'Performance',
+        description: 'fast',
+        isDefault: true,
+        isEnabled: true,
+        efforts: ['low', 'high'],
+        defaultEffort: 'high'
+      }]),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+    await expect(adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
+      state: 'ready',
+      data: {
+        models: [{
+          model: { id: 'performance' },
+          efforts: [{ id: 'low' }, { id: 'high', isDefault: true }]
+        }]
+      }
+    })
+    await adapter.dispose?.()
+  })
+
   it('deduplicates streamed text and treats impossible all-zero usage as unknown', async () => {
     const close = vi.fn().mockResolvedValue(undefined)
     sdk.query.mockReturnValue({
@@ -165,6 +192,30 @@ describe('Qoder provider adapter', () => {
       expect.any(AbortSignal)
     )
     await run.promise
+  })
+
+  it('passes Qoder model effort through model policy and uses auto review', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    await createQoderAdapter().run({
+      runId: 'run-controls',
+      prompt: 'work',
+      attachments: [],
+      model: { id: 'performance' },
+      effort: 'high',
+      permissionMode: 'auto_review',
+      emit: vi.fn()
+    }).promise
+    const options = sdk.query.mock.calls[0][0].options
+    expect(options.permissionMode).toBe('auto')
+    expect(options.allowDangerouslySkipPermissions).toBeUndefined()
+    expect(options.resolveModel()).toEqual({
+      model: 'performance',
+      parameters: { reasoningEffort: 'high' }
+    })
   })
 
   it('returns a non-interrupting Qoder denial when the user cancels a question', async () => {

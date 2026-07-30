@@ -24,4 +24,22 @@ describe('CodexAppServerClient', () => {
       client.close()
     }
   }, 15_000)
+
+  it('lets the selected run translate native server requests', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
+    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], requestTimeoutMs: 10_000 })
+    const off = client.onRequest((method, params) => {
+      if (method !== 'item/commandExecution/requestApproval') return undefined
+      expect(params).toMatchObject({ threadId: 'thread-1', command: 'pwd' })
+      return { decision: 'accept' }
+    })
+    try {
+      await expect(client.request('test/serverRequest')).resolves.toEqual({
+        approval: { decision: 'accept' }
+      })
+    } finally {
+      off()
+      client.close()
+    }
+  })
 })

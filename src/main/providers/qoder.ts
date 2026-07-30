@@ -4,11 +4,18 @@ import { readFile, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { capabilityReady, capabilityUnknown, type AccountSnapshot, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
-import { normalizeAgentQuestionRequest } from '../../shared/runtime'
+import {
+  agentPermissionDecision,
+  agentPermissionQuestion,
+  normalizeAgentQuestionRequest,
+  type AgentPermissionMode,
+  type AgentRunControlCatalog
+} from '../../shared/runtime'
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
+import { effortOption, permissionOptions } from './run-controls'
 
 interface Cached<T> {
   data: T
@@ -44,18 +51,21 @@ function qoderOptions(
   cwd: string | undefined,
   resume?: string,
   onPid?: (pid: number) => void,
-  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void
+  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
+  permissionMode: AgentPermissionMode = 'full_access'
 ): Record<string, unknown> {
   const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!executable) throw new Error('Qoder CLI 未找到')
+  const permissions = permissionMode === 'full_access'
+    ? { permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true }
+    : { permissionMode: permissionMode === 'auto_review' ? 'auto' : 'default' }
   return {
     auth: qodercliAuth(),
     cwd,
     resume,
     pathToQoderCLIExecutable: executable,
     env: runtimeCliEnv(),
-    permissionMode: 'bypassPermissions',
-    allowDangerouslySkipPermissions: true,
+    ...permissions,
     includePartialMessages: true,
     includeHookEvents: true,
     settingSources: ['user', 'project', 'local'],
@@ -227,6 +237,7 @@ export function createQoderAdapter(): ProviderAdapter {
   const skillCache = new Map<string, Cached<{ data: SkillMeta[]; total: number; included: number }>>()
   const commandCache = new Map<string, Cached<SlashCommand[]>>()
   const mcpCache = new Map<string, Cached<McpServerStatus[]>>()
+  const modelCache = new Map<string, Cached<AgentRunControlCatalog>>()
   const accountCache = new Map<string, Cached<{ usage: UsageInfo | null; account: AccountInfo }>>()
   let lastHookFallbackError: string | undefined
   let hookFallbackObserved = false
@@ -320,38 +331,81 @@ export function createQoderAdapter(): ProviderAdapter {
                 exitTimer = setTimeout(() => {
                   rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
                 }, 1000)
-              }
+              },
+              request.permissionMode
             ),
+            ...(request.model && !request.effort ? { model: request.model.id } : {}),
+            ...(request.model && request.effort
+              ? {
+                  resolveModel: () => ({
+                    model: request.model!.id,
+                    parameters: { reasoningEffort: request.effort }
+                  })
+                }
+              : {}),
             ...(request.requestUserInput
               ? {
                   canUseTool: async (
                     toolName: string,
                     input: Record<string, unknown>,
-                    permission: { signal: AbortSignal; toolUseID: string; agentID?: string }
+                    permission: {
+                      signal: AbortSignal
+                      toolUseID: string
+                      agentID?: string
+                      suggestions?: unknown[]
+                      title?: string
+                      description?: string
+                    }
                   ) => {
-                    if (toolName !== 'AskUserQuestion') return { behavior: 'allow' as const }
-                    const question = normalizeAgentQuestionRequest(
+                    if (toolName === 'AskUserQuestion') {
+                      const question = normalizeAgentQuestionRequest(
+                        request.runId,
+                        permission.toolUseID,
+                        input,
+                        permission.agentID
+                      )
+                      if (!question) {
+                        return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
+                      }
+                      const response = await request.requestUserInput!(question, permission.signal)
+                      if (response.behavior === 'cancelled') {
+                        return {
+                          behavior: 'deny' as const,
+                          message: '用户取消了提问',
+                          interrupt: false,
+                          decisionClassification: 'user_reject' as const
+                        }
+                      }
+                      return {
+                        behavior: 'allow' as const,
+                        updatedInput: { ...input, answers: response.answers },
+                        decisionClassification: 'user_temporary' as const
+                      }
+                    }
+                    if ((request.permissionMode ?? 'full_access') === 'full_access') return { behavior: 'allow' as const }
+                    const question = agentPermissionQuestion(
                       request.runId,
                       permission.toolUseID,
-                      input,
-                      permission.agentID
+                      permission.title ?? '权限请求',
+                      `允许 ${toolName} 执行这项操作吗？`,
+                      permission.description ?? JSON.stringify(input).slice(0, 1_200)
                     )
-                    if (!question) {
-                      return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
-                    }
                     const response = await request.requestUserInput!(question, permission.signal)
-                    if (response.behavior === 'cancelled') {
+                    const decision = agentPermissionDecision(question, response)
+                    if (decision === 'reject') {
                       return {
                         behavior: 'deny' as const,
-                        message: '用户取消了提问',
+                        message: '用户拒绝了操作',
                         interrupt: false,
                         decisionClassification: 'user_reject' as const
                       }
                     }
                     return {
                       behavior: 'allow' as const,
-                      updatedInput: { ...input, answers: response.answers },
-                      decisionClassification: 'user_temporary' as const
+                      ...(decision === 'session' && permission.suggestions?.length
+                        ? { updatedPermissions: permission.suggestions }
+                        : {}),
+                      decisionClassification: decision === 'session' ? 'user_permanent' as const : 'user_temporary' as const
                     }
                   }
                 }
@@ -526,6 +580,42 @@ export function createQoderAdapter(): ProviderAdapter {
           return capabilityReady(context, 'read', data, value.observedAt)
         } catch (error) {
           return capabilityUnknown<AccountSnapshot>(context, 'read', String((error as Error).message))
+        }
+      }
+    },
+    runControls: {
+      read: async (context) => {
+        try {
+          const key = context.cwd ?? ''
+          let value = modelCache.get(key)
+          if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
+            const models = await withControl(context, (q) => q.getAvailableModels({ fetchStrategy: 'live' }))
+            value = {
+              observedAt: Date.now(),
+              data: {
+                models: models
+                  .filter((model) => model.isEnabled !== false)
+                  .map((model) => ({
+                    model: { id: model.value },
+                    label: model.displayName,
+                    description: model.description,
+                    isDefault: model.isDefault,
+                    efforts: (model.efforts ?? []).map((effort) =>
+                      effortOption(effort, undefined, effort === model.defaultEffort)
+                    )
+                  })),
+                permissions: permissionOptions()
+              }
+            }
+            modelCache.set(key, value)
+          }
+          return capabilityReady(context, 'read', value.data, value.observedAt)
+        } catch (error) {
+          return {
+            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions() }),
+            state: 'degraded' as const,
+            reason: String((error as Error).message)
+          }
         }
       }
     },

@@ -29,12 +29,19 @@ type NotificationListener = (
   envelope: CodexNotificationEnvelope
 ) => void
 
+type ServerRequestListener = (
+  method: string,
+  params: unknown,
+  envelope: CodexNotificationEnvelope
+) => Promise<unknown> | unknown
+
 export class CodexAppServerClient {
   private process: ChildProcessWithoutNullStreams | null = null
   private startPromise: Promise<void> | null = null
   private nextId = 1
   private readonly pending = new Map<number | string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>()
   private readonly listeners = new Set<NotificationListener>()
+  private readonly requestListeners = new Set<ServerRequestListener>()
   private stderr = ''
 
   constructor(private readonly options: CodexAppServerOptions) {}
@@ -114,6 +121,11 @@ export class CodexAppServerClient {
     return () => this.listeners.delete(listener)
   }
 
+  onRequest(listener: ServerRequestListener): () => void {
+    this.requestListeners.add(listener)
+    return () => this.requestListeners.delete(listener)
+  }
+
   private handleLine(line: string): void {
     let message: JsonRpcMessage
     try {
@@ -131,7 +143,7 @@ export class CodexAppServerClient {
       return
     }
     if (message.method && message.id !== undefined) {
-      this.write({ id: message.id, error: { code: -32601, message: `Scry does not handle server request: ${message.method}` } })
+      void this.handleServerRequest(message)
       return
     }
     if (message.method) {
@@ -143,6 +155,27 @@ export class CodexAppServerClient {
       for (const listener of this.listeners) {
         listener(message.method, message.params, { emittedAtMs, receivedAtMs })
       }
+    }
+  }
+
+  private async handleServerRequest(message: JsonRpcMessage): Promise<void> {
+    const id = message.id
+    if (id === undefined || !message.method) return
+    const envelope = {
+      receivedAtMs: Date.now(),
+      emittedAtMs: typeof message.emittedAtMs === 'number' ? message.emittedAtMs : undefined
+    }
+    try {
+      for (const listener of this.requestListeners) {
+        const result = await listener(message.method, message.params, envelope)
+        if (result !== undefined) {
+          this.write({ id, result })
+          return
+        }
+      }
+      this.write({ id, error: { code: -32601, message: `Scry does not handle server request: ${message.method}` } })
+    } catch (error) {
+      this.write({ id, error: { code: -32000, message: String((error as Error).message) } })
     }
   }
 

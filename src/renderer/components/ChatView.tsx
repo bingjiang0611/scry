@@ -1,11 +1,18 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
-import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
+import type {
+  AgentModelRef,
+  AgentPermissionMode,
+  AgentQuestionRequest,
+  AgentQuestionResponse,
+  AgentRunControlCatalog,
+  AgentRunControls
+} from '@shared/runtime'
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
 import { AssistantTurn, UserMessage } from './ChatTurn'
-import { WorkdirPicker, CliPicker } from './Pickers'
+import { WorkdirPicker, CliPicker, RunControlSelect } from './Pickers'
 import { Icon } from './primitives/Icon'
 
 interface ChatViewProps {
@@ -18,6 +25,10 @@ interface ChatViewProps {
   agents: DetectedAgent[]
   selectedAgentId: string
   backend: 'local' | 'api'
+  runControls: AgentRunControls
+  runControlCatalog: AgentRunControlCatalog
+  runControlsLoading?: boolean
+  runControlsReason?: string | null
   input: string
   busy: boolean
   draftAttachments: DraftAttachment[]
@@ -49,6 +60,9 @@ interface ChatViewProps {
   onRemoveQueuedPrompt: (index: number) => void
   onSelectAgent: (agentId: string) => void
   onBackend: (backend: 'local' | 'api') => void
+  onRunModel: (model: AgentModelRef | undefined) => void
+  onRunEffort: (effort: string | undefined) => void
+  onPermissionMode: (mode: AgentPermissionMode) => void
   onRescan: () => void
 }
 
@@ -96,6 +110,10 @@ export function ChatView({
   agents,
   selectedAgentId,
   backend,
+  runControls,
+  runControlCatalog,
+  runControlsLoading = false,
+  runControlsReason = null,
   input,
   busy,
   draftAttachments,
@@ -127,11 +145,40 @@ export function ChatView({
   onRemoveQueuedPrompt,
   onSelectAgent,
   onBackend,
+  onRunModel,
+  onRunEffort,
+  onPermissionMode,
   onRescan
 }: ChatViewProps) {
   const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
+  const modelValue = runControls.model
+    ? JSON.stringify([runControls.model.providerId ?? null, runControls.model.id])
+    : ''
+  const selectedModel = runControlCatalog.models.find(
+    (option) => JSON.stringify([option.model.providerId ?? null, option.model.id]) === modelValue
+  )
+  const modelLabelCounts = runControlCatalog.models.reduce((counts, option) => {
+    counts.set(option.label, (counts.get(option.label) ?? 0) + 1)
+    return counts
+  }, new Map<string, number>())
+  const modelOptions = [
+    { value: '', label: runControlsLoading ? '读取模型…' : '自动模型', description: runControlsReason ?? '使用 Provider 默认模型' },
+    ...runControlCatalog.models.map((option) => ({
+      value: JSON.stringify([option.model.providerId ?? null, option.model.id]),
+      label: modelLabelCounts.get(option.label)! > 1 ? `${option.label} · ${option.model.id}` : option.label,
+      description: option.description
+    }))
+  ]
+  const effortOptions = [
+    { value: '', label: '默认 effort', description: '使用模型默认推理强度' },
+    ...(selectedModel?.efforts ?? []).map((option) => ({
+      value: option.id,
+      label: option.label,
+      description: option.description
+    }))
+  ]
 
   useEffect(() => {
     if (!slashOpen) return
@@ -171,6 +218,7 @@ export function ChatView({
       </div>
 
       <div className="composer">
+        <div className="composer-shell">
         <div className="composer-top">
           <WorkdirPicker
             cwd={cwd}
@@ -307,7 +355,41 @@ export function ChatView({
           }}
         />
         <div className="composer-bottom">
+          <RunControlSelect
+            ariaLabel="模型"
+            value={modelValue}
+            options={modelOptions}
+            disabled={busy}
+            loading={runControlsLoading}
+            onChange={(value) => {
+              const option = runControlCatalog.models.find(
+                (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
+              )
+              onRunModel(option?.model)
+            }}
+          />
+          {selectedModel && selectedModel.efforts.length > 0 && (
+            <RunControlSelect
+              ariaLabel="Effort"
+              value={runControls.effort ?? ''}
+              options={effortOptions}
+              disabled={busy}
+              onChange={(value) => onRunEffort(value || undefined)}
+            />
+          )}
           <div className="spacer" />
+          <button className="send" onClick={onSend} disabled={!input.trim() && draftAttachments.length === 0} title={busy ? '加入队列' : '发送'}>
+            <Icon name="send" />
+            <span className="send-label">{busy ? '排队' : '发送'}</span>
+          </button>
+          {busy && (
+            <button className="stop" onClick={onStop}>
+              <Icon name="square" /> 停止
+            </button>
+          )}
+        </div>
+        </div>
+        <div className="composer-meta">
           <CliPicker
             agents={agents}
             selectedId={selectedAgentId}
@@ -315,15 +397,20 @@ export function ChatView({
             onSelect={onSelectAgent}
             onBackend={onBackend}
             onRescan={onRescan}
+            disabled={busy}
           />
-          <button className="send" onClick={onSend} disabled={!input.trim() && draftAttachments.length === 0} title={busy ? '加入队列' : '发送'}>
-            <Icon name="send" /> {busy ? '排队' : '发送'}
-          </button>
-          {busy && (
-            <button className="stop" onClick={onStop}>
-              <Icon name="square" /> 停止
-            </button>
-          )}
+          <RunControlSelect
+            ariaLabel="权限"
+            value={runControls.permissionMode}
+            options={runControlCatalog.permissions.map((option) => ({
+              value: option.id,
+              label: option.label,
+              description: option.description
+            }))}
+            disabled={busy}
+            tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
+            onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
+          />
         </div>
       </div>
     </>

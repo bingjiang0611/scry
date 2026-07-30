@@ -9,7 +9,15 @@ import type {
   ProviderId,
   SkillMeta
 } from '../../shared/provider'
-import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, RuntimeProvider } from '../../shared/runtime'
+import type {
+  AgentInputAttachment,
+  AgentModelRef,
+  AgentPermissionMode,
+  AgentQuestionRequest,
+  AgentQuestionResponse,
+  AgentRunControlCatalog,
+  RuntimeProvider
+} from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
 import type { CodexHookInspection } from '../codex-hook-trust'
 
@@ -34,6 +42,9 @@ export interface ProviderRunRequest {
   cwd?: string
   resume?: string
   attachments: AgentInputAttachment[]
+  model?: AgentModelRef
+  effort?: string
+  permissionMode?: AgentPermissionMode
   bypassHookTrust?: boolean
   emit: (event: TraceEvent) => void
   onExternalSessionId?: (sessionId: string) => void
@@ -71,6 +82,10 @@ export interface HookTrustFacet {
   inspect(context: ProviderContext): Promise<CodexHookInspection>
 }
 
+export interface RunControlsFacet {
+  read(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>>
+}
+
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
@@ -81,5 +96,6 @@ export interface ProviderAdapter {
   readonly commands?: CommandsFacet
   readonly account?: AccountFacet
   readonly hookTrust?: HookTrustFacet
+  readonly runControls?: RunControlsFacet
   dispose?(): Promise<void> | void
 }

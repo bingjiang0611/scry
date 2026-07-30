@@ -145,7 +145,10 @@ const appSessionStore = () =>
   })
 const providerRegistry = new ProviderRegistry(
   createBuiltInProviderAdapters(homeDir, process.env.SCRY_PROVIDER_TRANSPORTS),
-  { disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS) }
+  {
+    disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS),
+    runControlsEnabled: process.env.SCRY_RUN_CONTROLS?.trim() !== '0'
+  }
 )
 const codexHookGrantStore = () => createCodexHookGrantStore(app.getPath('userData'))
 
@@ -541,6 +544,7 @@ ipcMain.handle('agent:mcpGuardScan', (_e, context: ProviderContext) => {
   return { ...context, mode: 'read', state: 'ready', data: scanMcp({ cwd: context.cwd, home: homeDir }), observedAt: Date.now() }
 })
 ipcMain.handle('agent:listCommands', (_e, context: ProviderContext) => providerRegistry.listCommands(context))
+ipcMain.handle('agent:runControls', (_e, context: ProviderContext) => providerRegistry.runControls(context))
 ipcMain.handle('agent:providerAccount', (_e, context: ProviderContext) => providerRegistry.account(context))
 
 // 单目录会话列表（当前工作目录）：只列 app 自己起过的会话
@@ -778,6 +782,18 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
     appendCoalescedTrace(runState.items, ev)
     if (runs.isFocused(runId)) queueTrace(ev) // 后台 run 继续归档，只把当前会话 trace 推给 UI。
   }
+  emit({
+    id: `c-${evSeq++}`,
+    ts: new Date().toISOString(),
+    runId,
+    kind: 'harness',
+    stage: 'runtime:controls',
+    input: {
+      model: request.model,
+      effort: request.effort,
+      permissionMode: request.permissionMode
+    }
+  })
   if (cwd) {
     if (resume) {
       // 续接同一原生 session 时也要把侧栏元数据的 runId 更新为本轮，否则切走再点回会拿到上一轮的 stale runId。
@@ -882,6 +898,9 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       cwd,
       resume,
       attachments,
+      model: request.model,
+      effort: request.effort,
+      permissionMode: request.permissionMode,
       bypassHookTrust,
       emit,
       onExternalSessionId: publishSessionId,

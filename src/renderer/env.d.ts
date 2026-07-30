@@ -4,6 +4,7 @@ import type {
   AgentInputAttachment,
   AgentQuestionRequest,
   AgentQuestionResponse,
+  AgentRunControlCatalog,
   AgentStartRequest,
   RuntimeProvider
 } from '@shared/runtime'
@@ -104,6 +105,7 @@ declare global {
       testMcp(context: ProviderContext, name: string): Promise<CapabilityEnvelope<McpTestResult>>
       toggleMcp(context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>>
       listCommands(context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>>
+      runControls?(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>>
       providerAccount(context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>>
       usageStats(context: ProviderContext): Promise<{ cost: number | null; tin: number | null; tout: number | null; turns: number }>
       stats(): Promise<DbStats>

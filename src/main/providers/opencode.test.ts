@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { TraceEvent } from '../../shared/trace'
 import type { ProviderRunRequest } from './types'
 
@@ -8,7 +9,15 @@ vi.mock('../claude-locate', () => ({
   shellEnv: () => ({})
 }))
 
-import { createOpenCodeAdapter, emitOpenCodeEvent, emitOpenCodeHookFrame, setOpenCodeMcpServers } from './opencode'
+import {
+  createOpenCodeAdapter,
+  emitOpenCodeEvent,
+  emitOpenCodeHookFrame,
+  handleOpenCodePermission,
+  openCodePermissionRules,
+  openCodeRunControlCatalog,
+  setOpenCodeMcpServers
+} from './opencode'
 import { parseOpenCodeHookLine } from './opencode-server'
 
 describe('OpenCode provider adapter', () => {
@@ -17,6 +26,63 @@ describe('OpenCode provider adapter', () => {
       id: 'opencode',
       runtimeProvider: 'opencode_server',
       capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' }
+    })
+  })
+
+  it('maps native models and excludes the unsupported auto-review mode', () => {
+    expect(openCodeRunControlCatalog([{
+      id: 'claude-sonnet',
+      providerID: 'anthropic',
+      name: 'Claude Sonnet',
+      request: { variant: 'high' },
+      variants: [{ id: 'low' }, { id: 'high' }]
+    }])).toEqual({
+      models: [{
+        model: { id: 'claude-sonnet', providerId: 'anthropic' },
+        label: 'Claude Sonnet · anthropic',
+        efforts: [
+          { id: 'low', label: '低' },
+          { id: 'high', label: '高', isDefault: true }
+        ]
+      }],
+      permissions: expect.not.arrayContaining([expect.objectContaining({ id: 'auto_review' })])
+    })
+    expect(openCodePermissionRules('default')).toEqual([{ permission: '*', pattern: '*', action: 'ask' }])
+    expect(openCodePermissionRules('full_access')).toEqual([{ permission: '*', pattern: '*', action: 'allow' }])
+    expect(() => openCodePermissionRules('auto_review')).toThrow('不支持自动审查')
+  })
+
+  it('translates a native permission request through the inline approval channel', async () => {
+    const reply = vi.fn().mockResolvedValue({ data: true })
+    const request = {
+      runId: 'run-permission',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: () => {},
+      requestUserInput: vi.fn(async (question) => ({
+        runId: question.runId,
+        questionId: question.questionId,
+        behavior: 'answered' as const,
+        answers: { [question.questions[0].question]: '本次会话允许' }
+      }))
+    } satisfies ProviderRunRequest
+    const client = { permission: { reply } } as unknown as OpencodeClient
+
+    await expect(handleOpenCodePermission(request, client, {
+      type: 'permission.asked',
+      properties: {
+        id: 'permission-1',
+        sessionID: 'session-1',
+        permission: 'bash',
+        patterns: ['npm test']
+      }
+    }, 'session-1')).resolves.toBe(true)
+
+    expect(reply).toHaveBeenCalledWith({
+      requestID: 'permission-1',
+      directory: '/repo',
+      reply: 'always'
     })
   })
 
