@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createWorkspaceEntry,
   listWorkspace,
+  moveWorkspaceEntry,
   readWorkspaceFile,
   renameWorkspaceEntry,
   trashWorkspaceEntry,
@@ -92,6 +93,18 @@ describe('workspace files', () => {
     ).rejects.toThrow('同名')
     const renamed = await renameWorkspaceEntry({ cwd: root, path: 'src/note.md', name: 'guide.md' })
     expect(renamed.path).toBe('src/guide.md')
+  })
+
+  it('支持跨目录移动，并拒绝移入自身或覆盖同名目标', async () => {
+    const root = await fixture()
+    await mkdir(join(root, 'src', 'nested'))
+
+    const moved = await moveWorkspaceEntry({ cwd: root, path: 'README.md', parentPath: 'src' })
+    expect(moved.path).toBe('src/README.md')
+    expect(await readFile(join(root, 'src', 'README.md'), 'utf8')).toBe('# Scry\n')
+    await expect(moveWorkspaceEntry({ cwd: root, path: 'src', parentPath: 'src/nested' })).rejects.toThrow('自身内部')
+    await writeFile(join(root, 'README.md'), '# duplicate\n')
+    await expect(moveWorkspaceEntry({ cwd: root, path: 'src/README.md' })).rejects.toThrow('同名')
   })
 
   it('删除只调用注入的系统废纸篓函数，失败时不永久删除', async () => {

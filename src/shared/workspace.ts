@@ -48,3 +48,7 @@ export interface WorkspaceCreateRequest {
 export interface WorkspaceRenameRequest extends WorkspacePathRequest {
   name: string
 }
+
+export interface WorkspaceMoveRequest extends WorkspacePathRequest {
+  parentPath?: string
+}

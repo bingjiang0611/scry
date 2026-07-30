@@ -45,26 +45,27 @@
 
 ## Phase 3 · 代码 & CR 循环
 
-- **实现范围**: 新增 shared workspace 契约、main 文件安全层、6 个精确 preload API、Electron 原生编辑菜单、右栏 lazy 文件树、CRUD/Trash、自定义管理菜单、文本编辑器、Markdown 同页预览、composer 路径引用、dirty guard 与响应式样式。
+- **实现范围**: 新增 shared workspace 契约、main 文件安全层、7 个精确 preload API、Electron 原生编辑菜单、右栏 lazy 文件树、新建/重命名/跨目录移动/Trash、自定义管理菜单、文本编辑器、Markdown 同页预览、composer 路径引用、dirty guard 与响应式样式。
 - **安全边界**: 相对路径/canonical cwd/逐分段 symlink 校验；保护目录大小写不敏感；文件 2 MiB 与目录 2,000 项门禁；二进制及无效 UTF-8 拒绝编辑；SHA-256 revision 阻止覆盖外部修改；删除只走 `shell.trashItem`。
 - **CR Round 1**: 发现并修复 7 项：带空格引用重复插入、节点菜单冒泡、异步树/文件旧响应覆盖新状态、保护目录大小写绕过、折叠 workspace 无法一键恢复、Agent 完成触发重复初始请求、菜单贴边溢出及搜索框与自定义菜单冲突。blocker/major 归零。
 - **CR Round 2**: 发现并修复 2 项：无效 UTF-8 被替换字符吞掉导致潜在保存破坏、筛选命中子文件时父目录被隐藏。补回归测试后自审未发现剩余 blocker/major。
-- **静态验证**: `npm run typecheck` 通过；定向 121/121 通过；全量 60 个测试文件通过、3 个跳过，共 631/631 已执行测试通过；`npm run build` 通过；`git diff --check` 通过。
+- **静态验证**: `npm run typecheck` 通过；补齐移动后的定向测试 122/122 通过；最终全量 60 个测试文件通过、3 个跳过，共 632/632 个已执行测试通过；`npm run build` 通过；`git diff --check` 通过。
 
 ## Phase 4 · 验证
 
 - **L1 静态 oracle**:
   - `npm run typecheck` 通过（node + web）。
-  - 定向测试 121/121 通过；全量测试 60 个文件通过、3 个跳过，共 631/631 个已执行测试通过。
+  - 定向测试 122/122 通过；全量测试 60 个文件通过、3 个跳过，共 632/632 个已执行测试通过。
   - `npm run build` 通过；`git diff --check` 通过。
 - **L2 运行时 smoke**:
   - 启动真实 Electron 开发构建，独立 bundle id / user data 隔离既有 Scry 实例。
-  - 窗口正常启动，workspace preload 六个 API 均存在；主界面、右栏与 overview 切换无崩溃、无 ErrorBoundary。
+  - 窗口正常启动，workspace preload 七个 API 均存在；主界面、右栏与 overview 切换无崩溃、无 ErrorBoundary。
 - **L3 端到端用户路径**:
   - 通过 macOS 原生目录选择器打开 Scry 仓库，右栏树正确隐藏受保护目录。
   - 经 UI 新建 Markdown 文件，完成源文编辑、同页实时预览与手动保存；制造 dirty 状态后验证离开确认和 reload 放弃确认。
   - 验证编辑器与 composer 的 Electron 原生右键菜单。
   - 经文件菜单验证加入对话（可见 `@relative/path`）、重命名及“移入系统废纸篓”；临时验收文件已从工作区移除，可从 Finder 废纸篓恢复。
+  - 补齐“移动到…”后再次启动隔离 Electron：将根目录临时文件移动到 `probe/`，树中原位置消失且目标目录出现该文件；随后通过系统废纸篓清理。
   - 展开 `src/renderer/components` 并搜索 `WorkspacePanel`，筛选保留父目录链；关闭再打开文件栏后 620px 宽度恢复。
   - CDP 分别在 1280×838 和 1024×768 检查布局，窄屏右栏正确覆盖主区，页面无水平溢出，树节点展开态 ARIA 正确。
 - **未覆盖 / 残余风险**:
@@ -74,10 +75,10 @@
 ## 交付摘要
 
 - **最终状态**: 完成。
-- **完成时间**: 2026-07-30 23:53 CST。
-- **交付内容**: 安全 workspace 文件服务、右栏文件树与 CRUD/Trash、同页 Markdown 编辑预览、聊天路径引用、dirty guard、原生输入菜单、响应式与宽度持久化。
-- **Commit**: 本次交付提交（最终 hash 见 Git 历史）。
-- **总耗时**: 约 56 分钟。
+- **完成时间**: 2026-07-31 00:05 CST。
+- **交付内容**: 安全 workspace 文件服务、右栏文件树与新建/重命名/跨目录移动/Trash、同页 Markdown 编辑预览、聊天路径引用、dirty guard、原生输入菜单、响应式与宽度持久化。
+- **Commit**: `dfebf46` + 移动能力补充提交（最终 hash 见 Git 历史）。
+- **总耗时**: 约 68 分钟。
 
 ## 复盘
 

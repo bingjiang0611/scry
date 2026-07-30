@@ -26,6 +26,7 @@ import type {
   WorkspaceFileSnapshot,
   WorkspaceListRequest,
   WorkspaceListResult,
+  WorkspaceMoveRequest,
   WorkspacePathRequest,
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
@@ -90,6 +91,7 @@ declare global {
       workspaceWrite(request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot>
       workspaceCreate(request: WorkspaceCreateRequest): Promise<WorkspaceEntry>
       workspaceRename(request: WorkspaceRenameRequest): Promise<WorkspaceEntry>
+      workspaceMove(request: WorkspaceMoveRequest): Promise<WorkspaceEntry>
       workspaceTrash(request: WorkspacePathRequest): Promise<true>
       setCwd(dir: string): Promise<string>
       newSession(context: ProviderContext): Promise<boolean>

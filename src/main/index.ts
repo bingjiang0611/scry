@@ -51,6 +51,7 @@ import {
 import {
   createWorkspaceEntry,
   listWorkspace,
+  moveWorkspaceEntry,
   readWorkspaceFile,
   renameWorkspaceEntry,
   trashWorkspaceEntry,
@@ -59,6 +60,7 @@ import {
 import type {
   WorkspaceCreateRequest,
   WorkspaceListRequest,
+  WorkspaceMoveRequest,
   WorkspacePathRequest,
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
@@ -490,6 +492,10 @@ ipcMain.handle('workspace:create', (event, request: WorkspaceCreateRequest) => {
 ipcMain.handle('workspace:rename', (event, request: WorkspaceRenameRequest) => {
   assertWorkspaceSender(event.sender.id)
   return renameWorkspaceEntry(request)
+})
+ipcMain.handle('workspace:move', (event, request: WorkspaceMoveRequest) => {
+  assertWorkspaceSender(event.sender.id)
+  return moveWorkspaceEntry(request)
 })
 ipcMain.handle('workspace:trash', (event, request: WorkspacePathRequest) => {
   assertWorkspaceSender(event.sender.id)

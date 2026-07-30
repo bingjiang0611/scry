@@ -6,7 +6,7 @@ Scry 已能选择 cwd、驱动 Agent 和展示聊天 Markdown，但用户不能�
 
 交付口径：
 
-- 文件树按需展开，支持新建文件/文件夹、重命名、移入系统废纸篓、刷新、添加文件或目录引用到 composer。
+- 文件树按需展开，支持新建文件/文件夹、重命名、跨目录移动、移入系统废纸篓、刷新、添加文件或目录引用到 composer。
 - 文本文件可打开和保存；Markdown 在同一文件页同时显示原文编辑区与渲染预览。
 - 普通 input、textarea 和文件编辑器使用 Electron 原生撤销/剪切/复制/粘贴/全选菜单；密码输入不开放该菜单。
 - 不新增第二套会话、附件或 Markdown 主题系统。
@@ -46,14 +46,14 @@ flowchart LR
 ### Shared
 
 - `src/shared/workspace.ts`
-  - 新增 `WorkspaceEntry`、`WorkspaceFileSnapshot`、list/read/write/create/rename/trash 请求类型。
+  - 新增 `WorkspaceEntry`、`WorkspaceFileSnapshot`、list/read/write/create/rename/move/trash 请求类型。
   - 所有 entry path 使用相对 cwd 的 `/` 分隔格式；绝对路径不暴露给 renderer。
 
 ### Main / Preload
 
 - `src/main/workspace-files.ts`
   - canonical cwd、segment-boundary 检查、逐分段 symlink 拒绝、文本/大小门禁。
-  - lazy directory listing、文件读取、内容 revision 冲突保存、排他新建、同目录重命名、Trash 删除。
+  - lazy directory listing、文件读取、内容 revision 冲突保存、排他新建、同目录重命名、安全跨目录移动、Trash 删除。
   - 保护 `.git`、`node_modules`、`dist`、`build`、`out`、`target`、`.next`、`.scry`，避免误操作仓库元数据或大生成目录。
 - `src/main/workspace-files.test.ts`
   - 覆盖路径穿越、绝对路径、保护目录、symlink 越界、二进制/无效 UTF-8、保存冲突、重名覆盖、Trash fail-closed。
@@ -93,6 +93,7 @@ workspaceRead({ cwd, path }) -> WorkspaceFileSnapshot
 workspaceWrite({ cwd, path, content, expectedRevision }) -> WorkspaceFileSnapshot
 workspaceCreate({ cwd, parentPath?, name, kind }) -> WorkspaceEntry
 workspaceRename({ cwd, path, name }) -> WorkspaceEntry
+workspaceMove({ cwd, path, parentPath? }) -> WorkspaceEntry
 workspaceTrash({ cwd, path }) -> true
 ```
 
