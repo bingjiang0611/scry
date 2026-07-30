@@ -182,14 +182,27 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
 async function doctorCommand(args: ParsedArgs): Promise<number> {
   const workspace = workspaceOf(args)
   const enablement = await recorderEnablement(workspace)
+  const runtime = {
+    recorderVersion: RECORDER_VERSION,
+    nodeVersion: process.versions.node,
+    platform: `${process.platform}-${process.arch}`
+  }
   if (!enablement.enabled) {
-    print({ healthy: false, enabled: false, reason: enablement.reason, detail: enablement.detail })
+    print({ healthy: false, enabled: false, ...runtime, reason: enablement.reason, detail: enablement.detail })
     return enablement.reason === 'invalid_config' || enablement.reason === 'missing_config' ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
   const [health, store] = await Promise.all([readHealth(enablement.dataRoot), verifyStore(enablement.dataRoot)])
   const degraded = !!health.lastError || health.orphanEvents > 0 || health.droppedEvents > 0 || health.pendingCount > 0
-  print({ healthy: store.ok && !degraded, enabled: true, workspace: enablement.workspaceRoot, dataRoot: enablement.dataRoot, health, store })
+  print({
+    healthy: store.ok && !degraded,
+    enabled: true,
+    ...runtime,
+    workspace: enablement.workspaceRoot,
+    dataRoot: enablement.dataRoot,
+    health,
+    store
+  })
   if (!store.ok) return 4
   return degraded ? 5 : 0
 }

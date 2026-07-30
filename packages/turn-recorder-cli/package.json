@@ -13,6 +13,16 @@
   "engines": {
     "node": ">=20"
   },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "prepublishOnly": "npm --prefix ../.. run check:cli-release"
+  },
+  "publishConfig": {
+    "registry": "https://registry.anpm.alibaba-inc.com"
+  },
   "license": "MIT",
   "author": "bingjiang0611",
   "repository": {

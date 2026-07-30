@@ -23,6 +23,8 @@
     "mcpguard": "npm run build:cli --silent && node out/cli/mcpguard.js",
     "scry": "npm run build:cli --silent && node packages/turn-recorder-cli/dist/cli/scry.js",
     "pack:cli": "npm run build:cli && npm pack ./packages/turn-recorder-cli",
+    "check:cli-release": "npm run typecheck && vitest run src/core/turn-recorder src/shared/turn-record.test.ts src/shared/trace.test.ts src/shared/runtime.test.ts src/main/normalize.test.ts src/main/danger.test.ts src/main/claude-locate.test.ts src/main/managed-turn-commit.test.ts && npm run build:cli",
+    "publish:cli": "npm publish ./packages/turn-recorder-cli",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",

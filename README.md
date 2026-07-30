@@ -65,10 +65,24 @@ npm run build
 `@ali/scry-turn-recorder` 与 Electron App 共用 turn record、Trace 聚合和 Git Diff Core，但不依赖 Electron、SQLite 或 Provider SDK。它只在本地写 `.scry/`：
 
 ```bash
-npm run build:cli
-npm install -g ./packages/turn-recorder-cli
+npm install -g @ali/scry-turn-recorder@0.2.7 \
+  --registry=https://registry.anpm.alibaba-inc.com
 scry doctor --workspace /path/to/workspace
 ```
+
+CLI 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围；
+默认 daemon 使用 Unix socket，rate-native 的 Hook/uploader 也依赖 Unix shell。
+
+若 npm 的系统全局目录不可写，可安装到用户目录，并确保 `~/.local/bin` 在 `PATH`：
+
+```bash
+npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.7 \
+  --registry=https://registry.anpm.alibaba-inc.com
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+维护者发布前运行 `npm run publish:cli`。该命令会通过 package lifecycle 强制执行
+typecheck、tests、CLI build，并固定发布到内网 registry；不要从陈旧 `dist` 手工发布。
 
 合同与接入约束见 [`docs/rfc/scry/turn-recorder-cli.md`](./docs/rfc/scry/turn-recorder-cli.md)。
 
