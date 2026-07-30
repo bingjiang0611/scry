@@ -25,4 +25,17 @@ describe('appendCoalescedTrace', () => {
     expect(first.text).toBe('O')
     expect(second.text).toBe('K')
   })
+
+  it('does not merge root and child output or a delta with its final snapshot', () => {
+    const items: TraceEvent[] = []
+    appendCoalescedTrace(items, delta('root', '根'))
+    appendCoalescedTrace(items, { ...delta('child', '子'), agentId: 'child-1', parentToolUseId: 'spawn-1' })
+    appendCoalescedTrace(items, { ...delta('snapshot', '根'), stage: 'text' })
+
+    expect(items.map((event) => [event.stage, event.text, event.agentId])).toEqual([
+      ['text_delta', '根', undefined],
+      ['text_delta', '子', 'child-1'],
+      ['text', '根', undefined]
+    ])
+  })
 })

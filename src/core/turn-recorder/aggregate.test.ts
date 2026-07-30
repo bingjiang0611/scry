@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
@@ -48,6 +49,90 @@ describe('aggregateTurnEvidence', () => {
       transcript('2', 4),
       { id: 'native', ts: '2026-01-01T00:00:03.000Z', runId: 'r', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5 }
     ] }).usage.value).toMatchObject({ inputTokens: 10, outputTokens: 5 })
+  })
+
+  it('把根与子 Agent 的观测模型调用聚合为累计耗时和去重墙钟', () => {
+    const events: TraceEvent[] = [
+      {
+        id: 'root-1',
+        ts: '2026-01-01T00:00:02.000Z',
+        runId: 'r',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-root-1',
+        durationMs: 2_000,
+        runtimeMetadata: { timingSource: 'observed', timingBoundary: 'turn_or_activity_end' }
+      },
+      {
+        id: 'child-1',
+        ts: '2026-01-01T00:00:04.000Z',
+        runId: 'r',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-child-1',
+        agentId: 'child-thread',
+        parentToolUseId: 'spawn-1',
+        durationMs: 3_000,
+        runtimeMetadata: { timingSource: 'observed', timingBoundary: 'turn_or_activity_end' }
+      },
+      {
+        id: 'root-2',
+        ts: '2026-01-01T00:00:07.000Z',
+        runId: 'r',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-root-2',
+        durationMs: 3_000,
+        runtimeMetadata: { timingSource: 'observed', timingBoundary: 'turn_or_activity_end' }
+      }
+    ]
+
+    expect(aggregateTurnEvidence({ events, source: 'scry_provider_adapter' }).modelTiming).toEqual({
+      status: 'available',
+      quality: 'estimated',
+      source: ['scry_provider_adapter'],
+      value: {
+        method: 'response_intervals',
+        totalCalls: 3,
+        timedCalls: 3,
+        cumulativeMs: 8_000,
+        occupiedMs: 7_000,
+        overlapMs: 1_000,
+        root: { totalCalls: 2, timedCalls: 2, cumulativeMs: 5_000 },
+        subagents: { totalCalls: 1, timedCalls: 1, cumulativeMs: 3_000 },
+        calls: [
+          expect.objectContaining({
+            responseId: 'response-root-1',
+            scope: 'root',
+            startedAt: '2026-01-01T00:00:00.000Z',
+            completedAt: '2026-01-01T00:00:02.000Z',
+            durationMs: 2_000,
+            source: 'observed',
+            boundary: 'turn_or_activity_end'
+          }),
+          expect.objectContaining({
+            responseId: 'response-child-1',
+            scope: 'subagent',
+            agentId: 'child-thread',
+            parentToolUseId: 'spawn-1',
+            startedAt: '2026-01-01T00:00:01.000Z',
+            completedAt: '2026-01-01T00:00:04.000Z',
+            durationMs: 3_000,
+            source: 'observed',
+            boundary: 'turn_or_activity_end'
+          }),
+          expect.objectContaining({
+            responseId: 'response-root-2',
+            scope: 'root',
+            startedAt: '2026-01-01T00:00:04.000Z',
+            completedAt: '2026-01-01T00:00:07.000Z',
+            durationMs: 3_000,
+            source: 'observed',
+            boundary: 'turn_or_activity_end'
+          })
+        ]
+      }
+    })
   })
 
   it('Tool、Skill、MCP 使用互斥口径，并共享 Skill 去重规则', () => {
@@ -112,6 +197,48 @@ describe('aggregateTurnEvidence', () => {
     expect(evidence.mcps.value).toEqual([
       expect.objectContaining({ mcp: { server: 'coop', action: 'get_sub_workitem', tool: 'mcporter:coop.get_sub_workitem' } }),
       expect.objectContaining({ mcp: { server: 'coop', action: 'get_workitem_comments', tool: 'mcporter:coop.get_workitem_comments' } })
+    ])
+  })
+
+  it('完整聚合 delta-only、text-only，并对同一流的最终 snapshot 去重', () => {
+    const events: TraceEvent[] = [
+      { id: 'd1', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '你', messageId: 'm1' },
+      { id: 'd2', ts: '2026-01-01T00:00:00.001Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '好', messageId: 'm1' },
+      { id: 'snapshot', ts: '2026-01-01T00:00:00.002Z', runId: 'r', kind: 'model', stage: 'text', text: '你好', messageId: 'm1' },
+      { id: 'tool', ts: '2026-01-01T00:00:00.003Z', runId: 'r', kind: 'tool', stage: 'tool:Read', tool: 'Read' },
+      { id: 'text', ts: '2026-01-01T00:00:00.004Z', runId: 'r', kind: 'model', stage: 'text', text: '完成', messageId: 'm2' }
+    ]
+    const assistant = aggregateTurnEvidence({ events }).assistant
+    const text = '你好完成'
+
+    expect(assistant).toEqual({
+      status: 'available',
+      quality: 'exact',
+      source: ['trace_events'],
+      value: {
+        text,
+        textHash: `sha256:${createHash('sha256').update(text).digest('hex')}`
+      }
+    })
+  })
+
+  it('按事件顺序保留根 Agent 与子 Agent 的相邻可见输出', () => {
+    const events: TraceEvent[] = [
+      { id: 'root', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '根', parentToolUseId: null },
+      { id: 'child', ts: '2026-01-01T00:00:00.001Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '子', agentId: 'child-1', parentToolUseId: 'spawn-1' },
+      { id: 'root-2', ts: '2026-01-01T00:00:00.002Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '终', parentToolUseId: null }
+    ]
+    expect(aggregateTurnEvidence({ events }).assistant.value?.text).toBe('根子终')
+  })
+
+  it('普通 errors 与总览一致，只包含失败的 tool_result', () => {
+    const events: TraceEvent[] = [
+      { id: 'tool', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'tool', stage: 'tool_result', tool: 'Bash', toolUseId: 't1', isError: true, text: 'exit 1' },
+      { id: 'hook', ts: '2026-01-01T00:00:00.001Z', runId: 'r', kind: 'hook', stage: 'hook_response', hookName: 'audit.py', isError: true, text: 'hook failed' },
+      { id: 'runtime', ts: '2026-01-01T00:00:00.002Z', runId: 'r', kind: 'harness', stage: 'result', isError: true, text: 'runtime failed' }
+    ]
+    expect(aggregateTurnEvidence({ events }).errors.value).toEqual([
+      { message: 'exit 1', source: 'tool_result', toolUseId: 't1' }
     ])
   })
 })

@@ -5,6 +5,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, posix, win32 } from 'node:path'
+import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
 
 export const QODER_NODE_BIN = `${homedir()}/.nvm/versions/node/v22.22.1/bin`
 export const QODER_NPM_BIN = `${QODER_NODE_BIN}/qodercli`
@@ -460,15 +461,42 @@ export function resolveRecorderCliPath(
   return resolveCommandOnPath('scry', trustedPath) ?? resolveCommandOnPath('scry', fallbackPath)
 }
 
-export function runtimeCliEnv(base?: Record<string, string>): Record<string, string> {
+export function runtimeCliEnv(
+  base?: Record<string, string>,
+  options: { managedRecorder?: boolean } = {}
+): Record<string, string> {
   const runtimeBase = base ?? shellEnv()
   const originalPath = base
     ? runtimeBase.PATH ?? process.env.PATH ?? ''
     : shellPathCache || process.env.PATH || ''
   const scryCliPath = resolveRecorderCliPath(runtimeBase, originalPath)
+  if (options.managedRecorder) {
+    if (!scryCliPath) {
+      throw new Error(`Scry managed recorder requires scry CLI ${RECORDER_VERSION}`)
+    }
+    let actualVersion = ''
+    try {
+      actualVersion = execFileSync(scryCliPath, ['--version'], {
+        encoding: 'utf8',
+        timeout: 5_000,
+        env: runtimeBase
+      }).trim()
+    } catch {
+      throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
+    }
+    if (actualVersion !== RECORDER_VERSION) {
+      throw new Error(
+        `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}`
+      )
+    }
+  }
   return sanitizeNestedAgentEnv({
     ...runtimeBase,
     SCRY_CLI_PATH: scryCliPath ?? '',
+    ...(options.managedRecorder ? {
+      SCRY_RECORDER_MANAGED: '1',
+      SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION
+    } : {}),
     PATH: [QODER_NODE_BIN, runtimeBase.PATH ?? process.env.PATH ?? ''].filter(Boolean).join(delimiter)
   })
 }
