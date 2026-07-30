@@ -413,6 +413,25 @@ describe('buildTurnTimingBreakdown', () => {
     expect(timing.phases[0]).toMatchObject({ kind: 'unsegmented', observedMs: 7000, toolMs: 3000 })
   })
 
+  it('纯文本轮也消费 recorder 的 residual 兜底，不把已有估算显示成未采集', () => {
+    const items = [
+      event({
+        id: 'result',
+        kind: 'harness',
+        stage: 'result',
+        ts: '2026-07-18T00:00:10.000Z',
+        durationMs: 10_000
+      })
+    ]
+
+    expect(buildTurnTimingBreakdown(items, [])).toMatchObject({
+      wallMs: 10_000,
+      apiMs: 10_000,
+      apiSource: 'observed',
+      apiObservation: 'residual'
+    })
+  })
+
   it('倒序结果时间不污染 lifecycle；非法 result duration 会回退到调用原生 duration', () => {
     const write = event({
       id: 'write',

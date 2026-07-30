@@ -252,6 +252,10 @@ export function buildTurnTimingBreakdown(
     derivedModelTiming?.value.method === 'response_intervals'
       ? derivedModelTiming.value
       : undefined
+  const derivedResidualTiming =
+    derivedModelTiming?.value.method === 'non_call_residual'
+      ? derivedModelTiming.value
+      : undefined
   const hasResponseBoundaryEvents = responseTiming != null
   const explicitGroups: Array<{
     messageId?: string
@@ -414,7 +418,7 @@ export function buildTurnTimingBreakdown(
     phaseTimedApiPhases.length > 0
       ? phaseTimedApiPhases.reduce((sum, phase) => sum + (phase.observedMs ?? 0), 0)
       : undefined
-  const observedApiMs = responseApiMs ?? phaseObservedApiMs
+  const observedApiMs = responseApiMs ?? phaseObservedApiMs ?? derivedResidualTiming?.cumulativeMs
   const timedApiPhases = responseTiming?.timedCalls ?? phaseTimedApiPhases.length
   const totalApiPhases = responseTiming?.totalCalls ?? apiPhases.length
   return {
@@ -426,11 +430,13 @@ export function buildTurnTimingBreakdown(
         ? undefined
         : responseApiMs != null
           ? 'response'
-          : unsegmentedPhase?.observedMs != null
-          ? 'residual'
-          : observedApiMs != null
-            ? 'phase'
-            : undefined,
+          : phaseObservedApiMs != null
+            ? unsegmentedPhase?.observedMs != null
+              ? 'residual'
+              : 'phase'
+            : derivedResidualTiming?.cumulativeMs != null
+              ? 'residual'
+              : undefined,
     timedApiPhases,
     totalApiPhases,
     ...(responseTiming

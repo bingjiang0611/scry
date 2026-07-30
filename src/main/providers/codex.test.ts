@@ -514,6 +514,11 @@ describe('Codex provider adapter', () => {
       responseId: 'response-2',
       usage: { inputTokens: 12, outputTokens: 3 }
     }, { emittedAtMs: 107_000 })
+    notify?.('item/completed', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      item: { id: 'agent-message-2', type: 'agentMessage', text: 'done' }
+    }, { emittedAtMs: 107_100 })
     notify?.('turn/completed', {
       threadId: 'thread-timing',
       turnId: 'turn-timing',
@@ -541,6 +546,63 @@ describe('Codex provider adapter', () => {
         runtimeMetadata: expect.objectContaining({
           timingSource: 'observed',
           timingBoundary: 'turn_or_activity_end'
+        })
+      })
+    ])
+  })
+
+  it('falls back to completed agent messages when raw response notifications are unavailable', async () => {
+    let notify: ((
+      method: string,
+      params: unknown,
+      envelope?: { emittedAtMs?: number }
+    ) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt', planType: 'pro' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-item-timing' }, model: 'gpt-test' }
+      if (method === 'turn/start') return { turn: { id: 'turn-item-timing' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-item-timing',
+      prompt: 'reply',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('turn/started', {
+      threadId: 'thread-item-timing',
+      turnId: 'turn-item-timing',
+      turn: { id: 'turn-item-timing', startedAt: 100, status: 'inProgress' }
+    }, { emittedAtMs: 100_500 })
+    notify?.('item/completed', {
+      threadId: 'thread-item-timing',
+      turnId: 'turn-item-timing',
+      item: { id: 'agent-message-item', type: 'agentMessage', text: 'OK' }
+    }, { emittedAtMs: 103_000 })
+    notify?.('turn/completed', {
+      threadId: 'thread-item-timing',
+      turnId: 'turn-item-timing',
+      turn: { id: 'turn-item-timing', status: 'completed', durationMs: 4_000 }
+    }, { emittedAtMs: 104_000 })
+    await handle.promise
+
+    expect(events.filter((event) => event.kind === 'model' && event.stage === 'response_completed')).toEqual([
+      expect.objectContaining({
+        messageId: 'agent-message-item',
+        ts: '1970-01-01T00:01:43.000Z',
+        durationMs: 3_000,
+        runtimeMetadata: expect.objectContaining({
+          timingSource: 'observed',
+          timingBoundary: 'turn_or_activity_end',
+          timingEvent: 'agent_message_item'
         })
       })
     ])

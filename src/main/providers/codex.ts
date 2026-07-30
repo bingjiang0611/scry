@@ -651,19 +651,27 @@ export function createCodexAdapter(): ProviderAdapter {
       let lastTurnError: Record<string, unknown> | undefined
       let planUpdateSeq = 0
       const childAgents = new Map<string, { parentToolUseId?: string; name?: string }>()
-      const timingByThread = new Map<string, { boundaryMs?: number; responses: Set<string> }>()
+      type ResponseTimingState = {
+        boundaryMs?: number
+        responses: Set<string>
+        responseSource?: 'raw_response' | 'agent_message_item'
+      }
+      const timingByThread = new Map<string, ResponseTimingState>()
       let finish: ((value: ProviderRunResult) => void) | undefined
 
       const notificationAt = (envelope?: CodexNotificationEnvelope): number =>
         envelope?.emittedAtMs ?? envelope?.receivedAtMs ?? Date.now()
 
-      const timingState = (threadId: string, fallbackBoundaryMs?: number) => {
+      const timingState = (
+        threadId: string,
+        fallbackBoundaryMs?: number
+      ): ResponseTimingState => {
         const existing = timingByThread.get(threadId)
         if (existing) {
           if (existing.boundaryMs == null && fallbackBoundaryMs != null) existing.boundaryMs = fallbackBoundaryMs
           return existing
         }
-        const created = { boundaryMs: fallbackBoundaryMs, responses: new Set<string>() }
+        const created: ResponseTimingState = { boundaryMs: fallbackBoundaryMs, responses: new Set<string>() }
         timingByThread.set(threadId, created)
         return created
       }
@@ -672,6 +680,39 @@ export function createCodexAdapter(): ProviderAdapter {
         if (!threadId || !Number.isFinite(atMs)) return
         const state = timingState(threadId)
         state.boundaryMs = state.boundaryMs == null ? atMs : Math.max(state.boundaryMs, atMs)
+      }
+
+      const emitObservedResponse = (
+        threadId: string,
+        responseId: string,
+        observedAtMs: number,
+        traceContext: ItemTraceContext,
+        source: 'raw_response' | 'agent_message_item'
+      ): void => {
+        const state = timingState(threadId)
+        if (state.responseSource && state.responseSource !== source) return
+        state.responseSource = source
+        if (state.responses.has(responseId)) return
+        state.responses.add(responseId)
+        const boundaryMs = state.boundaryMs
+        const durationMs =
+          boundaryMs != null && observedAtMs >= boundaryMs
+            ? observedAtMs - boundaryMs
+            : undefined
+        runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
+          kind: 'model',
+          stage: 'response_completed',
+          messageId: responseId,
+          ...(durationMs != null ? { durationMs } : {}),
+          runtimeMetadata: {
+            codexResponseId: responseId,
+            timingSource: 'observed',
+            timingBoundary: 'turn_or_activity_end',
+            timingEvent: source
+          },
+          ...traceContext
+        }))
+        state.boundaryMs = observedAtMs
       }
 
       const done = new Promise<ProviderRunResult>((resolve) => {
@@ -732,27 +773,7 @@ export function createCodexAdapter(): ProviderAdapter {
               if (!notificationThreadId) return
               const responseId = typeof params.responseId === 'string' ? params.responseId : undefined
               if (!responseId) return
-              const state = timingState(notificationThreadId)
-              if (state.responses.has(responseId)) return
-              state.responses.add(responseId)
-              const boundaryMs = state.boundaryMs
-              const durationMs =
-                boundaryMs != null && observedAtMs >= boundaryMs
-                  ? observedAtMs - boundaryMs
-                  : undefined
-              runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
-                kind: 'model',
-                stage: 'response_completed',
-                messageId: responseId,
-                ...(durationMs != null ? { durationMs } : {}),
-                runtimeMetadata: {
-                  codexResponseId: responseId,
-                  timingSource: 'observed',
-                  timingBoundary: 'turn_or_activity_end'
-                },
-                ...traceContext
-              }))
-              state.boundaryMs = observedAtMs
+              emitObservedResponse(notificationThreadId, responseId, observedAtMs, traceContext, 'raw_response')
             } else if (method === 'item/started' || method === 'item/completed') {
               const item = record(params.item)
               if (item.type === 'collabAgentToolCall' && item.tool === 'spawnAgent') {
@@ -779,7 +800,15 @@ export function createCodexAdapter(): ProviderAdapter {
               )) runRequest.emit(event)
               if (method === 'item/completed') {
                 const type = String(item.type ?? '')
-                if ([
+                if (type === 'agentMessage' && notificationThreadId && typeof item.id === 'string') {
+                  emitObservedResponse(
+                    notificationThreadId,
+                    item.id,
+                    observedAtMs,
+                    traceContext,
+                    'agent_message_item'
+                  )
+                } else if ([
                   'commandExecution',
                   'mcpToolCall',
                   'dynamicToolCall',

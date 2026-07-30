@@ -91,7 +91,7 @@ export function TurnTimingDetails({
       : timing.apiObservation === 'response'
         ? '模型响应累计'
       : isResidualEstimate
-        ? '未归因耗时'
+        ? '模型相关耗时估算'
         : timing.apiSource === 'observed'
           ? '模型 API 观测'
           : '模型 API'
@@ -225,14 +225,14 @@ export function TurnTimingDetails({
               const accessibleLabel = phase.observedMs == null
                 ? `${phaseName}等待时间未采集`
                 : phase.kind === 'unsegmented'
-                  ? `整轮未归因耗时约 ${apiValue}`
+                  ? `整轮模型相关耗时估算约 ${apiValue}`
                   : `${phaseName}前 API 观测耗时约 ${apiValue}`
               const toolValue = phase.toolMs == null ? '—' : `${durationText(phase.toolMs)}`
               const toolCount = phase.callsAfterResponse.length
               return (
                 <div className="turn-timing-phase" key={phase.id}>
                   <div className="turn-timing-api" role="group" title={accessibleLabel} aria-label={accessibleLabel}>
-                    <span>{phase.kind === 'unsegmented' ? '未归因耗时' : '模型 API'}</span>
+                    <span>{phase.kind === 'unsegmented' ? '模型相关耗时估算' : '模型 API'}</span>
                     <b aria-hidden="true">{phase.observedMs == null ? '—' : `~${apiValue}`}</b>
                   </div>
                   {toolCount > 0 && (
