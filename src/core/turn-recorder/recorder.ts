@@ -1488,6 +1488,9 @@ async function finalizeOpenTurn(
     if (evidence.dangerousOperations.value) {
       evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)
     }
+    if (evidence.modelTiming?.value && evidence.modelTiming.value.method !== 'provider_api') {
+      evidence.modelTiming = partial(evidence.modelTiming.value, evidence.modelTiming.source, reason)
+    }
   }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
   if (!enablement.config.capture.assistant) evidence.assistant = disabled('assistant capture disabled by config')

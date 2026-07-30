@@ -442,6 +442,110 @@ describe('Codex provider adapter', () => {
     }))
   })
 
+  it('records each Codex raw response as an observed model call bounded by prior activity', async () => {
+    let notify: ((
+      method: string,
+      params: unknown,
+      envelope?: { emittedAtMs?: number }
+    ) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt', planType: 'pro' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-timing' }, model: 'gpt-test' }
+      if (method === 'turn/start') return { turn: { id: 'turn-timing' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-timing',
+      prompt: 'inspect',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    notify?.('turn/started', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      turn: { id: 'turn-timing', startedAt: 100, status: 'inProgress' }
+    }, { emittedAtMs: 100_500 })
+    notify?.('item/agentMessage/delta', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      itemId: 'agent-message-1',
+      delta: 'working'
+    }, { emittedAtMs: 101_500 })
+    notify?.('rawResponse/completed', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      responseId: 'response-1',
+      usage: { inputTokens: 10, outputTokens: 2 }
+    }, { emittedAtMs: 102_000 })
+    notify?.('rawResponse/completed', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      responseId: 'response-1',
+      usage: { inputTokens: 10, outputTokens: 2 }
+    }, { emittedAtMs: 102_050 })
+    notify?.('item/started', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      item: { id: 'tool-1', type: 'commandExecution', command: 'pwd' }
+    }, { emittedAtMs: 102_100 })
+    notify?.('item/completed', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      item: {
+        id: 'tool-1',
+        type: 'commandExecution',
+        command: 'pwd',
+        status: 'completed',
+        durationMs: 1_900
+      },
+      completedAtMs: 104_000
+    }, { emittedAtMs: 104_500 })
+    notify?.('rawResponse/completed', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      responseId: 'response-2',
+      usage: { inputTokens: 12, outputTokens: 3 }
+    }, { emittedAtMs: 107_000 })
+    notify?.('turn/completed', {
+      threadId: 'thread-timing',
+      turnId: 'turn-timing',
+      turn: { id: 'turn-timing', status: 'completed', durationMs: 8_000 }
+    }, { emittedAtMs: 108_000 })
+    await handle.promise
+
+    const delta = events.find((event) => event.kind === 'model' && event.stage === 'text_delta')
+    expect(delta).toMatchObject({ runtimeMetadata: { codexItemId: 'agent-message-1' } })
+    expect(delta).not.toHaveProperty('messageId')
+    expect(events.filter((event) => event.kind === 'model' && event.stage === 'response_completed')).toEqual([
+      expect.objectContaining({
+        messageId: 'response-1',
+        ts: '1970-01-01T00:01:42.000Z',
+        durationMs: 2_000,
+        runtimeMetadata: expect.objectContaining({
+          timingSource: 'observed',
+          timingBoundary: 'turn_or_activity_end'
+        })
+      }),
+      expect.objectContaining({
+        messageId: 'response-2',
+        ts: '1970-01-01T00:01:47.000Z',
+        durationMs: 3_000,
+        runtimeMetadata: expect.objectContaining({
+          timingSource: 'observed',
+          timingBoundary: 'turn_or_activity_end'
+        })
+      })
+    ])
+  })
+
   it('translates a slash Skill alias into native Codex skill input', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     appServer.onNotification.mockImplementation((listener) => {

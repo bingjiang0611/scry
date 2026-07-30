@@ -48,6 +48,19 @@ function input(workspace: string, userDataDir: string): ManagedTraceTurnCommitIn
       text: '准确输出'
     },
     {
+      id: 'response',
+      ts: '2026-07-29T12:00:05.500Z',
+      runId: 'run-1',
+      kind: 'model',
+      stage: 'response_completed',
+      messageId: 'response-1',
+      durationMs: 5_500,
+      runtimeMetadata: {
+        timingSource: 'observed',
+        timingBoundary: 'turn_or_activity_end'
+      }
+    },
+    {
       id: 'result',
       ts: '2026-07-29T12:00:10.000Z',
       runId: 'run-1',
@@ -139,6 +152,7 @@ describe('managed trace turn coordinator', () => {
       'mcps',
       'hooks',
       'usage',
+      'modelTiming',
       'files',
       'diff',
       'dangerousOperations',

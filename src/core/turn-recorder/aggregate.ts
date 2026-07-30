@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared/logical-calls.js'
+import { deriveModelTiming } from '../../shared/model-timing.js'
 import { mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import {
   available,
@@ -238,6 +239,7 @@ export function aggregateTurnEvidence(args: {
       : []
   )
   const usage = usageFrom(args.events)
+  const modelTiming = deriveModelTiming(args.events)
 
   return {
     user: args.userText != null
@@ -257,6 +259,19 @@ export function aggregateTurnEvidence(args: {
       : usage
         ? available(usage, [source])
         : unavailable('no authoritative usage event was captured', [source]),
+    ...(modelTiming
+      ? {
+          modelTiming:
+            modelTiming.status === 'available'
+              ? available(modelTiming.value, [source], modelTiming.quality)
+              : partial(
+                  modelTiming.value,
+                  [source],
+                  modelTiming.omissionReason ?? 'model timing coverage was incomplete',
+                  modelTiming.quality
+                )
+        }
+      : {}),
     files: observable.files
       ? available([...fileMap].map(([path, operation]) => ({ path, operation })), [source])
       : unavailable('provider file events were not observable', [source]),

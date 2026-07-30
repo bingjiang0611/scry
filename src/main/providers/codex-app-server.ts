@@ -7,6 +7,7 @@ interface JsonRpcMessage {
   params?: unknown
   result?: unknown
   error?: { code?: number; message?: string; data?: unknown }
+  emittedAtMs?: number
 }
 
 export interface CodexAppServerOptions {
@@ -17,7 +18,16 @@ export interface CodexAppServerOptions {
   requestTimeoutMs?: number
 }
 
-type NotificationListener = (method: string, params: unknown) => void
+export interface CodexNotificationEnvelope {
+  emittedAtMs?: number
+  receivedAtMs: number
+}
+
+type NotificationListener = (
+  method: string,
+  params: unknown,
+  envelope: CodexNotificationEnvelope
+) => void
 
 export class CodexAppServerClient {
   private process: ChildProcessWithoutNullStreams | null = null
@@ -125,7 +135,14 @@ export class CodexAppServerClient {
       return
     }
     if (message.method) {
-      for (const listener of this.listeners) listener(message.method, message.params)
+      const receivedAtMs = Date.now()
+      const emittedAtMs =
+        typeof message.emittedAtMs === 'number' && Number.isFinite(message.emittedAtMs)
+          ? message.emittedAtMs
+          : undefined
+      for (const listener of this.listeners) {
+        listener(message.method, message.params, { emittedAtMs, receivedAtMs })
+      }
     }
   }
 

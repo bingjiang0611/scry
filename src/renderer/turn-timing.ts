@@ -1,4 +1,5 @@
 import type { TraceEvent } from '@shared/trace'
+import { deriveModelTiming } from '@shared/model-timing'
 
 export type TimingSource = 'provider' | 'observed' | 'unknown'
 
@@ -43,9 +44,14 @@ export interface TurnTimingBreakdown {
   wallMs?: number
   apiMs?: number
   apiSource: TimingSource
-  apiObservation?: 'phase' | 'residual'
+  apiObservation?: 'response' | 'phase' | 'residual'
   timedApiPhases: number
   totalApiPhases: number
+  cumulativeApiMs?: number
+  occupiedApiMs?: number
+  overlapApiMs?: number
+  rootApiMs?: number
+  nestedApiMs?: number
   totalCalls: number
   timedCalls: number
   cumulativeCallMs: number
@@ -241,16 +247,24 @@ export function buildTurnTimingBreakdown(
 
   const mainCalls = calls.filter((call) => !call.nested)
   const nestedCalls = calls.filter((call) => call.nested)
+  const derivedModelTiming = deriveModelTiming(items)
+  const responseTiming =
+    derivedModelTiming?.value.method === 'response_intervals'
+      ? derivedModelTiming.value
+      : undefined
+  const hasResponseBoundaryEvents = responseTiming != null
   const explicitGroups: Array<{
     messageId?: string
     responseOrder: number
     responseEndOrder: number
     responseAt?: number
+    observedMs?: number
     calls: TimedTurnCall[]
   }> = []
   const groupsByMessageId = new Map<string, (typeof explicitGroups)[number]>()
   for (const event of items) {
     if (!event.messageId || event.parentToolUseId || event.agentId || event.stage === 'tool_result') continue
+    if (hasResponseBoundaryEvents && (event.kind !== 'model' || event.stage !== 'response_completed')) continue
     if (event.kind !== 'model' && event.kind !== 'tool' && event.kind !== 'skill' && event.kind !== 'agent') continue
     const order = itemOrder.get(event) ?? items.length
     let group = groupsByMessageId.get(event.messageId)
@@ -260,6 +274,10 @@ export function buildTurnTimingBreakdown(
         responseOrder: order,
         responseEndOrder: order,
         responseAt: timestampMs(event.ts),
+        observedMs:
+          event.kind === 'model' && event.stage === 'response_completed'
+            ? finiteDuration(event.durationMs)
+            : undefined,
         calls: []
       }
       groupsByMessageId.set(event.messageId, group)
@@ -269,6 +287,9 @@ export function buildTurnTimingBreakdown(
     group.responseEndOrder = Math.max(group.responseEndOrder, order)
     const eventAt = timestampMs(event.ts)
     if (eventAt != null) group.responseAt = Math.max(group.responseAt ?? eventAt, eventAt)
+    if (event.kind === 'model' && event.stage === 'response_completed') {
+      group.observedMs = finiteDuration(event.durationMs) ?? group.observedMs
+    }
   }
   for (const call of mainCalls) {
     if (!call.messageId) continue
@@ -276,11 +297,20 @@ export function buildTurnTimingBreakdown(
   }
 
   explicitGroups.sort((a, b) => a.responseOrder - b.responseOrder)
+  if (hasResponseBoundaryEvents) {
+    for (const call of mainCalls) {
+      if (explicitGroups.some((group) => group.calls.includes(call))) continue
+      const owner = [...explicitGroups]
+        .reverse()
+        .find((group) => group.responseOrder < call.order)
+      if (owner) owner.calls.push(call)
+    }
+  }
   for (const group of explicitGroups) group.calls.sort((a, b) => a.order - b.order)
 
   // Claude 的 text-only 最终响应有时只留下无 messageId 的流式文本。仅当它明确位于
   // 最后一批工具之后时，补一个匿名“最终响应”边界；不会据此伪造单次 API 原值。
-  if (explicitGroups.length > 0) {
+  if (explicitGroups.length > 0 && !hasResponseBoundaryEvents) {
     const lastGroup = explicitGroups[explicitGroups.length - 1]
     const lastCallEnd = latestEnd(lastGroup.calls)
     const trailingModelEvents = items.filter((event) => {
@@ -330,7 +360,7 @@ export function buildTurnTimingBreakdown(
         sequence: index + 1,
         messageId: group.messageId,
         kind: isFinalResponse ? 'final' : 'response',
-        observedMs: observedGap(phaseStart, group.responseAt),
+        observedMs: group.observedMs ?? observedGap(phaseStart, group.responseAt),
         toolMs: intervalUnionMs(group.calls),
         timedTools: group.calls.filter((call) => call.durationMs != null).length,
         callsAfterResponse: group.calls
@@ -377,12 +407,16 @@ export function buildTurnTimingBreakdown(
   }
 
   const apiPhases = phases.filter((phase) => phase.kind !== 'tail')
-  const timedApiPhases = apiPhases.filter((phase) => phase.observedMs != null)
+  const phaseTimedApiPhases = apiPhases.filter((phase) => phase.observedMs != null)
   const providerApiMs = finiteDuration(resultEvent?.durationApiMs)
-  const observedApiMs =
-    timedApiPhases.length > 0
-      ? timedApiPhases.reduce((sum, phase) => sum + (phase.observedMs ?? 0), 0)
+  const responseApiMs = responseTiming?.cumulativeMs
+  const phaseObservedApiMs =
+    phaseTimedApiPhases.length > 0
+      ? phaseTimedApiPhases.reduce((sum, phase) => sum + (phase.observedMs ?? 0), 0)
       : undefined
+  const observedApiMs = responseApiMs ?? phaseObservedApiMs
+  const timedApiPhases = responseTiming?.timedCalls ?? phaseTimedApiPhases.length
+  const totalApiPhases = responseTiming?.totalCalls ?? apiPhases.length
   return {
     wallMs,
     apiMs: providerApiMs ?? observedApiMs,
@@ -390,13 +424,24 @@ export function buildTurnTimingBreakdown(
     apiObservation:
       providerApiMs != null
         ? undefined
-        : unsegmentedPhase?.observedMs != null
+        : responseApiMs != null
+          ? 'response'
+          : unsegmentedPhase?.observedMs != null
           ? 'residual'
           : observedApiMs != null
             ? 'phase'
             : undefined,
-    timedApiPhases: timedApiPhases.length,
-    totalApiPhases: apiPhases.length,
+    timedApiPhases,
+    totalApiPhases,
+    ...(responseTiming
+      ? {
+          cumulativeApiMs: responseTiming.cumulativeMs,
+          occupiedApiMs: responseTiming.occupiedMs,
+          overlapApiMs: responseTiming.overlapMs,
+          rootApiMs: responseTiming.root?.cumulativeMs,
+          nestedApiMs: responseTiming.subagents?.cumulativeMs
+        }
+      : {}),
     totalCalls: calls.length,
     timedCalls: timedCalls.length,
     cumulativeCallMs,

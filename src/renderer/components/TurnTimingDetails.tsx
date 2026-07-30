@@ -88,6 +88,8 @@ export function TurnTimingDetails({
   const apiMetricLabel =
     timing.apiSource === 'provider'
       ? '模型 API 合计'
+      : timing.apiObservation === 'response'
+        ? '模型响应累计'
       : isResidualEstimate
         ? '未归因耗时'
         : timing.apiSource === 'observed'
@@ -99,6 +101,8 @@ export function TurnTimingDetails({
       : timing.apiSource === 'observed'
         ? timing.apiObservation === 'residual'
           ? `~估算 · 已计时 ${coverage}`
+          : timing.apiObservation === 'response'
+            ? `~观测 · ${timing.timedApiPhases}/${timing.totalApiPhases}`
           : timing.timedApiPhases < timing.totalApiPhases
             ? `~观测 · ${timing.timedApiPhases}/${timing.totalApiPhases}`
             : '~观测'
@@ -128,6 +132,8 @@ export function TurnTimingDetails({
           apiSource,
           timing.apiSource === 'provider'
             ? 'Provider / SDK 上报的整轮模型 API 活跃时间合计。'
+            : timing.apiObservation === 'response'
+              ? '按 Codex 每次上游响应完成事件观测：从该 Agent 线程上一次工具或 Hook 完成（首轮为 turn start）到响应完成。累计值会重复计算并行子 Agent，不是服务端上报的精确 latency。'
             : timing.apiObservation === 'residual'
               ? 'Provider 未上报 API 耗时且缺少逐次响应边界；当前值为整轮墙钟减去已计时调用占用区间的余量，可能包含模型、调度、Hook、IPC 与未计时活动。'
               : 'Provider 未上报 API 耗时；当前值按工具结束到下一次模型响应之间的事件时间戳观测区间累计。'
@@ -140,6 +146,40 @@ export function TurnTimingDetails({
         )}
         {metric('可计时调用', coverage, timing.totalCalls > 0 && timing.timedCalls < timing.totalCalls ? '部分' : undefined)}
       </div>
+
+      {timing.apiObservation === 'response' && (
+        <div className="turn-timing-block">
+          <div className="turn-timing-block-title">
+            <span>模型调用观测</span>
+            <span
+              className="turn-timing-caption"
+              title="累计值会重复计算并行模型请求；占用墙钟按所有已观测模型区间的并集计算"
+            >
+              累计 {durationText(timing.cumulativeApiMs)} · 占用 {durationText(timing.occupiedApiMs)}
+              {(timing.overlapApiMs ?? 0) > 0 ? ` · 重叠 ${durationText(timing.overlapApiMs)}` : ''}
+            </span>
+          </div>
+          <div className="turn-timing-aggregate-list">
+            <div className="turn-timing-aggregate">
+              <span className="turn-timing-aggregate-name">根 Agent</span>
+              <span>{timing.phases.filter((phase) => phase.kind !== 'tail').length}×</span>
+              <b>{durationText(timing.rootApiMs)}</b>
+              <span>~观测</span>
+            </div>
+            {(timing.nestedApiMs != null || timing.totalApiPhases > timing.phases.filter((phase) => phase.kind !== 'tail').length) && (
+              <div className="turn-timing-aggregate">
+                <span className="turn-timing-aggregate-name">子 Agent</span>
+                <span>{Math.max(0, timing.totalApiPhases - timing.phases.filter((phase) => phase.kind !== 'tail').length)}×</span>
+                <b>{durationText(timing.nestedApiMs)}</b>
+                <span>~观测</span>
+              </div>
+            )}
+          </div>
+          <div className="turn-timing-note">
+            观测值可能包含 Codex 请求构造、调度、传输与重试；用于定位流程等待，不等同于 Provider 服务端 latency。
+          </div>
+        </div>
+      )}
 
       {timing.aggregates.length > 0 && (
         <div className="turn-timing-block">
