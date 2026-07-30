@@ -8,6 +8,7 @@ import type {
   WorkspaceFileSnapshot,
   WorkspaceListRequest,
   WorkspaceListResult,
+  WorkspaceMoveRequest,
   WorkspacePathRequest,
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
@@ -190,6 +191,30 @@ export async function renameWorkspaceEntry(request: WorkspaceRenameRequest): Pro
   return {
     name,
     path,
+    kind: sourceInfo.isDirectory() ? 'directory' : 'file',
+    ...(sourceInfo.isFile() ? { size: info.size } : {}),
+    mtimeMs: info.mtimeMs
+  }
+}
+
+export async function moveWorkspaceEntry(request: WorkspaceMoveRequest): Promise<WorkspaceEntry> {
+  const source = await checkedPath(request.cwd, request.path)
+  if (!source.portable) throw new Error('不能移动工作区根目录')
+  const sourceInfo = await lstat(source.path)
+  const targetParent = await checkedPath(request.cwd, request.parentPath)
+  if (!(await lstat(targetParent.path)).isDirectory()) throw new Error('目标路径不是文件夹')
+  const name = basename(source.path)
+  const targetPath = join(targetParent.path, name)
+  if (targetPath === source.path) throw new Error('文件或文件夹已在目标目录中')
+  if (sourceInfo.isDirectory() && isInside(source.path, targetPath)) {
+    throw new Error('文件夹不能移动到自身内部')
+  }
+  if (await exists(targetPath)) throw new Error('目标目录中已有同名文件或文件夹')
+  await rename(source.path, targetPath)
+  const info = await lstat(targetPath)
+  return {
+    name,
+    path: portablePath([...pathParts(targetParent.portable), name]),
     kind: sourceInfo.isDirectory() ? 'directory' : 'file',
     ...(sourceInfo.isFile() ? { size: info.size } : {}),
     mtimeMs: info.mtimeMs

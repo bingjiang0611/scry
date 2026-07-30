@@ -27,6 +27,7 @@ import type {
   WorkspaceFileSnapshot,
   WorkspaceListRequest,
   WorkspaceListResult,
+  WorkspaceMoveRequest,
   WorkspacePathRequest,
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
@@ -65,6 +66,7 @@ const api = {
   workspaceWrite: (request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:write', request),
   workspaceCreate: (request: WorkspaceCreateRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:create', request),
   workspaceRename: (request: WorkspaceRenameRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:rename', request),
+  workspaceMove: (request: WorkspaceMoveRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:move', request),
   workspaceTrash: (request: WorkspacePathRequest): Promise<true> => ipcRenderer.invoke('workspace:trash', request),
   setCwd: (dir: string): Promise<string> => ipcRenderer.invoke('agent:setCwd', dir),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),

@@ -32,6 +32,7 @@ interface WorkspacePanelProps {
 type ItemDialog =
   | { kind: 'create'; parentPath: string; entryKind: WorkspaceEntryKind; value: string }
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
+  | { kind: 'move'; entry: WorkspaceEntry; value: string }
 
 export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, onDirtyChange }: WorkspacePanelProps) {
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
@@ -150,7 +151,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
         })
         await loadDirectory(itemDialog.parentPath)
         if (created.kind === 'file') setSelected(created)
-      } else {
+      } else if (itemDialog.kind === 'rename') {
         if (selected && pathContains(itemDialog.entry.path, selected.path) && !confirmLeave()) return
         const renamed = await window.scry.workspaceRename({
           cwd,
@@ -162,6 +163,19 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
           setSelected({ ...selected, name: nextPath.split('/').pop() ?? renamed.name, path: nextPath })
         }
         await loadDirectory(parentPath(itemDialog.entry.path))
+      } else {
+        if (selected && pathContains(itemDialog.entry.path, selected.path) && !confirmLeave()) return
+        const previousParent = parentPath(itemDialog.entry.path)
+        const moved = await window.scry.workspaceMove({
+          cwd,
+          path: itemDialog.entry.path,
+          parentPath: itemDialog.value === '.' ? '' : itemDialog.value
+        })
+        if (selected && pathContains(itemDialog.entry.path, selected.path)) {
+          const nextPath = selected.path.replace(itemDialog.entry.path, moved.path)
+          setSelected({ ...selected, name: nextPath.split('/').pop() ?? moved.name, path: nextPath })
+        }
+        await Promise.all([...new Set([previousParent, parentPath(moved.path)])].map((path) => loadDirectory(path)))
       }
       setItemDialog(null)
     } catch (mutationError) {
@@ -371,6 +385,17 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
                   className="ctxitem"
                   role="menuitem"
                   onClick={() => {
+                    setItemDialog({ kind: 'move', entry: context.entry!, value: '.' })
+                    setContext(null)
+                  }}
+                >
+                  <Icon name="folder" /> 移动到…
+                </button>
+                <button
+                  type="button"
+                  className="ctxitem"
+                  role="menuitem"
+                  onClick={() => {
                     setItemDialog({ kind: 'rename', entry: context.entry!, value: context.entry!.name })
                     setContext(null)
                   }}
@@ -404,6 +429,8 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
           title={
             itemDialog.kind === 'rename'
               ? '重命名'
+              : itemDialog.kind === 'move'
+                ? '移动到文件夹（相对工作区，根目录填 .）'
               : itemDialog.entryKind === 'directory'
                 ? '新建文件夹'
                 : '新建文件'
