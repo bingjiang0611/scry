@@ -20,6 +20,16 @@ import type {
   SkillMeta
 } from '@shared/provider'
 import type { McpGuardReport } from './components/McpTrustPanel'
+import type {
+  WorkspaceCreateRequest,
+  WorkspaceEntry,
+  WorkspaceFileSnapshot,
+  WorkspaceListRequest,
+  WorkspaceListResult,
+  WorkspacePathRequest,
+  WorkspaceRenameRequest,
+  WorkspaceWriteRequest
+} from '@shared/workspace'
 
 export interface DetectedAgent {
   id: string
@@ -75,6 +85,12 @@ declare global {
       removeRecentFolder(dir: string): Promise<string[]>
       chooseFolder(): Promise<string | null>
       clipboardImage(): Promise<AgentInputAttachment | null>
+      workspaceList(request: WorkspaceListRequest): Promise<WorkspaceListResult>
+      workspaceRead(request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot>
+      workspaceWrite(request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot>
+      workspaceCreate(request: WorkspaceCreateRequest): Promise<WorkspaceEntry>
+      workspaceRename(request: WorkspaceRenameRequest): Promise<WorkspaceEntry>
+      workspaceTrash(request: WorkspacePathRequest): Promise<true>
       setCwd(dir: string): Promise<string>
       newSession(context: ProviderContext): Promise<boolean>
       listSessions(context: ProviderContext): Promise<SessionMeta[]>

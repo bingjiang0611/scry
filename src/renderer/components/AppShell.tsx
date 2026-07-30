@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from 'react'
 
 export interface AppShellProps {
   style: CSSProperties
-  rightPanelMode?: 'overview' | 'review'
+  rightPanelMode?: 'overview' | 'review' | 'workspace'
   sidebar: ReactNode
   sidebarSplitter: ReactNode
   main: ReactNode

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, extname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -48,6 +48,22 @@ import {
   hooksRequiringBypass,
   type CodexHookInspection
 } from './codex-hook-trust'
+import {
+  createWorkspaceEntry,
+  listWorkspace,
+  readWorkspaceFile,
+  renameWorkspaceEntry,
+  trashWorkspaceEntry,
+  writeWorkspaceFile
+} from './workspace-files'
+import type {
+  WorkspaceCreateRequest,
+  WorkspaceListRequest,
+  WorkspacePathRequest,
+  WorkspaceRenameRequest,
+  WorkspaceWriteRequest
+} from '../shared/workspace'
+import { editContextMenuTemplate, shouldShowEditContextMenu } from './edit-context-menu'
 import {
   canonicalTurnTiming,
   commitManagedTraceTurn,
@@ -378,6 +394,10 @@ function createWindow(): void {
   // ready-to-show 只代表第一帧能画，React 还没恢复 workspace/active run；此时 show 会先闪欢迎页。
   // Renderer 在关键快照稳定后主动发 app:rendererReady。保留超时兜底，避免 renderer 异常时窗口永久不可见。
   win.webContents.on('ipc-message', onIpcMessage)
+  win.webContents.on('context-menu', (_event, params) => {
+    if (!shouldShowEditContextMenu(params) || !win) return
+    Menu.buildFromTemplate(editContextMenuTemplate(params)).popup({ window: win })
+  })
   setTimeout(showWindow, 2500)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -445,6 +465,35 @@ ipcMain.handle('agent:clipboardImage', () => {
     width: size.width,
     height: size.height
   } satisfies AgentInputAttachment
+})
+
+function assertWorkspaceSender(senderId: number): void {
+  if (!win || win.isDestroyed() || senderId !== win.webContents.id) throw new Error('无权访问工作区文件')
+}
+
+ipcMain.handle('workspace:list', (event, request: WorkspaceListRequest) => {
+  assertWorkspaceSender(event.sender.id)
+  return listWorkspace(request)
+})
+ipcMain.handle('workspace:read', (event, request: WorkspacePathRequest) => {
+  assertWorkspaceSender(event.sender.id)
+  return readWorkspaceFile(request)
+})
+ipcMain.handle('workspace:write', (event, request: WorkspaceWriteRequest) => {
+  assertWorkspaceSender(event.sender.id)
+  return writeWorkspaceFile(request)
+})
+ipcMain.handle('workspace:create', (event, request: WorkspaceCreateRequest) => {
+  assertWorkspaceSender(event.sender.id)
+  return createWorkspaceEntry(request)
+})
+ipcMain.handle('workspace:rename', (event, request: WorkspaceRenameRequest) => {
+  assertWorkspaceSender(event.sender.id)
+  return renameWorkspaceEntry(request)
+})
+ipcMain.handle('workspace:trash', (event, request: WorkspacePathRequest) => {
+  assertWorkspaceSender(event.sender.id)
+  return trashWorkspaceEntry(request, (path) => shell.trashItem(path))
 })
 
 ipcMain.handle('agent:setCwd', (_e, dir: string) => {

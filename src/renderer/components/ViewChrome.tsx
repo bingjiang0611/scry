@@ -9,9 +9,11 @@ interface ViewChromeProps {
   agent: DetectedAgent | undefined
   agentScanning?: boolean
   showPanel: boolean
+  showWorkspace?: boolean
   canTogglePanel?: boolean
   onView: (view: AppView) => void
   onTogglePanel: () => void
+  onToggleWorkspace?: () => void
 }
 
 export function ViewChrome({
@@ -20,9 +22,11 @@ export function ViewChrome({
   agent,
   agentScanning = false,
   showPanel,
+  showWorkspace = false,
   canTogglePanel = true,
   onView,
-  onTogglePanel
+  onTogglePanel,
+  onToggleWorkspace
 }: ViewChromeProps) {
   const agentVersion = agent?.version?.replace(/\s+\(Claude Code\)\s*$/, '')
   return (
@@ -59,9 +63,20 @@ export function ViewChrome({
           </button>
         )}
         {cwd && canTogglePanel && (
-          <button className={`tb-pill panel-pill ${showPanel ? 'on' : ''}`} onClick={onTogglePanel} title="纵览面板">
-            <Icon name="grid" /> 面板
-          </button>
+          <>
+            {onToggleWorkspace && (
+              <button
+                className={`tb-pill panel-pill ${showWorkspace ? 'on' : ''}`}
+                onClick={onToggleWorkspace}
+                title="工作区文件"
+              >
+                <Icon name="folder" /> 文件
+              </button>
+            )}
+            <button className={`tb-pill panel-pill ${showPanel ? 'on' : ''}`} onClick={onTogglePanel} title="纵览面板">
+              <Icon name="grid" /> 面板
+            </button>
+          </>
         )}
       </div>
     </header>
