@@ -11,8 +11,11 @@ import {
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import type { CodexHookInspection, CodexHookMetadata, CodexHookTrustStatus } from '../codex-hook-trust'
-import { CodexAppServerClient } from './codex-app-server'
-import type { ProviderAdapter, ProviderRunRequest } from './types'
+import {
+  CodexAppServerClient,
+  type CodexNotificationEnvelope
+} from './codex-app-server'
+import type { ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 
 const CODEX_THREAD_ACCESS = {
   approvalPolicy: 'never',
@@ -27,7 +30,10 @@ interface CodexThreadResponse {
 }
 
 interface CodexTurnResponse {
-  turn: { id: string }
+  turn: {
+    id: string
+    startedAt?: number | null
+  }
 }
 
 interface TokenUsage {
@@ -58,8 +64,31 @@ const newEvent = (runId: string, fields: Omit<TraceEvent, 'id' | 'runId' | 'ts'>
   ...fields
 })
 
+const newEventAt = (
+  runId: string,
+  observedAtMs: number,
+  fields: Omit<TraceEvent, 'id' | 'runId' | 'ts'>
+): TraceEvent => ({
+  id: `codex-${observedAtMs.toString(36)}-${(eventCounter++).toString(36)}`,
+  runId,
+  ts: new Date(observedAtMs).toISOString(),
+  ...fields
+})
+
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+
+function canonicalTurnStatus(
+  nativeStatus: unknown,
+  stopped: boolean
+): NonNullable<ProviderRunResult['status']> {
+  if (nativeStatus === 'completed') return 'completed'
+  if (nativeStatus === 'failed') return 'failed'
+  if (nativeStatus === 'cancelled' || nativeStatus === 'canceled') return 'cancelled'
+  if (nativeStatus === 'interrupted') return 'interrupted'
+  if (stopped) return 'interrupted'
+  return 'failed'
+}
 
 function mcpStatus(value: unknown): McpLiveStatus[] {
   const data = Array.isArray(record(value).data) ? (record(value).data as unknown[]) : []
@@ -97,6 +126,17 @@ const hookEventName = (value: unknown): string => {
 
 const usageNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+
+const epochMilliseconds = (value: unknown): number | undefined => {
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : undefined
+  if (numeric == null || !Number.isFinite(numeric) || numeric < 0) return undefined
+  return numeric < 100_000_000_000 ? numeric * 1_000 : numeric
+}
 
 const tokenUsage = (value: unknown): TokenUsage => {
   const usage = record(value)
@@ -444,7 +484,12 @@ export function createCodexAdapter(): ProviderAdapter {
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
     const args = bypass ? ['--dangerously-bypass-hook-trust', 'app-server'] : undefined
-    const client = new CodexAppServerClient({ command: path, args, cwd, env: runtimeCliEnv() })
+    const client = new CodexAppServerClient({
+      command: path,
+      args,
+      cwd,
+      env: runtimeCliEnv(undefined, { managedRecorder: true })
+    })
     clients.set(key, client)
     lastClient = client
     return client
@@ -606,13 +651,75 @@ export function createCodexAdapter(): ProviderAdapter {
       let lastTurnError: Record<string, unknown> | undefined
       let planUpdateSeq = 0
       const childAgents = new Map<string, { parentToolUseId?: string; name?: string }>()
-      let finish: ((value: { externalSessionId?: string; stopped?: boolean; mcp?: McpSnapshot }) => void) | undefined
+      type ResponseTimingState = {
+        boundaryMs?: number
+        responses: Set<string>
+        responseSource?: 'raw_response' | 'agent_message_item'
+      }
+      const timingByThread = new Map<string, ResponseTimingState>()
+      let finish: ((value: ProviderRunResult) => void) | undefined
 
-      const done = new Promise<{ externalSessionId?: string; stopped?: boolean; mcp?: McpSnapshot }>((resolve) => {
+      const notificationAt = (envelope?: CodexNotificationEnvelope): number =>
+        envelope?.emittedAtMs ?? envelope?.receivedAtMs ?? Date.now()
+
+      const timingState = (
+        threadId: string,
+        fallbackBoundaryMs?: number
+      ): ResponseTimingState => {
+        const existing = timingByThread.get(threadId)
+        if (existing) {
+          if (existing.boundaryMs == null && fallbackBoundaryMs != null) existing.boundaryMs = fallbackBoundaryMs
+          return existing
+        }
+        const created: ResponseTimingState = { boundaryMs: fallbackBoundaryMs, responses: new Set<string>() }
+        timingByThread.set(threadId, created)
+        return created
+      }
+
+      const advanceTimingBoundary = (threadId: string | undefined, atMs: number): void => {
+        if (!threadId || !Number.isFinite(atMs)) return
+        const state = timingState(threadId)
+        state.boundaryMs = state.boundaryMs == null ? atMs : Math.max(state.boundaryMs, atMs)
+      }
+
+      const emitObservedResponse = (
+        threadId: string,
+        responseId: string,
+        observedAtMs: number,
+        traceContext: ItemTraceContext,
+        source: 'raw_response' | 'agent_message_item'
+      ): void => {
+        const state = timingState(threadId)
+        if (state.responseSource && state.responseSource !== source) return
+        state.responseSource = source
+        if (state.responses.has(responseId)) return
+        state.responses.add(responseId)
+        const boundaryMs = state.boundaryMs
+        const durationMs =
+          boundaryMs != null && observedAtMs >= boundaryMs
+            ? observedAtMs - boundaryMs
+            : undefined
+        runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
+          kind: 'model',
+          stage: 'response_completed',
+          messageId: responseId,
+          ...(durationMs != null ? { durationMs } : {}),
+          runtimeMetadata: {
+            codexResponseId: responseId,
+            timingSource: 'observed',
+            timingBoundary: 'turn_or_activity_end',
+            timingEvent: source
+          },
+          ...traceContext
+        }))
+        state.boundaryMs = observedAtMs
+      }
+
+      const done = new Promise<ProviderRunResult>((resolve) => {
         finish = resolve
       })
 
-      const promise = (async () => {
+      const promise = (async (): Promise<ProviderRunResult> => {
         try {
           const appServer = getClient(runRequest.cwd, runRequest.bypassHookTrust)
           await appServer.start()
@@ -620,7 +727,7 @@ export function createCodexAdapter(): ProviderAdapter {
             accountReadError = String((error as Error).message)
             return null
           })
-          unsubscribe = appServer.onNotification((method, value) => {
+          unsubscribe = appServer.onNotification((method, value, envelope) => {
             const params = record(value)
             // 订阅建立到 thread/start 返回之间可能收到同一 app-server 上其他 run 的通知。
             // 在本 run 拿到 threadId 前一律忽略；之后接受本 thread 及由它显式 spawn 的子 thread。
@@ -633,20 +740,40 @@ export function createCodexAdapter(): ProviderAdapter {
             const traceContext: ItemTraceContext = child
               ? { agentId: notificationThreadId, parentToolUseId: child.parentToolUseId }
               : {}
-            if (method === 'item/agentMessage/delta') {
-              runRequest.emit(newEvent(runRequest.runId, {
+            const observedAtMs = notificationAt(envelope)
+            if (method === 'turn/started') {
+              const turn = record(params.turn)
+              if (notificationThreadId) {
+                const state = timingState(notificationThreadId)
+                if (state.responses.size === 0) {
+                  state.boundaryMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
+                }
+              }
+            } else if (method === 'item/agentMessage/delta') {
+              runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                 kind: 'model',
                 stage: 'text_delta',
                 text: String(params.delta ?? ''),
+                runtimeMetadata: {
+                  codexItemId: typeof params.itemId === 'string' ? params.itemId : undefined
+                },
                 ...traceContext
               }))
             } else if (method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta') {
-              runRequest.emit(newEvent(runRequest.runId, {
+              runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                 kind: 'model',
                 stage: 'thinking',
                 thinking: String(params.delta ?? ''),
+                runtimeMetadata: {
+                  codexItemId: typeof params.itemId === 'string' ? params.itemId : undefined
+                },
                 ...traceContext
               }))
+            } else if (method === 'rawResponse/completed') {
+              if (!notificationThreadId) return
+              const responseId = typeof params.responseId === 'string' ? params.responseId : undefined
+              if (!responseId) return
+              emitObservedResponse(notificationThreadId, responseId, observedAtMs, traceContext, 'raw_response')
             } else if (method === 'item/started' || method === 'item/completed') {
               const item = record(params.item)
               if (item.type === 'collabAgentToolCall' && item.tool === 'spawnAgent') {
@@ -656,6 +783,7 @@ export function createCodexAdapter(): ProviderAdapter {
                     parentToolUseId: typeof item.id === 'string' ? item.id : undefined,
                     name: typeof item.model === 'string' ? item.model : undefined
                   })
+                  timingState(receiverThreadId, observedAtMs)
                 }
               } else if (item.type === 'subAgentActivity' && typeof item.agentThreadId === 'string') {
                 const existing = childAgents.get(item.agentThreadId)
@@ -670,6 +798,28 @@ export function createCodexAdapter(): ProviderAdapter {
                 method === 'item/completed',
                 traceContext
               )) runRequest.emit(event)
+              if (method === 'item/completed') {
+                const type = String(item.type ?? '')
+                if (type === 'agentMessage' && notificationThreadId && typeof item.id === 'string') {
+                  emitObservedResponse(
+                    notificationThreadId,
+                    item.id,
+                    observedAtMs,
+                    traceContext,
+                    'agent_message_item'
+                  )
+                } else if ([
+                  'commandExecution',
+                  'mcpToolCall',
+                  'dynamicToolCall',
+                  'collabAgentToolCall',
+                  'fileChange'
+                ].includes(type)) {
+                  const completedAtMs =
+                    usageNumber(params.completedAtMs) ?? observedAtMs
+                  advanceTimingBoundary(notificationThreadId, completedAtMs)
+                }
+              }
             } else if (method === 'turn/plan/updated') {
               const planToolUseId = `plan:${String(params.turnId ?? turnId ?? 'turn')}:${++planUpdateSeq}`
               runRequest.emit(newEvent(runRequest.runId, {
@@ -707,6 +857,11 @@ export function createCodexAdapter(): ProviderAdapter {
                 method === 'hook/completed',
                 runRequest.cwd
               ))
+              if (method === 'hook/completed') {
+                const run = record(params.run)
+                const completedAtMs = epochMilliseconds(run.completedAt) ?? observedAtMs
+                advanceTimingBoundary(notificationThreadId, completedAtMs)
+              }
             } else if (method === 'thread/tokenUsage/updated') {
               // Child threads report their own cumulative usage. It must not be added to the root turn.
               if (!isRoot) return
@@ -795,7 +950,12 @@ export function createCodexAdapter(): ProviderAdapter {
                   ...(effectiveError ? { turnError: effectiveError } : {})
                 }
               }))
-              finish?.({ externalSessionId, stopped })
+              finish?.({
+                externalSessionId,
+                providerTurnId: turnId,
+                stopped,
+                status: canonicalTurnStatus(turn.status, stopped)
+              })
             } else if (method === 'error') {
               const message = String(record(params.error).message ?? params.message ?? 'Codex app-server error')
               if (!isRoot) {
@@ -874,7 +1034,7 @@ export function createCodexAdapter(): ProviderAdapter {
             }))
           }
           runRequest.onExternalSessionId?.(externalSessionId)
-          if (stopped) return { externalSessionId, stopped: true }
+          if (stopped) return { externalSessionId, stopped: true, status: 'interrupted' }
           const input: unknown[] = []
           const mention = explicitSkillMention(runRequest.prompt)
           const skill = mention
@@ -907,6 +1067,11 @@ export function createCodexAdapter(): ProviderAdapter {
             approvalPolicy: 'never'
           }, runRequest.cwd, runRequest.bypassHookTrust)
           turnId = turn.turn.id
+          if (externalSessionId) {
+            const startedAtMs = epochMilliseconds(turn.turn.startedAt) ?? Date.now()
+            const state = timingState(externalSessionId)
+            if (state.responses.size === 0 && state.boundaryMs == null) state.boundaryMs = startedAtMs
+          }
           if (stopped) {
             void request(
               'turn/interrupt',
@@ -914,7 +1079,12 @@ export function createCodexAdapter(): ProviderAdapter {
               runRequest.cwd,
               runRequest.bypassHookTrust
             ).catch(() => {})
-            return { externalSessionId, stopped: true }
+            return {
+              externalSessionId,
+              providerTurnId: turnId,
+              stopped: true,
+              status: 'interrupted'
+            }
           }
           return await done
         } finally {
@@ -934,7 +1104,12 @@ export function createCodexAdapter(): ProviderAdapter {
         }
       }
 
-      return { promise, interrupt, getExternalSessionId: () => externalSessionId }
+      return {
+        promise,
+        interrupt,
+        getExternalSessionId: () => externalSessionId,
+        getProviderTurnId: () => turnId
+      }
     },
     skills,
     commands: {

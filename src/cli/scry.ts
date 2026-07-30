@@ -5,6 +5,7 @@ import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
 import { RECORDER_VERSION, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { compactModelTiming, summarizeTurnRecords } from '../core/turn-recorder/turns-summary.js'
 
 interface ParsedArgs {
   positionals: string[]
@@ -79,7 +80,13 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
     const payload = source.trim() ? JSON.parse(source) as Record<string, unknown> : {}
     const event = flag(args, 'event')
     if (!event) throw new Error('--event is required')
-    const result = await handleRecorderHook({ provider: providerOf(args), event, workspace, payload })
+    const result = await handleRecorderHook({
+      provider: providerOf(args),
+      event,
+      workspace,
+      payload,
+      managed: args.flags.has('managed')
+    })
     if (args.flags.has('start-daemon') && result.status !== 'disabled') {
       const scriptPath = process.argv[1]
       if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
@@ -137,6 +144,8 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
       sessionId: record.sessionId,
       turnIndex: record.turnIndex,
       status: record.status,
+      durationMs: record.durationMs,
+      modelTiming: compactModelTiming(record),
       startedAt: record.startedAt,
       completedAt: record.completedAt
     })))
@@ -148,6 +157,10 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     const record = await showRecord(dataRoot, selector)
     if (!record) return 4
     print(record)
+    return 0
+  }
+  if (action === 'summary') {
+    print(summarizeTurnRecords(await listRecords(dataRoot), args.positionals[2]))
     return 0
   }
   if (action === 'export') {
@@ -163,7 +176,7 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print(result)
     return result.ok ? 0 : 4
   }
-  throw new Error('usage: scry turns list|show|export|verify ...')
+  throw new Error('usage: scry turns list|show|summary|export|verify ...')
 }
 
 async function doctorCommand(args: ParsedArgs): Promise<number> {

@@ -9,15 +9,26 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { turnChangeHints } from './change-journal.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
-import { beginGitTurnDiff, finishGitTurnDiff, type GitTurnDiffCapture } from './git.js'
+import { beginGitTurnDiff, finishGitTurnDiff } from './git.js'
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { recoverManagedRecorderTurns } from './managed.js'
+import {
+  SESSION_LOCK_WAIT_MS,
+  recorderOpenPath as openPath,
+  recorderPendingHealth,
+  recorderSessionLock as sessionLock,
+  recorderSessionRoot as sessionRoot,
+  recorderStatePath as statePath,
+  recorderTurnRoot as turnRoot,
+  type RecorderOpenTurnState as OpenTurnState,
+  type RecorderSessionState as SessionState
+} from './runtime-state.js'
 import {
   RECORDER_VERSION,
   clearRuntimeTurn,
   commitRecord,
   listRecords,
   recordError,
-  safeKey,
   stableHash,
   updateHealth
 } from './store.js'
@@ -28,38 +39,13 @@ export interface RecorderHookInput {
   workspace: string
   payload: Record<string, unknown>
   env?: NodeJS.ProcessEnv
+  managed?: boolean
 }
 
 export interface RecorderHookResult {
   status: 'disabled' | 'ignored' | 'started' | 'recorded' | 'committed' | 'duplicate' | 'pending' | 'orphan'
   reason?: string
   record?: AgentTurnRecord
-}
-
-interface SessionState {
-  schemaVersion: 1
-  lastGeneration: number
-  lastTurnIndex: number
-  lastCommittedRecordId?: string
-  committedProviderTurnIds?: string[]
-}
-
-interface OpenTurnState {
-  schemaVersion: 1
-  provider: ProviderId
-  sessionId: string
-  generation: number
-  turnIndex: number
-  status: 'open' | 'closing'
-  startedAt: string
-  closingAt?: string
-  prompt?: string
-  promptHash?: string
-  startFingerprint: string
-  transcriptPath?: string
-  transcriptStartOffset?: number
-  providerTurnId?: string
-  captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }
 
 interface StoredLifecycleEvent {
@@ -75,6 +61,7 @@ interface TranscriptRead {
   stable: boolean
   observed: boolean
   complete?: boolean
+  toolStreamComplete?: boolean
   userText?: string
   events: TraceEvent[]
   observable: {
@@ -90,8 +77,6 @@ interface TranscriptRead {
 
 const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
-// Turn boundaries may synchronously snapshot Git for up to 5s; fallback delivery must outwait the original holder.
-const SESSION_LOCK_WAIT_MS = 10_000
 const TRANSCRIPT_REWIND_BYTES = 4 * 1024 * 1024
 const MAX_TRANSCRIPT_READ_BYTES = 32 * 1024 * 1024
 
@@ -133,26 +118,6 @@ function promptOf(payload: Record<string, unknown>): string | undefined {
 function timestampOf(payload: Record<string, unknown>): string {
   const value = stringAt(payload, 'timestamp', 'ts', 'created_at', 'createdAt')
   return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString()
-}
-
-function sessionRoot(dataRoot: string, provider: ProviderId, sessionId: string): string {
-  return join(dataRoot, 'runtime', provider, safeKey(sessionId))
-}
-
-function turnRoot(root: string, generation: number): string {
-  return join(root, 'turns', String(generation).padStart(8, '0'))
-}
-
-function openPath(root: string): string {
-  return join(root, 'open.json')
-}
-
-function statePath(root: string): string {
-  return join(root, 'session.json')
-}
-
-function sessionLock(dataRoot: string, provider: ProviderId, sessionId: string): string {
-  return join(dataRoot, 'locks', 'sessions', provider, `${safeKey(sessionId)}.lock`)
 }
 
 function summarize(value: unknown, max = 500): string | undefined {
@@ -217,7 +182,7 @@ function inferredSkillEvents(
   for (const candidate of candidates) {
     // 只有真正读取 skill 入口文件才算调用证据；仅 rg 某个 skill 目录或引用其 references
     // 不能证明 agent 使用了该 skill，否则会把代码搜索误报成 Skill 调用。
-    const pattern = /(?:^|[/\s"'`])(?:\.claude|\.codex|\.agents)\/skills\/([^/\s"'`]+)\/SKILL\.md/g
+    const pattern = /(?:^|[/\s"'`])(?:\.(?:claude|codex|agents)\/)?skills\/([^/\s"'`]+)\/SKILL\.md/g
     for (const match of candidate.matchAll(pattern)) if (match[1]) names.add(match[1])
   }
   return [...names].map((name) => ({
@@ -297,6 +262,7 @@ interface ParsedTranscriptTurn {
   events: TraceEvent[]
   observable: TranscriptRead['observable']
   childThreads: Array<{ sessionId: string; parentToolUseId?: string; name?: string }>
+  pendingToolCalls: Set<string>
 }
 
 function callInput(payload: Record<string, unknown>): Record<string, unknown> {
@@ -399,24 +365,34 @@ function codexToolName(name: string, input: Record<string, unknown>): Normalized
 
 function staticCommandMaps(source: string): Map<number, NormalizedCodexCall[]> {
   const arrays = new Map<string, string[]>()
-  const arrayPattern = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(\[(?:\s*"(?:\\.|[^"\\])*"\s*,?)*\])\s*;/g
+  const arrayPattern = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[/g
   for (const match of source.matchAll(arrayPattern)) {
+    const openIndex = (match.index ?? 0) + match[0].length - 1
+    const content = balancedCallArgument(source, openIndex)
+    if (content == null) continue
     try {
-      const values = JSON.parse(match[2]) as unknown
+      const values = JSON.parse(`[${content}]`) as unknown
       if (Array.isArray(values) && values.every((value) => typeof value === 'string')) arrays.set(match[1], values)
+      else if (
+        Array.isArray(values) &&
+        values.every((value) => Array.isArray(value) && typeof value[0] === 'string')
+      ) {
+        arrays.set(match[1], values.map((value) => value[0] as string))
+      }
     } catch {
       // Only literal string arrays are safe to expand without evaluating JavaScript.
     }
   }
 
   const expansions = new Map<number, NormalizedCodexCall[]>()
-  const mapPattern = /\b([A-Za-z_$][\w$]*)\.map\(\s*([A-Za-z_$][\w$]*)\s*=>\s*tools\.exec_command\s*\(/g
+  const mapPattern = /\b([A-Za-z_$][\w$]*)\.map\(\s*(?:\(\s*\[\s*([A-Za-z_$][\w$]*)[^\]]*\]\s*\)|([A-Za-z_$][\w$]*))\s*=>\s*tools\.exec_command\s*\(/g
   for (const match of source.matchAll(mapPattern)) {
     const commands = arrays.get(match[1])
     if (!commands) continue
+    const commandVariable = match[2] ?? match[3]
     const openIndex = (match.index ?? 0) + match[0].length - 1
     const argument = balancedCallArgument(source, openIndex)
-    if (!argument || !new RegExp(`(?:^|[{,]\\s*)${match[2]}(?:\\s*[,}])`).test(argument)) continue
+    if (!argument || !commandVariable || !new RegExp(`(?:^|[{,]\\s*)${commandVariable}(?:\\s*[,}])`).test(argument)) continue
     const common: Record<string, unknown> = {}
     for (const key of ['workdir'] as const) {
       const value = new RegExp(`\\b${key}\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`).exec(argument)?.[1]
@@ -460,7 +436,9 @@ function normalizedCodexCalls(payload: Record<string, unknown>): NormalizedCodex
   const name = stringAt(payload, 'name') ?? ''
   const input = callInput(payload)
   if (name === 'exec' && typeof input.raw === 'string') return nestedCodexCalls(input.raw)
-  const normalized = codexToolName(name || stringAt(payload, 'type') || 'unknown', input)
+  const namespace = stringAt(payload, 'namespace')
+  const qualifiedName = namespace && name ? `${namespace}__${name}` : name
+  const normalized = codexToolName(qualifiedName || stringAt(payload, 'type') || 'unknown', input)
   return normalized ? [normalized] : []
 }
 
@@ -481,14 +459,75 @@ function outputText(value: unknown): string | undefined {
   return text || summarize(value)
 }
 
+interface IndexedToolOutput {
+  output?: string
+  failed: boolean
+}
+
+function parsedToolOutput(value: unknown): IndexedToolOutput | undefined {
+  let parsed = value
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed) as unknown
+    } catch {
+      return undefined
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+  const record = parsed as Record<string, unknown>
+  const exitCode = typeof record.exit_code === 'number'
+    ? record.exit_code
+    : typeof record.exitCode === 'number'
+      ? record.exitCode
+      : undefined
+  const output = outputText(record.output ?? record.error ?? record.result)
+  if (exitCode == null && output == null && record.error == null && record.success == null && record.ok == null) return undefined
+  return {
+    output,
+    failed: (exitCode != null && exitCode !== 0) || record.success === false || record.ok === false || record.error != null
+  }
+}
+
+function indexedToolOutputs(value: unknown, count: number): Array<IndexedToolOutput | undefined> {
+  const outputs = Array<IndexedToolOutput | undefined>(count)
+  for (const candidate of stringsIn(value)) {
+    const match = /^(?:RESULT\s+|R)(\d+)\s*\n([\s\S]*)$/i.exec(candidate.trim())
+    if (!match) continue
+    const index = Number(match[1]) - 1
+    if (index >= 0 && index < count) {
+      outputs[index] = parsedToolOutput(match[2]) ?? {
+        output: match[2],
+        failed: outputFailed({}, match[2]) || /^\s*jq:\s+error\b/im.test(match[2])
+      }
+    }
+  }
+  if (count === 1 && !outputs[0]) {
+    for (const candidate of stringsIn(value).reverse()) {
+      const parsed = parsedToolOutput(candidate)
+      if (parsed) {
+        outputs[0] = parsed
+        break
+      }
+    }
+  }
+  return outputs
+}
+
 function outputFailed(payload: Record<string, unknown>, output: string | undefined): boolean {
   return payload.error != null ||
     payload.status === 'failed' ||
-    /\b(?:Script failed|Script error|tool failed|exit code [1-9]\d*)\b/i.test(output ?? '')
+    (
+      /\b(?:Script failed|Script error|tool failed|exit(?: code)?\s*[=:]\s*[1-9]\d*)\b/i.test(output ?? '') ||
+      /["']exit_code["']\s*:\s*[1-9]\d*/i.test(output ?? '')
+    )
 }
 
 function rejectedBeforeExecution(output: string | undefined): boolean {
   return /CreateProcess[\s\S]*Rejected|rejected:[\s\S]*(?:not permitted|permission|denied)/i.test(output ?? '')
+}
+
+function runningCellId(output: string | undefined): string | undefined {
+  return /\bScript running with (?:cell|session) ID\s+([A-Za-z0-9_-]+)/i.exec(output ?? '')?.[1]
 }
 
 function skillInjection(text: string | undefined): string | undefined {
@@ -559,13 +598,19 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
     reasoningTokens: 0
   }
   let usageObserved = false
+  let usageFinished = false
   let lastAssistant: string | undefined
   let injectedSkill: string | undefined
   let logicalIdsByOuterCall = new Map<string, string[]>()
   let toolById = new Map<string, string>()
+  let asyncOuterCallByCell = new Map<string, string>()
+  let transportCellByOuterCall = new Map<string, string>()
+  let lastAt: string | undefined
 
   const finishUsage = (at: string): void => {
-    if (!current || !usageObserved) return
+    if (!current || usageFinished) return
+    usageFinished = true
+    if (!usageObserved) return
     const finalUsage = latestTurnCumulative
       ? {
           tokensIn: Math.max(0, latestTurnCumulative.tokensIn - turnUsageBaseline.tokensIn),
@@ -589,6 +634,14 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
   const addToolCall = (payload: Record<string, unknown>, at: string): void => {
     if (!current) return
     const outerId = stringAt(payload, 'call_id', 'callId', 'id') ?? `call-${stableHash([payload, at]).slice(0, 16)}`
+    const name = stringAt(payload, 'name') ?? ''
+    if (name === 'wait' || name === 'write_stdin') {
+      const input = callInput(payload)
+      const rawCellId = input.cell_id ?? input.session_id
+      const cellId = typeof rawCellId === 'string' || typeof rawCellId === 'number' ? String(rawCellId) : undefined
+      if (cellId) transportCellByOuterCall.set(outerId, cellId)
+      return
+    }
     const calls = normalizedCodexCalls(payload)
     const logicalIds: string[] = []
     for (let index = 0; index < calls.length; index++) {
@@ -618,6 +671,7 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
     }
     if (logicalIds.length) {
       logicalIdsByOuterCall.set(outerId, logicalIds)
+      current.pendingToolCalls.add(outerId)
       current.observable.tools = true
       current.observable.mcps = true
       current.observable.errors = true
@@ -629,32 +683,48 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
     if (!current) return
     const outerId = stringAt(payload, 'call_id', 'callId', 'id')
     if (!outerId) return
-    const ids = logicalIdsByOuterCall.get(outerId) ?? [outerId]
-    const output = outputText(payload.output ?? payload.result ?? payload.tools ?? payload.error)
+    const rawOutput = payload.output ?? payload.result ?? payload.tools ?? payload.error
+    const output = outputText(rawOutput)
+    const transportCell = transportCellByOuterCall.get(outerId)
+    const targetOuterId = transportCell ? asyncOuterCallByCell.get(transportCell) : undefined
+    const logicalOuterId = targetOuterId ?? outerId
+    const ids = logicalIdsByOuterCall.get(logicalOuterId) ?? [logicalOuterId]
+    const cellId = runningCellId(output)
+    if (cellId) {
+      asyncOuterCallByCell.set(cellId, logicalOuterId)
+      return
+    }
     if (rejectedBeforeExecution(output)) {
       const rejected = new Set(ids)
       current.events = current.events.filter((event) => !event.toolUseId || !rejected.has(event.toolUseId))
       for (const id of ids) {
         toolById.delete(id)
       }
-      logicalIdsByOuterCall.delete(outerId)
+      logicalIdsByOuterCall.delete(logicalOuterId)
+      current.pendingToolCalls.delete(logicalOuterId)
       return
     }
-    const failed = outputFailed(payload, output)
-    for (const toolUseId of ids) {
+    const indexed = indexedToolOutputs(rawOutput, ids.length)
+    for (let index = 0; index < ids.length; index++) {
+      const toolUseId = ids[index]
+      const logicalOutput = indexed[index]
+      const resultOutput = logicalOutput?.output ?? output
+      const failed = logicalOutput?.failed ?? outputFailed(payload, resultOutput)
       current.events.push({
-        id: `codex-result-${stableHash([toolUseId, output]).slice(0, 16)}`,
+        id: `codex-result-${stableHash([toolUseId, resultOutput]).slice(0, 16)}`,
         ts: at,
         runId,
         kind: 'tool',
         stage: 'tool_result',
         tool: toolById.get(toolUseId),
         toolUseId,
-        text: output,
-        output,
+        text: resultOutput,
+        output: resultOutput,
         isError: failed
       })
     }
+    current.pendingToolCalls.delete(logicalOuterId)
+    if (transportCell) asyncOuterCallByCell.delete(transportCell)
   }
 
   for (const line of content.split('\n')) {
@@ -668,8 +738,10 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
     const type = stringAt(row, 'type')
     const payload = nestedRecord(row, 'payload') ?? {}
     const at = timestampOf(row)
+    lastAt = at
     if (type === 'session_meta' || type === 'turn_context' || type === 'event_msg' || type === 'response_item') sawCodexLine = true
     if (type === 'event_msg' && payload.type === 'task_started') {
+      finishUsage(at)
       current = {
         providerTurnId: stringAt(payload, 'turn_id', 'turnId'),
         userText: '',
@@ -684,17 +756,21 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
           files: false,
           errors: true
         },
-        childThreads: []
+        childThreads: [],
+        pendingToolCalls: new Set()
       }
       turns.push(current)
       turnUsageBaseline = { ...cumulativeUsage }
       latestTurnCumulative = undefined
       usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
       usageObserved = false
+      usageFinished = false
       lastAssistant = undefined
       injectedSkill = undefined
       logicalIdsByOuterCall = new Map()
       toolById = new Map()
+      asyncOuterCallByCell = new Map()
+      transportCellByOuterCall = new Map()
       continue
     }
     if (!current) continue
@@ -872,6 +948,7 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       addToolOutput(payload, at)
     }
   }
+  if (lastAt) finishUsage(lastAt)
   for (const turn of turns) {
     const injection = turn.events.find((event) =>
       event.kind === 'skill' &&
@@ -1062,6 +1139,7 @@ async function parseTranscriptSnapshot(args: {
       stable: args.stable,
       observed: parsed.recognized,
       complete: args.stable && !snapshot.truncated && enriched.complete,
+      toolStreamComplete: args.stable && !snapshot.truncated && !!turn && turn.pendingToolCalls.size === 0,
       ...(turn?.userText ? { userText: turn.userText } : {}),
       events: enriched.events,
       observable: enriched.observable
@@ -1194,11 +1272,23 @@ function toolEventKey(event: TraceEvent): string | undefined {
   return event.stage === 'tool_result' ? `result:${event.toolUseId}` : `start:${event.toolUseId}`
 }
 
-export function mergeTurnTraceEvents(lifecycle: TraceEvent[], transcript: TraceEvent[]): TraceEvent[] {
+function isLogicalCallEvent(event: TraceEvent): boolean {
+  return event.stage === 'tool_result' ||
+    (event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name))
+}
+
+export function mergeTurnTraceEvents(
+  lifecycle: TraceEvent[],
+  transcript: TraceEvent[],
+  transcriptToolStreamComplete = true
+): TraceEvent[] {
   const transcriptToolKeys = new Set(transcript.map(toolEventKey).filter((key): key is string => !!key))
+  const transcriptHasLogicalCalls = transcript.some((event) => isLogicalCallEvent(event) && event.stage !== 'tool_result')
+  const transcriptCallsAuthoritative = transcriptToolStreamComplete && transcriptHasLogicalCalls
   const transcriptHasAssistant = transcript.some((event) => event.kind === 'model' && event.stage === 'text')
   const transcriptHasUsage = transcript.some((event) => event.kind === 'harness' && event.stage === 'result')
   const filteredLifecycle = lifecycle.filter((event) => {
+    if (transcriptCallsAuthoritative && isLogicalCallEvent(event)) return false
     const key = toolEventKey(event)
     if (key && transcriptToolKeys.has(key)) return false
     if (transcriptHasAssistant && event.kind === 'model' && event.stage === 'text') return false
@@ -1223,7 +1313,8 @@ async function beginOpenTurn(
   provider: ProviderId,
   sessionId: string,
   event: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  managedByScry = false
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
@@ -1234,7 +1325,9 @@ async function beginOpenTurn(
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
   const captureDir = join(turnRoot(root, generation), 'captures')
-  const repositories = enablement.config.capture.diff ? await discoverRepositories(enablement.workspaceRoot, enablement.config) : []
+  const repositories = !managedByScry && enablement.config.capture.diff
+    ? await discoverRepositories(enablement.workspaceRoot, enablement.config)
+    : []
   const captures = await Promise.all(repositories.map(async (repository) => ({
     repository,
     capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
@@ -1253,11 +1346,27 @@ async function beginOpenTurn(
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
     ...(providerTurnIdOf(payload) ? { providerTurnId: providerTurnIdOf(payload) } : {}),
+    ...(managedByScry ? { managedByScry: true } : {}),
     captures
   }
   await writeJsonAtomic(openPath(root), open, { sync: false })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex }, { sync: false })
   return open
+}
+
+async function quarantineOpenTurn(
+  dataRoot: string,
+  root: string,
+  open: OpenTurnState,
+  reason: 'managed_replaced' | 'legacy_migration'
+): Promise<void> {
+  await writeJsonAtomic(join(turnRoot(root, open.generation), 'pending-open.json'), {
+    ...open,
+    quarantinedAt: new Date().toISOString(),
+    reason
+  }, { sync: false })
+  await rm(openPath(root), { force: true })
+  await updateHealth(dataRoot, { lastError: { at: new Date().toISOString(), message: `recorder turn quarantined: ${reason}` } })
 }
 
 async function storeLifecycleEvent(enablement: Extract<RecorderEnablement, { enabled: true }>, open: OpenTurnState, event: string, payload: Record<string, unknown>): Promise<void> {
@@ -1332,7 +1441,7 @@ async function finalizeOpenTurn(
       }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
-  const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events)
+  const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events, transcript.toolStreamComplete === true)
   const diffs = await Promise.all(open.captures.map(async ({ repository, capture }) =>
     finishGitTurnDiff(capture, undefined, turnChangeHints(repository, mergedEvents))
   ))
@@ -1378,6 +1487,9 @@ async function finalizeOpenTurn(
     if (evidence.hooks.value) evidence.hooks = partial(evidence.hooks.value, source, reason)
     if (evidence.dangerousOperations.value) {
       evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)
+    }
+    if (evidence.modelTiming?.value && evidence.modelTiming.value.method !== 'provider_api') {
+      evidence.modelTiming = partial(evidence.modelTiming.value, evidence.modelTiming.source, reason)
     }
   }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
@@ -1475,22 +1587,42 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
           (providerTurnId && open.providerTurnId === providerTurnId)
         )) return { status: 'duplicate' as const }
         if (open) {
-          const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
-          open.status = 'closing'
-          open.closingAt ??= timestampOf(input.payload)
-          await writeJsonAtomic(openPath(root), open, { sync: false })
-          await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+          if (open.managedByScry && !input.managed) {
+            return { status: 'recorded' as const, reason: 'managed lifecycle start ignored' }
+          }
+          if (open.managedByScry || input.managed) {
+            await quarantineOpenTurn(
+              enablement.dataRoot,
+              root,
+              open,
+              open.managedByScry ? 'managed_replaced' : 'legacy_migration'
+            )
+          } else {
+            const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
+            open.status = 'closing'
+            open.closingAt ??= timestampOf(input.payload)
+            await writeJsonAtomic(openPath(root), open, { sync: false })
+            await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+          }
         }
-        open = await beginOpenTurn(enablement, input.provider, sessionId, input.event, input.payload)
-        await storeLifecycleEvent(enablement, open, input.event, input.payload)
+        open = await beginOpenTurn(enablement, input.provider, sessionId, input.event, input.payload, input.managed === true)
+        if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
         return { status: 'started' as const }
       }
       if (!open) {
         if (END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
+        if (input.managed) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
         const orphanId = stableHash({ event: input.event, payload: input.payload })
         await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
         await updateHealth(enablement.dataRoot, { increment: { orphanEvents: 1 } })
         return { status: 'orphan' as const }
+      }
+      if (open.managedByScry) {
+        if (!END_EVENTS.has(input.event)) return { status: 'recorded' as const }
+        open.status = 'closing'
+        open.closingAt = timestampOf(input.payload)
+        await writeJsonAtomic(openPath(root), open, { sync: false })
+        return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
       }
       if (incomingProviderTurnId && open.providerTurnId && incomingProviderTurnId !== open.providerTurnId) {
         if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
@@ -1541,17 +1673,7 @@ async function runtimeSessions(dataRoot: string): Promise<Array<{ provider: Prov
 }
 
 async function pendingHealth(dataRoot: string): Promise<{ pendingCount: number; oldestPendingAgeMs: number }> {
-  let pendingCount = 0
-  let oldestPendingAgeMs = 0
-  const now = Date.now()
-  for (const item of await runtimeSessions(dataRoot)) {
-    const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
-    if (!open || open.status !== 'closing') continue
-    pendingCount++
-    const started = Date.parse(open.closingAt ?? open.startedAt)
-    if (Number.isFinite(started)) oldestPendingAgeMs = Math.max(oldestPendingAgeMs, Math.max(0, now - started))
-  }
-  return { pendingCount, oldestPendingAgeMs }
+  return recorderPendingHealth(dataRoot)
 }
 
 export async function refreshRecorderPendingHealth(dataRoot: string): Promise<void> {
@@ -1563,9 +1685,15 @@ export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv 
   if (!enablement.enabled) return { recovered: 0, pending: 0 }
   let recovered = 0
   let pending = 0
+  let managedPresent = false
   for (const item of await runtimeSessions(enablement.dataRoot)) {
     const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
-    if (!open || open.status !== 'closing') continue
+    if (!open) continue
+    if (open.managedByScry) {
+      managedPresent = true
+      continue
+    }
+    if (open.status !== 'closing') continue
     const result = await withDirectoryLock(
       sessionLock(enablement.dataRoot, item.provider, open.sessionId),
       () => finalizeOpenTurn(
@@ -1579,6 +1707,11 @@ export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv 
     )
     if (result.status === 'pending') pending++
     else recovered++
+  }
+  if (managedPresent) {
+    const managed = await recoverManagedRecorderTurns(workspace, env)
+    recovered += managed.recovered
+    pending += managed.pending
   }
   await updateHealth(enablement.dataRoot, {
     ...(await pendingHealth(enablement.dataRoot)),

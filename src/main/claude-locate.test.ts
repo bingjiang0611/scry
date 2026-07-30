@@ -2,6 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import {
   QODER_NODE_BIN,
   appBundleRootForExecutable,
@@ -171,6 +172,24 @@ describe('runtime CLI discovery constraints', () => {
     }
   })
 
+  it('marks only explicitly managed Provider environments for canonical recording', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-cli-managed-'))
+    try {
+      const scry = join(dir, 'scry')
+      writeFileSync(scry, `#!/bin/sh\nprintf '%s\\n' '${RECORDER_VERSION}'\n`)
+      chmodSync(scry, 0o755)
+      const base = { PATH: `${dir}:/usr/bin:/bin` }
+      expect(runtimeCliEnv(base).SCRY_RECORDER_MANAGED).toBeUndefined()
+      expect(runtimeCliEnv(base, { managedRecorder: true })).toMatchObject({
+        SCRY_RECORDER_MANAGED: '1',
+        SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION,
+        SCRY_CLI_PATH: scry
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('keeps provider-only PATH entries out of recorder CLI fallback resolution', () => {
     const providerDir = mkdtempSync(join(tmpdir(), 'scry-provider-path-'))
     const fallbackDir = mkdtempSync(join(tmpdir(), 'scry-recorder-fallback-'))
@@ -185,6 +204,21 @@ describe('runtime CLI discovery constraints', () => {
     } finally {
       rmSync(providerDir, { recursive: true, force: true })
       rmSync(fallbackDir, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed before Codex starts when the pinned scry CLI version differs', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-cli-stale-'))
+    try {
+      const scry = join(dir, 'scry')
+      writeFileSync(scry, "#!/bin/sh\nprintf '%s\\n' '0.2.5'\n")
+      chmodSync(scry, 0o755)
+      expect(() => runtimeCliEnv(
+        { PATH: `${dir}:/usr/bin:/bin` },
+        { managedRecorder: true }
+      )).toThrow(`requires CLI ${RECORDER_VERSION}`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 

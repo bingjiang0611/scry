@@ -11,6 +11,7 @@ import {
 } from '@shared/trace'
 import type { BillingGuardianState } from '@shared/billing'
 import type { RuntimeProvider } from '@shared/runtime'
+import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import type { McpMeta } from '../env'
 import { buildTurnTimingBreakdown, type TurnTimingBreakdown } from '../turn-timing'
 import {
@@ -576,7 +577,7 @@ export function OverviewPanel({
 
   // verdict 状态（诚实）：高危→bad；运行中/有报错/可疑→warn；否则 ok。error 绝不显绿。
   const dangerHi = dangers.filter((e) => e.danger!.level === 'danger').length
-  const toolErrors = all.filter((e) => e.stage === 'tool_result' && e.isError).length
+  const toolErrors = all.filter(isOverviewToolErrorEvent).length
   const turnError = turns.some((t) => !!t.error)
   const hasError = toolErrors > 0 || turnError
   let vstate: 'ok' | 'warn' | 'bad' = 'ok'

@@ -13,7 +13,7 @@ input.on('line', (line) => {
     send({ id: message.id, result: { thread: { id: 'thread-1' }, model: 'test', modelProvider: 'openai' } })
   } else if (message.method === 'turn/start') {
     send({ id: message.id, result: { turn: { id: 'turn-1' } } })
-    send({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'hello' } })
+    send({ method: 'item/agentMessage/delta', emittedAtMs: 1_234, params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'hello' } })
     send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', items: [], error: null, durationMs: 12 } } })
   } else if (message.id !== undefined) {
     send({ id: message.id, result: {} })
