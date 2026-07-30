@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
-import { isSupportedImageMimeType, runtimeProviderForAgentId, type AgentInputAttachment, type RuntimeProvider } from '@shared/runtime'
+import {
+  isSupportedImageMimeType,
+  runtimeProviderForAgentId,
+  type AgentInputAttachment,
+  type AgentStartRequest,
+  type RuntimeProvider
+} from '@shared/runtime'
 import type { ProviderId, SessionProviderId } from '@shared/provider'
 import type { WorkspaceEntry } from '@shared/workspace'
 import { basename, relTime } from './format'
@@ -107,6 +113,7 @@ export interface DraftAttachment extends AgentInputAttachment {
 export interface QueuedPrompt {
   text: string
   attachments: AgentInputAttachment[]
+  request: Omit<AgentStartRequest, 'prompt' | 'attachments'>
 }
 
 export function attachmentSummary(attachments: AgentInputAttachment[]): string {
@@ -121,11 +128,19 @@ export function promptSummary(prompt: QueuedPrompt): string {
 export function enqueuePrompt(
   queue: QueuedPrompt[],
   prompt: string,
-  attachments: AgentInputAttachment[] = []
+  attachments: AgentInputAttachment[] = [],
+  request: Omit<AgentStartRequest, 'prompt' | 'attachments'> = {}
 ): QueuedPrompt[] {
   const text = prompt.trim()
   if (!text && attachments.length === 0) return queue
-  return [...queue, { text, attachments: attachments.map((attachment) => ({ ...attachment })) }]
+  return [...queue, {
+    text,
+    attachments: attachments.map((attachment) => ({ ...attachment })),
+    request: {
+      ...request,
+      ...(request.model ? { model: { ...request.model } } : {})
+    }
+  }]
 }
 
 export function takeNextQueuedPrompt(queue: QueuedPrompt[]): { next: QueuedPrompt | null; rest: QueuedPrompt[] } {
@@ -583,20 +598,41 @@ export function App() {
     }
   }, [focusedTurnRunId, view, session.turns.length])
 
+  const currentRunRequest = useCallback(
+    (): Omit<AgentStartRequest, 'prompt' | 'attachments'> => ({
+      cwd: cwdRef.current ?? undefined,
+      providerId: integrations.selectedProviderId,
+      agentId: integrations.selectedId,
+      backend: integrations.backend,
+      runtimeProvider: runtimeProviderForAgentId(integrations.selectedId),
+      model: integrations.runControls.model,
+      effort: integrations.runControls.effort,
+      permissionMode: integrations.runControls.permissionMode
+    }),
+    [
+      integrations.backend,
+      integrations.runControls.effort,
+      integrations.runControls.model,
+      integrations.runControls.permissionMode,
+      integrations.selectedId,
+      integrations.selectedProviderId
+    ]
+  )
+
   const startPrompt = useCallback(
-    async (text: string, attachments: AgentInputAttachment[] = []): Promise<void> => {
+    async (
+      text: string,
+      attachments: AgentInputAttachment[] = [],
+      request = currentRunRequest()
+    ): Promise<void> => {
       shouldStickToBottomRef.current = true
       const runId = await session.send(text, {
-        cwd: cwdRef.current ?? undefined,
-        providerId: integrations.selectedProviderId,
-        agentId: integrations.selectedId,
-        backend: integrations.backend,
-        runtimeProvider: runtimeProviderForAgentId(integrations.selectedId),
+        ...request,
         attachments
       })
       if (runId && activeSessionIdRef.current == null) selectSessionId(runId)
     },
-    [integrations.backend, integrations.selectedId, selectSessionId, session.send]
+    [currentRunRequest, selectSessionId, session.send]
   )
 
   useEffect(() => {
@@ -609,7 +645,7 @@ export function App() {
     if (!next) return
     queuedStartPendingRef.current = true
     setQueuedPrompts(rest)
-    void startPrompt(next.text, next.attachments).catch(() => {
+    void startPrompt(next.text, next.attachments, next.request).catch(() => {
       queuedStartPendingRef.current = false
       setInput((current) => current || next.text)
       setDraftAttachments((current) => (current.length === 0 ? next.attachments.map(clipboardAttachmentToDraft) : current))
@@ -670,7 +706,8 @@ export function App() {
     const attachments = inputAttachments(draftAttachments)
     if (!text && attachments.length === 0) return
     if (session.busy) {
-      setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments))
+      const request = currentRunRequest()
+      setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments, request))
       setInput('')
       clearDraftAttachments()
       setSlashHidden(true)
@@ -910,13 +947,8 @@ export function App() {
           activeSessionId={activeSessionId}
           activeProviderId={integrations.selectedProviderId}
           runningRunIds={runningRunIds}
-          skillCount={integrations.skills.length}
-          mcpOnline={integrations.mcpLive.filter((live) => live.status === 'connected').length}
-          mcpTotal={integrations.mcps.length}
           onNewChat={newConversation}
           onPick={pickSession}
-          onSkills={openSkills}
-          onMcp={openMcp}
           onDelete={deleteSession}
           onDiagnostics={() => changeView('diagnostics')}
           diagnosticsActive={view === 'diagnostics'}
@@ -968,7 +1000,12 @@ export function App() {
           showPanel={panelVisible && !workspaceOpen && !turnDiffReview}
           canTogglePanel={view === 'chat'}
           showWorkspace={workspaceOpen && panelVisible}
+          skillCount={integrations.skills.length}
+          mcpOnline={integrations.mcpLive.filter((live) => live.status === 'connected').length}
+          mcpTotal={integrations.mcps.length}
           onView={changeView}
+          onSkills={openSkills}
+          onMcp={openMcp}
           onTogglePanel={toggleOverviewPanel}
           onToggleWorkspace={toggleWorkspacePanel}
         />
@@ -1115,6 +1152,10 @@ export function App() {
             agents={integrations.agents}
             selectedAgentId={integrations.selectedId}
             backend={integrations.backend}
+            runControls={integrations.runControls}
+            runControlCatalog={integrations.runControlCatalog}
+            runControlsLoading={integrations.runControlsLoading}
+            runControlsReason={integrations.runControlCapability?.reason}
             input={input}
             busy={session.busy}
             draftAttachments={draftAttachments}
@@ -1149,6 +1190,9 @@ export function App() {
             onRemoveQueuedPrompt={removeQueuedPrompt}
             onSelectAgent={integrations.setSelectedId}
             onBackend={integrations.setBackend}
+            onRunModel={integrations.setRunModel}
+            onRunEffort={integrations.setRunEffort}
+            onPermissionMode={integrations.setPermissionMode}
             onRescan={integrations.rescan}
           />
         )}

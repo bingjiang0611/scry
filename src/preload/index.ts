@@ -5,6 +5,7 @@ import type {
   AgentInputAttachment,
   AgentQuestionRequest,
   AgentQuestionResponse,
+  AgentRunControlCatalog,
   AgentStartRequest,
   RuntimeProvider
 } from '../shared/runtime'
@@ -84,6 +85,8 @@ const api = {
     ipcRenderer.invoke('agent:toggleMcp', { context, name, enabled }),
   listCommands: (context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>> =>
     ipcRenderer.invoke('agent:listCommands', context),
+  runControls: (context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>> =>
+    ipcRenderer.invoke('agent:runControls', context),
   providerAccount: (context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>> =>
     ipcRenderer.invoke('agent:providerAccount', context),
   usageStats: (context: ProviderContext): Promise<{ cost: number | null; tin: number | null; tout: number | null; turns: number }> =>

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runner = vi.hoisted(() => ({ captureInit: vi.fn(), runAgent: vi.fn() }))
 const mcp = vi.hoisted(() => ({ testMcpConfig: vi.fn() }))
+const sdk = vi.hoisted(() => ({ query: vi.fn() }))
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: sdk.query }))
 vi.mock('../agent-runner', () => ({ captureInit: runner.captureInit, getClaudeVersion: () => 'test', runAgent: runner.runAgent }))
 vi.mock('../claude-locate', () => ({ resolveClaudeBin: () => '/bin/claude', shellEnv: () => ({}) }))
 vi.mock('../mcp-config', () => ({
@@ -23,6 +25,7 @@ describe('Claude provider adapter', () => {
     runner.captureInit.mockReset()
     runner.runAgent.mockReset()
     mcp.testMcpConfig.mockReset()
+    sdk.query.mockReset()
     delete process.env.SCRY_CLAUDE_SETTING_SOURCES
   })
 
@@ -66,6 +69,9 @@ describe('Claude provider adapter', () => {
       prompt: 'probe',
       cwd: '/repo',
       attachments: [],
+      model: { id: 'claude-test' },
+      effort: 'high',
+      permissionMode: 'default',
       emit: vi.fn()
     })
 
@@ -73,7 +79,43 @@ describe('Claude provider adapter', () => {
       'probe',
       'run-1',
       expect.any(Function),
-      expect.objectContaining({ settingSources: ['project', 'local'] })
+      expect.objectContaining({
+        settingSources: ['project', 'local'],
+        model: 'claude-test',
+        effort: 'high',
+        permissionMode: 'default'
+      })
     )
+  })
+
+  it('reads model and effort options from the native control catalog', async () => {
+    sdk.query.mockReturnValue({
+      supportedModels: vi.fn().mockResolvedValue([{
+        value: 'claude-test',
+        displayName: 'Claude Test',
+        description: 'test model',
+        supportedEffortLevels: ['low', 'high']
+      }]),
+      close: vi.fn()
+    })
+    const result = await createClaudeAdapter('/tmp/scry-home').runControls!.read({
+      providerId: 'claude',
+      cwd: '/repo'
+    })
+    expect(result).toMatchObject({
+      state: 'ready',
+      data: {
+        models: [{
+          model: { id: 'claude-test' },
+          label: 'Claude Test',
+          efforts: [{ id: 'low' }, { id: 'high' }]
+        }],
+        permissions: [
+          { id: 'default' },
+          { id: 'auto_review' },
+          { id: 'full_access' }
+        ]
+      }
+    })
   })
 })

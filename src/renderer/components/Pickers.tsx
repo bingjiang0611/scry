@@ -75,7 +75,8 @@ export function CliPicker({
   backend,
   onSelect,
   onBackend,
-  onRescan
+  onRescan,
+  disabled = false
 }: {
   agents: DetectedAgent[]
   selectedId: string
@@ -83,15 +84,17 @@ export function CliPicker({
   onSelect: (id: string) => void
   onBackend: (b: 'local' | 'api') => void
   onRescan: () => void
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const sel = agents.find((a) => a.id === selectedId)
   return (
     <div className="clipick">
-      <button className="clibtn" onClick={() => setOpen((o) => !o)}>
+      <button className="clibtn" onClick={() => setOpen((o) => !o)} disabled={disabled}>
         <span className="agicon">
           <Icon name={(AGENT_ICON[selectedId] ?? 'cube') as IconName} />
-        </span>{' '}
+        </span>
+        <span>{sel?.name ?? 'Agent'}</span>
         <Icon name="chevronDown" className="chev" />
       </button>
       {open && (
@@ -132,5 +135,48 @@ export function CliPicker({
         </div>
       )}
     </div>
+  )
+}
+
+export interface RunControlSelectOption {
+  value: string
+  label: string
+  description?: string
+}
+
+export function RunControlSelect({
+  ariaLabel,
+  value,
+  options,
+  onChange,
+  disabled = false,
+  loading = false,
+  tone
+}: {
+  ariaLabel: string
+  value: string
+  options: RunControlSelectOption[]
+  onChange: (value: string) => void
+  disabled?: boolean
+  loading?: boolean
+  tone?: 'warning' | 'danger'
+}) {
+  const selected = options.find((option) => option.value === value)
+  return (
+    <label className={`run-control-select ${tone ?? ''}`} title={selected?.description}>
+      <select
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled || loading}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option value={option.value} key={option.value} title={option.description}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <Icon name="chevronDown" className="chev" />
+    </label>
   )
 }

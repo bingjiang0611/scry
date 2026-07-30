@@ -9,7 +9,7 @@ import { runAgent } from './agent-runner'
 describe('Claude Agent SDK launch options', () => {
   beforeEach(() => sdk.query.mockReset())
 
-  it('uses the selected executable and passes the explicit dangerous-skip flag', async () => {
+  it('uses the selected executable and keeps the legacy full-access default', async () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {}
     })
@@ -31,6 +31,24 @@ describe('Claude Agent SDK launch options', () => {
     })
   })
 
+  it('passes model, effort, and auto-review without dangerous-skip flags', async () => {
+    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    await runAgent('probe', 'run-probe', () => {}, {
+      model: 'claude-test',
+      effort: 'high',
+      permissionMode: 'auto_review'
+    }).promise
+    expect(sdk.query).toHaveBeenCalledWith({
+      prompt: 'probe',
+      options: expect.objectContaining({
+        model: 'claude-test',
+        effort: 'high',
+        permissionMode: 'auto'
+      })
+    })
+    expect(sdk.query.mock.calls[0][0].options).not.toHaveProperty('allowDangerouslySkipPermissions')
+  })
+
   it('does not append the completed assistant snapshot after partial text deltas', async () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {
@@ -46,7 +64,7 @@ describe('Claude Agent SDK launch options', () => {
     expect(emitted.filter((event) => event.kind === 'model').map((event) => event.text).join('')).toBe('OK')
   })
 
-  it('bridges AskUserQuestion answers through canUseTool without changing bypass for other tools', async () => {
+  it('bridges AskUserQuestion answers and keeps full access for other tools', async () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {}
     })
@@ -92,6 +110,24 @@ describe('Claude Agent SDK launch options', () => {
       expect.any(AbortSignal)
     )
     await handle.promise
+  })
+
+  it('bridges default tool approvals through the inline question channel', async () => {
+    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    const requestUserInput = vi.fn(async (request) => ({
+      runId: request.runId,
+      questionId: request.questionId,
+      behavior: 'answered' as const,
+      answers: { [request.questions[0].question]: '允许一次' }
+    }))
+    runAgent('probe', 'run-probe', () => {}, { requestUserInput, permissionMode: 'default' })
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool
+    await expect(canUseTool(
+      'Bash',
+      { command: 'pwd' },
+      { signal: new AbortController().signal, toolUseID: 'tool-2', description: 'pwd' }
+    )).resolves.toMatchObject({ behavior: 'allow', decisionClassification: 'user_temporary' })
+    expect(sdk.query.mock.calls[0][0].options).not.toHaveProperty('permissionMode')
   })
 
   it('returns a non-interrupting denial when the user cancels a question', async () => {

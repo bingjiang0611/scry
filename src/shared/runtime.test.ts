@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   billingProviderForRuntime,
+  agentPermissionDecision,
+  agentPermissionQuestion,
   normalizeAgentQuestionRequest,
   normalizeAgentQuestionResponse,
   normalizeAgentStartRequest,
@@ -38,8 +40,43 @@ describe('runtime frontdoor mapping', () => {
       agentId: 'claude',
       backend: 'local',
       runtimeProvider: 'claude_sdk',
-      attachments: []
+      attachments: [],
+      permissionMode: 'full_access'
     })
+  })
+
+  it('normalizes explicit run controls and rejects unknown permission modes', () => {
+    expect(
+      normalizeAgentStartRequest({
+        prompt: 'hi',
+        providerId: 'opencode',
+        model: { providerId: 'openai', id: ' gpt-test ' },
+        effort: ' high ',
+        permissionMode: 'default'
+      })
+    ).toMatchObject({
+      model: { providerId: 'openai', id: 'gpt-test' },
+      effort: 'high',
+      permissionMode: 'default'
+    })
+    expect(() =>
+      normalizeAgentStartRequest({ prompt: 'hi', permissionMode: 'unsafe' as never })
+    ).toThrow('不受支持')
+  })
+
+  it('maps generic permission answers without exposing native request ids', () => {
+    const request = agentPermissionQuestion('run-1', 'permission-1', '权限请求', '允许执行命令？', 'git status')
+    expect(agentPermissionDecision(request, {
+      runId: 'run-1',
+      questionId: 'permission-1',
+      behavior: 'answered',
+      answers: { '允许执行命令？': '本次会话允许' }
+    })).toBe('session')
+    expect(agentPermissionDecision(request, {
+      runId: 'run-1',
+      questionId: 'permission-1',
+      behavior: 'cancelled'
+    })).toBe('reject')
   })
 
   it('keeps an explicit cwd instead of reading mutable navigation state later', () => {

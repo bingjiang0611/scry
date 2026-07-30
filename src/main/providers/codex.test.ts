@@ -5,6 +5,7 @@ const appServer = vi.hoisted(() => ({
   request: vi.fn(),
   start: vi.fn(),
   onNotification: vi.fn(),
+  onRequest: vi.fn(),
   options: [] as Array<Record<string, unknown>>
 }))
 
@@ -13,6 +14,7 @@ vi.mock('./codex-app-server', () => ({
     request = appServer.request
     start = appServer.start
     onNotification = appServer.onNotification
+    onRequest = appServer.onRequest
     pid = 123
     constructor(options: Record<string, unknown>) {
       appServer.options.push(options)
@@ -34,6 +36,7 @@ describe('Codex provider adapter', () => {
     appServer.request.mockReset()
     appServer.start.mockReset().mockResolvedValue(undefined)
     appServer.onNotification.mockReset()
+    appServer.onRequest.mockReset().mockReturnValue(() => {})
     appServer.options.length = 0
   })
 
@@ -129,6 +132,132 @@ describe('Codex provider adapter', () => {
       approvalPolicy: 'never',
       sandbox: 'danger-full-access'
     })
+  })
+
+  it('passes selected model, effort and auto-review access to native requests', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-controls' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-controls' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+
+    const run = createCodexAdapter().run({
+      runId: 'run-controls',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      model: { id: 'gpt-5.3-codex' },
+      effort: 'high',
+      permissionMode: 'auto_review',
+      emit: () => {}
+    })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+
+    expect(appServer.request).toHaveBeenCalledWith('thread/start', {
+      cwd: '/repo',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      sandbox: 'workspace-write',
+      model: 'gpt-5.3-codex'
+    })
+    expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
+      threadId: 'thread-controls',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      model: 'gpt-5.3-codex',
+      effort: 'high'
+    }))
+
+    notify?.('turn/completed', {
+      threadId: 'thread-controls',
+      turnId: 'turn-controls',
+      turn: { status: 'completed' }
+    })
+    await run.promise
+  })
+
+  it('reads the native model catalog and translates default approval decisions', async () => {
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'model/list') {
+        return {
+          data: [{
+            model: 'gpt-5.3-codex',
+            displayName: 'GPT-5.3 Codex',
+            defaultReasoningEffort: 'medium',
+            supportedReasoningEfforts: [
+              { reasoningEffort: 'medium', description: 'Balanced' },
+              { reasoningEffort: 'high', description: 'Deep' }
+            ]
+          }]
+        }
+      }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const adapter = createCodexAdapter()
+    await expect(adapter.runControls!.read({ providerId: 'codex', cwd: '/repo' })).resolves.toMatchObject({
+      state: 'ready',
+      data: {
+        models: [{
+          model: { id: 'gpt-5.3-codex' },
+          label: 'GPT-5.3 Codex',
+          efforts: [
+            { id: 'medium', isDefault: true },
+            { id: 'high' }
+          ]
+        }]
+      }
+    })
+
+    let notify: ((method: string, params: unknown) => void) | undefined
+    let approve: ((method: string, params: unknown) => Promise<unknown>) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.onRequest.mockImplementation((listener) => {
+      approve = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-approval' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-approval' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const run = adapter.run({
+      runId: 'run-approval',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      permissionMode: 'default',
+      emit: () => {},
+      requestUserInput: async (question) => ({
+        runId: question.runId,
+        questionId: question.questionId,
+        behavior: 'answered',
+        answers: { [question.questions[0].question]: '允许一次' }
+      })
+    })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    await expect(approve?.('item/commandExecution/requestApproval', {
+      threadId: 'thread-approval',
+      itemId: 'item-1',
+      command: 'npm test',
+      availableDecisions: ['accept', 'acceptForSession']
+    })).resolves.toEqual({ decision: 'accept' })
+
+    notify?.('turn/completed', {
+      threadId: 'thread-approval',
+      turnId: 'turn-approval',
+      turn: { status: 'completed' }
+    })
+    await run.promise
   })
 
   it('reads Codex Hook trust metadata before a run', async () => {

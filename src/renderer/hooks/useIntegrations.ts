@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BillingGuardianState } from '@shared/billing'
-import type { CapabilityEnvelope, McpSnapshot, ProviderContext } from '@shared/provider'
+import type { CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
 import type { DbStats, Diagnostics, DiffFile, McpLiveStatus } from '@shared/trace'
-import { providerIdForAgentId, runtimeProviderForAgentId } from '@shared/runtime'
+import {
+  providerIdForAgentId,
+  runtimeProviderForAgentId,
+  type AgentModelRef,
+  type AgentPermissionMode,
+  type AgentRunControlCatalog,
+  type AgentRunControls
+} from '@shared/runtime'
 import type { DetectedAgent, McpMeta, SkillMeta } from '../env'
 import { updateMcpLiveAfterToggle } from '../format'
 import type { McpStatus } from '../format'
@@ -10,6 +17,37 @@ import type { McpGuardReport } from '../components/McpTrustPanel'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
 
 const contextKey = (context: ProviderContext): string => `${context.providerId}\0${context.cwd ?? ''}`
+const modelKey = (model: AgentModelRef): string => `${model.providerId ?? ''}\0${model.id}`
+
+const fallbackRunControlCatalog = (permissionMode: AgentPermissionMode): AgentRunControlCatalog => ({
+  models: [],
+  permissions: [{
+    id: permissionMode,
+    label: permissionMode === 'full_access' ? '完全访问' : '默认审批',
+    description: permissionMode === 'full_access' ? '兼容旧版运行控制' : '危险操作会暂停并请求你的确认'
+  }]
+})
+
+export function resolveRunControlSelection(
+  catalog: AgentRunControlCatalog,
+  current: AgentRunControls
+): AgentRunControls {
+  const model = current.model
+    ? catalog.models.find((option) => modelKey(option.model) === modelKey(current.model!))?.model
+    : undefined
+  const selectedModel = model
+    ? catalog.models.find((option) => modelKey(option.model) === modelKey(model))
+    : undefined
+  const effort = current.effort && selectedModel?.efforts.some((option) => option.id === current.effort)
+    ? current.effort
+    : undefined
+  const permissionMode = catalog.permissions.some((option) => option.id === current.permissionMode)
+    ? current.permissionMode
+    : catalog.permissions.find((option) => option.id === 'default')?.id ??
+      catalog.permissions[0]?.id ??
+      'full_access'
+  return { model, effort, permissionMode }
+}
 
 export async function authoritativeRefreshAfterToggle<T>(
   result: CapabilityEnvelope<boolean>,
@@ -24,6 +62,13 @@ export function useIntegrations(cwd: string | null) {
   const [agentsScanning, setAgentsScanning] = useState(true)
   const [selectedId, setSelectedId] = useState('claude')
   const [backend, setBackend] = useState<'local' | 'api'>('local')
+  const [runControls, setRunControls] = useState<AgentRunControls>({ permissionMode: 'default' })
+  const [runControlCatalog, setRunControlCatalog] = useState<AgentRunControlCatalog>(
+    fallbackRunControlCatalog('default')
+  )
+  const [runControlCapability, setRunControlCapability] =
+    useState<CapabilityEnvelope<AgentRunControlCatalog> | null>(null)
+  const [runControlsLoading, setRunControlsLoading] = useState(false)
   const [skills, setSkills] = useState<SkillMeta[]>([])
   const [skillCapability, setSkillCapability] = useState<CapabilityEnvelope<SkillMeta[]> | null>(null)
   const [mcps, setMcps] = useState<McpMeta[]>([])
@@ -43,6 +88,8 @@ export function useIntegrations(cwd: string | null) {
   const cwdRef = useRef(cwd)
   const gitDiffRequestSeq = useRef(0)
   const integrationRequestSeq = useRef(0)
+  const runControlRequestSeq = useRef(0)
+  const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>())
 
   const selectedAgent = agents.find((agent) => agent.id === selectedId)
   const selectedProviderId = providerIdForAgentId(selectedId) ?? 'claude'
@@ -220,6 +267,40 @@ export function useIntegrations(cwd: string | null) {
     void loadMcpLive()
   }, [loadBillingState, loadDiag, loadGitDiff, loadMcpLive, loadStats, loadUsage])
 
+  const setRunModel = useCallback((model: AgentModelRef | undefined): void => {
+    setRunControls((current) => {
+      const next = { ...current, model, effort: undefined }
+      runControlsByProvider.current.set(selectedProviderId, next)
+      return next
+    })
+  }, [selectedProviderId])
+
+  const setRunEffort = useCallback((effort: string | undefined): void => {
+    setRunControls((current) => {
+      const next = { ...current, effort }
+      runControlsByProvider.current.set(selectedProviderId, next)
+      return next
+    })
+  }, [selectedProviderId])
+
+  const setPermissionMode = useCallback((permissionMode: AgentPermissionMode): void => {
+    setRunControls((current) => {
+      const next = { ...current, permissionMode }
+      runControlsByProvider.current.set(selectedProviderId, next)
+      return next
+    })
+  }, [selectedProviderId])
+
+  const selectAgent = useCallback((agentId: string): void => {
+    const providerId = providerIdForAgentId(agentId) ?? 'claude'
+    const stored = runControlsByProvider.current.get(providerId) ?? { permissionMode: 'default' as const }
+    const loadingCatalog = fallbackRunControlCatalog('default')
+    setSelectedId(agentId)
+    setRunControlCatalog(loadingCatalog)
+    setRunControls(resolveRunControlSelection(loadingCatalog, stored))
+    setRunControlsLoading(true)
+  }, [])
+
   useEffect(() => {
     cwdRef.current = cwd
     providerContextRef.current = providerContext
@@ -241,6 +322,48 @@ export function useIntegrations(cwd: string | null) {
       })
       .catch(() => {})
   }, [applyMcpSnapshot, cwd, loadGitDiff, providerContext])
+
+  useEffect(() => {
+    const seq = ++runControlRequestSeq.current
+    const context = providerContext
+    const stored = runControlsByProvider.current.get(selectedProviderId) ?? { permissionMode: 'default' as const }
+    const fn = window.scry.runControls
+    setRunControlsLoading(true)
+    setRunControlCapability(null)
+    if (!cwd || typeof fn !== 'function') {
+      const fallback = fallbackRunControlCatalog(typeof fn === 'function' ? 'default' : 'full_access')
+      const next = resolveRunControlSelection(fallback, stored)
+      runControlsByProvider.current.set(selectedProviderId, next)
+      setRunControlCatalog(fallback)
+      setRunControls(next)
+      setRunControlsLoading(false)
+      return
+    }
+    void fn(context)
+      .then((result) => {
+        if (
+          seq !== runControlRequestSeq.current ||
+          contextKey(context) !== contextKey(providerContextRef.current)
+        ) return
+        const catalog = result.data ?? fallbackRunControlCatalog('full_access')
+        const next = resolveRunControlSelection(catalog, stored)
+        runControlsByProvider.current.set(selectedProviderId, next)
+        setRunControlCapability(result)
+        setRunControlCatalog(catalog)
+        setRunControls(next)
+      })
+      .catch(() => {
+        if (seq !== runControlRequestSeq.current) return
+        const fallback = fallbackRunControlCatalog('full_access')
+        const next = resolveRunControlSelection(fallback, stored)
+        runControlsByProvider.current.set(selectedProviderId, next)
+        setRunControlCatalog(fallback)
+        setRunControls(next)
+      })
+      .finally(() => {
+        if (seq === runControlRequestSeq.current) setRunControlsLoading(false)
+      })
+  }, [cwd, providerContext, selectedProviderId])
 
   useEffect(() => {
     const refreshGitDiff = (): void => {
@@ -291,9 +414,16 @@ export function useIntegrations(cwd: string | null) {
     selectedProviderId,
     selectedRuntimeProvider,
     providerContext,
-    setSelectedId,
+    setSelectedId: selectAgent,
     backend,
     setBackend,
+    runControls,
+    runControlCatalog,
+    runControlCapability,
+    runControlsLoading,
+    setRunModel,
+    setRunEffort,
+    setPermissionMode,
     skills,
     skillCapability,
     mcps,

@@ -56,6 +56,35 @@ describe('ProviderRegistry', () => {
       mode: 'none',
       data: null
     })
+    await expect(registry.runControls({ providerId: 'codex', cwd: '/repo' })).resolves.toMatchObject({
+      state: 'unsupported',
+      data: null
+    })
+  })
+
+  it('uses the legacy full-access path when run controls are disabled', async () => {
+    const base = adapter('codex')
+    const run = vi.fn(base.run)
+    base.run = run
+    const registry = new ProviderRegistry([base], { runControlsEnabled: false })
+    registry.run('codex', {
+      runId: 'run-1',
+      prompt: 'hi',
+      attachments: [],
+      model: { id: 'gpt-test' },
+      effort: 'high',
+      permissionMode: 'default',
+      emit: vi.fn()
+    })
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      model: undefined,
+      effort: undefined,
+      permissionMode: 'full_access'
+    }))
+    await expect(registry.runControls({ providerId: 'codex' })).resolves.toMatchObject({
+      state: 'degraded',
+      data: { models: [], permissions: [expect.objectContaining({ id: 'full_access' })] }
+    })
   })
 
   it('routes Hook trust inspection through the selected provider facet', async () => {

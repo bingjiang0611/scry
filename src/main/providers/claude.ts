@@ -1,10 +1,33 @@
 import { homedir } from 'node:os'
+import { query, type ModelInfo } from '@anthropic-ai/claude-agent-sdk'
 import { getClaudeVersion, runAgent } from '../agent-runner'
 import { resolveClaudeBin, shellEnv } from '../claude-locate'
 import { findMcpConfig, listMcp, testMcpConfig, toggleMcp } from '../mcp-config'
 import { computeEnabledSkills, listSkills, setSkillEnabled } from '../skill-config'
-import { capabilityReady, capabilityUnavailable } from '../../shared/provider'
+import { capabilityReady, capabilityUnavailable, type ProviderContext } from '../../shared/provider'
+import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { ProviderAdapter } from './types'
+import { effortOption, permissionOptions } from './run-controls'
+
+interface CachedControls {
+  data: AgentRunControlCatalog
+  observedAt: number
+}
+
+const CONTROL_TTL_MS = 30_000
+
+function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
+  let release = (): void => {}
+  const wait = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return {
+    stream: (async function* (): AsyncIterable<never> {
+      await wait
+    })(),
+    release
+  }
+}
 
 function settingSourcesFromEnv(): Array<'user' | 'project' | 'local'> | undefined {
   const configured = process.env.SCRY_CLAUDE_SETTING_SOURCES?.trim()
@@ -20,6 +43,8 @@ function settingSourcesFromEnv(): Array<'user' | 'project' | 'local'> | undefine
 export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
   let claudePath: string | undefined
   let pathResolved = false
+  const controlCache = new Map<string, CachedControls>()
+  const pendingControls = new Map<string, Promise<CachedControls>>()
 
   const executable = (): string | undefined => {
     if (!pathResolved) {
@@ -27,6 +52,54 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
       pathResolved = true
     }
     return claudePath
+  }
+
+  const readControls = async (context: ProviderContext): Promise<CachedControls> => {
+    const key = context.cwd ?? ''
+    const cached = controlCache.get(key)
+    if (cached && Date.now() - cached.observedAt < CONTROL_TTL_MS) return cached
+    const pending = pendingControls.get(key)
+    if (pending) return pending
+    const load = (async () => {
+      const path = executable()
+      if (!path) throw new Error('Claude Code executable 未找到')
+      const prompt = heldPrompt()
+      const q = query({
+        prompt: prompt.stream,
+        options: {
+          cwd: context.cwd,
+          pathToClaudeCodeExecutable: path,
+          env: shellEnv(),
+          settingSources: settingSourcesFromEnv()
+        }
+      })
+      try {
+        const models = await q.supportedModels()
+        const value = {
+          observedAt: Date.now(),
+          data: {
+            models: models.map((model: ModelInfo) => ({
+              model: { id: model.value },
+              label: model.displayName,
+              description: model.description,
+              efforts: (model.supportedEffortLevels ?? []).map((effort) => effortOption(effort))
+            })),
+            permissions: permissionOptions()
+          }
+        }
+        controlCache.set(key, value)
+        return value
+      } finally {
+        prompt.release()
+        q.close()
+      }
+    })()
+    pendingControls.set(key, load)
+    try {
+      return await load
+    } finally {
+      pendingControls.delete(key)
+    }
   }
 
   return {
@@ -75,7 +148,10 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
           settingSources: settingSourcesFromEnv(),
           onSessionId: request.onExternalSessionId,
           attachments: request.attachments,
-          requestUserInput: request.requestUserInput
+          requestUserInput: request.requestUserInput,
+          model: request.model?.id,
+          effort: request.effort,
+          permissionMode: request.permissionMode
         }
       )
       return {
@@ -141,6 +217,20 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
           ...capabilityReady(context, 'read', commands),
           state: 'degraded' as const,
           reason: 'Claude SDK 无法在不发送用户消息的前提下启动 control transport；当前仅列出静态可发现的 Skill 命令'
+        }
+      }
+    },
+    runControls: {
+      read: async (context) => {
+        try {
+          const controls = await readControls(context)
+          return capabilityReady(context, 'read', controls.data, controls.observedAt)
+        } catch (error) {
+          return {
+            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions() }),
+            state: 'degraded' as const,
+            reason: String((error as Error).message)
+          }
         }
       }
     }

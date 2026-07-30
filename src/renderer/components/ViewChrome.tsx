@@ -11,7 +11,12 @@ interface ViewChromeProps {
   showPanel: boolean
   showWorkspace?: boolean
   canTogglePanel?: boolean
+  skillCount?: number
+  mcpOnline?: number
+  mcpTotal?: number
   onView: (view: AppView) => void
+  onSkills?: () => void
+  onMcp?: () => void
   onTogglePanel: () => void
   onToggleWorkspace?: () => void
 }
@@ -24,7 +29,12 @@ export function ViewChrome({
   showPanel,
   showWorkspace = false,
   canTogglePanel = true,
+  skillCount,
+  mcpOnline,
+  mcpTotal,
   onView,
+  onSkills,
+  onMcp,
   onTogglePanel,
   onToggleWorkspace
 }: ViewChromeProps) {
@@ -60,6 +70,18 @@ export function ViewChrome({
         {!cwd && (
           <button className="tb-pill cwd-pill" title="未选工作目录">
             <Icon name="folder" /> <b>未选工作目录</b>
+          </button>
+        )}
+        {cwd && onSkills && (
+          <button className="tb-pill integration-pill" onClick={onSkills} title="Skills">
+            <Icon name="box" /> 技能
+            {skillCount != null && skillCount > 0 && <b>{skillCount}</b>}
+          </button>
+        )}
+        {cwd && onMcp && (
+          <button className="tb-pill integration-pill" onClick={onMcp} title="MCP">
+            <span className="dot" /> MCP
+            {mcpTotal != null && mcpTotal > 0 && <b>{mcpOnline ?? 0}/{mcpTotal}</b>}
           </button>
         )}
         {cwd && canTogglePanel && (

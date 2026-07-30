@@ -4,8 +4,11 @@
 import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { type TraceEvent, type McpLiveStatus } from '../shared/trace'
 import {
+  agentPermissionDecision,
+  agentPermissionQuestion,
   normalizeAgentQuestionRequest,
   type AgentInputAttachment,
+  type AgentPermissionMode,
   type AgentQuestionRequest,
   type AgentQuestionResponse
 } from '../shared/runtime'
@@ -36,6 +39,9 @@ export interface RunOpts {
   onSessionId?: (sessionId: string) => void
   attachments?: AgentInputAttachment[]
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
+  model?: string
+  effort?: string
+  permissionMode?: AgentPermissionMode
 }
 
 export interface RunHandle {
@@ -81,12 +87,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     opts.onSessionId?.(next)
   }
 
+  const permissionMode = opts.permissionMode ?? 'full_access'
   const options: Record<string, unknown> = {
-    // 对齐用户终端 alias `claude --dangerously-skip-permissions`：跳过所有权限确认。
-    // 也避免 app（MVP 无权限弹窗）下 claude 遇到危险操作卡在等待权限。P3 做 canUseTool 实时审批时再收紧。
-    permissionMode: 'bypassPermissions',
-    allowDangerouslySkipPermissions: true,
-    extraArgs: { 'dangerously-skip-permissions': null },
     // C1：开 partial messages，让模型文本逐 token 流式到达（否则只在整条 assistant message 完成时整块出现）。
     includePartialMessages: true,
     // P1（RFC §7/§8.2）：开 forwardSubagentText → subagent 的 text/thinking 也作为带 parent_tool_use_id
@@ -97,6 +99,15 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     // Hook 可观测：让 SDK 把 hook_started/progress/response 放进 message stream，normalize 后进右栏面板。
     includeHookEvents: true
   }
+  if (permissionMode === 'full_access') {
+    options.permissionMode = 'bypassPermissions'
+    options.allowDangerouslySkipPermissions = true
+    options.extraArgs = { 'dangerously-skip-permissions': null }
+  } else if (permissionMode === 'auto_review') {
+    options.permissionMode = 'auto'
+  }
+  if (opts.model) options.model = opts.model
+  if (opts.effort) options.effort = opts.effort
   if (opts.resume) options.resume = opts.resume
   if (opts.cwd) options.cwd = opts.cwd
   // 指向本机已装的 claude 原生二进制（选 B：不内嵌 SDK 自带的 216MB 二进制）。
@@ -108,20 +119,48 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     options.canUseTool = async (
       toolName: string,
       input: Record<string, unknown>,
-      permission: { signal: AbortSignal; toolUseID: string; agentID?: string }
+      permission: {
+        signal: AbortSignal
+        toolUseID: string
+        agentID?: string
+        suggestions?: unknown[]
+        title?: string
+        description?: string
+      }
     ) => {
-      // bypassPermissions 只负责安全审批；AskUserQuestion 仍需宿主收集答案并写回 input.answers。
-      if (toolName !== 'AskUserQuestion') return { behavior: 'allow' as const }
-      const request = normalizeAgentQuestionRequest(runId, permission.toolUseID, input, permission.agentID)
-      if (!request) return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
+      if (toolName === 'AskUserQuestion') {
+        const request = normalizeAgentQuestionRequest(runId, permission.toolUseID, input, permission.agentID)
+        if (!request) return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
+        const response = await opts.requestUserInput!(request, permission.signal)
+        if (response.behavior === 'cancelled') {
+          return { behavior: 'deny' as const, message: '用户取消了提问', interrupt: false, decisionClassification: 'user_reject' as const }
+        }
+        return {
+          behavior: 'allow' as const,
+          updatedInput: { ...input, answers: response.answers },
+          decisionClassification: 'user_temporary' as const
+        }
+      }
+      if (permissionMode === 'full_access') return { behavior: 'allow' as const }
+      const detail = permission.description ?? JSON.stringify(input).slice(0, 1_200)
+      const request = agentPermissionQuestion(
+        runId,
+        permission.toolUseID,
+        permission.title ?? '权限请求',
+        `允许 ${toolName} 执行这项操作吗？`,
+        detail
+      )
       const response = await opts.requestUserInput!(request, permission.signal)
-      if (response.behavior === 'cancelled') {
-        return { behavior: 'deny' as const, message: '用户取消了提问', interrupt: false, decisionClassification: 'user_reject' as const }
+      const decision = agentPermissionDecision(request, response)
+      if (decision === 'reject') {
+        return { behavior: 'deny' as const, message: '用户拒绝了操作', interrupt: false, decisionClassification: 'user_reject' as const }
       }
       return {
         behavior: 'allow' as const,
-        updatedInput: { ...input, answers: response.answers },
-        decisionClassification: 'user_temporary' as const
+        ...(decision === 'session' && permission.suggestions?.length
+          ? { updatedPermissions: permission.suggestions }
+          : {}),
+        decisionClassification: decision === 'session' ? 'user_permanent' as const : 'user_temporary' as const
       }
     }
   }

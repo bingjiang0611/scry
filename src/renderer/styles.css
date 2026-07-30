@@ -6998,6 +6998,214 @@ textarea:focus-visible,
   }
 }
 
+/* CodePilot-aligned run controls: one framed composer, quiet native selects, risk below. */
+.composer {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 10px clamp(16px, 3vw, 32px) 12px;
+  border-top: 0;
+  background: transparent;
+}
+
+.composer-shell {
+  position: relative;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--border2);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.composer-top {
+  margin-bottom: 2px;
+}
+
+.composer-shell .wdbtn {
+  padding: 3px 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.composer-shell .wdbtn:hover {
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.composer .input,
+.composer textarea {
+  min-height: 62px;
+  padding: 9px 6px 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  resize: none;
+}
+
+.composer .input:focus,
+.composer textarea:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.composer-bottom {
+  min-width: 0;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.composer-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 5px 0;
+}
+
+.composer-meta .run-control-select:last-child {
+  margin-left: auto;
+}
+
+.run-control-select {
+  position: relative;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dim);
+}
+
+.run-control-select select {
+  max-width: 210px;
+  height: 28px;
+  appearance: none;
+  padding: 0 25px 0 9px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: 11.5px/1 var(--font-ui);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.run-control-select .chev {
+  position: absolute;
+  right: 7px;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.run-control-select:hover select,
+.run-control-select select:focus-visible {
+  border-color: var(--border2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.run-control-select.warning {
+  color: var(--warn);
+}
+
+.run-control-select.danger {
+  color: var(--bad);
+}
+
+.run-control-select.danger select {
+  border-color: color-mix(in srgb, var(--bad) 38%, transparent);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+}
+
+.run-control-select select:disabled,
+.clibtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-meta .clibtn {
+  max-width: 190px;
+  height: 28px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.composer-meta .clibtn:hover:not(:disabled) {
+  border-color: var(--border2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.composer .send {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.composer .send-label {
+  display: none;
+}
+
+.composer .stop {
+  height: 32px;
+  padding: 0 10px;
+}
+
+.tb-pill.integration-pill {
+  flex: 0 0 auto;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.tb-pill.integration-pill b {
+  color: var(--dim);
+  font: 10px/1 var(--font-mono);
+}
+
+.tb-pill.integration-pill .dot {
+  background: var(--ok);
+}
+
+@media (max-width: 1080px) {
+  .composer {
+    padding-inline: 12px;
+  }
+
+  .run-control-select select {
+    max-width: 150px;
+  }
+
+  .tb-pill.integration-pill {
+    font-size: 0;
+  }
+
+  .tb-pill.integration-pill b {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 760px) {
+  .composer-bottom,
+  .composer-meta {
+    flex-wrap: wrap;
+  }
+
+  .composer-meta .run-control-select:last-child {
+    margin-left: 0;
+  }
+
+  .run-control-select select {
+    max-width: 132px;
+  }
+}
+
 /* 工作区文件：右栏 lazy tree + 文本编辑器 + Markdown 同页预览。高频操作保持无动画。 */
 .workspace-panel {
   width: 100%;

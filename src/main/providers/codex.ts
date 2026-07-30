@@ -8,6 +8,12 @@ import {
   type ProviderContext,
   type SkillMeta
 } from '../../shared/provider'
+import {
+  agentPermissionDecision,
+  agentPermissionQuestion,
+  type AgentPermissionMode,
+  type AgentRunControlCatalog
+} from '../../shared/runtime'
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import type { CodexHookInspection, CodexHookMetadata, CodexHookTrustStatus } from '../codex-hook-trust'
@@ -16,11 +22,22 @@ import {
   type CodexNotificationEnvelope
 } from './codex-app-server'
 import type { ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
+import { effortOption, permissionOptions } from './run-controls'
 
-const CODEX_THREAD_ACCESS = {
-  approvalPolicy: 'never',
-  sandbox: 'danger-full-access'
-} as const
+function codexAccess(mode: AgentPermissionMode | undefined): {
+  approvalPolicy: 'never' | 'on-request'
+  approvalsReviewer?: 'user' | 'auto_review'
+  sandbox: 'workspace-write' | 'danger-full-access'
+} {
+  if (!mode || mode === 'full_access') {
+    return { approvalPolicy: 'never', sandbox: 'danger-full-access' }
+  }
+  return {
+    approvalPolicy: 'on-request',
+    approvalsReviewer: mode === 'auto_review' ? 'auto_review' : 'user',
+    sandbox: 'workspace-write'
+  }
+}
 
 interface CodexThreadResponse {
   thread: { id: string }
@@ -465,11 +482,13 @@ function traceFromItem(
 
 export function createCodexAdapter(): ProviderAdapter {
   const clients = new Map<string, CodexAppServerClient>()
+  const modelCache = new Map<string, { data: AgentRunControlCatalog; observedAt: number }>()
   let lastClient: CodexAppServerClient | null = null
   let lastOkAt: number | undefined
   let lastErrorAt: number | undefined
   let lastError: string | undefined
   let restarts = 0
+  const MODEL_TTL_MS = 30_000
 
   const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
   const getClient = (cwd?: string, bypassHookTrust = false): CodexAppServerClient => {
@@ -638,6 +657,8 @@ export function createCodexAdapter(): ProviderAdapter {
       let turnId: string | undefined
       let stopped = false
       let unsubscribe = () => {}
+      let unsubscribeRequest = () => {}
+      const approvalControllers = new Set<AbortController>()
       let lastSeenCumulativeUsage: TokenUsage | undefined
       let turnUsage: TokenUsage | undefined
       let lastRequestUsage: TokenUsage | undefined
@@ -658,6 +679,65 @@ export function createCodexAdapter(): ProviderAdapter {
       }
       const timingByThread = new Map<string, ResponseTimingState>()
       let finish: ((value: ProviderRunResult) => void) | undefined
+
+      const handleApprovalRequest = async (method: string, value: unknown): Promise<unknown> => {
+        if ((runRequest.permissionMode ?? 'full_access') === 'full_access') return undefined
+        const params = record(value)
+        const requestThreadId = typeof params.threadId === 'string' ? params.threadId : undefined
+        if (!externalSessionId || (requestThreadId !== externalSessionId && !childAgents.has(requestThreadId ?? ''))) {
+          return undefined
+        }
+        if (![
+          'item/commandExecution/requestApproval',
+          'item/fileChange/requestApproval',
+          'item/permissions/requestApproval'
+        ].includes(method)) return undefined
+        if (!runRequest.requestUserInput) {
+          if (method === 'item/permissions/requestApproval') return { permissions: {}, scope: 'turn' }
+          return { decision: 'decline' }
+        }
+        const command = typeof params.command === 'string' ? params.command : undefined
+        const reason = typeof params.reason === 'string' ? params.reason : undefined
+        const grantRoot = typeof params.grantRoot === 'string' ? params.grantRoot : undefined
+        const detail = command ?? reason ?? grantRoot ?? JSON.stringify(params.permissions ?? {}).slice(0, 1_200)
+        const itemId = String(params.approvalId ?? params.itemId ?? `${Date.now()}`)
+        const questionText = method === 'item/commandExecution/requestApproval'
+          ? '允许 Codex 执行这条命令吗？'
+          : method === 'item/fileChange/requestApproval'
+            ? '允许 Codex 修改工作区文件吗？'
+            : '允许 Codex 获取额外权限吗？'
+        const available = Array.isArray(params.availableDecisions) ? params.availableDecisions : []
+        const allowSession = method !== 'item/commandExecution/requestApproval' || available.includes('acceptForSession')
+        const question = agentPermissionQuestion(
+          runRequest.runId,
+          `codex:${method}:${itemId}`,
+          'Codex 权限',
+          questionText,
+          detail,
+          allowSession
+        )
+        const controller = new AbortController()
+        approvalControllers.add(controller)
+        try {
+          const response = await runRequest.requestUserInput(question, controller.signal)
+          const decision = agentPermissionDecision(question, response)
+          if (method === 'item/permissions/requestApproval') {
+            return {
+              permissions: decision === 'reject' ? {} : record(params.permissions),
+              scope: decision === 'session' ? 'session' : 'turn'
+            }
+          }
+          return {
+            decision: decision === 'reject'
+              ? 'decline'
+              : decision === 'session' && allowSession
+                ? 'acceptForSession'
+                : 'accept'
+          }
+        } finally {
+          approvalControllers.delete(controller)
+        }
+      }
 
       const notificationAt = (envelope?: CodexNotificationEnvelope): number =>
         envelope?.emittedAtMs ?? envelope?.receivedAtMs ?? Date.now()
@@ -723,6 +803,7 @@ export function createCodexAdapter(): ProviderAdapter {
         try {
           const appServer = getClient(runRequest.cwd, runRequest.bypassHookTrust)
           await appServer.start()
+          unsubscribeRequest = appServer.onRequest(handleApprovalRequest)
           const accountPromise = appServer.request<Record<string, unknown>>('account/read', { refreshToken: false }).catch((error) => {
             accountReadError = String((error as Error).message)
             return null
@@ -999,6 +1080,7 @@ export function createCodexAdapter(): ProviderAdapter {
             }
           })
 
+          const access = codexAccess(runRequest.permissionMode)
           const thread = runRequest.resume
             ? await request<CodexThreadResponse>(
                 'thread/resume',
@@ -1006,14 +1088,19 @@ export function createCodexAdapter(): ProviderAdapter {
                   threadId: runRequest.resume,
                   cwd: runRequest.cwd,
                   excludeTurns: true,
-                  ...CODEX_THREAD_ACCESS
+                  ...access,
+                  ...(runRequest.model ? { model: runRequest.model.id } : {})
                 },
                 runRequest.cwd,
                 runRequest.bypassHookTrust
               )
             : await request<CodexThreadResponse>(
                 'thread/start',
-                { cwd: runRequest.cwd, ...CODEX_THREAD_ACCESS },
+                {
+                  cwd: runRequest.cwd,
+                  ...access,
+                  ...(runRequest.model ? { model: runRequest.model.id } : {})
+                },
                 runRequest.cwd,
                 runRequest.bypassHookTrust
               )
@@ -1064,7 +1151,10 @@ export function createCodexAdapter(): ProviderAdapter {
             threadId: externalSessionId,
             input,
             cwd: runRequest.cwd,
-            approvalPolicy: 'never'
+            approvalPolicy: access.approvalPolicy,
+            ...(access.approvalsReviewer ? { approvalsReviewer: access.approvalsReviewer } : {}),
+            ...(runRequest.model ? { model: runRequest.model.id } : {}),
+            ...(runRequest.effort ? { effort: runRequest.effort } : {})
           }, runRequest.cwd, runRequest.bypassHookTrust)
           turnId = turn.turn.id
           if (externalSessionId) {
@@ -1089,11 +1179,15 @@ export function createCodexAdapter(): ProviderAdapter {
           return await done
         } finally {
           unsubscribe()
+          unsubscribeRequest()
+          for (const controller of approvalControllers) controller.abort()
+          approvalControllers.clear()
         }
       })()
 
       const interrupt = (): void => {
         stopped = true
+        for (const controller of approvalControllers) controller.abort()
         if (externalSessionId && turnId) {
           void request(
             'turn/interrupt',
@@ -1151,6 +1245,54 @@ export function createCodexAdapter(): ProviderAdapter {
           return capabilityReady(context, 'read', data)
         } catch (error) {
           return capabilityUnknown<AccountSnapshot>(context, 'read', String((error as Error).message))
+        }
+      }
+    },
+    runControls: {
+      read: async (context) => {
+        try {
+          const key = context.cwd ?? ''
+          let value = modelCache.get(key)
+          if (!value || Date.now() - value.observedAt >= MODEL_TTL_MS) {
+            const response = await request<{ data?: unknown[] }>(
+              'model/list',
+              { includeHidden: false },
+              context.cwd
+            )
+            const models = (response.data ?? []).map((raw) => {
+              const item = record(raw)
+              const efforts = Array.isArray(item.supportedReasoningEfforts)
+                ? item.supportedReasoningEfforts.map((rawEffort) => {
+                    const entry = record(rawEffort)
+                    const id = String(entry.reasoningEffort ?? '')
+                    return effortOption(
+                      id,
+                      typeof entry.description === 'string' ? entry.description : undefined,
+                      id === item.defaultReasoningEffort
+                    )
+                  }).filter((effort) => effort.id)
+                : []
+              return {
+                model: { id: String(item.model ?? item.id ?? '') },
+                label: String(item.displayName ?? item.model ?? item.id ?? ''),
+                description: typeof item.description === 'string' ? item.description : undefined,
+                isDefault: item.isDefault === true,
+                efforts
+              }
+            }).filter((model) => model.model.id)
+            value = {
+              data: { models, permissions: permissionOptions() },
+              observedAt: Date.now()
+            }
+            modelCache.set(key, value)
+          }
+          return capabilityReady(context, 'read', value.data, value.observedAt)
+        } catch (error) {
+          return {
+            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions() }),
+            state: 'degraded' as const,
+            reason: String((error as Error).message)
+          }
         }
       }
     },

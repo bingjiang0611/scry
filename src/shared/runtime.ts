@@ -16,6 +16,45 @@ export type RuntimeFailureStage =
   | 'frontdoor'
   | 'capability'
 
+export type AgentPermissionMode = 'default' | 'auto_review' | 'full_access'
+
+export interface AgentModelRef {
+  id: string
+  providerId?: string
+}
+
+export interface AgentEffortOption {
+  id: string
+  label: string
+  description?: string
+  isDefault?: boolean
+}
+
+export interface AgentModelOption {
+  model: AgentModelRef
+  label: string
+  description?: string
+  isDefault?: boolean
+  efforts: AgentEffortOption[]
+}
+
+export interface AgentPermissionOption {
+  id: AgentPermissionMode
+  label: string
+  description: string
+}
+
+export interface AgentRunControlCatalog {
+  models: AgentModelOption[]
+  permissions: AgentPermissionOption[]
+}
+
+export interface AgentRunControls {
+  model?: AgentModelRef
+  effort?: string
+  permissionMode: AgentPermissionMode
+}
+
 export interface AgentStartRequest {
   prompt: string
   cwd?: string
@@ -24,6 +63,9 @@ export interface AgentStartRequest {
   backend?: RuntimeBackend
   runtimeProvider?: RuntimeProvider
   attachments?: AgentInputAttachment[]
+  model?: AgentModelRef
+  effort?: string
+  permissionMode?: AgentPermissionMode
 }
 
 export interface AgentQuestionOption {
@@ -68,6 +110,9 @@ export interface NormalizedAgentStartRequest {
   backend: RuntimeBackend
   runtimeProvider?: RuntimeProvider
   attachments: AgentInputAttachment[]
+  model?: AgentModelRef
+  effort?: string
+  permissionMode: AgentPermissionMode
 }
 
 export type AgentImageMimeType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
@@ -180,6 +225,13 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   const providerId = payload.providerId ?? mappedProviderId ?? 'claude'
   const agentId = explicitAgentId ?? providerId
   const expectedRuntime = runtimeProviderForProviderId(providerId)
+  const modelId = boundedControlValue(payload.model?.id)
+  const modelProviderId = boundedControlValue(payload.model?.providerId)
+  const effort = boundedControlValue(payload.effort)
+  const permissionMode = payload.permissionMode ?? 'full_access'
+  if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
+    throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
+  }
   return {
     prompt: payload.prompt,
     ...(typeof payload.cwd === 'string' && payload.cwd.trim() ? { cwd: payload.cwd } : {}),
@@ -187,8 +239,53 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
     agentId,
     backend: payload.backend ?? 'local',
     runtimeProvider: payload.runtimeProvider ?? expectedRuntime,
-    attachments: normalizeAgentAttachments(payload.attachments)
+    attachments: normalizeAgentAttachments(payload.attachments),
+    ...(modelId ? { model: { id: modelId, ...(modelProviderId ? { providerId: modelProviderId } : {}) } } : {}),
+    ...(effort ? { effort } : {}),
+    permissionMode
   }
+}
+
+function boundedControlValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value.trim()
+  return text && text.length <= 240 ? text : undefined
+}
+
+export type AgentPermissionDecision = 'once' | 'session' | 'reject'
+
+export function agentPermissionQuestion(
+  runId: string,
+  questionId: string,
+  header: string,
+  question: string,
+  description: string,
+  allowSession = true
+): AgentQuestionRequest {
+  return {
+    runId,
+    questionId,
+    questions: [{
+      header,
+      question,
+      multiSelect: false,
+      options: [
+        { label: '允许一次', description },
+        ...(allowSession ? [{ label: '本次会话允许', description: '允许这类操作直到当前原生会话结束' }] : []),
+        { label: '拒绝', description: '拒绝本次操作并让 Agent 继续处理结果' }
+      ]
+    }]
+  }
+}
+
+export function agentPermissionDecision(
+  request: AgentQuestionRequest,
+  response: AgentQuestionResponse
+): AgentPermissionDecision {
+  if (response.behavior === 'cancelled') return 'reject'
+  const answer = response.answers[request.questions[0]?.question ?? '']
+  if (answer === '本次会话允许') return 'session'
+  return answer === '允许一次' ? 'once' : 'reject'
 }
 
 export function isSupportedImageMimeType(value: string): value is AgentImageMimeType {

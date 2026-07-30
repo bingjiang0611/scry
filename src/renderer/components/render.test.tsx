@@ -25,6 +25,7 @@ import {
   takeNextQueuedPrompt
 } from '../App'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
+import { resolveRunControlSelection } from '../hooks/useIntegrations'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel } from './OverviewPanel'
@@ -94,6 +95,28 @@ const turn: Turn = {
   ]
 }
 
+const RUN_CONTROL_PROPS = {
+  runControls: { permissionMode: 'default' as const },
+  runControlCatalog: {
+    models: [{
+      model: { id: 'test-model' },
+      label: 'Test Model',
+      efforts: [{ id: 'high', label: '高' }]
+    }, {
+      model: { id: 'test-model-alias' },
+      label: 'Test Model',
+      efforts: []
+    }],
+    permissions: [
+      { id: 'default' as const, label: '默认审批', description: '危险操作需要确认' },
+      { id: 'full_access' as const, label: '完全访问', description: '跳过审批' }
+    ]
+  },
+  onRunModel: () => {},
+  onRunEffort: () => {},
+  onPermissionMode: () => {}
+}
+
 describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍可组合渲染', () => {
   const html = renderToStaticMarkup(<App />)
 
@@ -143,7 +166,12 @@ describe('ViewChrome 顶栏', () => {
         view="chat"
         agent={undefined}
         showPanel
+        skillCount={3}
+        mcpOnline={1}
+        mcpTotal={2}
         onView={() => {}}
+        onSkills={() => {}}
+        onMcp={() => {}}
         onTogglePanel={() => {}}
         onToggleWorkspace={() => {}}
       />
@@ -152,6 +180,9 @@ describe('ViewChrome 顶栏', () => {
     expect(html).toContain('拓扑')
     expect(html).toContain('分段')
     expect(html).toContain('title="工作区文件"')
+    expect(html).toContain('title="Skills"')
+    expect(html).toContain('title="MCP"')
+    expect(html).toContain('1/2')
     expect(html).toContain('文件')
     expect(html).not.toContain('sample-workspace')
     expect(html).not.toContain('cwd-pill')
@@ -159,6 +190,22 @@ describe('ViewChrome 顶栏', () => {
     expect(html).not.toContain('&gt;all&lt;')
     expect(html).not.toContain('&gt;tool&lt;')
     expect(html).not.toContain('&gt;mcp&lt;')
+  })
+})
+
+describe('运行控制选择', () => {
+  it('Provider 目录变化时丢弃失效模型和 effort，并保留仍受支持的权限', () => {
+    expect(resolveRunControlSelection({
+      models: [{ model: { id: 'new-model' }, label: 'New', efforts: [] }],
+      permissions: [
+        { id: 'default', label: '默认审批', description: 'ask' },
+        { id: 'full_access', label: '完全访问', description: 'allow' }
+      ]
+    }, {
+      model: { id: 'removed-model' },
+      effort: 'high',
+      permissionMode: 'full_access'
+    })).toEqual({ model: undefined, effort: undefined, permissionMode: 'full_access' })
   })
 })
 
@@ -346,8 +393,6 @@ describe('Sidebar 项目分组', () => {
         activeCwd={null}
         onNewChat={() => {}}
         onPick={() => {}}
-        onSkills={() => {}}
-        onMcp={() => {}}
         onDelete={() => {}}
       />
     )
@@ -375,8 +420,6 @@ describe('Sidebar 项目分组', () => {
         runningRunIds={new Set(['run-active'])}
         onNewChat={() => {}}
         onPick={() => {}}
-        onSkills={() => {}}
-        onMcp={() => {}}
         onDelete={() => {}}
       />
     )
@@ -981,6 +1024,8 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         agents={[]}
         selectedAgentId="claude"
         backend="local"
+        {...RUN_CONTROL_PROPS}
+        runControls={{ model: { id: 'test-model' }, effort: 'high', permissionMode: 'default' }}
         input=""
         busy={false}
         draftAttachments={[]}
@@ -1013,6 +1058,11 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     )
     expect(chatHtml).toContain('data-run-id="r1"')
     expect(chatHtml).toContain('turn-jump-target')
+    expect(chatHtml).toContain('aria-label="模型"')
+    expect(chatHtml).toContain('Test Model · test-model')
+    expect(chatHtml).toContain('Test Model · test-model-alias')
+    expect(chatHtml).toContain('aria-label="Effort"')
+    expect(chatHtml).toContain('aria-label="权限"')
   })
 
   it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () => {
@@ -1037,6 +1087,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         agents={[]}
         selectedAgentId="claude"
         backend="local"
+        {...RUN_CONTROL_PROPS}
         input="/code"
         busy={false}
         draftAttachments={[]}
@@ -1084,12 +1135,17 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         agents={[]}
         selectedAgentId="claude"
         backend="local"
+        {...RUN_CONTROL_PROPS}
         input=""
         busy
         draftAttachments={[
           { id: 'draft-1', kind: 'image', name: 'draft.png', mimeType: 'image/png', dataBase64: 'aQ==', previewUrl: 'data:image/png;base64,aQ==' }
         ]}
-        queuedPrompts={[{ text: '继续检查', attachments: [{ kind: 'image', name: 'queued.png', mimeType: 'image/png', dataBase64: 'aQ==' }] }]}
+        queuedPrompts={[{
+          text: '继续检查',
+          attachments: [{ kind: 'image', name: 'queued.png', mimeType: 'image/png', dataBase64: 'aQ==' }],
+          request: { providerId: 'claude', permissionMode: 'default' }
+        }]}
         slashOpen={false}
         slashLoading={false}
         slashCmds={[]}
@@ -1123,9 +1179,28 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
 
   it('运行中发送队列按 FIFO 取出，空消息不入队', () => {
     const image = { kind: 'image' as const, name: 'queued.png', mimeType: 'image/png' as const, dataBase64: 'aQ==' }
-    const queue = enqueuePrompt(enqueuePrompt([], '  先做 A  '), '', [image])
+    const queue = enqueuePrompt(
+      enqueuePrompt([], '  先做 A  ', [], {
+        providerId: 'codex',
+        model: { id: 'gpt-5.3-codex' },
+        effort: 'high',
+        permissionMode: 'default'
+      }),
+      '',
+      [image],
+      { providerId: 'claude', permissionMode: 'full_access' }
+    )
     expect(enqueuePrompt(queue, '   ')).toHaveLength(2)
-    expect(queue[0]).toMatchObject({ text: '先做 A', attachments: [] })
+    expect(queue[0]).toMatchObject({
+      text: '先做 A',
+      attachments: [],
+      request: {
+        providerId: 'codex',
+        model: { id: 'gpt-5.3-codex' },
+        effort: 'high',
+        permissionMode: 'default'
+      }
+    })
     const first = takeNextQueuedPrompt(queue)
     expect(first.next?.text).toBe('先做 A')
     expect(first.rest[0].attachments[0].name).toBe('queued.png')

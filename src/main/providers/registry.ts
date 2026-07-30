@@ -1,4 +1,5 @@
 import {
+  capabilityReady,
   capabilityUnavailable,
   type AccountSnapshot,
   type CapabilityEnvelope,
@@ -10,15 +11,21 @@ import {
   type ProviderId,
   type SkillMeta
 } from '../../shared/provider'
+import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { ProviderAdapter, ProviderRunHandle, ProviderRunRequest } from './types'
 import type { CodexHookInspection } from '../codex-hook-trust'
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>()
   private readonly disabledProviders: ReadonlySet<ProviderId>
+  private readonly runControlsEnabled: boolean
 
-  constructor(adapters: ProviderAdapter[], options: { disabledProviders?: ReadonlySet<ProviderId> } = {}) {
+  constructor(
+    adapters: ProviderAdapter[],
+    options: { disabledProviders?: ReadonlySet<ProviderId>; runControlsEnabled?: boolean } = {}
+  ) {
     this.disabledProviders = options.disabledProviders ?? new Set()
+    this.runControlsEnabled = options.runControlsEnabled ?? true
     for (const adapter of adapters) {
       if (this.adapters.has(adapter.id)) throw new Error(`duplicate provider adapter: ${adapter.id}`)
       this.adapters.set(adapter.id, adapter)
@@ -46,8 +53,32 @@ export class ProviderRegistry {
     const adapter = this.get(providerId)
     return adapter.run({
       ...request,
+      ...(this.runControlsEnabled
+        ? { permissionMode: request.permissionMode ?? 'full_access' }
+        : { model: undefined, effort: undefined, permissionMode: 'full_access' }),
       emit: (event) => request.emit({ ...event, providerId, runtimeProvider: adapter.runtimeProvider })
     })
+  }
+
+  runControls(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>> {
+    const disabled = this.disabled<AgentRunControlCatalog>(context)
+    if (disabled) return disabled
+    if (!this.runControlsEnabled) {
+      return Promise.resolve({
+        ...capabilityReady(context, 'read', {
+          models: [],
+          permissions: [{
+            id: 'full_access' as const,
+            label: '完全访问',
+            description: 'SCRY_RUN_CONTROLS=0，沿用升级前的完全访问行为'
+          }]
+        }),
+        state: 'degraded' as const,
+        reason: '运行控制已通过 SCRY_RUN_CONTROLS=0 关闭'
+      })
+    }
+    return this.get(context.providerId).runControls?.read(context) ??
+      Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的运行控制接口'))
   }
 
   async describe(): Promise<ProviderDescriptor[]> {

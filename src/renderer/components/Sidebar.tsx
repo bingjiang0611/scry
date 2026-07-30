@@ -1,4 +1,4 @@
-// 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 按工作目录分组的历史会话（右键删除）/ 底部 Skills·MCP。
+// 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 按工作目录分组的历史会话（右键删除）。
 import { useState } from 'react'
 import { relTime } from '../format'
 import { Icon } from './primitives/Icon'
@@ -23,13 +23,8 @@ export function Sidebar({
   activeProviderId,
   runningRunIds = new Set<string>(),
   version = '0.1.0',
-  skillCount,
-  mcpOnline,
-  mcpTotal,
   onNewChat,
   onPick,
-  onSkills,
-  onMcp,
   onDelete,
   onDiagnostics,
   diagnosticsActive = false,
@@ -43,13 +38,8 @@ export function Sidebar({
   activeProviderId?: SessionProviderId
   runningRunIds?: ReadonlySet<string>
   version?: string
-  skillCount?: number
-  mcpOnline?: number
-  mcpTotal?: number
   onNewChat: () => void
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string) => void
-  onSkills: () => void
-  onMcp: () => void
   onDelete: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string) => void
   onDiagnostics?: () => void
   diagnosticsActive?: boolean
@@ -171,21 +161,6 @@ export function Sidebar({
             </div>
           )
         })}
-      </div>
-
-      <div className="sb-foot">
-        <button className="sb-tool" onClick={onSkills}>
-          <Icon name="box" /> 技能
-          {skillCount != null && skillCount > 0 && <span className="cnt">{skillCount}</span>}
-        </button>
-        <button className="sb-tool" onClick={onMcp}>
-          <span className="dot" /> MCP
-          {mcpTotal != null && mcpTotal > 0 && (
-            <span className="cnt">
-              {mcpOnline ?? 0}/{mcpTotal}
-            </span>
-          )}
-        </button>
       </div>
 
       {ctx && (
