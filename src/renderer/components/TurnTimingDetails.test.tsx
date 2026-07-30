@@ -156,7 +156,7 @@ describe('TurnTimingDetails', () => {
     expect(html).toContain('主指标“调用耗时”会合并父子 Agent 的重叠区间')
   })
 
-  it('无逐次响应边界时展示墙钟减调用占用的未归因耗时', () => {
+  it('无逐次响应边界时展示墙钟减调用占用的模型相关耗时估算', () => {
     const bash = event({
       id: 'bash',
       kind: 'tool',
@@ -174,10 +174,10 @@ describe('TurnTimingDetails', () => {
       <TurnTimingDetails timing={buildTurnTimingBreakdown(items, [bash])} />
     )
 
-    expect(html).toContain('未归因耗时')
+    expect(html).toContain('模型相关耗时估算')
     expect(html).toContain('~7.0s')
     expect(html).toContain('~估算 · 已计时 1/1')
-    expect(html).toContain('aria-label="整轮未归因耗时约 7.0s"')
+    expect(html).toContain('aria-label="整轮模型相关耗时估算约 7.0s"')
     expect(html).toContain('aria-label="1 次工具调用，耗时约 3.0s"')
     expect(html).not.toContain('模型 API 合计')
   })
