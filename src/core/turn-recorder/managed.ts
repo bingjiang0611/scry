@@ -209,6 +209,7 @@ function recordEvidence(record: AgentTurnRecord): TurnEvidence {
     mcps: record.mcps,
     hooks: record.hooks,
     usage: record.usage,
+    ...(record.modelTiming ? { modelTiming: record.modelTiming } : {}),
     files: record.files,
     diff: record.diff,
     dangerousOperations: record.dangerousOperations,

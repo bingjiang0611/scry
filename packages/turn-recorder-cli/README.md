@@ -5,6 +5,8 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 ```bash
 scry doctor --workspace "$PWD"
 scry turns list --workspace "$PWD"
+scry turns summary --workspace "$PWD"
+scry turns summary <sessionId> --workspace "$PWD"
 scry turns export --workspace "$PWD" --after 0 --limit 100
 ```
 
@@ -46,7 +48,7 @@ scry recorder restart --workspace "$PWD"
 }
 ```
 
-创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/export/verify` 仍可只读已有数据。
+创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/summary/export/verify` 仍可只读已有数据。
 
 ## 数据口径
 
@@ -54,4 +56,7 @@ scry recorder restart --workspace "$PWD"
 - Codex 的顶层轮次会合并其子 Agent rollout，但 Token 和最终回复只取顶层权威值，避免重复累计。
 - 无调用记为 `available + []`；Provider 未暴露的数据记为 `unavailable`，不会伪装成 0。Codex rollout 不包含原生 Hook 运行时事件，因此 Hook 通常为 `unavailable`。
 - Codex 会从 rollout 恢复 slash prompt、Usage、文件修改及常见并行工具调用；若子 Agent rollout 缺失，相关字段降级为 `partial`。
+- `turns list` 会为每轮输出紧凑的 `modelTiming`；`turns summary [sessionId]` 汇总模型累计耗时、去重占用耗时、根/子 Agent 累计值和覆盖率。
+- Codex 当前没有上报服务端精确 latency。新记录的 `response_intervals` 是从同一 Agent 线程的 turn start 或上一段工具/Hook 完成，到 `rawResponse/completed` 的观测区间；它适合定位流程等待，但可能包含请求构造、调度、传输和重试。
+- `cumulativeMs` 会累计并行子 Agent 的模型时间；`occupiedMs` 是所有已观测模型区间的并集，用来与整轮墙钟比较。旧记录缺少 `modelTiming` 时保持 `unavailable`，不会被解释为 0。
 - Recorder 只保证新生成记录使用当前口径；已经上传的旧版本记录不会被自动重写。

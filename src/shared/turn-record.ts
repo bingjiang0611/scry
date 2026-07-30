@@ -51,6 +51,39 @@ export interface TurnUsage {
   model?: string
 }
 
+export type TurnModelTimingMethod = 'provider_api' | 'response_intervals' | 'non_call_residual'
+
+export interface TurnModelCallTiming {
+  responseId?: string
+  scope: 'root' | 'subagent'
+  agentId?: string
+  parentToolUseId?: string
+  startedAt?: string
+  completedAt: string
+  durationMs?: number
+  source: 'provider' | 'observed'
+  boundary?: 'turn_or_activity_end'
+}
+
+export interface TurnModelTimingLane {
+  totalCalls: number
+  timedCalls: number
+  cumulativeMs?: number
+}
+
+export interface TurnModelTiming {
+  method: TurnModelTimingMethod
+  cumulativeMs?: number
+  occupiedMs?: number
+  overlapMs?: number
+  totalCalls?: number
+  timedCalls?: number
+  root?: TurnModelTimingLane
+  subagents?: TurnModelTimingLane
+  calls?: TurnModelCallTiming[]
+  activityCoverage?: { timedCalls: number; totalCalls: number }
+}
+
 export interface TurnFile {
   path: string
   operation: 'read' | 'write' | 'edit'
@@ -90,6 +123,7 @@ export interface TurnEvidence {
   mcps: Evidence<TurnCall[]>
   hooks: Evidence<TurnHookCall[]>
   usage: Evidence<TurnUsage>
+  modelTiming?: Evidence<TurnModelTiming>
   files: Evidence<TurnFile[]>
   diff: Evidence<TurnDiffSnapshotRecord[]>
   dangerousOperations: Evidence<TurnDanger[]>
@@ -140,6 +174,76 @@ function isEvidence(value: unknown): value is Evidence<unknown> {
   )
 }
 
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function isModelTimingLane(value: unknown): value is TurnModelTimingLane {
+  if (!value || typeof value !== 'object') return false
+  const raw = value as Record<string, unknown>
+  return (
+    Number.isSafeInteger(raw.totalCalls) &&
+    Number(raw.totalCalls) >= 0 &&
+    Number.isSafeInteger(raw.timedCalls) &&
+    Number(raw.timedCalls) >= 0 &&
+    Number(raw.timedCalls) <= Number(raw.totalCalls) &&
+    (raw.cumulativeMs === undefined || isNonNegativeNumber(raw.cumulativeMs))
+  )
+}
+
+function isModelTimingCall(value: unknown): value is TurnModelCallTiming {
+  if (!value || typeof value !== 'object') return false
+  const raw = value as Record<string, unknown>
+  return (
+    ['root', 'subagent'].includes(String(raw.scope)) &&
+    typeof raw.completedAt === 'string' &&
+    ['provider', 'observed'].includes(String(raw.source)) &&
+    (raw.durationMs === undefined || isNonNegativeNumber(raw.durationMs)) &&
+    (raw.boundary === undefined || raw.boundary === 'turn_or_activity_end')
+  )
+}
+
+function isActivityCoverage(value: unknown): value is TurnModelTiming['activityCoverage'] {
+  if (!value || typeof value !== 'object') return false
+  const raw = value as Record<string, unknown>
+  return (
+    Number.isSafeInteger(raw.totalCalls) &&
+    Number(raw.totalCalls) >= 0 &&
+    Number.isSafeInteger(raw.timedCalls) &&
+    Number(raw.timedCalls) >= 0 &&
+    Number(raw.timedCalls) <= Number(raw.totalCalls)
+  )
+}
+
+function isModelTiming(value: unknown): value is TurnModelTiming {
+  if (!value || typeof value !== 'object') return false
+  const raw = value as Record<string, unknown>
+  if (!['provider_api', 'response_intervals', 'non_call_residual'].includes(String(raw.method))) return false
+  for (const key of ['cumulativeMs', 'occupiedMs', 'overlapMs']) {
+    if (raw[key] !== undefined && !isNonNegativeNumber(raw[key])) return false
+  }
+  for (const key of ['totalCalls', 'timedCalls']) {
+    if (raw[key] !== undefined && (!Number.isSafeInteger(raw[key]) || Number(raw[key]) < 0)) return false
+  }
+  if (
+    raw.totalCalls !== undefined &&
+    raw.timedCalls !== undefined &&
+    Number(raw.timedCalls) > Number(raw.totalCalls)
+  ) return false
+  if (raw.root !== undefined && !isModelTimingLane(raw.root)) return false
+  if (raw.subagents !== undefined && !isModelTimingLane(raw.subagents)) return false
+  if (raw.calls !== undefined && (!Array.isArray(raw.calls) || !raw.calls.every(isModelTimingCall))) return false
+  if (raw.activityCoverage !== undefined && !isActivityCoverage(raw.activityCoverage)) return false
+  return true
+}
+
+function isModelTimingEvidence(value: unknown): value is Evidence<TurnModelTiming> {
+  if (!isEvidence(value)) return false
+  const raw = value as Evidence<unknown>
+  if (raw.status === 'available' || raw.status === 'partial') return isModelTiming(raw.value)
+  return raw.value === undefined || isModelTiming(raw.value)
+}
+
 export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
   if (!value || typeof value !== 'object') return false
   const raw = value as Record<string, unknown>
@@ -153,7 +257,7 @@ export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
   if (!raw.workspace || typeof raw.workspace !== 'object' || !raw.provider || typeof raw.provider !== 'object') return false
   const provider = raw.provider as Record<string, unknown>
   if (!['claude', 'codex', 'qoder', 'opencode'].includes(String(provider.id))) return false
-  return [
+  const requiredEvidence = [
     'user',
     'assistant',
     'tools',
@@ -166,4 +270,5 @@ export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
     'dangerousOperations',
     'errors'
   ].every((key) => isEvidence(raw[key]))
+  return requiredEvidence && (raw.modelTiming === undefined || isModelTimingEvidence(raw.modelTiming))
 }

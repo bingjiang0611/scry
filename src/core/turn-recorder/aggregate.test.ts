@@ -51,6 +51,90 @@ describe('aggregateTurnEvidence', () => {
     ] }).usage.value).toMatchObject({ inputTokens: 10, outputTokens: 5 })
   })
 
+  it('把根与子 Agent 的观测模型调用聚合为累计耗时和去重墙钟', () => {
+    const events: TraceEvent[] = [
+      {
+        id: 'root-1',
+        ts: '2026-01-01T00:00:02.000Z',
+        runId: 'r',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-root-1',
+        durationMs: 2_000,
+        runtimeMetadata: { timingSource: 'observed', timingBoundary: 'turn_or_activity_end' }
+      },
+      {
+        id: 'child-1',
+        ts: '2026-01-01T00:00:04.000Z',
+        runId: 'r',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-child-1',
+        agentId: 'child-thread',
+        parentToolUseId: 'spawn-1',
+        durationMs: 3_000,
+        runtimeMetadata: { timingSource: 'observed', timingBoundary: 'turn_or_activity_end' }
+      },
+      {
+        id: 'root-2',
+        ts: '2026-01-01T00:00:07.000Z',
+        runId: 'r',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-root-2',
+        durationMs: 3_000,
+        runtimeMetadata: { timingSource: 'observed', timingBoundary: 'turn_or_activity_end' }
+      }
+    ]
+
+    expect(aggregateTurnEvidence({ events, source: 'scry_provider_adapter' }).modelTiming).toEqual({
+      status: 'available',
+      quality: 'estimated',
+      source: ['scry_provider_adapter'],
+      value: {
+        method: 'response_intervals',
+        totalCalls: 3,
+        timedCalls: 3,
+        cumulativeMs: 8_000,
+        occupiedMs: 7_000,
+        overlapMs: 1_000,
+        root: { totalCalls: 2, timedCalls: 2, cumulativeMs: 5_000 },
+        subagents: { totalCalls: 1, timedCalls: 1, cumulativeMs: 3_000 },
+        calls: [
+          expect.objectContaining({
+            responseId: 'response-root-1',
+            scope: 'root',
+            startedAt: '2026-01-01T00:00:00.000Z',
+            completedAt: '2026-01-01T00:00:02.000Z',
+            durationMs: 2_000,
+            source: 'observed',
+            boundary: 'turn_or_activity_end'
+          }),
+          expect.objectContaining({
+            responseId: 'response-child-1',
+            scope: 'subagent',
+            agentId: 'child-thread',
+            parentToolUseId: 'spawn-1',
+            startedAt: '2026-01-01T00:00:01.000Z',
+            completedAt: '2026-01-01T00:00:04.000Z',
+            durationMs: 3_000,
+            source: 'observed',
+            boundary: 'turn_or_activity_end'
+          }),
+          expect.objectContaining({
+            responseId: 'response-root-2',
+            scope: 'root',
+            startedAt: '2026-01-01T00:00:04.000Z',
+            completedAt: '2026-01-01T00:00:07.000Z',
+            durationMs: 3_000,
+            source: 'observed',
+            boundary: 'turn_or_activity_end'
+          })
+        ]
+      }
+    })
+  })
+
   it('Tool、Skill、MCP 使用互斥口径，并共享 Skill 去重规则', () => {
     const events: TraceEvent[] = [
       { id: 'bash', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', name: 'Bash', toolUseId: 'bash-1' },

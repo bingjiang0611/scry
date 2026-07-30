@@ -55,6 +55,49 @@ describe('TurnTimingDetails', () => {
     expect(html).not.toContain('turn-timing-call-name')
   })
 
+  it('把 Codex 根与子 Agent 响应显示为观测累计和去重占用，不再归入未归因耗时', () => {
+    const items = [
+      event({
+        id: 'root-response',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-root',
+        ts: '2026-07-18T00:00:02.000Z',
+        durationMs: 2_000
+      }),
+      event({
+        id: 'child-response',
+        kind: 'model',
+        stage: 'response_completed',
+        messageId: 'response-child',
+        agentId: 'child',
+        parentToolUseId: 'spawn-1',
+        ts: '2026-07-18T00:00:04.000Z',
+        durationMs: 3_000
+      }),
+      event({
+        id: 'result',
+        kind: 'harness',
+        stage: 'result',
+        ts: '2026-07-18T00:00:06.000Z',
+        durationMs: 6_000
+      })
+    ]
+    const html = renderToStaticMarkup(
+      <TurnTimingDetails timing={buildTurnTimingBreakdown(items, [])} />
+    )
+
+    expect(html).toContain('模型响应累计')
+    expect(html).toContain('~5.0s')
+    expect(html).toContain('~观测 · 2/2')
+    expect(html).toContain('模型调用观测')
+    expect(html).toContain('累计 5.0s · 占用 4.0s · 重叠 1.0s')
+    expect(html).toContain('根 Agent')
+    expect(html).toContain('子 Agent')
+    expect(html).toContain('不等同于 Provider 服务端 latency')
+    expect(html).not.toContain('未归因耗时')
+  })
+
   it('无生命周期的 Skill 显示未计时，不制造 0ms', () => {
     const skill = event({ id: 'skill', kind: 'skill', stage: 'skill:workflow-orchestrator', name: 'workflow-orchestrator' })
     const html = renderToStaticMarkup(

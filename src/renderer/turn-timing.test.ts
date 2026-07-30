@@ -315,6 +315,50 @@ describe('buildTurnTimingBreakdown', () => {
     expect(timing).toMatchObject({ wallMs: 10_000, apiMs: 4200, apiSource: 'provider' })
   })
 
+  it('uses observed root and subagent response calls instead of the unsegmented residual', () => {
+    const response = (
+      id: string,
+      completedAt: string,
+      durationMs: number,
+      agentId?: string
+    ): TraceEvent => event({
+      id,
+      kind: 'model',
+      stage: 'response_completed',
+      ts: completedAt,
+      messageId: id,
+      durationMs,
+      ...(agentId ? { agentId, parentToolUseId: 'spawn-1' } : {}),
+      runtimeMetadata: { timingSource: 'observed', timingBoundary: 'turn_or_activity_end' }
+    })
+    const items = [
+      response('root-1', '2026-07-18T00:00:02.000Z', 2_000),
+      response('child-1', '2026-07-18T00:00:04.000Z', 3_000, 'child-thread'),
+      response('root-2', '2026-07-18T00:00:07.000Z', 3_000),
+      event({
+        id: 'result',
+        kind: 'harness',
+        stage: 'result',
+        ts: '2026-07-18T00:00:08.000Z',
+        durationMs: 8_000
+      })
+    ]
+
+    expect(buildTurnTimingBreakdown(items, [])).toMatchObject({
+      wallMs: 8_000,
+      apiMs: 8_000,
+      apiSource: 'observed',
+      apiObservation: 'response',
+      timedApiPhases: 3,
+      totalApiPhases: 3,
+      cumulativeApiMs: 8_000,
+      occupiedApiMs: 7_000,
+      overlapApiMs: 1_000,
+      rootApiMs: 5_000,
+      nestedApiMs: 3_000
+    })
+  })
+
   it('Provider 未上报 API 耗时时回退到可确认的模型响应观测区间', () => {
     const bash = event({
       id: 'bash',
