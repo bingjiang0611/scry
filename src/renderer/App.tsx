@@ -954,6 +954,11 @@ export function App() {
           diagnosticsActive={view === 'diagnostics'}
           onAnalytics={() => changeView('analytics')}
           analyticsActive={view === 'analytics'}
+          onSkills={openSkills}
+          skillCount={integrations.skills.length}
+          onMcp={openMcp}
+          mcps={integrations.mcps}
+          mcpLive={integrations.mcpLive}
         />
       }
       sidebarSplitter={
@@ -1000,12 +1005,7 @@ export function App() {
           showPanel={panelVisible && !workspaceOpen && !turnDiffReview}
           canTogglePanel={view === 'chat'}
           showWorkspace={workspaceOpen && panelVisible}
-          skillCount={integrations.skills.length}
-          mcps={integrations.mcps}
-          mcpLive={integrations.mcpLive}
           onView={changeView}
-          onSkills={openSkills}
-          onMcp={openMcp}
           onTogglePanel={toggleOverviewPanel}
           onToggleWorkspace={toggleWorkspacePanel}
         />

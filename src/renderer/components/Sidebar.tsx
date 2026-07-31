@@ -3,7 +3,8 @@ import { useState } from 'react'
 import { relTime } from '../format'
 import { Icon } from './primitives/Icon'
 import type { ProjectMeta } from '../env'
-import type { SessionProviderId } from '@shared/provider'
+import type { McpMeta, SessionProviderId } from '@shared/provider'
+import type { McpLiveStatus } from '@shared/trace'
 
 const activeTimeTitle = (ms: number): string =>
   `最近活动：${new Intl.DateTimeFormat('zh-CN', {
@@ -29,7 +30,12 @@ export function Sidebar({
   onDiagnostics,
   diagnosticsActive = false,
   onAnalytics,
-  analyticsActive = false
+  analyticsActive = false,
+  onSkills,
+  skillCount,
+  onMcp,
+  mcps = [],
+  mcpLive = []
 }: {
   id?: string
   projects: ProjectMeta[]
@@ -45,6 +51,11 @@ export function Sidebar({
   diagnosticsActive?: boolean
   onAnalytics?: () => void
   analyticsActive?: boolean
+  onSkills?: () => void
+  skillCount?: number
+  onMcp?: () => void
+  mcps?: McpMeta[]
+  mcpLive?: McpLiveStatus[]
 }) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -68,6 +79,7 @@ export function Sidebar({
         .map((p) => ({ ...p, sessions: p.sessions.filter((s) => s.preview.toLowerCase().includes(ql)) }))
         .filter((p) => p.sessions.length > 0)
     : projects
+  const mcpSummary = summarizeMcpNav(mcps, mcpLive)
   return (
     <aside className="sidebar" id={id} aria-label="会话导航">
       <div className="sb-brand">
@@ -83,7 +95,7 @@ export function Sidebar({
         <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {(onDiagnostics || onAnalytics) && (
+      {(onDiagnostics || onAnalytics || onSkills || onMcp) && (
         <nav className="sb-nav" aria-label="主要视图">
           {onAnalytics && (
             <button
@@ -103,6 +115,28 @@ export function Sidebar({
               onClick={onDiagnostics}
             >
               <Icon name="info" /> 诊断
+            </button>
+          )}
+          {onSkills && (
+            <button type="button" className="sb-navitem" onClick={onSkills} title="Skills" aria-haspopup="dialog">
+              <Icon name="box" /> 技能
+              {skillCount != null && skillCount > 0 && <span className="sb-navmeta">{skillCount}</span>}
+            </button>
+          )}
+          {onMcp && (
+            <button
+              type="button"
+              className="sb-navitem"
+              onClick={onMcp}
+              title="MCP"
+              aria-haspopup="dialog"
+              aria-label={`MCP · ${mcpSummary.label}`}
+            >
+              <Icon name="cube" /> MCP
+              <span className="sb-navmeta" aria-hidden="true">
+                <span className={`sb-navdot ${mcpSummary.tone}`} />
+                {mcpSummary.total > 0 && <span>{mcpSummary.connected}/{mcpSummary.total}</span>}
+              </span>
             </button>
           )}
         </nav>
@@ -201,4 +235,37 @@ export function Sidebar({
       )}
     </aside>
   )
+}
+
+function summarizeMcpNav(mcps: McpMeta[], live: McpLiveStatus[]): {
+  connected: number
+  total: number
+  tone: 'online' | 'partial' | 'off'
+  label: string
+} {
+  const configuredByName = new Map(mcps.map((mcp) => [mcp.name, mcp]))
+  const liveByName = new Map(live.map((status) => [status.name, status]))
+  const names = new Set([...configuredByName.keys(), ...liveByName.keys()])
+  let connected = 0
+  let total = 0
+
+  for (const name of names) {
+    const configured = configuredByName.get(name)
+    const runtime = liveByName.get(name)
+    if (runtime?.status === 'disabled' || (!runtime && configured?.enabled === false)) continue
+    total += 1
+    if (runtime?.status === 'connected') connected += 1
+  }
+
+  if (total === 0) {
+    return {
+      connected: 0,
+      total: 0,
+      tone: 'off',
+      label: names.size > 0 ? '没有启用的 MCP' : '尚未发现配置'
+    }
+  }
+
+  const tone = connected === total ? 'online' : 'partial'
+  return { connected, total, tone, label: `${connected}/${total} 已连接` }
 }

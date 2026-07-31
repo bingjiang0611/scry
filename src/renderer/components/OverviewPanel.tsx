@@ -634,10 +634,6 @@ export function OverviewPanel({
   const isOverviewTab = panelTab === 'overview'
   const isBillingTab = panelTab === 'billing'
   const isTrustTab = panelTab === 'mcpTrust'
-  const panelTitle = isBillingTab ? '账单卫士' : isTrustTab ? 'MCP 信任' : '纵览'
-  const panelSub = sessionId ? `session ${sessionId.slice(0, 8)}` : turns.length > 0 ? `${turns.length} turns` : '等待会话'
-  const topbarState: 'ok' | 'warn' | 'bad' | 'off' = turns.length > 0 || busy ? vstate : 'off'
-  const topbarStatus = turns.length > 0 || busy ? judge : '等待会话'
   return (
     <aside className="panel">
       <div className="ov-topbar">
@@ -669,17 +665,6 @@ export function OverviewPanel({
           >
             <Icon name="lock" /> MCP 信任
           </button>
-        </div>
-        <div className="ov-title">
-          <span
-            className={`sdot ${topbarState}`}
-            title={`会话状态：${topbarStatus}`}
-            aria-label={`会话状态：${topbarStatus}`}
-          />
-          <div>
-            <b>{panelTitle}</b>
-            <em>{panelSub}</em>
-          </div>
         </div>
       </div>
       <div className="ov-scroll">

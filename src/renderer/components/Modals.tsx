@@ -87,6 +87,10 @@ const LIVE_LABEL: Record<McpLiveStatus['status'], { cls: string; text: string; i
   disabled: { cls: 'mcp-neutral', text: 'disabled', icon: 'square' }
 }
 
+function labelForLiveStatus(status: string): { cls: string; text: string; icon: IconName } {
+  return LIVE_LABEL[status as McpLiveStatus['status']] ?? { cls: 'mcp-neutral', text: status || 'unknown', icon: 'alert' }
+}
+
 export function McpModal({
   mcps,
   status,
@@ -140,6 +144,7 @@ export function McpModal({
               {list.map((m) => {
                 const st = status[m.name]
                 const lv = liveByName.get(m.name)
+                const lvLabel = lv ? labelForLiveStatus(lv.status) : undefined
                 // 开关跟 SDK 真实态走：有 live 就按它(disabled=关，其余=开)，没 live 退回配置读取
                 const enabled = lv ? lv.status !== 'disabled' : m.enabled
                 const open = expanded === m.name
@@ -153,10 +158,10 @@ export function McpModal({
                       <span className={`mcp-name ${enabled ? '' : 'off'}`}>{m.name}</span>
                       <span className="mcp-transport">{m.transport}</span>
                       {/* live 状态来自 SDK init；pending 是真实的未收敛/待刷新态，不显示成 connected */}
-                      {lv ? (
-                        <span className={LIVE_LABEL[lv.status].cls} title="来自当前 Provider 原生运行时的真实状态">
-                          <Icon name={LIVE_LABEL[lv.status].icon} />
-                          {LIVE_LABEL[lv.status].text}
+                      {lv && lvLabel ? (
+                        <span className={lvLabel.cls} title="来自当前 Provider 原生运行时的真实状态">
+                          <Icon name={lvLabel.icon} />
+                          {lvLabel.text}
                           {lv.status === 'connected' && st?.tools != null ? ` · ${st.tools} tools` : ''}
                         </span>
                       ) : (

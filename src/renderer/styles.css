@@ -150,7 +150,7 @@ body {
   overflow: hidden;
 }
 
-/* 左侧会话栏（蓝本：brand+ver / 新建会话+kbd / search / 最近分组 / Skills·MCP 底部） */
+/* 左侧会话栏：brand+ver / 新建会话+kbd / search / 主导航 / 最近分组 */
 .sidebar {
   width: 100%;
   background: var(--bg);
@@ -5883,32 +5883,6 @@ button.turn-timing-call {
   background: var(--panel);
   backdrop-filter: blur(8px);
 }
-.ov-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 0 2px;
-}
-.ov-title > div {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.ov-title b {
-  font: 650 13px/1 var(--font-ui);
-  color: var(--fg);
-}
-.ov-title em {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 10.5px/1 var(--font-mono);
-  color: var(--dim2);
-  font-style: normal;
-}
 .ov-scroll {
   flex: 1;
   min-height: 0;
@@ -6123,6 +6097,31 @@ textarea:focus-visible,
   color: var(--accent);
 }
 
+.sb-navmeta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim2);
+  font: 10.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-navdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim3);
+}
+
+.sb-navdot.online {
+  background: var(--ok);
+}
+
+.sb-navdot.partial {
+  background: var(--warn);
+}
+
 .sb-section {
   padding: 12px 11px 5px;
   color: var(--dim3);
@@ -6298,7 +6297,6 @@ textarea:focus-visible,
     padding-inline: 6px;
   }
 
-  .tb-action.integration-pill,
   .tb-action.panel-pill {
     font-size: 0;
   }
@@ -7248,25 +7246,6 @@ textarea:focus-visible,
   padding: 0 10px;
 }
 
-.tb-action.integration-pill {
-  flex: 0 0 auto;
-  gap: 5px;
-  white-space: nowrap;
-}
-
-.tb-action.integration-pill b {
-  color: var(--dim);
-  font: 10px/1 var(--font-mono);
-}
-
-.tb-action.integration-pill .dot.online {
-  background: var(--ok);
-}
-
-.tb-action.integration-pill .dot.partial {
-  background: var(--warn);
-}
-
 @media (max-width: 1080px) {
   .composer {
     padding-inline: 12px;
@@ -7276,13 +7255,6 @@ textarea:focus-visible,
     max-width: 150px;
   }
 
-  .tb-action.integration-pill {
-    font-size: 0;
-  }
-
-  .tb-action.integration-pill b {
-    font-size: 10px;
-  }
 }
 
 @media (max-width: 900px) {
