@@ -838,7 +838,7 @@ export function App() {
     '--sidebar-w': `${sidebarPane.visibleWidth}px`,
     '--overview-panel-w': `${activeRightPane.visibleWidth}px`
   }
-  const rightPanelOpen = view === 'chat' && (showPanel || workspaceOpen || turnDiffReview != null)
+  const rightPanelOpen = Boolean(cwd) && view === 'chat' && (showPanel || workspaceOpen || turnDiffReview != null)
   const panelVisible = rightPanelOpen && !activeRightPane.collapsed
   const panelRuntimeProvider = useMemo(
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
@@ -1001,8 +1001,8 @@ export function App() {
           canTogglePanel={view === 'chat'}
           showWorkspace={workspaceOpen && panelVisible}
           skillCount={integrations.skills.length}
-          mcpOnline={integrations.mcpLive.filter((live) => live.status === 'connected').length}
-          mcpTotal={integrations.mcps.length}
+          mcps={integrations.mcps}
+          mcpLive={integrations.mcpLive}
           onView={changeView}
           onSkills={openSkills}
           onMcp={openMcp}
@@ -1015,22 +1015,22 @@ export function App() {
             {!cwd ? (
             <main className="welcome-pane">
               <div className="welcome-inner">
-                <div className="wc-brand">
-                  <h1>Scry</h1>
-                  <span className="ver">v0.1.0</span>
-                </div>
                 <div className="wc-hero">
-                  <h2>
-                    在 app 里驱动本机 AI coding agent，
-                    <br />
-                    实时看它每一步。
-                  </h2>
+                  <span className="wc-eyebrow">本地 Agent 工作台</span>
+                  <h2>打开一个工作目录</h2>
                   <p>
-                    选一个工作目录，给一个任务。下面把工具调用、文件读写、模型思考、subagent、MCP、usage token
-                    —— 全摊在对话流里。把 terminal 的黑盒变成可观测、可控制、可回放的窗口。
+                    继续最近会话，或打开一个本地项目。Scry 会把工具调用、文件改动和运行状态铺在同一条时间线上。
                   </p>
                 </div>
-                <div className="wc-status">
+                <div className="wc-browse">
+                  <button className="btn primary" onClick={chooseFolder}>
+                    <Icon name="folder" /> 选择文件夹
+                    <span className="kbd">⌘O</span>
+                  </button>
+                </div>
+                <section className="wc-environment" aria-label="本机 Agent 环境">
+                  <span className="wc-status-label">本机 Agent</span>
+                  <div className="wc-status">
                   {(() => {
                     const providerLabels = [
                       ['claude', 'claude'],
@@ -1044,14 +1044,11 @@ export function App() {
                           const agent = integrations.agents.find((candidate) => candidate.id === id)
                           const checking = !agent && integrations.agentsScanning
                           return (
-                            <span className={`stat-pill ${agent ? 'ok' : ''}`} key={id}>
+                            <span className={`stat-pill ${agent ? 'ok' : ''}`} key={id} title={agent?.path}>
                               <span className={`sdot ${agent ? 'ok' : checking ? 'checking' : 'off'}`} />
-                              <span>{label}</span>
+                              <b>{label}</b>
                               {agent ? (
-                                <>
-                                  <b>{agent.version ?? '已检测'}</b>
-                                  <span className="sub" title={agent.path}>· {basename(agent.path)}</span>
-                                </>
+                                <span className="sub">{agent.version ?? basename(agent.path)}</span>
                               ) : checking ? (
                                 <span className="sub">检测中…</span>
                               ) : (
@@ -1063,10 +1060,12 @@ export function App() {
                       </>
                     )
                   })()}
-                </div>
+                  </div>
+                </section>
                 <div className="wc-actions">
                   <div className="wc-act-h">
-                    <h3>最近工作目录</h3>
+                    <h3>最近打开</h3>
+                    <span>{projects.length > 0 ? `${projects.length} 个工作目录` : ''}</span>
                   </div>
                   {projects.length === 0 ? (
                     <div className="sb-empty">还没有历史会话 —— 选个文件夹开始</div>
@@ -1086,44 +1085,36 @@ export function App() {
                             <div className="meta">
                               <div className="name">
                                 {p.name}
-                                {p.cwd === lastCwd && <span className="last-tag">LAST OPENED</span>}
+                                {p.cwd === lastCwd && <span className="last-tag">上次使用</span>}
                               </div>
                               <div className="path">{p.cwd.replace(/^\/Users\/[^/]+/, '~')}</div>
                             </div>
-                            <span className="sess">{p.sessions.length} sessions</span>
+                            <span className="sess">{p.sessions.length} 个会话</span>
                             <span className="when">{relTime(p.mtime)}</span>
                           </button>
                         ))
                       })()}
                     </div>
                   )}
-                  <div className="wc-browse">
-                    <button className="btn primary" onClick={chooseFolder}>
-                      <Icon name="folder" /> 选择文件夹…
-                      <span className="kbd">⌘O</span>
-                    </button>
-                  </div>
                 </div>
                 <div className="wc-suggest">
-                  <h3>选好工作目录之后试试 ↓</h3>
+                  <h3>快速开始</h3>
                   <div className="sg-grid">
                     {[
-                      { tag: 'explore', text: '梳理这个项目的目录结构和技术栈' },
-                      { tag: 'audit', text: '找出最近一次改动可能引入的问题' },
-                      { tag: 'build', text: '给核心模块补一个单元测试' },
-                      { tag: 'explain', text: '解释这个仓库是怎么跑起来的' }
+                      { tag: 'explore', text: '梳理项目结构和技术栈' },
+                      { tag: 'audit', text: '审查最近一次改动' },
+                      { tag: 'build', text: '为核心模块补单元测试' },
+                      { tag: 'explain', text: '解释项目如何运行' }
                     ].map((s) => (
                       <button key={s.tag} className="sg-card" onClick={() => setInput(s.text)}>
-                        <span className="sg-label">{s.tag}</span>
-                        {s.text}
+                        <span>{s.text}</span>
+                        <Icon name="chevronRight" />
                       </button>
                     ))}
                   </div>
                 </div>
                 <div className="wc-footnote">
-                  <b>单源真相 · Provider 原生流</b> · 应用进程直接驱动本机 Agent，不再 tail 别的 terminal 会话。
-                  <br />
-                  trace 字段来自各 Provider 的 SDK / app-server / server event；拿不到的值显示未知，不二次猜测。
+                  所有会话与使用记录保存在本机。无法确认的数据会显示为「未知」。
                 </div>
               </div>
             </main>

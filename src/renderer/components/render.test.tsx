@@ -120,25 +120,25 @@ const RUN_CONTROL_PROPS = {
 describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍可组合渲染', () => {
   const html = renderToStaticMarkup(<App />)
 
-  it('未选 cwd 首屏渲染 sidebar、welcome、topbar 和右侧纵览槽位', () => {
-    expect(html).toContain('app app-shell has-right-panel')
+  it('未选 cwd 首屏渲染 sidebar、welcome 和 topbar，不挂空白纵览面板', () => {
+    expect(html).toContain('app app-shell')
+    expect(html).not.toContain('has-right-panel')
     expect(html).toContain('id="sidebar-pane"')
     expect(html).toContain('id="main-pane"')
-    expect(html).toContain('id="overview-pane"')
+    expect(html).not.toContain('id="overview-pane"')
     expect(html).toContain('未选工作目录')
-    expect(html).toContain('在 app 里驱动本机 AI coding agent')
+    expect(html).toContain('打开一个工作目录')
     expect(html).toContain('opencode')
-    expect(html).toContain('最近工作目录')
-    expect(html).toContain('纵览')
+    expect(html).toContain('最近打开')
+    expect(html).not.toContain('纵览面板')
     expect(html).not.toContain('class="logo"')
   })
 
-  it('左右 splitter 的 aria contract 保留，避免 shell 化后拖拽控件丢失', () => {
-    expect(html.match(/role="separator"/g)).toHaveLength(2)
+  it('welcome 只保留左侧 splitter 的 aria contract', () => {
+    expect(html.match(/role="separator"/g)).toHaveLength(1)
     expect(html).toContain('aria-label="调整左侧栏宽度"')
     expect(html).toContain('aria-controls="sidebar-pane"')
-    expect(html).toContain('aria-label="调整右侧面板宽度"')
-    expect(html).toContain('aria-controls="overview-pane"')
+    expect(html).not.toContain('aria-label="调整右侧面板宽度"')
   })
 })
 
@@ -167,8 +167,14 @@ describe('ViewChrome 顶栏', () => {
         agent={undefined}
         showPanel
         skillCount={3}
-        mcpOnline={1}
-        mcpTotal={2}
+        mcps={[
+          { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
+          { name: 'failed', scope: 'user', transport: 'stdio', detail: 'failed', enabled: true }
+        ]}
+        mcpLive={[
+          { name: 'connected', status: 'connected' },
+          { name: 'failed', status: 'failed' }
+        ]}
         onView={() => {}}
         onSkills={() => {}}
         onMcp={() => {}}
@@ -179,9 +185,12 @@ describe('ViewChrome 顶栏', () => {
     expect(html).toContain('对话')
     expect(html).toContain('拓扑')
     expect(html).toContain('分段')
+    expect(html).toContain('aria-current="page"')
     expect(html).toContain('title="工作区文件"')
     expect(html).toContain('title="Skills"')
     expect(html).toContain('title="MCP"')
+    expect(html).toContain('aria-label="MCP · 1/2 已连接"')
+    expect(html).toContain('class="dot partial"')
     expect(html).toContain('1/2')
     expect(html).toContain('文件')
     expect(html).not.toContain('sample-workspace')
@@ -190,6 +199,36 @@ describe('ViewChrome 顶栏', () => {
     expect(html).not.toContain('&gt;all&lt;')
     expect(html).not.toContain('&gt;tool&lt;')
     expect(html).not.toContain('&gt;mcp&lt;')
+  })
+
+  it('MCP 状态排除 disabled，并把 runtime-only 连接计入真实分母', () => {
+    const renderMcp = (mcps: ComponentProps<typeof ViewChrome>['mcps'], mcpLive: ComponentProps<typeof ViewChrome>['mcpLive']) => renderToStaticMarkup(
+      <ViewChrome
+        cwd="/tmp/sample-workspace"
+        view="chat"
+        agent={undefined}
+        showPanel={false}
+        mcps={mcps}
+        mcpLive={mcpLive}
+        onView={() => {}}
+        onMcp={() => {}}
+        onTogglePanel={() => {}}
+      />
+    )
+
+    const disabledHtml = renderMcp([
+      { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
+      { name: 'disabled', scope: 'user', transport: 'stdio', detail: 'disabled', enabled: false }
+    ], [
+      { name: 'connected', status: 'connected' },
+      { name: 'disabled', status: 'disabled' }
+    ])
+    expect(disabledHtml).toContain('aria-label="MCP · 1/1 已连接"')
+    expect(disabledHtml).toContain('class="dot online"')
+
+    const runtimeOnlyHtml = renderMcp([], [{ name: 'runtime-only', status: 'connected' }])
+    expect(runtimeOnlyHtml).toContain('aria-label="MCP · 1/1 已连接"')
+    expect(runtimeOnlyHtml).toContain('class="dot online"')
   })
 })
 
@@ -399,9 +438,16 @@ describe('Sidebar 项目分组', () => {
         onNewChat={() => {}}
         onPick={() => {}}
         onDelete={() => {}}
+        onAnalytics={() => {}}
+        analyticsActive
+        onDiagnostics={() => {}}
       />
     )
 
+    expect(html).toContain('<nav class="sb-nav" aria-label="主要视图">')
+    expect(html).toContain('aria-current="page"')
+    expect(html).toContain('<button type="button" class="sb-proj-head')
+    expect(html).toContain('aria-expanded="true"')
     expect(html).toContain('data-project-path="/Users/example/IdeaProjects/sample-workspace"')
     expect(html).toContain('data-project-path="/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace"')
     expect(html).toContain('/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace')
@@ -422,6 +468,8 @@ describe('Sidebar 项目分组', () => {
           }
         ]}
         activeCwd="/Users/example/project"
+        activeSessionId="s1"
+        activeProviderId="claude"
         runningRunIds={new Set(['run-active'])}
         onNewChat={() => {}}
         onPick={() => {}}
@@ -429,7 +477,9 @@ describe('Sidebar 项目分组', () => {
       />
     )
 
-    expect(html).toContain('class="sb-sess running"')
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('class="sb-sess active running"')
+    expect(html).toContain('aria-current="true"')
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-label="正在运行"')
     expect(html.match(/class="sb-running"/g)).toHaveLength(1)
@@ -1775,7 +1825,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
   it('verdict 卡：聚合 token + 无报错无危险 → 判决"完成"（非假绿前提下的 ok 态）', () => {
     expect(html).toContain('3.0k tok') // 跨轮累计本会话 token（含 cache）
     expect(html).not.toContain('$0.1234')
-    expect(html).toContain('本会话 · 1 turns') // 会话标签（不造假 sess_id）
+    expect(html).toContain('本会话 · 1 轮') // 会话标签（不造假 sess_id）
     expect(html).toContain('judgement ok') // 无 error/danger → ok
     expect(html).toContain('完成')
     expect(html).toContain('verdict-foot') // cache·r/cache·w/api foot
@@ -1814,21 +1864,21 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       <OverviewPanel turns={[mergedTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(mergedHtml).toContain('本会话 · 1 turns')
+    expect(mergedHtml).toContain('本会话 · 1 轮')
     expect(mergedHtml).toContain('1 轮完成')
     expect(mergedHtml).toContain('1/1 轮已捕获')
     expect(mergedHtml).toContain('35 tok')
     expect(mergedHtml).not.toContain('47 tok')
   })
 
-  it('CONTEXT 段：最近一轮占用 ÷ 窗口（诚实单条，不伪造三色分段）', () => {
-    expect(html).toContain('CONTEXT')
+  it('上下文段：最近一轮占用 ÷ 窗口（诚实单条，不伪造三色分段）', () => {
+    expect(html).toContain('上下文')
     expect(html).toContain('claude-opus-4-8')
     expect(html).toContain('87.0k / 200.0k')
     expect(html).toContain('已占 44%')
   })
 
-  it('CONTEXT 缺少占用或窗口任一字段时保持未知，不拼出假比例', () => {
+  it('上下文缺少占用或窗口任一字段时保持未知，不拼出假比例', () => {
     const missingWindow: Turn = {
       runId: 'missing-window',
       userText: 'x',
@@ -2303,8 +2353,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(selectedHtml).not.toContain('input（工具入参）')
   })
 
-  it('SESSION 段展示当前会话 sessionId', () => {
-    expect(html).toContain('SESSION')
+  it('会话段展示当前会话 sessionId', () => {
+    expect(html).toContain('会话')
     expect(html).toContain('dea0c990-714d-4888-aed0-7a13952d84ad')
   })
 
@@ -2547,7 +2597,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
   })
 })
 
-describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / busy→LIVE / 不冒充"blocked"', () => {
+describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / busy→运行中 / 不冒充"blocked"', () => {
   const panel = (t: Turn, busy = false): string =>
     renderToStaticMarkup(
       <OverviewPanel turns={[t]} selected={null} onSelect={() => {}} usage={null} stats={null} busy={busy} />
@@ -2616,7 +2666,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).not.toContain('class="sdot ok" title="会话状态')
   })
 
-  it('busy → LIVE 脉冲 + 运行中（仅在真 busy 时）', () => {
+  it('busy → 静态运行中状态（仅在真 busy 时）', () => {
     const t: Turn = {
       runId: 'rn',
       userText: 'x',
@@ -2624,7 +2674,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
       items: [ev({ id: 'rn1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'r1' })]
     }
     const html = panel(t, true)
-    expect(html).toContain('LIVE')
+    expect(html).toContain('运行中')
     expect(html).toContain('运行中')
     expect(html).toContain('judgement warn')
   })
@@ -2871,8 +2921,8 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
   )
 
   it('渲染 hero + 系统判决 + 环境（真实 claude 路径/版本）', () => {
-    expect(html).toContain('Diagnostics')
-    expect(html).toContain('SYSTEM VERDICT')
+    expect(html).toContain('诊断')
+    expect(html).toContain('系统状态')
     expect(html).toContain('/usr/local/bin/claude')
     expect(html).toContain('2.1.170')
     expect(html).toContain('Qoder CLI')
@@ -3114,16 +3164,16 @@ describe('AnalyticsView 渲染：时间序列 + 四 Provider 覆盖', () => {
     expect(html).not.toContain('$12.47')
     expect(html).toContain('847')
     expect(html).toContain('3.42M') // tin+tout = 3.42M
-    expect(html).toContain('danger 触发')
+    expect(html).toContain('危险操作')
   })
 
-  it('Model donut + Project turns + Top Tools + MCP 用真实聚合', () => {
+  it('模型分布 + 项目轮次 + 常用工具 + MCP 用真实聚合', () => {
     expect(html).toContain('claude-sonnet-4-6')
     expect(html).toContain('scry')
-    expect(html).toContain('Project · turns')
+    expect(html).toContain('项目会话轮次')
     expect(html).toContain('300')
     expect(html).not.toContain('$5.42')
-    expect(html).toContain('Top Tools')
+    expect(html).toContain('常用工具')
     expect(html).toContain('mcp:obsidian')
   })
 

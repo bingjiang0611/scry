@@ -91,22 +91,22 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
   return (
     <main className="a-pane">
       <div className="a-hero">
-        <h2>Analytics · 跨会话分析</h2>
-        <div className="sub">本地 SQLite · 30/60/90 天有界聚合 · unknown 不按 0 计算</div>
+        <h2>跨会话分析</h2>
+        <div className="sub">本地 SQLite · 统计窗口 30 / 60 / 90 天 · 未知值不按 0 计</div>
       </div>
 
       {empty || !derived ? <div className="a-gap">还没有跨会话数据——完成几个 Provider 会话后再看这里。</div> : <>
         <div className="kpi-strip">
-          <div className="kpi"><div className="lbl">observed token</div><div className="val accent">{fmtTok(derived.tokens)}</div><div className="sub">Provider reported · 全时段已知值</div></div>
-          <div className="kpi"><div className="lbl">turns</div><div className="val">{stats.totals.turns}</div><div className="sub">30d {comparison?.current.turns ?? 0} · {fmtPct(comparison?.change.turnsPct ?? null)}</div></div>
-          <div className="kpi"><div className="lbl">30d token</div><div className="val">{fmtTok(comparison?.current.tokens ?? null)}</div><div className="sub"><span className="a-delta">{fmtPct(comparison?.change.tokensPct ?? null)}</span> · {comparison?.current.tokenKnownTurns ?? 0}/{comparison?.current.turns ?? 0} 完整</div></div>
-          <div className="kpi"><div className="lbl">tools</div><div className="val">{derived.toolCalls.toLocaleString()}</div><div className="sub">30d {comparison?.current.toolCalls ?? 0} · {fmtPct(comparison?.change.toolCallsPct ?? null)}</div></div>
-          <div className="kpi"><div className="lbl">danger 触发</div><div className="val bad">{derived.dangerN}</div><div className="sub">30d {comparison?.current.danger ?? 0} · {fmtPct(comparison?.change.dangerPct ?? null)}</div></div>
+          <div className="kpi"><div className="lbl">累计 Token</div><div className="val accent">{fmtTok(derived.tokens)}</div><div className="sub">Provider 上报 · 全时段已知值</div></div>
+          <div className="kpi"><div className="lbl">会话轮次</div><div className="val">{stats.totals.turns}</div><div className="sub">近 30 天 {comparison?.current.turns ?? 0} · {fmtPct(comparison?.change.turnsPct ?? null)}</div></div>
+          <div className="kpi"><div className="lbl">近 30 天 Token</div><div className="val">{fmtTok(comparison?.current.tokens ?? null)}</div><div className="sub"><span className="a-delta">{fmtPct(comparison?.change.tokensPct ?? null)}</span> · {comparison?.current.tokenKnownTurns ?? 0}/{comparison?.current.turns ?? 0} 完整</div></div>
+          <div className="kpi"><div className="lbl">工具调用</div><div className="val">{derived.toolCalls.toLocaleString()}</div><div className="sub">近 30 天 {comparison?.current.toolCalls ?? 0} · {fmtPct(comparison?.change.toolCallsPct ?? null)}</div></div>
+          <div className="kpi"><div className="lbl">危险操作</div><div className="val bad">{derived.dangerN}</div><div className="sub">近 30 天 {comparison?.current.danger ?? 0} · {fmtPct(comparison?.change.dangerPct ?? null)}</div></div>
         </div>
 
         <div className="a-wide-grid">
           <section className="d-card a-time-card">
-            <div className="h"><h3>Token · 最近 30 天</h3><span className="sub">input + output · Provider reported</span></div>
+            <div className="h"><h3>Token 趋势 · 近 30 天</h3><span className="sub">输入 + 输出 · Provider 上报</span></div>
             <div className="a-token-chart" aria-label="最近 30 天 Token 趋势">
               {tokenDaily.map((day, index) => {
                 const total = derived.dailyTotals[index]
@@ -121,7 +121,7 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
           </section>
 
           <section className="d-card a-time-card">
-            <div className="h"><h3>Danger · 最近 90 天</h3><span className="sub">Claude/Qoder classified · Codex/OpenCode unsupported</span></div>
+            <div className="h"><h3>危险操作 · 近 90 天</h3><span className="sub">Claude / Qoder 可分类 · Codex / OpenCode 未支持</span></div>
             <div className="a-heatmap" aria-label="最近 90 天危险操作热力图">
               {dangerDaily.map((day) => {
                 const total = day.danger + day.warn
@@ -135,7 +135,7 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
         <div className="a-grid">
           <div className="col">
             <section className="d-card">
-              <div className="h"><h3>Top Tools</h3><span className="sub">调用分布，不是 Token 份额</span></div>
+              <div className="h"><h3>常用工具</h3><span className="sub">调用分布，不代表 Token 份额</span></div>
               <div className="a-tool-head"><span>tool</span><span className="num">calls</span><span className="num">avg dur</span><span className="num">fail%</span><span>dist</span></div>
               {derived.tools.slice(0, 10).map((tool) => {
                 const isMcp = tool.tool.startsWith('mcp')
@@ -150,13 +150,13 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
             </section>
 
             {mcpLatency.length > 0 && <section className="d-card">
-              <div className="h"><h3>MCP · 最近 90 天延迟</h3><span className="sub">仅已完成调用 · nearest-rank</span></div>
+              <div className="h"><h3>MCP 延迟 · 近 90 天</h3><span className="sub">仅统计已完成调用 · nearest-rank</span></div>
               <div className="a-mcp-head"><span>server</span><span>calls</span><span>P50</span><span>P95</span><span>fail%</span></div>
               {mcpLatency.map((server) => <div className="a-mcp-row" key={server.server}><span className="nm">{server.server}</span><span>{server.calls}</span><span>{fmtMs(server.p50Ms)}</span><span>{fmtMs(server.p95Ms)}</span><span className={server.errors ? 'warn' : ''}>{server.calls ? ((server.errors / server.calls) * 100).toFixed(1) : '0.0'}%</span></div>)}
             </section>}
 
             <section className="d-card">
-              <div className="h"><h3>Cache Token · 最近 30 天</h3><span className="sub">按 Provider 语义计算</span></div>
+              <div className="h"><h3>缓存 Token · 近 30 天</h3><span className="sub">按 Provider 语义计算</span></div>
               {cacheReuse.map((row) => {
                 const formula = row.denominator === 'separate_input' ? 'read / (input + read + write)' : row.denominator === 'input_includes_cache' ? 'cached input / input' : '上游分母不可证明'
                 return <div className="a-cache-row" key={row.providerId}>
@@ -169,23 +169,23 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
 
           <div className="col">
             {derived.models.length > 0 && <section className="d-card">
-              <div className="h"><h3>Model · token 分布</h3><span className="sub">输入 + 输出</span></div>
-              <div className="a-donutwrap"><div className="a-donut" style={{ background: derived.conic }}><div className="center"><div className="t">{fmtTok(derived.tokens)}</div><div className="u">TOKENS</div></div></div><div className="a-legend">{derived.models.map((model) => <div className="item" key={model.model}><span className="sw" style={{ background: modelColor(model.model) }} />{model.model}<b>{fmtTok(model.tin == null && model.tout == null ? null : (model.tin ?? 0) + (model.tout ?? 0))}</b></div>)}</div></div>
+              <div className="h"><h3>模型 Token 分布</h3><span className="sub">输入 + 输出</span></div>
+              <div className="a-donutwrap"><div className="a-donut" style={{ background: derived.conic }}><div className="center"><div className="t">{fmtTok(derived.tokens)}</div><div className="u">Token</div></div></div><div className="a-legend">{derived.models.map((model) => <div className="item" key={model.model}><span className="sw" style={{ background: modelColor(model.model) }} />{model.model}<b>{fmtTok(model.tin == null && model.tout == null ? null : (model.tin ?? 0) + (model.tout ?? 0))}</b></div>)}</div></div>
             </section>}
 
             <section className="d-card">
-              <div className="h"><h3>Provider · 最近 30 天覆盖</h3><span className="sub">known / turns · 已映射 {providerCoverage.reduce((sum, row) => sum + row.turns, 0)}/{comparison?.current.turns ?? 0}</span></div>
+              <div className="h"><h3>Provider 覆盖 · 近 30 天</h3><span className="sub">已知值 / 轮次 · 已映射 {providerCoverage.reduce((sum, row) => sum + row.turns, 0)}/{comparison?.current.turns ?? 0}</span></div>
               <div className="a-coverage-head"><span>Provider</span><span>in</span><span>out</span><span>cache R</span><span>cache W</span><span>danger</span></div>
               {providerCoverage.map((row) => <div className="a-coverage-row" key={row.providerId}><b>{providerLabel[row.providerId]}</b><span>{row.inputKnownTurns}/{row.turns}</span><span>{row.outputKnownTurns}/{row.turns}</span><span>{row.cacheReadKnownTurns}/{row.turns}</span><span>{row.cacheWriteKnownTurns}/{row.turns}</span><em className={row.dangerCoverage}>{row.dangerCoverage}</em></div>)}
             </section>
 
             {derived.proj.length > 0 && <section className="d-card">
-              <div className="h"><h3>Project · turns</h3><span className="sub">工作目录聚合</span></div>
+              <div className="h"><h3>项目会话轮次</h3><span className="sub">按工作目录聚合</span></div>
               {derived.proj.map((project) => <div className="a-proj-row" key={project.cwd}><span className="nm">{project.name}</span><span className="num">{project.sessions ?? project.turns}</span><span className="num cost">{project.turns}</span><span className="bar"><i style={{ width: `${Math.round((project.turns / derived.maxCwdTurns) * 100)}%` }} /></span></div>)}
             </section>}
 
             {stats.dangerTrend.length > 0 && <section className="d-card">
-              <div className="h"><h3>Danger · 原因分布</h3><span className="sub">全时段 classified 事件</span></div>
+              <div className="h"><h3>危险原因分布</h3><span className="sub">全时段已分类事件</span></div>
               {stats.dangerTrend.slice(0, 8).map((item) => <div className="a-dbar" key={`${item.level}-${item.reason}`}><span className="nm" title={item.reason}>{item.reason}</span><span className="n">{item.n}</span><span className="bar"><i className={item.level === 'danger' ? 'danger' : 'warn'} style={{ width: `${Math.round((item.n / derived.dmax) * 100)}%` }} /></span></div>)}
             </section>}
           </div>

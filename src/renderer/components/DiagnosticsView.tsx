@@ -168,8 +168,8 @@ export function DiagnosticsView({
     <main className="d-pane">
       <div className="d-hero">
         <div>
-          <h2>Diagnostics</h2>
-          <div className="sub">Provider / MCP / SQLite / 安全审计 · 出问题先看这里</div>
+          <h2>诊断</h2>
+          <div className="sub">Agent、MCP、SQLite 与安全审计；运行异常先看这里</div>
         </div>
         <div className="right">
           <button className="btn" onClick={onReprobe}>
@@ -183,7 +183,7 @@ export function DiagnosticsView({
         <div className="d-verdict-wrap">
           <div className={`verdict-card full ${vstate}`}>
             <div className="verdict-left">
-              <div className="lbl">SYSTEM VERDICT</div>
+              <div className="lbl">系统状态</div>
               <div className={`judgement ${vstate}`}>
                 <span className={`sdot ${vstate}`} style={{ width: 10, height: 10 }} />
                 {judge}
@@ -196,7 +196,7 @@ export function DiagnosticsView({
               <div className={`verdict-pillar ${agents.length ? 'ok' : 'bad'}`}>
                 <div className="nm">
                   <span className="sdot" />
-                  agent cli
+                  Agent 环境
                 </div>
                 <div className="v">{agents.length ? `${agents.length} 个 Provider` : '未检测'}</div>
                 <div className="sub">{agents.map((agent) => agent.name).join(' · ') || '—'}</div>
@@ -204,7 +204,7 @@ export function DiagnosticsView({
               <div className={`verdict-pillar ${mcpNeedsProbe ? 'warn' : mcpTotal > 0 ? 'ok' : ''}`}>
                 <div className="nm">
                   <span className="sdot" />
-                  mcp · {mcpUp}/{mcpTotal} up
+                  MCP · {mcpUp}/{mcpTotal} 在线
                 </div>
                 <div className="v">{mcpVerdictValue}</div>
                 <div className="sub">{mcpVerdictSub}</div>
@@ -212,7 +212,7 @@ export function DiagnosticsView({
               <div className="verdict-pillar">
                 <div className="nm">
                   <span className="sdot" />
-                  ledger
+                  记录账本
                 </div>
                 <div className="v">{usage?.turns ?? stats?.totals.turns ?? 0} 轮</div>
                 <div className="sub">
@@ -252,11 +252,11 @@ export function DiagnosticsView({
               </div>
               <div className="d-stat-row">
                 <div className="d-stat">
-                  <div className="lbl">sessions</div>
+                  <div className="lbl">会话</div>
                   <div className="val">{sessionCount}</div>
                 </div>
                 <div className="d-stat">
-                  <div className="lbl">turns</div>
+                  <div className="lbl">轮次</div>
                   <div className="val">{usage?.turns ?? 0}</div>
                 </div>
                 <div className="d-stat">
@@ -271,7 +271,7 @@ export function DiagnosticsView({
                 </div>
               </div>
               <div className="d-row">
-                <span className="k">native abi</span>
+                <span className="k">Native ABI</span>
                 <span className="v warn">renderer 未暴露 native 健康；以 stats IPC 返回的聚合为准</span>
                 <span className="badge">
                   <span className="sdot warn" />
@@ -279,7 +279,7 @@ export function DiagnosticsView({
                 </span>
               </div>
               <div className="d-row">
-                <span className="k">db size / vacuum</span>
+                <span className="k">DB 文件 / Vacuum</span>
                 <span className="v path">renderer 不暴露文件元数据（诚实标注，不编）</span>
                 <span className="badge">
                   <span className="sdot off" />—
@@ -315,7 +315,7 @@ export function DiagnosticsView({
               </div>
               {trend.length > 0 && (
                 <div className="danger-tally">
-                  <span className="lbl">FREQUENT PATTERNS（跨会话）</span>
+                  <span className="lbl">常见模式（跨会话）</span>
                   <div className="row">
                     {trend.slice(0, 6).map((d) => (
                       <span className={`pat ${d.level === 'warn' ? 'w' : ''}`} key={`${d.level}-${d.reason}`}>

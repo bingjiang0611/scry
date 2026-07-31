@@ -694,7 +694,7 @@ export function OverviewPanel({
             <span>{ctx ? `${ctx.pct}%` : '—'}</span>
           </div>
           <div className="ctx-copy">
-            <div className="lbl">CONTEXT{ctx?.model ? ` · ${ctx.model}` : ''}</div>
+            <div className="lbl">上下文{ctx?.model ? ` · ${ctx.model}` : ''}</div>
             {ctx ? (
               <>
                 <div className="v">
@@ -718,11 +718,11 @@ export function OverviewPanel({
         <div className={`verdict-card ${vstate}`}>
           <div className="verdict-left">
             <div className="lbl">
-              本会话 · {turns.length} turns
+              本会话 · {turns.length} 轮
               {busy && (
                 <span className="live">
                   <span className="dot" />
-                  LIVE
+                  运行中
                 </span>
               )}
             </div>
@@ -813,7 +813,7 @@ export function OverviewPanel({
 
       {isOverviewTab && turns.length > 0 && (
         <div className="panel-section">
-          <h4>SESSION</h4>
+          <h4>会话</h4>
           <div className="filerow">
             <span className="fname">sessionId</span>
             <span className="dim session-id" title={sessionId ?? '尚未捕获 sessionId'}>
