@@ -56,6 +56,13 @@ export async function authoritativeRefreshAfterToggle<T>(
   return result.data === true ? refresh() : null
 }
 
+export function mergeMcpLiveSnapshot(
+  current: McpLiveStatus[],
+  runtime: McpLiveStatus[] | null | undefined
+): McpLiveStatus[] {
+  return runtime ?? current
+}
+
 export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId: string): boolean {
   return providerIdForAgentId(currentAgentId) !== providerIdForAgentId(nextAgentId)
 }
@@ -75,10 +82,12 @@ export function useIntegrations(cwd: string | null) {
   const [runControlsLoading, setRunControlsLoading] = useState(false)
   const [skills, setSkills] = useState<SkillMeta[]>([])
   const [skillCapability, setSkillCapability] = useState<CapabilityEnvelope<SkillMeta[]> | null>(null)
+  const [skillsRefreshing, setSkillsRefreshing] = useState(false)
   const [mcps, setMcps] = useState<McpMeta[]>([])
   const [mcpStatus, setMcpStatus] = useState<Record<string, McpStatus>>({})
   const [mcpLive, setMcpLive] = useState<McpLiveStatus[]>([])
   const [mcpCapability, setMcpCapability] = useState<CapabilityEnvelope<McpSnapshot> | null>(null)
+  const [mcpConfigRefreshing, setMcpConfigRefreshing] = useState(false)
   const [mcpRefreshing, setMcpRefreshing] = useState(false)
   const [usage, setUsage] = useState<{ cost: number | null; tin: number | null; tout: number | null; turns: number } | null>(null)
   const [stats, setStats] = useState<DbStats | null>(null)
@@ -92,6 +101,9 @@ export function useIntegrations(cwd: string | null) {
   const cwdRef = useRef(cwd)
   const gitDiffRequestSeq = useRef(0)
   const integrationRequestSeq = useRef(0)
+  const skillRefreshRequestSeq = useRef(0)
+  const mcpConfigRequestSeq = useRef(0)
+  const mcpConfigPromiseRef = useRef<Promise<McpLiveStatus[]> | null>(null)
   const runControlRequestSeq = useRef(0)
   const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>())
   const runControlCatalogByContext = useRef(
@@ -178,17 +190,25 @@ export function useIntegrations(cwd: string | null) {
 
   const refreshSkills = useCallback(async (): Promise<void> => {
     const context = providerContextRef.current
-    const result = await window.scry.listSkills(context)
-    if (contextKey(context) !== contextKey(providerContextRef.current)) return
-    setSkillCapability(result)
-    if (result.data) setSkills(result.data)
+    const seq = ++skillRefreshRequestSeq.current
+    setSkillsRefreshing(true)
+    try {
+      const result = await window.scry.listSkills(context)
+      if (seq !== skillRefreshRequestSeq.current || contextKey(context) !== contextKey(providerContextRef.current)) return
+      setSkillCapability(result)
+      if (result.data) setSkills(result.data)
+    } catch {
+      // 后台刷新失败时保留当前缓存；用户仍可再次点刷新。
+    } finally {
+      if (seq === skillRefreshRequestSeq.current) setSkillsRefreshing(false)
+    }
   }, [])
 
   const applyMcpSnapshot = useCallback((result: CapabilityEnvelope<McpSnapshot>): McpLiveStatus[] => {
     setMcpCapability(result)
     if (!result.data) return []
     setMcps(result.data.configured)
-    setMcpLive(result.data.runtime ?? [])
+    setMcpLive((current) => mergeMcpLiveSnapshot(current, result.data?.runtime))
     return result.data.runtime ?? []
   }, [])
 
@@ -198,7 +218,17 @@ export function useIntegrations(cwd: string | null) {
     return contextKey(context) === contextKey(providerContextRef.current) ? applyMcpSnapshot(result) : []
   }, [applyMcpSnapshot])
 
-  const refreshMcp = useCallback(async (): Promise<McpLiveStatus[]> => loadMcpLive(), [loadMcpLive])
+  const refreshMcp = useCallback((): Promise<McpLiveStatus[]> => {
+    if (mcpConfigPromiseRef.current) return mcpConfigPromiseRef.current
+    const seq = ++mcpConfigRequestSeq.current
+    setMcpConfigRefreshing(true)
+    const request = loadMcpLive()
+    mcpConfigPromiseRef.current = request
+    return request.finally(() => {
+      if (mcpConfigPromiseRef.current === request) mcpConfigPromiseRef.current = null
+      if (seq === mcpConfigRequestSeq.current) setMcpConfigRefreshing(false)
+    })
+  }, [loadMcpLive])
 
   const pullMcpLive = useCallback(async (): Promise<void> => {
     const context = providerContextRef.current
@@ -328,23 +358,39 @@ export function useIntegrations(cwd: string | null) {
     cwdRef.current = cwd
     providerContextRef.current = providerContext
     const seq = ++integrationRequestSeq.current
+    const skillSeq = ++skillRefreshRequestSeq.current
+    ++mcpConfigRequestSeq.current
+    mcpConfigPromiseRef.current = null
     setSkills([])
     setMcps([])
     setMcpLive([])
     setSkillCapability(null)
+    setSkillsRefreshing(Boolean(cwd))
     setMcpCapability(null)
+    setMcpConfigRefreshing(false)
     loadGitDiff(cwd)
     if (!cwd) return
-    Promise.all([window.scry.listSkills(providerContext), window.scry.mcpSnapshot(providerContext), window.scry.usageStats(providerContext)])
-      .then(([skillResult, mcpResult, nextUsage]) => {
+    void window.scry.listSkills(providerContext)
+      .then((skillResult) => {
         if (seq !== integrationRequestSeq.current || contextKey(providerContext) !== contextKey(providerContextRef.current)) return
         setSkillCapability(skillResult)
         if (skillResult.data) setSkills(skillResult.data)
-        applyMcpSnapshot(mcpResult)
-        setUsage(nextUsage)
       })
       .catch(() => {})
-  }, [applyMcpSnapshot, cwd, loadGitDiff, providerContext])
+      .finally(() => {
+        if (seq === integrationRequestSeq.current && skillSeq === skillRefreshRequestSeq.current) {
+          setSkillsRefreshing(false)
+        }
+      })
+    void refreshMcp().catch(() => {})
+    void window.scry.usageStats(providerContext)
+      .then((nextUsage) => {
+        if (seq === integrationRequestSeq.current && contextKey(providerContext) === contextKey(providerContextRef.current)) {
+          setUsage(nextUsage)
+        }
+      })
+      .catch(() => {})
+  }, [cwd, loadGitDiff, providerContext, refreshMcp])
 
   useEffect(() => {
     const seq = ++runControlRequestSeq.current
@@ -469,10 +515,12 @@ export function useIntegrations(cwd: string | null) {
     setPermissionMode,
     skills,
     skillCapability,
+    skillsRefreshing,
     mcps,
     mcpStatus,
     mcpLive,
     mcpCapability,
+    mcpConfigRefreshing,
     mcpRefreshing,
     usage,
     stats,

@@ -3056,6 +3056,40 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
 })
 
 describe('McpModal 渲染：pending 不伪装 connected', () => {
+  it('Skill 与 MCP 首次后台读取时立即展示诚实加载态', () => {
+    const skillHtml = renderToStaticMarkup(
+      <SkillsModal
+        skills={[]}
+        capability={null}
+        refreshing
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(skillHtml).toContain('读取中…')
+    expect(skillHtml).toContain('正在读取 Skill…')
+    expect(skillHtml).toContain('class="modal-refresh" disabled=""')
+
+    const mcpHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[]}
+        status={{}}
+        live={[]}
+        configRefreshing
+        refreshing={false}
+        capability={null}
+        onTest={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(mcpHtml).toContain('读取配置中…')
+    expect(mcpHtml).toContain('正在读取 MCP 配置…')
+    expect(mcpHtml).toContain('class="modal-refresh" disabled=""')
+  })
+
   it('live pending 直接显示 pending', () => {
     const html = renderToStaticMarkup(
       <McpModal

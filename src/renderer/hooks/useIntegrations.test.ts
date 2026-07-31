@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CapabilityEnvelope } from '@shared/provider'
-import { authoritativeRefreshAfterToggle } from './useIntegrations'
+import { authoritativeRefreshAfterToggle, mergeMcpLiveSnapshot } from './useIntegrations'
 
 const result = (data: boolean | null, state: CapabilityEnvelope<boolean>['state'] = 'ready'): CapabilityEnvelope<boolean> => ({
   providerId: 'claude',
@@ -22,5 +22,13 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
 
     await expect(authoritativeRefreshAfterToggle(result(null, 'unsupported'), refresh)).resolves.toBeNull()
     expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('MCP runtime 未知时保留已有 live 缓存，明确空数组时才清空', () => {
+    const cached = [{ name: 'github', status: 'connected' as const }]
+
+    expect(mergeMcpLiveSnapshot(cached, null)).toBe(cached)
+    expect(mergeMcpLiveSnapshot(cached, undefined)).toBe(cached)
+    expect(mergeMcpLiveSnapshot(cached, [])).toEqual([])
   })
 })

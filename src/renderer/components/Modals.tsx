@@ -9,12 +9,14 @@ import { Icon, type IconName } from './primitives/Icon'
 export function SkillsModal({
   skills,
   capability,
+  refreshing = false,
   onToggle,
   onRefresh,
   onClose
 }: {
   skills: SkillMeta[]
   capability?: CapabilityEnvelope<SkillMeta[]> | null
+  refreshing?: boolean
   onToggle: (name: string, enabled: boolean) => void
   onRefresh: () => void
   onClose: () => void
@@ -36,8 +38,9 @@ export function SkillsModal({
             {filtered.length}
             {ql ? `/${skills.length}` : ''}
           </span>
+          {refreshing && <span className="dim">读取中…</span>}
           {capability && capability.state !== 'ready' && <span className="dim">{capability.reason ?? capability.state}</span>}
-          <button className="modal-refresh" onClick={onRefresh} title="重新读取当前 Provider 的 Skill 状态">
+          <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 状态">
             <Icon name="refresh" />
           </button>
           <button className="modal-x" onClick={onClose}>
@@ -46,7 +49,9 @@ export function SkillsModal({
         </div>
         <input className="modal-search" placeholder="搜索 skill…" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="modal-body">
-          {filtered.length === 0 && <div className="dim pad">{skills.length === 0 ? '未发现 skill' : '无匹配'}</div>}
+          {filtered.length === 0 && (
+            <div className="dim pad">{refreshing && skills.length === 0 ? '正在读取 Skill…' : skills.length === 0 ? '未发现 skill' : '无匹配'}</div>
+          )}
           {Object.entries(groups).map(([scope, list]) => (
             <div key={scope}>
               <div className="mcp-scope">{scope === 'project' ? '项目 Skills' : '用户 Skills'}</div>
@@ -95,6 +100,7 @@ export function McpModal({
   mcps,
   status,
   live,
+  configRefreshing = false,
   refreshing,
   capability,
   onTest,
@@ -105,6 +111,7 @@ export function McpModal({
   mcps: McpMeta[]
   status: Record<string, McpStatus>
   live: McpLiveStatus[]
+  configRefreshing?: boolean
   refreshing: boolean
   capability?: CapabilityEnvelope<McpSnapshot> | null
   onTest: (name: string) => void
@@ -113,6 +120,8 @@ export function McpModal({
   onClose: () => void
 }) {
   const canManage = capability?.mode === 'manage'
+  const loadingConfig = configRefreshing && !capability
+  const loading = loadingConfig || refreshing
   const [expanded, setExpanded] = useState<string | null>(null)
   const liveByName = new Map(live.map((l) => [l.name, l]))
   const groups: Record<string, McpMeta[]> = {}
@@ -122,12 +131,12 @@ export function McpModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <b>MCP servers</b> <span className="dim">{mcps.length}</span>
-          {refreshing && <span className="dim">拉取真实状态中…</span>}
+          {loading && <span className="dim">{loadingConfig ? '读取配置中…' : '拉取真实状态中…'}</span>}
           {capability && capability.state !== 'ready' && <span className="dim">{capability.reason ?? capability.state}</span>}
           <button
             className="modal-refresh"
             onClick={onRefresh}
-            disabled={refreshing}
+            disabled={loading}
             title="重新读取当前 Provider 的原生 MCP 配置与运行状态"
           >
             <Icon name="refresh" />
@@ -137,7 +146,7 @@ export function McpModal({
           </button>
         </div>
         <div className="modal-body">
-          {mcps.length === 0 && <div className="dim pad">未发现 MCP 配置</div>}
+          {mcps.length === 0 && <div className="dim pad">{loadingConfig ? '正在读取 MCP 配置…' : '未发现 MCP 配置'}</div>}
           {Object.entries(groups).map(([scope, list]) => (
             <div key={scope}>
               <div className="mcp-scope">{MCP_SCOPE_LABEL[scope] ?? scope}</div>
