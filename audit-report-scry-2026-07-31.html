@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scry 全量审计报告</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #34c759; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #34c759, #30d158); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>Scry</h1>
+    <div class="sub">Full Audit · 2026-07-31</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 评分</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#architecture"><span class="icon">🏗</span> Architecture</a>
+    <a href="#security"><span class="icon">🔒</span> Security</a>
+    <a href="#stability"><span class="icon">⚡</span> Stability</a>
+    <a href="#performance"><span class="icon">🚀</span> Performance</a>
+    <a href="#testing"><span class="icon">🧪</span> Testing</a>
+    <a href="#maintainability"><span class="icon">📐</span> Maintainability</a>
+    <a href="#design"><span class="icon">📋</span> Design / Principles</a>
+    <a href="#release"><span class="icon">🚢</span> Release</a>
+    <a href="#documentation"><span class="icon">📚</span> Documentation</a>
+    <a href="#configuration"><span class="icon">⚙️</span> Configuration</a>
+    <a href="#observability"><span class="icon">🩺</span> Observability</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> Data Integrity</a>
+    <a href="#privacy"><span class="icon">🛡</span> Privacy</a>
+    <a href="#accessibility"><span class="icon">⌨️</span> Accessibility</a>
+    <a href="#supply-chain"><span class="icon">🔗</span> Supply Chain</a>
+    <a href="#cost"><span class="icon">💸</span> Cost</a>
+    <a href="#ai-safety"><span class="icon">🤖</span> AI / LLM Safety</a>
+    <a href="#fallback"><span class="icon">🧯</span> Fallback</a>
+    <a href="#testing-authenticity"><span class="icon">🎭</span> Testing Authenticity</a>
+    <a href="#type-safety"><span class="icon">🔤</span> Type Safety</a>
+    <a href="#frontend-state"><span class="icon">🧠</span> Frontend State</a>
+    <a href="#backend-api"><span class="icon">🔌</span> Backend API</a>
+    <a href="#dependency-weight"><span class="icon">📦</span> Dependency Weight</a>
+    <a href="#code-consistency"><span class="icon">🧩</span> Code Consistency</a>
+    <a href="#comment-coverage"><span class="icon">💬</span> Comment Coverage</a>
+    <a href="#principles"><span class="icon">📋</span> 原则合规</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0</div>
+</nav>
+
+<div class="main">
+
+  <div class="page-header" id="summary">
+    <h2>Scry 全量代码库审计报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-31</span>
+      <span>🔍 full · 25 dimensions</span>
+      <span>🛠 OpenAI Codex / GPT-5</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📊 评分面板</div>
+    <div class="card-body">
+      <div class="score-grid">
+
+        <div class="score-item">
+          <div class="label">Security</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill d" style="width:28%"></div></div>
+            <span class="value grade-d">2.8</span>
+            <span class="grade grade-d">D</span>
+          </div>
+          <div class="small">已确认 Critical 导航/IPC 边界突破及多条 High 安全链</div>
+        </div>
+        <div class="score-item">
+          <div class="label">Stability</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:42%"></div></div>
+            <span class="value grade-c">4.2</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">锁回收、迁移和 Provider 超时可破坏数据或留下失联任务</div>
+        </div>
+        <div class="score-item">
+          <div class="label">Performance</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:62%"></div></div>
+            <span class="value grade-b">6.2</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">归档 O(n²) 重写、附件复制和 423 MB 包体持续放大成本</div>
+        </div>
+        <div class="score-item">
+          <div class="label">Testing</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:46%"></div></div>
+            <span class="value grade-c">4.6</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">快速测试丰富，但交互、Electron、安全边界和 CI 基本缺席</div>
+        </div>
+        <div class="score-item">
+          <div class="label">Maintainability</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:54%"></div></div>
+            <span class="value grade-b">5.4</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">共享类型良好，多个 1000+ 行模块和 CSS 补丁栈拖累演进</div>
+        </div>
+        <div class="score-item">
+          <div class="label">Design</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:49%"></div></div>
+            <span class="value grade-c">4.9</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">最小权限、fail-fast、显式副作用和 SRP 在关键边界失守</div>
+        </div>
+        <div class="score-item">
+          <div class="label">Release</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:35%"></div></div>
+            <span class="value grade-c">3.5</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">无签名、公证、CI、回滚和安全迁移</div>
+        </div>
+        <div class="score-item overall-row">
+          <div class="label">Overall</div>
+          <div class="bar-row">
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:45%;background:linear-gradient(90deg,#ff3b30,#ff6b61)"></div></div>
+            <span class="value" style="color:#fff">4.5</span>
+            <span class="grade" style="color:#ff6b61">C</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="executive-summary">📝 总体评估</h3>
+  <div class="card">
+    <div class="card-header">📋 总体评估</div>
+    <div class="card-body">
+      <p><strong>项目概况：</strong>Scry 是 Electron + React + TypeScript 的本地 AI coding-agent 工作台，适配 Claude、Codex、Qoder、OpenCode，并把 trace、账单、会话和 canonical records 写入本地多套存储。Node 22 下 typecheck、全部启用测试、build、macOS dir pack 与 CLI dry-run 均通过。</p>
+      <p style="margin-top:12px"><strong>主要风险：</strong>普通 Markdown 外链可把特权窗口导航到不可信页面，而 preload 仍暴露全部 50 个 window.scry API；另有远端图片零点击外传、Provider 环境 secret 扩散、MCP 仓库命令执行和权限 fail-open。稳定性上存在锁 TOCTOU、不可重入 migration 与 Codex orphan turn。</p>
+      <p style="margin-top:12px"><strong>亮点：</strong>shared DTO、workspace 路径/修订防护、Git hook/filter 隔离、canonical record 原子正常路径、Provider registry 与大量真实文件系统测试都做得扎实。</p>
+      <p style="margin-top:12px"><strong>优先修复：</strong>先封导航/IPC/网络边界和 child env，再修 MCP trust、permission fallback、migration、锁与 Provider terminal lifecycle；之后补 Electron/交互/CI gate。</p>
+      <p style="margin-top:12px"><strong>总评：</strong>4.5/10（C）。基础工程能力不差，但当前安全、迁移、并发和发布闸门不足，不应作为稳定公开桌面应用分发。</p>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="coverage">🧭 覆盖矩阵</h3>
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>维度</th><th style="width:120px">覆盖</th><th>检查证据</th><th>限制</th></tr></thead>
+        <tbody>
+            <tr><td>Architecture</td><td><span class="badge badge-confirmed">High</span></td><td>main/preload/renderer/provider/recorder 边界、43 IPC、50 preload API、数据流与模块规模</td><td>未做 ownership 访谈或历史演化分析</td></tr>
+            <tr><td>Security</td><td><span class="badge badge-confirmed">High</span></td><td>BrowserWindow、preload、IPC、workspace、Markdown、MCP、child env、permissions 与 Electron data-origin 探针</td><td>未访问恶意公网域，未外传真实数据</td></tr>
+            <tr><td>Stability</td><td><span class="badge badge-confirmed">High</span></td><td>Provider lifecycle、locks、archive/catalog、DB migration、terminal outcome 与测试</td><td>未注入真实掉电、磁盘满、Provider 网络故障</td></tr>
+            <tr><td>Performance</td><td><span class="badge badge-suspected">Medium</span></td><td>build/pack 尺寸、同步 I/O、archive 复杂度、dependency/artifact 内容</td><td>无 profiler、RSS/event-loop 或长会话 benchmark</td></tr>
+            <tr><td>Testing</td><td><span class="badge badge-confirmed">High</span></td><td>Vitest config、63 个文件、renderer 231 项、recorder/provider 测试、完整 suite</td><td>3 个 real Provider/Admin integration 文件未启用，无 coverage report</td></tr>
+            <tr><td>Maintainability</td><td><span class="badge badge-confirmed">High</span></td><td>LOC/imports、职责、state owner、CSS 重复、错误路径与文档</td><td>未以 commit history 量化热点</td></tr>
+            <tr><td>Design / Principles</td><td><span class="badge badge-confirmed">High</span></td><td>principles rubric 对 Critical/High 与结构发现逐项映射</td><td>原则严重度含工程判断</td></tr>
+            <tr><td>Release</td><td><span class="badge badge-confirmed">High</span></td><td>package scripts、builder、installer、build/pack、CLI dry-run、README</td><td>未执行签名、公证、DMG、自动更新或 rollback</td></tr>
+            <tr><td>Documentation</td><td><span class="badge badge-suspected">Medium</span></td><td>README、CLAUDE.md、package metadata、billing/migration docs 抽样</td><td>未逐句校对全部 42 个 Markdown 文件</td></tr>
+            <tr><td>Configuration</td><td><span class="badge badge-confirmed">High</span></td><td>env、permission defaults、MCP/provider/recorder config、builder</td><td>未读取用户真实 secret 值</td></tr>
+            <tr><td>Observability</td><td><span class="badge badge-confirmed">High</span></td><td>trace、archive、span ledger、diagnostics、billing、terminal outcomes</td><td>未连接真实外部服务模拟事故</td></tr>
+            <tr><td>Data Integrity</td><td><span class="badge badge-confirmed">High</span></td><td>lock、record sequence/hash、migration、catalog、archive、workspace revision</td><td>未做真实掉电/文件系统故障注入</td></tr>
+            <tr><td>Privacy</td><td><span class="badge badge-confirmed">High</span></td><td>prompt/tool/image/path/usage/SQLite/archive/.scry 写入与 delete</td><td>不含 OS backup、Spotlight 或磁盘加密策略</td></tr>
+            <tr><td>Accessibility</td><td><span class="badge badge-suspected">Medium</span></td><td>组件语义、键盘/ARIA、Electron 初始页 AX tree</td><td>未跑 VoiceOver/axe，未遍历所有 modal/运行状态</td></tr>
+            <tr><td>Supply Chain</td><td><span class="badge badge-suspected">Medium</span></td><td>package-lock、离线 npm audit、install scripts、builder、artifact/CLI package</td><td>在线 advisory 未获外发元数据授权；无 provenance service</td></tr>
+            <tr><td>Cost</td><td><span class="badge badge-suspected">Medium</span></td><td>disk write amplification、attachment size、artifact size、timeout lifecycle</td><td>无真实模型账单、并发峰值或长期 retention 数据</td></tr>
+            <tr><td>AI / LLM Safety</td><td><span class="badge badge-confirmed">High</span></td><td>模型 Markdown、prompt/tool trust、permissions、MCP、Provider env/output validation</td><td>未对真实模型执行 adversarial suite</td></tr>
+            <tr><td>Fallback</td><td><span class="badge badge-confirmed">High</span></td><td>catches、default catalogs、DB/catalog init、terminal errors、compat branches</td><td>未做外部服务恢复时序实测</td></tr>
+            <tr><td>Testing Authenticity</td><td><span class="badge badge-confirmed">High</span></td><td>test runtime、environment、mock/SSR、real Git/socket/provider opt-in</td><td>真实 external Provider/Admin tests 未启用</td></tr>
+            <tr><td>Type Safety</td><td><span class="badge badge-confirmed">High</span></td><td>strict tsconfig、shared DTO、unknown IPC、本地重复类型</td><td>未生成全仓 any/unsafe-cast 形式化指标</td></tr>
+            <tr><td>Frontend State</td><td><span class="badge badge-confirmed">High</span></td><td>App、useIntegrations、useAgentSession、workspace sequence、modal/panel state</td><td>未自动化重放全部 race</td></tr>
+            <tr><td>Backend API</td><td><span class="badge badge-confirmed">High</span></td><td>50 preload 方法、43 IPC handlers、workspace operations、Provider contracts</td><td>无远程 HTTP backend，本节按 Electron local backend/IPC</td></tr>
+            <tr><td>Dependency Weight</td><td><span class="badge badge-suspected">Medium</span></td><td>direct dependency sizes、asar/unpacked、pack artifact、CLI tarball</td><td>未逐个 transitive package 做替代 benchmark</td></tr>
+            <tr><td>Code Consistency</td><td><span class="badge badge-confirmed">High</span></td><td>guard patterns、shared/duplicate DTO、selector 重复、错误/版本语义抽样</td><td>仓库无 ESLint/stylelint oracle</td></tr>
+            <tr><td>Comment Coverage</td><td><span class="badge badge-suspected">Medium</span></td><td>main、Provider、recorder、DB、workspace、renderer 关键注释/TODO</td><td>未按函数计数；关注 why/constraint 而非注释率</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">19</div><div class="desc">总发现</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-critical)">1</div><div class="desc">Critical</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">9</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">9</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--success)">19</div><div class="desc">Confirmed</div></div>
+  </div>
+
+  <h3 class="section-title" id="top-risks">⚠️ Top Risks</h3>
+  <div class="card">
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th style="width:60px">#</th><th>发现</th><th style="width:100px">严重程度</th><th style="width:120px">类别</th></tr></thead>
+      <tbody>
+            <tr><td>1</td><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td>Security</td></tr>
+            <tr><td>2</td><td>F-02 Markdown 远端图片构成零点击数据外传通道</td><td><span class="badge badge-high">High</span></td><td>Security</td></tr>
+            <tr><td>3</td><td>F-03 Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</td><td><span class="badge badge-high">High</span></td><td>Security</td></tr>
+            <tr><td>4</td><td>F-04 MCP 状态操作直接执行仓库控制的命令或任意 URL</td><td><span class="badge badge-high">High</span></td><td>Security</td></tr>
+            <tr><td>5</td><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td>Security</td></tr>
+            <tr><td>6</td><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td>Security</td></tr>
+            <tr><td>7</td><td>F-07 陈旧目录锁回收 TOCTOU 可让两个 recorder 同时提交</td><td><span class="badge badge-high">High</span></td><td>Stability</td></tr>
+            <tr><td>8</td><td>F-08 SQLite migration 非事务、非重入，中断可永久降级</td><td><span class="badge badge-high">High</span></td><td>Stability</td></tr>
+            <tr><td>9</td><td>F-09 Codex RPC 超时可能留下无人追踪的真实 turn</td><td><span class="badge badge-high">High</span></td><td>Stability</td></tr>
+            <tr><td>10</td><td>F-10 测试全绿仍缺真实交互、Electron 安全边界与 CI</td><td><span class="badge badge-high">High</span></td><td>Testing</td></tr>
+            <tr><td>11</td><td>F-11 app-sessions.json 非原子写入，损坏后静默清空</td><td><span class="badge badge-medium">Medium</span></td><td>Stability</td></tr>
+            <tr><td>12</td><td>F-12 附件无大小上限、重复持久化并在删除后残留</td><td><span class="badge badge-medium">Medium</span></td><td>Performance</td></tr>
+            <tr><td>13</td><td>F-13 普通 Provider 异常不产生 terminal result span</td><td><span class="badge badge-medium">Medium</span></td><td>Stability</td></tr>
+            <tr><td>14</td><td>F-14 provider/cwd/session 迟到响应覆盖最后一次选择</td><td><span class="badge badge-medium">Medium</span></td><td>Frontend-State</td></tr>
+            <tr><td>15</td><td>F-15 未实现 BYOK 可选，失败前已清空草稿和附件</td><td><span class="badge badge-medium">Medium</span></td><td>Frontend-State</td></tr></tbody>
+    </table></div></div>
+  </div>
+
+  <h3 class="section-title" id="findings">🔍 Detailed Findings</h3>
+
+  <div class="finding severity-critical">
+    <div class="finding-header">
+      <span class="badge badge-critical">Critical</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-01 · 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Security</span><span>范围：BrowserWindow、Markdown、preload、IPC、workspace API</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/main/index.ts:393-425,489-520；src/preload/index.ts:56-145；src/renderer/components/MarkdownImpl.tsx:1-5。Electron/CDP 将窗口导航到无网络 data 页面后，页面仍获得全部 50 个 window.scry API。</div>
+    <div class="problem"><strong>问题：</strong> 窗口允许不可信导航，preload 对每次导航继续暴露高权限桥；workspace 只比较不随导航变化的 webContents.id，且 cwd 由调用方提供。违反 4.6 Principle of Least Privilege。</div>
+    <div class="problem"><strong>为什么重要：</strong> 一次普通链接点击可变成本地文件读写、移入废纸篓与 full_access Agent 控制。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 恶意 README 或模型回复给出外链；用户点击；远端脚本读取配置、修改 shell 文件或启动 Agent。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>默认阻止非可信导航与 window.open；HTTP(S) 只交给 shell.openExternal；所有 privileged IPC 验证主 frame、精确 origin 和 main 签发 workspace token。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>恢复 sandbox:true，按最小能力拆 preload，建立统一 IPC authorization middleware。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>Electron 点击恶意外链后主窗口 URL 不变；非可信 URL 调全部 privileged IPC 均拒绝；错误 workspace token 拒绝；预计 1–2 days</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-02 · Markdown 远端图片构成零点击数据外传通道</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Security</span><span>范围：模型、工作区与问答 Markdown</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/renderer/components/MarkdownImpl.tsx:1-5；src/renderer/index.html:1-23；ChatTurn.tsx:819,843。SSR 动态验证把远端 Markdown 图片直接渲染为 https img。</div>
+    <div class="problem"><strong>问题：</strong> ReactMarkdown 默认图片和缺失 CSP 使 Chromium 在渲染时自动请求任意域，不需点击或工具审批。</div>
+    <div class="problem"><strong>为什么重要：</strong> prompt injection 可把模型已知的代码、路径、提示词编码进 URL，也会泄露 IP/时间/跟踪标识。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 恶意仓库指示模型返回攻击者图片 URL；聊天一显示就发 GET。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>只允许受控 data/blob/local 图片；远端图片默认占位并需显式加载；补严格 CSP。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>统一安全 Markdown 组件和 renderer 网络 allowlist/webRequest 拦截。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>三类预览注入远端图片时网络请求为零，本地附件仍显示；预计 0.5–1 day</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-03 · Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Security</span><span>范围：login-shell、billing connector、Provider spawn、MCP probe</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/main/index.ts:95；claude-locate.ts:41-95,458-495；providers/claude.ts:142-154；providers/codex.ts:493-511；providers/qoder.ts:50-80；providers/opencode-server.ts:120-126；mcp-config.ts:132-135。</div>
+    <div class="problem"><strong>问题：</strong> billing 与 Agent 共用完整登录 shell 环境，sanitize 不删除 Admin 变量；终端启动时 process.env 路径也让 MCP probe 继承这些变量。</div>
+    <div class="problem"><strong>为什么重要：</strong> 组织级账单凭据被扩大到项目可影响的 Provider 子进程和部分 MCP 执行面。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 用户启用 Admin billing；恶意仓库诱导 Provider 命令或 MCP 读取 env 并外传。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>billing secret source 与 runtime env 分离；Provider 剥离 Admin/organization/member 变量；MCP 固定 allowlist env。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>secret 放入 Keychain/main-only service，只在固定官方 HTTPS 请求构造时注入。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>sentinel 只对 billing fetch 可见，对 Claude/Codex/Qoder/OpenCode/legacy/MCP spawn 均不可见；预计 1 day；Keychain 3–5 days</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-04 · MCP 状态操作直接执行仓库控制的命令或任意 URL</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Security</span><span>范围：.mcp.json、MCP modal/trust panel、main MCP probe</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/main/mcp-config.ts:48-90,117-231；providers/claude.ts:174-208；useIntegrations.ts:233-277；App.tsx:832-848。</div>
+    <div class="problem"><strong>问题：</strong> 打开/刷新/测试/启用 MCP 可直接 spawn enabled command 或 POST 任意 URL；Guard 是并列按钮而不是前置 gate。违反 5.3 No Hidden Side Effects。</div>
+    <div class="problem"><strong>为什么重要：</strong> 用户只想看状态也可能执行仓库代码、泄露环境或访问内网。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 用户打开陌生仓库并点 MCP；恶意 command 立即执行。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>以 canonical cwd + config fingerprint 建立授权，显示 command/args/env key/source；变更即撤销；Guard 前置。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>probe 使用最小环境、资源沙箱和网络策略，静态配置/扫描/执行分离。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>未授权 sentinel 脚本在打开/刷新/测试/启用时均不执行；精确授权后才运行，修改字段后失效；预计 2–4 days</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-05 · 运行控制不可用时 fail-open 到 full_access</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Security</span><span>范围：renderer run controls、shared normalization、Provider adapters</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/renderer/hooks/useIntegrations.ts:416-451；src/shared/runtime.ts:216-246；providers/registry.ts:51-59；agent-runner.ts:90-105；providers/qoder.ts:50-68。</div>
+    <div class="problem"><strong>问题：</strong> 旧 preload、IPC reject、no-data 或缺 permissionMode 都可能落到 full_access，并映射为 bypassPermissions/dangerously-skip-permissions。</div>
+    <div class="problem"><strong>为什么重要：</strong> 控制面故障反而扩大执行权限，违反 4.4 Fail-Fast 与 4.6 Least Privilege。</div>
+    <div class="problem"><strong>现实失败场景：</strong> Provider 升级造成 capability 漂移；下一轮自动绕过审批。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>全部缺省改为 default；无法确认权限时禁用发送；legacy bypass 需显式确认。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>版本化权限状态机，权限只可经用户动作单调升级。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>reject/no-data/旧 preload/缺字段均不得产生 full_access，只有用户主动选择才出现 bypass 参数；预计 0.5–1.5 days</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-06 · Renderer 把缺失证据渲染成绿色安全或真实零</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Security</span><span>范围：MCP Trust 与 Diagnostics</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> McpTrustPanel.tsx:43-63,100-122,183-198,479-505；preload/index.ts:81；DiagnosticsView.tsx:217,258-270。</div>
+    <div class="problem"><strong>问题：</strong> partial unknown 报告缺 status/severity/offline 时显示 policy-pass/online/0；stats 缺失显示 0 轮/0 token。</div>
+    <div class="problem"><strong>为什么重要：</strong> 安全 UI 假阳性可诱导用户运行不可信 MCP，诊断零值会掩盖加载/存储故障。</div>
+    <div class="problem"><strong>现实失败场景：</strong> CLI/renderer 版本漂移返回 partial payload，面板却显示未发现阻断项。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>共享严格 schema；缺必填字段显示 unknown/error；Diagnostics 区分 loading/absent/error/true-zero。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>所有观测 DTO 带 freshness/completeness，renderer 不猜事实。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>partial MCP payload 不能绿色，null stats 不能显示 0，明确 true-zero 才显示零；预计 0.5–1 day</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-07 · 陈旧目录锁回收 TOCTOU 可让两个 recorder 同时提交</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Stability</span><span>范围：canonical recorder lock 与 sequence</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/core/turn-recorder/io.ts:60-113；store.ts:68-126；recorder.test.ts:1254-1286。</div>
+    <div class="problem"><strong>问题：</strong> 恢复者先判断 stale 再无条件删除目录；A 取得新锁后，B 可依据旧判断删掉 A 的锁，双方进入临界区。</div>
+    <div class="problem"><strong>为什么重要：</strong> canonical sequence 可冲突、记录覆盖或永久丢轮。违反 5.4 Shared Mutable State Synchronization。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 崩溃留锁后两个并行 agent 同时完成 turn 并回收。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>采用可靠跨进程锁；或 recovery mutex + 不可变 owner token CAS。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>sequence/recordId 再受数据库 unique constraint 或原子索引约束。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>双进程 barrier 强制同时判 stale，断言 maxActive=1、sequence 唯一且 verifyStore 通过；预计 1–2 days</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-08 · SQLite migration 非事务、非重入，中断可永久降级</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Stability</span><span>范围：scry.db schema migration</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/main/db.ts:86-134；span-ledger.ts:16-65；docs/product/billing-guardian-issues.md:141。</div>
+    <div class="problem"><strong>问题：</strong> DDL 逐条执行后才更新 user_version；未 guard 的 ALTER 重跑会 duplicate-column，initDb 捕获后 db=null。</div>
+    <div class="problem"><strong>为什么重要：</strong> 一次崩溃/掉电可让分析、账单和 span 数据库每次启动都失败。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 列已添加但 version 未更新，重启重复 ALTER 并永久降级。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>每版本在 transaction 内执行 DDL+version；ADD COLUMN 前检查 table_info。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>migration journal、升级前备份、integrity check 和自动恢复演练。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>每条 DDL 后注入中断，反复重开最终都收敛 v7；列已存在+旧 version 可重入；预计 0.5–1 day</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-09 · Codex RPC 超时可能留下无人追踪的真实 turn</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Stability</span><span>范围：Codex app-server lifecycle</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/main/providers/codex-app-server.ts:53-124；providers/codex.ts:1083-1160。</div>
+    <div class="problem"><strong>问题：</strong> initialize 前设置 process；30 秒 timeout 只 reject，不 cancel/close/quarantine；turnId 只在成功响应后取得。</div>
+    <div class="problem"><strong>为什么重要：</strong> 本地报失败后 Provider 仍可继续改文件、调用工具和消耗 token，审计链断裂。</div>
+    <div class="problem"><strong>现实失败场景：</strong> turn/start 响应迟到，Scry 移除 listener，真实 turn 继续且无法 Stop。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>initialize 失败 close/reset；非幂等 timeout 关闭/隔离并标 termination_unconfirmed，重连后查询/中断。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>client request id、恢复查询、显式 cancel 和多阶段 health。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>fake server 延迟 initialize/turn/start，断言 child 清理、重初始化且无 orphan turn；预计 1–2 days</code></div>
+  </div>
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-10 · 测试全绿仍缺真实交互、Electron 安全边界与 CI</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Testing</span><span>范围：renderer tests、Electron integration、release gates</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> vitest.config.ts:5-12；package.json:18-34；render.test.tsx:1-4；useAgentSession.test.ts:1-217。renderer 约 231 项主要为 SSR/纯函数；无 browser/Electron E2E 和 CI，3 个 real integration 文件默认 skip。</div>
+    <div class="problem"><strong>问题：</strong> effects、事件订阅、IPC origin、导航、焦点、键盘和异步 race 基本不执行。</div>
+    <div class="problem"><strong>为什么重要：</strong> F-01/F-06/F-14/F-15/F-16 可在完整启用测试全绿时逃逸。</div>
+    <div class="problem"><strong>现实失败场景：</strong> preload/Markdown 改动通过全部 Node 测试，打包应用仍可被外链接管。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>保留快速测试，增加 Testing Library 与 Electron/CDP security smoke，Node 22 CI 跑 typecheck/test/build。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>风险分层 release gate，覆盖 Provider contract、恶意 Markdown、迁移 crash、键盘与 installer rollback。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>把本报告 Critical/High 复现全部变成 CI 阻断测试；预计 3–5 days initial</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-11 · app-sessions.json 非原子写入，损坏后静默清空</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Stability</span><span>范围：项目/会话侧栏索引</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/main/app-store.ts:59-76；src/main/index.ts:390,564-570。</div>
+    <div class="problem"><strong>问题：</strong> 直接写原文件；读写错误被吞并返回 []；不再扫描 Provider transcript，且无 archive rebuild。</div>
+    <div class="problem"><strong>为什么重要：</strong> 底层历史仍在但全部项目/会话入口一次消失，表现与数据丢失相同。</div>
+    <div class="problem"><strong>现实失败场景：</strong> turn 完成更新 catalog 时进程退出，重启侧栏全空。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>temp + fsync + atomic rename、last-known-good backup、解析失败显示 degraded。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>catalog 可从 archive 对账重建，或迁移 SQLite transaction。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>注入半写时旧目录仍可读；损坏 index + 完整 archive 能恢复并记录事件；预计 1 day</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-12 · 附件无大小上限、重复持久化并在删除后残留</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Performance</span><span>范围：attachment、trace archive、privacy deletion</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/shared/runtime.ts:295-319；src/main/index.ts:116-126,293-315,618-634；transcript-archive.ts:73-164,213-235。</div>
+    <div class="problem"><strong>问题：</strong> 只限 8 张、不限字节；原始 blob 与 base64 双存；每轮全量读写 session JSON，累计 O(n²)；delete 不清所有 store。</div>
+    <div class="problem"><strong>为什么重要：</strong> 大图/长会话阻塞 main、放大 RSS/磁盘；敏感数据在用户以为删除后仍可恢复。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 多个 10 MB 图片持续几十轮，每轮重写全部历史，删除后附件仍在。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>单图/总请求字节上限；archive 只存 metadata+blob ref；删除清所有 Scry-owned store并明确 .scry 保留。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>append-only/SQLite turn store + content-addressed blob/refcount/retention/GC，重 I/O 移出 main。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>压力测 event-loop/RSS/写入字节；删除唯一 marker/图片后全 store 无残留；预计 2–6 days</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-13 · 普通 Provider 异常不产生 terminal result span</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Stability</span><span>范围：Provider failure recording 与 analytics</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/main/index.ts:1065-1145；span-ledger.ts:173-205,457-500；providers/opencode.ts:110-140。</div>
+    <div class="problem"><strong>问题：</strong> 仅 AgentRuntimeError 补 harness/result；普通 Error 只写 runState.error，SQLite totals/failure 以 result span 为母集。</div>
+    <div class="problem"><strong>为什么重要：</strong> 失败率和总 turn 系统性漏掉网络/SDK/初始化故障。</div>
+    <div class="problem"><strong>现实失败场景：</strong> OpenCode session.create 抛普通 Error，UI 报错但 SQLite 不增加总数或失败数。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>所有非主动停止异常保证恰好一个失败 harness/result。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>Provider adapter 返回 discriminated outcome，禁止裸 reject 无 terminal event。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>零事件/工具后 reject 均产生一个失败 result，已有 result 不重复；预计 0.5–1 day</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-14 · provider/cwd/session 迟到响应覆盖最后一次选择</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Frontend-State</span><span>范围：frontend context switching</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> src/renderer/App.tsx:655-677,767-813；hooks/useIntegrations.ts:270-277,357-393。</div>
+    <div class="problem"><strong>问题：</strong> 同类 context-scoped 请求部分有 sequence guard、部分没有；旧结果可在新上下文清空后写回。</div>
+    <div class="problem"><strong>为什么重要：</strong> UI 可显示错误 transcript、命令、MCP 或 usage，后续输入可能发往错误上下文。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 先选 A 再 B，较慢 A 最终覆盖 B。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>统一 contextKey + monotonic token，每次 await 后核对并清旧状态。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>显式 workspace/session state machine 或 keyed query cache。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>deferred A 在 B 后返回，最终 UI 和发送目标仍为 B；预计 1–2 days</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-15 · 未实现 BYOK 可选，失败前已清空草稿和附件</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Frontend-State</span><span>范围：composer backend picker 与 agent:start</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> Pickers.tsx:106-110；App.tsx:601-619,704-719；main/index.ts:692-705；CLAUDE.md:122。</div>
+    <div class="problem"><strong>问题：</strong> UI 正常提供 API/BYOK，main 必然拒绝非 local；renderer 在 start 成功前清空 prompt/attachments。</div>
+    <div class="problem"><strong>为什么重要：</strong> 用户丢长 prompt 和图片，也无法区分未实现能力与偶发故障。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 选 BYOK、输入并附图、发送；main 拒绝而 composer 已空。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>禁用并标未实现；只有获得 runId 后清空，reject 保留草稿。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>main descriptor 驱动 capability，composer 使用 pending/commit/rollback。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>start reject 时 prompt/attachment 保留且错误可见；unsupported backend 不可选；预计 0.5–1 day</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-16 · 核心交互与模态框缺完整键盘/焦点语义</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Accessibility</span><span>范围：ChatTurn、ExecutionGraph、Pickers、OverviewPanel、Sidebar、Modals</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> ChatTurn.tsx:54-65,106-114,195-228；ExecutionGraph.tsx:50-93；Pickers.tsx:29-37,106-134；OverviewPanel.tsx:1092-1143,1368-1510；Modals.tsx:33-77,130-242。</div>
+    <div class="problem"><strong>问题：</strong> 大量 div onClick 无键盘/ARIA；modal 无 dialog/aria-modal/focus trap/restore/Escape，关闭与开关缺关联名称。</div>
+    <div class="problem"><strong>为什么重要：</strong> 键盘/读屏用户无法完成核心路径，背景焦点还增加误操作。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 打开 MCP 后焦点仍在底层，Tab 穿透且 Escape 无法退出。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>原生 button/details/dialog/label；补 expanded/controls、focus trap/restore/Escape。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>统一 accessibility primitives + interaction/AX tests。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>Tab、Enter/Space、focus trap/restore、Escape、读屏名称；初始 AX 保持无 unnamed controls；预计 2–4 days</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-17 · 当前分发与安装链不可验证且不可回滚</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Release</span><span>范围：electron-builder、install:mac、release flow</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> electron-builder.yml:24-30；scripts/install-macos.mjs:9-29；package.json:18-34。</div>
+    <div class="problem"><strong>问题：</strong> 仅 dir target、identity:null、无 notarization/checksum/SBOM/provenance；installer 先删旧 App 再复制，无 staging/backup/rollback；无 CI。</div>
+    <div class="problem"><strong>为什么重要：</strong> 公开分发不可验证，复制/注册失败会先失去可用版本，migration 也无回滚。</div>
+    <div class="problem"><strong>现实失败场景：</strong> ditto 因磁盘满失败，旧 App 已删，新版本不完整。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>staging copy→verify→atomic swap+backup；Node22 CI；公开包签名/公证/checksum。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>可复现 pipeline、SBOM/provenance、DB backup、自动 rollback/smoke。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>注入 copy/register 失败旧 App 仍可启动；CI gate 签名、公证、checksum、升级/降级；预计 3–7 days</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-18 · Qoder SDK 让 macOS 包多带约 95 MB 未使用 CLI</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Performance</span><span>范围：production dependency 与 Electron artifact</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> package.json:36-43；electron-builder.yml:7-22；providers/qoder.ts:50-69。423 MB App 的 app.asar.unpacked 含约 95 MB qodercli，adapter 实际解析本机 executable。</div>
+    <div class="problem"><strong>问题：</strong> builder 未排除 Qoder postinstall 二级下载物，lock integrity 也不覆盖该下载物。</div>
+    <div class="problem"><strong>为什么重要：</strong> 增加安装/更新成本和供应链/签名面，却不被运行时使用。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 每次分发携带多余 CLI，二级下载源异常时 artifact 被污染。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>QODER_SKIP_DOWNLOAD=1 或 builder 排除 bundled qodercli，并跑四 Provider smoke。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>可选 Provider 按需模块化，记录 artifact component 来源/hash。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>artifact budget 断言 bundled qodercli 不存在，本机 qoder smoke 仍成功；预计 0.5–1 day</code></div>
+  </div>
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <h4>F-19 · 核心编排模块与全局 CSS 超出安全演进边界</h4>
+    </div>
+    <div class="finding-meta">
+      <span>置信度：High</span><span>类别：Maintainability</span><span>范围：main orchestration、renderer state/format、MCP guard、recorder、styles</span>
+    </div>
+    <div class="evidence"><strong>证据：</strong> main/index.ts 1265 行；App.tsx 1294；format.ts 1619；OverviewPanel.tsx 1566；mcpguard-core.ts 1852；recorder.ts 1754；styles.css 8617；agent:start 约 460 行。</div>
+    <div class="problem"><strong>问题：</strong> 关键文件有多种变更原因，CSS 多次定义同 selector 并依赖源码顺序。违反 1.1/1.2/1.3/1.6 与 2.2。</div>
+    <div class="problem"><strong>为什么重要：</strong> 安全/时序修复需触碰巨大面，回归难定位，样式改动易被后置 override 覆盖。</div>
+    <div class="problem"><strong>现实失败场景：</strong> 加 Provider 终止语义误改公共 archive；修 composer 样式被末尾规则覆盖。</div>
+    <div class="fix-box"><span class="fix-label">Minimal fix</span><code>提取 run coordinator 的验证/生命周期/持久化；format 分域；合并重复 selector/CSS layer。</code></div>
+    <div class="fix-box"><span class="fix-label">Better long-term fix</span><code>application service + ports，renderer 按 feature/state owner 分包，主要视口视觉回归。</code></div>
+    <div class="fix-box"><span class="fix-label">Regression test · Effort</span><code>coordinator outcome contract、Provider terminal matrix、1024/1180/1420 computed-style snapshot；预计 5–10 days staged</code></div>
+  </div>
+
+
+  <h3 class="section-title" id="architecture">🏗 Architecture</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>main/preload/renderer/provider/recorder 边界、43 IPC、50 preload API、数据流与模块规模</p>
+      <p><strong>Exclusions / limits：</strong>未做 ownership 访谈或历史演化分析</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-03 Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-19 核心编排模块与全局 CSS 超出安全演进边界</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>shared provider/runtime/trace DTO 形成清晰核心语言；Provider registry 已建立适配边界。</div></div></div>
+  </div>
+  <h3 class="section-title" id="security">🔒 Security</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>BrowserWindow、preload、IPC、workspace、Markdown、MCP、child env、permissions 与 Electron data-origin 探针</p>
+      <p><strong>Exclusions / limits：</strong>未访问恶意公网域，未外传真实数据</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 6 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-02 Markdown 远端图片构成零点击数据外传通道</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-03 Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-04 MCP 状态操作直接执行仓库控制的命令或任意 URL</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>workspace 路径/symlink/revision 防护完整；Codex Hook trust 默认 fail-closed；未发现 shell:true/eval/new Function。</div></div></div>
+  </div>
+  <h3 class="section-title" id="stability">⚡ Stability</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>Provider lifecycle、locks、archive/catalog、DB migration、terminal outcome 与测试</p>
+      <p><strong>Exclusions / limits：</strong>未注入真实掉电、磁盘满、Provider 网络故障</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 6 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-07 陈旧目录锁回收 TOCTOU 可让两个 recorder 同时提交</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-08 SQLite migration 非事务、非重入，中断可永久降级</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-09 Codex RPC 超时可能留下无人追踪的真实 turn</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-11 app-sessions.json 非原子写入，损坏后静默清空</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-12 附件无大小上限、重复持久化并在删除后残留</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-13 普通 Provider 异常不产生 terminal result span</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Git diff 有 timeout/SIGKILL/buffer/patch 上限；Qoder 控制会话有 refcount 和 idle cleanup。</div></div></div>
+  </div>
+  <h3 class="section-title" id="performance">🚀 Performance</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>Medium</p>
+      <p><strong>Inspected evidence：</strong>build/pack 尺寸、同步 I/O、archive 复杂度、dependency/artifact 内容</p>
+      <p><strong>Exclusions / limits：</strong>无 profiler、RSS/event-loop 或长会话 benchmark</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-12 附件无大小上限、重复持久化并在删除后残留</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-18 Qoder SDK 让 macOS 包多带约 95 MB 未使用 CLI</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-19 核心编排模块与全局 CSS 超出安全演进边界</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Git 采样和 recorder 请求存在资源上限，build 分离 main/preload/renderer。</div></div></div>
+  </div>
+  <h3 class="section-title" id="testing">🧪 Testing</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>Vitest config、63 个文件、renderer 231 项、recorder/provider 测试、完整 suite</p>
+      <p><strong>Exclusions / limits：</strong>3 个 real Provider/Admin integration 文件未启用，无 coverage report</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 6 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-10 测试全绿仍缺真实交互、Electron 安全边界与 CI</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-07 陈旧目录锁回收 TOCTOU 可让两个 recorder 同时提交</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-08 SQLite migration 非事务、非重入，中断可永久降级</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-09 Codex RPC 超时可能留下无人追踪的真实 turn</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-14 provider/cwd/session 迟到响应覆盖最后一次选择</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-16 核心交互与模态框缺完整键盘/焦点语义</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Node 22 typecheck 与全部启用测试通过；真实 Git、文件系统与进程测试有较高价值。</div></div></div>
+  </div>
+  <h3 class="section-title" id="maintainability">📐 Maintainability</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>LOC/imports、职责、state owner、CSS 重复、错误路径与文档</p>
+      <p><strong>Exclusions / limits：</strong>未以 commit history 量化热点</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-14 provider/cwd/session 迟到响应覆盖最后一次选择</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-15 未实现 BYOK 可选，失败前已清空草稿和附件</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-16 核心交互与模态框缺完整键盘/焦点语义</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-19 核心编排模块与全局 CSS 超出安全演进边界</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>共享 DTO、workspace sequence guard、session hydration replay 和 PaneSplitter 可复用。</div></div></div>
+  </div>
+  <h3 class="section-title" id="design">📋 Design / Principles</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>principles rubric 对 Critical/High 与结构发现逐项映射</p>
+      <p><strong>Exclusions / limits：</strong>原则严重度含工程判断</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 6 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-03 Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-04 MCP 状态操作直接执行仓库控制的命令或任意 URL</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-07 陈旧目录锁回收 TOCTOU 可让两个 recorder 同时提交</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-19 核心编排模块与全局 CSS 超出安全演进边界</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>record 正常提交使用 temp/fsync/rename/hash，workspace API 有明确 invariant。</div></div></div>
+  </div>
+  <h3 class="section-title" id="release">🚢 Release</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>package scripts、builder、installer、build/pack、CLI dry-run、README</p>
+      <p><strong>Exclusions / limits：</strong>未执行签名、公证、DMG、自动更新或 rollback</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 5 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-08 SQLite migration 非事务、非重入，中断可永久降级</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-10 测试全绿仍缺真实交互、Electron 安全边界与 CI</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-17 当前分发与安装链不可验证且不可回滚</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-18 Qoder SDK 让 macOS 包多带约 95 MB 未使用 CLI</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>build/pack/CLI dry-run 通过；README 诚实声明 MVP 与未签名状态。</div></div></div>
+  </div>
+  <h3 class="section-title" id="documentation">📚 Documentation</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>Medium</p>
+      <p><strong>Inspected evidence：</strong>README、CLAUDE.md、package metadata、billing/migration docs 抽样</p>
+      <p><strong>Exclusions / limits：</strong>未逐句校对全部 42 个 Markdown 文件</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-12 附件无大小上限、重复持久化并在删除后残留</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-15 未实现 BYOK 可选，失败前已清空草稿和附件</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-17 当前分发与安装链不可验证且不可回滚</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>README 对 local-only、MVP、权限和数据来源披露总体准确。</div></div></div>
+  </div>
+  <h3 class="section-title" id="configuration">⚙️ Configuration</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>env、permission defaults、MCP/provider/recorder config、builder</p>
+      <p><strong>Exclusions / limits：</strong>未读取用户真实 secret 值</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-03 Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-04 MCP 状态操作直接执行仓库控制的命令或任意 URL</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-17 当前分发与安装链不可验证且不可回滚</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>disabled Provider、Hook trust、workspace root 与 recorder config 有显式解析和测试。</div></div></div>
+  </div>
+  <h3 class="section-title" id="observability">🩺 Observability</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>trace、archive、span ledger、diagnostics、billing、terminal outcomes</p>
+      <p><strong>Exclusions / limits：</strong>未连接真实外部服务模拟事故</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-09 Codex RPC 超时可能留下无人追踪的真实 turn</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-13 普通 Provider 异常不产生 terminal result span</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>statsQuery 区分 ready/unavailable/query_error，trace 带 run/session/provider correlation。</div></div></div>
+  </div>
+  <h3 class="section-title" id="data-integrity">🧱 Data Integrity</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>lock、record sequence/hash、migration、catalog、archive、workspace revision</p>
+      <p><strong>Exclusions / limits：</strong>未做真实掉电/文件系统故障注入</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-07 陈旧目录锁回收 TOCTOU 可让两个 recorder 同时提交</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-08 SQLite migration 非事务、非重入，中断可永久降级</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-11 app-sessions.json 非原子写入，损坏后静默清空</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-12 附件无大小上限、重复持久化并在删除后残留</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>canonical record 正常路径原子 rename+verify；workspace write 使用 optimistic revision。</div></div></div>
+  </div>
+  <h3 class="section-title" id="privacy">🛡 Privacy</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>prompt/tool/image/path/usage/SQLite/archive/.scry 写入与 delete</p>
+      <p><strong>Exclusions / limits：</strong>不含 OS backup、Spotlight 或磁盘加密策略</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-02 Markdown 远端图片构成零点击数据外传通道</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-03 Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-12 附件无大小上限、重复持久化并在删除后残留</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>多数 Scry 本地数据使用 0600/0700，README 明示 local-only。</div></div></div>
+  </div>
+  <h3 class="section-title" id="accessibility">⌨️ Accessibility</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>Medium</p>
+      <p><strong>Inspected evidence：</strong>组件语义、键盘/ARIA、Electron 初始页 AX tree</p>
+      <p><strong>Exclusions / limits：</strong>未跑 VoiceOver/axe，未遍历所有 modal/运行状态</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-14 provider/cwd/session 迟到响应覆盖最后一次选择</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-15 未实现 BYOK 可选，失败前已清空草稿和附件</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-16 核心交互与模态框缺完整键盘/焦点语义</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>初始页 AX tree 29 个交互均有名称；AskUserQuestionDialog、PaneSplitter、reduced-motion 较好。</div></div></div>
+  </div>
+  <h3 class="section-title" id="supply-chain">🔗 Supply Chain</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>Medium</p>
+      <p><strong>Inspected evidence：</strong>package-lock、离线 npm audit、install scripts、builder、artifact/CLI package</p>
+      <p><strong>Exclusions / limits：</strong>在线 advisory 未获外发元数据授权；无 provenance service</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-17 当前分发与安装链不可验证且不可回滚</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-18 Qoder SDK 让 macOS 包多带约 95 MB 未使用 CLI</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>lockfile 已跟踪；离线缓存审计 746 总依赖/236 prod/0 已知漏洞；npm tarball 有 integrity。</div></div></div>
+  </div>
+  <h3 class="section-title" id="cost">💸 Cost</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>Medium</p>
+      <p><strong>Inspected evidence：</strong>disk write amplification、attachment size、artifact size、timeout lifecycle</p>
+      <p><strong>Exclusions / limits：</strong>无真实模型账单、并发峰值或长期 retention 数据</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-09 Codex RPC 超时可能留下无人追踪的真实 turn</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-12 附件无大小上限、重复持久化并在删除后残留</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-18 Qoder SDK 让 macOS 包多带约 95 MB 未使用 CLI</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>billing ledger 区分 provider/source，多数 Git/HTTP/MCP/CLI 路径有 timeout。</div></div></div>
+  </div>
+  <h3 class="section-title" id="ai-safety">🤖 AI / LLM Safety</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>模型 Markdown、prompt/tool trust、permissions、MCP、Provider env/output validation</p>
+      <p><strong>Exclusions / limits：</strong>未对真实模型执行 adversarial suite</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 5 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-02 Markdown 远端图片构成零点击数据外传通道</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-03 Billing Admin 凭据进入 Provider 环境，终端继承时也进入 MCP probe</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-04 MCP 状态操作直接执行仓库控制的命令或任意 URL</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Provider event 归一为共享 trace，AskUserQuestion 有结构校验，Codex Hook trust fail-closed。</div></div></div>
+  </div>
+  <h3 class="section-title" id="fallback">🧯 Fallback</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>catches、default catalogs、DB/catalog init、terminal errors、compat branches</p>
+      <p><strong>Exclusions / limits：</strong>未做外部服务恢复时序实测</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 5 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-08 SQLite migration 非事务、非重入，中断可永久降级</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-11 app-sessions.json 非原子写入，损坏后静默清空</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-13 普通 Provider 异常不产生 terminal result span</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>workspace validation、Hook trust、managed recorder version mismatch 会显式拒绝。</div></div></div>
+  </div>
+  <h3 class="section-title" id="testing-authenticity">🎭 Testing Authenticity</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>test runtime、environment、mock/SSR、real Git/socket/provider opt-in</p>
+      <p><strong>Exclusions / limits：</strong>真实 external Provider/Admin tests 未启用</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-10 测试全绿仍缺真实交互、Electron 安全边界与 CI</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>shared/provider/recorder/Git 测试真实度高；renderer SSR 适合作 output contract 而非交互证明。</div></div></div>
+  </div>
+  <h3 class="section-title" id="type-safety">🔤 Type Safety</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>strict tsconfig、shared DTO、unknown IPC、本地重复类型</p>
+      <p><strong>Exclusions / limits：</strong>未生成全仓 any/unsafe-cast 形式化指标</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>typecheck 通过；核心 Provider/trace/runtime 使用 discriminated types。</div></div></div>
+  </div>
+  <h3 class="section-title" id="frontend-state">🧠 Frontend State</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>App、useIntegrations、useAgentSession、workspace sequence、modal/panel state</p>
+      <p><strong>Exclusions / limits：</strong>未自动化重放全部 race</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-14 provider/cwd/session 迟到响应覆盖最后一次选择</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-15 未实现 BYOK 可选，失败前已清空草稿和附件</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>WorkspacePanel 有 sequence guard/revision conflict；session hydration 缓存 lifecycle delta。</div></div></div>
+  </div>
+  <h3 class="section-title" id="backend-api">🔌 Backend API</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>50 preload 方法、43 IPC handlers、workspace operations、Provider contracts</p>
+      <p><strong>Exclusions / limits：</strong>无远程 HTTP backend，本节按 Electron local backend/IPC</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 5 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-01 不可信导航继承完整 preload，形成远端到本地文件/Agent 的权限跃迁</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-04 MCP 状态操作直接执行仓库控制的命令或任意 URL</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-05 运行控制不可用时 fail-open 到 full_access</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-13 普通 Provider 异常不产生 terminal result span</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>workspace API 有 size、encoding、root、revision/conflict 约束；Provider registry 统一 envelope。</div></div></div>
+  </div>
+  <h3 class="section-title" id="dependency-weight">📦 Dependency Weight</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>Medium</p>
+      <p><strong>Inspected evidence：</strong>direct dependency sizes、asar/unpacked、pack artifact、CLI tarball</p>
+      <p><strong>Exclusions / limits：</strong>未逐个 transitive package 做替代 benchmark</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-18 Qoder SDK 让 macOS 包多带约 95 MB 未使用 CLI</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-19 核心编排模块与全局 CSS 超出安全演进边界</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Anthropic 平台二进制已排除，CLI dry-run 仅约 59 KB。</div></div></div>
+  </div>
+  <h3 class="section-title" id="code-consistency">🧩 Code Consistency</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>High</p>
+      <p><strong>Inspected evidence：</strong>guard patterns、shared/duplicate DTO、selector 重复、错误/版本语义抽样</p>
+      <p><strong>Exclusions / limits：</strong>仓库无 ESLint/stylelint oracle</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td>F-06 Renderer 把缺失证据渲染成绿色安全或真实零</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-14 provider/cwd/session 迟到响应覆盖最后一次选择</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F-19 核心编排模块与全局 CSS 超出安全演进边界</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Provider ID/runtimeProvider 映射总体稳定，format/shared 有丰富单元测试。</div></div></div>
+  </div>
+  <h3 class="section-title" id="comment-coverage">💬 Comment Coverage</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong>Medium</p>
+      <p><strong>Inspected evidence：</strong>main、Provider、recorder、DB、workspace、renderer 关键注释/TODO</p>
+      <p><strong>Exclusions / limits：</strong>未按函数计数；关注 why/constraint 而非注释率</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 无发现 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 0 个相关发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody><tr><td colspan="3">本维度未发现独立问题；结论受上方覆盖限制约束。</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证实践</div>
+    <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Git 隔离、shell env、window show、managed recorder、MCP live state 等复杂处有原因注释；需把意图升级为 gate。</div></div></div>
+  </div>
+
+  <h3 class="section-title" id="principles">📋 Principles Compliance</h3>
+  <div class="card">
+    <div class="card-header">原则违反</div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>Principle</th><th>Violations</th><th style="width:100px">Severity</th><th>Affected Areas</th></tr></thead>
+      <tbody>
+        <tr><td>4.6 Principle of Least Privilege</td><td>3</td><td><span class="badge badge-critical">Critical</span></td><td>preload/IPC、child env、permission fallback</td></tr>
+        <tr><td>4.4 Fail-Fast</td><td>3</td><td><span class="badge badge-high">High</span></td><td>run controls、partial evidence、migration</td></tr>
+        <tr><td>5.3 No Hidden Side Effects</td><td>1</td><td><span class="badge badge-high">High</span></td><td>MCP status/query actions</td></tr>
+        <tr><td>5.4 Shared Mutable State Synchronization</td><td>1</td><td><span class="badge badge-high">High</span></td><td>recorder stale-lock recovery</td></tr>
+        <tr><td>6.1 Do Not Swallow Errors</td><td>2</td><td><span class="badge badge-medium">Medium</span></td><td>app catalog、terminal result</td></tr>
+        <tr><td>3.1 Principle of Least Surprise</td><td>4</td><td><span class="badge badge-medium">Medium</span></td><td>MCP、delete、BYOK、unknown-as-zero</td></tr>
+        <tr><td>1.1 / 1.2 / 1.3 / 1.6</td><td>systemic</td><td><span class="badge badge-medium">Medium</span></td><td>main/App/format/Overview/recorder/CSS</td></tr>
+        <tr><td>7.3 Explicit Dependencies</td><td>1</td><td><span class="badge badge-high">High</span></td><td>shellEnv as secret/config bus</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已遵循原则</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span>workspace path、revision、encoding、size invariant 在 API 边界显式验证</div>
+      <div class="check-item"><span class="check">✓</span>canonical record 正常写入使用 temp、fsync、rename、hash 与 verify</div>
+      <div class="check-item"><span class="check">✓</span>Provider registry/shared DTO 避免 UI 直接依赖各 SDK 类型</div>
+      <div class="check-item"><span class="check">✓</span>Git evidence 采集关闭 hooks/filters 并设置 deadline/resource limits</div>
+    </div></div>
+  </div>
+
+  <h3 class="section-title" id="fix-order">🎯 Recommended Fix Order</h3>
+  <div class="card">
+    <div class="card-header"><span>⚡ Immediate — release blocker</span><span class="badge badge-critical">立即</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Fix</th><th>Effort</th><th>Risk removed</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>F-01/F-02：封同窗导航、window.open、远端资源与 privileged IPC origin</td><td>1–3 天</td><td>远端到本地权限跃迁/零点击外传</td></tr>
+        <tr><td>2</td><td>F-03：Provider 剥离 Billing Admin secrets；MCP probe 固定 allowlist env</td><td>1 天</td><td>组织级凭据泄漏</td></tr>
+        <tr><td>3</td><td>F-05：权限缺失/失败全部 fail closed</td><td>0.5–1.5 天</td><td>静默 bypass</td></tr>
+        <tr><td>4</td><td>F-04：MCP fingerprint trust gate，取消打开即执行</td><td>2–4 天</td><td>仓库命令执行/SSRF</td></tr>
+        <tr><td>5</td><td>F-08：transactional/idempotent migration + interruption matrix</td><td>1–2 天</td><td>永久 DB 降级</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span>📅 Next / Scheduled</span><span class="badge badge-medium">随后</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Fix</th><th>Effort</th></tr></thead>
+      <tbody>
+        <tr><td>6</td><td>F-07/F-09/F-13：跨进程锁、timeout quarantine、terminal outcome</td><td>3–6 天</td></tr>
+        <tr><td>7</td><td>F-11/F-12：catalog 原子写、全 store 删除、blob/refcount/retention</td><td>3–7 天</td></tr>
+        <tr><td>8</td><td>F-06/F-14/F-15：严格 unknown schema、context token、composer rollback</td><td>2–4 天</td></tr>
+        <tr><td>9</td><td>F-10/F-16：Electron/interaction/accessibility tests 与 CI</td><td>4–8 天</td></tr>
+        <tr><td>10</td><td>F-17/F-18/F-19：release pipeline、artifact budget、分阶段拆大模块</td><td>8–18 天</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+
+  <h3 class="section-title">⚡ Quick Wins</h3>
+  <div class="win-grid">
+    <div class="win-card"><div class="win-title">封导航与 window.open</div><div class="win-meta">先切断最短 Critical 链</div></div>
+    <div class="win-card"><div class="win-title">权限 fallback 改 default/disabled</div><div class="win-meta">0.5–1 天</div></div>
+    <div class="win-card"><div class="win-title">child env 剥离 Admin variables</div><div class="win-meta">1 天</div></div>
+    <div class="win-card"><div class="win-title">禁远端 Markdown img + CSP</div><div class="win-meta">0.5–1 天</div></div>
+    <div class="win-card"><div class="win-title">BYOK disabled + 保留草稿</div><div class="win-meta">0.5 天</div></div>
+    <div class="win-card"><div class="win-title">installer staging → atomic swap</div><div class="win-meta">1 天</div></div>
+    <div class="win-card"><div class="win-title">排除 bundled qodercli</div><div class="win-meta">回收约 95 MB</div></div>
+    <div class="win-card"><div class="win-title">app-sessions 原子写</div><div class="win-meta">1 天</div></div>
+    <div class="win-card"><div class="win-title">unknown 永不显示 green/0</div><div class="win-meta">0.5–1 天</div></div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    Scry full audit · 2026-07-31 · 19 confirmed findings · Offline npm advisory cache only
+  </div>
+
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting) activeId = entry.target.id;
+    });
+    if (activeId) {
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + activeId);
+      });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>
