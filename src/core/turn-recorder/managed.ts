@@ -37,9 +37,15 @@ export interface ManagedTurnTiming {
   durationMs: number
 }
 
+export type ManagedRecorderProviderId = Extract<ProviderId, 'codex' | 'qoder'>
+
+export function isManagedRecorderProvider(provider: ProviderId): provider is ManagedRecorderProviderId {
+  return provider === 'codex' || provider === 'qoder'
+}
+
 export interface PrepareManagedTurnInput {
   workspace: string
-  provider: Extract<ProviderId, 'codex'>
+  provider: ManagedRecorderProviderId
   sessionId: string
   runId: string
   providerTurnId: string
@@ -94,6 +100,13 @@ function assertExactText(
   }
 }
 
+function assertOptionalAssistantText(evidence: Evidence<{ text?: string; textHash?: string }>): void {
+  const text = evidence.value?.text
+  if (text && evidence.value?.textHash !== hashText(text)) {
+    throw new Error('managed recorder assistant text hash mismatch')
+  }
+}
+
 function assertStrictCapture(enablement: EnabledRecorder): void {
   const capture = enablement.config.capture
   const missing = [
@@ -138,7 +151,7 @@ async function recordById(dataRoot: string, recordId: string): Promise<AgentTurn
 
 async function recordByProviderTurnId(
   dataRoot: string,
-  provider: Extract<ProviderId, 'codex'>,
+  provider: ManagedRecorderProviderId,
   sessionId: string,
   providerTurnId: string
 ): Promise<AgentTurnRecord | undefined> {
@@ -246,7 +259,11 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
   assertExactText(input.evidence.user, input.userText, 'user')
-  assertExactText(input.evidence.assistant, undefined, 'assistant')
+  if (input.provider === 'qoder' && input.status !== 'completed') {
+    assertOptionalAssistantText(input.evidence.assistant)
+  } else {
+    assertExactText(input.evidence.assistant, undefined, 'assistant')
+  }
   assertTiming(input.timing)
   const { enablement } = mode
 
@@ -290,11 +307,23 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
       ...(current ? [current] : []),
       ...(await recorderQuarantinedOpenTurns(root))
     ]
-    const matches = candidates.filter(
+    let matches = candidates.filter(
       (candidate) =>
         candidate.managedByScry &&
         candidate.providerTurnId === input.providerTurnId
     )
+    const provisional = candidates.filter((candidate) => candidate.managedByScry && !candidate.providerTurnId)
+    if (
+      matches.length === 0 &&
+      input.provider === 'qoder' &&
+      current?.managedByScry &&
+      !current.providerTurnId &&
+      provisional.length === 1
+    ) {
+      const bound = { ...current, providerTurnId: input.providerTurnId }
+      await writeJsonAtomic(recorderOpenPath(root), bound, { sync: false })
+      matches = [bound]
+    }
     if (matches.length === 0 && candidates.length === 0) {
       return { status: 'pending' as const, reason: 'managed recorder open identity is not available yet' }
     }
@@ -357,7 +386,7 @@ async function commitHandoff(
 
 export async function commitManagedRecorderTurn(input: {
   workspace: string
-  provider: Extract<ProviderId, 'codex'>
+  provider: ManagedRecorderProviderId
   sessionId: string
   runId: string
   recordId: string
@@ -394,54 +423,56 @@ export async function commitManagedRecorderTurn(input: {
 export async function recoverManagedRecorderTurns(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env,
-  options: { sessionId?: string } = {}
+  options: { sessionId?: string; provider?: ManagedRecorderProviderId } = {}
 ): Promise<{ recovered: number; pending: number }> {
   const mode = await managedRecorderMode(workspace, env)
   if (mode.status === 'disabled') return { recovered: 0, pending: 0 }
   const { enablement } = mode
   let recovered = 0
   let pending = 0
-  const provider: Extract<ProviderId, 'codex'> = 'codex'
-  const providerRoot = join(enablement.dataRoot, 'runtime', provider)
-  for (const sessionDir of await listFiles(providerRoot)) {
-    const root = join(providerRoot, sessionDir)
-    const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
-    const quarantined = await recorderQuarantinedOpenTurns(root)
-    const items = (await handoffs(root)).filter(
-      (item) => !options.sessionId || item.handoff.record.sessionId === options.sessionId
-    )
-    if (
-      options.sessionId &&
-      open?.sessionId !== options.sessionId &&
-      items.length === 0 &&
-      !quarantined.some((item) => item.sessionId === options.sessionId)
-    ) continue
-    for (const item of items) {
-      if (item.handoff.phase !== 'archive_committed') {
-        pending++
-        continue
-      }
-      const result = await withDirectoryLock(
-        recorderSessionLock(enablement.dataRoot, provider, item.handoff.record.sessionId),
-        () => commitHandoff(enablement, root, item.handoff),
-        { waitMs: SESSION_LOCK_WAIT_MS }
+  const providers: ManagedRecorderProviderId[] = options.provider ? [options.provider] : ['codex', 'qoder']
+  for (const provider of providers) {
+    const providerRoot = join(enablement.dataRoot, 'runtime', provider)
+    for (const sessionDir of await listFiles(providerRoot)) {
+      const root = join(providerRoot, sessionDir)
+      const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
+      const quarantined = await recorderQuarantinedOpenTurns(root)
+      const items = (await handoffs(root)).filter(
+        (item) => !options.sessionId || item.handoff.record.sessionId === options.sessionId
       )
-      if (result.status === 'committed' || result.status === 'duplicate') recovered++
-    }
-    if (
-      open &&
-      (open.managedByScry || open.status === 'closing') &&
-      (!options.sessionId || open.sessionId === options.sessionId) &&
-      !items.some((item) => item.handoff.record.generation === open.generation)
-    ) {
-      pending++
-    }
-    for (const pendingOpen of quarantined) {
       if (
-        (!options.sessionId || pendingOpen.sessionId === options.sessionId) &&
-        !items.some((item) => item.handoff.record.generation === pendingOpen.generation)
+        options.sessionId &&
+        open?.sessionId !== options.sessionId &&
+        items.length === 0 &&
+        !quarantined.some((item) => item.sessionId === options.sessionId)
+      ) continue
+      for (const item of items) {
+        if (item.handoff.phase !== 'archive_committed') {
+          pending++
+          continue
+        }
+        const result = await withDirectoryLock(
+          recorderSessionLock(enablement.dataRoot, provider, item.handoff.record.sessionId),
+          () => commitHandoff(enablement, root, item.handoff),
+          { waitMs: SESSION_LOCK_WAIT_MS }
+        )
+        if (result.status === 'committed' || result.status === 'duplicate') recovered++
+      }
+      if (
+        open &&
+        (open.managedByScry || open.status === 'closing') &&
+        (!options.sessionId || open.sessionId === options.sessionId) &&
+        !items.some((item) => item.handoff.record.generation === open.generation)
       ) {
         pending++
+      }
+      for (const pendingOpen of quarantined) {
+        if (
+          (!options.sessionId || pendingOpen.sessionId === options.sessionId) &&
+          !items.some((item) => item.handoff.record.generation === pendingOpen.generation)
+        ) {
+          pending++
+        }
       }
     }
   }

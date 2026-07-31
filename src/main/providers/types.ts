@@ -46,6 +46,7 @@ export interface ProviderRunRequest {
   effort?: string
   permissionMode?: AgentPermissionMode
   bypassHookTrust?: boolean
+  managedRecorder?: boolean
   emit: (event: TraceEvent) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>

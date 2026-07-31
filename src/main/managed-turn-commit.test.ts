@@ -7,6 +7,7 @@ import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
 import { listRecords, stableHash } from '../core/turn-recorder/store'
 import {
+  canonicalOrObservedTurnTiming,
   canonicalTurnTiming,
   commitManagedTraceTurn,
   persistManagedTraceProgress,
@@ -118,6 +119,19 @@ async function startManaged(workspace: string): Promise<void> {
 }
 
 describe('managed trace turn coordinator', () => {
+  it('仅非 completed 轮次可在缺 Provider result 时使用 App 观测边界', () => {
+    const observed = {
+      startedAt: '2026-07-29T12:00:00.000Z',
+      completedAt: '2026-07-29T12:00:03.000Z',
+      durationMs: 3_000
+    }
+
+    expect(canonicalOrObservedTurnTiming([], 'qoder', 'failed', observed)).toEqual(observed)
+    expect(canonicalOrObservedTurnTiming([], 'qoder', 'interrupted', observed)).toEqual(observed)
+    expect(canonicalOrObservedTurnTiming([], 'qoder', 'completed', observed)).toBeNull()
+    expect(canonicalOrObservedTurnTiming([], 'codex', 'failed', observed)).toBeNull()
+  })
+
   it('archive 与 CLI record 复用同一 evidence 和 result timing', async () => {
     const { workspace, userDataDir } = await fixture()
     await startManaged(workspace)
@@ -160,6 +174,54 @@ describe('managed trace turn coordinator', () => {
     ] as const) {
       expect(record[key]).toEqual(archiveEvidence?.[key])
     }
+  })
+
+  it('Qoder failed turn 可用 unavailable assistant 与 canonical timing 提交同一份 evidence', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        promptId: 'qoder-turn',
+        prompt: '/rate-workflow 1',
+        timestamp: '2026-07-29T12:00:00.000Z'
+      }
+    })
+    const request = input(workspace, userDataDir)
+    request.sessionId = 'qoder-session'
+    request.providerTurnId = 'qoder-turn'
+    request.providerId = 'qoder'
+    request.runtimeProvider = 'qoder_cli'
+    request.status = 'failed'
+    request.turn = {
+      ...request.turn,
+      providerTurnId: 'qoder-turn',
+      status: 'failed',
+      items: request.turn.items.filter((event) => event.kind !== 'model')
+    }
+    request.turn.turnEvidence = aggregateTurnEvidence({
+      userText: request.turn.userText,
+      events: request.turn.items,
+      source: 'scry_provider_adapter'
+    })
+
+    await expect(commitManagedTraceTurn(request)).resolves.toMatchObject({ recorder: 'committed' })
+    const archive = readTraceArchive({
+      cwd: workspace,
+      sessionId: 'qoder-session',
+      providerId: 'qoder',
+      userDataDir
+    })
+    const [record] = await listRecords(join(workspace, '.scry'))
+
+    expect(archive?.turns[0].turnEvidence).toEqual(expect.objectContaining({
+      assistant: expect.objectContaining({ status: expect.not.stringMatching(/^available$/) })
+    }))
+    expect(record).toMatchObject({ provider: { id: 'qoder' }, status: 'failed' })
+    expect(record.assistant).toEqual(archive?.turns[0].turnEvidence?.assistant)
   })
 
   it.each([
@@ -274,6 +336,40 @@ describe('managed trace turn coordinator', () => {
       pending: 0,
       errors: []
     })
+  })
+
+  it('progress recovery 按 provider 过滤', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        promptId: 'qoder-turn',
+        prompt: '/rate-workflow 1',
+        timestamp: '2026-07-29T12:00:00.000Z'
+      }
+    })
+    const request = input(workspace, userDataDir)
+    request.sessionId = 'qoder-session'
+    request.providerTurnId = 'qoder-turn'
+    request.providerId = 'qoder'
+    request.runtimeProvider = 'qoder_cli'
+    request.turn = { ...request.turn, providerTurnId: 'qoder-turn' }
+    await persistManagedTraceProgress(request)
+
+    await expect(recoverManagedTraceProgress(userDataDir, {
+      cwd: workspace,
+      providerId: 'codex',
+      waitMs: 0
+    })).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    await expect(recoverManagedTraceProgress(userDataDir, {
+      cwd: workspace,
+      providerId: 'qoder',
+      waitMs: 100
+    })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
   })
 
   it('open 尚未到达时先保留 prepared journal，后续恢复可完整补写两端', async () => {

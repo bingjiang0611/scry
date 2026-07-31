@@ -37,7 +37,12 @@ import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import { createBuiltInProviderAdapters } from './providers'
 import { appendCoalescedTrace } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
-import { managedRecorderMode, recoverManagedRecorderTurns } from '../core/turn-recorder/managed'
+import {
+  isManagedRecorderProvider,
+  managedRecorderMode,
+  recoverManagedRecorderTurns,
+  type ManagedTurnTiming
+} from '../core/turn-recorder/managed'
 import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
@@ -67,7 +72,7 @@ import type {
 } from '../shared/workspace'
 import { editContextMenuTemplate, shouldShowEditContextMenu } from './edit-context-menu'
 import {
-  canonicalTurnTiming,
+  canonicalOrObservedTurnTiming,
   commitManagedTraceTurn,
   persistManagedTraceProgress,
   recoverManagedTraceProgress,
@@ -274,11 +279,20 @@ interface ArchiveTraceTurnArgs {
   status: 'completed' | 'failed' | 'cancelled' | 'interrupted'
   error?: string
   errorHint?: string
+  observedTiming?: ManagedTurnTiming
+}
+
+function observedTurnTiming(startedAt: string | undefined, completedAt: string): ManagedTurnTiming | undefined {
+  if (!startedAt) return undefined
+  const started = Date.parse(startedAt)
+  const completed = Date.parse(completedAt)
+  if (!Number.isFinite(started) || !Number.isFinite(completed)) return undefined
+  return { startedAt, completedAt, durationMs: Math.max(0, completed - started) }
 }
 
 function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
   turn: TraceArchiveTurn
-  timing: ReturnType<typeof canonicalTurnTiming>
+  timing: ManagedTurnTiming | null
 } {
   const persistedItems = args.items.map((event) => {
     const { hookConfiguredCommands: _currentConfig, ...persisted } = event
@@ -289,7 +303,7 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
     events: persistedItems,
     source: 'scry_provider_adapter'
   })
-  const timing = canonicalTurnTiming(persistedItems)
+  const timing = canonicalOrObservedTurnTiming(persistedItems, args.providerId, args.status, args.observedTiming)
   return {
     timing,
     turn: {
@@ -310,13 +324,13 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
 }
 
 async function persistManagedCompletionProgress(args: ArchiveTraceTurnArgs): Promise<void> {
-  if (args.providerId !== 'codex' || !args.cwd) return
+  if (!isManagedRecorderProvider(args.providerId) || !args.cwd) return
   const mode = await managedRecorderMode(args.cwd)
   if (mode.status === 'disabled') return
-  if (!args.sessionId) throw new Error('managed recorder requires an authoritative Codex session id')
-  if (!args.providerTurnId) throw new Error('managed recorder requires an authoritative Codex turn id')
+  if (!args.sessionId) throw new Error('managed recorder requires an authoritative Provider session id')
+  if (!args.providerTurnId) throw new Error('managed recorder requires an authoritative Provider turn id')
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (!timing) throw new Error('managed recorder requires authoritative Codex result timing')
+  if (!timing) throw new Error('managed recorder requires canonical Provider or observed interruption timing')
   await persistManagedTraceProgress({
     cwd: args.cwd,
     sessionId: args.sessionId,
@@ -333,19 +347,19 @@ async function persistManagedCompletionProgress(args: ArchiveTraceTurnArgs): Pro
 async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
   if (!args.cwd) return
   if (!args.sessionId) {
-    if (args.providerId === 'codex' && (await managedRecorderMode(args.cwd)).status === 'enabled') {
-      throw new Error('managed recorder requires an authoritative Codex session id')
+    if (isManagedRecorderProvider(args.providerId) && (await managedRecorderMode(args.cwd)).status === 'enabled') {
+      throw new Error('managed recorder requires an authoritative Provider session id')
     }
     return
   }
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (args.providerId === 'codex') {
+  if (isManagedRecorderProvider(args.providerId)) {
     const mode = await managedRecorderMode(args.cwd)
     if (mode.status === 'enabled' && !timing) {
-      throw new Error('managed recorder requires authoritative Codex result timing')
+      throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     }
     if (mode.status === 'enabled' && !args.providerTurnId) {
-      throw new Error('managed recorder requires an authoritative Codex turn id')
+      throw new Error('managed recorder requires an authoritative Provider turn id')
     }
     if (timing) {
       await commitManagedTraceTurn({
@@ -627,6 +641,7 @@ interface RunControl {
   cwd?: string
   resume?: string
   getExternalSessionId: () => string | undefined
+  canonicalLifecycle: boolean
   runtimeProvider: RuntimeProvider
   runState: ActiveRun
   adoptSession: () => void
@@ -716,12 +731,22 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '等待当前轮完成，或新建独立会话后并行运行'
     })
   }
-  if (providerId === 'codex' && cwd) {
-    const progressRecovery = await recoverManagedTraceProgress(app.getPath('userData'), { cwd, waitMs: 250 })
-    const journalRecovery = await recoverManagedTraceTurns(app.getPath('userData'), { cwd, waitMs: 250 })
+  let managedRecorderEnabled = false
+  if (isManagedRecorderProvider(providerId) && cwd) {
+    managedRecorderEnabled = (await managedRecorderMode(cwd)).status === 'enabled'
+    const progressRecovery = await recoverManagedTraceProgress(app.getPath('userData'), {
+      cwd,
+      providerId,
+      waitMs: 250
+    })
+    const journalRecovery = await recoverManagedTraceTurns(app.getPath('userData'), {
+      cwd,
+      providerId,
+      waitMs: 250
+    })
     const recorderRecovery = resume
-      ? await recoverManagedRecorderTurns(cwd, process.env, { sessionId: resume })
-      : await recoverManagedRecorderTurns(cwd)
+      ? await recoverManagedRecorderTurns(cwd, process.env, { sessionId: resume, provider: providerId })
+      : await recoverManagedRecorderTurns(cwd, process.env, { provider: providerId })
     // 同一轮可能同时留下 progress、journal 与 recorder open；三层计数不能相加，
     // 否则会把一个待恢复 turn 报成三轮。这里只需要 fail closed。
     const pending = Math.max(progressRecovery.pending, journalRecovery.pending, recorderRecovery.pending)
@@ -734,6 +759,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       })
     }
   }
+  const canonicalLifecycle = providerId === 'codex' || managedRecorderEnabled
   const bypassHookTrust = providerId === 'codex' && cwd
     ? await resolveCodexHookBypass(cwd)
     : false
@@ -890,8 +916,10 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
     getProviderTurnId?: () => string | undefined
   } | null = null
   let interrupted = false
+  let observedProviderStartedAt: string | undefined
   const runtimePromise = turnDiffCapture.then(async () => {
     if (interrupted) return { stopped: true }
+    observedProviderStartedAt = new Date().toISOString()
     h = providerRegistry.run(providerId, {
       runId,
       prompt: runtimePrompt,
@@ -902,6 +930,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       effort: request.effort,
       permissionMode: request.permissionMode,
       bypassHookTrust,
+      managedRecorder: managedRecorderEnabled,
       emit,
       onExternalSessionId: publishSessionId,
       requestUserInput: (question, signal) => userQuestionBroker.request({ ...question, providerId }, signal)
@@ -919,6 +948,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
     cwd,
     resume,
     getExternalSessionId: () => h?.getExternalSessionId(),
+    canonicalLifecycle,
     runtimeProvider,
     runState,
     adoptSession: () => {
@@ -935,6 +965,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
   runs.register(runState, control)
   runtimePromise
     .then(async (r) => {
+      const observedTiming = observedTurnTiming(observedProviderStartedAt, new Date().toISOString())
       publishSessionId(r.externalSessionId)
       const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
       const completionArchiveArgs: ArchiveTraceTurnArgs = {
@@ -948,7 +979,8 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         attachments,
         items: runState.items,
         done: true,
-        status: completionStatus
+        status: completionStatus,
+        observedTiming
       }
       // Diff 是附加观测数据：立即开始采集，但不能阻塞用户看到 turnDone。
       // 归档仍等待它完成，保证历史回放最终包含 turn_diff。
@@ -985,7 +1017,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         })
         return
       }
-      if (providerId !== 'codex' && !alreadyDone) {
+      if (!canonicalLifecycle && !alreadyDone) {
         win?.webContents.send('agent:turnDone', {
           runId,
           sessionId: r.externalSessionId,
@@ -1020,7 +1052,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         runtimeProvider,
         billingProvider: [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')?.billingProvider
       })
-      if (providerId === 'codex' && !alreadyDone) {
+      if (canonicalLifecycle && !alreadyDone) {
         win?.webContents.send('agent:turnDone', {
           runId,
           sessionId: r.externalSessionId,
@@ -1031,6 +1063,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       }
     })
     .catch(async (err) => {
+      const observedTiming = observedTurnTiming(observedProviderStartedAt, new Date().toISOString())
       const alreadyDone = runState.done
       const stopped = interrupted || alreadyDone
       const runtimeErr = err instanceof AgentRuntimeError ? err : null
@@ -1060,7 +1093,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
       const turnDiffDone = finalizeTurnDiff()
       mirrorSessionTranscript(providerId, cwd, h?.getExternalSessionId() ?? resume)
       flushTraceSend()
-      if (stopped && providerId !== 'codex') {
+      if (stopped && !canonicalLifecycle) {
         if (!alreadyDone) win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId })
       } else {
         win?.webContents.send('agent:error', { runId, message, category, hint })
@@ -1080,12 +1113,13 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
           items: runState.items,
           done: true,
           status: stopped ? 'interrupted' : 'failed',
+          observedTiming,
           ...(stopped ? {} : { error: message, errorHint: hint })
         })
       } catch (archiveError) {
         exactRecorded = false
         console.error('[scry] exact turn archive failed:', archiveError)
-        if (providerId === 'codex') {
+        if (canonicalLifecycle) {
           const recordingMessage = `Scry 精确记录提交失败：${String((archiveError as Error).message)}`
           win?.webContents.send('agent:error', {
             runId,
@@ -1105,7 +1139,7 @@ ipcMain.handle('agent:start', async (_e, payload: AgentStartRequest) => {
         runtimeProvider,
         billingProvider: [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')?.billingProvider
       })
-      if (stopped && providerId === 'codex' && !alreadyDone && exactRecorded) {
+      if (stopped && canonicalLifecycle && !alreadyDone && exactRecorded) {
         win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId })
       }
     })
@@ -1171,8 +1205,8 @@ ipcMain.handle('agent:stop', (_event, runId: string) => {
   setTimeout(async () => {
     const current = runs.get(stopping.runId)
     if (current?.control !== stopping || current.state.done) return
-    if (stopping.providerId === 'codex') {
-      // Managed Codex 必须等 Provider settle 后再归档并提交同一份 canonical evidence。
+    if (stopping.canonicalLifecycle) {
+      // Managed Provider 必须等 Provider settle 后再归档并提交同一份 canonical evidence。
       // 提前 turnDone 会允许下一轮覆盖唯一 open identity，因此此处宁可保持 stopping。
       void stopping.finalizeTurnDiff()
       return

@@ -3,6 +3,7 @@ import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Markdown } from './Markdown'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
+import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import {
   normalizeAgentQuestionRequest,
   type AgentInputAttachment,
@@ -710,7 +711,9 @@ function AssistantTurnImpl({
     return turn.items
       .filter((e) => e.stage !== 'tool_result')
       .map((e) => {
-        const r = e.toolUseId ? results.get(e.toolUseId) : undefined
+        const r = e.toolUseId && (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
+          ? results.get(e.toolUseId)
+          : undefined
         return r ? { ...e, output: r.text, isError: r.isError ?? e.isError, durationMs: r.durationMs ?? e.durationMs } : e
       })
   }, [turn.items])
@@ -729,7 +732,7 @@ function AssistantTurnImpl({
     () => aggregateCalls(logicalCallEventsForTurn(items)).totalCalls,
     [items]
   )
-  const errs = turn.error ? 1 : items.filter((e) => e.isError && e.stage !== 'tool_result').length
+  const errs = turn.items.filter(isOverviewToolErrorEvent).length
   const runtime = runtimeTitleForTurn(turn)
   // P1：subagent 内部步骤（parentToolUseId 指向父 Task tool_use）按父分组，折叠进父 Task 卡
   const childrenByParent = useMemo(() => {

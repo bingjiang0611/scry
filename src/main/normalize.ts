@@ -349,6 +349,8 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
     const content = (m.message as Record<string, unknown> | undefined)?.content
     if (Array.isArray(content)) {
       const out: TraceEvent[] = []
+      const resultBlocks = (content as Array<Record<string, unknown>>).filter((block) => block.type === 'tool_result')
+      const outerFailure = outerToolResultFailure(m)
       for (const b of content as Array<Record<string, unknown>>) {
         if (b.type === 'text' && typeof b.text === 'string') {
           const name = injectedSkillName(b.text)
@@ -374,7 +376,12 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
               filePath: started?.filePath,
               text: output,
               output,
-              isError: b.is_error === true || (started?.isMcp === true && mcpPayloadFailed(output))
+              isError: b.is_error === true ||
+                (outerFailure?.failed === true && (
+                  outerFailure.toolUseId === toolUseId ||
+                  (!outerFailure.toolUseId && resultBlocks.length === 1)
+                )) ||
+                (started?.isMcp === true && mcpPayloadFailed(output))
             })
           )
         }
@@ -506,7 +513,42 @@ export function extractUserText(content: unknown): string {
 
 export interface ParsedTurn {
   userText: string
+  providerTurnId?: string
   items: TraceEvent[]
+}
+
+function transcriptProviderTurnId(line: Record<string, unknown>): string | undefined {
+  for (const key of ['promptId', 'prompt_id', 'turnId', 'turn_id']) {
+    if (typeof line[key] === 'string' && line[key]) return line[key]
+  }
+  return undefined
+}
+
+function outerToolResultFailure(message: Record<string, unknown>): { failed: boolean; toolUseId?: string } | undefined {
+  let raw = message.toolUseResult ?? message.tool_use_result
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw) as unknown } catch { return undefined }
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const result = raw as Record<string, unknown>
+  const exitCode = typeof result.exitCode === 'number'
+    ? result.exitCode
+    : typeof result.exit_code === 'number'
+      ? result.exit_code
+      : undefined
+  const toolUseId = typeof result.toolUseId === 'string'
+    ? result.toolUseId
+    : typeof result.tool_use_id === 'string'
+      ? result.tool_use_id
+      : undefined
+  return {
+    toolUseId,
+    failed: result.isError === true ||
+      result.is_error === true ||
+      result.kind === 'failed' ||
+      result.status === 'failed' ||
+      (exitCode != null && exitCode !== 0)
+  }
 }
 
 function transcriptContextForLine(ctx: NormalizeCtx, line: Record<string, unknown>): NormalizeCtx {
@@ -538,6 +580,10 @@ export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): Pars
     const lineCtx = transcriptContextForLine(ctx, o)
     try {
       if (o.type === 'user') {
+        if (o.isCompactSummary === true) {
+          suppressMetaAssistant = false
+          continue
+        }
         const text = extractUserText((o.message as Record<string, unknown> | undefined)?.content)
         const injectedSkill = text ? injectedSkillName(text) : undefined
         if (o.isMeta === true && !injectedSkill) {
@@ -551,7 +597,11 @@ export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): Pars
           cur.items.push(...userEvents)
         } else if (text) {
           suppressMetaAssistant = false
-          cur = { userText: text, items: [] }
+          cur = {
+            userText: text,
+            ...(transcriptProviderTurnId(o) ? { providerTurnId: transcriptProviderTurnId(o) } : {}),
+            items: []
+          }
           if (pendingBeforeFirstTurn.length) {
             cur.items.push(...pendingBeforeFirstTurn)
             pendingBeforeFirstTurn = []

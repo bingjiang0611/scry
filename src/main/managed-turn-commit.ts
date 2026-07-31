@@ -1,12 +1,13 @@
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { ProviderId } from '../shared/provider.js'
 import type { RuntimeProvider } from '../shared/runtime.js'
+import type { ProviderId } from '../shared/provider.js'
 import type { AgentTurnRecord } from '../shared/turn-record.js'
 import {
   commitManagedRecorderTurn,
   managedRecorderMode,
   prepareManagedRecorderTurn,
+  type ManagedRecorderProviderId,
   type ManagedTurnTiming
 } from '../core/turn-recorder/managed.js'
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from '../core/turn-recorder/io.js'
@@ -26,7 +27,7 @@ interface ManagedTurnJournal {
     cwd: string
     sessionId: string
     providerTurnId: string
-    providerId: Extract<ProviderId, 'codex'>
+    providerId: ManagedRecorderProviderId
     runtimeProvider: RuntimeProvider
     turn: TraceArchiveTurn
     timing: ManagedTurnTiming
@@ -45,7 +46,7 @@ export interface ManagedTraceTurnCommitInput {
   cwd: string
   sessionId: string
   providerTurnId: string
-  providerId: Extract<ProviderId, 'codex'>
+  providerId: ManagedRecorderProviderId
   runtimeProvider: RuntimeProvider
   turn: TraceArchiveTurn
   timing: ManagedTurnTiming
@@ -273,6 +274,26 @@ export function canonicalTurnTiming(events: Array<{
   }
 }
 
+export function canonicalOrObservedTurnTiming(
+  events: Parameters<typeof canonicalTurnTiming>[0],
+  providerId: ProviderId,
+  status: AgentTurnRecord['status'],
+  observed?: ManagedTurnTiming
+): ManagedTurnTiming | null {
+  const canonical = canonicalTurnTiming(events)
+  if (canonical || providerId !== 'qoder' || status === 'completed' || !observed) return canonical
+  const started = Date.parse(observed.startedAt)
+  const completed = Date.parse(observed.completedAt)
+  if (
+    !Number.isFinite(started) ||
+    !Number.isFinite(completed) ||
+    !Number.isFinite(observed.durationMs) ||
+    observed.durationMs < 0 ||
+    Math.max(0, completed - started) !== observed.durationMs
+  ) return null
+  return observed
+}
+
 export async function commitManagedTraceTurn(
   input: ManagedTraceTurnCommitInput,
   options: { waitMs?: number } = {}
@@ -368,7 +389,7 @@ export async function persistManagedTraceProgress(
 
 export async function recoverManagedTraceProgress(
   userDataDir: string,
-  options: { cwd?: string; waitMs?: number } = {}
+  options: { cwd?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
   let pending = 0
@@ -383,6 +404,7 @@ export async function recoverManagedTraceProgress(
       continue
     }
     if (options.cwd && progress.request.cwd !== options.cwd) continue
+    if (options.providerId && progress.request.providerId !== options.providerId) continue
     try {
       await commitManagedTraceTurn(
         { ...progress.request, userDataDir },
@@ -399,7 +421,7 @@ export async function recoverManagedTraceProgress(
 
 export async function recoverManagedTraceTurns(
   userDataDir: string,
-  options: { cwd?: string; waitMs?: number } = {}
+  options: { cwd?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
   let pending = 0
@@ -414,6 +436,7 @@ export async function recoverManagedTraceTurns(
       continue
     }
     if (options.cwd && journal.request.cwd !== options.cwd) continue
+    if (options.providerId && journal.request.providerId !== options.providerId) continue
     const result = await withDirectoryLock(
       lockPath(userDataDir, journal.request.turn.runId),
       () => replayJournal(path, userDataDir, journal, options.waitMs ?? 250),
