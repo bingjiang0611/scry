@@ -14,7 +14,7 @@ import {
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
-import type { ProviderAdapter, ProviderRunRequest } from './types'
+import type { ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 
 interface Cached<T> {
@@ -52,7 +52,8 @@ function qoderOptions(
   resume?: string,
   onPid?: (pid: number) => void,
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
-  permissionMode: AgentPermissionMode = 'full_access'
+  permissionMode: AgentPermissionMode = 'full_access',
+  managedRecorder = false
 ): Record<string, unknown> {
   const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!executable) throw new Error('Qoder CLI 未找到')
@@ -64,7 +65,7 @@ function qoderOptions(
     cwd,
     resume,
     pathToQoderCLIExecutable: executable,
-    env: runtimeCliEnv(),
+    env: runtimeCliEnv(undefined, managedRecorder ? { managedRecorder: true } : {}),
     ...permissions,
     includePartialMessages: true,
     includeHookEvents: true,
@@ -154,6 +155,36 @@ export function qoderHookFallbackOnly(sdkHooks: TraceEvent[], fallback: TraceEve
     sdkCounts.set(key, remaining - 1)
     return false
   })
+}
+
+function qoderProviderTurnId(message: Record<string, unknown>): string | undefined {
+  for (const key of ['promptId', 'prompt_id']) {
+    if (typeof message[key] === 'string' && message[key]) return message[key]
+  }
+  return undefined
+}
+
+function uniqueId(ids: Set<string>): string | undefined {
+  return ids.size === 1 ? [...ids][0] : undefined
+}
+
+export function qoderProviderTurnIdFromLog(text: string, sessionId?: string): string | undefined {
+  const sdkPromptIds = new Set<string>()
+  const rootTurnIds = new Set<string>()
+  for (const line of text.split('\n')) {
+    const match = line.match(/^\S+\s+\S+\s+\[([^\]]+)\]\s+(input\.prompt\.received|input\.prompt\.submitted|turn\.started)\s+(.+)$/)
+    if (!match) continue
+    const context = fields(match[1])
+    const detail = fields(match[3])
+    if (sessionId && context.session !== sessionId) continue
+    if (!context.turn || context.turn === context.session) continue
+    if (match[2] === 'input.prompt.received' && detail.query_source === 'sdk') {
+      sdkPromptIds.add(context.turn)
+    } else if (detail.is_subagent === 'false') {
+      rootTurnIds.add(context.turn)
+    }
+  }
+  return sdkPromptIds.size > 0 ? uniqueId(sdkPromptIds) : uniqueId(rootTurnIds)
 }
 
 async function qoderHookLog(pid: number): Promise<string> {
@@ -306,6 +337,15 @@ export function createQoderAdapter(): ProviderAdapter {
       const controller = new AbortController()
       let stopped = false
       let externalSessionId = request.resume
+      let providerTurnId: string | undefined
+      let providerTurnIdAmbiguous = false
+      let providerStatus: 'completed' | 'failed' = 'completed'
+      const observeProviderTurnId = (value: string | undefined): void => {
+        if (!value || providerTurnIdAmbiguous) return
+        if (!providerTurnId) providerTurnId = value
+        else if (providerTurnId !== value) providerTurnIdAmbiguous = true
+      }
+      const currentProviderTurnId = (): string | undefined => providerTurnIdAmbiguous ? undefined : providerTurnId
       let q: Query | undefined
       let qoderPid: number | undefined
       let streamSettled = false
@@ -318,7 +358,7 @@ export function createQoderAdapter(): ProviderAdapter {
       let streamedText = ''
       const sdkHooks: TraceEvent[] = []
       const ctx: NormalizeCtx = { runId: request.runId, cwd: request.cwd, newId, now: () => new Date().toISOString() }
-      const promise = (async () => {
+      const promise: Promise<ProviderRunResult> = (async () => {
         q = query({
           prompt: request.prompt,
           options: {
@@ -332,7 +372,8 @@ export function createQoderAdapter(): ProviderAdapter {
                   rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
                 }, 1000)
               },
-              request.permissionMode
+              request.permissionMode,
+              request.managedRecorder === true
             ),
             ...(request.model && !request.effort ? { model: request.model.id } : {}),
             ...(request.model && request.effort
@@ -414,12 +455,14 @@ export function createQoderAdapter(): ProviderAdapter {
           } as never
         })
         let statuses: McpServerStatus[] | undefined
+        let terminalError: unknown
         try {
           try {
             await Promise.race([
               (async () => {
                 for await (const message of q!) {
                   const raw = message as unknown as Record<string, unknown>
+                  observeProviderTurnId(qoderProviderTurnId(raw))
                   if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
                     externalSessionId = raw.session_id
                     request.onExternalSessionId?.(raw.session_id)
@@ -429,6 +472,9 @@ export function createQoderAdapter(): ProviderAdapter {
                       name: server.name,
                       status: server.status
                     }))
+                  }
+                  if (raw.type === 'result' && (raw.subtype !== 'success' || raw.is_error === true)) {
+                    providerStatus = 'failed'
                   }
                   for (const rawEvent of normalizeSdkMessage(message, ctx)) {
                     const event = qoderTrace(rawEvent)
@@ -451,7 +497,7 @@ export function createQoderAdapter(): ProviderAdapter {
               unexpectedExit
             ])
           } catch (error) {
-            if (!providerFailureSeen) throw error
+            if (!providerFailureSeen) terminalError = error
           }
         } finally {
           streamSettled = true
@@ -459,15 +505,20 @@ export function createQoderAdapter(): ProviderAdapter {
           try {
             await q.close()
           } catch (error) {
-            if (!providerFailureSeen) throw error
+            if (!providerFailureSeen && terminalError == null) terminalError = error
           }
         }
-        if (process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0' && qoderPid) {
+        const logHooksEnabled = process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0'
+        if ((request.managedRecorder === true || logHooksEnabled) && qoderPid) {
           try {
-            const fallback = parseQoderHookLog(request.runId, await qoderHookLog(qoderPid), externalSessionId)
-            for (const event of qoderHookFallbackOnly(sdkHooks, fallback)) request.emit(event)
+            const log = await qoderHookLog(qoderPid)
+            observeProviderTurnId(qoderProviderTurnIdFromLog(log, externalSessionId))
+            if (logHooksEnabled) {
+              const fallback = parseQoderHookLog(request.runId, log, externalSessionId)
+              for (const event of qoderHookFallbackOnly(sdkHooks, fallback)) request.emit(event)
+              hookFallbackObserved = true
+            }
             lastHookFallbackError = undefined
-            hookFallbackObserved = true
           } catch (error) {
             lastHookFallbackError = String((error as Error).message)
             request.emit({
@@ -476,17 +527,29 @@ export function createQoderAdapter(): ProviderAdapter {
               runtimeMetadata: { source: 'qoder_cli_log', capability: 'hooks' }
             })
           }
-        } else if (process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0' && !qoderPid) {
-          lastHookFallbackError = 'Qoder Hook fallback could not identify the current CLI process'
+        } else if ((request.managedRecorder === true || logHooksEnabled) && !qoderPid) {
+          lastHookFallbackError = 'Qoder log fallback could not identify the current CLI process'
         }
-        return { externalSessionId, stopped, mcp: statuses ? qoderMcpSnapshot(statuses) : undefined }
+        if (terminalError != null) throw terminalError
+        return {
+          externalSessionId,
+          providerTurnId: currentProviderTurnId(),
+          stopped,
+          status: stopped ? 'interrupted' : providerStatus,
+          mcp: statuses ? qoderMcpSnapshot(statuses) : undefined
+        }
       })()
       const interrupt = (): void => {
         stopped = true
         controller.abort()
         void q?.interrupt().catch(() => {})
       }
-      return { promise, interrupt, getExternalSessionId: () => externalSessionId }
+      return {
+        promise,
+        interrupt,
+        getExternalSessionId: () => externalSessionId,
+        getProviderTurnId: currentProviderTurnId
+      }
     },
     skills: {
       list: async (context) => {

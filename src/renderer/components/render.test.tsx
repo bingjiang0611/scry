@@ -521,6 +521,42 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(footer).not.toContain('<span class="lbl">tools</span> <b>2</b>')
   })
 
+  it('Header 错误数只统计失败 tool_result，不把结果复制到同 ID Hook', () => {
+    const sharedHooks = Array.from({ length: 10 }, (_, index) =>
+      ev({
+        id: `hook-${index}`,
+        kind: 'hook',
+        stage: 'hook_response',
+        toolUseId: 'grep-failed',
+        hookName: 'PostToolUse:Grep',
+        hookEvent: 'PostToolUse',
+        isError: index === 0
+      })
+    )
+    const failedTools = ['grep-failed', 'bash-1', 'bash-2', 'bash-3', 'bash-4', 'bash-5'].flatMap((toolUseId) => [
+      ev({ id: `${toolUseId}-start`, kind: 'tool', stage: `tool:${toolUseId === 'grep-failed' ? 'Grep' : 'Bash'}`, tool: toolUseId === 'grep-failed' ? 'Grep' : 'Bash', toolUseId }),
+      ev({ id: `${toolUseId}-result`, kind: 'tool', stage: 'tool_result', tool: toolUseId === 'grep-failed' ? 'Grep' : 'Bash', toolUseId, isError: true })
+    ])
+    const errorTurn: Turn = {
+      runId: 'qoder-errors',
+      userText: 'work',
+      done: true,
+      items: [
+        ...failedTools,
+        ...sharedHooks,
+        ev({ id: 'hook-no-id', kind: 'hook', stage: 'hook_response', hookName: 'SessionStart', hookEvent: 'SessionStart', isError: true })
+      ]
+    }
+
+    const errorHtml = renderToStaticMarkup(<AssistantTurn turn={errorTurn} selectedId={null} onSelect={() => {}} />)
+    const header = errorHtml.match(/<div class="who">[\s\S]*?<\/div>/)?.[0] ?? ''
+
+    expect(header).toContain('err <b>6</b>')
+    expect(header).not.toContain('err <b>13</b>')
+    expect(errorHtml).toContain('失败 1')
+    expect(errorHtml).not.toContain('失败 10')
+  })
+
   it('turn 顶部与 footer 共用逻辑调用口径，不把 Skill 内部路径证据重复计数', () => {
     const ordinaryTools = Array.from({ length: 40 }, (_, index) =>
       ev({

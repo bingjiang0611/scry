@@ -109,6 +109,11 @@ function transcriptPathOf(payload: Record<string, unknown>): string | undefined 
 function promptOf(payload: Record<string, unknown>): string | undefined {
   const direct = stringAt(payload, 'prompt', 'user_prompt', 'userPrompt', 'text')
   if (direct) return direct
+  const rawQoder = nestedRecord(payload, 'raw_qoder_payload')
+  if (rawQoder) {
+    const rawPrompt = stringAt(rawQoder, 'prompt', 'user_prompt', 'userPrompt', 'text')
+    if (rawPrompt) return rawPrompt
+  }
   const message = payload.message
   if (typeof message === 'string' && message.trim()) return message
   const messageRecord = nestedRecord(payload, 'message')
@@ -138,7 +143,10 @@ function toolUseIdOf(payload: Record<string, unknown>): string | undefined {
   return stringAt(payload, 'tool_use_id', 'toolUseId', 'call_id', 'callId', 'id')
 }
 
-function providerTurnIdOf(payload: Record<string, unknown>): string | undefined {
+function providerTurnIdOf(payload: Record<string, unknown>, provider?: ProviderId): string | undefined {
+  const qoderPromptId = stringAt(payload, 'prompt_id', 'promptId')
+    ?? stringAt(nestedRecord(payload, 'raw_qoder_payload') ?? {}, 'prompt_id', 'promptId')
+  if (qoderPromptId || provider === 'qoder') return qoderPromptId
   return stringAt(payload, 'turn_id', 'turnId')
     ?? stringAt(nestedRecord(payload, 'task') ?? {}, 'turn_id', 'turnId', 'id')
 }
@@ -1150,10 +1158,20 @@ async function parseTranscriptSnapshot(args: {
     newId: () => `transcript-${randomUUID()}`,
     now: () => new Date().toISOString()
   })
-  const matching = args.promptHash
-    ? [...turns].reverse().find((turn) => createHash('sha256').update(turn.userText).digest('hex') === args.promptHash)
+  const direct = args.providerTurnId
+    ? turns.find((turn) => turn.providerTurnId === args.providerTurnId)
     : undefined
-  const turn = matching ?? turns.at(-1)
+  const matching = args.promptHash
+    ? [...turns].reverse().find((turn) => {
+        const command = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>[\s\S]*?<command-args>\s*([\s\S]*?)\s*<\/command-args>/i.exec(turn.userText)
+        const candidates = [
+          turn.userText,
+          ...(command ? [`${command[1]}${command[2].trim() ? ` ${command[2].trim()}` : ''}`] : [])
+        ]
+        return candidates.some((candidate) => createHash('sha256').update(candidate).digest('hex') === args.promptHash)
+      })
+    : undefined
+  const turn = direct ?? matching ?? turns.at(-1)
   const events = turn?.items ?? []
   return {
     stable: args.stable,
@@ -1322,6 +1340,7 @@ async function beginOpenTurn(
   const turnIndex = session.lastTurnIndex + 1
   const prompt = promptOf(payload)
   const promptHash = prompt ? createHash('sha256').update(prompt).digest('hex') : undefined
+  const providerTurnId = providerTurnIdOf(payload, provider)
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
   const captureDir = join(turnRoot(root, generation), 'captures')
@@ -1345,7 +1364,7 @@ async function beginOpenTurn(
     ...(promptHash ? { promptHash } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
-    ...(providerTurnIdOf(payload) ? { providerTurnId: providerTurnIdOf(payload) } : {}),
+    ...(providerTurnId ? { providerTurnId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
     captures
   }
@@ -1460,7 +1479,9 @@ async function finalizeOpenTurn(
   )
   const hasHookEvidence = events.some((event) => event.kind === 'hook')
   const evidence = aggregateTurnEvidence({
-    userText: transcript.userText ?? open.prompt,
+    userText: open.provider === 'qoder'
+      ? open.prompt ?? transcript.userText
+      : transcript.userText ?? open.prompt,
     events,
     source: transcript.observed ? 'provider_transcript+lifecycle_hooks' : 'lifecycle_hooks',
     observable: {
@@ -1573,10 +1594,17 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     const result = await withDirectoryLock(sessionLock(enablement.dataRoot, input.provider, sessionId), async () => {
       const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
       let open = await readJson<OpenTurnState>(openPath(root))
-      const incomingProviderTurnId = providerTurnIdOf(input.payload)
+      const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
       if (START_EVENTS.has(input.event)) {
         const providerTurnId = incomingProviderTurnId
         const startFingerprint = stableHash({ event: input.event, payload: input.payload })
+        const sameManagedQoderPrompt = input.provider === 'qoder' &&
+          input.managed === true &&
+          open?.managedByScry === true &&
+          !providerTurnId &&
+          !open.providerTurnId &&
+          !!open.prompt &&
+          open.prompt === promptOf(input.payload)
         if (
           providerTurnId &&
           providerTurnId !== open?.providerTurnId &&
@@ -1584,7 +1612,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         ) return { status: 'duplicate' as const }
         if (open && (
           open.startFingerprint === startFingerprint ||
-          (providerTurnId && open.providerTurnId === providerTurnId)
+          (providerTurnId && open.providerTurnId === providerTurnId) ||
+          sameManagedQoderPrompt
         )) return { status: 'duplicate' as const }
         if (open) {
           if (open.managedByScry && !input.managed) {

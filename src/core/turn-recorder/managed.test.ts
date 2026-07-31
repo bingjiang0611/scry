@@ -80,6 +80,99 @@ async function startManaged(root: string, sessionId = 'session-1'): Promise<void
 }
 
 describe('managed canonical recorder', () => {
+  it('Codex 非 completed 轮次仍保持 exact assistant 的原有 fail-closed 语义', async () => {
+    const root = await workspace()
+    await startManaged(root)
+    const evidence = aggregateTurnEvidence({
+      userText: '/rate-workflow 1',
+      events: [{
+        id: 'result',
+        ts: timing.completedAt,
+        runId: 'run-1',
+        kind: 'harness',
+        stage: 'result',
+        durationMs: timing.durationMs
+      }],
+      source: 'scry_provider_adapter'
+    })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'codex',
+      sessionId: 'session-1',
+      runId: 'run-1',
+      providerTurnId: 'turn-1',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'failed',
+      archiveFingerprint: stableHash({ runId: 'run-1', evidence, timing })
+    })).rejects.toThrow('requires non-empty exact assistant evidence')
+  })
+
+  it('Qoder hook 未暴露 promptId 时先去重 provisional open，再绑定 App 取得的 native turn ID', async () => {
+    const root = await workspace()
+    const direct = {
+      session_id: 'qoder-session',
+      prompt: '/rate-workflow 1\n\n[attachment injected for Provider]',
+      timestamp: timing.startedAt
+    }
+    const bridge = {
+      session_id: 'qoder-session',
+      prompt: direct.prompt,
+      turn_id: 'bridge-envelope-id',
+      raw_qoder_payload: direct,
+      timestamp: timing.startedAt
+    }
+
+    await expect(handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root, managed: true, payload: direct
+    })).resolves.toMatchObject({ status: 'started' })
+    await expect(handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root, managed: true, payload: bridge
+    })).resolves.toMatchObject({ status: 'duplicate' })
+
+    const evidence = canonicalEvidence()
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'qoder',
+      sessionId: 'qoder-session',
+      runId: 'run-qoder',
+      providerTurnId: 'native-prompt-id',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint: stableHash({ runId: 'run-qoder', evidence, timing })
+    })).resolves.toMatchObject({ status: 'prepared' })
+
+    const open = JSON.parse(await readFile(join(
+      root, '.scry', 'runtime', 'qoder', safeKey('qoder-session'), 'open.json'
+    ), 'utf8')) as { providerTurnId?: string }
+    expect(open.providerTurnId).toBe('native-prompt-id')
+  })
+
+  it('pending recovery 按 provider 隔离，不让 Qoder 阻塞 Codex', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        promptId: 'qoder-turn',
+        prompt: '/rate-workflow 1',
+        timestamp: timing.startedAt
+      }
+    })
+
+    await expect(recoverManagedRecorderTurns(root, process.env, { provider: 'codex' }))
+      .resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(recoverManagedRecorderTurns(root, process.env, { provider: 'qoder' }))
+      .resolves.toEqual({ recovered: 0, pending: 1 })
+  })
+
   it('App-first 时序先持久化 prepared，archive 确认后才提交同一 evidence', async () => {
     const root = await workspace()
     await startManaged(root)

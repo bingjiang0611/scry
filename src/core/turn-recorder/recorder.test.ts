@@ -82,6 +82,118 @@ describe('turn recorder state machine', () => {
     expect((await listRecords(join(root, '.scry'))).map((record) => [record.generation, record.turnIndex])).toEqual([[1, 1], [2, 2]])
   })
 
+  it('Qoder 同一 promptId 的直连与 bridge 包装只开启一轮', async () => {
+    const root = await workspace()
+    const direct = payload('q1', { prompt: '/rate-workflow 1', promptId: 'qoder-turn-1' })
+    const bridged = payload('q1', {
+      prompt: '/rate-workflow 1',
+      turn_id: 'bridge-envelope-id',
+      raw_qoder_payload: { ...direct, promptId: 'qoder-turn-1' }
+    })
+
+    expect(await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: direct }))
+      .toMatchObject({ status: 'started' })
+    expect(await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: bridged }))
+      .toMatchObject({ status: 'duplicate' })
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('q1', { promptId: 'qoder-turn-1', timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    expect(await listRecords(join(root, '.scry'))).toMatchObject([
+      { providerTurnId: 'qoder-turn-1', turnIndex: 1, status: 'completed' }
+    ])
+  })
+
+  it('Qoder 相同 prompt 但不同 promptId 仍保留两个真实轮次', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('q1', { prompt: 'same', promptId: 'qoder-turn-1' })
+    })
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('q1', {
+        prompt: 'same',
+        promptId: 'qoder-turn-2',
+        timestamp: '2026-07-19T12:00:02.000Z'
+      })
+    })
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('q1', { promptId: 'qoder-turn-2', timestamp: '2026-07-19T12:00:03.000Z' })
+    })
+
+    expect((await listRecords(join(root, '.scry'))).map((record) => [record.providerTurnId, record.status])).toEqual([
+      ['qoder-turn-1', 'interrupted'],
+      ['qoder-turn-2', 'completed']
+    ])
+  })
+
+  it('Qoder compact transcript 保留原始 hook prompt，并合并 compact 前后 assistant', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'qoder-session.jsonl')
+    await writeFile(transcript, [
+      JSON.stringify({
+        type: 'user',
+        promptId: 'qoder-turn-1',
+        message: {
+          role: 'user',
+          content: '<command-name>/rate-native-rate-workflow</command-name><command-args>84959911</command-args>'
+        }
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        promptId: 'qoder-turn-1',
+        message: { content: [{ type: 'text', text: 'compact 前' }] }
+      }),
+      JSON.stringify({ type: 'system', subtype: 'compact_boundary', isCompactSummary: true }),
+      JSON.stringify({
+        type: 'user',
+        isCompactSummary: true,
+        message: { role: 'user', content: [{ type: 'text', text: 'synthetic summary' }] }
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        promptId: 'qoder-turn-1',
+        message: { content: [{ type: 'text', text: 'compact 后' }] }
+      })
+    ].join('\n'))
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('q1', {
+        prompt: '/rate-native-rate-workflow 84959911',
+        promptId: 'qoder-turn-1',
+        transcript_path: transcript
+      })
+    })
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('q1', {
+        promptId: 'qoder-turn-1',
+        transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.user.value?.text).toBe('/rate-native-rate-workflow 84959911')
+    expect(record.assistant.value?.text).toBe('compact 前compact 后')
+    expect(record.assistant.value?.text).not.toContain('synthetic summary')
+  })
+
   it('Codex 连续两轮输入相同 prompt 时按不同时间边界分别记录', async () => {
     const root = await workspace()
     await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: root, payload: payload('c1', { prompt: 'same' }) })

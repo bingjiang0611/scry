@@ -1,8 +1,16 @@
 import { EventEmitter } from 'node:events'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 
-const sdk = vi.hoisted(() => ({ query: vi.fn(), close: vi.fn(), spawn: vi.fn() }))
+const sdk = vi.hoisted(() => ({
+  query: vi.fn(),
+  close: vi.fn(),
+  spawn: vi.fn(),
+  runtimeCliEnv: vi.fn((_base?: Record<string, string>, _options: { managedRecorder?: boolean } = {}) => ({}))
+}))
 
 vi.mock('node:child_process', () => ({ spawn: sdk.spawn }))
 
@@ -13,11 +21,16 @@ vi.mock('@qoder-ai/qoder-agent-sdk', () => ({
 
 vi.mock('../claude-locate', () => ({
   resolveRuntimeCliBin: () => '/bin/qodercli',
-  runtimeCliEnv: () => ({}),
+  runtimeCliEnv: sdk.runtimeCliEnv,
   shellEnv: () => ({})
 }))
 
-import { createQoderAdapter, parseQoderHookLog, qoderHookFallbackOnly } from './qoder'
+import {
+  createQoderAdapter,
+  parseQoderHookLog,
+  qoderHookFallbackOnly,
+  qoderProviderTurnIdFromLog
+} from './qoder'
 
 describe('Qoder provider adapter', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -135,6 +148,51 @@ describe('Qoder provider adapter', () => {
       costUsd: undefined,
       runtimeMetadata: expect.objectContaining({ reportedZeroUsage: true })
     })
+    expect(sdk.runtimeCliEnv).toHaveBeenCalledWith(undefined, {})
+  })
+
+  it('managed Qoder 返回 native promptId 与失败状态，并只在显式启用时注入 managed 环境', async () => {
+    sdk.runtimeCliEnv.mockImplementation((_base?: Record<string, string>, options: { managedRecorder?: boolean } = {}) =>
+      options?.managedRecorder ? { SCRY_RECORDER_MANAGED: '1' } : {}
+    )
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'assistant',
+          session_id: 'qoder-session',
+          promptId: 'qoder-turn',
+          message: { content: [{ type: 'text', text: 'failed' }] }
+        }
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'qoder-session',
+          promptId: 'qoder-turn',
+          duration_ms: 10,
+          duration_api_ms: 8,
+          errors: ['failed']
+        }
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+
+    const handle = createQoderAdapter().run({
+      runId: 'run-managed',
+      prompt: 'work',
+      cwd: '/repo',
+      attachments: [],
+      managedRecorder: true,
+      emit: vi.fn()
+    })
+
+    await expect(handle.promise).resolves.toMatchObject({
+      externalSessionId: 'qoder-session',
+      providerTurnId: 'qoder-turn',
+      status: 'failed'
+    })
+    expect(handle.getProviderTurnId?.()).toBe('qoder-turn')
+    expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({ SCRY_RECORDER_MANAGED: '1' })
   })
 
   it('bridges AskUserQuestion answers through the Qoder SDK permission callback', async () => {
@@ -349,6 +407,59 @@ describe('Qoder provider adapter', () => {
     }))
   })
 
+  it('SDK 流抛错时仍从 root log 绑定 managed native turn ID', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'scry-qoder-log-test-'))
+    const runLogDir = join(configDir, 'logs', 'runs', 'run-p125')
+    await mkdir(runLogDir, { recursive: true })
+    await writeFile(join(runLogDir, 'qodercli.log'), [
+      '2026-07-31T16:28:19.807+08:00 INFO  [session=qoder-session turn=native-prompt] input.prompt.received text_preview="work" query_source="sdk"',
+      '2026-07-31T16:28:38.706+08:00 INFO  [session=qoder-session turn=native-prompt] turn.started is_subagent=false'
+    ].join('\n'))
+    const previousConfigDir = process.env.QODER_CONFIG_DIR
+    const previousLogHooks = process.env.SCRY_QODER_LOG_HOOKS
+    process.env.QODER_CONFIG_DIR = configDir
+    process.env.SCRY_QODER_LOG_HOOKS = '0'
+    try {
+      const child = Object.assign(new EventEmitter(), { pid: 125, kill: vi.fn() })
+      sdk.spawn.mockReturnValue(child)
+      sdk.query.mockImplementation(({ options }) => {
+        options.spawnQoderCLIProcess({
+          command: '/bin/qodercli',
+          args: [],
+          cwd: '/repo',
+          env: {},
+          signal: new AbortController().signal
+        })
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { type: 'system', subtype: 'init', session_id: 'qoder-session', mcp_servers: [] }
+            throw new Error('stream aborted')
+          },
+          close: vi.fn().mockResolvedValue(undefined),
+          interrupt: vi.fn().mockResolvedValue(undefined)
+        }
+      })
+
+      const handle = createQoderAdapter().run({
+        runId: 'run-interrupted',
+        prompt: 'work',
+        cwd: '/repo',
+        attachments: [],
+        managedRecorder: true,
+        emit: vi.fn()
+      })
+
+      await expect(handle.promise).rejects.toThrow('stream aborted')
+      expect(handle.getProviderTurnId?.()).toBe('native-prompt')
+    } finally {
+      if (previousConfigDir == null) delete process.env.QODER_CONFIG_DIR
+      else process.env.QODER_CONFIG_DIR = previousConfigDir
+      if (previousLogHooks == null) delete process.env.SCRY_QODER_LOG_HOOKS
+      else process.env.SCRY_QODER_LOG_HOOKS = previousLogHooks
+      await rm(configDir, { recursive: true, force: true })
+    }
+  })
+
   it('promotes the Qoder SDK hook name to its runtime command', async () => {
     const command = '"${QODER_PLUGIN_ROOT}/bin/qodersec-launch.cmd" ensure-deps --hook-event SessionStart'
     sdk.query.mockReturnValue({
@@ -403,6 +514,27 @@ describe('Qoder provider adapter', () => {
       expect.objectContaining({ hookCommand: 'project-hook', hookOutcome: 'success', hookExitCode: 0 }),
       expect.objectContaining({ hookCommand: 'user-hook', hookOutcome: 'error', hookExitCode: 1, isError: true })
     ])
+  })
+
+  it('从 Qoder root prompt 日志取 native turn identity，不把 hook 的 session turn 当成 promptId', () => {
+    const log = [
+      '2026-07-31T16:28:19.831+08:00 INFO  [session=s1 turn=s1] hook.started hook_name="UserPromptSubmit" hook_event_name="UserPromptSubmit" source="project"',
+      '2026-07-31T16:28:19.807+08:00 INFO  [session=s1 turn=prompt-1] input.prompt.received text_preview="work" query_source="sdk"',
+      '2026-07-31T16:28:38.705+08:00 INFO  [session=s1 turn=prompt-1] input.prompt.submitted is_subagent=false',
+      '2026-07-31T16:28:38.706+08:00 INFO  [session=s1 turn=prompt-1] turn.started is_subagent=false',
+      '2026-07-31T16:28:40.000+08:00 INFO  [session=s1 turn=child] turn.started is_subagent=true'
+    ].join('\n')
+
+    expect(qoderProviderTurnIdFromLog(log, 's1')).toBe('prompt-1')
+  })
+
+  it('Qoder 日志出现多个 SDK root prompt 时不猜 turn identity', () => {
+    const log = [
+      '2026-07-31T16:28:19.807+08:00 INFO  [session=s1 turn=prompt-1] input.prompt.received query_source="sdk"',
+      '2026-07-31T16:29:19.807+08:00 INFO  [session=s1 turn=prompt-2] input.prompt.received query_source="sdk"'
+    ].join('\n')
+
+    expect(qoderProviderTurnIdFromLog(log, 's1')).toBeUndefined()
   })
 
   it('deduplicates SDK and log hooks by command while preserving repeated log-only hooks', () => {
