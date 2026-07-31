@@ -159,25 +159,14 @@ describe('ViewChrome 顶栏', () => {
     expect(html).not.toContain('未检测到 agent')
   })
 
-  it('聊天页只保留视图切换，不再渲染 all/tool/skill/mcp 过滤 tab', () => {
+  it('聊天页只保留视图切换和面板入口，不混入集成入口', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
         cwd="/tmp/sample-workspace"
         view="chat"
         agent={undefined}
         showPanel
-        skillCount={3}
-        mcps={[
-          { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
-          { name: 'failed', scope: 'user', transport: 'stdio', detail: 'failed', enabled: true }
-        ]}
-        mcpLive={[
-          { name: 'connected', status: 'connected' },
-          { name: 'failed', status: 'failed' }
-        ]}
         onView={() => {}}
-        onSkills={() => {}}
-        onMcp={() => {}}
         onTogglePanel={() => {}}
         onToggleWorkspace={() => {}}
       />
@@ -187,48 +176,15 @@ describe('ViewChrome 顶栏', () => {
     expect(html).toContain('分段')
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('title="工作区文件"')
-    expect(html).toContain('title="Skills"')
-    expect(html).toContain('title="MCP"')
-    expect(html).toContain('aria-label="MCP · 1/2 已连接"')
-    expect(html).toContain('class="dot partial"')
-    expect(html).toContain('1/2')
     expect(html).toContain('文件')
+    expect(html).not.toContain('title="Skills"')
+    expect(html).not.toContain('title="MCP"')
     expect(html).not.toContain('sample-workspace')
     expect(html).not.toContain('cwd-pill')
     expect(html).not.toContain('tb-filter')
     expect(html).not.toContain('&gt;all&lt;')
     expect(html).not.toContain('&gt;tool&lt;')
     expect(html).not.toContain('&gt;mcp&lt;')
-  })
-
-  it('MCP 状态排除 disabled，并把 runtime-only 连接计入真实分母', () => {
-    const renderMcp = (mcps: ComponentProps<typeof ViewChrome>['mcps'], mcpLive: ComponentProps<typeof ViewChrome>['mcpLive']) => renderToStaticMarkup(
-      <ViewChrome
-        cwd="/tmp/sample-workspace"
-        view="chat"
-        agent={undefined}
-        showPanel={false}
-        mcps={mcps}
-        mcpLive={mcpLive}
-        onView={() => {}}
-        onMcp={() => {}}
-        onTogglePanel={() => {}}
-      />
-    )
-
-    const disabledHtml = renderMcp([
-      { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
-      { name: 'disabled', scope: 'user', transport: 'stdio', detail: 'disabled', enabled: false }
-    ], [
-      { name: 'connected', status: 'connected' },
-      { name: 'disabled', status: 'disabled' }
-    ])
-    expect(disabledHtml).toContain('aria-label="MCP · 1/1 已连接"')
-    expect(disabledHtml).toContain('class="dot online"')
-
-    const runtimeOnlyHtml = renderMcp([], [{ name: 'runtime-only', status: 'connected' }])
-    expect(runtimeOnlyHtml).toContain('aria-label="MCP · 1/1 已连接"')
-    expect(runtimeOnlyHtml).toContain('class="dot online"')
   })
 })
 
@@ -417,6 +373,57 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
 })
 
 describe('Sidebar 项目分组', () => {
+  it('Skill 和 MCP 与分析、诊断同组展示，并保留 MCP 真实连接状态', () => {
+    const renderIntegrations = (
+      mcps: ComponentProps<typeof Sidebar>['mcps'],
+      mcpLive: ComponentProps<typeof Sidebar>['mcpLive']
+    ) => renderToStaticMarkup(
+      <Sidebar
+        projects={[]}
+        activeCwd={null}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onDelete={() => {}}
+        onAnalytics={() => {}}
+        onDiagnostics={() => {}}
+        onSkills={() => {}}
+        skillCount={3}
+        onMcp={() => {}}
+        mcps={mcps}
+        mcpLive={mcpLive}
+      />
+    )
+
+    const disabledHtml = renderIntegrations([
+      { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
+      { name: 'disabled', scope: 'user', transport: 'stdio', detail: 'disabled', enabled: false }
+    ], [
+      { name: 'connected', status: 'connected' },
+      { name: 'disabled', status: 'disabled' }
+    ])
+    expect(disabledHtml).toContain('<nav class="sb-nav" aria-label="主要视图">')
+    expect(disabledHtml).toContain('title="Skills"')
+    expect(disabledHtml).toContain('title="MCP"')
+    expect(disabledHtml).toContain('<span class="sb-navmeta">3</span>')
+    expect(disabledHtml).toContain('aria-label="MCP · 1/1 已连接"')
+    expect(disabledHtml).toContain('class="sb-navdot online"')
+    expect(disabledHtml.indexOf('诊断')).toBeLessThan(disabledHtml.indexOf('title="Skills"'))
+
+    const partialHtml = renderIntegrations([
+      { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
+      { name: 'failed', scope: 'user', transport: 'stdio', detail: 'failed', enabled: true }
+    ], [
+      { name: 'connected', status: 'connected' },
+      { name: 'failed', status: 'failed' }
+    ])
+    expect(partialHtml).toContain('aria-label="MCP · 1/2 已连接"')
+    expect(partialHtml).toContain('class="sb-navdot partial"')
+
+    const runtimeOnlyHtml = renderIntegrations([], [{ name: 'runtime-only', status: 'connected' }])
+    expect(runtimeOnlyHtml).toContain('aria-label="MCP · 1/1 已连接"')
+    expect(runtimeOnlyHtml).toContain('class="sb-navdot online"')
+  })
+
   it('同名项目标题带完整路径提示，hover 时能区分 cwd', () => {
     const html = renderToStaticMarkup(
       <Sidebar
@@ -2366,6 +2373,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).not.toContain('BILLING GUARDIAN')
     expect(html).not.toContain('Source reconciliation')
     expect(html).not.toContain('尚未导入扫描报告')
+    expect(html).not.toContain('class="ov-title"')
+    expect(html).not.toContain('session dea0c990')
   })
 
   it('账单卫士 tab：标题、口径和默认异常空态尽量中文展示', () => {
@@ -2655,15 +2664,13 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).not.toContain('blocked') // 不冒充蓝本 demo 的"已阻断"语义
   })
 
-  it('topbar 状态点使用真实会话 verdict，不被 selected 事件覆盖成 ok', () => {
+  it('移除冗余 topbar 状态行后，判决卡仍使用真实会话 verdict', () => {
     const { t, dangerEv } = dangerTurn()
     const html = renderToStaticMarkup(
       <OverviewPanel turns={[t]} selected={dangerEv} onSelect={() => {}} usage={null} stats={null} />
     )
-    expect(html).toContain(
-      'class="sdot bad" title="会话状态：1 处高危操作" aria-label="会话状态：1 处高危操作"'
-    )
-    expect(html).not.toContain('class="sdot ok" title="会话状态')
+    expect(html).toContain('<div class="judgement bad"><span class="sdot bad"></span>1 处高危操作</div>')
+    expect(html).not.toContain('title="会话状态')
   })
 
   it('busy → 静态运行中状态（仅在真 busy 时）', () => {
@@ -3064,6 +3071,23 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     )
     expect(html).toContain('pending')
     expect(html).not.toContain('connected')
+  })
+
+  it('Provider 返回未知运行态时诚实降级展示，不让整个 renderer 崩溃', () => {
+    const html = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ name: 'legacy', scope: 'user', transport: 'stdio', detail: 'legacy mcp', enabled: true }]}
+        status={{}}
+        live={[{ name: 'legacy', status: 'disconnected' } as unknown as ComponentProps<typeof McpModal>['live'][number]]}
+        refreshing={false}
+        onTest={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(html).toContain('class="mcp-neutral"')
+    expect(html).toContain('disconnected')
   })
 })
 
