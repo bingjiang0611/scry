@@ -7,8 +7,6 @@ import { homedir } from 'node:os'
 import { delimiter, join, posix, win32 } from 'node:path'
 import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
 
-export const QODER_NODE_BIN = `${homedir()}/.nvm/versions/node/v22.22.1/bin`
-export const QODER_NPM_BIN = `${QODER_NODE_BIN}/qodercli`
 export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex'
 
 // GUI app 从 Finder/Dock 启动走 launchd，PATH 极简（/usr/bin:/bin），不 source 用户的 .zshrc，
@@ -168,7 +166,7 @@ function fastAgentPath(id: string, bin: string): string | undefined {
     const configured = process.env.SCRY_CODEX_PATH?.trim()
     return firstExisting([configured, onProcessPath, CODEX_APP_BIN])
   }
-  if (id === 'qoder') return firstExisting([qoderPathFromEnv(), onProcessPath, QODER_NPM_BIN])
+  if (id === 'qoder') return firstExisting([qoderPathFromEnv(), onProcessPath])
   if (id === 'opencode') {
     const configured = process.env.SCRY_OPENCODE_PATH?.trim()
     return firstExisting([
@@ -199,7 +197,6 @@ function versionProbePath(): string {
   // 启动昂贵的登录 shell。非标准安装仍由完整 PATH fallback 负责发现。
   return [
     process.env.PATH ?? '',
-    QODER_NODE_BIN,
     ...nvmBins(),
     `${homedir()}/.local/bin`,
     `${homedir()}/.opencode/bin`,
@@ -293,32 +290,29 @@ function qoderPathFromEnv(): string {
   return configured && existsSync(configured) ? configured : ''
 }
 
-export function isAcceptedQoderPath(path: string, target: string = QODER_NPM_BIN): boolean {
-  return !!path && (path === target || path.endsWith('/qodercli'))
+export function isAcceptedQoderPath(path: string): boolean {
+  return !!path && path.endsWith('/qodercli')
 }
 
 export function selectQoderBinCandidate(args: {
   configured?: string
   onPath?: string
-  npmBin?: string
-  npmExists: boolean
 }): string | undefined {
-  const target = args.npmBin ?? QODER_NPM_BIN
-  if (args.configured && isAcceptedQoderPath(args.configured, target)) return args.configured
-  if (args.onPath && isAcceptedQoderPath(args.onPath, target)) return args.onPath
-  return args.npmExists ? target : undefined
+  if (args.configured && isAcceptedQoderPath(args.configured)) return args.configured
+  if (args.onPath && isAcceptedQoderPath(args.onPath)) return args.onPath
+  return undefined
 }
 
 function resolveQoderBin(): string | undefined {
   const configured = qoderPathFromEnv()
   const onPath = which('qodercli')
-  return selectQoderBinCandidate({ configured, onPath, npmExists: existsSync(QODER_NPM_BIN) })
+  return selectQoderBinCandidate({ configured, onPath })
 }
 
 async function resolveQoderBinAsync(): Promise<string | undefined> {
   const configured = qoderPathFromEnv()
   const onPath = await whichAsync('qodercli')
-  return selectQoderBinCandidate({ configured, onPath, npmExists: existsSync(QODER_NPM_BIN) })
+  return selectQoderBinCandidate({ configured, onPath })
 }
 
 export function selectCodexBinCandidate(args: {
@@ -497,6 +491,6 @@ export function runtimeCliEnv(
       SCRY_RECORDER_MANAGED: '1',
       SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION
     } : {}),
-    PATH: [QODER_NODE_BIN, runtimeBase.PATH ?? process.env.PATH ?? ''].filter(Boolean).join(delimiter)
+    PATH: runtimeBase.PATH ?? process.env.PATH ?? ''
   })
 }

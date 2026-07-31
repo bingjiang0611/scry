@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import {
-  QODER_NODE_BIN,
   appBundleRootForExecutable,
   detectAgentsFast,
   isAcceptedQoderPath,
@@ -35,20 +34,19 @@ describe('runtime CLI discovery constraints', () => {
   })
 
   it('accepts qodercli from either npm or an application bundle', () => {
-    expect(isAcceptedQoderPath(npmBin, npmBin)).toBe(true)
-    expect(isAcceptedQoderPath(appBundleBin, npmBin)).toBe(true)
+    expect(isAcceptedQoderPath(npmBin)).toBe(true)
+    expect(isAcceptedQoderPath(appBundleBin)).toBe(true)
   })
 
   it('prefers an explicit compatible qodercli and lets the SDK validate its wire protocol', () => {
     expect(
       selectQoderBinCandidate({
         configured: appBundleBin,
-        onPath: appBundleBin,
-        npmBin,
-        npmExists: true
+        onPath: appBundleBin
       })
     ).toBe(appBundleBin)
-    expect(selectQoderBinCandidate({ configured: appBundleBin, onPath: appBundleBin, npmBin, npmExists: false })).toBe(appBundleBin)
+    expect(selectQoderBinCandidate({ configured: appBundleBin, onPath: appBundleBin })).toBe(appBundleBin)
+    expect(selectQoderBinCandidate({})).toBeUndefined()
   })
 
   it('prefers an explicit Claude path, then the native installer, before a PATH copy', () => {
@@ -133,7 +131,7 @@ describe('runtime CLI discovery constraints', () => {
     }
   })
 
-  it('pins scry from the original PATH before prepending the Qoder Node directory', () => {
+  it('pins scry from the original PATH without prepending a fixed Qoder Node directory', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-cli-path-'))
     try {
       const scry = join(dir, 'scry')
@@ -141,7 +139,7 @@ describe('runtime CLI discovery constraints', () => {
       chmodSync(scry, 0o755)
       const env = runtimeCliEnv({ PATH: `${dir}:/usr/bin:/bin` })
       expect(env.SCRY_CLI_PATH).toBe(scry)
-      expect(env.PATH?.split(':').slice(0, 4)).toEqual([QODER_NODE_BIN, dir, '/usr/bin', '/bin'])
+      expect(env.PATH).toBe(`${dir}:/usr/bin:/bin`)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
