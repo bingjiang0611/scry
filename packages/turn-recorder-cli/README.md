@@ -5,7 +5,7 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.8 \
+npm install -g @ali/scry-turn-recorder@0.2.9 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
