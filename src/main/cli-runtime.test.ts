@@ -37,14 +37,15 @@ exit 2
     ).not.toThrow()
   })
 
-  it('rejects non-target Qoder versions as version_probe failures', () => {
+  it.each(['0.9.0', '1.0.2', '1.1.5', '99.0.0'])('accepts Qoder %s when the required CLI surface is present', (version) => {
     const cli = fakeCli(`
-if [ "$1" = "-v" ]; then echo "2.0.0"; exit 0; fi
+# local bundle strings: --output-format --cwd --permission-mode --add-dir --mcp-config
+if [ "$1" = "-v" ]; then echo "${version}"; exit 0; fi
 exit 2
 `)
     expect(() =>
       assertRuntimeCliSurface({ runtimeProvider: 'qoder_cli', executablePath: cli, env: process.env as Record<string, string> })
-    ).toThrow(AgentRuntimeError)
+    ).not.toThrow()
   })
 
   it('rejects Qoder bundles missing required local flags', () => {

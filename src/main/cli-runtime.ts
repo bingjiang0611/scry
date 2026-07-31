@@ -432,10 +432,6 @@ export function assertRuntimeCliSurface(opts: CliRuntimeOpts): void {
     if (!probeCommandOk(versionProbe)) {
       throw new Error(versionProbe.error || versionProbe.stderr.trim() || `${versionProbe.commandSummary} exited with ${versionProbe.exitCode ?? versionProbe.signal ?? 'unknown'}`)
     }
-    const version = versionProbe.stdout.trim()
-    if (opts.runtimeProvider === 'qoder_cli' && version !== '1.0.2') {
-      throw new Error(`expected qodercli 1.0.2, got ${version || 'unknown'}`)
-    }
     const required =
       opts.runtimeProvider === 'codex_cli'
         ? ['--json', '--cd', '--add-dir', '--sandbox', '--skip-git-repo-check']
@@ -482,7 +478,7 @@ function errorFor(
 }
 
 function nextActionFor(stage: RuntimeFailureStage, provider: RuntimeProvider): string {
-  if (stage === 'discovery') return provider === 'qoder_cli' ? '确认 npm qodercli 1.0.2 位于 Node 22 bin 目录' : '确认 CLI 在登录 shell PATH 中'
+  if (stage === 'discovery') return provider === 'qoder_cli' ? '确认 qodercli 可执行文件位于登录 shell PATH 中' : '确认 CLI 在登录 shell PATH 中'
   if (stage === 'version_probe') return '运行 --version/--help，确认 CLI flag surface 与 adapter 匹配'
   if (stage === 'spawn') return '检查可执行权限、cwd 是否存在、以及 GUI 环境 PATH'
   if (stage === 'protocol') return '检查 CLI 是否支持 stdin prompt 与结构化输出参数组合'
