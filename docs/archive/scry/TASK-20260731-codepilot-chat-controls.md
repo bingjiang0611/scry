@@ -121,6 +121,13 @@ Phase 1 通过，无待补信息。
   - `npm run dev -- --remoteDebuggingPort 9444` 成功启动真实 Electron，CDP target 为 `Scry`，
     preload 中 `start/stop/activeRun/.../runControls` 全部存在，页面无 ErrorBoundary。
   - 验收结束后停止本次 Electron 与专用 browser-harness daemon，9444 已关闭。
+  - 解锁后重新运行源码态真实 Electron；Computer Use 成功读取窗口 AX 树与截图，并完成物理焦点、
+    鼠标点击和弹层开关。
+  - `npm run install:mac` 重新执行 CLI/main/preload/renderer 构建、`better-sqlite3` arm64 rebuild
+    与 electron-builder 打包，随后明确替换 `/Applications/Scry.app`；安装 bundle 版本为 `0.2.0`。
+  - 已安装版本从 `/Applications/Scry.app/Contents/MacOS/Scry` 做两次冷启动。最终干净冷启动中，
+    打开现有 Codex 会话后约 10 秒原生模型目录收敛；页面无 ErrorBoundary，preload
+    `runControls` 可用，调试验收结束后 9445 已关闭。
 - **L3 受影响用户路径（Browser/CDP runtime probe）**:
   - 从侧栏点击已有 Codex 会话；确认左下 Skill/MCP footer 不再存在，右上顺序为
     `技能 / MCP / 文件 / 面板`。
@@ -134,9 +141,15 @@ Phase 1 通过，无待补信息。
     横向溢出。
   - 视觉复核时发现 Claude 多个 alias 的 displayName 重名，已改为仅在重名时追加 model id；
     发现 Skill pill 被压成竖排，已补 `nowrap` 并复拍通过。
-- **真实桌面窗口操作边界**: Electron 窗口已真实启动；Computer Use 因 macOS 处于锁屏态而无法执行
-  物理鼠标/焦点操作，未绕过锁屏。上述点击为该真实 Electron renderer 的 CDP 输入，不冒充
-  Computer Use 证据。
+- **L3 真实桌面窗口操作（Computer Use）**:
+  - 源码态用真实鼠标从右上角打开 Skill 弹窗，确认 109 条 Skill 可见；关闭后打开 MCP 弹窗，
+    确认 16 个原生 MCP 状态以 connected / pending / 需认证如实展示。
+  - 在真实窗口中核对 `GPT-5.6-Sol / 高 / 自动审查` 三项联动与视觉结果；未发送模型请求，验收后
+    恢复 `自动模型 / 默认审批`。
+  - 安装态用真实鼠标打开已有 Codex 会话，确认右上 `技能 / MCP / 文件 / 面板` 与 composer 控件
+    可见；再次核对 `GPT-5.6-Sol / 高 / 自动审查` 后复位。
+  - 临时远程调试实例已正常退出；最终通过 Launch Services 正常打开 `/Applications/Scry.app`，
+    当前保留 welcome 窗口供用户继续使用。
 - **四 Provider regression 边界**: 按 `scry-provider-regression` 的模式门禁，本次只做无模型
   catalog/preload preflight；用户未明确授权 4 家 × 10 轮及真实 Provider 配置 backup/sanitize，
   因此未启动昂贵完整协议，也未用 UI 选择器发真实模型 turn。
@@ -144,9 +157,9 @@ Phase 1 通过，无待补信息。
 ## 交付摘要
 
 - **最终状态**: 已完成
-- **完成时间**: 2026-07-31 01:15 CST
+- **完成时间**: 2026-07-31 10:50 CST（解锁后完成物理验收与重新安装）
 - **Commit**: 本文所在交付提交
-- **总耗时**: 约 1 小时 6 分钟
+- **总耗时**: 实施与自动验证约 1 小时 6 分钟；解锁后的物理验收、打包安装与冷启动复验约 25 分钟
 
 ## 复盘
 
