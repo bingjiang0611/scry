@@ -823,14 +823,29 @@ export function App() {
     workspace.removeSessionFromProjects(projectCwd, sessionId, providerId)
   }
 
-  const openSkills = async (): Promise<void> => {
-    await integrations.refreshSkills()
+  const openSkills = (): void => {
     setShowSkills(true)
+    if (!integrations.skillCapability && !integrations.skillsRefreshing) {
+      void integrations.refreshSkills()
+    }
   }
-  const openMcp = async (): Promise<void> => {
-    const cached = await integrations.refreshMcp() // 重开即重读 MCP 配置 + 当前 runtime 缓存的真实状态
+  const openMcp = (): void => {
     setShowMcp(true)
-    if (cached.length === 0) integrations.pullMcpLive()
+    if (!integrations.mcpCapability) {
+      void integrations.refreshMcp()
+        .then((runtime) => {
+          if (runtime.length === 0) return integrations.pullMcpLive()
+        })
+        .catch(() => {})
+      return
+    }
+    if (
+      !integrations.mcpRefreshing &&
+      integrations.mcpLive.length === 0 &&
+      integrations.mcps.some((mcp) => mcp.enabled)
+    ) {
+      void integrations.pullMcpLive().catch(() => {})
+    }
   }
 
   const activeRightPane = turnDiffReview ? reviewPane : workspaceOpen ? workspacePane : overviewPane
@@ -1252,6 +1267,7 @@ export function App() {
             <SkillsModal
               skills={integrations.skills}
               capability={integrations.skillCapability}
+              refreshing={integrations.skillsRefreshing}
               onToggle={integrations.toggleSkill}
               onRefresh={integrations.refreshSkills}
               onClose={() => setShowSkills(false)}
@@ -1262,6 +1278,7 @@ export function App() {
               mcps={integrations.mcps}
               status={integrations.mcpStatus}
               live={integrations.mcpLive}
+              configRefreshing={integrations.mcpConfigRefreshing}
               refreshing={integrations.mcpRefreshing}
               capability={integrations.mcpCapability}
               onTest={integrations.testMcp}
