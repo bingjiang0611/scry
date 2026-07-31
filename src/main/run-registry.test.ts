@@ -41,7 +41,7 @@ describe('RunRegistry', () => {
       { runId: string; done: boolean },
       { runId: string }
     >()
-    const state = { runId: 'run-a', done: false }
+    const state = { runId: 'run-a', done: false, providerSettled: false }
     registry.register(state, { runId: 'run-a' })
 
     state.done = true
@@ -49,5 +49,9 @@ describe('RunRegistry', () => {
     expect(registry.isFocused('run-a')).toBe(false)
     expect(registry.focusedState()).toBeNull()
     expect(registry.activeStates()).toEqual([])
+    expect(registry.unsettledStates()).toEqual([state])
+
+    state.providerSettled = true
+    expect(registry.unsettledStates()).toEqual([])
   })
 })

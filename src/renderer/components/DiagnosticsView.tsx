@@ -2,7 +2,8 @@
 // 诚实红线：scry 的 P3 是**观测不拦截**——审计日志按级别(danger/warn)统计并标"审计放行·未拦截"，
 // node/electron/db 大小 renderer 拿不到 → 用真实替代或诚实标注，不编。
 import { useMemo } from 'react'
-import type { DbStats, Diagnostics, McpLiveStatus, TraceEvent } from '@shared/trace'
+import type { DbStats, Diagnostics, McpLiveStatus, TraceEvent, UsageStats } from '@shared/trace'
+import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
 import type { DetectedAgent, McpMeta, ProjectMeta } from '../env'
 import { fmtTok, toolArg } from '../format'
 import type { Turn } from '../format'
@@ -63,6 +64,7 @@ export function DiagnosticsView({
   diag,
   mcpLive,
   mcps,
+  mcpCapability = null,
   stats,
   turns,
   projects,
@@ -73,10 +75,11 @@ export function DiagnosticsView({
   diag: Diagnostics | null
   mcpLive: McpLiveStatus[]
   mcps: McpMeta[]
+  mcpCapability?: CapabilityEnvelope<McpSnapshot> | null
   stats: DbStats | null
   turns: Turn[]
   projects: ProjectMeta[]
-  usage: { cost: number | null; tin: number | null; tout: number | null; turns: number } | null
+  usage: UsageStats | null
   onReprobe: () => void
 }) {
   const mcpTotal = Math.max(mcpLive.length, mcps.length)
@@ -85,47 +88,63 @@ export function DiagnosticsView({
   const mcpPending = mcpLive.filter((l) => l.status === 'pending')
   const mcpDisabled = mcpLive.filter((l) => l.status === 'disabled').length
   const mcpKnown = mcpLive.length > 0
-  const mcpUnknown = mcps.length > 0 && !mcpKnown
+  const mcpUnsupported = mcpCapability?.state === 'unsupported' || mcpCapability?.mode === 'none'
+  const mcpCapabilityUnknown = !mcpCapability || mcpCapability.state === 'unknown' || mcpCapability.data == null
+  const mcpUnknown = !mcpUnsupported && (mcpCapabilityUnknown || (mcps.length > 0 && !mcpKnown))
   const mcpPartial = mcpLive.length > 0 && mcps.length > mcpLive.length
   const sessionCount = projects.reduce((s, p) => s + p.sessions.length, 0)
+  const usageReady = usage?.status === 'ready'
+  const dbReady = stats?.status === 'ready'
+  const ledgerTurns = usageReady ? usage.turns : dbReady ? stats.totals.turns : null
+  const usageHealth = usage?.status ?? 'unknown'
   // 危险审计（观测，不拦截）：本会话 danger 标记 + 跨会话趋势
   const sessionDangers = useMemo(
     () => turns.flatMap((t) => t.items).filter((e) => e.danger && e.stage !== 'tool_result'),
     [turns]
   )
   const runtimeWarnings = useMemo(() => runtimeWarningsFromTurns(turns), [turns])
-  const trend = stats?.dangerTrend ?? []
+  const trend = dbReady ? stats.dangerTrend : []
   const trendHi = trend.filter((d) => d.level === 'danger').reduce((s, d) => s + d.n, 0)
   const trendWarn = trend.filter((d) => d.level === 'warn').reduce((s, d) => s + d.n, 0)
-  const trendTotal = trendHi + trendWarn
+  const trendTotal = dbReady ? trendHi + trendWarn : null
 
-  const mcpNeedsProbe = mcpBad.length > 0 || mcpPending.length > 0 || mcpUnknown || mcpPartial
+  const mcpNeedsProbe = !mcpUnsupported && (mcpBad.length > 0 || mcpPending.length > 0 || mcpUnknown || mcpPartial)
   const mcpAttentionCount = mcpBad.length + mcpPending.length + (mcpUnknown || mcpPartial ? 1 : 0)
   const runtimeNeedsAttention = runtimeWarnings.length > 0
-  const attentionCount = mcpAttentionCount + runtimeWarnings.length
+  const evidenceAttentionCount = Number(!diag) + Number(!dbReady) + Number(!usageReady)
+  const evidenceIncomplete = evidenceAttentionCount > 0
+  const attentionCount = mcpAttentionCount + runtimeWarnings.length + evidenceAttentionCount
   const firstRuntimeWarning = runtimeWarnings[0]
   const firstRuntimeWarningLabel = firstRuntimeWarning
     ? `${firstRuntimeWarning.runtimeProvider} ${firstRuntimeWarning.name} ${firstRuntimeWarning.observed ?? firstRuntimeWarning.reason}`
     : 'CLI runtime capability 未报告异常'
-  const vstate: 'ok' | 'warn' | 'bad' = agents.length === 0 ? 'bad' : mcpNeedsProbe || runtimeNeedsAttention ? 'warn' : 'ok'
+  const vstate: 'ok' | 'warn' | 'bad' = agents.length === 0
+    ? 'bad'
+    : mcpNeedsProbe || runtimeNeedsAttention || evidenceIncomplete
+      ? 'warn'
+      : 'ok'
   let judge = '运行正常'
   let since = '环境探测正常 · app launch 时捕获'
   if (agents.length === 0) {
     judge = '未检测到 Provider'
     since = 'PATH 中未找到已注册的 Agent executable'
-  } else if (mcpNeedsProbe || runtimeNeedsAttention) {
+  } else if (mcpNeedsProbe || runtimeNeedsAttention || evidenceIncomplete) {
     judge = `运行 · ${attentionCount} 项需关注`
     if (mcpBad.length > 0) since = `MCP ${mcpBad.map((m) => m.name).join(' / ')} 需重连`
     else if (mcpPending.length > 0) since = `MCP ${mcpPending.map((m) => m.name).join(' / ')} 状态待收敛`
     else if (mcpUnknown) since = 'MCP 配置已发现，但真实连接状态尚未探测'
     else if (mcpPartial) since = '部分 MCP 配置尚未拿到真实连接状态'
-    else since = firstRuntimeWarningLabel
-  } else if (!diag) {
-    judge = '等待诊断探测'
-    since = '诊断 IPC 尚未返回；可点重新探测'
+    else if (runtimeNeedsAttention) since = firstRuntimeWarningLabel
+    else if (!diag) since = '诊断 IPC 尚未返回；可点重新探测'
+    else if (!dbReady) since = 'SQLite 统计尚无可信结果'
+    else since = `usage 状态为 ${usageHealth}`
   }
   const mcpVerdictValue =
-    mcpBad.length > 0
+    mcpUnsupported
+      ? '当前 Provider 不暴露 MCP'
+      : mcpCapabilityUnknown
+        ? '能力状态未知'
+        : mcpBad.length > 0
       ? `${mcpBad[0].name} ${mcpBad[0].status}`
       : mcpPending.length > 0
         ? `${mcpPending[0].name} pending`
@@ -139,7 +158,11 @@ export function DiagnosticsView({
                 ? `${mcpUp} connected · ${mcpDisabled} disabled`
                 : `${mcpUp}/${mcpTotal} connected`
   const mcpVerdictSub =
-    mcpBad.length > 0
+    mcpUnsupported
+      ? mcpCapability?.reason ?? 'Provider adapter 已明确禁用或不支持 MCP'
+      : mcpCapabilityUnknown
+        ? mcpCapability?.reason ?? 'MCP capability 尚未返回完整证据'
+        : mcpBad.length > 0
       ? '去 MCP 面板重连'
       : mcpPending.length > 0
         ? '等待 SDK init 收敛'
@@ -201,10 +224,10 @@ export function DiagnosticsView({
                 <div className="v">{agents.length ? `${agents.length} 个 Provider` : '未检测'}</div>
                 <div className="sub">{agents.map((agent) => agent.name).join(' · ') || '—'}</div>
               </div>
-              <div className={`verdict-pillar ${mcpNeedsProbe ? 'warn' : mcpTotal > 0 ? 'ok' : ''}`}>
+              <div className={`verdict-pillar ${mcpNeedsProbe ? 'warn' : !mcpUnsupported && mcpTotal > 0 ? 'ok' : ''}`}>
                 <div className="nm">
                   <span className="sdot" />
-                  MCP · {mcpUp}/{mcpTotal} 在线
+                  MCP · {mcpUnsupported ? '不可用' : mcpCapabilityUnknown ? '未知' : `${mcpUp}/${mcpTotal} 在线`}
                 </div>
                 <div className="v">{mcpVerdictValue}</div>
                 <div className="sub">{mcpVerdictSub}</div>
@@ -214,9 +237,9 @@ export function DiagnosticsView({
                   <span className="sdot" />
                   记录账本
                 </div>
-                <div className="v">{usage?.turns ?? stats?.totals.turns ?? 0} 轮</div>
+                <div className="v">{ledgerTurns == null ? '未知' : `${ledgerTurns} 轮`}</div>
                 <div className="sub">
-                  {sessionCount} 会话 · db 健康未暴露
+                  {sessionCount} 会话 · usage {usageHealth} · db {stats?.status ?? 'unknown'}
                 </div>
               </div>
             </div>
@@ -248,7 +271,7 @@ export function DiagnosticsView({
             <div className="d-card">
               <div className="h">
                 <h3>账本与用量</h3>
-                <span className="sub">better-sqlite3 · WAL · 跨会话统计源（健康状态未暴露给 renderer）</span>
+                <span className="sub">better-sqlite3 · WAL · 跨会话统计源（健康状态来自 main）</span>
               </div>
               <div className="d-stat-row">
                 <div className="d-stat">
@@ -257,25 +280,25 @@ export function DiagnosticsView({
                 </div>
                 <div className="d-stat">
                   <div className="lbl">轮次</div>
-                  <div className="val">{usage?.turns ?? 0}</div>
+                  <div className="val">{usageReady ? usage.turns : '未知'}</div>
                 </div>
                 <div className="d-stat">
                   <div className="lbl">工具类型</div>
-                  <div className="val">{stats?.topTools.length ?? 0}</div>
+                  <div className="val">{dbReady ? stats.topTools.length : '未知'}</div>
                 </div>
                 <div className="d-stat">
                   <div className="lbl">累计 token</div>
                   <div className="val" style={{ color: 'var(--accent)' }}>
-                    {fmtTok((usage?.tin ?? 0) + (usage?.tout ?? 0))}
+                    {usageReady && usage.tin != null && usage.tout != null ? fmtTok(usage.tin + usage.tout) : '未知'}
                   </div>
                 </div>
               </div>
               <div className="d-row">
                 <span className="k">Native ABI</span>
-                <span className="v warn">renderer 未暴露 native 健康；以 stats IPC 返回的聚合为准</span>
+                <span className={dbReady ? 'v ok' : 'v warn'}>{dbReady ? 'native 健康：stats IPC 查询成功' : `native 健康：stats ${stats?.status ?? 'unknown'}`}</span>
                 <span className="badge">
-                  <span className="sdot warn" />
-                  unknown
+                  <span className={`sdot ${dbReady ? 'ok' : 'warn'}`} />
+                  {stats?.status ?? 'unknown'}
                 </span>
               </div>
               <div className="d-row">
@@ -290,22 +313,22 @@ export function DiagnosticsView({
 
           {/* RIGHT */}
           <div className="col">
-            <div className={`d-card danger-audit-card ${trendTotal || sessionDangers.length ? 'has-findings' : ''}`}>
+            <div className={`d-card danger-audit-card ${(trendTotal ?? 0) > 0 || sessionDangers.length ? 'has-findings' : ''}`}>
               <div className="h">
                 <h3>安全审计</h3>
                 <span className="sub">仅观测，不拦截</span>
-                <span className="hright">本会话 {sessionDangers.length} · 跨会话 {trendTotal}</span>
+                <span className="hright">本会话 {sessionDangers.length} · 跨会话 {trendTotal ?? '未知'}</span>
               </div>
               <div className="danger-summary">
                 <div className="cell">
                   <div className="lbl">高危 · 跨会话</div>
-                  <div className="v bad">{trendHi}</div>
-                  <div className="sub">跨会话累计标记</div>
+                  <div className="v bad">{dbReady ? trendHi : '未知'}</div>
+                  <div className="sub">{dbReady ? '跨会话累计标记' : 'SQLite 统计不可用'}</div>
                 </div>
                 <div className="cell">
                   <div className="lbl">可疑 · 跨会话</div>
-                  <div className="v warn">{trendWarn}</div>
-                  <div className="sub">跨会话累计标记</div>
+                  <div className="v warn">{dbReady ? trendWarn : '未知'}</div>
+                  <div className="sub">{dbReady ? '跨会话累计标记' : 'SQLite 统计不可用'}</div>
                 </div>
                 <div className="cell">
                   <div className="lbl">处置</div>

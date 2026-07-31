@@ -95,6 +95,20 @@ export function sanitizeNestedAgentEnv(input: Record<string, string>): Record<st
   return out
 }
 
+const PROVIDER_FORBIDDEN_ENV = new Set([
+  'OPENAI_ADMIN_API_KEY',
+  'ANTHROPIC_ADMIN_API_KEY',
+  'QODER_ADMIN_API_KEY',
+  'QODER_ORGANIZATION_ID',
+  'QODER_MEMBER_ID'
+])
+
+export function sanitizeProviderEnv(input: Record<string, string>): Record<string, string> {
+  const out = sanitizeNestedAgentEnv(input)
+  for (const key of PROVIDER_FORBIDDEN_ENV) delete out[key]
+  return out
+}
+
 export function shellEnv(): Record<string, string> {
   if (shellEnvCache) return shellEnvCache
   void warmShellEnv()
@@ -473,7 +487,7 @@ export function runtimeCliEnv(
       actualVersion = execFileSync(scryCliPath, ['--version'], {
         encoding: 'utf8',
         timeout: 5_000,
-        env: runtimeBase
+        env: sanitizeProviderEnv(runtimeBase)
       }).trim()
     } catch {
       throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
@@ -484,7 +498,7 @@ export function runtimeCliEnv(
       )
     }
   }
-  return sanitizeNestedAgentEnv({
+  return sanitizeProviderEnv({
     ...runtimeBase,
     SCRY_CLI_PATH: scryCliPath ?? '',
     ...(options.managedRecorder ? {

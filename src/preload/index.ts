@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { TraceEvent, ActiveRun, DbStats, Diagnostics, DiffFile } from '../shared/trace'
+import type { TraceEvent, ActiveRun, DbStats, Diagnostics, DiffFile, UsageStats } from '../shared/trace'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResult } from '../shared/billing'
 import type {
   AgentInputAttachment,
@@ -11,7 +11,9 @@ import type {
 } from '../shared/runtime'
 import type {
   AccountSnapshot,
+  CatalogHealth,
   CapabilityEnvelope,
+  DeleteSessionResult,
   McpSnapshot,
   McpTestResult,
   ProviderCommand,
@@ -33,6 +35,8 @@ import type {
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
 } from '../shared/workspace'
+import type { ScanReport } from '../cli/mcpguard-core'
+import { isMcpGuardReport } from '../shared/mcpguard-report'
 
 export interface SessionMeta {
   sessionId: string
@@ -73,14 +77,19 @@ const api = {
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   listSessions: (context: ProviderContext): Promise<SessionMeta[]> => ipcRenderer.invoke('agent:listSessions', context),
   listProjects: (): Promise<ProjectMeta[]> => ipcRenderer.invoke('agent:listProjects'),
+  catalogHealth: (): Promise<CatalogHealth> => ipcRenderer.invoke('agent:catalogHealth'),
   listSkills: (context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> => ipcRenderer.invoke('agent:listSkills', context),
   toggleSkill: (context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>> =>
     ipcRenderer.invoke('agent:toggleSkill', { context, name, enabled }),
   mcpSnapshot: (context: ProviderContext, refresh = false): Promise<CapabilityEnvelope<McpSnapshot>> =>
     ipcRenderer.invoke('agent:mcpSnapshot', { context, refresh }),
-  mcpGuardScan: (context: ProviderContext): Promise<CapabilityEnvelope<unknown>> => ipcRenderer.invoke('agent:mcpGuardScan', context),
-  testMcp: (context: ProviderContext, name: string): Promise<CapabilityEnvelope<McpTestResult>> =>
-    ipcRenderer.invoke('agent:testMcp', { context, name }),
+  mcpGuardScan: async (context: ProviderContext): Promise<CapabilityEnvelope<ScanReport>> => {
+    const envelope = await ipcRenderer.invoke('agent:mcpGuardScan', context) as CapabilityEnvelope<unknown>
+    if (envelope.data !== null && !isMcpGuardReport(envelope.data)) throw new Error('main 返回了无效的 mcpguard 报告')
+    return envelope as CapabilityEnvelope<ScanReport>
+  },
+  testMcp: (context: ProviderContext, targetId: string): Promise<CapabilityEnvelope<McpTestResult>> =>
+    ipcRenderer.invoke('agent:testMcp', { context, targetId }),
   toggleMcp: (context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>> =>
     ipcRenderer.invoke('agent:toggleMcp', { context, name, enabled }),
   listCommands: (context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>> =>
@@ -89,7 +98,7 @@ const api = {
     ipcRenderer.invoke('agent:runControls', context),
   providerAccount: (context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>> =>
     ipcRenderer.invoke('agent:providerAccount', context),
-  usageStats: (context: ProviderContext): Promise<{ cost: number | null; tin: number | null; tout: number | null; turns: number }> =>
+  usageStats: (context: ProviderContext): Promise<UsageStats> =>
     ipcRenderer.invoke('agent:usageStats', context),
   stats: (): Promise<DbStats> => ipcRenderer.invoke('agent:stats'),
   billingState: (): Promise<BillingGuardianState> => ipcRenderer.invoke('agent:billingState'),
@@ -98,7 +107,7 @@ const api = {
   gitDiff: (cwd: string): Promise<DiffFile[]> => ipcRenderer.invoke('agent:gitDiff', cwd),
   diagnostics: (): Promise<Diagnostics> => ipcRenderer.invoke('agent:diagnostics'),
   loadSession: (context: ProviderContext): Promise<ParsedTurn[] | null> => ipcRenderer.invoke('agent:loadSession', context),
-  deleteSession: (context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<boolean> =>
+  deleteSession: (context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult> =>
     ipcRenderer.invoke('agent:deleteSession', context),
   start: (request: AgentStartRequest): Promise<{ runId: string }> => ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),

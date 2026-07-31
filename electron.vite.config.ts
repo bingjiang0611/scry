@@ -12,9 +12,15 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: { input: { index: resolve('src/preload/index.ts') } }
+      // Electron's sandboxed preload loader executes CommonJS even when the app
+      // package is ESM. An .mjs preload is parsed as a classic script in the
+      // packaged app and never exposes the contextBridge API. Keep this as one
+      // bundled file: sandboxed preload can only require Electron and built-ins.
+      rollupOptions: {
+        input: { index: resolve('src/preload/index.ts') },
+        output: { format: 'cjs', entryFileNames: '[name].cjs', inlineDynamicImports: true }
+      }
     }
   },
   renderer: {

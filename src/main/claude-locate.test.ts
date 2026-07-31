@@ -12,6 +12,7 @@ import {
   resolveRecorderCliPath,
   runtimeCliEnv,
   sanitizeNestedAgentEnv,
+  sanitizeProviderEnv,
   selectClaudeBinCandidate,
   selectCodexBinCandidate,
   selectQoderBinCandidate
@@ -188,6 +189,30 @@ describe('runtime CLI discovery constraints', () => {
     }
   })
 
+  it('does not expose billing admin credentials to the managed-recorder version probe', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-cli-probe-env-'))
+    try {
+      const scry = join(dir, 'scry')
+      writeFileSync(scry, `#!/bin/sh
+for key in OPENAI_ADMIN_API_KEY ANTHROPIC_ADMIN_API_KEY QODER_ADMIN_API_KEY QODER_ORGANIZATION_ID QODER_MEMBER_ID; do
+  env | grep -q "^$key=" && exit 9
+done
+printf '%s\\n' '${RECORDER_VERSION}'
+`)
+      chmodSync(scry, 0o755)
+      expect(runtimeCliEnv({
+        PATH: `${dir}:/usr/bin:/bin`,
+        OPENAI_ADMIN_API_KEY: 'a',
+        ANTHROPIC_ADMIN_API_KEY: 'b',
+        QODER_ADMIN_API_KEY: 'c',
+        QODER_ORGANIZATION_ID: 'd',
+        QODER_MEMBER_ID: 'e'
+      }, { managedRecorder: true })).toMatchObject({ SCRY_CLI_PATH: scry })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('keeps provider-only PATH entries out of recorder CLI fallback resolution', () => {
     const providerDir = mkdtempSync(join(tmpdir(), 'scry-provider-path-'))
     const fallbackDir = mkdtempSync(join(tmpdir(), 'scry-recorder-fallback-'))
@@ -264,6 +289,23 @@ describe('runtime CLI discovery constraints', () => {
     ).toEqual({
       CODEX_HOME: '/keep',
       SHELL: '/bin/zsh'
+    })
+  })
+
+  it('keeps billing-only admin credentials out of provider children', () => {
+    expect(sanitizeProviderEnv({
+      PATH: '/usr/bin:/bin',
+      OPENAI_ADMIN_API_KEY: 'openai-admin',
+      ANTHROPIC_ADMIN_API_KEY: 'anthropic-admin',
+      QODER_ADMIN_API_KEY: 'qoder-admin',
+      QODER_ORGANIZATION_ID: 'org-1',
+      QODER_MEMBER_ID: 'member-1',
+      OPENAI_API_KEY: 'provider-key',
+      ANTHROPIC_API_KEY: 'provider-key-2'
+    })).toEqual({
+      PATH: '/usr/bin:/bin',
+      OPENAI_API_KEY: 'provider-key',
+      ANTHROPIC_API_KEY: 'provider-key-2'
     })
   })
 })

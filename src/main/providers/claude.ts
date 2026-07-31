@@ -1,8 +1,8 @@
 import { homedir } from 'node:os'
 import { query, type ModelInfo } from '@anthropic-ai/claude-agent-sdk'
 import { getClaudeVersion, runAgent } from '../agent-runner'
-import { resolveClaudeBin, shellEnv } from '../claude-locate'
-import { findMcpConfig, listMcp, testMcpConfig, toggleMcp } from '../mcp-config'
+import { resolveClaudeBin, runtimeCliEnv } from '../claude-locate'
+import { authorizedMcpRuntimeEnv, listMcp, testMcpConfig, toggleMcp } from '../mcp-config'
 import { computeEnabledSkills, listSkills, setSkillEnabled } from '../skill-config'
 import { capabilityReady, capabilityUnavailable, type ProviderContext } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
@@ -15,6 +15,43 @@ interface CachedControls {
 }
 
 const CONTROL_TTL_MS = 30_000
+
+function claudeRuntimeEnv(): Record<string, string> {
+  return { ...runtimeCliEnv(), CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1' }
+}
+
+function isRemoteMcpConfig(config: Record<string, unknown>): boolean {
+  return Boolean(config.url) || config.type === 'http' || config.type === 'sse'
+}
+
+function claudeRuntimeEnvForExecution(
+  execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution']
+): Record<string, string> {
+  const env = claudeRuntimeEnv()
+  const remoteEnabled = execution?.targets.some((target) => target.enabled && isRemoteMcpConfig(target.config))
+  return execution && remoteEnabled ? authorizedMcpRuntimeEnv(env, execution.env) : env
+}
+
+function authorizedMcpServers(
+  execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution']
+): Record<string, Record<string, unknown>> {
+  if (!execution) return {}
+  return Object.fromEntries(
+    execution.targets
+      .filter((target) => target.enabled)
+      .map((target) => {
+        const config = { ...target.config }
+        const stdio = !isRemoteMcpConfig(config)
+        if (stdio) {
+          const configuredEnv = config.env && typeof config.env === 'object'
+            ? config.env as Record<string, unknown>
+            : {}
+          config.env = { ...execution.env, ...configuredEnv }
+        }
+        return [target.name, config]
+      })
+  )
+}
 
 function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
   let release = (): void => {}
@@ -69,8 +106,10 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
         options: {
           cwd: context.cwd,
           pathToClaudeCodeExecutable: path,
-          env: shellEnv(),
-          settingSources: settingSourcesFromEnv()
+          env: claudeRuntimeEnv(),
+          settingSources: settingSourcesFromEnv(),
+          strictMcpConfig: true,
+          mcpServers: {}
         }
       })
       try {
@@ -141,17 +180,18 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
           ),
         {
           resume: request.resume,
-          cwd: request.cwd,
+          cwd: request.mcpExecution?.cwd ?? request.cwd,
           skills: computeEnabledSkills(request.cwd, homeDir),
           claudePath: executable(),
-          env: shellEnv(),
+          env: claudeRuntimeEnvForExecution(request.mcpExecution),
           settingSources: settingSourcesFromEnv(),
           onSessionId: request.onExternalSessionId,
           attachments: request.attachments,
           requestUserInput: request.requestUserInput,
           model: request.model?.id,
           effort: request.effort,
-          permissionMode: request.permissionMode
+          permissionMode: request.permissionMode,
+          mcpServers: authorizedMcpServers(request.mcpExecution)
         }
       )
       return {
@@ -172,7 +212,7 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
       }
     },
     mcp: {
-      snapshot: async (context, refresh = false) => {
+      snapshot: async (context, refresh = false, execution) => {
         if (!executable()) return capabilityUnavailable(context, 'unknown', 'Claude Code executable 未找到')
         const configured = listMcp(context.cwd, homeDir)
         if (!refresh) {
@@ -182,12 +222,11 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
             reason: '运行态尚未直接检测；刷新会逐个执行 MCP initialize/tools/list，不会发起模型对话'
           }
         }
+        if (!execution) return capabilityUnavailable(context, 'unknown', '缺少绑定当前配置快照的 MCP 执行授权')
         const runtime = await Promise.all(
-          configured.map(async (item) => {
+          execution.targets.map(async (item) => {
             if (!item.enabled) return { name: item.name, status: 'disabled' as const }
-            const config = findMcpConfig(item.name, context.cwd, homeDir)
-            if (!config) return { name: item.name, status: 'failed' as const }
-            const result = await testMcpConfig(config)
+            const result = await testMcpConfig(item.config, execution.env, execution.cwd)
             return {
               name: item.name,
               status: result.ok ? ('connected' as const) : ('failed' as const),
@@ -201,10 +240,11 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
         const ok = toggleMcp(name, enabled, context.cwd, homeDir)
         return capabilityReady(context, 'manage', ok)
       },
-      test: async (context, name) => {
-        const config = findMcpConfig(name, context.cwd, homeDir)
-        if (!config) return capabilityReady(context, 'manage', { ok: false, error: '找不到配置' })
-        return capabilityReady(context, 'manage', await testMcpConfig(config))
+      test: async (context, targetId, execution) => {
+        if (!execution) return capabilityReady(context, 'manage', { ok: false, error: '缺少绑定当前配置快照的 MCP 执行授权' })
+        const target = execution.targets.find((item) => item.targetId === targetId)
+        if (!target) return capabilityReady(context, 'manage', { ok: false, error: '找不到精确配置目标' })
+        return capabilityReady(context, 'manage', await testMcpConfig(target.config, execution.env, execution.cwd))
       }
     },
     commands: {

@@ -18,7 +18,7 @@ Electron 桌面 app，用 **Claude Agent SDK**（模式 A）在主进程驱动�
 2. **electron 二进制可能没下全**：报 `Error: Electron uninstall` → `node node_modules/electron/install.js`（同 maka-agent README 的坑）。
 3. **认证 env 污染（关键）**：若 app 从一个父 Claude Code 会话内启动（开发时常见），会继承 `CLAUDECODE` / `CLAUDE_CODE_*` / `AI_AGENT` 等环境变量，SDK 驱动的 cli.js 会误判为「嵌套会话」→ `Not logged in · Please run /login`。`main/index.ts` 启动时已清掉这些。改启动逻辑别破坏它。（登录态本身在 macOS Keychain，不是 `~/.claude/.credentials.json`。）
 4. **SDK `query()` 不是纯进程内**：底层 `spawn` 自带的 `cli.js`（claude code）。后果：① `electron.vite.config.ts` 用 `externalizeDepsPlugin` 把 SDK 留在 node_modules（别 bundle）；② 将来打包必须 `asarUnpack` 整个 `@anthropic-ai/claude-agent-sdk`，否则 ENOENT；③ GUI 从 Finder 启动不继承 shell PATH，子进程裸 `node` 可能找不到（打包待处理）。
-5. **`permissionMode: 'bypassPermissions'`**（`agent-runner.ts`）：对齐用户终端 alias `claude --dangerously-skip-permissions`，也避免 app（无权限弹窗）下 claude 卡在等权限。二期做 `canUseTool` 实时审批时再收紧。
+5. **权限默认必须 fail closed**：`default` 使用 Provider 的原生审批/workspace sandbox；只有用户显式选择 `full_access` 时，Claude/Qoder 才映射为 `bypassPermissions` + `dangerously-skip-permissions`，Codex/OpenCode 使用各自等价的完全访问模式。能力不支持或探测失败时拒绝启动，不能退回完全访问。
 6. **文件足迹有盲区**：只有 Read/Write/Edit/MultiEdit/NotebookEdit 有 `file_path`；**Glob/Grep 是 pattern/path（不算读写）**；Bash 的 `cat/rm/>`、MCP 写文件统计不到 → 用命令正则推断补（标「未必真读写」）。别假设它是全集。
 7. **历史会话目录**：`~/.claude/projects/<cwd 把 / . _ 换成 ->/<sessionId>.jsonl`。大型工作区可能有**上百个** transcript（其中不少是 skill 路由的 `-p` 子会话），所以 `listSessions` 必须**先按 mtime 排序取前 N、只读文件头 64KB 找预览、按首条消息去重**，否则同步读全部大文件卡死主进程。
 8. **subagent 内部明细**：SDK 主流看不到，靠 `SubagentStop` hook 的 `agent_transcript_path` tail 补一层；嵌套（subagent→subagent）的精确父子映射 SDK 不直接给，二期再做。

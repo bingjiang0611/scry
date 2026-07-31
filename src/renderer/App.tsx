@@ -147,6 +147,32 @@ export function takeNextQueuedPrompt(queue: QueuedPrompt[]): { next: QueuedPromp
   return { next: queue[0] ?? null, rest: queue.slice(1) }
 }
 
+export function shouldQueuePrompt(busy: boolean, queuedCount: number, queuedStartPending: boolean): boolean {
+  return busy || queuedCount > 0 || queuedStartPending
+}
+
+export function dequeueStartedPrompt(queue: QueuedPrompt[], started: QueuedPrompt): QueuedPrompt[] {
+  return queue[0] === started ? queue.slice(1) : queue
+}
+
+export function inputAfterSuccessfulSubmit(current: string, submitted: string): string {
+  if (current === submitted) return ''
+  if (submitted && current.startsWith(submitted)) return current.slice(submitted.length).replace(/^\s*\n?/, '')
+  return current
+}
+
+export function attachmentsAfterSuccessfulSubmit(
+  current: DraftAttachment[],
+  submittedIds: ReadonlySet<string>
+): DraftAttachment[] {
+  return current.filter((attachment) => !submittedIds.has(attachment.id))
+}
+
+export async function commitDraftAfterStart(start: () => Promise<void>, commit: () => void): Promise<void> {
+  await start()
+  commit()
+}
+
 function inputAttachments(attachments: DraftAttachment[]): AgentInputAttachment[] {
   return attachments.map(({ previewUrl: _previewUrl, id: _id, ...attachment }) => ({ ...attachment }))
 }
@@ -263,12 +289,14 @@ export async function restoreActiveSessionSelection(
       parsed: ParsedTurn[],
       options: { activeRun: ActiveRun }
     ) => void
+    isCurrent?: () => boolean
   }
 ): Promise<boolean> {
   if (!args.runId) return false
+  if (effects.isCurrent && !effects.isCurrent()) return false
   effects.prepareRunFocus(args.runId)
   const activeRun = await effects.adoptActiveRun(args.runId)
-  if (!activeRun) return false
+  if (!activeRun || (effects.isCurrent && !effects.isCurrent())) return false
   const parsed = args.externalSessionId
     ? await effects.loadSession({
         providerId: args.providerId,
@@ -276,6 +304,7 @@ export async function restoreActiveSessionSelection(
         externalSessionId: args.externalSessionId
       })
     : null
+  if (effects.isCurrent && !effects.isCurrent()) return false
   effects.replaceWithParsedSession(args.sessionId, parsed ?? [], { activeRun })
   return true
 }
@@ -301,18 +330,23 @@ interface NewConversationEffects {
   setActiveSessionId: (sessionId: string | null) => void
   setView: (view: AppView) => void
   focusComposer: () => void
+  isCurrent?: () => boolean
 }
 
 export async function applyNewConversationEffects(effects: NewConversationEffects): Promise<void> {
+  if (effects.isCurrent && !effects.isCurrent()) return
   effects.clearTurns()
   let nextCwd = effects.cwd
   if (!nextCwd && effects.defaultCwd) {
     nextCwd = effects.defaultCwd
     await effects.activateCwd(nextCwd)
+    if (effects.isCurrent && !effects.isCurrent()) return
   }
   if (!nextCwd) nextCwd = await effects.chooseFolder()
+  if (effects.isCurrent && !effects.isCurrent()) return
   if (!nextCwd) return
   await effects.newSession()
+  if (effects.isCurrent && !effects.isCurrent()) return
   effects.setActiveSessionId(null)
   effects.setView('chat')
   effects.focusComposer()
@@ -320,7 +354,10 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
 
 export function App() {
   const [input, setInput] = useState('')
+  const [composerError, setComposerError] = useState<string | null>(null)
+  const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachment[]>([])
+  const draftStartPendingRef = useRef(false)
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([])
   const [activeRunHydrated, setActiveRunHydrated] = useState(false)
   const workspace = useWorkspaceState()
@@ -333,7 +370,8 @@ export function App() {
     setActiveSessionId,
     loadProjects,
     chooseFolder: chooseFolderRaw,
-    removeRecentFolder
+    removeRecentFolder,
+    catalogHealth
   } = workspace
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
@@ -383,6 +421,16 @@ export function App() {
     [setActiveSessionId]
   )
   const integrations = useIntegrations(cwd)
+  const providerSendBlockedReason = !integrations.agentsHydrated
+    ? '正在检测本机 Provider，暂不能发送'
+    : !integrations.selectedAgent
+      ? `未检测到 ${integrations.selectedId}，草稿与附件已保留`
+      : integrations.selectedAgent.health?.state === 'unavailable'
+        ? integrations.selectedAgent.health.lastError ?? `${integrations.selectedAgent.name} 当前不可用`
+        : !integrations.runControlCapability || integrations.runControlCapability.data == null ||
+            (integrations.runControlCapability.state !== 'ready' && integrations.runControlCapability.state !== 'degraded')
+          ? integrations.runControlCapability?.reason ?? '运行权限能力尚未确认，暂不能发送'
+          : null
   const session = useAgentSession({
     onTurnDone: (event) => {
       markRunFinished(event.runId)
@@ -438,6 +486,11 @@ export function App() {
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
   const shouldStickToBottomRef = useRef(true)
   const queuedStartPendingRef = useRef(false)
+  const queuedStartInFlightRef = useRef(false)
+  const sessionSelectionSeqRef = useRef(0)
+  const slashRequestSeqRef = useRef(0)
+  const integrationContextKeyRef = useRef('')
+  integrationContextKeyRef.current = `${integrations.providerContext.providerId}\0${integrations.providerContext.cwd ?? ''}`
   const draftAttachmentsRef = useRef<DraftAttachment[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [focusedTurnRunId, setFocusedTurnRunId] = useState<string | null>(null)
@@ -601,6 +654,7 @@ export function App() {
   const currentRunRequest = useCallback(
     (): Omit<AgentStartRequest, 'prompt' | 'attachments'> => ({
       cwd: cwdRef.current ?? undefined,
+      expectedExternalSessionId: activeSessionIdRef.current,
       providerId: integrations.selectedProviderId,
       agentId: integrations.selectedId,
       backend: integrations.backend,
@@ -637,43 +691,66 @@ export function App() {
 
   useEffect(() => {
     if (session.busy) {
-      queuedStartPendingRef.current = false
       return
     }
     if (queuedStartPendingRef.current || queuedPrompts.length === 0) return
-    const { next, rest } = takeNextQueuedPrompt(queuedPrompts)
+    const queued = queuedPrompts[0]
+    const queuedAgentId = queued.request.agentId ?? queued.request.providerId
+    if (!queuedAgentId || !integrations.agents.some((agent) => agent.id === queuedAgentId)) {
+      setComposerError(`队列中的 ${queuedAgentId ?? '未知'} Provider 当前不可用；消息仍保留在队列`)
+      return
+    }
+    const { next } = takeNextQueuedPrompt(queuedPrompts)
     if (!next) return
     queuedStartPendingRef.current = true
-    setQueuedPrompts(rest)
-    void startPrompt(next.text, next.attachments, next.request).catch(() => {
-      queuedStartPendingRef.current = false
-      setInput((current) => current || next.text)
-      setDraftAttachments((current) => (current.length === 0 ? next.attachments.map(clipboardAttachmentToDraft) : current))
-    })
-  }, [queuedPrompts, session.busy, startPrompt])
+    queuedStartInFlightRef.current = true
+    void startPrompt(next.text, next.attachments, next.request)
+      .then(() => {
+        queuedStartInFlightRef.current = false
+        setQueuedPrompts((current) => dequeueStartedPrompt(current, next))
+        queuedStartPendingRef.current = false
+      })
+      .catch((error) => {
+        // Keep the failed item at the head and pause automatic draining. Removing that
+        // head is the explicit "skip" action, so later prompts can never overtake it.
+        queuedStartInFlightRef.current = false
+        queuedStartPendingRef.current = true
+        setComposerError(`${error instanceof Error ? error.message : String(error)}；队首消息仍保留，队列已暂停`)
+      })
+  }, [integrations.agents, queuedPrompts, session.busy, startPrompt])
 
   // 首次输入 / 时拉一次命令清单（slashFetched 锁住，空结果不无限重拉；retrySlash 解锁可重拉）
   useEffect(() => {
     if (slashToken == null || slashFetched || slashLoading) return
+    const seq = ++slashRequestSeqRef.current
+    const context = integrations.providerContext
+    const requestKey = `${context.providerId}\0${context.cwd ?? ''}`
     setSlashFetched(true)
     // 防御：老 preload 可能没 slashCommands（dev 没重建时）。直接 undefined() 会同步抛错冲垮整个渲染树→黑屏。
     const fn = window.scry?.listCommands
     if (typeof fn !== 'function') return
     setSlashLoading(true)
     Promise.resolve()
-      .then(() => fn(integrations.providerContext))
+      .then(() => fn(context))
       .then((result) => {
+        if (seq !== slashRequestSeqRef.current || requestKey !== integrationContextKeyRef.current) return
         setSlashCmds(result.data ?? [])
         setSlashReason(result.reason ?? null)
       })
-      .catch((error) => setSlashReason(String((error as Error).message)))
-      .finally(() => setSlashLoading(false))
+      .catch((error) => {
+        if (seq === slashRequestSeqRef.current) setSlashReason(String((error as Error).message))
+      })
+      .finally(() => {
+        if (seq === slashRequestSeqRef.current) setSlashLoading(false)
+      })
   }, [integrations.providerContext, slashToken, slashFetched, slashLoading])
 
   useEffect(() => {
+    ++slashRequestSeqRef.current
     setSlashCmds([])
     setSlashReason(null)
     setSlashFetched(false)
+    setSlashLoading(false)
   }, [integrations.providerContext])
 
   // 过滤结果变化时高亮项回到顶部
@@ -705,17 +782,44 @@ export function App() {
     const text = input.trim()
     const attachments = inputAttachments(draftAttachments)
     if (!text && attachments.length === 0) return
-    if (session.busy) {
+    if (draftStartPendingRef.current) return
+    if (providerSendBlockedReason) {
+      setComposerError(providerSendBlockedReason)
+      return
+    }
+    if (shouldQueuePrompt(session.busy, queuedPrompts.length, queuedStartPendingRef.current)) {
       const request = currentRunRequest()
       setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments, request))
       setInput('')
       clearDraftAttachments()
       setSlashHidden(true)
+      setComposerError(null)
       return
     }
-    setInput('')
-    clearDraftAttachments()
-    await startPrompt(text, attachments)
+    const originalInput = input
+    const submittedAttachments = draftAttachments
+    const submittedIds = new Set(submittedAttachments.map((attachment) => attachment.id))
+    setComposerError(null)
+    draftStartPendingRef.current = true
+    setComposerSubmitting(true)
+    try {
+      await commitDraftAfterStart(
+        () => startPrompt(text, attachments),
+        () => {
+          setInput((current) => inputAfterSuccessfulSubmit(current, originalInput))
+          setDraftAttachments((current) => attachmentsAfterSuccessfulSubmit(current, submittedIds))
+          for (const attachment of submittedAttachments) {
+            if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
+          }
+          setSlashHidden(true)
+        }
+      )
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : String(error))
+    } finally {
+      draftStartPendingRef.current = false
+      setComposerSubmitting(false)
+    }
   }
 
   const pickRecent = async (dir: string): Promise<void> => {
@@ -731,8 +835,12 @@ export function App() {
       return
     }
     if (dir !== cwd && !confirmWorkspaceTransition()) return
+    const seq = ++sessionSelectionSeqRef.current
+    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     await window.scry.focusRun(null)
+    if (!isCurrent()) return
     await window.scry.setCwd(dir)
+    if (!isCurrent()) return
     setCwd(dir)
     session.clearTurns()
     setQueuedPrompts([])
@@ -743,10 +851,13 @@ export function App() {
   }
 
   const newConversation = async (): Promise<void> => {
+    const seq = ++sessionSelectionSeqRef.current
+    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     setQueuedPrompts([])
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
     await window.scry.focusRun(null)
+    if (!isCurrent()) return
     await applyNewConversationEffects({
       cwd,
       defaultCwd: defaultNewConversationCwd(cwd, projects, recent),
@@ -754,13 +865,14 @@ export function App() {
       clearTurns: session.clearTurns,
       activateCwd: async (dir) => {
         await window.scry.setCwd(dir)
-        setCwd(dir)
+        if (isCurrent()) setCwd(dir)
       },
       chooseFolder,
       newSession: () => window.scry.newSession(integrations.providerContext),
       setActiveSessionId: selectSessionId,
       setView,
-      focusComposer: () => window.setTimeout(() => taRef.current?.focus(), 0)
+      focusComposer: () => window.setTimeout(() => taRef.current?.focus(), 0),
+      isCurrent
     })
   }
 
@@ -773,19 +885,23 @@ export function App() {
   ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
     if (projectCwd !== cwd && !confirmWorkspaceTransition()) return
+    const seq = ++sessionSelectionSeqRef.current
+    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     const switchingSession = activeSessionIdRef.current !== sessionId
     let runId = knownRunId
     if (!runId) {
       const activeRuns = await window.scry.activeRuns()
+      if (!isCurrent()) return
       runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId)?.runId
     }
+    await window.scry.setCwd(projectCwd)
+    if (!isCurrent()) return
     if (switchingSession) session.clearTurns()
     setQueuedPrompts([])
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
     selectSessionId(sessionId)
     setView('chat')
-    await window.scry.setCwd(projectCwd)
     setCwd(projectCwd)
     integrations.setSelectedId(providerId)
     if (
@@ -795,18 +911,22 @@ export function App() {
           prepareRunFocus: session.prepareRunFocus,
           adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
           loadSession: (context) => window.scry.loadSession(context),
-          replaceWithParsedSession: session.replaceWithParsedSession
+          replaceWithParsedSession: session.replaceWithParsedSession,
+          isCurrent
         }
       )
     ) {
       return
     }
+    if (!isCurrent()) return
     if (runId) {
       if (switchingSession) session.clearTurns()
     }
     await window.scry.focusRun(null)
+    if (!isCurrent()) return
     if (!externalSessionId) return
     const parsed = await window.scry.loadSession({ providerId, cwd: projectCwd, externalSessionId })
+    if (!isCurrent()) return
     session.replaceWithParsedSession(sessionId, parsed ?? [], {
       activeRun: null
     })
@@ -818,7 +938,8 @@ export function App() {
     providerId: SessionProviderId,
     externalSessionId?: string
   ): Promise<void> => {
-    await window.scry.deleteSession({ providerId, cwd: projectCwd, externalSessionId: externalSessionId ?? sessionId })
+    const result = await window.scry.deleteSession({ providerId, cwd: projectCwd, externalSessionId: externalSessionId ?? sessionId })
+    if (!result.ok) return
     // 乐观移除：只删这一条、保持其余顺序，不全量重扫重排（避免删除后列表顺序跳动）
     workspace.removeSessionFromProjects(projectCwd, sessionId, providerId)
   }
@@ -831,21 +952,7 @@ export function App() {
   }
   const openMcp = (): void => {
     setShowMcp(true)
-    if (!integrations.mcpCapability) {
-      void integrations.refreshMcp()
-        .then((runtime) => {
-          if (runtime.length === 0) return integrations.pullMcpLive()
-        })
-        .catch(() => {})
-      return
-    }
-    if (
-      !integrations.mcpRefreshing &&
-      integrations.mcpLive.length === 0 &&
-      integrations.mcps.some((mcp) => mcp.enabled)
-    ) {
-      void integrations.pullMcpLive().catch(() => {})
-    }
+    if (!integrations.mcpCapability) void integrations.refreshMcp().catch(() => {})
   }
 
   const activeRightPane = turnDiffReview ? reviewPane : workspaceOpen ? workspacePane : overviewPane
@@ -859,9 +966,6 @@ export function App() {
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
     [integrations.selectedId, session.turns]
   )
-  useEffect(() => {
-    if (rightPanelOpen && showPanel && !workspaceOpen && !turnDiffReview) void integrations.loadMcpLive()
-  }, [integrations.loadMcpLive, rightPanelOpen, showPanel, turnDiffReview, workspaceOpen])
   const toggleOverviewPanel = (): void => {
     if (view !== 'chat') return
     if (turnDiffReview) {
@@ -929,6 +1033,11 @@ export function App() {
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [turnDiffReview])
   const removeQueuedPrompt = (index: number): void => {
+    if (index === 0 && queuedStartInFlightRef.current) {
+      setComposerError('队首消息正在启动，完成前不能移除')
+      return
+    }
+    if (index === 0) queuedStartPendingRef.current = false
     setQueuedPrompts((queue) => queue.filter((_, i) => i !== index))
   }
   const removeDraftAttachment = (id: string): void => {
@@ -974,6 +1083,7 @@ export function App() {
           onMcp={openMcp}
           mcps={integrations.mcps}
           mcpLive={integrations.mcpLive}
+          catalogHealth={catalogHealth}
         />
       }
       sidebarSplitter={
@@ -998,6 +1108,7 @@ export function App() {
             diag={integrations.diag}
             mcpLive={integrations.mcpLive}
             mcps={integrations.mcps}
+            mcpCapability={integrations.mcpCapability}
             stats={integrations.stats}
             turns={session.turns}
             projects={projects}
@@ -1163,6 +1274,9 @@ export function App() {
             runControlsLoading={integrations.runControlsLoading}
             runControlsReason={integrations.runControlCapability?.reason}
             input={input}
+            composerError={composerError}
+            sendBlockedReason={providerSendBlockedReason}
+            submitting={composerSubmitting}
             busy={session.busy}
             draftAttachments={draftAttachments}
             queuedPrompts={queuedPrompts}
@@ -1179,6 +1293,7 @@ export function App() {
             onAnswerQuestion={session.answerQuestion}
             onInput={(value) => {
               setInput(value)
+              setComposerError(null)
               setSlashHidden(false)
             }}
             onChooseFolder={chooseFolder}

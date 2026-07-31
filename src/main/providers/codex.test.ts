@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { TraceEvent } from '../../shared/trace'
 
 const appServer = vi.hoisted(() => ({
@@ -6,8 +9,10 @@ const appServer = vi.hoisted(() => ({
   start: vi.fn(),
   onNotification: vi.fn(),
   onRequest: vi.fn(),
+  failureForCurrentGeneration: vi.fn(),
   options: [] as Array<Record<string, unknown>>
 }))
+const runtime = vi.hoisted(() => ({ env: {} as NodeJS.ProcessEnv }))
 
 vi.mock('./codex-app-server', () => ({
   CodexAppServerClient: class {
@@ -15,6 +20,7 @@ vi.mock('./codex-app-server', () => ({
     start = appServer.start
     onNotification = appServer.onNotification
     onRequest = appServer.onRequest
+    failureForCurrentGeneration = appServer.failureForCurrentGeneration
     pid = 123
     constructor(options: Record<string, unknown>) {
       appServer.options.push(options)
@@ -25,7 +31,7 @@ vi.mock('./codex-app-server', () => ({
 
 vi.mock('../claude-locate', () => ({
   resolveRuntimeCliBin: () => '/bin/codex',
-  runtimeCliEnv: () => ({}),
+  runtimeCliEnv: () => ({ ...runtime.env }),
   shellEnv: () => ({})
 }))
 
@@ -37,7 +43,9 @@ describe('Codex provider adapter', () => {
     appServer.start.mockReset().mockResolvedValue(undefined)
     appServer.onNotification.mockReset()
     appServer.onRequest.mockReset().mockReturnValue(() => {})
+    appServer.failureForCurrentGeneration.mockReset().mockReturnValue(new Promise(() => {}))
     appServer.options.length = 0
+    runtime.env = {}
   })
 
   it('declares only app-server capabilities that it can prove', async () => {
@@ -45,19 +53,12 @@ describe('Codex provider adapter', () => {
       id: 'codex',
       runtimeProvider: 'codex_cli',
       transport: 'app-server',
-      capabilities: { skills: 'manage', mcp: 'read', commands: 'read', account: 'read' }
+      capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' }
     })
   })
 
-  it('marks MCP status degraded until a cwd-bound thread exists', async () => {
-    appServer.request.mockResolvedValue({ data: [] })
-
-    const result = await createCodexAdapter().mcp!.snapshot({ providerId: 'codex', cwd: '/repo' })
-
-    expect(result).toMatchObject({
-      state: 'degraded',
-      reason: expect.stringContaining('thread')
-    })
+  it('does not expose native MCP after starting app-server with MCP sources disabled', async () => {
+    expect(createCodexAdapter().mcp).toBeUndefined()
   })
 
   it('starts the app-server inside the Provider context cwd', async () => {
@@ -66,6 +67,22 @@ describe('Codex provider adapter', () => {
     await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
 
     expect(appServer.options).toContainEqual(expect.objectContaining({ cwd: '/isolated-copy' }))
+  })
+
+  it('uses CODEX_HOME discovered from the login-shell environment as isolated native state source', async () => {
+    const source = mkdtempSync(join(tmpdir(), 'scry-codex-shell-home-'))
+    writeFileSync(join(source, 'auth.json'), '{}')
+    runtime.env = { CODEX_HOME: source }
+    appServer.request.mockResolvedValue({ data: [] })
+    try {
+      await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/repo' })
+      const childEnv = appServer.options.at(-1)?.env as NodeJS.ProcessEnv
+      expect(childEnv.CODEX_HOME).not.toBe(source)
+      expect(readlinkSync(join(childEnv.CODEX_HOME!, 'auth.json'))).toBe(join(source, 'auth.json'))
+      rmSync(childEnv.CODEX_HOME!, { recursive: true, force: true })
+    } finally {
+      rmSync(source, { recursive: true, force: true })
+    }
   })
 
   it('uses full host access without approvals for new and resumed Codex threads', async () => {
@@ -88,6 +105,7 @@ describe('Codex provider adapter', () => {
       prompt: 'inspect',
       cwd: '/repo',
       attachments: [],
+      permissionMode: 'full_access',
       emit: () => {}
     })
     await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
@@ -110,6 +128,7 @@ describe('Codex provider adapter', () => {
       cwd: '/repo',
       resume: 'thread-existing',
       attachments: [],
+      permissionMode: 'full_access',
       emit: () => {}
     })
     await vi.waitFor(() => {
@@ -337,26 +356,19 @@ describe('Codex provider adapter', () => {
     })
   })
 
-  it('writes Codex Skill state and returns the updated native catalog on reread', async () => {
-    let enabled = true
+  it('keeps the isolated Codex Skill catalog read-only', async () => {
     appServer.request.mockImplementation(async (method, params) => {
       if (method === 'skills/list') {
-        return { data: [{ cwd: '/isolated-copy', skills: [{ name: 'scry-e2e-audit', path: '/skill', enabled }] }] }
+        return { data: [{ cwd: '/isolated-copy', skills: [{ name: 'scry-e2e-audit', path: '/skill', enabled: true }] }] }
       }
-      if (method === 'skills/config/write') {
-        enabled = (params as { enabled: boolean }).enabled
-        return {}
-      }
-      throw new Error(`unexpected request: ${method}`)
+      throw new Error(`unexpected request: ${method} ${JSON.stringify(params)}`)
     })
     const adapter = createCodexAdapter()
     const context = { providerId: 'codex' as const, cwd: '/isolated-copy' }
 
     await expect(adapter.skills!.list(context)).resolves.toMatchObject({ data: [{ name: 'scry-e2e-audit', enabled: true }] })
-    await expect(adapter.skills!.setEnabled!(context, 'scry-e2e-audit', false)).resolves.toMatchObject({ state: 'ready', data: true })
-    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ data: [{ name: 'scry-e2e-audit', enabled: false }] })
-    await expect(adapter.skills!.setEnabled!(context, 'scry-e2e-audit', true)).resolves.toMatchObject({ state: 'ready', data: true })
-    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ data: [{ name: 'scry-e2e-audit', enabled: true }] })
+    expect(adapter.skills!.setEnabled).toBeUndefined()
+    expect(appServer.request).not.toHaveBeenCalledWith('skills/config/write', expect.anything())
   })
 
   it('only bypasses Codex hook trust when explicitly enabled for vetted automation', async () => {
@@ -368,7 +380,9 @@ describe('Codex provider adapter', () => {
       await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
 
       expect(appServer.options).toContainEqual(
-        expect.objectContaining({ args: ['--dangerously-bypass-hook-trust', 'app-server'] })
+        expect.objectContaining({
+          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins'])
+        })
       )
     } finally {
       if (previous === undefined) delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
@@ -384,7 +398,11 @@ describe('Codex provider adapter', () => {
 
       await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
 
-      expect(appServer.options).toContainEqual(expect.objectContaining({ cwd: '/isolated-copy', args: undefined }))
+      expect(appServer.options).toContainEqual(expect.objectContaining({
+        cwd: '/isolated-copy',
+        args: expect.arrayContaining(['app-server', '--strict-config', 'apps', 'plugins'])
+      }))
+      expect(appServer.options[0].args).not.toContain('--dangerously-bypass-hook-trust')
     } finally {
       if (previous === undefined) delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
       else process.env.SCRY_CODEX_BYPASS_HOOK_TRUST = previous
@@ -418,7 +436,7 @@ describe('Codex provider adapter', () => {
       expect(appServer.options).toContainEqual(
         expect.objectContaining({
           cwd: '/isolated-copy',
-          args: ['--dangerously-bypass-hook-trust', 'app-server']
+          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins'])
         })
       )
     } finally {
@@ -503,6 +521,32 @@ describe('Codex provider adapter', () => {
       stopped: true,
       status: 'completed'
     })
+  })
+
+  it('rejects an active turn when its app-server generation dies before completion', async () => {
+    let resolveFailure: (error: Error) => void = () => {}
+    appServer.failureForCurrentGeneration.mockReturnValue(new Promise((resolve) => {
+      resolveFailure = resolve
+    }))
+    appServer.onNotification.mockReturnValue(() => {})
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-lost' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-lost' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({
+      runId: 'run-lost',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: () => {}
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    resolveFailure(new Error('Codex app-server request timed out: test/hang'))
+
+    await expect(handle.promise).rejects.toThrow('test/hang')
   })
 
   it('sends an explicit $skill mention as native Codex skill input and records it', async () => {

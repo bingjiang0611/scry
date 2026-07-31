@@ -1433,6 +1433,19 @@ function stableId(name: string, path: string): string {
   return `srv_${hashText(`${path}:${name}`).slice(0, 12)}`
 }
 
+export function mcpConfigTargetId(
+  serverName: string,
+  sourcePath: string,
+  pointer: string,
+  workspaceRoot: string,
+  home: string
+): string {
+  return stableId(
+    serverName,
+    portableTargetIdentity(sourcePath, 'local_config', pointer, workspaceRoot, home)
+  )
+}
+
 function portableTargetIdentity(sourcePath: string, sourceType: McpServerTarget['sourceType'], pointer?: string, workspaceRoot?: string, home = HOME): string {
   const sourceIdentity = sourceType === 'package' ? `package:${sourcePath}` : portablePathIdentity(sourcePath, workspaceRoot, home)
   const pointerIdentity = pointer ? portableJsonPointer(pointer, workspaceRoot, home) : undefined

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ProjectMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
+import type { CatalogHealth } from '@shared/provider'
 
 export function useWorkspaceState() {
   const [cwd, setCwd] = useState<string | null>(null)
@@ -8,9 +9,20 @@ export function useWorkspaceState() {
   const [projects, setProjects] = useState<ProjectMeta[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
+  const [catalogHealth, setCatalogHealth] = useState<CatalogHealth>({ status: 'ready', source: 'empty' })
+  const projectsRequestSeq = useRef(0)
+  const readCatalogHealth = (): Promise<CatalogHealth> => typeof window.scry.catalogHealth === 'function'
+    ? window.scry.catalogHealth()
+    : Promise.resolve({ status: 'unavailable', source: 'empty', reason: '当前 preload 未暴露 catalog health' })
 
   const loadProjects = useCallback((): void => {
-    window.scry.listProjects().then(setProjects)
+    const seq = ++projectsRequestSeq.current
+    void Promise.allSettled([window.scry.listProjects(), readCatalogHealth()]).then(([nextProjects, nextHealth]) => {
+      if (seq !== projectsRequestSeq.current) return
+      if (nextProjects.status === 'fulfilled') setProjects(nextProjects.value)
+      if (nextHealth.status === 'fulfilled') setCatalogHealth(nextHealth.value)
+      else setCatalogHealth({ status: 'unavailable', source: 'empty', reason: String(nextHealth.reason) })
+    })
   }, [])
 
   const refreshRecent = useCallback((): void => {
@@ -31,6 +43,7 @@ export function useWorkspaceState() {
   }, [refreshRecent])
 
   const removeSessionFromProjects = useCallback((projectCwd: string, sessionId: string, providerId: SessionProviderId): void => {
+    ++projectsRequestSeq.current
     setProjects((prev) =>
       prev
         .map((project) =>
@@ -49,10 +62,20 @@ export function useWorkspaceState() {
 
   useEffect(() => {
     let cancelled = false
-    void Promise.allSettled([window.scry.listProjects(), window.scry.recentFolders()]).then(([nextProjects, nextRecent]) => {
+    const projectsSeq = ++projectsRequestSeq.current
+    void Promise.allSettled([
+      window.scry.listProjects(),
+      window.scry.recentFolders(),
+      readCatalogHealth()
+    ]).then(([nextProjects, nextRecent, nextHealth]) => {
       if (cancelled) return
-      if (nextProjects.status === 'fulfilled') setProjects(nextProjects.value)
+      const projectsCurrent = projectsSeq === projectsRequestSeq.current
+      if (nextProjects.status === 'fulfilled' && projectsCurrent) setProjects(nextProjects.value)
       if (nextRecent.status === 'fulfilled') setRecent(nextRecent.value)
+      if (projectsCurrent) {
+        if (nextHealth.status === 'fulfilled') setCatalogHealth(nextHealth.value)
+        else setCatalogHealth({ status: 'unavailable', source: 'empty', reason: String(nextHealth.reason) })
+      }
       setHydrated(true)
     })
     return () => {
@@ -69,6 +92,7 @@ export function useWorkspaceState() {
     activeSessionId,
     setActiveSessionId,
     hydrated,
+    catalogHealth,
     loadProjects,
     refreshRecent,
     removeRecentFolder,

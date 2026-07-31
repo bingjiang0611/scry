@@ -52,7 +52,7 @@ function qoderOptions(
   resume?: string,
   onPid?: (pid: number) => void,
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
-  permissionMode: AgentPermissionMode = 'full_access',
+  permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false
 ): Record<string, unknown> {
   const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
@@ -70,6 +70,10 @@ function qoderOptions(
     includePartialMessages: true,
     includeHookEvents: true,
     settingSources: ['user', 'project', 'local'],
+    // Scry cannot yet produce an exact Qoder MCP config snapshot. Disable every
+    // discovered/plugin MCP source instead of starting it during background probes or runs.
+    strictMcpConfig: true,
+    mcpServers: {},
     controlRequestTimeoutMs: 30_000,
     ...(onPid
       ? {
@@ -267,7 +271,6 @@ export function createQoderAdapter(): ProviderAdapter {
   const controls = new Map<string, QoderControlSession>()
   const skillCache = new Map<string, Cached<{ data: SkillMeta[]; total: number; included: number }>>()
   const commandCache = new Map<string, Cached<SlashCommand[]>>()
-  const mcpCache = new Map<string, Cached<McpServerStatus[]>>()
   const modelCache = new Map<string, Cached<AgentRunControlCatalog>>()
   const accountCache = new Map<string, Cached<{ usage: UsageInfo | null; account: AccountInfo }>>()
   let lastHookFallbackError: string | undefined
@@ -327,7 +330,7 @@ export function createQoderAdapter(): ProviderAdapter {
         transport: 'Qoder Agent SDK',
         available: !!path,
         path,
-        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' },
+        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' },
         health: lastHookFallbackError
           ? { state: 'degraded', transport: 'Qoder Agent SDK', lastError: lastHookFallbackError }
           : { state: !path ? 'unavailable' : hookFallbackObserved ? 'ready' : 'unknown', transport: 'Qoder Agent SDK' }
@@ -423,7 +426,7 @@ export function createQoderAdapter(): ProviderAdapter {
                         decisionClassification: 'user_temporary' as const
                       }
                     }
-                    if ((request.permissionMode ?? 'full_access') === 'full_access') return { behavior: 'allow' as const }
+                    if ((request.permissionMode ?? 'default') === 'full_access') return { behavior: 'allow' as const }
                     const question = agentPermissionQuestion(
                       request.runId,
                       permission.toolUseID,
@@ -582,21 +585,6 @@ export function createQoderAdapter(): ProviderAdapter {
             : ready
         } catch (error) {
           return capabilityUnknown<SkillMeta[]>(context, 'read', String((error as Error).message))
-        }
-      }
-    },
-    mcp: {
-      snapshot: async (context, refresh = false) => {
-        try {
-          const key = context.cwd ?? ''
-          let value = mcpCache.get(key)
-          if (refresh || !value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            value = { data: await withControl(context, (q) => q.mcpServerStatus()), observedAt: Date.now() }
-            mcpCache.set(key, value)
-          }
-          return capabilityReady(context, 'read', qoderMcpSnapshot(value.data), value.observedAt)
-        } catch (error) {
-          return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
         }
       }
     },

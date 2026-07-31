@@ -1,10 +1,81 @@
 // 两个弹窗：Skills（列表+开关，软屏蔽）/ MCP（列表+连接测试）。
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
 import { Icon, type IconName } from './primitives/Icon'
+
+function ModalFrame({
+  labelledBy,
+  initialFocusRef,
+  onClose,
+  children
+}: {
+  labelledBy: string
+  initialFocusRef?: RefObject<HTMLElement>
+  onClose: () => void
+  children: ReactNode
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  useEffect(() => {
+    const restore = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const focusable = (): HTMLElement[] => [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ) ?? [])]
+    const frame = window.requestAnimationFrame(() => {
+      const requested = initialFocusRef?.current
+      const target = requested && !requested.matches(':disabled') ? requested : focusable()[0] ?? dialogRef.current
+      target?.focus()
+    })
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const controls = focusable()
+      if (controls.length === 0) {
+        event.preventDefault()
+        dialogRef.current.focus()
+        return
+      }
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (!dialogRef.current.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', onKeyDown)
+      if (restore?.isConnected) restore.focus()
+    }
+  }, [initialFocusRef])
+  return (
+    <div
+      className="modal-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 export function SkillsModal({
   skills,
@@ -22,6 +93,8 @@ export function SkillsModal({
   onClose: () => void
 }) {
   const canManage = capability?.mode === 'manage'
+  const titleId = useId()
+  const searchRef = useRef<HTMLInputElement>(null)
   const [q, setQ] = useState('')
   const ql = q.trim().toLowerCase()
   const filtered = ql
@@ -30,24 +103,23 @@ export function SkillsModal({
   const groups: Record<string, SkillMeta[]> = {}
   for (const s of filtered) (groups[s.scope] ??= []).push(s)
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <ModalFrame labelledBy={titleId} initialFocusRef={searchRef} onClose={onClose}>
         <div className="modal-head">
-          <b>Skills</b>{' '}
+          <b id={titleId}>Skills</b>{' '}
           <span className="dim">
             {filtered.length}
             {ql ? `/${skills.length}` : ''}
           </span>
           {refreshing && <span className="dim">读取中…</span>}
           {capability && capability.state !== 'ready' && <span className="dim">{capability.reason ?? capability.state}</span>}
-          <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 状态">
+          <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 状态" aria-label="刷新 Skills">
             <Icon name="refresh" />
           </button>
-          <button className="modal-x" onClick={onClose}>
+          <button className="modal-x" onClick={onClose} aria-label="关闭 Skills">
             <Icon name="x" />
           </button>
         </div>
-        <input className="modal-search" placeholder="搜索 skill…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input ref={searchRef} className="modal-search" placeholder="搜索 skill…" aria-label="搜索 Skills" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="modal-body">
           {filtered.length === 0 && (
             <div className="dim pad">{refreshing && skills.length === 0 ? '正在读取 Skill…' : skills.length === 0 ? '未发现 skill' : '无匹配'}</div>
@@ -59,7 +131,7 @@ export function SkillsModal({
                 <div key={s.name} className="skill-row">
                   <div className="skill-tog">
                     <label className="switch">
-                      <input type="checkbox" checked={s.enabled} disabled={!canManage} onChange={(e) => onToggle(s.name, e.target.checked)} />
+                      <input type="checkbox" aria-label={`启用 Skill ${s.name}`} checked={s.enabled} disabled={!canManage} onChange={(e) => onToggle(s.name, e.target.checked)} />
                       <span className="slider" />
                     </label>
                     <span className={`skill-name ${s.enabled ? '' : 'off'}`}>{s.name}</span>
@@ -73,8 +145,7 @@ export function SkillsModal({
         <div className="modal-foot dim">
           {canManage ? '当前 Provider 支持由 Scry 管理 Skill 开关。' : '当前 Provider 的 Skill 目录仅供读取；Scry 不修改其私有配置。'}
         </div>
-      </div>
-    </div>
+    </ModalFrame>
   )
 }
 
@@ -114,12 +185,14 @@ export function McpModal({
   configRefreshing?: boolean
   refreshing: boolean
   capability?: CapabilityEnvelope<McpSnapshot> | null
-  onTest: (name: string) => void
+  onTest: (targetId: string) => void
   onToggle: (name: string, enabled: boolean) => void
   onRefresh: () => void
   onClose: () => void
 }) {
   const canManage = capability?.mode === 'manage'
+  const titleId = useId()
+  const closeRef = useRef<HTMLButtonElement>(null)
   const loadingConfig = configRefreshing && !capability
   const loading = loadingConfig || refreshing
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -127,10 +200,9 @@ export function McpModal({
   const groups: Record<string, McpMeta[]> = {}
   for (const m of mcps) (groups[m.scope] ??= []).push(m)
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} onClose={onClose}>
         <div className="modal-head">
-          <b>MCP servers</b> <span className="dim">{mcps.length}</span>
+          <b id={titleId}>MCP servers</b> <span className="dim">{mcps.length}</span>
           {loading && <span className="dim">{loadingConfig ? '读取配置中…' : '拉取真实状态中…'}</span>}
           {capability && capability.state !== 'ready' && <span className="dim">{capability.reason ?? capability.state}</span>}
           <button
@@ -138,10 +210,11 @@ export function McpModal({
             onClick={onRefresh}
             disabled={loading}
             title="重新读取当前 Provider 的原生 MCP 配置与运行状态"
+            aria-label="刷新 MCP 状态"
           >
             <Icon name="refresh" />
           </button>
-          <button className="modal-x" onClick={onClose}>
+          <button ref={closeRef} className="modal-x" onClick={onClose} aria-label="关闭 MCP">
             <Icon name="x" />
           </button>
         </div>
@@ -150,18 +223,20 @@ export function McpModal({
           {Object.entries(groups).map(([scope, list]) => (
             <div key={scope}>
               <div className="mcp-scope">{MCP_SCOPE_LABEL[scope] ?? scope}</div>
-              {list.map((m) => {
-                const st = status[m.name]
+              {list.map((m, index) => {
+                const targetId = m.targetId ?? m.name
+                const st = status[targetId]
                 const lv = liveByName.get(m.name)
                 const lvLabel = lv ? labelForLiveStatus(lv.status) : undefined
                 // 开关跟 SDK 真实态走：有 live 就按它(disabled=关，其余=开)，没 live 退回配置读取
                 const enabled = lv ? lv.status !== 'disabled' : m.enabled
-                const open = expanded === m.name
+                const open = expanded === targetId
+                const toolsId = `${titleId}-tools-${scope}-${index}`
                 return (
                   <div key={scope + m.name} className="mcp-row">
                     <div className="mcp-main">
                       <label className="switch" title="当前 Provider 支持管理时，可持久化启用或禁用">
-                        <input type="checkbox" checked={enabled} disabled={!canManage} onChange={(e) => onToggle(m.name, e.target.checked)} />
+                        <input type="checkbox" aria-label={`启用 MCP ${m.name}`} checked={enabled} disabled={!canManage} onChange={(e) => onToggle(m.name, e.target.checked)} />
                         <span className="slider" />
                       </label>
                       <span className={`mcp-name ${enabled ? '' : 'off'}`}>{m.name}</span>
@@ -199,7 +274,7 @@ export function McpModal({
                       {m.detail}
                     </div>
                     <div className="mcp-actions">
-                      <button className="mcp-test" onClick={() => onTest(m.name)} disabled={!canManage || st?.testing}>
+                      <button className="mcp-test" onClick={() => onTest(targetId)} disabled={!canManage || st?.testing}>
                         {st?.testing ? (
                           <>
                             <span className="spinner" /> 测试中…
@@ -209,7 +284,12 @@ export function McpModal({
                         )}
                       </button>
                       {st?.ok && st.toolNames && st.toolNames.length > 0 && (
-                        <button className="mcp-test" onClick={() => setExpanded(open ? null : m.name)}>
+                        <button
+                          className="mcp-test"
+                          aria-expanded={open}
+                          aria-controls={toolsId}
+                          onClick={() => setExpanded(open ? null : targetId)}
+                        >
                           {open ? '收起工具' : `查看工具 (${st.toolNames.length})`}
                         </button>
                       )}
@@ -218,7 +298,7 @@ export function McpModal({
                       </span>
                     </div>
                     {open && st?.toolNames && (
-                      <div className="mcp-tools">
+                      <div id={toolsId} className="mcp-tools">
                         {st.toolNames.map((t) => (
                           <span key={t} className="mcp-tool">
                             {t}
@@ -237,7 +317,6 @@ export function McpModal({
             ? '当前 Provider 支持由 Scry 管理 MCP 开关与连接测试。'
             : '当前 Provider 只暴露原生 MCP 配置/运行状态；Scry 不把读取能力伪装成持久化开关。'}
         </div>
-      </div>
-    </div>
+    </ModalFrame>
   )
 }

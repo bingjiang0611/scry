@@ -1,10 +1,11 @@
 import type { BillingProvider } from '../../shared/billing'
-import type { ProviderId } from '../../shared/provider'
+import { capabilityReady, type ProviderId } from '../../shared/provider'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
 import { assertRuntimeCliSurface, runCliAgent } from '../cli-runtime'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
+import { permissionOptions } from './run-controls'
 
 type LegacyProviderId = Extract<ProviderId, 'codex' | 'qoder'>
 
@@ -14,6 +15,20 @@ function runtimeFor(providerId: LegacyProviderId): Exclude<RuntimeProvider, 'cla
 
 function billingFor(providerId: LegacyProviderId): BillingProvider {
   return providerId === 'codex' ? 'codex' : 'qoder'
+}
+
+function legacyPermissionOptions(providerId: LegacyProviderId) {
+  const options = permissionOptions()
+  if (providerId === 'qoder') return options
+  return options
+    .filter((option) => option.id !== 'auto_review')
+    .map((option) => option.id === 'default'
+      ? {
+          ...option,
+          label: '工作区沙箱',
+          description: 'legacy codex exec 在 workspace-write 沙箱内非交互运行；越界请求不会自动升级'
+        }
+      : option)
 }
 
 function legacyTrace(providerId: LegacyProviderId, event: TraceEvent): TraceEvent {
@@ -41,7 +56,7 @@ function legacyTrace(providerId: LegacyProviderId, event: TraceEvent): TraceEven
   }
 }
 
-export function createLegacyCliAdapter(providerId: LegacyProviderId): ProviderAdapter {
+export function createLegacyCliAdapter(providerId: LegacyProviderId, nativeAdapter?: ProviderAdapter): ProviderAdapter {
   const runtimeProvider = runtimeFor(providerId)
   const executable = (): string | undefined => resolveRuntimeCliBin(providerId)
   return {
@@ -66,6 +81,12 @@ export function createLegacyCliAdapter(providerId: LegacyProviderId): ProviderAd
       }
     },
     run: (request: ProviderRunRequest) => {
+      if (providerId === 'codex' && request.permissionMode === 'auto_review') {
+        throw new Error('codex legacy transport 不支持 auto_review；请选择工作区沙箱、完全访问或切回 native transport')
+      }
+      if (request.resume) {
+        throw new Error(`${providerId} legacy transport 不支持恢复已有会话；请新建对话或切回 native transport`)
+      }
       const path = executable()
       if (!path) throw new Error(`${providerId} CLI 未找到`)
       const options = {
@@ -74,6 +95,12 @@ export function createLegacyCliAdapter(providerId: LegacyProviderId): ProviderAd
         cwd: request.cwd,
         env: runtimeCliEnv(),
         timeoutMs: 30 * 60_000,
+        permissionMode: request.permissionMode,
+        bypassHookTrust: request.bypassHookTrust,
+        ...(providerId === 'qoder' ? { mcpConfigPath: '{"mcpServers":{}}' } : {}),
+        ...(providerId === 'codex'
+          ? { configArgs: ['--ignore-user-config', '-c', 'mcp_servers={}'] }
+          : {}),
         onSessionId: request.onExternalSessionId,
         capabilityMetadata: { transport: 'legacy-cli-jsonl', degraded: true, resumeSupported: false }
       } as const
@@ -88,7 +115,11 @@ export function createLegacyCliAdapter(providerId: LegacyProviderId): ProviderAd
         interrupt: handle.interrupt,
         getExternalSessionId: handle.getSessionId
       }
-    }
+    },
+    runControls: {
+      read: async (context) => capabilityReady(context, 'read', { models: [], permissions: legacyPermissionOptions(providerId) })
+    },
+    ...(providerId === 'codex' && nativeAdapter?.hookTrust ? { hookTrust: nativeAdapter.hookTrust } : {})
   }
 }
 
@@ -107,7 +138,7 @@ export function selectProviderTransports(
     const transport = overrides.get(adapter.id)
     if (!transport || transport === 'native') return adapter
     if (transport === 'legacy' && (adapter.id === 'codex' || adapter.id === 'qoder')) {
-      return createLegacyCliAdapter(adapter.id)
+      return createLegacyCliAdapter(adapter.id, adapter)
     }
     warn(`忽略无效 SCRY_PROVIDER_TRANSPORTS 项：${adapter.id}:${transport}`)
     return adapter

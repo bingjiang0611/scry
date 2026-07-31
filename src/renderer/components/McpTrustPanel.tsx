@@ -2,65 +2,15 @@ import { useMemo, useState } from 'react'
 import type { McpLiveStatus } from '@shared/trace'
 import type { RuntimeProvider } from '@shared/runtime'
 import type { McpMeta } from '../env'
+import type { Finding, InventoryTarget, ScanReport, Severity } from '../../cli/mcpguard-core'
+import { isMcpGuardReport } from '@shared/mcpguard-report'
 import { Icon } from './primitives/Icon'
 
-type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 type TrustTone = 'ok' | 'warn' | 'bad' | 'muted'
 
-export interface McpGuardTarget {
-  targetId: string
-  serverName: string
-  client?: string
-  scope?: string
-  transport?: string
-  sourceType?: string
-  sourcePath?: string
-  command?: string
-  args?: string[]
-  url?: string
-  package?: string
-  version?: string
-  repository?: string
-  envKeys?: string[]
-  roots?: string[]
-  toolFingerprints?: Array<{ name: string; changed?: boolean }>
-  enabled?: boolean
-  introspection?: { status?: string; reason?: string }
-}
-
-export interface McpGuardFinding {
-  findingInstanceId: string
-  title: string
-  severity: Severity
-  confidence?: string
-  affectedTargets?: Array<{ targetId: string; role?: string }>
-  rule?: { id?: string; version?: string; source?: string }
-  category?: string
-  policy?: { profile?: string; decision?: 'block' | 'warn' | 'pass'; exceptionId?: string | null }
-  recommendation?: string
-}
-
-export interface McpGuardReport {
-  schemaVersion: string
-  scan: {
-    id?: string
-    tool?: string
-    toolVersion?: string
-    ruleVersion?: string
-    startedAt?: string
-    mcpSpecVersion?: string
-    mode?: string
-    offline?: boolean
-    redactionPolicy?: string
-  }
-  targets: McpGuardTarget[]
-  summary: Partial<Record<Severity, number>> & { status?: 'pass' | 'warn' | 'block' }
-  sessionAuthPosture?: { status?: string; missingAuthCount?: number | null; items?: unknown[] }
-  findings: McpGuardFinding[]
-  audit?: { reportHash?: string; signedBundle?: unknown; generatedFor?: string }
-  errors?: string[]
-  skipped?: Array<{ targetId?: string; reason?: string }>
-}
+export type McpGuardTarget = InventoryTarget
+export type McpGuardFinding = Finding
+export type McpGuardReport = ScanReport
 
 interface TrustLabel {
   key: string
@@ -72,49 +22,7 @@ interface TrustLabel {
 const SEVERITY_ORDER: Record<Severity, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 }
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isSeverity(value: unknown): value is Severity {
-  return typeof value === 'string' && value in SEVERITY_ORDER
-}
-
-function isPolicyStatus(value: unknown): value is 'pass' | 'warn' | 'block' {
-  return value === 'pass' || value === 'warn' || value === 'block'
-}
-
-function isMcpGuardTarget(value: unknown): value is McpGuardTarget {
-  return isRecord(value) && typeof value.targetId === 'string' && typeof value.serverName === 'string'
-}
-
-function isMcpGuardFinding(value: unknown): value is McpGuardFinding {
-  return (
-    isRecord(value) &&
-    typeof value.findingInstanceId === 'string' &&
-    typeof value.title === 'string' &&
-    isSeverity(value.severity)
-  )
-}
-
-function isMcpGuardReport(value: unknown): value is McpGuardReport {
-  if (!isRecord(value)) return false
-  const scan = value.scan
-  const summary = value.summary
-  const targets = value.targets
-  const findings = value.findings
-  return (
-    value.schemaVersion === '0.1' &&
-    isRecord(scan) &&
-    scan.tool === 'mcpguard' &&
-    Array.isArray(targets) &&
-    targets.every(isMcpGuardTarget) &&
-    Array.isArray(findings) &&
-    findings.every(isMcpGuardFinding) &&
-    isRecord(summary) &&
-    (summary.status == null || isPolicyStatus(summary.status))
-  )
-}
+export { isMcpGuardReport }
 
 function count(summary: McpGuardReport['summary'], severity: Severity): number {
   const value = summary[severity]

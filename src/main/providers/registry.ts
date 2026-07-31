@@ -12,7 +12,7 @@ import {
   type SkillMeta
 } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
-import type { ProviderAdapter, ProviderRunHandle, ProviderRunRequest } from './types'
+import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunHandle, ProviderRunRequest } from './types'
 import type { CodexHookInspection } from '../codex-hook-trust'
 
 export class ProviderRegistry {
@@ -54,7 +54,7 @@ export class ProviderRegistry {
     return adapter.run({
       ...request,
       ...(this.runControlsEnabled
-        ? { permissionMode: request.permissionMode ?? 'full_access' }
+        ? { permissionMode: request.permissionMode ?? 'default' }
         : { model: undefined, effort: undefined, permissionMode: 'full_access' }),
       emit: (event) => request.emit({ ...event, providerId, runtimeProvider: adapter.runtimeProvider })
     })
@@ -105,8 +105,12 @@ export class ProviderRegistry {
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 不支持由 Scry 管理 Skill 开关'))
   }
 
-  mcpSnapshot(context: ProviderContext, refresh = false): Promise<CapabilityEnvelope<McpSnapshot>> {
-    return this.disabled<McpSnapshot>(context) ?? this.get(context.providerId).mcp?.snapshot(context, refresh) ??
+  mcpSnapshot(
+    context: ProviderContext,
+    refresh = false,
+    execution?: AuthorizedMcpExecution
+  ): Promise<CapabilityEnvelope<McpSnapshot>> {
+    return this.disabled<McpSnapshot>(context) ?? this.get(context.providerId).mcp?.snapshot(context, refresh, execution) ??
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的 MCP 状态接口'))
   }
 
@@ -115,8 +119,12 @@ export class ProviderRegistry {
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 不支持由 Scry 管理 MCP 开关'))
   }
 
-  testMcp(context: ProviderContext, name: string): Promise<CapabilityEnvelope<McpTestResult>> {
-    return this.disabled<McpTestResult>(context) ?? this.get(context.providerId).mcp?.test?.(context, name) ??
+  testMcp(
+    context: ProviderContext,
+    name: string,
+    execution?: AuthorizedMcpExecution
+  ): Promise<CapabilityEnvelope<McpTestResult>> {
+    return this.disabled<McpTestResult>(context) ?? this.get(context.providerId).mcp?.test?.(context, name, execution) ??
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 不支持由 Scry 直接测试 MCP 工具'))
   }
 

@@ -41,7 +41,7 @@ describe('runtime frontdoor mapping', () => {
       backend: 'local',
       runtimeProvider: 'claude_sdk',
       attachments: [],
-      permissionMode: 'full_access'
+      permissionMode: 'default'
     })
   })
 
@@ -50,18 +50,22 @@ describe('runtime frontdoor mapping', () => {
       normalizeAgentStartRequest({
         prompt: 'hi',
         providerId: 'opencode',
+        expectedExternalSessionId: 'session-a',
         model: { providerId: 'openai', id: ' gpt-test ' },
         effort: ' high ',
         permissionMode: 'default'
       })
     ).toMatchObject({
       model: { providerId: 'openai', id: 'gpt-test' },
+      expectedExternalSessionId: 'session-a',
       effort: 'high',
       permissionMode: 'default'
     })
     expect(() =>
       normalizeAgentStartRequest({ prompt: 'hi', permissionMode: 'unsafe' as never })
     ).toThrow('不受支持')
+    expect(normalizeAgentStartRequest({ prompt: 'new', expectedExternalSessionId: null }))
+      .toMatchObject({ expectedExternalSessionId: null })
   })
 
   it('maps generic permission answers without exposing native request ids', () => {
@@ -110,6 +114,24 @@ describe('runtime frontdoor mapping', () => {
         ]
       }).attachments
     ).toEqual([{ kind: 'image', name: 'shot.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=', size: 5 }])
+  })
+
+  it('rejects decoded attachment bytes above the per-image and aggregate hard limits', () => {
+    const tenMiB = Buffer.alloc(10 * 1024 * 1024).toString('base64')
+    const overTenMiB = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
+    expect(() => normalizeAgentStartRequest({
+      prompt: '',
+      attachments: [{ kind: 'image', name: 'large.png', mimeType: 'image/png', dataBase64: overTenMiB }]
+    })).toThrow('超过 10 MiB')
+    expect(() => normalizeAgentStartRequest({
+      prompt: '',
+      attachments: [0, 1, 2].map((index) => ({
+        kind: 'image' as const,
+        name: `${index}.png`,
+        mimeType: 'image/png' as const,
+        dataBase64: tenMiB
+      }))
+    })).toThrow('总大小超过 24 MiB')
   })
 
   it('normalizes Claude AskUserQuestion payloads without inventing answers', () => {

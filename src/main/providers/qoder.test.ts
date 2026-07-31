@@ -39,7 +39,7 @@ describe('Qoder provider adapter', () => {
     await expect(createQoderAdapter().describe()).resolves.toMatchObject({
       id: 'qoder',
       transport: 'Qoder Agent SDK',
-      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' }
+      capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' }
     })
   })
 
@@ -214,6 +214,7 @@ describe('Qoder provider adapter', () => {
       prompt: 'ask',
       attachments: [],
       emit: vi.fn(),
+      permissionMode: 'full_access',
       requestUserInput
     })
     const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool as (

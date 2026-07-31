@@ -758,7 +758,7 @@ export interface SegmentReport {
   subagents: number
 }
 
-function resultsOf(t: Turn): TraceEvent[] {
+function resultsOf(t: Turn | Pick<Turn, 'items'>): TraceEvent[] {
   return t.items.filter((e) => e.kind === 'harness' && e.stage === 'result')
 }
 
@@ -799,7 +799,7 @@ function aggregateModelUsage(rows: ModelUsageRow[]): ModelUsageRow[] | undefined
   return [...map.values()]
 }
 
-export function resultOf(t: Turn): TraceEvent | undefined {
+export function resultOf(t: Turn | Pick<Turn, 'items'>): TraceEvent | undefined {
   const observed = resultsOf(t)
   const archived = observed.filter((event) => event.text !== 'transcript assistant usage')
   const results = archived.some(hasTokenUsage) ? archived : observed
@@ -863,12 +863,11 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
     else groups.push({ ctx: c, idx: [i] })
   })
 
-  const apiValues = turns.flatMap((turn) =>
-    resultsOf(turn).map((result) => result.durationApiMs).filter((value): value is number => value != null)
-  )
+  const turnResults = turns.map((turn) => resultOf(turn))
+  const apiValues = turnResults.map((result) => result?.durationApiMs).filter((value): value is number => value != null)
   const totalApiMs = apiValues.length > 0 ? apiValues.reduce((sum, value) => sum + value, 0) : null
-  const totalCost = turns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + (r.costUsd ?? 0), 0), 0)
-  const totalTokens = turns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + resultTokenTotal(r), 0), 0)
+  const totalCost = turnResults.reduce((sum, result) => sum + (result?.costUsd ?? 0), 0)
+  const totalTokens = turnResults.reduce((sum, result) => sum + (result ? resultTokenTotal(result) : 0), 0)
 
   const actLabels = (e: TraceEvent): SegAct[] => {
     if (e.kind === 'agent') return [{ label: e.name ?? 'Task', count: 0, agent: true }]
@@ -885,11 +884,10 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
   const segments: RichSegment[] = groups.map((g) => {
     const segTurns = g.idx.map((i) => turns[i])
     const items = segTurns.flatMap((t) => logicalCallEventsForTurn(t.items))
-    const cost = segTurns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + (r.costUsd ?? 0), 0), 0)
-    const totalTokensForSegment = segTurns.reduce((s, t) => s + resultsOf(t).reduce((sum, r) => sum + resultTokenTotal(r), 0), 0)
-    const segmentApiValues = segTurns.flatMap((turn) =>
-      resultsOf(turn).map((result) => result.durationApiMs).filter((value): value is number => value != null)
-    )
+    const segmentResults = segTurns.map((turn) => resultOf(turn))
+    const cost = segmentResults.reduce((sum, result) => sum + (result?.costUsd ?? 0), 0)
+    const totalTokensForSegment = segmentResults.reduce((sum, result) => sum + (result ? resultTokenTotal(result) : 0), 0)
+    const segmentApiValues = segmentResults.map((result) => result?.durationApiMs).filter((value): value is number => value != null)
     const apiMs = segmentApiValues.length > 0
       ? segmentApiValues.reduce((sum, value) => sum + value, 0)
       : null
@@ -1603,7 +1601,27 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
       continue
     }
     const items = next[i].items
-    if (items.some((e) => e.id === ev.id)) continue // 去重
+    const existingIndex = items.findIndex((event) => event.id === ev.id)
+    if (ev.kind === 'harness' && ev.stage === 'result_superseded') {
+      if (existingIndex === -1) continue
+      if (!mutated) {
+        next = [...next]
+        mutated = true
+      }
+      next[i] = { ...next[i], items: items.filter((_, index) => index !== existingIndex) }
+      continue
+    }
+    if (existingIndex !== -1) {
+      if (items[existingIndex] === ev) continue
+      if (!mutated) {
+        next = [...next]
+        mutated = true
+      }
+      const updated = [...items]
+      updated[existingIndex] = ev
+      next[i] = { ...next[i], items: updated }
+      continue
+    }
     const last = items[items.length - 1]
     const merged =
       ev.stage === 'text_delta' && last?.stage === 'text_delta'

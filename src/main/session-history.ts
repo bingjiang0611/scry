@@ -1,9 +1,13 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { basename } from 'node:path'
 import { mcpCallsForEvent, mcpPayloadFailed, type TraceEvent } from '../shared/trace'
 import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMimeType } from '../shared/runtime'
 import type { ParsedTurn as TranscriptTurn } from './normalize'
 import type { TraceArchive } from './transcript-archive'
+import {
+  hydrateLegacyAttachmentPath,
+  hydrateStoredAttachment,
+  MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES,
+  type AttachmentHydrationBudget
+} from './attachment-store'
 
 export interface LoadedSessionTurn {
   runId?: string
@@ -17,45 +21,79 @@ export interface LoadedSessionTurn {
 
 const ATTACHMENT_MARKER = 'Scry pasted image attachments:'
 
+export interface SessionHistoryContext {
+  userDataDir: string
+  attachmentBudgetBytes?: number
+}
+
 function cleanAttachmentPrompt(userText: string): string {
   const markerIndex = userText.indexOf(ATTACHMENT_MARKER)
   if (markerIndex === -1) return userText
   return userText.slice(0, markerIndex).trim()
 }
 
-function imageAttachmentFromLine(line: string): AgentInputAttachment | null {
+function imageAttachmentFromLine(
+  line: string,
+  runId: string,
+  context: SessionHistoryContext,
+  budget: AttachmentHydrationBudget
+): { attachment: AgentInputAttachment | null; warning?: string } {
   const match = line.match(/^\s*\d+\.\s+(.+?)\s+\((image\/(?:png|jpeg|gif|webp))\s*,[\s\S]*?\)\s+local copy:\s+(.+?)\s*$/)
-  if (!match) return null
+  if (!match) return { attachment: null }
   const [, rawName, mimeType, filePath] = match
-  if (!isSupportedImageMimeType(mimeType) || !existsSync(filePath)) return null
-  try {
-    const data = readFileSync(filePath)
-    return {
-      kind: 'image',
-      name: rawName.trim() || basename(filePath),
-      mimeType: mimeType as AgentImageMimeType,
-      dataBase64: data.toString('base64'),
-      size: statSync(filePath).size,
-      path: filePath
-    }
-  } catch {
-    return null
+  if (!isSupportedImageMimeType(mimeType)) return { attachment: null, warning: `${rawName} 的 MIME 不受支持` }
+  return hydrateLegacyAttachmentPath({
+    userDataDir: context.userDataDir,
+    runId,
+    name: rawName.trim() || '历史图片',
+    mimeType: mimeType as AgentImageMimeType,
+    path: filePath,
+    budget
+  })
+}
+
+function recoverAttachmentsFromPrompt(
+  userText: string,
+  runId: string,
+  context: SessionHistoryContext | undefined,
+  budget: AttachmentHydrationBudget
+): { attachments: AgentInputAttachment[]; warnings: string[] } {
+  const markerIndex = userText.indexOf(ATTACHMENT_MARKER)
+  if (markerIndex === -1) return { attachments: [], warnings: [] }
+  if (!context) return { attachments: [], warnings: ['历史附件缺少受控 userData 上下文，未加载'] }
+  const results = userText
+    .slice(markerIndex + ATTACHMENT_MARKER.length)
+    .split('\n')
+    .map((line) => imageAttachmentFromLine(line, runId, context, budget))
+  return {
+    attachments: results.map((result) => result.attachment).filter((attachment): attachment is AgentInputAttachment => attachment != null),
+    warnings: results.map((result) => result.warning).filter((warning): warning is string => !!warning)
   }
 }
 
-function recoverAttachmentsFromPrompt(userText: string): AgentInputAttachment[] {
-  const markerIndex = userText.indexOf(ATTACHMENT_MARKER)
-  if (markerIndex === -1) return []
-  return userText
-    .slice(markerIndex + ATTACHMENT_MARKER.length)
-    .split('\n')
-    .map(imageAttachmentFromLine)
-    .filter((attachment): attachment is AgentInputAttachment => attachment != null)
+function withAttachmentWarnings(errorHint: string | undefined, warnings: string[]): string | undefined {
+  if (warnings.length === 0) return errorHint
+  return [errorHint, `历史附件不可用：${warnings.join('；')}`].filter(Boolean).join('\n')
 }
 
-export function restoreTraceArchiveTurn(turn: TraceArchive['turns'][number]): LoadedSessionTurn {
-  const recovered = recoverAttachmentsFromPrompt(turn.userText)
-  const attachments = turn.attachments?.length ? turn.attachments : recovered
+export function restoreTraceArchiveTurn(
+  turn: TraceArchive['turns'][number],
+  context?: SessionHistoryContext,
+  budget: AttachmentHydrationBudget = {
+    usedBytes: 0,
+    maxBytes: context?.attachmentBudgetBytes ?? MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES
+  }
+): LoadedSessionTurn {
+  const recovered = recoverAttachmentsFromPrompt(turn.userText, turn.runId, context, budget)
+  const stored = (turn.attachments ?? []).map((attachment) =>
+    hydrateStoredAttachment(context?.userDataDir ?? '', turn.runId, attachment, budget)
+  )
+  const attachments = turn.attachments?.length
+    ? stored.map((result) => result.attachment).filter((attachment): attachment is AgentInputAttachment => attachment != null)
+    : recovered.attachments
+  const warnings = turn.attachments?.length
+    ? stored.map((result) => result.warning).filter((warning): warning is string => !!warning)
+    : recovered.warnings
   return {
     runId: turn.runId,
     userText: cleanAttachmentPrompt(turn.userText),
@@ -63,7 +101,7 @@ export function restoreTraceArchiveTurn(turn: TraceArchive['turns'][number]): Lo
     items: turn.items,
     done: turn.done,
     error: turn.error,
-    errorHint: turn.errorHint
+    errorHint: withAttachmentWarnings(turn.errorHint, warnings)
   }
 }
 
@@ -259,25 +297,45 @@ function mergeTraceItems(transcriptItems: TraceEvent[], archiveItems: TraceEvent
 }
 
 function mergeTurnWithArchive(transcriptTurn: LoadedSessionTurn, archiveTurn: LoadedSessionTurn): LoadedSessionTurn {
+  const archiveHasCanonicalUsage = archiveTurn.items.some(
+    (event) =>
+      event.kind === 'harness' &&
+      event.stage === 'result' &&
+      event.text !== 'transcript assistant usage' &&
+      [event.tokensIn, event.tokensOut, event.cacheReadTokens, event.cacheCreationTokens].some((value) => value != null)
+  )
+  const transcriptItems = archiveHasCanonicalUsage
+    ? transcriptTurn.items.filter(
+        (event) => !(event.kind === 'harness' && event.stage === 'result' && event.text === 'transcript assistant usage')
+      )
+    : transcriptTurn.items
   return {
     runId: archiveTurn.runId,
     userText: transcriptTurn.userText,
     attachments: archiveTurn.attachments?.length ? archiveTurn.attachments : transcriptTurn.attachments,
-    items: mergeTraceItems(transcriptTurn.items, archiveTurn.items),
+    items: mergeTraceItems(transcriptItems, archiveTurn.items),
     done: archiveTurn.done,
     error: archiveTurn.error,
     errorHint: archiveTurn.errorHint
   }
 }
 
-export function mergeSessionTurns(transcriptTurns: TranscriptTurn[], archive: TraceArchive | null): LoadedSessionTurn[] {
-  const restoredArchive = (archive?.turns ?? []).map(restoreTraceArchiveTurn).map((turn) => ({
+export function mergeSessionTurns(
+  transcriptTurns: TranscriptTurn[],
+  archive: TraceArchive | null,
+  context?: SessionHistoryContext
+): LoadedSessionTurn[] {
+  const budget: AttachmentHydrationBudget = {
+    usedBytes: 0,
+    maxBytes: context?.attachmentBudgetBytes ?? MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES
+  }
+  const restoredArchive = (archive?.turns ?? []).map((turn) => restoreTraceArchiveTurn(turn, context, budget)).map((turn) => ({
     ...turn,
     items: normalizeHistoricalMcpResults(keepLastTurnDiff(turn.items))
   }))
   const merged: LoadedSessionTurn[] = transcriptTurns.map((turn) => ({
     userText: cleanAttachmentPrompt(turn.userText),
-    attachments: recoverAttachmentsFromPrompt(turn.userText),
+    attachments: recoverAttachmentsFromPrompt(turn.userText, '', context, budget).attachments,
     items: normalizeHistoricalMcpResults(turn.items)
   }))
   for (const turn of merged) {

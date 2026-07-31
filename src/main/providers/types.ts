@@ -36,6 +36,17 @@ export interface ProviderRunHandle {
   getProviderTurnId?: () => string | undefined
 }
 
+export interface AuthorizedMcpExecution {
+  cwd: string
+  targets: Array<{
+    targetId: string
+    name: string
+    enabled: boolean
+    config: Record<string, unknown>
+  }>
+  env: NodeJS.ProcessEnv
+}
+
 export interface ProviderRunRequest {
   runId: string
   prompt: string
@@ -47,6 +58,7 @@ export interface ProviderRunRequest {
   permissionMode?: AgentPermissionMode
   bypassHookTrust?: boolean
   managedRecorder?: boolean
+  mcpExecution?: AuthorizedMcpExecution
   emit: (event: TraceEvent) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
@@ -62,13 +74,21 @@ export interface SkillsFacet {
 }
 
 export interface McpFacet {
-  snapshot(context: ProviderContext, refresh?: boolean): Promise<CapabilityEnvelope<McpSnapshot>>
+  snapshot(
+    context: ProviderContext,
+    refresh?: boolean,
+    execution?: AuthorizedMcpExecution
+  ): Promise<CapabilityEnvelope<McpSnapshot>>
   setEnabled?(
     context: ProviderContext,
     name: string,
     enabled: boolean
   ): Promise<CapabilityEnvelope<boolean>>
-  test?(context: ProviderContext, name: string): Promise<CapabilityEnvelope<McpTestResult>>
+  test?(
+    context: ProviderContext,
+    name: string,
+    execution?: AuthorizedMcpExecution
+  ): Promise<CapabilityEnvelope<McpTestResult>>
 }
 
 export interface CommandsFacet {

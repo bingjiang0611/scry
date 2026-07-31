@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { AgentRuntimeError, assertRuntimeCliSurface, captureCliMcpStatus, runCliAgent } from './cli-runtime'
+import { AgentRuntimeError, assertRuntimeCliSurface, buildCliArgs, captureCliMcpStatus, runCliAgent } from './cli-runtime'
 import type { TraceEvent } from '../shared/trace'
 
 function fakeCli(body: string): string {
@@ -14,10 +14,47 @@ function fakeCli(body: string): string {
 }
 
 describe('CLI runtime probes', () => {
+  it.each([
+    ['default', 'default', false],
+    ['auto_review', 'auto', false],
+    ['full_access', 'bypass_permissions', true]
+  ] as const)('maps Qoder %s permission mode without implicit privilege escalation', (permissionMode, cliMode, dangerous) => {
+    const args = buildCliArgs({
+      runtimeProvider: 'qoder_cli',
+      executablePath: '/bin/qoder',
+      permissionMode,
+      mcpConfigPath: '{"mcpServers":{}}'
+    })
+    expect(args).toContain(cliMode)
+    expect(args.includes('--dangerously-skip-permissions')).toBe(dangerous)
+    expect(args).toEqual(expect.arrayContaining([
+      '--mcp-config', '{"mcpServers":{}}', '--strict-mcp-config'
+    ]))
+  })
+
+  it('only enables Codex danger-full-access for an explicit full_access request', () => {
+    const defaults = buildCliArgs({ runtimeProvider: 'codex_cli', executablePath: '/bin/codex' })
+    const full = buildCliArgs({ runtimeProvider: 'codex_cli', executablePath: '/bin/codex', permissionMode: 'full_access' })
+    expect(defaults).toEqual(expect.arrayContaining(['--sandbox', 'workspace-write']))
+    expect(defaults).not.toContain('--dangerously-bypass-approvals-and-sandbox')
+    expect(full).toEqual(expect.arrayContaining(['--sandbox', 'danger-full-access', '--dangerously-bypass-approvals-and-sandbox']))
+  })
+
+  it('only bypasses Codex Hook trust after the caller grants the inspected snapshot', () => {
+    const guarded = buildCliArgs({ runtimeProvider: 'codex_cli', executablePath: '/bin/codex' })
+    const granted = buildCliArgs({
+      runtimeProvider: 'codex_cli',
+      executablePath: '/bin/codex',
+      bypassHookTrust: true
+    })
+    expect(guarded).not.toContain('--dangerously-bypass-hook-trust')
+    expect(granted).toContain('--dangerously-bypass-hook-trust')
+  })
+
   it('accepts the required Codex exec flag surface', () => {
     const cli = fakeCli(`
 if [ "$1" = "--version" ]; then echo "codex-cli 0.142.5"; exit 0; fi
-if [ "$1" = "exec" ] && [ "$2" = "--help" ]; then echo "--json --cd --add-dir --sandbox --skip-git-repo-check"; exit 0; fi
+if [ "$1" = "exec" ] && [ "$2" = "--help" ]; then echo "--json --cd --add-dir --sandbox --skip-git-repo-check --ignore-user-config --dangerously-bypass-hook-trust"; exit 0; fi
 exit 2
 `)
     expect(() =>
@@ -27,7 +64,7 @@ exit 2
 
   it('accepts the required Qoder npm flag surface without relying on hanging --help', () => {
     const cli = fakeCli(`
-# local bundle strings: --output-format --cwd --permission-mode --add-dir --mcp-config
+# local bundle strings: --output-format --cwd --permission-mode --dangerously-skip-permissions --add-dir --mcp-config --strict-mcp-config
 if [ "$1" = "-v" ]; then echo "1.0.2"; exit 0; fi
 if [ "$1" = "--help" ]; then sleep 30; fi
 exit 2
@@ -39,7 +76,7 @@ exit 2
 
   it.each(['0.9.0', '1.0.2', '1.1.5', '99.0.0'])('accepts Qoder %s when the required CLI surface is present', (version) => {
     const cli = fakeCli(`
-# local bundle strings: --output-format --cwd --permission-mode --add-dir --mcp-config
+# local bundle strings: --output-format --cwd --permission-mode --dangerously-skip-permissions --add-dir --mcp-config --strict-mcp-config
 if [ "$1" = "-v" ]; then echo "${version}"; exit 0; fi
 exit 2
 `)
@@ -50,7 +87,7 @@ exit 2
 
   it('rejects Qoder bundles missing required local flags', () => {
     const cli = fakeCli(`
-# local bundle strings: --output-format --cwd --permission-mode --mcp-config
+# local bundle strings: --output-format --cwd --permission-mode --dangerously-skip-permissions --mcp-config --strict-mcp-config
 if [ "$1" = "-v" ]; then echo "1.0.2"; exit 0; fi
 exit 2
 `)
@@ -63,6 +100,19 @@ exit 2
     expect(err).toBeInstanceOf(AgentRuntimeError)
     expect((err as AgentRuntimeError).brief).toMatchObject({ provider: 'qoder_cli', stage: 'version_probe' })
     expect(String((err as Error).message)).toContain('missing flags: --add-dir')
+  })
+
+  it('rejects Qoder bundles that cannot enforce an empty strict MCP config', () => {
+    const cli = fakeCli(`
+# local bundle strings: --output-format --cwd --permission-mode --dangerously-skip-permissions --add-dir --mcp-config
+if [ "$1" = "-v" ]; then echo "1.1.5"; exit 0; fi
+exit 2
+`)
+    expect(() => assertRuntimeCliSurface({
+      runtimeProvider: 'qoder_cli',
+      executablePath: cli,
+      env: process.env as Record<string, string>
+    })).toThrow('missing flags: --strict-mcp-config')
   })
 
   it('captures version_probe failure evidence under the provider sample directory', () => {

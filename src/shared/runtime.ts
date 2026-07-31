@@ -58,6 +58,7 @@ export interface AgentRunControls {
 export interface AgentStartRequest {
   prompt: string
   cwd?: string
+  expectedExternalSessionId?: string | null
   providerId?: ProviderId
   agentId?: string
   backend?: RuntimeBackend
@@ -105,6 +106,7 @@ export type AgentQuestionResponse =
 export interface NormalizedAgentStartRequest {
   prompt: string
   cwd?: string
+  expectedExternalSessionId?: string | null
   providerId: ProviderId
   agentId: string
   backend: RuntimeBackend
@@ -116,6 +118,10 @@ export interface NormalizedAgentStartRequest {
 }
 
 export type AgentImageMimeType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+
+export const MAX_AGENT_ATTACHMENTS = 8
+export const MAX_AGENT_ATTACHMENT_BYTES = 10 * 1024 * 1024
+export const MAX_AGENT_ATTACHMENTS_TOTAL_BYTES = 24 * 1024 * 1024
 
 export interface AgentInputAttachment {
   kind: 'image'
@@ -228,13 +234,18 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   const modelId = boundedControlValue(payload.model?.id)
   const modelProviderId = boundedControlValue(payload.model?.providerId)
   const effort = boundedControlValue(payload.effort)
-  const permissionMode = payload.permissionMode ?? 'full_access'
+  const permissionMode = payload.permissionMode ?? 'default'
   if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
     throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
   }
   return {
     prompt: payload.prompt,
     ...(typeof payload.cwd === 'string' && payload.cwd.trim() ? { cwd: payload.cwd } : {}),
+    ...(payload.expectedExternalSessionId === null
+      ? { expectedExternalSessionId: null }
+      : typeof payload.expectedExternalSessionId === 'string' && payload.expectedExternalSessionId
+        ? { expectedExternalSessionId: payload.expectedExternalSessionId }
+        : {}),
     providerId,
     agentId,
     backend: payload.backend ?? 'local',
@@ -292,9 +303,24 @@ export function isSupportedImageMimeType(value: string): value is AgentImageMime
   return value === 'image/png' || value === 'image/jpeg' || value === 'image/gif' || value === 'image/webp'
 }
 
+export function decodedBase64ByteLength(value: string): number | null {
+  const compact = value.replace(/\s+/g, '')
+  if (!compact || compact.length % 4 !== 0) return null
+  const padding = compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0
+  for (let index = 0; index < compact.length - padding; index++) {
+    const code = compact.charCodeAt(index)
+    const alphaNumeric = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    if (!alphaNumeric && code !== 43 && code !== 47) return null
+  }
+  for (let index = compact.length - padding; index < compact.length; index++) {
+    if (compact.charCodeAt(index) !== 61) return null
+  }
+  return (compact.length / 4) * 3 - padding
+}
+
 export function normalizeAgentAttachments(value: unknown): AgentInputAttachment[] {
   if (!Array.isArray(value)) return []
-  return value
+  const attachments = value
     .filter((item): item is AgentInputAttachment => {
       if (!item || typeof item !== 'object') return false
       const a = item as Partial<AgentInputAttachment>
@@ -303,20 +329,33 @@ export function normalizeAgentAttachments(value: unknown): AgentInputAttachment[
         typeof a.name === 'string' &&
         isSupportedImageMimeType(String(a.mimeType ?? '')) &&
         typeof a.dataBase64 === 'string' &&
-        a.dataBase64.length > 0
+        decodedBase64ByteLength(a.dataBase64) != null
       )
     })
-    .slice(0, 8)
-    .map((a) => ({
+    .map<AgentInputAttachment>((a) => ({
       kind: 'image',
       name: a.name || 'pasted-image',
       mimeType: a.mimeType,
       dataBase64: a.dataBase64,
-      size: typeof a.size === 'number' ? a.size : undefined,
+      size: decodedBase64ByteLength(a.dataBase64)!,
       width: typeof a.width === 'number' ? a.width : undefined,
       height: typeof a.height === 'number' ? a.height : undefined,
       path: typeof a.path === 'string' ? a.path : undefined
     }))
+  if (attachments.length > MAX_AGENT_ATTACHMENTS) {
+    throw new Error(`图片附件最多 ${MAX_AGENT_ATTACHMENTS} 张`)
+  }
+  let totalBytes = 0
+  for (const attachment of attachments) {
+    if ((attachment.size ?? 0) > MAX_AGENT_ATTACHMENT_BYTES) {
+      throw new Error(`图片 ${attachment.name} 超过 10 MiB 上限`)
+    }
+    totalBytes += attachment.size ?? 0
+  }
+  if (totalBytes > MAX_AGENT_ATTACHMENTS_TOTAL_BYTES) {
+    throw new Error('图片附件总大小超过 24 MiB 上限')
+  }
+  return attachments
 }
 
 function exactBoundedText(value: unknown, max: number): string | null {

@@ -111,7 +111,7 @@ const PATHS: Record<IconName, ReactNode> = {
 
 export function Icon({ name, lg, className }: { name: IconName; lg?: boolean; className?: string }) {
   return (
-    <svg className={`ico${lg ? ' ico-lg' : ''}${className ? ' ' + className : ''}`} viewBox="0 0 24 24">
+    <svg className={`ico${lg ? ' ico-lg' : ''}${className ? ' ' + className : ''}`} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       {PATHS[name]}
     </svg>
   )

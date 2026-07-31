@@ -1,6 +1,7 @@
 export interface RunRegistryState {
   runId: string
   done: boolean
+  providerSettled?: boolean
 }
 
 export interface RunRegistryControl {
@@ -31,6 +32,16 @@ export class RunRegistry<
   activeControls(): Control[] {
     return [...this.entries.values()].map(({ control, state }) => ({ control, state }))
       .filter(({ state }) => !state.done)
+      .map(({ control }) => control)
+  }
+
+  unsettledStates(): State[] {
+    return [...this.entries.values()].map(({ state }) => state).filter((state) => state.providerSettled !== true)
+  }
+
+  unsettledControls(): Control[] {
+    return [...this.entries.values()].map(({ control, state }) => ({ control, state }))
+      .filter(({ state }) => state.providerSettled !== true)
       .map(({ control }) => control)
   }
 

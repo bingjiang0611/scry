@@ -1,5 +1,6 @@
 import { rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { lstatSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import type { RuntimeProvider } from '../shared/runtime.js'
 import type { ProviderId } from '../shared/provider.js'
 import type { AgentTurnRecord } from '../shared/turn-record.js'
@@ -13,8 +14,8 @@ import {
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from '../core/turn-recorder/io.js'
 import { safeKey, stableHash } from '../core/turn-recorder/store.js'
 import {
-  readTraceArchive,
   upsertTraceArchiveTurn,
+  findTraceArchiveTurnMatches,
   type TraceArchiveTurn
 } from './transcript-archive.js'
 
@@ -39,6 +40,61 @@ interface ManagedTurnProgress {
   schemaVersion: 1
   persistedAt: string
   request: Omit<ManagedTraceTurnCommitInput, 'userDataDir'>
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validManagedRequest(value: unknown): value is ManagedTurnJournal['request'] {
+  if (!isRecord(value) || !isRecord(value.turn) || !isRecord(value.timing)) return false
+  const turn = value.turn
+  const timing = value.timing
+  return typeof value.cwd === 'string' && value.cwd.length > 0 &&
+    typeof value.sessionId === 'string' && value.sessionId.length > 0 &&
+    typeof value.providerTurnId === 'string' && value.providerTurnId.length > 0 &&
+    (value.providerId === 'codex' || value.providerId === 'qoder') &&
+    (value.runtimeProvider === 'codex_cli' || value.runtimeProvider === 'qoder_cli') &&
+    typeof turn.runId === 'string' && turn.runId.length > 0 &&
+    (turn.providerTurnId === undefined || typeof turn.providerTurnId === 'string') &&
+    typeof turn.userText === 'string' &&
+    Array.isArray(turn.items) && isRecord(turn.turnEvidence) && turn.done === true &&
+    typeof turn.status === 'string' && typeof value.status === 'string' &&
+    typeof timing.startedAt === 'string' && typeof timing.completedAt === 'string' &&
+    typeof timing.durationMs === 'number' && Number.isFinite(timing.durationMs)
+}
+
+function validProgress(value: ManagedTurnProgress | null): value is ManagedTurnProgress {
+  return value?.schemaVersion === 1 && typeof value.persistedAt === 'string' && validManagedRequest(value.request)
+}
+
+function validJournal(value: ManagedTurnJournal | null): value is ManagedTurnJournal {
+  return value?.schemaVersion === 1 &&
+    (value.phase === 'prepared' || value.phase === 'archive_committed') &&
+    typeof value.archiveFingerprint === 'string' && validManagedRequest(value.request)
+}
+
+function managedArtifactIdentity(value: unknown): {
+  cwd: string
+  sessionId: string
+  providerId: ManagedRecorderProviderId
+} | null {
+  if (!isRecord(value) || !isRecord(value.request)) return null
+  const request = value.request
+  if (
+    typeof request.cwd !== 'string' || typeof request.sessionId !== 'string' ||
+    (request.providerId !== 'codex' && request.providerId !== 'qoder')
+  ) return null
+  return { cwd: request.cwd, sessionId: request.sessionId, providerId: request.providerId }
+}
+
+function managedIdentityMatches(
+  identity: { cwd: string; sessionId: string; providerId: ManagedRecorderProviderId },
+  options: { cwd?: string; sessionId?: string; providerId?: ManagedRecorderProviderId }
+): boolean {
+  return (!options.cwd || identity.cwd === options.cwd) &&
+    (!options.sessionId || identity.sessionId === options.sessionId) &&
+    (!options.providerId || identity.providerId === options.providerId)
 }
 
 export interface ManagedTraceTurnCommitInput {
@@ -79,6 +135,96 @@ function lockPath(userDataDir: string, runId: string): string {
   return join(journalRoot(userDataDir), 'locks', `${safeKey(runId)}.lock`)
 }
 
+function atomicTempPaths(path: string): string[] {
+  const dir = dirname(path)
+  const base = basename(path).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  let names: string[]
+  try { names = readdirSync(dir) } catch { return [] }
+  const pattern = new RegExp(`^${base}\\.\\d+\\.[0-9a-f-]{36}\\.tmp$`)
+  return names.filter((name) => pattern.test(name)).map((name) => join(dir, name))
+}
+
+function artifactExists(path: string): boolean {
+  try {
+    const stat = lstatSync(path)
+    return stat.isFile() && !stat.isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+export function managedSessionRunIds(
+  userDataDir: string,
+  identity: { cwd: string; sessionId: string; providerId: ProviderId }
+): string[] {
+  const runIds = new Set<string>()
+  for (const root of [progressRoot(userDataDir), journalRoot(userDataDir)]) {
+    let names: string[]
+    try { names = readdirSync(root) } catch { continue }
+    for (const name of names.filter((entry) => entry.endsWith('.json'))) {
+      try {
+        const value = JSON.parse(readFileSync(join(root, name), 'utf8')) as {
+          schemaVersion?: unknown
+          request?: { cwd?: unknown; sessionId?: unknown; providerId?: unknown; turn?: { runId?: unknown } }
+        }
+        const request = value.request
+        if (
+          value.schemaVersion === 1 && request?.cwd === identity.cwd &&
+          request.sessionId === identity.sessionId && request.providerId === identity.providerId &&
+          typeof request.turn?.runId === 'string'
+        ) runIds.add(request.turn.runId)
+      } catch {
+        // An invalid unrelated artifact cannot be attributed to this session.
+      }
+    }
+  }
+  return [...runIds]
+}
+
+export async function deleteManagedTurnArtifacts(
+  userDataDir: string,
+  runIds: ReadonlySet<string>
+): Promise<{ failed: Array<{ path: string; error: string }> }> {
+  const failed: Array<{ path: string; error: string }> = []
+  for (const runId of runIds) {
+    const lock = lockPath(userDataDir, runId)
+    try {
+      await withDirectoryLock(lock, async () => {
+        const paths = [progressPath(userDataDir, runId), journalPath(userDataDir, runId)]
+        for (const path of paths.flatMap((value) => [value, ...atomicTempPaths(value)])) {
+          try { rmSync(path, { force: true }) } catch (error) {
+            failed.push({ path, error: error instanceof Error ? error.message : String(error) })
+          }
+        }
+      }, { waitMs: 10_000 })
+    } catch (error) {
+      failed.push({ path: lock, error: error instanceof Error ? error.message : String(error) })
+    }
+    if (failed.length > 0) {
+      // Keep later stores and the catalog intact when any managed artifact is still live.
+      break
+    }
+  }
+  return { failed }
+}
+
+export function cleanupManagedTurnTemps(userDataDir: string): void {
+  for (const root of [progressRoot(userDataDir), journalRoot(userDataDir)]) {
+    let names: string[]
+    try { names = readdirSync(root) } catch { continue }
+    for (const name of names) {
+      if (!/\.json\.\d+\.[0-9a-f-]{36}\.tmp$/.test(name)) continue
+      const path = join(root, name)
+      try {
+        const stat = lstatSync(path)
+        if (stat.isFile() && !stat.isSymbolicLink()) rmSync(path, { force: true })
+      } catch {
+        // Startup cleanup is best-effort; recovery will still ignore temp files.
+      }
+    }
+  }
+}
+
 function archiveFingerprint(input: ManagedTraceTurnCommitInput): string {
   return stableHash({
     cwd: input.cwd,
@@ -105,6 +251,52 @@ function providerTurnFingerprint(turn: TraceArchiveTurn): string {
     completedAt: turn.completedAt,
     durationMs: turn.durationMs
   })
+}
+
+function baseTurnFingerprint(turn: TraceArchiveTurn): string {
+  const { turnEvidence: _turnEvidence, items, ts: _ts, ...base } = turn
+  return stableHash({
+    ...base,
+    items: items.filter((item) => !(item.kind === 'harness' && item.stage === 'turn_diff'))
+  })
+}
+
+function turnDiffCount(turn: TraceArchiveTurn): number {
+  return turn.items.filter((item) => item.kind === 'harness' && item.stage === 'turn_diff').length
+}
+
+function turnContentFingerprint(turn: TraceArchiveTurn): string {
+  const { ts: _ts, ...content } = turn
+  return stableHash(content)
+}
+
+function existingTurnDisposition(
+  existing: TraceArchiveTurn,
+  incoming: TraceArchiveTurn
+): 'existing_dominates' | 'incoming_enriches' | 'conflict' {
+  if (baseTurnFingerprint(existing) !== baseTurnFingerprint(incoming)) return 'conflict'
+  if (turnContentFingerprint(existing) === turnContentFingerprint(incoming)) return 'existing_dominates'
+  const existingDiffs = turnDiffCount(existing)
+  const incomingDiffs = turnDiffCount(incoming)
+  if (existingDiffs > incomingDiffs) return 'existing_dominates'
+  if (incomingDiffs > existingDiffs) return 'incoming_enriches'
+  return 'conflict'
+}
+
+function matchingArchiveTurn(input: ManagedTraceTurnCommitInput): TraceArchiveTurn | undefined {
+  const matches = findTraceArchiveTurnMatches({
+    cwd: input.cwd,
+    sessionId: input.sessionId,
+    providerId: input.providerId,
+    userDataDir: input.userDataDir,
+    runId: input.turn.runId,
+    providerTurnId: input.providerTurnId
+  })
+  if (
+    matches.byRunId && matches.byProviderTurnId &&
+    stableHash(matches.byRunId) !== stableHash(matches.byProviderTurnId)
+  ) throw new Error(`managed recorder archive identity collision for ${input.turn.runId}`)
+  return matches.byProviderTurnId ?? matches.byRunId
 }
 
 function assertManagedTraceInput(input: ManagedTraceTurnCommitInput): void {
@@ -143,23 +335,22 @@ function assertProgressIdentity(
 
 function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void {
   const request = journal.request
-  const archive = readTraceArchive({
+  const existing = findTraceArchiveTurnMatches({
     cwd: request.cwd,
     sessionId: request.sessionId,
     providerId: request.providerId,
-    userDataDir
+    userDataDir,
+    runId: request.turn.runId,
+    providerTurnId: request.providerTurnId
   })
-  const providerExisting = archive?.turns.find(
-    (turn) => turn.providerTurnId === request.providerTurnId
-  )
+  const providerExisting = existing.byProviderTurnId
   if (providerExisting) {
     if (providerTurnFingerprint(providerExisting) !== providerTurnFingerprint(request.turn)) {
       throw new Error(`managed recorder Provider turn collision for ${request.providerTurnId}`)
     }
     return
   }
-  const existing = archive?.turns.find((turn) => turn.runId === request.turn.runId)
-  if (existing && stableHash(existing) !== stableHash(request.turn)) {
+  if (existing.byRunId && stableHash(existing.byRunId) !== stableHash(request.turn)) {
     throw new Error(`managed recorder archive collision for ${request.turn.runId}`)
   }
   const ok = upsertTraceArchiveTurn({
@@ -243,6 +434,7 @@ async function replayJournal(
     if (committed.status === 'disabled' || committed.status === 'pending' || committed.status === 'prepared') {
       throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')
     }
+    await rm(progressPath(userDataDir, journal.request.turn.runId), { force: true })
     await rm(path, { force: true })
     return 'recovered'
   } catch {
@@ -296,11 +488,24 @@ export function canonicalOrObservedTurnTiming(
 
 export async function commitManagedTraceTurn(
   input: ManagedTraceTurnCommitInput,
-  options: { waitMs?: number } = {}
+  options: {
+    waitMs?: number
+    removeArtifact?: (path: string) => Promise<void>
+  } = {}
 ): Promise<{ recorder: 'disabled' | 'committed'; recordId?: string }> {
-  assertManagedTraceInput(input)
   const mode = await managedRecorderMode(input.cwd)
   if (mode.status === 'disabled') {
+    const existing = matchingArchiveTurn(input)
+    if (existing) {
+      const disposition = existingTurnDisposition(existing, input.turn)
+      if (disposition === 'conflict') {
+        throw new Error(`managed recorder progress conflicts with committed archive: ${input.turn.runId}`)
+      }
+      if (disposition === 'existing_dominates') {
+        await rm(progressPath(input.userDataDir, input.turn.runId), { force: true })
+        return { recorder: 'disabled' }
+      }
+    }
     const ok = upsertTraceArchiveTurn({
       cwd: input.cwd,
       sessionId: input.sessionId,
@@ -313,8 +518,10 @@ export async function commitManagedTraceTurn(
     await rm(progressPath(input.userDataDir, input.turn.runId), { force: true })
     return { recorder: 'disabled' }
   }
+  assertManagedTraceInput(input)
 
   const path = journalPath(input.userDataDir, input.turn.runId)
+  const removeArtifact = options.removeArtifact ?? ((target: string) => rm(target, { force: true }))
   return withDirectoryLock(lockPath(input.userDataDir, input.turn.runId), async () => {
     const fingerprint = archiveFingerprint(input)
     const existing = await readJson<ManagedTurnJournal>(path)
@@ -361,8 +568,8 @@ export async function commitManagedTraceTurn(
     if (committed.status !== 'committed' && committed.status !== 'duplicate') {
       throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')
     }
-    await rm(path, { force: true })
-    await rm(progressPath(input.userDataDir, input.turn.runId), { force: true })
+    await removeArtifact(progressPath(input.userDataDir, input.turn.runId))
+    await removeArtifact(path)
     return { recorder: 'committed' as const, recordId: committed.recordId }
   })
 }
@@ -389,25 +596,51 @@ export async function persistManagedTraceProgress(
 
 export async function recoverManagedTraceProgress(
   userDataDir: string,
-  options: { cwd?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
+  options: { cwd?: string; sessionId?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
   let pending = 0
   const errors: string[] = []
+  const scoped = Boolean(options.cwd || options.sessionId || options.providerId)
   for (const name of await listFiles(progressRoot(userDataDir))) {
     if (!name.endsWith('.json')) continue
     const path = join(progressRoot(userDataDir), name)
     const progress = await readJson<ManagedTurnProgress>(path)
-    if (!progress || progress.schemaVersion !== 1) {
-      pending++
-      errors.push(`invalid managed turn progress: ${name}`)
+    if (!validProgress(progress)) {
+      const identity = managedArtifactIdentity(progress)
+      if (!scoped || (identity && managedIdentityMatches(identity, options))) {
+        pending++
+        errors.push(`invalid managed turn progress: ${name}`)
+      }
       continue
     }
     if (options.cwd && progress.request.cwd !== options.cwd) continue
+    if (options.sessionId && progress.request.sessionId !== options.sessionId) continue
     if (options.providerId && progress.request.providerId !== options.providerId) continue
     try {
+      const canonicalJournalPath = journalPath(userDataDir, progress.request.turn.runId)
+      const journal = await readJson<ManagedTurnJournal>(canonicalJournalPath)
+      if (journal || artifactExists(canonicalJournalPath)) {
+        pending++
+        errors.push(`managed turn ${progress.request.turn.runId} has a canonical journal that must recover first`)
+        continue
+      }
+      const input = { ...progress.request, userDataDir }
+      assertManagedTraceInput(input)
+      const existing = matchingArchiveTurn(input)
+      if (existing) {
+        const disposition = existingTurnDisposition(existing, progress.request.turn)
+        if (disposition === 'conflict') {
+          throw new Error(`managed recorder progress conflicts with committed archive: ${progress.request.turn.runId}`)
+        }
+        if (disposition === 'existing_dominates') {
+          await rm(path, { force: true })
+          recovered++
+          continue
+        }
+      }
       await commitManagedTraceTurn(
-        { ...progress.request, userDataDir },
+        input,
         { waitMs: options.waitMs ?? 250 }
       )
       recovered++
@@ -421,21 +654,26 @@ export async function recoverManagedTraceProgress(
 
 export async function recoverManagedTraceTurns(
   userDataDir: string,
-  options: { cwd?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
+  options: { cwd?: string; sessionId?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
   let pending = 0
   const errors: string[] = []
+  const scoped = Boolean(options.cwd || options.sessionId || options.providerId)
   for (const name of await listFiles(journalRoot(userDataDir))) {
     if (!name.endsWith('.json')) continue
     const path = join(journalRoot(userDataDir), name)
     const journal = await readJson<ManagedTurnJournal>(path)
-    if (!journal || journal.schemaVersion !== 1) {
-      pending++
-      errors.push(`invalid managed turn journal: ${name}`)
+    if (!validJournal(journal)) {
+      const identity = managedArtifactIdentity(journal)
+      if (!scoped || (identity && managedIdentityMatches(identity, options))) {
+        pending++
+        errors.push(`invalid managed turn journal: ${name}`)
+      }
       continue
     }
     if (options.cwd && journal.request.cwd !== options.cwd) continue
+    if (options.sessionId && journal.request.sessionId !== options.sessionId) continue
     if (options.providerId && journal.request.providerId !== options.providerId) continue
     const result = await withDirectoryLock(
       lockPath(userDataDir, journal.request.turn.runId),

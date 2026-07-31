@@ -18,14 +18,63 @@ import {
   openCodeRunControlCatalog,
   setOpenCodeMcpServers
 } from './opencode'
-import { parseOpenCodeHookLine } from './opencode-server'
+import {
+  isolatedOpenCodeChildEnv,
+  openCodeServerAuthorization,
+  parseOpenCodeHookLine,
+  sanitizeOpenCodeAuth
+} from './opencode-server'
 
 describe('OpenCode provider adapter', () => {
+  it('forwards only local api/oauth credentials and drops wellknown remote configuration auth', () => {
+    expect(sanitizeOpenCodeAuth({
+      anthropic: { type: 'api', key: 'api-key' },
+      openai: { type: 'oauth', access: 'access', refresh: 'refresh', expires: 1 },
+      'https://remote.example': { type: 'wellknown', key: 'remote', token: 'token' },
+      malformed: { key: 'missing-type' }
+    })).toEqual({
+      anthropic: { type: 'api', key: 'api-key' },
+      openai: { type: 'oauth', access: 'access', refresh: 'refresh', expires: 1 }
+    })
+  })
+
+  it('isolates every inherited OpenCode and XDG control path while preserving ordinary provider credentials', () => {
+    const env = isolatedOpenCodeChildEnv({
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'provider-key',
+      OPENCODE_API_KEY: 'zen-key',
+      OPENCODE_DB: '/outside/opencode.db',
+      OPENCODE_WORKSPACE_ID: 'outside-workspace',
+      OPENCODE_PLUGIN_META_FILE: '/outside/plugins.json',
+      XDG_DATA_HOME: '/outside/data',
+      XDG_DATA_DIRS: '/outside/data-dirs'
+    }, '/isolated', '/isolated/safe-config.json', '/isolated/config', '{"openai":{"type":"oauth"}}', 'random-password')
+
+    expect(env).toMatchObject({
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'provider-key',
+      OPENCODE_API_KEY: 'zen-key',
+      XDG_DATA_HOME: '/isolated/data',
+      XDG_DATA_DIRS: '/isolated/data-dirs',
+      XDG_RUNTIME_DIR: '/isolated/runtime',
+      OPENCODE_DB: '/isolated/data/opencode.db',
+      OPENCODE_CONFIG: '/isolated/safe-config.json',
+      OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth"}}',
+      OPENCODE_SERVER_USERNAME: 'opencode',
+      OPENCODE_SERVER_PASSWORD: 'random-password'
+    })
+    expect(env).not.toHaveProperty('OPENCODE_WORKSPACE_ID')
+    expect(env).not.toHaveProperty('OPENCODE_PLUGIN_META_FILE')
+    expect(openCodeServerAuthorization('random-password')).toBe(
+      `Basic ${Buffer.from('opencode:random-password').toString('base64')}`
+    )
+  })
+
   it('exposes native server capabilities without claiming account billing support', async () => {
     await expect(createOpenCodeAdapter().describe()).resolves.toMatchObject({
       id: 'opencode',
       runtimeProvider: 'opencode_server',
-      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' }
+      capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' }
     })
   })
 

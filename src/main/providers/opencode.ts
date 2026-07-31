@@ -1,5 +1,5 @@
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
-import { capabilityReady, capabilityUnknown, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
+import { capabilityReady, capabilityUnknown, type ProviderContext, type SkillMeta } from '../../shared/provider'
 import type { BillingProvider } from '../../shared/billing'
 import {
   agentPermissionDecision,
@@ -125,7 +125,7 @@ export function openCodePermissionRules(mode: AgentPermissionMode | undefined): 
   pattern: string
   action: 'allow' | 'ask'
 }> {
-  if (!mode || mode === 'full_access') return [{ permission: '*', pattern: '*', action: 'allow' }]
+  if (mode === 'full_access') return [{ permission: '*', pattern: '*', action: 'allow' }]
   if (mode === 'auto_review') throw new Error('OpenCode 不支持自动审查权限模式')
   return [{ permission: '*', pattern: '*', action: 'ask' }]
 }
@@ -246,31 +246,6 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
   }
 }
 
-async function mcpSnapshot(client: OpencodeClient, context: ProviderContext): Promise<McpSnapshot> {
-  const statuses = await unwrap<Record<string, { status?: string; error?: string }>>(client.mcp.status({ directory: context.cwd }))
-  const runtime = Object.entries(statuses).map(([name, status]) => ({
-    name,
-    status:
-      status.status === 'needs_auth' || status.status === 'needs_client_registration'
-        ? ('needs-auth' as const)
-        : status.status === 'connected'
-          ? ('connected' as const)
-          : status.status === 'disabled'
-            ? ('disabled' as const)
-            : ('failed' as const)
-  }))
-  return {
-    configured: Object.entries(statuses).map(([name, status]) => ({
-      name,
-      scope: 'opencode',
-      transport: 'native',
-      detail: status.error ?? status.status ?? 'unknown',
-      enabled: status.status !== 'disabled'
-    })),
-    runtime
-  }
-}
-
 export function createOpenCodeAdapter(): ProviderAdapter {
   const executable = (): string | undefined => process.env.SCRY_OPENCODE_PATH?.trim() || resolveRuntimeCliBin('opencode')
   const managers = new Map<string, OpenCodeServerManager>()
@@ -310,7 +285,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
       const current = states.find(({ state }) => state != null)
       const degradedBridge = states
         .map(({ manager, state }) => ({ bridge: manager.hookBridge, state }))
-        .find(({ bridge, state }) => bridge.enabled && state && !bridge.ready)
+        .find(({ bridge, state }) => state && (!bridge.enabled || !bridge.ready))
       const bridgeError = degradedBridge
         ? degradedBridge.bridge.error ?? 'OpenCode Hook bridge not ready'
         : undefined
@@ -321,7 +296,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         transport: 'server SDK',
         available: !!path,
         path,
-        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' },
+        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' },
         health: {
           state: !path ? 'unavailable' : lastError || bridgeError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'server SDK',
@@ -456,6 +431,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
           isError: !!info.error,
           runtimeMetadata: { modelProvider: upstream, source: 'opencode_server', finish: info.finish }
         }))
+        if (info.error && !stopped) throw new Error(`OpenCode Provider 失败：${errorText(info.error)}`)
         return { externalSessionId, stopped }
       })()
       const interrupt = (): void => {
@@ -506,15 +482,6 @@ export function createOpenCodeAdapter(): ProviderAdapter {
           return capabilityReady(context, 'read', data)
         } catch (error) {
           return capabilityUnknown<SkillMeta[]>(context, 'read', String((error as Error).message))
-        }
-      }
-    },
-    mcp: {
-      snapshot: async (context) => {
-        try {
-          return capabilityReady(context, 'read', await mcpSnapshot(await clientFor(context), context))
-        } catch (error) {
-          return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
         }
       }
     },
