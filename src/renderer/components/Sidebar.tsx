@@ -69,7 +69,7 @@ export function Sidebar({
         .filter((p) => p.sessions.length > 0)
     : projects
   return (
-    <aside className="sidebar" id={id}>
+    <aside className="sidebar" id={id} aria-label="会话导航">
       <div className="sb-brand">
         <span className="name">Scry</span>
         <span className="ver">{version}</span>
@@ -84,18 +84,28 @@ export function Sidebar({
       </div>
 
       {(onDiagnostics || onAnalytics) && (
-        <div className="sb-nav">
+        <nav className="sb-nav" aria-label="主要视图">
           {onAnalytics && (
-            <div className={`sb-navitem ${analyticsActive ? 'active' : ''}`} onClick={onAnalytics}>
+            <button
+              type="button"
+              className={`sb-navitem ${analyticsActive ? 'active' : ''}`}
+              aria-current={analyticsActive ? 'page' : undefined}
+              onClick={onAnalytics}
+            >
               <Icon name="chart" /> 分析
-            </div>
+            </button>
           )}
           {onDiagnostics && (
-            <div className={`sb-navitem ${diagnosticsActive ? 'active' : ''}`} onClick={onDiagnostics}>
+            <button
+              type="button"
+              className={`sb-navitem ${diagnosticsActive ? 'active' : ''}`}
+              aria-current={diagnosticsActive ? 'page' : undefined}
+              onClick={onDiagnostics}
+            >
               <Icon name="info" /> 诊断
-            </div>
+            </button>
           )}
-        </div>
+        </nav>
       )}
 
       <div className="sb-section">
@@ -107,10 +117,12 @@ export function Sidebar({
           const open = !collapsed.has(p.cwd)
           return (
             <div key={p.cwd} className={`sb-proj ${open ? 'open' : ''}`}>
-              <div
+              <button
+                type="button"
                 className={`sb-proj-head ${p.cwd === activeCwd ? 'on' : ''}`}
                 title={`${p.name}\n${p.cwd}`}
                 aria-label={`${p.name} · ${p.cwd}`}
+                aria-expanded={open}
                 data-project-path={p.cwd}
                 onClick={() => toggle(p.cwd)}
               >
@@ -120,17 +132,19 @@ export function Sidebar({
                   {p.cwd}
                 </span>
                 <span className="pcnt">{p.sessions.length}</span>
-              </div>
+              </button>
               {open && (
                 <div className="sb-sess-list">
                   {p.sessions.map((s) => {
                     const active = s.sessionId === activeSessionId && s.providerId === activeProviderId
                     const running = Boolean(s.runId && runningRunIds.has(s.runId))
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={`${s.providerId}:${s.sessionId}`}
                         className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
                         title={`${s.preview}${s.preview ? '\n' : ''}${activeTimeTitle(s.mtime)}${running ? '\n正在运行' : ''}`}
+                        aria-current={active ? 'true' : undefined}
                         onClick={() => onPick(p.cwd, s.sessionId, s.providerId, s.externalSessionId, s.runId)}
                         onContextMenu={(e) => {
                           e.preventDefault()
@@ -153,7 +167,7 @@ export function Sidebar({
                           活跃 {relTime(s.mtime)}
                         </span>
                         {running && <span className="sb-running" role="status" aria-label="正在运行" />}
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
