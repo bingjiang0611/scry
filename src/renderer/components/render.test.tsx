@@ -25,7 +25,7 @@ import {
   takeNextQueuedPrompt
 } from '../App'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
-import { resolveRunControlSelection } from '../hooks/useIntegrations'
+import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel } from './OverviewPanel'
@@ -194,6 +194,11 @@ describe('ViewChrome 顶栏', () => {
 })
 
 describe('运行控制选择', () => {
+  it('重复选择同一 Agent 时不清空已有模型目录，切换 Provider 时才重置', () => {
+    expect(shouldResetRunControlCatalog('qoder', 'qoder')).toBe(false)
+    expect(shouldResetRunControlCatalog('codex', 'qoder')).toBe(true)
+  })
+
   it('Provider 目录变化时丢弃失效模型和 effort，并保留仍受支持的权限', () => {
     expect(resolveRunControlSelection({
       models: [{ model: { id: 'new-model' }, label: 'New', efforts: [] }],

@@ -124,7 +124,7 @@ export function CliPicker({
               <span className="agicon">
                 <Icon name={(AGENT_ICON[a.id] ?? 'cube') as IconName} />
               </span>{' '}
-              {a.name}
+              <span className="agent-option-name">{a.name}</span>
               {a.id === selectedId && <span className="ck"><Icon name="check" /> selected</span>}
             </div>
           ))}
