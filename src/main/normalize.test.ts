@@ -298,6 +298,67 @@ describe('normalizeSdkMessage', () => {
     })
   })
 
+  it('Qoder 外层 toolUseResult 的失败状态进入 tool_result', () => {
+    const result = normalizeSdkMessage(
+      {
+        type: 'user',
+        toolUseResult: { kind: 'completed', exitCode: 3, isError: true },
+        message: { content: [{ type: 'tool_result', tool_use_id: 'qoder-bash', content: 'command failed' }] }
+      },
+      ctx()
+    )[0]
+
+    expect(result).toMatchObject({
+      kind: 'tool',
+      stage: 'tool_result',
+      toolUseId: 'qoder-bash',
+      output: 'command failed',
+      isError: true
+    })
+  })
+
+  it('不把无 tool ID 的外层失败复制给同一消息里的多个 tool_result', () => {
+    const results = normalizeSdkMessage(
+      {
+        type: 'user',
+        toolUseResult: { kind: 'completed', exitCode: 1, isError: true },
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'parallel-ok', content: 'ok' },
+            { type: 'tool_result', tool_use_id: 'parallel-failed', content: 'failed', is_error: true }
+          ]
+        }
+      },
+      ctx()
+    )
+
+    expect(results).toEqual([
+      expect.objectContaining({ toolUseId: 'parallel-ok', isError: false }),
+      expect.objectContaining({ toolUseId: 'parallel-failed', isError: true })
+    ])
+  })
+
+  it('并行 tool_result 的外层失败带 tool ID 时只标记对应结果', () => {
+    const results = normalizeSdkMessage(
+      {
+        type: 'user',
+        toolUseResult: { toolUseId: 'parallel-failed', exitCode: 1, isError: true },
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'parallel-ok', content: 'ok' },
+            { type: 'tool_result', tool_use_id: 'parallel-failed', content: 'failed' }
+          ]
+        }
+      },
+      ctx()
+    )
+
+    expect(results).toEqual([
+      expect.objectContaining({ toolUseId: 'parallel-ok', isError: false }),
+      expect.objectContaining({ toolUseId: 'parallel-failed', isError: true })
+    ])
+  })
+
   it('用 tool_use 身份补全 Qoder MCP tool_result', () => {
     const c = ctx()
     normalizeSdkMessage(
@@ -558,6 +619,48 @@ describe('normalizeTranscriptLine', () => {
 })
 
 describe('parseTranscriptToTurns', () => {
+  it('Qoder compact summary 不开启新轮，并保留原生 promptId', () => {
+    const content = [
+      JSON.stringify({
+        type: 'user',
+        promptId: 'qoder-turn-1',
+        message: {
+          role: 'user',
+          content: '<command-name>/rate-native-rate-workflow</command-name><command-args>84959911</command-args>'
+        }
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        promptId: 'qoder-turn-1',
+        message: { content: [{ type: 'text', text: 'compact 前' }] }
+      }),
+      JSON.stringify({ type: 'system', subtype: 'compact_boundary', isCompactSummary: true }),
+      JSON.stringify({
+        type: 'user',
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+        message: { role: 'user', content: [{ type: 'text', text: 'This session is being continued from a previous conversation.' }] }
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        promptId: 'qoder-turn-1',
+        message: { content: [{ type: 'text', text: 'compact 后' }] }
+      })
+    ].join('\n')
+
+    const turns = parseTranscriptToTurns(content, ctx())
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]).toMatchObject({
+      providerTurnId: 'qoder-turn-1',
+      userText: '<command-name>/rate-native-rate-workflow</command-name><command-args>84959911</command-args>'
+    })
+    expect(turns[0].items.filter((event) => event.kind === 'model').map((event) => event.text)).toEqual([
+      'compact 前',
+      'compact 后'
+    ])
+  })
+
   it('历史 transcript 保留 skill 注入事件', () => {
     const content = [
       JSON.stringify({
