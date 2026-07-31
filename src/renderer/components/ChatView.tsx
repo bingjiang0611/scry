@@ -30,6 +30,9 @@ interface ChatViewProps {
   runControlsLoading?: boolean
   runControlsReason?: string | null
   input: string
+  composerError?: string | null
+  sendBlockedReason?: string | null
+  submitting?: boolean
   busy: boolean
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
@@ -115,6 +118,9 @@ export function ChatView({
   runControlsLoading = false,
   runControlsReason = null,
   input,
+  composerError = null,
+  sendBlockedReason = null,
+  submitting = false,
   busy,
   draftAttachments,
   queuedPrompts,
@@ -304,7 +310,7 @@ export function ChatView({
         <textarea
           ref={textareaRef}
           className="input"
-          placeholder={busy ? '运行中，输入后 Enter 加入队列…' : `给 ${selectedAgentName} 一个任务…（/ 唤起命令，Enter 发送，Shift+Enter 换行）`}
+          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : busy ? '运行中，输入后 Enter 加入队列…' : `给 ${selectedAgentName} 一个任务…（/ 唤起命令，Enter 发送，Shift+Enter 换行）`}
           value={input}
           onChange={(event) => onInput(event.target.value)}
           onPaste={(event) => {
@@ -350,10 +356,12 @@ export function ChatView({
             }
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault()
+              if (sendBlockedReason) return
               onSend()
             }
           }}
         />
+        {(composerError || sendBlockedReason) && <div className="composer-error" role="alert">{composerError ?? sendBlockedReason}</div>}
         <div className="composer-bottom">
           <RunControlSelect
             ariaLabel="模型"
@@ -378,9 +386,15 @@ export function ChatView({
             />
           )}
           <div className="spacer" />
-          <button className="send" onClick={onSend} disabled={!input.trim() && draftAttachments.length === 0} title={busy ? '加入队列' : '发送'}>
+          <button
+            className="send"
+            onClick={onSend}
+            disabled={submitting || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
+            aria-busy={submitting}
+            title={sendBlockedReason ?? (submitting ? '正在启动' : busy ? '加入队列' : '发送')}
+          >
             <Icon name="send" />
-            <span className="send-label">{busy ? '排队' : '发送'}</span>
+            <span className="send-label">{submitting ? '启动中' : busy ? '排队' : '发送'}</span>
           </button>
           {busy && (
             <button className="stop" onClick={onStop}>

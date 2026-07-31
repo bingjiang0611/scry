@@ -11,17 +11,22 @@ import type { ParsedTurn } from '../env'
 import {
   App,
   activeRunForSession,
+  attachmentsAfterSuccessfulSubmit,
   appendWorkspaceReference,
   applyNewConversationEffects,
   applySessionCapturedEffects,
   applyTurnDoneEffects,
   chatBottomDistance,
+  commitDraftAfterStart,
   defaultNewConversationCwd,
+  dequeueStartedPrompt,
   enqueuePrompt,
+  inputAfterSuccessfulSubmit,
   isChatNearBottom,
   restoreActiveSessionSelection,
   scrollChatToBottomIfNeeded,
   scrollChatTargetIntoView,
+  shouldQueuePrompt,
   takeNextQueuedPrompt
 } from '../App'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
@@ -1302,6 +1307,35 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     const first = takeNextQueuedPrompt(queue)
     expect(first.next?.text).toBe('先做 A')
     expect(first.rest[0].attachments[0].name).toBe('queued.png')
+    expect(dequeueStartedPrompt(queue, first.next!)).toEqual(first.rest)
+    expect(dequeueStartedPrompt(queue, { ...first.next! })).toBe(queue)
+    expect(shouldQueuePrompt(false, queue.length, true)).toBe(true)
+    expect(shouldQueuePrompt(false, queue.length, false)).toBe(true)
+    expect(shouldQueuePrompt(false, 0, false)).toBe(false)
+  })
+
+  it('启动成功才提交原草稿，失败时不清空，且保留等待期间新增内容', async () => {
+    let commits = 0
+    await expect(
+      commitDraftAfterStart(
+        () => Promise.reject(new Error('start rejected')),
+        () => { commits += 1 }
+      )
+    ).rejects.toThrow('start rejected')
+    expect(commits).toBe(0)
+
+    await commitDraftAfterStart(
+      () => Promise.resolve(),
+      () => { commits += 1 }
+    )
+    expect(commits).toBe(1)
+    expect(inputAfterSuccessfulSubmit('原始草稿', '原始草稿')).toBe('')
+    expect(inputAfterSuccessfulSubmit('原始草稿\n等待期间新增', '原始草稿')).toBe('等待期间新增')
+    expect(inputAfterSuccessfulSubmit('完全改写', '原始草稿')).toBe('完全改写')
+
+    const submitted = { id: 'sent', kind: 'image' as const, name: 'sent.png', mimeType: 'image/png' as const, dataBase64: 'aQ==', previewUrl: 'blob:sent' }
+    const newer = { ...submitted, id: 'new', name: 'new.png', previewUrl: 'blob:new' }
+    expect(attachmentsAfterSuccessfulSubmit([submitted, newer], new Set(['sent']))).toEqual([newer])
   })
 
   it('滚动只在接近底部时自动粘底', () => {
@@ -1694,7 +1728,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       mcpSpecVersion: '2025-11-25',
       mode: 'static',
       offline: true,
-      redactionPolicy: 'hash_secret_values_keep_key_names'
+      redactionPolicy: 'hash_secret_values_keep_key_names',
+      analyzers: [{ name: 'config-static', version: '0.1.0' }]
     },
     targets: [
       {
@@ -1709,7 +1744,11 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
         args: ['-y', 'remote-mcp'],
         envKeys: ['ANTHROPIC_AUTH_TOKEN'],
         roots: ['/Users/example'],
-        toolFingerprints: [{ name: 'read_all' }, { name: 'write_all' }],
+        serverDigest: 'sha256:danger',
+        toolFingerprints: [
+          { name: 'read_all', kind: 'tool', canonicalHash: 'sha256:read', changed: false },
+          { name: 'write_all', kind: 'tool', canonicalHash: 'sha256:write', changed: false }
+        ],
         enabled: true,
         introspection: { status: 'not_observed', reason: 'static_only' }
       },
@@ -1725,7 +1764,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
         args: [],
         envKeys: [],
         roots: [],
-        toolFingerprints: [{ name: 'search' }],
+        serverDigest: 'sha256:safe',
+        toolFingerprints: [{ name: 'search', kind: 'tool', canonicalHash: 'sha256:search', changed: false }],
         enabled: true,
         introspection: { status: 'not_observed', reason: 'static_only' }
       }
@@ -1735,24 +1775,40 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     findings: [
       {
         findingInstanceId: 'finding-1',
+        dedupeKey: 'finding-1',
+        fingerprint: 'sha256:finding-1',
         title: 'Runtime package manager in MCP launch path',
         severity: 'high',
         confidence: 'high',
         affectedTargets: [{ targetId: 'target-danger', role: 'subject' }],
         rule: { id: 'MCP-CMD-002', version: '2026.07.03', source: 'mcpguard-rules' },
         category: 'launch',
-        policy: { profile: 'enterprise-default', decision: 'block', exceptionId: null },
+        firstSeen: null,
+        baselineSeen: null,
+        evidence: [],
+        relationships: [],
+        impact: 'Remote code could execute.',
+        references: [],
+        policy: { profile: 'enterprise-default', decision: 'block', exceptionId: null, allowException: true },
         recommendation: 'Pin the package before launch.'
       },
       {
         findingInstanceId: 'finding-2',
+        dedupeKey: 'finding-2',
+        fingerprint: 'sha256:finding-2',
         title: 'Sensitive environment key is passed to MCP server',
         severity: 'medium',
         confidence: 'high',
         affectedTargets: [{ targetId: 'target-danger', role: 'subject' }],
         rule: { id: 'MCP-ENV-001', version: '2026.07.03', source: 'mcpguard-rules' },
         category: 'secret',
-        policy: { profile: 'enterprise-default', decision: 'warn', exceptionId: null },
+        firstSeen: null,
+        baselineSeen: null,
+        evidence: [],
+        relationships: [],
+        impact: 'Credentials may be exposed.',
+        references: [],
+        policy: { profile: 'enterprise-default', decision: 'warn', exceptionId: null, allowException: true },
         recommendation: 'Move credentials to a scoped secret store.'
       }
     ],
@@ -1778,6 +1834,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       usage={{ cost: 0.5, tin: 3000, tout: 400, turns: 2 }}
       billingState={billingState}
       stats={{
+        status: 'ready',
         totals: { cost: 0.5, tin: 3000, tout: 400, turns: 2 },
         topTools: [
           { tool: 'Read', n: 12, mcp: 0 },
@@ -2958,7 +3015,7 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
         }
       ]}
       projects={[]}
-      usage={{ cost: 0.5, tin: 100, tout: 20, turns: 3 }}
+      usage={{ status: 'ready', cost: 0.5, tin: 100, tout: 20, turns: 3, invalidLines: 0 }}
       onReprobe={() => {}}
     />
   )
@@ -3017,6 +3074,33 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
     expect(missing).not.toContain('加载正常')
   })
 
+  it('Provider 与 MCP 可用但诊断、DB、usage 缺证据时保持 warn，不显示绿色正常', () => {
+    const incomplete = renderToStaticMarkup(
+      <DiagnosticsView
+        agents={[{ id: 'qoder', name: 'Qoder CLI', bin: 'qodercli', path: '/bin/qodercli' }]}
+        diag={null}
+        mcpLive={[]}
+        mcps={[]}
+        mcpCapability={{
+          providerId: 'qoder',
+          mode: 'none',
+          state: 'unsupported',
+          data: null,
+          reason: '隔离模式不暴露 MCP'
+        }}
+        stats={null}
+        turns={[]}
+        projects={[]}
+        usage={null}
+        onReprobe={() => {}}
+      />
+    )
+    expect(incomplete).toContain('verdict-card full warn')
+    expect(incomplete).toContain('诊断 IPC 尚未返回')
+    expect(incomplete).not.toContain('verdict-card full ok')
+    expect(incomplete).not.toContain('运行正常')
+  })
+
   it('MCP 有配置但 live 状态未探测时不显示全部连通', () => {
     const unknown = renderToStaticMarkup(
       <DiagnosticsView
@@ -3024,6 +3108,13 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
         diag={{ sdkVersion: '^0.3.186', settingSources: 'none' }}
         mcpLive={[]}
         mcps={[{ name: 'github', scope: 'user', transport: 'stdio', detail: 'github mcp', enabled: true }]}
+        mcpCapability={{
+          providerId: 'claude',
+          mode: 'manage',
+          state: 'unknown',
+          data: null,
+          reason: 'MCP capability 尚未返回完整证据'
+        }}
         stats={null}
         turns={[]}
         projects={[]}
@@ -3032,8 +3123,8 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
       />
     )
     expect(unknown).toContain('judgement warn')
-    expect(unknown).toContain('状态待探测')
-    expect(unknown).toContain('点重新探测获取真实状态')
+    expect(unknown).toContain('能力状态未知')
+    expect(unknown).toContain('MCP capability 尚未返回完整证据')
     expect(unknown).not.toContain('全部连通')
   })
 
@@ -3047,6 +3138,12 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
         diag={{ sdkVersion: '^0.3.186', settingSources: 'none', claudeVersion: '2.1.170' }}
         mcpLive={[]}
         mcps={[]}
+        mcpCapability={{
+          providerId: 'qoder',
+          mode: 'read',
+          state: 'ready',
+          data: { configured: [], runtime: [] }
+        }}
         stats={null}
         turns={[
           {
@@ -3172,7 +3269,7 @@ describe('Skill/MCP 操作能力渲染', () => {
         onClose={() => {}}
       />
     )
-    expect(html).toContain('type="checkbox" disabled="" checked=""')
+    expect(html).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
     expect(html).toContain('Skill 目录仅供读取')
   })
 
@@ -3208,7 +3305,7 @@ describe('Skill/MCP 操作能力渲染', () => {
         onClose={() => {}}
       />
     )
-    expect(mcpHtml).toContain('type="checkbox" disabled="" checked=""')
+    expect(mcpHtml).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
     expect(mcpHtml).toContain('connected')
     expect(mcpHtml).toContain('只暴露原生 MCP 配置/运行状态')
   })

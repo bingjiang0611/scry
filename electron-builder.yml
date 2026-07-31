@@ -13,13 +13,21 @@ asarUnpack:
   - node_modules/better-sqlite3/**
   - node_modules/bindings/**
 
-# 选 B：不内嵌 SDK 自带的平台原生 claude 二进制(每个 ~216MB)，app 驱动本机已装的 claude。
-# 仅用负向 pattern → 保留 electron-builder 默认 files(含 out/ 与 node_modules)，只剔除这些包。
-# 已实测：平台包缺席下 SDK 仍能 import 并驱动本机 claude。
+# 只允许生产构建与运行时依赖进入 asar。不能依赖 electron-builder 的默认 files：
+# checkout 内被 Git ignore 的 .claude/.local 也可能被默认打包，泄露本机运行日志与会话元数据。
 files:
+  - out/**
+  - package.json
+  - LICENSE
+  - THIRD_PARTY_NOTICES.md
+  - fixtures/billing/anthropic-gateway-response.json
+  - node_modules/**
+  # 选 B：不内嵌 SDK 自带的平台原生 claude 二进制(每个 ~216MB)，app 驱动本机已装的 claude。
   - "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-*/**"
   - "!node_modules/@anthropic-ai/claude-agent-sdk-linux-*/**"
   - "!node_modules/@anthropic-ai/claude-agent-sdk-win32-*/**"
+  # Qoder adapter always passes the user's external qodercli path; the SDK postinstall binary is unused (~95 MiB).
+  - "!node_modules/@qoder-ai/qoder-agent-sdk/dist/_bundled/**"
 
 mac:
   category: public.app-category.developer-tools

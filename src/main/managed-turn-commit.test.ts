@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { existsSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
@@ -10,12 +11,14 @@ import {
   canonicalOrObservedTurnTiming,
   canonicalTurnTiming,
   commitManagedTraceTurn,
+  deleteManagedTurnArtifacts,
+  managedSessionRunIds,
   persistManagedTraceProgress,
   recoverManagedTraceProgress,
   recoverManagedTraceTurns,
   type ManagedTraceTurnCommitInput
 } from './managed-turn-commit'
-import { readTraceArchive } from './transcript-archive'
+import { deleteTranscriptCopies, readTraceArchive, traceArchivePath, upsertTraceArchiveTurn } from './transcript-archive'
 
 const roots: string[] = []
 
@@ -102,6 +105,38 @@ function input(workspace: string, userDataDir: string): ManagedTraceTurnCommitIn
   }
 }
 
+function withCapturedDiff(request: ManagedTraceTurnCommitInput): ManagedTraceTurnCommitInput {
+  const diff: TraceEvent = {
+    id: 'diff',
+    ts: request.timing.completedAt,
+    runId: request.turn.runId,
+    kind: 'harness',
+    stage: 'turn_diff',
+    turnDiff: {
+      version: 1,
+      beforeAt: request.timing.startedAt,
+      afterAt: request.timing.completedAt,
+      captureMs: 1,
+      status: 'captured',
+      cleanup: 'ok',
+      files: []
+    }
+  }
+  const items = [...request.turn.items, diff]
+  return {
+    ...request,
+    turn: {
+      ...request.turn,
+      items,
+      turnEvidence: aggregateTurnEvidence({
+        userText: request.turn.userText,
+        events: items,
+        source: 'scry_provider_adapter'
+      })
+    }
+  }
+}
+
 async function startManaged(workspace: string): Promise<void> {
   await handleRecorderHook({
     provider: 'codex',
@@ -176,6 +211,137 @@ describe('managed trace turn coordinator', () => {
     }
   })
 
+  it('500-turn legacy monolith 后仍以 segment 提交下一轮且不留下 recovery dead-end', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const legacy = traceArchivePath(userDataDir, workspace, 'session-1', 'codex')
+    await mkdir(dirname(legacy), { recursive: true })
+    await writeFile(legacy, JSON.stringify({
+      version: 3,
+      cwd: workspace,
+      sessionId: 'session-1',
+      providerId: 'codex',
+      runtimeProvider: 'codex_cli',
+      turns: Array.from({ length: 500 }, (_, index) => ({
+        runId: `legacy-${index}`,
+        providerTurnId: `legacy-turn-${index}`,
+        userText: `legacy ${index}`,
+        items: [],
+        done: true,
+        status: 'completed',
+        ts: index
+      }))
+    }))
+    await startManaged(workspace)
+
+    await expect(commitManagedTraceTurn(input(workspace, userDataDir))).resolves.toMatchObject({ recorder: 'committed' })
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: 'session-1',
+      providerId: 'codex',
+      userDataDir
+    })?.turns).toHaveLength(501)
+    await expect(recoverManagedTraceProgress(userDataDir, { cwd: workspace, providerId: 'codex', waitMs: 0 }))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: workspace, providerId: 'codex', waitMs: 0 }))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
+  it('session deletion can discover and remove pending managed progress plus its atomic temp', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = input(workspace, userDataDir)
+    await persistManagedTraceProgress(request)
+    const root = join(userDataDir, 'managed-turn-progress')
+    const progress = join(root, readdirSync(root).find((name) => name.endsWith('.json'))!)
+    const temp = `${progress}.123.00000000-0000-4000-8000-000000000000.tmp`
+    writeFileSync(temp, 'partial sensitive turn')
+
+    expect(managedSessionRunIds(userDataDir, {
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: request.providerId
+    })).toEqual(['run-1'])
+    await expect(deleteManagedTurnArtifacts(userDataDir, new Set(['run-1']))).resolves.toEqual({ failed: [] })
+    expect(existsSync(progress)).toBe(false)
+    expect(existsSync(temp)).toBe(false)
+    await expect(recoverManagedTraceProgress(userDataDir, { cwd: workspace, providerId: 'codex', waitMs: 0 }))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
+  it('unattributable malformed artifacts warn globally without blocking an unrelated scoped run', async () => {
+    const { userDataDir } = await fixture()
+    const progress = join(userDataDir, 'managed-turn-progress', 'malformed.json')
+    const journal = join(userDataDir, 'managed-turn-commits', 'malformed.json')
+    await mkdir(dirname(progress), { recursive: true })
+    await mkdir(dirname(journal), { recursive: true })
+    await writeFile(progress, '{"schemaVersion":1}')
+    await writeFile(journal, '{"schemaVersion":1}')
+
+    await expect(recoverManagedTraceProgress(userDataDir)).resolves.toEqual({
+      recovered: 0,
+      pending: 1,
+      errors: ['invalid managed turn progress: malformed.json']
+    })
+    await expect(recoverManagedTraceTurns(userDataDir)).resolves.toEqual({
+      recovered: 0,
+      pending: 1,
+      errors: ['invalid managed turn journal: malformed.json']
+    })
+    await expect(recoverManagedTraceProgress(userDataDir, { cwd: '/another-repo' })).resolves.toEqual({
+      recovered: 0,
+      pending: 0,
+      errors: []
+    })
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: '/another-repo' })).resolves.toEqual({
+      recovered: 0,
+      pending: 0,
+      errors: []
+    })
+    expect(existsSync(progress)).toBe(true)
+    expect(existsSync(journal)).toBe(true)
+  })
+
+  it('deletion waits for an in-flight managed commit and cannot be followed by archive resurrection', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = input(workspace, userDataDir)
+    const commit = commitManagedTraceTurn(request, { waitMs: 2_000 })
+    const journalRoot = join(userDataDir, 'managed-turn-commits')
+    const hasJournal = (): boolean => {
+      try { return readdirSync(journalRoot).some((name) => name.endsWith('.json')) } catch { return false }
+    }
+    for (let attempt = 0; attempt < 100 && !hasJournal(); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(hasJournal()).toBe(true)
+
+    let deletionFinished = false
+    const deletion = deleteManagedTurnArtifacts(userDataDir, new Set(['run-1'])).then((result) => {
+      expect(result).toEqual({ failed: [] })
+      deleteTranscriptCopies({
+        cwd: workspace,
+        sessionId: request.sessionId,
+        providerId: request.providerId,
+        userDataDir
+      })
+      deletionFinished = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(deletionFinished).toBe(false)
+
+    await startManaged(workspace)
+    await commit
+    await deletion
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: request.providerId,
+      userDataDir
+    })).toBeNull()
+    await expect(recoverManagedTraceProgress(userDataDir, { cwd: workspace, providerId: 'codex', waitMs: 0 }))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: workspace, providerId: 'codex', waitMs: 0 }))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
   it('Qoder failed turn 可用 unavailable assistant 与 canonical timing 提交同一份 evidence', async () => {
     const { workspace, userDataDir } = await fixture()
     await handleRecorderHook({
@@ -222,6 +388,36 @@ describe('managed trace turn coordinator', () => {
     }))
     expect(record).toMatchObject({ provider: { id: 'qoder' }, status: 'failed' })
     expect(record.assistant).toEqual(archive?.turns[0].turnEvidence?.assistant)
+  })
+
+  it('recorder disabled 时 Qoder failure 无 Provider turn id 仍写入 Scry archive', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await writeFile(join(workspace, 'scry.config.json'), JSON.stringify({
+      schemaVersion: 1,
+      enabled: false,
+      workspaceId: 'managed-main-fixture',
+      dataDir: '.scry',
+      repositories: { mode: 'workspace-only' },
+      capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+    }))
+    const request = input(workspace, userDataDir)
+    request.providerId = 'qoder'
+    request.runtimeProvider = 'qoder_cli'
+    request.providerTurnId = ''
+    request.status = 'failed'
+    request.turn = {
+      ...request.turn,
+      providerTurnId: undefined,
+      status: 'failed'
+    }
+
+    await expect(commitManagedTraceTurn(request)).resolves.toEqual({ recorder: 'disabled' })
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: 'qoder',
+      userDataDir
+    })?.turns).toEqual([expect.objectContaining({ runId: 'run-1', status: 'failed' })])
   })
 
   it.each([
@@ -336,6 +532,78 @@ describe('managed trace turn coordinator', () => {
       pending: 0,
       errors: []
     })
+  })
+
+  it.each([1, 2])('canonical commit 后第 %i 个 artifact cleanup 崩溃仍由 rich journal 单调恢复', async (failAt) => {
+    const { workspace, userDataDir } = await fixture()
+    await startManaged(workspace)
+    const base = input(workspace, userDataDir)
+    const rich = withCapturedDiff(input(workspace, userDataDir))
+    await persistManagedTraceProgress(base)
+    let removals = 0
+
+    await expect(commitManagedTraceTurn(rich, {
+      removeArtifact: async (path) => {
+        removals++
+        if (removals === failAt) throw new Error(`simulated cleanup crash ${failAt}`)
+        await rm(path, { force: true })
+      }
+    })).rejects.toThrow(`simulated cleanup crash ${failAt}`)
+
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: workspace, waitMs: 100 })).resolves.toEqual({
+      recovered: 1,
+      pending: 0,
+      errors: []
+    })
+    await expect(recoverManagedTraceProgress(userDataDir, { cwd: workspace, waitMs: 0 })).resolves.toEqual({
+      recovered: 0,
+      pending: 0,
+      errors: []
+    })
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: rich.sessionId,
+      providerId: rich.providerId,
+      userDataDir
+    })?.turns[0].items).toEqual(expect.arrayContaining([expect.objectContaining({ stage: 'turn_diff' })]))
+    const records = await listRecords(join(workspace, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].diff).toEqual(rich.turn.turnEvidence?.diff)
+  })
+
+  it('disabled recovery discards stale progress without overwriting a richer committed archive', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const base = input(workspace, userDataDir)
+    const rich = withCapturedDiff(input(workspace, userDataDir))
+    await persistManagedTraceProgress(base)
+    expect(upsertTraceArchiveTurn({
+      cwd: rich.cwd,
+      sessionId: rich.sessionId,
+      providerId: rich.providerId,
+      runtimeProvider: rich.runtimeProvider,
+      userDataDir,
+      turn: rich.turn
+    })).toBe(true)
+    await writeFile(join(workspace, 'scry.config.json'), JSON.stringify({
+      schemaVersion: 1,
+      enabled: false,
+      workspaceId: 'managed-main-fixture',
+      dataDir: '.scry',
+      repositories: { mode: 'workspace-only' },
+      capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+    }))
+
+    await expect(recoverManagedTraceProgress(userDataDir, { cwd: workspace, waitMs: 0 })).resolves.toEqual({
+      recovered: 1,
+      pending: 0,
+      errors: []
+    })
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: rich.sessionId,
+      providerId: rich.providerId,
+      userDataDir
+    })?.turns[0].items).toEqual(expect.arrayContaining([expect.objectContaining({ stage: 'turn_diff' })]))
   })
 
   it('progress recovery 按 provider 过滤', async () => {

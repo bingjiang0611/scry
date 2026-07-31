@@ -53,6 +53,7 @@ export interface ActiveRun {
   pendingQuestions?: AgentQuestionRequest[]
   items: TraceEvent[]
   done: boolean
+  providerSettled?: boolean
   sessionId?: string
   error?: string
   errorHint?: string
@@ -283,6 +284,16 @@ export interface DbStats {
     cacheWriteKnownTurns: number
     dangerCoverage: 'classified' | 'unsupported'
   }[]
+}
+
+export interface UsageStats {
+  status: 'ready' | 'partial' | 'unavailable' | 'query_error'
+  cost: number | null
+  tin: number | null
+  tout: number | null
+  turns: number
+  invalidLines: number
+  error?: string
 }
 
 export interface TraceEvent {

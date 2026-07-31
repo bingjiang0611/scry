@@ -1,5 +1,5 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { Markdown } from './Markdown'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -22,6 +22,7 @@ import {
   hookCommandLabel,
   logicalCallEventsForTurn,
   parseUserMessage,
+  resultOf,
   resultTokenTotal,
   toolArg,
   toolDisplayName,
@@ -44,6 +45,7 @@ function attachmentSrc(attachment: AgentInputAttachment): string {
 
 function UserMessageImpl({ text, attachments = [] }: { text: string; attachments?: AgentInputAttachment[] }) {
   const [expanded, setExpanded] = useState(false)
+  const skillDetailId = useId()
   if (!text && attachments.length === 0) return null
   const { command, body, injectedSkill } = parseUserMessage(text)
 
@@ -52,13 +54,13 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
     const lineCount = body.split('\n').length
     return (
       <div className="skillinject">
-        <div className="si-head" onClick={() => setExpanded((v) => !v)}>
+        <button type="button" className="si-head" aria-expanded={expanded} aria-controls={skillDetailId} onClick={() => setExpanded((v) => !v)}>
           <Icon name="box" /> 注入 skill 内容 · <b>{injectedSkill}</b> · {lineCount} 行{' '}
           <span className="dim">（claude code 自动注入，非用户输入）</span>
           <Icon name={expanded ? 'chevronDown' : 'chevronRight'} className="chev" />
-        </div>
+        </button>
         {expanded && (
-          <div className="md si-body">
+          <div id={skillDetailId} className="md si-body">
             <Markdown>{body}</Markdown>
           </div>
         )}
@@ -105,12 +107,12 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
 
 function ThinkingBlock({ text, onSelect }: { text: string; onSelect: () => void }) {
   return (
-    <div className="thinking" onClick={onSelect} title="点看完整思考">
+    <button type="button" className="thinking" onClick={onSelect} title="查看完整思考">
       <div className="head">
         <Icon name="bulb" /> 思考
       </div>
       <div className="preview">{text}</div>
-    </div>
+    </button>
   )
 }
 
@@ -163,6 +165,7 @@ function ToolItem({
   turnDone?: boolean
 }) {
   const isAskUserQuestion = ev.tool === 'AskUserQuestion'
+  const detailId = useId()
   const [open, setOpen] = useState(isAskUserQuestion)
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, string>>()
   const meta = toolMeta(ev)
@@ -192,8 +195,11 @@ function ToolItem({
       className={`tool-card k-${kind} ${selected ? 'selected' : ''} ${ev.agentId || ev.parentToolUseId ? 'sub' : ''}`}
       data-trace-event-id={ev.id}
     >
-      <div
+      <button
+        type="button"
         className="tool-row"
+        aria-expanded={hasDetail ? shownOpen : undefined}
+        aria-controls={hasDetail ? detailId : undefined}
         onClick={() => {
           onSelect()
           if (hasDetail && !lockedOpen) setOpen((v) => !v)
@@ -225,9 +231,10 @@ function ToolItem({
           )}
         </span>
         {hasDetail && !lockedOpen && <Icon name={shownOpen ? 'chevronUp' : 'chevronDown'} className="chev" />}
-      </div>
+      </button>
       {shownOpen && hasDetail && (
-        waitingForAnswer && questionRequest && onAnswerQuestion ? (
+        <div id={detailId} className="tool-detail-region">
+        {waitingForAnswer && questionRequest && onAnswerQuestion ? (
           <AskUserQuestionInline
             request={questionRequest}
             queuedCount={queuedQuestionCount}
@@ -271,7 +278,8 @@ function ToolItem({
               </>
             )}
           </div>
-        )
+        )}
+        </div>
       )}
     </div>
   )
@@ -298,6 +306,7 @@ function SubagentBlock({
     pendingQuestions.some((request) => request.runId === event.runId && request.questionId === event.toolUseId)
   )
   const [open, setOpen] = useState(hasPendingQuestion)
+  const bodyId = useId()
   useEffect(() => {
     if (hasPendingQuestion) setOpen(true)
   }, [hasPendingQuestion])
@@ -305,12 +314,12 @@ function SubagentBlock({
   const maxDur = Math.max(1, ...items.map((e) => e.durationMs ?? 0))
   return (
     <div className="subagent">
-      <div className="subhead" onClick={() => setOpen((current) => (hasPendingQuestion ? true : !current))}>
+      <button type="button" className="subhead" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((current) => (hasPendingQuestion ? true : !current))}>
         <Icon name="cube" /> 子 agent 内部 · {toolN} 工具 / {items.length} 步{' '}
         <Icon name={open ? 'chevronDown' : 'chevronRight'} className="chev" />
-      </div>
+      </button>
       {open && (
-        <div className="subbody">
+        <div id={bodyId} className="subbody">
           {items.map((ev) => {
             if (ev.kind === 'model' && ev.stage === 'thinking') {
               return <ThinkingBlock key={ev.id} text={ev.thinking ?? ''} onSelect={() => onSelect(ev)} />
@@ -651,7 +660,7 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
 
 // 蓝本 .turn-footer：in / out / cache·r / cache·w / dur / api / tools / files / err，分组用 .sep 隔。
 function TurnFooter({ items }: { items: TraceEvent[] }) {
-  const result = items.find((e) => e.kind === 'harness' && e.stage === 'result')
+  const result = resultOf({ items })
   const calls = logicalCallEventsForTurn(items)
   const tools = aggregateCalls(calls).totalCalls
   const reads = calls.filter((e) => e.stage !== 'tool_result' && e.fileOp === 'read').length
@@ -717,7 +726,7 @@ function AssistantTurnImpl({
         return r ? { ...e, output: r.text, isError: r.isError ?? e.isError, durationMs: r.durationMs ?? e.durationMs } : e
       })
   }, [turn.items])
-  const result = items.find((e) => e.kind === 'harness' && e.stage === 'result')
+  const result = resultOf({ items })
   const turnDiff = [...items].reverse().find((e) => e.kind === 'harness' && e.stage === 'turn_diff')?.turnDiff
   const { structured } = useMemo(() => aggregateFiles(items), [items])
   const hookSummary = useMemo(() => aggregateHooks(items), [items])

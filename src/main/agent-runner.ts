@@ -42,6 +42,7 @@ export interface RunOpts {
   model?: string
   effort?: string
   permissionMode?: AgentPermissionMode
+  mcpServers?: Record<string, Record<string, unknown>>
 }
 
 export interface RunHandle {
@@ -87,7 +88,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     opts.onSessionId?.(next)
   }
 
-  const permissionMode = opts.permissionMode ?? 'full_access'
+  const permissionMode = opts.permissionMode ?? 'default'
   const options: Record<string, unknown> = {
     // C1：开 partial messages，让模型文本逐 token 流式到达（否则只在整条 assistant message 完成时整块出现）。
     includePartialMessages: true,
@@ -115,6 +116,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   // 显式传完整登录环境，修 launchd 启动的打包 app spawn claude 时 "Not logged in"。
   if (opts.env) options.env = opts.env
   if (opts.settingSources?.length) options.settingSources = opts.settingSources
+  options.strictMcpConfig = true
+  options.mcpServers = opts.mcpServers ?? {}
   if (opts.requestUserInput) {
     options.canUseTool = async (
       toolName: string,

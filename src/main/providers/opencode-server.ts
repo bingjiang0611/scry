@@ -1,14 +1,85 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { randomBytes } from 'node:crypto'
+import { tmpdir, userInfo } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
 import { runtimeCliEnv } from '../claude-locate'
 
 const HOOK_PREFIX = 'SCRY_OPENCODE_HOOK\t'
 const MAX_HOOK_FRAME = 64 * 1024
+const HOOK_DISABLED_REASON = 'OpenCode observer 在隔离配置目录中会阻塞 1.17.x 配置加载，当前版本已安全禁用'
+
+export function sanitizeOpenCodeAuth(value: unknown): Record<string, Record<string, unknown>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const safe: Record<string, Record<string, unknown>> = {}
+  for (const [provider, auth] of Object.entries(value)) {
+    if (!auth || typeof auth !== 'object' || Array.isArray(auth)) continue
+    const type = (auth as Record<string, unknown>).type
+    if (type === 'api' || type === 'oauth') safe[provider] = { ...(auth as Record<string, unknown>) }
+  }
+  return safe
+}
+
+async function isolatedOpenCodeAuthContent(env: NodeJS.ProcessEnv): Promise<string> {
+  const merged: Record<string, Record<string, unknown>> = {}
+  const configuredDataHome = env.XDG_DATA_HOME?.trim()
+  const dataHome = configuredDataHome && isAbsolute(configuredDataHome)
+    ? configuredDataHome
+    : join(env.HOME?.trim() || userInfo().homedir, '.local', 'share')
+  try {
+    Object.assign(merged, sanitizeOpenCodeAuth(JSON.parse(await readFile(join(dataHome, 'opencode', 'auth.json'), 'utf8'))))
+  } catch {
+    // Missing or malformed source auth means the isolated process starts unauthenticated.
+  }
+  try {
+    if (env.OPENCODE_AUTH_CONTENT) Object.assign(merged, sanitizeOpenCodeAuth(JSON.parse(env.OPENCODE_AUTH_CONTENT)))
+  } catch {
+    // Never forward malformed or unclassified inherited auth content.
+  }
+  return JSON.stringify(merged)
+}
+
+export function isolatedOpenCodeChildEnv(
+  sourceEnv: NodeJS.ProcessEnv,
+  root: string,
+  configPath: string,
+  configDir: string,
+  authContent: string,
+  serverPassword: string
+): NodeJS.ProcessEnv {
+  const inherited = Object.fromEntries(
+    Object.entries(sourceEnv).filter(([key]) => !key.startsWith('OPENCODE_') && !key.startsWith('XDG_'))
+  )
+  const openCodeApiKey = sourceEnv.OPENCODE_API_KEY?.trim()
+  return {
+    ...inherited,
+    ...(openCodeApiKey ? { OPENCODE_API_KEY: openCodeApiKey } : {}),
+    XDG_CONFIG_HOME: join(root, 'xdg-config'),
+    XDG_DATA_HOME: join(root, 'data'),
+    XDG_STATE_HOME: join(root, 'state'),
+    XDG_CACHE_HOME: join(root, 'cache'),
+    XDG_RUNTIME_DIR: join(root, 'runtime'),
+    XDG_CONFIG_DIRS: join(root, 'config-dirs'),
+    XDG_DATA_DIRS: join(root, 'data-dirs'),
+    OPENCODE_TEST_HOME: root,
+    OPENCODE_TEST_MANAGED_CONFIG_DIR: join(root, 'managed'),
+    OPENCODE_CONFIG: configPath,
+    OPENCODE_CONFIG_DIR: configDir,
+    OPENCODE_CONFIG_CONTENT: '{}',
+    OPENCODE_AUTH_CONTENT: authContent,
+    OPENCODE_DB: join(root, 'data', 'opencode.db'),
+    OPENCODE_SERVER_USERNAME: 'opencode',
+    OPENCODE_SERVER_PASSWORD: serverPassword,
+    OPENCODE_DISABLE_PROJECT_CONFIG: 'true'
+  }
+}
+
+export function openCodeServerAuthorization(serverPassword: string): string {
+  return `Basic ${Buffer.from(`opencode:${serverPassword}`).toString('base64')}`
+}
 
 export interface OpenCodeHookFrame {
   v: 1
@@ -27,23 +98,6 @@ export function parseOpenCodeHookLine(line: string): OpenCodeHookFrame | null {
     return null
   }
 }
-
-const HOOK_PLUGIN = `
-const prefix = ${JSON.stringify(HOOK_PREFIX)}
-const emit = (type, input = {}) => {
-  const picked = { sessionID: input.sessionID, callID: input.callID, tool: input.tool, command: input.command }
-  process.stderr.write(prefix + JSON.stringify({ v: 1, type, ts: Date.now(), input: picked }) + "\\n")
-}
-export const ScryObserver = async () => {
-  emit("init")
-  return {
-    "tool.execute.before": async (input) => emit("tool.execute.before", input),
-    "tool.execute.after": async (input) => emit("tool.execute.after", input),
-    "command.execute.before": async (input) => emit("command.execute.before", input),
-    "permission.ask": async (input) => emit("permission.ask", input)
-  }
-}
-`
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -79,7 +133,7 @@ export class OpenCodeServerManager {
   }
 
   get hookBridge(): { enabled: boolean; ready: boolean; error?: string } {
-    return { enabled: process.env.SCRY_OPENCODE_HOOK_BRIDGE?.trim() !== '0', ready: this.hookReady, error: this.hookError }
+    return { enabled: false, ready: false, error: this.hookError ?? HOOK_DISABLED_REASON }
   }
 
   onHook(listener: (frame: OpenCodeHookFrame) => void): () => void {
@@ -105,24 +159,50 @@ export class OpenCodeServerManager {
   private async start(cwd: string): Promise<OpenCodeServerState> {
     const executable = this.executable()
     if (!executable) throw new Error('OpenCode executable 未找到')
-    const port = await freePort()
-    const hookEnabled = process.env.SCRY_OPENCODE_HOOK_BRIDGE?.trim() !== '0'
-    let hookPlugin: string | undefined
-    this.hookReady = false
-    this.hookError = undefined
-    if (hookEnabled) {
-      this.hookConfigDir = await mkdtemp(join(tmpdir(), 'scry-opencode-'))
-      const plugins = join(this.hookConfigDir, 'plugins')
-      await mkdir(plugins, { recursive: true })
-      hookPlugin = join(plugins, 'scry-observer.js')
-      await writeFile(hookPlugin, HOOK_PLUGIN, { mode: 0o600 })
+    if (process.platform === 'darwin') {
+      const managedPreferences = [
+        `/Library/Managed Preferences/${userInfo().username}/ai.opencode.managed.plist`,
+        '/Library/Managed Preferences/ai.opencode.managed.plist'
+      ]
+      const configured = managedPreferences.find(existsSync)
+      if (configured) throw new Error(`OpenCode managed config 无法安全隔离：${configured}`)
     }
+    const port = await freePort()
+    const sourceEnv = runtimeCliEnv()
+    const isolatedAuthContent = await isolatedOpenCodeAuthContent(sourceEnv)
+    const hookEnabled = false
+    this.hookReady = false
+    this.hookError = HOOK_DISABLED_REASON
+    this.hookConfigDir = await mkdtemp(join(tmpdir(), 'scry-opencode-'))
+    let isolatedConfigPath: string
+    let isolatedConfigDir: string
+    try {
+      isolatedConfigDir = join(this.hookConfigDir, 'config')
+      await mkdir(isolatedConfigDir, { mode: 0o700 })
+      await Promise.all(['xdg-config', 'data', 'state', 'cache', 'runtime', 'config-dirs', 'data-dirs'].map((dir) =>
+        mkdir(join(this.hookConfigDir!, dir), { mode: 0o700 })
+      ))
+      isolatedConfigPath = join(this.hookConfigDir, 'safe-config.json')
+      await mkdir(join(this.hookConfigDir, 'managed'), { mode: 0o700 })
+      await writeFile(isolatedConfigPath, JSON.stringify({ mcp: {} }), { mode: 0o600 })
+    } catch (error) {
+      const dir = this.hookConfigDir
+      this.hookConfigDir = null
+      if (dir) await rm(dir, { recursive: true, force: true })
+      throw error
+    }
+    const serverPassword = randomBytes(32).toString('base64url')
+    const authorization = openCodeServerAuthorization(serverPassword)
     const child = spawn(executable, ['serve', '--hostname=127.0.0.1', `--port=${port}`], {
       cwd,
-      env: {
-        ...runtimeCliEnv(),
-        OPENCODE_CONFIG_CONTENT: JSON.stringify(hookPlugin ? { plugin: [pathToFileURL(hookPlugin).href] } : {})
-      },
+      env: isolatedOpenCodeChildEnv(
+        sourceEnv,
+        this.hookConfigDir,
+        isolatedConfigPath,
+        isolatedConfigDir,
+        isolatedAuthContent,
+        serverPassword
+      ),
       stdio: ['pipe', 'pipe', 'pipe']
     })
     let hookBuffer = ''
@@ -182,7 +262,7 @@ export class OpenCodeServerManager {
       url,
       pid: child.pid,
       process: child,
-      client: createOpencodeClient({ baseUrl: url, directory: cwd })
+      client: createOpencodeClient({ baseUrl: url, directory: cwd, headers: { Authorization: authorization } })
     }
     child.once('exit', () => {
       if (this.active?.process === child) this.active = null

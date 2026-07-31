@@ -1,12 +1,31 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createAppSessionStore, createRecentFoldersStore } from './app-store'
+import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore, createRecentFoldersStore } from './app-store'
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'scry-store-'))
 
 describe('app-store', () => {
+  it('removes strictly named crash-temp catalog copies only during single-instance startup cleanup', () => {
+    const dir = tempDir()
+    try {
+      const crashTemp = join(dir, 'app-sessions.json.123.00000000-0000-4000-8000-000000000000.tmp')
+      writeFileSync(crashTemp, 'sensitive stale snapshot')
+      createAppSessionStore(dir)
+      expect(existsSync(crashTemp)).toBe(true)
+      cleanupAppStoreAtomicTemps(dir)
+      expect(existsSync(crashTemp)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not treat a runId-backed failure archive as a Provider resume id', () => {
+    expect(appSessionCanResume({ runId: 'run-1', externalSessionId: 'run-1' })).toBe(false)
+    expect(appSessionCanResume({ runId: 'run-1', externalSessionId: 'native-1' })).toBe(true)
+  })
+
   it('recent folders 去重并保留最近 8 个', () => {
     const dir = tempDir()
     try {
@@ -129,6 +148,70 @@ describe('app-store', () => {
           externalSessionId: 'session-1'
         })
       ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('主 catalog 损坏时回读 last-known-good backup 并暴露 degraded', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.save([{ sessionId: 'old', cwd: '/repo', preview: 'old', ts: 1 }])
+      store.save([{ sessionId: 'new', cwd: '/repo', preview: 'new', ts: 2 }])
+      writeFileSync(join(dir, 'app-sessions.json'), '{partial')
+      expect(store.load()).toEqual([expect.objectContaining({ sessionId: 'old' })])
+      expect(store.health()).toMatchObject({ status: 'degraded', source: 'backup' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('主 catalog 虽可解析但 schema 错误时回读 backup，而不是伪装 ready', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.save([{ sessionId: 'backup', cwd: '/repo', preview: 'old', ts: 1 }])
+      store.save([{ sessionId: 'primary', cwd: '/repo', preview: 'new', ts: 2 }])
+      writeFileSync(join(dir, 'app-sessions.json'), JSON.stringify([null]))
+      expect(store.load()).toEqual([expect.objectContaining({ sessionId: 'backup' })])
+      expect(store.health()).toMatchObject({ status: 'degraded', source: 'backup' })
+
+      writeFileSync(join(dir, 'app-sessions.json'), JSON.stringify([{
+        sessionId: {},
+        runId: 'looks-valid',
+        cwd: '/repo',
+        preview: 'bad identity type',
+        ts: 3
+      }]))
+      expect(store.load()).toEqual([expect.objectContaining({ sessionId: 'backup' })])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('主 catalog 和 backup 都损坏时显式失败而不是返回空目录', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      writeFileSync(join(dir, 'app-sessions.json'), '{partial')
+      writeFileSync(join(dir, 'app-sessions.json.bak'), '{also-partial')
+      expect(() => store.listProjects()).toThrow('均不可用')
+      expect(store.health()).toMatchObject({ status: 'unavailable' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('删除会话同时更新 primary 与 backup，fallback 不会复活已删项', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.record({ providerId: 'codex', runtimeProvider: 'codex_cli', externalSessionId: 'session-1', cwd: '/repo', prompt: 'hello' })
+      store.remove({ providerId: 'codex', cwd: '/repo', externalSessionId: 'session-1' })
+      writeFileSync(join(dir, 'app-sessions.json'), '{broken')
+      expect(store.listSessions('/repo', 'codex')).toEqual([])
+      expect(store.health()).toMatchObject({ status: 'degraded', source: 'backup' })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

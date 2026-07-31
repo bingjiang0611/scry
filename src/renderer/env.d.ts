@@ -1,4 +1,4 @@
-import type { TraceEvent, ActiveRun, DbStats, Diagnostics, DiffFile } from '@shared/trace'
+import type { TraceEvent, ActiveRun, DbStats, Diagnostics, DiffFile, UsageStats } from '@shared/trace'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResult } from '@shared/billing'
 import type {
   AgentInputAttachment,
@@ -10,7 +10,9 @@ import type {
 } from '@shared/runtime'
 import type {
   AccountSnapshot,
+  CatalogHealth,
   CapabilityEnvelope,
+  DeleteSessionResult,
   McpMeta,
   McpSnapshot,
   McpTestResult,
@@ -98,16 +100,17 @@ declare global {
       newSession(context: ProviderContext): Promise<boolean>
       listSessions(context: ProviderContext): Promise<SessionMeta[]>
       listProjects(): Promise<ProjectMeta[]>
+      catalogHealth?(): Promise<CatalogHealth>
       listSkills(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>>
       toggleSkill(context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>>
       mcpSnapshot(context: ProviderContext, refresh?: boolean): Promise<CapabilityEnvelope<McpSnapshot>>
       mcpGuardScan(context: ProviderContext): Promise<CapabilityEnvelope<McpGuardReport>>
-      testMcp(context: ProviderContext, name: string): Promise<CapabilityEnvelope<McpTestResult>>
+      testMcp(context: ProviderContext, targetId: string): Promise<CapabilityEnvelope<McpTestResult>>
       toggleMcp(context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>>
       listCommands(context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>>
       runControls?(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>>
       providerAccount(context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>>
-      usageStats(context: ProviderContext): Promise<{ cost: number | null; tin: number | null; tout: number | null; turns: number }>
+      usageStats(context: ProviderContext): Promise<UsageStats>
       stats(): Promise<DbStats>
       billingState(): Promise<BillingGuardianState>
       syncBillingAdmin(): Promise<BillingSyncResult>
@@ -115,7 +118,7 @@ declare global {
       gitDiff(cwd: string): Promise<DiffFile[]>
       diagnostics(): Promise<Diagnostics>
       loadSession(context: ProviderContext): Promise<ParsedTurn[] | null>
-      deleteSession(context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<boolean>
+      deleteSession(context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult>
       start(request: AgentStartRequest): Promise<{ runId: string }>
       activeRun(): Promise<ActiveRun | null>
       activeRuns(): Promise<ActiveRun[]>

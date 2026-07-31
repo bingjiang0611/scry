@@ -23,6 +23,13 @@ export interface CodexNotificationEnvelope {
   receivedAtMs: number
 }
 
+interface GenerationFailureState {
+  generation: number
+  promise: Promise<Error>
+  resolve: (error: Error) => void
+  settled: boolean
+}
+
 type NotificationListener = (
   method: string,
   params: unknown,
@@ -37,12 +44,21 @@ type ServerRequestListener = (
 
 export class CodexAppServerClient {
   private process: ChildProcessWithoutNullStreams | null = null
+  private processGeneration = 0
+  private nextGeneration = 1
+  private generationFailureState: GenerationFailureState | null = null
   private startPromise: Promise<void> | null = null
+  private stopping: Promise<void> | null = null
   private nextId = 1
-  private readonly pending = new Map<number | string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>()
+  private readonly pending = new Map<number | string, {
+    generation: number
+    method: string
+    resolve: (value: unknown) => void
+    reject: (error: Error) => void
+    timer: NodeJS.Timeout
+  }>()
   private readonly listeners = new Set<NotificationListener>()
   private readonly requestListeners = new Set<ServerRequestListener>()
-  private stderr = ''
 
   constructor(private readonly options: CodexAppServerOptions) {}
 
@@ -51,8 +67,9 @@ export class CodexAppServerClient {
   }
 
   async start(): Promise<void> {
-    if (this.process) return
+    if (this.stopping) await this.stopping
     if (this.startPromise) return this.startPromise
+    if (this.process) return
     this.startPromise = this.spawnAndInitialize()
     try {
       await this.startPromise
@@ -68,42 +85,104 @@ export class CodexAppServerClient {
       env: this.options.env,
       stdio: ['pipe', 'pipe', 'pipe']
     })
+    const generation = this.nextGeneration++
+    let resolveGenerationFailure: (error: Error) => void = () => {}
+    const generationFailureState: GenerationFailureState = {
+      generation,
+      promise: new Promise((resolve) => {
+        resolveGenerationFailure = resolve
+      }),
+      resolve: (error) => resolveGenerationFailure(error),
+      settled: false
+    }
     this.process = child
-    this.stderr = ''
+    this.processGeneration = generation
+    this.generationFailureState = generationFailureState
+    let stderr = ''
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk) => {
-      this.stderr = (this.stderr + String(chunk)).slice(-8_000)
+      stderr = (stderr + String(chunk)).slice(-8_000)
     })
-    createInterface({ input: child.stdout }).on('line', (line) => this.handleLine(line))
-    child.once('error', (error) => this.fail(error))
+    createInterface({ input: child.stdout }).on('line', (line) => this.handleLine(line, generation))
+    child.once('error', (error) => this.failGeneration(child, generation, error))
     child.once('exit', (code, signal) => {
-      const detail = this.stderr.trim()
-      this.fail(new Error(`Codex app-server exited (${code ?? signal ?? 'unknown'})${detail ? `: ${detail}` : ''}`))
+      const detail = stderr.trim()
+      this.failGeneration(
+        child,
+        generation,
+        new Error(`Codex app-server exited (${code ?? signal ?? 'unknown'})${detail ? `: ${detail}` : ''}`)
+      )
     })
-    await this.request('initialize', {
-      clientInfo: { name: 'scry', title: 'Scry', version: '0.1.0' },
-      capabilities: { experimentalApi: true, requestAttestation: false }
-    })
-    this.notify('initialized')
+    try {
+      await this.requestOnGeneration('initialize', {
+        clientInfo: { name: 'scry', title: 'Scry', version: '0.1.0' },
+        capabilities: { experimentalApi: true, requestAttestation: false }
+      }, child, generation)
+      await this.writeOnGeneration({ method: 'initialized' }, child, generation)
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error))
+      this.failGeneration(child, generation, failure)
+      await this.stopGeneration(child, generation)
+      throw failure
+    }
   }
 
-  private write(message: JsonRpcMessage): void {
+  private writeOnGeneration(
+    message: JsonRpcMessage,
+    child: ChildProcessWithoutNullStreams,
+    generation: number
+  ): Promise<void> {
+    if (this.process !== child || generation !== this.processGeneration || child.stdin.destroyed) {
+      return Promise.reject(new Error('Codex app-server is not running'))
+    }
+    return new Promise((resolve, reject) => {
+      child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+  }
+
+  private write(message: JsonRpcMessage, generation = this.processGeneration): void {
     const child = this.process
-    if (!child || child.stdin.destroyed) throw new Error('Codex app-server is not running')
+    if (!child || generation !== this.processGeneration || child.stdin.destroyed) {
+      throw new Error('Codex app-server is not running')
+    }
     child.stdin.write(`${JSON.stringify(message)}\n`)
   }
 
   async request<T = unknown>(method: string, params?: unknown): Promise<T> {
-    if (method !== 'initialize') await this.start()
+    await this.start()
+    const child = this.process
+    if (!child) throw new Error('Codex app-server failed to start')
+    return this.requestOnGeneration<T>(method, params, child, this.processGeneration)
+  }
+
+  failureForCurrentGeneration(): Promise<Error> {
+    const state = this.generationFailureState
+    if (!this.process || !state || state.generation !== this.processGeneration) {
+      throw new Error('Codex app-server is not running')
+    }
+    return state.promise
+  }
+
+  private requestOnGeneration<T = unknown>(
+    method: string,
+    params: unknown,
+    child: ChildProcessWithoutNullStreams,
+    generation: number
+  ): Promise<T> {
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`Codex app-server request timed out: ${method}`))
+        const suffix = method === 'turn/start' ? ' (termination_unconfirmed)' : ''
+        const error = new Error(`Codex app-server request timed out: ${method}${suffix}`)
+        this.failGeneration(child, generation, error)
+        void this.stopGeneration(child, generation)
       }, this.options.requestTimeoutMs ?? 30_000)
-      this.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer })
+      this.pending.set(id, { generation, method, resolve: (value) => resolve(value as T), reject, timer })
       try {
-        this.write({ id, method, params })
+        this.write({ id, method, params }, generation)
       } catch (error) {
         clearTimeout(timer)
         this.pending.delete(id)
@@ -113,7 +192,11 @@ export class CodexAppServerClient {
   }
 
   notify(method: string, params?: unknown): void {
-    this.write(params === undefined ? { method } : { method, params })
+    this.notifyOnGeneration(method, params, this.processGeneration)
+  }
+
+  private notifyOnGeneration(method: string, params: unknown, generation: number): void {
+    this.write(params === undefined ? { method } : { method, params }, generation)
   }
 
   onNotification(listener: NotificationListener): () => void {
@@ -126,7 +209,7 @@ export class CodexAppServerClient {
     return () => this.requestListeners.delete(listener)
   }
 
-  private handleLine(line: string): void {
+  private handleLine(line: string, generation: number): void {
     let message: JsonRpcMessage
     try {
       message = JSON.parse(line) as JsonRpcMessage
@@ -135,7 +218,7 @@ export class CodexAppServerClient {
     }
     if (message.id !== undefined && !message.method) {
       const pending = this.pending.get(message.id)
-      if (!pending) return
+      if (!pending || pending.generation !== generation) return
       clearTimeout(pending.timer)
       this.pending.delete(message.id)
       if (message.error) pending.reject(new Error(message.error.message ?? 'Codex app-server request failed'))
@@ -143,10 +226,11 @@ export class CodexAppServerClient {
       return
     }
     if (message.method && message.id !== undefined) {
-      void this.handleServerRequest(message)
+      void this.handleServerRequest(message, generation)
       return
     }
     if (message.method) {
+      if (generation !== this.processGeneration) return
       const receivedAtMs = Date.now()
       const emittedAtMs =
         typeof message.emittedAtMs === 'number' && Number.isFinite(message.emittedAtMs)
@@ -158,7 +242,7 @@ export class CodexAppServerClient {
     }
   }
 
-  private async handleServerRequest(message: JsonRpcMessage): Promise<void> {
+  private async handleServerRequest(message: JsonRpcMessage, generation: number): Promise<void> {
     const id = message.id
     if (id === undefined || !message.method) return
     const envelope = {
@@ -169,29 +253,79 @@ export class CodexAppServerClient {
       for (const listener of this.requestListeners) {
         const result = await listener(message.method, message.params, envelope)
         if (result !== undefined) {
-          this.write({ id, result })
+          this.write({ id, result }, generation)
           return
         }
       }
-      this.write({ id, error: { code: -32601, message: `Scry does not handle server request: ${message.method}` } })
+      this.write({ id, error: { code: -32601, message: `Scry does not handle server request: ${message.method}` } }, generation)
     } catch (error) {
-      this.write({ id, error: { code: -32000, message: String((error as Error).message) } })
+      if (generation === this.processGeneration) {
+        this.write({ id, error: { code: -32000, message: String((error as Error).message) } }, generation)
+      }
     }
   }
 
-  private fail(error: Error): void {
-    this.process = null
-    for (const pending of this.pending.values()) {
+  private failGeneration(child: ChildProcessWithoutNullStreams, generation: number, error: Error): void {
+    const state = this.generationFailureState
+    if (state?.generation === generation && !state.settled) {
+      state.settled = true
+      state.resolve(error)
+    }
+    if (this.process === child && this.processGeneration === generation) this.process = null
+    for (const [id, pending] of this.pending) {
+      if (pending.generation !== generation) continue
       clearTimeout(pending.timer)
       pending.reject(error)
+      this.pending.delete(id)
     }
-    this.pending.clear()
+  }
+
+  private async stopGeneration(child: ChildProcessWithoutNullStreams, generation: number): Promise<void> {
+    if (this.stopping) return this.stopping
+    const stop = (async () => {
+      if (child.exitCode == null && child.signalCode == null && !child.killed) child.kill('SIGTERM')
+      await this.waitForExit(child, 1_000)
+      if (child.exitCode == null && child.signalCode == null) {
+        child.kill('SIGKILL')
+        await this.waitForExit(child, 1_000)
+      }
+      this.failGeneration(child, generation, new Error('Codex app-server terminated after request failure'))
+    })()
+    this.stopping = stop
+    try {
+      await stop
+    } finally {
+      if (this.stopping === stop) this.stopping = null
+    }
+  }
+
+  private waitForExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> {
+    if (child.exitCode != null || child.signalCode != null) return Promise.resolve()
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs)
+      child.once('exit', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
   }
 
   close(): void {
     const child = this.process
-    this.process = null
-    if (child && !child.killed) child.kill('SIGTERM')
-    this.fail(new Error('Codex app-server closed'))
+    if (!child) return
+    const generation = this.processGeneration
+    this.failGeneration(child, generation, new Error('Codex app-server closed'))
+    void this.stopGeneration(child, generation)
+  }
+
+  async shutdown(): Promise<void> {
+    const child = this.process
+    if (!child) {
+      if (this.stopping) await this.stopping
+      return
+    }
+    const generation = this.processGeneration
+    this.failGeneration(child, generation, new Error('Codex app-server closed'))
+    await this.stopGeneration(child, generation)
   }
 }

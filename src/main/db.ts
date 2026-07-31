@@ -8,13 +8,6 @@ import { basename, join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { maskSecrets, type TraceEvent, type DbStats } from '../shared/trace'
 import {
-  DDL_V1,
-  DDL_V2,
-  DDL_V3,
-  DDL_V4,
-  DDL_V5,
-  DDL_V6,
-  DDL_V7,
   SPAN_COLS,
   MODEL_USAGE_COLS,
   FILE_OP_COLS,
@@ -47,14 +40,17 @@ import {
   sqlInsert,
   spanRowsFromItems
 } from './span-ledger'
+import { migrateDatabase } from './db-migrations'
 import { adminKeyStatus, fetchAnthropicAdminUsageAndCosts, fetchOpenAiAdminUsageAndCosts, fetchQoderUsageAndCosts, type AdminFetchResult } from './billing-admin'
 import { billingRowsFromAnthropicGatewayPayload, billingRowsFromItems, reconcileUsageLedger, type LocalModelPriceVersion } from './billing-ledger'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingProvider, BillingSyncResult, UsageLedgerObject } from '../shared/billing'
 import type { RuntimeProvider } from '../shared/runtime'
 import type { ProviderId } from '../shared/provider'
 import { scrySessionId } from './session-id'
+import { deleteSessionDataRows, resolveSessionDataRunIds, type SessionDeleteDatabase } from './session-data-delete'
 
 let db: Database.Database | null = null
+let dbFilePath: string | null = null
 const require = createRequire(import.meta.url)
 let billingEnvProvider: () => NodeJS.ProcessEnv = () => process.env
 
@@ -86,50 +82,59 @@ function safeJson(v: unknown): string {
 export function initDb(): void {
   try {
     const Database = require('better-sqlite3') as typeof import('better-sqlite3')
-    db = new Database(join(app.getPath('userData'), 'scry.db'))
+    dbFilePath = join(app.getPath('userData'), 'scry.db')
+    db = new Database(dbFilePath)
     db.pragma('journal_mode = WAL')
-    migrate(db)
+    migrateDatabase(db)
   } catch (e) {
+    try { db?.close() } catch { /* retain the original initialization error */ }
     db = null // 降级：sqlite 不可用就不写不查，app 照常跑
     console.warn('[scry] sqlite 初始化失败，观测分析降级:', (e as Error)?.message)
   }
 }
 
-function migrate(d: Database.Database): void {
-  let v = d.pragma('user_version', { simple: true }) as number
-  if (v < 1) {
-    for (const stmt of DDL_V1) d.prepare(stmt).run()
-    d.pragma('user_version = 1')
-    v = 1
+export function deleteSessionData(args: {
+  providerId: ProviderId
+  cwd: string
+  externalSessionId: string
+  runIds: Iterable<string>
+}): { status: 'deleted' | 'not_present' | 'unavailable'; runIds: string[]; deletedRows: number; error?: string } {
+  if (!db) {
+    const file = dbFilePath ?? join(app.getPath('userData'), 'scry.db')
+    return existsSync(file)
+      ? { status: 'unavailable', runIds: [...args.runIds], deletedRows: 0, error: 'SQLite 当前不可用，无法确认会话数据已清除' }
+      : { status: 'not_present', runIds: [...args.runIds], deletedRows: 0 }
   }
-  if (v < 2) {
-    for (const stmt of DDL_V2) d.prepare(stmt).run()
-    d.pragma('user_version = 2')
-    v = 2
+  try {
+    const result = deleteSessionDataRows(db as unknown as SessionDeleteDatabase, args)
+    return { status: 'deleted', ...result }
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      runIds: [...args.runIds],
+      deletedRows: 0,
+      error: error instanceof Error ? error.message : String(error)
+    }
   }
-  if (v < 3) {
-    for (const stmt of DDL_V3) d.prepare(stmt).run()
-    d.pragma('user_version = 3')
-    v = 3
+}
+
+export function resolveSessionRunIds(args: {
+  providerId: ProviderId
+  cwd: string
+  externalSessionId: string
+  runIds: Iterable<string>
+}): { status: 'ready' | 'not_present' | 'unavailable'; runIds: string[]; conflicts: string[]; error?: string } {
+  if (!db) {
+    const file = dbFilePath ?? join(app.getPath('userData'), 'scry.db')
+    return existsSync(file)
+      ? { status: 'unavailable', runIds: [], conflicts: [], error: 'SQLite 当前不可用，无法校验会话 runId 归属' }
+      : { status: 'not_present', runIds: [...args.runIds], conflicts: [] }
   }
-  if (v < 4) {
-    for (const stmt of DDL_V4) d.prepare(stmt).run()
-    d.pragma('user_version = 4')
-    v = 4
-  }
-  if (v < 5) {
-    for (const stmt of DDL_V5) d.prepare(stmt).run()
-    d.pragma('user_version = 5')
-    v = 5
-  }
-  if (v < 6) {
-    for (const stmt of DDL_V6) d.prepare(stmt).run()
-    d.pragma('user_version = 6')
-    v = 6
-  }
-  if (v < 7) {
-    for (const stmt of DDL_V7) d.prepare(stmt).run()
-    d.pragma('user_version = 7')
+  try {
+    const resolution = resolveSessionDataRunIds(db as unknown as SessionDeleteDatabase, args)
+    return { status: 'ready', runIds: resolution.runIds, conflicts: resolution.conflicts }
+  } catch (error) {
+    return { status: 'unavailable', runIds: [], conflicts: [], error: error instanceof Error ? error.message : String(error) }
   }
 }
 

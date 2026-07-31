@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
@@ -13,14 +13,19 @@ export async function readJson<T>(path: string): Promise<T | null> {
 export async function writeJsonAtomic(path: string, value: unknown, options: { sync?: boolean } = {}): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const temp = `${path}.${process.pid}.${randomUUID()}.tmp`
-  const handle = await open(temp, 'wx', 0o600)
+  let handle
   try {
+    handle = await open(temp, 'wx', 0o600)
     await handle.writeFile(`${JSON.stringify(value)}\n`)
     if (options.sync !== false) await handle.sync()
-  } finally {
     await handle.close()
+    handle = undefined
+    await rename(temp, path)
+  } catch (error) {
+    try { await handle?.close() } catch { /* preserve original error */ }
+    await rm(temp, { force: true }).catch(() => {})
+    throw error
   }
-  await rename(temp, path)
 }
 
 export async function listFiles(path: string): Promise<string[]> {
@@ -29,6 +34,12 @@ export async function listFiles(path: string): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+interface LockOwner {
+  pid?: number
+  createdAt?: number
+  token?: string
 }
 
 function pidAlive(pid: number): boolean {
@@ -41,15 +52,82 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-async function staleLock(lockDir: string, ttlMs: number): Promise<boolean> {
-  const owner = await readJson<{ pid?: number; createdAt?: number }>(join(lockDir, 'owner.json'))
-  if (owner?.pid) return !pidAlive(owner.pid)
+function recoveryToken(lockDir: string, owner: LockOwner): string {
+  const sanitized = owner.token?.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
+  if (sanitized) return sanitized
+  return createHash('sha256').update(`${lockDir}\0${JSON.stringify(owner)}`).digest('hex')
+}
+
+async function staleOwner(lockDir: string, ttlMs: number): Promise<LockOwner | 'ownerless' | 'missing' | null> {
+  const ownerPath = join(lockDir, 'owner.json')
+  let owner: LockOwner
   try {
-    const info = await stat(lockDir)
-    const createdAt = owner?.createdAt ?? info.mtimeMs
-    return Date.now() - createdAt >= ttlMs
-  } catch {
-    return true
+    owner = JSON.parse(await readFile(ownerPath, 'utf8')) as LockOwner
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      try {
+        const info = await stat(ownerPath)
+        if (Date.now() - info.mtimeMs >= ttlMs) {
+          return {
+            createdAt: info.mtimeMs,
+            token: `corrupt-${info.ino}-${Math.floor(info.birthtimeMs)}-${Math.floor(info.mtimeMs)}`
+          }
+        }
+        return null
+      } catch (statError) {
+        return (statError as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : null
+      }
+    }
+    try {
+      const info = await stat(lockDir)
+      if (Date.now() - info.mtimeMs >= ttlMs) return 'ownerless'
+      return null
+    } catch (statError) {
+      return (statError as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : null
+    }
+  }
+  if (Number.isInteger(owner.pid) && (owner.pid ?? 0) > 0) return pidAlive(owner.pid as number) ? null : owner
+  if (owner.token && typeof owner.createdAt === 'number' && Date.now() - owner.createdAt >= ttlMs) return owner
+  return null
+}
+
+async function claimOwnerlessLock(lockDir: string): Promise<LockOwner | 'missing' | null> {
+  const claim: Required<LockOwner> = { pid: process.pid, createdAt: Date.now(), token: randomUUID() }
+  return writeLockOwnerExclusive(lockDir, claim)
+}
+
+async function writeLockOwnerExclusive(
+  lockDir: string,
+  owner: Required<LockOwner>
+): Promise<Required<LockOwner> | 'missing' | null> {
+  let handle
+  try {
+    handle = await open(join(lockDir, 'owner.json'), 'wx', 0o600)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'EEXIST') return null
+    if (code === 'ENOENT') return 'missing'
+    throw error
+  }
+  try {
+    await handle.writeFile(`${JSON.stringify(owner)}\n`)
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+  const current = await readJson<LockOwner>(join(lockDir, 'owner.json'))
+  return current?.token === owner.token ? owner : null
+}
+
+async function recoverStaleLock(lockDir: string, owner: LockOwner): Promise<void> {
+  const recoveredDir = join(dirname(lockDir), 'recovered')
+  await mkdir(recoveredDir, { recursive: true, mode: 0o700 })
+  const tombstone = join(recoveredDir, `${recoveryToken(lockDir, owner)}.lock`)
+  try {
+    await rename(lockDir, tombstone)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT' && code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error
   }
 }
 
@@ -65,17 +143,41 @@ export async function withDirectoryLock<T>(
   const waitMs = options.waitMs ?? 2_000
   const ttlMs = options.ttlMs ?? 30_000
   const deadline = Date.now() + waitMs
+  const owner: Required<LockOwner> = { pid: process.pid, createdAt: Date.now(), token: randomUUID() }
   await mkdir(dirname(lockDir), { recursive: true, mode: 0o700 })
   for (;;) {
     try {
-      await mkdir(lockDir)
-      await writeJsonAtomic(join(lockDir, 'owner.json'), { pid: process.pid, createdAt: Date.now() }, { sync: false })
+      await mkdir(lockDir, { mode: 0o700 })
+      try {
+        const acquired = await writeLockOwnerExclusive(lockDir, owner)
+        if (acquired === null) {
+          const error = new Error(`lock owner already exists: ${lockDir}`) as NodeJS.ErrnoException
+          error.code = 'EEXIST'
+          throw error
+        }
+        if (acquired === 'missing') {
+          const error = new Error(`lock directory disappeared: ${lockDir}`) as NodeJS.ErrnoException
+          error.code = 'EEXIST'
+          throw error
+        }
+      } catch (error) {
+        const current = await readJson<LockOwner>(join(lockDir, 'owner.json'))
+        if (current?.token === owner.token) await rm(lockDir, { recursive: true, force: true })
+        throw error
+      }
       break
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code !== 'EEXIST') throw error
-      if (await staleLock(lockDir, ttlMs)) {
-        await rm(lockDir, { recursive: true, force: true })
+      const stale = await staleOwner(lockDir, ttlMs)
+      if (stale === 'missing') continue
+      if (stale === 'ownerless') {
+        const claim = await claimOwnerlessLock(lockDir)
+        if (claim && claim !== 'missing') await recoverStaleLock(lockDir, claim)
+        continue
+      }
+      if (stale) {
+        await recoverStaleLock(lockDir, stale)
         continue
       }
       if (Date.now() >= deadline) throw new Error(`lock timeout: ${lockDir}`)
@@ -85,7 +187,8 @@ export async function withDirectoryLock<T>(
   try {
     return await action()
   } finally {
-    await rm(lockDir, { recursive: true, force: true })
+    const current = await readJson<LockOwner>(join(lockDir, 'owner.json'))
+    if (current?.token === owner.token) await rm(lockDir, { recursive: true, force: true })
   }
 }
 

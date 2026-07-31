@@ -15,12 +15,12 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 
 ## 安全与数据边界
 
-> **重要：当前 MVP 会绕过部分 Provider 的逐工具权限确认。** Claude 和 Qoder 运行路径默认使用 `bypassPermissions` / `dangerously-skip-permissions`。Agent 可以在其运行时权限范围内读取、修改文件并执行命令，不保证被限制在所选工作目录内。只在你信任的代码库和可恢复环境中使用。
+> **重要：Scry 不是安全沙箱。** 各 Provider 默认使用自身的审批或 workspace sandbox；只有用户显式选择“完全访问”时，Claude 和 Qoder 才使用 `bypassPermissions` / `dangerously-skip-permissions`，其他 Provider 采用各自等价的完全访问模式。Agent 仍可能在获批或完全访问时读取、修改文件并执行命令，不保证被限制在所选工作目录内。只在你信任的代码库和可恢复环境中使用。
 
 - Scry 的会话索引、观测数据和 turn-recorder 记录保存在本机；turn-recorder 默认只写工作区的 `.scry/`，不实现上传。
 - Scry 本身没有项目数据上传后端，但 Provider CLI/SDK 会连接各自服务；其数据处理遵循对应 Provider 的配置、许可证和服务条款。
 - Bash、MCP 和第三方工具可能访问 Scry 无法完整统计的文件或网络资源，文件足迹不是安全沙箱或完整审计日志。
-- 实时逐工具审批仍在计划中。在它完成前，不要把 Scry 当作权限隔离层。
+- 逐工具审批的覆盖范围取决于 Provider 与 transport；即使界面出现审批，也不能把 Scry 当作统一的权限隔离层。
 
 ## Provider 状态
 

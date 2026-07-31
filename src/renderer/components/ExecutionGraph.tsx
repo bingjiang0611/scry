@@ -69,7 +69,12 @@ function GLine({
       : toolArg(ev)
   const w = ev.durationMs != null && maxDur > 0 ? Math.max(2, Math.round((ev.durationMs / maxDur) * 100)) : 0
   return (
-    <div className={`gline ${selectedId === ev.id ? 'selected' : ''}`} onClick={() => onSelect(ev)}>
+    <button
+      type="button"
+      className={`gline ${selectedId === ev.id ? 'selected' : ''}`}
+      aria-pressed={selectedId === ev.id}
+      onClick={() => onSelect(ev)}
+    >
       <span className={`gtype ${t.cls} ${err ? 'err' : ''}`}>
         <span className="st" />
         {t.label}
@@ -89,7 +94,7 @@ function GLine({
           </span>
         )}
       </span>
-    </div>
+    </button>
   )
 }
 

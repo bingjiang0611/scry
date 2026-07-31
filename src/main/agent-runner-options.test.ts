@@ -9,7 +9,7 @@ import { runAgent } from './agent-runner'
 describe('Claude Agent SDK launch options', () => {
   beforeEach(() => sdk.query.mockReset())
 
-  it('uses the selected executable and keeps the legacy full-access default', async () => {
+  it('uses the selected executable and keeps the safe approval default', async () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {}
     })
@@ -23,12 +23,10 @@ describe('Claude Agent SDK launch options', () => {
       prompt: 'probe',
       options: expect.objectContaining({
         pathToClaudeCodeExecutable: '/Users/example/.local/bin/claude',
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        extraArgs: { 'dangerously-skip-permissions': null },
         settingSources: ['project', 'local']
       })
     })
+    expect(sdk.query.mock.calls[0][0].options).not.toHaveProperty('allowDangerouslySkipPermissions')
   })
 
   it('passes model, effort, and auto-review without dangerous-skip flags', async () => {
@@ -75,7 +73,7 @@ describe('Claude Agent SDK launch options', () => {
       answers: { '选择流程？': '全量' }
     }))
 
-    const handle = runAgent('probe', 'run-probe', () => {}, { requestUserInput })
+    const handle = runAgent('probe', 'run-probe', () => {}, { requestUserInput, permissionMode: 'full_access' })
     const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool as (
       tool: string,
       input: Record<string, unknown>,

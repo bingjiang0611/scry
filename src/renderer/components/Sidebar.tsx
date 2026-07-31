@@ -1,9 +1,10 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 按工作目录分组的历史会话（右键删除）。
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { relTime } from '../format'
 import { Icon } from './primitives/Icon'
 import type { ProjectMeta } from '../env'
 import type { McpMeta, SessionProviderId } from '@shared/provider'
+import type { CatalogHealth } from '@shared/provider'
 import type { McpLiveStatus } from '@shared/trace'
 
 const activeTimeTitle = (ms: number): string =>
@@ -35,7 +36,8 @@ export function Sidebar({
   skillCount,
   onMcp,
   mcps = [],
-  mcpLive = []
+  mcpLive = [],
+  catalogHealth
 }: {
   id?: string
   projects: ProjectMeta[]
@@ -56,9 +58,11 @@ export function Sidebar({
   onMcp?: () => void
   mcps?: McpMeta[]
   mcpLive?: McpLiveStatus[]
+  catalogHealth?: CatalogHealth
 }) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const contextActionRef = useRef<HTMLButtonElement>(null)
   const [ctx, setCtx] = useState<{
     x: number
     y: number
@@ -66,7 +70,16 @@ export function Sidebar({
     sessionId: string
     providerId: SessionProviderId
     externalSessionId?: string
+    opener: HTMLButtonElement
   } | null>(null)
+  useEffect(() => {
+    if (ctx) contextActionRef.current?.focus()
+  }, [ctx])
+  const closeContextMenu = (): void => {
+    const opener = ctx?.opener
+    setCtx(null)
+    window.requestAnimationFrame(() => opener?.focus())
+  }
   const toggle = (cwd: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -146,6 +159,13 @@ export function Sidebar({
         最近 <span className="cnt">{filtered.length}</span>
       </div>
       <div className="sb-list">
+        {catalogHealth && catalogHealth.status !== 'ready' && (
+          <div className="sb-empty" role="status" title={catalogHealth.reason}>
+            {catalogHealth.status === 'degraded'
+              ? '会话索引已从备份恢复；下一次成功写入会修复主索引。'
+              : '会话索引不可用；请检查 app-sessions.json 与 .bak 后重试。'}
+          </div>
+        )}
         {filtered.length === 0 && <div className="sb-empty">无历史会话</div>}
         {filtered.map((p) => {
           const open = !collapsed.has(p.cwd)
@@ -179,16 +199,33 @@ export function Sidebar({
                         className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
                         title={`${s.preview}${s.preview ? '\n' : ''}${activeTimeTitle(s.mtime)}${running ? '\n正在运行' : ''}`}
                         aria-current={active ? 'true' : undefined}
+                        aria-haspopup="menu"
                         onClick={() => onPick(p.cwd, s.sessionId, s.providerId, s.externalSessionId, s.runId)}
                         onContextMenu={(e) => {
                           e.preventDefault()
+                          const rect = e.currentTarget.getBoundingClientRect()
                           setCtx({
-                            x: e.clientX,
-                            y: e.clientY,
+                            x: e.clientX || rect.left + 8,
+                            y: e.clientY || rect.top + 8,
                             cwd: p.cwd,
                             sessionId: s.sessionId,
                             providerId: s.providerId,
-                            externalSessionId: s.externalSessionId
+                            externalSessionId: s.externalSessionId,
+                            opener: e.currentTarget
+                          })
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return
+                          e.preventDefault()
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setCtx({
+                            x: rect.left + 8,
+                            y: rect.top + 8,
+                            cwd: p.cwd,
+                            sessionId: s.sessionId,
+                            providerId: s.providerId,
+                            externalSessionId: s.externalSessionId,
+                            opener: e.currentTarget
                           })
                         }}
                       >
@@ -214,22 +251,36 @@ export function Sidebar({
       {ctx && (
         <div
           className="ctx-overlay"
-          onClick={() => setCtx(null)}
+          onClick={closeContextMenu}
           onContextMenu={(e) => {
             e.preventDefault()
-            setCtx(null)
+            closeContextMenu()
           }}
         >
-          <div className="ctxmenu" style={{ left: ctx.x, top: ctx.y }}>
-            <div
+          <div
+            className="ctxmenu"
+            role="menu"
+            aria-label="会话操作"
+            style={{ left: ctx.x, top: ctx.y }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return
+              event.preventDefault()
+              closeContextMenu()
+            }}
+          >
+            <button
+              ref={contextActionRef}
+              type="button"
+              role="menuitem"
               className="ctxitem del"
               onClick={() => {
                 onDelete(ctx.cwd, ctx.sessionId, ctx.providerId, ctx.externalSessionId)
-                setCtx(null)
+                closeContextMenu()
               }}
             >
               <Icon name="x" /> 删除会话
-            </div>
+            </button>
           </div>
         </div>
       )}

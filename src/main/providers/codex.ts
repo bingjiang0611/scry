@@ -3,7 +3,6 @@ import {
   capabilityUnknown,
   type AccountSnapshot,
   type CapabilityEnvelope,
-  type McpSnapshot,
   type ProviderCommand,
   type ProviderContext,
   type SkillMeta
@@ -14,13 +13,14 @@ import {
   type AgentPermissionMode,
   type AgentRunControlCatalog
 } from '../../shared/runtime'
-import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
+import { mcpPayloadFailed, parseMcp, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import type { CodexHookInspection, CodexHookMetadata, CodexHookTrustStatus } from '../codex-hook-trust'
 import {
   CodexAppServerClient,
   type CodexNotificationEnvelope
 } from './codex-app-server'
+import { createCodexIsolatedHome } from './codex-isolated-home'
 import type { ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 
@@ -29,7 +29,7 @@ function codexAccess(mode: AgentPermissionMode | undefined): {
   approvalsReviewer?: 'user' | 'auto_review'
   sandbox: 'workspace-write' | 'danger-full-access'
 } {
-  if (!mode || mode === 'full_access') {
+  if (mode === 'full_access') {
     return { approvalPolicy: 'never', sandbox: 'danger-full-access' }
   }
   return {
@@ -105,23 +105,6 @@ function canonicalTurnStatus(
   if (nativeStatus === 'interrupted') return 'interrupted'
   if (stopped) return 'interrupted'
   return 'failed'
-}
-
-function mcpStatus(value: unknown): McpLiveStatus[] {
-  const data = Array.isArray(record(value).data) ? (record(value).data as unknown[]) : []
-  return data.map((raw) => {
-    const item = record(raw)
-    const auth = item.authStatus
-    const serverInfo = record(item.serverInfo)
-    const tools = record(item.tools)
-    return {
-      name: String(item.name ?? ''),
-      status: auth === 'notLoggedIn' ? 'needs-auth' : item.serverInfo ? 'connected' : 'pending',
-      serverName: typeof serverInfo.name === 'string' ? serverInfo.name : undefined,
-      serverVersion: typeof serverInfo.version === 'string' ? serverInfo.version : undefined,
-      tools: Object.keys(tools).length
-    }
-  })
 }
 
 const explicitSkillMention = (prompt: string): { name: string; text: string } | undefined => {
@@ -489,6 +472,7 @@ export function createCodexAdapter(): ProviderAdapter {
   let lastError: string | undefined
   let restarts = 0
   const MODEL_TTL_MS = 30_000
+  let isolatedHome: ReturnType<typeof createCodexIsolatedHome> | undefined
 
   const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
   const getClient = (cwd?: string, bypassHookTrust = false): CodexAppServerClient => {
@@ -502,12 +486,22 @@ export function createCodexAdapter(): ProviderAdapter {
     const path = executable()
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
-    const args = bypass ? ['--dangerously-bypass-hook-trust', 'app-server'] : undefined
+    const env = runtimeCliEnv(undefined, { managedRecorder: true })
+    isolatedHome ??= createCodexIsolatedHome(env.CODEX_HOME?.trim() || undefined)
+    const appServerArgs = [
+      'app-server',
+      '--strict-config',
+      '--disable', 'apps',
+      '--disable', 'plugins',
+      '--disable', 'remote_plugin',
+      '--disable', 'skill_mcp_dependency_install'
+    ]
+    const args = bypass ? ['--dangerously-bypass-hook-trust', ...appServerArgs] : appServerArgs
     const client = new CodexAppServerClient({
       command: path,
       args,
       cwd,
-      env: runtimeCliEnv(undefined, { managedRecorder: true })
+      env: { ...env, CODEX_HOME: isolatedHome.path }
     })
     clients.set(key, client)
     lastClient = client
@@ -586,45 +580,11 @@ export function createCodexAdapter(): ProviderAdapter {
         })
         const errors = group?.errors?.length ?? 0
         return errors
-          ? { ...capabilityReady(context, 'manage' as const, data), state: 'degraded' as const, reason: `${errors} 个 Skill 读取错误` }
-          : capabilityReady(context, 'manage' as const, data)
+          ? { ...capabilityReady(context, 'read' as const, data), state: 'degraded' as const, reason: `${errors} 个 Skill 读取错误` }
+          : capabilityReady(context, 'read' as const, data)
       } catch (error) {
-        return capabilityUnknown<SkillMeta[]>(context, 'manage', String((error as Error).message))
+        return capabilityUnknown<SkillMeta[]>(context, 'read', String((error as Error).message))
       }
-    },
-    setEnabled: async (context: ProviderContext, name: string, enabled: boolean) => {
-      try {
-        await request('skills/config/write', { name, enabled }, context.cwd)
-        return capabilityReady(context, 'manage', true)
-      } catch (error) {
-        return capabilityUnknown<boolean>(context, 'manage', String((error as Error).message))
-      }
-    }
-  }
-
-  const snapshot = async (context: ProviderContext): Promise<CapabilityEnvelope<McpSnapshot>> => {
-    try {
-      const response = await request('mcpServerStatus/list', { threadId: context.externalSessionId ?? null, detail: 'full' }, context.cwd)
-      const runtime = mcpStatus(response)
-      const ready = capabilityReady(context, 'read', {
-        configured: runtime.map((server) => ({
-          name: server.name,
-          scope: 'codex',
-          transport: 'native',
-          detail: server.serverName ?? server.status,
-          enabled: server.status !== 'disabled'
-        })),
-        runtime
-      })
-      return context.externalSessionId
-        ? ready
-        : {
-            ...ready,
-            state: 'degraded',
-            reason: '尚未建立 cwd-bound thread；当前仅能读取 app-server 进程级 MCP 状态，项目配置运行态为 unknown'
-          }
-    } catch (error) {
-      return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
     }
   }
 
@@ -640,7 +600,7 @@ export function createCodexAdapter(): ProviderAdapter {
         transport: 'app-server',
         available: !!path,
         path,
-        capabilities: { skills: 'manage', mcp: 'read', commands: 'read', account: 'read' },
+        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' },
         health: {
           state: !path ? 'unavailable' : lastError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'app-server',
@@ -681,7 +641,7 @@ export function createCodexAdapter(): ProviderAdapter {
       let finish: ((value: ProviderRunResult) => void) | undefined
 
       const handleApprovalRequest = async (method: string, value: unknown): Promise<unknown> => {
-        if ((runRequest.permissionMode ?? 'full_access') === 'full_access') return undefined
+        if ((runRequest.permissionMode ?? 'default') === 'full_access') return undefined
         const params = record(value)
         const requestThreadId = typeof params.threadId === 'string' ? params.threadId : undefined
         if (!externalSessionId || (requestThreadId !== externalSessionId && !childAgents.has(requestThreadId ?? ''))) {
@@ -803,6 +763,7 @@ export function createCodexAdapter(): ProviderAdapter {
         try {
           const appServer = getClient(runRequest.cwd, runRequest.bypassHookTrust)
           await appServer.start()
+          const generationFailure = appServer.failureForCurrentGeneration()
           unsubscribeRequest = appServer.onRequest(handleApprovalRequest)
           const accountPromise = appServer.request<Record<string, unknown>>('account/read', { refreshToken: false }).catch((error) => {
             accountReadError = String((error as Error).message)
@@ -1176,7 +1137,10 @@ export function createCodexAdapter(): ProviderAdapter {
               status: 'interrupted'
             }
           }
-          return await done
+          return await Promise.race([
+            done,
+            generationFailure.then((error) => Promise.reject(error))
+          ])
         } finally {
           unsubscribe()
           unsubscribeRequest()
@@ -1225,7 +1189,6 @@ export function createCodexAdapter(): ProviderAdapter {
       }
     },
     hookTrust: { inspect: inspectHookTrust },
-    mcp: { snapshot },
     account: {
       read: async (context) => {
         try {
@@ -1296,10 +1259,12 @@ export function createCodexAdapter(): ProviderAdapter {
         }
       }
     },
-    dispose: () => {
-      for (const client of clients.values()) client.close()
+    dispose: async () => {
+      await Promise.all([...clients.values()].map((client) => client.shutdown()))
       clients.clear()
       lastClient = null
+      isolatedHome?.cleanup()
+      isolatedHome = undefined
     }
   }
 }

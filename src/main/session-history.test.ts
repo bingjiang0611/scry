@@ -12,6 +12,33 @@ afterEach(() => {
 })
 
 describe('session history merge', () => {
+  it('drops transcript usage shadows when the archive has the canonical terminal result', () => {
+    const archive: TraceArchive = {
+      version: 3,
+      cwd: '/repo',
+      sessionId: 'sess',
+      providerId: 'claude',
+      turns: [{
+        runId: 'run-1',
+        userText: 'inspect',
+        items: [{ id: 'canonical', ts: '2026-08-01T00:00:02.000Z', runId: 'run-1', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5 }],
+        done: true,
+        status: 'completed',
+        ts: 1
+      }]
+    }
+    const [turn] = mergeSessionTurns([{
+      userText: 'inspect',
+      items: [
+        { id: 'shadow-1', ts: '2026-08-01T00:00:00.000Z', runId: 'sess', kind: 'harness', stage: 'result', text: 'transcript assistant usage', tokensIn: 3 },
+        { id: 'shadow-2', ts: '2026-08-01T00:00:01.000Z', runId: 'sess', kind: 'harness', stage: 'result', text: 'transcript assistant usage', tokensIn: 7 }
+      ]
+    }], archive)
+    expect(turn.items.filter((event) => event.kind === 'harness' && event.stage === 'result')).toEqual([
+      expect.objectContaining({ id: 'canonical', tokensIn: 10 })
+    ])
+  })
+
   it('把 Claude command envelope 与 archive 纯文本命令识别为同一轮', () => {
     const archive: TraceArchive = {
       version: 2,
@@ -201,7 +228,11 @@ describe('session history merge', () => {
     const imageDir = join(root, 'Application Support', 'scry', 'attachments', 'run-1')
     mkdirSync(imageDir, { recursive: true })
     const imagePath = join(imageDir, '01-image.png')
-    writeFileSync(imagePath, Buffer.from('hello image'))
+    const imageBytes = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from('hello image')
+    ])
+    writeFileSync(imagePath, imageBytes)
 
     const archive: TraceArchive = {
       version: 1,
@@ -223,7 +254,8 @@ describe('session history merge', () => {
         { userText: '前面的历史', items: [{ id: 'old', ts: '', runId: 'sess', kind: 'model', stage: 'text' }] },
         { userText: '这是什么原因', items: [{ id: 'transcript-event', ts: '', runId: 'sess', kind: 'model', stage: 'text' }] }
       ],
-      archive
+      archive,
+      { userDataDir: join(root, 'Application Support', 'scry') }
     )
 
     expect(turns).toHaveLength(2)
@@ -236,7 +268,7 @@ describe('session history merge', () => {
       mimeType: 'image/png',
       path: imagePath
     })
-    expect(turns[1].attachments?.[0].dataBase64).toBe(Buffer.from('hello image').toString('base64'))
+    expect(turns[1].attachments?.[0].dataBase64).toBe(imageBytes.toString('base64'))
   })
 
   it('archive 只有 runtime 能力清单时，不覆盖 transcript 里的最终回答', () => {

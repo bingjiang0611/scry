@@ -1089,7 +1089,8 @@ export function OverviewPanel({
           {topTools.rows.map((t) => {
             const c = topToolColor(t.name)
             return (
-              <div
+              <button
+                type="button"
                 className="toptool"
                 key={t.name}
                 onClick={() =>
@@ -1105,7 +1106,7 @@ export function OverviewPanel({
                 <span className={`mini-bar ${c}`}>
                   <i style={{ width: `${Math.round((t.count / topTools.max) * 100)}%` }} />
                 </span>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -1126,7 +1127,8 @@ export function OverviewPanel({
               const tone = hookTone(h)
               return (
                 <div className="hook-group" key={h.key}>
-                  <div
+                  <button
+                    type="button"
                     className="callrow hook-trigger"
                     onClick={() => h.last && onSelect(h.last)}
                     title="点查看最近一次 hook 事件"
@@ -1140,7 +1142,7 @@ export function OverviewPanel({
                       {h.triggerRuns == null ? '触发次数未单独上报' : `触发 ${h.triggerRuns} 次`}
                       {' · '}处理器 {h.logicalRuns} 实例 · 生命周期 {h.rawEvents} 条
                     </span>
-                  </div>
+                  </button>
                   {h.scripts.map((s) => {
                     const scriptTone = hookTone(s)
                     const target = s.lastError ?? s.lastCancelled ?? s.last
@@ -1365,7 +1367,8 @@ export function OverviewPanel({
             <div className="dim pad2">本会话无 Skill 调用</div>
           ) : (
             calls.skills.map((s) => (
-              <div
+              <button
+                type="button"
                 className="callrow"
                 key={s.name}
                 onClick={() => jumpTo((e) => e.kind === 'skill' && e.name === s.name && e.stage !== 'tool_result')}
@@ -1378,7 +1381,7 @@ export function OverviewPanel({
                   {s.name}
                 </span>
                 <span className="dim">{s.count}×</span>
-              </div>
+              </button>
             ))
           )}
 
@@ -1396,7 +1399,8 @@ export function OverviewPanel({
                   <span className="dim">{g.total}×</span>
                 </div>
                 {g.actions.map((a) => (
-                  <div
+                  <button
+                    type="button"
                     className="callrow indent"
                     key={a.tool}
                     onClick={() => jumpTo((e) => (e.mcpTool ?? e.tool) === a.tool && e.stage !== 'tool_result')}
@@ -1404,7 +1408,7 @@ export function OverviewPanel({
                   >
                     <span className="fname">{a.action}</span>
                     <span className="dim">{a.count}×</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             ))
@@ -1414,7 +1418,8 @@ export function OverviewPanel({
             <>
               <div className="psub">子 Agent</div>
               {calls.agents.map((a) => (
-                <div
+                <button
+                  type="button"
                   className="callrow"
                   key={a.name}
                   onClick={() => jumpTo((e) => e.kind === 'agent' && e.name === a.name && e.stage !== 'tool_result')}
@@ -1427,7 +1432,7 @@ export function OverviewPanel({
                     {a.name}
                   </span>
                   <span className="dim">{a.count}×</span>
-                </div>
+                </button>
               ))}
             </>
           )}
@@ -1437,7 +1442,8 @@ export function OverviewPanel({
             <div className="dim pad2">本会话无工具调用</div>
           ) : (
             calls.tools.map((t) => (
-              <div
+              <button
+                type="button"
                 className="callrow"
                 key={t.name}
                 onClick={() =>
@@ -1452,7 +1458,7 @@ export function OverviewPanel({
                   {t.name}
                 </span>
                 <span className="dim">{t.count}×</span>
-              </div>
+              </button>
             ))
           )}
         </div>
@@ -1460,18 +1466,23 @@ export function OverviewPanel({
 
       {isOverviewTab && (
         <div className="panel-section">
-          <h4
-            className="clickable"
-            title="R/W/E 来自结构化文件工具；~R 来自 cat、sed、rg 等只读 Bash 命令推断，其他间接文件访问仍可能未统计"
-            onClick={() => setFilesFolded((v) => !v)}
-          >
-            文件足迹（全会话 · 工具证据）
-            <span className="more">
-              {structured.length} files <Icon name={filesFolded ? 'chevronRight' : 'chevronDown'} />
-            </span>
+          <h4>
+            <button
+              type="button"
+              className="panel-section-heading"
+              title="R/W/E 来自结构化文件工具；~R 来自 cat、sed、rg 等只读 Bash 命令推断，其他间接文件访问仍可能未统计"
+              aria-expanded={!filesFolded}
+              aria-controls="overview-file-footprint"
+              onClick={() => setFilesFolded((v) => !v)}
+            >
+              文件足迹（全会话 · 工具证据）
+              <span className="more">
+                {structured.length} files <Icon name={filesFolded ? 'chevronRight' : 'chevronDown'} />
+              </span>
+            </button>
           </h4>
           {!filesFolded && (
-            <>
+            <div id="overview-file-footprint">
               {coverage.written > 0 && (
                 <div className="covrow">
                   改 {coverage.written} · 先读 {coverage.readBefore}/{coverage.written}
@@ -1491,7 +1502,8 @@ export function OverviewPanel({
               )}
               {structured.length === 0 && <div className="dim pad">暂无</div>}
               {structured.map((f) => (
-                <div
+                <button
+                  type="button"
                   className="filerow click"
                   key={f.path}
                   onClick={() => jumpTo((e) => e.filePath === f.path && e.stage !== 'tool_result')}
@@ -1507,9 +1519,9 @@ export function OverviewPanel({
                       f.edit && `E${f.edit}`
                     ].filter(Boolean).join(' ')}
                   </span>
-                </div>
+                </button>
               ))}
-            </>
+            </div>
           )}
         </div>
       )}

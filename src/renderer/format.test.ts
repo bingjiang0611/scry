@@ -1151,6 +1151,25 @@ describe('applyTraceBatch（性能：批量合并，语义不变）', () => {
     expect(out[0].items.map((x) => x.id)).toEqual(['a', 'b']) // a 不重复
   })
 
+  it('相同 id 的终态修正原位覆盖，不追加第二个 result', () => {
+    const original = e({ id: 'result', kind: 'harness', stage: 'result', isError: false, tokensIn: 7 })
+    const corrected = { ...original, isError: true, runtimeFailureStage: 'runtime' as const }
+    const prev: Turn[] = [{ runId: 'r1', userText: '', items: [original], done: false }]
+    const out = applyTraceBatch(prev, [corrected], new Set())
+    expect(out[0].items).toEqual([corrected])
+  })
+
+  it('Provider 多发的旧 result 通过 superseded correction 从 live UI 移除', () => {
+    const oldResult = e({ id: 'old-result', kind: 'harness', stage: 'result' })
+    const finalResult = e({ id: 'final-result', kind: 'harness', stage: 'result' })
+    const prev: Turn[] = [{ runId: 'r1', userText: '', items: [oldResult, finalResult], done: false }]
+    const out = applyTraceBatch(prev, [
+      { ...oldResult, stage: 'result_superseded' },
+      { ...finalResult, isError: true }
+    ], new Set())
+    expect(out[0].items).toEqual([{ ...finalResult, isError: true }])
+  })
+
   it('clearedRuns 里的 run 事件被丢弃；空批/无变化返回原引用', () => {
     const prev: Turn[] = [{ runId: 'r1', userText: '', items: [], done: false }]
     expect(applyTraceBatch(prev, [e({ id: 'x', runId: 'gone' })], new Set(['gone']))).toBe(prev)

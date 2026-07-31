@@ -13,6 +13,21 @@ export interface ProviderContext {
   externalSessionId?: string
 }
 
+export interface CatalogHealth {
+  status: 'ready' | 'degraded' | 'unavailable'
+  source: 'primary' | 'backup' | 'empty'
+  reason?: string
+}
+
+export interface DeleteSessionResult {
+  ok: boolean
+  cancelled?: boolean
+  reason?: 'invalid_request' | 'active_session' | 'user_cancelled' | 'partial_failure'
+  deleted: Array<'recovery journals' | 'usage' | 'database' | 'attachments' | 'transcripts' | 'catalog'>
+  retained: string[]
+  failed: Array<{ store: string; error: string }>
+}
+
 export interface CapabilityEnvelope<T> {
   providerId: ProviderId
   cwd?: string
@@ -57,6 +72,7 @@ export interface SkillMeta {
 }
 
 export interface McpMeta {
+  targetId?: string
   name: string
   scope: string
   transport: string

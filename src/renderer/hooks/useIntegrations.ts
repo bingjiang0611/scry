@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BillingGuardianState } from '@shared/billing'
 import type { CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
-import type { DbStats, Diagnostics, DiffFile, McpLiveStatus } from '@shared/trace'
+import type { DbStats, Diagnostics, DiffFile, McpLiveStatus, UsageStats } from '@shared/trace'
 import {
   providerIdForAgentId,
   runtimeProviderForAgentId,
@@ -45,7 +45,7 @@ export function resolveRunControlSelection(
     ? current.permissionMode
     : catalog.permissions.find((option) => option.id === 'default')?.id ??
       catalog.permissions[0]?.id ??
-      'full_access'
+      'default'
   return { model, effort, permissionMode }
 }
 
@@ -89,7 +89,7 @@ export function useIntegrations(cwd: string | null) {
   const [mcpCapability, setMcpCapability] = useState<CapabilityEnvelope<McpSnapshot> | null>(null)
   const [mcpConfigRefreshing, setMcpConfigRefreshing] = useState(false)
   const [mcpRefreshing, setMcpRefreshing] = useState(false)
-  const [usage, setUsage] = useState<{ cost: number | null; tin: number | null; tout: number | null; turns: number } | null>(null)
+  const [usage, setUsage] = useState<UsageStats | null>(null)
   const [stats, setStats] = useState<DbStats | null>(null)
   const [billingState, setBillingState] = useState<BillingGuardianState | null>(null)
   const [billingSyncing, setBillingSyncing] = useState(false)
@@ -101,8 +101,14 @@ export function useIntegrations(cwd: string | null) {
   const cwdRef = useRef(cwd)
   const gitDiffRequestSeq = useRef(0)
   const integrationRequestSeq = useRef(0)
+  const usageRequestSeq = useRef(0)
   const skillRefreshRequestSeq = useRef(0)
   const mcpConfigRequestSeq = useRef(0)
+  const mcpLiveRequestSeq = useRef(0)
+  const mcpTestCounter = useRef(0)
+  const mcpTestRequests = useRef(new Map<string, number>())
+  const mcpToggleCounter = useRef(0)
+  const mcpToggleRequests = useRef(new Map<string, number>())
   const mcpConfigPromiseRef = useRef<Promise<McpLiveStatus[]> | null>(null)
   const runControlRequestSeq = useRef(0)
   const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>())
@@ -139,7 +145,13 @@ export function useIntegrations(cwd: string | null) {
   }, [])
 
   const loadUsage = useCallback((): void => {
-    window.scry.usageStats(providerContextRef.current).then(setUsage)
+    const context = providerContextRef.current
+    const seq = ++usageRequestSeq.current
+    window.scry.usageStats(context)
+      .then((next) => {
+        if (seq === usageRequestSeq.current && contextKey(context) === contextKey(providerContextRef.current)) setUsage(next)
+      })
+      .catch(() => {})
   }, [])
 
   const loadStats = useCallback((): void => {
@@ -232,12 +244,15 @@ export function useIntegrations(cwd: string | null) {
 
   const pullMcpLive = useCallback(async (): Promise<void> => {
     const context = providerContextRef.current
+    const seq = ++mcpLiveRequestSeq.current
     setMcpRefreshing(true)
     try {
       const result = await window.scry.mcpSnapshot(context, true)
-      if (contextKey(context) === contextKey(providerContextRef.current)) applyMcpSnapshot(result)
+      if (seq === mcpLiveRequestSeq.current && contextKey(context) === contextKey(providerContextRef.current)) {
+        applyMcpSnapshot(result)
+      }
     } finally {
-      setMcpRefreshing(false)
+      if (seq === mcpLiveRequestSeq.current) setMcpRefreshing(false)
     }
   }, [applyMcpSnapshot])
 
@@ -256,24 +271,44 @@ export function useIntegrations(cwd: string | null) {
   const toggleMcp = useCallback(
     async (name: string, enabled: boolean): Promise<void> => {
       const context = providerContextRef.current
+      const key = `${contextKey(context)}\0${name}`
+      const seq = ++mcpToggleCounter.current
+      mcpToggleRequests.current.set(key, seq)
       const result = await window.scry.toggleMcp(context, name, enabled)
-      if (contextKey(context) !== contextKey(providerContextRef.current)) return
+      if (mcpToggleRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
       if (result.data !== true) return
       setMcps((prev) => prev.map((mcp) => (mcp.name === name ? { ...mcp, enabled } : mcp)))
       setMcpLive((prev) => updateMcpLiveAfterToggle(prev, name, enabled))
-      const refreshed = await authoritativeRefreshAfterToggle(result, () => window.scry.mcpSnapshot(context, true))
-      if (refreshed && contextKey(context) === contextKey(providerContextRef.current)) applyMcpSnapshot(refreshed)
+      const refreshed = await authoritativeRefreshAfterToggle(result, () => window.scry.mcpSnapshot(context, false))
+      if (
+        refreshed &&
+        mcpToggleRequests.current.get(key) === seq &&
+        contextKey(context) === contextKey(providerContextRef.current)
+      ) applyMcpSnapshot(refreshed)
     },
     [applyMcpSnapshot]
   )
 
-  const testMcp = useCallback(async (name: string): Promise<void> => {
-    setMcpStatus((prev) => ({ ...prev, [name]: { testing: true } }))
-    const result = await window.scry.testMcp(providerContextRef.current, name)
-    setMcpStatus((prev) => ({
-      ...prev,
-      [name]: { ...(result.data ?? { ok: false, error: result.reason ?? '当前 Provider 不支持 MCP 测试' }), testing: false }
-    }))
+  const testMcp = useCallback(async (targetId: string): Promise<void> => {
+    const context = providerContextRef.current
+    const key = `${contextKey(context)}\0${targetId}`
+    const seq = ++mcpTestCounter.current
+    mcpTestRequests.current.set(key, seq)
+    setMcpStatus((prev) => ({ ...prev, [targetId]: { testing: true } }))
+    try {
+      const result = await window.scry.testMcp(context, targetId)
+      if (mcpTestRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
+      setMcpStatus((prev) => ({
+        ...prev,
+        [targetId]: { ...(result.data ?? { ok: false, error: result.reason ?? '当前 Provider 不支持 MCP 测试' }), testing: false }
+      }))
+    } catch (error) {
+      if (mcpTestRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
+      setMcpStatus((prev) => ({
+        ...prev,
+        [targetId]: { ok: false, error: error instanceof Error ? error.message : String(error), testing: false }
+      }))
+    }
   }, [])
 
   const setCurrentMcpGuardReport = useCallback(
@@ -301,8 +336,7 @@ export function useIntegrations(cwd: string | null) {
     loadBillingState()
     loadGitDiff()
     loadDiag()
-    void loadMcpLive()
-  }, [loadBillingState, loadDiag, loadGitDiff, loadMcpLive, loadStats, loadUsage])
+  }, [loadBillingState, loadDiag, loadGitDiff, loadStats, loadUsage])
 
   const setRunModel = useCallback((model: AgentModelRef | undefined): void => {
     setRunControls((current) => {
@@ -358,16 +392,23 @@ export function useIntegrations(cwd: string | null) {
     cwdRef.current = cwd
     providerContextRef.current = providerContext
     const seq = ++integrationRequestSeq.current
+    ++usageRequestSeq.current
+    setUsage(null)
     const skillSeq = ++skillRefreshRequestSeq.current
     ++mcpConfigRequestSeq.current
+    ++mcpLiveRequestSeq.current
+    mcpTestRequests.current.clear()
+    mcpToggleRequests.current.clear()
     mcpConfigPromiseRef.current = null
     setSkills([])
     setMcps([])
+    setMcpStatus({})
     setMcpLive([])
     setSkillCapability(null)
     setSkillsRefreshing(Boolean(cwd))
     setMcpCapability(null)
     setMcpConfigRefreshing(false)
+    setMcpRefreshing(false)
     loadGitDiff(cwd)
     if (!cwd) return
     void window.scry.listSkills(providerContext)
@@ -383,14 +424,8 @@ export function useIntegrations(cwd: string | null) {
         }
       })
     void refreshMcp().catch(() => {})
-    void window.scry.usageStats(providerContext)
-      .then((nextUsage) => {
-        if (seq === integrationRequestSeq.current && contextKey(providerContext) === contextKey(providerContextRef.current)) {
-          setUsage(nextUsage)
-        }
-      })
-      .catch(() => {})
-  }, [cwd, loadGitDiff, providerContext, refreshMcp])
+    loadUsage()
+  }, [cwd, loadGitDiff, loadUsage, providerContext, refreshMcp])
 
   useEffect(() => {
     const seq = ++runControlRequestSeq.current
@@ -414,7 +449,7 @@ export function useIntegrations(cwd: string | null) {
       setRunControlsLoading(true)
     }
     if (!cwd || typeof fn !== 'function') {
-      const fallback = fallbackRunControlCatalog(typeof fn === 'function' ? 'default' : 'full_access')
+      const fallback = fallbackRunControlCatalog('default')
       const next = resolveRunControlSelection(fallback, stored)
       runControlsByProvider.current.set(selectedProviderId, next)
       setRunControlCatalog(fallback)
@@ -433,7 +468,7 @@ export function useIntegrations(cwd: string | null) {
           setRunControlCapability(result)
           return
         }
-        const catalog = result.data ?? fallbackRunControlCatalog('full_access')
+        const catalog = result.data ?? fallbackRunControlCatalog('default')
         const next = resolveRunControlSelection(catalog, stored)
         runControlsByProvider.current.set(selectedProviderId, next)
         setRunControlCapability(result)
@@ -443,7 +478,7 @@ export function useIntegrations(cwd: string | null) {
       .catch(() => {
         if (seq !== runControlRequestSeq.current) return
         if (cached?.data) return
-        const fallback = fallbackRunControlCatalog('full_access')
+        const fallback = fallbackRunControlCatalog('default')
         const next = resolveRunControlSelection(fallback, stored)
         runControlsByProvider.current.set(selectedProviderId, next)
         setRunControlCatalog(fallback)

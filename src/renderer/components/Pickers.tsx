@@ -1,5 +1,5 @@
 // 顶部/底部选择器：工作目录选择（含 recent）/ 本地 CLI 选择（local·api 后端 + rescan）。
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { AGENT_ICON, basename } from '../format'
 import { Icon, type IconName } from './primitives/Icon'
 import type { DetectedAgent } from '../env'
@@ -18,15 +18,17 @@ export function WorkdirPicker({
   onRemove: (d: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const menuId = useId()
   return (
     <div className="wdpick">
-      <button className="wdbtn" onClick={() => setOpen((o) => !o)}>
+      <button className="wdbtn" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={menuId} aria-haspopup="menu">
         <Icon name="folder" /> {cwd ? basename(cwd) : 'Select working directory'}{' '}
         <Icon name="chevronDown" className="chev" />
       </button>
       {open && (
-        <div className="menu wdmenu" onMouseLeave={() => setOpen(false)}>
-          <div
+        <div id={menuId} className="menu wdmenu" onMouseLeave={() => setOpen(false)}>
+          <button
+            type="button"
             className="mitem"
             onClick={() => {
               setOpen(false)
@@ -34,7 +36,7 @@ export function WorkdirPicker({
             }}
           >
             <Icon name="folder" /> Choose folder
-          </div>
+          </button>
           {recent.length > 0 && <div className="mhdr">Recent folders</div>}
           <div className="wdrecent-list">
             {recent.map((d) => (
@@ -87,10 +89,11 @@ export function CliPicker({
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const menuId = useId()
   const sel = agents.find((a) => a.id === selectedId)
   return (
     <div className="clipick">
-      <button className="clibtn" onClick={() => setOpen((o) => !o)} disabled={disabled}>
+      <button className="clibtn" onClick={() => setOpen((o) => !o)} disabled={disabled} aria-expanded={open} aria-controls={menuId} aria-haspopup="menu">
         <span className="agicon">
           <Icon name={(AGENT_ICON[selectedId] ?? 'cube') as IconName} />
         </span>
@@ -98,21 +101,22 @@ export function CliPicker({
         <Icon name="chevronDown" className="chev" />
       </button>
       {open && (
-        <div className="menu climenu" onMouseLeave={() => setOpen(false)}>
+        <div id={menuId} className="menu climenu" onMouseLeave={() => setOpen(false)}>
           <div className="cltitle">
             Local CLI
             <div className="dim">{sel?.name ?? '未检测到'}</div>
           </div>
-          <div className={`mitem ${backend === 'local' ? 'on' : ''}`} onClick={() => onBackend('local')}>
+          <button type="button" className={`mitem ${backend === 'local' ? 'on' : ''}`} onClick={() => onBackend('local')}>
             <Icon name="tool" /> Use Local CLI {backend === 'local' && <span className="ck"><Icon name="check" /> active</span>}
-          </div>
-          <div className={`mitem ${backend === 'api' ? 'on' : ''}`} onClick={() => onBackend('api')}>
-            <Icon name="lock" /> Use API · BYOK {backend === 'api' && <span className="ck"><Icon name="check" /> active</span>}
-          </div>
+          </button>
+          <button type="button" className={`mitem ${backend === 'api' ? 'on' : ''}`} disabled title="API/BYOK transport 尚未实现">
+            <Icon name="lock" /> Use API · BYOK（尚未实现）
+          </button>
           <div className="mhdr">CODE AGENT</div>
           {agents.length === 0 && <div className="dim pad">未检测到 agent CLI</div>}
           {agents.map((a) => (
-            <div
+            <button
+              type="button"
               key={a.id}
               className="mitem"
               title={`${a.path}${a.version ? ' · ' + a.version : ''}`}
@@ -126,12 +130,12 @@ export function CliPicker({
               </span>{' '}
               <span className="agent-option-name">{a.name}</span>
               {a.id === selectedId && <span className="ck"><Icon name="check" /> selected</span>}
-            </div>
+            </button>
           ))}
           <div className="mdiv" />
-          <div className="mitem" onClick={() => onRescan()}>
+          <button type="button" className="mitem" onClick={() => onRescan()}>
             <Icon name="refresh" /> Rescan PATH
-          </div>
+          </button>
         </div>
       )}
     </div>

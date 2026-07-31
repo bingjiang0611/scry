@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { type TraceEvent, type ModelUsageRow, type McpLiveStatus, classifyTool, fileOpOf, parseMcp } from '../shared/trace'
 import type {
+  AgentPermissionMode,
   AgentRuntimeEvent,
   RuntimeCapabilityWarning,
   RuntimeFailureBrief,
@@ -42,6 +43,8 @@ export interface CliRuntimeOpts {
   capabilityMetadata?: Record<string, unknown>
   sampleRoot?: string
   timeoutMs?: number
+  permissionMode?: AgentPermissionMode
+  bypassHookTrust?: boolean
   onSessionId?: (sessionId: string) => void
 }
 
@@ -395,16 +398,19 @@ function createProbeEvidence(
   return samplePath
 }
 
-function buildArgs(opts: CliRuntimeOpts): string[] {
+export function buildCliArgs(opts: CliRuntimeOpts): string[] {
   const dirs = (opts.extraAllowedDirs ?? []).filter((d) => d.length > 0)
   if (opts.runtimeProvider === 'codex_cli') {
+    const fullAccess = opts.permissionMode === 'full_access'
     const args = [
       'exec',
       ...(opts.configArgs ?? []),
+      ...(opts.bypassHookTrust ? ['--dangerously-bypass-hook-trust'] : []),
       '--json',
       '--skip-git-repo-check',
       '--sandbox',
-      'workspace-write',
+      fullAccess ? 'danger-full-access' : 'workspace-write',
+      ...(fullAccess ? ['--dangerously-bypass-approvals-and-sandbox'] : []),
       '-c',
       'sandbox_workspace_write.network_access=true'
     ]
@@ -412,7 +418,17 @@ function buildArgs(opts: CliRuntimeOpts): string[] {
     for (const dir of dirs) args.push('--add-dir', dir)
     return args
   }
-  const args = ['-p', '--output-format', 'stream-json', '--permission-mode', 'bypass_permissions']
+  const permissionMode = opts.permissionMode === 'full_access'
+    ? 'bypass_permissions'
+    : opts.permissionMode === 'auto_review'
+      ? 'auto'
+      : 'default'
+  const args = [
+    '-p',
+    '--output-format', 'stream-json',
+    '--permission-mode', permissionMode,
+    ...(opts.permissionMode === 'full_access' ? ['--dangerously-skip-permissions'] : [])
+  ]
   if (opts.cwd) args.push('--cwd', opts.cwd)
   if (opts.mcpConfigPath) args.push('--mcp-config', opts.mcpConfigPath, '--strict-mcp-config')
   for (const dir of dirs) args.push('--add-dir', dir)
@@ -434,8 +450,14 @@ export function assertRuntimeCliSurface(opts: CliRuntimeOpts): void {
     }
     const required =
       opts.runtimeProvider === 'codex_cli'
-        ? ['--json', '--cd', '--add-dir', '--sandbox', '--skip-git-repo-check']
-        : ['--output-format', '--cwd', '--permission-mode', '--add-dir']
+        ? [
+            '--json', '--cd', '--add-dir', '--sandbox', '--skip-git-repo-check',
+            '--ignore-user-config', '--dangerously-bypass-hook-trust'
+          ]
+        : [
+            '--output-format', '--cwd', '--permission-mode', '--dangerously-skip-permissions',
+            '--add-dir', '--mcp-config', '--strict-mcp-config'
+          ]
     if (opts.runtimeProvider === 'codex_cli') {
       const helpProbe = runProbeCommand(opts.executablePath, ['exec', '--help'], opts.env)
       probes.push(helpProbe)
@@ -951,7 +973,7 @@ function resultTraceFromUsage(
 }
 
 export function runCliAgent(prompt: string, runId: string, emit: EmitFn, opts: CliRuntimeOpts): RunHandle {
-  const args = buildArgs(opts)
+  const args = buildCliArgs(opts)
   const summary = commandSummary(opts.executablePath, args)
   let stopped = false
   let sessionId: string | undefined
@@ -1207,7 +1229,7 @@ export function captureCliMcpStatus(opts: CliRuntimeOpts): Promise<McpLiveStatus
     })
     timer = setTimeout(() => finish([]), Math.min(opts.timeoutMs ?? PROBE_TIMEOUT_MS, PROBE_TIMEOUT_MS))
     try {
-      child = spawn(opts.executablePath, buildArgs(opts), {
+      child = spawn(opts.executablePath, buildCliArgs(opts), {
         cwd: opts.cwd,
         env: opts.env,
         stdio: ['pipe', 'pipe', 'ignore']
