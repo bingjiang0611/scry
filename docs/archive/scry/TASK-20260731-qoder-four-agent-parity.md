@@ -83,11 +83,12 @@
 ### 交付提交
 
 - Scry 实现与 RFC：`2b1e9fc`（`codex/fix-qoder-four-agent-parity`）。
+- Scry 合入主线：`44973cf`（`main`，合并时包含最新 UI 提交）。
 - rate-native 适配器：`ffcc909`（`codex/fix-scry-qoder-managed-uploader`）。
 
 ### Scry L1
 
-- `npm test`：Test Files 60 passed / 3 skipped；Tests 668 passed / 3 skipped（671 total）。
+- 合并后的 `main` 重新执行 `npm test`：Test Files 60 passed / 3 skipped；Tests 672 passed / 3 skipped（675 total）。
 - `npm run typecheck`：通过。
 - `npm run build`：CLI、main、preload、renderer 全部通过。
 - `npm run check:cli-release`：15 files、164 tests 全部通过，`build:cli` 通过。
@@ -113,11 +114,12 @@
 
 ### Scry L2
 
-- 使用隔离安装的 CLI `0.2.9` 启动真实 Electron 构建产物。
-- CDP 确认页面来自本 worktree 的 `out/renderer/index.html`，窗口标题为 Scry，无 ErrorBoundary、无遗留 active run。
-- 四个 provider descriptor 均可发现；未发起付费模型调用。
+- 从合并后的 `main` 生成 macOS arm64 bundle，并替换 `/Applications/Scry.app`；安装源与目标的 `app.asar` SHA-256 均为 `d4c6bac98383183958cd127b833b8093f3a5a34f32a6a4daa19267748747a6e5`，bundle version 为 `0.2.0`。
+- 使用 Computer Use 启动真实安装包；renderer URL 来自 `/Applications/Scry.app/Contents/Resources/app.asar/out/renderer/index.html`，窗口标题为 Scry，无 ErrorBoundary。
+- 欢迎页可发现 Claude Code、Codex、Qoder、opencode 四个本机 provider；未发起付费模型调用。
+- 从本地 tarball 将用户级 `/Users/baobingjiang/.local/bin/scry` 更新到 `0.2.9`；`scry --version` 已验证。工作区根目录 `doctor` 返回 `missing_config`，符合该目录未启用 recorder 的现状。
 
 ### 未执行与残余边界
 
 - 未执行 scry-provider-regression 的 40-turn 四 provider 长回归：该流程会备份/改写真实 provider 配置并产生模型成本，skill 明确要求单独 checkpoint，本任务未获得该授权。
-- CLI `0.2.9` 仅在隔离 prefix 验证，尚未发布或覆盖用户全局安装；部署新版本后，新 Qoder managed 会话才会使用本次协议。
+- CLI `0.2.9` 已覆盖用户级安装，但未发布到 npm registry；新 Qoder managed 会话会使用本次协议。
