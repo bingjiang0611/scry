@@ -181,8 +181,22 @@ const appSessionStore = () =>
     const archive = readTraceArchive({ cwd, sessionId: externalSessionId, userDataDir: app.getPath('userData') })
     return archive ? inferLegacyTraceArchiveProvider(archive) : undefined
   })
+const codexSessionIds = () => {
+  try {
+    return appSessionStore().load()
+      .filter((session) => session.providerId === 'codex' && session.externalSessionId)
+      .map((session) => session.externalSessionId as string)
+  } catch {
+    return []
+  }
+}
 const providerRegistry = new ProviderRegistry(
-  createBuiltInProviderAdapters(homeDir, process.env.SCRY_PROVIDER_TRANSPORTS),
+  createBuiltInProviderAdapters(
+    homeDir,
+    process.env.SCRY_PROVIDER_TRANSPORTS,
+    join(app.getPath('userData'), 'codex-home-v1'),
+    codexSessionIds
+  ),
   {
     disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS),
     runControlsEnabled: process.env.SCRY_RUN_CONTROLS?.trim() !== '0'

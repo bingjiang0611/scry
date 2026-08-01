@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TraceEvent } from '../../shared/trace'
@@ -26,6 +26,7 @@ vi.mock('./codex-app-server', () => ({
       appServer.options.push(options)
     }
     close() {}
+    shutdown() { return Promise.resolve() }
   }
 }))
 
@@ -82,6 +83,31 @@ describe('Codex provider adapter', () => {
       rmSync(childEnv.CODEX_HOME!, { recursive: true, force: true })
     } finally {
       rmSync(source, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a provided isolated home across adapter disposal and recreation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-codex-stable-'))
+    const source = join(root, 'native')
+    const stable = join(root, 'isolated')
+    mkdirSync(source)
+    writeFileSync(join(source, 'auth.json'), '{}')
+    runtime.env = { CODEX_HOME: source }
+    appServer.request.mockResolvedValue({ data: [] })
+    try {
+      const first = createCodexAdapter(stable)
+      await first.skills!.list({ providerId: 'codex', cwd: '/repo' })
+      expect((appServer.options.at(-1)?.env as NodeJS.ProcessEnv).CODEX_HOME).toBe(stable)
+      writeFileSync(join(stable, 'state_5.sqlite'), 'state')
+      await first.dispose?.()
+
+      const second = createCodexAdapter(stable)
+      await second.skills!.list({ providerId: 'codex', cwd: '/repo' })
+      expect((appServer.options.at(-1)?.env as NodeJS.ProcessEnv).CODEX_HOME).toBe(stable)
+      expect(existsSync(join(stable, 'state_5.sqlite'))).toBe(true)
+      await second.dispose?.()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 
