@@ -19,7 +19,7 @@ import type {
   RuntimeProvider
 } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
-import type { CodexHookInspection } from '../codex-hook-trust'
+import type { CodexHookInspection, CodexHookTrustGrant } from '../codex-hook-trust'
 
 export interface ProviderRunResult {
   externalSessionId?: string
@@ -57,6 +57,7 @@ export interface ProviderRunRequest {
   effort?: string
   permissionMode?: AgentPermissionMode
   bypassHookTrust?: boolean
+  codexHookTrust?: CodexHookTrustGrant[]
   managedRecorder?: boolean
   mcpExecution?: AuthorizedMcpExecution
   emit: (event: TraceEvent) => void

@@ -21,6 +21,11 @@ export interface CodexHookInspection {
   errors: string[]
 }
 
+export interface CodexHookTrustGrant {
+  key: string
+  currentHash: string
+}
+
 interface CodexHookGrant {
   cwd: string
   fingerprint: string

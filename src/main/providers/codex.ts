@@ -15,7 +15,12 @@ import {
 } from '../../shared/runtime'
 import { mcpPayloadFailed, parseMcp, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
-import type { CodexHookInspection, CodexHookMetadata, CodexHookTrustStatus } from '../codex-hook-trust'
+import type {
+  CodexHookInspection,
+  CodexHookMetadata,
+  CodexHookTrustGrant,
+  CodexHookTrustStatus
+} from '../codex-hook-trust'
 import {
   CodexAppServerClient,
   type CodexNotificationEnvelope
@@ -478,9 +483,10 @@ export function createCodexAdapter(
   let isolatedHome: ReturnType<typeof createCodexIsolatedHome> | undefined
 
   const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
-  const getClient = (cwd?: string, bypassHookTrust = false): CodexAppServerClient => {
-    const bypass = bypassHookTrust || process.env.SCRY_CODEX_BYPASS_HOOK_TRUST?.trim() === '1'
-    const key = `${cwd ?? ''}\0${bypass ? 'bypass' : 'trusted'}`
+  const getClient = (cwd?: string, hookTrust: CodexHookTrustGrant[] = []): CodexAppServerClient => {
+    const trustedHooks = [...hookTrust].sort((left, right) => left.key.localeCompare(right.key))
+    const trustKey = trustedHooks.map((hook) => `${hook.key}\0${hook.currentHash}`).join('\n')
+    const key = `${cwd ?? ''}\0${trustKey}`
     const existing = clients.get(key)
     if (existing) {
       lastClient = existing
@@ -506,7 +512,19 @@ export function createCodexAdapter(
       '--disable', 'external_migration',
       '--disable', 'skill_mcp_dependency_install'
     ]
-    const args = bypass ? ['--dangerously-bypass-hook-trust', ...appServerArgs] : appServerArgs
+    const projectTrustArgs = cwd
+      ? ['-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`]
+      : []
+    const hookTrustArgs = trustedHooks.length > 0
+      ? ['-c', `hooks={state={${trustedHooks.map((hook) =>
+          `${JSON.stringify(hook.key)}={trusted_hash=${JSON.stringify(hook.currentHash)}}`
+        ).join(',')}}}`]
+      : []
+    const args = [
+      ...projectTrustArgs,
+      ...hookTrustArgs,
+      ...appServerArgs
+    ]
     const client = new CodexAppServerClient({
       command: path,
       args,
@@ -522,10 +540,10 @@ export function createCodexAdapter(
     method: string,
     params?: unknown,
     cwd?: string,
-    bypassHookTrust = false
+    hookTrust: CodexHookTrustGrant[] = []
   ): Promise<T> => {
     try {
-      const result = await getClient(cwd, bypassHookTrust).request<T>(method, params)
+      const result = await getClient(cwd, hookTrust).request<T>(method, params)
       lastOkAt = Date.now()
       lastError = undefined
       return result
@@ -771,7 +789,7 @@ export function createCodexAdapter(
 
       const promise = (async (): Promise<ProviderRunResult> => {
         try {
-          const appServer = getClient(runRequest.cwd, runRequest.bypassHookTrust)
+          const appServer = getClient(runRequest.cwd, runRequest.codexHookTrust)
           await appServer.start()
           const generationFailure = appServer.failureForCurrentGeneration()
           unsubscribeRequest = appServer.onRequest(handleApprovalRequest)
@@ -1063,7 +1081,7 @@ export function createCodexAdapter(
                   ...(runRequest.model ? { model: runRequest.model.id } : {})
                 },
                 runRequest.cwd,
-                runRequest.bypassHookTrust
+                runRequest.codexHookTrust
               )
             : await request<CodexThreadResponse>(
                 'thread/start',
@@ -1073,7 +1091,7 @@ export function createCodexAdapter(
                   ...(runRequest.model ? { model: runRequest.model.id } : {})
                 },
                 runRequest.cwd,
-                runRequest.bypassHookTrust
+                runRequest.codexHookTrust
               )
           externalSessionId = thread.thread.id
           model = thread.model
@@ -1126,7 +1144,7 @@ export function createCodexAdapter(
             ...(access.approvalsReviewer ? { approvalsReviewer: access.approvalsReviewer } : {}),
             ...(runRequest.model ? { model: runRequest.model.id } : {}),
             ...(runRequest.effort ? { effort: runRequest.effort } : {})
-          }, runRequest.cwd, runRequest.bypassHookTrust)
+          }, runRequest.cwd, runRequest.codexHookTrust)
           turnId = turn.turn.id
           if (externalSessionId) {
             const startedAtMs = epochMilliseconds(turn.turn.startedAt) ?? Date.now()
@@ -1138,7 +1156,7 @@ export function createCodexAdapter(
               'turn/interrupt',
               { threadId: externalSessionId, turnId },
               runRequest.cwd,
-              runRequest.bypassHookTrust
+              runRequest.codexHookTrust
             ).catch(() => {})
             return {
               externalSessionId,
@@ -1167,7 +1185,7 @@ export function createCodexAdapter(
             'turn/interrupt',
             { threadId: externalSessionId, turnId },
             runRequest.cwd,
-            runRequest.bypassHookTrust
+            runRequest.codexHookTrust
           ).catch(() => {})
         }
       }
