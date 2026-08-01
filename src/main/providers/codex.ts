@@ -463,7 +463,10 @@ function traceFromItem(
   return []
 }
 
-export function createCodexAdapter(): ProviderAdapter {
+export function createCodexAdapter(
+  isolatedHomePath?: string,
+  legacySessionIds: () => readonly string[] = () => []
+): ProviderAdapter {
   const clients = new Map<string, CodexAppServerClient>()
   const modelCache = new Map<string, { data: AgentRunControlCatalog; observedAt: number }>()
   let lastClient: CodexAppServerClient | null = null
@@ -487,7 +490,11 @@ export function createCodexAdapter(): ProviderAdapter {
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
     const env = runtimeCliEnv(undefined, { managedRecorder: true })
-    isolatedHome ??= createCodexIsolatedHome(env.CODEX_HOME?.trim() || undefined)
+    isolatedHome ??= createCodexIsolatedHome(
+      env.CODEX_HOME?.trim() || undefined,
+      isolatedHomePath,
+      legacySessionIds()
+    )
     const appServerArgs = [
       'app-server',
       '--strict-config',
