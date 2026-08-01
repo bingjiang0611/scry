@@ -170,8 +170,9 @@ export function createCodexIsolatedHome(
     for (const entry of SHARED_STATE) {
       const source = join(sourceHome, entry)
       if (!existsSync(source)) continue
-      const type = lstatSync(source).isDirectory() ? (process.platform === 'win32' ? 'junction' : 'dir') : 'file'
-      symlinkSync(source, join(path, entry), type)
+      const canonicalSource = realpathSync(source)
+      const type = lstatSync(canonicalSource).isDirectory() ? (process.platform === 'win32' ? 'junction' : 'dir') : 'file'
+      symlinkSync(canonicalSource, join(path, entry), type)
     }
     for (const entry of LOCAL_STATE) ensureLocalDirectory(join(path, entry))
     if (!temporary) migrateLegacyRollouts(sourceHome, path, legacySessionIds)

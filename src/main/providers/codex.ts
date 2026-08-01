@@ -490,8 +490,10 @@ export function createCodexAdapter(
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
     const env = runtimeCliEnv(undefined, { managedRecorder: true })
+    const sourceHome = process.env.SCRY_CODEX_SOURCE_HOME?.trim() || env.CODEX_HOME?.trim() || undefined
+    delete env.SCRY_CODEX_SOURCE_HOME
     isolatedHome ??= createCodexIsolatedHome(
-      env.CODEX_HOME?.trim() || undefined,
+      sourceHome,
       isolatedHomePath,
       legacySessionIds()
     )

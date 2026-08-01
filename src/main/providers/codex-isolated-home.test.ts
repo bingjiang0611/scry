@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync
@@ -39,7 +40,7 @@ describe('createCodexIsolatedHome', () => {
     const isolated = createCodexIsolatedHome(source, persistent)
     cleanups.push(isolated.cleanup)
 
-    expect(readlinkSync(join(isolated.path, 'auth.json'))).toBe(join(source, 'auth.json'))
+    expect(readlinkSync(join(isolated.path, 'auth.json'))).toBe(realpathSync(join(source, 'auth.json')))
     expect(existsSync(join(isolated.path, 'sessions', 'native.jsonl'))).toBe(false)
     expect(existsSync(join(isolated.path, 'archived_sessions'))).toBe(true)
     expect(existsSync(join(isolated.path, 'config.toml'))).toBe(false)
@@ -51,6 +52,23 @@ describe('createCodexIsolatedHome', () => {
     cleanups.push(reopened.cleanup)
     expect(existsSync(join(reopened.path, 'sessions', 'scry.jsonl'))).toBe(true)
     expect(readFileSync(join(reopened.path, 'state_5.sqlite'), 'utf8')).toBe('state')
+  })
+
+  it('links persistent shared state to the canonical source instead of an ephemeral symlink', () => {
+    const native = mkdtempSync(join(tmpdir(), 'scry-codex-native-'))
+    const source = mkdtempSync(join(tmpdir(), 'scry-codex-source-'))
+    const persistent = mkdtempSync(join(tmpdir(), 'scry-codex-persistent-'))
+    cleanups.push(() => rmSync(native, { recursive: true, force: true }))
+    cleanups.push(() => rmSync(source, { recursive: true, force: true }))
+    cleanups.push(() => rmSync(persistent, { recursive: true, force: true }))
+    writeFileSync(join(native, 'auth.json'), '{"account":"fixture"}')
+    symlinkSync(join(native, 'auth.json'), join(source, 'auth.json'))
+
+    createCodexIsolatedHome(source, persistent)
+
+    expect(readlinkSync(join(persistent, 'auth.json'))).toBe(realpathSync(join(native, 'auth.json')))
+    rmSync(source, { recursive: true, force: true })
+    expect(readFileSync(join(persistent, 'auth.json'), 'utf8')).toBe('{"account":"fixture"}')
   })
 
   it('rejects a persistent root symlink before touching the native home', () => {
