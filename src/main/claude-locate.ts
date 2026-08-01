@@ -84,6 +84,7 @@ export function sanitizeNestedAgentEnv(input: Record<string, string>): Record<st
       k === 'CLAUDECODE' ||
       k === 'AI_AGENT' ||
       k === 'CLAUDE_EFFORT' ||
+      k === 'SCRY_CODEX_SOURCE_HOME' ||
       k === 'CODEX_CI' ||
       k === 'CODEX_THREAD_ID' ||
       k.startsWith('CLAUDE_CODE_') ||
