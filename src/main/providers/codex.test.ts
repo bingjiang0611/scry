@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TraceEvent } from '../../shared/trace'
@@ -79,10 +79,33 @@ describe('Codex provider adapter', () => {
       await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/repo' })
       const childEnv = appServer.options.at(-1)?.env as NodeJS.ProcessEnv
       expect(childEnv.CODEX_HOME).not.toBe(source)
-      expect(readlinkSync(join(childEnv.CODEX_HOME!, 'auth.json'))).toBe(join(source, 'auth.json'))
+      expect(readlinkSync(join(childEnv.CODEX_HOME!, 'auth.json'))).toBe(realpathSync(join(source, 'auth.json')))
       rmSync(childEnv.CODEX_HOME!, { recursive: true, force: true })
     } finally {
       rmSync(source, { recursive: true, force: true })
+    }
+  })
+
+  it('lets the launcher pin the source home without leaking the control variable to app-server', async () => {
+    const explicit = mkdtempSync(join(tmpdir(), 'scry-codex-explicit-home-'))
+    const shell = mkdtempSync(join(tmpdir(), 'scry-codex-shell-home-'))
+    const previous = process.env.SCRY_CODEX_SOURCE_HOME
+    writeFileSync(join(explicit, 'auth.json'), '{}')
+    writeFileSync(join(shell, 'auth.json'), '{}')
+    process.env.SCRY_CODEX_SOURCE_HOME = explicit
+    runtime.env = { CODEX_HOME: shell, SCRY_CODEX_SOURCE_HOME: '/must-not-leak' }
+    appServer.request.mockResolvedValue({ data: [] })
+    try {
+      await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/repo' })
+      const childEnv = appServer.options.at(-1)?.env as NodeJS.ProcessEnv
+      expect(readlinkSync(join(childEnv.CODEX_HOME!, 'auth.json'))).toBe(realpathSync(join(explicit, 'auth.json')))
+      expect(childEnv.SCRY_CODEX_SOURCE_HOME).toBeUndefined()
+      rmSync(childEnv.CODEX_HOME!, { recursive: true, force: true })
+    } finally {
+      if (previous === undefined) delete process.env.SCRY_CODEX_SOURCE_HOME
+      else process.env.SCRY_CODEX_SOURCE_HOME = previous
+      rmSync(explicit, { recursive: true, force: true })
+      rmSync(shell, { recursive: true, force: true })
     }
   })
 
