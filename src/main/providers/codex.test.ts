@@ -407,7 +407,7 @@ describe('Codex provider adapter', () => {
 
       expect(appServer.options).toContainEqual(
         expect.objectContaining({
-          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins'])
+          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins', 'external_migration'])
         })
       )
     } finally {
@@ -426,7 +426,7 @@ describe('Codex provider adapter', () => {
 
       expect(appServer.options).toContainEqual(expect.objectContaining({
         cwd: '/isolated-copy',
-        args: expect.arrayContaining(['app-server', '--strict-config', 'apps', 'plugins'])
+        args: expect.arrayContaining(['app-server', '--strict-config', 'apps', 'plugins', 'external_migration'])
       }))
       expect(appServer.options[0].args).not.toContain('--dangerously-bypass-hook-trust')
     } finally {
@@ -462,7 +462,7 @@ describe('Codex provider adapter', () => {
       expect(appServer.options).toContainEqual(
         expect.objectContaining({
           cwd: '/isolated-copy',
-          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins'])
+          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins', 'external_migration'])
         })
       )
     } finally {
