@@ -23,16 +23,6 @@ export const AGENT_ICON: Record<string, string> = {
   qoder: 'square'
 }
 
-export const KIND_ICON: Record<string, string> = {
-  human: 'message',
-  model: 'bulb',
-  tool: 'tool',
-  skill: 'box',
-  agent: 'cube',
-  harness: 'check',
-  hook: 'clock'
-}
-
 export interface FileRow {
   path: string
   read: number
@@ -1022,15 +1012,12 @@ export function fileBadge(f: FileRow): string {
   return f.write > 0 ? 'W' : f.edit > 0 ? 'E' : 'R'
 }
 
-export type AttributionMethod = 'direct' | 'turn_allocated' | 'heuristic' | 'unattributed'
 export type BillingSignalSeverity = 'info' | 'warn' | 'bad'
 
 export interface BillingTurnRow {
   turnNo: number
   runId: string
   label: string
-  cost: number
-  costKnown: boolean
   tokensTotal: number
   tokenKnown: boolean
   tokensIn: number
@@ -1049,31 +1036,12 @@ export interface BillingTurnRow {
 
 export interface BillingModelRow {
   model: string
-  cost: number
-  costKnown: boolean
   totalTokens: number
   tokensIn: number
   tokensOut: number
   cacheReadTokens: number
   cacheCreationTokens: number
   contextWindow?: number
-  costSource: string
-  confidence: string
-}
-
-export interface BillingEvidenceRow {
-  kind: 'skill' | 'tool' | 'mcp' | 'hook' | 'agent'
-  name: string
-  count: number
-  relatedCost: number
-  relatedTokens: number
-  relatedTurns: number
-  costKnownTurns: number
-  costMissingTurns: number
-  tokenKnownTurns: number
-  tokenMissingTurns: number
-  attributionMethod: AttributionMethod
-  firstEvent?: TraceEvent
 }
 
 export interface BillingSignal {
@@ -1087,7 +1055,6 @@ export interface BillingSignal {
 export interface BillingAnalysis {
   sourceLabel: string
   officialBillLabel: string
-  totalCost: number
   totalTokens: number
   tokensIn: number
   tokensOut: number
@@ -1095,37 +1062,15 @@ export interface BillingAnalysis {
   cacheCreationTokens: number
   apiMs: number | null
   resultTurns: number
-  knownCostResultCount: number
-  missingCostResultCount: number
   knownTokenResultCount: number
   missingTokenResultCount: number
-  directRunCoveragePct: number
-  modelCostCoveragePct: number
   tokenCoveragePct: number
   modelTokenCoveragePct: number
-  workflowDirectCoveragePct: number
-  workflowUnattributedPct: number
-  workflowUnattributedCost: number
   workflowUnattributedTokens: number
-  topCostTurns: BillingTurnRow[]
   topTokenTurns: BillingTurnRow[]
   allTurnRows: BillingTurnRow[]
   models: BillingModelRow[]
-  evidence: BillingEvidenceRow[]
   signals: BillingSignal[]
-}
-
-function costSourceName(source: string | undefined, confidence: string | undefined): string {
-  const s = source ?? 'sdk_estimate'
-  const c = confidence ?? 'estimated'
-  if (s === 'sdk_estimate') return c === 'estimated' ? 'Claude SDK 估算' : 'Claude SDK'
-  if (s === 'gateway_reported') return '网关上报'
-  if (s === 'provider_bill') return '官方账单'
-  if (s === 'provider_reported') return '供应商上报'
-  if (s === 'official_telemetry') return '官方 telemetry'
-  if (s === 'analytics_report') return '分析报告'
-  if (s === 'price_table') return '历史价格字段'
-  return s
 }
 
 function cleanTurnLabel(t: Turn, turnNo: number): string {
@@ -1138,55 +1083,11 @@ function safeReportLabel(name: string): string {
   return (maskSecrets(name.replace(/\s+/g, ' ').trim()) ?? name).slice(0, 96)
 }
 
-function modelCostSource(mu: ModelUsageRow): { costSource: string; confidence: string } {
-  return {
-    costSource: costSourceName(mu.costSource, mu.costConfidence),
-    confidence: mu.costConfidence ?? (mu.costUsd != null ? 'estimated' : 'inferred')
-  }
-}
-
-function eventNameForEvidence(e: TraceEvent): { kind: BillingEvidenceRow['kind']; name: string; method: AttributionMethod } | null {
-  if (e.stage === 'tool_result') return null
-  if (e.kind === 'skill') return { kind: 'skill', name: safeReportLabel(e.name ?? 'skill'), method: 'turn_allocated' }
-  // Provider 没有子 agent 独立 usage 时，不能把父 turn 的全部 Token/费用算给子 agent。
-  if (e.kind === 'agent') return { kind: 'agent', name: safeReportLabel(e.name ?? 'Task'), method: 'unattributed' }
-  if (e.kind === 'hook') return { kind: 'hook', name: safeReportLabel(e.hookName ?? e.name ?? 'Hook'), method: 'heuristic' }
-  if (e.kind === 'tool' && e.isMcp) return { kind: 'mcp', name: safeReportLabel(`mcp:${e.mcpServer ?? '?'}`), method: 'turn_allocated' }
-  if (e.kind === 'tool') return { kind: 'tool', name: safeReportLabel(e.tool ?? e.stage), method: 'turn_allocated' }
-  return null
-}
-
 function hiddenSpendCommand(e: TraceEvent): boolean {
   if (e.tool !== 'Bash') return false
   const input = e.input as Record<string, unknown> | undefined
   const cmd = typeof input?.command === 'string' ? input.command : ''
   return /\b(openai|anthropic|gemini|openrouter)\b|curl\s+https?:\/\/api\./i.test(cmd)
-}
-
-export function attributionMethodLabel(method: AttributionMethod): string {
-  if (method === 'direct') return '直接归因'
-  if (method === 'turn_allocated') return '同轮关联'
-  if (method === 'heuristic') return '弱关联'
-  return '未归因'
-}
-
-export function attributionMethodHint(method: AttributionMethod): string {
-  if (method === 'direct') return '这个对象本身带有用量字段。'
-  if (method === 'turn_allocated') return '该对象出现在哪些 turn，就关联这些 turn 的总 token；多行会重复覆盖同一 turn，不能相加。'
-  if (method === 'heuristic') return '按时间和 turn 邻近关系推断，只能作为弱线索，不代表 hook 自身消耗 token。'
-  return '没有足够数据归因。'
-}
-
-export function evidenceCostBasisLabel(method: AttributionMethod): string {
-  if (method === 'direct') return '直接 token'
-  if (method === 'heuristic') return '相邻轮次 token'
-  return '所在轮次 token'
-}
-
-export function fmtKnownCost(value: number, knownCount: number, missingCount = 0): string {
-  if (knownCount === 0 && missingCount === 0) return '等待 result'
-  if (knownCount === 0 && missingCount > 0) return '未捕获'
-  return `$${value.toFixed(4)}${missingCount > 0 ? '+' : ''}`
 }
 
 export function fmtKnownTokens(value: number, knownCount: number, missingCount = 0): string {
@@ -1216,8 +1117,6 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
       turnNo: i + 1,
       runId: t.runId,
       label: cleanTurnLabel(t, i + 1),
-      cost: r?.costUsd ?? 0,
-      costKnown: r?.costUsd != null,
       tokensTotal,
       tokenKnown,
       tokensIn: r?.tokensIn ?? 0,
@@ -1238,9 +1137,6 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
     }
   })
 
-  const totalCost = results.reduce((s, e) => s + (e.costUsd ?? 0), 0)
-  const knownCostResultCount = results.filter((e) => e.costUsd != null).length
-  const missingCostResultCount = Math.max(0, results.length - knownCostResultCount)
   const tokensIn = results.reduce((s, e) => s + (e.tokensIn ?? 0), 0)
   const tokensOut = results.reduce((s, e) => s + (e.tokensOut ?? 0), 0)
   const cacheReadTokens = results.reduce((s, e) => s + (e.cacheReadTokens ?? 0), 0)
@@ -1256,24 +1152,17 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
   const modelMap = new Map<string, BillingModelRow>()
   for (const r of results) {
     for (const mu of r.modelUsage ?? []) {
-      const source = modelCostSource(mu)
       const prev =
         modelMap.get(mu.model) ??
         ({
           model: mu.model,
-          cost: 0,
-          costKnown: true,
           totalTokens: 0,
           tokensIn: 0,
           tokensOut: 0,
           cacheReadTokens: 0,
           cacheCreationTokens: 0,
-          contextWindow: mu.contextWindow,
-          costSource: source.costSource,
-          confidence: source.confidence
+          contextWindow: mu.contextWindow
         } satisfies BillingModelRow)
-      prev.cost += mu.costUsd ?? 0
-      prev.costKnown = prev.costKnown && mu.costUsd != null
       prev.tokensIn += mu.inputTokens ?? 0
       prev.tokensOut += mu.outputTokens ?? 0
       prev.cacheReadTokens += mu.cacheReadTokens ?? 0
@@ -1295,58 +1184,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
     }
   }
   const models = [...modelMap.values()].sort((a, b) => b.totalTokens - a.totalTokens || b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut))
-  const modelCost = models.reduce((s, m) => s + m.cost, 0)
   const modelTokens = models.reduce((s, m) => s + m.totalTokens, 0)
-
-  type EvidenceDraft = Omit<BillingEvidenceRow, 'relatedTurns'> & { turnIds: Set<string> }
-  const evidenceMap = new Map<string, EvidenceDraft>()
-  for (const [i, t] of turns.entries()) {
-    const turnCost = allTurnRows[i]?.cost ?? 0
-    const turnTokens = allTurnRows[i]?.tokensTotal ?? 0
-    for (const e of t.items) {
-      const meta = eventNameForEvidence(e)
-      if (!meta) continue
-      const key = `${meta.kind}\u0000${meta.name}`
-      let row = evidenceMap.get(key)
-      if (!row) {
-        row = {
-          kind: meta.kind,
-          name: meta.name,
-          count: 0,
-          relatedCost: 0,
-          relatedTokens: 0,
-          costKnownTurns: 0,
-          costMissingTurns: 0,
-          tokenKnownTurns: 0,
-          tokenMissingTurns: 0,
-          turnIds: new Set(),
-          attributionMethod: meta.method,
-          firstEvent: e
-        }
-        evidenceMap.set(key, row)
-      }
-      row.count++
-      if (!row.turnIds.has(t.runId)) {
-        row.turnIds.add(t.runId)
-        if (meta.method === 'unattributed') continue
-        if (allTurnRows[i]?.costKnown) {
-          row.relatedCost += turnCost
-          row.costKnownTurns++
-        } else if (allTurnRows[i]?.result) {
-          row.costMissingTurns++
-        }
-        if (allTurnRows[i]?.tokenKnown) {
-          row.relatedTokens += turnTokens
-          row.tokenKnownTurns++
-        } else if (allTurnRows[i]?.result) {
-          row.tokenMissingTurns++
-        }
-      }
-    }
-  }
-  const evidence = [...evidenceMap.values()]
-    .map(({ turnIds, ...row }) => ({ ...row, relatedTurns: turnIds.size }))
-    .sort((a, b) => b.relatedTokens - a.relatedTokens || b.count - a.count || a.name.localeCompare(b.name))
 
   const signals: BillingSignal[] = []
   const maxCtx = [...allTurnRows].filter((r) => r.contextPct != null).sort((a, b) => (b.contextPct ?? 0) - (a.contextPct ?? 0))[0]
@@ -1479,7 +1317,6 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
   return {
     sourceLabel: '本会话可验证 token',
     officialBillLabel: '仅看 token，不算金额',
-    totalCost,
     totalTokens,
     tokensIn,
     tokensOut,
@@ -1487,23 +1324,14 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
     cacheCreationTokens,
     apiMs,
     resultTurns: results.length,
-    knownCostResultCount,
-    missingCostResultCount,
     knownTokenResultCount,
     missingTokenResultCount,
-    directRunCoveragePct: results.length > 0 ? Math.round((knownCostResultCount / results.length) * 100) : 0,
-    modelCostCoveragePct: totalCost > 0 ? Math.min(100, Math.round((modelCost / totalCost) * 100)) : knownCostResultCount > 0 ? 100 : 0,
     tokenCoveragePct: results.length > 0 ? Math.round((knownTokenResultCount / results.length) * 100) : 0,
     modelTokenCoveragePct: totalTokens > 0 ? Math.min(100, Math.round((modelTokens / totalTokens) * 100)) : knownTokenResultCount > 0 ? 100 : 0,
-    workflowDirectCoveragePct: 0,
-    workflowUnattributedPct: totalTokens > 0 ? 100 : 0,
-    workflowUnattributedCost: totalCost,
     workflowUnattributedTokens: totalTokens,
-    topCostTurns: [...allTurnRows].filter((r) => r.costKnown && r.cost > 0).sort((a, b) => b.cost - a.cost).slice(0, 5),
     topTokenTurns: [...allTurnRows].filter((r) => r.tokenKnown && r.tokensTotal > 0).sort((a, b) => b.tokensTotal - a.tokensTotal).slice(0, 10),
     allTurnRows,
     models,
-    evidence,
     signals
   }
 }

@@ -16,7 +16,7 @@ import {
   type TraceEvent
 } from '../../shared/trace'
 import { resolveRuntimeCliBin } from '../claude-locate'
-import { OpenCodeServerManager, type OpenCodeHookFrame } from './opencode-server'
+import { OpenCodeServerManager } from './opencode-server'
 import { effortOption, permissionOptions } from './run-controls'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
 
@@ -34,7 +34,6 @@ const record = (value: unknown): Record<string, unknown> =>
 interface OpenCodeEventState {
   starts: Set<string>
   results: Set<string>
-  mcpServers: Set<string>
   mcpByToolUseId: Map<string, ParsedMcp>
 }
 
@@ -46,45 +45,13 @@ const eventState = (request: ProviderRunRequest): OpenCodeEventState => {
   const created = {
     starts: new Set<string>(),
     results: new Set<string>(),
-    mcpServers: new Set<string>(),
     mcpByToolUseId: new Map<string, ParsedMcp>()
   }
   eventStates.set(request, created)
   return created
 }
 
-export function setOpenCodeMcpServers(request: ProviderRunRequest, names: string[]): void {
-  eventState(request).mcpServers = new Set(names)
-}
-
-export function emitOpenCodeHookFrame(request: ProviderRunRequest, frame: OpenCodeHookFrame, sessionId: string): void {
-  if (frame.type === 'init' || frame.input.sessionID !== sessionId) return
-  const hookEvent = frame.type === 'tool.execute.before'
-    ? 'PreToolUse'
-    : frame.type === 'tool.execute.after'
-      ? 'PostToolUse'
-      : frame.type === 'permission.ask'
-        ? 'PermissionRequest'
-        : 'UserPromptSubmit'
-  const callId = typeof frame.input.callID === 'string' ? frame.input.callID : undefined
-  const target = String(frame.input.tool ?? frame.input.command ?? 'OpenCode')
-  const hookId = `opencode:${sessionId}:${callId ?? frame.ts}:${frame.type}`
-  const common = {
-    kind: 'hook' as const,
-    tool: 'Scry OpenCode observer',
-    name: hookEvent,
-    hookId,
-    hookName: 'Scry OpenCode observer',
-    hookEvent,
-    hookCommand: target,
-    toolUseId: callId,
-    runtimeMetadata: { source: 'opencode_plugin', protocolVersion: frame.v }
-  }
-  request.emit(newEvent(request.runId, { ...common, stage: 'hook_started', hookOutcome: 'started' }))
-  request.emit(newEvent(request.runId, { ...common, stage: 'hook_response', hookOutcome: 'success', durationMs: 0, isError: false }))
-}
-
-function normalizeOpenCodeTool(request: ProviderRunRequest, rawName: string, rawInput: unknown): {
+function normalizeOpenCodeTool(rawName: string, rawInput: unknown): {
   toolName: string
   input: Record<string, unknown>
 } {
@@ -95,10 +62,6 @@ function normalizeOpenCodeTool(request: ProviderRunRequest, rawName: string, raw
     bash: 'Bash', edit: 'Edit', glob: 'Glob', grep: 'Grep', read: 'Read', skill: 'Skill', task: 'Task', write: 'Write'
   }
   if (rawName === 'skill' && typeof input.name === 'string') input.skill = input.name
-  for (const server of [...eventState(request).mcpServers].sort((a, b) => b.length - a.length)) {
-    const prefix = `${server}_`
-    if (rawName.startsWith(prefix)) return { toolName: `mcp__${server}__${rawName.slice(prefix.length)}`, input }
-  }
   return { toolName: aliases[rawName] ?? rawName, input }
 }
 
@@ -211,7 +174,7 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
   const isToolStart = type === 'session.next.tool.called' || (isPartTool && ['running', 'completed', 'error'].includes(status))
   if (isToolStart && toolUseId && !eventState(request).starts.has(toolUseId)) {
     eventState(request).starts.add(toolUseId)
-    const normalized = normalizeOpenCodeTool(request, String(part.tool ?? ''), isPartTool ? toolState.input : part.input)
+    const normalized = normalizeOpenCodeTool(String(part.tool ?? ''), isPartTool ? toolState.input : part.input)
     const { toolName, input } = normalized
     const classified = classifyTool(toolName, input)
     const mcp = parseMcp(toolName, input)
@@ -281,14 +244,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
     runtimeProvider: 'opencode_server',
     describe: async () => {
       const path = executable()
-      const states = [...managers.values()].map((manager) => ({ manager, state: manager.state }))
-      const current = states.find(({ state }) => state != null)
-      const degradedBridge = states
-        .map(({ manager, state }) => ({ bridge: manager.hookBridge, state }))
-        .find(({ bridge, state }) => state && (!bridge.enabled || !bridge.ready))
-      const bridgeError = degradedBridge
-        ? degradedBridge.bridge.error ?? 'OpenCode Hook bridge not ready'
-        : undefined
+      const current = [...managers.values()].map((manager) => manager.state).find((state) => state != null)
       return {
         id: 'opencode',
         label: 'OpenCode',
@@ -298,13 +254,13 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         path,
         capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' },
         health: {
-          state: !path ? 'unavailable' : lastError || bridgeError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
+          state: !path ? 'unavailable' : lastError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'server SDK',
-          cwd: current?.state?.cwd,
-          pid: current?.state?.pid,
+          cwd: current?.cwd,
+          pid: current?.pid,
           lastOkAt,
           lastErrorAt,
-          lastError: lastError ?? bridgeError
+          lastError
         }
       }
     },
@@ -343,9 +299,6 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         }
         const subscription = await client.event.subscribe({ directory: request.cwd })
         stream = subscription.stream as AsyncGenerator<unknown>
-        const unsubscribeHook = managerFor(request.cwd!).onHook((frame) =>
-          emitOpenCodeHookFrame(request, frame, externalSessionId!)
-        )
         const events = (async () => {
           try {
             for await (const event of stream!) {
@@ -385,12 +338,8 @@ export function createOpenCodeAdapter(): ProviderAdapter {
                 ]
               }))
         } finally {
-          try {
-            await stream.return(undefined)
-            await events
-          } finally {
-            unsubscribeHook()
-          }
+          await stream.return(undefined)
+          await events
         }
         const info = record(response.info)
         const tokens = record(info.tokens)

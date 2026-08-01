@@ -1126,7 +1126,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         recent={[]}
         agents={[]}
         selectedAgentId="claude"
-        backend="local"
         {...RUN_CONTROL_PROPS}
         runControls={{ model: { id: 'test-model' }, effort: 'high', permissionMode: 'default' }}
         input=""
@@ -1155,7 +1154,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         onRemoveDraftAttachment={() => {}}
         onRemoveQueuedPrompt={() => {}}
         onSelectAgent={() => {}}
-        onBackend={() => {}}
         onRescan={() => {}}
       />
     )
@@ -1189,7 +1187,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         recent={[]}
         agents={[]}
         selectedAgentId="claude"
-        backend="local"
         {...RUN_CONTROL_PROPS}
         input="/code"
         busy={false}
@@ -1215,7 +1212,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         onRemoveDraftAttachment={() => {}}
         onRemoveQueuedPrompt={() => {}}
         onSelectAgent={() => {}}
-        onBackend={() => {}}
         onRescan={() => {}}
       />
     )
@@ -1237,7 +1233,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         recent={[]}
         agents={[]}
         selectedAgentId="claude"
-        backend="local"
         {...RUN_CONTROL_PROPS}
         input=""
         busy
@@ -1269,7 +1264,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         onRemoveDraftAttachment={() => {}}
         onRemoveQueuedPrompt={() => {}}
         onSelectAgent={() => {}}
-        onBackend={() => {}}
         onRescan={() => {}}
       />
     )

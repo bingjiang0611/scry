@@ -224,23 +224,11 @@ function versionProbePath(): string {
 }
 
 function which(bin: string): string {
-  try {
-    const p = execFileSync('/usr/bin/which', [bin], {
-      encoding: 'utf8',
-      env: { ...process.env, PATH: enrichedPath() }
-    }).trim()
-    return p && existsSync(p) ? p : ''
-  } catch {
-    return ''
-  }
+  return resolveCommandOnPath(bin, enrichedPath()) ?? ''
 }
 
 async function whichAsync(bin: string): Promise<string> {
-  const p = (await execFileText('/usr/bin/which', [bin], {
-    env: { ...process.env, PATH: await enrichedPathAsync() },
-    timeout: 1200
-  })).trim()
-  return p && existsSync(p) ? p : ''
+  return resolveCommandOnPath(bin, await enrichedPathAsync()) ?? ''
 }
 
 export function normalizeAgentVersion(raw: string): string | undefined {

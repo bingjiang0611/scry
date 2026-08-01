@@ -12,16 +12,13 @@ vi.mock('../claude-locate', () => ({
 import {
   createOpenCodeAdapter,
   emitOpenCodeEvent,
-  emitOpenCodeHookFrame,
   handleOpenCodePermission,
   openCodePermissionRules,
-  openCodeRunControlCatalog,
-  setOpenCodeMcpServers
+  openCodeRunControlCatalog
 } from './opencode'
 import {
   isolatedOpenCodeChildEnv,
   openCodeServerAuthorization,
-  parseOpenCodeHookLine,
   sanitizeOpenCodeAuth
 } from './opencode-server'
 
@@ -175,7 +172,7 @@ describe('OpenCode provider adapter', () => {
     ])
   })
 
-  it('normalizes native OpenCode Skill and MCP tool identities', () => {
+  it('normalizes the native OpenCode Skill identity', () => {
     const events: TraceEvent[] = []
     const request = {
       runId: 'run-2',
@@ -184,18 +181,16 @@ describe('OpenCode provider adapter', () => {
       attachments: [],
       emit: (event: TraceEvent) => events.push(event)
     } satisfies ProviderRunRequest
-    setOpenCodeMcpServers(request, ['scry-e2e'])
-
-    for (const part of [
-      { type: 'tool', callID: 'skill-1', tool: 'skill', state: { status: 'completed', input: { name: 'scry-e2e-audit' }, output: 'loaded' } },
-      { type: 'tool', callID: 'mcp-1', tool: 'scry-e2e_repo_tree', state: { status: 'completed', input: { path: '.' }, output: '{}' } }
-    ]) {
-      emitOpenCodeEvent(request, { type: 'message.part.updated', properties: { sessionID: 'session-2', part } }, 'session-2')
+    const part = {
+      type: 'tool',
+      callID: 'skill-1',
+      tool: 'skill',
+      state: { status: 'completed', input: { name: 'scry-e2e-audit' }, output: 'loaded' }
     }
+    emitOpenCodeEvent(request, { type: 'message.part.updated', properties: { sessionID: 'session-2', part } }, 'session-2')
 
     expect(events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'skill', stage: 'skill:scry-e2e-audit', tool: 'Skill', name: 'scry-e2e-audit', toolUseId: 'skill-1' }),
-      expect.objectContaining({ kind: 'tool', tool: 'mcp__scry-e2e__repo_tree', isMcp: true, mcpServer: 'scry-e2e', mcpAction: 'repo_tree', toolUseId: 'mcp-1' })
+      expect.objectContaining({ kind: 'skill', stage: 'skill:scry-e2e-audit', tool: 'Skill', name: 'scry-e2e-audit', toolUseId: 'skill-1' })
     ]))
   })
 
@@ -246,20 +241,4 @@ describe('OpenCode provider adapter', () => {
     expect(events[1]).toMatchObject({ stage: 'tool_result', isMcp: true, isError: true })
   })
 
-  it('maps versioned plugin frames to hook events and rejects another session', () => {
-    const events: TraceEvent[] = []
-    const request = {
-      runId: 'run-hooks', prompt: 'inspect', cwd: '/repo', attachments: [], emit: (event: TraceEvent) => events.push(event)
-    } satisfies ProviderRunRequest
-    const frame = parseOpenCodeHookLine('SCRY_OPENCODE_HOOK\t{"v":1,"type":"tool.execute.before","ts":1,"input":{"sessionID":"session-1","callID":"call-1","tool":"read"}}')!
-
-    emitOpenCodeHookFrame(request, frame, 'other-session')
-    emitOpenCodeHookFrame(request, frame, 'session-1')
-
-    expect(events).toEqual([
-      expect.objectContaining({ kind: 'hook', stage: 'hook_started', hookEvent: 'PreToolUse', toolUseId: 'call-1' }),
-      expect.objectContaining({ kind: 'hook', stage: 'hook_response', hookOutcome: 'success', runtimeMetadata: { source: 'opencode_plugin', protocolVersion: 1 } })
-    ])
-    expect(parseOpenCodeHookLine('SCRY_OPENCODE_HOOK\t{"v":2,"type":"init","ts":1,"input":{}}')).toBeNull()
-  })
 })

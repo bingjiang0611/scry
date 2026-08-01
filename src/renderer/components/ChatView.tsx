@@ -24,7 +24,6 @@ interface ChatViewProps {
   recent: string[]
   agents: DetectedAgent[]
   selectedAgentId: string
-  backend: 'local' | 'api'
   runControls: AgentRunControls
   runControlCatalog: AgentRunControlCatalog
   runControlsLoading?: boolean
@@ -62,7 +61,6 @@ interface ChatViewProps {
   onRemoveDraftAttachment: (id: string) => void
   onRemoveQueuedPrompt: (index: number) => void
   onSelectAgent: (agentId: string) => void
-  onBackend: (backend: 'local' | 'api') => void
   onRunModel: (model: AgentModelRef | undefined) => void
   onRunEffort: (effort: string | undefined) => void
   onPermissionMode: (mode: AgentPermissionMode) => void
@@ -112,7 +110,6 @@ export function ChatView({
   recent,
   agents,
   selectedAgentId,
-  backend,
   runControls,
   runControlCatalog,
   runControlsLoading = false,
@@ -150,7 +147,6 @@ export function ChatView({
   onRemoveDraftAttachment,
   onRemoveQueuedPrompt,
   onSelectAgent,
-  onBackend,
   onRunModel,
   onRunEffort,
   onPermissionMode,
@@ -407,9 +403,7 @@ export function ChatView({
           <CliPicker
             agents={agents}
             selectedId={selectedAgentId}
-            backend={backend}
             onSelect={onSelectAgent}
-            onBackend={onBackend}
             onRescan={onRescan}
             disabled={busy}
           />

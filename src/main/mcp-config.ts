@@ -172,35 +172,6 @@ export function findMcpConfigByTargetId(
   return resolveMcpConfigs(cwd, homeDir).find((item) => item.targetId === targetId) ?? null
 }
 
-export function findMcpConfig(name: string, cwd: string | undefined, homeDir: string): Record<string, unknown> | null {
-  return resolveMcpConfigs(cwd, homeDir).find((item) => item.name === name)?.config ?? null
-}
-
-export function parseToolNames(text: string): string[] {
-  const out: string[] = []
-  const grab = (o: unknown): void => {
-    const tools = (o as { result?: { tools?: Array<{ name?: string }> } })?.result?.tools
-    if (Array.isArray(tools)) for (const t of tools) if (t.name) out.push(t.name)
-  }
-  try {
-    grab(JSON.parse(text))
-    if (out.length) return out
-  } catch {
-    /* not direct JSON; try SSE data lines below */
-  }
-  for (const line of text.split('\n')) {
-    const m = line.match(/^data:\s*(.+)$/)
-    if (m) {
-      try {
-        grab(JSON.parse(m[1]))
-      } catch {
-        /* ignore invalid SSE frame */
-      }
-    }
-  }
-  return out
-}
-
 function strictToolNames(text: string, expectedId: number): string[] | null {
   const parse = (value: unknown): string[] | null => {
     if (!value || typeof value !== 'object') return null

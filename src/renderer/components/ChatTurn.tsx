@@ -1,6 +1,6 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { memo, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Markdown } from './Markdown'
+import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'

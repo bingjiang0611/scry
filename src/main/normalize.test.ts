@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   type NormalizeCtx,
   normalizeSdkMessage,
-  normalizeTranscriptLine,
   parseTranscriptToTurns,
   humanEvent
 } from './normalize'
@@ -599,22 +598,6 @@ describe('humanEvent', () => {
     expect(ev.kind).toBe('human')
     expect(ev.stage).toBe('prompt')
     expect(ev.text).toHaveLength(500)
-  })
-})
-
-describe('normalizeTranscriptLine', () => {
-  it('解析 subagent transcript 行，带上 agentId', () => {
-    const c: NormalizeCtx = { ...ctx(), agentId: 'sub-9' }
-    const line = JSON.stringify({
-      type: 'assistant',
-      message: { content: [{ type: 'tool_use', id: 'i', name: 'Read', input: { file_path: '/x.ts' } }] }
-    })
-    const evs = normalizeTranscriptLine(line, c)
-    expect(evs[0]).toMatchObject({ agentId: 'sub-9', tool: 'Read', fileOp: 'read', filePath: '/x.ts' })
-  })
-
-  it('坏行（半截写入）静默跳过', () => {
-    expect(normalizeTranscriptLine('{"type":"assist', ctx())).toEqual([])
   })
 })
 

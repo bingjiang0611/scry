@@ -72,7 +72,6 @@ export function useIntegrations(cwd: string | null) {
   const [agentsHydrated, setAgentsHydrated] = useState(false)
   const [agentsScanning, setAgentsScanning] = useState(true)
   const [selectedId, setSelectedId] = useState('claude')
-  const [backend, setBackend] = useState<'local' | 'api'>('local')
   const [runControls, setRunControls] = useState<AgentRunControls>({ permissionMode: 'default' })
   const [runControlCatalog, setRunControlCatalog] = useState<AgentRunControlCatalog>(
     fallbackRunControlCatalog('default')
@@ -539,8 +538,6 @@ export function useIntegrations(cwd: string | null) {
     selectedRuntimeProvider,
     providerContext,
     setSelectedId: selectAgent,
-    backend,
-    setBackend,
     runControls,
     runControlCatalog,
     runControlCapability,

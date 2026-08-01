@@ -22,8 +22,8 @@ import type {
   SessionProviderId,
   SkillMeta
 } from '../shared/provider'
-import type { DetectedAgent } from '../main/claude-locate'
-import type { ParsedTurn } from '../main/normalize'
+import type { DetectedAgent as LocatedAgent } from '../main/claude-locate'
+import type { LoadedSessionTurn } from '../main/session-history'
 import type {
   WorkspaceCreateRequest,
   WorkspaceEntry,
@@ -56,6 +56,15 @@ export interface ProjectMeta {
   mtime: number
   sessions: SessionMeta[]
 }
+
+export type DetectedAgent = LocatedAgent & {
+  runtimeProvider?: RuntimeProvider
+  transport?: string
+  capabilities?: ProviderDescriptor['capabilities']
+  health?: ProviderDescriptor['health']
+}
+
+export type ParsedTurn = LoadedSessionTurn
 
 const api = {
   rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
@@ -124,8 +133,8 @@ const api = {
     ipcRenderer.on('agent:trace', l)
     return () => ipcRenderer.removeListener('agent:trace', l)
   },
-  onTurnDone: (cb: (e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string }) => void): (() => void) => {
-    const l = (_: unknown, e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string }): void => cb(e)
+  onTurnDone: (cb: (e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; stopped?: boolean }) => void): (() => void) => {
+    const l = (_: unknown, e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; stopped?: boolean }): void => cb(e)
     ipcRenderer.on('agent:turnDone', l)
     return () => ipcRenderer.removeListener('agent:turnDone', l)
   },

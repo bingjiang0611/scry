@@ -11,12 +11,6 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": [
-    "src/cli/scry.ts",
-    "src/core/turn-recorder/**/*.ts",
-    "src/shared/**/*.ts",
-    "src/main/danger.ts",
-    "src/main/normalize.ts"
-  ],
+  "include": ["src/cli/scry.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

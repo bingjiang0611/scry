@@ -483,24 +483,6 @@ export function humanEvent(prompt: string, ctx: NormalizeCtx): TraceEvent {
   return base(ctx, { kind: 'human', stage: 'prompt', text: prompt.slice(0, 500) })
 }
 
-// subagent transcript 一行 jsonl → TraceEvent[]。坏行（半截写入）静默跳过。
-export function normalizeTranscriptLine(line: string, ctx: NormalizeCtx): TraceEvent[] {
-  let o: Record<string, unknown>
-  try {
-    o = JSON.parse(line)
-  } catch {
-    return []
-  }
-  if (o?.type === 'assistant') {
-    const content = (o.message as Record<string, unknown> | undefined)?.content as Block[] | undefined
-    if (Array.isArray(content)) {
-      // subagent 内部事件用 agentId 归属（在 ctx 里），主树挂回靠 agentId（二期做精确父子映射）
-      return normalizeBlocks(content, null, ctx)
-    }
-  }
-  return []
-}
-
 // 从 transcript 的 user message content 抽出真实用户输入文本（tool_result 回传的不算）
 export function extractUserText(content: unknown): string {
   if (typeof content === 'string') return content

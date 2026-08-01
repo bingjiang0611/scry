@@ -40,7 +40,7 @@ if (unexpected.length > 0) {
 for (const required of ['/package.json', '/LICENSE', '/THIRD_PARTY_NOTICES.md']) {
   if (!entries.includes(required)) throw new Error(`packaged app 缺少发布文件：${required}`)
 }
-for (const forbiddenRoot of ['/.claude', '/.local', '/src', '/docs', '/scripts', '/audit-report-scry-2026-07-31.md']) {
+for (const forbiddenRoot of ['/.claude', '/.local', '/src', '/docs', '/scripts', '/out/cli', '/audit-report-scry-2026-07-31.md']) {
   if (entries.some((entry) => entry === forbiddenRoot || entry.startsWith(`${forbiddenRoot}/`))) {
     throw new Error(`packaged app 泄露构建 checkout 内容：${forbiddenRoot}`)
   }

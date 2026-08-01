@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { WorkspaceEntry, WorkspaceEntryKind, WorkspaceFileSnapshot } from '@shared/workspace'
-import { Markdown } from './Markdown'
+import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 
 export function workspaceReferenceToken(entry: Pick<WorkspaceEntry, 'kind' | 'path'>): string {
