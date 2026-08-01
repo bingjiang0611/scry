@@ -54,7 +54,8 @@ import {
   codexHookFingerprint,
   createCodexHookGrantStore,
   hooksRequiringBypass,
-  type CodexHookInspection
+  type CodexHookInspection,
+  type CodexHookTrustGrant
 } from './codex-hook-trust'
 import {
   createWorkspaceEntry,
@@ -227,9 +228,7 @@ function codexHookSourceSummary(inspection: CodexHookInspection): string {
   return [...counts.entries()].map(([source, count]) => `${source} ${count}`).join('，')
 }
 
-async function resolveCodexHookBypass(cwd: string): Promise<boolean> {
-  if (process.env.SCRY_CODEX_BYPASS_HOOK_TRUST?.trim() === '1') return true
-
+async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]> {
   let inspection: CodexHookInspection
   try {
     inspection = await providerRegistry.inspectHookTrust({ providerId: 'codex', cwd })
@@ -249,11 +248,14 @@ async function resolveCodexHookBypass(cwd: string): Promise<boolean> {
   }
 
   const pending = hooksRequiringBypass(inspection.hooks)
-  if (pending.length === 0) return false
+  if (pending.length === 0) return []
+
+  const trust = pending.map(({ key, currentHash }) => ({ key, currentHash }))
+  if (process.env.SCRY_CODEX_BYPASS_HOOK_TRUST?.trim() === '1') return trust
 
   const fingerprint = codexHookFingerprint(inspection.hooks)
   const store = codexHookGrantStore()
-  if (store.isGranted(cwd, fingerprint)) return true
+  if (store.isGranted(cwd, fingerprint)) return trust
 
   const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
   const detail = [
@@ -261,7 +263,7 @@ async function resolveCodexHookBypass(cwd: string): Promise<boolean> {
     `启用 Hook：${enabledCount} 个（${codexHookSourceSummary(inspection)}）`,
     `其中未信任或已修改：${pending.length} 个`,
     '',
-    '允许后，Scry 仅为这个仓库、这组 Hook 指纹启动带 --dangerously-bypass-hook-trust 的 Codex app-server。',
+    '允许后，Scry 仅把这组 Hook 的精确 key/hash 注入本次 Codex app-server 进程。',
     '以后同一组 Hook 自动放行；任何 Hook 增删或内容 hash 变化都会重新询问。',
     '这是 Scry 的本地授权，不会修改 Codex 自身的 Hook 信任库。',
     ...(inspection.warnings.length > 0 ? ['', `Codex 警告：${inspection.warnings.join('；')}`] : [])
@@ -295,7 +297,7 @@ async function resolveCodexHookBypass(cwd: string): Promise<boolean> {
       '检查 Scry userData 目录写权限后重试'
     )
   }
-  return true
+  return trust
 }
 
 async function ensureMcpExecutionAuthorized(
@@ -1160,9 +1162,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
   }
   const canonicalLifecycle = providerId === 'codex' || managedRecorderEnabled
-  const bypassHookTrust = providerId === 'codex' && cwd
-    ? await resolveCodexHookBypass(cwd)
-    : false
+  const codexHookTrust = providerId === 'codex' && cwd
+    ? await resolveCodexHookTrust(cwd)
+    : []
   const mcpExecution = providerId === 'claude'
     ? authorizedMcpExecution(await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run'))
     : undefined
@@ -1419,7 +1421,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       model: request.model,
       effort: request.effort,
       permissionMode: request.permissionMode,
-      bypassHookTrust,
+      codexHookTrust,
       managedRecorder: managedRecorderEnabled,
       mcpExecution,
       emit,

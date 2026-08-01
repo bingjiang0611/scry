@@ -363,6 +363,10 @@ describe('Codex provider adapter', () => {
       errors: []
     })
     expect(appServer.request).toHaveBeenCalledWith('hooks/list', { cwds: ['/isolated-copy'] })
+    expect(appServer.options).toContainEqual(expect.objectContaining({
+      cwd: '/isolated-copy',
+      args: expect.arrayContaining(['-c', 'projects={"/isolated-copy"={trust_level="trusted"}}'])
+    }))
   })
 
   it('exposes enabled Codex Skills as slash-command aliases', async () => {
@@ -420,78 +424,70 @@ describe('Codex provider adapter', () => {
     expect(appServer.request).not.toHaveBeenCalledWith('skills/config/write', expect.anything())
   })
 
-  it('only bypasses Codex hook trust when explicitly enabled for vetted automation', async () => {
-    const previous = process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-    process.env.SCRY_CODEX_BYPASS_HOOK_TRUST = '1'
-    try {
-      appServer.request.mockResolvedValue({ data: [{ cwd: '/isolated-copy', skills: [] }] })
+  it('keeps unapproved Codex hooks out of the app-server process', async () => {
+    appServer.request.mockResolvedValue({ data: [{ cwd: '/isolated-copy', skills: [] }] })
 
-      await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
+    await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
 
-      expect(appServer.options).toContainEqual(
-        expect.objectContaining({
-          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins', 'external_migration'])
-        })
-      )
-    } finally {
-      if (previous === undefined) delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-      else process.env.SCRY_CODEX_BYPASS_HOOK_TRUST = previous
-    }
+    expect(appServer.options).toContainEqual(expect.objectContaining({
+      cwd: '/isolated-copy',
+      args: expect.arrayContaining([
+        '-c',
+        'projects={"/isolated-copy"={trust_level="trusted"}}',
+        'app-server',
+        '--strict-config',
+        'apps',
+        'plugins',
+        'external_migration'
+      ])
+    }))
+    expect(appServer.options[0].args).not.toContain('--dangerously-bypass-hook-trust')
+    expect(appServer.options[0].args).not.toContain(
+      'hooks={state={"project-hook"={trusted_hash="sha256:current"}}}'
+    )
   })
 
-  it('keeps Codex hook trust enabled by default', async () => {
-    const previous = process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-    delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-    try {
-      appServer.request.mockResolvedValue({ data: [{ cwd: '/isolated-copy', skills: [] }] })
+  it('injects only the approved Hook key/hash into the approved run', async () => {
+    appServer.onNotification.mockReturnValue(() => {})
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-approved' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({
+      runId: 'run-approved',
+      prompt: 'inspect',
+      cwd: '/isolated-copy',
+      attachments: [],
+      codexHookTrust: [
+        { key: 'z-stop', currentHash: 'sha256:z' },
+        { key: 'a-start', currentHash: 'sha256:a' }
+      ],
+      emit: () => {}
+    })
+    handle.interrupt()
 
-      await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
-
-      expect(appServer.options).toContainEqual(expect.objectContaining({
+    await expect(handle.promise).resolves.toMatchObject({
+      externalSessionId: 'thread-approved',
+      stopped: true
+    })
+    expect(appServer.options).toContainEqual(
+      expect.objectContaining({
         cwd: '/isolated-copy',
-        args: expect.arrayContaining(['app-server', '--strict-config', 'apps', 'plugins', 'external_migration'])
-      }))
-      expect(appServer.options[0].args).not.toContain('--dangerously-bypass-hook-trust')
-    } finally {
-      if (previous === undefined) delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-      else process.env.SCRY_CODEX_BYPASS_HOOK_TRUST = previous
-    }
-  })
-
-  it('starts only the approved run with Hook trust bypassed', async () => {
-    const previous = process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-    delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-    try {
-      appServer.onNotification.mockReturnValue(() => {})
-      appServer.request.mockImplementation(async (method) => {
-        if (method === 'account/read') return { account: { type: 'chatgpt' } }
-        if (method === 'thread/start') return { thread: { id: 'thread-approved' } }
-        throw new Error(`unexpected request: ${method}`)
+        args: expect.arrayContaining([
+          '-c',
+          'projects={"/isolated-copy"={trust_level="trusted"}}',
+          '-c',
+          'hooks={state={"a-start"={trusted_hash="sha256:a"},"z-stop"={trusted_hash="sha256:z"}}}',
+          'app-server',
+          '--strict-config',
+          'apps',
+          'plugins',
+          'external_migration'
+        ])
       })
-      const handle = createCodexAdapter().run({
-        runId: 'run-approved',
-        prompt: 'inspect',
-        cwd: '/isolated-copy',
-        attachments: [],
-        bypassHookTrust: true,
-        emit: () => {}
-      })
-      handle.interrupt()
-
-      await expect(handle.promise).resolves.toMatchObject({
-        externalSessionId: 'thread-approved',
-        stopped: true
-      })
-      expect(appServer.options).toContainEqual(
-        expect.objectContaining({
-          cwd: '/isolated-copy',
-          args: expect.arrayContaining(['--dangerously-bypass-hook-trust', 'app-server', '--strict-config', 'apps', 'plugins', 'external_migration'])
-        })
-      )
-    } finally {
-      if (previous === undefined) delete process.env.SCRY_CODEX_BYPASS_HOOK_TRUST
-      else process.env.SCRY_CODEX_BYPASS_HOOK_TRUST = previous
-    }
+    )
+    expect(appServer.options[0].args).not.toContain('--dangerously-bypass-hook-trust')
   })
 
   it('ignores other-thread notifications and an early stop does not start a turn', async () => {
