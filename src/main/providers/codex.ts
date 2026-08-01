@@ -501,6 +501,7 @@ export function createCodexAdapter(
       '--disable', 'apps',
       '--disable', 'plugins',
       '--disable', 'remote_plugin',
+      '--disable', 'external_migration',
       '--disable', 'skill_mcp_dependency_install'
     ]
     const args = bypass ? ['--dangerously-bypass-hook-trust', ...appServerArgs] : appServerArgs
