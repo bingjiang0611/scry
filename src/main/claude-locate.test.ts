@@ -262,6 +262,7 @@ printf '%s\\n' '${RECORDER_VERSION}'
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64000',
       CLAUDECODE: '1',
       AI_AGENT: '1',
+      SCRY_CODEX_SOURCE_HOME: '/must-not-leak',
       CODEX_HOME: '/tmp/codex-home',
       OPENAI_API_KEY: 'sk-test',
       QODER_TOKEN: 'qoder-token'
@@ -272,6 +273,7 @@ printf '%s\\n' '${RECORDER_VERSION}'
     expect(env).not.toHaveProperty('CLAUDE_CODE_MAX_OUTPUT_TOKENS')
     expect(env).not.toHaveProperty('CLAUDECODE')
     expect(env).not.toHaveProperty('AI_AGENT')
+    expect(env).not.toHaveProperty('SCRY_CODEX_SOURCE_HOME')
     expect(env).toMatchObject({
       CODEX_HOME: '/tmp/codex-home',
       OPENAI_API_KEY: 'sk-test',
