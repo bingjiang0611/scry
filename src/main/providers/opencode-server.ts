@@ -8,10 +8,6 @@ import { isAbsolute, join } from 'node:path'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
 import { runtimeCliEnv } from '../claude-locate'
 
-const HOOK_PREFIX = 'SCRY_OPENCODE_HOOK\t'
-const MAX_HOOK_FRAME = 64 * 1024
-const HOOK_DISABLED_REASON = 'OpenCode observer 在隔离配置目录中会阻塞 1.17.x 配置加载，当前版本已安全禁用'
-
 export function sanitizeOpenCodeAuth(value: unknown): Record<string, Record<string, unknown>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const safe: Record<string, Record<string, unknown>> = {}
@@ -81,24 +77,6 @@ export function openCodeServerAuthorization(serverPassword: string): string {
   return `Basic ${Buffer.from(`opencode:${serverPassword}`).toString('base64')}`
 }
 
-export interface OpenCodeHookFrame {
-  v: 1
-  type: 'init' | 'tool.execute.before' | 'tool.execute.after' | 'command.execute.before' | 'permission.ask'
-  ts: number
-  input: Record<string, unknown>
-}
-
-export function parseOpenCodeHookLine(line: string): OpenCodeHookFrame | null {
-  if (!line.startsWith(HOOK_PREFIX) || line.length > MAX_HOOK_FRAME) return null
-  try {
-    const frame = JSON.parse(line.slice(HOOK_PREFIX.length)) as OpenCodeHookFrame
-    if (frame.v !== 1 || typeof frame.type !== 'string' || typeof frame.ts !== 'number' || !frame.input || typeof frame.input !== 'object') return null
-    return frame
-  } catch {
-    return null
-  }
-}
-
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer()
@@ -122,23 +100,11 @@ export class OpenCodeServerManager {
   private active: (OpenCodeServerState & { process: ChildProcessWithoutNullStreams }) | null = null
   private starting: Promise<OpenCodeServerState> | null = null
   private hookConfigDir: string | null = null
-  private hookReady = false
-  private hookError: string | undefined
-  private readonly hookListeners = new Set<(frame: OpenCodeHookFrame) => void>()
 
   constructor(private readonly executable: () => string | undefined) {}
 
   get state(): OpenCodeServerState | null {
     return this.active
-  }
-
-  get hookBridge(): { enabled: boolean; ready: boolean; error?: string } {
-    return { enabled: false, ready: false, error: this.hookError ?? HOOK_DISABLED_REASON }
-  }
-
-  onHook(listener: (frame: OpenCodeHookFrame) => void): () => void {
-    this.hookListeners.add(listener)
-    return () => this.hookListeners.delete(listener)
   }
 
   async ensure(cwd: string): Promise<OpenCodeServerState> {
@@ -170,9 +136,6 @@ export class OpenCodeServerManager {
     const port = await freePort()
     const sourceEnv = runtimeCliEnv()
     const isolatedAuthContent = await isolatedOpenCodeAuthContent(sourceEnv)
-    const hookEnabled = false
-    this.hookReady = false
-    this.hookError = HOOK_DISABLED_REASON
     this.hookConfigDir = await mkdtemp(join(tmpdir(), 'scry-opencode-'))
     let isolatedConfigPath: string
     let isolatedConfigDir: string
@@ -204,26 +167,6 @@ export class OpenCodeServerManager {
         serverPassword
       ),
       stdio: ['pipe', 'pipe', 'pipe']
-    })
-    let hookBuffer = ''
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (chunk: string) => {
-      hookBuffer += chunk
-      const lines = hookBuffer.split('\n')
-      hookBuffer = lines.pop() ?? ''
-      if (hookBuffer.length > MAX_HOOK_FRAME) {
-        hookBuffer = ''
-        this.hookError = 'OpenCode Hook bridge frame exceeded 64 KiB'
-      }
-      for (const line of lines) {
-        const frame = parseOpenCodeHookLine(line)
-        if (!frame) continue
-        if (frame.type === 'init') {
-          this.hookReady = true
-          this.hookError = undefined
-        }
-        for (const listener of this.hookListeners) listener(frame)
-      }
     })
     let url: string
     try {
@@ -267,7 +210,6 @@ export class OpenCodeServerManager {
     child.once('exit', () => {
       if (this.active?.process === child) this.active = null
     })
-    if (hookEnabled && !this.hookReady) this.hookError = 'OpenCode Hook bridge plugin did not initialize'
     this.active = state
     return state
   }
@@ -278,8 +220,6 @@ export class OpenCodeServerManager {
     if (active && !active.process.killed && active.process.exitCode === null) active.process.kill('SIGTERM')
     const dir = this.hookConfigDir
     this.hookConfigDir = null
-    this.hookReady = false
-    this.hookError = undefined
     if (dir) void rm(dir, { recursive: true, force: true })
   }
 }

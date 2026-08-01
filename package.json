@@ -17,8 +17,8 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build:cli": "tsc -p tsconfig.cli.json && tsc -p tsconfig.recorder.json",
-    "build": "npm run build:cli && electron-vite build",
+    "build:cli": "tsc -p tsconfig.cli.json && rm -rf packages/turn-recorder-cli/dist && tsc -p tsconfig.recorder.json",
+    "build": "electron-vite build",
     "start": "electron-vite preview",
     "mcpguard": "npm run build:cli --silent && node out/cli/mcpguard.js",
     "scry": "npm run build:cli --silent && node packages/turn-recorder-cli/dist/cli/scry.js",
@@ -32,8 +32,7 @@
     "pack": "npm run typecheck && npm test && npm run build && electron-builder --dir && npm run check:packaged-app && npm run smoke:electron",
     "check:packaged-app": "node scripts/check-packaged-app.mjs",
     "smoke:electron": "node scripts/electron-security-smoke.mjs",
-    "install:mac": "npm run pack && node scripts/install-macos.mjs",
-    "dist": "npm run typecheck && npm test && npm run build && electron-builder && npm run check:packaged-app && npm run smoke:electron"
+    "install:mac": "npm run pack && node scripts/install-macos.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.186",

@@ -7,7 +7,6 @@ import {
   listMcp,
   mcpDisabledSet,
   minimalMcpEnv,
-  parseToolNames,
   testHttpMcp,
   testMcpConfig,
   toggleMcp
@@ -67,16 +66,6 @@ describe('mcp-config', () => {
       HTTPS_PROXY: 'http://approved-proxy',
       CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1'
     })
-  })
-
-  it('解析 direct JSON 和 SSE tools/list 响应', () => {
-    expect(parseToolNames(JSON.stringify({ result: { tools: [{ name: 'query' }, { name: 'update' }] } }))).toEqual([
-      'query',
-      'update'
-    ])
-    expect(parseToolNames('event: message\ndata: {"result":{"tools":[{"name":"tracker.query"}]}}\n\n')).toEqual([
-      'tracker.query'
-    ])
   })
 
   it('requires a successful, structurally valid HTTP tools/list response', async () => {

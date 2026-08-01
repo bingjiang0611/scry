@@ -74,17 +74,13 @@ export function WorkdirPicker({
 export function CliPicker({
   agents,
   selectedId,
-  backend,
   onSelect,
-  onBackend,
   onRescan,
   disabled = false
 }: {
   agents: DetectedAgent[]
   selectedId: string
-  backend: 'local' | 'api'
   onSelect: (id: string) => void
-  onBackend: (b: 'local' | 'api') => void
   onRescan: () => void
   disabled?: boolean
 }) {
@@ -106,12 +102,6 @@ export function CliPicker({
             Local CLI
             <div className="dim">{sel?.name ?? '未检测到'}</div>
           </div>
-          <button type="button" className={`mitem ${backend === 'local' ? 'on' : ''}`} onClick={() => onBackend('local')}>
-            <Icon name="tool" /> Use Local CLI {backend === 'local' && <span className="ck"><Icon name="check" /> active</span>}
-          </button>
-          <button type="button" className={`mitem ${backend === 'api' ? 'on' : ''}`} disabled title="API/BYOK transport 尚未实现">
-            <Icon name="lock" /> Use API · BYOK（尚未实现）
-          </button>
           <div className="mhdr">CODE AGENT</div>
           {agents.length === 0 && <div className="dim pad">未检测到 agent CLI</div>}
           {agents.map((a) => (

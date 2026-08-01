@@ -24,6 +24,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run build:cli
 
   packaged-electron:
     runs-on: macos-14
@@ -38,4 +39,3 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run pack
-      - run: npm run smoke:electron

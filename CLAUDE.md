@@ -68,7 +68,6 @@ git diff --check
 PATH="$HOME/.nvm/versions/node/v22.22.1/bin:$PATH" npm run build:cli
 PATH="$HOME/.nvm/versions/node/v22.22.1/bin:$PATH" npm run mcpguard -- <args>
 PATH="$HOME/.nvm/versions/node/v22.22.1/bin:$PATH" npm run pack
-PATH="$HOME/.nvm/versions/node/v22.22.1/bin:$PATH" npm run dist
 ```
 
 若 Electron 二进制或 `better-sqlite3` ABI 有问题,先按本文件上方陷阱处理:

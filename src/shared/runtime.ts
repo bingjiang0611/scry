@@ -1,4 +1,3 @@
-import type { BillingProvider } from './billing.js'
 import type { ProviderId } from './provider.js'
 
 export type RuntimeBackend = 'local' | 'api'
@@ -210,13 +209,6 @@ export function runtimeProviderForProviderId(providerId: ProviderId): RuntimePro
   if (providerId === 'qoder') return 'qoder_cli'
   if (providerId === 'opencode') return 'opencode_server'
   return 'claude_sdk'
-}
-
-export function billingProviderForRuntime(runtimeProvider: RuntimeProvider): BillingProvider | undefined {
-  if (runtimeProvider === 'codex_cli') return 'codex'
-  if (runtimeProvider === 'qoder_cli') return 'qoder'
-  if (runtimeProvider === 'opencode_server') return undefined
-  return 'anthropic'
 }
 
 export function normalizeAgentStartRequest(payload: AgentStartRequest): NormalizedAgentStartRequest {

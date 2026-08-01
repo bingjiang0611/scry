@@ -139,16 +139,16 @@ async function main() {
   })`)
   assert.deepEqual(csp, { violated: true, executed: false })
 
-  const byok = await evaluate(`(async () => {
+  const transportPicker = await evaluate(`(async () => {
     const recent = document.querySelector('button.recent')
     recent?.click()
     await new Promise((resolve) => setTimeout(resolve, 250))
     document.querySelector('button.clibtn')?.click()
     await new Promise((resolve) => setTimeout(resolve, 50))
     const button = [...document.querySelectorAll('button')].find((node) => node.title?.includes('API/BYOK'))
-    return { recentFound: !!recent, found: !!button, disabled: !!button?.disabled }
+    return { recentFound: !!recent, menuFound: !!document.querySelector('.climenu'), apiPlaceholderFound: !!button }
   })()`)
-  assert.deepEqual(byok, { recentFound: true, found: true, disabled: true })
+  assert.deepEqual(transportPicker, { recentFound: true, menuFound: true, apiPlaceholderFound: false })
 
   const modal = await evaluate(`(async () => {
     const trigger = document.querySelector('button[title="MCP"]')

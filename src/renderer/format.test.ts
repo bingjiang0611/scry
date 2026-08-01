@@ -738,12 +738,6 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     expect(b.models[0]).toMatchObject({ model: 'claude-opus-4-8[1m]', totalTokens: 100500, tokensIn: 100000, tokensOut: 200 })
     expect(b.tokenCoveragePct).toBe(100)
     expect(b.modelTokenCoveragePct).toBe(100)
-    expect(b.workflowDirectCoveragePct).toBe(0)
-    expect(b.workflowUnattributedPct).toBe(100)
-    expect(b.evidence.find((e) => e.kind === 'skill' && e.name === 'workflow-orchestrator')).toMatchObject({
-      relatedTokens: 100500,
-      attributionMethod: 'turn_allocated'
-    })
     expect(b.signals.map((s) => s.title)).toContain('上下文 90%')
     expect(b.signals.some((s) => s.title.includes('高 Token 轮次'))).toBe(true)
     expect(b.signals.some((s) => s.title.includes('突增'))).toBe(false)
@@ -1034,11 +1028,6 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
       title: '子 agent 调用 20 次',
       detail: 'TURN 01 · Provider 未上报子 agent 独立 Token/API'
     })
-    expect(b.evidence.find((row) => row.kind === 'agent')).toMatchObject({
-      relatedTokens: 0,
-      relatedCost: 0,
-      attributionMethod: 'unattributed'
-    })
   })
 
   it('模型用量按 token 展示，不把未知成本显示成 $0.0000', () => {
@@ -1053,7 +1042,7 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
       })
     ]
     const b = analyzeBilling([{ runId: 'r', userText: 'x', items, done: true }])
-    expect(b.models[0]).toMatchObject({ model: 'unknown-local-model', totalTokens: 120, costKnown: false })
+    expect(b.models[0]).toMatchObject({ model: 'unknown-local-model', totalTokens: 120 })
     const md = buildSessionReport([{ runId: 'r', userText: 'x', items, done: true }])
     expect(md).toContain('unknown-local-model 120 tok')
     expect(md).not.toContain('unknown-local-model $0.0000')

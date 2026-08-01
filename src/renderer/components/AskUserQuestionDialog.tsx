@@ -1,7 +1,7 @@
 import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import type { ProviderId } from '@shared/provider'
-import { Markdown } from './Markdown'
+import Markdown from './MarkdownImpl'
 
 const providerLabels = {
   claude: 'Claude',

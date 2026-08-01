@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  billingProviderForRuntime,
   agentPermissionDecision,
   agentPermissionQuestion,
   normalizeAgentQuestionRequest,
@@ -18,13 +17,6 @@ describe('runtime frontdoor mapping', () => {
     expect(runtimeProviderForAgentId('qoder')).toBe('qoder_cli')
     expect(runtimeProviderForAgentId('opencode')).toBe('opencode_server')
     expect(runtimeProviderForAgentId('cursor')).toBeUndefined()
-  })
-
-  it('keeps runtime provider separate from billing provider', () => {
-    expect(billingProviderForRuntime('claude_sdk')).toBe('anthropic')
-    expect(billingProviderForRuntime('codex_cli')).toBe('codex')
-    expect(billingProviderForRuntime('qoder_cli')).toBe('qoder')
-    expect(billingProviderForRuntime('opencode_server')).toBeUndefined()
   })
 
   it('keeps stable provider ids separate from runtime transports', () => {

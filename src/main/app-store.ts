@@ -51,10 +51,6 @@ export function appSessionCanResume(session: Pick<AppSession, 'runId' | 'externa
   return !(session.runId && session.externalSessionId === session.runId)
 }
 
-export function baseName(p: string): string {
-  return p.split('/').filter(Boolean).pop() ?? p
-}
-
 export function readHead(fp: string, bytes = 65536): string {
   try {
     const fd = openSync(fp, 'r')
@@ -323,7 +319,7 @@ export function createAppSessionStore(
         sessions.sort((a, b) => b.ts - a.ts)
         return {
           cwd,
-          name: baseName(cwd),
+          name: basename(cwd),
           sessions: sessions.map((session) => ({
             sessionId: session.sessionId,
             ...(session.runId ? { runId: session.runId } : {}),

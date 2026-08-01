@@ -17,6 +17,7 @@ asarUnpack:
 # checkout 内被 Git ignore 的 .claude/.local 也可能被默认打包，泄露本机运行日志与会话元数据。
 files:
   - out/**
+  - "!out/cli/**"
   - package.json
   - LICENSE
   - THIRD_PARTY_NOTICES.md

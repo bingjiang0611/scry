@@ -25,7 +25,6 @@ import { OverviewPanel } from './components/OverviewPanel'
 import { SkillsModal, McpModal } from './components/Modals'
 import { TurnDiffReviewPanel, type TurnDiffReview } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspacePanel'
-import { firstSessionInProject } from './session-selection'
 import type { ParsedTurn, ProjectMeta } from './env'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
@@ -114,15 +113,6 @@ export interface QueuedPrompt {
   text: string
   attachments: AgentInputAttachment[]
   request: Omit<AgentStartRequest, 'prompt' | 'attachments'>
-}
-
-export function attachmentSummary(attachments: AgentInputAttachment[]): string {
-  if (attachments.length === 0) return ''
-  return `${attachments.length} 张图片`
-}
-
-export function promptSummary(prompt: QueuedPrompt): string {
-  return prompt.text || attachmentSummary(prompt.attachments)
 }
 
 export function enqueuePrompt(
@@ -657,14 +647,12 @@ export function App() {
       expectedExternalSessionId: activeSessionIdRef.current,
       providerId: integrations.selectedProviderId,
       agentId: integrations.selectedId,
-      backend: integrations.backend,
       runtimeProvider: runtimeProviderForAgentId(integrations.selectedId),
       model: integrations.runControls.model,
       effort: integrations.runControls.effort,
       permissionMode: integrations.runControls.permissionMode
     }),
     [
-      integrations.backend,
       integrations.runControls.effort,
       integrations.runControls.model,
       integrations.runControls.permissionMode,
@@ -823,7 +811,7 @@ export function App() {
   }
 
   const pickRecent = async (dir: string): Promise<void> => {
-    const firstSession = firstSessionInProject(projects, dir)
+    const firstSession = projects.find((project) => project.cwd === dir)?.sessions[0] ?? null
     if (firstSession) {
       await pickSession(
         dir,
@@ -1268,7 +1256,6 @@ export function App() {
             recent={recent}
             agents={integrations.agents}
             selectedAgentId={integrations.selectedId}
-            backend={integrations.backend}
             runControls={integrations.runControls}
             runControlCatalog={integrations.runControlCatalog}
             runControlsLoading={integrations.runControlsLoading}
@@ -1310,7 +1297,6 @@ export function App() {
             onRemoveDraftAttachment={removeDraftAttachment}
             onRemoveQueuedPrompt={removeQueuedPrompt}
             onSelectAgent={integrations.setSelectedId}
-            onBackend={integrations.setBackend}
             onRunModel={integrations.setRunModel}
             onRunEffort={integrations.setRunEffort}
             onPermissionMode={integrations.setPermissionMode}
