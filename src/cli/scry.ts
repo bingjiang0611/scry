@@ -160,7 +160,12 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     return 0
   }
   if (action === 'summary') {
-    print(summarizeTurnRecords(await listRecords(dataRoot), args.positionals[2]))
+    if (args.positionals[2] && args.flags.has('all')) {
+      throw new Error('scry turns summary accepts either <sessionId> or --all, not both')
+    }
+    const records = await listRecords(dataRoot)
+    const sessionId = args.positionals[2] ?? (args.flags.has('all') ? undefined : records.at(-1)?.sessionId)
+    print(summarizeTurnRecords(records, sessionId, args.flags.has('all') ? { scope: 'workspace' } : {}))
     return 0
   }
   if (action === 'export') {
@@ -176,7 +181,7 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print(result)
     return result.ok ? 0 : 4
   }
-  throw new Error('usage: scry turns list|show|summary|export|verify ...')
+  throw new Error('usage: scry turns list|show|summary [sessionId|--all]|export|verify ...')
 }
 
 async function doctorCommand(args: ParsedArgs): Promise<number> {
