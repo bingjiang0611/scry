@@ -27,6 +27,7 @@ vi.mock('../claude-locate', () => ({
 
 import {
   createQoderAdapter,
+  expandQoderProjectCommand,
   parseQoderHookLog,
   qoderHookFallbackOnly,
   qoderProviderTurnIdFromLog
@@ -193,6 +194,70 @@ describe('Qoder provider adapter', () => {
     })
     expect(handle.getProviderTurnId?.()).toBe('qoder-turn')
     expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({ SCRY_RECORDER_MANAGED: '1' })
+  })
+
+  it('在送入 SDK 前展开项目 Qoder command，避免 slash command 零 turn 退出', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'scry-qoder-command-test-'))
+    const commandsDir = join(cwd, '.qoder', 'commands')
+    await mkdir(commandsDir, { recursive: true })
+    await writeFile(join(commandsDir, 'rate-native-rate-workflow.md'), [
+      '---',
+      'description: validate rate workflow',
+      '---',
+      '# rate-workflow',
+      '',
+      'Read the canonical skill before acting.'
+    ].join('\n'))
+    try {
+      const expanded = [
+        '# rate-workflow',
+        '',
+        'Read the canonical skill before acting.',
+        '',
+        'ARGUMENTS: 85008418'
+      ].join('\n')
+      await expect(
+        expandQoderProjectCommand('/rate-native-rate-workflow 85008418', cwd)
+      ).resolves.toBe(expanded)
+      sdk.query.mockImplementation(({ prompt }) => {
+        expect(prompt).toBe(expanded)
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { type: 'result', subtype: 'success', result: 'done' }
+          },
+          close: vi.fn().mockResolvedValue(undefined),
+          interrupt: vi.fn().mockResolvedValue(undefined)
+        }
+      })
+
+      await createQoderAdapter().run({
+        runId: 'run-project-command',
+        prompt: '/rate-native-rate-workflow 85008418',
+        cwd,
+        attachments: [],
+        emit: vi.fn()
+      }).promise
+      expect(sdk.query).toHaveBeenCalledOnce()
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('展开 Qoder command 的位置参数，未命中项目 command 时保持原 prompt', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'scry-qoder-command-args-test-'))
+    const commandsDir = join(cwd, '.qoder', 'commands')
+    await mkdir(commandsDir, { recursive: true })
+    await writeFile(join(commandsDir, 'inspect.md'), 'Inspect $0 then $ARGUMENTS[1]. All: $ARGUMENTS')
+    try {
+      await expect(expandQoderProjectCommand('/inspect "hello world" tail', cwd))
+        .resolves.toBe('Inspect hello world then tail. All: "hello world" tail')
+      await expect(expandQoderProjectCommand('/missing value', cwd))
+        .resolves.toBe('/missing value')
+      await expect(expandQoderProjectCommand('/../inspect secret', cwd))
+        .resolves.toBe('/../inspect secret')
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
   })
 
   it('bridges AskUserQuestion answers through the Qoder SDK permission callback', async () => {
