@@ -76,6 +76,9 @@ interface Evidence<T> {
 interface TurnCall {
   id?: string
   parentId?: string
+  category?: 'tool' | 'skill' | 'agent' | 'mcp'
+  order?: number
+  completedOrder?: number
   name: string
   startedAt?: string
   completedAt?: string
@@ -90,6 +93,8 @@ interface TurnCall {
 
 interface TurnHookCall {
   id?: string
+  order?: number
+  lifecycleEvents?: number
   event: string
   name?: string
   command?: string
@@ -106,6 +111,9 @@ interface TurnUsage {
   cacheCreationTokens?: number
   reasoningTokens?: number
   costUsd?: number
+  apiDurationMs?: number
+  contextTokens?: number
+  contextWindow?: number
   model?: string
 }
 
@@ -185,13 +193,15 @@ scry turns export --workspace <root> --after <sequence> --limit <n>
 ```text
 scry recorder hook --provider <id> --event <event> --workspace <root> --stdin --quiet
 scry recorder recover --workspace <root>
-scry turns list|show|export|verify --workspace <root>
+scry turns list|show|summary|export|verify --workspace <root>
 scry doctor --workspace <root> [--json]
 ```
 
 Hook 模式默认静默；可恢复错误写 health/log 并以 0 返回，不改变 Agent 权限、提示词或工具结果。配置/Store 检查命令使用稳定退出码：`0=healthy`、`2=disabled`、`3=config`、`4=store-corrupt`、`5=degraded`。
 
 Recorder handler 由 sample-workspace 生成器在 Provider 可见的 command 上注入结构化 `SCRY_HANDLER_ID=turn-recorder-v1`；Core 同时识别 marker 与 `scry-recorder.sh` 命令，确保 Recorder 自身不进入 Hook 统计。
+
+`turns summary` 默认选择最新 session，以 Scry 纵览的四类互斥逻辑调用、Hook 实例/生命周期、结构化/推断文件足迹和 result usage 口径输出；显式传 `<sessionId>` 可选择其他会话，只有 `--all` 才汇总整个 workspace。旧记录缺少分类、事件顺序、Hook 原始生命周期或上下文窗口时保留推断/不可用标记，不伪装成 exact 或 0。
 
 ## 8. 配置、范围与无发布止损
 

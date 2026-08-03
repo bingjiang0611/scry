@@ -31,7 +31,9 @@ function outputSummary(value: string | undefined): string | undefined {
 function callFromEvent(
   event: TraceEvent,
   resultById: Map<string, TraceEvent>,
-  mcpRef?: McpCallRef
+  mcpRef?: McpCallRef,
+  order?: number,
+  completedOrder?: number
 ): TurnCall {
   const result = event.toolUseId ? resultById.get(event.toolUseId) : undefined
   const completedAt = result?.ts
@@ -40,6 +42,9 @@ function callFromEvent(
   return {
     ...(event.toolUseId ? { id: event.toolUseId } : {}),
     ...(event.parentToolUseId ? { parentId: event.parentToolUseId } : {}),
+    category: mcpRef ? 'mcp' : event.kind as 'tool' | 'skill' | 'agent',
+    ...(order != null ? { order } : {}),
+    ...(completedOrder != null ? { completedOrder } : {}),
     name: event.name ?? event.tool ?? 'unknown',
     startedAt: event.ts,
     ...(completedAt ? { completedAt } : {}),
@@ -87,6 +92,8 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   const native = observed.filter((event) => event.text !== 'transcript assistant usage')
   const results = native.length ? native : observed
   const models = new Set(results.flatMap((event) => event.modelUsage ?? []).map((row) => row.model).filter(Boolean))
+  const latest = results.at(-1)
+  const contextModel = latest?.modelUsage?.find((row) => row.contextWindow != null && row.contextWindow > 0)
   return {
     inputTokens: sumObserved(results, (event) => event.tokensIn),
     outputTokens: sumObserved(results, (event) => event.tokensOut),
@@ -94,6 +101,9 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
     cacheCreationTokens: sumObserved(results, (event) => event.cacheCreationTokens),
     reasoningTokens: sumObserved(results, (event) => event.reasoningTokens),
     costUsd: sumObserved(results, (event) => event.costUsd),
+    apiDurationMs: sumObserved(results, (event) => event.durationApiMs),
+    ...(latest?.contextTokens != null ? { contextTokens: latest.contextTokens } : {}),
+    ...(contextModel?.contextWindow != null ? { contextWindow: contextModel.contextWindow } : {}),
     ...(models.size === 1 ? { model: [...models][0] } : {})
   }
 }
@@ -132,7 +142,7 @@ function assistantTextFrom(events: TraceEvent[]): string {
   return output.join('')
 }
 
-function aggregateHooks(events: TraceEvent[]): TurnHookCall[] {
+function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number>): TurnHookCall[] {
   const groups = new Map<string, TraceEvent[]>()
   for (const event of events.filter((item) => item.kind === 'hook' && !isRecorderHook(item))) {
     const key = event.hookId ? `hook:${event.hookId}` : `event:${event.id}`
@@ -155,6 +165,8 @@ function aggregateHooks(events: TraceEvent[]): TurnHookCall[] {
     )
     return {
       ...(first.hookId ? { id: first.hookId } : {}),
+      ...(eventOrder.get(first) != null ? { order: eventOrder.get(first) } : {}),
+      lifecycleEvents: ordered.length,
       event: last.hookEvent ?? first.hookEvent ?? last.name ?? first.name ?? 'Hook',
       ...(last.hookName ?? first.hookName ? { name: last.hookName ?? first.hookName } : {}),
       ...(last.hookCommand ?? first.hookCommand ? { command: last.hookCommand ?? first.hookCommand } : {}),
@@ -197,27 +209,34 @@ export function aggregateTurnEvidence(args: {
     ...args.observable
   }
   const resultById = new Map<string, TraceEvent>()
+  const eventOrder = new Map(args.events.map((event, index) => [event, index]))
   for (const event of args.events) {
     if (event.stage === 'tool_result' && event.toolUseId) resultById.set(event.toolUseId, event)
   }
 
   const logicalEvents = logicalCallEventsForTurn(args.events)
+  const resultOrder = (event: TraceEvent): number | undefined => {
+    const result = event.toolUseId ? resultById.get(event.toolUseId) : undefined
+    return result ? eventOrder.get(result) : undefined
+  }
   const starts = logicalEvents.filter((event) =>
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
   )
-  // reportAgentTurns 的 Tool / Skill / MCP 是互斥列。Agent 暂无独立列，因此归入 Tool；
-  // MCP 不能同时再出现在 Tool 中，否则看板总调用会重复相加。
+  // AgentTurnRecord v1 的 Tool / Skill / MCP 是互斥 evidence 容器。Agent 为兼容 v1 仍存入
+  // tools，但用 category=agent 明确分列；MCP 不能同时再进入 tools，否则总调用会重复相加。
   const tools = starts
     .filter((event) => event.kind === 'agent' || (event.kind === 'tool' && !event.isMcp))
-    .map((event) => callFromEvent(event, resultById))
-  const skills = starts.filter((event) => event.kind === 'skill').map((event) => callFromEvent(event, resultById))
+    .map((event) => callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)))
+  const skills = starts
+    .filter((event) => event.kind === 'skill')
+    .map((event) => callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)))
   const mcps = starts
     .filter((event) => event.kind === 'tool' && event.isMcp)
     .flatMap((event) => {
       const refs = mcpCallsForEvent(event)
-      return refs.map((ref) => callFromEvent(event, resultById, ref))
+      return refs.map((ref) => callFromEvent(event, resultById, ref, eventOrder.get(event), resultOrder(event)))
     })
-  const hooks = aggregateHooks(args.events)
+  const hooks = aggregateHooks(args.events, eventOrder)
   const assistantText = assistantTextFrom(args.events)
   const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
   for (const event of args.events) {

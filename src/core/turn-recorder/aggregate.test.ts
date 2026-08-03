@@ -28,7 +28,15 @@ describe('aggregateTurnEvidence', () => {
       { id: 'self', ts: '2026-01-01T00:00:00.030Z', runId: 'r', kind: 'hook', stage: 'hook_response', hookId: 'h2', hookName: 'command', hookEvent: 'PreToolUse', hookCommand: 'SCRY_HANDLER_ID=turn-recorder-v1 .claude/hooks/scry-recorder.sh claude PreToolUse', hookOutcome: 'success' }
     ]
     expect(aggregateTurnEvidence({ events }).hooks.value).toEqual([
-      expect.objectContaining({ id: 'h1', name: 'audit.py', event: 'PreToolUse', status: 'success', durationMs: 25 })
+      expect.objectContaining({
+        id: 'h1',
+        order: 0,
+        lifecycleEvents: 2,
+        name: 'audit.py',
+        event: 'PreToolUse',
+        status: 'success',
+        durationMs: 25
+      })
     ])
   })
 
@@ -47,8 +55,26 @@ describe('aggregateTurnEvidence', () => {
     expect(aggregateTurnEvidence({ events: [
       transcript('1', 3),
       transcript('2', 4),
-      { id: 'native', ts: '2026-01-01T00:00:03.000Z', runId: 'r', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5 }
-    ] }).usage.value).toMatchObject({ inputTokens: 10, outputTokens: 5 })
+      {
+        id: 'native',
+        ts: '2026-01-01T00:00:03.000Z',
+        runId: 'r',
+        kind: 'harness',
+        stage: 'result',
+        tokensIn: 10,
+        tokensOut: 5,
+        durationApiMs: 123,
+        contextTokens: 42,
+        modelUsage: [{ model: 'fixture-model', contextWindow: 100, inputTokens: 10, outputTokens: 5 }]
+      }
+    ] }).usage.value).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 5,
+      apiDurationMs: 123,
+      contextTokens: 42,
+      contextWindow: 100,
+      model: 'fixture-model'
+    })
   })
 
   it('把根与子 Agent 的观测模型调用聚合为累计耗时和去重墙钟', () => {
@@ -144,9 +170,15 @@ describe('aggregateTurnEvidence', () => {
     ]
     const evidence = aggregateTurnEvidence({ events })
 
-    expect(evidence.tools.value?.map((call) => call.id)).toEqual(['bash-1'])
-    expect(evidence.mcps.value?.map((call) => call.id)).toEqual(['mcp-1'])
-    expect(evidence.skills.value?.map((call) => call.name)).toEqual(['rate-workflow'])
+    expect(evidence.tools.value).toEqual([
+      expect.objectContaining({ id: 'bash-1', category: 'tool', order: 0 })
+    ])
+    expect(evidence.mcps.value).toEqual([
+      expect.objectContaining({ id: 'mcp-1', category: 'mcp', order: 1 })
+    ])
+    expect(evidence.skills.value).toEqual([
+      expect.objectContaining({ name: 'rate-workflow', category: 'skill', order: 2 })
+    ])
   })
 
   it('同一个 shell lifecycle 中的多个 MCP 操作分别进入 evidence', () => {

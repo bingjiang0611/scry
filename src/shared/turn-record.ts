@@ -17,6 +17,9 @@ export type TurnCallStatus = 'started' | 'success' | 'failed' | 'cancelled' | 'u
 export interface TurnCall {
   id?: string
   parentId?: string
+  category?: 'tool' | 'skill' | 'agent' | 'mcp'
+  order?: number
+  completedOrder?: number
   name: string
   startedAt?: string
   completedAt?: string
@@ -31,6 +34,8 @@ export interface TurnCall {
 
 export interface TurnHookCall {
   id?: string
+  order?: number
+  lifecycleEvents?: number
   event: string
   name?: string
   command?: string
@@ -48,6 +53,9 @@ export interface TurnUsage {
   cacheCreationTokens?: number
   reasoningTokens?: number
   costUsd?: number
+  apiDurationMs?: number
+  contextTokens?: number
+  contextWindow?: number
   model?: string
 }
 
