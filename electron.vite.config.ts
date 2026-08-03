@@ -25,6 +25,9 @@ export default defineConfig({
   },
   renderer: {
     root: 'src/renderer',
+    // React Refresh injects an inline preamble that the renderer CSP correctly blocks.
+    // Keep development fail-closed and use full reloads instead of weakening script-src.
+    server: { hmr: false },
     resolve: {
       alias: { '@shared': resolve('src/shared') }
     },
