@@ -66,6 +66,8 @@ describe('renderer security boundary', () => {
   it('emits distinct production and exact-origin development CSPs', () => {
     expect(rendererContentSecurityPolicy(fileEntry)).toContain("connect-src 'none'")
     expect(rendererContentSecurityPolicy(fileEntry)).toContain("img-src 'self' data: blob:")
-    expect(rendererContentSecurityPolicy(devEntry)).toContain('connect-src \'self\' http://127.0.0.1:5173 ws://127.0.0.1:5173')
+    const devPolicy = rendererContentSecurityPolicy(devEntry)
+    expect(devPolicy).toContain('connect-src \'self\' http://127.0.0.1:5173 ws://127.0.0.1:5173')
+    expect(devPolicy).toContain("script-src 'self' 'unsafe-eval';")
   })
 })
