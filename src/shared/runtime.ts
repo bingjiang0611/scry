@@ -141,6 +141,10 @@ export interface RuntimeFailureBrief {
   exitCode?: number | null
   signal?: string | null
   timeoutMs?: number
+  transportCode?: string
+  requestMethod?: string
+  requestPath?: string
+  httpStatus?: number
   evidencePath?: string
   nextAction: string
 }

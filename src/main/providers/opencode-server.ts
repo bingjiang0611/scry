@@ -6,7 +6,39 @@ import { randomBytes } from 'node:crypto'
 import { tmpdir, userInfo } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
+import { Agent as UndiciAgent, type Dispatcher } from 'undici'
 import { runtimeCliEnv } from '../claude-locate'
+
+export const OPEN_CODE_LONG_REQUEST_TIMEOUTS = {
+  headersTimeout: 0,
+  bodyTimeout: 0
+} as const
+
+const LONG_REQUEST_PATH = /^\/session\/[^/]+\/(?:command|message)$/
+
+export function createOpenCodeFetch(
+  dispatcher: Dispatcher,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch
+): typeof globalThis.fetch {
+  return (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    const longRunning = request.method === 'POST' && LONG_REQUEST_PATH.test(new URL(request.url).pathname)
+    return longRunning
+      ? fetchImpl(request, { dispatcher } as unknown as RequestInit)
+      : fetchImpl(input, init)
+  }
+}
+
+export function sanitizeOpenCodeServerLog(value: string): string {
+  return value
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\b(Basic|Bearer)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 [redacted]')
+    .replace(
+      /\b((?:[A-Z0-9]+_)*(?:API[_-]?KEY|TOKEN|PASSWORD|SECRET|AUTHORIZATION|COOKIE))["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+      '$1=[redacted]'
+    )
+    .slice(-2_000)
+}
 
 export function sanitizeOpenCodeAuth(value: unknown): Record<string, Record<string, unknown>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
@@ -89,6 +121,37 @@ async function freePort(): Promise<number> {
   })
 }
 
+async function waitForOpenCodeHealth(
+  url: string,
+  authorization: string,
+  child: ChildProcessWithoutNullStreams,
+  startupError: () => Error | undefined
+): Promise<void> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const spawnError = startupError()
+    if (spawnError) throw spawnError
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`OpenCode server exited (${child.exitCode ?? child.signalCode ?? 'unknown'})`)
+    }
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 500)
+    try {
+      const response = await fetch(`${url}/global/health`, {
+        headers: { Authorization: authorization },
+        signal: controller.signal
+      })
+      if (response.ok) return
+    } catch {
+      // The fixed local port may refuse connections until the child finishes binding.
+    } finally {
+      clearTimeout(timeout)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error('OpenCode server 启动超时：本地健康检查在 10 秒内未就绪')
+}
+
 export interface OpenCodeServerState {
   cwd: string
   url: string
@@ -96,15 +159,44 @@ export interface OpenCodeServerState {
   client: OpencodeClient
 }
 
+export interface OpenCodeServerExitDiagnostic {
+  at: number
+  code: number | null
+  signal: NodeJS.Signals | null
+  expected: boolean
+}
+
+export interface OpenCodeServerDiagnostic {
+  running: boolean
+  pid?: number
+  lastExit?: OpenCodeServerExitDiagnostic
+}
+
 export class OpenCodeServerManager {
-  private active: (OpenCodeServerState & { process: ChildProcessWithoutNullStreams }) | null = null
+  private active: (OpenCodeServerState & {
+    process: ChildProcessWithoutNullStreams
+    dispatcher: Dispatcher
+  }) | null = null
   private starting: Promise<OpenCodeServerState> | null = null
+  private pendingChild: ChildProcessWithoutNullStreams | null = null
+  private pendingDispatcher: Dispatcher | null = null
+  private startGeneration = 0
   private hookConfigDir: string | null = null
+  private lastExit: OpenCodeServerExitDiagnostic | undefined
+  private readonly expectedStops = new WeakSet<ChildProcessWithoutNullStreams>()
 
   constructor(private readonly executable: () => string | undefined) {}
 
   get state(): OpenCodeServerState | null {
     return this.active
+  }
+
+  get diagnostic(): OpenCodeServerDiagnostic {
+    return {
+      running: this.active?.process.exitCode === null,
+      pid: this.active?.pid,
+      lastExit: this.lastExit
+    }
   }
 
   async ensure(cwd: string): Promise<OpenCodeServerState> {
@@ -114,15 +206,16 @@ export class OpenCodeServerManager {
       if (starting.cwd === cwd) return starting
     }
     this.close()
-    this.starting = this.start(cwd)
+    const starting = this.start(cwd, this.startGeneration)
+    this.starting = starting
     try {
-      return await this.starting
+      return await starting
     } finally {
-      this.starting = null
+      if (this.starting === starting) this.starting = null
     }
   }
 
-  private async start(cwd: string): Promise<OpenCodeServerState> {
+  private async start(cwd: string, generation: number): Promise<OpenCodeServerState> {
     const executable = this.executable()
     if (!executable) throw new Error('OpenCode executable 未找到')
     if (process.platform === 'darwin') {
@@ -136,6 +229,7 @@ export class OpenCodeServerManager {
     const port = await freePort()
     const sourceEnv = runtimeCliEnv()
     const isolatedAuthContent = await isolatedOpenCodeAuthContent(sourceEnv)
+    if (generation !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
     this.hookConfigDir = await mkdtemp(join(tmpdir(), 'scry-opencode-'))
     let isolatedConfigPath: string
     let isolatedConfigDir: string
@@ -148,6 +242,7 @@ export class OpenCodeServerManager {
       isolatedConfigPath = join(this.hookConfigDir, 'safe-config.json')
       await mkdir(join(this.hookConfigDir, 'managed'), { mode: 0o700 })
       await writeFile(isolatedConfigPath, JSON.stringify({ mcp: {} }), { mode: 0o600 })
+      if (generation !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
     } catch (error) {
       const dir = this.hookConfigDir
       this.hookConfigDir = null
@@ -168,56 +263,112 @@ export class OpenCodeServerManager {
       ),
       stdio: ['pipe', 'pipe', 'pipe']
     })
-    let url: string
+    this.pendingChild = child
+    let output = ''
+    const inspect = (chunk: Buffer | string): void => {
+      output = (output + String(chunk)).slice(-12_000)
+    }
+    child.stdout.on('data', inspect)
+    child.stderr.on('data', inspect)
+    let dispatcher: Dispatcher | undefined
+    let spawnError: Error | undefined
+    child.once('error', (error) => {
+      spawnError = error
+    })
+    child.once('exit', (code, signal) => {
+      this.lastExit = {
+        at: Date.now(),
+        code,
+        signal,
+        expected: this.expectedStops.has(child)
+      }
+      if (this.active?.process === child) this.active = null
+      if (this.pendingChild === child) this.pendingChild = null
+      dispatcher?.destroy()
+    })
+    const url = `http://127.0.0.1:${port}`
     try {
-      url = await new Promise<string>((resolve, reject) => {
-        let output = ''
-        const timeout = setTimeout(() => {
-          child.kill('SIGTERM')
-          reject(new Error(`OpenCode server 启动超时: ${output.trim() || 'no output'}`))
-        }, 10_000)
-        const inspect = (chunk: Buffer | string): void => {
-          output = (output + String(chunk)).slice(-12_000)
-          const match = output.match(/opencode server listening.*?on\s+(https?:\/\/[^\s]+)/)
-          if (!match) return
-          clearTimeout(timeout)
-          resolve(match[1])
-        }
-        child.stdout.on('data', inspect)
-        child.stderr.on('data', inspect)
-        child.once('error', (error) => {
-          clearTimeout(timeout)
-          reject(error)
-        })
-        child.once('exit', (code, signal) => {
-          clearTimeout(timeout)
-          reject(new Error(`OpenCode server exited (${code ?? signal ?? 'unknown'}): ${output.trim()}`))
-        })
-      })
+      await waitForOpenCodeHealth(url, authorization, child, () => spawnError)
+      if (generation !== this.startGeneration || this.pendingChild !== child) {
+        throw new Error('OpenCode server 启动已取消')
+      }
     } catch (error) {
+      this.expectedStops.add(child)
+      if (!child.killed && child.exitCode === null) child.kill('SIGTERM')
+      const dir = this.hookConfigDir
+      this.hookConfigDir = null
+      if (dir) await rm(dir, { recursive: true, force: true })
+      const detail = sanitizeOpenCodeServerLog(output).trim()
+      throw new Error(`${error instanceof Error ? error.message : String(error)}${detail ? `：${detail}` : ''}`, {
+        cause: error instanceof Error ? error : undefined
+      })
+    }
+    if (child.exitCode !== null || child.signalCode !== null) {
+      const exit = child.exitCode ?? child.signalCode ?? 'unknown'
+      const dir = this.hookConfigDir
+      this.hookConfigDir = null
+      if (dir) await rm(dir, { recursive: true, force: true })
+      throw new Error(
+        `OpenCode server exited before readiness commit (${exit}): ${sanitizeOpenCodeServerLog(output).trim()}`
+      )
+    }
+    try {
+      dispatcher = new UndiciAgent(OPEN_CODE_LONG_REQUEST_TIMEOUTS)
+      this.pendingDispatcher = dispatcher
+      const state = {
+        cwd,
+        url,
+        pid: child.pid,
+        process: child,
+        dispatcher,
+        client: createOpencodeClient({
+          baseUrl: url,
+          directory: cwd,
+          headers: { Authorization: authorization },
+          fetch: createOpenCodeFetch(dispatcher)
+        })
+      }
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(
+          `OpenCode server exited during readiness commit (${child.exitCode ?? child.signalCode ?? 'unknown'})`
+        )
+      }
+      this.lastExit = undefined
+      this.active = state
+      this.pendingChild = null
+      this.pendingDispatcher = null
+      return state
+    } catch (error) {
+      if (this.active?.process === child) this.active = null
+      if (this.pendingChild === child) this.pendingChild = null
+      if (this.pendingDispatcher === dispatcher) this.pendingDispatcher = null
+      this.expectedStops.add(child)
+      if (!child.killed && child.exitCode === null) child.kill('SIGTERM')
+      dispatcher?.destroy()
       const dir = this.hookConfigDir
       this.hookConfigDir = null
       if (dir) await rm(dir, { recursive: true, force: true })
       throw error
     }
-    const state = {
-      cwd,
-      url,
-      pid: child.pid,
-      process: child,
-      client: createOpencodeClient({ baseUrl: url, directory: cwd, headers: { Authorization: authorization } })
-    }
-    child.once('exit', () => {
-      if (this.active?.process === child) this.active = null
-    })
-    this.active = state
-    return state
   }
 
   close(): void {
+    this.startGeneration += 1
     const active = this.active
     this.active = null
-    if (active && !active.process.killed && active.process.exitCode === null) active.process.kill('SIGTERM')
+    if (active) {
+      this.expectedStops.add(active.process)
+      if (!active.process.killed && active.process.exitCode === null) active.process.kill('SIGTERM')
+      active.dispatcher.destroy()
+    }
+    const pendingChild = this.pendingChild
+    this.pendingChild = null
+    if (pendingChild) {
+      this.expectedStops.add(pendingChild)
+      if (!pendingChild.killed && pendingChild.exitCode === null) pendingChild.kill('SIGTERM')
+    }
+    this.pendingDispatcher?.destroy()
+    this.pendingDispatcher = null
     const dir = this.hookConfigDir
     this.hookConfigDir = null
     if (dir) void rm(dir, { recursive: true, force: true })
