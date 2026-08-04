@@ -95,8 +95,9 @@ import {
 } from './renderer-security'
 import {
   buildMcpExecutionSnapshot,
+  confirmMcpExecutionAuthorization,
   McpExecutionTrust,
-  mcpTargetSummary,
+  mcpExecutionAuthorizationPrompt,
   type McpExecutionOperation,
   type McpExecutionSnapshot
 } from './mcp-execution-trust'
@@ -324,30 +325,13 @@ async function ensureMcpExecutionAuthorized(
   if (selected.length === 0) return operation === 'run' ? null : snapshot
 
   if (!mcpExecutionTrust.isGranted(operation, snapshot)) {
-    const severity = snapshot.report.summary
-    const detail = [
-      `工作目录：${snapshot.cwd}`,
-      `操作：${operation}`,
-      `Guard：${severity.status}（critical ${severity.critical} / high ${severity.high} / medium ${severity.medium}）`,
-      '',
-      ...selected.map((target) => mcpTargetSummary(target, snapshot.executionEnv)),
-      '',
-      '授权只对当前 Scry 进程、当前工作目录、当前配置指纹和本次操作类型有效；任何配置变化或重启都会失效。'
-    ].join('\n')
-    const options = {
-      type: severity.status === 'block' ? ('warning' as const) : ('info' as const),
-      title: '授权 MCP 执行',
-      message: `Scry 将执行 ${selected.length} 个 MCP 配置`,
-      detail,
-      buttons: ['取消', '允许本次配置'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true
-    }
-    const result = win && !win.isDestroyed()
-      ? await dialog.showMessageBox(win, options)
-      : await dialog.showMessageBox(options)
-    if (result.response !== 1) throw new Error('已取消 MCP 执行授权')
+    const prompt = mcpExecutionAuthorizationPrompt(snapshot, operation, selected)
+    const confirmed = await confirmMcpExecutionAuthorization(prompt, (options) =>
+      win && !win.isDestroyed()
+        ? dialog.showMessageBox(win, options)
+        : dialog.showMessageBox(options)
+    )
+    if (!confirmed) throw new Error('已取消 MCP 执行授权')
   }
 
   const verified = build()
