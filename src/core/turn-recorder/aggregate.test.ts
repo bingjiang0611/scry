@@ -157,6 +157,45 @@ describe('aggregateTurnEvidence', () => {
     })
   })
 
+  it('把 costUsd 量化为 DECIMAL(20,8) 兼容值', () => {
+    const originalCost = 5.858768000000001
+    const event: TraceEvent = {
+      id: '1',
+      ts: '2026-01-01T00:00:01.000Z',
+      runId: 'r',
+      kind: 'harness',
+      stage: 'result',
+      runtimeProvider: 'claude_sdk',
+      tokensIn: 1,
+      costUsd: originalCost
+    }
+    expect(aggregateTurnEvidence({ events: [event] }).usage.value).toMatchObject({
+      inputTokens: 1,
+      costUsd: 5.858768
+    })
+    expect(event.costUsd).toBe(originalCost)
+
+    expect(aggregateTurnEvidence({ events: [{ ...event, costUsd: 0.11662925 }] }).usage.value?.costUsd).toBe(0.11662925)
+    expect(aggregateTurnEvidence({ events: [
+      { ...event, id: '2', runtimeProvider: 'codex_cli', costUsd: 0.1 },
+      { ...event, id: '3', runtimeProvider: 'codex_cli', costUsd: 0.2 }
+    ] }).usage.value?.costUsd).toBe(0.3)
+  })
+
+  it('省略非法 costUsd 而不丢失其余 usage', () => {
+    for (const costUsd of [-0.01, Number.NaN, Number.POSITIVE_INFINITY, 1_000_000_000_000]) {
+      expect(aggregateTurnEvidence({ events: [{
+        id: '1',
+        ts: '2026-01-01T00:00:01.000Z',
+        runId: 'r',
+        kind: 'harness',
+        stage: 'result',
+        tokensIn: 7,
+        costUsd
+      }] }).usage.value).toMatchObject({ inputTokens: 7, costUsd: undefined })
+    }
+  })
+
   it('把根与子 Agent 的观测模型调用聚合为累计耗时和去重墙钟', () => {
     const events: TraceEvent[] = [
       {
