@@ -60,6 +60,7 @@ interface StoredLifecycleEvent {
 interface TranscriptRead {
   stable: boolean
   observed: boolean
+  identityMatched?: boolean
   complete?: boolean
   toolStreamComplete?: boolean
   userText?: string
@@ -146,6 +147,12 @@ function toolUseIdOf(payload: Record<string, unknown>): string | undefined {
 function providerTurnIdOf(payload: Record<string, unknown>, provider?: ProviderId): string | undefined {
   const qoderPromptId = stringAt(payload, 'prompt_id', 'promptId')
     ?? stringAt(nestedRecord(payload, 'raw_qoder_payload') ?? {}, 'prompt_id', 'promptId')
+  if (provider === 'claude') {
+    return qoderPromptId
+      ?? stringAt(payload, 'prompt_event_id', 'promptEventId')
+      ?? stringAt(payload, 'turn_id', 'turnId')
+      ?? stringAt(nestedRecord(payload, 'task') ?? {}, 'turn_id', 'turnId', 'id')
+  }
   if (qoderPromptId || provider === 'qoder') return qoderPromptId
   return stringAt(payload, 'turn_id', 'turnId')
     ?? stringAt(nestedRecord(payload, 'task') ?? {}, 'turn_id', 'turnId', 'id')
@@ -1127,7 +1134,12 @@ async function parseTranscriptSnapshot(args: {
           return candidates.some((candidate) => createHash('sha256').update(candidate).digest('hex') === args.promptHash)
         })
       : undefined
-    const turn = direct ?? matching ?? parsed.turns.at(-1)
+    const turn = args.providerTurnId
+      ? direct
+      : args.promptHash
+        ? matching
+        : parsed.turns.at(-1)
+    const identityMatched = !args.providerTurnId && !args.promptHash ? undefined : !!turn
     const enriched = turn
       ? await codexTurnWithChildren(turn, args.path, args.runId)
       : {
@@ -1146,6 +1158,7 @@ async function parseTranscriptSnapshot(args: {
     return {
       stable: args.stable,
       observed: parsed.recognized,
+      ...(identityMatched != null ? { identityMatched } : {}),
       complete: args.stable && !snapshot.truncated && enriched.complete,
       toolStreamComplete: args.stable && !snapshot.truncated && !!turn && turn.pendingToolCalls.size === 0,
       ...(turn?.userText ? { userText: turn.userText } : {}),
@@ -1171,11 +1184,17 @@ async function parseTranscriptSnapshot(args: {
         return candidates.some((candidate) => createHash('sha256').update(candidate).digest('hex') === args.promptHash)
       })
     : undefined
-  const turn = direct ?? matching ?? turns.at(-1)
+  const turn = args.providerTurnId
+    ? direct
+    : args.promptHash
+      ? matching
+      : turns.at(-1)
+  const identityMatched = !args.providerTurnId && !args.promptHash ? undefined : !!turn
   const events = turn?.items ?? []
   return {
     stable: args.stable,
     observed: turns.length > 0,
+    ...(identityMatched != null ? { identityMatched } : {}),
     complete: args.stable && !snapshot.truncated,
     ...(turn?.userText ? { userText: turn.userText } : {}),
     events,
@@ -1209,6 +1228,7 @@ async function stableTranscript(
       return {
         stable: true,
         observed: false,
+        ...(providerTurnId || promptHash ? { identityMatched: false } : {}),
         complete: true,
         events: [],
         observable: {
@@ -1459,6 +1479,9 @@ async function finalizeOpenTurn(
         }
       }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
+  if (transcript.identityMatched === false) {
+    return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+  }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
   const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events, transcript.toolStreamComplete === true)
   const diffs = await Promise.all(open.captures.map(async ({ repository, capture }) =>
@@ -1479,7 +1502,7 @@ async function finalizeOpenTurn(
   )
   const hasHookEvidence = events.some((event) => event.kind === 'hook')
   const evidence = aggregateTurnEvidence({
-    userText: open.provider === 'qoder'
+    userText: open.provider === 'qoder' || open.provider === 'claude'
       ? open.prompt ?? transcript.userText
       : transcript.userText ?? open.prompt,
     events,
@@ -1561,6 +1584,31 @@ async function finalizeOpenTurn(
   return { status: committed.status, record: committed.record }
 }
 
+function isClaudeTaskNotification(payload: Record<string, unknown>): boolean {
+  const origin = nestedRecord(payload, 'origin')
+  return stringAt(origin ?? {}, 'kind') === 'task-notification' ||
+    (promptOf(payload)?.trimStart().startsWith('<task-notification>') ?? false)
+}
+
+function continuationProviderTurnIds(open: OpenTurnState): string[] {
+  return open.continuationProviderTurnIds ?? []
+}
+
+async function rememberContinuationProviderTurn(
+  root: string,
+  open: OpenTurnState,
+  providerTurnId: string | undefined
+): Promise<void> {
+  if (!providerTurnId || providerTurnId === open.providerTurnId) return
+  const ids = [...new Set([...continuationProviderTurnIds(open), providerTurnId])].slice(-200)
+  open.continuationProviderTurnIds = ids
+  await writeJsonAtomic(openPath(root), open, { sync: false })
+}
+
+function isContinuationProviderTurn(open: OpenTurnState, providerTurnId: string | undefined): boolean {
+  return !!providerTurnId && continuationProviderTurnIds(open).includes(providerTurnId)
+}
+
 function isSynthetic(payload: Record<string, unknown>): boolean {
   return payload.isMeta === true || payload.synthetic === true || stringAt(payload, 'source') === 'synthetic'
 }
@@ -1589,12 +1637,24 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     await recordError(enablement.dataRoot, `missing session id for ${input.event}`)
     return { status: 'ignored', reason: 'missing session id' }
   }
-  if (isSynthetic(input.payload)) return { status: 'ignored', reason: 'synthetic/meta prompt' }
+  const taskNotification = input.provider === 'claude' &&
+    START_EVENTS.has(input.event) &&
+    isClaudeTaskNotification(input.payload)
+  if (isSynthetic(input.payload) && !taskNotification) return { status: 'ignored', reason: 'synthetic/meta prompt' }
   try {
     const result = await withDirectoryLock(sessionLock(enablement.dataRoot, input.provider, sessionId), async () => {
       const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
       let open = await readJson<OpenTurnState>(openPath(root))
       const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
+      if (taskNotification) {
+        if (!open) return { status: 'ignored' as const, reason: 'task notification has no real user turn' }
+        if (open.managedByScry) {
+          return { status: 'recorded' as const, reason: 'managed task continuation kept in canonical Scry turn' }
+        }
+        await rememberContinuationProviderTurn(root, open, incomingProviderTurnId)
+        await storeLifecycleEvent(enablement, open, input.event, input.payload)
+        return { status: 'recorded' as const, reason: 'task notification continued the current Claude turn' }
+      }
       if (START_EVENTS.has(input.event)) {
         const providerTurnId = incomingProviderTurnId
         const startFingerprint = stableHash({ event: input.event, payload: input.payload })
@@ -1631,7 +1691,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
             open.status = 'closing'
             open.closingAt ??= timestampOf(input.payload)
             await writeJsonAtomic(openPath(root), open, { sync: false })
-            await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+            const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+            if (finalized.status === 'pending') return finalized
           }
         }
         open = await beginOpenTurn(enablement, input.provider, sessionId, input.event, input.payload, input.managed === true)
@@ -1653,7 +1714,12 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         await writeJsonAtomic(openPath(root), open, { sync: false })
         return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
       }
-      if (incomingProviderTurnId && open.providerTurnId && incomingProviderTurnId !== open.providerTurnId) {
+      if (
+        incomingProviderTurnId &&
+        open.providerTurnId &&
+        incomingProviderTurnId !== open.providerTurnId &&
+        !isContinuationProviderTurn(open, incomingProviderTurnId)
+      ) {
         if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
           return { status: 'duplicate' as const }
         }
@@ -1667,6 +1733,13 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       open.status = 'closing'
       open.closingAt = timestampOf(input.payload)
       await writeJsonAtomic(openPath(root), open, { sync: false })
+      if (
+        input.provider === 'claude' &&
+        input.event === 'Stop' &&
+        (open.providerTurnId || continuationProviderTurnIds(open).length > 0)
+      ) {
+        return { status: 'pending' as const, reason: 'Claude turn awaits continuations or recorder recovery' }
+      }
       return finalizeOpenTurn(enablement, open, input.payload, 'completed', { allowUnstableTranscript: true })
     }, { waitMs: SESSION_LOCK_WAIT_MS })
     const pending = START_EVENTS.has(input.event) || END_EVENTS.has(input.event)

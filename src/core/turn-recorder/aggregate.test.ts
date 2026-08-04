@@ -77,6 +77,86 @@ describe('aggregateTurnEvidence', () => {
     })
   })
 
+  it('Claude SDK 多个 result 是累计快照，仅使用最终快照', () => {
+    const result = (
+      id: string,
+      usage: Pick<TraceEvent, 'tokensIn' | 'tokensOut' | 'cacheReadTokens' | 'cacheCreationTokens' | 'costUsd' | 'durationApiMs'>
+    ): TraceEvent => ({
+      id,
+      ts: `2026-01-01T00:00:0${id}.000Z`,
+      runId: 'r',
+      kind: 'harness',
+      stage: 'result',
+      runtimeProvider: 'claude_sdk',
+      ...usage
+    })
+
+    expect(aggregateTurnEvidence({
+      events: [
+        result('1', { tokensIn: 5, tokensOut: 10, cacheReadTokens: 100, cacheCreationTokens: 20, costUsd: 0.1, durationApiMs: 1_000 }),
+        {
+          id: 'shadow',
+          ts: '2026-01-01T00:00:01.500Z',
+          runId: 'r',
+          kind: 'harness',
+          stage: 'result',
+          runtimeProvider: 'claude_sdk',
+          text: 'transcript assistant usage',
+          tokensIn: 999,
+          tokensOut: 999
+        },
+        result('2', { tokensIn: 7, tokensOut: 15, cacheReadTokens: 180, cacheCreationTokens: 30, costUsd: 0.2, durationApiMs: 1_800 })
+      ]
+    }).usage.value).toMatchObject({
+      inputTokens: 7,
+      outputTokens: 15,
+      cacheReadTokens: 180,
+      cacheCreationTokens: 30,
+      costUsd: 0.2,
+      apiDurationMs: 1_800
+    })
+  })
+
+  it('非 Claude provider 的多个 result 仍按整轮求和', () => {
+    const events: TraceEvent[] = [
+      {
+        id: '1',
+        ts: '2026-01-01T00:00:01.000Z',
+        runId: 'r',
+        kind: 'harness',
+        stage: 'result',
+        runtimeProvider: 'codex_cli',
+        tokensIn: 5,
+        tokensOut: 10,
+        durationApiMs: 1_000
+      },
+      {
+        id: '2',
+        ts: '2026-01-01T00:00:02.000Z',
+        runId: 'r',
+        kind: 'harness',
+        stage: 'result',
+        runtimeProvider: 'codex_cli',
+        tokensIn: 7,
+        tokensOut: 15,
+        durationApiMs: 1_800
+      }
+    ]
+
+    expect(aggregateTurnEvidence({ events }).usage.value).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 25,
+      apiDurationMs: 2_800
+    })
+    expect(aggregateTurnEvidence({
+      events: events.map((event) => ({ ...event, runtimeProvider: undefined }))
+    }).usage.value).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 25,
+      apiDurationMs: 2_800
+    })
+  })
+
   it('把根与子 Agent 的观测模型调用聚合为累计耗时和去重墙钟', () => {
     const events: TraceEvent[] = [
       {

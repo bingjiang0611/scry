@@ -50,11 +50,14 @@ function validManagedRequest(value: unknown): value is ManagedTurnJournal['reque
   if (!isRecord(value) || !isRecord(value.turn) || !isRecord(value.timing)) return false
   const turn = value.turn
   const timing = value.timing
+  const validProviderRuntime =
+    (value.providerId === 'claude' && value.runtimeProvider === 'claude_sdk') ||
+    (value.providerId === 'codex' && value.runtimeProvider === 'codex_cli') ||
+    (value.providerId === 'qoder' && value.runtimeProvider === 'qoder_cli')
   return typeof value.cwd === 'string' && value.cwd.length > 0 &&
     typeof value.sessionId === 'string' && value.sessionId.length > 0 &&
     typeof value.providerTurnId === 'string' && value.providerTurnId.length > 0 &&
-    (value.providerId === 'codex' || value.providerId === 'qoder') &&
-    (value.runtimeProvider === 'codex_cli' || value.runtimeProvider === 'qoder_cli') &&
+    validProviderRuntime &&
     typeof turn.runId === 'string' && turn.runId.length > 0 &&
     (turn.providerTurnId === undefined || typeof turn.providerTurnId === 'string') &&
     typeof turn.userText === 'string' &&
@@ -83,7 +86,7 @@ function managedArtifactIdentity(value: unknown): {
   const request = value.request
   if (
     typeof request.cwd !== 'string' || typeof request.sessionId !== 'string' ||
-    (request.providerId !== 'codex' && request.providerId !== 'qoder')
+    (request.providerId !== 'claude' && request.providerId !== 'codex' && request.providerId !== 'qoder')
   ) return null
   return { cwd: request.cwd, sessionId: request.sessionId, providerId: request.providerId }
 }
@@ -472,18 +475,27 @@ export function canonicalOrObservedTurnTiming(
   status: AgentTurnRecord['status'],
   observed?: ManagedTurnTiming
 ): ManagedTurnTiming | null {
+  const observedTiming = (() => {
+    if (!observed) return null
+    const started = Date.parse(observed.startedAt)
+    const completed = Date.parse(observed.completedAt)
+    if (
+      !Number.isFinite(started) ||
+      !Number.isFinite(completed) ||
+      !Number.isFinite(observed.durationMs) ||
+      observed.durationMs < 0 ||
+      Math.max(0, completed - started) !== observed.durationMs
+    ) return null
+    return observed
+  })()
+
+  // A Claude query may continue after intermediate SDK result messages. The
+  // latest result duration then covers only that continuation, while the App
+  // boundary covers the complete user query.
+  if (providerId === 'claude' && observedTiming) return observedTiming
   const canonical = canonicalTurnTiming(events)
-  if (canonical || providerId !== 'qoder' || status === 'completed' || !observed) return canonical
-  const started = Date.parse(observed.startedAt)
-  const completed = Date.parse(observed.completedAt)
-  if (
-    !Number.isFinite(started) ||
-    !Number.isFinite(completed) ||
-    !Number.isFinite(observed.durationMs) ||
-    observed.durationMs < 0 ||
-    Math.max(0, completed - started) !== observed.durationMs
-  ) return null
-  return observed
+  if (canonical || providerId !== 'qoder' || status === 'completed') return canonical
+  return observedTiming
 }
 
 export async function commitManagedTraceTurn(

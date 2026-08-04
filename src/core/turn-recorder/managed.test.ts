@@ -7,6 +7,7 @@ import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 import {
   commitManagedRecorderTurn,
+  isManagedRecorderProvider,
   prepareManagedRecorderTurn,
   recoverManagedRecorderTurns
 } from './managed'
@@ -80,6 +81,10 @@ async function startManaged(root: string, sessionId = 'session-1'): Promise<void
 }
 
 describe('managed canonical recorder', () => {
+  it('includes Claude in the managed recorder provider set', () => {
+    expect(isManagedRecorderProvider('claude')).toBe(true)
+  })
+
   it('Codex 非 completed 轮次仍保持 exact assistant 的原有 fail-closed 语义', async () => {
     const root = await workspace()
     await startManaged(root)
@@ -108,6 +113,83 @@ describe('managed canonical recorder', () => {
       status: 'failed',
       archiveFingerprint: stableHash({ runId: 'run-1', evidence, timing })
     })).rejects.toThrow('requires non-empty exact assistant evidence')
+  })
+
+  it('Claude 非 completed 轮次允许没有 assistant，并按 native root turn id 准备 canonical handoff', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'claude-session',
+        turn_id: 'claude-root-turn',
+        prompt: '/rate-workflow 1',
+        timestamp: timing.startedAt
+      }
+    })
+    await expect(handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'claude-session',
+        turn_id: 'background-notification',
+        prompt: '<task-notification>background agent finished</task-notification>',
+        origin: { kind: 'task-notification' },
+        timestamp: timing.startedAt
+      }
+    })).resolves.toMatchObject({
+      status: 'recorded',
+      reason: 'managed task continuation kept in canonical Scry turn'
+    })
+    const evidence = aggregateTurnEvidence({
+      userText: '/rate-workflow 1',
+      events: [{
+        id: 'failed-result',
+        ts: timing.completedAt,
+        runId: 'run-claude',
+        kind: 'harness',
+        stage: 'result',
+        durationMs: timing.durationMs,
+        isError: true,
+        text: 'interrupted'
+      }],
+      source: 'scry_provider_adapter'
+    })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'claude',
+      sessionId: 'claude-session',
+      runId: 'run-claude',
+      providerTurnId: 'claude-root-turn',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'interrupted',
+      archiveFingerprint: stableHash({ runId: 'run-claude', evidence, timing })
+    })).resolves.toMatchObject({ status: 'prepared' })
+  })
+
+  it('default recovery includes pending Claude managed turns', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'claude-session',
+        turn_id: 'claude-root-turn',
+        prompt: '/rate-workflow 1',
+        timestamp: timing.startedAt
+      }
+    })
+
+    await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 1 })
   })
 
   it('Qoder hook 未暴露 promptId 时先去重 provisional open，再绑定 App 取得的 native turn ID', async () => {

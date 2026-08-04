@@ -194,6 +194,263 @@ describe('turn recorder state machine', () => {
     expect(record.assistant.value?.text).not.toContain('synthetic summary')
   })
 
+  it('Claude 三条 task-notification 延续首轮，最终只提交两个真实轮次并保留原始 slash prompt', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'claude-continuations.jsonl')
+    const user = (promptId: string, content: string, extra: Record<string, unknown> = {}) => JSON.stringify({
+      type: 'user',
+      promptId,
+      message: { role: 'user', content },
+      ...extra
+    })
+    const tool = (promptId: string, id: string) => JSON.stringify({
+      type: 'assistant',
+      promptId,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id, name: 'Bash', input: { command: `printf ${id}` } }]
+      }
+    })
+    const notificationText = (taskId: string) =>
+      `<task-notification>\n<task-id>${taskId}</task-id>\n<status>completed</status>\n</task-notification>`
+    const slashEnvelope = '<command-message>rate-workflow</command-message>\n' +
+      '<command-name>/rate-workflow</command-name>\n' +
+      '<command-args>85076624 写技术方案前停下</command-args>'
+    await writeFile(transcript, `${[
+      user('real-1', slashEnvelope),
+      tool('real-1', 'root-tool')
+    ].join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-session', {
+        prompt: '/rate-workflow 85076624 写技术方案前停下',
+        promptId: 'real-1',
+        transcript_path: transcript
+      })
+    })
+    await expect(handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('claude-session', {
+        promptId: 'real-1',
+        transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })).resolves.toMatchObject({ status: 'pending' })
+
+    for (const [index, taskId] of ['task-a', 'task-b', 'task-a'].entries()) {
+      const promptId = `notification-${index + 1}`
+      const toolId = `continuation-tool-${index + 1}`
+      await appendFile(transcript, `${[
+        user(promptId, notificationText(taskId), { origin: { kind: 'task-notification' }, promptSource: 'sdk' }),
+        tool(promptId, toolId)
+      ].join('\n')}\n`)
+      await expect(handleRecorderHook({
+        provider: 'claude',
+        event: 'UserPromptSubmit',
+        workspace: root,
+        payload: payload('claude-session', {
+          prompt: notificationText(taskId),
+          promptId,
+          origin: { kind: 'task-notification' },
+          transcript_path: transcript,
+          timestamp: `2026-07-19T12:00:0${index + 2}.000Z`
+        })
+      })).resolves.toMatchObject({ status: 'recorded' })
+      await handleRecorderHook({
+        provider: 'claude',
+        event: 'PreToolUse:Bash',
+        workspace: root,
+        payload: payload('claude-session', {
+          promptId,
+          tool_name: 'Bash',
+          tool_use_id: toolId,
+          tool_input: { command: `printf ${toolId}` }
+        })
+      })
+      await expect(handleRecorderHook({
+        provider: 'claude',
+        event: 'Stop',
+        workspace: root,
+        payload: payload('claude-session', {
+          promptId,
+          transcript_path: transcript,
+          timestamp: `2026-07-19T12:00:0${index + 5}.000Z`
+        })
+      })).resolves.toMatchObject({ status: 'pending' })
+    }
+
+    await appendFile(transcript, `${[
+      user('real-2', '确认 写技术方案前停下'),
+      tool('real-2', 'second-turn-tool')
+    ].join('\n')}\n`)
+    await expect(handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-session', {
+        prompt: '确认 写技术方案前停下',
+        promptId: 'real-2',
+        transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:09.000Z'
+      })
+    })).resolves.toMatchObject({ status: 'started' })
+    await expect(handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('claude-session', {
+        promptId: 'real-2',
+        transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:10.000Z'
+      })
+    })).resolves.toMatchObject({ status: 'pending' })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+
+    const records = await listRecords(join(root, '.scry'))
+    expect(records.map((record) => [record.providerTurnId, record.turnIndex, record.status, record.user.value?.text])).toEqual([
+      ['real-1', 1, 'completed', '/rate-workflow 85076624 写技术方案前停下'],
+      ['real-2', 2, 'completed', '确认 写技术方案前停下']
+    ])
+    expect(records[0].tools.value?.map((call) => call.id)).toEqual([
+      'root-tool',
+      'continuation-tool-1',
+      'continuation-tool-2',
+      'continuation-tool-3'
+    ])
+    expect(records.flatMap((record) => record.user.value?.text ?? []).join('\n')).not.toContain('<task-notification>')
+  })
+
+  it('Claude 指定 providerTurnId 未出现在 transcript 时保持 pending，绝不借用最后一轮', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'claude-unmatched-id.jsonl')
+    await writeFile(transcript, [
+      JSON.stringify({
+        type: 'user',
+        promptId: 'other-turn',
+        message: { role: 'user', content: 'other prompt' }
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        promptId: 'other-turn',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'other answer' }] }
+      })
+    ].join('\n'))
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-unmatched', {
+        prompt: 'target prompt',
+        promptId: 'target-turn',
+        transcript_path: transcript
+      })
+    })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('claude-unmatched', {
+        promptId: 'target-turn',
+        transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 1 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+
+    await appendFile(transcript, `\n${JSON.stringify({
+      type: 'user',
+      promptId: 'target-turn',
+      message: { role: 'user', content: 'target prompt' }
+    })}\n`)
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
+      {
+        providerTurnId: 'target-turn',
+        user: { value: { text: 'target prompt' } }
+      }
+    ])
+  })
+
+  it.each([
+    ['promptId 优先于 turnId', { promptId: 'claude-root', turn_id: 'different-turn' }],
+    ['promptEventId 可作为兼容回退', { prompt_event_id: 'claude-root' }]
+  ])('Claude %s 并与 transcript promptId 对齐', async (_case, identity) => {
+    const root = await workspace()
+    const transcript = join(root, 'claude-provider-id-priority.jsonl')
+    await writeFile(transcript, [
+      JSON.stringify({
+        type: 'user',
+        promptId: 'claude-root',
+        message: { role: 'user', content: 'root prompt' }
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        promptId: 'claude-root',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'root answer' }] }
+      })
+    ].join('\n'))
+
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-id-priority', {
+        ...identity,
+        prompt: 'root prompt',
+        transcript_path: transcript
+      })
+    })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('claude-id-priority', {
+        ...identity,
+        transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
+      { providerTurnId: 'claude-root', user: { value: { text: 'root prompt' } } }
+    ])
+  })
+
+  it('Claude 只有 promptHash 时未匹配 transcript 也保持 pending', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'claude-unmatched-hash.jsonl')
+    await writeFile(transcript, JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: 'other prompt' }
+    }))
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-unmatched-hash', { prompt: 'target prompt', transcript_path: transcript })
+    })
+    const stopped = await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('claude-unmatched-hash', { transcript_path: transcript })
+    })
+
+    expect(stopped).toMatchObject({
+      status: 'pending',
+      reason: 'target turn is not present in transcript snapshot'
+    })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+  })
+
   it('Codex 连续两轮输入相同 prompt 时按不同时间边界分别记录', async () => {
     const root = await workspace()
     await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: root, payload: payload('c1', { prompt: 'same' }) })
@@ -344,7 +601,10 @@ describe('turn recorder state machine', () => {
   it('transcript 仍在变化时以有界快照提交，不留下 pending 也不吞下一轮', async () => {
     const root = await workspace()
     const transcript = join(root, 'session.jsonl')
-    await writeFile(transcript, '')
+    await writeFile(transcript, `${JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: 'one' }
+    })}\n`)
     await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: payload('s1', { prompt: 'one', transcript_path: transcript }) })
     const timer = setInterval(() => void appendFile(transcript, '{}\n'), 10)
     try {
@@ -1127,7 +1387,7 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
     expect(record.usage.value).toMatchObject({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, reasoningTokens: 5 })
   })
 
-  it('未知 transcript 格式不会把 Skill/Hook/Usage 伪装为 exact 空', async () => {
+  it('未知 transcript 格式无法匹配指定 turn 时保持 pending，不伪造或借用记录', async () => {
     const root = await workspace()
     const transcript = join(root, 'unknown.jsonl')
     await writeFile(transcript, '{"type":"unknown"}\n')
@@ -1137,17 +1397,18 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
       workspace: root,
       payload: payload('c1', { prompt: 'unknown', turn_id: 'unknown-turn', rollout_path: transcript })
     })
-    await handleRecorderHook({
+    const completed = await handleRecorderHook({
       provider: 'codex',
       event: 'turn/completed',
       workspace: root,
       payload: payload('c1', { turn_id: 'unknown-turn', rollout_path: transcript })
     })
 
-    const [record] = await listRecords(join(root, '.scry'))
-    expect(record.skills).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
-    expect(record.hooks).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
-    expect(record.usage).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
+    expect(completed).toMatchObject({
+      status: 'pending',
+      reason: 'target turn is not present in transcript snapshot'
+    })
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
   })
 
   it('token_count 使用累计值做轮间差分，不重复累计 last_token_usage', async () => {

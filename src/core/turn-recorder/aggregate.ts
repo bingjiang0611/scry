@@ -90,9 +90,13 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   const observed = events.filter((event) => event.kind === 'harness' && event.stage === 'result')
   if (!observed.length) return undefined
   const native = observed.filter((event) => event.text !== 'transcript assistant usage')
-  const results = native.length ? native : observed
+  const nativeOrObserved = native.length ? native : observed
+  // Claude Agent SDK may emit more than one result while the same query continues
+  // (for example, after task notifications). Each result is a cumulative snapshot,
+  // so summing them double-counts every earlier model call.
+  const latest = nativeOrObserved.at(-1)
+  const results = latest?.runtimeProvider === 'claude_sdk' ? [latest] : nativeOrObserved
   const models = new Set(results.flatMap((event) => event.modelUsage ?? []).map((row) => row.model).filter(Boolean))
-  const latest = results.at(-1)
   const contextModel = latest?.modelUsage?.find((row) => row.contextWindow != null && row.contextWindow > 0)
   return {
     inputTokens: sumObserved(results, (event) => event.tokensIn),
