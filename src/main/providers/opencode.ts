@@ -16,15 +16,20 @@ import {
   type TraceEvent
 } from '../../shared/trace'
 import { resolveRuntimeCliBin } from '../claude-locate'
-import { OpenCodeServerManager } from './opencode-server'
+import { AgentRuntimeError } from '../cli-runtime'
+import { OpenCodeServerManager, sanitizeOpenCodeServerLog } from './opencode-server'
 import { effortOption, permissionOptions } from './run-controls'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
 
 let counter = 0
-const newEvent = (runId: string, fields: Omit<TraceEvent, 'id' | 'runId' | 'ts'>): TraceEvent => ({
+const newEvent = (
+  runId: string,
+  fields: Omit<TraceEvent, 'id' | 'runId' | 'ts'>,
+  ts = new Date().toISOString()
+): TraceEvent => ({
   id: `opencode-${Date.now().toString(36)}-${(counter++).toString(36)}`,
   runId,
-  ts: new Date().toISOString(),
+  ts,
   ...fields
 })
 
@@ -70,10 +75,145 @@ function errorText(value: unknown): string {
   return String(record(item.data).message ?? item.message ?? JSON.stringify(value))
 }
 
-async function unwrap<T>(promise: Promise<unknown>): Promise<T> {
+function safeErrorDetail(value: unknown): string | undefined {
+  const base = sanitizeOpenCodeServerLog(errorText(value))
+  const details: string[] = []
+  let current: unknown = value
+  for (let depth = 0; depth < 3; depth++) {
+    const item = record(current)
+    const code = typeof item.code === 'string' ? item.code : undefined
+    const message = typeof item.message === 'string' ? item.message : undefined
+    const detail = [code, message].filter(Boolean).join(': ')
+    if (detail && !details.includes(detail)) details.push(detail)
+    current = item.cause
+    if (!current) break
+  }
+  const summary = details.filter((detail) => detail !== base).join(' → ')
+  return summary ? sanitizeOpenCodeServerLog(summary).slice(0, 500) : undefined
+}
+
+function nestedErrorCode(value: unknown): string | undefined {
+  let current: unknown = value
+  for (let depth = 0; depth < 3; depth++) {
+    const item = record(current)
+    if (typeof item.code === 'string' && item.code) return item.code
+    current = item.cause
+    if (!current) break
+  }
+  return undefined
+}
+
+function requestSummary(result: Record<string, unknown>): { method?: string; path?: string; status?: number } {
+  const request = result.request instanceof Request ? result.request : undefined
+  const response = result.response instanceof Response ? result.response : undefined
+  let path: string | undefined
+  if (request) {
+    try {
+      path = new URL(request.url).pathname.replace(/^(\/session\/)[^/]+/, '$1{sessionId}')
+    } catch {
+      // The operation name still identifies the request without exposing a malformed raw URL.
+    }
+  }
+  return { method: request?.method, path, status: response?.status }
+}
+
+class OpenCodeRequestError extends Error {
+  readonly operation: string
+  readonly transportFailure: boolean
+  readonly transportCode?: string
+  readonly method?: string
+  readonly path?: string
+  readonly status?: number
+
+  constructor(operation: string, result: Record<string, unknown>) {
+    const original = result.error
+    const base = sanitizeOpenCodeServerLog(errorText(original))
+    const cause = safeErrorDetail(original)
+    const request = requestSummary(result)
+    const requestText = [request.method, request.path].filter(Boolean).join(' ')
+    const suffix = [
+      cause,
+      request.status == null ? requestText : `${requestText} → HTTP ${request.status}`
+    ].filter(Boolean).join('；')
+    super(`OpenCode ${operation} 请求失败：${base}${suffix ? `（${suffix}）` : ''}`, {
+      cause: original instanceof Error ? original : undefined
+    })
+    this.name = 'OpenCodeRequestError'
+    this.operation = operation
+    this.transportFailure = result.response == null && original instanceof Error
+    this.transportCode = nestedErrorCode(original)
+    this.method = request.method
+    this.path = request.path
+    this.status = request.status
+  }
+}
+
+async function unwrap<T>(promise: Promise<unknown>, operation: string): Promise<T> {
   const result = record(await promise)
-  if (result.error !== undefined) throw new Error(errorText(result.error))
+  if (result.error !== undefined) throw new OpenCodeRequestError(operation, result)
   return (result.data === undefined ? result : result.data) as T
+}
+
+function openCodeResultTiming(info: Record<string, unknown>): { ts: string; durationMs: number } | undefined {
+  const time = record(info.time)
+  const created = typeof time.created === 'number' ? time.created : NaN
+  const completed = typeof time.completed === 'number' ? time.completed : NaN
+  if (!Number.isFinite(created) || !Number.isFinite(completed) || completed < created) return undefined
+  try {
+    return { ts: new Date(completed).toISOString(), durationMs: completed - created }
+  } catch {
+    return undefined
+  }
+}
+
+function abortableSseSleep(signal: AbortSignal): (delayMs: number) => Promise<void> {
+  return (delayMs) => new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const done = (): void => {
+      if (timeout) clearTimeout(timeout)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    timeout = setTimeout(done, delayMs)
+    signal.addEventListener('abort', done, { once: true })
+  })
+}
+
+function normalizeOpenCodeRunError(
+  error: unknown,
+  cwd: string | undefined,
+  manager: OpenCodeServerManager | undefined
+): Error {
+  if (!(error instanceof OpenCodeRequestError) || !error.transportFailure) {
+    return error instanceof Error ? error : new Error(String(error))
+  }
+  const diagnostic = manager?.diagnostic ?? { running: false }
+  const exit = diagnostic.lastExit && !diagnostic.lastExit.expected
+    ? diagnostic.lastExit
+    : undefined
+  const exitText = exit
+    ? `；本地 server 已退出（${exit.code ?? exit.signal ?? 'unknown'}）`
+    : diagnostic.running
+      ? `；本地 server pid=${diagnostic.pid ?? 'unknown'} 仍在运行`
+      : '；本地 server 当前不在运行'
+  const normalized = new AgentRuntimeError(`${error.message}${exitText}`, {
+    provider: 'opencode_server',
+    stage: 'protocol',
+    commandSummary: error.operation,
+    cwd,
+    transportCode: error.transportCode,
+    requestMethod: error.method,
+    requestPath: error.path,
+    httpStatus: error.status,
+    ...(exit ? { exitCode: exit.code, signal: exit.signal } : {}),
+    nextAction: 'Scry 已尝试终止当前 OpenCode 会话；确认没有后台运行后再重试。若重复出现，请查看 Provider 健康状态中的 cause/exit 信息'
+  })
+  Object.defineProperty(normalized, 'cause', { value: error, configurable: true })
+  return normalized
 }
 
 function billingProvider(providerId: string): BillingProvider | undefined {
@@ -123,9 +263,15 @@ export async function handleOpenCodePermission(
   const decision = agentPermissionDecision(question, response)
   const reply = decision === 'once' ? 'once' : decision === 'session' ? 'always' : 'reject'
   if (versioned) {
-    await unwrap(client.v2.session.permission.reply({ sessionID: sessionId, requestID: requestId, reply }))
+    await unwrap(
+      client.v2.session.permission.reply({ sessionID: sessionId, requestID: requestId, reply }),
+      'permission.reply'
+    )
   } else {
-    await unwrap(client.permission.reply({ requestID: requestId, directory: request.cwd, reply }))
+    await unwrap(
+      client.permission.reply({ requestID: requestId, directory: request.cwd, reply }),
+      'permission.reply'
+    )
   }
   return true
 }
@@ -224,6 +370,10 @@ export function createOpenCodeAdapter(): ProviderAdapter {
   let lastErrorAt: number | undefined
   let lastError: string | undefined
   const modelCache = new Map<string, { expiresAt: number; catalog: AgentRunControlCatalog }>()
+  const rememberFailure = (error: unknown): void => {
+    lastErrorAt = Date.now()
+    lastError = error instanceof Error ? error.message : String(error)
+  }
 
   const clientFor = async (context: ProviderContext): Promise<OpencodeClient> => {
     if (!context.cwd) throw new Error('OpenCode 需要工作目录')
@@ -233,8 +383,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
       lastError = undefined
       return state.client
     } catch (error) {
-      lastErrorAt = Date.now()
-      lastError = String((error as Error).message)
+      rememberFailure(error)
       throw error
     }
   }
@@ -245,6 +394,15 @@ export function createOpenCodeAdapter(): ProviderAdapter {
     describe: async () => {
       const path = executable()
       const current = [...managers.values()].map((manager) => manager.state).find((state) => state != null)
+      const unexpectedExit = [...managers.values()]
+        .map((manager) => manager.diagnostic.lastExit)
+        .filter((exit) => exit && !exit.expected)
+        .sort((left, right) => (right?.at ?? 0) - (left?.at ?? 0))[0]
+      const exitError = unexpectedExit
+        ? `OpenCode 本地 server 已退出（${unexpectedExit.code ?? unexpectedExit.signal ?? 'unknown'}）`
+        : undefined
+      const healthError = lastError ?? exitError
+      const healthErrorAt = lastErrorAt ?? unexpectedExit?.at
       return {
         id: 'opencode',
         label: 'OpenCode',
@@ -254,118 +412,128 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         path,
         capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' },
         health: {
-          state: !path ? 'unavailable' : lastError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
+          state: !path ? 'unavailable' : healthError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'server SDK',
           cwd: current?.cwd,
           pid: current?.pid,
           lastOkAt,
-          lastErrorAt,
-          lastError
+          lastErrorAt: healthErrorAt,
+          lastError: healthError
         }
       }
     },
     run: (request) => {
       let externalSessionId = request.resume
+      let providerTurnId: string | undefined
       let stopped = false
       let client: OpencodeClient | undefined
-      let stream: AsyncGenerator<unknown> | undefined
       const permissionController = new AbortController()
+      const requestController = new AbortController()
+      const eventController = new AbortController()
       const context: ProviderContext = { providerId: 'opencode', cwd: request.cwd, externalSessionId }
+      const manager = request.cwd ? managerFor(request.cwd) : undefined
       const promise = (async () => {
-        client = await clientFor(context)
-        if (stopped) return { externalSessionId, stopped }
-        const permission = openCodePermissionRules(request.permissionMode)
-        const model = request.model
-          ? {
-              providerID: request.model.providerId ?? '',
-              modelID: request.model.id
-            }
-          : undefined
-        if (model && !model.providerID) throw new Error('OpenCode 模型缺少 providerId')
-        if (!externalSessionId) {
-          const session = await unwrap<{ id: string }>(client.session.create({
-            directory: request.cwd,
-            permission,
-            ...(model ? { model: { id: model.modelID, providerID: model.providerID, variant: request.effort } } : {})
-          }))
-          externalSessionId = session.id
-          request.onExternalSessionId?.(session.id)
-        } else {
-          await unwrap(client.session.update({ sessionID: externalSessionId, directory: request.cwd, permission }))
-        }
-        if (stopped) {
-          await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
-          return { externalSessionId, stopped }
-        }
-        const subscription = await client.event.subscribe({ directory: request.cwd })
-        stream = subscription.stream as AsyncGenerator<unknown>
-        const events = (async () => {
-          try {
-            for await (const event of stream!) {
-              if (await handleOpenCodePermission(request, client!, event, externalSessionId!, permissionController.signal)) continue
-              emitOpenCodeEvent(request, event, externalSessionId!)
-            }
-          } catch (error) {
-            if (!stopped) throw error
-          }
-        })()
-        const slash = request.prompt.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
-        let response: { info: Record<string, unknown>; parts: unknown[] }
         try {
-          response = slash
-            ? await unwrap(client.session.command({
-                sessionID: externalSessionId,
-                directory: request.cwd,
-                command: slash[1],
-                arguments: slash[2] ?? '',
-                ...(model ? {
-                  model: `${model.providerID}/${model.modelID}`,
-                  variant: request.effort
-                } : {})
-              }))
-            : await unwrap(client.session.prompt({
-                sessionID: externalSessionId,
-                directory: request.cwd,
-                ...(model ? { model, variant: request.effort } : {}),
-                parts: [
-                  { type: 'text', text: request.prompt },
-                  ...request.attachments.map((attachment) => ({
-                    type: 'file' as const,
-                    mime: attachment.mimeType,
-                    filename: attachment.name,
-                    url: `data:${attachment.mimeType};base64,${attachment.dataBase64}`
-                  }))
-                ]
-              }))
-        } finally {
-          await stream.return(undefined)
-          await events
-        }
-        const info = record(response.info)
-        const tokens = record(info.tokens)
-        const cache = record(tokens.cache)
-        const upstream = String(info.providerID ?? '')
-        const sourceProvider = billingProvider(upstream)
-        const cost = typeof info.cost === 'number' ? info.cost : undefined
-        request.emit(newEvent(request.runId, {
-          kind: 'harness',
-          stage: 'result',
-          tokensIn: typeof tokens.input === 'number' ? tokens.input : undefined,
-          tokensOut: typeof tokens.output === 'number' ? tokens.output : undefined,
-          reasoningTokens: typeof tokens.reasoning === 'number' ? tokens.reasoning : undefined,
-          cacheReadTokens: typeof cache.read === 'number' ? cache.read : undefined,
-          cacheCreationTokens: typeof cache.write === 'number' ? cache.write : undefined,
-          costUsd: cost,
-          costSource: cost === undefined ? undefined : 'provider_reported',
-          costConfidence: cost === undefined ? undefined : 'provider_reported',
-          costUnit: cost === undefined ? undefined : 'usd',
-          billingProvider: sourceProvider,
-          upstreamProvider: upstream || undefined,
-          usageSource: 'opencode_session',
-          modelUsage: typeof info.modelID === 'string' ? [{
-            model: info.modelID,
-            inputTokens: typeof tokens.input === 'number' ? tokens.input : undefined,
-            outputTokens: typeof tokens.output === 'number' ? tokens.output : undefined,
+          client = await clientFor(context)
+          if (stopped) return { externalSessionId, providerTurnId, stopped }
+          const permission = openCodePermissionRules(request.permissionMode)
+          const model = request.model
+            ? {
+                providerID: request.model.providerId ?? '',
+                modelID: request.model.id
+              }
+            : undefined
+          if (model && !model.providerID) throw new Error('OpenCode 模型缺少 providerId')
+          if (!externalSessionId) {
+            const session = await unwrap<{ id: string }>(client.session.create({
+              directory: request.cwd,
+              permission,
+              ...(model ? { model: { id: model.modelID, providerID: model.providerID, variant: request.effort } } : {})
+            }), 'session.create')
+            externalSessionId = session.id
+            request.onExternalSessionId?.(session.id)
+          } else {
+            await unwrap(
+              client.session.update({ sessionID: externalSessionId, directory: request.cwd, permission }),
+              'session.update'
+            )
+          }
+          if (stopped) {
+            await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
+            return { externalSessionId, providerTurnId, stopped }
+          }
+          const eventOptions = {
+            signal: eventController.signal,
+            // The generated SDK does not expose sseSleepFn in this method's type,
+            // but its runtime forwards it to createSseClient. This makes abort
+            // interrupt retry backoff instead of waiting up to 30 seconds.
+            sseSleepFn: abortableSseSleep(eventController.signal)
+          } as unknown as Parameters<typeof client.event.subscribe>[1]
+          const subscription = await client.event.subscribe({ directory: request.cwd }, eventOptions)
+          const stream = subscription.stream as AsyncGenerator<unknown>
+          let eventError: unknown
+          const events = (async () => {
+            try {
+              for await (const event of stream) {
+                if (await handleOpenCodePermission(request, client!, event, externalSessionId!, permissionController.signal)) continue
+                emitOpenCodeEvent(request, event, externalSessionId!)
+              }
+            } catch (error) {
+              if (!stopped && !eventController.signal.aborted) eventError = error
+            }
+          })()
+          const slash = request.prompt.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
+          let response: { info: Record<string, unknown>; parts: unknown[] }
+          let responseError: unknown
+          try {
+            response = slash
+              ? await unwrap(client.session.command({
+                  sessionID: externalSessionId,
+                  directory: request.cwd,
+                  command: slash[1],
+                  arguments: slash[2] ?? '',
+                  ...(model ? {
+                    model: `${model.providerID}/${model.modelID}`,
+                    variant: request.effort
+                  } : {})
+                }, { signal: requestController.signal }), 'session.command')
+              : await unwrap(client.session.prompt({
+                  sessionID: externalSessionId,
+                  directory: request.cwd,
+                  ...(model ? { model, variant: request.effort } : {}),
+                  parts: [
+                    { type: 'text', text: request.prompt },
+                    ...request.attachments.map((attachment) => ({
+                      type: 'file' as const,
+                      mime: attachment.mimeType,
+                      filename: attachment.name,
+                      url: `data:${attachment.mimeType};base64,${attachment.dataBase64}`
+                    }))
+                  ]
+                }, { signal: requestController.signal }), 'session.prompt')
+          } catch (error) {
+            responseError = error
+          } finally {
+            eventController.abort()
+            await events
+            if (responseError == null && eventError != null) responseError = eventError
+          }
+          if (responseError != null) throw responseError
+          const info = record(response!.info)
+          providerTurnId = typeof info.id === 'string' && info.id ? info.id : undefined
+          const timing = openCodeResultTiming(info)
+          const tokens = record(info.tokens)
+          const cache = record(tokens.cache)
+          const upstream = String(info.providerID ?? '')
+          const sourceProvider = billingProvider(upstream)
+          const cost = typeof info.cost === 'number' ? info.cost : undefined
+          request.emit(newEvent(request.runId, {
+            kind: 'harness',
+            stage: 'result',
+            messageId: providerTurnId,
+            durationMs: timing?.durationMs,
+            tokensIn: typeof tokens.input === 'number' ? tokens.input : undefined,
+            tokensOut: typeof tokens.output === 'number' ? tokens.output : undefined,
             reasoningTokens: typeof tokens.reasoning === 'number' ? tokens.reasoning : undefined,
             cacheReadTokens: typeof cache.read === 'number' ? cache.read : undefined,
             cacheCreationTokens: typeof cache.write === 'number' ? cache.write : undefined,
@@ -375,21 +543,55 @@ export function createOpenCodeAdapter(): ProviderAdapter {
             costUnit: cost === undefined ? undefined : 'usd',
             billingProvider: sourceProvider,
             upstreamProvider: upstream || undefined,
-            usageSource: 'opencode_session'
-          }] : undefined,
-          isError: !!info.error,
-          runtimeMetadata: { modelProvider: upstream, source: 'opencode_server', finish: info.finish }
-        }))
-        if (info.error && !stopped) throw new Error(`OpenCode Provider 失败：${errorText(info.error)}`)
-        return { externalSessionId, stopped }
+            usageSource: 'opencode_session',
+            modelUsage: typeof info.modelID === 'string' ? [{
+              model: info.modelID,
+              inputTokens: typeof tokens.input === 'number' ? tokens.input : undefined,
+              outputTokens: typeof tokens.output === 'number' ? tokens.output : undefined,
+              reasoningTokens: typeof tokens.reasoning === 'number' ? tokens.reasoning : undefined,
+              cacheReadTokens: typeof cache.read === 'number' ? cache.read : undefined,
+              cacheCreationTokens: typeof cache.write === 'number' ? cache.write : undefined,
+              costUsd: cost,
+              costSource: cost === undefined ? undefined : 'provider_reported',
+              costConfidence: cost === undefined ? undefined : 'provider_reported',
+              costUnit: cost === undefined ? undefined : 'usd',
+              billingProvider: sourceProvider,
+              upstreamProvider: upstream || undefined,
+              usageSource: 'opencode_session'
+            }] : undefined,
+            isError: !!info.error,
+            runtimeMetadata: { modelProvider: upstream, source: 'opencode_server', finish: info.finish }
+          }, timing?.ts))
+          if (info.error && !stopped) throw new Error(`OpenCode Provider 失败：${errorText(info.error)}`)
+          lastOkAt = Date.now()
+          lastError = undefined
+          return { externalSessionId, providerTurnId, stopped }
+        } catch (error) {
+          permissionController.abort()
+          requestController.abort()
+          eventController.abort()
+          if (stopped) return { externalSessionId, providerTurnId, stopped }
+          if (client && externalSessionId) {
+            await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
+          }
+          const normalized = normalizeOpenCodeRunError(error, request.cwd, manager)
+          rememberFailure(normalized)
+          throw normalized
+        }
       })()
       const interrupt = (): void => {
         stopped = true
         permissionController.abort()
+        requestController.abort()
+        eventController.abort()
         if (client && externalSessionId) void client.session.abort({ sessionID: externalSessionId, directory: request.cwd })
-        void stream?.return(undefined)
       }
-      return { promise, interrupt, getExternalSessionId: () => externalSessionId }
+      return {
+        promise,
+        interrupt,
+        getExternalSessionId: () => externalSessionId,
+        getProviderTurnId: () => providerTurnId
+      }
     },
     runControls: {
       read: async (context) => {
@@ -399,12 +601,14 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         try {
           const client = await clientFor(context)
           const response = await unwrap<{ data?: unknown[] }>(
-            client.v2.model.list({ location: { directory: context.cwd } })
+            client.v2.model.list({ location: { directory: context.cwd } }),
+            'model.list'
           )
           const catalog = openCodeRunControlCatalog(response.data ?? [])
           modelCache.set(cacheKey, { expiresAt: Date.now() + 30_000, catalog })
           return capabilityReady(context, 'read', catalog)
         } catch (error) {
+          rememberFailure(error)
           return {
             ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions(false) }),
             state: 'degraded' as const,
@@ -417,7 +621,10 @@ export function createOpenCodeAdapter(): ProviderAdapter {
       list: async (context) => {
         try {
           const client = await clientFor(context)
-          const response = await unwrap<{ data?: unknown[] }>(client.v2.skill.list({ location: { directory: context.cwd } }))
+          const response = await unwrap<{ data?: unknown[] }>(
+            client.v2.skill.list({ location: { directory: context.cwd } }),
+            'skill.list'
+          )
           const data: SkillMeta[] = (response.data ?? []).map((raw) => {
             const skill = record(raw)
             return {
@@ -430,6 +637,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
           })
           return capabilityReady(context, 'read', data)
         } catch (error) {
+          rememberFailure(error)
           return capabilityUnknown<SkillMeta[]>(context, 'read', String((error as Error).message))
         }
       }
@@ -438,12 +646,16 @@ export function createOpenCodeAdapter(): ProviderAdapter {
       list: async (context) => {
         try {
           const client = await clientFor(context)
-          const response = await unwrap<{ data?: unknown[] }>(client.v2.command.list({ location: { directory: context.cwd } }))
+          const response = await unwrap<{ data?: unknown[] }>(
+            client.v2.command.list({ location: { directory: context.cwd } }),
+            'command.list'
+          )
           return capabilityReady(context, 'read', (response.data ?? []).map((raw) => {
             const command = record(raw)
             return { name: String(command.name ?? ''), description: String(command.description ?? ''), source: 'custom' as const }
           }))
         } catch (error) {
+          rememberFailure(error)
           return capabilityUnknown(context, 'read', String((error as Error).message))
         }
       }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import type { Dispatcher } from 'undici'
 import type { TraceEvent } from '../../shared/trace'
 import type { ProviderRunRequest } from './types'
 
@@ -17,9 +18,13 @@ import {
   openCodeRunControlCatalog
 } from './opencode'
 import {
+  createOpenCodeFetch,
   isolatedOpenCodeChildEnv,
+  OPEN_CODE_LONG_REQUEST_TIMEOUTS,
+  OpenCodeServerManager,
   openCodeServerAuthorization,
-  sanitizeOpenCodeAuth
+  sanitizeOpenCodeAuth,
+  sanitizeOpenCodeServerLog
 } from './opencode-server'
 
 describe('OpenCode provider adapter', () => {
@@ -65,6 +70,55 @@ describe('OpenCode provider adapter', () => {
     expect(openCodeServerAuthorization('random-password')).toBe(
       `Basic ${Buffer.from('opencode:random-password').toString('base64')}`
     )
+  })
+
+  it('disables Undici header/body timeouts only for synchronous long-running session requests', async () => {
+    const dispatcher = {} as Dispatcher
+    const fetchImpl = vi.fn(async () => new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })) as unknown as typeof globalThis.fetch
+    const openCodeFetch = createOpenCodeFetch(dispatcher, fetchImpl)
+
+    await openCodeFetch(new Request('http://127.0.0.1:12345/session/ses-1/command', { method: 'POST' }))
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      expect.any(Request),
+      expect.objectContaining({ dispatcher })
+    )
+
+    await openCodeFetch(new Request('http://127.0.0.1:12345/session/ses-1/message', { method: 'POST' }))
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      expect.any(Request),
+      expect.objectContaining({ dispatcher })
+    )
+
+    await openCodeFetch(new Request('http://127.0.0.1:12345/session', { method: 'GET' }))
+    expect(fetchImpl).toHaveBeenLastCalledWith(expect.any(Request), undefined)
+    expect(OPEN_CODE_LONG_REQUEST_TIMEOUTS).toEqual({ headersTimeout: 0, bodyTimeout: 0 })
+  })
+
+  it('redacts credentials from bounded OpenCode server diagnostics', () => {
+    const log = sanitizeOpenCodeServerLog([
+      'Authorization: Basic dXNlcjpzZWNyZXQ=',
+      'token=plain-token',
+      'api_key: "provider-secret"',
+      'OPENAI_API_KEY=sk-openai-secret',
+      'ANTHROPIC_API_KEY=sk-ant-secret',
+      'OPENCODE_SERVER_PASSWORD=server-secret',
+      'GITHUB_TOKEN=github-secret',
+      '"COOKIE": "session-secret"',
+      'fatal: headers timeout'
+    ].join('\n'))
+
+    expect(log).toContain('fatal: headers timeout')
+    expect(log).not.toContain('dXNlcjpzZWNyZXQ=')
+    expect(log).not.toContain('plain-token')
+    expect(log).not.toContain('provider-secret')
+    expect(log).not.toContain('sk-openai-secret')
+    expect(log).not.toContain('sk-ant-secret')
+    expect(log).not.toContain('server-secret')
+    expect(log).not.toContain('github-secret')
+    expect(log).not.toContain('session-secret')
   })
 
   it('exposes native server capabilities without claiming account billing support', async () => {
@@ -239,6 +293,149 @@ describe('OpenCode provider adapter', () => {
       ]
     })
     expect(events[1]).toMatchObject({ stage: 'tool_result', isMcp: true, isError: true })
+  })
+
+  it('returns the native message id/timing and aborts the SSE subscription after a successful slash command', async () => {
+    const emitted: TraceEvent[] = []
+    let subscriptionSignal: AbortSignal | undefined
+    let retryDelaySettled = false
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-1' } })),
+        command: vi.fn(async () => ({
+          data: {
+            info: {
+              id: 'message-1',
+              time: { created: 1_000, completed: 4_000 },
+              tokens: { input: 3, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+              cost: 0,
+              providerID: 'anthropic',
+              modelID: 'model-1',
+              finish: 'stop'
+            },
+            parts: []
+          }
+        })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: {
+        subscribe: vi.fn(async (_parameters, options) => {
+          subscriptionSignal = options?.signal
+          const retrySleep = (options as unknown as {
+            sseSleepFn?: (delayMs: number) => Promise<void>
+          })?.sseSleepFn
+          if (!retrySleep) throw new Error('missing abort-aware SSE sleep')
+          const retryDelay = retrySleep(30_000).then(() => {
+            retryDelaySettled = true
+          })
+          return { stream: (async function * () { await retryDelay })() }
+        })
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo',
+      url: 'http://127.0.0.1:12345',
+      pid: 42,
+      client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      const handle = adapter.run({
+        runId: 'run-success',
+        prompt: '/rate-workflow 1',
+        cwd: '/repo',
+        attachments: [],
+        permissionMode: 'full_access',
+        emit: (event) => emitted.push(event)
+      })
+
+      await expect(handle.promise).resolves.toMatchObject({
+        externalSessionId: 'session-1',
+        providerTurnId: 'message-1',
+        stopped: false
+      })
+      expect(handle.getProviderTurnId?.()).toBe('message-1')
+      expect(subscriptionSignal?.aborted).toBe(true)
+      expect(retryDelaySettled).toBe(true)
+      expect(emitted.at(-1)).toMatchObject({
+        kind: 'harness',
+        stage: 'result',
+        messageId: 'message-1',
+        durationMs: 3_000,
+        isError: false
+      })
+      expect(emitted.at(-1)?.ts).toBe('1970-01-01T00:00:04.000Z')
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('preserves the local transport cause and degrades provider health instead of reporting a generic network error', async () => {
+    const cause = Object.assign(new Error('Headers Timeout Error'), { code: 'UND_ERR_HEADERS_TIMEOUT' })
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-timeout' } })),
+        command: vi.fn(async () => ({
+          error: new TypeError('fetch failed', { cause }),
+          request: new Request('http://127.0.0.1:12345/session/session-timeout/command', { method: 'POST' }),
+          response: undefined
+        })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: {
+        subscribe: vi.fn(async () => ({ stream: (async function * () {})() }))
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo',
+      url: 'http://127.0.0.1:12345',
+      pid: 43,
+      client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      const handle = adapter.run({
+        runId: 'run-timeout',
+        prompt: '/rate-workflow 1',
+        cwd: '/repo',
+        attachments: [],
+        permissionMode: 'full_access',
+        emit: () => {}
+      })
+
+      await expect(handle.promise).rejects.toMatchObject({
+        name: 'AgentRuntimeError',
+        message: expect.stringContaining('UND_ERR_HEADERS_TIMEOUT'),
+        brief: expect.objectContaining({
+          provider: 'opencode_server',
+          stage: 'protocol',
+          commandSummary: 'session.command',
+          transportCode: 'UND_ERR_HEADERS_TIMEOUT',
+          requestMethod: 'POST',
+          requestPath: '/session/{sessionId}/command'
+        })
+      })
+      await expect(handle.promise).rejects.toHaveProperty(
+        'cause.cause.cause.code',
+        'UND_ERR_HEADERS_TIMEOUT'
+      )
+      expect(client.session.abort).toHaveBeenCalledWith({
+        sessionID: 'session-timeout',
+        directory: '/repo'
+      })
+      await expect(adapter.describe()).resolves.toMatchObject({
+        health: {
+          state: 'degraded',
+          lastError: expect.stringContaining('UND_ERR_HEADERS_TIMEOUT')
+        }
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
   })
 
 })
