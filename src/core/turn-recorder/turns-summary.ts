@@ -1,12 +1,13 @@
 import { inferredReadPathsFromCommand } from '../../shared/file-evidence.js'
-import type {
-  AgentTurnRecord,
-  Evidence,
-  EvidenceQuality,
-  EvidenceStatus,
-  TurnCall,
-  TurnFile,
-  TurnHookCall
+import {
+  canonicalCostUsd,
+  type AgentTurnRecord,
+  type Evidence,
+  type EvidenceQuality,
+  type EvidenceStatus,
+  type TurnCall,
+  type TurnFile,
+  type TurnHookCall
 } from '../../shared/turn-record.js'
 
 export interface CompactModelTiming {
@@ -474,7 +475,8 @@ function summarizeUsage(selected: AgentTurnRecord[]) {
   const cacheReadTokens = sumKnown(values.map((value) => value.cacheReadTokens))
   const cacheCreationTokens = sumKnown(values.map((value) => value.cacheCreationTokens))
   const reasoningTokens = sumKnown(values.map((value) => value.reasoningTokens))
-  const costUsd = sumKnown(values.map((value) => value.costUsd))
+  const summedCostUsd = sumKnown(values.map((value) => value.costUsd))
+  const costUsd = summedCostUsd == null ? null : canonicalCostUsd(summedCostUsd) ?? null
   const apiDurationMs = sumKnown(values.map((value) => value.apiDurationMs))
   const totalTokens = inputTokens == null && outputTokens == null ? null : (inputTokens ?? 0) + (outputTokens ?? 0)
   const models = countRows(values.flatMap((value) => value.model ? [value.model] : []))

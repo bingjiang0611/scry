@@ -95,6 +95,20 @@ describe('turn CLI model timing summaries', () => {
     })
   })
 
+  it('量化跨轮 costUsd 汇总，避免重新产生浮点尾差', () => {
+    const usage = (costUsd: number): AgentTurnRecord['usage'] => ({
+      status: 'available',
+      quality: 'exact',
+      source: ['fixture'],
+      value: { costUsd }
+    })
+    const summary = summarizeTurnRecords([
+      record(1, undefined, { usage: usage(0.1) }),
+      record(2, undefined, { usage: usage(0.2) })
+    ])
+    expect(summary.usage.costUsd).toBe(0.3)
+  })
+
   it('aggregates known model timing with explicit turn and call coverage', () => {
     const observed = {
       status: 'available',

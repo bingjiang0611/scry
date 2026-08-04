@@ -4,6 +4,7 @@ import { deriveModelTiming } from '../../shared/model-timing.js'
 import { mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import {
   available,
+  canonicalCostUsd,
   partial,
   unavailable,
   type TurnCall,
@@ -86,6 +87,12 @@ function sumObserved(events: TraceEvent[], pick: (event: TraceEvent) => number |
   return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined
 }
 
+function sumCostUsd(events: TraceEvent[]): number | undefined {
+  const values = events.map((event) => event.costUsd).filter((value): value is number => value != null)
+  if (!values.length || values.some((value) => !Number.isFinite(value) || value < 0)) return undefined
+  return canonicalCostUsd(values.reduce((sum, value) => sum + value, 0))
+}
+
 function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   const observed = events.filter((event) => event.kind === 'harness' && event.stage === 'result')
   if (!observed.length) return undefined
@@ -104,7 +111,7 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
     cacheReadTokens: sumObserved(results, (event) => event.cacheReadTokens),
     cacheCreationTokens: sumObserved(results, (event) => event.cacheCreationTokens),
     reasoningTokens: sumObserved(results, (event) => event.reasoningTokens),
-    costUsd: sumObserved(results, (event) => event.costUsd),
+    costUsd: sumCostUsd(results),
     apiDurationMs: sumObserved(results, (event) => event.durationApiMs),
     ...(latest?.contextTokens != null ? { contextTokens: latest.contextTokens } : {}),
     ...(contextModel?.contextWindow != null ? { contextWindow: contextModel.contextWindow } : {}),

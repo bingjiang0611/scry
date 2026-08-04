@@ -4,6 +4,15 @@ import type { DangerLevel, DiffFile, TurnDiffCollection, TurnDiffReason, TurnDif
 export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
 export type EvidenceStatus = 'available' | 'partial' | 'disabled' | 'unavailable'
 
+const DECIMAL_20_8_LIMIT = 1_000_000_000_000
+
+export function canonicalCostUsd(value: number | null | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value) || value < 0 || value >= DECIMAL_20_8_LIMIT) return undefined
+  const rounded = Number(value.toFixed(8))
+  if (!Number.isFinite(rounded) || rounded >= DECIMAL_20_8_LIMIT) return undefined
+  return Object.is(rounded, -0) ? 0 : rounded
+}
+
 export interface Evidence<T> {
   status: EvidenceStatus
   quality: EvidenceQuality
@@ -52,6 +61,7 @@ export interface TurnUsage {
   cacheReadTokens?: number
   cacheCreationTokens?: number
   reasoningTokens?: number
+  /** Canonical writers emit a non-negative DECIMAL(20,8)-compatible value. */
   costUsd?: number
   apiDurationMs?: number
   contextTokens?: number
