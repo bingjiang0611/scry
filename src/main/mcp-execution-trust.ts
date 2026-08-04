@@ -1,7 +1,8 @@
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
-import { scanMcp, type ScanReport } from '../cli/mcpguard-core'
+import type { MessageBoxOptions } from 'electron'
+import { scanMcp, type ScanReport, type Severity } from '../cli/mcpguard-core'
 import { resolveCommandOnPath } from './claude-locate'
 import {
   minimalMcpEnv,
@@ -209,58 +210,448 @@ function shortHash(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12)
 }
 
-function summarizedUrl(value: string): string {
+const REDACTION_DIGEST_KEY = randomBytes(32)
+const DETAIL_COLUMNS = 84
+const TARGET_LINES_PER_PAGE = 18
+
+function redactionDigest(value: string): string {
+  return createHmac('sha256', REDACTION_DIGEST_KEY).update(value).digest('hex').slice(0, 10)
+}
+
+function summarizedUrl(value: string, maxWidth: number, targetDigest: string): string {
   try {
     const url = new URL(value)
-    if (url.username || url.password) {
-      url.username = 'redacted'
-      url.password = 'redacted'
-    }
-    for (const key of [...url.searchParams.keys()]) url.searchParams.set(key, '<redacted>')
-    url.hash = ''
-    return url.toString()
+    const origin = `${url.protocol}//${url.host}`
+    const hasRouteDetails = Boolean(url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+    const route = ` · ${hasRouteDetails ? '路由' : '配置'}#${targetDigest}`
+    const originWidth = Math.max(1, maxWidth - displayWidth(route))
+    return `${compactIdentity(origin, originWidth)}${route}`
   } catch {
-    return `<url sha256:${shortHash(value)}>`
+    return compactIdentity(`<无效 URL#${targetDigest}>`, maxWidth)
   }
+}
+
+function singleLine(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f-\u009f]|\p{Default_Ignorable_Code_Point}/gu, (char) =>
+      `\\u{${char.codePointAt(0)!.toString(16).padStart(4, '0')}}`
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function displayWidth(value: string): number {
+  return [...value].reduce((width, char) => width + (char.codePointAt(0)! > 0x7f ? 2 : 1), 0)
+}
+
+function sliceStartByWidth(value: string, maxWidth: number): string {
+  let width = 0
+  let result = ''
+  for (const char of value) {
+    const next = char.codePointAt(0)! > 0x7f ? 2 : 1
+    if (width + next > maxWidth) break
+    result += char
+    width += next
+  }
+  return result
+}
+
+function sliceEndByWidth(value: string, maxWidth: number): string {
+  let width = 0
+  let result = ''
+  for (const char of [...value].reverse()) {
+    const next = char.codePointAt(0)! > 0x7f ? 2 : 1
+    if (width + next > maxWidth) break
+    result = char + result
+    width += next
+  }
+  return result
+}
+
+function compactIdentity(value: string, maxWidth: number): string {
+  const compact = singleLine(value)
+  const marker = `#${shortHash(value)}`
+  const normalized = compact !== value
+  if (!normalized && displayWidth(compact) <= maxWidth) return compact
+  if (maxWidth <= displayWidth(marker) + 2) return marker.slice(0, Math.max(1, maxWidth))
+  if (displayWidth(compact) + displayWidth(marker) + 1 <= maxWidth) return `${compact} ${marker}`
+  const visibleBudget = Math.max(2, maxWidth - displayWidth(marker) - 4)
+  const suffixBudget = Math.ceil(visibleBudget * 0.7)
+  const prefixBudget = visibleBudget - suffixBudget
+  return `${sliceStartByWidth(compact, prefixBudget)}…${marker}…${sliceEndByWidth(compact, suffixBudget)}`
 }
 
 function summarizedArgs(value: unknown): string {
   if (!Array.isArray(value) || value.length === 0) return ''
-  return value.map((item) => {
+  const visible = value.slice(0, 6).map((item) => {
     const raw = String(item)
-    if (/^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/.test(raw)) return raw.replace(/=.*/, '=<redacted>')
-    return `<arg sha256:${shortHash(raw)}>`
-  }).join(' ')
+    if (/^--[A-Za-z0-9][A-Za-z0-9_-]*$/.test(raw)) {
+      return displayWidth(raw) <= 40 ? raw : `<flag#${redactionDigest(raw)}>`
+    }
+    if (/^-[A-Za-z0-9]$/.test(raw)) return raw
+    const assignment = raw.match(/^(--?[A-Za-z0-9][A-Za-z0-9_-]*)=/)
+    if (assignment) return `${compactIdentity(assignment[1], 32)}=<redacted:#${redactionDigest(raw)}>`
+    return `<arg#${redactionDigest(raw)}>`
+  })
+  const hidden = value.length - visible.length
+  if (hidden > 0) visible.push(`<另 ${hidden} 个参数；#${redactionDigest(stableJson(value))}>`)
+  return visible.join(' ')
 }
 
-export function mcpTargetSummary(target: ResolvedMcpConfig, inheritedEnv: NodeJS.ProcessEnv = {}): string {
+interface McpTargetDisplayFacts {
+  destination: string
+  args: string
+  url?: string
+  queryKeys: string[]
+  envKeys: string[]
+  headerKeys: string[]
+}
+
+function mcpTargetDisplayFacts(target: ResolvedMcpConfig): McpTargetDisplayFacts {
   const config = target.config
   const args = summarizedArgs(config.args)
-  const command = [String(config.command ?? ''), args].filter(Boolean).join(' ')
-  const destination = typeof config.url === 'string'
-    ? summarizedUrl(config.url)
-    : command || '(未指定启动目标)'
-  const envEntries = config.env && typeof config.env === 'object'
-    ? Object.entries(config.env as Record<string, unknown>).map(([key, value]) => {
-        const raw = String(value ?? '')
-        const secret = /(token|secret|password|credential|cookie|api[_-]?key|authorization)/i.test(key)
-          || proxyEnvValueContainsCredentials(key, raw)
-        const shown = secret
-          ? `<redacted sha256:${shortHash(raw)}>`
-          : JSON.stringify(raw.slice(0, 240))
-        return `${key}=${shown}`
-      })
+  const command = String(config.command ?? '')
+  const url = typeof config.url === 'string' ? config.url : undefined
+  const destination = command || '(未指定启动目标)'
+  let queryKeys: string[] = []
+  if (url) {
+    try {
+      queryKeys = [...new Set(new URL(url).searchParams.keys())].sort()
+    } catch {
+      // Invalid URLs are represented only by a keyed digest.
+    }
+  }
+  const envKeys = config.env && typeof config.env === 'object'
+    ? Object.keys(config.env as Record<string, unknown>).sort()
     : []
   const headerKeys = config.headers && typeof config.headers === 'object'
-    ? Object.keys(config.headers as Record<string, unknown>)
+    ? Object.keys(config.headers as Record<string, unknown>).sort()
     : []
-  return [
-    `${target.name} · ${target.scope}`,
-    `  target: ${target.targetId}`,
-    `  source: ${target.sourcePath}${target.jsonPointer}`,
-    `  execute: ${destination}`,
-    `  configured env: ${envEntries.length ? envEntries.join(', ') : '(none)'}`,
-    `  inherited env keys: ${Object.keys(inheritedEnv).sort().join(', ') || '(none)'}`,
-    `  header keys: ${headerKeys.length ? headerKeys.join(', ') : '(none)'}`
-  ].join('\n')
+  return { destination, args, url, queryKeys, envKeys, headerKeys }
+}
+
+function scopeLabel(scope: string): string {
+  if (scope === 'user') return '用户配置'
+  if (scope === 'project') return '项目配置'
+  if (scope === '.mcp.json') return '项目 .mcp.json'
+  return compactIdentity(scope, 32) || '未知来源'
+}
+
+function compactScopeMarker(scope: string, count: number): string {
+  if (scope === '用户配置') return `用户×${count}`
+  if (scope === '项目配置') return `项目×${count}`
+  if (scope === '项目 .mcp.json') return `.mcp×${count}`
+  return `S#${shortHash(scope).slice(0, 6)}×${count}`
+}
+
+function operationLabel(operation: McpExecutionOperation): string {
+  if (operation === 'run') return '启动会话'
+  if (operation === 'live') return '刷新 MCP 运行状态'
+  return '测试单个 MCP 连接'
+}
+
+function guardStatusLabel(status: string): string {
+  if (status === 'block') return '阻断'
+  if (status === 'warn') return '警告'
+  if (status === 'pass') return '通过'
+  return singleLine(status) || '未知'
+}
+
+function wrappedKeyLines(
+  label: string,
+  keys: string[],
+  values?: unknown,
+  indent = '  '
+): string[] {
+  if (keys.length === 0) return [`${label}：无`]
+  const prefix = `${label}：`
+  const continuation = ' '.repeat(displayWidth(prefix))
+  const tokens = keys.map((key) => compactIdentity(key, 36))
+  const suffix = values === undefined ? '' : ` · 值摘要#${redactionDigest(stableJson(values))}`
+  const lines: string[] = []
+  let line = `${indent}${prefix}`
+  for (const token of tokens) {
+    const separator = line.endsWith(prefix) ? '' : ', '
+    if (!line.endsWith(prefix) && displayWidth(`${line}${separator}${token}`) > DETAIL_COLUMNS) {
+      lines.push(line)
+      line = `${indent}${continuation}${token}`
+    } else {
+      line += `${separator}${token}`
+    }
+  }
+  if (suffix && displayWidth(`${line}${suffix}`) > DETAIL_COLUMNS) {
+    lines.push(line)
+    line = `${indent}${continuation}${suffix.trimStart()}`
+  } else {
+    line += suffix
+  }
+  lines.push(line)
+  return lines
+}
+
+function wrappedTextLines(label: string, value: string): string[] {
+  const prefix = `  ${label}：`
+  const continuation = ' '.repeat(displayWidth(prefix))
+  const tokenWidth = DETAIL_COLUMNS - displayWidth(prefix)
+  const tokens = value
+    .split(' ')
+    .filter(Boolean)
+    .map((token) => displayWidth(token) <= tokenWidth ? token : compactIdentity(token, tokenWidth))
+  const lines: string[] = []
+  let line = prefix
+  for (const token of tokens) {
+    const separator = line === prefix ? '' : ' '
+    if (line !== prefix && displayWidth(`${line}${separator}${token}`) > DETAIL_COLUMNS) {
+      lines.push(line)
+      line = `${continuation}${token}`
+    } else {
+      line += `${separator}${token}`
+    }
+  }
+  lines.push(line)
+  return lines
+}
+
+interface AuthorizationTargetBlock {
+  scope: string
+  continuation: string
+  lines: string[]
+}
+
+function targetAuthorizationDigest(target: ResolvedMcpConfig): string {
+  return redactionDigest(stableJson({
+    targetId: target.targetId,
+    scope: target.scope,
+    transport: target.transport,
+    sourcePath: target.sourcePath,
+    jsonPointer: target.jsonPointer,
+    enabled: target.enabled,
+    config: target.config,
+    executableIdentity: target.executableIdentity
+  }))
+}
+
+function urlNeedsOwnLine(value: string, maxWidth: number): boolean {
+  try {
+    const url = new URL(value)
+    const origin = `${url.protocol}//${url.host}`
+    const hasRouteDetails = Boolean(url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+    const suffix = ` · ${hasRouteDetails ? '路由' : '配置'}#0000000000`
+    return displayWidth(origin) + displayWidth(suffix) > maxWidth
+  } catch {
+    return false
+  }
+}
+
+function mcpExecutionAuthorizationTargetBlock(
+  target: ResolvedMcpConfig,
+  groupMarker = ''
+): AuthorizationTargetBlock {
+  const { destination, args, url, queryKeys, envKeys, headerKeys } = mcpTargetDisplayFacts(target)
+  const transport = target.transport === 'http' ? 'HTTP' : target.transport
+  const name = compactIdentity(target.name, 28)
+  const marker = groupMarker ? `[${groupMarker}] ` : ''
+  const identity = `• ${marker}${name} · ${compactIdentity(transport, 8)}`
+  const prefix = `${identity} → `
+  const targetDigest = targetAuthorizationDigest(target)
+  const configDigest = url ? '' : ` · 配置#${targetDigest}`
+  const destinationWidth = Math.max(1, DETAIL_COLUMNS - displayWidth(prefix) - displayWidth(configDigest))
+  const lines = url && urlNeedsOwnLine(url, destinationWidth)
+    ? [identity, `  → ${summarizedUrl(url, DETAIL_COLUMNS - 4, targetDigest)}`]
+    : [`${prefix}${url ? summarizedUrl(url, destinationWidth, targetDigest) : compactIdentity(destination, destinationWidth)}${configDigest}`]
+  if (args) lines.push(...wrappedTextLines('args', args))
+  if (queryKeys.length > 0) lines.push(...wrappedKeyLines('query', queryKeys, url))
+  if (envKeys.length > 0) lines.push(...wrappedKeyLines('env', envKeys, target.config.env))
+  if (headerKeys.length > 0) lines.push(...wrappedKeyLines('headers', headerKeys, target.config.headers))
+  return {
+    scope: scopeLabel(target.scope),
+    continuation: `• ${name}（续）`,
+    lines
+  }
+}
+
+export function mcpExecutionAuthorizationTargetLine(target: ResolvedMcpConfig): string {
+  return mcpExecutionAuthorizationTargetBlock(target).lines.join('\n')
+}
+
+export type McpExecutionGuardSummary = ScanReport['summary'] & { incomplete: number }
+
+export function mcpExecutionGuardSummary(
+  snapshot: McpExecutionSnapshot,
+  selected: ResolvedMcpConfig[]
+): McpExecutionGuardSummary {
+  const selectedIds = new Set(selected.map((target) => target.targetId))
+  const inventoryById = new Map(snapshot.report.targets.map((target) => [target.targetId, target]))
+  const findings = snapshot.report.findings.filter((finding) =>
+    finding.affectedTargets.some((target) => selectedIds.has(target.targetId))
+  )
+  const counts: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
+  for (const finding of findings) counts[finding.severity] += 1
+  const incompleteIds = new Set(
+    selected
+      .filter((target) => inventoryById.get(target.targetId)?.enabled !== true)
+      .map((target) => target.targetId)
+  )
+  for (const item of snapshot.report.skipped) {
+    if (selectedIds.has(item.targetId)) incompleteIds.add(item.targetId)
+  }
+  const status: ScanReport['summary']['status'] = counts.critical > 0 || counts.high > 0
+    ? 'block'
+    : findings.length > 0 || incompleteIds.size > 0
+      ? 'warn'
+      : 'pass'
+  return { ...counts, status, incomplete: incompleteIds.size }
+}
+
+function guardSummaryLine(summary: McpExecutionGuardSummary): string {
+  const labels: Array<[Severity, string]> = [
+    ['critical', '严重'], ['high', '高'], ['medium', '中'], ['low', '低'], ['info', '信息']
+  ]
+  const findings = labels
+    .filter(([severity]) => summary[severity] > 0)
+    .map(([severity, label]) => `${label} ${summary[severity]}`)
+  if (summary.incomplete > 0) findings.push(`未完整扫描 ${summary.incomplete}`)
+  if (findings.length === 0) findings.push('无风险项')
+  return `Guard：${guardStatusLabel(summary.status)} · ${findings.join(' / ')}`
+}
+
+function splitTargetBlock(block: AuthorizationTargetBlock): AuthorizationTargetBlock[] {
+  const available = TARGET_LINES_PER_PAGE
+  if (block.lines.length <= available) return [block]
+  const [primary, ...detail] = block.lines
+  const chunks: AuthorizationTargetBlock[] = []
+  let offset = 0
+  let first = true
+  while (offset < detail.length || first) {
+    const heading = first ? primary : block.continuation
+    const take = Math.max(0, available - 1)
+    chunks.push({ ...block, lines: [heading, ...detail.slice(offset, offset + take)] })
+    offset += take
+    first = false
+  }
+  return chunks
+}
+
+function targetPages(selected: ResolvedMcpConfig[]): string[][] {
+  const groups = new Map<string, ResolvedMcpConfig[]>()
+  for (const target of selected) {
+    const scope = scopeLabel(target.scope)
+    const targets = groups.get(scope) ?? []
+    targets.push(target)
+    groups.set(scope, targets)
+  }
+  const pages: string[][] = []
+  let page: string[] = []
+  const flush = (): void => {
+    if (page.length > 0) pages.push(page)
+    page = []
+  }
+  for (const [scope, targets] of groups) {
+    for (const [targetIndex, target] of targets.entries()) {
+      const groupMarker = targetIndex === 0 ? compactScopeMarker(scope, targets.length) : ''
+      const original = mcpExecutionAuthorizationTargetBlock(target, groupMarker)
+      for (const block of splitTargetBlock(original)) {
+        if (page.length > 0 && page.length + block.lines.length > TARGET_LINES_PER_PAGE) flush()
+        page.push(...block.lines)
+      }
+    }
+  }
+  flush()
+  return pages.length > 0 ? pages : [[]]
+}
+
+/**
+ * Builds the compact native-dialog body. Execution-wide facts are shown once;
+ * every selected target keeps a compact, redacted destination line.
+ */
+export function mcpExecutionAuthorizationDetail(
+  snapshot: McpExecutionSnapshot,
+  operation: McpExecutionOperation,
+  selected: ResolvedMcpConfig[]
+): string {
+  return mcpExecutionAuthorizationPages(snapshot, operation, selected).join('\n\n')
+}
+
+export function mcpExecutionAuthorizationPages(
+  snapshot: McpExecutionSnapshot,
+  operation: McpExecutionOperation,
+  selected: ResolvedMcpConfig[]
+): string[] {
+  const severity = mcpExecutionGuardSummary(snapshot, selected)
+  const inheritedKeys = Object.keys(snapshot.executionEnv).sort()
+  const proxyKeys = inheritedKeys.filter((key) => /^(?:https?|all|no)_proxy$/i.test(key))
+  const sources = new Map<string, number>()
+  for (const target of selected) {
+    const label = scopeLabel(target.scope)
+    sources.set(label, (sources.get(label) ?? 0) + 1)
+  }
+  const sourceSequence = [...sources.entries()].map(([label, count]) => `${label} ${count}`).join(' → ') || '无'
+  const common = [
+    `工作目录：${compactIdentity(snapshot.cwd, DETAIL_COLUMNS - 10)}`,
+    `操作：${operationLabel(operation)} · ${guardSummaryLine(severity)}`,
+    `继承环境：${inheritedKeys.length} 个白名单键${proxyKeys.length > 0 ? `（代理 ${proxyKeys.length}）` : ''} · 值摘要#${redactionDigest(stableJson(snapshot.executionEnv))}`
+  ]
+  const pages = targetPages(selected)
+  return pages.map((targets, index) => [
+    ...common,
+    '',
+    `执行对象（${selected.length}${pages.length > 1 ? `；清单 ${index + 1}/${pages.length}` : ''}）：${sourceSequence}`,
+    ...targets,
+    '',
+    '授权绑定当前进程、目录、配置与操作；变化或重启后重新询问。'
+  ].join('\n'))
+}
+
+export interface McpExecutionAuthorizationPrompt {
+  status: ScanReport['summary']['status']
+  title: string
+  message: string
+  confirmLabel: string
+  pages: string[]
+}
+
+export function mcpExecutionAuthorizationPrompt(
+  snapshot: McpExecutionSnapshot,
+  operation: McpExecutionOperation,
+  selected: ResolvedMcpConfig[]
+): McpExecutionAuthorizationPrompt {
+  const severity = mcpExecutionGuardSummary(snapshot, selected)
+  return {
+    status: severity.status,
+    title: '授权 MCP 执行',
+    message: `允许 Scry 执行 ${selected.length} 个 MCP 配置？`,
+    confirmLabel: severity.status === 'pass' ? `执行 ${selected.length} 个 MCP` : `仍然执行 ${selected.length} 个 MCP`,
+    pages: mcpExecutionAuthorizationPages(snapshot, operation, selected)
+  }
+}
+
+export function mcpExecutionAuthorizationDialogOptions(
+  prompt: McpExecutionAuthorizationPrompt,
+  pageIndex: number,
+  platform = process.platform
+): MessageBoxOptions {
+  const lastPage = pageIndex === prompt.pages.length - 1
+  return {
+    type: prompt.status === 'pass' ? 'info' : 'warning',
+    title: prompt.title,
+    message: prompt.pages.length > 1 ? `${prompt.message}（第 ${pageIndex + 1}/${prompt.pages.length} 页）` : prompt.message,
+    detail: prompt.pages[pageIndex],
+    buttons: ['取消', lastPage ? prompt.confirmLabel : `查看下一页（${pageIndex + 2}/${prompt.pages.length}）`],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    ...(platform === 'darwin' ? { textWidth: 600 } : {})
+  }
+}
+
+export async function confirmMcpExecutionAuthorization(
+  prompt: McpExecutionAuthorizationPrompt,
+  showMessageBox: (options: MessageBoxOptions) => Promise<{ response: number }>,
+  platform = process.platform
+): Promise<boolean> {
+  for (let pageIndex = 0; pageIndex < prompt.pages.length; pageIndex++) {
+    const result = await showMessageBox(mcpExecutionAuthorizationDialogOptions(prompt, pageIndex, platform))
+    if (result.response !== 1) return false
+  }
+  return true
 }
