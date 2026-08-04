@@ -2981,7 +2981,7 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
     <DiagnosticsView
       agents={[
         { id: 'claude', name: 'claude', bin: 'claude', path: '/usr/local/bin/claude', version: '2.1.170' },
-        { id: 'qoder', name: 'Qoder CLI', bin: 'qodercli', path: '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli', version: '1.0.2' }
+        { id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli', version: '1.0.2' }
       ]}
       diag={{ sdkVersion: '^0.3.186', settingSources: 'none', claudeVersion: '2.1.170' }}
       mcpLive={[
@@ -3019,7 +3019,7 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
     expect(html).toContain('系统状态')
     expect(html).toContain('/usr/local/bin/claude')
     expect(html).toContain('2.1.170')
-    expect(html).toContain('Qoder CLI')
+    expect(html).toContain('Qoder')
     expect(html).toContain('/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli')
     expect(html).toContain('1.0.2')
   })
@@ -3071,7 +3071,7 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
   it('Provider 与 MCP 可用但诊断、DB、usage 缺证据时保持 warn，不显示绿色正常', () => {
     const incomplete = renderToStaticMarkup(
       <DiagnosticsView
-        agents={[{ id: 'qoder', name: 'Qoder CLI', bin: 'qodercli', path: '/bin/qodercli' }]}
+        agents={[{ id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/bin/qodercli' }]}
         diag={null}
         mcpLive={[]}
         mcps={[]}
@@ -3127,7 +3127,7 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
       <DiagnosticsView
         agents={[
           { id: 'claude', name: 'claude', bin: 'claude', path: '/usr/local/bin/claude', version: '2.1.170' },
-          { id: 'qoder', name: 'Qoder CLI', bin: 'qodercli', path: '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli', version: '1.0.2' }
+          { id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli', version: '1.0.2' }
         ]}
         diag={{ sdkVersion: '^0.3.186', settingSources: 'none', claudeVersion: '2.1.170' }}
         mcpLive={[]}

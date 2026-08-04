@@ -119,7 +119,7 @@ describe('runtime CLI discovery constraints', () => {
         expect.arrayContaining([
           expect.objectContaining({ id: 'claude', path: configured.claude }),
           expect.objectContaining({ id: 'codex', path: configured.codex }),
-          expect.objectContaining({ id: 'qoder', path: configured.qodercli }),
+          expect.objectContaining({ id: 'qoder', name: 'Qoder', path: configured.qodercli }),
           expect.objectContaining({ id: 'opencode', path: configured.opencode })
         ])
       )
