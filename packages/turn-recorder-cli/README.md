@@ -5,7 +5,7 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.10 \
+npm install -g @ali/scry-turn-recorder@0.2.11 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
@@ -20,7 +20,7 @@ scry turns export --workspace "$PWD" --after 0 --limit 100
 
 Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，首事件由 `scry recorder hook --start-daemon` 直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。Agent、skill 和用户提示词不应主动调用这些记录命令。
 
-Scry 启动的 Codex 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
+Scry 启动且启用精确记录的 Claude、Codex、Qoder 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
 身份，Scry App 在 result、Hook 与 diff 全部收齐后，把 trace archive 使用的同一份
 canonical evidence 两阶段提交到 CLI record；managed turn 禁止回退 rollout 近似重建。
 

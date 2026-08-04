@@ -602,6 +602,58 @@ describe('humanEvent', () => {
 })
 
 describe('parseTranscriptToTurns', () => {
+  it('Claude task-notification 作为当前真实轮的 continuation，三条通知不制造新轮且不丢后续工具证据', () => {
+    const user = (promptId: string, content: string, extra: Record<string, unknown> = {}) => JSON.stringify({
+      type: 'user',
+      promptId,
+      message: { role: 'user', content },
+      ...extra
+    })
+    const tool = (promptId: string, id: string) => JSON.stringify({
+      type: 'assistant',
+      promptId,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id, name: 'Bash', input: { command: `printf ${id}` } }]
+      }
+    })
+    const notification = (promptId: string, taskId: string, withOrigin = true) => user(
+      promptId,
+      `<task-notification>\n<task-id>${taskId}</task-id>\n<status>completed</status>\n</task-notification>`,
+      withOrigin ? { origin: { kind: 'task-notification' }, promptSource: 'sdk' } : {}
+    )
+    const content = [
+      user('real-1', '/rate-workflow 85076624 写技术方案前停下'),
+      tool('real-1', 'root-tool'),
+      notification('notification-1', 'task-a'),
+      tool('notification-1', 'continuation-tool-1'),
+      notification('notification-2', 'task-b'),
+      tool('notification-2', 'continuation-tool-2'),
+      // prefix 也是防御性判据，兼容未带 origin 的旧 transcript。
+      notification('notification-3', 'task-a', false),
+      tool('notification-3', 'continuation-tool-3'),
+      user('real-2', '确认 写技术方案前停下'),
+      tool('real-2', 'second-turn-tool')
+    ].join('\n')
+
+    const turns = parseTranscriptToTurns(content, ctx())
+
+    expect(turns.map((turn) => [turn.providerTurnId, turn.userText])).toEqual([
+      ['real-1', '/rate-workflow 85076624 写技术方案前停下'],
+      ['real-2', '确认 写技术方案前停下']
+    ])
+    expect(turns[0].items.filter((event) => event.kind === 'tool').map((event) => event.toolUseId)).toEqual([
+      'root-tool',
+      'continuation-tool-1',
+      'continuation-tool-2',
+      'continuation-tool-3'
+    ])
+    expect(turns.flatMap((turn) => turn.items).map((event) => event.text).join('\n')).not.toContain('<task-notification>')
+    expect(turns[1].items.filter((event) => event.kind === 'tool').map((event) => event.toolUseId)).toEqual([
+      'second-turn-tool'
+    ])
+  })
+
   it('Qoder compact summary 不开启新轮，并保留原生 promptId', () => {
     const content = [
       JSON.stringify({

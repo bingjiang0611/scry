@@ -506,6 +506,14 @@ function transcriptProviderTurnId(line: Record<string, unknown>): string | undef
   return undefined
 }
 
+function isClaudeTaskNotification(line: Record<string, unknown>, text: string): boolean {
+  const origin = line.origin
+  const originKind = origin && typeof origin === 'object' && !Array.isArray(origin)
+    ? (origin as Record<string, unknown>).kind
+    : undefined
+  return originKind === 'task-notification' || text.trimStart().startsWith('<task-notification>')
+}
+
 function outerToolResultFailure(message: Record<string, unknown>): { failed: boolean; toolUseId?: string } | undefined {
   let raw = message.toolUseResult ?? message.tool_use_result
   if (typeof raw === 'string') {
@@ -567,6 +575,13 @@ export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): Pars
           continue
         }
         const text = extractUserText((o.message as Record<string, unknown> | undefined)?.content)
+        if (isClaudeTaskNotification(o, text)) {
+          // Claude Agent SDK 把后台 agent 完成通知写成新的 user message，并给它新的
+          // promptId；它仍是当前真实用户轮次的 continuation。保留 cur，后续的
+          // assistant/tool/hook 证据自然并入原轮，但通知本身不能成为 human prompt。
+          suppressMetaAssistant = false
+          continue
+        }
         const injectedSkill = text ? injectedSkillName(text) : undefined
         if (o.isMeta === true && !injectedSkill) {
           cur = null

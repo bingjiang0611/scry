@@ -27,6 +27,7 @@ export interface RecorderOpenTurnState {
   transcriptPath?: string
   transcriptStartOffset?: number
   providerTurnId?: string
+  continuationProviderTurnIds?: string[]
   managedByScry?: boolean
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }

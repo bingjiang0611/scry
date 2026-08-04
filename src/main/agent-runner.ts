@@ -1,7 +1,7 @@
 // 模式 A：用 Claude Agent SDK 驱动 claude，把 message stream 归一化成 TraceEvent 流式 emit。
 // 支持多轮对话（resume）+ 工作目录（cwd）+ 中断（interrupt）+ subagent 内部明细（tail transcript 一层）。
 
-import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { query, type HookInput, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { type TraceEvent, type McpLiveStatus } from '../shared/trace'
 import {
   agentPermissionDecision,
@@ -37,6 +37,7 @@ export interface RunOpts {
   env?: Record<string, string>
   settingSources?: Array<'user' | 'project' | 'local'>
   onSessionId?: (sessionId: string) => void
+  captureProviderTurnId?: boolean
   attachments?: AgentInputAttachment[]
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
   model?: string
@@ -46,9 +47,34 @@ export interface RunOpts {
 }
 
 export interface RunHandle {
-  promise: Promise<{ sessionId?: string; stopped?: boolean; mcpStatus?: McpLiveStatus[] }>
+  promise: Promise<{ sessionId?: string; providerTurnId?: string; stopped?: boolean; mcpStatus?: McpLiveStatus[] }>
   interrupt: () => void
   getSessionId: () => string | undefined
+  getProviderTurnId?: () => string | undefined
+}
+
+function hookString(input: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function isSyntheticPromptHook(input: Record<string, unknown>): boolean {
+  const origin = input.origin
+  const originKind = origin && typeof origin === 'object' && !Array.isArray(origin)
+    ? hookString(origin as Record<string, unknown>, 'kind')
+    : undefined
+  const prompt = hookString(input, 'prompt')
+  return originKind === 'task-notification' || prompt?.trimStart().startsWith('<task-notification>') === true
+}
+
+function nativeProviderTurnId(input: Record<string, unknown>): string | undefined {
+  // Claude Code exposes this identity at runtime before the SDK HookInput type catches up.
+  // The transcript persists this identity as promptId, so prefer prompt-shaped
+  // fields when a runtime payload happens to expose both prompt and turn ids.
+  return hookString(input, 'prompt_id', 'promptId', 'prompt_event_id', 'promptEventId', 'turn_id', 'turnId')
 }
 
 function sdkPrompt(prompt: string, attachments: AgentInputAttachment[]): string | AsyncIterable<SDKUserMessage> {
@@ -82,6 +108,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   const ctx: NormalizeCtx = { runId, cwd: opts.cwd, newId, now }
   let stopped = false
   let sessionId: string | undefined
+  let providerTurnId: string | undefined
   const captureSessionId = (next: string | undefined): void => {
     if (!next || sessionId === next) return
     sessionId = next
@@ -99,6 +126,19 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     forwardSubagentText: true,
     // Hook 可观测：让 SDK 把 hook_started/progress/response 放进 message stream，normalize 后进右栏面板。
     includeHookEvents: true
+  }
+  if (opts.captureProviderTurnId) {
+    options.hooks = {
+      UserPromptSubmit: [{
+        hooks: [async (input: HookInput) => {
+          const payload = input as unknown as Record<string, unknown>
+          if (!providerTurnId && !isSyntheticPromptHook(payload)) {
+            providerTurnId = nativeProviderTurnId(payload)
+          }
+          return { continue: true }
+        }]
+      }]
+    }
   }
   if (permissionMode === 'full_access') {
     options.permissionMode = 'bypassPermissions'
@@ -234,8 +274,13 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       if (!stopped) runErr = err // 用户主动 interrupt 引发的中断不算错误
     }
     if (runErr) throw runErr
-    return { sessionId, stopped, mcpStatus }
+    return { sessionId, providerTurnId, stopped, mcpStatus }
   })()
 
-  return { promise, interrupt, getSessionId: () => sessionId }
+  return {
+    promise,
+    interrupt,
+    getSessionId: () => sessionId,
+    getProviderTurnId: () => providerTurnId
+  }
 }

@@ -62,6 +62,40 @@ describe('Claude Agent SDK launch options', () => {
     expect(emitted.filter((event) => event.kind === 'model').map((event) => event.text).join('')).toBe('OK')
   })
 
+  it('captures the root native prompt id without letting task notifications replace it', async () => {
+    let release = (): void => {}
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        await waiting
+      }
+    })
+
+    const handle = runAgent('probe', 'run-probe', () => {}, { captureProviderTurnId: true })
+    const hook = sdk.query.mock.calls[0][0].options.hooks.UserPromptSubmit[0].hooks[0]
+    await hook({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: '<task-notification>early background result</task-notification>',
+      turn_id: 'notification-before-root',
+      origin: { kind: 'task-notification' }
+    })
+    await hook({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'probe',
+      prompt_id: 'root-prompt-id',
+      turn_id: 'different-turn-id'
+    })
+    await hook({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: '<task-notification>later background result</task-notification>',
+      turn_id: 'notification-after-root'
+    })
+
+    expect(handle.getProviderTurnId?.()).toBe('root-prompt-id')
+    release()
+    await expect(handle.promise).resolves.toMatchObject({ providerTurnId: 'root-prompt-id' })
+  })
+
   it('bridges AskUserQuestion answers and keeps full access for other tools', async () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {}

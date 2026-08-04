@@ -3,17 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const runner = vi.hoisted(() => ({ captureInit: vi.fn(), runAgent: vi.fn() }))
 const mcp = vi.hoisted(() => ({ testMcpConfig: vi.fn() }))
 const sdk = vi.hoisted(() => ({ query: vi.fn() }))
+const locate = vi.hoisted(() => ({ runtimeCliEnv: vi.fn() }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: sdk.query }))
 vi.mock('../agent-runner', () => ({ captureInit: runner.captureInit, getClaudeVersion: () => 'test', runAgent: runner.runAgent }))
 vi.mock('../claude-locate', () => ({
   resolveClaudeBin: () => '/bin/claude',
-  runtimeCliEnv: () => ({
-    PATH: '/runtime/bin',
-    ANTHROPIC_API_KEY: 'provider-auth',
-    UNAPPROVED_SECRET: 'runtime-secret',
-    HTTPS_PROXY: 'http://provider-user:provider-secret@proxy.example.test',
-    SSL_CERT_FILE: '/runtime/provider-ca.pem'
-  })
+  runtimeCliEnv: locate.runtimeCliEnv
 }))
 vi.mock('../mcp-config', async () => {
   const actual = await vi.importActual<typeof import('../mcp-config')>('../mcp-config')
@@ -39,6 +34,17 @@ describe('Claude provider adapter', () => {
     runner.runAgent.mockReset()
     mcp.testMcpConfig.mockReset()
     sdk.query.mockReset()
+    locate.runtimeCliEnv.mockReset().mockImplementation((_base, options) => ({
+      PATH: '/runtime/bin',
+      ANTHROPIC_API_KEY: 'provider-auth',
+      UNAPPROVED_SECRET: 'runtime-secret',
+      HTTPS_PROXY: 'http://provider-user:provider-secret@proxy.example.test',
+      SSL_CERT_FILE: '/runtime/provider-ca.pem',
+      ...(options?.managedRecorder ? {
+        SCRY_RECORDER_MANAGED: '1',
+        SCRY_RECORDER_REQUIRED_VERSION: 'test'
+      } : {})
+    }))
     delete process.env.SCRY_CLAUDE_SETTING_SOURCES
   })
 
@@ -113,6 +119,41 @@ describe('Claude provider adapter', () => {
         model: 'claude-test',
         effort: 'high',
         permissionMode: 'default'
+      })
+    )
+  })
+
+  it('enables the managed recorder environment and forwards the root Provider turn id', async () => {
+    const getProviderTurnId = vi.fn(() => 'root-prompt-id')
+    runner.runAgent.mockReturnValue({
+      promise: Promise.resolve({ sessionId: 'session-1', providerTurnId: 'root-prompt-id' }),
+      interrupt: vi.fn(),
+      getSessionId: vi.fn(() => 'session-1'),
+      getProviderTurnId
+    })
+
+    const handle = createClaudeAdapter('/tmp/scry-home').run({
+      runId: 'run-managed',
+      prompt: 'probe',
+      cwd: '/repo',
+      attachments: [],
+      managedRecorder: true,
+      emit: vi.fn()
+    })
+
+    await expect(handle.promise).resolves.toMatchObject({
+      externalSessionId: 'session-1',
+      providerTurnId: 'root-prompt-id'
+    })
+    expect(handle.getProviderTurnId?.()).toBe('root-prompt-id')
+    expect(locate.runtimeCliEnv).toHaveBeenCalledWith(undefined, { managedRecorder: true })
+    expect(runner.runAgent).toHaveBeenCalledWith(
+      'probe',
+      'run-managed',
+      expect.any(Function),
+      expect.objectContaining({
+        captureProviderTurnId: true,
+        env: expect.objectContaining({ SCRY_RECORDER_MANAGED: '1' })
       })
     )
   })

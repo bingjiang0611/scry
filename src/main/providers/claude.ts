@@ -16,8 +16,11 @@ interface CachedControls {
 
 const CONTROL_TTL_MS = 30_000
 
-function claudeRuntimeEnv(): Record<string, string> {
-  return { ...runtimeCliEnv(), CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1' }
+function claudeRuntimeEnv(managedRecorder = false): Record<string, string> {
+  return {
+    ...(managedRecorder ? runtimeCliEnv(undefined, { managedRecorder: true }) : runtimeCliEnv()),
+    CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1'
+  }
 }
 
 function isRemoteMcpConfig(config: Record<string, unknown>): boolean {
@@ -25,9 +28,10 @@ function isRemoteMcpConfig(config: Record<string, unknown>): boolean {
 }
 
 function claudeRuntimeEnvForExecution(
-  execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution']
+  execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution'],
+  managedRecorder = false
 ): Record<string, string> {
-  const env = claudeRuntimeEnv()
+  const env = claudeRuntimeEnv(managedRecorder)
   const remoteEnabled = execution?.targets.some((target) => target.enabled && isRemoteMcpConfig(target.config))
   return execution && remoteEnabled ? authorizedMcpRuntimeEnv(env, execution.env) : env
 }
@@ -183,9 +187,10 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
           cwd: request.mcpExecution?.cwd ?? request.cwd,
           skills: computeEnabledSkills(request.cwd, homeDir),
           claudePath: executable(),
-          env: claudeRuntimeEnvForExecution(request.mcpExecution),
+          env: claudeRuntimeEnvForExecution(request.mcpExecution, request.managedRecorder === true),
           settingSources: settingSourcesFromEnv(),
           onSessionId: request.onExternalSessionId,
+          captureProviderTurnId: request.managedRecorder === true,
           attachments: request.attachments,
           requestUserInput: request.requestUserInput,
           model: request.model?.id,
@@ -197,11 +202,13 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
       return {
         promise: handle.promise.then((result) => ({
           externalSessionId: result.sessionId,
+          providerTurnId: result.providerTurnId,
           stopped: result.stopped,
           mcp: result.mcpStatus ? { configured: listMcp(request.cwd, homeDir), runtime: result.mcpStatus } : undefined
         })),
         interrupt: handle.interrupt,
-        getExternalSessionId: handle.getSessionId
+        getExternalSessionId: handle.getSessionId,
+        getProviderTurnId: handle.getProviderTurnId
       }
     },
     skills: {

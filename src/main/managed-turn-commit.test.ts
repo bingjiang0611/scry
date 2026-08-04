@@ -137,9 +137,17 @@ function withCapturedDiff(request: ManagedTraceTurnCommitInput): ManagedTraceTur
   }
 }
 
-async function startManaged(workspace: string): Promise<void> {
+function asClaude(request: ManagedTraceTurnCommitInput): ManagedTraceTurnCommitInput {
+  return {
+    ...request,
+    providerId: 'claude',
+    runtimeProvider: 'claude_sdk'
+  }
+}
+
+async function startManaged(workspace: string, provider: 'claude' | 'codex' = 'codex'): Promise<void> {
   await handleRecorderHook({
-    provider: 'codex',
+    provider,
     event: 'UserPromptSubmit',
     workspace,
     managed: true,
@@ -165,6 +173,27 @@ describe('managed trace turn coordinator', () => {
     expect(canonicalOrObservedTurnTiming([], 'qoder', 'interrupted', observed)).toEqual(observed)
     expect(canonicalOrObservedTurnTiming([], 'qoder', 'completed', observed)).toBeNull()
     expect(canonicalOrObservedTurnTiming([], 'codex', 'failed', observed)).toBeNull()
+  })
+
+  it('Claude 优先使用完整 App 观测边界，其他 provider 仍使用 result timing', () => {
+    const events = [{
+      kind: 'harness',
+      stage: 'result',
+      ts: '2026-07-29T12:00:10.000Z',
+      durationMs: 2_000
+    }]
+    const observed = {
+      startedAt: '2026-07-29T12:00:00.000Z',
+      completedAt: '2026-07-29T12:00:10.000Z',
+      durationMs: 10_000
+    }
+
+    expect(canonicalOrObservedTurnTiming(events, 'claude', 'completed', observed)).toEqual(observed)
+    expect(canonicalOrObservedTurnTiming(events, 'codex', 'completed', observed)).toEqual({
+      startedAt: '2026-07-29T12:00:08.000Z',
+      completedAt: '2026-07-29T12:00:10.000Z',
+      durationMs: 2_000
+    })
   })
 
   it('archive 与 CLI record 复用同一 evidence 和 result timing', async () => {
@@ -534,6 +563,29 @@ describe('managed trace turn coordinator', () => {
     })
   })
 
+  it('Claude durable progress 可在崩溃后恢复 archive 与 CLI record', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await startManaged(workspace, 'claude')
+    const request = asClaude(input(workspace, userDataDir))
+
+    await persistManagedTraceProgress(request)
+    await expect(recoverManagedTraceProgress(userDataDir, {
+      cwd: workspace,
+      providerId: 'claude',
+      waitMs: 100
+    })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: 'claude',
+      userDataDir
+    })?.turns).toHaveLength(1)
+    expect(await listRecords(join(workspace, '.scry'))).toEqual([
+      expect.objectContaining({ provider: { id: 'claude' } })
+    ])
+  })
+
   it.each([1, 2])('canonical commit 后第 %i 个 artifact cleanup 崩溃仍由 rich journal 单调恢复', async (failAt) => {
     const { workspace, userDataDir } = await fixture()
     await startManaged(workspace)
@@ -659,6 +711,29 @@ describe('managed trace turn coordinator', () => {
       userDataDir
     })?.turns).toHaveLength(1)
     expect(await listRecords(join(workspace, '.scry'))).toHaveLength(1)
+  })
+
+  it('Claude prepared journal 可在 open identity 到达后恢复两端', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = asClaude(input(workspace, userDataDir))
+
+    await expect(commitManagedTraceTurn(request, { waitMs: 0 })).rejects.toThrow('open identity')
+    await startManaged(workspace, 'claude')
+    await expect(recoverManagedTraceTurns(userDataDir, {
+      cwd: workspace,
+      providerId: 'claude',
+      waitMs: 100
+    })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: 'claude',
+      userDataDir
+    })?.turns).toHaveLength(1)
+    expect(await listRecords(join(workspace, '.scry'))).toEqual([
+      expect.objectContaining({ provider: { id: 'claude' } })
+    ])
   })
 
   it('恢复拒绝 archive 与 CLI 元数据分叉的 journal，且两端都不提交', async () => {

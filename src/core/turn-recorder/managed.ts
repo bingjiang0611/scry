@@ -37,10 +37,10 @@ export interface ManagedTurnTiming {
   durationMs: number
 }
 
-export type ManagedRecorderProviderId = Extract<ProviderId, 'codex' | 'qoder'>
+export type ManagedRecorderProviderId = Extract<ProviderId, 'claude' | 'codex' | 'qoder'>
 
 export function isManagedRecorderProvider(provider: ProviderId): provider is ManagedRecorderProviderId {
-  return provider === 'codex' || provider === 'qoder'
+  return provider === 'claude' || provider === 'codex' || provider === 'qoder'
 }
 
 export interface PrepareManagedTurnInput {
@@ -259,7 +259,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
   assertExactText(input.evidence.user, input.userText, 'user')
-  if (input.provider === 'qoder' && input.status !== 'completed') {
+  if ((input.provider === 'claude' || input.provider === 'qoder') && input.status !== 'completed') {
     assertOptionalAssistantText(input.evidence.assistant)
   } else {
     assertExactText(input.evidence.assistant, undefined, 'assistant')
@@ -430,7 +430,7 @@ export async function recoverManagedRecorderTurns(
   const { enablement } = mode
   let recovered = 0
   let pending = 0
-  const providers: ManagedRecorderProviderId[] = options.provider ? [options.provider] : ['codex', 'qoder']
+  const providers: ManagedRecorderProviderId[] = options.provider ? [options.provider] : ['claude', 'codex', 'qoder']
   for (const provider of providers) {
     const providerRoot = join(enablement.dataRoot, 'runtime', provider)
     for (const sessionDir of await listFiles(providerRoot)) {
