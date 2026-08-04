@@ -279,12 +279,12 @@ export interface DetectedAgent {
   version?: string
 }
 
-// 已知 agent CLI 清单（命令名）。MVP 只有 claude 能真正驱动（用 Agent SDK），
-// 其余检测到也列出，切换/驱动二期接各自 adapter。
+// name 是 renderer 使用的 Provider 显示名，bin 才是本地可执行文件名。
+// 快速探测和完整 Provider descriptor 必须保持同一显示名，避免冷启动闪变。
 const KNOWN_AGENTS: Array<{ id: string; name: string; bin: string }> = [
   { id: 'claude', name: 'Claude Code', bin: 'claude' },
   { id: 'codex', name: 'Codex', bin: 'codex' },
-  { id: 'qoder', name: 'Qoder CLI', bin: 'qodercli' },
+  { id: 'qoder', name: 'Qoder', bin: 'qodercli' },
   { id: 'opencode', name: 'OpenCode', bin: 'opencode' }
 ]
 

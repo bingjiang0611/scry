@@ -39,6 +39,7 @@ describe('Qoder provider adapter', () => {
   it('reports the SDK Skill catalog as read-only rather than unsupported', async () => {
     await expect(createQoderAdapter().describe()).resolves.toMatchObject({
       id: 'qoder',
+      label: 'Qoder',
       transport: 'Qoder Agent SDK',
       capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' }
     })
