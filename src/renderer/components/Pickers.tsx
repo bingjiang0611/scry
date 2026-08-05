@@ -8,12 +8,14 @@ export function WorkdirPicker({
   cwd,
   recent,
   onChoose,
+  onUnbind,
   onPick,
   onRemove
 }: {
   cwd: string | null
   recent: string[]
   onChoose: () => void
+  onUnbind: () => void
   onPick: (d: string) => void
   onRemove: (d: string) => void
 }) {
@@ -22,7 +24,7 @@ export function WorkdirPicker({
   return (
     <div className="wdpick">
       <button className="wdbtn" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={menuId} aria-haspopup="menu">
-        <Icon name="folder" /> {cwd ? basename(cwd) : 'Select working directory'}{' '}
+        <Icon name="folder" /> {cwd ? basename(cwd) : '不绑定项目'}{' '}
         <Icon name="chevronDown" className="chev" />
       </button>
       {open && (
@@ -32,12 +34,23 @@ export function WorkdirPicker({
             className="mitem"
             onClick={() => {
               setOpen(false)
+              onUnbind()
+            }}
+          >
+            <Icon name="message" /> 不绑定项目
+            {!cwd && <span className="ck"><Icon name="check" /> 当前</span>}
+          </button>
+          <button
+            type="button"
+            className="mitem"
+            onClick={() => {
+              setOpen(false)
               onChoose()
             }}
           >
-            <Icon name="folder" /> Choose folder
+            <Icon name="folder" /> 选择文件夹
           </button>
-          {recent.length > 0 && <div className="mhdr">Recent folders</div>}
+          {recent.length > 0 && <div className="mhdr">最近使用</div>}
           <div className="wdrecent-list">
             {recent.map((d) => (
               <div key={d} className="wdrecent-row">

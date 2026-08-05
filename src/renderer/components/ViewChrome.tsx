@@ -73,8 +73,8 @@ export function ViewChrome({
           </div>
         )}
         {!cwd && (
-          <span className="tb-context cwd-pill" title="未选工作目录">
-            <Icon name="folder" /> <b>未选工作目录</b>
+          <span className="tb-context cwd-pill" title="当前运行未指定工作目录">
+            <Icon name="folder" /> <b>不绑定项目</b>
           </span>
         )}
         {cwd && canTogglePanel && (

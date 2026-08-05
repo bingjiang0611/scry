@@ -167,9 +167,10 @@ function attachmentPrompt(prompt: string, attachments: PreparedAttachment[]): st
   return [text, `Scry pasted image attachments:\n${lines.join('\n')}`].filter(Boolean).join('\n\n')
 }
 
-// 每个 cwd 维护各自的会话（换目录 = 换会话）
+// 每个 Provider + cwd 维护各自的会话；空 cwd 是“不绑定项目”的内存会话。
 const sessionByContext = new Map<string, string>()
 const sessionRevisionByContext = new Map<string, number>()
+const sessionAliasesByContext = new Map<string, Map<string, string>>()
 const contextAdmission = new ContextAdmission()
 const recordingBlockedSessions = new Map<string, string>()
 const recordingRecoveryHint = '不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复'
@@ -355,7 +356,7 @@ function bumpSessionRevision(key: string): void {
   sessionRevisionByContext.set(key, (sessionRevisionByContext.get(key) ?? 0) + 1)
 }
 
-function setCurrentCwd(dir: string): void {
+function setCurrentCwd(dir: string | undefined): void {
   if (dir !== currentCwd) {
     // Provider adapters 自己按 cwd 管理原生 transport/cache；这里只更新当前工作目录。
   }
@@ -691,18 +692,20 @@ handleTrusted('workspace:trash', (event, request: WorkspacePathRequest) => {
   return trashWorkspaceEntry(request, (path) => shell.trashItem(path))
 })
 
-handleTrusted('agent:setCwd', (_e, dir: string) => {
-  setCurrentCwd(dir)
-  recentStore().push(dir)
-  return dir
+handleTrusted('agent:setCwd', (_e, dir: string | null) => {
+  const cwd = typeof dir === 'string' && dir.trim() ? dir : undefined
+  setCurrentCwd(cwd)
+  if (cwd) recentStore().push(cwd)
+  return cwd ?? null
 })
 
 handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
   const cwd = context?.cwd ?? currentCwd
-  if (context?.providerId && cwd) {
-    const key = providerContextKey(context.providerId, cwd)
+  if (context?.providerId) {
+    const key = providerContextKey(context.providerId, cwd ?? '')
     bumpSessionRevision(key)
     sessionByContext.delete(key)
+    sessionAliasesByContext.delete(key)
   }
   return true
 })
@@ -776,6 +779,7 @@ handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
   setCurrentCwd(payload.cwd)
   const key = providerContextKey(payload.providerId, payload.cwd)
   bumpSessionRevision(key)
+  sessionAliasesByContext.delete(key)
   const catalogSession = appSessionStore().load().find((session) =>
     session.providerId === payload.providerId && session.cwd === payload.cwd &&
     (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
@@ -1005,23 +1009,27 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const admissionKey = providerContextKey(providerId, cwd ?? '')
   return contextAdmission.run(admissionKey, async () => {
     await startupManagedRecovery
-    const contextKey = cwd ? providerContextKey(providerId, cwd) : undefined
-    let contextRevision = contextKey ? (sessionRevisionByContext.get(contextKey) ?? 0) : 0
-    let resume = contextKey ? sessionByContext.get(contextKey) : undefined
+    const contextKey = providerContextKey(providerId, cwd ?? '')
+    let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
+    let resume = sessionByContext.get(contextKey)
     const expectedSessionId = request.expectedExternalSessionId
     const contextRuns = runs.unsettledStates().filter((run) => run.providerId === providerId && run.cwd === cwd)
     const catalogAliases = (): Array<{ runId: string; externalSessionId?: string; sessionId?: string }> => {
-      if (!cwd) return []
+      const liveAliases = [...(sessionAliasesByContext.get(contextKey) ?? [])].map(([runId, externalSessionId]) => ({
+        runId,
+        externalSessionId
+      }))
+      if (!cwd) return liveAliases
       try {
-        return appSessionStore().load()
+        return [...liveAliases, ...appSessionStore().load()
           .filter((session) => session.providerId === providerId && session.cwd === cwd && Boolean(session.runId))
           .map((session) => ({
             runId: session.runId!,
             ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : {}),
             sessionId: session.sessionId
-          }))
+          }))]
       } catch {
-        return []
+        return liveAliases
       }
     }
     const contextChangedError = (): AgentRuntimeError => new AgentRuntimeError(
@@ -1062,8 +1070,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     }
     // Renderer 会在 turnDone 后立即投递队列下一条；此时 Provider 已结束，但 diff/archive
     // 仍可能在收口。等待真实 settled 后再继续，避免稳定拒绝并破坏 FIFO。
-    contextRevision = contextKey ? (sessionRevisionByContext.get(contextKey) ?? 0) : 0
-    resume = contextKey ? sessionByContext.get(contextKey) : undefined
+    contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
+    resume = sessionByContext.get(contextKey)
     const latestContextRuns = runs.unsettledStates().filter((run) => run.providerId === providerId && run.cwd === cwd)
     if (!expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...latestContextRuns, ...catalogAliases()])) {
       throw contextChangedError()
@@ -1160,8 +1168,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '重新打开 Scry 后再启动'
     })
   }
-  const committedResume = contextKey ? sessionByContext.get(contextKey) : undefined
-  const committedRevision = contextKey ? (sessionRevisionByContext.get(contextKey) ?? 0) : 0
+  const committedResume = sessionByContext.get(contextKey)
+  const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
   const committedRuns = runs.unsettledStates().filter((run) => run.providerId === providerId && run.cwd === cwd)
   if (
     committedResume !== resume || committedRevision !== contextRevision ||
@@ -1344,8 +1352,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const publishSessionId = (sessionId: string | undefined): void => {
     if (!sessionId) return
     observedSessionId = sessionId
-    if (contextKey && (sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
+    if ((sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
       sessionByContext.set(contextKey, sessionId)
+      sessionAliasesByContext.set(contextKey, new Map([[runId, sessionId]]))
     }
     runState.sessionId = sessionId
     runState.externalSessionId = sessionId
