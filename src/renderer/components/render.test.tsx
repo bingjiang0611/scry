@@ -2072,6 +2072,42 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('Read')
   })
 
+  it('纵览按轮次与会话拆成二级 tab，并把会话汇总放入会话数据', () => {
+    const tabHtml = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[{
+          ...turn,
+          items: [
+            ev({ id: 'tab-skill', kind: 'skill', stage: 'skill:workflow', name: 'workflow' }),
+            ...turn.items
+          ]
+        }]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+      />
+    )
+    const turnsPanel = tabHtml.slice(tabHtml.indexOf('id="overview-turns-panel"'), tabHtml.indexOf('id="overview-session-panel"'))
+    const sessionPanel = tabHtml.slice(tabHtml.indexOf('id="overview-session-panel"'))
+
+    expect(tabHtml).toContain('aria-label="纵览数据维度"')
+    expect(tabHtml).toMatch(/id="overview-turns-tab"[^>]*aria-selected="true"/)
+    expect(tabHtml).toMatch(/id="overview-session-tab"[^>]*aria-selected="false"/)
+    expect(turnsPanel).toContain('每轮调用')
+    expect(turnsPanel).not.toContain('TOP TOOLS')
+    expect(turnsPanel).not.toContain('HOOKS')
+    expect(turnsPanel).not.toContain('段落（按 skill）')
+    expect(turnsPanel).not.toContain('调用明细（本会话）')
+    expect(turnsPanel).not.toContain('文件足迹（全会话 · 工具证据）')
+    expect(sessionPanel).toContain('hidden=""')
+    expect(sessionPanel).toContain('TOP TOOLS')
+    expect(sessionPanel).toContain('HOOKS')
+    expect(sessionPanel).toContain('段落（按 skill）')
+    expect(sessionPanel).toContain('调用明细（本会话）')
+    expect(sessionPanel).toContain('文件足迹（全会话 · 工具证据）')
+  })
+
   it('每轮调用段把一条 shell 中的多个 MCP 调用分别计数', () => {
     const multiMcpTurn: Turn = {
       runId: 'multi-mcp-turn',

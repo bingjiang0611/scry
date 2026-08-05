@@ -477,6 +477,7 @@ export function OverviewPanel({
 }) {
   const [filesFolded, setFilesFolded] = useState(false)
   const [panelTab, setPanelTab] = useState<'overview' | 'billing' | 'mcpTrust'>(initialPanelTab)
+  const [overviewDataTab, setOverviewDataTab] = useState<'turns' | 'session'>('turns')
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
   const dangerAuditRef = useRef<HTMLDivElement>(null)
   const all = useMemo(() => turns.flatMap((t) => t.items), [turns])
@@ -627,8 +628,11 @@ export function OverviewPanel({
     })
   }
   const showDangerAudit = (): void => {
-    dangerAuditRef.current?.scrollIntoView({ block: 'nearest' })
-    dangerAuditRef.current?.focus({ preventScroll: true })
+    setOverviewDataTab('session')
+    requestAnimationFrame(() => {
+      dangerAuditRef.current?.scrollIntoView({ block: 'nearest' })
+      dangerAuditRef.current?.focus({ preventScroll: true })
+    })
   }
   const isOverviewTab = panelTab === 'overview'
   const isBillingTab = panelTab === 'billing'
@@ -808,6 +812,33 @@ export function OverviewPanel({
         </div>
       )}
 
+      {isOverviewTab && turns.length > 0 && (
+        <div className="overview-data-tabs" role="tablist" aria-label="纵览数据维度">
+          <button
+            type="button"
+            id="overview-turns-tab"
+            role="tab"
+            aria-selected={overviewDataTab === 'turns'}
+            aria-controls="overview-turns-panel"
+            className={overviewDataTab === 'turns' ? 'active' : ''}
+            onClick={() => setOverviewDataTab('turns')}
+          >
+            轮次数据
+          </button>
+          <button
+            type="button"
+            id="overview-session-tab"
+            role="tab"
+            aria-selected={overviewDataTab === 'session'}
+            aria-controls="overview-session-panel"
+            className={overviewDataTab === 'session' ? 'active' : ''}
+            onClick={() => setOverviewDataTab('session')}
+          >
+            会话数据
+          </button>
+        </div>
+      )}
+
       {isBillingTab && (
         <div className="panel-section billing-section">
           <h4>
@@ -961,7 +992,14 @@ export function OverviewPanel({
         />
       )}
 
-      {isOverviewTab && turnCallRows.length > 0 && (
+      {isOverviewTab && (
+        <div
+          id="overview-turns-panel"
+          role="tabpanel"
+          aria-labelledby="overview-turns-tab"
+          hidden={overviewDataTab !== 'turns'}
+        >
+      {turnCallRows.length > 0 && (
         <div className="panel-section turn-calls-section">
           <h4>
             每轮调用
@@ -1079,7 +1117,16 @@ export function OverviewPanel({
           <div className="psrc">按每轮逻辑调用聚合；Skill 内部文件读取不重复计数。点 Txx 跳回该轮，点耗时或右侧箭头展开/收起明细。</div>
         </div>
       )}
+        </div>
+      )}
 
+      {isOverviewTab && (
+        <div
+          id="overview-session-panel"
+          role="tabpanel"
+          aria-labelledby="overview-session-tab"
+          hidden={overviewDataTab !== 'session'}
+        >
       {isOverviewTab && topTools.rows.length > 0 && (
         <div className="panel-section top-tools-section">
           <h4>
@@ -1568,6 +1615,8 @@ export function OverviewPanel({
             <span className="fchip">{usage.turns} turns</span>
           </div>
           <div className="psrc">来自 usage.jsonl 持久化（每轮 SDK result usage 落盘，仅看 token，不算金额）</div>
+        </div>
+      )}
         </div>
       )}
 

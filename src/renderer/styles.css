@@ -2392,6 +2392,36 @@ button.mitem:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.overview-data-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border3);
+  background: var(--panel);
+}
+
+.overview-data-tabs button {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dim2);
+  font: 500 11.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.overview-data-tabs button.active {
+  border-color: var(--border2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.overview-data-tabs button:active {
+  transform: scale(0.98);
+}
+
 /* 行内状态点（蓝本）——补上现有代码已引用、但 CSS 一直缺失的 .sdot */
 .sdot {
   width: 7px;
