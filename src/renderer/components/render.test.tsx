@@ -32,7 +32,7 @@ import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-s
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
-import { logicalCallEventsForTurn, OverviewPanel, turnCallRowsFromMap } from './OverviewPanel'
+import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { McpTrustPanel, type McpGuardReport } from './McpTrustPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
@@ -2123,9 +2123,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('3 次调用')
     expect(html).toContain('耗时 3m 12s')
     expect(html).toContain('title="整轮墙钟耗时 3m 12s；其中 API 耗时 5.0s"')
-    expect(html.match(/aria-label="展开第 1 轮耗时明细"/g)).toHaveLength(2)
-    expect(html.match(/aria-controls="turn-timing-1"/g)).toHaveLength(2)
-    expect(html).toContain('点 Txx 跳回该轮，点耗时或右侧箭头展开/收起明细')
+    expect(html.match(/aria-label="展开第 1 轮明细"/g)).toHaveLength(2)
+    expect(html.match(/aria-controls="turn-detail-1"/g)).toHaveLength(2)
+    expect(html).toContain('文件 2')
+    expect(html).toContain('右侧箭头展开耗时与本轮文件足迹')
     expect(html).toContain('turn-call-group tool')
     expect(html).toContain('Bash')
     expect(html).toContain('Write')
@@ -2155,6 +2156,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(tabHtml).toMatch(/id="overview-turns-tab"[^>]*aria-selected="true"/)
     expect(tabHtml).toMatch(/id="overview-session-tab"[^>]*aria-selected="false"/)
     expect(turnsPanel).toContain('每轮调用')
+    expect(turnsPanel).toContain('文件 2')
     expect(turnsPanel).not.toContain('TOP TOOLS')
     expect(turnsPanel).not.toContain('HOOKS')
     expect(turnsPanel).not.toContain('段落（按 skill）')
@@ -2196,6 +2198,19 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
 
     expect(turnCalls).toContain('2 次调用')
     expect(turnCalls).toContain('turn-call-count">2</span>')
+  })
+
+  it('本轮文件足迹逐文件展示操作证据，并为无证据轮次保留诚实空态', () => {
+    const footprintHtml = renderToStaticMarkup(
+      <TurnFileFootprint files={[{ path: '/repo/src/a.ts', read: 2, inferredRead: 1, write: 1, edit: 0 }]} />
+    )
+    const emptyHtml = renderToStaticMarkup(<TurnFileFootprint files={[]} />)
+
+    expect(footprintHtml).toContain('本轮文件足迹（工具证据）')
+    expect(footprintHtml).toContain('1 files')
+    expect(footprintHtml).toContain('a.ts')
+    expect(footprintHtml).toContain('R1 ~R1 W1')
+    expect(emptyHtml).toContain('暂无文件工具证据')
   })
 
   it('每轮 Skill 调用把注入和内部文件证据折叠为一次，同时保留嵌套 Skill', () => {
@@ -2985,7 +3000,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
   })
 
   it('每轮调用区分工具、MCP、Skill 和子 Agent；MCP/Skill 默认只显示数量', () => {
-    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('按每轮逻辑调用聚合'))
+    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('按每轮逻辑调用与文件工具证据聚合'))
     expect(html).toContain('每轮调用')
     expect(html).toContain('4 次调用')
     expect(turnCallHtml).toContain('turn-call-group tool')

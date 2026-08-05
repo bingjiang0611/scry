@@ -2689,7 +2689,7 @@ button.turn-call-jump.turn-call-open {
   border-radius: 6px;
   background: transparent;
 }
-button.turn-call-timing-edge-toggle[aria-expanded='true'] {
+button.turn-call-detail-edge-toggle[aria-expanded='true'] {
   color: var(--accent);
   background: rgba(123, 171, 255, 0.08);
 }
@@ -2830,6 +2830,23 @@ button.turn-call-group:focus-visible {
   color: var(--dim2);
   font-variant-numeric: tabular-nums;
 }
+.turn-call-file-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--border3);
+  border-radius: 6px;
+  color: var(--dim2);
+  background: var(--surface-subtle);
+  font: 10.5px/1.35 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.turn-call-file-count svg {
+  color: var(--read);
+}
 .turn-call-toggle-icon {
   color: var(--dim3);
   display: inline-grid;
@@ -2892,9 +2909,67 @@ button.turn-call-group:focus-visible {
 .turn-call-row:hover .turn-call-jump {
   color: var(--accent);
 }
-.turn-call-timing-slot {
+.turn-call-detail-slot {
   grid-column: 1 / -1;
   min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.turn-file-footprint {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(91, 182, 255, 0.16);
+  border-radius: 8px;
+  background: var(--surface-inset);
+}
+.turn-file-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border3);
+  color: var(--fg);
+  font: 10.5px/1.35 var(--font-mono);
+}
+.turn-file-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.turn-file-heading > span:last-child {
+  color: var(--dim3);
+  font-variant-numeric: tabular-nums;
+}
+.turn-file-list {
+  display: grid;
+}
+.turn-file-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 10px;
+}
+.turn-file-row + .turn-file-row {
+  border-top: 1px solid var(--border3);
+}
+.turn-file-row .fname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-file-row .fops {
+  color: var(--dim2);
+  font-variant-numeric: tabular-nums;
+}
+.turn-file-empty {
+  padding: 10px;
+  color: var(--dim3);
+  font: 11px/1.4 var(--font-mono);
 }
 .turn-call-timing {
   min-width: 0;
