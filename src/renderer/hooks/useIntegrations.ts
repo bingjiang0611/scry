@@ -18,6 +18,90 @@ import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-s
 
 const contextKey = (context: ProviderContext): string => `${context.providerId}\0${context.cwd ?? ''}`
 const modelKey = (model: AgentModelRef): string => `${model.providerId ?? ''}\0${model.id}`
+const RUN_CONTROL_PREFERENCES_KEY = 'scry:run-control-preferences:v1'
+const PROVIDER_IDS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode']
+
+export interface RunControlPreferences {
+  selectedAgentId: string
+  controlsByProvider: Partial<Record<ProviderId, AgentRunControls>>
+}
+
+const boundedPreferenceValue = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed && trimmed.length <= 240 ? trimmed : undefined
+}
+
+const parseStoredRunControls = (value: unknown): AgentRunControls | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const permissionMode: AgentPermissionMode =
+    record.permissionMode === 'auto_review' || record.permissionMode === 'full_access'
+      ? record.permissionMode
+      : 'default'
+  const storedModel = record.model
+  const modelId = storedModel && typeof storedModel === 'object' && !Array.isArray(storedModel)
+    ? boundedPreferenceValue((storedModel as Record<string, unknown>).id)
+    : undefined
+  const modelProviderId = storedModel && typeof storedModel === 'object' && !Array.isArray(storedModel)
+    ? boundedPreferenceValue((storedModel as Record<string, unknown>).providerId)
+    : undefined
+  const effort = boundedPreferenceValue(record.effort)
+  return {
+    ...(modelId ? { model: { id: modelId, ...(modelProviderId ? { providerId: modelProviderId } : {}) } } : {}),
+    ...(effort ? { effort } : {}),
+    permissionMode
+  }
+}
+
+export function parseRunControlPreferences(raw: string | null): RunControlPreferences {
+  const fallback: RunControlPreferences = { selectedAgentId: 'claude', controlsByProvider: {} }
+  if (!raw) return fallback
+  try {
+    const stored = JSON.parse(raw) as unknown
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return fallback
+    const record = stored as Record<string, unknown>
+    const selectedAgentId = boundedPreferenceValue(record.selectedAgentId)
+    const controlsRecord = record.controlsByProvider
+    const controlsByProvider: Partial<Record<ProviderId, AgentRunControls>> = {}
+    if (controlsRecord && typeof controlsRecord === 'object' && !Array.isArray(controlsRecord)) {
+      for (const providerId of PROVIDER_IDS) {
+        const controls = parseStoredRunControls((controlsRecord as Record<string, unknown>)[providerId])
+        if (controls) controlsByProvider[providerId] = controls
+      }
+    }
+    return {
+      selectedAgentId: selectedAgentId && providerIdForAgentId(selectedAgentId) ? selectedAgentId : 'claude',
+      controlsByProvider
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function readRunControlPreferences(): RunControlPreferences {
+  if (typeof window === 'undefined') return parseRunControlPreferences(null)
+  try {
+    return parseRunControlPreferences(window.localStorage.getItem(RUN_CONTROL_PREFERENCES_KEY))
+  } catch {
+    return parseRunControlPreferences(null)
+  }
+}
+
+function writeRunControlPreferences(
+  selectedAgentId: string,
+  controlsByProvider: Map<ProviderId, AgentRunControls>
+): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(RUN_CONTROL_PREFERENCES_KEY, JSON.stringify({
+      selectedAgentId,
+      controlsByProvider: Object.fromEntries(controlsByProvider)
+    }))
+  } catch {
+    // localStorage 不可用时仅退化为当前进程内记忆，不阻断会话发送。
+  }
+}
 
 const fallbackRunControlCatalog = (permissionMode: AgentPermissionMode): AgentRunControlCatalog => ({
   models: [],
@@ -86,11 +170,15 @@ export function runControlSendBlockedReason(
 }
 
 export function useIntegrations(cwd: string | null) {
+  const storedRunControlPreferences = useMemo(readRunControlPreferences, [])
+  const initialProviderId = providerIdForAgentId(storedRunControlPreferences.selectedAgentId) ?? 'claude'
   const [agents, setAgents] = useState<DetectedAgent[]>([])
   const [agentsHydrated, setAgentsHydrated] = useState(false)
   const [agentsScanning, setAgentsScanning] = useState(true)
-  const [selectedId, setSelectedId] = useState('claude')
-  const [runControls, setRunControls] = useState<AgentRunControls>({ permissionMode: 'default' })
+  const [selectedId, setSelectedId] = useState(storedRunControlPreferences.selectedAgentId)
+  const [runControls, setRunControls] = useState<AgentRunControls>(
+    storedRunControlPreferences.controlsByProvider[initialProviderId] ?? { permissionMode: 'default' }
+  )
   const [runControlCatalog, setRunControlCatalog] = useState<AgentRunControlCatalog>(
     fallbackRunControlCatalog('default')
   )
@@ -128,7 +216,12 @@ export function useIntegrations(cwd: string | null) {
   const mcpToggleRequests = useRef(new Map<string, number>())
   const mcpConfigPromiseRef = useRef<Promise<McpLiveStatus[]> | null>(null)
   const runControlRequestSeq = useRef(0)
-  const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>())
+  const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>(
+    PROVIDER_IDS.flatMap((providerId) => {
+      const controls = storedRunControlPreferences.controlsByProvider[providerId]
+      return controls ? [[providerId, controls]] : []
+    })
+  ))
   const runControlCatalogByContext = useRef(
     new Map<string, CapabilityEnvelope<AgentRunControlCatalog>>()
   )
@@ -540,6 +633,10 @@ export function useIntegrations(cwd: string | null) {
         if (seq === runControlRequestSeq.current) setRunControlsLoading(false)
       })
   }, [cwd, providerContext, requestRunControlCatalog, selectedProviderId])
+
+  useEffect(() => {
+    writeRunControlPreferences(selectedId, runControlsByProvider.current)
+  }, [runControls, selectedId])
 
   useEffect(() => {
     const refreshGitDiff = (): void => {
