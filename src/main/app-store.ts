@@ -167,7 +167,7 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
     const hasIdentity = identities
       .some((id) => typeof id === 'string' && id.length > 0)
     return identities.every((id) => id == null || typeof id === 'string') && hasIdentity &&
-      typeof session.cwd === 'string' && session.cwd.length > 0 &&
+      typeof session.cwd === 'string' &&
       typeof session.preview === 'string' &&
       typeof session.ts === 'number' && Number.isFinite(session.ts) &&
       (session.providerId == null || SESSION_PROVIDERS.has(session.providerId)) &&
@@ -233,7 +233,7 @@ export function createAppSessionStore(
     cwd: string
     prompt: string
   }): void => {
-    if (!args.runId || !args.cwd) return
+    if (!args.runId) return
     const list = load()
     const now = Date.now()
     const ex = list.find(
@@ -264,7 +264,7 @@ export function createAppSessionStore(
     cwd: string
     prompt: string
   }): void => {
-    if (!args.externalSessionId || !args.cwd) return
+    if (!args.externalSessionId) return
     const list = load()
     const ex = list.find(
       (session) =>
@@ -319,7 +319,7 @@ export function createAppSessionStore(
         sessions.sort((a, b) => b.ts - a.ts)
         return {
           cwd,
-          name: basename(cwd),
+          name: cwd ? basename(cwd) : '不绑定项目',
           sessions: sessions.map((session) => ({
             sessionId: session.sessionId,
             ...(session.runId ? { runId: session.runId } : {}),

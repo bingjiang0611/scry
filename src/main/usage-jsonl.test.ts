@@ -61,6 +61,20 @@ describe('usage-jsonl', () => {
     }
   })
 
+  it('空 cwd 只聚合不绑定项目的用量', () => {
+    const dir = tempDir()
+    try {
+      appendUsage(dir, { providerId: 'qoder', runtimeProvider: 'qoder_cli' }, { tokensIn: 3, tokensOut: 1, ts: '2026-07-04T00:00:00.000Z' })
+      appendUsage(dir, { providerId: 'qoder', runtimeProvider: 'qoder_cli', cwd: '/repo' }, { tokensIn: 30, tokensOut: 10, ts: '2026-07-04T00:00:01.000Z' })
+
+      expect(readUsageStats(dir, { providerId: 'qoder', cwd: '' })).toEqual({
+        status: 'ready', cost: null, tin: 3, tout: 1, turns: 1, invalidLines: 0
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('全损坏文件返回 query_error，不伪装成真实零值', () => {
     const dir = tempDir()
     try {

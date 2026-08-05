@@ -151,21 +151,20 @@ export function recordTurn(args: {
   if (!db) return
   try {
     const ts = Date.now()
-    if (args.cwd) {
-      db.prepare(
-        `INSERT INTO projects (cwd, name, last_seen_at) VALUES (?, ?, ?)
-         ON CONFLICT(cwd) DO UPDATE SET last_seen_at = excluded.last_seen_at`
-      ).run(args.cwd, basename(args.cwd), ts)
-    }
-    const internalSessionId = args.sessionId && args.cwd && args.providerId
-      ? scrySessionId(args.providerId, args.cwd, args.sessionId)
+    const cwd = args.cwd ?? ''
+    db.prepare(
+      `INSERT INTO projects (cwd, name, last_seen_at) VALUES (?, ?, ?)
+       ON CONFLICT(cwd) DO UPDATE SET last_seen_at = excluded.last_seen_at`
+    ).run(cwd, cwd ? basename(cwd) : '不绑定项目', ts)
+    const internalSessionId = args.sessionId && args.providerId
+      ? scrySessionId(args.providerId, cwd, args.sessionId)
       : undefined
-    if (internalSessionId && args.sessionId && args.cwd && args.providerId && args.runtimeProvider) {
+    if (internalSessionId && args.sessionId && args.providerId && args.runtimeProvider) {
       db.prepare(UPSERT_SESSION_REF_SQL).run(
         internalSessionId,
         args.providerId,
         args.runtimeProvider,
-        args.cwd,
+        cwd,
         args.sessionId,
         args.userText.slice(0, 200),
         ts,
@@ -173,7 +172,7 @@ export function recordTurn(args: {
       )
     }
 
-    const rows = spanRowsFromItems({ runId: args.runId, sessionId: internalSessionId, cwd: args.cwd, items: args.items, nowMs: ts })
+    const rows = spanRowsFromItems({ runId: args.runId, sessionId: internalSessionId, cwd, items: args.items, nowMs: ts })
     const gatewayLabel = gatewayAccountLabel(billingEnvProvider())
     const priceVersions = db.prepare(
       `SELECT id, provider, model, currency,
@@ -185,7 +184,7 @@ export function recordTurn(args: {
     const billing = billingRowsFromItems({
       runId: args.runId,
       sessionId: internalSessionId,
-      cwd: args.cwd,
+      cwd,
       items: args.items,
       nowMs: ts,
       runtimeProvider: args.runtimeProvider,

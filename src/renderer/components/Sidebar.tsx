@@ -169,13 +169,15 @@ export function Sidebar({
         {filtered.length === 0 && <div className="sb-empty">无历史会话</div>}
         {filtered.map((p) => {
           const open = !collapsed.has(p.cwd)
+          const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
+          const contextLabel = p.cwd || '未关联工作目录'
           return (
             <div key={p.cwd} className={`sb-proj ${open ? 'open' : ''}`}>
               <button
                 type="button"
-                className={`sb-proj-head ${p.cwd === activeCwd ? 'on' : ''}`}
-                title={`${p.name}\n${p.cwd}`}
-                aria-label={`${p.name} · ${p.cwd}`}
+                className={`sb-proj-head ${active ? 'on' : ''}`}
+                title={`${p.name}\n${contextLabel}`}
+                aria-label={`${p.name} · ${contextLabel}`}
                 aria-expanded={open}
                 data-project-path={p.cwd}
                 onClick={() => toggle(p.cwd)}

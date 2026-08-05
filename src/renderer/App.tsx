@@ -251,7 +251,7 @@ export function activeRunForSession(
     runs.find((run) => {
       if (run.done) return false
       const runSessionId = run.externalSessionId ?? run.sessionId
-      return run.cwd === cwd && (run.runId === sessionId || runSessionId === sessionId) && run.providerId === providerId
+      return (run.cwd ?? '') === cwd && (run.runId === sessionId || runSessionId === sessionId) && run.providerId === providerId
     }) ?? null
   )
 }
@@ -867,7 +867,7 @@ export function App() {
       if (!isCurrent()) return
       runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId)?.runId
     }
-    await window.scry.setCwd(projectCwd)
+    await window.scry.setCwd(projectCwd || null)
     if (!isCurrent()) return
     if (switchingSession) session.clearTurns()
     setQueuedPrompts([])
@@ -875,7 +875,7 @@ export function App() {
     shouldStickToBottomRef.current = true
     selectSessionId(sessionId)
     setView('chat')
-    setCwd(projectCwd)
+    setCwd(projectCwd || null)
     integrations.setSelectedId(providerId)
     if (
       await restoreActiveSessionSelection(
@@ -933,7 +933,7 @@ export function App() {
     '--sidebar-w': `${sidebarPane.visibleWidth}px`,
     '--overview-panel-w': `${activeRightPane.visibleWidth}px`
   }
-  const rightPanelOpen = Boolean(cwd) && view === 'chat' && (showPanel || workspaceOpen || turnDiffReview != null)
+  const rightPanelOpen = Boolean(cwd || activeSessionId) && view === 'chat' && (showPanel || workspaceOpen || turnDiffReview != null)
   const panelVisible = rightPanelOpen && !activeRightPane.collapsed
   const panelRuntimeProvider = useMemo(
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
@@ -1102,7 +1102,7 @@ export function App() {
           agent={integrations.selectedAgent}
           agentScanning={integrations.agentsScanning}
           showPanel={panelVisible && !workspaceOpen && !turnDiffReview}
-          canTogglePanel={view === 'chat'}
+          canTogglePanel={view === 'chat' && Boolean(cwd || activeSessionId)}
           showWorkspace={workspaceOpen && panelVisible}
           onView={changeView}
           onTogglePanel={toggleOverviewPanel}

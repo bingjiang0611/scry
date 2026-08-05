@@ -45,7 +45,7 @@ function validProgress(value: TraceTurnProgress | null): value is TraceTurnProgr
   const request = value?.request
   const turn = request?.turn
   return value?.schemaVersion === 1 && typeof value.persistedAt === 'string' &&
-    typeof request?.cwd === 'string' && request.cwd.length > 0 &&
+    typeof request?.cwd === 'string' &&
     typeof request.sessionId === 'string' && request.sessionId.length > 0 &&
     PROVIDERS.has(request.providerId) && RUNTIMES.has(request.runtimeProvider) &&
     Boolean(
@@ -73,7 +73,7 @@ function identityMatches(
   identity: { cwd: string; sessionId: string; providerId: ProviderId },
   filter: { cwd?: string; sessionId?: string; providerId?: ProviderId }
 ): boolean {
-  return (!filter.cwd || identity.cwd === filter.cwd) &&
+  return (filter.cwd == null || identity.cwd === filter.cwd) &&
     (!filter.sessionId || identity.sessionId === filter.sessionId) &&
     (!filter.providerId || identity.providerId === filter.providerId)
 }
@@ -126,7 +126,7 @@ export async function recoverTraceTurnProgress(
   let recovered = 0
   let pending = 0
   const errors: string[] = []
-  const scoped = Boolean(filter.cwd || filter.sessionId || filter.providerId)
+  const scoped = filter.cwd != null || Boolean(filter.sessionId || filter.providerId)
   for (const name of await listFiles(progressRoot(userDataDir))) {
     if (!name.endsWith('.json')) continue
     const path = join(progressRoot(userDataDir), name)
@@ -140,7 +140,7 @@ export async function recoverTraceTurnProgress(
       continue
     }
     const request = progress.request
-    if (filter.cwd && request.cwd !== filter.cwd) continue
+    if (filter.cwd != null && request.cwd !== filter.cwd) continue
     if (filter.sessionId && request.sessionId !== filter.sessionId) continue
     if (filter.providerId && request.providerId !== filter.providerId) continue
     const existing = findTraceArchiveTurnMatches({

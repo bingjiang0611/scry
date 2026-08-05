@@ -52,6 +52,7 @@ export function transcriptPath(cwd: string, sessionId: string, home = homedir())
 }
 
 function ownedCwdKey(cwd: string): string {
+  if (cwd === '') return 'unbound'
   if (!isAbsolute(cwd)) throw new Error('Scry-owned cwd must be absolute')
   return `cwd-${createHash('sha256').update(cwd).digest('hex')}`
 }
@@ -595,7 +596,7 @@ export function upsertTraceArchiveTurn(args: {
   userDataDir: string
   turn: Omit<TraceArchiveTurn, 'ts'> & { ts?: number }
 }): boolean {
-  if (!args.cwd || !args.sessionId) return false
+  if (!args.sessionId) return false
   const providerId = args.providerId ?? 'claude'
   const turn: TraceArchiveTurn = {
     ...args.turn,

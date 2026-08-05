@@ -167,7 +167,7 @@ function attachmentPrompt(prompt: string, attachments: PreparedAttachment[]): st
   return [text, `Scry pasted image attachments:\n${lines.join('\n')}`].filter(Boolean).join('\n\n')
 }
 
-// 每个 Provider + cwd 维护各自的会话；空 cwd 是“不绑定项目”的内存会话。
+// 每个 Provider + cwd 维护各自的会话；空 cwd 是“不绑定项目”的持久会话作用域。
 const sessionByContext = new Map<string, string>()
 const sessionRevisionByContext = new Map<string, number>()
 const sessionAliasesByContext = new Map<string, Map<string, string>>()
@@ -430,9 +430,10 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
 }
 
 async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void> {
-  if (!args.cwd || !args.sessionId) return
+  if (!args.sessionId) return
+  const archiveCwd = args.cwd ?? ''
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (isManagedRecorderProvider(args.providerId) && (await managedRecorderMode(args.cwd)).status === 'enabled') {
+  if (args.cwd && isManagedRecorderProvider(args.providerId) && (await managedRecorderMode(args.cwd)).status === 'enabled') {
     if (!args.providerTurnId) throw new Error('managed recorder requires an authoritative Provider turn id')
     if (!timing) throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     await persistManagedTraceProgress({
@@ -450,7 +451,7 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
   }
   await persistTraceTurnProgress({
     userDataDir: app.getPath('userData'),
-    cwd: args.cwd,
+    cwd: archiveCwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
     runtimeProvider: args.runtimeProvider,
@@ -459,15 +460,15 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
 }
 
 async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
-  if (!args.cwd) return
   if (!args.sessionId) {
-    if (isManagedRecorderProvider(args.providerId) && (await managedRecorderMode(args.cwd)).status === 'enabled') {
+    if (args.cwd && isManagedRecorderProvider(args.providerId) && (await managedRecorderMode(args.cwd)).status === 'enabled') {
       throw new Error('managed recorder requires an authoritative Provider session id')
     }
     return
   }
+  const archiveCwd = args.cwd ?? ''
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (isManagedRecorderProvider(args.providerId)) {
+  if (args.cwd && isManagedRecorderProvider(args.providerId)) {
     const mode = await managedRecorderMode(args.cwd)
     if (mode.status === 'enabled' && !timing) {
       throw new Error('managed recorder requires canonical Provider or observed interruption timing')
@@ -491,7 +492,7 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
     }
   }
   const ok = upsertTraceArchiveTurn({
-    cwd: args.cwd,
+    cwd: archiveCwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
     runtimeProvider: args.runtimeProvider,
@@ -751,16 +752,17 @@ handleTrusted('agent:catalogHealth', () => appSessionStore().health())
 
 // 加载一个历史会话：解析 transcript 成对话轮次，并把它设为当前会话（后续对话会 resume）
 handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
-  if (!payload.cwd || !payload.externalSessionId) return null
+  if (!payload.externalSessionId) return null
+  const cwd = payload.cwd ?? ''
   const archived = readTraceArchive({
-    cwd: payload.cwd,
+    cwd,
     sessionId: payload.externalSessionId,
     providerId: payload.providerId,
     userDataDir: app.getPath('userData')
   })
   const fp =
-    payload.providerId === 'claude'
-      ? resolveTranscriptPath({ cwd: payload.cwd, sessionId: payload.externalSessionId, userDataDir: app.getPath('userData') })
+    payload.providerId === 'claude' && cwd
+      ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir: app.getPath('userData') })
       : null
   let turns: ParsedTurn[] = []
   if (fp) {
@@ -776,23 +778,23 @@ handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
     }
   }
   if (!fp && !archived) return null
-  setCurrentCwd(payload.cwd)
-  const key = providerContextKey(payload.providerId, payload.cwd)
+  setCurrentCwd(cwd || undefined)
+  const key = providerContextKey(payload.providerId, cwd)
   bumpSessionRevision(key)
   sessionAliasesByContext.delete(key)
   const catalogSession = appSessionStore().load().find((session) =>
-    session.providerId === payload.providerId && session.cwd === payload.cwd &&
+    session.providerId === payload.providerId && session.cwd === cwd &&
     (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
   )
   if (!catalogSession || appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
   else sessionByContext.delete(key)
-  recentStore().push(payload.cwd)
+  if (cwd) recentStore().push(cwd)
   const merged = mergeSessionTurns(turns, archived, { userDataDir: app.getPath('userData') })
   const hookConfig =
-    payload.providerId === 'claude'
-      ? loadClaudeHookConfig(payload.cwd, homeDir)
+    cwd && payload.providerId === 'claude'
+      ? loadClaudeHookConfig(cwd, homeDir)
       : payload.providerId === 'codex'
-        ? loadCodexHookConfig(payload.cwd, homeDir)
+        ? cwd ? loadCodexHookConfig(cwd, homeDir) : null
         : null
   if (!hookConfig) return merged
   return merged.map((turn) => ({
@@ -810,17 +812,17 @@ handleTrusted(
       retained: ['workspace .scry/ canonical turn evidence', 'Provider-native session transcript/history'],
       failed: []
     })
-    if (!p.cwd || !p.externalSessionId || p.providerId === 'legacy_unknown') {
+    if (!p.externalSessionId || p.providerId === 'legacy_unknown') {
       return { ok: false, reason: 'invalid_request', ...empty() }
     }
-    const cwd = p.cwd
+    const cwd = p.cwd ?? ''
     const externalSessionId = p.externalSessionId
     const providerId = p.providerId as ProviderId
     const admissionKey = providerContextKey(providerId, cwd)
     const deletionKey = providerSessionKey(providerId, cwd, externalSessionId)
     const hasActiveSession = (): boolean => runs.unsettledStates().some((run) => {
       const sessionId = run.externalSessionId ?? run.sessionId
-      return run.providerId === providerId && run.cwd === cwd &&
+      return run.providerId === providerId && (run.cwd ?? '') === cwd &&
         (run.runId === externalSessionId || sessionId === externalSessionId)
     })
     const reserved = await contextAdmission.run(admissionKey, async () => {
@@ -990,6 +992,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   await warmShellEnv()
   const cwd = request.cwd ?? currentCwd
+  const catalogCwd = cwd ?? ''
   if (request.backend !== 'local') {
     throw new AgentRuntimeError(`backend=${request.backend} 尚未实现`, {
       provider: runtimeProvider,
@@ -1019,10 +1022,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         runId,
         externalSessionId
       }))
-      if (!cwd) return liveAliases
       try {
         return [...liveAliases, ...appSessionStore().load()
-          .filter((session) => session.providerId === providerId && session.cwd === cwd && Boolean(session.runId))
+          .filter((session) => session.providerId === providerId && session.cwd === catalogCwd && Boolean(session.runId))
           .map((session) => ({
             runId: session.runId!,
             ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : {}),
@@ -1142,7 +1144,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       })
     }
   }
-  const recordingKey = cwd && resume ? providerSessionKey(providerId, cwd, resume) : undefined
+  const recordingKey = resume ? providerSessionKey(providerId, catalogCwd, resume) : undefined
   if (recordingKey && recoveredManagedTurns > 0) recordingBlockedSessions.delete(recordingKey)
   const recordingFailure = recordingKey ? recordingBlockedSessions.get(recordingKey) : undefined
   if (recordingFailure) {
@@ -1223,8 +1225,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     providerSettled: false
   }
   const cleanupProvisional = (): void => {
-    if (!cwd || resume || runState.externalSessionId) return
-    appSessionStore().remove({ providerId, cwd, externalSessionId: runId })
+    if (resume || runState.externalSessionId) return
+    appSessionStore().remove({ providerId, cwd: catalogCwd, externalSessionId: runId })
   }
   const emit = (rawEvent: TraceEvent): void => {
     const ev = hookConfig ? attachConfiguredHookCommands(rawEvent, hookConfig) : rawEvent
@@ -1252,20 +1254,20 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     }
   })
   try {
-    if (cwd && resume) {
+    if (resume) {
       // 续接同一原生 session 时也要把侧栏元数据的 runId 更新为本轮，否则切走再点回会拿到上一轮的 stale runId。
       appSessionStore().record({
         providerId,
         runtimeProvider,
         runId,
         externalSessionId: resume,
-        cwd,
+        cwd: catalogCwd,
         prompt: displayPrompt
       })
-    } else if (cwd) {
+    } else {
       // Ownership is durable before attachment bytes are created. A crash can no longer
       // leave a new-session attachment directory with no catalog runId to delete.
-      appSessionStore().recordPending({ providerId, runtimeProvider, runId, cwd, prompt: displayPrompt })
+      appSessionStore().recordPending({ providerId, runtimeProvider, runId, cwd: catalogCwd, prompt: displayPrompt })
     }
     attachments = prepareRunAttachments(
       app.getPath('userData'),
@@ -1275,14 +1277,14 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     )
     runState.attachments = attachments
     runtimePrompt = attachmentPrompt(displayPrompt, attachments)
-    if (cwd && resume) {
+    if (resume) {
       win?.webContents.send('agent:session', {
         runId,
         sessionId: resume,
         externalSessionId: resume,
         providerId
       })
-    } else if (cwd) {
+    } else {
       win?.webContents.send('agent:session', { runId, sessionId: runId, providerId, pending: true })
     }
   } catch (error) {
@@ -1363,12 +1365,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         console.warn('[scry] attachment ownership update deferred:', runId, error)
       }
     }
-    if (cwd) {
-      try {
-        appSessionStore().record({ providerId, runtimeProvider, runId, externalSessionId: sessionId, cwd, prompt: displayPrompt })
-      } catch (error) {
-        console.warn('[scry] native session catalog update deferred:', runId, error)
-      }
+    try {
+      appSessionStore().record({ providerId, runtimeProvider, runId, externalSessionId: sessionId, cwd: catalogCwd, prompt: displayPrompt })
+    } catch (error) {
+      console.warn('[scry] native session catalog update deferred:', runId, error)
     }
     if (notifiedSessionId === sessionId) return
     notifiedSessionId = sessionId
@@ -1504,24 +1504,22 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       publishSessionId(r.externalSessionId)
       // Diff 是附加观测数据：立即开始采集，但不能阻塞用户看到 turnDone。
       // 归档仍等待它完成，保证历史回放最终包含 turn_diff。
-      if (cwd) {
-        try {
-          appSessionStore().record({
-            providerId,
-            runtimeProvider,
-            runId,
-            externalSessionId: storageSessionId,
-            cwd,
-            prompt: displayPrompt
-          })
-        } catch (error) {
-          win?.webContents.send('agent:error', {
-            runId,
-            message: `模型已完成，但会话 catalog 更新失败：${String((error as Error).message)}`,
-            category: 'catalog',
-            hint: '保留 userData/app-sessions.json 与 .bak 后重试；本轮 trace 仍会继续归档'
-          })
-        }
+      try {
+        appSessionStore().record({
+          providerId,
+          runtimeProvider,
+          runId,
+          externalSessionId: storageSessionId,
+          cwd: catalogCwd,
+          prompt: displayPrompt
+        })
+      } catch (error) {
+        win?.webContents.send('agent:error', {
+          runId,
+          message: `模型已完成，但会话 catalog 更新失败：${String((error as Error).message)}`,
+          category: 'catalog',
+          hint: '保留 userData/app-sessions.json 与 .bak 后重试；本轮 trace 仍会继续归档'
+        })
       }
       mirrorSessionTranscript(providerId, cwd, nativeSessionId)
       const alreadyDone = runState.done
@@ -1536,7 +1534,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         const message = `模型已完成，但 Scry 精确记录快照失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
-        if (cwd) recordingBlockedSessions.set(providerSessionKey(providerId, cwd, storageSessionId), runState.errorHint)
+        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
         win?.webContents.send('agent:error', {
           runId,
           message,
@@ -1557,12 +1555,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       try {
         await archiveTraceTurn(completionArchiveArgs)
         terminalArchiveCommitted = true
-        if (cwd) recordingBlockedSessions.delete(providerSessionKey(providerId, cwd, storageSessionId))
+        recordingBlockedSessions.delete(providerSessionKey(providerId, catalogCwd, storageSessionId))
       } catch (error) {
         const message = `模型已完成，但 Scry 精确记录提交失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
-        if (cwd) recordingBlockedSessions.set(providerSessionKey(providerId, cwd, storageSessionId), runState.errorHint)
+        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
         win?.webContents.send('agent:error', {
           runId,
           message,
@@ -1663,24 +1661,22 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           runState.errorHint = hint
         }
       }
-      if (cwd) {
-        try {
-          appSessionStore().record({
-            providerId,
-            runtimeProvider,
-            runId,
-            externalSessionId: storageSessionId,
-            cwd,
-            prompt: displayPrompt
-          })
-        } catch (catalogError) {
-          win?.webContents.send('agent:error', {
-            runId,
-            message: `Provider 已失败，且会话 catalog 更新失败：${String((catalogError as Error).message)}`,
-            category: 'catalog',
-            hint: '保留 userData/app-sessions.json、archive 与 attachments 后重试恢复'
-          })
-        }
+      try {
+        appSessionStore().record({
+          providerId,
+          runtimeProvider,
+          runId,
+          externalSessionId: storageSessionId,
+          cwd: catalogCwd,
+          prompt: displayPrompt
+        })
+      } catch (catalogError) {
+        win?.webContents.send('agent:error', {
+          runId,
+          message: `Provider 已失败，且会话 catalog 更新失败：${String((catalogError as Error).message)}`,
+          category: 'catalog',
+          hint: '保留 userData/app-sessions.json、archive 与 attachments 后重试恢复'
+        })
       }
       mirrorSessionTranscript(providerId, cwd, nativeSessionId)
       try {
@@ -1689,7 +1685,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         const recordingMessage = `Provider 已结束，但 Scry 精确记录快照失败：${String((progressError as Error).message)}`
         runState.error = recordingMessage
         runState.errorHint = recordingRecoveryHint
-        if (cwd) recordingBlockedSessions.set(providerSessionKey(providerId, cwd, storageSessionId), runState.errorHint)
+        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
         flushTraceSend()
         win?.webContents.send('agent:error', {
           runId,
@@ -1709,11 +1705,11 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       try {
         await archiveTraceTurn(terminalArchiveArgs)
         terminalArchiveCommitted = true
-        if (cwd) recordingBlockedSessions.delete(providerSessionKey(providerId, cwd, storageSessionId))
+        recordingBlockedSessions.delete(providerSessionKey(providerId, catalogCwd, storageSessionId))
       } catch (archiveError) {
         exactRecorded = false
-        if (cwd) recordingBlockedSessions.set(
-          providerSessionKey(providerId, cwd, storageSessionId),
+        recordingBlockedSessions.set(
+          providerSessionKey(providerId, catalogCwd, storageSessionId),
           recordingRecoveryHint
         )
         console.error('[scry] exact turn archive failed:', archiveError)
@@ -1748,12 +1744,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         try {
           await archiveTraceTurn(terminalArchiveArgs)
           terminalArchiveCommitted = true
-          if (cwd && terminalArchiveArgs.sessionId) {
-            recordingBlockedSessions.delete(providerSessionKey(providerId, cwd, terminalArchiveArgs.sessionId))
+          if (terminalArchiveArgs.sessionId) {
+            recordingBlockedSessions.delete(providerSessionKey(providerId, catalogCwd, terminalArchiveArgs.sessionId))
           }
         } catch (archiveError) {
-          if (cwd && terminalArchiveArgs.sessionId) recordingBlockedSessions.set(
-            providerSessionKey(providerId, cwd, terminalArchiveArgs.sessionId),
+          if (terminalArchiveArgs.sessionId) recordingBlockedSessions.set(
+            providerSessionKey(providerId, catalogCwd, terminalArchiveArgs.sessionId),
             recordingRecoveryHint
           )
           console.error('[scry] fallback terminal archive failed:', archiveError)
@@ -1847,7 +1843,7 @@ handleTrusted('agent:stop', (_event, runId: string) => {
 
 // B2-lite：累计用量统计（读 usage.jsonl 聚合）
 handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
-  readUsageStats(app.getPath('userData'), context ? { providerId: context.providerId, cwd: context.cwd } : {})
+  readUsageStats(app.getPath('userData'), context ? { providerId: context.providerId, cwd: context.cwd ?? '' } : {})
 )
 
 app.whenReady().then(() => {

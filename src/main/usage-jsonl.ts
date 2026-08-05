@@ -129,7 +129,7 @@ export function readUsageStats(
         parsedLines++
         const providerId = o.providerId ?? 'legacy_unknown'
         if (filter.providerId && providerId !== filter.providerId) continue
-        if (filter.cwd && o.cwd !== filter.cwd) continue
+        if (filter.cwd != null && o.cwd !== filter.cwd) continue
         if (typeof o.cost === 'number') {
           cost += o.cost
           costRows++
