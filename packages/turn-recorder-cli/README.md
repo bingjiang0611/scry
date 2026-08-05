@@ -5,9 +5,18 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.12 \
+npm install -g @ali/scry-turn-recorder@0.2.14 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
+
+独立 npm 安装的 `scry` 会在交互式命令结束后后台检查更新；检查至多每天一次，失败后 6 小时再试，当前命令不会等待网络。`0.x` 版本只自动安装同一 minor 下的 patch，`1.x` 起只自动安装同一 major 下的兼容版本。桌面 App 内置 CLI、recorder、daemon 和 CI 不触发自动更新。
+
+```bash
+scry upgrade --check  # 只检查
+scry upgrade          # 立即升级到 registry 的 latest
+```
+
+设置 `SCRY_NO_UPDATE_CHECK=1` 或传入 `--no-update-check` 可关闭后台检查；私有 registry 可通过 `SCRY_CLI_REGISTRY` 覆盖。
 
 ```bash
 scry doctor --workspace "$PWD"

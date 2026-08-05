@@ -15,7 +15,7 @@ bin_dir=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
 resources_dir=$(dirname "$bin_dir")
 contents_dir=$(dirname "$resources_dir")
 
-ELECTRON_RUN_AS_NODE=1 exec \
+SCRY_CLI_BUNDLED=1 ELECTRON_RUN_AS_NODE=1 exec \
   "$contents_dir/MacOS/Scry" \
   "$resources_dir/scry-cli/dist/cli/scry.js" \
   "$@"

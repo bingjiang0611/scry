@@ -12,5 +12,5 @@
     "sourceMap": false
   },
   "include": ["src/cli/**/*"],
-  "exclude": ["src/cli/**/*.test.ts", "src/cli/scry.ts"]
+  "exclude": ["src/cli/**/*.test.ts", "src/cli/scry.ts", "src/cli/update.ts"]
 }
