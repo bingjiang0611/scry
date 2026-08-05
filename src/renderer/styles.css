@@ -3674,9 +3674,10 @@ button.turn-timing-call {
 }
 .verdict-right {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .verdict-pillar {
+  min-width: 0;
   padding: 11px 14px 12px;
   border-right: 1px solid var(--border3);
   border-bottom: 1px solid var(--border3);
@@ -3691,6 +3692,7 @@ button.turn-timing-call {
   border-bottom: 0;
 }
 .verdict-pillar .nm {
+  min-width: 0;
   font: 10.5px/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.14em;
@@ -3698,6 +3700,9 @@ button.turn-timing-call {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* SUBAGENT 这类单词在窄列里断不开，不允许它顶进隔壁 pillar */
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 .verdict-pillar .v {
   font: 600 14px/1.1 var(--font-mono);
@@ -3725,9 +3730,11 @@ button.turn-timing-call {
   background: var(--bad);
 }
 .verdict-pillar .sub {
+  min-width: 0;
   font: 10px/1.4 var(--font-mono);
   color: var(--dim2);
   margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 .verdict-pillar-action {
   appearance: none;
@@ -5104,7 +5111,9 @@ button.toptool {
 }
 /* full verdict 卡（graph 顶部，非 compact，4 pillar 一排） */
 .verdict-card.full {
-  grid-template-columns: 280px 1fr;
+  /* 都用 minmax(0, …)：1fr 的下限是 min-content，pillar 里的
+     「审计·未拦截」这类文案会把整排顶出卡片，再被 overflow:hidden 切一半。 */
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
   margin: 14px 0 18px;
 }
 .verdict-card.full .verdict-left {
@@ -5115,7 +5124,7 @@ button.toptool {
   font-size: 22px;
 }
 .verdict-card.full .verdict-right {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .verdict-card.full .verdict-pillar {
   border-bottom: 0;
@@ -5128,7 +5137,30 @@ button.toptool {
   font-size: 15px;
 }
 
-@media (max-width: 1180px) {
+/* 卡片可能被视图内部的分栏压窄（拓扑左树右详情），这跟主区宽度无关，
+   所以 pillar 列数按卡片自身宽度判定：4 列挤到 ~74px 会把 SUBAGENT 折断。 */
+.verdict-card.full {
+  container-type: inline-size;
+}
+
+@container (max-width: 640px) {
+  .verdict-card.full .verdict-right {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .verdict-card.full .verdict-pillar:nth-child(2n) {
+    border-right: 0;
+  }
+
+  /* 除最后一排外都补一条底线，2 列 4/5 个 pillar 都成立 */
+  .verdict-card.full .verdict-pillar:nth-last-child(n + 3) {
+    border-bottom: 1px solid var(--border3);
+  }
+}
+
+/* 判决卡 / 分段卡都活在主区里：断点按主区（container）判，不按窗口。
+   拖宽右栏或放大缩放都会把主区压窄，而 viewport 断点这两种情况都看不到。 */
+@container main-pane (max-width: 920px) {
   .verdict-card.full {
     grid-template-columns: 1fr;
   }
@@ -5457,6 +5489,8 @@ button.toptool {
   opacity: 0.55;
 }
 .a-token-day > span { position: absolute; top: calc(100% + 7px); left: 0; font: 9px/1 var(--font-mono); color: var(--dim2); white-space: nowrap; }
+/* 末日期标签靠右生长，否则窄栏（缩放/拖分栏）时会被卡片边缘切掉 */
+.a-token-day:last-child > span { left: auto; right: 0; }
 .a-chart-note { padding: 9px 18px 12px; border-top: 1px solid var(--border3); color: var(--dim2); font: 10px/1.5 var(--font-mono); }
 .a-heatmap {
   padding: 18px; display: grid; grid-template-columns: repeat(15, minmax(10px, 1fr)); gap: 5px;
@@ -5480,7 +5514,10 @@ button.toptool {
 .a-cache-row strong { font: 650 13px/1 var(--font-mono); color: var(--accent); }
 .a-cache-row span, .a-cache-row em { font: 10px/1.45 var(--font-mono); color: var(--dim2); font-style: normal; }
 .a-cache-row em { text-align: right; }
-.a-coverage-head, .a-coverage-row { grid-template-columns: minmax(78px, 1fr) repeat(4, 54px) 82px; }
+/* 数值列用 minmax(0, x)：主区被压窄时这些列跟着收，不会把整表顶出卡片。
+   固定宽度的列在窄栏里既撑破卡片又把「classified / unsupported」切一半。 */
+.a-coverage-head, .a-coverage-row { grid-template-columns: minmax(60px, 1fr) repeat(4, minmax(0, 54px)) minmax(0, 82px); }
+.a-coverage-head > *, .a-coverage-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .a-coverage-row b { font: 600 11.5px/1 var(--font-ui); }
 .a-coverage-row span { color: var(--dim); text-align: right; }
 .a-coverage-row em { font-style: normal; text-align: right; color: var(--dim2); }
@@ -6626,7 +6663,11 @@ textarea:focus-visible,
     width: min(var(--overview-panel-w), calc(100vw - var(--sidebar-w) - var(--pane-resizer-w)));
     box-shadow: -18px 0 48px rgba(0, 0, 0, 0.5);
   }
+}
 
+/* 诊断/分析的多列网格按主区宽度收拢：只看 viewport 的话，
+   把左栏或右栏拖宽时这些网格会继续硬撑多列，把内容挤出卡片。 */
+@container main-pane (max-width: 920px) {
   .d-grid,
   .a-grid,
   .a-wide-grid {
@@ -6638,7 +6679,7 @@ textarea:focus-visible,
   }
 }
 
-@media (max-width: 900px) {
+@container main-pane (max-width: 640px) {
   .welcome-pane {
     padding: 48px 24px 32px;
   }
@@ -6676,7 +6717,7 @@ textarea:focus-visible,
 
   .a-coverage-head,
   .a-coverage-row {
-    grid-template-columns: minmax(68px, 1fr) repeat(4, 42px) 68px;
+    grid-template-columns: minmax(52px, 1fr) repeat(4, minmax(0, 42px)) minmax(0, 68px);
     gap: 6px;
     padding-inline: 12px;
     font-size: 9.5px;
@@ -6684,7 +6725,7 @@ textarea:focus-visible,
 
   .a-mcp-head,
   .a-mcp-row {
-    grid-template-columns: minmax(0, 1fr) 42px 54px 54px 48px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 42px) minmax(0, 54px) minmax(0, 54px) minmax(0, 48px);
     gap: 6px;
     padding-inline: 12px;
   }
@@ -6873,7 +6914,9 @@ textarea:focus-visible,
 .composer {
   max-width: 960px;
   margin: 0 auto;
-  padding: 8px clamp(18px, 3vw, 32px) 10px;
+  /* 内边距跟主区（container）走而不是跟 viewport 走：拖宽右栏时窗口没变，
+     3vw 会继续留 32px 白边，把本来就不够的输入区再挤窄。 */
+  padding: 8px clamp(12px, 3cqi, 32px) 10px;
   border-top: 0;
   background: transparent;
 }
@@ -6924,6 +6967,8 @@ textarea:focus-visible,
 .composer-bottom {
   min-width: 0;
   flex-wrap: nowrap;
+  /* 运行配置换行成多排时，发送/停止跟最后一排对齐，而不是悬在两排中间 */
+  align-items: flex-end;
   gap: 6px;
   margin-top: 3px;
 }
@@ -6932,24 +6977,19 @@ textarea:focus-visible,
   min-width: 0;
   display: flex;
   flex: 0 1 auto;
-  flex-wrap: nowrap;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 3px;
 }
 
+/* 运行配置：宽度不够时先让模型名省略号收窄，再整块换行——绝不横向裁切。
+   （被切一半的「完全访问」既难看又看不出当前权限，违反反假状态原则。）
+   窄宽度来自窗口缩放和左右拖分栏两种路径，所以只能靠内在收缩/换行，
+   不能靠 viewport 断点：拖分栏时 viewport 根本没变。
+   display: contents 让三个下拉与 Agent 选择器在同一个 flex 流里换行，
+   换行后每排都左对齐，不会挂在 Agent 按钮右边缩进一格。 */
 .run-control-scroll {
-  min-width: 0;
-  display: flex;
-  flex: 0 1 auto;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 3px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.run-control-scroll::-webkit-scrollbar {
-  display: none;
+  display: contents;
 }
 
 .run-control-select {
@@ -6961,7 +7001,10 @@ textarea:focus-visible,
 }
 
 .run-control-select select {
-  max-width: 210px;
+  min-width: 0; /* flex item 默认 min-width:auto 会拒绝收缩，宽度不足时直接顶穿容器 */
+  /* 模型名最长，用主区宽度（container）约束它：窄栏里先省略号让位，
+     免得它一个人占满一排、把 effort/权限挤到下一排 */
+  max-width: min(210px, 34cqi);
   height: 40px;
   appearance: none;
   padding: 0 25px 0 9px;
@@ -7040,24 +7083,9 @@ textarea:focus-visible,
 
 .composer .stop {
   height: 40px;
+  flex: none;
   padding: 0 10px;
-}
-
-@media (max-width: 1080px) {
-  .composer {
-    padding-inline: 12px;
-  }
-
-  .run-control-select select {
-    max-width: 150px;
-  }
-
-}
-
-@media (max-width: 900px) {
-  .run-control-select select {
-    max-width: 132px;
-  }
+  white-space: nowrap;
 }
 
 .unbound-empty {
@@ -7665,7 +7693,7 @@ textarea:focus-visible,
   background: transparent;
 }
 
-@media (max-width: 1180px) {
+@container main-pane (max-width: 920px) {
   .d-pane .verdict-card.full .verdict-right {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -7683,7 +7711,7 @@ textarea:focus-visible,
   }
 }
 
-@media (max-width: 820px) {
+@container main-pane (max-width: 560px) {
   .d-verdict-wrap,
   .d-grid,
   .d-foot {
@@ -7950,7 +7978,8 @@ textarea:focus-visible,
   opacity: 0.7;
 }
 
-@media (max-width: 720px) {
+/* 内联问答表单长在对话流里 → 断点按主区宽度，不按窗口 */
+@container main-pane (max-width: 460px) {
   .question-dialog-head,
   .question-dialog-body,
   .question-dialog-foot {
