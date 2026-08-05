@@ -30,6 +30,17 @@ files:
   # Qoder adapter always passes the user's external qodercli path; the SDK postinstall binary is unused (~95 MiB).
   - "!node_modules/@qoder-ai/qoder-agent-sdk/dist/_bundled/**"
 
+# App 私有 recorder CLI：Provider/Hook 固定调用 Resources/bin/scry，随 App 一起升级。
+# wrapper 复用 Electron 的 Node 模式，不再额外捆绑 Node runtime。
+extraResources:
+  - from: packages/turn-recorder-cli
+    to: scry-cli
+    filter:
+      - package.json
+      - dist/**
+  - from: build/scry-cli
+    to: bin/scry
+
 mac:
   category: public.app-category.developer-tools
   # 本地试跑：dir 目标最快(只出 .app 不打 dmg)，identity:null 跳过 Developer ID 签名(ad-hoc)。

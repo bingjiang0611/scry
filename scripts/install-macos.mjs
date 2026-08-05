@@ -16,6 +16,7 @@ if (!existsSync(source)) {
 
 const launchServices = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 const expectedVersion = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')).version
+const expectedCliVersion = JSON.parse(readFileSync(join(process.cwd(), 'packages', 'turn-recorder-cli', 'package.json'), 'utf8')).version
 
 function run(command, args, capture = false) {
   const result = spawnSync(command, args, capture ? { encoding: 'utf8' } : { stdio: 'inherit' })
@@ -27,6 +28,10 @@ function run(command, args, capture = false) {
 function validateBundle(path) {
   accessSync(join(path, 'Contents', 'MacOS', 'Scry'), constants.X_OK)
   if (!existsSync(join(path, 'Contents', 'Resources', 'app.asar'))) throw new Error('安装包缺少 Resources/app.asar')
+  const cli = join(path, 'Contents', 'Resources', 'bin', 'scry')
+  accessSync(cli, constants.X_OK)
+  const cliVersion = run(cli, ['--version'], true)
+  if (cliVersion !== expectedCliVersion) throw new Error(`内置 CLI 版本不匹配：expected ${expectedCliVersion}, got ${cliVersion || 'unknown'}`)
   const plist = join(path, 'Contents', 'Info.plist')
   const bundleId = run('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], true)
   const version = run('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', plist], true)

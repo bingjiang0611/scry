@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, readdirSync } from 'node:fs'
+import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { listPackage } from '@electron/asar'
 
@@ -9,6 +10,8 @@ const unpacked = join(resources, 'app.asar.unpacked')
 const qoderRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 'dist', '_bundled', 'qodercli')
 const qoderIndexRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 'dist', 'index.js')
 const maxBytes = Number(process.env.SCRY_APP_MAX_BYTES || 380 * 1024 * 1024)
+const scryCli = join(resources, 'bin', 'scry')
+const scryCliPackage = join(resources, 'scry-cli', 'package.json')
 
 function directoryBytes(path) {
   const stat = lstatSync(path)
@@ -59,8 +62,16 @@ const sdkIndexInAsar = entries.includes(`/${qoderIndexRelative.replaceAll('\\', 
 const sdkIndexUnpacked = existsSync(join(unpacked, qoderIndexRelative))
 if (!sdkIndexInAsar && !sdkIndexUnpacked) throw new Error('排除 Qoder CLI 时误删了 Qoder SDK JavaScript adapter')
 
+accessSync(scryCli, constants.X_OK)
+if (!existsSync(scryCliPackage)) throw new Error('packaged app 缺少 App 私有 Scry CLI package.json')
+const expectedCliVersion = JSON.parse(readFileSync(scryCliPackage, 'utf8')).version
+const actualCliVersion = execFileSync(scryCli, ['--version'], { encoding: 'utf8', timeout: 5_000 }).trim()
+if (actualCliVersion !== expectedCliVersion) {
+  throw new Error(`App 私有 Scry CLI 版本不匹配：expected ${expectedCliVersion}, got ${actualCliVersion || 'unknown'}`)
+}
+
 const bytes = directoryBytes(appPath)
 if (bytes > maxBytes) {
   throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes`)
 }
-console.log(JSON.stringify({ appPath, bytes, maxBytes, preload: 'cjs', qoderBundledCli: false, qoderSdk: true }))
+console.log(JSON.stringify({ appPath, bytes, maxBytes, preload: 'cjs', qoderBundledCli: false, qoderSdk: true, scryCliBundled: true, scryCliVersion: actualCliVersion }))
