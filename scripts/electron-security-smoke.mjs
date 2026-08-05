@@ -140,7 +140,12 @@ async function main() {
   assert.deepEqual(csp, { violated: true, executed: false })
 
   const transportPicker = await evaluate(`(async () => {
-    const recent = document.querySelector('button.recent')
+    const deadline = Date.now() + 2_000
+    let recent
+    while (!recent && Date.now() < deadline) {
+      recent = document.querySelector('button.sb-sess')
+      if (!recent) await new Promise((resolve) => setTimeout(resolve, 50))
+    }
     recent?.click()
     await new Promise((resolve) => setTimeout(resolve, 250))
     document.querySelector('button.clibtn')?.click()
