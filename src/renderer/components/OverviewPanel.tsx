@@ -1158,11 +1158,16 @@ export function OverviewPanel({
       )}
 
       {isOverviewTab && turns.length > 0 && (
-        <div className="panel-section">
-          <h4>
-            HOOKS
-            <span className="more">
-              本会话 · 处理器 {hookSummary.logicalRuns} 实例 · 生命周期 {hookSummary.rawEvents} 条
+        <div className="panel-section hooks-section">
+          <h4 className="hooks-heading">
+            <span>HOOKS</span>
+            <span
+              className="hook-summary-stats"
+              aria-label={`本会话 Hook：事件 ${hookSummary.groups.length} 类，${hookSummary.logicalRuns} 次执行，${hookSummary.rawEvents} 条生命周期事件`}
+            >
+              <span>事件 {hookSummary.groups.length} 类</span>
+              <span>{hookSummary.logicalRuns} 次执行</span>
+              <span>{hookSummary.rawEvents} 条事件</span>
             </span>
           </h4>
           {hookSummary.groups.length === 0 ? (
@@ -1170,6 +1175,11 @@ export function OverviewPanel({
           ) : (
             hookSummary.groups.map((h) => {
               const tone = hookTone(h)
+              const triggerLabel = h.trigger === h.event
+                ? null
+                : h.trigger.startsWith(`${h.event}:`)
+                  ? h.trigger.slice(h.event.length + 1)
+                  : h.trigger
               return (
                 <div className="hook-group" key={h.key}>
                   <button
@@ -1179,13 +1189,15 @@ export function OverviewPanel({
                     title="点查看最近一次 hook 事件"
                   >
                     <span className={`sdot ${tone}`} />
-                    <span className="fname" title={`${h.event} · ${h.trigger}`}>
-                      {h.event}
+                    <span className="hook-trigger-main">
+                      <span className="fname" title={`${h.event} · ${h.trigger}`}>
+                        {h.event}
+                      </span>
+                      {triggerLabel && <span className="dim hook-name">{triggerLabel}</span>}
                     </span>
-                    <span className="dim hook-name">{h.trigger}</span>
                     <span className="dim hook-count">
-                      {h.triggerRuns == null ? '触发次数未单独上报' : `触发 ${h.triggerRuns} 次`}
-                      {' · '}处理器 {h.logicalRuns} 实例 · 生命周期 {h.rawEvents} 条
+                      {h.triggerRuns != null && <>{h.triggerRuns} 次触发 · </>}
+                      {h.logicalRuns} 次执行 · {h.rawEvents} 条事件
                     </span>
                   </button>
                   {h.scripts.map((s) => {
@@ -1196,16 +1208,18 @@ export function OverviewPanel({
                     const configuredCommands = uniqueConfiguredCommands(s.instances)
                     const logicalHandlers = logicalHookRows(configuredCommands, s.command)
                     const displayedInstances = groupHookInstances(s.instances)
+                    const badgeText = hookBadgeText(s)
+                    const detailText = hookDetailText(s)
+                    const secondaryDetail = detailText && !badgeText.startsWith(detailText) ? detailText : null
                     return (
                       <details className="hook-script overview-hook-script" key={s.key}>
                         <summary
                           className="callrow hook-row indent"
                           title={cancellationTitle ?? '点查看 Hook 执行详情'}
                         >
-                          <span className={`sdot ${scriptTone}`} />
                           <span className="fname hook-command">{s.label}</span>
-                          <span className="dim hook-detail">{hookDetailText(s)}</span>
-                          <span className={`hook-status ${scriptTone}`}>{hookBadgeText(s)}</span>
+                          {secondaryDetail && <span className="dim hook-detail">{secondaryDetail}</span>}
+                          <span className={`hook-status ${scriptTone}`}>{badgeText}</span>
                           <Icon name="chevronRight" className="hook-row-chev" />
                         </summary>
                         <div className="turn-hook-detail overview-hook-detail">
