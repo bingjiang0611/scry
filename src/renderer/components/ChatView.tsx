@@ -377,40 +377,42 @@ export function ChatView({
               onRescan={onRescan}
               disabled={busy}
             />
-            <RunControlSelect
-              ariaLabel="模型"
-              value={modelValue}
-              options={modelOptions}
-              disabled={busy}
-              loading={runControlsLoading}
-              onChange={(value) => {
-                const option = runControlCatalog.models.find(
-                  (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
-                )
-                onRunModel(option?.model)
-              }}
-            />
-            {selectedModel && selectedModel.efforts.length > 0 && (
+            <div className="run-control-scroll">
               <RunControlSelect
-                ariaLabel="Effort"
-                value={runControls.effort ?? ''}
-                options={effortOptions}
+                ariaLabel="模型"
+                value={modelValue}
+                options={modelOptions}
                 disabled={busy}
-                onChange={(value) => onRunEffort(value || undefined)}
+                loading={runControlsLoading}
+                onChange={(value) => {
+                  const option = runControlCatalog.models.find(
+                    (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
+                  )
+                  onRunModel(option?.model)
+                }}
               />
-            )}
-            <RunControlSelect
-              ariaLabel="权限"
-              value={runControls.permissionMode}
-              options={runControlCatalog.permissions.map((option) => ({
-                value: option.id,
-                label: option.label,
-                description: option.description
-              }))}
-              disabled={busy}
-              tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
-              onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
-            />
+              {selectedModel && selectedModel.efforts.length > 0 && (
+                <RunControlSelect
+                  ariaLabel="Effort"
+                  value={runControls.effort ?? ''}
+                  options={effortOptions}
+                  disabled={busy}
+                  onChange={(value) => onRunEffort(value || undefined)}
+                />
+              )}
+              <RunControlSelect
+                ariaLabel="权限"
+                value={runControls.permissionMode}
+                options={runControlCatalog.permissions.map((option) => ({
+                  value: option.id,
+                  label: option.label,
+                  description: option.description
+                }))}
+                disabled={busy}
+                tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
+                onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
+              />
+            </div>
           </div>
           <div className="spacer" />
           <button

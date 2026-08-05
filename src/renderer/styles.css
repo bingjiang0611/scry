@@ -6664,11 +6664,20 @@ textarea:focus-visible,
   flex-wrap: nowrap;
   align-items: center;
   gap: 3px;
+}
+
+.run-control-scroll {
+  min-width: 0;
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 3px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.composer-controls::-webkit-scrollbar {
+.run-control-scroll::-webkit-scrollbar {
   display: none;
 }
 
