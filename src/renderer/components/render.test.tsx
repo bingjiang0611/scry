@@ -415,6 +415,8 @@ describe('Sidebar 项目分组', () => {
         onMcp={() => {}}
         mcps={mcps}
         mcpLive={mcpLive}
+        onSettings={() => {}}
+        themeLabel="浅色"
       />
     )
 
@@ -431,6 +433,8 @@ describe('Sidebar 项目分组', () => {
     expect(disabledHtml).toContain('<span class="sb-navmeta">3</span>')
     expect(disabledHtml).toContain('aria-label="MCP · 1/1 已连接"')
     expect(disabledHtml).toContain('class="sb-navdot online"')
+    expect(disabledHtml).toContain('class="sb-navitem sb-settings"')
+    expect(disabledHtml).toContain('<span class="sb-navmeta">浅色</span>')
     expect(disabledHtml.indexOf('诊断')).toBeLessThan(disabledHtml.indexOf('title="Skills"'))
 
     const partialHtml = renderIntegrations([
@@ -3069,7 +3073,7 @@ describe('SegmentsView 渲染：主体内容对齐容器', () => {
 })
 
 import { DiagnosticsView } from './DiagnosticsView'
-import { McpModal, SkillsModal } from './Modals'
+import { McpModal, SettingsModal, SkillsModal } from './Modals'
 
 describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => {
   const html = renderToStaticMarkup(
@@ -3278,6 +3282,17 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
 })
 
 describe('McpModal 渲染：pending 不伪装 connected', () => {
+  it('设置弹窗把当前主题呈现为可访问的单选项', () => {
+    const html = renderToStaticMarkup(
+      <SettingsModal theme="light" onThemeChange={() => {}} onClose={() => {}} />
+    )
+    expect(html).toContain('class="modal settings-modal"')
+    expect(html).toContain('role="radiogroup" aria-label="界面主题"')
+    expect(html).toContain('class="theme-option active" role="radio" aria-checked="true"')
+    expect(html).toContain('浅色')
+    expect(html).toContain('立即应用到全部视图')
+  })
+
   it('Skill 与 MCP 首次后台读取时立即展示诚实加载态', () => {
     const skillHtml = renderToStaticMarkup(
       <SkillsModal
