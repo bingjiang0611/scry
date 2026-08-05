@@ -20,7 +20,7 @@ import { DiagnosticsView } from './components/DiagnosticsView'
 import { AnalyticsView } from './components/AnalyticsView'
 import { ViewChrome, type AppView } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
-import { SkillsModal, McpModal } from './components/Modals'
+import { SkillsModal, McpModal, SettingsModal } from './components/Modals'
 import { TurnDiffReviewPanel, type TurnDiffReview } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspacePanel'
 import type { ParsedTurn } from './env'
@@ -28,6 +28,7 @@ import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
 import { useAgentSession } from './hooks/useAgentSession'
+import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -317,6 +318,7 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
 }
 
 export function App() {
+  const [theme, setTheme] = useState<AppTheme>(() => readStoredTheme(browserThemeStorage()))
   const [input, setInput] = useState('')
   const [composerError, setComposerError] = useState<string | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
@@ -446,6 +448,7 @@ export function App() {
   const [turnDiffReview, setTurnDiffReview] = useState<TurnDiffReview | null>(null)
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [view, setView] = useState<AppView>('chat') // 对话/拓扑/分段/诊断/分析
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
@@ -927,6 +930,11 @@ export function App() {
     setShowMcp(true)
     if (!integrations.mcpCapability) void integrations.refreshMcp().catch(() => {})
   }
+  const changeTheme = (nextTheme: AppTheme): void => {
+    setTheme(nextTheme)
+    applyTheme(nextTheme, document.documentElement)
+    persistTheme(nextTheme, browserThemeStorage())
+  }
 
   const activeRightPane = turnDiffReview ? reviewPane : workspaceOpen ? workspacePane : overviewPane
   const appStyle: AppStyle = {
@@ -1057,6 +1065,8 @@ export function App() {
           mcps={integrations.mcps}
           mcpLive={integrations.mcpLive}
           catalogHealth={catalogHealth}
+          onSettings={() => setShowSettings(true)}
+          themeLabel={theme === 'dark' ? '深色' : '浅色'}
         />
       }
       sidebarSplitter={
@@ -1266,6 +1276,13 @@ export function App() {
               onToggle={integrations.toggleMcp}
               onRefresh={integrations.pullMcpLive}
               onClose={() => setShowMcp(false)}
+            />
+          )}
+          {showSettings && (
+            <SettingsModal
+              theme={theme}
+              onThemeChange={changeTheme}
+              onClose={() => setShowSettings(false)}
             />
           )}
         </>

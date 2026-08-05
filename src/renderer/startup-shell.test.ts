@@ -7,6 +7,7 @@ describe('renderer 启动画布', () => {
 
   it('不在 React 接管前渲染旧品牌启动页', () => {
     expect(html).toContain('<div id="root"></div>')
+    expect(html).toContain('<meta name="color-scheme" content="dark light" />')
     expect(html).not.toContain('boot-shell')
     expect(html).not.toContain('boot-logo')
   })

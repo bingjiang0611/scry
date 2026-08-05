@@ -1,19 +1,22 @@
-// 两个弹窗：Skills（列表+开关，软屏蔽）/ MCP（列表+连接测试）。
+// 全局弹窗：设置 / Skills（列表+开关，软屏蔽）/ MCP（列表+连接测试）。
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
 import { Icon, type IconName } from './primitives/Icon'
+import type { AppTheme } from '../theme'
 
 function ModalFrame({
   labelledBy,
   initialFocusRef,
+  className,
   onClose,
   children
 }: {
   labelledBy: string
   initialFocusRef?: RefObject<HTMLElement>
+  className?: string
   onClose: () => void
   children: ReactNode
 }) {
@@ -70,10 +73,79 @@ function ModalFrame({
         if (event.target === event.currentTarget) onClose()
       }}
     >
-      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}>
+      <div ref={dialogRef} className={`modal${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}>
         {children}
       </div>
     </div>
+  )
+}
+
+export function SettingsModal({
+  theme,
+  onThemeChange,
+  onClose
+}: {
+  theme: AppTheme
+  onThemeChange: (theme: AppTheme) => void
+  onClose: () => void
+}) {
+  const titleId = useId()
+  const darkRef = useRef<HTMLButtonElement>(null)
+  const lightRef = useRef<HTMLButtonElement>(null)
+  return (
+    <ModalFrame labelledBy={titleId} initialFocusRef={theme === 'dark' ? darkRef : lightRef} className="settings-modal" onClose={onClose}>
+      <div className="modal-head">
+        <b id={titleId}>设置</b>
+        <button className="modal-x" onClick={onClose} aria-label="关闭设置">
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="settings-body">
+        <div className="settings-copy">
+          <b>外观</b>
+          <span>选择 Scry 的全局界面主题。</span>
+        </div>
+        <div className="theme-options" role="radiogroup" aria-label="界面主题">
+          <button
+            ref={darkRef}
+            type="button"
+            className={`theme-option ${theme === 'dark' ? 'active' : ''}`}
+            role="radio"
+            aria-checked={theme === 'dark'}
+            onClick={() => onThemeChange('dark')}
+          >
+            <span className="theme-preview dark" aria-hidden="true">
+              <span />
+              <i />
+            </span>
+            <span className="theme-option-copy">
+              <b>深色</b>
+              <small>低光环境</small>
+            </span>
+            <span className="theme-check" aria-hidden="true"><Icon name="check" /></span>
+          </button>
+          <button
+            ref={lightRef}
+            type="button"
+            className={`theme-option ${theme === 'light' ? 'active' : ''}`}
+            role="radio"
+            aria-checked={theme === 'light'}
+            onClick={() => onThemeChange('light')}
+          >
+            <span className="theme-preview light" aria-hidden="true">
+              <span />
+              <i />
+            </span>
+            <span className="theme-option-copy">
+              <b>浅色</b>
+              <small>明亮环境</small>
+            </span>
+            <span className="theme-check" aria-hidden="true"><Icon name="check" /></span>
+          </button>
+        </div>
+      </div>
+      <div className="modal-foot dim">选择会保存在此设备，并立即应用到全部视图。</div>
+    </ModalFrame>
   )
 }
 

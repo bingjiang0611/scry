@@ -37,7 +37,9 @@ export function Sidebar({
   onMcp,
   mcps = [],
   mcpLive = [],
-  catalogHealth
+  catalogHealth,
+  onSettings,
+  themeLabel = '深色'
 }: {
   id?: string
   projects: ProjectMeta[]
@@ -59,6 +61,8 @@ export function Sidebar({
   mcps?: McpMeta[]
   mcpLive?: McpLiveStatus[]
   catalogHealth?: CatalogHealth
+  onSettings?: () => void
+  themeLabel?: string
 }) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -249,6 +253,15 @@ export function Sidebar({
           )
         })}
       </div>
+
+      {onSettings && (
+        <div className="sb-footer">
+          <button type="button" className="sb-navitem sb-settings" onClick={onSettings} aria-haspopup="dialog">
+            <Icon name="settings" /> 设置
+            <span className="sb-navmeta">{themeLabel}</span>
+          </button>
+        </div>
+      )}
 
       {ctx && (
         <div
