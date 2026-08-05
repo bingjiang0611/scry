@@ -56,11 +56,22 @@ describe('Claude provider adapter', () => {
     })
   })
 
-  it('lists statically discovered Skill commands without launching a hidden model probe', async () => {
+  it('lists native slash commands through the existing control transport without a model prompt', async () => {
+    sdk.query.mockReturnValue({
+      supportedModels: vi.fn().mockResolvedValue([]),
+      supportedCommands: vi.fn().mockResolvedValue([
+        { name: 'usage', description: 'Show usage', argumentHint: '' },
+        { name: 'scry-e2e-audit', description: 'Safe audit', argumentHint: '<path>' }
+      ]),
+      close: vi.fn()
+    })
     const result = await createClaudeAdapter('/tmp/scry-home').commands!.list({ providerId: 'claude', cwd: '/repo' })
     expect(result).toMatchObject({
-      state: 'degraded',
-      data: [{ name: 'scry-e2e-audit', source: 'skill' }]
+      state: 'ready',
+      data: [
+        { name: 'usage', source: 'builtin' },
+        { name: 'scry-e2e-audit', argumentHint: '<path>', source: 'skill' }
+      ]
     })
     expect(runner.captureInit).not.toHaveBeenCalled()
   })
@@ -268,6 +279,7 @@ describe('Claude provider adapter', () => {
         description: 'test model',
         supportedEffortLevels: ['low', 'high']
       }]),
+      supportedCommands: vi.fn().mockResolvedValue([]),
       close: vi.fn()
     })
     const result = await createClaudeAdapter('/tmp/scry-home').runControls!.read({

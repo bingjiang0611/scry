@@ -13,6 +13,23 @@ function ctx(): NormalizeCtx {
 }
 
 describe('normalizeSdkMessage', () => {
+  it('把 Provider 本地 slash 命令输出显示为非计费助手文本', () => {
+    const [event] = normalizeSdkMessage({
+      type: 'system',
+      subtype: 'local_command_output',
+      content: 'Current usage: 42%',
+      session_id: 'session-1'
+    }, ctx())
+    expect(event).toMatchObject({
+      kind: 'model',
+      stage: 'text',
+      text: 'Current usage: 42%',
+      runtimeMetadata: { source: 'provider_local_command', subtype: 'local_command_output' }
+    })
+    expect(event).not.toHaveProperty('tokensIn')
+    expect(event).not.toHaveProperty('costUsd')
+  })
+
   it('把 assistant 的 text 和 thinking block 拆成 model 事件', () => {
     const evs = normalizeSdkMessage(
       {
