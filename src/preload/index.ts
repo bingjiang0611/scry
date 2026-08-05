@@ -68,6 +68,7 @@ export type ParsedTurn = LoadedSessionTurn
 
 const api = {
   rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
+  setTheme: (theme: 'dark' | 'light'): Promise<true> => ipcRenderer.invoke('app:setTheme', theme),
   detectFast: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detectFast'),
   detect: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detect'),
   providerDescriptors: (): Promise<ProviderDescriptor[]> => ipcRenderer.invoke('agent:providerDescriptors'),

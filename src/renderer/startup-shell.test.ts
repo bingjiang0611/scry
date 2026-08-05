@@ -11,4 +11,9 @@ describe('renderer 启动画布', () => {
     expect(html).not.toContain('boot-shell')
     expect(html).not.toContain('boot-logo')
   })
+
+  it('启动根节点跟随主题画布，不把透明的主区固定成深色', () => {
+    expect(html).toContain('background: var(--bg, #0b0d12);')
+    expect(html).not.toContain('background: #0b0d12;')
+  })
 })
