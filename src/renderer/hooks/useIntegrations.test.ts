@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CapabilityEnvelope } from '@shared/provider'
-import { authoritativeRefreshAfterToggle, mergeMcpLiveSnapshot } from './useIntegrations'
+import {
+  authoritativeRefreshAfterToggle,
+  mergeMcpLiveSnapshot,
+  runControlSendBlockedReason
+} from './useIntegrations'
 
 const result = (data: boolean | null, state: CapabilityEnvelope<boolean>['state'] = 'ready'): CapabilityEnvelope<boolean> => ({
   providerId: 'claude',
@@ -30,5 +34,28 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
     expect(mergeMcpLiveSnapshot(cached, null)).toBe(cached)
     expect(mergeMcpLiveSnapshot(cached, undefined)).toBe(cached)
     expect(mergeMcpLiveSnapshot(cached, [])).toEqual([])
+  })
+})
+
+describe('Agent 切换时的运行控制门禁', () => {
+  it('目录读取期间仅允许 Provider 默认模型和默认审批立即发送', () => {
+    expect(runControlSendBlockedReason(null, true, { permissionMode: 'default' })).toBeNull()
+    expect(runControlSendBlockedReason(null, true, {
+      permissionMode: 'full_access'
+    })).toBe('运行权限能力尚未确认，暂不能发送')
+    expect(runControlSendBlockedReason(null, true, {
+      model: { id: 'ultimate' },
+      permissionMode: 'default'
+    })).toBe('运行权限能力尚未确认，暂不能发送')
+  })
+
+  it('探测完成后的 unknown/unsupported 仍然 fail closed', () => {
+    expect(runControlSendBlockedReason({
+      providerId: 'qoder',
+      mode: 'none',
+      state: 'unknown',
+      data: null,
+      reason: 'Qoder 控制接口不可用'
+    }, false, { permissionMode: 'default' })).toBe('Qoder 控制接口不可用')
   })
 })

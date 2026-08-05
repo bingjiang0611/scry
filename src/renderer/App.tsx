@@ -26,7 +26,7 @@ import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspaceP
 import type { ParsedTurn } from './env'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
-import { useIntegrations } from './hooks/useIntegrations'
+import { runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
 import { useAgentSession } from './hooks/useAgentSession'
 
 type AppStyle = CSSProperties & {
@@ -391,10 +391,11 @@ export function App() {
       ? `未检测到 ${integrations.selectedId}，草稿与附件已保留`
       : integrations.selectedAgent.health?.state === 'unavailable'
         ? integrations.selectedAgent.health.lastError ?? `${integrations.selectedAgent.name} 当前不可用`
-        : !integrations.runControlCapability || integrations.runControlCapability.data == null ||
-            (integrations.runControlCapability.state !== 'ready' && integrations.runControlCapability.state !== 'degraded')
-          ? integrations.runControlCapability?.reason ?? '运行权限能力尚未确认，暂不能发送'
-          : null
+        : runControlSendBlockedReason(
+            integrations.runControlCapability,
+            integrations.runControlsLoading,
+            integrations.runControls
+          )
   const session = useAgentSession({
     onTurnDone: (event) => {
       markRunFinished(event.runId)
