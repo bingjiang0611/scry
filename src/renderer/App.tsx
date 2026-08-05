@@ -1147,6 +1147,7 @@ export function App() {
             recent={recent}
             agents={integrations.agents}
             selectedAgentId={integrations.selectedId}
+            agentLocked={activeSessionId != null || session.busy}
             runControls={integrations.runControls}
             runControlCatalog={integrations.runControlCatalog}
             runControlsLoading={integrations.runControlsLoading}

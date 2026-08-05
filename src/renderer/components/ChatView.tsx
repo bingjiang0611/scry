@@ -24,6 +24,7 @@ interface ChatViewProps {
   recent: string[]
   agents: DetectedAgent[]
   selectedAgentId: string
+  agentLocked?: boolean
   runControls: AgentRunControls
   runControlCatalog: AgentRunControlCatalog
   runControlsLoading?: boolean
@@ -111,6 +112,7 @@ export function ChatView({
   recent,
   agents,
   selectedAgentId,
+  agentLocked = false,
   runControls,
   runControlCatalog,
   runControlsLoading = false,
@@ -385,14 +387,13 @@ export function ChatView({
               selectedId={selectedAgentId}
               onSelect={onSelectAgent}
               onRescan={onRescan}
-              disabled={busy}
+              disabled={agentLocked}
             />
             <div className="run-control-scroll">
               <RunControlSelect
                 ariaLabel="模型"
                 value={modelValue}
                 options={modelOptions}
-                disabled={busy}
                 loading={runControlsLoading}
                 onChange={(value) => {
                   const option = runControlCatalog.models.find(
@@ -406,7 +407,6 @@ export function ChatView({
                   ariaLabel="Effort"
                   value={runControls.effort ?? ''}
                   options={effortOptions}
-                  disabled={busy}
                   onChange={(value) => onRunEffort(value || undefined)}
                 />
               )}
@@ -418,7 +418,6 @@ export function ChatView({
                   label: option.label,
                   description: option.description
                 }))}
-                disabled={busy}
                 tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
                 onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
               />
