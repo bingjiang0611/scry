@@ -275,15 +275,19 @@ export function ChatView({
           </div>
         )}
         {queuedPrompts.length > 0 && (
-          <div className="prompt-queue" aria-label="排队中的消息">
+          <div className="prompt-queue" aria-label={`排队中的消息，共 ${queuedPrompts.length} 条`}>
             <div className="queue-title">
-              <Icon name="clock" />
-              <span>队列 {queuedPrompts.length}</span>
+              <span className="queue-title-main">
+                <Icon name="clock" />
+                <span>等待运行</span>
+                <span className="queue-count">{queuedPrompts.length}</span>
+              </span>
+              <span className="queue-hint">当前任务结束后依次发送</span>
             </div>
-            <div className="queue-list">
+            <div className="queue-list" role="list">
               {queuedPrompts.map((prompt, index) => (
-                <div className="queue-item" key={`${index}:${prompt.text}:${prompt.attachments.map((a) => a.name).join(',')}`}>
-                  <span className="queue-index">{index + 1}</span>
+                <div className="queue-item" role="listitem" key={`${index}:${prompt.text}:${prompt.attachments.map((a) => a.name).join(',')}`}>
+                  <span className="queue-index" aria-hidden="true">{index + 1}</span>
                   <span className="queue-text" title={prompt.text}>
                     {prompt.text || `${prompt.attachments.length} 张图片`}
                   </span>
@@ -292,7 +296,13 @@ export function ChatView({
                       <Icon name="image" /> {prompt.attachments.length}
                     </span>
                   )}
-                  <button type="button" className="queue-remove" onClick={() => onRemoveQueuedPrompt(index)} title="移除排队消息">
+                  <button
+                    type="button"
+                    className="queue-remove"
+                    onClick={() => onRemoveQueuedPrompt(index)}
+                    title="移除排队消息"
+                    aria-label={`移除队列第 ${index + 1} 条消息`}
+                  >
                     <Icon name="x" />
                   </button>
                 </div>

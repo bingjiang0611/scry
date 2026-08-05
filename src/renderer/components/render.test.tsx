@@ -1321,7 +1321,10 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         onRescan={() => {}}
       />
     )
-    expect(chatHtml).toContain('队列 1')
+    expect(chatHtml).toContain('等待运行')
+    expect(chatHtml).toContain('当前任务结束后依次发送')
+    expect(chatHtml).toContain('queue-count">1')
+    expect(chatHtml).toContain('aria-label="移除队列第 1 条消息"')
     expect(chatHtml).toContain('继续检查')
     expect(chatHtml).toContain('draft.png')
     expect(chatHtml).toContain('sent.png')
@@ -2276,8 +2279,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
 
   it('HOOKS 段：展示本会话实际触发的 hook', () => {
     expect(html).toContain('HOOKS')
-    expect(html).toContain('处理器 1 实例 · 生命周期 1 条')
-    expect(html).toContain('触发次数未单独上报')
+    expect(html).toContain('事件 1 类')
+    expect(html).toContain('1 次执行')
+    expect(html).toContain('1 条事件')
+    expect(html).not.toContain('触发次数未单独上报')
     expect(html).toContain('PreToolUse')
     expect(html).toContain('PreToolUse:Edit')
     expect(html).toContain('branch-check-hook.sh')
@@ -2490,7 +2495,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       />
     )
 
-    expect(partialHtml).toContain('处理器 447 实例 · 生命周期 894 条')
+    expect(partialHtml).toContain('447 次执行')
+    expect(partialHtml).toContain('894 条事件')
     expect(partialHtml).toContain('成功 426 · 取消 21')
     expect(partialHtml).toContain('hook-status warn">取消 21')
     expect(partialHtml).not.toContain('部分取消 · 447×')
