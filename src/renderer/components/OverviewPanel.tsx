@@ -808,7 +808,6 @@ export function OverviewPanel({
               {sessionId ?? '（尚未捕获）'}
             </span>
           </div>
-          <div className="psrc">来自当前 Provider 的原生 session/result metadata；旧历史会话可能仅有外部 ID</div>
         </div>
       )}
 
