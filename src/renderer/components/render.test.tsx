@@ -1327,7 +1327,9 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="移除队列第 1 条消息"')
     expect(chatHtml).toContain('继续检查')
     expect(chatHtml).toContain('draft.png')
-    expect(chatHtml).toContain('sent.png')
+    expect(chatHtml).toContain('aria-label="放大查看图片 sent.png"')
+    expect(chatHtml).not.toContain('<figcaption>sent.png</figcaption>')
+    expect(chatHtml).toContain('class="user-attachment"')
     expect(chatHtml).toContain('排队')
   })
 

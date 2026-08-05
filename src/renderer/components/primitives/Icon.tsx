@@ -3,13 +3,14 @@
 import type { ReactNode } from 'react'
 
 export type IconName =
-  | 'plus' | 'search' | 'folder' | 'file' | 'box' | 'cube' | 'tool' | 'bulb' | 'message'
+  | 'plus' | 'minus' | 'search' | 'folder' | 'file' | 'box' | 'cube' | 'tool' | 'bulb' | 'message'
   | 'graph' | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
   | 'image' | 'send' | 'settings'
 
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   search: (
     <>
       <circle cx="11" cy="11" r="7" />

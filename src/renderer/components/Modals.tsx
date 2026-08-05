@@ -7,7 +7,7 @@ import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
 import { Icon, type IconName } from './primitives/Icon'
 import type { AppTheme } from '../theme'
 
-function ModalFrame({
+export function ModalFrame({
   labelledBy,
   initialFocusRef,
   className,
