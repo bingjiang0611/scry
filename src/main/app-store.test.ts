@@ -79,6 +79,43 @@ describe('app-store', () => {
     }
   })
 
+  it('不绑定项目的会话也进入 catalog，并以独立分组展示', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.recordPending({
+        providerId: 'qoder',
+        runtimeProvider: 'qoder_cli',
+        runId: 'run-unbound',
+        cwd: '',
+        prompt: 'unbound task'
+      })
+      store.record({
+        providerId: 'qoder',
+        runtimeProvider: 'qoder_cli',
+        runId: 'run-unbound',
+        externalSessionId: 'session-unbound',
+        cwd: '',
+        prompt: 'unbound task'
+      })
+
+      expect(store.listProjects()).toEqual([
+        expect.objectContaining({
+          cwd: '',
+          name: '不绑定项目',
+          sessions: [expect.objectContaining({
+            sessionId: 'session-unbound',
+            externalSessionId: 'session-unbound',
+            providerId: 'qoder'
+          })]
+        })
+      ])
+      expect(store.listSessions('', 'qoder')).toHaveLength(1)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('隔离相同 external session id，并把无证据老数据标成 legacy_unknown', () => {
     const dir = tempDir()
     try {

@@ -191,6 +191,24 @@ describe('ViewChrome 顶栏', () => {
     expect(html).not.toContain('&gt;tool&lt;')
     expect(html).not.toContain('&gt;mcp&lt;')
   })
+
+  it('不绑定项目的活动会话可打开纵览，但不伪造工作区文件入口', () => {
+    const html = renderToStaticMarkup(
+      <ViewChrome
+        cwd={null}
+        view="chat"
+        agent={undefined}
+        showPanel
+        canTogglePanel
+        onView={() => {}}
+        onTogglePanel={() => {}}
+        onToggleWorkspace={() => {}}
+      />
+    )
+
+    expect(html).toContain('title="纵览面板"')
+    expect(html).not.toContain('title="工作区文件"')
+  })
 })
 
 describe('运行控制选择', () => {
@@ -249,6 +267,7 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
     })
     expect(activeRunForSession(run, '/repo/b', 'session-1', 'claude')).toBeNull()
     expect(activeRunForSession({ ...run, done: true }, '/repo/a', 'session-1', 'claude')).toBeNull()
+    expect(activeRunForSession({ ...run, cwd: undefined }, '', 'session-1', 'claude')).toMatchObject({ runId: 'run-1' })
   })
 
   it('恢复 live run 时先加载同一 session 的已停止历史轮次', async () => {
@@ -463,6 +482,30 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('data-project-path="/Users/example/IdeaProjects/sample-workspace"')
     expect(html).toContain('data-project-path="/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace"')
     expect(html).toContain('/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace')
+  })
+
+  it('不绑定项目会话以独立活动分组出现在左侧', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[{
+          cwd: '',
+          name: '不绑定项目',
+          mtime: 2,
+          sessions: [{ sessionId: 's-unbound', externalSessionId: 's-unbound', providerId: 'qoder', mtime: 2, preview: '无工作目录任务', count: 1 }]
+        }]}
+        activeCwd={null}
+        activeSessionId="s-unbound"
+        activeProviderId="qoder"
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onDelete={() => {}}
+      />
+    )
+
+    expect(html).toContain('class="sb-proj-head on"')
+    expect(html).toContain('aria-label="不绑定项目 · 未关联工作目录"')
+    expect(html).toContain('class="sb-sess active"')
+    expect(html).toContain('无工作目录任务')
   })
 
   it('仅给真实 active run 对应的会话展示运行中标识', () => {

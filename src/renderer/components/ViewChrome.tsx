@@ -77,9 +77,9 @@ export function ViewChrome({
             <Icon name="folder" /> <b>不绑定项目</b>
           </span>
         )}
-        {cwd && canTogglePanel && (
+        {canTogglePanel && (
           <>
-            {onToggleWorkspace && (
+            {cwd && onToggleWorkspace && (
               <button
                 type="button"
                 className={`tb-action panel-pill ${showWorkspace ? 'on' : ''}`}

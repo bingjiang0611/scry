@@ -45,6 +45,24 @@ afterEach(() => {
 })
 
 describe('transcript archive mirror', () => {
+  it('不绑定项目使用独立受管目录写入和读取 trace archive', () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const sessionId = 'unbound-session'
+
+    expect(upsertTraceArchiveTurn({
+      cwd: '',
+      sessionId,
+      providerId: 'qoder',
+      runtimeProvider: 'qoder_cli',
+      userDataDir,
+      turn: { runId: 'run-unbound', userText: 'unbound task', items: [], done: true }
+    })).toBe(true)
+    expect(traceArchivePath(userDataDir, '', sessionId, 'qoder')).toContain('/unbound/')
+    expect(readTraceArchive({ cwd: '', sessionId, userDataDir, providerId: 'qoder' }))
+      .toMatchObject({ cwd: '', sessionId, providerId: 'qoder' })
+  })
+
   it('keeps opaque or traversal-like session ids inside every owned directory for read/write/delete', () => {
     const root = tempRoot()
     const home = join(root, 'home')

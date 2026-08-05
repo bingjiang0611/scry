@@ -44,6 +44,25 @@ describe('trace turn progress', () => {
     await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
   })
 
+  it('不绑定项目的 terminal progress 也能恢复为 archive', async () => {
+    const userDataDir = root()
+    await persistTraceTurnProgress({
+      userDataDir,
+      cwd: '',
+      sessionId: 'session-unbound',
+      providerId: 'qoder',
+      runtimeProvider: 'qoder_cli',
+      turn: { runId: 'run-unbound', userText: 'hello', items: [], done: true, status: 'completed', ts: 1 }
+    })
+
+    await expect(recoverTraceTurnProgress(userDataDir, {
+      cwd: '', sessionId: 'session-unbound', providerId: 'qoder'
+    })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+    expect(readTraceArchive({
+      cwd: '', sessionId: 'session-unbound', providerId: 'qoder', userDataDir
+    })?.turns[0]).toMatchObject({ runId: 'run-unbound', status: 'completed' })
+  })
+
   it('deletion removes a pending non-managed progress snapshot', async () => {
     const userDataDir = root()
     await persistTraceTurnProgress({
