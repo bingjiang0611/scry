@@ -218,6 +218,48 @@ describe('Qoder provider adapter', () => {
     expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({ SCRY_RECORDER_MANAGED: '1' })
   })
 
+  it('通过 Qoder control API 执行 /plugins reload，不把它发送给模型', async () => {
+    const reloadPlugins = vi.fn().mockResolvedValue({
+      commands: Array.from({ length: 11 }, (_, index) => ({ name: `command-${index}` })),
+      agents: [],
+      plugins: [{ name: 'test-plugin', path: '/plugin' }],
+      mcpServers: [],
+      error_count: 0
+    })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'system', subtype: 'init', session_id: 'qoder-session', mcp_servers: [] }
+      },
+      reloadPlugins,
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const events: TraceEvent[] = []
+
+    const result = await createQoderAdapter().run({
+      runId: 'run-plugin-reload',
+      prompt: '/plugins reload',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event) => events.push(event)
+    }).promise
+
+    expect(reloadPlugins).toHaveBeenCalledOnce()
+    expect(sdk.query.mock.calls[0][0].prompt).not.toBe('/plugins reload')
+    expect(result).toMatchObject({ externalSessionId: 'qoder-session', status: 'completed' })
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'model',
+      stage: 'text',
+      text: '插件已重载：1 个插件，11 条命令',
+      runtimeMetadata: expect.objectContaining({ source: 'qoder_sdk_control' })
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'harness',
+      stage: 'result',
+      isError: false
+    }))
+  })
+
   it('把 Qoder 日志中的后台 shell 失败回写为本轮失败', async () => {
     const configDir = await mkdtemp(join(tmpdir(), 'scry-qoder-background-test-'))
     const runLogDir = join(configDir, 'logs', 'runs', 'run-p126')

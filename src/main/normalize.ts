@@ -179,6 +179,14 @@ function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: No
 
 function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeCtx): TraceEvent[] {
   const subtype = typeof m.subtype === 'string' ? m.subtype : ''
+  if ((subtype === 'local_command_output' || subtype === 'informational') && typeof m.content === 'string') {
+    return [base(ctx, {
+      kind: 'model',
+      stage: 'text',
+      text: m.content,
+      runtimeMetadata: { source: 'provider_local_command', subtype }
+    })]
+  }
   if (subtype !== 'hook_started' && subtype !== 'hook_progress' && subtype !== 'hook_response') return []
   const hookName = typeof m.hook_name === 'string' ? m.hook_name : 'hook'
   const hookEvent = typeof m.hook_event === 'string' ? m.hook_event : 'Hook'

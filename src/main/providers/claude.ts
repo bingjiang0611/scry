@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { query, type ModelInfo } from '@anthropic-ai/claude-agent-sdk'
+import { query, type ModelInfo, type SlashCommand } from '@anthropic-ai/claude-agent-sdk'
 import { getClaudeVersion, runAgent } from '../agent-runner'
 import { resolveClaudeBin, runtimeCliEnv } from '../claude-locate'
 import { authorizedMcpRuntimeEnv, listMcp, testMcpConfig, toggleMcp } from '../mcp-config'
@@ -11,6 +11,7 @@ import { effortOption, permissionOptions } from './run-controls'
 
 interface CachedControls {
   data: AgentRunControlCatalog
+  commands: SlashCommand[]
   observedAt: number
 }
 
@@ -117,9 +118,10 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
         }
       })
       try {
-        const models = await q.supportedModels()
+        const [models, commands] = await Promise.all([q.supportedModels(), q.supportedCommands()])
         const value = {
           observedAt: Date.now(),
+          commands,
           data: {
             models: models.map((model: ModelInfo) => ({
               model: { id: model.value },
@@ -257,13 +259,22 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
     commands: {
       list: async (context) => {
         if (!executable()) return capabilityUnavailable(context, 'unknown', 'Claude Code executable 未找到')
-        const commands = listSkills(context.cwd, homeDir)
-          .filter((skill) => skill.enabled)
-          .map((skill) => ({ name: skill.name, description: skill.description, source: 'skill' as const }))
-        return {
-          ...capabilityReady(context, 'read', commands),
-          state: 'degraded' as const,
-          reason: 'Claude SDK 无法在不发送用户消息的前提下启动 control transport；当前仅列出静态可发现的 Skill 命令'
+        try {
+          const controls = await readControls(context)
+          const skills = new Set(listSkills(context.cwd, homeDir).filter((skill) => skill.enabled).map((skill) => skill.name))
+          return capabilityReady(
+            context,
+            'read',
+            controls.commands.map((command) => ({
+              name: command.name,
+              description: command.description,
+              argumentHint: command.argumentHint || undefined,
+              source: skills.has(command.name) ? 'skill' as const : 'builtin' as const
+            })),
+            controls.observedAt
+          )
+        } catch (error) {
+          return capabilityUnavailable(context, 'unknown', String((error as Error).message))
         }
       }
     },
