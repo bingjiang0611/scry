@@ -358,6 +358,47 @@ export interface HookSummary {
   groups: HookGroup[]
 }
 
+const HOOK_LIFECYCLE = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PermissionRequest',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'Notification',
+  'SubagentStart',
+  'SubagentStop',
+  'PreCompact',
+  'Stop',
+  'TeammateIdle',
+  'TaskCompleted',
+  'SessionEnd'
+] as const
+
+const HOOK_LIFECYCLE_RANK = new Map<string, number>(
+  HOOK_LIFECYCLE.map((event, index) => [event, index])
+)
+
+function hookLifecycleRank(event: string): number {
+  const normalized = event.split(':', 1)[0]
+  if (normalized === 'tool.execute.before') return HOOK_LIFECYCLE_RANK.get('PreToolUse')!
+  if (normalized === 'tool.execute.after') return HOOK_LIFECYCLE_RANK.get('PostToolUse')!
+  if (normalized === 'session.start') return HOOK_LIFECYCLE_RANK.get('SessionStart')!
+  if (normalized === 'session.stop' || normalized === 'session.idle') return HOOK_LIFECYCLE_RANK.get('Stop')!
+  return HOOK_LIFECYCLE_RANK.get(normalized) ?? HOOK_LIFECYCLE.length
+}
+
+function hookGroupFirstTimestamp(group: HookGroup): number {
+  let first = Number.POSITIVE_INFINITY
+  for (const script of group.scripts) {
+    for (const instance of script.instances) {
+      const timestamp = Date.parse(instance.last.ts)
+      if (Number.isFinite(timestamp)) first = Math.min(first, timestamp)
+    }
+  }
+  return first
+}
+
 function hookCommandFromEvent(e: TraceEvent): string | undefined {
   if (e.hookCommand) return e.hookCommand
   const input = e.input as Record<string, unknown> | undefined
@@ -651,8 +692,8 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
 
   finalized.sort(
     (a, b) =>
-      b.logicalRuns - a.logicalRuns ||
-      b.rawEvents - a.rawEvents ||
+      hookLifecycleRank(a.event) - hookLifecycleRank(b.event) ||
+      hookGroupFirstTimestamp(a) - hookGroupFirstTimestamp(b) ||
       a.event.localeCompare(b.event) ||
       a.trigger.localeCompare(b.trigger)
   )

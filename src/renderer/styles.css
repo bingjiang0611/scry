@@ -4336,6 +4336,62 @@ button.turn-timing-call {
   padding: 4px 8px 8px;
   border-top: 1px solid var(--border3);
 }
+.turn-hook-phase {
+  border-radius: 5px;
+}
+.turn-hook-phase + .turn-hook-phase {
+  border-top: 1px solid var(--border3);
+  border-radius: 0 0 5px 5px;
+}
+.turn-hook-phase[open] {
+  background: var(--surface-faint);
+}
+.turn-hook-phase-row {
+  display: grid;
+  grid-template-columns: 24px 8px minmax(0, 1fr) max-content 12px;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 5px 8px;
+  color: var(--fg);
+  font: 11.5px/1.3 var(--font-mono);
+  cursor: pointer;
+  list-style: none;
+}
+.turn-hook-phase-row::-webkit-details-marker {
+  display: none;
+}
+.turn-hook-phase-row:hover {
+  background: var(--surface-hover);
+}
+.hook-phase-order {
+  color: var(--dim3);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.hook-phase-event {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hook-phase-count {
+  color: var(--dim2);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.turn-hook-phase-row .hook-row-chev {
+  width: 12px;
+  height: 12px;
+  color: var(--dim3);
+}
+.turn-hook-phase[open] > .turn-hook-phase-row .hook-row-chev {
+  transform: rotate(90deg);
+}
+.turn-hook-phase-body {
+  padding: 0 6px 6px 31px;
+}
 .turn-hook-item {
   border-radius: 4px;
 }

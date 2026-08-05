@@ -266,7 +266,9 @@ describe('aggregateHooks', () => {
     const r = aggregateHooks(items)
     expect(r.rawEvents).toBe(5)
     expect(r.logicalRuns).toBe(3) // 2 response + 1 started-only；progress 不额外算一条调用
-    expect(r.groups[0]).toMatchObject({
+    expect(r.groups.map((group) => group.event)).toEqual(['SessionStart', 'PreToolUse'])
+    const preToolUse = r.groups[1]
+    expect(preToolUse).toMatchObject({
       event: 'PreToolUse',
       trigger: 'PreToolUse:Bash',
       rawEvents: 4,
@@ -276,8 +278,8 @@ describe('aggregateHooks', () => {
       toolCalls: 1,
       triggerRuns: 1
     })
-    expect(r.groups[0].scripts.map((s) => s.label)).toEqual(['branch-check-hook.sh', 'trace_prompt.py'])
-    expect(r.groups[0].scripts[0]).toMatchObject({
+    expect(preToolUse.scripts.map((s) => s.label)).toEqual(['branch-check-hook.sh', 'trace_prompt.py'])
+    expect(preToolUse.scripts[0]).toMatchObject({
       rawEvents: 3,
       logicalRuns: 1,
       responses: 1,
@@ -294,14 +296,14 @@ describe('aggregateHooks', () => {
         })
       ]
     })
-    expect(r.groups[0].scripts[1]).toMatchObject({
+    expect(preToolUse.scripts[1]).toMatchObject({
       label: 'trace_prompt.py',
       errors: 1,
       failureSummary: 'exit 1: trace prompt denied'
     })
-    expect(r.groups[0].scripts[1].unsuccessful.map((event) => event.hookId)).toEqual(['hk-2'])
-    expect(r.groups[0].scripts[1].lastError?.hookId).toBe('hk-2')
-    expect(r.groups[1]).toMatchObject({ event: 'SessionStart', logicalRuns: 1, pending: 1, triggerRuns: null })
+    expect(preToolUse.scripts[1].unsuccessful.map((event) => event.hookId)).toEqual(['hk-2'])
+    expect(preToolUse.scripts[1].lastError?.hookId).toBe('hk-2')
+    expect(r.groups[0]).toMatchObject({ event: 'SessionStart', logicalRuns: 1, pending: 1, triggerRuns: null })
   })
 
   it('全局桥接命令优先用 expected-marker 展示逻辑脚本短名', () => {

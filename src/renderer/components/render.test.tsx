@@ -891,6 +891,52 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).not.toContain('hook_response')
   })
 
+  it('本轮 Hook 按生命周期分组，并在周期内聚合同一处理器的调用次数', () => {
+    const eventRouter = 'python3 /repo/.claude/hooks/event_router.py'
+    const pair = (
+      id: string,
+      event: string,
+      trigger: string,
+      command: string,
+      ts: string
+    ): TraceEvent[] => [
+      ev({ id: `${id}-start`, ts, kind: 'hook', stage: 'hook_started', hookId: id, hookEvent: event, hookName: trigger, hookCommand: command }),
+      ev({ id: `${id}-response`, ts, kind: 'hook', stage: 'hook_response', hookId: id, hookEvent: event, hookName: trigger, hookCommand: command, hookOutcome: 'success' })
+    ]
+    const lifecycleTurn: Turn = {
+      runId: 'run-hook-lifecycle',
+      userText: '检查 Hook 周期',
+      done: true,
+      items: [
+        ev({ id: 'bash', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'bash' }),
+        ev({ id: 'read', kind: 'tool', stage: 'tool:Read', tool: 'Read', toolUseId: 'read' }),
+        ...pair('stop-router', 'Stop', 'Stop', eventRouter, '2026-08-05T11:43:14.621Z'),
+        ...pair('stop-goal', 'Stop', 'Stop', 'goal-loop-stop', '2026-08-05T11:43:14.622Z'),
+        ...pair('stop-entry', 'Stop', 'Stop', 'hook_entry', '2026-08-05T11:43:14.623Z'),
+        ...pair('stop-pilot', 'Stop', 'Stop', 'qoder-loongsuite-pilot-hook.sh', '2026-08-05T11:43:14.624Z'),
+        ...pair('post-read', 'PostToolUse', 'PostToolUse:Read', eventRouter, '2026-08-05T11:42:12.670Z'),
+        ...pair('pre-bash', 'PreToolUse', 'PreToolUse:Bash', eventRouter, '2026-08-05T11:40:12.163Z'),
+        ...pair('post-bash', 'PostToolUse', 'PostToolUse:Bash', eventRouter, '2026-08-05T11:40:12.830Z')
+      ]
+    }
+
+    const hookHtml = renderToStaticMarkup(<AssistantTurn turn={lifecycleTurn} selectedId={null} onSelect={() => {}} />)
+    const pre = hookHtml.indexOf('class="hook-phase-event">PreToolUse')
+    const post = hookHtml.indexOf('class="hook-phase-event">PostToolUse')
+    const stop = hookHtml.indexOf('class="hook-phase-event">Stop')
+    const postPhaseHtml = hookHtml.slice(post, stop)
+
+    expect(hookHtml).toContain('3 个周期 · 7 个处理器实例')
+    expect(hookHtml.match(/class="turn-hook-phase"/g)).toHaveLength(3)
+    expect(pre).toBeGreaterThan(-1)
+    expect(post).toBeGreaterThan(pre)
+    expect(stop).toBeGreaterThan(post)
+    expect(postPhaseHtml.match(/event_router\.py/g)).toHaveLength(1)
+    expect(postPhaseHtml).toContain('hook-run-count">2×')
+    expect(postPhaseHtml).toContain('1 次 Bash')
+    expect(postPhaseHtml).toContain('1 次 Read')
+  })
+
   it('cancelled Hook 使用黄色诚实态，并展示疑似超时依据而不冒充工具取消', () => {
     const command = 'python3 $CLAUDE_PROJECT_DIR/.claude/hooks/trace_pre.py'
     const cancelledTurn: Turn = {
