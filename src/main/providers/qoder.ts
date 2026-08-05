@@ -25,7 +25,7 @@ interface Cached<T> {
 interface QoderControlSession {
   query: Query
   releasePrompt: () => void
-  ready: Promise<unknown>
+  ready: ReturnType<Query['initializationResult']>
   active: number
   idleTimer?: NodeJS.Timeout
 }
@@ -405,13 +405,16 @@ export function createQoderAdapter(): ProviderAdapter {
     return [key, session]
   }
 
-  const withControl = async <T>(context: ProviderContext, read: (q: Query) => Promise<T>): Promise<T> => {
+  const withControl = async <T>(
+    context: ProviderContext,
+    read: (q: Query, initialized: Awaited<ReturnType<Query['initializationResult']>>) => Promise<T>
+  ): Promise<T> => {
     const [key, session] = controlFor(context)
     if (session.idleTimer) clearTimeout(session.idleTimer)
     session.active++
     try {
-      await session.ready
-      return await read(session.query)
+      const initialized = await session.ready
+      return await read(session.query, initialized)
     } catch (error) {
       if (/transport|closed|process|broken pipe/i.test(String((error as Error).message))) closeControl(key, session)
       throw error
@@ -748,7 +751,12 @@ export function createQoderAdapter(): ProviderAdapter {
           const key = context.cwd ?? ''
           let value = modelCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            const models = await withControl(context, (q) => q.getAvailableModels({ fetchStrategy: 'live' }))
+            const models = await withControl(context, (q, initialized) => {
+              const cached = Array.isArray(initialized.models) ? initialized.models : []
+              return cached.length > 0
+                ? Promise.resolve(cached)
+                : q.getAvailableModels({ fetchStrategy: 'live' })
+            })
             value = {
               observedAt: Date.now(),
               data: {

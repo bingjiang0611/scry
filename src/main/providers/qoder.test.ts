@@ -96,17 +96,20 @@ describe('Qoder provider adapter', () => {
   })
 
   it('reads model efforts from the native Qoder catalog', async () => {
+    const getAvailableModels = vi.fn().mockResolvedValue([])
     sdk.query.mockReturnValue({
-      initializationResult: vi.fn().mockResolvedValue({}),
-      getAvailableModels: vi.fn().mockResolvedValue([{
-        value: 'performance',
-        displayName: 'Performance',
-        description: 'fast',
-        isDefault: true,
-        isEnabled: true,
-        efforts: ['low', 'high'],
-        defaultEffort: 'high'
-      }]),
+      initializationResult: vi.fn().mockResolvedValue({
+        models: [{
+          value: 'performance',
+          displayName: 'Performance',
+          description: 'fast',
+          isDefault: true,
+          isEnabled: true,
+          efforts: ['low', 'high'],
+          defaultEffort: 'high'
+        }]
+      }),
+      getAvailableModels,
       close: sdk.close
     })
     const adapter = createQoderAdapter()
@@ -119,6 +122,20 @@ describe('Qoder provider adapter', () => {
         }]
       }
     })
+    expect(getAvailableModels).not.toHaveBeenCalled()
+    await adapter.dispose?.()
+  })
+
+  it('falls back to the live CLI catalog when initialization has no models', async () => {
+    const getAvailableModels = vi.fn().mockResolvedValue([])
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({ models: [] }),
+      getAvailableModels,
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+    await adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })
+    expect(getAvailableModels).toHaveBeenCalledWith({ fetchStrategy: 'live' })
     await adapter.dispose?.()
   })
 

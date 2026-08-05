@@ -67,6 +67,24 @@ export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId
   return providerIdForAgentId(currentAgentId) !== providerIdForAgentId(nextAgentId)
 }
 
+export function runControlSendBlockedReason(
+  capability: CapabilityEnvelope<AgentRunControlCatalog> | null,
+  loading: boolean,
+  controls: AgentRunControls
+): string | null {
+  if (
+    capability === null &&
+    loading &&
+    controls.permissionMode === 'default' &&
+    controls.model == null &&
+    controls.effort == null
+  ) return null
+  return !capability || capability.data == null ||
+    (capability.state !== 'ready' && capability.state !== 'degraded')
+    ? capability?.reason ?? '运行权限能力尚未确认，暂不能发送'
+    : null
+}
+
 export function useIntegrations(cwd: string | null) {
   const [agents, setAgents] = useState<DetectedAgent[]>([])
   const [agentsHydrated, setAgentsHydrated] = useState(false)
@@ -113,6 +131,28 @@ export function useIntegrations(cwd: string | null) {
   const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>())
   const runControlCatalogByContext = useRef(
     new Map<string, CapabilityEnvelope<AgentRunControlCatalog>>()
+  )
+  const runControlCatalogRequests = useRef(
+    new Map<string, Promise<CapabilityEnvelope<AgentRunControlCatalog>>>()
+  )
+
+  const requestRunControlCatalog = useCallback(
+    (context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>> => {
+      const key = contextKey(context)
+      const pending = runControlCatalogRequests.current.get(key)
+      if (pending) return pending
+      const fn = window.scry.runControls
+      if (typeof fn !== 'function') return Promise.reject(new Error('运行控制接口不可用'))
+      const request = fn(context)
+        .then((result) => {
+          if (result.data) runControlCatalogByContext.current.set(key, result)
+          return result
+        })
+        .finally(() => runControlCatalogRequests.current.delete(key))
+      runControlCatalogRequests.current.set(key, request)
+      return request
+    },
+    []
   )
 
   const selectedAgent = agents.find((agent) => agent.id === selectedId)
@@ -427,6 +467,20 @@ export function useIntegrations(cwd: string | null) {
   }, [cwd, loadGitDiff, loadUsage, providerContext, refreshMcp])
 
   useEffect(() => {
+    if (typeof window.scry.runControls !== 'function') return
+    const providerIds = new Set(
+      agents
+        .map((agent) => providerIdForAgentId(agent.id))
+        .filter((providerId): providerId is ProviderId => providerId != null)
+    )
+    for (const providerId of providerIds) {
+      const context = { providerId, cwd: cwd ?? undefined }
+      if (runControlCatalogByContext.current.has(contextKey(context))) continue
+      void requestRunControlCatalog(context).catch(() => {})
+    }
+  }, [agents, cwd, requestRunControlCatalog])
+
+  useEffect(() => {
     const seq = ++runControlRequestSeq.current
     const context = providerContext
     const key = contextKey(context)
@@ -456,9 +510,8 @@ export function useIntegrations(cwd: string | null) {
       setRunControlsLoading(false)
       return
     }
-    void fn(context)
+    void requestRunControlCatalog(context)
       .then((result) => {
-        if (result.data) runControlCatalogByContext.current.set(key, result)
         if (
           seq !== runControlRequestSeq.current ||
           contextKey(context) !== contextKey(providerContextRef.current)
@@ -486,7 +539,7 @@ export function useIntegrations(cwd: string | null) {
       .finally(() => {
         if (seq === runControlRequestSeq.current) setRunControlsLoading(false)
       })
-  }, [cwd, providerContext, selectedProviderId])
+  }, [cwd, providerContext, requestRunControlCatalog, selectedProviderId])
 
   useEffect(() => {
     const refreshGitDiff = (): void => {
