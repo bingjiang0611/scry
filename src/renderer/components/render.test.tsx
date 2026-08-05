@@ -18,7 +18,6 @@ import {
   applyTurnDoneEffects,
   chatBottomDistance,
   commitDraftAfterStart,
-  defaultNewConversationCwd,
   dequeueStartedPrompt,
   enqueuePrompt,
   inputAfterSuccessfulSubmit,
@@ -125,21 +124,22 @@ const RUN_CONTROL_PROPS = {
 describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍可组合渲染', () => {
   const html = renderToStaticMarkup(<App />)
 
-  it('未选 cwd 首屏渲染 sidebar、welcome 和 topbar，不挂空白纵览面板', () => {
+  it('未选 cwd 首屏直接渲染不绑定项目的 composer，不挂空白纵览面板', () => {
     expect(html).toContain('app app-shell')
     expect(html).not.toContain('has-right-panel')
     expect(html).toContain('id="sidebar-pane"')
     expect(html).toContain('id="main-pane"')
     expect(html).not.toContain('id="overview-pane"')
-    expect(html).toContain('未选工作目录')
-    expect(html).toContain('打开一个工作目录')
-    expect(html).toContain('opencode')
-    expect(html).toContain('最近打开')
+    expect(html).toContain('不绑定项目')
+    expect(html).toContain('可直接发起任务')
+    expect(html).toContain('aria-label="运行配置"')
+    expect(html).toContain('aria-label="模型"')
+    expect(html).toContain('aria-label="权限"')
     expect(html).not.toContain('纵览面板')
     expect(html).not.toContain('class="logo"')
   })
 
-  it('welcome 只保留左侧 splitter 的 aria contract', () => {
+  it('不绑定项目时只保留左侧 splitter 的 aria contract', () => {
     expect(html.match(/role="separator"/g)).toHaveLength(1)
     expect(html).toContain('aria-label="调整左侧栏宽度"')
     expect(html).toContain('aria-controls="sidebar-pane"')
@@ -1164,6 +1164,11 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('Test Model · test-model-alias')
     expect(chatHtml).toContain('aria-label="Effort"')
     expect(chatHtml).toContain('aria-label="权限"')
+    const controls = chatHtml.match(/<div class="composer-controls"[\s\S]*?<div class="spacer"/u)?.[0] ?? ''
+    expect(controls).toContain('aria-label="运行配置"')
+    expect(controls.indexOf('Agent')).toBeLessThan(controls.indexOf('aria-label="模型"'))
+    expect(controls.indexOf('aria-label="模型"')).toBeLessThan(controls.indexOf('aria-label="Effort"'))
+    expect(controls.indexOf('aria-label="Effort"')).toBeLessThan(controls.indexOf('aria-label="权限"'))
   })
 
   it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () => {
@@ -1359,22 +1364,11 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(calls).toEqual([{ top: 664, behavior: 'auto' }])
   })
 
-  it('新建会话默认复用最近工作目录，避免直接弹系统选择框', () => {
-    expect(defaultNewConversationCwd(null, [{ cwd: '/new', name: 'new', mtime: 2, sessions: [] }], ['/old'])).toBe('/new')
-    expect(defaultNewConversationCwd(null, [], ['/old'])).toBe('/old')
-    expect(defaultNewConversationCwd('/current', [], ['/old'])).toBe('/current')
-  })
-
   it('新建会话只脱离正在运行的会话，不调用 stop', async () => {
     const calls: string[] = []
 
     await applyNewConversationEffects({
-      cwd: '/repo',
-      defaultCwd: '/repo',
-      running: true,
       clearTurns: (options) => calls.push(`clear:${String(options?.preserveRunning)}`),
-      activateCwd: async () => {},
-      chooseFolder: async () => null,
       newSession: async () => {
         calls.push('newSession')
         return true

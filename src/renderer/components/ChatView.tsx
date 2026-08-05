@@ -20,7 +20,7 @@ interface ChatViewProps {
   selectedId: string | null
   scrollRef: RefObject<HTMLDivElement>
   textareaRef: RefObject<HTMLTextAreaElement>
-  cwd: string
+  cwd: string | null
   recent: string[]
   agents: DetectedAgent[]
   selectedAgentId: string
@@ -48,6 +48,7 @@ interface ChatViewProps {
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onInput: (value: string) => void
   onChooseFolder: () => void
+  onUnbindProject?: () => void
   onPickRecent: (cwd: string) => void
   onRemoveRecent: (cwd: string) => void
   onRetrySlash: () => void
@@ -134,6 +135,7 @@ export function ChatView({
   onAnswerQuestion,
   onInput,
   onChooseFolder,
+  onUnbindProject = () => {},
   onPickRecent,
   onRemoveRecent,
   onRetrySlash,
@@ -198,6 +200,13 @@ export function ChatView({
     <>
       <div className="body">
         <div className="chat" ref={scrollRef}>
+          {turns.length === 0 && !cwd && (
+            <div className="unbound-empty">
+              <span className="unbound-icon"><Icon name="message" /></span>
+              <strong>不绑定项目</strong>
+              <span>可直接发起任务；需要读写项目文件时再选择工作目录。</span>
+            </div>
+          )}
           {turns.map((turn) => (
             <div
               key={turn.runId}
@@ -226,6 +235,7 @@ export function ChatView({
             cwd={cwd}
             recent={recent}
             onChoose={onChooseFolder}
+            onUnbind={onUnbindProject}
             onPick={onPickRecent}
             onRemove={onRemoveRecent}
           />
@@ -359,28 +369,49 @@ export function ChatView({
         />
         {(composerError || sendBlockedReason) && <div className="composer-error" role="alert">{composerError ?? sendBlockedReason}</div>}
         <div className="composer-bottom">
-          <RunControlSelect
-            ariaLabel="模型"
-            value={modelValue}
-            options={modelOptions}
-            disabled={busy}
-            loading={runControlsLoading}
-            onChange={(value) => {
-              const option = runControlCatalog.models.find(
-                (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
-              )
-              onRunModel(option?.model)
-            }}
-          />
-          {selectedModel && selectedModel.efforts.length > 0 && (
-            <RunControlSelect
-              ariaLabel="Effort"
-              value={runControls.effort ?? ''}
-              options={effortOptions}
+          <div className="composer-controls" aria-label="运行配置">
+            <CliPicker
+              agents={agents}
+              selectedId={selectedAgentId}
+              onSelect={onSelectAgent}
+              onRescan={onRescan}
               disabled={busy}
-              onChange={(value) => onRunEffort(value || undefined)}
             />
-          )}
+            <RunControlSelect
+              ariaLabel="模型"
+              value={modelValue}
+              options={modelOptions}
+              disabled={busy}
+              loading={runControlsLoading}
+              onChange={(value) => {
+                const option = runControlCatalog.models.find(
+                  (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
+                )
+                onRunModel(option?.model)
+              }}
+            />
+            {selectedModel && selectedModel.efforts.length > 0 && (
+              <RunControlSelect
+                ariaLabel="Effort"
+                value={runControls.effort ?? ''}
+                options={effortOptions}
+                disabled={busy}
+                onChange={(value) => onRunEffort(value || undefined)}
+              />
+            )}
+            <RunControlSelect
+              ariaLabel="权限"
+              value={runControls.permissionMode}
+              options={runControlCatalog.permissions.map((option) => ({
+                value: option.id,
+                label: option.label,
+                description: option.description
+              }))}
+              disabled={busy}
+              tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
+              onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
+            />
+          </div>
           <div className="spacer" />
           <button
             className="send"
@@ -398,27 +429,6 @@ export function ChatView({
             </button>
           )}
         </div>
-        </div>
-        <div className="composer-meta">
-          <CliPicker
-            agents={agents}
-            selectedId={selectedAgentId}
-            onSelect={onSelectAgent}
-            onRescan={onRescan}
-            disabled={busy}
-          />
-          <RunControlSelect
-            ariaLabel="权限"
-            value={runControls.permissionMode}
-            options={runControlCatalog.permissions.map((option) => ({
-              value: option.id,
-              label: option.label,
-              description: option.description
-            }))}
-            disabled={busy}
-            tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
-            onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
-          />
         </div>
       </div>
     </>

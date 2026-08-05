@@ -10,7 +10,6 @@ import {
 } from '@shared/runtime'
 import type { ProviderId, SessionProviderId } from '@shared/provider'
 import type { WorkspaceEntry } from '@shared/workspace'
-import { basename, relTime } from './format'
 import { AppShell } from './components/AppShell'
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
@@ -19,13 +18,12 @@ import { ExecutionGraph } from './components/ExecutionGraph'
 import { SegmentsView } from './components/SegmentsView'
 import { DiagnosticsView } from './components/DiagnosticsView'
 import { AnalyticsView } from './components/AnalyticsView'
-import { Icon } from './components/primitives/Icon'
 import { ViewChrome, type AppView } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
 import { SkillsModal, McpModal } from './components/Modals'
 import { TurnDiffReviewPanel, type TurnDiffReview } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspacePanel'
-import type { ParsedTurn, ProjectMeta } from './env'
+import type { ParsedTurn } from './env'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { useIntegrations } from './hooks/useIntegrations'
@@ -299,23 +297,8 @@ export async function restoreActiveSessionSelection(
   return true
 }
 
-export function defaultNewConversationCwd(
-  cwd: string | null,
-  projects: ProjectMeta[],
-  recent: string[]
-): string | null {
-  if (cwd) return cwd
-  const latestProject = [...projects].sort((a, b) => b.mtime - a.mtime)[0]?.cwd
-  return latestProject ?? recent[0] ?? null
-}
-
 interface NewConversationEffects {
-  cwd: string | null
-  defaultCwd: string | null
-  running: boolean
   clearTurns: (options?: { preserveRunning?: boolean }) => void
-  activateCwd: (cwd: string) => Promise<void>
-  chooseFolder: () => Promise<string | null>
   newSession: () => Promise<boolean>
   setActiveSessionId: (sessionId: string | null) => void
   setView: (view: AppView) => void
@@ -326,15 +309,6 @@ interface NewConversationEffects {
 export async function applyNewConversationEffects(effects: NewConversationEffects): Promise<void> {
   if (effects.isCurrent && !effects.isCurrent()) return
   effects.clearTurns()
-  let nextCwd = effects.cwd
-  if (!nextCwd && effects.defaultCwd) {
-    nextCwd = effects.defaultCwd
-    await effects.activateCwd(nextCwd)
-    if (effects.isCurrent && !effects.isCurrent()) return
-  }
-  if (!nextCwd) nextCwd = await effects.chooseFolder()
-  if (effects.isCurrent && !effects.isCurrent()) return
-  if (!nextCwd) return
   await effects.newSession()
   if (effects.isCurrent && !effects.isCurrent()) return
   effects.setActiveSessionId(null)
@@ -838,6 +812,24 @@ export function App() {
     setView('chat')
   }
 
+  const unbindProject = async (): Promise<void> => {
+    if (!cwd || !confirmWorkspaceTransition()) return
+    const seq = ++sessionSelectionSeqRef.current
+    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
+    await window.scry.focusRun(null)
+    if (!isCurrent()) return
+    await window.scry.setCwd(null)
+    if (!isCurrent()) return
+    setCwd(null)
+    session.clearTurns()
+    setQueuedPrompts([])
+    clearDraftAttachments()
+    shouldStickToBottomRef.current = true
+    selectSessionId(null)
+    setView('chat')
+    window.setTimeout(() => taRef.current?.focus(), 0)
+  }
+
   const newConversation = async (): Promise<void> => {
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
@@ -847,15 +839,7 @@ export function App() {
     await window.scry.focusRun(null)
     if (!isCurrent()) return
     await applyNewConversationEffects({
-      cwd,
-      defaultCwd: defaultNewConversationCwd(cwd, projects, recent),
-      running: false,
       clearTurns: session.clearTurns,
-      activateCwd: async (dir) => {
-        await window.scry.setCwd(dir)
-        if (isCurrent()) setCwd(dir)
-      },
-      chooseFolder,
       newSession: () => window.scry.newSession(integrations.providerContext),
       setActiveSessionId: selectSessionId,
       setView,
@@ -1124,115 +1108,9 @@ export function App() {
           onToggleWorkspace={toggleWorkspacePanel}
         />
 
-        {(!cwd || view !== 'chat') && (
+        {view !== 'chat' && (
           <div className="body">
-            {!cwd ? (
-            <main className="welcome-pane">
-              <div className="welcome-inner">
-                <div className="wc-hero">
-                  <span className="wc-eyebrow">本地 Agent 工作台</span>
-                  <h2>打开一个工作目录</h2>
-                  <p>
-                    继续最近会话，或打开一个本地项目。Scry 会把工具调用、文件改动和运行状态铺在同一条时间线上。
-                  </p>
-                </div>
-                <div className="wc-browse">
-                  <button className="btn primary" onClick={chooseFolder}>
-                    <Icon name="folder" /> 选择文件夹
-                    <span className="kbd">⌘O</span>
-                  </button>
-                </div>
-                <section className="wc-environment" aria-label="本机 Agent 环境">
-                  <span className="wc-status-label">本机 Agent</span>
-                  <div className="wc-status">
-                  {(() => {
-                    const providerLabels = [
-                      ['claude', 'claude'],
-                      ['codex', 'codex'],
-                      ['qoder', 'qoder'],
-                      ['opencode', 'opencode']
-                    ] as const
-                    return (
-                      <>
-                        {providerLabels.map(([id, label]) => {
-                          const agent = integrations.agents.find((candidate) => candidate.id === id)
-                          const checking = !agent && integrations.agentsScanning
-                          return (
-                            <span className={`stat-pill ${agent ? 'ok' : ''}`} key={id} title={agent?.path}>
-                              <span className={`sdot ${agent ? 'ok' : checking ? 'checking' : 'off'}`} />
-                              <b>{label}</b>
-                              {agent ? (
-                                <span className="sub">{agent.version ?? basename(agent.path)}</span>
-                              ) : checking ? (
-                                <span className="sub">检测中…</span>
-                              ) : (
-                                <span className="sub">未检测到</span>
-                              )}
-                            </span>
-                          )
-                        })}
-                      </>
-                    )
-                  })()}
-                  </div>
-                </section>
-                <div className="wc-actions">
-                  <div className="wc-act-h">
-                    <h3>最近打开</h3>
-                    <span>{projects.length > 0 ? `${projects.length} 个工作目录` : ''}</span>
-                  </div>
-                  {projects.length === 0 ? (
-                    <div className="sb-empty">还没有历史会话 —— 选个文件夹开始</div>
-                  ) : (
-                    <div className="recent-list">
-                      {(() => {
-                        const sorted = [...projects].sort((a, b) => b.mtime - a.mtime)
-                        const lastCwd = sorted[0]?.cwd
-                        return sorted.slice(0, 6).map((p) => (
-                          <button
-                            key={p.cwd}
-                            className={`recent ${p.cwd === lastCwd ? 'last' : ''}`}
-                            onClick={() => pickRecent(p.cwd)}
-                            title={p.cwd}
-                          >
-                            <Icon name="folder" />
-                            <div className="meta">
-                              <div className="name">
-                                {p.name}
-                                {p.cwd === lastCwd && <span className="last-tag">上次使用</span>}
-                              </div>
-                              <div className="path">{p.cwd.replace(/^\/Users\/[^/]+/, '~')}</div>
-                            </div>
-                            <span className="sess">{p.sessions.length} 个会话</span>
-                            <span className="when">{relTime(p.mtime)}</span>
-                          </button>
-                        ))
-                      })()}
-                    </div>
-                  )}
-                </div>
-                <div className="wc-suggest">
-                  <h3>快速开始</h3>
-                  <div className="sg-grid">
-                    {[
-                      { tag: 'explore', text: '梳理项目结构和技术栈' },
-                      { tag: 'audit', text: '审查最近一次改动' },
-                      { tag: 'build', text: '为核心模块补单元测试' },
-                      { tag: 'explain', text: '解释项目如何运行' }
-                    ].map((s) => (
-                      <button key={s.tag} className="sg-card" onClick={() => setInput(s.text)}>
-                        <span>{s.text}</span>
-                        <Icon name="chevronRight" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="wc-footnote">
-                  所有会话与使用记录保存在本机。无法确认的数据会显示为「未知」。
-                </div>
-              </div>
-            </main>
-            ) : view === 'segments' ? (
+            {view === 'segments' ? (
               <SegmentsView turns={session.turns} />
             ) : view === 'graph' ? (
               <ExecutionGraph
@@ -1246,7 +1124,7 @@ export function App() {
           </div>
         )}
 
-        {cwd && view === 'chat' && (
+        {view === 'chat' && (
           <ChatView
             turns={session.turns}
             selectedId={session.selected?.id ?? null}
@@ -1284,6 +1162,7 @@ export function App() {
               setSlashHidden(false)
             }}
             onChooseFolder={chooseFolder}
+            onUnbindProject={unbindProject}
             onPickRecent={pickRecent}
             onRemoveRecent={removeRecentFolder}
             onRetrySlash={retrySlash}

@@ -447,7 +447,7 @@ export function useIntegrations(cwd: string | null) {
       setRunControls(resolveRunControlSelection(loadingCatalog, stored))
       setRunControlsLoading(true)
     }
-    if (!cwd || typeof fn !== 'function') {
+    if (typeof fn !== 'function') {
       const fallback = fallbackRunControlCatalog('default')
       const next = resolveRunControlSelection(fallback, stored)
       runControlsByProvider.current.set(selectedProviderId, next)
