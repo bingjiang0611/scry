@@ -6,6 +6,13 @@ import { recorderDaemonStatus, serveRecorderDaemon, startRecorderDaemon, stopRec
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
 import { RECORDER_VERSION, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import { compactModelTiming, summarizeTurnRecords } from '../core/turn-recorder/turns-summary.js'
+import {
+  consumeUpdateNotice,
+  runBackgroundUpdate,
+  scheduleBackgroundUpdate,
+  shouldScheduleAutoUpdate,
+  upgradeCli
+} from './update.js'
 
 interface ParsedArgs {
   positionals: string[]
@@ -212,6 +219,25 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
   return degraded ? 5 : 0
 }
 
+async function upgradeCommand(args: ParsedArgs): Promise<number> {
+  if (process.env.SCRY_CLI_BUNDLED === '1') {
+    print({
+      status: 'managed_by_app',
+      currentVersion: RECORDER_VERSION,
+      message: 'Scry App 内置 CLI 随 App 一起升级'
+    })
+    return 0
+  }
+  const result = await upgradeCli({
+    currentVersion: RECORDER_VERSION,
+    entryPath: process.argv[1],
+    checkOnly: args.flags.has('check'),
+    allowBreaking: !args.flags.has('check')
+  })
+  print(result)
+  return result.status === 'error' ? 1 : 0
+}
+
 export async function runScryCli(argv: string[]): Promise<number> {
   const args = parseArgs(argv)
   if (args.flags.has('version') || args.positionals[0] === 'version') {
@@ -219,17 +245,38 @@ export async function runScryCli(argv: string[]): Promise<number> {
     return 0
   }
   switch (args.positionals[0]) {
+    case '__auto_update':
+      await runBackgroundUpdate(
+        process.env.SCRY_UPDATE_CURRENT_VERSION ?? RECORDER_VERSION,
+        process.argv[1]
+      )
+      return 0
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
     case 'doctor': return doctorCommand(args)
+    case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry recorder|turns|doctor ...')
+      throw new Error('usage: scry recorder|turns|doctor|upgrade ...')
   }
 }
 
+const cliArgv = process.argv.slice(2)
+const parsedCliArgs = parseArgs(cliArgv)
+const autoUpdateEligible = shouldScheduleAutoUpdate({
+  command: parsedCliArgs.positionals[0],
+  action: parsedCliArgs.positionals[1],
+  noUpdateCheck: parsedCliArgs.flags.has('no-update-check'),
+  stderrIsTTY: process.stderr.isTTY === true
+})
 try {
-  process.exitCode = await runScryCli(process.argv.slice(2))
+  if (autoUpdateEligible) {
+    const notice = await consumeUpdateNotice()
+    if (notice) process.stderr.write(`${notice}\n`)
+  }
+  process.exitCode = await runScryCli(cliArgv)
 } catch (error) {
   process.stderr.write(`scry: ${error instanceof Error ? error.message : String(error)}\n`)
   process.exitCode = 1
+} finally {
+  if (autoUpdateEligible) await scheduleBackgroundUpdate(RECORDER_VERSION, process.argv[1])
 }
