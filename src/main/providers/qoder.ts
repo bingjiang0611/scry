@@ -170,7 +170,12 @@ function qoderOptions(
     cwd,
     resume,
     pathToQoderCLIExecutable: executable,
-    env: runtimeCliEnv(undefined, managedRecorder ? { managedRecorder: true } : {}),
+    env: {
+      ...runtimeCliEnv(undefined, managedRecorder ? { managedRecorder: true } : {}),
+      // Scry owns cancellation through the run's AbortController. Let Qoder wait for
+      // background shell tasks instead of force-stopping them after ten minutes.
+      QODERCLI_PRINT_BG_WAIT_CEILING_MS: '0'
+    },
     ...permissions,
     includePartialMessages: true,
     includeHookEvents: true,
@@ -243,6 +248,57 @@ export function parseQoderHookLog(runId: string, text: string, sessionId?: strin
       toolUseId: context.tool, durationMs: detail.duration_ms == null ? undefined : Number(detail.duration_ms), isError: !success,
       input: { sessionId: context.session, turnId: context.turn, source: started.source, hookIndex: started.hook_index },
       runtimeMetadata: { source: 'qoder_cli_log', hookSource: started.source, hookIndex: started.hook_index }
+    })
+  }
+  return events
+}
+
+export function parseQoderBackgroundTaskFailures(runId: string, text: string, sessionId?: string): TraceEvent[] {
+  const backgrounded = new Map<string, { command?: string; ts: string }>()
+  const events: TraceEvent[] = []
+  for (const line of text.split('\n')) {
+    const match = line.match(/^(\S+)\s+\S+\s+(?:\[([^\]]+)\]\s+)?tool\.shell\.(backgrounded|finished)\s+(.+)$/)
+    if (!match) continue
+    const context = fields(match[2] ?? '')
+    const detail = fields(match[4])
+    if (sessionId && context.session !== sessionId) continue
+    if (!detail.pid) continue
+    if (match[3] === 'backgrounded') {
+      backgrounded.set(detail.pid, { command: detail.command, ts: match[1] })
+      continue
+    }
+    const started = backgrounded.get(detail.pid)
+    if (!started) continue
+    const exitCode = detail.exit_code == null ? undefined : Number(detail.exit_code)
+    const failed = detail.aborted === 'true' || detail.signal != null || (Number.isFinite(exitCode) && exitCode !== 0)
+    if (!failed) continue
+    const reason = [
+      Number.isFinite(exitCode) ? `exit ${exitCode}` : undefined,
+      detail.signal ? `signal ${detail.signal}` : undefined
+    ].filter(Boolean).join(' · ')
+    const durationMs = new Date(match[1]).getTime() - new Date(started.ts).getTime()
+    const output = `后台 Bash 任务异常结束${reason ? `（${reason}）` : ''}`
+    events.push({
+      id: `qoder-log:background:${detail.pid}:${context.tool ?? 'unknown'}:response`,
+      runId,
+      ts: new Date(match[1]).toISOString(),
+      kind: 'tool',
+      stage: 'tool_result',
+      tool: 'Bash',
+      toolUseId: context.tool,
+      input: started.command ? { command: started.command } : undefined,
+      text: output,
+      output,
+      durationMs: Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined,
+      isError: true,
+      runtimeMetadata: {
+        source: 'qoder_cli_log',
+        backgroundTask: true,
+        pid: Number(detail.pid),
+        exitCode: Number.isFinite(exitCode) ? exitCode : undefined,
+        signal: detail.signal,
+        aborted: detail.aborted === 'true'
+      }
     })
   }
   return events
@@ -627,6 +683,9 @@ export function createQoderAdapter(): ProviderAdapter {
           try {
             const log = await qoderHookLog(qoderPid)
             observeProviderTurnId(qoderProviderTurnIdFromLog(log, externalSessionId))
+            const backgroundFailures = parseQoderBackgroundTaskFailures(request.runId, log, externalSessionId)
+            for (const event of backgroundFailures) request.emit(event)
+            if (backgroundFailures.length > 0) providerStatus = 'failed'
             if (logHooksEnabled) {
               const fallback = parseQoderHookLog(request.runId, log, externalSessionId)
               for (const event of qoderHookFallbackOnly(sdkHooks, fallback)) request.emit(event)
