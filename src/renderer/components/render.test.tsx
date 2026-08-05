@@ -32,7 +32,7 @@ import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-s
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
-import { logicalCallEventsForTurn, OverviewPanel } from './OverviewPanel'
+import { logicalCallEventsForTurn, OverviewPanel, turnCallRowsFromMap } from './OverviewPanel'
 import { McpTrustPanel, type McpGuardReport } from './McpTrustPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
@@ -2112,6 +2112,26 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(turnCalls).toContain('2 次调用')
     expect(turnCalls).toContain('turn-call-group turn-call-toggle skill')
     expect(turnCalls).toContain('turn-call-count">2</span>')
+  })
+
+  it('每轮 Skill 明细按首次调用顺序展示，不按次数或名称重排', () => {
+    const rows = turnCallRowsFromMap(new Map([
+      ['rate-native-rate-workflow', 1],
+      ['rate-workflow', 1],
+      ['browser-harness', 2],
+      ['rate-native-rate-doc', 1],
+      ['rate-doc', 1],
+      ['ali-config', 1]
+    ]), true)
+
+    expect(rows.map((row) => row.name)).toEqual([
+      'rate-native-rate-workflow',
+      'rate-workflow',
+      'browser-harness',
+      'rate-native-rate-doc',
+      'rate-doc',
+      'ali-config'
+    ])
   })
 
   it('同名 Skill 有两个不同 toolUseId 时仍计为两次真实调用', () => {

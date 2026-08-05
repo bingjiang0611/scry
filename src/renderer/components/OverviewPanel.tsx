@@ -343,10 +343,9 @@ function addTurnCall(map: Map<string, number>, name: string): void {
   map.set(name, (map.get(name) ?? 0) + 1)
 }
 
-function turnCallRowsFromMap(map: Map<string, number>): TurnCallItem[] {
-  return [...map.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+export function turnCallRowsFromMap(map: Map<string, number>, preserveCallOrder = false): TurnCallItem[] {
+  const rows = [...map.entries()].map(([name, count]) => ({ name, count }))
+  return preserveCallOrder ? rows : rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
 
 export { logicalCallEventsForTurn } from '../format'
@@ -534,7 +533,7 @@ export function OverviewPanel({
         const groups: Record<TurnCallKind, TurnCallItem[]> = {
           tool: turnCallRowsFromMap(maps.tool),
           mcp: turnCallRowsFromMap(maps.mcp),
-          skill: turnCallRowsFromMap(maps.skill),
+          skill: turnCallRowsFromMap(maps.skill, true),
           agent: turnCallRowsFromMap(maps.agent)
         }
         const total = (Object.keys(groups) as TurnCallKind[]).reduce((sum, kind) => {
