@@ -30,7 +30,7 @@ import {
   logicalCallEventsForTurn,
   resultOf
 } from '../format'
-import type { BillingTurnRow, HookInstanceRow, HookScriptRow, Turn } from '../format'
+import type { BillingTurnRow, FileRow, HookInstanceRow, HookScriptRow, Turn } from '../format'
 import { Icon } from './primitives/Icon'
 import { McpTrustPanel, type McpGuardReport } from './McpTrustPanel'
 import { TurnTimingDetails } from './TurnTimingDetails'
@@ -320,6 +320,44 @@ interface TurnCallRow {
   groups: Record<TurnCallKind, TurnCallItem[]>
   userText: string
   timing: TurnTimingBreakdown
+  files: FileRow[]
+}
+
+function fileOperationText(file: FileRow): string {
+  return [
+    file.read - file.inferredRead > 0 && `R${file.read - file.inferredRead}`,
+    file.inferredRead > 0 && `~R${file.inferredRead}`,
+    file.write > 0 && `W${file.write}`,
+    file.edit > 0 && `E${file.edit}`
+  ].filter(Boolean).join(' ')
+}
+
+export function TurnFileFootprint({ files }: { files: FileRow[] }) {
+  return (
+    <section
+      className="turn-file-footprint"
+      aria-label="本轮文件足迹"
+      title="R/W/E 来自本轮结构化文件工具；~R 来自本轮 cat、sed、rg 等只读 Bash 命令推断，其他间接文件访问仍可能未统计"
+    >
+      <div className="turn-file-heading">
+        <span><Icon name="file" /> 本轮文件足迹（工具证据）</span>
+        <span>{files.length} files</span>
+      </div>
+      {files.length === 0 ? (
+        <div className="turn-file-empty">暂无文件工具证据</div>
+      ) : (
+        <div className="turn-file-list">
+          {files.map((file) => (
+            <div className="turn-file-row" key={file.path} title={file.path}>
+              <span className={`fbadge ${fileBadge(file).toLowerCase()}`}>{fileBadge(file)}</span>
+              <span className="fname">{basename(file.path)}</span>
+              <span className="fops">{fileOperationText(file)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
 }
 
 function formatTurnDuration(ms?: number): string | null {
@@ -548,7 +586,8 @@ export function OverviewPanel({
           result,
           groups,
           userText: turnUserPreview(turn.userText),
-          timing: buildTurnTimingBreakdown(turn.items, logicalEvents, result ?? undefined)
+          timing: buildTurnTimingBreakdown(turn.items, logicalEvents, result ?? undefined),
+          files: aggregateFiles(turn.items).structured
         }
       })
   }, [turns])
@@ -1008,16 +1047,16 @@ export function OverviewPanel({
             {turnCallRows.map((row) => {
               const mcpKey = `${row.runId}:mcp`
               const skillKey = `${row.runId}:skill`
-              const timingKey = `${row.runId}:timing`
+              const detailKey = `${row.runId}:detail`
               const mcpExpanded = expandedTurnCallGroups.has(mcpKey)
               const skillExpanded = expandedTurnCallGroups.has(skillKey)
-              const timingExpanded = expandedTurnCallGroups.has(timingKey)
+              const detailExpanded = expandedTurnCallGroups.has(detailKey)
               const duration = formatTurnDuration(row.result?.durationMs)
               const apiDuration = formatTurnDuration(row.result?.durationApiMs)
               const durationTitle = duration
                 ? `整轮墙钟耗时 ${duration}${apiDuration ? `；其中 API 耗时 ${apiDuration}` : ''}`
                 : undefined
-              const timingToggleLabel = `${timingExpanded ? '收起' : '展开'}第 ${row.turnNo} 轮耗时明细`
+              const detailToggleLabel = `${detailExpanded ? '收起' : '展开'}第 ${row.turnNo} 轮明细`
               const action = (): void => {
                 if (onOpenTurn) {
                   onOpenTurn(row.runId, row.firstEvent ?? row.result)
@@ -1048,11 +1087,11 @@ export function OverviewPanel({
                         <button
                           type="button"
                           className="turn-call-duration-toggle"
-                          title={timingExpanded ? '收起耗时明细' : durationTitle ?? '展开耗时明细'}
-                          aria-label={timingToggleLabel}
-                          aria-expanded={timingExpanded}
-                          aria-controls={`turn-timing-${row.turnNo}`}
-                          onClick={(event) => toggleTurnCallGroup(timingKey, event)}
+                          title={detailExpanded ? '收起轮次明细' : durationTitle ?? '展开轮次明细'}
+                          aria-label={detailToggleLabel}
+                          aria-expanded={detailExpanded}
+                          aria-controls={`turn-detail-${row.turnNo}`}
+                          onClick={(event) => toggleTurnCallGroup(detailKey, event)}
                           onKeyDown={(event) => event.stopPropagation()}
                         >
                           {duration ? `耗时 ${duration}` : '耗时明细'}
@@ -1075,6 +1114,9 @@ export function OverviewPanel({
                         </div>
                       )}
                       {renderTurnCallGroup('agent', row.groups.agent)}
+                      <span className="turn-call-file-count" title={`本轮捕获 ${row.files.length} 个文件的工具证据`}>
+                        <Icon name="file" /> 文件 {row.files.length}
+                      </span>
                     </div>
                     {(mcpExpanded || skillExpanded) && (
                       <div className="turn-call-details">
@@ -1085,18 +1127,18 @@ export function OverviewPanel({
                   </div>
                   <button
                     type="button"
-                    className="turn-call-jump turn-call-open turn-call-timing-edge-toggle"
-                    onClick={(event) => toggleTurnCallGroup(timingKey, event)}
+                    className="turn-call-jump turn-call-open turn-call-detail-edge-toggle"
+                    onClick={(event) => toggleTurnCallGroup(detailKey, event)}
                     onKeyDown={(event) => event.stopPropagation()}
-                    title={timingToggleLabel}
-                    aria-label={timingToggleLabel}
-                    aria-expanded={timingExpanded}
-                    aria-controls={`turn-timing-${row.turnNo}`}
+                    title={detailToggleLabel}
+                    aria-label={detailToggleLabel}
+                    aria-expanded={detailExpanded}
+                    aria-controls={`turn-detail-${row.turnNo}`}
                   >
-                    <Icon name={timingExpanded ? 'chevronDown' : 'chevronRight'} />
+                    <Icon name={detailExpanded ? 'chevronDown' : 'chevronRight'} />
                   </button>
-                  {timingExpanded && (
-                    <div id={`turn-timing-${row.turnNo}`} className="turn-call-timing-slot">
+                  {detailExpanded && (
+                    <div id={`turn-detail-${row.turnNo}`} className="turn-call-detail-slot">
                       <TurnTimingDetails
                         timing={row.timing}
                         onOpenCall={(call) => {
@@ -1107,13 +1149,14 @@ export function OverviewPanel({
                           onSelect(call.event)
                         }}
                       />
+                      <TurnFileFootprint files={row.files} />
                     </div>
                   )}
                 </div>
               )
             })}
           </div>
-          <div className="psrc">按每轮逻辑调用聚合；Skill 内部文件读取不重复计数。点 Txx 跳回该轮，点耗时或右侧箭头展开/收起明细。</div>
+          <div className="psrc">按每轮逻辑调用与文件工具证据聚合；Skill 内部文件读取不重复计数。点 Txx 跳回该轮，右侧箭头展开耗时与本轮文件足迹。</div>
         </div>
       )}
         </div>
@@ -1570,14 +1613,7 @@ export function OverviewPanel({
                 >
                   <span className={`fbadge ${fileBadge(f).toLowerCase()}`}>{fileBadge(f)}</span>
                   <span className="fname">{basename(f.path)}</span>
-                  <span className="dim fops">
-                    {[
-                      f.read - f.inferredRead > 0 && `R${f.read - f.inferredRead}`,
-                      f.inferredRead > 0 && `~R${f.inferredRead}`,
-                      f.write && `W${f.write}`,
-                      f.edit && `E${f.edit}`
-                    ].filter(Boolean).join(' ')}
-                  </span>
+                  <span className="dim fops">{fileOperationText(f)}</span>
                 </button>
               ))}
             </div>
