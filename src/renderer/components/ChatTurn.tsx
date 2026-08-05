@@ -29,7 +29,7 @@ import {
   toolDisplayName,
   toolMeta
 } from '../format'
-import type { FileRow, HookSummary, Turn } from '../format'
+import type { FileRow, HookGroup, HookScriptRow, HookSummary, Turn } from '../format'
 
 function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
   const event = turn.items.find((item) => item.providerId || item.runtimeProvider)
@@ -515,7 +515,155 @@ function FilesSummary({
   )
 }
 
+interface TurnHookTriggerRow {
+  trigger: string
+  toolCalls: number
+  displayedRuns: number
+  exactConfiguredMapping: boolean
+}
+
+interface TurnHookScript extends HookScriptRow {
+  configuredCommands: HookConfiguredCommand[]
+  displayedRuns: number
+  triggerRows: TurnHookTriggerRow[]
+  exactConfiguredMapping: boolean
+}
+
+interface TurnHookPhase {
+  event: string
+  logicalRuns: number
+  responses: number
+  pending: number
+  errors: number
+  cancelled: number
+  triggerRuns: number | null
+  scripts: TurnHookScript[]
+}
+
+function latestHookEvent(a: TraceEvent | undefined, b: TraceEvent | undefined): TraceEvent | undefined {
+  if (!a) return b
+  if (!b) return a
+  const aTime = Date.parse(a.ts)
+  const bTime = Date.parse(b.ts)
+  if (!Number.isFinite(aTime)) return b
+  if (!Number.isFinite(bTime)) return a
+  return bTime >= aTime ? b : a
+}
+
+function uniqueHookCommands(commands: HookConfiguredCommand[]): HookConfiguredCommand[] {
+  const seen = new Set<string>()
+  return commands.filter((candidate) => {
+    const key = `${candidate.source}\0${candidate.sourcePath}\0${candidate.command}\0${candidate.matcher ?? ''}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function configuredCommandsForScript(script: HookScriptRow): HookConfiguredCommand[] {
+  if (script.command) return []
+  return uniqueHookCommands([
+    ...script.instances.flatMap((instance) => instance.configuredCommands),
+    ...(script.last?.hookConfiguredCommands ?? [])
+  ])
+}
+
+function hookTriggerRow(group: HookGroup, script: HookScriptRow, configuredCommands: HookConfiguredCommand[]): TurnHookTriggerRow {
+  const exactConfiguredMapping =
+    !script.command &&
+    script.pending === 0 &&
+    group.toolCalls > 0 &&
+    configuredCommands.length > 0 &&
+    group.toolCalls * configuredCommands.length === script.logicalRuns
+  return {
+    trigger: group.trigger,
+    toolCalls: group.toolCalls,
+    displayedRuns: exactConfiguredMapping ? group.toolCalls : script.logicalRuns,
+    exactConfiguredMapping
+  }
+}
+
+function aggregateTurnHookPhases(summary: HookSummary): TurnHookPhase[] {
+  const phases = new Map<string, TurnHookPhase & { scriptsByHandler: Map<string, TurnHookScript> }>()
+  for (const group of summary.groups) {
+    let phase = phases.get(group.event)
+    if (!phase) {
+      phase = {
+        event: group.event,
+        logicalRuns: 0,
+        responses: 0,
+        pending: 0,
+        errors: 0,
+        cancelled: 0,
+        triggerRuns: null,
+        scripts: [],
+        scriptsByHandler: new Map()
+      }
+      phases.set(group.event, phase)
+    }
+    phase.logicalRuns += group.logicalRuns
+    phase.responses += group.responses
+    phase.pending += group.pending
+    phase.errors += group.errors
+    phase.cancelled += group.cancelled
+    if (group.triggerRuns != null) phase.triggerRuns = (phase.triggerRuns ?? 0) + group.triggerRuns
+
+    for (const script of group.scripts) {
+      const configuredCommands = configuredCommandsForScript(script)
+      const triggerRow = hookTriggerRow(group, script, configuredCommands)
+      const handlerKey = script.command ? `command:${script.command}` : `unmapped:${script.key}`
+      const existing = phase.scriptsByHandler.get(handlerKey)
+      if (!existing) {
+        phase.scriptsByHandler.set(handlerKey, {
+          ...script,
+          key: `${group.event}\0${handlerKey}`,
+          configuredCommands,
+          displayedRuns: triggerRow.displayedRuns,
+          triggerRows: [triggerRow],
+          exactConfiguredMapping: triggerRow.exactConfiguredMapping
+        })
+        continue
+      }
+
+      const last = latestHookEvent(existing.last, script.last)
+      const lastError = latestHookEvent(existing.lastError, script.lastError)
+      const lastCancelled = latestHookEvent(existing.lastCancelled, script.lastCancelled)
+      phase.scriptsByHandler.set(handlerKey, {
+        ...existing,
+        rawEvents: existing.rawEvents + script.rawEvents,
+        logicalRuns: existing.logicalRuns + script.logicalRuns,
+        responses: existing.responses + script.responses,
+        pending: existing.pending + script.pending,
+        started: existing.started + script.started,
+        progress: existing.progress + script.progress,
+        errors: existing.errors + script.errors,
+        cancelled: existing.cancelled + script.cancelled,
+        outcome: last?.hookOutcome ?? (last === script.last ? script.outcome : existing.outcome),
+        exitCode: last?.hookExitCode ?? (last === script.last ? script.exitCode : existing.exitCode),
+        last,
+        lastError,
+        lastCancelled,
+        unsuccessful: [...existing.unsuccessful, ...script.unsuccessful],
+        failureSummary: lastError === script.lastError ? script.failureSummary : existing.failureSummary,
+        instances: [...existing.instances, ...script.instances],
+        configuredCommands: uniqueHookCommands([...existing.configuredCommands, ...configuredCommands]),
+        displayedRuns: existing.displayedRuns + triggerRow.displayedRuns,
+        triggerRows: [...existing.triggerRows, triggerRow],
+        exactConfiguredMapping: existing.exactConfiguredMapping && triggerRow.exactConfiguredMapping
+      })
+    }
+  }
+
+  return [...phases.values()].map(({ scriptsByHandler, ...phase }) => ({
+    ...phase,
+    scripts: [...scriptsByHandler.values()].sort(
+      (a, b) => b.displayedRuns - a.displayedRuns || a.label.localeCompare(b.label)
+    )
+  }))
+}
+
 function HooksSummary({ summary }: { summary: HookSummary }) {
+  const phases = aggregateTurnHookPhases(summary)
   const detailValue = (value: unknown): string | undefined =>
     typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
   const scopeLabel = (source: HookConfiguredCommand['source']): string =>
@@ -525,11 +673,25 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
     <details className="turn-hooks-summary" open>
       <summary>
         <Icon name="tool" /> 本轮 Hook
-        <span className="hook-total">{summary.logicalRuns} 个处理器实例</span>
+        <span className="hook-total">{phases.length} 个周期 · {summary.logicalRuns} 个处理器实例</span>
       </summary>
       <div className="turn-hooks-body">
-        {summary.groups.flatMap((group) =>
-          group.scripts.map((script) => {
+        {phases.map((phase, phaseIndex) => {
+          const phaseTone = phase.errors > 0 ? 'bad' : phase.cancelled > 0 || phase.pending > 0 ? 'warn' : 'ok'
+          return (
+            <details className="turn-hook-phase" key={phase.event}>
+              <summary className="turn-hook-phase-row">
+                <span className="hook-phase-order">{String(phaseIndex + 1).padStart(2, '0')}</span>
+                <span className={`sdot ${phaseTone}`} />
+                <span className="hook-phase-event">{phase.event}</span>
+                <span className="hook-phase-count">
+                  {phase.triggerRuns != null && <>{phase.triggerRuns} 次触发 · </>}
+                  {phase.logicalRuns} 次调用
+                </span>
+                <Icon name="chevronRight" className="hook-row-chev" />
+              </summary>
+              <div className="turn-hook-phase-body">
+                {phase.scripts.map((script) => {
             const cancellation = hookCancellationDetail(script.lastCancelled)
             const unsuccessfulErrors = Math.max(
               script.errors,
@@ -549,16 +711,22 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
               ? `${script.cancelled < script.responses ? '部分取消；最近一次：' : ''}${cancellationStatus(cancellation)}`
               : status
             const latest = script.lastError ?? script.lastCancelled ?? script.last
-            const configuredCommands = script.command ? [] : (latest?.hookConfiguredCommands ?? [])
-            const triggerPrefix = `${group.event}:`
-            const triggerSubject = group.trigger.startsWith(triggerPrefix) ? group.trigger.slice(triggerPrefix.length) : group.trigger
-            const exactConfiguredMapping =
-              !script.command &&
-              script.pending === 0 &&
-              group.toolCalls > 0 &&
-              configuredCommands.length > 0 &&
-              group.toolCalls * configuredCommands.length === script.logicalRuns
-            const displayedRuns = exactConfiguredMapping ? group.toolCalls : script.logicalRuns
+            const configuredCommands = script.configuredCommands
+            const triggerSubjects = [...new Set(script.triggerRows.map((row) => {
+              const triggerPrefix = `${phase.event}:`
+              return row.trigger.startsWith(triggerPrefix) ? row.trigger.slice(triggerPrefix.length) : row.trigger
+            }))]
+            const triggerLabel = triggerSubjects.length === 1
+              ? triggerSubjects[0] === phase.event ? '周期' : triggerSubjects[0]
+              : `${triggerSubjects[0]} +${triggerSubjects.length - 1}`
+            const triggerSummary = script.triggerRows
+              .filter((row) => row.toolCalls > 0)
+              .map((row) => {
+                const triggerPrefix = `${phase.event}:`
+                const subject = row.trigger.startsWith(triggerPrefix) ? row.trigger.slice(triggerPrefix.length) : row.trigger
+                return `${row.toolCalls} 次 ${subject}`
+              })
+              .join(' · ')
             const input = latest?.input as Record<string, unknown> | undefined
             const evidenceCandidates = [
               ['stdout', detailValue(input?.stdout)],
@@ -584,20 +752,20 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
               .join(' · ')
             return (
               <details className="turn-hook-item" key={script.key}>
-                <summary className="turn-hook-row" title={group.trigger}>
+                <summary className="turn-hook-row" title={`${phase.event} · ${triggerSubjects.join('、')}`}>
                   <span className={`sdot ${tone}`} />
                   <span className="hook-script-name">{script.label}</span>
-                  <span className="hook-event-name">{group.event}</span>
+                  <span className="hook-event-name">{triggerLabel}</span>
                   <span className={`hook-run-status ${tone}`}>{status}</span>
-                  <span className="hook-run-count">{displayedRuns}×</span>
+                  <span className="hook-run-count">{script.displayedRuns}×</span>
                   <Icon name="chevronRight" className="hook-row-chev" />
                 </summary>
                 <div className="turn-hook-detail">
                   <dl className="hook-detail-grid">
-                    {group.toolCalls > 0 && (
+                    {triggerSummary && (
                       <>
                         <dt>工具调用</dt>
-                        <dd>{group.toolCalls} 次 {triggerSubject}</dd>
+                        <dd>{triggerSummary}</dd>
                       </>
                     )}
                     <dt>执行结果</dt>
@@ -646,9 +814,9 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
                   {configuredCommands.length > 0 && (
                     <div className="hook-configured-block">
                       <div className="hook-detail-label">
-                        {exactConfiguredMapping ? `每次并行触发的 Hook · ${configuredCommands.length} 个` : `当前配置匹配 · ${configuredCommands.length} 条`}
+                        {script.exactConfiguredMapping ? `每次并行触发的 Hook · ${configuredCommands.length} 个` : `当前配置匹配 · ${configuredCommands.length} 条`}
                       </div>
-                      {!exactConfiguredMapping && (
+                      {!script.exactConfiguredMapping && (
                         <p className="hook-configured-note">
                           运行时未上报 Hook 与工具调用的逐实例映射；当前配置无法完整解释实际数量。配置可能在会话结束后变化，以下为当前配置反查。
                         </p>
@@ -685,8 +853,11 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
                 </div>
               </details>
             )
-          })
-        )}
+                })}
+              </div>
+            </details>
+          )
+        })}
       </div>
     </details>
   )
