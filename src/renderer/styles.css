@@ -4059,10 +4059,12 @@ button.turn-timing-call {
   min-width: 0;
   max-width: min(210px, 100%);
   margin: 0;
+  padding: 0;
   overflow: hidden;
   border: 1px solid var(--border2);
   border-radius: 8px;
   background: var(--surface-inset);
+  cursor: zoom-in;
 }
 .user-attachment img {
   display: block;
@@ -4072,15 +4074,111 @@ button.turn-timing-call {
   object-fit: contain;
   background: var(--surface-inset);
 }
-.user-attachment figcaption {
-  max-width: 100%;
-  padding: 5px 7px 6px;
+.user-attachment:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.user-attachment:active {
+  transform: scale(0.98);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  color: var(--dim);
-  font-size: 11.5px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+  border: 0;
+}
+.image-lightbox.modal {
+  position: relative;
+  width: min(1200px, calc(100vw - 112px));
+  height: min(860px, calc(100vh - 96px));
+  max-width: none;
+  max-height: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.image-lightbox-stage {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.image-lightbox-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center;
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.image-lightbox-close,
+.image-lightbox-zoom button {
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #17191d;
+  background: rgba(255, 255, 255, 0.94);
+  cursor: pointer;
+}
+.image-lightbox-close {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+}
+.image-lightbox-close .ico,
+.image-lightbox-zoom .ico {
+  width: 18px;
+  height: 18px;
+}
+.image-lightbox-zoom {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 42px 68px 42px;
+  align-items: center;
+  transform: translateX(-50%);
+  overflow: hidden;
+  border-radius: 24px;
+  color: #17191d;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+}
+.image-lightbox-zoom button {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  background: transparent;
+}
+.image-lightbox-zoom button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.image-lightbox-zoom span {
+  text-align: center;
+  font: 600 12px/1 var(--font-mono);
+}
+.image-lightbox-close:not(:disabled):active,
+.image-lightbox-zoom button:not(:disabled):active {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  .image-lightbox-stage img {
+    transition: none;
+  }
 }
 .who {
   display: flex;

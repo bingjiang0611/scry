@@ -462,6 +462,7 @@ export function App() {
   const queuedStartInFlightRef = useRef(false)
   const sessionSelectionSeqRef = useRef(0)
   const slashRequestSeqRef = useRef(0)
+  const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
   const integrationContextKeyRef = useRef('')
   integrationContextKeyRef.current = `${integrations.providerContext.providerId}\0${integrations.providerContext.cwd ?? ''}`
   const draftAttachmentsRef = useRef<DraftAttachment[]>([])
@@ -471,16 +472,15 @@ export function App() {
   const [slashCmds, setSlashCmds] = useState<SlashCmd[]>([])
   const [slashReason, setSlashReason] = useState<string | null>(null)
   const [slashLoading, setSlashLoading] = useState(false)
-  const [slashFetched, setSlashFetched] = useState(false) // 已尝试拉取(不论成败)，避免空结果无限重拉
+  const [slashRefreshKey, setSlashRefreshKey] = useState(0)
   const [slashSel, setSlashSel] = useState(0)
   const [slashHidden, setSlashHidden] = useState(false) // Esc 临时收起；改输入时复位
   const slashToken = input.startsWith('/') && !/\s/.test(input) ? input.slice(1) : null
   // 输入命令 token 时总是开菜单：加载中/清单空/无匹配 都摊开显示，不再静默藏掉
   const slashOpen = slashToken != null && !slashHidden
   const retrySlash = (): void => {
-    setSlashCmds([])
-    setSlashReason(null)
-    setSlashFetched(false) // 触发 effect 重新拉取
+    slashCacheRef.current.delete(integrationContextKeyRef.current)
+    setSlashRefreshKey((key) => key + 1)
   }
 
   useEffect(() => {
@@ -690,20 +690,25 @@ export function App() {
       })
   }, [integrations.agents, queuedPrompts, session.busy, startPrompt])
 
-  // 首次输入 / 时拉一次命令清单（slashFetched 锁住，空结果不无限重拉；retrySlash 解锁可重拉）
+  // Agent / 目录就绪后立即预取；用户输入 / 时只展示缓存，不再现场等 Provider。
   useEffect(() => {
-    if (slashToken == null || slashFetched || slashLoading) return
     const seq = ++slashRequestSeqRef.current
     const context = integrations.providerContext
     const requestKey = `${context.providerId}\0${context.cwd ?? ''}`
-    setSlashFetched(true)
+    const cached = slashCacheRef.current.get(requestKey)
+    setSlashCmds(cached?.commands ?? [])
+    setSlashReason(cached?.reason ?? null)
     // 防御：老 preload 可能没 slashCommands（dev 没重建时）。直接 undefined() 会同步抛错冲垮整个渲染树→黑屏。
     const fn = window.scry?.listCommands
     if (typeof fn !== 'function') return
-    setSlashLoading(true)
+    setSlashLoading(cached == null)
     Promise.resolve()
       .then(() => fn(context))
       .then((result) => {
+        slashCacheRef.current.set(requestKey, {
+          commands: result.data ?? [],
+          reason: result.reason ?? null
+        })
         if (seq !== slashRequestSeqRef.current || requestKey !== integrationContextKeyRef.current) return
         setSlashCmds(result.data ?? [])
         setSlashReason(result.reason ?? null)
@@ -714,15 +719,7 @@ export function App() {
       .finally(() => {
         if (seq === slashRequestSeqRef.current) setSlashLoading(false)
       })
-  }, [integrations.providerContext, slashToken, slashFetched, slashLoading])
-
-  useEffect(() => {
-    ++slashRequestSeqRef.current
-    setSlashCmds([])
-    setSlashReason(null)
-    setSlashFetched(false)
-    setSlashLoading(false)
-  }, [integrations.providerContext])
+  }, [integrations.providerContext, slashRefreshKey])
 
   // 过滤结果变化时高亮项回到顶部
   useEffect(() => {

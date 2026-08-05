@@ -1,5 +1,5 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
-import { memo, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -11,6 +11,7 @@ import {
   type AgentQuestionResponse
 } from '@shared/runtime'
 import { AskUserQuestionInline, AskUserQuestionResult } from './AskUserQuestionDialog'
+import { ModalFrame } from './Modals'
 import {
   aggregateCalls,
   aggregateHooks,
@@ -43,8 +44,35 @@ function attachmentSrc(attachment: AgentInputAttachment): string {
   return `data:${attachment.mimeType};base64,${attachment.dataBase64}`
 }
 
+function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachment; onClose: () => void }) {
+  const titleId = useId()
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const [zoom, setZoom] = useState(1)
+  return (
+    <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} className="image-lightbox" onClose={onClose}>
+      <h2 id={titleId} className="visually-hidden">{attachment.name}</h2>
+      <button ref={closeRef} type="button" className="image-lightbox-close" onClick={onClose} aria-label="关闭图片预览">
+        <Icon name="x" />
+      </button>
+      <div className="image-lightbox-stage">
+        <img src={attachmentSrc(attachment)} alt={attachment.name} style={{ transform: `scale(${zoom})` }} />
+      </div>
+      <div className="image-lightbox-zoom" aria-label="图片缩放">
+        <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))} disabled={zoom <= 0.5} aria-label="缩小图片">
+          <Icon name="minus" />
+        </button>
+        <span>{Math.round(zoom * 100)}%</span>
+        <button type="button" onClick={() => setZoom((value) => Math.min(2, value + 0.25))} disabled={zoom >= 2} aria-label="放大图片">
+          <Icon name="plus" />
+        </button>
+      </div>
+    </ModalFrame>
+  )
+}
+
 function UserMessageImpl({ text, attachments = [] }: { text: string; attachments?: AgentInputAttachment[] }) {
   const [expanded, setExpanded] = useState(false)
+  const [preview, setPreview] = useState<AgentInputAttachment | null>(null)
   const skillDetailId = useId()
   if (!text && attachments.length === 0) return null
   const { command, body, injectedSkill } = parseUserMessage(text)
@@ -88,10 +116,15 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
         {attachments.length > 0 && (
           <div className="user-attachments" aria-label="发送的图片">
             {attachments.map((attachment, index) => (
-              <figure className="user-attachment" key={`${attachment.name}:${attachment.size}:${index}`}>
-                <img src={attachmentSrc(attachment)} alt={attachment.name} />
-                <figcaption>{attachment.name}</figcaption>
-              </figure>
+              <button
+                type="button"
+                className="user-attachment"
+                key={`${attachment.name}:${attachment.size}:${index}`}
+                onClick={() => setPreview(attachment)}
+                aria-label={`放大查看图片 ${attachment.name}`}
+              >
+                <img src={attachmentSrc(attachment)} alt="" />
+              </button>
             ))}
           </div>
         )}
@@ -101,6 +134,7 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
           </button>
         )}
       </div>
+      {preview && <ImageLightbox attachment={preview} onClose={() => setPreview(null)} />}
     </div>
   )
 }
