@@ -1,6 +1,6 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import {
@@ -10,6 +10,7 @@ import {
   normalizeAgentVersion,
   resolveCommandOnPath,
   resolveRecorderCliPath,
+  packagedRecorderCliPath,
   runtimeCliEnv,
   sanitizeNestedAgentEnv,
   sanitizeProviderEnv,
@@ -141,6 +142,26 @@ describe('runtime CLI discovery constraints', () => {
       const env = runtimeCliEnv({ PATH: `${dir}:/usr/bin:/bin` })
       expect(env.SCRY_CLI_PATH).toBe(scry)
       expect(env.PATH).toBe(`${dir}:/usr/bin:/bin`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('prefers the App-private recorder CLI over PATH and fallback installations', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-bundled-cli-'))
+    try {
+      const resources = join(dir, 'Scry.app', 'Contents', 'Resources')
+      const bundled = join(resources, 'bin', 'scry')
+      const external = join(dir, 'external', 'scry')
+      mkdirSync(dirname(bundled), { recursive: true })
+      mkdirSync(dirname(external), { recursive: true })
+      writeFileSync(bundled, '#!/bin/sh\n')
+      writeFileSync(external, '#!/bin/sh\n')
+      chmodSync(bundled, 0o755)
+      chmodSync(external, 0o755)
+
+      expect(packagedRecorderCliPath(resources)).toBe(bundled)
+      expect(resolveRecorderCliPath({ PATH: dirname(external) }, dirname(external), '', bundled)).toBe(bundled)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

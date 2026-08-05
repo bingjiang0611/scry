@@ -447,14 +447,22 @@ function recorderFallbackSearchPath(env: Record<string, string>): string {
   return directories.filter((directory): directory is string => !!directory).join(delimiter)
 }
 
+export function packagedRecorderCliPath(resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath): string | undefined {
+  if (!resourcesPath) return undefined
+  const candidate = join(resourcesPath, 'bin', 'scry')
+  return existsSync(candidate) ? candidate : undefined
+}
+
 export function resolveRecorderCliPath(
   env: Record<string, string>,
   trustedPath: string,
-  fallbackPath: string = recorderFallbackSearchPath(env)
+  fallbackPath: string = recorderFallbackSearchPath(env),
+  bundledPath: string | undefined = packagedRecorderCliPath()
 ): string | undefined {
   if (Object.prototype.hasOwnProperty.call(env, 'SCRY_CLI_PATH')) {
     return env.SCRY_CLI_PATH?.trim() ?? ''
   }
+  if (bundledPath) return bundledPath
   return resolveCommandOnPath('scry', trustedPath) ?? resolveCommandOnPath('scry', fallbackPath)
 }
 
@@ -466,25 +474,33 @@ export function runtimeCliEnv(
   const originalPath = base
     ? runtimeBase.PATH ?? process.env.PATH ?? ''
     : shellPathCache || process.env.PATH || ''
-  const scryCliPath = resolveRecorderCliPath(runtimeBase, originalPath)
+  const bundledCliPath = packagedRecorderCliPath()
+  const scryCliPath = resolveRecorderCliPath(
+    runtimeBase,
+    originalPath,
+    recorderFallbackSearchPath(runtimeBase),
+    bundledCliPath
+  )
   if (options.managedRecorder) {
     if (!scryCliPath) {
       throw new Error(`Scry managed recorder requires scry CLI ${RECORDER_VERSION}`)
     }
-    let actualVersion = ''
-    try {
-      actualVersion = execFileSync(scryCliPath, ['--version'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-        env: sanitizeProviderEnv(runtimeBase)
-      }).trim()
-    } catch {
-      throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
-    }
-    if (actualVersion !== RECORDER_VERSION) {
-      throw new Error(
-        `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}`
-      )
+    if (scryCliPath !== bundledCliPath) {
+      let actualVersion = ''
+      try {
+        actualVersion = execFileSync(scryCliPath, ['--version'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          env: sanitizeProviderEnv(runtimeBase)
+        }).trim()
+      } catch {
+        throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
+      }
+      if (actualVersion !== RECORDER_VERSION) {
+        throw new Error(
+          `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}`
+        )
+      }
     }
   }
   return sanitizeProviderEnv({

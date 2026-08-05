@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+self=$0
+while [ -L "$self" ]; do
+  base=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
+  target=$(readlink "$self")
+  case "$target" in
+    /*) self=$target ;;
+    *) self=$base/$target ;;
+  esac
+done
+
+bin_dir=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
+resources_dir=$(dirname "$bin_dir")
+contents_dir=$(dirname "$resources_dir")
+
+ELECTRON_RUN_AS_NODE=1 exec \
+  "$contents_dir/MacOS/Scry" \
+  "$resources_dir/scry-cli/dist/cli/scry.js" \
+  "$@"
