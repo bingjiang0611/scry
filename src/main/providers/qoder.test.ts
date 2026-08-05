@@ -28,6 +28,7 @@ vi.mock('../claude-locate', () => ({
 import {
   createQoderAdapter,
   expandQoderProjectCommand,
+  parseQoderBackgroundTaskFailures,
   parseQoderHookLog,
   qoderHookFallbackOnly,
   qoderProviderTurnIdFromLog
@@ -168,6 +169,9 @@ describe('Qoder provider adapter', () => {
       runtimeMetadata: expect.objectContaining({ reportedZeroUsage: true })
     })
     expect(sdk.runtimeCliEnv).toHaveBeenCalledWith(undefined, {})
+    expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({
+      QODERCLI_PRINT_BG_WAIT_CEILING_MS: '0'
+    })
   })
 
   it('managed Qoder 返回 native promptId 与失败状态，并只在显式启用时注入 managed 环境', async () => {
@@ -212,6 +216,61 @@ describe('Qoder provider adapter', () => {
     })
     expect(handle.getProviderTurnId?.()).toBe('qoder-turn')
     expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({ SCRY_RECORDER_MANAGED: '1' })
+  })
+
+  it('把 Qoder 日志中的后台 shell 失败回写为本轮失败', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'scry-qoder-background-test-'))
+    const runLogDir = join(configDir, 'logs', 'runs', 'run-p126')
+    await mkdir(runLogDir, { recursive: true })
+    await writeFile(join(runLogDir, 'qodercli.log'), [
+      '2026-08-05T18:31:57.544+08:00 INFO  [session=qoder-session] tool.shell.backgrounded pid=35509 command="make build-local"',
+      '2026-08-05T18:42:08.004+08:00 WARN  [session=qoder-session turn=qoder-turn tool=tool-1] tool.shell.finished pid=35509 exit_code=143 signal=15 aborted=true output_length=0'
+    ].join('\n'))
+    const previousConfigDir = process.env.QODER_CONFIG_DIR
+    process.env.QODER_CONFIG_DIR = configDir
+    try {
+      const child = Object.assign(new EventEmitter(), { pid: 126, kill: vi.fn() })
+      sdk.spawn.mockReturnValue(child)
+      sdk.query.mockImplementation(({ options }) => {
+        options.spawnQoderCLIProcess({
+          command: '/bin/qodercli',
+          args: [],
+          cwd: '/repo',
+          env: {},
+          signal: new AbortController().signal
+        })
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { type: 'system', subtype: 'init', session_id: 'qoder-session', mcp_servers: [] }
+            yield { type: 'result', subtype: 'success', session_id: 'qoder-session', result: 'backgrounded' }
+          },
+          close: vi.fn().mockResolvedValue(undefined),
+          interrupt: vi.fn().mockResolvedValue(undefined)
+        }
+      })
+      const events: TraceEvent[] = []
+
+      const result = await createQoderAdapter().run({
+        runId: 'run-background-failure',
+        prompt: 'work',
+        cwd: '/repo',
+        attachments: [],
+        emit: (event) => events.push(event)
+      }).promise
+
+      expect(result.status).toBe('failed')
+      expect(events).toContainEqual(expect.objectContaining({
+        kind: 'tool',
+        stage: 'tool_result',
+        toolUseId: 'tool-1',
+        isError: true,
+        runtimeMetadata: expect.objectContaining({ backgroundTask: true, exitCode: 143 })
+      }))
+    } finally {
+      if (previousConfigDir == null) delete process.env.QODER_CONFIG_DIR
+      else process.env.QODER_CONFIG_DIR = previousConfigDir
+      await rm(configDir, { recursive: true, force: true })
+    }
   })
 
   it('在送入 SDK 前展开项目 Qoder command，避免 slash command 零 turn 退出', async () => {
@@ -597,6 +656,27 @@ describe('Qoder provider adapter', () => {
     expect(events.filter((event) => event.stage === 'hook_response')).toEqual([
       expect.objectContaining({ hookCommand: 'project-hook', hookOutcome: 'success', hookExitCode: 0 }),
       expect.objectContaining({ hookCommand: 'user-hook', hookOutcome: 'error', hookExitCode: 1, isError: true })
+    ])
+  })
+
+  it('marks only failed background shell tasks from the Qoder process log', () => {
+    const log = [
+      '2026-08-05T18:31:57.544+08:00 INFO  [session=s1] tool.shell.backgrounded pid=35509 command="make build-local"',
+      '2026-08-05T18:42:08.004+08:00 WARN  [session=s1 turn=t1 tool=tool-1] tool.shell.finished pid=35509 exit_code=143 signal=15 aborted=true output_length=0',
+      '2026-08-05T18:42:09.000+08:00 INFO  [session=s1] tool.shell.backgrounded pid=35510 command="echo ok"',
+      '2026-08-05T18:42:10.000+08:00 INFO  [session=s1 turn=t1 tool=tool-2] tool.shell.finished pid=35510 exit_code=0 aborted=false output_length=3'
+    ].join('\n')
+
+    expect(parseQoderBackgroundTaskFailures('run-1', log, 's1')).toEqual([
+      expect.objectContaining({
+        kind: 'tool',
+        stage: 'tool_result',
+        tool: 'Bash',
+        toolUseId: 'tool-1',
+        output: '后台 Bash 任务异常结束（exit 143 · signal 15）',
+        isError: true,
+        runtimeMetadata: expect.objectContaining({ backgroundTask: true, exitCode: 143, signal: '15' })
+      })
     ])
   })
 
