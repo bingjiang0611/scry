@@ -1166,7 +1166,9 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="权限"')
     const controls = chatHtml.match(/<div class="composer-controls"[\s\S]*?<div class="spacer"/u)?.[0] ?? ''
     expect(controls).toContain('aria-label="运行配置"')
+    expect(controls).toContain('class="run-control-scroll"')
     expect(controls.indexOf('Agent')).toBeLessThan(controls.indexOf('aria-label="模型"'))
+    expect(controls.indexOf('class="clipick"')).toBeLessThan(controls.indexOf('class="run-control-scroll"'))
     expect(controls.indexOf('aria-label="模型"')).toBeLessThan(controls.indexOf('aria-label="Effort"'))
     expect(controls.indexOf('aria-label="Effort"')).toBeLessThan(controls.indexOf('aria-label="权限"'))
   })
