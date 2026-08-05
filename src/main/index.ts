@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -598,6 +598,13 @@ function handleTrusted<TArgs extends unknown[], TResult>(
     return listener(event, ...(args as TArgs))
   })
 }
+
+handleTrusted('app:setTheme', (_event, theme: unknown) => {
+  if (theme !== 'dark' && theme !== 'light') throw new Error('无效的界面主题')
+  nativeTheme.themeSource = theme
+  win?.setBackgroundColor(theme === 'light' ? '#f3f5f7' : '#0c0d0f')
+  return true as const
+})
 
 handleTrusted('agent:detectFast', () => {
   const supported = new Set(['claude', 'codex', 'qoder', 'opencode'])

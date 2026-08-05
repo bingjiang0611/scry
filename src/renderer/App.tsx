@@ -342,6 +342,11 @@ export function App() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
+
+  useEffect(() => {
+    const setWindowTheme = window.scry.setTheme
+    if (typeof setWindowTheme === 'function') void setWindowTheme(theme).catch(() => {})
+  }, [theme])
   const confirmWorkspaceTransition = useCallback(
     (): boolean => !workspaceDirty || window.confirm('当前文件有未保存修改。放弃修改并继续吗？'),
     [workspaceDirty]
