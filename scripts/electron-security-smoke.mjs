@@ -146,14 +146,29 @@ async function main() {
       recent = document.querySelector('button.sb-sess')
       if (!recent) await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    recent?.click()
-    await new Promise((resolve) => setTimeout(resolve, 250))
-    document.querySelector('button.clibtn')?.click()
+    document.querySelector('button.sb-new')?.click()
+    const unlockDeadline = Date.now() + 2_000
+    let unlockedAgent
+    while ((!unlockedAgent || unlockedAgent.disabled) && Date.now() < unlockDeadline) {
+      unlockedAgent = document.querySelector('button.clibtn')
+      if (!unlockedAgent || unlockedAgent.disabled) await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    unlockedAgent?.click()
     await new Promise((resolve) => setTimeout(resolve, 50))
     const button = [...document.querySelectorAll('button')].find((node) => node.title?.includes('API/BYOK'))
-    return { recentFound: !!recent, menuFound: !!document.querySelector('.climenu'), apiPlaceholderFound: !!button }
+    return {
+      recentFound: !!recent,
+      newSessionAgentUnlocked: !!unlockedAgent && !unlockedAgent.disabled,
+      menuFound: !!document.querySelector('.climenu'),
+      apiPlaceholderFound: !!button
+    }
   })()`)
-  assert.deepEqual(transportPicker, { recentFound: true, menuFound: true, apiPlaceholderFound: false })
+  assert.deepEqual(transportPicker, {
+    recentFound: true,
+    newSessionAgentUnlocked: true,
+    menuFound: true,
+    apiPlaceholderFound: false
+  })
 
   const modal = await evaluate(`(async () => {
     const trigger = document.querySelector('button[title="MCP"]')

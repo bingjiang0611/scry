@@ -1,5 +1,5 @@
 // 顶部/底部选择器：工作目录选择（含 recent）/ 本地 CLI 选择（local·api 后端 + rescan）。
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { AGENT_ICON, basename } from '../format'
 import { Icon, type IconName } from './primitives/Icon'
 import type { DetectedAgent } from '../env'
@@ -100,16 +100,27 @@ export function CliPicker({
   const [open, setOpen] = useState(false)
   const menuId = useId()
   const sel = agents.find((a) => a.id === selectedId)
+  useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
   return (
     <div className="clipick">
-      <button className="clibtn" onClick={() => setOpen((o) => !o)} disabled={disabled} aria-expanded={open} aria-controls={menuId} aria-haspopup="menu">
+      <button
+        className="clibtn"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        title={disabled ? '同一会话不能切换 Agent；请新建会话后重新选择' : undefined}
+        aria-expanded={open}
+        aria-controls={menuId}
+        aria-haspopup="menu"
+      >
         <span className="agicon">
           <Icon name={(AGENT_ICON[selectedId] ?? 'cube') as IconName} />
         </span>
         <span>{sel?.name ?? 'Agent'}</span>
-        <Icon name="chevronDown" className="chev" />
+        <Icon name={disabled ? 'lock' : 'chevronDown'} className="chev" />
       </button>
-      {open && (
+      {open && !disabled && (
         <div id={menuId} className="menu climenu" onMouseLeave={() => setOpen(false)}>
           <div className="cltitle">
             Local CLI

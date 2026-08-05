@@ -1287,6 +1287,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         recent={[]}
         agents={[]}
         selectedAgentId="claude"
+        agentLocked
         {...RUN_CONTROL_PROPS}
         input=""
         busy
@@ -1325,6 +1326,10 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('当前任务结束后依次发送')
     expect(chatHtml).toContain('queue-count">1')
     expect(chatHtml).toContain('aria-label="移除队列第 1 条消息"')
+    expect(chatHtml).toContain('title="同一会话不能切换 Agent；请新建会话后重新选择"')
+    expect(chatHtml).toMatch(/class="clibtn"[^>]*disabled=""/)
+    expect(chatHtml).toMatch(/aria-label="模型"(?![^>]*disabled)/)
+    expect(chatHtml).toMatch(/aria-label="权限"(?![^>]*disabled)/)
     expect(chatHtml).toContain('继续检查')
     expect(chatHtml).toContain('draft.png')
     expect(chatHtml).toContain('aria-label="放大查看图片 sent.png"')
