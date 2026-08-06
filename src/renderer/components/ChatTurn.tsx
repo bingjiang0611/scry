@@ -354,34 +354,63 @@ function SubagentBlock({
       </button>
       {open && (
         <div id={bodyId} className="subbody">
-          {items.map((ev) => {
-            if (ev.kind === 'model' && ev.stage === 'thinking') {
-              return <ThinkingBlock key={ev.id} text={ev.thinking ?? ''} onSelect={() => onSelect(ev)} />
-            }
-            if (ev.kind === 'model' && ev.stage === 'text') {
-              return ev.text ? (
-                <div className="model-text md sub" key={ev.id}>
-                  <Markdown>{ev.text}</Markdown>
+          {(() => {
+            const out: ReactNode[] = []
+            let live = ''
+            let liveKey = ''
+            const flushLive = (): void => {
+              if (!live) return
+              out.push(
+                <div className="model-text md sub" key={liveKey || `sub-live-${out.length}`}>
+                  <Markdown>{live}</Markdown>
                 </div>
-              ) : null
+              )
+              live = ''
+              liveKey = ''
             }
-            const pendingQuestion = pendingQuestions.find(
-              (request) => request.runId === ev.runId && request.questionId === ev.toolUseId
-            )
-            return (
-              <ToolItem
-                key={ev.id}
-                ev={ev}
-                selected={selectedId === ev.id}
-                onSelect={() => onSelect(ev)}
-                maxDur={maxDur}
-                pendingQuestion={pendingQuestion}
-                queuedQuestionCount={pendingQuestions.length}
-                onAnswerQuestion={onAnswerQuestion}
-                turnDone={turnDone}
-              />
-            )
-          })}
+            for (const ev of items) {
+              if (ev.kind === 'model' && ev.stage === 'text_delta') {
+                if (!live) liveKey = ev.id
+                live += ev.text ?? ''
+                continue
+              }
+              if (ev.kind === 'model' && ev.stage === 'thinking') {
+                flushLive()
+                out.push(<ThinkingBlock key={ev.id} text={ev.thinking ?? ''} onSelect={() => onSelect(ev)} />)
+                continue
+              }
+              if (ev.kind === 'model' && ev.stage === 'text') {
+                flushLive()
+                if (ev.text) {
+                  out.push(
+                    <div className="model-text md sub" key={ev.id}>
+                      <Markdown>{ev.text}</Markdown>
+                    </div>
+                  )
+                }
+                continue
+              }
+              flushLive()
+              const pendingQuestion = pendingQuestions.find(
+                (request) => request.runId === ev.runId && request.questionId === ev.toolUseId
+              )
+              out.push(
+                <ToolItem
+                  key={ev.id}
+                  ev={ev}
+                  selected={selectedId === ev.id}
+                  onSelect={() => onSelect(ev)}
+                  maxDur={maxDur}
+                  pendingQuestion={pendingQuestion}
+                  queuedQuestionCount={pendingQuestions.length}
+                  onAnswerQuestion={onAnswerQuestion}
+                  turnDone={turnDone}
+                />
+              )
+            }
+            flushLive()
+            return out
+          })()}
         </div>
       )}
     </div>
@@ -966,6 +995,15 @@ function AssistantTurnImpl({
     }
     return m
   }, [items])
+  const knownToolUseIds = new Set(
+    items
+      .filter(
+        (event) =>
+          (event.kind === 'tool' || event.kind === 'skill' || event.kind === 'agent') &&
+          !!event.toolUseId
+      )
+      .map((event) => event.toolUseId as string)
+  )
   const topLevelToolUseIds = new Set(
     items
       .filter(
@@ -978,7 +1016,12 @@ function AssistantTurnImpl({
   )
   const renderedPendingQuestionKeys = new Set(
     items
-      .filter((event) => !event.parentToolUseId || topLevelToolUseIds.has(event.parentToolUseId))
+      .filter(
+        (event) =>
+          !event.parentToolUseId ||
+          !knownToolUseIds.has(event.parentToolUseId) ||
+          topLevelToolUseIds.has(event.parentToolUseId)
+      )
       .filter((event) =>
         pendingQuestions.some(
           (request) => request.runId === event.runId && request.questionId === event.toolUseId
@@ -1044,7 +1087,9 @@ function AssistantTurnImpl({
         }
         for (const ev of items) {
           if (ev.kind === 'harness') continue
-          if (ev.parentToolUseId) continue // subagent 子步骤：在父 Task 卡下折叠渲染，不在主流平铺
+          // 只有父调用真实存在时才折叠。Provider 给出孤儿 parent id 时，仍按顶层事件渲染，
+          // 避免一条坏归因把后续根 agent 内容整段吞掉。
+          if (ev.parentToolUseId && knownToolUseIds.has(ev.parentToolUseId)) continue
           const isStreamFragment =
             ev.kind === 'model' &&
             (ev.stage === 'text_delta' ||
