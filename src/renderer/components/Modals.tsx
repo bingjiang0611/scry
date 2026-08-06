@@ -175,7 +175,7 @@ export function SkillsModal({
   const groups: Record<string, SkillMeta[]> = {}
   for (const s of filtered) (groups[s.scope] ??= []).push(s)
   return (
-    <ModalFrame labelledBy={titleId} initialFocusRef={searchRef} onClose={onClose}>
+    <ModalFrame labelledBy={titleId} initialFocusRef={searchRef} className="skills-modal" onClose={onClose}>
         <div className="modal-head">
           <b id={titleId}>Skills</b>{' '}
           <span className="dim">
@@ -202,13 +202,14 @@ export function SkillsModal({
               {list.map((s) => (
                 <div key={s.name} className="skill-row">
                   <div className="skill-tog">
-                    <label className="switch">
-                      <input type="checkbox" aria-label={`启用 Skill ${s.name}`} checked={s.enabled} disabled={!canManage} onChange={(e) => onToggle(s.name, e.target.checked)} />
-                      <span className="slider" />
-                    </label>
                     <span className={`skill-name ${s.enabled ? '' : 'off'}`}>{s.name}</span>
+                    <label className="switch skill-switch">
+                      <input type="checkbox" aria-label={`启用 Skill ${s.name}`} checked={s.enabled} disabled={!canManage} onChange={(e) => onToggle(s.name, e.target.checked)} />
+                      <span className="slider" aria-hidden="true" />
+                      <span className="skill-switch-state" aria-hidden="true">{s.enabled ? '已启用' : '已关闭'}</span>
+                    </label>
                   </div>
-                  <div className="skill-desc">{s.description}</div>
+                  <div className="skill-desc" title={s.description}>{s.description}</div>
                 </div>
               ))}
             </div>

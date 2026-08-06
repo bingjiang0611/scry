@@ -235,13 +235,15 @@ export function Sidebar({
                           })
                         }}
                       >
-                        <span className="sb-sesstext">
+                        <span className="sb-session-main">
                           <span className="sb-provider">{s.providerId === 'legacy_unknown' ? '历史?' : s.providerId}</span>
-                          {s.preview || '(无预览)'}
-                          {s.count > 1 && <span className="sb-count"> ×{s.count}</span>}
+                          <span className="sb-sesstext">{s.preview || '(无预览)'}</span>
                         </span>
-                        <span className="sb-sesstime" title={activeTimeTitle(s.mtime)}>
-                          活跃 {relTime(s.mtime)}
+                        <span className="sb-session-meta">
+                          {s.count > 1 && <span className="sb-count">{s.count} 轮</span>}
+                          <span className="sb-sesstime" title={activeTimeTitle(s.mtime)}>
+                            {relTime(s.mtime)}
+                          </span>
                         </span>
                         {running && <span className="sb-running" role="status" aria-label="正在运行" />}
                       </button>
