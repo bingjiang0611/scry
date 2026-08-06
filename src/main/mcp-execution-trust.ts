@@ -1,19 +1,22 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import type { MessageBoxOptions } from 'electron'
 import { scanMcp, type ScanReport, type Severity } from '../cli/mcpguard-core'
+import type { ProviderId } from '../shared/provider'
 import { resolveCommandOnPath } from './claude-locate'
 import {
   minimalMcpEnv,
+  providerMcpConfigPaths,
   proxyEnvValueContainsCredentials,
-  resolveMcpConfigs,
+  resolveProviderMcpConfigs,
   type ResolvedMcpConfig
 } from './mcp-config'
 
 export type McpExecutionOperation = 'run' | 'live' | `test:${string}`
 
 export interface McpExecutionSnapshot {
+  providerId: ProviderId
   cwd: string
   fingerprint: string
   settingSources: string
@@ -113,12 +116,14 @@ function normalizedExecutionTarget(
 }
 
 export function buildMcpExecutionSnapshot(args: {
+  providerId?: ProviderId
   cwd?: string
   homeDir: string
   settingSources?: string
   env?: NodeJS.ProcessEnv
   selectedTargetId?: string
 }): McpExecutionSnapshot {
+  const providerId = args.providerId ?? 'claude'
   const errors: string[] = []
   const requestedCwd = args.cwd ?? process.cwd()
   let cwd = resolve(requestedCwd)
@@ -129,9 +134,9 @@ export function buildMcpExecutionSnapshot(args: {
   }
   const executionEnv = {
     ...minimalMcpEnv(args.env),
-    CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1'
+    ...(providerId === 'claude' ? { CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1' } : {})
   }
-  const targets = resolveMcpConfigs(args.cwd, args.homeDir).map((target) =>
+  const targets = resolveProviderMcpConfigs(providerId, args.cwd, args.homeDir, args.env).map((target) =>
     normalizedExecutionTarget(
       target,
       cwd,
@@ -150,10 +155,8 @@ export function buildMcpExecutionSnapshot(args: {
       `启用的远程 MCP（${enabledRemoteTargets.map((target) => target.name).join(', ')}）无法与含凭据代理环境隔离：${credentialProxyKeys.join(', ')}`
     )
   }
-  const configPaths = [
-    join(args.homeDir, '.claude.json'),
-    ...(args.cwd ? [join(args.cwd, '.mcp.json'), join(args.cwd, '.claude', 'settings.local.json')] : [])
-  ].filter((path) => existsSync(path))
+  const configPaths = providerMcpConfigPaths(providerId, args.cwd, args.homeDir, args.env)
+    .filter((path) => existsSync(path))
   const report = scanMcp({ cwd, home: args.homeDir, configPaths })
   const reportIds = new Set(report.targets.map((target) => target.targetId))
   errors.push(...report.errors)
@@ -169,8 +172,9 @@ export function buildMcpExecutionSnapshot(args: {
   for (const [name, ids] of enabledNames) {
     if (ids.length > 1) errors.push(`MCP server ${name} 存在 ${ids.length} 个启用定义，执行优先级不唯一`)
   }
-  const settingSources = args.settingSources?.trim() || 'default:user,project,local'
+  const settingSources = args.settingSources?.trim() || `default:${providerId}:user,project,local`
   const canonical = {
+    providerId,
     cwd,
     settingSources,
     executionEnv,
@@ -184,6 +188,7 @@ export function buildMcpExecutionSnapshot(args: {
     }))
   }
   return {
+    providerId,
     cwd,
     settingSources,
     executionEnv,

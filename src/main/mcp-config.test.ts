@@ -7,6 +7,7 @@ import {
   listMcp,
   mcpDisabledSet,
   minimalMcpEnv,
+  resolveProviderMcpConfigs,
   testHttpMcp,
   testMcpConfig,
   toggleMcp
@@ -191,6 +192,43 @@ describe('mcp-config', () => {
           }
         }
       })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('normalizes Codex, Qoder, and OpenCode native MCP configs without reading unrelated files', () => {
+    const home = tempDir()
+    const cwd = tempDir()
+    try {
+      mkdirSync(join(home, '.codex'), { recursive: true })
+      mkdirSync(join(home, '.qoder'), { recursive: true })
+      mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+      mkdirSync(join(cwd, '.codex'), { recursive: true })
+      writeFileSync(join(home, '.codex', 'config.toml'), '[mcp_servers.codex-user]\ncommand = "/bin/echo"\nargs = ["user"]\n')
+      writeFileSync(join(cwd, '.codex', 'config.toml'), '[mcp_servers.codex-project]\nurl = "https://mcp.example.test"\n')
+      writeFileSync(join(home, '.qoder', 'mcp.json'), JSON.stringify({
+        mcpServers: { qoder: { command: '/bin/echo', args: ['qoder'], env: { TOKEN: 'configured' } } }
+      }))
+      writeFileSync(join(home, '.config', 'opencode', 'opencode.json'), JSON.stringify({
+        mcp: {
+          local: { type: 'local', command: ['/bin/echo', 'open'], environment: { LOCAL: '1' } },
+          remote: { type: 'remote', url: 'https://remote.example.test', enabled: false }
+        }
+      }))
+
+      expect(resolveProviderMcpConfigs('codex', cwd, home)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'codex-user', scope: 'user', transport: 'stdio', config: expect.objectContaining({ command: '/bin/echo' }) }),
+        expect.objectContaining({ name: 'codex-project', scope: 'project', transport: 'http' })
+      ]))
+      expect(resolveProviderMcpConfigs('qoder', cwd, home)).toContainEqual(expect.objectContaining({
+        name: 'qoder', config: expect.objectContaining({ args: ['qoder'], env: { TOKEN: 'configured' } })
+      }))
+      expect(resolveProviderMcpConfigs('opencode', cwd, home)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'local', enabled: true, config: expect.objectContaining({ command: '/bin/echo', args: ['open'], env: { LOCAL: '1' } }) }),
+        expect.objectContaining({ name: 'remote', enabled: false, transport: 'http' })
+      ]))
     } finally {
       rmSync(home, { recursive: true, force: true })
       rmSync(cwd, { recursive: true, force: true })

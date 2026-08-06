@@ -36,7 +36,7 @@ vi.mock('../claude-locate', () => ({
   shellEnv: () => ({})
 }))
 
-import { createCodexAdapter } from './codex'
+import { codexMcpConfigArgs, createCodexAdapter } from './codex'
 
 describe('Codex provider adapter', () => {
   beforeEach(() => {
@@ -54,12 +54,54 @@ describe('Codex provider adapter', () => {
       id: 'codex',
       runtimeProvider: 'codex_cli',
       transport: 'app-server',
-      capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' }
+      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' }
     })
   })
 
-  it('does not expose native MCP after starting app-server with MCP sources disabled', async () => {
-    expect(createCodexAdapter().mcp).toBeUndefined()
+  it('clears implicit MCP and serializes only approved Codex configs', () => {
+    expect(codexMcpConfigArgs()).toEqual(['-c', 'mcp_servers={}'])
+    expect(codexMcpConfigArgs({
+      cwd: '/repo', fingerprint: 'sha256:test', env: { PATH: '/bin' },
+      targets: [
+        { targetId: 'stdio', name: 'stdio target', enabled: true, config: { command: '/bin/echo', args: ['ok'], env: { SAFE: '1' } } },
+        { targetId: 'off', name: 'off', enabled: false, config: { command: '/bin/off' } },
+        { targetId: 'remote', name: 'remote', enabled: true, config: { type: 'http', url: 'https://mcp.example.test', headers: { Authorization: 'configured' } } }
+      ]
+    })).toEqual([
+      '-c',
+      'mcp_servers={"stdio target"={"command"="/bin/echo","args"=["ok"],"env"={"PATH"="/bin","SAFE"="1"},"enabled"=true},"remote"={"url"="https://mcp.example.test","http_headers"={"Authorization"="configured"},"enabled"=true}}'
+    ])
+  })
+
+  it('lists Codex MCP without app-server, then reads native status from the authorized client', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'scry-codex-mcp-test-'))
+    mkdirSync(join(home, '.codex'))
+    writeFileSync(join(home, '.codex', 'config.toml'), '[mcp_servers.tracker]\ncommand = "/bin/echo"\nargs = ["configured"]\n')
+    const adapter = createCodexAdapter(undefined, () => [], home)
+    try {
+      await expect(adapter.mcp!.snapshot({ providerId: 'codex', cwd: '/repo' })).resolves.toMatchObject({
+        state: 'degraded', data: { configured: [expect.objectContaining({ name: 'tracker' })], runtime: null }
+      })
+      expect(appServer.request).not.toHaveBeenCalled()
+      appServer.request.mockResolvedValue({
+        data: [{ name: 'tracker', authStatus: 'unsupported', serverInfo: { name: 'fixture', version: '1' }, tools: { ping: {} } }]
+      })
+      const execution = {
+        cwd: '/repo', fingerprint: 'sha256:approved', env: { PATH: '/bin' },
+        targets: [{ targetId: 'tracker', name: 'tracker', enabled: true, config: { command: '/bin/echo', args: ['approved'] } }]
+      }
+      await expect(adapter.mcp!.snapshot({ providerId: 'codex', cwd: '/repo' }, true, execution)).resolves.toMatchObject({
+        state: 'ready', data: { runtime: [{ name: 'tracker', status: 'connected', tools: 1 }] }
+      })
+      expect(appServer.request).toHaveBeenCalledWith('mcpServerStatus/list', { threadId: null, detail: 'full' })
+      expect(appServer.options.at(-1)?.args).toEqual(expect.arrayContaining([
+        '-c',
+        'mcp_servers={"tracker"={"command"="/bin/echo","args"=["approved"],"env"={"PATH"="/bin"},"enabled"=true}}'
+      ]))
+    } finally {
+      await adapter.dispose?.()
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it('starts the app-server inside the Provider context cwd', async () => {

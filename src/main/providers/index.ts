@@ -14,9 +14,9 @@ export function createBuiltInProviderAdapters(
   return selectProviderTransports(
     [
       createClaudeAdapter(homeDir),
-      createCodexAdapter(codexHomeDir, codexSessionIds),
-      createQoderAdapter(),
-      createOpenCodeAdapter()
+      createCodexAdapter(codexHomeDir, codexSessionIds, homeDir),
+      createQoderAdapter(homeDir),
+      createOpenCodeAdapter(homeDir)
     ],
     transportSpec
   )

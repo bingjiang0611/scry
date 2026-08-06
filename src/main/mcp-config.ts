@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process'
-import { readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { mcpConfigTargetId } from '../cli/mcpguard-core'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { isAbsolute, join, resolve } from 'node:path'
+import { mcpConfigTargetId, parseTomlDocument } from '../cli/mcpguard-core'
+import type { ProviderId } from '../shared/provider'
+import type { AuthorizedMcpExecution } from './providers/types'
 
 export interface McpConfigItem {
   targetId: string
@@ -83,6 +85,121 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
+function readToml(file: string): Record<string, unknown> | null {
+  try {
+    return parseTomlDocument(readFileSync(file, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function absoluteConfigRoot(value: string | undefined, fallback: string, cwd: string | undefined): string {
+  const configured = value?.trim()
+  if (!configured) return fallback
+  return isAbsolute(configured) ? configured : resolve(cwd ?? fallback, configured)
+}
+
+export function providerMcpConfigPaths(
+  providerId: ProviderId,
+  cwd: string | undefined,
+  homeDir: string,
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  if (providerId === 'claude') {
+    return [
+      join(homeDir, '.claude.json'),
+      ...(cwd ? [join(cwd, '.mcp.json'), join(cwd, '.claude', 'settings.local.json')] : [])
+    ]
+  }
+  if (providerId === 'codex') {
+    const codexHome = absoluteConfigRoot(env.CODEX_HOME, join(homeDir, '.codex'), cwd)
+    return [join(codexHome, 'config.toml'), ...(cwd ? [join(cwd, '.codex', 'config.toml')] : [])]
+  }
+  if (providerId === 'qoder') {
+    const qoderRoot = env.QODER_CONFIG_DIR?.trim()
+      ? absoluteConfigRoot(env.QODER_CONFIG_DIR, join(homeDir, '.qoder'), cwd)
+      : join(absoluteConfigRoot(env.QODER_CLI_HOME, homeDir, cwd), '.qoder')
+    return [join(qoderRoot, 'mcp.json'), ...(cwd ? [join(cwd, '.mcp.json'), join(cwd, '.qoder', 'mcp.json')] : [])]
+  }
+  const configured = env.OPENCODE_CONFIG?.trim()
+  const configHome = absoluteConfigRoot(env.XDG_CONFIG_HOME, join(homeDir, '.config'), cwd)
+  return [
+    configured ? absoluteConfigRoot(configured, join(configHome, 'opencode', 'opencode.json'), cwd) : join(configHome, 'opencode', 'opencode.json'),
+    ...(cwd ? [join(cwd, 'opencode.json')] : [])
+  ]
+}
+
+function normalizedProviderConfig(providerId: ProviderId, value: unknown): Record<string, unknown> {
+  const raw = record(value)
+  if (providerId !== 'opencode') {
+    const headers = raw.headers ?? raw.http_headers
+    return headers === raw.headers ? { ...raw } : { ...raw, headers }
+  }
+  const command = Array.isArray(raw.command) ? raw.command.filter((item): item is string => typeof item === 'string') : []
+  if (raw.type === 'local' || command.length > 0) {
+    return {
+      ...raw,
+      type: 'stdio',
+      command: command[0] ?? raw.command,
+      args: command.slice(1),
+      env: record(raw.environment ?? raw.env)
+    }
+  }
+  return { ...raw, type: raw.type === 'remote' ? 'http' : raw.type }
+}
+
+export function resolveProviderMcpConfigs(
+  providerId: ProviderId,
+  cwd: string | undefined,
+  homeDir: string,
+  env: NodeJS.ProcessEnv = process.env
+): ResolvedMcpConfig[] {
+  if (providerId === 'claude') return resolveClaudeMcpConfigs(cwd, homeDir)
+  const result: ResolvedMcpConfig[] = []
+  const workspaceRoot = cwd ?? process.cwd()
+  const paths = providerMcpConfigPaths(providerId, cwd, homeDir, env)
+  const addGroup = (
+    servers: Record<string, unknown>,
+    scope: string,
+    sourcePath: string,
+    pointer: string
+  ): void => {
+    for (const [name, value] of Object.entries(servers)) {
+      const native = record(value)
+      const config = normalizedProviderConfig(providerId, native)
+      const jsonPointer = `${pointer}/${escapeJsonPointer(name)}`
+      const remote = Boolean(config.url) || config.type === 'http' || config.type === 'sse'
+      result.push({
+        targetId: mcpConfigTargetId(name, sourcePath, jsonPointer, workspaceRoot, homeDir),
+        name,
+        scope,
+        transport: remote ? 'http' : 'stdio',
+        detail: String(config.url ?? config.command ?? ''),
+        enabled: native.enabled !== false && native.disabled !== true,
+        sourcePath,
+        jsonPointer,
+        config
+      })
+    }
+  }
+  for (const sourcePath of paths) {
+    if (!existsSync(sourcePath)) continue
+    const parsed = sourcePath.endsWith('.toml') ? readToml(sourcePath) : readJson(sourcePath)
+    if (!parsed) continue
+    const scope = cwd && sourcePath.startsWith(`${cwd}/`) ? 'project' : 'user'
+    if (providerId === 'codex') addGroup(record(parsed.mcp_servers), scope, sourcePath, '/mcp_servers')
+    if (providerId === 'qoder') addGroup(record(parsed.mcpServers), scope, sourcePath, '/mcpServers')
+    if (providerId === 'opencode') addGroup(record(parsed.mcp), scope, sourcePath, '/mcp')
+  }
+  return result
+}
+
 export function mcpDisabledSet(cwd: string | undefined, homeDir: string): Set<string> {
   if (!cwd) return new Set()
   const disabled = new Set<string>()
@@ -107,7 +224,7 @@ function escapeJsonPointer(value: string): string {
   return value.replace(/~/g, '~0').replace(/\//g, '~1')
 }
 
-export function resolveMcpConfigs(cwd: string | undefined, homeDir: string): ResolvedMcpConfig[] {
+function resolveClaudeMcpConfigs(cwd: string | undefined, homeDir: string): ResolvedMcpConfig[] {
   const disabled = mcpDisabledSet(cwd, homeDir)
   const result: ResolvedMcpConfig[] = []
   const workspaceRoot = cwd ?? process.cwd()
@@ -160,8 +277,46 @@ export function resolveMcpConfigs(cwd: string | undefined, homeDir: string): Res
   return result
 }
 
+export function resolveMcpConfigs(cwd: string | undefined, homeDir: string): ResolvedMcpConfig[] {
+  return resolveProviderMcpConfigs('claude', cwd, homeDir)
+}
+
+export function listProviderMcp(
+  providerId: ProviderId,
+  cwd: string | undefined,
+  homeDir: string,
+  env: NodeJS.ProcessEnv = process.env
+): McpConfigItem[] {
+  return resolveProviderMcpConfigs(providerId, cwd, homeDir, env)
+    .map(({ sourcePath: _sourcePath, jsonPointer: _jsonPointer, config: _config, ...item }) => item)
+}
+
 export function listMcp(cwd: string | undefined, homeDir: string): McpConfigItem[] {
-  return resolveMcpConfigs(cwd, homeDir).map(({ sourcePath: _sourcePath, jsonPointer: _jsonPointer, config: _config, ...item }) => item)
+  return listProviderMcp('claude', cwd, homeDir)
+}
+
+export function isRemoteMcpConfig(config: Record<string, unknown>): boolean {
+  return Boolean(config.url) || config.type === 'http' || config.type === 'sse'
+}
+
+export function authorizedMcpServers(
+  execution: AuthorizedMcpExecution | undefined
+): Record<string, Record<string, unknown>> {
+  if (!execution) return {}
+  return Object.fromEntries(
+    execution.targets
+      .filter((target) => target.enabled)
+      .map((target) => {
+        const config = { ...target.config }
+        if (!isRemoteMcpConfig(config)) {
+          const configuredEnv = config.env && typeof config.env === 'object'
+            ? config.env as Record<string, unknown>
+            : {}
+          config.env = { ...execution.env, ...configuredEnv }
+        }
+        return [target.name, config]
+      })
+  )
 }
 
 export function findMcpConfigByTargetId(

@@ -23,7 +23,6 @@ import {
 } from './transcript-archive'
 import { mergeSessionTurns } from './session-history'
 import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore, createRecentFoldersStore } from './app-store'
-import { scanMcp } from '../cli/mcpguard-core'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { migrateLegacyUserData } from './user-data-migration'
@@ -307,11 +306,11 @@ async function ensureMcpExecutionAuthorized(
   operation: McpExecutionOperation,
   targetId?: string
 ): Promise<McpExecutionSnapshot | null> {
-  if (context.providerId !== 'claude') return null
   const build = (): McpExecutionSnapshot => buildMcpExecutionSnapshot({
+    providerId: context.providerId,
     cwd: context.cwd,
     homeDir,
-    settingSources: process.env.SCRY_CLAUDE_SETTING_SOURCES,
+    settingSources: context.providerId === 'claude' ? process.env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
     env: shellEnv(),
     selectedTargetId: targetId
   })
@@ -347,6 +346,7 @@ function authorizedMcpExecution(snapshot: McpExecutionSnapshot | null): Authoriz
   if (!snapshot) return undefined
   return {
     cwd: snapshot.cwd,
+    fingerprint: snapshot.fingerprint,
     targets: snapshot.targets.map(({ targetId, name, enabled, config }) => ({ targetId, name, enabled, config })),
     env: { ...snapshot.executionEnv }
   }
@@ -737,12 +737,23 @@ handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
   if (providerRegistry.isDisabled(context.providerId)) {
     return capabilityUnavailable(context, 'unsupported', '该 Provider 已通过 SCRY_DISABLED_PROVIDERS 禁用')
   }
-  if (context.providerId !== 'claude') {
-    return capabilityUnavailable(context, 'unsupported', 'MCP Guard 当前只扫描 Claude Code 配置；其他 Provider 不复用 Claude 路径')
-  }
-  const report = scanMcp({ cwd: context.cwd, home: homeDir })
+  const snapshot = buildMcpExecutionSnapshot({
+    providerId: context.providerId,
+    cwd: context.cwd,
+    homeDir,
+    settingSources: context.providerId === 'claude' ? process.env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
+    env: shellEnv()
+  })
+  const report = snapshot.report
   if (!isMcpGuardReport(report)) throw new Error('mcpguard 生成了不一致的扫描报告')
-  return { ...context, mode: 'read', state: 'ready', data: report, observedAt: Date.now() }
+  return {
+    ...context,
+    mode: 'read',
+    state: snapshot.errors.length > 0 ? 'degraded' : 'ready',
+    data: report,
+    ...(snapshot.errors.length > 0 ? { reason: snapshot.errors.join('；') } : {}),
+    observedAt: Date.now()
+  }
 })
 handleTrusted('agent:listCommands', (_e, context: ProviderContext) => providerRegistry.listCommands(context))
 handleTrusted('agent:runControls', (_e, context: ProviderContext) => providerRegistry.runControls(context))
@@ -963,6 +974,20 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
   const run = runs.get(change.runId)?.state
   if (run) {
     run.pendingQuestions = (run.pendingQuestions ?? []).filter((item) => item.questionId !== change.questionId)
+    const event: TraceEvent = {
+      id: `i-${evSeq++}`,
+      ts: change.intervention.closedAt,
+      runId: change.runId,
+      kind: 'human',
+      stage: 'intervention',
+      toolUseId: change.questionId,
+      providerId: change.intervention.request.providerId,
+      agentId: change.intervention.request.agentId,
+      durationMs: change.intervention.durationMs,
+      intervention: change.intervention
+    }
+    appendCoalescedTrace(run.items, event)
+    if (runs.isFocused(change.runId)) queueTrace(event)
   }
   if (runs.isFocused(change.runId)) win?.webContents.send('agent:userQuestionClosed', change)
 })
@@ -1166,9 +1191,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const codexHookTrust = providerId === 'codex' && cwd
     ? await resolveCodexHookTrust(cwd)
     : []
-  const mcpExecution = providerId === 'claude'
-    ? authorizedMcpExecution(await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run'))
-    : undefined
+  const mcpExecution = authorizedMcpExecution(
+    await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
+  )
   if (isShuttingDown) {
     throw new AgentRuntimeError('Scry 正在退出，已拒绝启动新一轮', {
       provider: runtimeProvider,

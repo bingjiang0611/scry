@@ -3,6 +3,7 @@ import {
   capabilityUnknown,
   type AccountSnapshot,
   type CapabilityEnvelope,
+  type McpSnapshot,
   type ProviderCommand,
   type ProviderContext,
   type SkillMeta
@@ -13,8 +14,9 @@ import {
   type AgentPermissionMode,
   type AgentRunControlCatalog
 } from '../../shared/runtime'
-import { mcpPayloadFailed, parseMcp, type TraceEvent } from '../../shared/trace'
-import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
+import { homedir } from 'node:os'
+import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
+import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import type {
   CodexHookInspection,
   CodexHookMetadata,
@@ -26,7 +28,8 @@ import {
   type CodexNotificationEnvelope
 } from './codex-app-server'
 import { createCodexIsolatedHome } from './codex-isolated-home'
-import type { ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
+import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
+import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 
 function codexAccess(mode: AgentPermissionMode | undefined): {
@@ -99,6 +102,68 @@ const newEventAt = (
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+
+function tomlInline(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (Array.isArray(value)) return `[${value.map(tomlInline).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined && item !== null)
+      .map(([key, item]) => `${JSON.stringify(key)}=${tomlInline(item)}`)
+      .join(',')}}`
+  }
+  throw new Error('Codex MCP 配置包含不支持的 TOML 值')
+}
+
+export function codexMcpConfigArgs(execution?: AuthorizedMcpExecution): string[] {
+  const servers: Record<string, Record<string, unknown>> = {}
+  for (const [name, config] of Object.entries(authorizedMcpServers(execution))) {
+    servers[name] = isRemoteMcpConfig(config)
+      ? {
+          url: config.url,
+          http_headers: config.headers,
+          bearer_token_env_var: config.bearer_token_env_var,
+          env_http_headers: config.env_http_headers,
+          enabled: true,
+          startup_timeout_sec: config.startup_timeout_sec,
+          tool_timeout_sec: config.tool_timeout_sec
+        }
+      : {
+          command: config.command,
+          args: config.args,
+          env: config.env,
+          cwd: config.cwd,
+          enabled: true,
+          startup_timeout_sec: config.startup_timeout_sec,
+          tool_timeout_sec: config.tool_timeout_sec
+        }
+  }
+  return ['-c', `mcp_servers=${tomlInline(servers)}`]
+}
+
+function codexMcpStatus(value: unknown): McpLiveStatus[] {
+  const data = Array.isArray(record(value).data) ? record(value).data as unknown[] : []
+  return data.map((raw) => {
+    const item = record(raw)
+    const serverInfo = record(item.serverInfo)
+    const tools = record(item.tools)
+    return {
+      name: String(item.name ?? ''),
+      status: item.authStatus === 'notLoggedIn'
+        ? 'needs-auth'
+        : item.error
+          ? 'failed'
+          : item.serverInfo
+            ? 'connected'
+            : 'pending',
+      serverName: typeof serverInfo.name === 'string' ? serverInfo.name : undefined,
+      serverVersion: typeof serverInfo.version === 'string' ? serverInfo.version : undefined,
+      tools: Object.keys(tools).length
+    }
+  })
+}
 
 function canonicalTurnStatus(
   nativeStatus: unknown,
@@ -475,7 +540,8 @@ function traceFromItem(
 
 export function createCodexAdapter(
   isolatedHomePath?: string,
-  legacySessionIds: () => readonly string[] = () => []
+  legacySessionIds: () => readonly string[] = () => [],
+  homeDir = homedir()
 ): ProviderAdapter {
   const clients = new Map<string, CodexAppServerClient>()
   const modelCache = new Map<string, { data: AgentRunControlCatalog; observedAt: number }>()
@@ -488,10 +554,14 @@ export function createCodexAdapter(
   let isolatedHome: ReturnType<typeof createCodexIsolatedHome> | undefined
 
   const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
-  const getClient = (cwd?: string, hookTrust: CodexHookTrustGrant[] = []): CodexAppServerClient => {
+  const getClient = (
+    cwd?: string,
+    hookTrust: CodexHookTrustGrant[] = [],
+    mcpExecution?: AuthorizedMcpExecution
+  ): CodexAppServerClient => {
     const trustedHooks = [...hookTrust].sort((left, right) => left.key.localeCompare(right.key))
     const trustKey = trustedHooks.map((hook) => `${hook.key}\0${hook.currentHash}`).join('\n')
-    const key = `${cwd ?? ''}\0${trustKey}`
+    const key = `${cwd ?? ''}\0${trustKey}\0${mcpExecution?.fingerprint ?? 'none'}`
     const existing = clients.get(key)
     if (existing) {
       lastClient = existing
@@ -528,6 +598,7 @@ export function createCodexAdapter(
     const args = [
       ...projectTrustArgs,
       ...hookTrustArgs,
+      ...codexMcpConfigArgs(mcpExecution),
       ...appServerArgs
     ]
     const client = new CodexAppServerClient({
@@ -545,10 +616,11 @@ export function createCodexAdapter(
     method: string,
     params?: unknown,
     cwd?: string,
-    hookTrust: CodexHookTrustGrant[] = []
+    hookTrust: CodexHookTrustGrant[] = [],
+    mcpExecution?: AuthorizedMcpExecution
   ): Promise<T> => {
     try {
-      const result = await getClient(cwd, hookTrust).request<T>(method, params)
+      const result = await getClient(cwd, hookTrust, mcpExecution).request<T>(method, params)
       lastOkAt = Date.now()
       lastError = undefined
       return result
@@ -633,7 +705,7 @@ export function createCodexAdapter(
         transport: 'app-server',
         available: !!path,
         path,
-        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' },
+        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' },
         health: {
           state: !path ? 'unavailable' : lastError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'app-server',
@@ -794,7 +866,7 @@ export function createCodexAdapter(
 
       const promise = (async (): Promise<ProviderRunResult> => {
         try {
-          const appServer = getClient(runRequest.cwd, runRequest.codexHookTrust)
+          const appServer = getClient(runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
           await appServer.start()
           const generationFailure = appServer.failureForCurrentGeneration()
           unsubscribeRequest = appServer.onRequest(handleApprovalRequest)
@@ -1096,7 +1168,8 @@ export function createCodexAdapter(
                   ...(runRequest.model ? { model: runRequest.model.id } : {})
                 },
                 runRequest.cwd,
-                runRequest.codexHookTrust
+                runRequest.codexHookTrust,
+                runRequest.mcpExecution
               )
             : await request<CodexThreadResponse>(
                 'thread/start',
@@ -1106,7 +1179,8 @@ export function createCodexAdapter(
                   ...(runRequest.model ? { model: runRequest.model.id } : {})
                 },
                 runRequest.cwd,
-                runRequest.codexHookTrust
+                runRequest.codexHookTrust,
+                runRequest.mcpExecution
               )
           externalSessionId = thread.thread.id
           model = thread.model
@@ -1159,7 +1233,7 @@ export function createCodexAdapter(
             ...(access.approvalsReviewer ? { approvalsReviewer: access.approvalsReviewer } : {}),
             ...(runRequest.model ? { model: runRequest.model.id } : {}),
             ...(runRequest.effort ? { effort: runRequest.effort } : {})
-          }, runRequest.cwd, runRequest.codexHookTrust)
+          }, runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
           turnId = turn.turn.id
           if (externalSessionId) {
             const startedAtMs = epochMilliseconds(turn.turn.startedAt) ?? Date.now()
@@ -1171,7 +1245,8 @@ export function createCodexAdapter(
               'turn/interrupt',
               { threadId: externalSessionId, turnId },
               runRequest.cwd,
-              runRequest.codexHookTrust
+              runRequest.codexHookTrust,
+              runRequest.mcpExecution
             ).catch(() => {})
             return {
               externalSessionId,
@@ -1200,7 +1275,8 @@ export function createCodexAdapter(
             'turn/interrupt',
             { threadId: externalSessionId, turnId },
             runRequest.cwd,
-            runRequest.codexHookTrust
+            runRequest.codexHookTrust,
+            runRequest.mcpExecution
           ).catch(() => {})
         }
       }
@@ -1232,6 +1308,34 @@ export function createCodexAdapter(
       }
     },
     hookTrust: { inspect: inspectHookTrust },
+    mcp: {
+      snapshot: async (context, refresh = false, execution) => {
+        const configured = listProviderMcp('codex', context.cwd, homeDir, shellEnv())
+        if (!refresh) {
+          return {
+            ...capabilityReady(context, 'read', { configured, runtime: null }),
+            state: 'degraded',
+            reason: '配置已读取；刷新后才会启动已授权 MCP 并读取 Codex app-server 运行状态'
+          }
+        }
+        if (!configured.some((item) => item.enabled)) {
+          return capabilityReady(context, 'read', { configured, runtime: [] })
+        }
+        if (!execution) return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 Codex MCP 执行快照')
+        try {
+          const response = await request(
+            'mcpServerStatus/list',
+            { threadId: context.externalSessionId ?? null, detail: 'full' },
+            context.cwd,
+            [],
+            execution
+          )
+          return capabilityReady(context, 'read', { configured, runtime: codexMcpStatus(response) })
+        } catch (error) {
+          return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
+        }
+      }
+    },
     account: {
       read: async (context) => {
         try {

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { Dispatcher } from 'undici'
 import type { TraceEvent } from '../../shared/trace'
@@ -22,6 +25,7 @@ import {
   isolatedOpenCodeChildEnv,
   OPEN_CODE_LONG_REQUEST_TIMEOUTS,
   OpenCodeServerManager,
+  openCodeMcpConfig,
   openCodeServerAuthorization,
   sanitizeOpenCodeAuth,
   sanitizeOpenCodeServerLog
@@ -125,8 +129,57 @@ describe('OpenCode provider adapter', () => {
     await expect(createOpenCodeAdapter().describe()).resolves.toMatchObject({
       id: 'opencode',
       runtimeProvider: 'opencode_server',
-      capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' }
+      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' }
     })
+  })
+
+  it('keeps MCP disabled until authorization and converts only approved configs into isolated OpenCode format', () => {
+    expect(openCodeMcpConfig()).toEqual({})
+    expect(openCodeMcpConfig({
+      cwd: '/repo', fingerprint: 'sha256:test', env: { PATH: '/bin' },
+      targets: [
+        { targetId: 'local', name: 'local', enabled: true, config: { command: '/bin/echo', args: ['ok'], env: { SAFE: '1' } } },
+        { targetId: 'off', name: 'off', enabled: false, config: { command: '/bin/off' } },
+        { targetId: 'remote', name: 'remote', enabled: true, config: { type: 'http', url: 'https://mcp.example.test', headers: { Authorization: 'configured' } } }
+      ]
+    })).toEqual({
+      local: { type: 'local', command: ['/bin/echo', 'ok'], environment: { PATH: '/bin', SAFE: '1' }, enabled: true },
+      remote: { type: 'remote', url: 'https://mcp.example.test', headers: { Authorization: 'configured' }, enabled: true }
+    })
+  })
+
+  it('lists OpenCode config without starting a server and reads native status only after authorization', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-opencode-mcp-test-'))
+    const configDir = join(home, '.config', 'opencode')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'opencode.json'), JSON.stringify({
+      mcp: { tracker: { type: 'local', command: ['/bin/echo', 'configured'] } }
+    }))
+    const client = {
+      mcp: { status: vi.fn(async () => ({ data: { tracker: { status: 'connected' } } })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'sha256:test', url: 'http://127.0.0.1:12345', pid: 41, client
+    })
+    const adapter = createOpenCodeAdapter(home)
+    try {
+      await expect(adapter.mcp!.snapshot({ providerId: 'opencode', cwd: '/repo' })).resolves.toMatchObject({
+        state: 'degraded', data: { configured: [expect.objectContaining({ name: 'tracker' })], runtime: null }
+      })
+      expect(ensure).not.toHaveBeenCalled()
+      const execution = {
+        cwd: '/repo', fingerprint: 'sha256:test', env: { PATH: '/bin' },
+        targets: [{ targetId: 'tracker', name: 'tracker', enabled: true, config: { command: '/bin/echo', args: ['approved'] } }]
+      }
+      await expect(adapter.mcp!.snapshot({ providerId: 'opencode', cwd: '/repo' }, true, execution)).resolves.toMatchObject({
+        state: 'ready', data: { runtime: [{ name: 'tracker', status: 'connected' }] }
+      })
+      expect(ensure).toHaveBeenCalledWith('/repo', execution)
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+      await rm(home, { recursive: true, force: true })
+    }
   })
 
   it('maps native models and excludes the unsupported auto-review mode', () => {
@@ -334,6 +387,7 @@ describe('OpenCode provider adapter', () => {
     } as unknown as OpencodeClient
     const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
       cwd: '/repo',
+      mcpFingerprint: 'none',
       url: 'http://127.0.0.1:12345',
       pid: 42,
       client
@@ -390,6 +444,7 @@ describe('OpenCode provider adapter', () => {
     } as unknown as OpencodeClient
     const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
       cwd: '/repo',
+      mcpFingerprint: 'none',
       url: 'http://127.0.0.1:12345',
       pid: 43,
       client
