@@ -2275,10 +2275,11 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
   it('每轮调用段：按 turn 聚合工具并可跳回该轮用户消息', () => {
     expect(html).toContain('每轮调用')
     expect(html).toContain('1 turns')
-    expect(html).toContain('aria-label="跳到第 1 轮，对话中共 3 次工具/Skill/MCP/子 Agent 调用，耗时 3m 12s"')
+    expect(html).toContain('aria-label="跳到第 1 轮，对话中共 3 次工具/Skill/MCP/子 Agent 调用"')
     expect(html).toContain('创建并读回文件')
     expect(html).toContain('turn-call-group turn-call-toggle timing')
-    expect(html).toContain('title="整轮墙钟耗时 3m 12s；其中 API 耗时 5.0s"')
+    expect(html).toContain('title="查看模型响应耗时与工具调用耗时"')
+    expect(html).toContain('<span class="turn-call-count">2 项</span>')
     expect(html).toContain('aria-label="展开第 1 轮耗时明细"')
     expect(html).toContain('aria-controls="turn-timing-1"')
     expect(html).toContain('aria-label="MCP 0，无明细"')

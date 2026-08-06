@@ -1,6 +1,5 @@
-import type { MouseEvent, ReactNode } from 'react'
-import type { TimedTurnCall, TurnTimingBreakdown } from '../turn-timing'
-import { Icon } from './primitives/Icon'
+import type { ReactNode } from 'react'
+import type { TurnTimingBreakdown } from '../turn-timing'
 
 function durationText(ms?: number): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return '—'
@@ -12,109 +11,44 @@ function durationText(ms?: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
 }
 
-function waitSeconds(ms?: number): string {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—'
-  const seconds = ms / 1000
-  return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`
-}
-
-function timingSource(call: TimedTurnCall): string {
-  if (call.durationSource === 'provider') return '原生'
-  if (call.durationSource === 'observed') return '观测'
-  return '未计时'
-}
-
-function phaseToolSource(timed: number, total: number): string {
-  if (timed === 0) return '未计时'
-  return timed < total ? `~观测 · ${timed}/${total}` : '~观测'
-}
-
-function metric(label: string, value: string, source?: string, title?: string): ReactNode {
+function metric(label: string, value: string, source: string, title: string): ReactNode {
   return (
     <div className="turn-timing-metric" title={title}>
       <span>{label}</span>
       <b>{value}</b>
-      {source && <em>{source}</em>}
+      <em>{source}</em>
     </div>
   )
 }
 
-function callRow(call: TimedTurnCall, onOpenCall?: (call: TimedTurnCall) => void): ReactNode {
-  const value = call.durationMs == null ? '—' : `${call.durationSource === 'observed' ? '~' : ''}${durationText(call.durationMs)}`
-  const accessibleDuration =
-    call.durationMs == null
-      ? '未计时'
-      : `${call.durationSource === 'observed' ? '观测耗时约' : '原生耗时'} ${durationText(call.durationMs)}`
-  const content = (
-    <>
-      <span className="turn-timing-call-kind">{call.category}</span>
-      <span className="turn-timing-call-name">{call.label === call.category ? '' : call.label}</span>
-      <span className="turn-timing-call-duration">{value}</span>
-      <span className={`turn-timing-source ${call.durationSource}`}>{timingSource(call)}</span>
-    </>
-  )
-  if (!onOpenCall) return <div className="turn-timing-call">{content}</div>
-
-  const action = (event: MouseEvent<HTMLButtonElement>): void => {
-    event.preventDefault()
-    event.stopPropagation()
-    onOpenCall(call)
-  }
-  return (
-    <button
-      type="button"
-      className="turn-timing-call clickable"
-      title={`跳到 ${call.label} 调用，${accessibleDuration}`}
-      aria-label={`跳到 ${call.label} 调用，${accessibleDuration}`}
-      onClick={action}
-      onKeyDown={(event) => event.stopPropagation()}
-    >
-      {content}
-      <span className="turn-timing-call-jump" aria-hidden="true">›</span>
-    </button>
-  )
+function modelWallMs(timing: TurnTimingBreakdown): number | undefined {
+  const measured = timing.apiObservation === 'response' && timing.occupiedApiMs != null
+    ? timing.occupiedApiMs
+    : timing.apiMs
+  if (measured == null) return undefined
+  return timing.wallMs == null ? measured : Math.min(measured, timing.wallMs)
 }
 
-export function TurnTimingDetails({
-  timing,
-  onOpenCall
-}: {
-  timing: TurnTimingBreakdown
-  onOpenCall?: (call: TimedTurnCall) => void
-}) {
-  const hasTimedCalls = timing.timedCalls > 0
-  const coverage = timing.totalCalls > 0 ? `${timing.timedCalls}/${timing.totalCalls}` : '—'
-  const modelPhases = timing.phases.filter((phase) => phase.kind !== 'tail')
-  const isResidualEstimate = timing.apiSource === 'observed' && timing.apiObservation === 'residual'
-  const apiMetricLabel =
-    timing.apiSource === 'provider'
-      ? '模型 API 合计'
-      : timing.apiObservation === 'response'
-        ? '模型响应累计'
-      : isResidualEstimate
-        ? '模型相关耗时估算'
-        : timing.apiSource === 'observed'
-          ? '模型 API 观测'
-          : '模型 API'
-  const apiSource =
-    timing.apiSource === 'provider'
-      ? 'SDK'
-      : timing.apiSource === 'observed'
-        ? timing.apiObservation === 'residual'
-          ? `~估算 · 已计时 ${coverage}`
-          : timing.apiObservation === 'response'
-            ? `~观测 · ${timing.timedApiPhases}/${timing.totalApiPhases}`
-          : timing.timedApiPhases < timing.totalApiPhases
-            ? `~观测 · ${timing.timedApiPhases}/${timing.totalApiPhases}`
-            : '~观测'
-        : '未采集'
-  const aggregateCaption = hasTimedCalls
-    ? `累计 ${durationText(timing.cumulativeCallMs)} · ${
-        (timing.overlapCallMs ?? 0) > 0
-          ? `重叠 ${durationText(timing.overlapCallMs)}`
-          : '无重叠'
-      }`
-    : '暂无可计时调用'
+function modelSource(timing: TurnTimingBreakdown): string {
+  if (timing.apiSource === 'provider') return 'SDK 原值'
+  if (timing.apiSource === 'observed' && timing.apiObservation === 'residual') return '~估算'
+  if (timing.apiSource === 'observed') return '~观测'
+  return '未采集'
+}
+
+export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
+  const modelMs = modelWallMs(timing)
+  const toolMs = timing.wallMs != null && modelMs != null
+    ? Math.max(0, timing.wallMs - modelMs)
+    : timing.occupiedCallMs
+  const toolSource = timing.wallMs != null && modelMs != null
+    ? '整轮剩余'
+    : timing.occupiedCallMs != null
+      ? '~工具事件观测'
+      : timing.totalCalls === 0
+        ? '本轮无工具调用'
+        : '未计时'
+
   return (
     <div
       className="turn-call-timing"
@@ -123,169 +57,25 @@ export function TurnTimingDetails({
     >
       <div className="turn-timing-title">
         <span>耗时明细</span>
-        <span className="turn-timing-caption" title="Provider / SDK 原值与基于事件时间戳推算的观测值分开标记">原值 / ~观测</span>
+        <span className="turn-timing-caption">两类墙钟</span>
       </div>
       <div className="turn-timing-summary">
-        {metric('整轮墙钟', durationText(timing.wallMs), timing.wallMs == null ? '未上报' : '运行时')}
         {metric(
-          apiMetricLabel,
-          `${timing.apiSource === 'observed' && timing.apiMs != null ? '~' : ''}${durationText(timing.apiMs)}`,
-          apiSource,
-          timing.apiSource === 'provider'
-            ? 'Provider / SDK 上报的整轮模型 API 活跃时间合计。'
-            : timing.apiObservation === 'response'
-              ? '按 Codex 每次上游响应完成事件观测：从该 Agent 线程上一次工具或 Hook 完成（首轮为 turn start）到响应完成。累计值会重复计算并行子 Agent，不是服务端上报的精确 latency。'
-            : timing.apiObservation === 'residual'
-              ? 'Provider 未上报 API 耗时且缺少逐次响应边界；当前值为整轮墙钟减去已计时调用占用区间的余量，可能包含模型、调度、Hook、IPC 与未计时活动。'
-              : 'Provider 未上报 API 耗时；当前值按工具结束到下一次模型响应之间的事件时间戳观测区间累计。'
+          '模型响应耗时',
+          modelMs == null ? '—' : `${timing.apiSource === 'observed' ? '~' : ''}${durationText(modelMs)}`,
+          modelSource(timing),
+          '根 Agent 与子 Agent 的模型响应区间合并去重；同一时段只计算一次。'
         )}
         {metric(
-          '调用耗时',
-          hasTimedCalls ? durationText(timing.occupiedCallMs) : '—',
-          hasTimedCalls ? '去重墙钟' : '未计时',
-          '至少一个已计时调用正在运行的墙钟时间；并行和子 Agent 嵌套区间只计算一次。'
+          '工具调用耗时',
+          toolMs == null ? (timing.totalCalls === 0 ? '0ms' : '—') : durationText(toolMs),
+          toolSource,
+          '整轮墙钟扣除模型响应后的剩余时间；模型与其他活动重叠时优先归入模型响应。'
         )}
-        {metric('可计时调用', coverage, timing.totalCalls > 0 && timing.timedCalls < timing.totalCalls ? '部分' : undefined)}
       </div>
-
-      {timing.apiObservation === 'response' && (
-        <div className="turn-timing-block">
-          <div className="turn-timing-block-title">
-            <span>模型调用观测</span>
-            <span
-              className="turn-timing-caption"
-              title="累计值会重复计算并行模型请求；占用墙钟按所有已观测模型区间的并集计算"
-            >
-              累计 {durationText(timing.cumulativeApiMs)} · 占用 {durationText(timing.occupiedApiMs)}
-              {(timing.overlapApiMs ?? 0) > 0 ? ` · 重叠 ${durationText(timing.overlapApiMs)}` : ''}
-            </span>
-          </div>
-          <div className="turn-timing-aggregate-list">
-            <div className="turn-timing-aggregate">
-              <span className="turn-timing-aggregate-name">根 Agent</span>
-              <span>{timing.phases.filter((phase) => phase.kind !== 'tail').length}×</span>
-              <b>{durationText(timing.rootApiMs)}</b>
-              <span>~观测</span>
-            </div>
-            {(timing.nestedApiMs != null || timing.totalApiPhases > timing.phases.filter((phase) => phase.kind !== 'tail').length) && (
-              <div className="turn-timing-aggregate">
-                <span className="turn-timing-aggregate-name">子 Agent</span>
-                <span>{Math.max(0, timing.totalApiPhases - timing.phases.filter((phase) => phase.kind !== 'tail').length)}×</span>
-                <b>{durationText(timing.nestedApiMs)}</b>
-                <span>~观测</span>
-              </div>
-            )}
-          </div>
-          <div className="turn-timing-note">
-            观测值可能包含 Codex 请求构造、调度、传输与重试；用于定位流程等待，不等同于 Provider 服务端 latency。
-          </div>
-        </div>
-      )}
-
-      {timing.aggregates.length > 0 && (
-        <div className="turn-timing-block">
-          <div className="turn-timing-block-title">
-            <span>按类型累计</span>
-            <span
-              className="turn-timing-caption"
-              title="按类型累计会重复计算并行和子 Agent 嵌套区间；主指标“调用耗时”已去重"
-            >
-              {aggregateCaption}
-            </span>
-          </div>
-          <div className="turn-timing-aggregate-list">
-            {timing.aggregates.map((aggregate) => (
-              <div className="turn-timing-aggregate" key={aggregate.category}>
-                <span className="turn-timing-aggregate-name">{aggregate.category}</span>
-                <span>{aggregate.count}×</span>
-                <b>{aggregate.timedCount > 0 ? durationText(aggregate.totalMs) : '—'}</b>
-                <span title="平均 / 最慢">
-                  {aggregate.timedCount > 0
-                    ? `均 ${durationText(aggregate.averageMs)} · 最慢 ${durationText(aggregate.maxMs)}`
-                    : `${aggregate.count} 次未计时`}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {modelPhases.length > 0 && (
-        <details className="turn-timing-block turn-timing-timeline-block" open>
-          <summary className="turn-timing-block-title" title="展开或收起耗时归因时间线">
-            <span>耗时归因时间线</span>
-            <Icon name="chevronRight" />
-          </summary>
-          <div className="turn-timing-timeline">
-            {modelPhases.map((phase) => {
-              const apiValue = waitSeconds(phase.observedMs)
-              const phaseName = phase.kind === 'final'
-                ? '最终模型响应'
-                : phase.kind === 'unsegmented'
-                  ? '模型响应'
-                  : `第 ${phase.sequence} 次模型响应`
-              const accessibleLabel = phase.observedMs == null
-                ? `${phaseName}等待时间未采集`
-                : phase.kind === 'unsegmented'
-                  ? `整轮模型相关耗时估算约 ${apiValue}`
-                  : `${phaseName}前 API 观测耗时约 ${apiValue}`
-              const toolValue = phase.toolMs == null ? '—' : `${durationText(phase.toolMs)}`
-              const toolCount = phase.callsAfterResponse.length
-              return (
-                <div className="turn-timing-phase" key={phase.id}>
-                  <div className="turn-timing-api" role="group" title={accessibleLabel} aria-label={accessibleLabel}>
-                    <span>{phase.kind === 'unsegmented' ? '模型相关耗时估算' : '模型 API'}</span>
-                    <b aria-hidden="true">{phase.observedMs == null ? '—' : `~${apiValue}`}</b>
-                  </div>
-                  {toolCount > 0 && (
-                    <div
-                      className="turn-timing-tool-batch"
-                      role="group"
-                      title={`${toolCount} 次工具调用；${phase.timedTools} 次可计时`}
-                      aria-label={`${toolCount} 次工具调用，耗时${phase.toolMs == null ? '未计时' : `约 ${toolValue}`}`}
-                    >
-                      <span>工具调用</span>
-                      <em>{toolCount} 次</em>
-                      <b>{phase.toolMs == null ? '—' : `~${toolValue}`}</b>
-                      <small>{phaseToolSource(phase.timedTools, toolCount)}</small>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </details>
-      )}
-
-      {timing.unassignedCalls.length > 0 && (
-        <div className="turn-timing-block">
-          <div className="turn-timing-block-title">
-            <span>未绑定模型响应</span>
-            <span className="turn-timing-caption">{timing.unassignedCalls.length} 次</span>
-          </div>
-          <div className="turn-timing-batch">
-            {timing.unassignedCalls.map((call) => (
-              <div key={`unassigned:${call.event.id}:${call.order}`}>{callRow(call, onOpenCall)}</div>
-            ))}
-          </div>
-          <div className="turn-timing-note">缺少明确 messageId，保留耗时但不猜测它属于哪次模型响应。</div>
-        </div>
-      )}
-
-      {timing.nestedCalls.length > 0 && (
-        <div className="turn-timing-block">
-          <div className="turn-timing-block-title">
-            <span>子 Agent 内部调用</span>
-            <span className="turn-timing-caption">{timing.nestedCalls.length} 次</span>
-          </div>
-          <div className="turn-timing-batch">
-            {timing.nestedCalls.map((call) => (
-              <div key={`nested:${call.event.id}:${call.order}`}>{callRow(call, onOpenCall)}</div>
-            ))}
-          </div>
-          <div className="turn-timing-note">计入按类型累计；主指标“调用耗时”会合并父子 Agent 的重叠区间。</div>
-        </div>
-      )}
+      <div className="turn-timing-note">
+        口径：以整轮墙钟划分。模型响应区间优先归入模型；其余时间统一计入工具调用，包括 Tool、MCP、Skill、子 Agent 调度、Hook、IPC 与等待。两项可相加；“~”表示事件时间戳观测或估算，缺少可靠数据时显示“—”。
+      </div>
     </div>
   )
 }

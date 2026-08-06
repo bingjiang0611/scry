@@ -1101,18 +1101,13 @@ export function OverviewPanel({
               const mcpCount = row.groups.mcp.reduce((sum, item) => sum + item.count, 0)
               const skillCount = row.groups.skill.reduce((sum, item) => sum + item.count, 0)
               const hooksCount = row.hooks.logicalRuns
-              const duration = formatTurnDuration(row.result?.durationMs)
-              const apiDuration = formatTurnDuration(row.result?.durationApiMs)
-              const timingAvailable = Boolean(duration || row.timing.apiMs != null || row.timing.totalCalls > 0)
+              const timingAvailable = Boolean(row.timing.apiMs != null || row.timing.totalCalls > 0)
               const mcpExpanded = mcpCount > 0 && expandedTurnCallGroups.has(mcpKey)
               const skillExpanded = skillCount > 0 && expandedTurnCallGroups.has(skillKey)
               const hooksExpanded = hooksCount > 0 && expandedTurnCallGroups.has(hooksKey)
               const fileExpanded = row.files.length > 0 && expandedTurnCallGroups.has(fileKey)
               const timingExpanded = timingAvailable && expandedTurnCallGroups.has(timingKey)
               const interventionExpanded = row.interventions.length > 0 && expandedTurnCallGroups.has(interventionKey)
-              const durationTitle = duration
-                ? `整轮墙钟耗时 ${duration}${apiDuration ? `；其中 API 耗时 ${apiDuration}` : ''}`
-                : undefined
               const timingToggleLabel = `${timingExpanded ? '收起' : '展开'}第 ${row.turnNo} 轮耗时明细`
               const action = (): void => {
                 if (onOpenTurn) {
@@ -1121,7 +1116,7 @@ export function OverviewPanel({
                 }
                 if (row.firstEvent) onSelect(row.firstEvent)
               }
-              const label = `跳到第 ${row.turnNo} 轮，对话中共 ${row.total} 次工具/Skill/MCP/子 Agent 调用${duration ? `，耗时 ${duration}` : ''}`
+              const label = `跳到第 ${row.turnNo} 轮，对话中共 ${row.total} 次工具/Skill/MCP/子 Agent 调用`
               return (
                 <div
                   className="turn-call-row"
@@ -1148,7 +1143,7 @@ export function OverviewPanel({
                         <button
                           type="button"
                           className="turn-call-group turn-call-toggle timing"
-                          title={timingExpanded ? '收起耗时明细' : durationTitle ?? '展开耗时明细'}
+                          title={timingExpanded ? '收起耗时明细' : '查看模型响应耗时与工具调用耗时'}
                           aria-label={timingToggleLabel}
                           aria-expanded={timingExpanded}
                           aria-controls={`turn-timing-${row.turnNo}`}
@@ -1156,7 +1151,7 @@ export function OverviewPanel({
                           onKeyDown={(event) => event.stopPropagation()}
                         >
                           <span className="turn-call-kind">耗时</span>
-                          <span className="turn-call-count">{duration ?? '明细'}</span>
+                          <span className="turn-call-count">2 项</span>
                           <span className="turn-call-toggle-icon">
                             <Icon name={timingExpanded ? 'chevronDown' : 'chevronRight'} />
                           </span>
@@ -1193,16 +1188,7 @@ export function OverviewPanel({
                     <div className="turn-call-detail-slot">
                       {timingExpanded && (
                         <div id={`turn-timing-${row.turnNo}`}>
-                          <TurnTimingDetails
-                            timing={row.timing}
-                            onOpenCall={(call) => {
-                              if (onOpenTurn) {
-                                onOpenTurn(row.runId, call.event, 'event')
-                                return
-                              }
-                              onSelect(call.event)
-                            }}
-                          />
+                          <TurnTimingDetails timing={row.timing} />
                         </div>
                       )}
                       {interventionExpanded && (
