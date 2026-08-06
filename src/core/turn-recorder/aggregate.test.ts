@@ -392,4 +392,42 @@ describe('aggregateTurnEvidence', () => {
       { message: 'exit 1', source: 'tool_result', toolUseId: 't1' }
     ])
   })
+
+  it('把人工介入作为独立 evidence 保留，不依赖 Provider 文本解析', () => {
+    const intervention = {
+      kind: 'clarification' as const,
+      source: 'codex:item/tool/requestUserInput',
+      resolution: 'answered' as const,
+      request: {
+        runId: 'r',
+        questionId: 'question-1',
+        providerId: 'codex' as const,
+        questions: [{
+          header: '范围',
+          question: '选择范围？',
+          multiSelect: false,
+          options: [{ label: '全量', description: '全部' }, { label: '增量', description: '仅变化' }]
+        }]
+      },
+      response: {
+        runId: 'r',
+        questionId: 'question-1',
+        behavior: 'answered' as const,
+        answers: { '选择范围？': '全量' }
+      },
+      openedAt: '2026-08-06T10:00:00.000Z',
+      closedAt: '2026-08-06T10:00:02.000Z',
+      durationMs: 2000
+    }
+    const evidence = aggregateTurnEvidence({
+      events: [{ id: 'human-1', ts: intervention.closedAt, runId: 'r', kind: 'human', stage: 'intervention', intervention }]
+    })
+
+    expect(evidence.interventions).toEqual({
+      status: 'available',
+      quality: 'exact',
+      source: ['trace_events'],
+      value: [intervention]
+    })
+  })
 })

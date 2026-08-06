@@ -2780,6 +2780,9 @@ button.turn-call-group:focus-visible {
 .turn-call-group.file {
   border-color: rgba(91, 182, 255, 0.24);
 }
+.turn-call-group.intervention {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border3));
+}
 .turn-call-kind {
   flex: 0 0 auto;
   padding: 1px 5px;
@@ -2812,6 +2815,72 @@ button.turn-call-group:focus-visible {
 }
 .turn-call-detail.mcp {
   border-color: rgba(92, 211, 160, 0.2);
+}
+.turn-intervention-detail {
+  display: grid;
+  gap: 7px;
+}
+.turn-intervention {
+  display: grid;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border3));
+  border-radius: 8px;
+  background: var(--surface-inset);
+}
+.turn-intervention-head,
+.turn-intervention-answer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.turn-intervention-head {
+  color: var(--fg);
+  font: 650 10.5px/1.35 var(--font-mono);
+}
+.turn-intervention-head small,
+.turn-intervention-source {
+  color: var(--dim3);
+  font: 9.5px/1.35 var(--font-mono);
+}
+.turn-intervention-answer {
+  align-items: baseline;
+  color: var(--dim2);
+  font: 10.5px/1.45 var(--font-mono);
+}
+.turn-intervention-answer > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-intervention-answer > b {
+  flex: 0 1 auto;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.intervention-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.intervention-summary-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border3);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+}
+.intervention-summary-grid span {
+  color: var(--dim3);
+  font: 9.5px/1.2 var(--font-mono);
+}
+.intervention-summary-grid b {
+  color: var(--fg);
+  font: 650 13px/1.2 var(--font-mono);
 }
 .turn-call-detail.skill {
   border-color: rgba(246, 187, 92, 0.22);

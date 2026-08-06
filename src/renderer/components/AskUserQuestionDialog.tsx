@@ -1,5 +1,5 @@
 import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
+import type { AgentIntervention, AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import type { ProviderId } from '@shared/provider'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
@@ -255,24 +255,41 @@ export function AskUserQuestionResult({
   request,
   answers,
   output,
-  error = false
+  error = false,
+  resolution,
+  durationMs,
+  source
 }: {
   request: AgentQuestionRequest
   answers?: Record<string, string>
   output?: string
   error?: boolean
+  resolution?: AgentIntervention['resolution']
+  durationMs?: number
+  source?: string
 }) {
+  const incomplete = error || (resolution != null && resolution !== 'answered')
+  const status = resolution === 'user_cancelled'
+    ? '用户取消'
+    : resolution === 'provider_cancelled'
+      ? 'Provider 取消'
+      : error
+        ? '未完成'
+        : '已回答'
   return (
-    <div className={`question-result ${error ? 'error' : ''}`} aria-label={`AskUserQuestion ${error ? '未完成' : '已回答'}`}>
+    <div className={`question-result ${incomplete ? 'error' : ''}`} aria-label={`AskUserQuestion ${status}`}>
       <div className="question-result-head">
-        <span>{error ? '未完成' : '已回答'}</span>
-        <small>{request.questions.length} 个问题</small>
+        <span>{status}</span>
+        <small>
+          {request.questions.length} 个问题
+          {durationMs != null ? ` · 等待 ${(durationMs / 1000).toFixed(1)}s` : ''}
+        </small>
       </div>
       <dl className="question-result-list">
         {request.questions.map((question) => (
           <div key={question.question}>
             <dt>{question.question}</dt>
-            <dd>{answers?.[question.question] ?? (error ? '未获得答案' : '答案已提交')}</dd>
+            <dd>{answers?.[question.question] ?? (incomplete ? '未获得答案' : '答案已提交')}</dd>
           </div>
         ))}
       </dl>
@@ -280,7 +297,7 @@ export function AskUserQuestionResult({
       <details className="question-raw">
         <summary>查看原始输入与输出</summary>
         <div className="lbl">input</div>
-        <pre>{JSON.stringify({ questions: request.questions }, null, 2)}</pre>
+        <pre>{JSON.stringify({ source, questions: request.questions }, null, 2)}</pre>
         {output && (
           <>
             <div className="lbl">output</div>

@@ -70,6 +70,9 @@ export function resolveSessionDataRunIds(
   for (const row of db.prepare(`SELECT DISTINCT run_id runId FROM usage_ledger WHERE ${usageIdentitySql} AND run_id IS NOT NULL`).all(...usageIdentityParams) as Array<{ runId?: string }>) {
     if (row.runId) discovered.add(row.runId)
   }
+  for (const row of db.prepare('SELECT DISTINCT run_id runId FROM human_interventions WHERE session_id = ? AND run_id IS NOT NULL').all(internalSessionId) as Array<{ runId?: string }>) {
+    if (row.runId) discovered.add(row.runId)
+  }
   if (args.providerId === 'claude') {
     for (const row of db.prepare('SELECT DISTINCT run_id runId FROM turns WHERE session_id = ? AND cwd = ? AND run_id IS NOT NULL').all(args.externalSessionId, args.cwd) as Array<{ runId?: string }>) {
       if (row.runId) discovered.add(row.runId)
@@ -82,6 +85,7 @@ export function resolveSessionDataRunIds(
   const conflicts: string[] = []
   const spanConflict = db.prepare(`SELECT 1 found FROM spans WHERE run_id = ? AND NOT ${spanIdentitySql} LIMIT 1`)
   const usageConflict = db.prepare(`SELECT 1 found FROM usage_ledger WHERE run_id = ? AND session_id IS NOT NULL AND NOT ${usageIdentitySql} LIMIT 1`)
+  const interventionConflict = db.prepare('SELECT 1 found FROM human_interventions WHERE run_id = ? AND session_id IS NOT ? LIMIT 1')
   const turnConflict = args.providerId === 'claude'
     ? db.prepare('SELECT 1 found FROM turns WHERE run_id = ? AND (session_id IS NOT ? OR cwd IS NOT ?) LIMIT 1')
     : db.prepare('SELECT 1 found FROM turns WHERE run_id = ? LIMIT 1')
@@ -90,6 +94,7 @@ export function resolveSessionDataRunIds(
     const hasConflict =
       spanConflict.get(runId, ...spanIdentityParams) != null ||
       usageConflict.get(runId, ...usageIdentityParams) != null ||
+      interventionConflict.get(runId, internalSessionId) != null ||
       (args.providerId === 'claude'
         ? turnConflict.get(runId, args.externalSessionId, args.cwd) != null
         : turnConflict.get(runId) != null)
@@ -160,6 +165,10 @@ export function deleteSessionDataRows(
     }
     for (const batch of batches(targetSpanIds)) {
       deletedRows += changes(db.prepare(`DELETE FROM usage_ledger WHERE span_id IN (${placeholders(batch)})`).run(...batch).changes)
+    }
+    deletedRows += changes(db.prepare('DELETE FROM human_interventions WHERE session_id = ?').run(internalSessionId).changes)
+    for (const batch of batches(ids)) {
+      deletedRows += changes(db.prepare(`DELETE FROM human_interventions WHERE run_id IN (${placeholders(batch)})`).run(...batch).changes)
     }
     deletedRows += changes(db.prepare(`DELETE FROM spans WHERE ${spanIdentitySql}`).run(...spanIdentityParams).changes)
     for (const batch of batches(ids)) {

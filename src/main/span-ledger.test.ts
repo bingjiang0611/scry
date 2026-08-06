@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ANALYTICS_RESULTS_SQL, buildAnalyticsStats, canonicalCostWhere, canonicalUsdCostWhere, DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V6, DDL_V7, MODEL_USAGE_COLS, nearestRank, spanRowsFromItems, SPAN_COLS, sqlInsert, TOTALS_SQL, UPSERT_SESSION_REF_SQL, USAGE_LEDGER_COLS } from './span-ledger'
+import { ANALYTICS_RESULTS_SQL, buildAnalyticsStats, canonicalCostWhere, canonicalUsdCostWhere, DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V6, DDL_V7, DDL_V8, HUMAN_INTERVENTION_COLS, INTERVENTION_STATS_SQL, MODEL_USAGE_COLS, nearestRank, spanRowsFromItems, SPAN_COLS, sqlInsert, TOTALS_SQL, UPSERT_SESSION_REF_SQL, USAGE_LEDGER_COLS } from './span-ledger'
 import { usageLedgerObjectToRow } from './billing-ledger'
 import type { TraceEvent } from '../shared/trace'
 import type { UsageLedgerObject } from '../shared/billing'
@@ -20,6 +20,8 @@ const asSpan = (row: unknown[]): Record<string, unknown> =>
   Object.fromEntries(SPAN_COLS.map((c, i) => [c, row[i]]))
 const asMu = (row: unknown[]): Record<string, unknown> =>
   Object.fromEntries(MODEL_USAGE_COLS.map((c, i) => [c, row[i]]))
+const asIntervention = (row: unknown[]): Record<string, unknown> =>
+  Object.fromEntries(HUMAN_INTERVENTION_COLS.map((c, i) => [c, row[i]]))
 
 const ev = (p: Partial<TraceEvent>): TraceEvent =>
   ({ id: 'x', ts: '2026-06-26T00:00:00.000Z', runId: 'run-1', kind: 'tool', stage: 'tool:X', ...p }) as TraceEvent
@@ -132,6 +134,56 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     const kinds = spanRowsFromItems({ runId: 'run-1', items, nowMs: 1 }).spans.map((r) => asSpan(r).kind)
     expect(kinds).toEqual(['skill', 'agent'])
   })
+
+  it('人工选择完整落 human_interventions，并对 SQLite JSON 副本脱敏', () => {
+    const items = [ev({
+      id: 'human-1',
+      kind: 'human',
+      stage: 'intervention',
+      providerId: 'codex',
+      intervention: {
+        kind: 'clarification',
+        source: 'codex:item/tool/requestUserInput',
+        resolution: 'answered',
+        request: {
+          runId: 'run-1',
+          questionId: 'question-1',
+          providerId: 'codex',
+          questions: [{
+            header: '密钥',
+            question: '使用哪个值？',
+            multiSelect: false,
+            options: [{ label: '现有', description: '继续' }, { label: '新建', description: '替换' }]
+          }]
+        },
+        response: {
+          runId: 'run-1',
+          questionId: 'question-1',
+          behavior: 'answered',
+          answers: { '使用哪个值？': 'sk-ant-api03-abcdefGHIJKLmnop1234567890' }
+        },
+        openedAt: '2026-08-06T00:00:00.000Z',
+        closedAt: '2026-08-06T00:00:01.500Z',
+        durationMs: 1500
+      }
+    })]
+
+    const rows = spanRowsFromItems({ runId: 'run-1', sessionId: 'session-1', items, nowMs: 1 })
+    expect(rows.spans).toHaveLength(0)
+    expect(asIntervention(rows.interventions[0])).toMatchObject({
+      id: 'human-1',
+      session_id: 'session-1',
+      run_id: 'run-1',
+      provider_id: 'codex',
+      question_id: 'question-1',
+      kind: 'clarification',
+      source: 'codex:item/tool/requestUserInput',
+      resolution: 'answered',
+      question_count: 1,
+      duration_ms: 1500
+    })
+    expect(String(asIntervention(rows.interventions[0]).response_json)).toContain('«REDACTED»')
+  })
 })
 
 describe('Analytics v7（四 Provider 口径 + 窗口聚合）', () => {
@@ -218,6 +270,34 @@ describe('Analytics v7（四 Provider 口径 + 窗口聚合）', () => {
         preview: 'first prompt',
         createdAt: 1,
         updatedAt: 2
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  sqliteIt('人工介入统计排除 Provider 自动取消，并分开澄清与权限', () => {
+    const db = new nodeSqlite!.DatabaseSync(':memory:')
+    try {
+      for (const stmt of DDL_V8) db.prepare(stmt).run()
+      const insert = db.prepare(sqlInsert('human_interventions', HUMAN_INTERVENTION_COLS))
+      const row = (id: string, kind: string, resolution: string, questions: number, duration: number) => [
+        id, 'session-1', `run-${id}`, 'codex', null, `question-${id}`, kind, 'codex:test', resolution,
+        questions, '{}', '{}', 1, 1 + duration, duration
+      ]
+      insert.run(...row('answered', 'clarification', 'answered', 2, 1000))
+      insert.run(...row('cancelled', 'permission', 'user_cancelled', 1, 500))
+      insert.run(...row('provider', 'permission', 'provider_cancelled', 3, 250))
+
+      expect(db.prepare(INTERVENTION_STATS_SQL).get()).toEqual({
+        requested: 3,
+        total: 2,
+        answered: 1,
+        cancelled: 1,
+        questions: 3,
+        clarification: 1,
+        permission: 1,
+        waitMs: 1500
       })
     } finally {
       db.close()

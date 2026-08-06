@@ -17,6 +17,7 @@ import {
   createOpenCodeAdapter,
   emitOpenCodeEvent,
   handleOpenCodePermission,
+  handleOpenCodeQuestion,
   openCodePermissionRules,
   openCodeRunControlCatalog
 } from './opencode'
@@ -236,6 +237,60 @@ describe('OpenCode provider adapter', () => {
       requestID: 'permission-1',
       directory: '/repo',
       reply: 'always'
+    })
+  })
+
+  it('bridges native question.v2 choices and replies with ordered answer arrays', async () => {
+    const reply = vi.fn().mockResolvedValue({ data: true })
+    const request = {
+      runId: 'run-question',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: () => {},
+      requestUserInput: vi.fn(async (question) => ({
+        runId: question.runId,
+        questionId: question.questionId,
+        behavior: 'answered' as const,
+        answers: {
+          [question.questions[0].question]: '全量',
+          [question.questions[1].question]: 'MCP, Skill'
+        }
+      }))
+    } satisfies ProviderRunRequest
+    const client = { v2: { session: { question: { reply, reject: vi.fn() } } } } as unknown as OpencodeClient
+
+    await expect(handleOpenCodeQuestion(request, client, {
+      type: 'question.v2.asked',
+      properties: {
+        id: 'question-1',
+        sessionID: 'session-1',
+        tool: { callID: 'call-question' },
+        questions: [
+          {
+            header: '范围', question: '选择范围？', multiple: false,
+            options: [{ label: '全量', description: '全部' }, { label: '增量', description: '变化' }]
+          },
+          {
+            header: '能力', question: '选择能力？', multiple: true,
+            options: [{ label: 'MCP', description: 'MCP' }, { label: 'Skill', description: 'Skill' }]
+          }
+        ]
+      }
+    }, 'session-1')).resolves.toBe(true)
+
+    expect(request.requestUserInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questionId: 'call-question',
+        questionKind: 'clarification',
+        source: 'opencode:question.v2.asked'
+      }),
+      expect.any(AbortSignal)
+    )
+    expect(reply).toHaveBeenCalledWith({
+      sessionID: 'session-1',
+      requestID: 'question-1',
+      questionV2Reply: { answers: [['全量'], ['MCP', 'Skill']] }
     })
   })
 

@@ -11,6 +11,7 @@ import {
   SPAN_COLS,
   MODEL_USAGE_COLS,
   FILE_OP_COLS,
+  HUMAN_INTERVENTION_COLS,
   PROVIDER_RAW_USAGE_COLS,
   USAGE_LEDGER_COLS,
   MODEL_PRICE_VERSION_COLS,
@@ -26,6 +27,7 @@ import {
   BY_MODEL_SQL,
   TOOL_STATS_SQL,
   DANGER_TREND_SQL,
+  INTERVENTION_STATS_SQL,
   ANALYTICS_RESULTS_SQL,
   ANALYTICS_TOOLS_SQL,
   ANALYTICS_DANGER_SQL,
@@ -197,11 +199,13 @@ export function recordTurn(args: {
     const insFo = db.prepare(
       `INSERT INTO file_ops (${FILE_OP_COLS.join(', ')}) VALUES (${FILE_OP_COLS.map(() => '?').join(', ')})`
     )
+    const insIntervention = db.prepare(sqlInsert('human_interventions', HUMAN_INTERVENTION_COLS))
     const insLedger = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
     const tx = db.transaction(() => {
       for (const r of rows.spans) insSpan.run(...(r as never[]))
       for (const r of rows.modelUsage) insMu.run(...(r as never[]))
       for (const r of rows.fileOps) insFo.run(...(r as never[]))
+      for (const r of rows.interventions) insIntervention.run(...(r as never[]))
       for (const r of billing.usageLedger) insLedger.run(...(r as never[]))
     })
     tx()
@@ -706,7 +710,8 @@ const EMPTY: DbStats = {
   },
   cacheReuse: [],
   mcpLatency: [],
-  providerCoverage: []
+  providerCoverage: [],
+  interventions: { requested: 0, total: 0, answered: 0, cancelled: 0, questions: 0, clarification: 0, permission: 0, waitMs: 0 }
 }
 
 export function statsQuery(): DbStats {
@@ -721,6 +726,7 @@ export function statsQuery(): DbStats {
     const byModel = db.prepare(BY_MODEL_SQL).all() as DbStats['byModel']
     const toolStats = db.prepare(TOOL_STATS_SQL).all() as DbStats['toolStats']
     const dangerTrend = db.prepare(DANGER_TREND_SQL).all() as DbStats['dangerTrend']
+    const interventions = db.prepare(INTERVENTION_STATS_SQL).get() as NonNullable<DbStats['interventions']>
     const analytics = buildAnalyticsStats({
       nowMs: now,
       results: db.prepare(ANALYTICS_RESULTS_SQL).all(resultStart, now + 1) as AnalyticsResultRow[],
@@ -728,7 +734,7 @@ export function statsQuery(): DbStats {
       dangers: db.prepare(ANALYTICS_DANGER_SQL).all(dangerStart, now + 1) as AnalyticsDangerRow[],
       mcp: db.prepare(ANALYTICS_MCP_SQL).all(dangerStart, now + 1) as AnalyticsMcpRow[]
     })
-    return { status: 'ready', totals, topTools, byCwd, byModel, toolStats, dangerTrend, ...analytics }
+    return { status: 'ready', totals, topTools, byCwd, byModel, toolStats, dangerTrend, interventions, ...analytics }
   } catch (e) {
     console.warn('[scry] statsQuery 失败:', (e as Error)?.message)
     return { ...EMPTY, status: 'query_error' }

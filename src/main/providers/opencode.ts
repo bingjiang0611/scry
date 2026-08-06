@@ -5,6 +5,7 @@ import type { BillingProvider } from '../../shared/billing'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  normalizeAgentQuestionRequest,
   type AgentPermissionMode,
   type AgentRunControlCatalog
 } from '../../shared/runtime'
@@ -257,7 +258,9 @@ export async function handleOpenCodePermission(
     `opencode:${requestId}`,
     'OpenCode 权限',
     `是否允许 ${operation}？`,
-    patterns || 'OpenCode 请求执行此操作'
+    patterns || 'OpenCode 请求执行此操作',
+    true,
+    `opencode:${String(event.type)}`
   )
   const response = request.requestUserInput
     ? await request.requestUserInput(question, signal)
@@ -274,6 +277,71 @@ export async function handleOpenCodePermission(
       client.permission.reply({ requestID: requestId, directory: request.cwd, reply }),
       'permission.reply'
     )
+  }
+  return true
+}
+
+function openCodeAnswers(question: NonNullable<ReturnType<typeof normalizeAgentQuestionRequest>>, answers: Record<string, string>): string[][] {
+  return question.questions.map((prompt) => {
+    const answer = answers[prompt.question]
+    return prompt.multiSelect ? answer.split(', ').filter(Boolean) : [answer]
+  })
+}
+
+export async function handleOpenCodeQuestion(
+  request: ProviderRunRequest,
+  client: OpencodeClient,
+  raw: unknown,
+  sessionId: string,
+  signal = new AbortController().signal
+): Promise<boolean> {
+  const event = record(raw)
+  const versioned = event.type === 'question.v2.asked'
+  if (!versioned && event.type !== 'question.asked') return false
+  const payload = record(event.properties ?? event.data)
+  if (payload.sessionID !== sessionId) return false
+  const requestId = String(payload.id ?? '')
+  const questions = Array.isArray(payload.questions) ? payload.questions.map(record) : []
+  const tool = record(payload.tool)
+  if (!requestId) return false
+  const question = normalizeAgentQuestionRequest(
+    request.runId,
+    String(tool.callID ?? `opencode:question:${requestId}`),
+    {
+      questions: questions.map((candidate) => ({
+        header: candidate.header,
+        question: candidate.question,
+        options: Array.isArray(candidate.options) ? candidate.options : [],
+        multiSelect: candidate.multiple === true
+      }))
+    },
+    undefined,
+    `opencode:${String(event.type)}`,
+    true
+  )
+  const response = question && request.requestUserInput
+    ? await request.requestUserInput(question, signal)
+    : null
+  if (!question || !response || response.behavior === 'cancelled') {
+    if (versioned) {
+      await unwrap(client.v2.session.question.reject({ sessionID: sessionId, requestID: requestId }), 'question.reject')
+    } else {
+      await unwrap(client.question.reject({ requestID: requestId, directory: request.cwd }), 'question.reject')
+    }
+    return true
+  }
+  const answers = openCodeAnswers(question, response.answers)
+  if (versioned) {
+    await unwrap(
+      client.v2.session.question.reply({
+        sessionID: sessionId,
+        requestID: requestId,
+        questionV2Reply: { answers }
+      }),
+      'question.reply'
+    )
+  } else {
+    await unwrap(client.question.reply({ requestID: requestId, directory: request.cwd, answers }), 'question.reply')
   }
   return true
 }
@@ -503,6 +571,7 @@ export function createOpenCodeAdapter(homeDir = homedir()): ProviderAdapter {
             try {
               for await (const event of stream) {
                 if (await handleOpenCodePermission(request, client!, event, externalSessionId!, permissionController.signal)) continue
+                if (await handleOpenCodeQuestion(request, client!, event, externalSessionId!, permissionController.signal)) continue
                 emitOpenCodeEvent(request, event, externalSessionId!)
               }
             } catch (error) {

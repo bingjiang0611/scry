@@ -81,11 +81,15 @@ export interface AgentQuestionPrompt {
   multiSelect: boolean
 }
 
+export type AgentQuestionKind = 'clarification' | 'permission'
+
 export interface AgentQuestionRequest {
   runId: string
   questionId: string
   providerId?: ProviderId
   agentId?: string
+  questionKind?: AgentQuestionKind
+  source?: string
   questions: AgentQuestionPrompt[]
 }
 
@@ -101,6 +105,17 @@ export type AgentQuestionResponse =
       questionId: string
       behavior: 'cancelled'
     }
+
+export interface AgentIntervention {
+  kind: AgentQuestionKind
+  source: string
+  resolution: 'answered' | 'user_cancelled' | 'provider_cancelled'
+  request: AgentQuestionRequest
+  response: AgentQuestionResponse
+  openedAt: string
+  closedAt: string
+  durationMs: number
+}
 
 export interface NormalizedAgentStartRequest {
   prompt: string
@@ -267,11 +282,14 @@ export function agentPermissionQuestion(
   header: string,
   question: string,
   description: string,
-  allowSession = true
+  allowSession = true,
+  source = 'permission_request'
 ): AgentQuestionRequest {
   return {
     runId,
     questionId,
+    questionKind: 'permission',
+    source,
     questions: [{
       header,
       question,
@@ -370,7 +388,9 @@ export function normalizeAgentQuestionRequest(
   runId: string,
   questionId: string,
   input: unknown,
-  agentId?: string
+  agentId?: string,
+  source = 'AskUserQuestion',
+  allowFreeText = false
 ): AgentQuestionRequest | null {
   if (!runId || !questionId || !input || typeof input !== 'object') return null
   const rawQuestions = (input as { questions?: unknown }).questions
@@ -383,7 +403,7 @@ export function normalizeAgentQuestionRequest(
     const question = exactBoundedText(value.question, 2_000)
     const header = exactBoundedText(value.header, 120)
     if (!question || !header || seen.has(question) || !Array.isArray(value.options)) return null
-    if (value.options.length < 2 || value.options.length > 4) return null
+    if (value.options.length > 4 || (!allowFreeText && value.options.length < 2)) return null
     const options: AgentQuestionOption[] = []
     for (const rawOption of value.options) {
       if (!rawOption || typeof rawOption !== 'object') return null
@@ -397,7 +417,14 @@ export function normalizeAgentQuestionRequest(
     seen.add(question)
     questions.push({ question, header, options, multiSelect: value.multiSelect === true })
   }
-  return { runId, questionId, ...(agentId ? { agentId } : {}), questions }
+  return {
+    runId,
+    questionId,
+    ...(agentId ? { agentId } : {}),
+    questionKind: 'clarification',
+    source,
+    questions
+  }
 }
 
 export function normalizeAgentQuestionResponse(

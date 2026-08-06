@@ -9,6 +9,7 @@ import {
   type TurnFile,
   type TurnHookCall
 } from '../../shared/turn-record.js'
+import type { AgentIntervention } from '../../shared/runtime.js'
 
 export interface CompactModelTiming {
   status: EvidenceStatus
@@ -540,6 +541,40 @@ function summarizeEvidenceCount<T>(selected: AgentTurnRecord[], pick: (record: A
   return { total: coverage.knownTurns > 0 ? values.length : null, coverage }
 }
 
+const interventionEvidence = (record: AgentTurnRecord): Evidence<AgentIntervention[]> =>
+  record.interventions ?? {
+    status: 'unavailable',
+    quality: 'unavailable',
+    source: [],
+    omissionReason: 'record predates human intervention evidence'
+  }
+
+function summarizeInterventions(selected: AgentTurnRecord[]) {
+  const coverage = evidenceCoverage(selected, interventionEvidence)
+  const requested = selected.flatMap((record) => {
+    const evidence = interventionEvidence(record)
+    return availableArray(evidence) ? evidence.value : []
+  })
+  const human = requested.filter((intervention) => intervention.resolution !== 'provider_cancelled')
+  const known = coverage.knownTurns > 0
+  return {
+    requested: known ? requested.length : null,
+    total: known ? human.length : null,
+    questions: known
+      ? human.reduce((sum, intervention) => sum + intervention.request.questions.length, 0)
+      : null,
+    answered: known ? human.filter((intervention) => intervention.resolution === 'answered').length : null,
+    cancelled: known ? human.filter((intervention) => intervention.resolution === 'user_cancelled').length : null,
+    clarification: known ? human.filter((intervention) => intervention.kind === 'clarification').length : null,
+    permission: known ? human.filter((intervention) => intervention.kind === 'permission').length : null,
+    waitMs: known ? human.reduce((sum, intervention) => sum + intervention.durationMs, 0) : null,
+    byProvider: known
+      ? countRows(human.map((intervention) => intervention.request.providerId ?? 'unknown'))
+      : null,
+    coverage
+  }
+}
+
 export function summarizeTurnRecords(
   records: AgentTurnRecord[],
   sessionId?: string,
@@ -583,6 +618,7 @@ export function summarizeTurnRecords(
   const calls = summarizeCalls(selected)
   const errors = summarizeEvidenceCount(selected, (record) => record.errors)
   const dangers = summarizeEvidenceCount(selected, (record) => record.dangerousOperations)
+  const interventions = summarizeInterventions(selected)
   return {
     scope: options.scope ?? (sessionId || uniqueSessions.size === 1 ? 'session' : 'workspace'),
     sessionId: effectiveSessionId,
@@ -605,6 +641,10 @@ export function summarizeTurnRecords(
     calls,
     perTurn: selected.map((record) => {
       const turnCalls = summarizeCalls([record])
+      const evidence = interventionEvidence(record)
+      const turnInterventions = availableArray(evidence)
+        ? evidence.value.filter((intervention) => intervention.resolution !== 'provider_cancelled')
+        : null
       return {
         sequence: record.sequence,
         turnIndex: record.turnIndex,
@@ -617,7 +657,12 @@ export function summarizeTurnRecords(
           skills: turnCalls.skills.total,
           subagents: turnCalls.subagents.total
         },
-        errors: availableArray(record.errors) ? record.errors.value.length : null
+        errors: availableArray(record.errors) ? record.errors.value.length : null,
+        interventions: turnInterventions?.length ?? null,
+        interventionQuestions: turnInterventions?.reduce(
+          (sum, intervention) => sum + intervention.request.questions.length,
+          0
+        ) ?? null
       }
     }),
     hooks: summarizeHooks(selected),
@@ -626,6 +671,7 @@ export function summarizeTurnRecords(
     segments: summarizeSegments(selected, timeline),
     errors,
     dangerousOperations: dangers,
+    interventions,
     wall: {
       cumulativeMs: sumKnown(selected.map((record) => record.durationMs)),
       knownTurns: selected.filter((record) => finite(record.durationMs)).length,

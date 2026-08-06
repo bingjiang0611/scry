@@ -81,4 +81,36 @@ describe('UserQuestionBroker', () => {
     ).toBe(true)
     expect(await first).toMatchObject({ behavior: 'answered', answers: { '选择流程？': '快速' } })
   })
+
+  it('emits the exact question, selected answer, source and wait time as a closed intervention', async () => {
+    const changes = vi.fn()
+    const times = [Date.parse('2026-08-06T10:00:00.000Z'), Date.parse('2026-08-06T10:00:01.250Z')]
+    const broker = new UserQuestionBroker(changes, () => times.shift()!)
+    const pending = broker.request({
+      ...request('run-1', 'tool-1'),
+      providerId: 'qoder',
+      questionKind: 'clarification',
+      source: 'qoder:AskUserQuestion'
+    }, new AbortController().signal)
+
+    broker.answer({
+      runId: 'run-1',
+      questionId: 'tool-1',
+      behavior: 'answered',
+      answers: { '选择流程？': '全量' }
+    })
+    await pending
+
+    expect(changes.mock.calls[1][0]).toMatchObject({
+      kind: 'closed',
+      intervention: {
+        kind: 'clarification',
+        source: 'qoder:AskUserQuestion',
+        resolution: 'answered',
+        durationMs: 1250,
+        request: { providerId: 'qoder', questionId: 'tool-1' },
+        response: { behavior: 'answered', answers: { '选择流程？': '全量' } }
+      }
+    })
+  })
 })

@@ -172,7 +172,13 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       }
     ) => {
       if (toolName === 'AskUserQuestion') {
-        const request = normalizeAgentQuestionRequest(runId, permission.toolUseID, input, permission.agentID)
+        const request = normalizeAgentQuestionRequest(
+          runId,
+          permission.toolUseID,
+          input,
+          permission.agentID,
+          'claude:AskUserQuestion'
+        )
         if (!request) return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
         const response = await opts.requestUserInput!(request, permission.signal)
         if (response.behavior === 'cancelled') {
@@ -191,7 +197,9 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         permission.toolUseID,
         permission.title ?? '权限请求',
         `允许 ${toolName} 执行这项操作吗？`,
-        detail
+        detail,
+        true,
+        `claude:permission:${toolName}`
       )
       const response = await opts.requestUserInput!(request, permission.signal)
       const decision = agentPermissionDecision(request, response)

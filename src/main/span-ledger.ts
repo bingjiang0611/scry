@@ -121,6 +121,17 @@ export const DDL_V7 = [
   `CREATE INDEX IF NOT EXISTS idx_spans_mcp_time_duration ON spans(mcp_server, ts_start, duration_ms)`
 ]
 
+// v8（Human intervention）：原样保留问题/答案的结构化事实；SQLite 副本在写入前做密钥脱敏。
+export const DDL_V8 = [
+  `CREATE TABLE IF NOT EXISTS human_interventions (
+     id TEXT PRIMARY KEY, session_id TEXT, run_id TEXT NOT NULL, provider_id TEXT, agent_id TEXT,
+     question_id TEXT NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, resolution TEXT NOT NULL,
+     question_count INTEGER NOT NULL, request_json TEXT NOT NULL, response_json TEXT NOT NULL,
+     opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL, duration_ms INTEGER NOT NULL)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_human_interventions_run_question ON human_interventions(run_id, question_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_human_interventions_session_time ON human_interventions(session_id, closed_at)`
+]
+
 export const UPSERT_SESSION_REF_SQL = `INSERT INTO session_refs (
   scry_session_id, provider_id, runtime_provider, cwd, external_session_id, preview, created_ts, updated_ts
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -136,6 +147,10 @@ export const MODEL_USAGE_COLS = [
   'span_id', 'model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'cost_usd', 'context_window'
 ] as const
 export const FILE_OP_COLS = ['span_id', 'session_id', 'op', 'path', 'source', 'confidence', 'lines_added', 'lines_deleted'] as const
+export const HUMAN_INTERVENTION_COLS = [
+  'id', 'session_id', 'run_id', 'provider_id', 'agent_id', 'question_id', 'kind', 'source', 'resolution',
+  'question_count', 'request_json', 'response_json', 'opened_at', 'closed_at', 'duration_ms'
+] as const
 export const PROVIDER_RAW_USAGE_COLS = [
   'id', 'provider', 'source', 'source_kind', 'account_label', 'fetched_at', 'starting_at', 'ending_at',
   'bucket_start', 'bucket_end', 'provider_request_id', 'trace_id', 'otel_span_id', 'parent_span_id', 'otel_signal',
@@ -191,6 +206,16 @@ export const TOOL_STATS_SQL = `SELECT tool, COUNT(*) n, CAST(AVG(duration_ms) AS
 export const DANGER_TREND_SQL = `SELECT danger_reason reason, danger_level level, COUNT(*) n
   FROM spans WHERE danger_level IS NOT NULL
   GROUP BY danger_reason, danger_level ORDER BY (danger_level='danger') DESC, n DESC LIMIT 10`
+export const INTERVENTION_STATS_SQL = `SELECT
+  COUNT(*) requested,
+  COALESCE(SUM(CASE WHEN resolution IN ('answered','user_cancelled') THEN 1 ELSE 0 END), 0) total,
+  COALESCE(SUM(CASE WHEN resolution='answered' THEN 1 ELSE 0 END), 0) answered,
+  COALESCE(SUM(CASE WHEN resolution='user_cancelled' THEN 1 ELSE 0 END), 0) cancelled,
+  COALESCE(SUM(CASE WHEN resolution IN ('answered','user_cancelled') THEN question_count ELSE 0 END), 0) questions,
+  COALESCE(SUM(CASE WHEN resolution IN ('answered','user_cancelled') AND kind='clarification' THEN 1 ELSE 0 END), 0) clarification,
+  COALESCE(SUM(CASE WHEN resolution IN ('answered','user_cancelled') AND kind='permission' THEN 1 ELSE 0 END), 0) permission,
+  COALESCE(SUM(CASE WHEN resolution IN ('answered','user_cancelled') THEN duration_ms ELSE 0 END), 0) waitMs
+  FROM human_interventions`
 
 export const ANALYTICS_RESULTS_SQL = `SELECT s.ts_start tsStart, r.provider_id providerId,
   s.tokens_in inputTokens, s.tokens_out outputTokens,
@@ -418,6 +443,7 @@ export interface LedgerRows {
   spans: unknown[][]
   modelUsage: unknown[][]
   fileOps: unknown[][]
+  interventions: unknown[][]
 }
 
 // TraceEvent[] → 待插入的行（纯函数）。tool_result 按 tool_use_id 合并进 tool_use span（不插新行）；
@@ -430,11 +456,31 @@ export function spanRowsFromItems(args: {
   nowMs: number
 }): LedgerRows {
   const { items, sessionId, cwd, nowMs } = args
-  const rows: LedgerRows = { spans: [], modelUsage: [], fileOps: [] }
+  const rows: LedgerRows = { spans: [], modelUsage: [], fileOps: [], interventions: [] }
   const results = new Map<string, TraceEvent>()
   for (const e of items) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
 
   for (const e of items) {
+    if (e.intervention) {
+      const intervention = e.intervention
+      rows.interventions.push([
+        e.id,
+        sessionId ?? null,
+        e.runId,
+        e.providerId ?? intervention.request.providerId ?? null,
+        e.agentId ?? intervention.request.agentId ?? null,
+        intervention.request.questionId,
+        intervention.kind,
+        intervention.source,
+        intervention.resolution,
+        intervention.request.questions.length,
+        maskSecrets(JSON.stringify(intervention.request)) ?? '{}',
+        maskSecrets(JSON.stringify(intervention.response)) ?? '{}',
+        tsMs(intervention.openedAt, nowMs),
+        tsMs(intervention.closedAt, nowMs),
+        intervention.durationMs
+      ])
+    }
     if (e.stage === 'tool_result' || e.stage === 'text_delta') continue // 不落 span
     if (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') {
       const r = e.toolUseId ? results.get(e.toolUseId) : undefined

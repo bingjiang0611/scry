@@ -1,5 +1,6 @@
 import type { ProviderId } from './provider.js'
 import type { DangerLevel, DiffFile, TurnDiffCollection, TurnDiffReason, TurnDiffStatus } from './trace.js'
+import type { AgentIntervention } from './runtime.js'
 
 export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
 export type EvidenceStatus = 'available' | 'partial' | 'disabled' | 'unavailable'
@@ -146,6 +147,7 @@ export interface TurnEvidence {
   diff: Evidence<TurnDiffSnapshotRecord[]>
   dangerousOperations: Evidence<TurnDanger[]>
   errors: Evidence<TurnError[]>
+  interventions?: Evidence<AgentIntervention[]>
 }
 
 export interface AgentTurnRecord extends TurnEvidence {
@@ -288,5 +290,7 @@ export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
     'dangerousOperations',
     'errors'
   ].every((key) => isEvidence(raw[key]))
-  return requiredEvidence && (raw.modelTiming === undefined || isModelTimingEvidence(raw.modelTiming))
+  return requiredEvidence &&
+    (raw.modelTiming === undefined || isModelTimingEvidence(raw.modelTiming)) &&
+    (raw.interventions === undefined || isEvidence(raw.interventions))
 }
