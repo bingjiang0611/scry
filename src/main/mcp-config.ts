@@ -202,22 +202,25 @@ export function resolveProviderMcpConfigs(
 
 export function mcpDisabledSet(cwd: string | undefined, homeDir: string): Set<string> {
   if (!cwd) return new Set()
-  const disabled = new Set<string>()
-  const enabled = new Set<string>()
+  const disabledJson = new Set<string>()
+  const disabledUser = new Set<string>()
+  const enabledJson = new Set<string>()
   const add = (set: Set<string>, a: unknown): void => {
     if (Array.isArray(a)) for (const n of a) set.add(String(n))
   }
   const claudeJson = readJson(join(homeDir, '.claude.json'))
-  add(disabled, (claudeJson?.projects as Record<string, Record<string, unknown>> | undefined)?.[cwd]?.disabledMcpjsonServers)
-  add(disabled, (claudeJson?.projects as Record<string, Record<string, unknown>> | undefined)?.[cwd]?.disabledMcpServers)
-  add(enabled, (claudeJson?.projects as Record<string, Record<string, unknown>> | undefined)?.[cwd]?.enabledMcpjsonServers)
+  const project = (claudeJson?.projects as Record<string, Record<string, unknown>> | undefined)?.[cwd]
+  add(disabledJson, project?.disabledMcpjsonServers)
+  add(disabledUser, project?.disabledMcpServers)
+  add(enabledJson, project?.enabledMcpjsonServers)
 
   const localSettings = readJson(join(cwd, '.claude', 'settings.local.json'))
-  add(disabled, localSettings?.disabledMcpjsonServers)
-  add(enabled, localSettings?.enabledMcpjsonServers)
+  add(disabledJson, localSettings?.disabledMcpjsonServers)
+  add(disabledUser, localSettings?.disabledMcpServers)
+  add(enabledJson, localSettings?.enabledMcpjsonServers)
 
-  for (const n of enabled) disabled.delete(n)
-  return disabled
+  for (const n of enabledJson) disabledJson.delete(n)
+  return new Set([...disabledJson, ...disabledUser])
 }
 
 function escapeJsonPointer(value: string): string {
