@@ -662,7 +662,13 @@ function aggregateTurnHookPhases(summary: HookSummary): TurnHookPhase[] {
   }))
 }
 
-function HooksSummary({ summary }: { summary: HookSummary }) {
+export function HooksSummary({
+  summary,
+  title = '本轮 Hook'
+}: {
+  summary: HookSummary
+  title?: string
+}) {
   const phases = aggregateTurnHookPhases(summary)
   const detailValue = (value: unknown): string | undefined =>
     typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
@@ -672,7 +678,7 @@ function HooksSummary({ summary }: { summary: HookSummary }) {
   return (
     <details className="turn-hooks-summary" open>
       <summary>
-        <Icon name="tool" /> 本轮 Hook
+        <Icon name="tool" /> {title}
         <span className="hook-total">{phases.length} 个周期 · {summary.logicalRuns} 个处理器实例</span>
       </summary>
       <div className="turn-hooks-body">

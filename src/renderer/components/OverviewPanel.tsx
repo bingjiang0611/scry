@@ -30,7 +30,8 @@ import {
   logicalCallEventsForTurn,
   resultOf
 } from '../format'
-import type { BillingTurnRow, FileRow, HookInstanceRow, HookScriptRow, Turn } from '../format'
+import type { BillingTurnRow, FileRow, HookInstanceRow, HookScriptRow, HookSummary, Turn } from '../format'
+import { HooksSummary } from './ChatTurn'
 import { Icon } from './primitives/Icon'
 import { McpTrustPanel, type McpGuardReport } from './McpTrustPanel'
 import { TurnTimingDetails } from './TurnTimingDetails'
@@ -321,6 +322,7 @@ interface TurnCallRow {
   userText: string
   timing: TurnTimingBreakdown
   files: FileRow[]
+  hooks: HookSummary
 }
 
 function fileOperationText(file: FileRow): string {
@@ -415,49 +417,46 @@ function turnUserPreview(text: string): string {
     ?.slice(0, 48) ?? ''
 }
 
-function renderTurnCallGroup(
-  kind: TurnCallKind,
-  items: TurnCallItem[],
-  toggle?: { expanded: boolean; onToggle: (ev: MouseEvent<HTMLButtonElement>) => void }
-): ReactNode {
-  if (items.length === 0) return null
-  const visible = items.slice(0, 3)
-  const hidden = items.slice(3).reduce((sum, item) => sum + item.count, 0)
-  const total = items.reduce((sum, item) => sum + item.count, 0)
-  const detailTitle = items.map((item) => `${item.name} ${item.count}×`).join('\n')
-  if (toggle) {
-    return (
-      <button
-        type="button"
-        className={`turn-call-group turn-call-toggle ${kind}`}
-        title={toggle.expanded ? `收起 ${TURN_CALL_KIND_LABEL[kind]} 明细` : `展开 ${TURN_CALL_KIND_LABEL[kind]} 明细`}
-        aria-expanded={toggle.expanded}
-        onClick={toggle.onToggle}
-        onKeyDown={(ev) => ev.stopPropagation()}
-      >
-        <span className="turn-call-kind">{TURN_CALL_KIND_LABEL[kind]}</span>
-        <span className="turn-call-count">{total}</span>
-        <span className="turn-call-toggle-icon">
-          <Icon name={toggle.expanded ? 'chevronDown' : 'chevronRight'} />
-        </span>
-      </button>
-    )
-  }
+type TurnDetailKind = 'mcp' | 'skill' | 'hooks' | 'file'
+
+const TURN_DETAIL_LABEL: Record<TurnDetailKind, string> = {
+  mcp: 'MCP',
+  skill: 'Skill',
+  hooks: 'Hooks',
+  file: '文件'
+}
+
+function renderTurnDetailToggle(args: {
+  kind: TurnDetailKind
+  count: number
+  expanded: boolean
+  controls: string
+  onToggle: (ev: MouseEvent<HTMLButtonElement>) => void
+}): ReactNode {
+  const label = TURN_DETAIL_LABEL[args.kind]
+  const available = args.count > 0
   return (
-    <span className={`turn-call-group ${kind}`} title={detailTitle}>
-      <span className="turn-call-kind">{TURN_CALL_KIND_LABEL[kind]}</span>
-      {visible.map((item) => (
-        <span className="turn-call-chip" key={`${kind}-${item.name}`}>
-          {item.name}
-          {item.count > 1 && <b>{item.count}</b>}
-        </span>
-      ))}
-      {hidden > 0 && <span className="turn-call-more">+{hidden}</span>}
-    </span>
+    <button
+      type="button"
+      className={`turn-call-group turn-call-toggle ${args.kind}`}
+      title={available ? `${args.expanded ? '收起' : '展开'} ${label} 明细` : `本轮无 ${label} 明细`}
+      aria-label={`${label} ${args.count}${available ? `，${args.expanded ? '收起' : '展开'}明细` : '，无明细'}`}
+      aria-expanded={available ? args.expanded : false}
+      aria-controls={available ? args.controls : undefined}
+      disabled={!available}
+      onClick={args.onToggle}
+      onKeyDown={(ev) => ev.stopPropagation()}
+    >
+      <span className="turn-call-kind">{label}</span>
+      <span className="turn-call-count">{args.count}</span>
+      <span className="turn-call-toggle-icon">
+        <Icon name={args.expanded ? 'chevronDown' : 'chevronRight'} />
+      </span>
+    </button>
   )
 }
 
-function renderTurnCallDetail(kind: TurnCallKind, items: TurnCallItem[]): ReactNode {
+function renderTurnCallDetail(kind: 'mcp' | 'skill', items: TurnCallItem[]): ReactNode {
   if (items.length === 0) return null
   return (
     <div className={`turn-call-detail ${kind}`} onClick={(ev) => ev.stopPropagation()}>
@@ -587,7 +586,8 @@ export function OverviewPanel({
           groups,
           userText: turnUserPreview(turn.userText),
           timing: buildTurnTimingBreakdown(turn.items, logicalEvents, result ?? undefined),
-          files: aggregateFiles(turn.items).structured
+          files: aggregateFiles(turn.items).structured,
+          hooks: aggregateHooks(turn.items)
         }
       })
   }, [turns])
@@ -1047,16 +1047,23 @@ export function OverviewPanel({
             {turnCallRows.map((row) => {
               const mcpKey = `${row.runId}:mcp`
               const skillKey = `${row.runId}:skill`
-              const detailKey = `${row.runId}:detail`
-              const mcpExpanded = expandedTurnCallGroups.has(mcpKey)
-              const skillExpanded = expandedTurnCallGroups.has(skillKey)
-              const detailExpanded = expandedTurnCallGroups.has(detailKey)
+              const hooksKey = `${row.runId}:hooks`
+              const fileKey = `${row.runId}:file`
+              const timingKey = `${row.runId}:timing`
+              const mcpCount = row.groups.mcp.reduce((sum, item) => sum + item.count, 0)
+              const skillCount = row.groups.skill.reduce((sum, item) => sum + item.count, 0)
+              const hooksCount = row.hooks.logicalRuns
+              const mcpExpanded = mcpCount > 0 && expandedTurnCallGroups.has(mcpKey)
+              const skillExpanded = skillCount > 0 && expandedTurnCallGroups.has(skillKey)
+              const hooksExpanded = hooksCount > 0 && expandedTurnCallGroups.has(hooksKey)
+              const fileExpanded = row.files.length > 0 && expandedTurnCallGroups.has(fileKey)
+              const timingExpanded = expandedTurnCallGroups.has(timingKey)
               const duration = formatTurnDuration(row.result?.durationMs)
               const apiDuration = formatTurnDuration(row.result?.durationApiMs)
               const durationTitle = duration
                 ? `整轮墙钟耗时 ${duration}${apiDuration ? `；其中 API 耗时 ${apiDuration}` : ''}`
                 : undefined
-              const detailToggleLabel = `${detailExpanded ? '收起' : '展开'}第 ${row.turnNo} 轮明细`
+              const timingToggleLabel = `${timingExpanded ? '收起' : '展开'}第 ${row.turnNo} 轮耗时明细`
               const action = (): void => {
                 if (onOpenTurn) {
                   onOpenTurn(row.runId, row.firstEvent ?? row.result)
@@ -1082,16 +1089,15 @@ export function OverviewPanel({
                   </button>
                   <div className="turn-call-main">
                     <div className="turn-call-head">
-                      <b>{row.total} 次调用</b>
                       {(duration || row.timing.apiMs != null || row.timing.totalCalls > 0) && (
                         <button
                           type="button"
                           className="turn-call-duration-toggle"
-                          title={detailExpanded ? '收起轮次明细' : durationTitle ?? '展开轮次明细'}
-                          aria-label={detailToggleLabel}
-                          aria-expanded={detailExpanded}
-                          aria-controls={`turn-detail-${row.turnNo}`}
-                          onClick={(event) => toggleTurnCallGroup(detailKey, event)}
+                          title={timingExpanded ? '收起耗时明细' : durationTitle ?? '展开耗时明细'}
+                          aria-label={timingToggleLabel}
+                          aria-expanded={timingExpanded}
+                          aria-controls={`turn-timing-${row.turnNo}`}
+                          onClick={(event) => toggleTurnCallGroup(timingKey, event)}
                           onKeyDown={(event) => event.stopPropagation()}
                         >
                           {duration ? `耗时 ${duration}` : '耗时明细'}
@@ -1100,63 +1106,63 @@ export function OverviewPanel({
                       {row.userText && <span className="turn-call-preview">{row.userText}</span>}
                     </div>
                     <div className="turn-call-groups">
-                      {renderTurnCallGroup('tool', row.groups.tool)}
-                      {(row.groups.mcp.length > 0 || row.groups.skill.length > 0) && (
-                        <div className="turn-call-capability-groups">
-                          {renderTurnCallGroup('mcp', row.groups.mcp, {
-                            expanded: mcpExpanded,
-                            onToggle: (ev) => toggleTurnCallGroup(mcpKey, ev)
-                          })}
-                          {renderTurnCallGroup('skill', row.groups.skill, {
-                            expanded: skillExpanded,
-                            onToggle: (ev) => toggleTurnCallGroup(skillKey, ev)
-                          })}
+                      {renderTurnDetailToggle({
+                        kind: 'mcp', count: mcpCount, expanded: mcpExpanded,
+                        controls: `turn-mcp-${row.turnNo}`,
+                        onToggle: (event) => toggleTurnCallGroup(mcpKey, event)
+                      })}
+                      {renderTurnDetailToggle({
+                        kind: 'skill', count: skillCount, expanded: skillExpanded,
+                        controls: `turn-skill-${row.turnNo}`,
+                        onToggle: (event) => toggleTurnCallGroup(skillKey, event)
+                      })}
+                      {renderTurnDetailToggle({
+                        kind: 'hooks', count: hooksCount, expanded: hooksExpanded,
+                        controls: `turn-hooks-${row.turnNo}`,
+                        onToggle: (event) => toggleTurnCallGroup(hooksKey, event)
+                      })}
+                      {renderTurnDetailToggle({
+                        kind: 'file', count: row.files.length, expanded: fileExpanded,
+                        controls: `turn-files-${row.turnNo}`,
+                        onToggle: (event) => toggleTurnCallGroup(fileKey, event)
+                      })}
+                    </div>
+                  </div>
+                  {(timingExpanded || mcpExpanded || skillExpanded || hooksExpanded || fileExpanded) && (
+                    <div className="turn-call-detail-slot">
+                      {timingExpanded && (
+                        <div id={`turn-timing-${row.turnNo}`}>
+                          <TurnTimingDetails
+                            timing={row.timing}
+                            onOpenCall={(call) => {
+                              if (onOpenTurn) {
+                                onOpenTurn(row.runId, call.event, 'event')
+                                return
+                              }
+                              onSelect(call.event)
+                            }}
+                          />
                         </div>
                       )}
-                      {renderTurnCallGroup('agent', row.groups.agent)}
-                      <span className="turn-call-file-count" title={`本轮捕获 ${row.files.length} 个文件的工具证据`}>
-                        <Icon name="file" /> 文件 {row.files.length}
-                      </span>
-                    </div>
-                    {(mcpExpanded || skillExpanded) && (
-                      <div className="turn-call-details">
-                        {mcpExpanded && renderTurnCallDetail('mcp', row.groups.mcp)}
-                        {skillExpanded && renderTurnCallDetail('skill', row.groups.skill)}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="turn-call-jump turn-call-open turn-call-detail-edge-toggle"
-                    onClick={(event) => toggleTurnCallGroup(detailKey, event)}
-                    onKeyDown={(event) => event.stopPropagation()}
-                    title={detailToggleLabel}
-                    aria-label={detailToggleLabel}
-                    aria-expanded={detailExpanded}
-                    aria-controls={`turn-detail-${row.turnNo}`}
-                  >
-                    <Icon name={detailExpanded ? 'chevronDown' : 'chevronRight'} />
-                  </button>
-                  {detailExpanded && (
-                    <div id={`turn-detail-${row.turnNo}`} className="turn-call-detail-slot">
-                      <TurnTimingDetails
-                        timing={row.timing}
-                        onOpenCall={(call) => {
-                          if (onOpenTurn) {
-                            onOpenTurn(row.runId, call.event, 'event')
-                            return
-                          }
-                          onSelect(call.event)
-                        }}
-                      />
-                      <TurnFileFootprint files={row.files} />
+                      {mcpExpanded && (
+                        <div id={`turn-mcp-${row.turnNo}`}>{renderTurnCallDetail('mcp', row.groups.mcp)}</div>
+                      )}
+                      {skillExpanded && (
+                        <div id={`turn-skill-${row.turnNo}`}>{renderTurnCallDetail('skill', row.groups.skill)}</div>
+                      )}
+                      {hooksExpanded && (
+                        <div id={`turn-hooks-${row.turnNo}`}><HooksSummary summary={row.hooks} title="Hooks 明细" /></div>
+                      )}
+                      {fileExpanded && (
+                        <div id={`turn-files-${row.turnNo}`}><TurnFileFootprint files={row.files} /></div>
+                      )}
                     </div>
                   )}
                 </div>
               )
             })}
           </div>
-          <div className="psrc">按每轮逻辑调用与文件工具证据聚合；Skill 内部文件读取不重复计数。点 Txx 跳回该轮，右侧箭头展开耗时与本轮文件足迹。</div>
+          <div className="psrc">每轮仅展示 MCP、Skill、Hook 处理器实例与文件数量；各项默认收起，点击数量查看本轮明细，点 Txx 跳回对话。</div>
         </div>
       )}
         </div>

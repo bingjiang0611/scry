@@ -1,5 +1,6 @@
 import type { MouseEvent, ReactNode } from 'react'
 import type { TimedTurnCall, TurnTimingBreakdown } from '../turn-timing'
+import { Icon } from './primitives/Icon'
 
 function durationText(ms?: number): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return '—'
@@ -210,10 +211,11 @@ export function TurnTimingDetails({
       )}
 
       {modelPhases.length > 0 && (
-        <div className="turn-timing-block">
-          <div className="turn-timing-block-title">
+        <details className="turn-timing-block turn-timing-timeline-block" open>
+          <summary className="turn-timing-block-title" title="展开或收起耗时归因时间线">
             <span>耗时归因时间线</span>
-          </div>
+            <Icon name="chevronRight" />
+          </summary>
           <div className="turn-timing-timeline">
             {modelPhases.map((phase) => {
               const apiValue = waitSeconds(phase.observedMs)
@@ -252,7 +254,7 @@ export function TurnTimingDetails({
               )
             })}
           </div>
-        </div>
+        </details>
       )}
 
       {timing.unassignedCalls.length > 0 && (

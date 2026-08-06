@@ -42,6 +42,8 @@ describe('TurnTimingDetails', () => {
     expect(html).toContain('Read')
     expect(html).toContain('Write')
     expect(html).toContain('耗时归因时间线')
+    expect(html).toContain('turn-timing-timeline-block" open=""')
+    expect(html).toContain('title="展开或收起耗时归因时间线"')
     expect(html).toContain('模型 API')
     expect(html).toContain('工具调用')
     expect(html).toContain('>~0.0s</b>')
