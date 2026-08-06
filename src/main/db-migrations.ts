@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V5, DDL_V6, DDL_V7 } from './span-ledger'
+import { DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V5, DDL_V6, DDL_V7, DDL_V8 } from './span-ledger'
 
 export const DB_MIGRATIONS: readonly (readonly string[])[] = [
   DDL_V1,
@@ -8,7 +8,8 @@ export const DB_MIGRATIONS: readonly (readonly string[])[] = [
   DDL_V4,
   DDL_V5,
   DDL_V6,
-  DDL_V7
+  DDL_V7,
+  DDL_V8
 ]
 
 const ADD_COLUMN = /^\s*ALTER\s+TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+ADD\s+COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\b/i

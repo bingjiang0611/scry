@@ -10,7 +10,7 @@ import {
   type McpLiveStatus
 } from '@shared/trace'
 import type { BillingGuardianState } from '@shared/billing'
-import type { RuntimeProvider } from '@shared/runtime'
+import type { AgentIntervention, RuntimeProvider } from '@shared/runtime'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import type { McpMeta } from '../env'
 import { buildTurnTimingBreakdown, type TurnTimingBreakdown } from '../turn-timing'
@@ -323,6 +323,7 @@ interface TurnCallRow {
   timing: TurnTimingBreakdown
   files: FileRow[]
   hooks: HookSummary
+  interventions: AgentIntervention[]
 }
 
 function fileOperationText(file: FileRow): string {
@@ -417,13 +418,48 @@ function turnUserPreview(text: string): string {
     ?.slice(0, 48) ?? ''
 }
 
-type TurnDetailKind = 'mcp' | 'skill' | 'hooks' | 'file'
+type TurnDetailKind = 'mcp' | 'skill' | 'hooks' | 'file' | 'intervention'
 
 const TURN_DETAIL_LABEL: Record<TurnDetailKind, string> = {
   mcp: 'MCP',
   skill: 'Skill',
   hooks: 'Hooks',
-  file: '文件'
+  file: '文件',
+  intervention: '介入'
+}
+
+function humanInterventions(events: TraceEvent[]): AgentIntervention[] {
+  return events
+    .flatMap((event) => event.intervention ? [event.intervention] : [])
+    .filter((intervention) => intervention.resolution !== 'provider_cancelled')
+}
+
+function InterventionDetails({ interventions }: { interventions: AgentIntervention[] }): ReactNode {
+  return (
+    <div className="turn-intervention-detail">
+      {interventions.map((intervention, interventionIndex) => (
+        <div className="turn-intervention" key={intervention.request.questionId}>
+          <div className="turn-intervention-head">
+            <span>#{interventionIndex + 1} · {intervention.kind === 'permission' ? '权限确认' : '需求澄清'}</span>
+            <small>
+              {intervention.request.providerId ?? 'agent'} · {formatTurnDuration(intervention.durationMs) ?? '0.0s'}
+            </small>
+          </div>
+          {intervention.request.questions.map((question) => (
+            <div className="turn-intervention-answer" key={question.question}>
+              <span title={question.question}>{question.header} · {question.question}</span>
+              <b>
+                {intervention.response.behavior === 'answered'
+                  ? intervention.response.answers[question.question]
+                  : '用户取消'}
+              </b>
+            </div>
+          ))}
+          <div className="turn-intervention-source">{intervention.source}</div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function renderTurnDetailToggle(args: {
@@ -475,6 +511,7 @@ export function OverviewPanel({
   turns,
   sessionId = null,
   usage,
+  stats,
   runtimeProvider,
   mcpLive = [],
   mcps = [],
@@ -518,6 +555,14 @@ export function OverviewPanel({
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
   const dangerAuditRef = useRef<HTMLDivElement>(null)
   const all = useMemo(() => turns.flatMap((t) => t.items), [turns])
+  const sessionInterventions = useMemo(() => humanInterventions(all), [all])
+  const sessionQuestions = sessionInterventions.reduce(
+    (total, intervention) => total + intervention.request.questions.length,
+    0
+  )
+  const sessionWaitMs = sessionInterventions.reduce((total, intervention) => total + intervention.durationMs, 0)
+  const sessionClarifications = sessionInterventions.filter((intervention) => intervention.kind === 'clarification').length
+  const sessionPermissions = sessionInterventions.filter((intervention) => intervention.kind === 'permission').length
   const results = turns.map(resultOf).filter((event): event is TraceEvent => event != null)
   const sumObserved = (pick: (event: TraceEvent) => number | undefined): number | null => {
     const values = results.map(pick).filter((value): value is number => value != null)
@@ -587,7 +632,8 @@ export function OverviewPanel({
           userText: turnUserPreview(turn.userText),
           timing: buildTurnTimingBreakdown(turn.items, logicalEvents, result ?? undefined),
           files: aggregateFiles(turn.items).structured,
-          hooks: aggregateHooks(turn.items)
+          hooks: aggregateHooks(turn.items),
+          interventions: humanInterventions(turn.items)
         }
       })
   }, [turns])
@@ -759,6 +805,7 @@ export function OverviewPanel({
             </div>
             <div className="since">
               {results.length} 轮完成 · {calls.totalCalls} 次调用
+              {sessionInterventions.length > 0 ? ` · ${sessionInterventions.length} 次人工介入` : ''}
               {dangers.length > 0 ? ` · ${dangers.length} 处危险（审计放行）` : ''}
             </div>
           </div>
@@ -1050,6 +1097,7 @@ export function OverviewPanel({
               const hooksKey = `${row.runId}:hooks`
               const fileKey = `${row.runId}:file`
               const timingKey = `${row.runId}:timing`
+              const interventionKey = `${row.runId}:intervention`
               const mcpCount = row.groups.mcp.reduce((sum, item) => sum + item.count, 0)
               const skillCount = row.groups.skill.reduce((sum, item) => sum + item.count, 0)
               const hooksCount = row.hooks.logicalRuns
@@ -1061,6 +1109,7 @@ export function OverviewPanel({
               const hooksExpanded = hooksCount > 0 && expandedTurnCallGroups.has(hooksKey)
               const fileExpanded = row.files.length > 0 && expandedTurnCallGroups.has(fileKey)
               const timingExpanded = timingAvailable && expandedTurnCallGroups.has(timingKey)
+              const interventionExpanded = row.interventions.length > 0 && expandedTurnCallGroups.has(interventionKey)
               const durationTitle = duration
                 ? `整轮墙钟耗时 ${duration}${apiDuration ? `；其中 API 耗时 ${apiDuration}` : ''}`
                 : undefined
@@ -1114,6 +1163,11 @@ export function OverviewPanel({
                         </button>
                       )}
                       {renderTurnDetailToggle({
+                        kind: 'intervention', count: row.interventions.length, expanded: interventionExpanded,
+                        controls: `turn-interventions-${row.turnNo}`,
+                        onToggle: (event) => toggleTurnCallGroup(interventionKey, event)
+                      })}
+                      {renderTurnDetailToggle({
                         kind: 'mcp', count: mcpCount, expanded: mcpExpanded,
                         controls: `turn-mcp-${row.turnNo}`,
                         onToggle: (event) => toggleTurnCallGroup(mcpKey, event)
@@ -1135,7 +1189,7 @@ export function OverviewPanel({
                       })}
                     </div>
                   </div>
-                  {(timingExpanded || mcpExpanded || skillExpanded || hooksExpanded || fileExpanded) && (
+                  {(timingExpanded || interventionExpanded || mcpExpanded || skillExpanded || hooksExpanded || fileExpanded) && (
                     <div className="turn-call-detail-slot">
                       {timingExpanded && (
                         <div id={`turn-timing-${row.turnNo}`}>
@@ -1149,6 +1203,11 @@ export function OverviewPanel({
                               onSelect(call.event)
                             }}
                           />
+                        </div>
+                      )}
+                      {interventionExpanded && (
+                        <div id={`turn-interventions-${row.turnNo}`}>
+                          <InterventionDetails interventions={row.interventions} />
                         </div>
                       )}
                       {mcpExpanded && (
@@ -1169,7 +1228,7 @@ export function OverviewPanel({
               )
             })}
           </div>
-          <div className="psrc">每轮仅展示 MCP、Skill、Hook 处理器实例与文件数量；各项默认收起，点击数量查看本轮明细，点 Txx 跳回对话。</div>
+          <div className="psrc">每轮展示人工介入、MCP、Skill、Hook 与文件数量；介入明细直接列出问题和最终选择，点 Txx 跳回对话。</div>
         </div>
       )}
         </div>
@@ -1182,6 +1241,27 @@ export function OverviewPanel({
           aria-labelledby="overview-session-tab"
           hidden={overviewDataTab !== 'session'}
         >
+      {(sessionInterventions.length > 0 || (stats?.interventions?.requested ?? 0) > 0) && (
+        <div className="panel-section intervention-summary-section">
+          <h4>
+            人工介入
+            <span className="more">本会话 {sessionInterventions.length} 次 · {sessionQuestions} 个问题</span>
+          </h4>
+          <div className="intervention-summary-grid">
+            <div><span>需求澄清</span><b>{sessionClarifications}</b></div>
+            <div><span>权限确认</span><b>{sessionPermissions}</b></div>
+            <div><span>累计等待</span><b>{formatTurnDuration(sessionWaitMs) ?? '0.0s'}</b></div>
+          </div>
+          {stats?.interventions && (
+            <div className="psrc">
+              SQLite 历史累计：人工介入 {stats.interventions.total} 次 · 问题 {stats.interventions.questions} 个
+              {stats.interventions.requested > stats.interventions.total
+                ? ` · 另有 ${stats.interventions.requested - stats.interventions.total} 次由 Provider 取消，不计入人工介入`
+                : ''}
+            </div>
+          )}
+        </div>
+      )}
       {isOverviewTab && topTools.rows.length > 0 && (
         <div className="panel-section top-tools-section">
           <h4>

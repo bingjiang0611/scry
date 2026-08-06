@@ -11,6 +11,7 @@ import {
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  normalizeAgentQuestionRequest,
   type AgentPermissionMode,
   type AgentRunControlCatalog
 } from '../../shared/runtime'
@@ -745,13 +746,56 @@ export function createCodexAdapter(
       const timingByThread = new Map<string, ResponseTimingState>()
       let finish: ((value: ProviderRunResult) => void) | undefined
 
-      const handleApprovalRequest = async (method: string, value: unknown): Promise<unknown> => {
-        if ((runRequest.permissionMode ?? 'default') === 'full_access') return undefined
+      const handleServerRequest = async (method: string, value: unknown): Promise<unknown> => {
         const params = record(value)
         const requestThreadId = typeof params.threadId === 'string' ? params.threadId : undefined
         if (!externalSessionId || (requestThreadId !== externalSessionId && !childAgents.has(requestThreadId ?? ''))) {
           return undefined
         }
+        if (method === 'item/tool/requestUserInput') {
+          if (!runRequest.requestUserInput) return { answers: {} }
+          const itemId = typeof params.itemId === 'string' && params.itemId ? params.itemId : `${Date.now()}`
+          const rawQuestions = Array.isArray(params.questions) ? params.questions.map(record) : []
+          if (rawQuestions.some((question) => question.isSecret === true)) return { answers: {} }
+          const questionIds = rawQuestions.map((question) => String(question.id ?? ''))
+          if (questionIds.some((id) => !id)) return { answers: {} }
+          const question = normalizeAgentQuestionRequest(
+            runRequest.runId,
+            `codex:item/tool/requestUserInput:${itemId}`,
+            {
+              questions: rawQuestions.map((candidate) => ({
+                header: candidate.header,
+                question: candidate.question,
+                options: Array.isArray(candidate.options) ? candidate.options : [],
+                multiSelect: false
+              }))
+            },
+            requestThreadId !== externalSessionId ? requestThreadId : undefined,
+            'codex:item/tool/requestUserInput',
+            true
+          )
+          if (!question) return { answers: {} }
+          const controller = new AbortController()
+          approvalControllers.add(controller)
+          const autoResolutionMs = typeof params.autoResolutionMs === 'number' && params.autoResolutionMs > 0
+            ? params.autoResolutionMs
+            : undefined
+          const timer = autoResolutionMs == null ? undefined : setTimeout(() => controller.abort(), autoResolutionMs)
+          try {
+            const response = await runRequest.requestUserInput(question, controller.signal)
+            if (response.behavior === 'cancelled') return { answers: {} }
+            return {
+              answers: Object.fromEntries(rawQuestions.map((candidate, index) => [
+                questionIds[index],
+                { answers: [response.answers[String(candidate.question ?? '')]] }
+              ]))
+            }
+          } finally {
+            if (timer) clearTimeout(timer)
+            approvalControllers.delete(controller)
+          }
+        }
+        if ((runRequest.permissionMode ?? 'default') === 'full_access') return undefined
         if (![
           'item/commandExecution/requestApproval',
           'item/fileChange/requestApproval',
@@ -779,7 +823,8 @@ export function createCodexAdapter(
           'Codex 权限',
           questionText,
           detail,
-          allowSession
+          allowSession,
+          `codex:${method}`
         )
         const controller = new AbortController()
         approvalControllers.add(controller)
@@ -869,7 +914,7 @@ export function createCodexAdapter(
           const appServer = getClient(runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
           await appServer.start()
           const generationFailure = appServer.failureForCurrentGeneration()
-          unsubscribeRequest = appServer.onRequest(handleApprovalRequest)
+          unsubscribeRequest = appServer.onRequest(handleServerRequest)
           const accountPromise = appServer.request<Record<string, unknown>>('account/read', { refreshToken: false }).catch((error) => {
             accountReadError = String((error as Error).message)
             return null

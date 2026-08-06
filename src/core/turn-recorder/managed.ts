@@ -226,7 +226,8 @@ function recordEvidence(record: AgentTurnRecord): TurnEvidence {
     files: record.files,
     diff: record.diff,
     dangerousOperations: record.dangerousOperations,
-    errors: record.errors
+    errors: record.errors,
+    ...(record.interventions ? { interventions: record.interventions } : {})
   }
 }
 

@@ -6,6 +6,7 @@ import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@share
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import {
   normalizeAgentQuestionRequest,
+  type AgentIntervention,
   type AgentInputAttachment,
   type AgentQuestionRequest,
   type AgentQuestionResponse
@@ -185,6 +186,7 @@ function ToolItem({
   onSelect,
   maxDur,
   pendingQuestion,
+  intervention,
   queuedQuestionCount = 0,
   onAnswerQuestion,
   turnDone = false
@@ -194,11 +196,12 @@ function ToolItem({
   onSelect: () => void
   maxDur: number
   pendingQuestion?: AgentQuestionRequest
+  intervention?: AgentIntervention
   queuedQuestionCount?: number
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   turnDone?: boolean
 }) {
-  const isAskUserQuestion = ev.tool === 'AskUserQuestion'
+  const isAskUserQuestion = ev.tool === 'AskUserQuestion' || !!intervention
   const detailId = useId()
   const [open, setOpen] = useState(isAskUserQuestion)
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, string>>()
@@ -209,16 +212,18 @@ function ToolItem({
   const questionRequest = useMemo(
     () =>
       pendingQuestion ??
+      intervention?.request ??
       (isAskUserQuestion && ev.toolUseId
         ? normalizeAgentQuestionRequest(ev.runId, ev.toolUseId, ev.input, ev.agentId)
         : null),
-    [ev.agentId, ev.input, ev.runId, ev.toolUseId, isAskUserQuestion, pendingQuestion]
+    [ev.agentId, ev.input, ev.runId, ev.toolUseId, intervention, isAskUserQuestion, pendingQuestion]
   )
   const waitingForAnswer = !!pendingQuestion
+  const interventionFailed = !!intervention && intervention.resolution !== 'answered'
   const waitingForQuestionState =
-    !turnDone && isAskUserQuestion && !!questionRequest && !ev.output && !ev.isError && !submittedAnswers
+    !turnDone && isAskUserQuestion && !!questionRequest && !ev.output && !ev.isError && !submittedAnswers && !intervention
   const missingQuestionResult =
-    turnDone && isAskUserQuestion && !!questionRequest && !ev.output && !ev.isError && !submittedAnswers
+    turnDone && isAskUserQuestion && !!questionRequest && !ev.output && !ev.isError && !submittedAnswers && !intervention
   const lockedOpen = waitingForAnswer || waitingForQuestionState
   const hasDetail = ev.input != null || !!ev.output || !!questionRequest
   const shownOpen = lockedOpen || open
@@ -240,8 +245,8 @@ function ToolItem({
           if (hasDetail && !lockedOpen) setOpen((v) => !v)
         }}
       >
-        <span className={`st ${lockedOpen || missingQuestionResult ? 'pending' : ev.isError ? 'err' : 'ok'}`}>
-          <Icon name={lockedOpen ? 'clock' : missingQuestionResult ? 'alert' : ev.isError ? 'x' : 'check'} />
+        <span className={`st ${lockedOpen || missingQuestionResult ? 'pending' : ev.isError || interventionFailed ? 'err' : 'ok'}`}>
+          <Icon name={lockedOpen ? 'clock' : missingQuestionResult ? 'alert' : ev.isError || interventionFailed ? 'x' : 'check'} />
         </span>
         <span className="name" title={displayName}>{displayName}</span>
         {(kind === 'skill' || kind === 'mcp' || kind === 'agent') && <span className={`kindtag ${kind}`} />}
@@ -276,12 +281,15 @@ function ToolItem({
             onRespond={onAnswerQuestion}
             onSubmitted={setSubmittedAnswers}
           />
-        ) : isAskUserQuestion && questionRequest && (!!submittedAnswers || !!ev.output || !!ev.isError) ? (
+        ) : isAskUserQuestion && questionRequest && (!!submittedAnswers || !!ev.output || !!ev.isError || !!intervention) ? (
           <AskUserQuestionResult
             request={questionRequest}
-            answers={submittedAnswers}
+            answers={intervention?.response.behavior === 'answered' ? intervention.response.answers : submittedAnswers}
             output={ev.output}
             error={ev.isError}
+            resolution={intervention?.resolution}
+            durationMs={intervention?.durationMs}
+            source={intervention?.source}
           />
         ) : (
           <div className="tool-detail">
@@ -327,6 +335,7 @@ function SubagentBlock({
   selectedId,
   onSelect,
   pendingQuestions = [],
+  interventions = [],
   onAnswerQuestion,
   turnDone = false
 }: {
@@ -334,6 +343,7 @@ function SubagentBlock({
   selectedId: string | null
   onSelect: (ev: TraceEvent) => void
   pendingQuestions?: AgentQuestionRequest[]
+  interventions?: AgentIntervention[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   turnDone?: boolean
 }) {
@@ -403,6 +413,7 @@ function SubagentBlock({
                   onSelect={() => onSelect(ev)}
                   maxDur={maxDur}
                   pendingQuestion={pendingQuestion}
+                  intervention={interventions.find((item) => item.request.questionId === ev.toolUseId)}
                   queuedQuestionCount={pendingQuestions.length}
                   onAnswerQuestion={onAnswerQuestion}
                   turnDone={turnDone}
@@ -909,7 +920,10 @@ function TurnFooter({ items }: { items: TraceEvent[] }) {
     (e) => e.stage !== 'tool_result' && (e.fileOp === 'write' || e.fileOp === 'edit')
   ).length
   const errs = items.filter((e) => e.stage === 'tool_result' && e.isError).length
-  if (!result && tools === 0) return null
+  const interventions = items.flatMap((event) => event.intervention ? [event.intervention] : [])
+    .filter((intervention) => intervention.resolution !== 'provider_cancelled')
+  const questions = interventions.reduce((total, intervention) => total + intervention.request.questions.length, 0)
+  if (!result && tools === 0 && interventions.length === 0) return null
   const stat = (lbl: string, val: ReactNode, cls = ''): ReactNode => (
     <span className={`stat ${cls}`}>
       <span className="lbl">{lbl}</span> <b>{val}</b>
@@ -929,6 +943,7 @@ function TurnFooter({ items }: { items: TraceEvent[] }) {
       <span className="sep" />
       {stat('tools', tools)}
       {reads + writes > 0 && stat('files', `${reads} R · ${writes} W`)}
+      {interventions.length > 0 && stat('human', `${interventions.length} · ${questions}Q`)}
       {errs > 0 && (
         <>
           <span className="sep" />
@@ -1004,6 +1019,10 @@ function AssistantTurnImpl({
           !!event.toolUseId
       )
       .map((event) => event.toolUseId as string)
+  )
+  const interventions = items.flatMap((event) => event.intervention ? [event.intervention] : [])
+  const interventionsByQuestionId = new Map(
+    interventions.map((intervention) => [intervention.request.questionId, intervention])
   )
   const topLevelToolUseIds = new Set(
     items
@@ -1130,6 +1149,7 @@ function AssistantTurnImpl({
               onSelect={() => onSelect(ev)}
               maxDur={maxDur}
               pendingQuestion={pendingQuestion}
+              intervention={ev.toolUseId ? interventionsByQuestionId.get(ev.toolUseId) : undefined}
               queuedQuestionCount={pendingQuestions.length}
               onAnswerQuestion={onAnswerQuestion}
               turnDone={turn.done}
@@ -1145,6 +1165,7 @@ function AssistantTurnImpl({
                 selectedId={selectedId}
                 onSelect={onSelect}
                 pendingQuestions={pendingQuestions}
+                interventions={interventions}
                 onAnswerQuestion={onAnswerQuestion}
                 turnDone={turn.done}
               />
@@ -1170,6 +1191,27 @@ function AssistantTurnImpl({
           )}
         </div>
       ))}
+      {interventions
+        .filter((intervention) => !knownToolUseIds.has(intervention.request.questionId))
+        .map((intervention) => (
+          <div className="tool-card k-human intervention-card" key={`intervention:${intervention.request.questionId}`}>
+            <div className="tool-row">
+              <span className={`st ${intervention.resolution === 'answered' ? 'ok' : 'err'}`}>
+                <Icon name={intervention.resolution === 'answered' ? 'check' : 'x'} />
+              </span>
+              <span className="name">{intervention.kind === 'permission' ? '权限确认' : '人工选择'}</span>
+              <span className="arg">{intervention.source}</span>
+              <span className="meta"><span className="dur">{(intervention.durationMs / 1000).toFixed(1)}s</span></span>
+            </div>
+            <AskUserQuestionResult
+              request={intervention.request}
+              answers={intervention.response.behavior === 'answered' ? intervention.response.answers : undefined}
+              resolution={intervention.resolution}
+              durationMs={intervention.durationMs}
+              source={intervention.source}
+            />
+          </div>
+        ))}
       {turn.error && (
         <div className="errline">
           <div className="errmain">

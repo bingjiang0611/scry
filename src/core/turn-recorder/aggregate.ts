@@ -204,6 +204,7 @@ export function aggregateTurnEvidence(args: {
     files?: boolean
     errors?: boolean
     diff?: boolean
+    interventions?: boolean
   }
 }): TurnEvidence {
   const source = args.source ?? 'trace_events'
@@ -217,6 +218,7 @@ export function aggregateTurnEvidence(args: {
     files: true,
     errors: true,
     diff: true,
+    interventions: true,
     ...args.observable
   }
   const resultById = new Map<string, TraceEvent>()
@@ -270,6 +272,7 @@ export function aggregateTurnEvidence(args: {
   )
   const usage = usageFrom(args.events)
   const modelTiming = deriveModelTiming(args.events)
+  const interventions = args.events.flatMap((event) => event.intervention ? [event.intervention] : [])
 
   return {
     user: args.userText != null
@@ -321,6 +324,9 @@ export function aggregateTurnEvidence(args: {
                 omissionReason: 'no repository snapshot was captured'
               },
     dangerousOperations: observable.tools ? available(dangers, [source]) : unavailable('tool evidence was unavailable', [source]),
-    errors: observable.errors ? available(errors, [source]) : unavailable('provider error events were not observable', [source])
+    errors: observable.errors ? available(errors, [source]) : unavailable('provider error events were not observable', [source]),
+    interventions: observable.interventions
+      ? available(interventions, [source])
+      : unavailable('provider user-input events were not observable', [source])
   }
 }

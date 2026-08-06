@@ -41,6 +41,9 @@ describe('session data deletion', () => {
       native.prepare('INSERT INTO file_ops (span_id, session_id, path) VALUES (?, ?, ?)').run('span-keep', keep, '/keep')
       native.prepare('INSERT INTO usage_ledger (id, provider, source, source_kind, session_id, run_id, usage_kind, cost_unit, cost_source, confidence, attribution_method, created_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run('usage-target', 'openai', 'runtime', 'sdk_reported', target, 'run-target', 'model', 'usd', 'provider_reported', 'exact', 'session_id', 1)
+      const insertIntervention = native.prepare('INSERT INTO human_interventions (id, session_id, run_id, question_id, kind, source, resolution, question_count, request_json, response_json, opened_at, closed_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      insertIntervention.run('intervention-target', target, 'run-target', 'q1', 'clarification', 'codex:test', 'answered', 1, '{}', '{}', 1, 2, 1)
+      insertIntervention.run('intervention-keep', keep, 'run-keep', 'q2', 'permission', 'codex:test', 'answered', 1, '{}', '{}', 1, 2, 1)
 
       const args = {
         providerId: 'codex', cwd: '/repo', externalSessionId: 'sess-target', runIds: ['run-keep']
@@ -56,6 +59,7 @@ describe('session data deletion', () => {
       expect(native.prepare('SELECT span_id FROM model_usage').all()).toEqual([{ span_id: 'span-keep' }])
       expect(native.prepare('SELECT path FROM file_ops').all()).toEqual([{ path: '/keep' }])
       expect(native.prepare('SELECT id FROM usage_ledger').all()).toEqual([])
+      expect(native.prepare('SELECT id FROM human_interventions').all()).toEqual([{ id: 'intervention-keep' }])
       expect(native.prepare('SELECT scry_session_id FROM session_refs').all()).toEqual([{ scry_session_id: keep }])
       expect(native.prepare('SELECT cwd FROM projects').all()).toEqual([{ cwd: '/repo' }])
     } finally {

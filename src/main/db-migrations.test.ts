@@ -56,6 +56,9 @@ describe('SQLite migrations', () => {
       expect(db.pragma('user_version', { simple: true })).toBe(DB_MIGRATIONS.length)
       expect(columns(db, 'sessions')).toContain('project_id')
       expect(columns(db, 'spans')).toEqual(expect.arrayContaining(['danger_level', 'danger_reason']))
+      expect(columns(db, 'human_interventions')).toEqual(expect.arrayContaining([
+        'run_id', 'question_id', 'kind', 'resolution', 'request_json', 'response_json', 'duration_ms'
+      ]))
     } finally {
       db.close()
     }

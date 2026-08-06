@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentTurnRecord, Evidence } from '../../shared/turn-record'
+import type { AgentIntervention } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
 import { logicalCallEventsForTurn } from '../../shared/logical-calls'
 import {
@@ -107,6 +108,55 @@ describe('turn CLI model timing summaries', () => {
       record(2, undefined, { usage: usage(0.2) })
     ])
     expect(summary.usage.costUsd).toBe(0.3)
+  })
+
+  it('按轮次汇总人工介入，并排除 Provider 自动取消', () => {
+    const intervention = (resolution: 'answered' | 'provider_cancelled'): AgentIntervention => ({
+      kind: 'clarification',
+      source: 'codex:item/tool/requestUserInput',
+      resolution,
+      request: {
+        runId: 'run-1',
+        questionId: `question-${resolution}`,
+        providerId: 'codex',
+        questions: [{
+          header: '范围',
+          question: '选择范围？',
+          multiSelect: false,
+          options: [{ label: '全量', description: '全部' }, { label: '增量', description: '变化' }]
+        }]
+      },
+      response: resolution === 'answered'
+        ? {
+            runId: 'run-1', questionId: `question-${resolution}`, behavior: 'answered',
+            answers: { '选择范围？': '全量' }
+          }
+        : { runId: 'run-1', questionId: `question-${resolution}`, behavior: 'cancelled' },
+      openedAt: '2026-08-06T00:00:00.000Z',
+      closedAt: '2026-08-06T00:00:01.000Z',
+      durationMs: 1000
+    })
+    const exact = (value: AgentIntervention[]): NonNullable<AgentTurnRecord['interventions']> => ({
+      status: 'available', quality: 'exact', source: ['fixture'], value
+    })
+    const summary = summarizeTurnRecords([
+      record(1, undefined, { interventions: exact([intervention('answered')]) }),
+      record(2, undefined, { interventions: exact([intervention('provider_cancelled')]) })
+    ], 'session-1')
+
+    expect(summary.interventions).toMatchObject({
+      requested: 2,
+      total: 1,
+      questions: 1,
+      answered: 1,
+      cancelled: 0,
+      clarification: 1,
+      permission: 0,
+      waitMs: 1000,
+      byProvider: [{ name: 'codex', count: 1 }],
+      coverage: { complete: true, knownTurns: 2, totalTurns: 2 }
+    })
+    expect(summary.perTurn.map((turn) => [turn.interventions, turn.interventionQuestions])).toEqual([[1, 1], [0, 0]])
   })
 
   it('aggregates known model timing with explicit turn and call coverage', () => {

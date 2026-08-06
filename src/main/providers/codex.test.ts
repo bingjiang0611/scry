@@ -370,6 +370,74 @@ describe('Codex provider adapter', () => {
     await run.promise
   })
 
+  it('bridges native requestUserInput questions and returns answers by Codex question id', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    let requestHandler: ((method: string, params: unknown) => Promise<unknown>) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.onRequest.mockImplementation((listener) => {
+      requestHandler = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-question' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-question' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const requestUserInput = vi.fn(async (question) => ({
+      runId: question.runId,
+      questionId: question.questionId,
+      behavior: 'answered' as const,
+      answers: { [question.questions[0].question]: '全量' }
+    }))
+    const run = createCodexAdapter().run({
+      runId: 'run-question',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      permissionMode: 'full_access',
+      emit: () => {},
+      requestUserInput
+    })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+
+    await expect(requestHandler?.('item/tool/requestUserInput', {
+      threadId: 'thread-question',
+      turnId: 'turn-question',
+      itemId: 'item-question',
+      autoResolutionMs: null,
+      questions: [{
+        id: 'scope',
+        header: '范围',
+        question: '选择验证范围？',
+        isOther: true,
+        isSecret: false,
+        options: [
+          { label: '全量', description: '验证全部路径' },
+          { label: '增量', description: '只验证改动路径' }
+        ]
+      }]
+    })).resolves.toEqual({ answers: { scope: { answers: ['全量'] } } })
+    expect(requestUserInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questionId: 'codex:item/tool/requestUserInput:item-question',
+        questionKind: 'clarification',
+        source: 'codex:item/tool/requestUserInput'
+      }),
+      expect.any(AbortSignal)
+    )
+
+    notify?.('turn/completed', {
+      threadId: 'thread-question',
+      turnId: 'turn-question',
+      turn: { status: 'completed' }
+    })
+    await run.promise
+  })
+
   it('reads Codex Hook trust metadata before a run', async () => {
     appServer.request.mockResolvedValue({
       data: [{

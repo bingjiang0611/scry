@@ -653,7 +653,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                         request.runId,
                         permission.toolUseID,
                         input,
-                        permission.agentID
+                        permission.agentID,
+                        'qoder:AskUserQuestion'
                       )
                       if (!question) {
                         return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
@@ -679,7 +680,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                       permission.toolUseID,
                       permission.title ?? '权限请求',
                       `允许 ${toolName} 执行这项操作吗？`,
-                      permission.description ?? JSON.stringify(input).slice(0, 1_200)
+                      permission.description ?? JSON.stringify(input).slice(0, 1_200),
+                      true,
+                      `qoder:permission:${toolName}`
                     )
                     const response = await request.requestUserInput!(question, permission.signal)
                     const decision = agentPermissionDecision(question, response)

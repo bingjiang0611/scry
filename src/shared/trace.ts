@@ -1,4 +1,4 @@
-import type { AgentInputAttachment, AgentQuestionRequest, RuntimeFailureStage, RuntimeProvider } from './runtime.js'
+import type { AgentInputAttachment, AgentIntervention, AgentQuestionRequest, RuntimeFailureStage, RuntimeProvider } from './runtime.js'
 import type { ProviderId } from './provider.js'
 import type { BillingProvider } from './billing.js'
 
@@ -284,6 +284,16 @@ export interface DbStats {
     cacheWriteKnownTurns: number
     dangerCoverage: 'classified' | 'unsupported'
   }[]
+  interventions?: {
+    requested: number
+    total: number
+    answered: number
+    cancelled: number
+    questions: number
+    clarification: number
+    permission: number
+    waitMs: number
+  }
 }
 
 export interface UsageStats {
@@ -354,6 +364,7 @@ export interface TraceEvent {
   usageSource?: string
   runtimeFailureStage?: RuntimeFailureStage
   runtimeMetadata?: Record<string, unknown>
+  intervention?: AgentIntervention
 }
 
 // 工具名 → kind 分类

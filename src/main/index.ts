@@ -974,6 +974,20 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
   const run = runs.get(change.runId)?.state
   if (run) {
     run.pendingQuestions = (run.pendingQuestions ?? []).filter((item) => item.questionId !== change.questionId)
+    const event: TraceEvent = {
+      id: `i-${evSeq++}`,
+      ts: change.intervention.closedAt,
+      runId: change.runId,
+      kind: 'human',
+      stage: 'intervention',
+      toolUseId: change.questionId,
+      providerId: change.intervention.request.providerId,
+      agentId: change.intervention.request.agentId,
+      durationMs: change.intervention.durationMs,
+      intervention: change.intervention
+    }
+    appendCoalescedTrace(run.items, event)
+    if (runs.isFocused(change.runId)) queueTrace(event)
   }
   if (runs.isFocused(change.runId)) win?.webContents.send('agent:userQuestionClosed', change)
 })

@@ -1773,6 +1773,56 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
     expect(html).not.toContain('等待状态同步')
     expect(html).not.toContain('已回答')
   })
+
+  it('使用结构化 intervention 展示所在轮次、问题、答案与人工介入计数', () => {
+    const completed: Turn = {
+      ...askTurn,
+      done: true,
+      items: [
+        ...askTurn.items,
+        ev({
+          id: 'human-intervention',
+          runId: 'ask-run',
+          ts: '2026-08-06T10:00:02.000Z',
+          kind: 'human',
+          stage: 'intervention',
+          toolUseId: 'ask-tool',
+          providerId: 'qoder',
+          intervention: {
+            kind: 'clarification',
+            source: 'qoder:AskUserQuestion',
+            resolution: 'answered',
+            request: { ...pendingRequest, providerId: 'qoder', questionKind: 'clarification', source: 'qoder:AskUserQuestion' },
+            response: {
+              runId: 'ask-run',
+              questionId: 'ask-tool',
+              behavior: 'answered',
+              answers: {
+                '请选择验证方式': '自动验证',
+                '请选择需要验证的能力': 'MCP, Skill'
+              }
+            },
+            openedAt: '2026-08-06T10:00:00.000Z',
+            closedAt: '2026-08-06T10:00:02.000Z',
+            durationMs: 2000
+          }
+        })
+      ]
+    }
+    const turnHtml = renderToStaticMarkup(<AssistantTurn turn={completed} selectedId={null} onSelect={() => {}} />)
+    const overviewHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[completed]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(turnHtml).toContain('请选择验证方式')
+    expect(turnHtml).toContain('自动验证')
+    expect(turnHtml).toContain('MCP, Skill')
+    expect(turnHtml).toContain('等待 2.0s')
+    expect(turnHtml).toContain('human</span> <b>1 · 2Q</b>')
+    expect(overviewHtml).toContain('1 次人工介入')
+    expect(overviewHtml).toContain('aria-label="介入 1，展开明细"')
+    expect(overviewHtml).toContain('T01')
+  })
 })
 
 describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足迹 + git diff + 累计 + sqlite 分析', () => {
@@ -3151,14 +3201,16 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
     expect(segmentHtml).not.toContain('R1')
   })
 
-  it('每轮调用只展示 MCP、Skill、Hooks、文件计数，四项明细默认收起', () => {
-    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮仅展示'))
+  it('每轮调用展示介入、MCP、Skill、Hooks、文件计数，五项明细默认收起', () => {
+    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮展示人工介入'))
     expect(html).toContain('每轮调用')
+    expect(turnCallHtml).toContain('turn-call-group turn-call-toggle intervention')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle mcp')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle skill')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle hooks')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle file')
     expect(turnCallHtml).toContain('aria-expanded="false"')
+    expect(turnCallHtml).toContain('aria-label="介入 0，无明细"')
     expect(turnCallHtml).toContain('aria-label="MCP 1，展开明细"')
     expect(turnCallHtml).toContain('aria-label="Skill 1，展开明细"')
     expect(turnCallHtml).toContain('aria-label="Hooks 1，展开明细"')

@@ -144,6 +144,8 @@ describe('runtime frontdoor mapping', () => {
     expect(request).toEqual({
       runId: 'run-1',
       questionId: 'tool-1',
+      questionKind: 'clarification',
+      source: 'AskUserQuestion',
       questions: [
         {
           question: '选择流程？',
