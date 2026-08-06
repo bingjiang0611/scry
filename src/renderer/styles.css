@@ -2645,11 +2645,11 @@ button.mitem:disabled {
 }
 .turn-call-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px 4px;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 4px;
   border: 0;
   border-bottom: 1px solid var(--border3);
   border-radius: 0;
@@ -2679,7 +2679,12 @@ button.turn-id.turn-call-open:focus-visible {
   border-color: var(--accent);
 }
 button.turn-id.turn-call-open {
-  min-height: 40px;
+  width: 32px;
+  min-height: 28px;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 5px;
+  font: 9.5px/1 var(--font-mono);
 }
 button.turn-call-open:focus-visible {
   outline: 2px solid var(--accent);
@@ -2703,31 +2708,6 @@ button.turn-call-open:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--dim2);
-}
-.turn-call-duration-toggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-height: 40px;
-  padding: 1px 3px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--dim1);
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.turn-call-duration-toggle:hover,
-.turn-call-duration-toggle[aria-expanded='true'] {
-  color: var(--accent);
-  background: rgba(123, 171, 255, 0.08);
-}
-.turn-call-duration-toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 .turn-call-groups {
   display: flex;
@@ -2774,6 +2754,9 @@ button.turn-call-group:focus-visible {
 }
 .turn-call-group.mcp {
   border-color: rgba(92, 211, 160, 0.24);
+}
+.turn-call-group.timing {
+  border-color: rgba(123, 171, 255, 0.28);
 }
 .turn-call-group.skill {
   border-color: rgba(246, 187, 92, 0.28);

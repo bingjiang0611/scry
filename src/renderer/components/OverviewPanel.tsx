@@ -1053,13 +1053,14 @@ export function OverviewPanel({
               const mcpCount = row.groups.mcp.reduce((sum, item) => sum + item.count, 0)
               const skillCount = row.groups.skill.reduce((sum, item) => sum + item.count, 0)
               const hooksCount = row.hooks.logicalRuns
+              const duration = formatTurnDuration(row.result?.durationMs)
+              const apiDuration = formatTurnDuration(row.result?.durationApiMs)
+              const timingAvailable = Boolean(duration || row.timing.apiMs != null || row.timing.totalCalls > 0)
               const mcpExpanded = mcpCount > 0 && expandedTurnCallGroups.has(mcpKey)
               const skillExpanded = skillCount > 0 && expandedTurnCallGroups.has(skillKey)
               const hooksExpanded = hooksCount > 0 && expandedTurnCallGroups.has(hooksKey)
               const fileExpanded = row.files.length > 0 && expandedTurnCallGroups.has(fileKey)
-              const timingExpanded = expandedTurnCallGroups.has(timingKey)
-              const duration = formatTurnDuration(row.result?.durationMs)
-              const apiDuration = formatTurnDuration(row.result?.durationApiMs)
+              const timingExpanded = timingAvailable && expandedTurnCallGroups.has(timingKey)
               const durationTitle = duration
                 ? `整轮墙钟耗时 ${duration}${apiDuration ? `；其中 API 耗时 ${apiDuration}` : ''}`
                 : undefined
@@ -1088,11 +1089,16 @@ export function OverviewPanel({
                     T{String(row.turnNo).padStart(2, '0')}
                   </button>
                   <div className="turn-call-main">
-                    <div className="turn-call-head">
-                      {(duration || row.timing.apiMs != null || row.timing.totalCalls > 0) && (
+                    {row.userText && (
+                      <div className="turn-call-head">
+                        <span className="turn-call-preview">{row.userText}</span>
+                      </div>
+                    )}
+                    <div className="turn-call-groups">
+                      {timingAvailable && (
                         <button
                           type="button"
-                          className="turn-call-duration-toggle"
+                          className="turn-call-group turn-call-toggle timing"
                           title={timingExpanded ? '收起耗时明细' : durationTitle ?? '展开耗时明细'}
                           aria-label={timingToggleLabel}
                           aria-expanded={timingExpanded}
@@ -1100,12 +1106,13 @@ export function OverviewPanel({
                           onClick={(event) => toggleTurnCallGroup(timingKey, event)}
                           onKeyDown={(event) => event.stopPropagation()}
                         >
-                          {duration ? `耗时 ${duration}` : '耗时明细'}
+                          <span className="turn-call-kind">耗时</span>
+                          <span className="turn-call-count">{duration ?? '明细'}</span>
+                          <span className="turn-call-toggle-icon">
+                            <Icon name={timingExpanded ? 'chevronDown' : 'chevronRight'} />
+                          </span>
                         </button>
                       )}
-                      {row.userText && <span className="turn-call-preview">{row.userText}</span>}
-                    </div>
-                    <div className="turn-call-groups">
                       {renderTurnDetailToggle({
                         kind: 'mcp', count: mcpCount, expanded: mcpExpanded,
                         controls: `turn-mcp-${row.turnNo}`,
