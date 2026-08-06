@@ -38,6 +38,7 @@ export interface ProviderRunHandle {
 
 export interface AuthorizedMcpExecution {
   cwd: string
+  fingerprint: string
   targets: Array<{
     targetId: string
     name: string

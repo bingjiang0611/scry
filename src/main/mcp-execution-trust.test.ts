@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -55,6 +55,30 @@ describe('MCP execution trust', () => {
       const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir })
       expect(snapshot.errors).toContainEqual(expect.stringContaining('执行优先级不唯一'))
       expect(new Set(snapshot.targets.map((target) => target.targetId)).size).toBe(2)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('binds Codex and OpenCode native configs to provider-specific guard snapshots', () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      mkdirSync(join(homeDir, '.codex'), { recursive: true })
+      mkdirSync(join(homeDir, '.config', 'opencode'), { recursive: true })
+      writeFileSync(join(homeDir, '.codex', 'config.toml'), '[mcp_servers.tracker]\ncommand = "/bin/echo"\nargs = ["codex"]\n')
+      writeFileSync(join(homeDir, '.config', 'opencode', 'opencode.json'), JSON.stringify({
+        mcp: { tracker: { type: 'local', command: ['/bin/echo', 'opencode'], environment: { SAFE: '1' } } }
+      }))
+
+      const codex = buildMcpExecutionSnapshot({ providerId: 'codex', cwd, homeDir })
+      const opencode = buildMcpExecutionSnapshot({ providerId: 'opencode', cwd, homeDir })
+      expect(codex.errors).toEqual([])
+      expect(codex.targets).toContainEqual(expect.objectContaining({ name: 'tracker', config: expect.objectContaining({ args: ['codex'] }) }))
+      expect(opencode.errors).toEqual([])
+      expect(opencode.targets).toContainEqual(expect.objectContaining({
+        name: 'tracker', config: expect.objectContaining({ command: realpathSync('/bin/echo'), args: ['opencode'], env: { SAFE: '1' } })
+      }))
+      expect(codex.fingerprint).not.toBe(opencode.fingerprint)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

@@ -12,9 +12,10 @@ import {
   type AgentRunControlCatalog
 } from '../../shared/runtime'
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
-import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
+import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
+import { authorizedMcpServers, listProviderMcp } from '../mcp-config'
 import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
-import type { ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
+import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 
 interface Cached<T> {
@@ -158,7 +159,8 @@ function qoderOptions(
   onPid?: (pid: number) => void,
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
   permissionMode: AgentPermissionMode = 'default',
-  managedRecorder = false
+  managedRecorder = false,
+  mcpExecution?: AuthorizedMcpExecution
 ): Record<string, unknown> {
   const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!executable) throw new Error('Qoder CLI 未找到')
@@ -180,10 +182,10 @@ function qoderOptions(
     includePartialMessages: true,
     includeHookEvents: true,
     settingSources: ['user', 'project', 'local'],
-    // Scry cannot yet produce an exact Qoder MCP config snapshot. Disable every
-    // discovered/plugin MCP source instead of starting it during background probes or runs.
+    // Qoder must never discover MCP implicitly. Scry injects only the exact
+    // fingerprinted configs approved in the native authorization dialog.
     strictMcpConfig: true,
-    mcpServers: {},
+    mcpServers: authorizedMcpServers(mcpExecution),
     controlRequestTimeoutMs: 30_000,
     ...(onPid
       ? {
@@ -428,7 +430,7 @@ function qoderTrace(event: TraceEvent): TraceEvent {
   }
 }
 
-export function createQoderAdapter(): ProviderAdapter {
+export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
   const controls = new Map<string, QoderControlSession>()
   const skillCache = new Map<string, Cached<{ data: SkillMeta[]; total: number; included: number }>>()
   const commandCache = new Map<string, Cached<SlashCommand[]>>()
@@ -494,7 +496,7 @@ export function createQoderAdapter(): ProviderAdapter {
         transport: 'Qoder Agent SDK',
         available: !!path,
         path,
-        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' },
+        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' },
         health: lastHookFallbackError
           ? { state: 'degraded', transport: 'Qoder Agent SDK', lastError: lastHookFallbackError }
           : { state: !path ? 'unavailable' : hookFallbackObserved ? 'ready' : 'unknown', transport: 'Qoder Agent SDK' }
@@ -518,7 +520,8 @@ export function createQoderAdapter(): ProviderAdapter {
                 undefined,
                 undefined,
                 request.permissionMode,
-                request.managedRecorder === true
+                request.managedRecorder === true,
+                request.mcpExecution
               ),
               abortController: controller
             } as never
@@ -619,7 +622,8 @@ export function createQoderAdapter(): ProviderAdapter {
                 }, 1000)
               },
               request.permissionMode,
-              request.managedRecorder === true
+              request.managedRecorder === true,
+              request.mcpExecution
             ),
             ...(request.model && !request.effort ? { model: request.model.id } : {}),
             ...(request.model && request.effort
@@ -798,6 +802,36 @@ export function createQoderAdapter(): ProviderAdapter {
         interrupt,
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: currentProviderTurnId
+      }
+    },
+    mcp: {
+      snapshot: async (context, refresh = false, execution) => {
+        const configured = listProviderMcp('qoder', context.cwd, homeDir, shellEnv())
+        const base: McpSnapshot = { configured, runtime: null }
+        if (!refresh) {
+          return {
+            ...capabilityReady(context, 'read', base),
+            state: 'degraded',
+            reason: '配置已读取；刷新后才会启动已授权 MCP 并读取 Qoder 原生运行状态'
+          }
+        }
+        if (!configured.some((item) => item.enabled)) {
+          return capabilityReady(context, 'read', { configured, runtime: [] })
+        }
+        if (!execution) {
+          return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 Qoder MCP 执行快照')
+        }
+        const prompt = heldPrompt()
+        const q = query({ prompt: prompt.stream, options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, execution) as never })
+        try {
+          await q.initializationResult()
+          return capabilityReady(context, 'read', qoderMcpSnapshot(await q.mcpServerStatus()))
+        } catch (error) {
+          return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
+        } finally {
+          prompt.release()
+          await Promise.resolve(q.close()).catch(() => {})
+        }
       }
     },
     skills: {

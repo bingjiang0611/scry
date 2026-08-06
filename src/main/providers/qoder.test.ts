@@ -42,8 +42,54 @@ describe('Qoder provider adapter', () => {
       id: 'qoder',
       label: 'Qoder',
       transport: 'Qoder Agent SDK',
-      capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'read' }
+      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' }
     })
+  })
+
+  it('lists Qoder MCP without starting a process, then injects only the authorized snapshot on refresh', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-qoder-mcp-test-'))
+    const configDir = join(home, '.qoder')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'mcp.json'), JSON.stringify({
+      mcpServers: { tracker: { command: '/bin/echo', args: ['configured'] } }
+    }))
+    try {
+      const adapter = createQoderAdapter(home)
+      await expect(adapter.mcp!.snapshot({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
+        mode: 'read',
+        state: 'degraded',
+        data: { configured: [expect.objectContaining({ name: 'tracker' })], runtime: null }
+      })
+      expect(sdk.query).not.toHaveBeenCalled()
+
+      const mcpServerStatus = vi.fn().mockResolvedValue([{
+        name: 'tracker', status: 'connected', scope: 'qoder',
+        config: { command: '/bin/echo', args: ['approved'] }, tools: [{ name: 'ping' }]
+      }])
+      sdk.query.mockReturnValue({
+        initializationResult: vi.fn().mockResolvedValue({}),
+        mcpServerStatus,
+        close: sdk.close
+      })
+      await expect(adapter.mcp!.snapshot(
+        { providerId: 'qoder', cwd: '/repo' },
+        true,
+        {
+          cwd: '/repo', fingerprint: 'sha256:test', env: { PATH: '/bin' },
+          targets: [{ targetId: 'target', name: 'tracker', enabled: true, config: { command: '/bin/echo', args: ['approved'] } }]
+        }
+      )).resolves.toMatchObject({
+        state: 'ready',
+        data: { runtime: [expect.objectContaining({ name: 'tracker', status: 'connected', tools: 1 })] }
+      })
+      expect(sdk.query.mock.calls[0][0].options).toMatchObject({
+        strictMcpConfig: true,
+        mcpServers: { tracker: { command: '/bin/echo', args: ['approved'], env: { PATH: '/bin' } } }
+      })
+      expect(mcpServerStatus).toHaveBeenCalledOnce()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 
   it('reads discovered Skill metadata from the native context usage catalog', async () => {

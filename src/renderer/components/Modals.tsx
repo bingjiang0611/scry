@@ -388,7 +388,9 @@ export function McpModal({
         <div className="modal-foot dim">
           {canManage
             ? '当前 Provider 支持由 Scry 管理 MCP 开关与连接测试。'
-            : '当前 Provider 只暴露原生 MCP 配置/运行状态；Scry 不把读取能力伪装成持久化开关。'}
+            : capability?.mode === 'read'
+              ? '当前 Provider 只暴露原生 MCP 配置/运行状态；Scry 不把读取能力伪装成持久化开关。'
+              : '当前 Provider 没有可用的 MCP 配置/运行状态接口。'}
         </div>
     </ModalFrame>
   )

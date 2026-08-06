@@ -2,7 +2,14 @@ import { homedir } from 'node:os'
 import { query, type ModelInfo, type SlashCommand } from '@anthropic-ai/claude-agent-sdk'
 import { getClaudeVersion, runAgent } from '../agent-runner'
 import { resolveClaudeBin, runtimeCliEnv } from '../claude-locate'
-import { authorizedMcpRuntimeEnv, listMcp, testMcpConfig, toggleMcp } from '../mcp-config'
+import {
+  authorizedMcpRuntimeEnv,
+  authorizedMcpServers,
+  isRemoteMcpConfig,
+  listMcp,
+  testMcpConfig,
+  toggleMcp
+} from '../mcp-config'
 import { computeEnabledSkills, listSkills, setSkillEnabled } from '../skill-config'
 import { capabilityReady, capabilityUnavailable, type ProviderContext } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
@@ -24,10 +31,6 @@ function claudeRuntimeEnv(managedRecorder = false): Record<string, string> {
   }
 }
 
-function isRemoteMcpConfig(config: Record<string, unknown>): boolean {
-  return Boolean(config.url) || config.type === 'http' || config.type === 'sse'
-}
-
 function claudeRuntimeEnvForExecution(
   execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution'],
   managedRecorder = false
@@ -35,27 +38,6 @@ function claudeRuntimeEnvForExecution(
   const env = claudeRuntimeEnv(managedRecorder)
   const remoteEnabled = execution?.targets.some((target) => target.enabled && isRemoteMcpConfig(target.config))
   return execution && remoteEnabled ? authorizedMcpRuntimeEnv(env, execution.env) : env
-}
-
-function authorizedMcpServers(
-  execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution']
-): Record<string, Record<string, unknown>> {
-  if (!execution) return {}
-  return Object.fromEntries(
-    execution.targets
-      .filter((target) => target.enabled)
-      .map((target) => {
-        const config = { ...target.config }
-        const stdio = !isRemoteMcpConfig(config)
-        if (stdio) {
-          const configuredEnv = config.env && typeof config.env === 'object'
-            ? config.env as Record<string, unknown>
-            : {}
-          config.env = { ...execution.env, ...configuredEnv }
-        }
-        return [target.name, config]
-      })
-  )
 }
 
 function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {

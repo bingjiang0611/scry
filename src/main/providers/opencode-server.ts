@@ -8,6 +8,8 @@ import { isAbsolute, join } from 'node:path'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
 import { Agent as UndiciAgent, type Dispatcher } from 'undici'
 import { runtimeCliEnv } from '../claude-locate'
+import { authorizedMcpServers, isRemoteMcpConfig } from '../mcp-config'
+import type { AuthorizedMcpExecution } from './types'
 
 export const OPEN_CODE_LONG_REQUEST_TIMEOUTS = {
   headersTimeout: 0,
@@ -154,6 +156,7 @@ async function waitForOpenCodeHealth(
 
 export interface OpenCodeServerState {
   cwd: string
+  mcpFingerprint: string
   url: string
   pid?: number
   client: OpencodeClient
@@ -170,6 +173,29 @@ export interface OpenCodeServerDiagnostic {
   running: boolean
   pid?: number
   lastExit?: OpenCodeServerExitDiagnostic
+}
+
+export function openCodeMcpConfig(execution?: AuthorizedMcpExecution): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(authorizedMcpServers(execution)).map(([name, config]) => {
+      if (isRemoteMcpConfig(config)) {
+        return [name, {
+          type: 'remote',
+          url: config.url,
+          ...(config.headers && typeof config.headers === 'object' ? { headers: config.headers } : {}),
+          ...(typeof config.timeout === 'number' ? { timeout: config.timeout } : {}),
+          enabled: true
+        }]
+      }
+      return [name, {
+        type: 'local',
+        command: [String(config.command ?? ''), ...(Array.isArray(config.args) ? config.args.map(String) : [])],
+        ...(config.env && typeof config.env === 'object' ? { environment: config.env } : {}),
+        ...(typeof config.timeout === 'number' ? { timeout: config.timeout } : {}),
+        enabled: true
+      }]
+    })
+  )
 }
 
 export class OpenCodeServerManager {
@@ -199,14 +225,15 @@ export class OpenCodeServerManager {
     }
   }
 
-  async ensure(cwd: string): Promise<OpenCodeServerState> {
-    if (this.active?.cwd === cwd && this.active.process.exitCode === null) return this.active
+  async ensure(cwd: string, mcpExecution?: AuthorizedMcpExecution): Promise<OpenCodeServerState> {
+    const mcpFingerprint = mcpExecution?.fingerprint ?? 'none'
+    if (this.active?.cwd === cwd && this.active.mcpFingerprint === mcpFingerprint && this.active.process.exitCode === null) return this.active
     if (this.starting) {
       const starting = await this.starting
-      if (starting.cwd === cwd) return starting
+      if (starting.cwd === cwd && starting.mcpFingerprint === mcpFingerprint) return starting
     }
     this.close()
-    const starting = this.start(cwd, this.startGeneration)
+    const starting = this.start(cwd, this.startGeneration, mcpExecution)
     this.starting = starting
     try {
       return await starting
@@ -215,7 +242,7 @@ export class OpenCodeServerManager {
     }
   }
 
-  private async start(cwd: string, generation: number): Promise<OpenCodeServerState> {
+  private async start(cwd: string, generation: number, mcpExecution?: AuthorizedMcpExecution): Promise<OpenCodeServerState> {
     const executable = this.executable()
     if (!executable) throw new Error('OpenCode executable 未找到')
     if (process.platform === 'darwin') {
@@ -241,7 +268,7 @@ export class OpenCodeServerManager {
       ))
       isolatedConfigPath = join(this.hookConfigDir, 'safe-config.json')
       await mkdir(join(this.hookConfigDir, 'managed'), { mode: 0o700 })
-      await writeFile(isolatedConfigPath, JSON.stringify({ mcp: {} }), { mode: 0o600 })
+      await writeFile(isolatedConfigPath, JSON.stringify({ mcp: openCodeMcpConfig(mcpExecution) }), { mode: 0o600 })
       if (generation !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
     } catch (error) {
       const dir = this.hookConfigDir
@@ -317,6 +344,7 @@ export class OpenCodeServerManager {
       this.pendingDispatcher = dispatcher
       const state = {
         cwd,
+        mcpFingerprint: mcpExecution?.fingerprint ?? 'none',
         url,
         pid: child.pid,
         process: child,

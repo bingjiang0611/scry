@@ -1,5 +1,6 @@
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
-import { capabilityReady, capabilityUnknown, type ProviderContext, type SkillMeta } from '../../shared/provider'
+import { homedir } from 'node:os'
+import { capabilityReady, capabilityUnknown, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
 import type { BillingProvider } from '../../shared/billing'
 import {
   agentPermissionDecision,
@@ -15,11 +16,12 @@ import {
   type ParsedMcp,
   type TraceEvent
 } from '../../shared/trace'
-import { resolveRuntimeCliBin } from '../claude-locate'
+import { resolveRuntimeCliBin, shellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../cli-runtime'
+import { listProviderMcp } from '../mcp-config'
 import { OpenCodeServerManager, sanitizeOpenCodeServerLog } from './opencode-server'
 import { effortOption, permissionOptions } from './run-controls'
-import type { ProviderAdapter, ProviderRunRequest } from './types'
+import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
 
 let counter = 0
 const newEvent = (
@@ -355,7 +357,32 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
   }
 }
 
-export function createOpenCodeAdapter(): ProviderAdapter {
+async function openCodeMcpSnapshot(
+  client: OpencodeClient,
+  context: ProviderContext,
+  configured: McpSnapshot['configured']
+): Promise<McpSnapshot> {
+  const statuses = await unwrap<Record<string, { status?: string; error?: string }>>(
+    client.mcp.status({ directory: context.cwd }),
+    'mcp.status'
+  )
+  return {
+    configured,
+    runtime: Object.entries(statuses).map(([name, status]) => ({
+      name,
+      status:
+        status.status === 'needs_auth' || status.status === 'needs_client_registration'
+          ? 'needs-auth'
+          : status.status === 'connected'
+            ? 'connected'
+            : status.status === 'disabled'
+              ? 'disabled'
+              : 'failed'
+    }))
+  }
+}
+
+export function createOpenCodeAdapter(homeDir = homedir()): ProviderAdapter {
   const executable = (): string | undefined => process.env.SCRY_OPENCODE_PATH?.trim() || resolveRuntimeCliBin('opencode')
   const managers = new Map<string, OpenCodeServerManager>()
   const managerFor = (cwd: string): OpenCodeServerManager => {
@@ -375,10 +402,10 @@ export function createOpenCodeAdapter(): ProviderAdapter {
     lastError = error instanceof Error ? error.message : String(error)
   }
 
-  const clientFor = async (context: ProviderContext): Promise<OpencodeClient> => {
+  const clientFor = async (context: ProviderContext, mcpExecution?: AuthorizedMcpExecution): Promise<OpencodeClient> => {
     if (!context.cwd) throw new Error('OpenCode 需要工作目录')
     try {
-      const state = await managerFor(context.cwd).ensure(context.cwd)
+      const state = await managerFor(context.cwd).ensure(context.cwd, mcpExecution)
       lastOkAt = Date.now()
       lastError = undefined
       return state.client
@@ -410,7 +437,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         transport: 'server SDK',
         available: !!path,
         path,
-        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' },
+        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' },
         health: {
           state: !path ? 'unavailable' : healthError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'server SDK',
@@ -434,7 +461,7 @@ export function createOpenCodeAdapter(): ProviderAdapter {
       const manager = request.cwd ? managerFor(request.cwd) : undefined
       const promise = (async () => {
         try {
-          client = await clientFor(context)
+          client = await clientFor(context, request.mcpExecution)
           if (stopped) return { externalSessionId, providerTurnId, stopped }
           const permission = openCodePermissionRules(request.permissionMode)
           const model = request.model
@@ -591,6 +618,28 @@ export function createOpenCodeAdapter(): ProviderAdapter {
         interrupt,
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: () => providerTurnId
+      }
+    },
+    mcp: {
+      snapshot: async (context, refresh = false, execution) => {
+        const configured = listProviderMcp('opencode', context.cwd, homeDir, shellEnv())
+        if (!refresh) {
+          return {
+            ...capabilityReady(context, 'read', { configured, runtime: null }),
+            state: 'degraded',
+            reason: '配置已读取；刷新后才会启动隔离 OpenCode server 并读取已授权 MCP 运行状态'
+          }
+        }
+        if (!configured.some((item) => item.enabled)) {
+          return capabilityReady(context, 'read', { configured, runtime: [] })
+        }
+        if (!execution) return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 OpenCode MCP 执行快照')
+        try {
+          return capabilityReady(context, 'read', await openCodeMcpSnapshot(await clientFor(context, execution), context, configured))
+        } catch (error) {
+          rememberFailure(error)
+          return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
+        }
       }
     },
     runControls: {

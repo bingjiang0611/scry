@@ -390,6 +390,7 @@ function parseConfigFile(path: string, context: DiscoveryContext): McpServerTarg
   const groups: Array<{ servers: Record<string, unknown>; pointer: string }> = []
   if (isRecord(json) && isRecord(json.mcpServers)) groups.push({ servers: json.mcpServers, pointer: '/mcpServers' })
   if (isRecord(json) && isRecord(json.mcp_servers)) groups.push({ servers: json.mcp_servers, pointer: '/mcp_servers' })
+  if (isRecord(json) && isRecord(json.mcp)) groups.push({ servers: json.mcp, pointer: '/mcp' })
   if (isRecord(json) && isRecord(json.servers)) groups.push({ servers: json.servers, pointer: '/servers' })
   const isProjectMcpJson = samePath(path, join(context.cwd, '.mcp.json'))
   const client = isProjectMcpJson ? 'Claude' : inferClient(path)
@@ -509,12 +510,15 @@ function normalizeTarget(input: {
   workspaceRoot?: string
   home?: string
 }): McpServerTarget {
-  const command = stringValue(input.raw.command)
-  const args = arrayStrings(input.raw.args)
+  const commandParts = arrayStrings(input.raw.command)
+  const command = stringValue(input.raw.command) ?? commandParts[0]
+  const args = arrayStrings(input.raw.args).length > 0 ? arrayStrings(input.raw.args) : commandParts.slice(1)
   const url = stringValue(input.raw.url) ?? stringValue(input.raw.endpoint)
   const pkg = stringValue(input.raw.package) ?? inferPackage(command, args)
-  const envSecretSources = extractEnvSecretSources(input.raw.env)
-  const rootSources = extractRootSources(input.raw, command, args, pkg, {
+  const env = input.raw.env ?? input.raw.environment
+  const normalizedRaw = env === input.raw.env ? input.raw : { ...input.raw, env }
+  const envSecretSources = extractEnvSecretSources(env)
+  const rootSources = extractRootSources(normalizedRaw, command, args, pkg, {
     basePath: input.rootBasePath,
     workspaceRoot: input.workspaceRoot,
     home: input.home
@@ -535,7 +539,7 @@ function normalizeTarget(input: {
     package: pkg,
     version: stringValue(input.raw.version),
     repository: stringValue(input.raw.repository),
-    envKeys: isRecord(input.raw.env) ? Object.keys(input.raw.env) : [],
+    envKeys: isRecord(env) ? Object.keys(env) : [],
     envSecretSources,
     roots: rootSources.map((root) => root.value),
     rootSources,
@@ -1673,7 +1677,7 @@ function samePath(a: string, b: string): boolean {
   return resolve(a) === resolve(b)
 }
 
-function parseTomlDocument(text: string): Record<string, unknown> {
+export function parseTomlDocument(text: string): Record<string, unknown> {
   const root: Record<string, unknown> = {}
   let table: Record<string, unknown> = root
   let pending: { table: Record<string, unknown>; keyPath: string[]; value: string } | undefined

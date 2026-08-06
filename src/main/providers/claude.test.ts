@@ -83,6 +83,7 @@ describe('Claude provider adapter', () => {
       true,
       {
         cwd: '/repo',
+        fingerprint: 'sha256:snapshot',
         env: {},
         targets: [{ targetId: 'target-scry-e2e', name: 'scry-e2e', enabled: true, config: { command: '/bin/mcp' } }]
       }
@@ -184,6 +185,7 @@ describe('Claude provider adapter', () => {
       emit: vi.fn(),
       mcpExecution: {
         cwd: '/repo',
+        fingerprint: 'sha256:remote',
         env: {
           PATH: '/approved/bin',
           HTTPS_PROXY: 'http://proxy.example.test',
@@ -252,6 +254,7 @@ describe('Claude provider adapter', () => {
       emit: vi.fn(),
       mcpExecution: {
         cwd: '/repo',
+        fingerprint: 'sha256:stdio',
         env: { PATH: '/approved/bin', TERM: 'approved-term', CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1' },
         targets: [{ targetId: 'stdio', name: 'stdio', enabled: true, config: { command: '/bin/stdio' } }]
       }
