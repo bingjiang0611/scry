@@ -207,16 +207,16 @@ async function main() {
   })()`)
   assert.notEqual(subframeIpc, 'allowed', 'an untrusted subframe reached privileged IPC')
 
-  const popupOpened = await evaluate(`window.open('https://example.invalid/scry-smoke') !== null`)
+  const popupOpened = await evaluate(`window.open('file:///scry-smoke') !== null`)
   assert.equal(popupOpened, false)
   await new Promise((resolveWait) => setTimeout(resolveWait, 150))
   const afterPopupTargets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json())
   assert.equal(afterPopupTargets.filter((target) => target.type === 'page').length, initialTargets.filter((target) => target.type === 'page').length)
 
-  await evaluate(`location.assign('https://example.invalid/scry-navigation-smoke')`)
+  await evaluate(`location.assign('file:///scry-navigation-smoke')`)
   await new Promise((resolveWait) => setTimeout(resolveWait, 200))
   const afterNavigation = await waitForTarget(port, 2_000)
-  assert.match(afterNavigation.page.url, /^file:/, 'will-navigate failed to keep renderer on its trusted URL')
+  assert.equal(afterNavigation.page.url, page.url, 'will-navigate failed to keep renderer on its trusted URL')
 
   cdp.close()
   console.log(JSON.stringify({
