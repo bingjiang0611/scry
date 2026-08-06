@@ -2,6 +2,7 @@ import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } 
 import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import type { ProviderId } from '@shared/provider'
 import Markdown from './MarkdownImpl'
+import { Icon } from './primitives/Icon'
 
 const providerLabels = {
   claude: 'Claude',
@@ -228,8 +229,13 @@ export function AskUserQuestionInline({
       </div>
 
       <footer className="question-dialog-foot">
-        <div id={statusId} aria-live="polite">
-          {error ? <span className="question-error">{error}</span> : missing > 0 ? `还有 ${missing} 个问题未回答` : '回答已完整'}
+        <div
+          id={statusId}
+          className={`question-status ${error ? 'error' : missing > 0 ? 'incomplete' : 'complete'}`}
+          aria-live="polite"
+        >
+          {!error && <Icon name={missing > 0 ? 'alert' : 'check'} />}
+          {error ? <span className="question-error">{error}</span> : missing > 0 ? `还需回答 ${missing} 个问题` : '回答完整，可提交'}
         </div>
         <div className="question-actions">
           <button type="button" className="btn question-cancel" disabled={submitting} onClick={cancel}>
@@ -237,7 +243,7 @@ export function AskUserQuestionInline({
           </button>
           <button type="submit" className="btn primary question-submit" disabled={!answers || submitting}>
             {submitting ? '正在提交…' : '提交并继续'}
-            <span className="kbd" aria-hidden="true">⌘↵</span>
+            <span className="question-shortcut" aria-hidden="true">⌘ Enter</span>
           </button>
         </div>
       </footer>
