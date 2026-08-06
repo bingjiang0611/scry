@@ -182,6 +182,8 @@ describe('ViewChrome 顶栏', () => {
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('title="工作区文件"')
     expect(html).toContain('文件')
+    expect(html).toContain('title="纵览面板"')
+    expect(html).toContain('纵览')
     expect(html).not.toContain('title="Skills"')
     expect(html).not.toContain('title="MCP"')
     expect(html).not.toContain('sample-workspace')
@@ -509,6 +511,10 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('class="sb-proj-head on"')
     expect(html).toContain('aria-label="不绑定项目 · 未关联工作目录"')
     expect(html).toContain('class="sb-sess active"')
+    expect(html).toContain('class="sb-session-main"')
+    expect(html).toContain('<span class="sb-provider">qoder</span>')
+    expect(html).toContain('<span class="sb-sesstext">无工作目录任务</span>')
+    expect(html).toContain('class="sb-session-meta"')
     expect(html).toContain('无工作目录任务')
   })
 
@@ -3619,6 +3625,9 @@ describe('Skill/MCP 操作能力渲染', () => {
       />
     )
     expect(html).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
+    expect(html).toContain('class="modal skills-modal"')
+    expect(html).toContain('class="switch skill-switch"')
+    expect(html).toContain('已启用')
     expect(html).toContain('Skill 目录仅供读取')
   })
 
@@ -3633,6 +3642,7 @@ describe('Skill/MCP 操作能力渲染', () => {
       />
     )
     expect(skillHtml).toContain('当前 Provider 支持由 Scry 管理 Skill 开关')
+    expect(skillHtml).toContain('已关闭')
     expect(skillHtml).not.toContain('type="checkbox" disabled=""')
 
     const mcpHtml = renderToStaticMarkup(

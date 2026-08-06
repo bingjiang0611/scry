@@ -36,9 +36,9 @@ type AppStyle = CSSProperties & {
 }
 
 const SIDEBAR_MIN = 220
-const SIDEBAR_MAX = 440
-const PANEL_MIN = 280
-const PANEL_MAX = 560
+const SIDEBAR_MAX = 320
+const PANEL_MIN = 320
+const PANEL_MAX = 400
 const REVIEW_PANEL_MIN = 420
 const REVIEW_PANEL_MAX = 960
 const WORKSPACE_PANEL_MIN = 420

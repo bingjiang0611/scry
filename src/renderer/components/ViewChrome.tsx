@@ -97,7 +97,7 @@ export function ViewChrome({
               title="纵览面板"
               aria-pressed={showPanel}
             >
-              <Icon name="grid" /> 面板
+              <Icon name="grid" /> 纵览
             </button>
           </>
         )}
