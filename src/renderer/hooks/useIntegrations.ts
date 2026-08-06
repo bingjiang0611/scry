@@ -537,12 +537,11 @@ export function useIntegrations(cwd: string | null) {
     setMcpStatus({})
     setMcpLive([])
     setSkillCapability(null)
-    setSkillsRefreshing(Boolean(cwd))
+    setSkillsRefreshing(true)
     setMcpCapability(null)
     setMcpConfigRefreshing(false)
     setMcpRefreshing(false)
     loadGitDiff(cwd)
-    if (!cwd) return
     void window.scry.listSkills(providerContext)
       .then((skillResult) => {
         if (seq !== integrationRequestSeq.current || contextKey(providerContext) !== contextKey(providerContextRef.current)) return
@@ -556,7 +555,7 @@ export function useIntegrations(cwd: string | null) {
         }
       })
     void refreshMcp().catch(() => {})
-    loadUsage()
+    if (cwd) loadUsage()
   }, [cwd, loadGitDiff, loadUsage, providerContext, refreshMcp])
 
   useEffect(() => {
