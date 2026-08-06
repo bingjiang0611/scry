@@ -8396,6 +8396,28 @@ textarea:focus-visible,
   color: var(--bad);
 }
 
+.question-status {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.question-status .ico {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.question-status.complete {
+  color: var(--ok);
+}
+
+.question-status.incomplete {
+  color: var(--dim);
+}
+
 .question-actions {
   flex: 0 0 auto;
   display: flex;
@@ -8417,9 +8439,18 @@ textarea:focus-visible,
   cursor: not-allowed;
 }
 
-.question-submit .kbd {
-  color: currentColor;
-  opacity: 0.7;
+.question-submit {
+  padding-right: 9px;
+}
+
+.question-submit .question-shortcut {
+  margin-left: 2px;
+  padding-left: 9px;
+  border-left: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font: 10.5px/1 var(--font-mono);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 /* 内联问答表单长在对话流里 → 断点按主区宽度，不按窗口 */
