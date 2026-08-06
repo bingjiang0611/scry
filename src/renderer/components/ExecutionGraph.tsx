@@ -122,10 +122,11 @@ function TurnBlock({
   }, [turn.items])
 
   const calls = items.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
+  const knownToolUseIds = new Set(calls.flatMap((event) => event.toolUseId ? [event.toolUseId] : []))
   const childrenByParent = useMemo(() => {
     const m = new Map<string, TraceEvent[]>()
     for (const e of calls) {
-      if (!e.parentToolUseId) continue
+      if (!e.parentToolUseId || !knownToolUseIds.has(e.parentToolUseId)) continue
       const arr = m.get(e.parentToolUseId) ?? []
       arr.push(e)
       m.set(e.parentToolUseId, arr)
@@ -138,7 +139,7 @@ function TurnBlock({
   const groups = useMemo(() => {
     const g: { mid: string; items: TraceEvent[] }[] = []
     for (const e of calls) {
-      if (e.parentToolUseId) continue
+      if (e.parentToolUseId && knownToolUseIds.has(e.parentToolUseId)) continue
       const mid = e.messageId ?? '(no-msg)'
       let grp = g.find((x) => x.mid === mid)
       if (!grp) {

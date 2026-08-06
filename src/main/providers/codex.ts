@@ -406,7 +406,12 @@ function traceFromItem(
     ]
   }
   if (type === 'subAgentActivity') {
-    const agentId = String(item.agentThreadId ?? context.agentId ?? '')
+    const targetAgentId = String(item.agentThreadId ?? '')
+    const agentId = String(
+      item.kind === 'started'
+        ? targetAgentId || context.agentId || ''
+        : context.agentId || targetAgentId
+    )
     if (item.kind !== 'started') {
       return [
         newEvent(runId, {
@@ -418,7 +423,7 @@ function traceFromItem(
           name: String(item.agentPath ?? (agentId || 'subagent')),
           input: {
             activity: item.kind,
-            agentThreadId: agentId || undefined,
+            agentThreadId: targetAgentId || undefined,
             agentPath: item.agentPath
           }
         })
@@ -807,7 +812,7 @@ export function createCodexAdapter(
             const isRoot = notificationThreadId === externalSessionId
             if (!isRoot && !child) return
             if (isRoot && turnId && params.turnId && params.turnId !== turnId) return
-            const traceContext: ItemTraceContext = child
+            const traceContext: ItemTraceContext = !isRoot && child
               ? { agentId: notificationThreadId, parentToolUseId: child.parentToolUseId }
               : {}
             const observedAtMs = notificationAt(envelope)
@@ -855,19 +860,29 @@ export function createCodexAdapter(
                   })
                   timingState(receiverThreadId, observedAtMs)
                 }
-              } else if (item.type === 'subAgentActivity' && typeof item.agentThreadId === 'string') {
+              } else if (
+                method === 'item/started' &&
+                item.type === 'subAgentActivity' &&
+                item.kind === 'started' &&
+                typeof item.agentThreadId === 'string' &&
+                item.agentThreadId !== externalSessionId
+              ) {
                 const existing = childAgents.get(item.agentThreadId)
                 childAgents.set(item.agentThreadId, {
                   parentToolUseId: existing?.parentToolUseId ?? (typeof item.id === 'string' ? item.id : undefined),
                   name: typeof item.agentPath === 'string' ? item.agentPath : existing?.name
                 })
               }
-              for (const event of traceFromItem(
-                runRequest.runId,
-                item,
-                method === 'item/completed',
-                traceContext
-              )) runRequest.emit(event)
+              // subAgentActivity 是瞬时活动通知；app-server 会用相同 id 同时发送
+              // item/started 与 item/completed。只记录 started，避免父 Task 卡重复。
+              if (!(item.type === 'subAgentActivity' && method === 'item/completed')) {
+                for (const event of traceFromItem(
+                  runRequest.runId,
+                  item,
+                  method === 'item/completed',
+                  traceContext
+                )) runRequest.emit(event)
+              }
               if (method === 'item/completed') {
                 const type = String(item.type ?? '')
                 if (type === 'agentMessage' && notificationThreadId && typeof item.id === 'string') {

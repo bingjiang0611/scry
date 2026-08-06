@@ -1152,6 +1152,112 @@ describe('Codex provider adapter', () => {
     })
   })
 
+  it('keeps root events top-level after a child interacts with root and deduplicates subagent activity', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-root' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-root' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-child-return',
+      prompt: 'delegate and resume',
+      cwd: '/isolated-copy',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    const childStarted = {
+      id: 'spawn-activity',
+      type: 'subAgentActivity',
+      kind: 'started',
+      agentThreadId: 'thread-child',
+      agentPath: '/root/inspect'
+    }
+    notify?.('item/started', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      item: childStarted
+    })
+    notify?.('item/completed', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      item: childStarted
+    })
+    notify?.('item/agentMessage/delta', {
+      threadId: 'thread-child',
+      turnId: 'turn-child',
+      itemId: 'child-message',
+      delta: 'child work'
+    })
+    const interactedWithRoot = {
+      id: 'interact-root',
+      type: 'subAgentActivity',
+      kind: 'interacted',
+      agentThreadId: 'thread-root',
+      agentPath: '/root'
+    }
+    notify?.('item/started', {
+      threadId: 'thread-child',
+      turnId: 'turn-child',
+      item: interactedWithRoot
+    })
+    notify?.('item/completed', {
+      threadId: 'thread-child',
+      turnId: 'turn-child',
+      item: interactedWithRoot
+    })
+    notify?.('item/agentMessage/delta', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      itemId: 'root-message',
+      delta: 'root resumed'
+    })
+    notify?.('item/started', {
+      threadId: 'thread-root',
+      turnId: 'turn-root',
+      item: {
+        id: 'root-command',
+        type: 'commandExecution',
+        command: 'pwd',
+        cwd: '/isolated-copy',
+        status: 'inProgress'
+      }
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-root',
+      turn: { id: 'turn-root', status: 'completed', error: null }
+    })
+    await handle.promise
+
+    expect(events.filter((event) => event.toolUseId === 'spawn-activity')).toHaveLength(1)
+    expect(events.find((event) => event.text === 'child work')).toMatchObject({
+      agentId: 'thread-child',
+      parentToolUseId: 'spawn-activity'
+    })
+    expect(events.find((event) => event.toolUseId === 'interact-root')).toMatchObject({
+      kind: 'harness',
+      agentId: 'thread-child',
+      parentToolUseId: 'spawn-activity',
+      input: expect.objectContaining({ agentThreadId: 'thread-root' })
+    })
+    const rootResume = events.find((event) => event.text === 'root resumed')
+    expect(rootResume).toBeDefined()
+    expect(rootResume).not.toHaveProperty('agentId')
+    expect(rootResume).not.toHaveProperty('parentToolUseId')
+    const rootCommand = events.find((event) => event.toolUseId === 'root-command')
+    expect(rootCommand).toMatchObject({ kind: 'tool' })
+    expect(rootCommand?.agentId).toBeUndefined()
+    expect(rootCommand?.parentToolUseId).toBeUndefined()
+  })
+
   it('records one update_plan call when app-server also emits a plan ThreadItem snapshot', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     appServer.onNotification.mockImplementation((listener) => {

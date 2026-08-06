@@ -1030,6 +1030,107 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('我将按 <code>rate-workflow</code> 执行。')
   })
 
+  it('Provider 给出孤儿 parent id 时仍展示根 agent 的后续文本和工具', () => {
+    const orphanedTurn: Turn = {
+      runId: 'run-orphan-parent',
+      userText: '继续',
+      done: true,
+      items: [
+        ev({
+          id: 'root-delta',
+          kind: 'model',
+          stage: 'text_delta',
+          text: '根 agent 已恢复',
+          agentId: 'thread-root',
+          parentToolUseId: 'missing-parent'
+        }),
+        ev({
+          id: 'root-command',
+          kind: 'tool',
+          stage: 'tool:Bash',
+          tool: 'Bash',
+          toolUseId: 'root-command',
+          input: { command: 'pwd' },
+          agentId: 'thread-root',
+          parentToolUseId: 'missing-parent'
+        })
+      ]
+    }
+
+    const html = renderToStaticMarkup(<AssistantTurn turn={orphanedTurn} selectedId={null} onSelect={() => {}} />)
+
+    expect(html).toContain('根 agent 已恢复')
+    expect(html).toContain('pwd')
+  })
+
+  it('子 agent 的 text_delta 在 Task 内合并展示', () => {
+    const pendingQuestion: AgentQuestionRequest = {
+      runId: 'run-child-stream',
+      questionId: 'child-question',
+      questions: [{
+        question: '继续吗？',
+        header: '确认',
+        multiSelect: false,
+        options: [{ label: '继续', description: '继续执行' }]
+      }]
+    }
+    const childTurn: Turn = {
+      runId: 'run-child-stream',
+      userText: '委派',
+      done: false,
+      items: [
+        ev({
+          id: 'child-task',
+          runId: 'run-child-stream',
+          kind: 'agent',
+          stage: 'agent:inspect',
+          tool: 'Agent',
+          name: 'inspect',
+          toolUseId: 'child-task'
+        }),
+        ev({
+          id: 'child-delta-1',
+          runId: 'run-child-stream',
+          kind: 'model',
+          stage: 'text_delta',
+          text: '子 agent ',
+          parentToolUseId: 'child-task'
+        }),
+        ev({
+          id: 'child-delta-2',
+          runId: 'run-child-stream',
+          kind: 'model',
+          stage: 'text_delta',
+          text: '已完成',
+          parentToolUseId: 'child-task'
+        }),
+        ev({
+          id: 'child-question-use',
+          runId: 'run-child-stream',
+          kind: 'tool',
+          stage: 'tool:AskUserQuestion',
+          tool: 'AskUserQuestion',
+          toolUseId: 'child-question',
+          input: { questions: pendingQuestion.questions },
+          parentToolUseId: 'child-task'
+        })
+      ]
+    }
+
+    const html = renderToStaticMarkup(
+      <AssistantTurn
+        turn={childTurn}
+        selectedId={null}
+        onSelect={() => {}}
+        pendingQuestions={[pendingQuestion]}
+        onAnswerQuestion={async () => {}}
+      />
+    )
+
+    expect(html).toContain('子 agent 已完成')
+    expect(html.match(/class="model-text md sub"/g)).toHaveLength(1)
+  })
+
   it('Hook 缺少上游命令时明确标记数据边界', () => {
     const hookTurn: Turn = {
       runId: 'run-hook-without-command',
@@ -3109,6 +3210,29 @@ describe('ExecutionGraph 渲染：调用拓扑树', () => {
     expect(html).toContain('verdict-card full') // 顶部 full verdict 卡
     expect(html).toContain('调整拓扑详情面板宽度') // 右侧详情面板可拖拽
     expect(html).toContain('aria-hidden="true"') // TURN 箭头只做方向提示，不再点击折叠
+  })
+
+  it('孤儿 parent id 的调用仍作为顶层节点展示', () => {
+    const t: Turn = {
+      runId: 'run-orphan-graph',
+      userText: '继续',
+      done: true,
+      items: [
+        ev({
+          id: 'orphan-call',
+          kind: 'tool',
+          stage: 'tool:RootBash',
+          tool: 'RootBash',
+          toolUseId: 'orphan-call',
+          parentToolUseId: 'missing-parent',
+          messageId: 'msg-root'
+        })
+      ]
+    }
+
+    const html = renderToStaticMarkup(<ExecutionGraph turns={[t]} selectedId={null} onSelect={() => {}} />)
+
+    expect(html).toContain('RootBash')
   })
 
   it('Turn 与会话汇总共用 Provider-aware Token 和逻辑调用口径', () => {
