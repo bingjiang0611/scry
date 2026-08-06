@@ -5488,6 +5488,13 @@ button.toptool {
 .tool-row .st.ok { color: var(--ok); }
 .tool-row .st.err { color: var(--bad); }
 .tool-row .name { font: 600 12.5px/1 var(--font-mono); color: var(--fg); letter-spacing: -0.005em; }
+.tool-card.k-mcp .tool-row .name {
+  min-width: 0;
+  max-width: min(42%, 320px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tool-row .kindtag {
   width: 7px;
   height: 7px;
@@ -5513,6 +5520,11 @@ button.toptool {
   gap: 8px;
   font: 11px/1 var(--font-mono);
   color: var(--dim2);
+}
+.tool-card.k-mcp .tool-row .meta {
+  min-width: 0;
+  flex-shrink: 1;
+  justify-content: flex-end;
 }
 .tool-row .meta .dur {
   flex: 0 0 6ch;
@@ -7564,7 +7576,7 @@ textarea:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px 8px 12px;
+  padding: 8px 10px 8px 20px;
   border-bottom: 1px solid var(--border);
 }
 

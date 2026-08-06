@@ -223,6 +223,7 @@ function ToolItem({
   const hasDetail = ev.input != null || !!ev.output || !!questionRequest
   const shownOpen = lockedOpen || open
   const kind = ev.isError ? 'err' : ev.isMcp ? 'mcp' : ev.kind
+  const displayName = toolDisplayName(ev)
   const durPct = ev.durationMs != null ? Math.max(3, Math.round((ev.durationMs / maxDur) * 100)) : 0
   return (
     <div
@@ -242,7 +243,7 @@ function ToolItem({
         <span className={`st ${lockedOpen || missingQuestionResult ? 'pending' : ev.isError ? 'err' : 'ok'}`}>
           <Icon name={lockedOpen ? 'clock' : missingQuestionResult ? 'alert' : ev.isError ? 'x' : 'check'} />
         </span>
-        <span className="name">{toolDisplayName(ev)}</span>
+        <span className="name" title={displayName}>{displayName}</span>
         {(kind === 'skill' || kind === 'mcp' || kind === 'agent') && <span className={`kindtag ${kind}`} />}
         {op && <span className={`op ${op}`}>{op.toUpperCase()}</span>}
         <span className="arg">{toolArg(ev)}</span>
@@ -254,7 +255,7 @@ function ToolItem({
             </span>
           )}
           {meta && <span className="tok">{meta}</span>}
-          {ev.isMcp && <span className="tok">mcp:{ev.mcpServer}</span>}
+          {ev.isMcp && <span className="tok" title={ev.mcpServer}>mcp:{ev.mcpServer}</span>}
           {waitingForAnswer && <span className="question-waiting">等待回答</span>}
           {!waitingForAnswer && waitingForQuestionState && <span className="question-waiting">等待状态同步</span>}
           {missingQuestionResult && <span className="question-waiting">未获得返回</span>}

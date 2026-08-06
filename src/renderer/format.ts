@@ -193,6 +193,10 @@ export function bashFiles(cmd: string): string[] {
 }
 
 export function toolDisplayName(ev: TraceEvent): string {
+  if (ev.isMcp) {
+    const action = ev.mcpAction ?? (ev.tool ?? '').split('__').slice(2).join('__')
+    return action || 'MCP'
+  }
   if (ev.kind === 'agent') return 'Task'
   if (ev.kind === 'skill') return 'Skill'
   if (ev.kind === 'hook') return hookCommandLabel(ev.hookCommand) ?? ev.hookName ?? ev.tool ?? 'Hook'
@@ -206,6 +210,7 @@ export function toolArg(ev: TraceEvent): string {
   if (typeof inp?.pattern === 'string') return inp.pattern
   if (typeof inp?.subagent_type === 'string') return inp.subagent_type
   if (typeof inp?.description === 'string') return inp.description
+  if (ev.isMcp) return ''
   return ev.name ?? ''
 }
 
