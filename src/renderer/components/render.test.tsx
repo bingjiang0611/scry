@@ -2120,17 +2120,16 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('1 turns')
     expect(html).toContain('aria-label="跳到第 1 轮，对话中共 3 次工具/Skill/MCP/子 Agent 调用，耗时 3m 12s"')
     expect(html).toContain('创建并读回文件')
-    expect(html).toContain('3 次调用')
     expect(html).toContain('耗时 3m 12s')
     expect(html).toContain('title="整轮墙钟耗时 3m 12s；其中 API 耗时 5.0s"')
-    expect(html.match(/aria-label="展开第 1 轮明细"/g)).toHaveLength(2)
-    expect(html.match(/aria-controls="turn-detail-1"/g)).toHaveLength(2)
-    expect(html).toContain('文件 2')
-    expect(html).toContain('右侧箭头展开耗时与本轮文件足迹')
-    expect(html).toContain('turn-call-group tool')
-    expect(html).toContain('Bash')
-    expect(html).toContain('Write')
-    expect(html).toContain('Read')
+    expect(html).toContain('aria-label="展开第 1 轮耗时明细"')
+    expect(html).toContain('aria-controls="turn-timing-1"')
+    expect(html).toContain('aria-label="MCP 0，无明细"')
+    expect(html).toContain('aria-label="Skill 0，无明细"')
+    expect(html).toContain('aria-label="Hooks 1，展开明细"')
+    expect(html).toContain('aria-label="文件 2，展开明细"')
+    expect(html).not.toContain('turn-call-group tool')
+    expect(html).not.toContain('turn-call-group agent')
   })
 
   it('纵览按轮次与会话拆成二级 tab，并把会话汇总放入会话数据', () => {
@@ -2156,7 +2155,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(tabHtml).toMatch(/id="overview-turns-tab"[^>]*aria-selected="true"/)
     expect(tabHtml).toMatch(/id="overview-session-tab"[^>]*aria-selected="false"/)
     expect(turnsPanel).toContain('每轮调用')
-    expect(turnsPanel).toContain('文件 2')
+    expect(turnsPanel).toContain('aria-label="文件 2，展开明细"')
+    expect(turnsPanel).toContain('aria-label="Hooks 1，展开明细"')
     expect(turnsPanel).not.toContain('TOP TOOLS')
     expect(turnsPanel).not.toContain('HOOKS')
     expect(turnsPanel).not.toContain('段落（按 skill）')
@@ -2194,9 +2194,9 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     const multiMcpHtml = renderToStaticMarkup(
       <OverviewPanel turns={[multiMcpTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
-    const turnCalls = multiMcpHtml.slice(multiMcpHtml.indexOf('turn-call-list'), multiMcpHtml.indexOf('按每轮逻辑调用聚合'))
+    const turnCalls = multiMcpHtml.slice(multiMcpHtml.indexOf('turn-call-list'), multiMcpHtml.indexOf('每轮仅展示'))
 
-    expect(turnCalls).toContain('2 次调用')
+    expect(turnCalls).toContain('aria-label="MCP 2，展开明细"')
     expect(turnCalls).toContain('turn-call-count">2</span>')
   })
 
@@ -2262,8 +2262,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     const skillHtml = renderToStaticMarkup(
       <OverviewPanel turns={[skillEvidenceTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
-    const turnCalls = skillHtml.slice(skillHtml.indexOf('turn-call-list'), skillHtml.indexOf('按每轮逻辑调用聚合'))
-    expect(turnCalls).toContain('2 次调用')
+    const turnCalls = skillHtml.slice(skillHtml.indexOf('turn-call-list'), skillHtml.indexOf('每轮仅展示'))
+    expect(turnCalls).toContain('aria-label="Skill 2，展开明细"')
     expect(turnCalls).toContain('turn-call-group turn-call-toggle skill')
     expect(turnCalls).toContain('turn-call-count">2</span>')
   })
@@ -2342,7 +2342,41 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(rowsHtml).toContain('2 turns')
     expect(rowsHtml).toContain('T02')
     expect(rowsHtml).toContain('只返回文本，不调用工具')
-    expect(rowsHtml).toContain('0 次调用')
+    expect(rowsHtml).toContain('aria-label="MCP 0，无明细"')
+    expect(rowsHtml).toContain('aria-label="Skill 0，无明细"')
+    expect(rowsHtml).toContain('aria-label="Hooks 0，无明细"')
+    expect(rowsHtml).toContain('aria-label="文件 0，无明细"')
+  })
+
+  it('Hooks 按轮聚合，不把会话总数重复展示到每一轮', () => {
+    const hook = (id: string, runId: string): TraceEvent => ev({
+      id,
+      runId,
+      kind: 'hook',
+      stage: 'hook_response',
+      hookId: id,
+      hookEvent: 'PostToolUse',
+      hookName: 'PostToolUse:Read',
+      hookCommand: 'event_router.py',
+      hookOutcome: 'success'
+    })
+    const hookTurnsHtml = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[
+          { runId: 'hook-r1', userText: '第一轮', done: true, items: [hook('hook-1', 'hook-r1')] },
+          { runId: 'hook-r2', userText: '第二轮', done: true, items: [hook('hook-2', 'hook-r2'), hook('hook-3', 'hook-r2')] }
+        ]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+      />
+    )
+    const turnCalls = hookTurnsHtml.slice(hookTurnsHtml.indexOf('turn-call-list'), hookTurnsHtml.indexOf('每轮仅展示'))
+
+    expect(turnCalls).toContain('aria-label="Hooks 1，展开明细"')
+    expect(turnCalls).toContain('aria-label="Hooks 2，展开明细"')
+    expect(turnCalls).not.toContain('aria-label="Hooks 3，展开明细"')
   })
 
   it('HOOKS 段：展示本会话实际触发的 hook', () => {
@@ -2967,6 +3001,16 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
         mcpTool: 'mcp__tracker__call'
       }),
       ev({ id: 's-agent', kind: 'agent', stage: 'agent:general-purpose', name: 'general-purpose' }),
+      ev({
+        id: 's-hook',
+        kind: 'hook',
+        stage: 'hook_response',
+        hookId: 's-hook',
+        hookEvent: 'PostToolUse',
+        hookName: 'PostToolUse:Read',
+        hookCommand: 'event_router.py',
+        hookOutcome: 'success'
+      }),
       ev({ id: 's3', kind: 'harness', stage: 'result', costUsd: 0.02, tokensIn: 50, tokensOut: 10 })
     ]
   }
@@ -2999,18 +3043,20 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
     expect(segmentHtml).not.toContain('R1')
   })
 
-  it('每轮调用区分工具、MCP、Skill 和子 Agent；MCP/Skill 默认只显示数量', () => {
-    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('按每轮逻辑调用与文件工具证据聚合'))
+  it('每轮调用只展示 MCP、Skill、Hooks、文件计数，四项明细默认收起', () => {
+    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮仅展示'))
     expect(html).toContain('每轮调用')
-    expect(html).toContain('4 次调用')
-    expect(turnCallHtml).toContain('turn-call-group tool')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle mcp')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle skill')
-    expect(turnCallHtml).toContain('turn-call-group agent')
+    expect(turnCallHtml).toContain('turn-call-group turn-call-toggle hooks')
+    expect(turnCallHtml).toContain('turn-call-group turn-call-toggle file')
     expect(turnCallHtml).toContain('aria-expanded="false"')
-    expect(turnCallHtml).toContain('turn-call-count">1</span>')
-    expect(turnCallHtml).toContain('Read')
-    expect(turnCallHtml).toContain('general-purpose')
+    expect(turnCallHtml).toContain('aria-label="MCP 1，展开明细"')
+    expect(turnCallHtml).toContain('aria-label="Skill 1，展开明细"')
+    expect(turnCallHtml).toContain('aria-label="Hooks 1，展开明细"')
+    expect(turnCallHtml).toContain('aria-label="文件 1，展开明细"')
+    expect(turnCallHtml).not.toContain('turn-call-group tool')
+    expect(turnCallHtml).not.toContain('turn-call-group agent')
     expect(turnCallHtml).not.toContain('humanizer')
     expect(turnCallHtml).not.toContain('tracker.call')
   })

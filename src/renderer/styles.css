@@ -2635,7 +2635,7 @@ button.mitem:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-/* 每轮调用：按 turn 聚合 tool / MCP / Skill / 子 Agent；Txx 跳转，右侧箭头展开 */
+/* 每轮调用：摘要只保留 MCP / Skill / Hooks / 文件，明细各自独立展开。 */
 .turn-calls-section h4 .more {
   color: var(--dim2);
 }
@@ -2645,7 +2645,7 @@ button.mitem:disabled {
 }
 .turn-call-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 40px;
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   min-height: 40px;
@@ -2681,18 +2681,6 @@ button.turn-id.turn-call-open:focus-visible {
 button.turn-id.turn-call-open {
   min-height: 40px;
 }
-button.turn-call-jump.turn-call-open {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-}
-button.turn-call-detail-edge-toggle[aria-expanded='true'] {
-  color: var(--accent);
-  background: rgba(123, 171, 255, 0.08);
-}
 button.turn-call-open:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -2708,11 +2696,6 @@ button.turn-call-open:focus-visible {
   gap: 8px;
   min-width: 0;
   font: 11.5px/1.3 var(--font-mono);
-}
-.turn-call-head b {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 .turn-call-head .turn-call-preview {
   min-width: 0;
@@ -2752,12 +2735,6 @@ button.turn-call-open:focus-visible {
   gap: 5px;
   min-width: 0;
 }
-.turn-call-capability-groups {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 5px;
-}
 .turn-call-group {
   min-width: 0;
   display: inline-flex;
@@ -2774,21 +2751,26 @@ button.turn-call-group {
   appearance: none;
   cursor: pointer;
   color: inherit;
+  transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 button.turn-call-toggle {
   flex: 0 0 auto;
   justify-content: space-between;
   padding-right: 4px;
 }
-button.turn-call-group:hover {
+button.turn-call-group:not(:disabled):hover {
   background: var(--panel3);
+}
+button.turn-call-group:not(:disabled):active {
+  transform: scale(0.97);
+}
+button.turn-call-group:disabled {
+  cursor: default;
+  opacity: 0.42;
 }
 button.turn-call-group:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-.turn-call-group.tool {
-  border-color: rgba(123, 171, 255, 0.24);
 }
 .turn-call-group.mcp {
   border-color: rgba(92, 211, 160, 0.24);
@@ -2796,8 +2778,11 @@ button.turn-call-group:focus-visible {
 .turn-call-group.skill {
   border-color: rgba(246, 187, 92, 0.28);
 }
-.turn-call-group.agent {
+.turn-call-group.hooks {
   border-color: rgba(199, 132, 255, 0.28);
+}
+.turn-call-group.file {
+  border-color: rgba(91, 182, 255, 0.24);
 }
 .turn-call-kind {
   flex: 0 0 auto;
@@ -2812,41 +2797,6 @@ button.turn-call-group:focus-visible {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.turn-call-chip {
-  min-width: 0;
-  max-width: 116px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dim);
-}
-.turn-call-chip b {
-  margin-left: 3px;
-  color: var(--fg);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.turn-call-more {
-  color: var(--dim2);
-  font-variant-numeric: tabular-nums;
-}
-.turn-call-file-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 22px;
-  padding: 2px 6px;
-  border: 1px solid var(--border3);
-  border-radius: 6px;
-  color: var(--dim2);
-  background: var(--surface-subtle);
-  font: 10.5px/1.35 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.turn-call-file-count svg {
-  color: var(--read);
-}
 .turn-call-toggle-icon {
   color: var(--dim3);
   display: inline-grid;
@@ -2854,11 +2804,6 @@ button.turn-call-group:focus-visible {
 }
 .turn-call-toggle[aria-expanded='true'] .turn-call-toggle-icon {
   color: var(--accent);
-}
-.turn-call-details {
-  display: grid;
-  gap: 6px;
-  margin-top: 2px;
 }
 .turn-call-detail {
   display: grid;
@@ -2901,19 +2846,17 @@ button.turn-call-group:focus-visible {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
-.turn-call-jump {
-  color: var(--dim3);
-  display: grid;
-  place-items: center;
-}
-.turn-call-row:hover .turn-call-jump {
-  color: var(--accent);
-}
 .turn-call-detail-slot {
   grid-column: 1 / -1;
   min-width: 0;
   display: grid;
   gap: 8px;
+}
+.turn-call-detail-slot > div {
+  min-width: 0;
+}
+.turn-call-detail-slot .turn-hooks-summary {
+  margin-top: 0;
 }
 .turn-file-footprint {
   min-width: 0;
@@ -3039,6 +2982,26 @@ button.turn-call-group:focus-visible {
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--border3);
+}
+.turn-timing-timeline-block > summary {
+  min-height: 28px;
+  cursor: pointer;
+  list-style: none;
+}
+.turn-timing-timeline-block > summary::-webkit-details-marker {
+  display: none;
+}
+.turn-timing-timeline-block > summary svg {
+  width: 12px;
+  height: 12px;
+  color: var(--dim3);
+}
+.turn-timing-timeline-block[open] > summary svg {
+  transform: rotate(90deg);
+}
+.turn-timing-timeline-block > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .turn-timing-aggregate-list,
 .turn-timing-timeline,
