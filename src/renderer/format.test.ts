@@ -16,6 +16,8 @@ import {
   logicalCallEventsForTurn,
   parseUserMessage,
   resultOf,
+  toolArg,
+  toolDisplayName,
   updateMcpLiveAfterToggle
 } from './format'
 import type { Turn } from './format'
@@ -61,6 +63,21 @@ describe('parseUserMessage', () => {
 // 造一条最小 TraceEvent（只填 aggregateCalls 关心的字段）
 const ev = (p: Partial<TraceEvent>): TraceEvent =>
   ({ id: 'x', ts: '', runId: 'r', kind: 'tool', stage: 'tool:X', ...p }) as TraceEvent
+
+describe('tool label', () => {
+  it('MCP 卡片只显示 action，避免重复原始工具名', () => {
+    const item = ev({
+      tool: 'mcp__plugin_clarify-requirements__clarification-reporter__clarify_question_prepare',
+      name: 'mcp__plugin_clarify-requirements__clarification-reporter__clarify_question_prepare',
+      isMcp: true,
+      mcpServer: 'plugin_clarify-requirements',
+      mcpAction: 'clarification-reporter__clarify_question_prepare'
+    })
+
+    expect(toolDisplayName(item)).toBe('clarification-reporter__clarify_question_prepare')
+    expect(toolArg(item)).toBe('')
+  })
+})
 
 describe('aggregateCalls', () => {
   it('只数 tool_use、排除 tool_result（修正旧的 2× 膨胀计数）', () => {
