@@ -95,7 +95,6 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
   const slowest = [...segments]
     .filter((segment) => segment.apiMs != null)
     .sort((a, b) => (b.apiMs ?? 0) - (a.apiMs ?? 0))[0]
-  const worst = [...segments].filter((s) => s.effFactor > 1).sort((a, b) => b.effFactor - a.effFactor)[0]
   const selectedIndex = selectedKey == null ? 0 : segments.findIndex((segment) => segmentKey(segment) === selectedKey)
   const safeSelectedIndex = selectedIndex >= 0 ? selectedIndex : 0
   const selected = segments[safeSelectedIndex]
@@ -114,15 +113,31 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
     const pct = tokenPct(s)
     return pct == null ? '—' : `${pct}%`
   }
+  const apiKnownTurns = [...coverage.values()].reduce((sum, item) => sum + item.apiKnownTurns, 0)
+  const selectedState = selectedCoverage.apiKnownTurns === 0
+    ? 'unknown'
+    : selectedCoverage.apiKnownTurns < selectedCoverage.turns || !tokenCoverageComplete(selectedCoverage)
+      ? 'partial'
+      : 'exact'
 
   return (
-    <main className="seg-pane">
+    <main className="seg-pane evidence-segments" data-screen-label="分段 · 时间 Ribbon 与证据账本">
       <header className="segments-evidence-header">
         <div><span>SEGMENTS · ACTIVE CONTEXT LEDGER</span><h2>会话切成 {segments.length} 段</h2><p>选择一个时间段，右侧只解释该段能够证明的 Token、API、工具与文件证据。</p></div>
-        <strong>{rep.totalTokens == null ? '—' : `${sessionTokenCoverageComplete ? '' : '≥ '}${fmtTok(rep.totalTokens)}`} tok</strong>
+        <em className={sessionApiCoverageComplete ? 'exact' : apiKnownTurns > 0 ? 'partial' : 'unknown'}>
+          <i aria-hidden="true" />{apiKnownTurns}/{rep.sessionTurns} API 已捕获
+        </em>
       </header>
 
-      <div className="seg-note"><Icon name="info" /> 按 turn 活跃 context 聚合；子 Agent 没有独立 usage 时不伪造归属。</div>
+      <section className="segment-conclusion" aria-label="分段结论">
+        <div><strong>{rep.totalApiMs == null ? '—' : `${sessionApiCoverageComplete ? '' : '≥ '}${fmtDur(rep.totalApiMs)}`}</strong><span>已知 API 时长</span></div>
+        <p>{slowest ? <><b>{slowest.name} · {fmtSegmentApi(slowest, coverage.get(segmentKey(slowest))!)}</b> 是当前最长已知 API 段；Token 缺字段时只保留已知下界。</> : '当前会话没有可用的 API 时长证据。'}</p>
+        <div className="segment-conclusion-ranking">
+          <span><small>{sessionTokenCoverageComplete ? '最高 Token' : '最大已知下界'}</small><strong>{tokenHeaviest ? `${fmtSegmentTokens(tokenHeaviest, coverage.get(segmentKey(tokenHeaviest))!)} tok` : '—'}</strong></span>
+          <span><small>{sessionApiCoverageComplete ? '最慢段' : '最长已知 API'}</small><strong>{slowest ? fmtSegmentApi(slowest, coverage.get(segmentKey(slowest))!) : '—'}</strong></span>
+        </div>
+        <small><Icon name="info" />按 turn 活跃 context 聚合；子 Agent 无独立 usage 时不伪造归属。</small>
+      </section>
 
       <div className="segment-ribbon" role="group" aria-label="会话分段时间带">
         {segments.map((segment, index) => {
@@ -134,50 +149,50 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
             <button
               type="button"
               key={`${segment.kind}-${segment.turnStart}-${index}`}
-              className={`${KIND_CLASS[segment.kind]} ${index === safeSelectedIndex ? 'is-selected' : ''}`}
-              style={{ width: `${Math.max(width, 3)}%` }}
+              className={`${KIND_CLASS[segment.kind]} ${segmentCoverage.apiKnownTurns < segmentCoverage.turns || !tokenCoverageComplete(segmentCoverage) ? 'is-partial' : ''} ${index === safeSelectedIndex ? 'is-selected' : ''}`}
+              style={{ flexGrow: Math.max(width, 3), flexBasis: `${Math.max(width, 3)}px` }}
               onClick={() => setSelectedKey(segmentKey(segment))}
               aria-pressed={index === safeSelectedIndex}
               title={`${segment.name} · ${turnRange(segment)} · API ${fmtSegmentApi(segment, segmentCoverage)}`}
             >
-              {width >= 8 ? `${String(index + 1).padStart(2, '0')} · ${segment.name}` : String(index + 1).padStart(2, '0')}
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <b>{segment.name}</b>
+              <small>{fmtSegmentApi(segment, segmentCoverage)}</small>
             </button>
           )
         })}
       </div>
 
-      <div className="segments-summary-strip" aria-label="分段摘要">
-        <span><small>SESSION</small><b>{rep.sessionTurns} turns</b></span>
-        <span><small>{sessionTokenCoverageComplete ? '最高 Token' : '最大已知下界'}</small><b>{tokenHeaviest ? `${tokenHeaviest.name} · ${sessionTokenCoverageComplete ? tokenPctLabel(tokenHeaviest) : fmtSegmentTokens(tokenHeaviest, coverage.get(segmentKey(tokenHeaviest))!)}` : '—'}</b></span>
-        <span><small>{sessionApiCoverageComplete ? '最慢段' : '最长已知 API'}</small><b>{slowest ? `${slowest.name} · ${fmtSegmentApi(slowest, coverage.get(segmentKey(slowest))!)}` : '—'}</b></span>
-        <span><small>结构化重读</small><b>{worst ? `${worst.name} · ${worst.repeatReads}` : '已观测 0'}</b></span>
-      </div>
-
       <div className="segments-workspace">
         <nav className="segment-ledger" aria-label="分段账本">
-          <header><span>01</span><h3>时间段</h3><small>按出现顺序</small></header>
+          <header><span>SEGMENT</span><span>TURN</span><span>API</span><span>TOOLS</span><span>API + TOKEN</span></header>
           {segments.map((segment, index) => {
             const segmentCoverage = coverage.get(segmentKey(segment))!
+            const state = segmentCoverage.apiKnownTurns === 0
+              ? 'unknown'
+              : segmentCoverage.apiKnownTurns < segmentCoverage.turns || !tokenCoverageComplete(segmentCoverage)
+                ? 'partial'
+                : 'exact'
             return (
               <button
                 type="button"
                 key={`${segment.name}-${segment.turnStart}-${index}`}
-                className={index === safeSelectedIndex ? 'is-selected' : ''}
+                className={`segment-row ${index === safeSelectedIndex ? 'is-selected' : ''}`}
                 onClick={() => setSelectedKey(segmentKey(segment))}
                 aria-pressed={index === safeSelectedIndex}
               >
-                <span className="segment-index">{String(index + 1).padStart(2, '0')}</span>
-                <i style={{ background: KIND_VAR[segment.kind] }} aria-hidden="true" />
-                <span className="segment-ledger-copy"><b>{segment.name}</b><small>{KIND_LABEL[segment.kind]} · {turnRange(segment)}</small></span>
-                <span className="segment-ledger-values"><b>{fmtSegmentApi(segment, segmentCoverage)}</b><small>{fmtSegmentTokens(segment, segmentCoverage)} tok</small></span>
-                <span aria-hidden="true">›</span>
+                <span className="segment-name"><i style={{ background: KIND_VAR[segment.kind] }} aria-hidden="true" /><b>{String(index + 1).padStart(2, '0')} · {segment.name}</b><small>{KIND_LABEL[segment.kind]} · {fmtSegmentTokens(segment, segmentCoverage)} tok</small></span>
+                <time>{turnRange(segment).replace(/^turns? /, 'T')}</time>
+                <b>{fmtSegmentApi(segment, segmentCoverage)}</b>
+                <b>{segment.tools}</b>
+                <em className={`segment-state ${state}`}><i aria-hidden="true" />{state === 'exact' ? 'API+Token 完整' : state === 'partial' ? 'API+Token 部分' : 'API+Token 未知'}</em>
               </button>
             )
           })}
         </nav>
 
-        <article className={`segment-inspector kind-${selected.kind}`} aria-live="polite">
-          <header><span>SEGMENT EVIDENCE</span><em style={{ color: KIND_VAR[selected.kind] }}><i style={{ background: KIND_VAR[selected.kind] }} />{KIND_LABEL[selected.kind]}</em></header>
+        <article className={`segment-inspector kind-${selected.kind}`} aria-live="polite" aria-label={`分段 ${safeSelectedIndex + 1} 证据`}>
+          <header><span>SEGMENT EVIDENCE</span><em className={selectedState} style={{ color: KIND_VAR[selected.kind] }}><i style={{ background: KIND_VAR[selected.kind] }} />{selectedState === 'exact' ? 'API+Token 完整' : selectedState === 'partial' ? 'API+Token 部分' : 'API+Token 未知'}</em></header>
           <div className="segment-inspector-title"><span>{String(safeSelectedIndex + 1).padStart(2, '0')}</span><div><h2>{selected.name}</h2><p>{turnRange(selected)} · {selectedCoverage.apiKnownTurns === 0 ? 'API 覆盖未知' : sessionApiCoverageComplete ? `${selected.pct.toFixed(0)}% 会话 API 时间` : `${selectedCoverage.apiKnownTurns}/${selectedCoverage.turns} 轮 API 已捕获；会话占比未知`}</p></div></div>
           <p className="segment-inspector-summary">
             {selected.files.length > 0 ? `结构化文件证据：${selected.files.join('、')}${selected.files.length >= 4 ? ' 等' : ''}。` : '本段没有结构化文件读写证据。'}
@@ -196,7 +211,7 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
               <div key={activity.label}><span>{activity.op ? <em className={`op ${activity.op}`}>{activity.label}</em> : activity.label}</span><i /><b>{activity.count}</b></div>
             )) : <p>当前段没有结构化调用证据。</p>}
           </section>
-          <footer>TRACE AGGREGATE · UNKNOWN ≠ 0 · TOOL TOKEN ATTRIBUTION UNAVAILABLE</footer>
+          <footer>TRACE AGGREGATE · UNKNOWN ≠ 0 · TOOL TOKEN ATTRIBUTION UNAVAILABLE · {selected.repeatReads > 0 ? `RE-READ ${selected.repeatReads}` : 'RE-READ 0 OBSERVED'}</footer>
         </article>
       </div>
     </main>

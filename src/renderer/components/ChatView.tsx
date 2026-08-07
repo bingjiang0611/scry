@@ -24,6 +24,7 @@ interface ChatViewProps {
   recent: string[]
   agents: DetectedAgent[]
   selectedAgentId: string
+  agentScanning?: boolean
   agentLocked?: boolean
   runControls: AgentRunControls
   runControlCatalog: AgentRunControlCatalog
@@ -112,6 +113,7 @@ export function ChatView({
   recent,
   agents,
   selectedAgentId,
+  agentScanning = false,
   agentLocked = false,
   runControls,
   runControlCatalog,
@@ -157,7 +159,52 @@ export function ChatView({
   onRescan
 }: ChatViewProps) {
   const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
+  const permissionLabel = {
+    default: 'Provider 原生权限',
+    auto_review: '自动复核',
+    full_access: '完全访问'
+  }[runControls.permissionMode]
+  const healthyAgentCount = agents.filter((agent) => agent.health?.state === 'ready').length
+  const degradedAgentCount = agents.filter((agent) => agent.health?.state === 'degraded').length
+  const availableAgentCount = healthyAgentCount + degradedAgentCount
+  const unresolvedAgentCount = agents.length - availableAgentCount
+  const providerReadiness = agentScanning
+    ? {
+        tone: 'neutral',
+        title: 'Provider 探测中',
+        summary: '正在探测本机 Provider',
+        detail: agents.length > 0
+          ? `已返回 ${agents.length} 个候选；完整健康状态尚未确认`
+          : 'CLI 路径与 runtime 健康状态尚未返回',
+        meta: '正在探测'
+      }
+    : agents.length > 0 && healthyAgentCount === agents.length
+      ? {
+          tone: 'ok',
+          title: 'Provider 就绪',
+          summary: `${healthyAgentCount} 个 Provider 健康`,
+          detail: '仅表示本机 CLI / runtime 探测结果，不代表账号或用量状态',
+          meta: `${healthyAgentCount} 个健康`
+        }
+      : availableAgentCount > 0
+        ? {
+            tone: 'warn',
+            title: 'Provider 部分可用',
+            summary: `${availableAgentCount}/${agents.length} 个 Provider 可用`,
+            detail: `${healthyAgentCount} 个健康 · ${degradedAgentCount} 个降级 · ${unresolvedAgentCount} 个未知或不可用`,
+            meta: `${availableAgentCount} 可用 · ${healthyAgentCount} 健康`
+          }
+        : {
+            tone: 'warn',
+            title: 'Provider 未就绪',
+            summary: agents.length > 0 ? `${agents.length} 个 Provider 均未确认可用` : '未检测到可用 Provider',
+            detail: agents.length > 0
+              ? `0 个可用 · 0 个健康 · ${unresolvedAgentCount} 个未知或不可用`
+              : '完整探测已结束；请检查 CLI 路径或重新扫描',
+            meta: '0 个可用'
+          }
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const modelValue = runControls.model
@@ -201,7 +248,7 @@ export function ChatView({
 
   return (
     <>
-      <div className="body chat-body">
+      <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
         {turns.length > 0 && (
           <div className="chat-evidence-source" role="note" aria-label="会话证据来源">
             <span><i aria-hidden="true" />本机真实会话</span>
@@ -209,42 +256,126 @@ export function ChatView({
             <b>{selectedAgentName} · runtime / local archive · 未捕获字段保持未知</b>
           </div>
         )}
-        <div className="chat" ref={scrollRef}>
+        <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线">
           {turns.length === 0 && (
             <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
-              <div className="welcome-kicker">
-                <span className="welcome-ready-dot" />
-                {cwd ? 'WORKSPACE CONTEXT' : 'LOCAL-FIRST AGENT WORKBENCH'}
+              <header className="welcome-heading">
+                <div className="welcome-kicker"><span className="welcome-ready-dot" />LOCAL WORKSPACE</div>
+                <h1>准备好观察下一次执行。</h1>
+                <p>
+                  {cwd
+                    ? `已绑定 ${workspaceName ?? '当前项目'}；先核对 Provider、权限与模型，再从下方输入任务。`
+                    : '可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。'}
+                </p>
+              </header>
+
+              <div className="welcome-layout">
+                <section className="welcome-primary" aria-labelledby="welcome-provider-title">
+                  <div className="welcome-ready-line" data-tone={providerReadiness.tone} role="status">
+                    <span className="welcome-runtime-pulse" aria-hidden="true" />
+                    <span><b>{providerReadiness.summary}</b><small>{providerReadiness.detail}</small></span>
+                  </div>
+                  <div className="welcome-section-head">
+                    <span>01</span>
+                    <h2 id="welcome-provider-title">{providerReadiness.title}</h2>
+                    <em>{providerReadiness.meta}</em>
+                  </div>
+                  <div className="welcome-provider-list" aria-label="Provider 探测结果">
+                    {agents.map((agent) => {
+                      const selected = agent.id === selectedAgentId
+                      const healthState = agent.health?.state ?? (agentScanning ? 'scanning' : 'unknown')
+                      const state = healthState === 'ready'
+                        ? '健康'
+                        : healthState === 'degraded'
+                          ? '降级'
+                          : healthState === 'unavailable'
+                            ? '不可用'
+                            : healthState === 'scanning'
+                              ? '探测中'
+                              : '状态未知'
+                      return (
+                        <button
+                          type="button"
+                          className={`welcome-provider ${selected ? 'is-selected' : ''}`}
+                          data-provider={agent.id}
+                          data-health={healthState}
+                          key={agent.id}
+                          aria-pressed={selected}
+                          disabled={agentLocked}
+                          onClick={() => onSelectAgent(agent.id)}
+                        >
+                          <i aria-hidden="true" />
+                          <span>
+                            <span><b>{agent.name}</b><em>{state}</em></span>
+                            <code title={agent.path}>{agent.path}</code>
+                            <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
+                          </span>
+                          <Icon name="chevronRight" />
+                        </button>
+                      )
+                    })}
+                    {agents.length === 0 && (
+                      <div className="welcome-list-empty" role="status">
+                        {agentScanning
+                          ? '正在探测本机 agent CLI…'
+                          : '完整探测未返回可用 agent CLI；可在下方 Provider 选择器重新扫描。'}
+                      </div>
+                    )}
+                  </div>
+                  <p className="welcome-boundary"><b>边界：</b>未发现不等于未安装；未上报的状态保持未知。</p>
+                </section>
+
+                <aside className="welcome-secondary" aria-label="本地执行上下文">
+                  <section aria-labelledby="welcome-context-title">
+                    <div className="welcome-section-head">
+                      <span>02</span>
+                      <h2 id="welcome-context-title">运行上下文</h2>
+                      <em>执行前核对</em>
+                    </div>
+                    <div className="welcome-context-ledger">
+                      <span><small>Provider</small><b>{selectedAgent?.name ?? 'Provider 未知'}</b><em>{selectedAgent?.version ?? '版本未知'}</em></span>
+                      <span><small>工作目录</small><b>{workspaceName ?? '不绑定项目'}</b><em title={cwd ?? '不绑定项目'}>{cwd ?? '按需选择'}</em></span>
+                      <span><small>权限</small><b className={runControls.permissionMode === 'full_access' ? 'is-danger' : ''}>{permissionLabel}</b><em>当前 composer 配置</em></span>
+                      <span><small>模型</small><b>{selectedModel?.label ?? 'Provider 默认'}</b><em>{runControls.effort ? `effort · ${runControls.effort}` : 'effort 由 Provider 决定'}</em></span>
+                    </div>
+                  </section>
+
+                  <section className="welcome-recent-section" aria-labelledby="welcome-recent-title">
+                    <div className="welcome-section-head">
+                      <span>03</span>
+                      <h2 id="welcome-recent-title">最近工作目录</h2>
+                      <em>本机历史</em>
+                    </div>
+                    <div className="welcome-recent" aria-label="最近工作目录">
+                      {recent.slice(0, 3).map((path) => (
+                        <button
+                          type="button"
+                          className={cwd === path ? 'is-selected' : ''}
+                          key={path}
+                          onClick={() => onPickRecent(path)}
+                          title={path}
+                          aria-pressed={cwd === path}
+                        >
+                          <Icon name="folder" />
+                          <span><b>{path.split('/').filter(Boolean).at(-1) || path}</b><small>{path}</small></span>
+                          <Icon name="chevronRight" />
+                        </button>
+                      ))}
+                      {recent.length === 0 && <div className="welcome-list-empty" role="status">当前没有可显示的本机工作目录历史。</div>}
+                    </div>
+                  </section>
+                </aside>
               </div>
-              <span className="unbound-icon"><Icon name={cwd ? 'folder' : 'message'} /></span>
-              <strong>{cwd ? `准备在 ${workspaceName ?? '当前项目'} 开始` : '不绑定项目，也能开始'}</strong>
-              <span className="welcome-copy">
-                {cwd
-                  ? '还没有会话轮次。发出第一条任务后，执行、工具与结果会进入同一条本机证据时间线。'
-                  : '可直接发起任务；需要读写项目文件时再选择工作目录。所有可观测证据留在本机。'}
-              </span>
-              <div className="welcome-readiness" aria-label="本机就绪状态">
-                <span><b>{agents.length}</b><small>已发现 Provider</small></span>
-                <span><b>{recent.length}</b><small>最近工作目录</small></span>
-                <span><b>LOCAL</b><small>证据优先</small></span>
-              </div>
-              {!cwd && recent.length > 0 && (
-                <div className="welcome-recent" aria-label="最近工作目录">
-                  {recent.slice(0, 3).map((path) => (
-                    <button type="button" key={path} onClick={() => onPickRecent(path)} title={path}>
-                      <Icon name="folder" />
-                      <span>{path.split('/').filter(Boolean).at(-1) || path}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           )}
-          {turns.map((turn) => (
+          {turns.map((turn) => {
+            const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
+            return (
             <div
               key={turn.runId}
-              className={`turn ${focusedTurnRunId === turn.runId ? 'turn-jump-target' : ''}`}
+              className={`turn transcript-turn ${selectedTurn ? 'is-selected' : ''} ${focusedTurnRunId === turn.runId ? 'turn-jump-target' : ''}`}
               data-run-id={turn.runId}
+              data-selected={selectedTurn || undefined}
               ref={onTurnRef ? (el) => onTurnRef(turn.runId, el) : undefined}
             >
               <UserMessage text={turn.userText} attachments={turn.attachments ?? []} />
@@ -257,12 +388,19 @@ export function ChatView({
                 onAnswerQuestion={onAnswerQuestion}
               />
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
-      <div className="composer">
-        <div className="composer-shell">
+      <div className="composer runtime-composer">
+        <div className="composer-shell evidence-composer-shell">
+        {turns.length === 0 && (
+          <div className="welcome-composer-heading">
+            <span><small>00</small><b>开始一项可追溯任务</b></span>
+            <em>证据默认开启</em>
+          </div>
+        )}
         <div className="composer-top">
           <WorkdirPicker
             cwd={cwd}
@@ -359,6 +497,7 @@ export function ChatView({
         <textarea
           ref={textareaRef}
           className="input"
+          aria-label="描述任务"
           placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : busy ? '运行中，输入后 Enter 加入队列…' : `给 ${selectedAgentName} 一个任务…（/ 唤起命令，Enter 发送，Shift+Enter 换行）`}
           value={input}
           onChange={(event) => onInput(event.target.value)}

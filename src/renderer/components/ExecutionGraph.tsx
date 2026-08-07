@@ -29,9 +29,11 @@ type GraphPaneStyle = CSSProperties & {
   '--graph-detail-w': string
 }
 
-const GRAPH_DETAIL_MIN = 300
-const GRAPH_DETAIL_MAX = 640
-const GRAPH_DETAIL_DEFAULT = 380
+// 原型的 inspector 是固定证据栏，不应该吞掉一半泳道；旧的 640px 上限会让
+// 1024–1280px 窗口里的 session wall 几乎不可见。
+const GRAPH_DETAIL_MIN = 280
+const GRAPH_DETAIL_MAX = 440
+const GRAPH_DETAIL_DEFAULT = 340
 
 const GTYPE: Record<string, { cls: string; label: string }> = {
   tool: { cls: 'tool', label: 'TOOL' },
@@ -161,7 +163,7 @@ function TurnBlock({
   const preview = parsedUser.command ?? (parsedUser.injectedSkill ? `Skill · ${parsedUser.injectedSkill}` : parsedUser.body) ?? ''
 
   return (
-    <section className={`graph-turn-lane ${running ? 'is-running' : ''}`}>
+    <section className={`graph-turn-lane ${running ? 'is-running' : ''}`} role="listitem">
       <header className="graph-lane-head">
         <span className="num">
           TURN {String(idx + 1).padStart(2, '0')}
@@ -456,7 +458,7 @@ export function ExecutionGraph({
   }
 
   return (
-    <div className="graph-pane" style={graphStyle}>
+    <div className="graph-pane evidence-graph" style={graphStyle} data-screen-label="拓扑 · 固定泳道与节点证据">
       <div className="gtree">
         <header className="graph-evidence-header">
           <div><span>TOPOLOGY · SESSION WALL</span><h2>执行拓扑</h2><p>每一行固定为一轮；选择节点只更新右侧证据，不改变几何位置。</p></div>
@@ -474,9 +476,12 @@ export function ExecutionGraph({
           </span>
         </section>
 
-        {turns.map((t, i) => (
-          <TurnBlock key={t.runId} turn={t} idx={i} selectedId={selectedId} onSelect={onSelect} />
-        ))}
+        <div className="graph-session-wall" role="list" aria-label="执行会话墙">
+          {turns.map((t, i) => (
+            <TurnBlock key={t.runId} turn={t} idx={i} selectedId={selectedId} onSelect={onSelect} />
+          ))}
+        </div>
+        <footer className="graph-evidence-foot">选择只改变检查对象，不重排节点 · TOKEN 仅按 TURN RESULT 汇总</footer>
       </div>
 
       <PaneSplitter

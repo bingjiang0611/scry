@@ -737,7 +737,7 @@ export function OverviewPanel({
   const isBillingTab = panelTab === 'billing'
   const isTrustTab = panelTab === 'mcpTrust'
   return (
-    <aside className="panel">
+    <aside className="panel overview-dossier" data-screen-label="总览 · 当前会话证据" aria-label="当前执行总览">
       <div className="ov-topbar">
         <div className="overview-panel-title">
           <div><strong>总览</strong><span>{busy ? '当前执行' : '会话证据'}</span></div>
@@ -751,7 +751,7 @@ export function OverviewPanel({
             className={isOverviewTab ? 'active' : ''}
             onClick={() => setPanelTab('overview')}
           >
-            <Icon name="grid" /> 纵览
+            纵览
           </button>
           <button
             type="button"
@@ -760,7 +760,7 @@ export function OverviewPanel({
             className={isBillingTab ? 'active' : ''}
             onClick={() => setPanelTab('billing')}
           >
-            <Icon name="bulb" /> 账单卫士
+            账单卫士
           </button>
           <button
             type="button"
@@ -769,11 +769,11 @@ export function OverviewPanel({
             className={isTrustTab ? 'active' : ''}
             onClick={() => setPanelTab('mcpTrust')}
           >
-            <Icon name="lock" /> MCP 信任
+            MCP 信任
           </button>
         </div>
       </div>
-      <div className="ov-scroll">
+      <div className="ov-scroll overview-scroll-content">
 
       {isOverviewTab && (
         <div className={`ctx-gauge ${ctx ? (ctx.pct >= 80 ? 'hot' : ctx.pct >= 50 ? 'warm' : '') : 'empty'}`}>

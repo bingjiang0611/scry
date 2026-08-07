@@ -5,6 +5,7 @@ export type AppView = 'chat' | 'graph' | 'segments' | 'diagnostics' | 'analytics
 
 interface ViewChromeProps {
   cwd: string | null
+  hasSession?: boolean
   view: AppView
   agent: DetectedAgent | undefined
   agentScanning?: boolean
@@ -18,6 +19,7 @@ interface ViewChromeProps {
 
 export function ViewChrome({
   cwd,
+  hasSession = false,
   view,
   agent,
   agentScanning = false,
@@ -31,7 +33,7 @@ export function ViewChrome({
   const agentVersion = agent?.version?.replace(/\s+\(Claude Code\)\s*$/, '')
   return (
     <header className="topbar compact">
-      {cwd && (
+      {(cwd || hasSession) && (
         <nav className="vtabs" aria-label="会话视图">
           <button
             type="button"
