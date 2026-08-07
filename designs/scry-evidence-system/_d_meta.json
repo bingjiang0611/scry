@@ -1,0 +1,24 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Evidence System": {
+      "versions": [
+        {
+          "path": "Scry Evidence System.html",
+          "createdAt": "2026-08-07T10:52:19.782Z",
+          "status": "needs-review",
+          "subtitle": "九表面统一证据语言交互原型",
+          "viewport": {
+            "width": 1280,
+            "height": 720
+          },
+          "section": "Welcome · Chat · Analytics · Diagnostics · Graph · Segments · Overview · Skills · MCP"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-07T10:52:19.783Z",
+  "updatedAt": "2026-08-07T10:52:19.783Z"
+}
