@@ -264,6 +264,7 @@ export function McpModal({
   onClose: () => void
 }) {
   const canManage = capability?.mode === 'manage'
+  const readsRuntime = capability?.mode === 'read'
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
   const loadingConfig = configRefreshing && !capability
@@ -276,16 +277,23 @@ export function McpModal({
     <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} onClose={onClose}>
         <div className="modal-head">
           <b id={titleId}>MCP servers</b> <span className="dim">{mcps.length}</span>
-          {loading && <span className="dim">{loadingConfig ? '读取配置中…' : '拉取真实状态中…'}</span>}
-          {capability && capability.state !== 'ready' && <span className="dim">{capability.reason ?? capability.state}</span>}
+          {loading && <span className="dim" role="status" aria-live="polite">{loadingConfig ? '读取配置中…' : '正在检测全部 MCP…'}</span>}
+          {capability && capability.state !== 'ready' && (
+            <span className="dim" role={capability.state === 'unknown' ? 'alert' : 'status'}>
+              {capability.reason ?? capability.state}
+            </span>
+          )}
           <button
-            className="modal-refresh"
+            className={`modal-refresh${readsRuntime ? ' mcp-refresh-all' : ''}`}
             onClick={onRefresh}
             disabled={loading}
-            title="重新读取当前 Provider 的原生 MCP 配置与运行状态"
-            aria-label="刷新 MCP 状态"
+            title={readsRuntime
+              ? '启动已授权 MCP，并刷新当前 Provider 的全部原生运行状态'
+              : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
+            aria-label={readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
           >
-            <Icon name="refresh" />
+            {refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
+            {readsRuntime && <span>{refreshing ? '检测中…' : '检测全部'}</span>}
           </button>
           <button ref={closeRef} className="modal-x" onClick={onClose} aria-label="关闭 MCP">
             <Icon name="x" />
@@ -305,6 +313,7 @@ export function McpModal({
                 const enabled = lv ? lv.status !== 'disabled' : m.enabled
                 const open = expanded === targetId
                 const toolsId = `${titleId}-tools-${scope}-${index}`
+                const authLimited = st && !st.testing && !st.ok && /40[13]/.test(st.error ?? '')
                 return (
                   <div key={scope + m.name} className="mcp-row">
                     <div className="mcp-main">
@@ -315,47 +324,45 @@ export function McpModal({
                       <span className={`mcp-name ${enabled ? '' : 'off'}`}>{m.name}</span>
                       <span className="mcp-transport">{m.transport}</span>
                       {/* live 状态来自 SDK init；pending 是真实的未收敛/待刷新态，不显示成 connected */}
-                      {lv && lvLabel ? (
+                      {lv && lvLabel && (
                         <span className={lvLabel.cls} title="来自当前 Provider 原生运行时的真实状态">
                           <Icon name={lvLabel.icon} />
                           {lvLabel.text}
-                          {lv.status === 'connected' && st?.tools != null ? ` · ${st.tools} tools` : ''}
+                          {lv.status === 'connected' && lv.tools != null ? ` · ${lv.tools} tools` : ''}
                         </span>
-                      ) : (
-                        <>
-                          {st?.testing && <span className="dim">测试中…</span>}
-                          {st && !st.testing && st.ok && (
-                            <span className="mcp-ok">
-                              <Icon name="check" /> connected{st.tools != null ? ` · ${st.tools} tools` : ''}
-                            </span>
-                          )}
-                          {st && !st.testing && !st.ok &&
-                            (/40[13]/.test(st.error ?? '') ? (
-                              // 裸握手没 OAuth token，401/403 不代表真断——真实状态以 SDK/终端为准（跑一轮即更新）
-                              <span className="dim" title="测试握手没带 OAuth token；真实连接以当前 Provider 原生运行时为准">
-                                <Icon name="alert" /> 需认证（测试无 token）
-                              </span>
-                            ) : (
-                              <span className="mcp-bad">
-                                <Icon name="x" /> {st.error}
-                              </span>
-                            ))}
-                        </>
                       )}
                     </div>
                     <div className="mcp-detail" title={m.detail}>
                       {m.detail}
                     </div>
                     <div className="mcp-actions">
-                      <button className="mcp-test" onClick={() => onTest(targetId)} disabled={!canManage || st?.testing}>
-                        {st?.testing ? (
-                          <>
-                            <span className="spinner" /> 测试中…
-                          </>
-                        ) : (
-                          '测试连接'
-                        )}
-                      </button>
+                      {canManage && (
+                        <button className="mcp-test" onClick={() => onTest(targetId)} disabled={st?.testing}>
+                          {st?.testing ? (
+                            <>
+                              <span className="spinner" /> 测试中…
+                            </>
+                          ) : (
+                            '测试连接'
+                          )}
+                        </button>
+                      )}
+                      {canManage && st && (
+                        <span
+                          className={`mcp-test-result ${st.testing ? '' : st.ok ? 'ok' : authLimited ? 'warn' : 'bad'}`}
+                          role={!st.testing && !st.ok ? 'alert' : 'status'}
+                          aria-live="polite"
+                          title={authLimited ? '测试握手没带 OAuth token；真实连接以当前 Provider 原生运行时为准' : undefined}
+                        >
+                          {st.testing
+                            ? '正在执行 initialize / tools/list…'
+                            : st.ok
+                              ? `本次测试成功${st.tools != null ? ` · ${st.tools} tools` : ''}`
+                              : authLimited
+                                ? '需认证（测试无 token）'
+                                : `本次测试失败${st.error ? ` · ${st.error}` : ''}`}
+                        </span>
+                      )}
                       {st?.ok && st.toolNames && st.toolNames.length > 0 && (
                         <button
                           className="mcp-test"
@@ -389,7 +396,7 @@ export function McpModal({
           {canManage
             ? '当前 Provider 支持由 Scry 管理 MCP 开关与连接测试。'
             : capability?.mode === 'read'
-              ? '当前 Provider 只暴露原生 MCP 配置/运行状态；Scry 不把读取能力伪装成持久化开关。'
+              ? '当前 Provider 只暴露原生 MCP 配置/运行状态，不提供单项直测；使用顶部「检测全部」读取原生运行状态。Scry 不把读取能力伪装成持久化开关。'
               : '当前 Provider 没有可用的 MCP 配置/运行状态接口。'}
         </div>
     </ModalFrame>

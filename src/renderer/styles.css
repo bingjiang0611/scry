@@ -763,12 +763,12 @@ body.pane-resizing * {
   font-size: 12px;
   white-space: nowrap;
 }
-.mcp-test:hover {
+.mcp-test:hover:not(:disabled) {
   border-color: var(--accent);
 }
 .mcp-test:disabled {
-  opacity: 0.7;
-  cursor: default;
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .spinner {
   display: inline-block;
@@ -785,6 +785,23 @@ body.pane-resizing * {
   font-size: 10px;
   color: var(--dim2);
   white-space: nowrap;
+}
+.mcp-test-result {
+  max-width: 260px;
+  color: var(--dim2);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.mcp-test-result.ok {
+  color: var(--ok);
+}
+.mcp-test-result.warn {
+  color: var(--warn);
+}
+.mcp-test-result.bad {
+  color: var(--danger);
 }
 .mcp-tools {
   grid-column: 1 / span 2;
@@ -2433,6 +2450,7 @@ button.mitem:disabled {
   height: 14px;
 }
 .btn:not(:disabled):active,
+.mcp-test:not(:disabled):active,
 .sb-new:not(:disabled):active,
 .send:not(:disabled):active,
 .stop:not(:disabled):active,
@@ -6931,6 +6949,22 @@ textarea:focus-visible,
 
 .mcp-test {
   background: var(--panel3);
+}
+
+.modal-refresh.mcp-refresh-all {
+  width: auto;
+  min-width: 96px;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--fg);
+  font: 500 11.5px/1 var(--font-ui);
+  white-space: nowrap;
+}
+
+.modal-refresh.mcp-refresh-all .spinner {
+  margin-right: 0;
 }
 
 @media (max-width: 1260px) {
