@@ -232,6 +232,7 @@ const LIVE_LABEL: Record<McpLiveStatus['status'], { cls: string; text: string; i
   connected: { cls: 'mcp-ok', text: 'connected', icon: 'check' },
   failed: { cls: 'mcp-bad', text: 'failed', icon: 'x' },
   'needs-auth': { cls: 'mcp-bad', text: '需认证', icon: 'alert' },
+  'needs-client-registration': { cls: 'mcp-bad', text: '需配置 OAuth Client', icon: 'alert' },
   pending: { cls: 'mcp-neutral', text: 'pending', icon: 'clock' },
   disabled: { cls: 'mcp-neutral', text: 'disabled', icon: 'square' }
 }
@@ -248,6 +249,7 @@ export function McpModal({
   refreshing,
   capability,
   onTest,
+  onReauthenticate,
   onToggle,
   onRefresh,
   onClose
@@ -259,6 +261,7 @@ export function McpModal({
   refreshing: boolean
   capability?: CapabilityEnvelope<McpSnapshot> | null
   onTest: (targetId: string) => void
+  onReauthenticate?: (targetId: string) => void
   onToggle: (name: string, enabled: boolean) => void
   onRefresh: () => void
   onClose: () => void
@@ -269,6 +272,7 @@ export function McpModal({
   const closeRef = useRef<HTMLButtonElement>(null)
   const loadingConfig = configRefreshing && !capability
   const loading = loadingConfig || refreshing
+  const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
   const liveByName = new Map(live.map((l) => [l.name, l]))
   const groups: Record<string, McpMeta[]> = {}
@@ -286,7 +290,7 @@ export function McpModal({
           <button
             className={`modal-refresh${readsRuntime ? ' mcp-refresh-all' : ''}`}
             onClick={onRefresh}
-            disabled={loading}
+            disabled={loading || authenticationInProgress}
             title={readsRuntime
               ? '启动已授权 MCP，并刷新当前 Provider 的全部原生运行状态'
               : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
@@ -314,11 +318,16 @@ export function McpModal({
                 const open = expanded === targetId
                 const toolsId = `${titleId}-tools-${scope}-${index}`
                 const authLimited = st && !st.testing && !st.ok && /40[13]/.test(st.error ?? '')
+                const canAuthenticate = Boolean(
+                  onReauthenticate && capability?.data?.operations?.authenticate.includes(targetId)
+                )
+                const needsAuth = lv?.status === 'needs-auth'
+                const needsClientRegistration = lv?.status === 'needs-client-registration'
                 return (
                   <div key={scope + m.name} className="mcp-row">
                     <div className="mcp-main">
                       <label className="switch" title="当前 Provider 支持管理时，可持久化启用或禁用">
-                        <input type="checkbox" aria-label={`启用 MCP ${m.name}`} checked={enabled} disabled={!canManage} onChange={(e) => onToggle(m.name, e.target.checked)} />
+                        <input type="checkbox" aria-label={`启用 MCP ${m.name}`} checked={enabled} disabled={!canManage || authenticationInProgress} onChange={(e) => onToggle(m.name, e.target.checked)} />
                         <span className="slider" />
                       </label>
                       <span className={`mcp-name ${enabled ? '' : 'off'}`}>{m.name}</span>
@@ -337,7 +346,7 @@ export function McpModal({
                     </div>
                     <div className="mcp-actions">
                       {canManage && (
-                        <button className="mcp-test" onClick={() => onTest(targetId)} disabled={st?.testing}>
+                        <button className="mcp-test" onClick={() => onTest(targetId)} disabled={st?.testing || authenticationInProgress}>
                           {st?.testing ? (
                             <>
                               <span className="spinner" /> 测试中…
@@ -373,9 +382,38 @@ export function McpModal({
                           {open ? '收起工具' : `查看工具 (${st.toolNames.length})`}
                         </button>
                       )}
-                      <span className="mcp-runtime" title="重新认证与重连由当前 Provider 的原生客户端处理">
-                        Re-auth / Reconnect → Provider 客户端
-                      </span>
+                      {needsAuth && canAuthenticate && (
+                        <button
+                          className="mcp-test"
+                          onClick={() => onReauthenticate?.(targetId)}
+                          disabled={authenticationInProgress}
+                          aria-label={`重新认证 MCP ${m.name}`}
+                        >
+                          {st?.authenticating ? (
+                            <><span className="spinner" /> 认证中…</>
+                          ) : '重新认证'}
+                        </button>
+                      )}
+                      {(st?.authenticating || st?.authOk != null || st?.authError) && (
+                        <span
+                          className={`mcp-test-result ${st.authenticating ? '' : st.authOk ? st.authError ? 'warn' : 'ok' : 'bad'}`}
+                          role={!st.authenticating && !st.authOk ? 'alert' : 'status'}
+                          aria-live="polite"
+                        >
+                          {st.authenticating
+                            ? '等待浏览器完成授权…'
+                            : st.authOk
+                              ? st.authError
+                                ? `授权流程已完成；运行状态未确认 · ${st.authError}`
+                                : '认证成功，运行状态已刷新'
+                              : `认证失败${st.authError ? ` · ${st.authError}` : ''}`}
+                        </span>
+                      )}
+                      {needsClientRegistration ? (
+                        <span className="mcp-runtime">需在 Provider 中配置 OAuth Client ID</span>
+                      ) : needsAuth && !canAuthenticate ? (
+                        <span className="mcp-runtime">请在 Provider 客户端完成认证</span>
+                      ) : null}
                     </div>
                     {open && st?.toolNames && (
                       <div id={toolsId} className="mcp-tools">
@@ -393,7 +431,9 @@ export function McpModal({
           ))}
         </div>
         <div className="modal-foot dim">
-          {canManage
+          {capability?.data?.operations?.authenticate.length
+            ? '支持认证的远程 MCP 可直接在 Scry 完成 Provider 原生 OAuth；凭据由 Provider 保存在本机（OpenCode 使用 Scry 私有目录），不会上传。'
+            : canManage
             ? '当前 Provider 支持由 Scry 管理 MCP 开关与连接测试。'
             : capability?.mode === 'read'
               ? '当前 Provider 只暴露原生 MCP 配置/运行状态，不提供单项直测；使用顶部「检测全部」读取原生运行状态。Scry 不把读取能力伪装成持久化开关。'

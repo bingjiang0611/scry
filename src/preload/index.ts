@@ -14,6 +14,7 @@ import type {
   CatalogHealth,
   CapabilityEnvelope,
   DeleteSessionResult,
+  McpAuthResult,
   McpSnapshot,
   McpTestResult,
   ProviderCommand,
@@ -100,6 +101,8 @@ const api = {
   },
   testMcp: (context: ProviderContext, targetId: string): Promise<CapabilityEnvelope<McpTestResult>> =>
     ipcRenderer.invoke('agent:testMcp', { context, targetId }),
+  reauthenticateMcp: (context: ProviderContext, targetId: string): Promise<CapabilityEnvelope<McpAuthResult>> =>
+    ipcRenderer.invoke('agent:reauthenticateMcp', { context, targetId }),
   toggleMcp: (context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>> =>
     ipcRenderer.invoke('agent:toggleMcp', { context, name, enabled }),
   listCommands: (context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>> =>

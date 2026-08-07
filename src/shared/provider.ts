@@ -90,12 +90,22 @@ export interface ProviderCommand {
 export interface McpSnapshot {
   configured: McpMeta[]
   runtime: McpLiveStatus[] | null
+  operations?: {
+    /** 精确 targetId；只有 Provider 原生 OAuth 流程可由 Scry 驱动时才列入。 */
+    authenticate: string[]
+  }
 }
 
 export interface McpTestResult {
   ok: boolean
   tools?: number
   toolNames?: string[]
+  error?: string
+}
+
+export interface McpAuthResult {
+  ok: boolean
+  status: 'authenticated' | 'authenticated-unverified' | 'failed'
   error?: string
 }
 

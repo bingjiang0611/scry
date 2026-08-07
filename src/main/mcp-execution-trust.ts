@@ -13,7 +13,7 @@ import {
   type ResolvedMcpConfig
 } from './mcp-config'
 
-export type McpExecutionOperation = 'run' | 'live' | `test:${string}`
+export type McpExecutionOperation = 'run' | 'live' | `test:${string}` | `auth:${string}`
 
 export interface McpExecutionSnapshot {
   providerId: ProviderId
@@ -42,6 +42,33 @@ const EXECUTION_SHAPING_ENV = new Set([
 ])
 
 const ENV_INTERPOLATION = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+interface RemoteCredentialEnvReferences {
+  headerBindings: string[]
+  bearerToken?: string
+  invalid: string[]
+}
+
+function remoteCredentialEnvReferences(config: Record<string, unknown>): RemoteCredentialEnvReferences {
+  const headerBindings: string[] = []
+  const invalid: string[] = []
+  if (config.env_http_headers !== undefined) {
+    if (!config.env_http_headers || typeof config.env_http_headers !== 'object' || Array.isArray(config.env_http_headers)) {
+      invalid.push('env_http_headers')
+    } else {
+      for (const [header, variable] of Object.entries(config.env_http_headers as Record<string, unknown>)) {
+        if (typeof variable !== 'string' || !ENV_NAME.test(variable)) invalid.push(`env_http_headers.${header}`)
+        else headerBindings.push(`${header}→${variable}`)
+      }
+    }
+  }
+  const bearerToken = typeof config.bearer_token_env_var === 'string' && ENV_NAME.test(config.bearer_token_env_var)
+    ? config.bearer_token_env_var
+    : undefined
+  if (config.bearer_token_env_var !== undefined && !bearerToken) invalid.push('bearer_token_env_var')
+  return { headerBindings, bearerToken, invalid }
+}
 
 function interpolationReferences(value: unknown, path: string, result: string[]): void {
   if (typeof value === 'string') {
@@ -75,6 +102,19 @@ function normalizedExecutionTarget(
   if (interpolations.length > 0) {
     errors.push(
       `MCP server ${target.name} 使用不受支持的父进程环境插值（${interpolations.join('；')}）；请把值显式放入已审查的 config.env/headers 或安全存储`
+    )
+  }
+  const credentialEnv = remoteCredentialEnvReferences(config)
+  if (credentialEnv.invalid.length > 0) {
+    errors.push(`MCP server ${target.name} 的凭据环境变量配置无效：${credentialEnv.invalid.join(', ')}`)
+  }
+  const credentialVariables = [
+    ...credentialEnv.headerBindings.map((binding) => binding.slice(binding.indexOf('→') + 1)),
+    ...(credentialEnv.bearerToken ? [credentialEnv.bearerToken] : [])
+  ]
+  if (credentialVariables.length > 0 && target.scope !== 'user') {
+    errors.push(
+      `MCP server ${target.name} 的${target.scope}配置引用父进程凭据环境变量（${[...new Set(credentialVariables)].join(', ')}）；项目配置不得读取 Provider 登录环境`
     )
   }
   const configuredEnv = config.env && typeof config.env === 'object'
@@ -310,6 +350,7 @@ interface McpTargetDisplayFacts {
   queryKeys: string[]
   envKeys: string[]
   headerKeys: string[]
+  credentialEnvBindings: string[]
 }
 
 function mcpTargetDisplayFacts(target: ResolvedMcpConfig): McpTargetDisplayFacts {
@@ -332,7 +373,12 @@ function mcpTargetDisplayFacts(target: ResolvedMcpConfig): McpTargetDisplayFacts
   const headerKeys = config.headers && typeof config.headers === 'object'
     ? Object.keys(config.headers as Record<string, unknown>).sort()
     : []
-  return { destination, args, url, queryKeys, envKeys, headerKeys }
+  const credentialEnv = remoteCredentialEnvReferences(config)
+  const credentialEnvBindings = [
+    ...credentialEnv.headerBindings,
+    ...(credentialEnv.bearerToken ? [`Bearer→${credentialEnv.bearerToken}`] : [])
+  ].sort()
+  return { destination, args, url, queryKeys, envKeys, headerKeys, credentialEnvBindings }
 }
 
 function scopeLabel(scope: string): string {
@@ -352,6 +398,7 @@ function compactScopeMarker(scope: string, count: number): string {
 function operationLabel(operation: McpExecutionOperation): string {
   if (operation === 'run') return '启动会话'
   if (operation === 'live') return '刷新 MCP 运行状态'
+  if (operation.startsWith('auth:')) return '认证单个 MCP'
   return '测试单个 MCP 连接'
 }
 
@@ -452,7 +499,7 @@ function mcpExecutionAuthorizationTargetBlock(
   target: ResolvedMcpConfig,
   groupMarker = ''
 ): AuthorizationTargetBlock {
-  const { destination, args, url, queryKeys, envKeys, headerKeys } = mcpTargetDisplayFacts(target)
+  const { destination, args, url, queryKeys, envKeys, headerKeys, credentialEnvBindings } = mcpTargetDisplayFacts(target)
   const transport = target.transport === 'http' ? 'HTTP' : target.transport
   const name = compactIdentity(target.name, 28)
   const marker = groupMarker ? `[${groupMarker}] ` : ''
@@ -468,6 +515,7 @@ function mcpExecutionAuthorizationTargetBlock(
   if (queryKeys.length > 0) lines.push(...wrappedKeyLines('query', queryKeys, url))
   if (envKeys.length > 0) lines.push(...wrappedKeyLines('env', envKeys, target.config.env))
   if (headerKeys.length > 0) lines.push(...wrappedKeyLines('headers', headerKeys, target.config.headers))
+  if (credentialEnvBindings.length > 0) lines.push(...wrappedKeyLines('凭据环境引用', credentialEnvBindings))
   return {
     scope: scopeLabel(target.scope),
     continuation: `• ${name}（续）`,

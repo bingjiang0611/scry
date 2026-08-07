@@ -13,10 +13,12 @@ import {
 } from '../../shared/runtime'
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
-import { authorizedMcpServers, listProviderMcp } from '../mcp-config'
+import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
-import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
+import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
+import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
+import { sanitizeMcpAuthError } from './mcp-auth-security'
 
 interface Cached<T> {
   data: T
@@ -32,6 +34,7 @@ interface QoderControlSession {
 }
 
 const PROBE_TTL_MS = 30_000
+const QODER_MCP_AUTH_TIMEOUT_MS = 120_000
 const MAX_PROJECT_COMMAND_BYTES = 256 * 1024
 let counter = 0
 const newId = (): string => `qoder-${Date.now().toString(36)}-${(counter++).toString(36)}`
@@ -363,7 +366,17 @@ async function qoderHookLog(pid: number): Promise<string> {
   return readFile(join(root, match, 'qodercli.log'), 'utf8')
 }
 
-function qoderMcpSnapshot(statuses: McpServerStatus[]): McpSnapshot {
+function qoderAuthenticationTargets(configured: McpSnapshot['configured']): string[] {
+  const enabledNames = new Map<string, number>()
+  for (const item of configured) {
+    if (item.enabled) enabledNames.set(item.name, (enabledNames.get(item.name) ?? 0) + 1)
+  }
+  return configured
+    .filter((item) => item.enabled && enabledNames.get(item.name) === 1 && item.transport === 'http' && item.targetId)
+    .map((item) => item.targetId!)
+}
+
+function qoderMcpSnapshot(statuses: McpServerStatus[], configured?: McpSnapshot['configured']): McpSnapshot {
   const runtime: McpLiveStatus[] = statuses.map((server) => ({
     name: server.name,
     status: server.status,
@@ -371,14 +384,18 @@ function qoderMcpSnapshot(statuses: McpServerStatus[]): McpSnapshot {
     serverVersion: server.serverInfo?.version,
     tools: server.tools?.length
   }))
+  const snapshotConfigured: McpSnapshot['configured'] = configured ?? statuses.map((server) => {
+    const config = server.config
+    const transport = config && 'type' in config ? config.type ?? 'stdio' : 'stdio'
+    const detail = config && 'url' in config ? config.url : config && 'command' in config ? config.command : server.error ?? server.status
+    return { name: server.name, scope: server.scope ?? 'qoder', transport, detail, enabled: server.status !== 'disabled' }
+  })
   return {
-    configured: statuses.map((server) => {
-      const config = server.config
-      const transport = config && 'type' in config ? config.type ?? 'stdio' : 'stdio'
-      const detail = config && 'url' in config ? config.url : config && 'command' in config ? config.command : server.error ?? server.status
-      return { name: server.name, scope: server.scope ?? 'qoder', transport, detail, enabled: server.status !== 'disabled' }
-    }),
-    runtime
+    configured: snapshotConfigured,
+    runtime,
+    operations: {
+      authenticate: qoderAuthenticationTargets(snapshotConfigured)
+    }
   }
 }
 
@@ -810,7 +827,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
     mcp: {
       snapshot: async (context, refresh = false, execution) => {
         const configured = listProviderMcp('qoder', context.cwd, homeDir, shellEnv())
-        const base: McpSnapshot = { configured, runtime: null }
+        const operations = { authenticate: qoderAuthenticationTargets(configured) }
+        const base: McpSnapshot = { configured, runtime: null, operations }
         if (!refresh) {
           return {
             ...capabilityReady(context, 'read', base),
@@ -819,7 +837,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           }
         }
         if (!configured.some((item) => item.enabled)) {
-          return capabilityReady(context, 'read', { configured, runtime: [] })
+          return capabilityReady(context, 'read', { configured, runtime: [], operations })
         }
         if (!execution) {
           return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 Qoder MCP 执行快照')
@@ -828,12 +846,97 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         const q = query({ prompt: prompt.stream, options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, execution) as never })
         try {
           await q.initializationResult()
-          return capabilityReady(context, 'read', qoderMcpSnapshot(await q.mcpServerStatus()))
+          return capabilityReady(context, 'read', qoderMcpSnapshot(await q.mcpServerStatus(), configured))
         } catch (error) {
-          return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
+          return capabilityUnknown<McpSnapshot>(context, 'read', sanitizeMcpAuthError(error))
         } finally {
           prompt.release()
           await Promise.resolve(q.close()).catch(() => {})
+        }
+      },
+      reauthenticate: async (context, targetId, execution, interaction: McpAuthInteraction) => {
+        const failed = (error: unknown, authenticated = false) => capabilityReady(context, 'read', {
+          ok: false,
+          status: authenticated ? 'authenticated-unverified' as const : 'failed' as const,
+          error: sanitizeMcpAuthError(error)
+        })
+        if (!execution) return failed('缺少绑定当前配置快照的 MCP 执行授权')
+        if (execution.cwd !== context.cwd) return failed('MCP 执行授权与当前工作目录不匹配')
+        const target = execution.targets.find((item) => item.targetId === targetId)
+        if (!target) return failed('已确认的 Qoder MCP 执行快照中不存在该目标')
+        if (!target.enabled) return failed(`Qoder MCP ${target.name} 当前已停用`)
+        if (!isRemoteMcpConfig(target.config)) return failed('stdio MCP 不支持 OAuth 重新认证')
+        if (execution.targets.some((item) => item.targetId !== targetId && item.enabled && item.name === target.name)) {
+          return failed(`Qoder 存在多个同名 MCP ${target.name}，无法安全绑定认证目标`)
+        }
+
+        let loopback: Awaited<ReturnType<McpAuthInteraction['prepareLoopbackCallback']>>
+        try {
+          loopback = await interaction.prepareLoopbackCallback()
+        } catch (error) {
+          return failed(error)
+        }
+
+        const prompt = heldPrompt()
+        const q = query({
+          prompt: prompt.stream,
+          options: {
+            ...qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, {
+              ...execution,
+              targets: [target]
+            }),
+            persistSession: false
+          } as never
+        })
+        let authenticated = false
+        let timedOut = false
+        let timer: NodeJS.Timeout | undefined
+        const assertActive = (): void => {
+          if (timedOut) throw new Error('等待 Qoder MCP 浏览器认证超时')
+        }
+        try {
+          return await Promise.race([
+            (async () => {
+              await q.initializationResult()
+              assertActive()
+              const auth = await q.mcpAuthenticate(target.name, loopback.redirectUri)
+              assertActive()
+              if (auth.requiresUserAction) {
+                if (!auth.authUrl) throw new Error('Qoder 未返回 OAuth 授权地址')
+                if (!isSafeOAuthAuthorizationUrl(auth.authUrl)) throw new Error('Qoder 返回了不安全的 OAuth 授权地址')
+                await interaction.openExternal(auth.authUrl)
+                assertActive()
+                await q.mcpSubmitOAuthCallbackUrl(target.name, await loopback.waitForCallback())
+                assertActive()
+              }
+              authenticated = true
+              const status = (await q.mcpServerStatus()).find((server) => server.name === target.name)
+              assertActive()
+              if (status?.status !== 'connected') {
+                throw new Error(status?.error || `Qoder MCP ${target.name} 认证后状态为 ${status?.status ?? 'unknown'}`)
+              }
+              return capabilityReady(context, 'read', { ok: true, status: 'authenticated' as const })
+            })(),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => {
+                timedOut = true
+                reject(new Error('等待 Qoder MCP 浏览器认证超时'))
+              }, QODER_MCP_AUTH_TIMEOUT_MS)
+              timer.unref()
+            })
+          ])
+        } catch (error) {
+          return failed(error, authenticated)
+        } finally {
+          if (timer) clearTimeout(timer)
+          try {
+            loopback.close()
+          } finally {
+            prompt.release()
+            const close = Promise.resolve(q.close()).catch(() => {})
+            if (timedOut) void close
+            else await close
+          }
         }
       }
     },

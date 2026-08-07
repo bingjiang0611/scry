@@ -1,6 +1,12 @@
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import { homedir } from 'node:os'
-import { capabilityReady, capabilityUnknown, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
+import {
+  capabilityReady,
+  capabilityUnknown,
+  type McpSnapshot,
+  type ProviderContext,
+  type SkillMeta
+} from '../../shared/provider'
 import type { BillingProvider } from '../../shared/billing'
 import {
   agentPermissionDecision,
@@ -20,12 +26,15 @@ import {
 } from '../../shared/trace'
 import { resolveRuntimeCliBin, shellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../cli-runtime'
-import { listProviderMcp } from '../mcp-config'
+import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { OpenCodeServerManager, sanitizeOpenCodeServerLog } from './opencode-server'
 import { effortOption, permissionOptions } from './run-controls'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
+import { sanitizeMcpAuthError } from './mcp-auth-security'
 
 let counter = 0
+const OPEN_CODE_MCP_AUTH_TIMEOUT_MS = 120_000
+const OPEN_CODE_MCP_VERIFY_TIMEOUT_MS = 15_000
 const newEvent = (
   runId: string,
   fields: Omit<TraceEvent, 'id' | 'runId' | 'ts'>,
@@ -450,7 +459,8 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
 async function openCodeMcpSnapshot(
   client: OpencodeClient,
   context: ProviderContext,
-  configured: McpSnapshot['configured']
+  configured: McpSnapshot['configured'],
+  authenticate: string[]
 ): Promise<McpSnapshot> {
   const statuses = await unwrap<Record<string, { status?: string; error?: string }>>(
     client.mcp.status({ directory: context.cwd }),
@@ -461,24 +471,43 @@ async function openCodeMcpSnapshot(
     runtime: Object.entries(statuses).map(([name, status]) => ({
       name,
       status:
-        status.status === 'needs_auth' || status.status === 'needs_client_registration'
+        status.status === 'needs_auth'
           ? 'needs-auth'
+          : status.status === 'needs_client_registration'
+            ? 'needs-client-registration'
           : status.status === 'connected'
             ? 'connected'
             : status.status === 'disabled'
               ? 'disabled'
               : 'failed'
-    }))
+    })),
+    operations: { authenticate }
   }
 }
 
-export function createOpenCodeAdapter(homeDir = homedir()): ProviderAdapter {
+function openCodeAuthenticationTargets(execution: AuthorizedMcpExecution | undefined): string[] {
+  if (!execution) return []
+  const nameCounts = new Map<string, number>()
+  for (const target of execution.targets) {
+    if (target.enabled) nameCounts.set(target.name, (nameCounts.get(target.name) ?? 0) + 1)
+  }
+  return execution.targets
+    .filter((target) =>
+      target.enabled
+      && nameCounts.get(target.name) === 1
+      && isRemoteMcpConfig(target.config)
+      && target.config.oauth !== false
+    )
+    .map((target) => target.targetId)
+}
+
+export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirectory?: string): ProviderAdapter {
   const executable = (): string | undefined => process.env.SCRY_OPENCODE_PATH?.trim() || resolveRuntimeCliBin('opencode')
   const managers = new Map<string, OpenCodeServerManager>()
   const managerFor = (cwd: string): OpenCodeServerManager => {
     let manager = managers.get(cwd)
     if (!manager) {
-      manager = new OpenCodeServerManager(executable)
+      manager = new OpenCodeServerManager(executable, privateMcpAuthDirectory)
       managers.set(cwd, manager)
     }
     return manager
@@ -489,7 +518,7 @@ export function createOpenCodeAdapter(homeDir = homedir()): ProviderAdapter {
   const modelCache = new Map<string, { expiresAt: number; catalog: AgentRunControlCatalog }>()
   const rememberFailure = (error: unknown): void => {
     lastErrorAt = Date.now()
-    lastError = error instanceof Error ? error.message : String(error)
+    lastError = sanitizeMcpAuthError(error)
   }
 
   const clientFor = async (context: ProviderContext, mcpExecution?: AuthorizedMcpExecution): Promise<OpencodeClient> => {
@@ -721,22 +750,110 @@ export function createOpenCodeAdapter(homeDir = homedir()): ProviderAdapter {
     mcp: {
       snapshot: async (context, refresh = false, execution) => {
         const configured = listProviderMcp('opencode', context.cwd, homeDir, shellEnv())
+        const operations = { authenticate: openCodeAuthenticationTargets(execution) }
         if (!refresh) {
           return {
-            ...capabilityReady(context, 'read', { configured, runtime: null }),
+            ...capabilityReady(context, 'read', { configured, runtime: null, operations }),
             state: 'degraded',
             reason: '配置已读取；刷新后才会启动隔离 OpenCode server 并读取已授权 MCP 运行状态'
           }
         }
         if (!configured.some((item) => item.enabled)) {
-          return capabilityReady(context, 'read', { configured, runtime: [] })
+          return capabilityReady(context, 'read', { configured, runtime: [], operations })
         }
         if (!execution) return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 OpenCode MCP 执行快照')
         try {
-          return capabilityReady(context, 'read', await openCodeMcpSnapshot(await clientFor(context, execution), context, configured))
+          return capabilityReady(context, 'read', await openCodeMcpSnapshot(
+            await clientFor(context, execution),
+            context,
+            configured,
+            operations.authenticate
+          ))
         } catch (error) {
           rememberFailure(error)
-          return capabilityUnknown<McpSnapshot>(context, 'read', String((error as Error).message))
+          return capabilityUnknown<McpSnapshot>(context, 'read', sanitizeMcpAuthError(error))
+        }
+      },
+      reauthenticate: async (context, targetId, execution) => {
+        const failed = (error: unknown, authenticated = false) => capabilityReady(context, 'read', {
+          ok: false,
+          status: authenticated ? 'authenticated-unverified' as const : 'failed' as const,
+          error: sanitizeMcpAuthError(error)
+        })
+        if (!context.cwd) return failed('OpenCode 需要工作目录')
+        if (!execution) return failed('缺少绑定当前配置快照的 MCP 执行授权')
+        if (execution.cwd !== context.cwd) return failed('MCP 执行授权与当前工作目录不匹配')
+        const target = execution.targets.find((item) => item.targetId === targetId)
+        if (!target) return failed('已确认的 OpenCode MCP 执行快照中不存在该目标')
+        if (!target.enabled) return failed(`OpenCode MCP ${target.name} 当前已停用`)
+        if (!isRemoteMcpConfig(target.config)) return failed('stdio MCP 不支持 OAuth 重新认证')
+        if (target.config.oauth === false) return failed(`OpenCode MCP ${target.name} 已显式停用 OAuth`)
+        if (execution.targets.some((item) => item.targetId !== targetId && item.enabled && item.name === target.name)) {
+          return failed(`OpenCode 存在多个同名 MCP ${target.name}，无法安全绑定认证目标`)
+        }
+        const authExecution: AuthorizedMcpExecution = {
+          ...execution,
+          fingerprint: `${execution.fingerprint}:auth:${target.targetId}`,
+          targets: [target]
+        }
+        const authManager = new OpenCodeServerManager(executable, privateMcpAuthDirectory, {
+          completeTargetInventory: false
+        })
+        let persisted = false
+        try {
+          const client = (await authManager.ensure(context.cwd, authExecution)).client
+          let timer: NodeJS.Timeout | undefined
+          try {
+            await Promise.race([
+              unwrap(client.mcp.auth.authenticate({ name: target.name, directory: context.cwd }), 'mcp.auth.authenticate'),
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => {
+                  reject(new Error('等待 OpenCode MCP 浏览器认证超时'))
+                }, OPEN_CODE_MCP_AUTH_TIMEOUT_MS)
+                timer.unref()
+              })
+            ])
+          } finally {
+            if (timer) clearTimeout(timer)
+          }
+          await authManager.persistMcpAuth(target, execution.cwd)
+          persisted = true
+          let verificationTimer: NodeJS.Timeout | undefined
+          let snapshot: McpSnapshot
+          try {
+            snapshot = await Promise.race([
+              (async () => {
+                await unwrap(client.mcp.connect({ name: target.name, directory: context.cwd }), 'mcp.connect')
+                return await openCodeMcpSnapshot(client, context, [
+                  {
+                    targetId: target.targetId,
+                    name: target.name,
+                    scope: 'authorized',
+                    transport: 'http',
+                    detail: String(target.config.url ?? ''),
+                    enabled: true
+                  }
+                ], [target.targetId])
+              })(),
+              new Promise<never>((_resolve, reject) => {
+                verificationTimer = setTimeout(() => {
+                  reject(new Error('OpenCode MCP 认证已完成，但连接状态校验超时'))
+                }, OPEN_CODE_MCP_VERIFY_TIMEOUT_MS)
+                verificationTimer.unref()
+              })
+            ])
+          } finally {
+            if (verificationTimer) clearTimeout(verificationTimer)
+          }
+          const status = snapshot.runtime?.find((item) => item.name === target.name)
+          if (status?.status !== 'connected') {
+            return failed(`OpenCode MCP ${target.name} 认证后状态为 ${status?.status ?? 'unknown'}`, true)
+          }
+          return capabilityReady(context, 'read', { ok: true, status: 'authenticated' as const })
+        } catch (error) {
+          return failed(error, persisted)
+        } finally {
+          authManager.close()
         }
       }
     },

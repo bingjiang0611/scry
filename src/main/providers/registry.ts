@@ -3,6 +3,7 @@ import {
   capabilityUnavailable,
   type AccountSnapshot,
   type CapabilityEnvelope,
+  type McpAuthResult,
   type McpSnapshot,
   type McpTestResult,
   type ProviderCommand,
@@ -12,7 +13,13 @@ import {
   type SkillMeta
 } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
-import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunHandle, ProviderRunRequest } from './types'
+import type {
+  AuthorizedMcpExecution,
+  McpAuthInteraction,
+  ProviderAdapter,
+  ProviderRunHandle,
+  ProviderRunRequest
+} from './types'
 import type { CodexHookInspection } from '../codex-hook-trust'
 
 export class ProviderRegistry {
@@ -126,6 +133,17 @@ export class ProviderRegistry {
   ): Promise<CapabilityEnvelope<McpTestResult>> {
     return this.disabled<McpTestResult>(context) ?? this.get(context.providerId).mcp?.test?.(context, name, execution) ??
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 不支持由 Scry 直接测试 MCP 工具'))
+  }
+
+  reauthenticateMcp(
+    context: ProviderContext,
+    targetId: string,
+    execution: AuthorizedMcpExecution | undefined,
+    interaction: McpAuthInteraction
+  ): Promise<CapabilityEnvelope<McpAuthResult>> {
+    return this.disabled<McpAuthResult>(context) ??
+      this.get(context.providerId).mcp?.reauthenticate?.(context, targetId, execution, interaction) ??
+      Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 不支持由 Scry 发起 MCP 认证'))
   }
 
   listCommands(context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>> {
