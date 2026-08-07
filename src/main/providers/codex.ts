@@ -312,6 +312,18 @@ function traceFromItem(
   const item = record(raw)
   const type = String(item.type ?? '')
   const id = typeof item.id === 'string' ? item.id : undefined
+  if (type === 'contextCompaction') {
+    if (!completed) return []
+    const compaction = id ? { providerEventId: id } : {}
+    return [newEvent(runId, {
+      kind: 'harness',
+      stage: 'context_compaction',
+      compaction,
+      input: compaction,
+      runtimeMetadata: { source: 'codex_context_compaction', codexItemId: id },
+      ...context
+    })]
+  }
   if (type === 'commandExecution') {
     const command = String(item.command ?? '')
     const input = { command, cwd: item.cwd }

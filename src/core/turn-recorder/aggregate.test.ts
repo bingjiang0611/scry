@@ -4,6 +4,34 @@ import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 
 describe('aggregateTurnEvidence', () => {
+  it('把 compact 事件保留为逐轮结构化证据', () => {
+    const evidence = aggregateTurnEvidence({ events: [{
+      id: 'compact-1',
+      ts: '2026-01-01T00:00:00.000Z',
+      runId: 'run-1',
+      kind: 'harness',
+      stage: 'context_compaction',
+      durationMs: 250,
+      agentId: 'child-1',
+      compaction: { trigger: 'auto', preTokens: 100, postTokens: 20 }
+    }] })
+
+    expect(evidence.compactions).toEqual({
+      status: 'available',
+      quality: 'exact',
+      source: ['trace_events'],
+      value: [{
+        eventId: 'compact-1',
+        at: '2026-01-01T00:00:00.000Z',
+        trigger: 'auto',
+        preTokens: 100,
+        postTokens: 20,
+        durationMs: 250,
+        agentId: 'child-1'
+      }]
+    })
+  })
+
   it('区分真实零调用与 Provider 不可观测', () => {
     const exact = aggregateTurnEvidence({ userText: 'hello', events: [], observable: { tools: true } })
     const unavailable = aggregateTurnEvidence({ userText: 'hello', events: [], observable: { tools: false } })

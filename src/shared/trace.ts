@@ -313,6 +313,15 @@ export interface UsageStats {
   error?: string
 }
 
+export type CompactionTrigger = 'auto' | 'manual'
+
+export interface ContextCompaction {
+  trigger?: CompactionTrigger
+  preTokens?: number
+  postTokens?: number
+  providerEventId?: string
+}
+
 export interface TraceEvent {
   id: string
   ts: string
@@ -374,6 +383,7 @@ export interface TraceEvent {
   providerStopReason?: string
   runtimeMetadata?: Record<string, unknown>
   intervention?: AgentIntervention
+  compaction?: ContextCompaction
 }
 
 // 工具名 → kind 分类

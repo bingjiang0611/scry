@@ -678,6 +678,50 @@ describe('Codex provider adapter', () => {
     })
   })
 
+  it('records a completed contextCompaction item exactly once', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-compact' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-compact' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-compact',
+      prompt: 'continue',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    const params = {
+      threadId: 'thread-compact',
+      turnId: 'turn-compact',
+      item: { id: 'compact-item-1', type: 'contextCompaction' }
+    }
+    notify?.('item/started', params)
+    notify?.('item/completed', params)
+    notify?.('turn/completed', {
+      threadId: 'thread-compact',
+      turnId: 'turn-compact',
+      turn: { id: 'turn-compact', status: 'completed' }
+    })
+    await handle.promise
+
+    expect(events.filter((event) => event.stage === 'context_compaction')).toEqual([
+      expect.objectContaining({
+        kind: 'harness',
+        compaction: { providerEventId: 'compact-item-1' }
+      })
+    ])
+  })
+
   it('preserves a native output-limit completion as an incomplete result', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     appServer.onNotification.mockImplementation((listener) => {

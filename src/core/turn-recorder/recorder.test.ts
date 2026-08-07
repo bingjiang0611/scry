@@ -192,6 +192,9 @@ describe('turn recorder state machine', () => {
     expect(record.user.value?.text).toBe('/rate-native-rate-workflow 84959911')
     expect(record.assistant.value?.text).toBe('compact 前compact 后')
     expect(record.assistant.value?.text).not.toContain('synthetic summary')
+    expect(record.compactions?.value).toEqual([
+      expect.objectContaining({ eventId: expect.any(String) })
+    ])
   })
 
   it('Claude 三条 task-notification 延续首轮，最终只提交两个真实轮次并保留原始 slash prompt', async () => {
@@ -758,6 +761,39 @@ describe('lifecycle/transcript merge', () => {
 })
 
 describe('Codex rollout recorder evidence', () => {
+  it('只按 context_compacted 记录一次 Codex rollout compact', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'compact-rollout.jsonl')
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'codex-turn-compact' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'continue' } },
+      { timestamp: '2026-07-19T12:00:00.100Z', type: 'event_msg', payload: { type: 'context_compacted' } },
+      { timestamp: '2026-07-19T12:00:00.101Z', type: 'response_item', payload: { type: 'compaction', encrypted_content: 'opaque' } },
+      { timestamp: '2026-07-19T12:00:01.000Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'codex-turn-compact' } }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('c1', { prompt: 'continue', turn_id: 'codex-turn-compact', rollout_path: rollout })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('c1', {
+        turn_id: 'codex-turn-compact',
+        rollout_path: rollout,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.compactions?.value).toHaveLength(1)
+  })
+
   it('双 hook 入口重放同一 Codex tool lifecycle 时按 call_id 只记录一次', async () => {
     const root = await workspace()
     const rollout = join(root, 'duplicate-lifecycle-rollout.jsonl')
@@ -1573,6 +1609,39 @@ describe('record store cursor and recovery semantics', () => {
     const source = await readFile(join(root, '.scry', 'records', names[0]), 'utf8')
     expect(source).not.toContain('reportTraces')
     expect(source).not.toContain('upload')
+  })
+})
+
+describe('OpenCode compact lifecycle evidence', () => {
+  it('把 session.next.compaction.ended 写进 CLI Turn Record', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'chat.message',
+      workspace: root,
+      payload: payload('o1', { prompt: 'continue' })
+    })
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'session.next.compaction.ended',
+      workspace: root,
+      payload: payload('o1', {
+        messageID: 'compact-message-1',
+        reason: 'auto',
+        timestamp: '2026-07-19T12:00:00.500Z'
+      })
+    })
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'session.idle',
+      workspace: root,
+      payload: payload('o1', { timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.compactions?.value).toEqual([
+      expect.objectContaining({ trigger: 'auto' })
+    ])
   })
 })
 

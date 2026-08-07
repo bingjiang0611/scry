@@ -117,6 +117,16 @@ interface TurnUsage {
   model?: string
 }
 
+interface TurnCompaction {
+  eventId: string
+  at: string
+  trigger?: 'auto' | 'manual'
+  preTokens?: number
+  postTokens?: number
+  durationMs?: number
+  agentId?: string
+}
+
 interface AgentTurnRecord {
   schemaVersion: 1
   recordKind: 'agent_turn'
@@ -140,6 +150,7 @@ interface AgentTurnRecord {
   mcps: Evidence<TurnCall[]>
   hooks: Evidence<TurnHookCall[]>
   usage: Evidence<TurnUsage>
+  compactions?: Evidence<TurnCompaction[]>
   modelSegments?: Evidence<Array<{
     order: number
     at: string
@@ -214,6 +225,8 @@ Recorder handler 由 sample-workspace 生成器在 Provider 可见的 command �
 `turns summary` 默认选择最新 session，以 Scry 纵览的四类互斥逻辑调用、人工介入、Hook 实例/生命周期、结构化/推断文件足迹和 result usage 口径输出；显式传 `<sessionId>` 可选择其他会话，只有 `--all` 才汇总整个 workspace。人工介入按已回答或用户主动取消计数，Provider 自动取消只进入 requested，不虚增人工介入；旧记录缺少分类、事件顺序、介入事实、Hook 原始生命周期或上下文窗口时保留推断/不可用标记，不伪装成 exact 或 0。
 
 `modelSegments` 是向后兼容的可选证据：连续流式 delta 合并为一段，最终 snapshot 与同一 delta 串相等时去重；可见过程文字与 Provider 明文暴露的 thinking 按原始 `order` 保存，不尝试解密或推断未暴露的内部思维。`turns timeline <sequence|recordId>` 通过同一 `order` 与 Tool、Skill、MCP、子 Agent 生命周期交错输出；旧记录缺少该字段时明确返回 `unavailable`。
+
+`compactions` 同样是向后兼容的可选证据：Claude/Qoder 取 `compact_boundary`，Codex 取完成态 `contextCompaction`（历史 rollout 取 `context_compacted`），OpenCode 取 `session.next.compaction.ended`。started、delta、summary/response 两侧不重复计数；`turns list` 输出逐轮次数，`turns summary` 汇总总数及 auto/manual 触发方式。旧记录缺少该字段时返回 `unavailable`，不会误报为 0。
 
 ## 8. 配置、范围与无发布止损
 

@@ -13,6 +13,40 @@ function ctx(): NormalizeCtx {
 }
 
 describe('normalizeSdkMessage', () => {
+  it('把 Claude/Qoder compact boundary 归一化为一次完成态 compact', () => {
+    expect(normalizeSdkMessage({
+      type: 'system',
+      subtype: 'compact_boundary',
+      uuid: 'compact-1',
+      compact_metadata: {
+        trigger: 'auto',
+        pre_tokens: 190_000,
+        post_tokens: 12_000,
+        duration_ms: 321
+      }
+    }, ctx())).toEqual([
+      expect.objectContaining({
+        kind: 'harness',
+        stage: 'context_compaction',
+        durationMs: 321,
+        compaction: {
+          trigger: 'auto',
+          preTokens: 190_000,
+          postTokens: 12_000,
+          providerEventId: 'compact-1'
+        }
+      })
+    ])
+    expect(normalizeSdkMessage({
+      type: 'system',
+      subtype: 'compact_boundary',
+      compactMetadata: { trigger: 'manual', preTokens: 80_000, postTokens: 9_000 }
+    }, ctx())[0]).toMatchObject({
+      stage: 'context_compaction',
+      compaction: { trigger: 'manual', preTokens: 80_000, postTokens: 9_000 }
+    })
+  })
+
   it('把 Provider 本地 slash 命令输出显示为非计费助手文本', () => {
     const [event] = normalizeSdkMessage({
       type: 'system',
@@ -737,6 +771,7 @@ describe('parseTranscriptToTurns', () => {
       'compact 前',
       'compact 后'
     ])
+    expect(turns[0].items.filter((event) => event.stage === 'context_compaction')).toHaveLength(1)
   })
 
   it('历史 transcript 保留 skill 注入事件', () => {

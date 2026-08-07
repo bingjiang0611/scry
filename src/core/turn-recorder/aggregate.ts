@@ -9,6 +9,7 @@ import {
   unavailable,
   type TurnCall,
   type TurnCallStatus,
+  type TurnCompaction,
   type TurnEvidence,
   type TurnHookCall,
   type TurnModelSegment,
@@ -296,6 +297,19 @@ export function aggregateTurnEvidence(args: {
   const usage = usageFrom(args.events)
   const modelTiming = deriveModelTiming(args.events)
   const interventions = args.events.flatMap((event) => event.intervention ? [event.intervention] : [])
+  const compactions: TurnCompaction[] = args.events.flatMap((event) => {
+    if (event.kind !== 'harness' || event.stage !== 'context_compaction') return []
+    return [{
+      eventId: event.id,
+      at: event.ts,
+      ...(event.compaction?.trigger ? { trigger: event.compaction.trigger } : {}),
+      ...(event.compaction?.preTokens != null ? { preTokens: event.compaction.preTokens } : {}),
+      ...(event.compaction?.postTokens != null ? { postTokens: event.compaction.postTokens } : {}),
+      ...(event.durationMs != null ? { durationMs: event.durationMs } : {}),
+      ...(event.agentId ? { agentId: event.agentId } : {})
+    }]
+  })
+
   return {
     user: args.userText != null
       ? available({ text: args.userText, textHash: hash(args.userText) }, [source])
@@ -317,6 +331,7 @@ export function aggregateTurnEvidence(args: {
       : usage
         ? available(usage, [source])
         : unavailable('no authoritative usage event was captured', [source]),
+    compactions: available(compactions, [source]),
     ...(modelTiming
       ? {
           modelTiming:

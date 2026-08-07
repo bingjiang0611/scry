@@ -96,6 +96,32 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     })
   })
 
+  it('compact 作为 harness span 落 SQLite，可直接按 stage 计数', () => {
+    const spans = spanRowsFromItems({
+      runId: 'run-1',
+      sessionId: 'session-1',
+      cwd: '/repo',
+      nowMs: 1,
+      items: [ev({
+        id: 'compact-1',
+        kind: 'harness',
+        stage: 'context_compaction',
+        durationMs: 321,
+        compaction: { trigger: 'auto', preTokens: 100, postTokens: 20 }
+      })]
+    }).spans
+
+    expect(spans).toHaveLength(1)
+    expect(asSpan(spans[0])).toMatchObject({
+      id: 'compact-1',
+      kind: 'harness',
+      stage: 'context_compaction',
+      name: 'auto',
+      duration_ms: 321
+    })
+    expect(String(asSpan(spans[0]).input_preview)).toContain('"preTokens":100')
+  })
+
   it('Read/Write 投影 file_ops（source=tool-input, confidence=exact）', () => {
     const items = [ev({ id: 's1', kind: 'tool', stage: 'tool:Read', tool: 'Read', fileOp: 'read', filePath: '/a/b.ts' })]
     const { fileOps } = spanRowsFromItems({ runId: 'run-1', sessionId: 'sess', items, nowMs: 1 })

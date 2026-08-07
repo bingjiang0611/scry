@@ -43,6 +43,27 @@ describe('AgentTurnRecord model timing compatibility', () => {
     expect(isAgentTurnRecord(record())).toBe(true)
   })
 
+  it('accepts valid optional compactions and rejects malformed token counts', () => {
+    const valid = record()
+    valid.compactions = {
+      status: 'available',
+      quality: 'exact',
+      source: ['fixture'],
+      value: [{
+        eventId: 'compact-1',
+        at: '2026-01-01T00:00:00.000Z',
+        trigger: 'auto',
+        preTokens: 100,
+        postTokens: 20
+      }]
+    }
+    expect(isAgentTurnRecord(valid)).toBe(true)
+
+    const malformed = structuredClone(valid)
+    ;((malformed.compactions as { value: Array<{ preTokens: number }> }).value)[0].preTokens = -1
+    expect(isAgentTurnRecord(malformed)).toBe(false)
+  })
+
   it('accepts valid optional timing and rejects malformed timing instead of treating it as zero', () => {
     const valid = record()
     valid.modelTiming = {
