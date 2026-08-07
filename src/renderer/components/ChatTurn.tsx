@@ -581,6 +581,12 @@ interface TurnHookPhase {
   scripts: TurnHookScript[]
 }
 
+interface HookPhaseTiming {
+  durationMs: number
+  timedInstances: number
+  totalInstances: number
+}
+
 function latestHookEvent(a: TraceEvent | undefined, b: TraceEvent | undefined): TraceEvent | undefined {
   if (!a) return b
   if (!b) return a
@@ -703,6 +709,50 @@ function aggregateTurnHookPhases(summary: HookSummary): TurnHookPhase[] {
   }))
 }
 
+function formatHookPhaseDuration(ms: number): string {
+  if (ms < 1_000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(ms < 10_000 ? 1 : 0)}s`
+  const seconds = Math.round(ms / 1_000)
+  const minutes = Math.floor(seconds / 60)
+  return minutes < 60
+    ? `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
+    : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+}
+
+function hookPhaseTiming(phase: TurnHookPhase): HookPhaseTiming | undefined {
+  const instances = new Map<string, HookScriptRow['instances'][number]>()
+  for (const instance of phase.scripts.flatMap((script) => script.instances)) {
+    const previous = instances.get(instance.key)
+    if (!previous || previous.durationMs == null && instance.durationMs != null) instances.set(instance.key, instance)
+  }
+  const intervals = [...instances.values()].flatMap((instance): Array<[number, number]> => {
+    let end = instance.completedAtMs
+    if (end == null && instance.last.stage === 'hook_response') {
+      const timestamp = Date.parse(instance.last.ts)
+      if (Number.isFinite(timestamp)) end = timestamp
+    }
+    let start = instance.startedAtMs
+    if (end != null && instance.durationMs != null && instance.durationSource === 'provider') {
+      start = end - instance.durationMs
+    }
+    return start != null && end != null && end >= start ? [[start, end]] : []
+  }).sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  if (intervals.length === 0) return undefined
+
+  let durationMs = 0
+  let [start, end] = intervals[0]
+  for (const [nextStart, nextEnd] of intervals.slice(1)) {
+    if (nextStart <= end) {
+      end = Math.max(end, nextEnd)
+    } else {
+      durationMs += end - start
+      start = nextStart
+      end = nextEnd
+    }
+  }
+  return { durationMs: durationMs + end - start, timedInstances: intervals.length, totalInstances: instances.size }
+}
+
 export function HooksSummary({
   summary,
   title = '本轮 Hook'
@@ -725,15 +775,23 @@ export function HooksSummary({
       <div className="turn-hooks-body">
         {phases.map((phase, phaseIndex) => {
           const phaseTone = phase.errors > 0 ? 'bad' : phase.cancelled > 0 || phase.pending > 0 ? 'warn' : 'ok'
+          const timing = hookPhaseTiming(phase)
+          const timingLabel = timing ? `耗时 ~${formatHookPhaseDuration(timing.durationMs)}` : '耗时 —'
+          const timingTitle = timing
+            ? `周期占用墙钟约 ${formatHookPhaseDuration(timing.durationMs)}；按 ${timing.timedInstances}/${timing.totalInstances} 个处理器实例的运行区间合并去重，并行实例不重复计时。`
+            : '未获得可配对的 Hook 开始与结束时间，无法可靠计算周期耗时。'
           return (
             <details className="turn-hook-phase" key={phase.event}>
               <summary className="turn-hook-phase-row">
                 <span className="hook-phase-order">{String(phaseIndex + 1).padStart(2, '0')}</span>
                 <span className={`sdot ${phaseTone}`} />
                 <span className="hook-phase-event">{phase.event}</span>
-                <span className="hook-phase-count">
-                  {phase.triggerRuns != null && <>{phase.triggerRuns} 次触发 · </>}
-                  {phase.logicalRuns} 次调用
+                <span className="hook-phase-stats">
+                  <span className="hook-phase-duration" title={timingTitle}>{timingLabel}</span>
+                  <span className="hook-phase-count">
+                    {phase.triggerRuns != null && <>{phase.triggerRuns} 次触发 · </>}
+                    {phase.logicalRuns} 次调用
+                  </span>
                 </span>
                 <Icon name="chevronRight" className="hook-row-chev" />
               </summary>
