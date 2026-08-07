@@ -10,6 +10,13 @@ function fmtTok(n: number | null): string {
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
   return String(n)
 }
+function fmtCoveredTok(n: number | null, knownTurns: number, turns: number): string {
+  if (n == null || knownTurns === 0) return 'unknown'
+  return `${knownTurns < turns ? '≥ ' : ''}${fmtTok(n)}`
+}
+function fmtKnownTokenLowerBound(n: number | null): string {
+  return n == null ? 'unknown' : `≥ ${fmtTok(n)}`
+}
 function fmtMs(ms: number | null): string {
   if (ms == null) return 'unknown'
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
@@ -91,15 +98,26 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
   return (
     <main className="a-pane">
       <div className="a-hero">
-        <h2>跨会话分析</h2>
-        <div className="sub">本地 SQLite · 统计窗口 30 / 60 / 90 天 · 未知值不按 0 计</div>
+        <div className="a-hero-copy">
+          <span className="surface-kicker">01 · LOCAL EVIDENCE LEDGER</span>
+          <h2>跨会话分析</h2>
+          <p>每个数字都带着范围、来源与覆盖率。</p>
+          <div className="sub">本地 SQLite · 统计窗口 30 / 60 / 90 天 · 未知值不按 0 计</div>
+        </div>
+        {derived && !empty && (
+          <div className="a-hero-reading" aria-label="全时段已知 Token 下界">
+            <span>ALL-TIME KNOWN LOWER BOUND</span>
+            <strong>{fmtKnownTokenLowerBound(derived.tokens)}</strong>
+            <em>{stats.totals.turns.toLocaleString()} turns · SQLite 汇总已上报字段</em>
+          </div>
+        )}
       </div>
 
       {empty || !derived ? <div className="a-gap">还没有跨会话数据——完成几个 Provider 会话后再看这里。</div> : <>
         <div className="kpi-strip">
-          <div className="kpi"><div className="lbl">累计 Token</div><div className="val accent">{fmtTok(derived.tokens)}</div><div className="sub">Provider 上报 · 全时段已知值</div></div>
+          <div className="kpi"><div className="lbl">累计 Token</div><div className="val accent">{fmtKnownTokenLowerBound(derived.tokens)}</div><div className="sub">Provider 上报 · 全时段已知下界</div></div>
           <div className="kpi"><div className="lbl">会话轮次</div><div className="val">{stats.totals.turns}</div><div className="sub">近 30 天 {comparison?.current.turns ?? 0} · {fmtPct(comparison?.change.turnsPct ?? null)}</div></div>
-          <div className="kpi"><div className="lbl">近 30 天 Token</div><div className="val">{fmtTok(comparison?.current.tokens ?? null)}</div><div className="sub"><span className="a-delta">{fmtPct(comparison?.change.tokensPct ?? null)}</span> · {comparison?.current.tokenKnownTurns ?? 0}/{comparison?.current.turns ?? 0} 完整</div></div>
+          <div className="kpi"><div className="lbl">近 30 天 Token</div><div className="val">{fmtCoveredTok(comparison?.current.tokens ?? null, comparison?.current.tokenKnownTurns ?? 0, comparison?.current.turns ?? 0)}</div><div className="sub"><span className="a-delta">{fmtPct(comparison?.change.tokensPct ?? null)}</span> · {comparison?.current.tokenKnownTurns ?? 0}/{comparison?.current.turns ?? 0} 完整</div></div>
           <div className="kpi"><div className="lbl">工具调用</div><div className="val">{derived.toolCalls.toLocaleString()}</div><div className="sub">近 30 天 {comparison?.current.toolCalls ?? 0} · {fmtPct(comparison?.change.toolCallsPct ?? null)}</div></div>
           <div className="kpi"><div className="lbl">危险操作</div><div className="val bad">{derived.dangerN}</div><div className="sub">近 30 天 {comparison?.current.danger ?? 0} · {fmtPct(comparison?.change.dangerPct ?? null)}</div></div>
         </div>
@@ -159,7 +177,7 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
               <div className="h"><h3>缓存 Token · 近 30 天</h3><span className="sub">按 Provider 语义计算</span></div>
               {cacheReuse.map((row) => {
                 const formula = row.denominator === 'separate_input' ? 'read / (input + read + write)' : row.denominator === 'input_includes_cache' ? 'cached input / input' : '上游分母不可证明'
-                return <div className="a-cache-row" key={row.providerId}>
+                return <div className="a-cache-row" data-provider={row.providerId} key={row.providerId}>
                   <b>{providerLabel[row.providerId]}</b><strong>{row.reuseRate == null ? 'unknown' : `${(row.reuseRate * 100).toFixed(1)}%`}</strong>
                   <span>read {fmtTok(row.cacheReadTokens)} · write {fmtTok(row.cacheWriteTokens)} · comparable {row.comparableTurns}/{row.turns}</span><em>{formula}</em>
                 </div>
@@ -170,13 +188,13 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
           <div className="col">
             {derived.models.length > 0 && <section className="d-card">
               <div className="h"><h3>模型 Token 分布</h3><span className="sub">输入 + 输出</span></div>
-              <div className="a-donutwrap"><div className="a-donut" style={{ background: derived.conic }}><div className="center"><div className="t">{fmtTok(derived.tokens)}</div><div className="u">Token</div></div></div><div className="a-legend">{derived.models.map((model) => <div className="item" key={model.model}><span className="sw" style={{ background: modelColor(model.model) }} />{model.model}<b>{fmtTok(model.tin == null && model.tout == null ? null : (model.tin ?? 0) + (model.tout ?? 0))}</b></div>)}</div></div>
+              <div className="a-donutwrap"><div className="a-donut" style={{ background: derived.conic }}><div className="center"><div className="t">{fmtKnownTokenLowerBound(derived.tokens)}</div><div className="u">已知 Token</div></div></div><div className="a-legend">{derived.models.map((model) => <div className="item" key={model.model}><span className="sw" style={{ background: modelColor(model.model) }} />{model.model}<b>{fmtTok(model.tin == null && model.tout == null ? null : (model.tin ?? 0) + (model.tout ?? 0))}</b></div>)}</div></div>
             </section>}
 
             <section className="d-card">
               <div className="h"><h3>Provider 覆盖 · 近 30 天</h3><span className="sub">已知值 / 轮次 · 已映射 {providerCoverage.reduce((sum, row) => sum + row.turns, 0)}/{comparison?.current.turns ?? 0}</span></div>
               <div className="a-coverage-head"><span>Provider</span><span>in</span><span>out</span><span>cache R</span><span>cache W</span><span>danger</span></div>
-              {providerCoverage.map((row) => <div className="a-coverage-row" key={row.providerId}><b>{providerLabel[row.providerId]}</b><span>{row.inputKnownTurns}/{row.turns}</span><span>{row.outputKnownTurns}/{row.turns}</span><span>{row.cacheReadKnownTurns}/{row.turns}</span><span>{row.cacheWriteKnownTurns}/{row.turns}</span><em className={row.dangerCoverage}>{row.dangerCoverage}</em></div>)}
+              {providerCoverage.map((row) => <div className="a-coverage-row" data-provider={row.providerId} key={row.providerId}><b>{providerLabel[row.providerId]}</b><span>{row.inputKnownTurns}/{row.turns}</span><span>{row.outputKnownTurns}/{row.turns}</span><span>{row.cacheReadKnownTurns}/{row.turns}</span><span>{row.cacheWriteKnownTurns}/{row.turns}</span><em className={row.dangerCoverage}>{row.dangerCoverage}</em></div>)}
             </section>
 
             {derived.proj.length > 0 && <section className="d-card">

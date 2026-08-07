@@ -2,7 +2,7 @@
 // ribbon 时间条 + 4 KPI 对比 + 段卡（token/api/工具/文件，全真实数据）。
 // 数据走 aggregateSegmentsRich（renderer 纯函数，turn 粒度归集 token）——精确 active_skill 待后端 PR#7。
 import { useMemo } from 'react'
-import { aggregateSegmentsRich, fmtTok } from '../format'
+import { aggregateSegmentsRich, fmtTokenCoverage } from '../format'
 import type { RichSegment, Turn } from '../format'
 import { Icon } from './primitives/Icon'
 
@@ -56,13 +56,26 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
   }
 
   // 4 KPI：最高 token 段 / 最慢段 / 最多工具 / 效率最差
-  const tokenHeaviest = [...segments].sort((a, b) => b.totalTokens - a.totalTokens)[0]
+  const tokenHeaviest = [...segments]
+    .filter((segment) => segment.totalTokens != null)
+    .sort((a, b) => (b.totalTokens ?? 0) - (a.totalTokens ?? 0))[0]
   const slowest = [...segments]
     .filter((segment) => segment.apiMs != null)
     .sort((a, b) => (b.apiMs ?? 0) - (a.apiMs ?? 0))[0]
   const mostTools = [...segments].sort((a, b) => b.tools - a.tools)[0]
   const worst = [...segments].filter((s) => s.effFactor > 1).sort((a, b) => b.effFactor - a.effFactor)[0]
-  const tokenPct = (s: RichSegment): number => (rep.totalTokens > 0 ? Math.round((s.totalTokens / rep.totalTokens) * 100) : 0)
+  const tokenPct = (s: RichSegment): number | null =>
+    rep.totalTokens != null &&
+    rep.totalTokens > 0 &&
+    rep.tokenKnownTurns === rep.tokenTotalTurns &&
+    s.totalTokens != null &&
+    s.tokenKnownTurns === s.tokenTotalTurns
+      ? Math.round((s.totalTokens / rep.totalTokens) * 100)
+      : null
+  const tokenPctLabel = (s: RichSegment): string => {
+    const pct = tokenPct(s)
+    return pct == null ? '—' : `${pct}%`
+  }
 
   return (
     <main className="seg-pane">
@@ -74,7 +87,8 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
         <div className="seg-ribbon">
           <h2>会话切成 {segments.length} 段</h2>
           <div className="sub">
-            {rep.sessionTurns} turns · {fmtDur(rep.totalApiMs)} 总 API · {fmtTok(rep.totalTokens)} tok · skill 切换{' '}
+            {rep.sessionTurns} turns · {fmtDur(rep.totalApiMs)} 总 API ·{' '}
+            {fmtTokenCoverage(rep.totalTokens, rep.tokenKnownTurns, rep.tokenTotalTurns)} tok · skill 切换{' '}
             {rep.skillSwitches} 次 · subagent {rep.subagents} 次
           </div>
           <div className="seg-bar">
@@ -112,8 +126,12 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
         <div className="seg-compare">
           <div>
             <div className="lbl">最高 Token 段</div>
-            <div className="val accent">{fmtTok(tokenHeaviest.totalTokens)}</div>
-            <div className="sub">{tokenHeaviest.name} · {tokenPct(tokenHeaviest)}% 总 token</div>
+            <div className="val accent">
+              {tokenHeaviest
+                ? fmtTokenCoverage(tokenHeaviest.totalTokens, tokenHeaviest.tokenKnownTurns, tokenHeaviest.tokenTotalTurns)
+                : '—'}
+            </div>
+            <div className="sub">{tokenHeaviest ? `${tokenHeaviest.name} · ${tokenPctLabel(tokenHeaviest)} 总 token` : 'Provider 未上报 Token'}</div>
           </div>
           <div>
             <div className="lbl">最慢段</div>
@@ -204,8 +222,8 @@ export function SegmentsView({ turns }: { turns: Turn[] }) {
             <div className="seg-r">
               <div className="m-stat">
                 <div className="lbl">token</div>
-                <div className="val accent">{fmtTok(s.totalTokens)}</div>
-                <div className="delta">{tokenPct(s)}% 总 token</div>
+                <div className="val accent">{fmtTokenCoverage(s.totalTokens, s.tokenKnownTurns, s.tokenTotalTurns)}</div>
+                <div className="delta">{tokenPctLabel(s)} 总 token</div>
               </div>
               <div className="m-stat">
                 <div className="lbl">api</div>

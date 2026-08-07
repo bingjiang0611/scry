@@ -203,6 +203,7 @@ export function Sidebar({
                         type="button"
                         key={`${s.providerId}:${s.sessionId}`}
                         className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
+                        data-provider={s.providerId}
                         title={`${s.preview}${s.preview ? '\n' : ''}${activeTimeTitle(s.mtime)}${running ? '\n正在运行' : ''}`}
                         aria-current={active ? 'true' : undefined}
                         aria-haspopup="menu"

@@ -191,6 +191,7 @@ export function DiagnosticsView({
     <main className="d-pane">
       <div className="d-hero">
         <div>
+          <span className="surface-kicker">02 · LOCAL HEALTH &amp; COVERAGE</span>
           <h2>诊断</h2>
           <div className="sub">Agent、MCP、SQLite 与安全审计；运行异常先看这里</div>
         </div>

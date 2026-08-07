@@ -11,7 +11,10 @@ import {
   aggregateCalls,
   basename,
   fmtTok,
+  fmtTokenCoverage,
+  hasTokenUsage,
   parseUserMessage,
+  resultOf,
   resultTokenTotal,
   toolArg,
   toolDisplayName
@@ -151,7 +154,7 @@ function TurnBlock({
     return g
   }, [calls])
 
-  const result = turn.items.find((e) => e.kind === 'harness' && e.stage === 'result')
+  const result = resultOf(turn)
   const running = !turn.done && !turn.error
   const toolN = aggregateCalls(calls).totalCalls
   const parsedUser = parseUserMessage(turn.userText)
@@ -173,7 +176,7 @@ function TurnBlock({
               <b>{fmtDur(result.durationMs)}</b>
             </span>
           )}
-          {result && <span>{fmtTok(resultTokenTotal(result))} tok</span>}
+          {result && <span>{fmtTok(hasTokenUsage(result) ? resultTokenTotal(result) : null)} tok</span>}
           <span>{toolN} calls</span>
           {running ? (
             <span style={{ color: 'var(--warn)' }}>
@@ -430,8 +433,11 @@ export function ExecutionGraph({
   const all = useMemo(() => turns.flatMap((t) => t.items), [turns])
   const logicalCalls = useMemo(() => turns.flatMap((turn) => logicalCallEventsForTurn(turn.items)), [turns])
   const calls = useMemo(() => aggregateCalls(logicalCalls), [logicalCalls])
-  const results = all.filter((e) => e.kind === 'harness' && e.stage === 'result')
-  const totalTokens = results.reduce((sum, event) => sum + resultTokenTotal(event), 0)
+  const results = turns.map(resultOf).filter((event): event is TraceEvent => event != null)
+  const tokenKnownTurns = results.filter(hasTokenUsage).length
+  const totalTokens = tokenKnownTurns > 0
+    ? results.reduce((sum, event) => sum + (hasTokenUsage(event) ? resultTokenTotal(event) : 0), 0)
+    : null
   const dangers = all.filter((e) => e.danger && e.stage !== 'tool_result')
   const agents = calls.agents
   const v = verdictState(turns, busy)
@@ -464,7 +470,7 @@ export function ExecutionGraph({
                 <span className="sdot" />
                 token · so far
               </div>
-              <div className="v">{fmtTok(totalTokens)}</div>
+              <div className="v">{fmtTokenCoverage(totalTokens, tokenKnownTurns, turns.length)}</div>
               <div className="sub">{turns.length} turns</div>
             </div>
             <div className="verdict-pillar ok">

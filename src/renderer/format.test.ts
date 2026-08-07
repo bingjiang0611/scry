@@ -1295,4 +1295,50 @@ describe('aggregateSegmentsRich：按 turn 切活跃段 + cost/api 归集（segm
     expect(unknown.segments[0].apiMs).toBeNull()
     expect(analyzeBilling(turns).apiMs).toBeNull()
   })
+
+  it('Token 字段全缺失时保持 unknown，显式零值才聚合为 0', () => {
+    const unknown = aggregateSegmentsRich([
+      turn('unknown-token', [
+        ev({ id: 'read-unknown-token', tool: 'Read' }),
+        ev({ id: 'result-unknown-token', kind: 'harness', stage: 'result' })
+      ])
+    ])
+    expect(unknown.totalTokens).toBeNull()
+    expect(unknown).toMatchObject({ tokenKnownTurns: 0, tokenTotalTurns: 1 })
+    expect(unknown.segments[0].totalTokens).toBeNull()
+    expect(unknown.segments[0]).toMatchObject({ tokenKnownTurns: 0, tokenTotalTurns: 1 })
+
+    const zero = aggregateSegmentsRich([
+      turn('zero-token', [
+        ev({ id: 'read-zero-token', tool: 'Read' }),
+        ev({
+          id: 'result-zero-token',
+          kind: 'harness',
+          stage: 'result',
+          tokensIn: 0,
+          tokensOut: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0
+        })
+      ])
+    ])
+    expect(zero.totalTokens).toBe(0)
+    expect(zero).toMatchObject({ tokenKnownTurns: 1, tokenTotalTurns: 1 })
+    expect(zero.segments[0].totalTokens).toBe(0)
+    expect(zero.segments[0]).toMatchObject({ tokenKnownTurns: 1, tokenTotalTurns: 1 })
+
+    const partial = aggregateSegmentsRich([
+      turn('known-token', [
+        ev({ id: 'read-known-token', tool: 'Read' }),
+        ev({ id: 'result-known-token', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5 })
+      ]),
+      turn('missing-token', [
+        ev({ id: 'read-missing-token', tool: 'Read' }),
+        ev({ id: 'result-missing-token', kind: 'harness', stage: 'result' })
+      ])
+    ])
+    expect(partial.totalTokens).toBe(15)
+    expect(partial).toMatchObject({ tokenKnownTurns: 1, tokenTotalTurns: 2 })
+    expect(partial.segments[0]).toMatchObject({ totalTokens: 15, tokenKnownTurns: 1, tokenTotalTurns: 2 })
+  })
 })
