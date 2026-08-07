@@ -9,16 +9,16 @@
           "path": "Scry Evidence System.html",
           "createdAt": "2026-08-07T10:52:19.782Z",
           "status": "needs-review",
-          "subtitle": "九表面统一证据语言交互原型",
+          "subtitle": "本机 SQLite v8 + trace archive 只读真实数据验收",
           "viewport": {
-            "width": 1280,
-            "height": 720
+            "width": 1600,
+            "height": 1000
           },
-          "section": "Welcome · Chat · Analytics · Diagnostics · Graph · Segments · Overview · Skills · MCP"
+          "section": "Scry UI"
         }
       ]
     }
   },
   "createdAt": "2026-08-07T10:52:19.783Z",
-  "updatedAt": "2026-08-07T10:52:19.783Z"
+  "updatedAt": "2026-08-07T12:44:53.214Z"
 }

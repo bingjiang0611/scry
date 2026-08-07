@@ -170,7 +170,7 @@
   }
 
   function SampleBadge() {
-    return <span className="sample-badge">交互原型 · 示例数据</span>
+    return <span className="sample-badge">{window.sampleData?.meta?.live ? '本机真实证据 · 只读' : '交互原型 · 示例数据'}</span>
   }
 
   function ContextBar({ context, kind, resultSummary }) {
@@ -228,13 +228,14 @@
   function ScopeMark({ scope }) {
     return (
       <span className={`scope-mark scope-mark--${scope}`}>
-        {scope === 'project' ? '项目' : '用户'}
+        {scope === 'project' ? '项目' : scope === 'user' ? '用户' : '观测'}
       </span>
     )
   }
 
   function SkillsModalContent({ data, onClose }) {
     const inventory = resolveInventoryData(data)
+    const live = window.sampleData?.meta?.live
     const [query, setQuery] = useState('')
     const [rows, setRows] = useState(() => inventory.skills.map((skill) => ({ ...skill })))
     const timers = useRef(new Set())
@@ -252,7 +253,8 @@
 
     const groups = [
       { id: 'project', label: '项目 Skills', hint: '随当前仓库生效' },
-      { id: 'user', label: '用户 Skills', hint: '来自用户目录，可跨项目复用' }
+      { id: 'user', label: '用户 Skills', hint: '来自用户目录，可跨项目复用' },
+      { id: 'unknown', label: '观测到的 Skills', hint: '账本没有 scope 与配置状态' }
     ]
 
     function toggleSkill(skill, enabled) {
@@ -278,12 +280,12 @@
     const enabledCount = rows.filter((skill) => skill.enabled).length
 
     return (
-      <section className="inventory-surface skills-surface" aria-labelledby="skills-surface-title" data-sample-data="true">
+      <section className="inventory-surface skills-surface" aria-labelledby="skills-surface-title" data-sample-data={!live}>
         <InventoryTitle
           id="skills-surface-title"
           eyebrow="Capability inventory"
           title="Skills"
-          description="查看当前 Provider 在这个工作目录里实际发现了什么，以及 Scry 是否有权管理它。"
+          description={live ? '仅列出当前 trace archive 中真实观测到的 Skill 调用；SQLite 不保存配置开关，因此全部保持只读。' : '查看当前 Provider 在这个工作目录里实际发现了什么，以及 Scry 是否有权管理它。'}
           actions={onClose && (
             <button className="icon-button" type="button" onClick={onClose} aria-label="关闭 Skills">
               <span aria-hidden="true">×</span>
@@ -294,7 +296,9 @@
         <ContextBar
           context={inventory.context}
           kind="Skills"
-          resultSummary={`${enabledCount} 启用 · ${rows.length - enabledCount} 关闭/不可管理`}
+          resultSummary={live
+            ? `${rows.length} 个已观测 Skill · 配置状态未知`
+            : `${enabledCount} 启用 · ${rows.length - enabledCount} 关闭/不可管理`}
         />
 
         <div className="inventory-toolbar">
@@ -376,15 +380,15 @@
           {filtered.length === 0 && (
             <div className="inventory-empty" role="status">
               <strong>没有匹配的 Skill</strong>
-              <p>换一个关键词，或清空搜索查看全部示例条目。</p>
+              <p>{live ? '当前会话没有观测到 Skill 调用。' : '换一个关键词，或清空搜索查看全部示例条目。'}</p>
               <button type="button" onClick={() => setQuery('')}>清空搜索</button>
             </div>
           )}
         </div>
 
         <footer className="inventory-footnote">
-          <span>示例数据</span>
-          <p>“启用”只表示配置开关；“处理中”与“错误”保留真实中间态，不会被折叠成已启用。</p>
+          <span>{live ? '真实调用证据' : '示例数据'}</span>
+          <p>{live ? '“观测到调用”不等于“当前已启用”；配置与管理状态不在 SQLite / archive 中。' : '“启用”只表示配置开关；“处理中”与“错误”保留真实中间态，不会被折叠成已启用。'}</p>
         </footer>
       </section>
     )
@@ -428,6 +432,7 @@
 
   function McpModalContent({ data, onClose }) {
     const inventory = resolveInventoryData(data)
+    const live = window.sampleData?.meta?.live
     const [servers, setServers] = useState(() => inventory.mcps.map((server) => ({
       ...server,
       config: { ...server.config },
@@ -518,12 +523,12 @@
     const issueCount = servers.filter((server) => ['failed', 'needs-auth'].includes(server.runtime.state)).length
 
     return (
-      <section className="inventory-surface mcp-surface" aria-labelledby="mcp-surface-title" data-sample-data="true">
+      <section className="inventory-surface mcp-surface" aria-labelledby="mcp-surface-title" data-sample-data={!live}>
         <InventoryTitle
           id="mcp-surface-title"
           eyebrow="Capability fleet"
           title="MCP"
-          description="同一张 Fleet 表里对齐配置、运行态、本次测试和认证证据，但不把它们混成一个“健康”结论。"
+          description={live ? 'Fleet 仅列出当前会话真实发生过的 MCP 调用；配置、当前运行态、测试和认证未落库，明确保持未知。' : '同一张 Fleet 表里对齐配置、运行态、本次测试和认证证据，但不把它们混成一个“健康”结论。'}
           actions={onClose && (
             <button className="icon-button" type="button" onClick={onClose} aria-label="关闭 MCP">
               <span aria-hidden="true">×</span>
@@ -534,7 +539,9 @@
         <ContextBar
           context={inventory.context}
           kind="MCP"
-          resultSummary={`${connectedCount} 已连接 · ${issueCount} 需处理 · ${servers.length} 配置项`}
+          resultSummary={live
+            ? `${servers.length} 个已观测 Server · 当前运行态未知`
+            : `${connectedCount} 已连接 · ${issueCount} 需处理 · ${servers.length} 配置项`}
         />
 
         <div className="mcp-legend" aria-label="状态语义说明">
@@ -552,7 +559,7 @@
 
         <div className="mcp-fleet-wrap">
           <table className="mcp-fleet">
-            <caption className="sr-only">MCP Fleet 示例数据</caption>
+            <caption className="sr-only">MCP Fleet {live ? '真实调用证据' : '示例数据'}</caption>
             <thead>
               <tr>
                 <th scope="col">Server / 来源</th>
@@ -616,7 +623,7 @@
                           <div id={toolsId} className="mcp-tools-drawer">
                             <div>
                               <span className="mcp-tools-drawer__label">Provider 返回的工具</span>
-                              <small>示例 tools/list</small>
+                              <small>{live ? '本会话实际调用名' : '示例 tools/list'}</small>
                             </div>
                             <div className="mcp-tools-drawer__list">
                               {server.tools.map((tool) => <code key={tool}>{tool}</code>)}
@@ -632,9 +639,10 @@
           </table>
         </div>
 
+        {servers.length === 0 && <div className="inventory-empty"><strong>当前会话没有 MCP 调用证据</strong><p>这不是“未配置”；SQLite / archive 只能证明实际发生过的调用。</p></div>}
         <footer className="inventory-footnote">
-          <span>示例数据</span>
-          <p>配置开关不等于已连接；测试失败也不覆盖 Provider 的原生运行态。重新认证与重连仍交给 Provider 客户端。</p>
+          <span>{live ? '真实调用证据' : '示例数据'}</span>
+          <p>{live ? '观测到历史调用不等于当前已连接；运行态、认证与 tools/list 必须由 Provider 客户端实时提供。' : '配置开关不等于已连接；测试失败也不覆盖 Provider 的原生运行态。重新认证与重连仍交给 Provider 客户端。'}</p>
         </footer>
       </section>
     )

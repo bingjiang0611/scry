@@ -4,7 +4,9 @@
 
 把获批的 Analytics 叙事质感扩展到 Scry 九个真实表面，同时保留桌面工作台的空间记忆和操作密度。统一的是证据语言，不是把所有页面改成长滚动海报。
 
-本目录是结构仿真原型，不读取 Provider、SQLite、会话归档或本机配置。页面内所有数字均明确标注为示例数据。
+本目录现在是可验收的只读真实数据原型。`live-server.mjs` 仅监听 `127.0.0.1`，通过 Node 22 内置 `node:sqlite` 读取本机 Scry SQLite v8，并用 trace archive 补足 SQLite 不保存的用户 / Assistant 正文与工具明细。数据桥不可用时才回退到结构仿真，页面会明确显示 `FALLBACK`，不会把缺失值补成 0。
+
+SQLite 与 archive 都不保存 Provider 当前运行态、MCP 认证、配置开关或完整 Skill inventory；这些字段在 live 模式保持“未知 / 未支持”。MCP 与 Skill 页面只表达当前会话真实观测到的调用证据，不把历史调用写成“当前已连接 / 已启用”。
 
 ## 九表面映射
 
@@ -18,7 +20,7 @@
 | 对话 | 稳定执行时间线 | 结论优先、调用和文件降为轻证据带、选中锚点跨面板一致 |
 | 拓扑 | Session wall + inspector | 固定泳道与几何，选择只改变强调，不引发布局重排 |
 | 分段 | Ribbon + ledger | Ribbon 只编码 duration；Token/API coverage 在账本说明 |
-| 总览 | 336px 证据档案 | Sticky tabs、一行判词、最多 2×2 metrics、轮次排名 |
+| 总览 | 360–400px 证据档案 | Sticky tabs、一行判词、最多 2×2 metrics、轮次排名 |
 
 ## 状态契约
 
@@ -40,15 +42,15 @@
 
 ## 原型交互
 
-- 顶部可切换九个表面、深浅主题和 `ready / partial / empty / error` 状态。
+- 顶部可切换九个表面、真实会话、深浅主题和 `ready / partial / empty / error` 展示状态，并可刷新本机只读快照。
 - Sidebar 和会话顶栏也可导航。
 - Analytics 支持章节、日期和 Provider 高亮。
 - Diagnostics、Graph、Segments 均支持 master/detail 选择。
 - Chat 选择事件后，总览使用同一青色锚点。
-- Skills 支持搜索和逐行 enable/pending/error 演示。
-- MCP 支持测试、认证动作和 tools 展开。
+- Skills 在 live 模式支持搜索真实调用证据，配置状态保持只读未知；结构仿真降级态才保留 enable/pending/error 演示。
+- MCP 在 live 模式展示真实调用与 tools 展开；运行态、测试、认证未落库时动作禁用并标未知。
 - Modal 支持 Escape、点击遮罩、焦点循环与焦点恢复。
 
 ## 生产实现边界
 
-该原型没有改动 `src/`。真实实现前必须先修正 Analytics Top-N 查询、Diagnostics MCP identity union、Segments coverage、Overview scope 与 danger capability 等语义问题；当前主工作树另有 OAuth/Provider 改动，因此后续实现应在该基线落盘后再分批迁移。
+该原型没有改动 `src/`，`live-server.mjs` 只用于本机设计验收，不是新的生产数据通道。迁移到产品时应复用现有 preload / IPC 和 Provider adapter，并保持本稿已经验证的语义：SQLite 是账本、archive 是 transcript 补充、unknown 不等于 0、unsupported 不等于 safe、历史调用不等于当前连接。

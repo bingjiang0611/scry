@@ -157,8 +157,11 @@ function getCoreData() {
 
 function SampleStamp({ compact = false }) {
   const { meta } = getCoreData()
+  const sourceTitle = meta.live
+    ? `来自本机 ${meta.db || 'SQLite'} 的只读投影`
+    : '结构仿真 · 示例数据'
   return (
-    <div className={`sample-stamp ${compact ? 'is-compact' : ''}`} title="原型不会读取本机 Provider 或 SQLite">
+    <div className={`sample-stamp ${compact ? 'is-compact' : ''}`} title={sourceTitle}>
       <span className="sample-stamp-dot" aria-hidden="true"></span>
       <b>{meta.sampleLabel}</b>
       {!compact && <time>{meta.snapshot}</time>}

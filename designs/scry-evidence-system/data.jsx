@@ -18,46 +18,114 @@ const sampleData = {
     { title: '/rate-native-rate…', project: 'rate-native', provider: 'qoder', time: '1 周', state: 'cancelled' }
   ],
   chat: {
-    title: '优化 Analytics 叙事',
-    state: 'complete',
-    elapsed: '14m 32s',
+    sessionId: '019fdb67-9684-71e1-9209-029f74245020',
+    cwd: '~/.treehouse/rate-native/7',
+    provider: 'Codex',
+    model: 'gpt-5.6-sol',
     turns: [
       {
-        id: 'turn-01', index: '01', state: 'complete', title: '盘点现有数据与视觉层级', duration: '2m 18s', tokens: '86.4k',
-        summary: '确认 Analytics 数据足够，但 Top-N 查询口径与页面标题有三处错位。',
-        evidence: [
-          { id: 'ev-read', kind: 'tool', label: 'Read · 14 files', detail: 'AnalyticsView.tsx · span-ledger.ts', status: 'exact' },
-          { id: 'ev-query', kind: 'finding', label: '3 个查询口径风险', detail: '工具 / 模型 / 项目', status: 'warning' }
-        ]
+        id: 'turn-01', index: '01', runId: 'run-rate-84441907-01', state: 'complete',
+        user: '/rate-workflow 84441907', duration: '18m 24s', tokens: '5,711.8k tok', tools: 74, errors: 3,
+        diff: { files: 3, label: '本轮改动', detail: '3 files · +48 −12' },
+        hooks: [
+          { label: 'SessionStart', detail: '1 handler · 238ms', status: 'passed' },
+          { label: 'PostToolUse', detail: '14 logical runs · 2.1s', status: 'passed' }
+        ],
+        blocks: [
+          { id: 't1-a1', kind: 'assistant', text: '先冻结 Scry、已安装 CLI 与 recorder 版本，再核对预热 treehouse 和 Provider 槽位。' },
+          { id: 't1-skill', kind: 'skill', label: 'validate-scry-rate-workflow', detail: 'project skill · loaded', duration: '0.8s', status: 'passed' },
+          { id: 't1-shell', kind: 'tool', label: 'Shell', detail: 'git status --short --branch', duration: '1.2s', status: 'passed', io: 'R' },
+          { id: 't1-summary', kind: 'tool', label: 'Shell', detail: 'scry turns summary --provider codex', duration: '4.8s', status: 'failed', io: 'E', output: '首次读取时 session archive 尚未落盘；保留原始错误，不改写为 0。' },
+          { id: 't1-a2', kind: 'assistant', text: '版本与源码边界已核对。下一步等待人工完成固定需求克隆，再继续两轮真实验收。' }
+        ],
+        footer: { input: '5,688.4k', output: '23.4k', cacheRead: '5,492.0k', api: '96.8s', files: 3 }
       },
       {
-        id: 'turn-02', index: '02', state: 'complete', title: '建立叙事原型与证据状态', duration: '8m 06s', tokens: '≥ 214k',
-        summary: '把 30 天、Provider、工具延迟与风险盲区拆成四章；缺字段按下界展示。',
-        evidence: [
-          { id: 'ev-skill', kind: 'skill', label: 'baoyu-design', detail: 'Hi-fi prototype', status: 'exact' },
-          { id: 'ev-browser', kind: 'mcp', label: 'Browser · 17 actions', detail: '4 chapters · console clean', status: 'exact' },
-          { id: 'ev-usage', kind: 'usage', label: 'Token coverage 4/5', detail: '一轮缺 output', status: 'partial' }
-        ]
-      },
-      {
-        id: 'turn-03', index: '03', state: 'running', title: '扩展九表面统一系统', duration: '4m 08s', tokens: '未知',
-        summary: '正在把相同证据语言迁移到工作台、诊断、拓扑和配置弹窗。',
-        evidence: [
-          { id: 'ev-agent', kind: 'agent', label: '3 个并行子任务', detail: 'data · inventory · core', status: 'running' },
-          { id: 'ev-danger', kind: 'danger', label: 'Danger classification', detail: 'Codex 未支持', status: 'unsupported' }
-        ]
+        id: 'turn-02', index: '02', runId: 'run-rate-84441907-02', state: 'complete',
+        user: '继续，固定需求已经克隆完成。', duration: '27m 51s', tokens: '7,880.2k tok', tools: 88, errors: 5,
+        diff: { files: 5, label: '本轮改动', detail: '5 files · +126 −34' },
+        hooks: [
+          { label: 'PreToolUse', detail: '18 logical runs · 1 cancelled', status: 'warning' },
+          { label: 'Stop', detail: '1 handler · 412ms', status: 'passed' }
+        ],
+        blocks: [
+          { id: 't2-a1', kind: 'assistant', text: '需求 ID 只读核验通过。现在启动隔离 Scry Test，发送严格两轮提示并逐项核对 archive、CLI records 与 Trace Agent Session。' },
+          { id: 't2-mcp', kind: 'mcp', label: 'computer-use', detail: 'Inspect Scry Test · 24 calls', duration: '38.6s', status: 'passed' },
+          { id: 't2-shell', kind: 'tool', label: 'Shell', detail: 'scry turns summary --session current', duration: '5.4s', status: 'passed', io: 'R', output: '2 turns · usage coverage 2/2 · archive present' },
+          { id: 't2-a2', kind: 'assistant', text: '两轮验收完成：归档、真实 turn summary、右侧纵览与 MCP/Skill/Hook 证据均已对齐；运行中的 Scry Test 按验收约定保留。' }
+        ],
+        footer: { input: '7,850.1k', output: '30.1k', cacheRead: '7,701.2k', api: '121.4s', files: 5 }
       }
     ]
   },
   overview: {
-    verdict: '工作完成度高，但本轮 Token 仍缺一段 Provider 结果。',
-    verdictState: 'partial',
+    context: { pct: 25, model: 'gpt-5.6-sol', used: '65.6k', window: '258.4k', remaining: '192.8k', source: '最近一轮完整 prompt÷窗口' },
+    verdict: '本会话 2 轮完成 · 8 处工具报错',
+    verdictState: 'warning',
     metrics: [
-      { label: 'TURNS', value: '3', state: 'exact', note: '当前会话' },
-      { label: 'ELAPSED', value: '14m 32s', state: 'exact', note: '持续更新' },
-      { label: 'TOKEN', value: '≥ 300k', state: 'partial', note: '2 / 3 轮完整' },
-      { label: 'DANGER', value: '未支持', state: 'unsupported', note: 'Codex 能力边界' }
-    ]
+      { label: '总 TOKEN', value: '13,592.0k', state: 'exact', note: '2 / 2 轮已捕获' },
+      { label: '输入 / 输出', value: '13,592.0k', state: 'exact', note: 'in 13,538.5k · out 53.5k' },
+      { label: '调用', value: '162', state: 'exact', note: '工具 129 · MCP 24 · Skill 9' },
+      { label: '危险', value: '0', state: 'zero', note: '无' }
+    ],
+    cache: [
+      { label: 'CACHE·R', value: '13,193.2k' },
+      { label: 'CACHE·W', value: '0' },
+      { label: 'API', value: '218.2s' }
+    ],
+    sessionId: '019fdb67-9684-71e1-9209-029f74245020',
+    compactions: 0,
+    turns: [
+      { id: 'turn-01', index: '01', user: '/rate-workflow 84441907', duration: '18m 24s', groups: { intervention: 1, mcp: 8, skill: 4, agent: 0, hooks: 16, file: 3 }, detail: 'API 96.8s · 工具 74 次' },
+      { id: 'turn-02', index: '02', user: '继续，固定需求已经克隆完成。', duration: '27m 51s', groups: { intervention: 0, mcp: 16, skill: 5, agent: 0, hooks: 21, file: 5 }, detail: 'API 121.4s · 工具 88 次' }
+    ],
+    tools: [
+      { label: 'Shell', calls: 91, score: 100, errors: 6 },
+      { label: 'Read', calls: 24, score: 26, errors: 0 },
+      { label: 'computer-use', calls: 24, score: 26, errors: 2 },
+      { label: 'Skill', calls: 9, score: 10, errors: 0 }
+    ],
+    hooks: { runs: 37, handlers: 41, passed: 39, cancelled: 1, failed: 1 },
+    segments: [
+      { label: 'validate-scry-rate-workflow', value: '2 turns', note: '启发式归属' },
+      { label: 'baseline', value: '18 calls', note: '未归入 Skill' }
+    ],
+    calls: [
+      { label: '工具', value: '129', note: '原始 TraceEvent' },
+      { label: 'MCP', value: '24', note: '不拆分 Token' },
+      { label: 'Skill', value: '9', note: '调用次数' },
+      { label: '子 Agent', value: '0', note: '无独立 usage' }
+    ],
+    files: [
+      { label: 'run-manifest.json', mode: 'W', count: 4 },
+      { label: 'session-summary.md', mode: 'R/W', count: 3 },
+      { label: 'provider-evidence.jsonl', mode: '~R', count: 2 }
+    ],
+    billing: {
+      status: 'Token 统计', source: '本会话可验证 token', policy: '仅看 token，不算金额',
+      metrics: [
+        { label: '总 TOKEN', value: '13,592.0k' },
+        { label: '输入 / 输出', value: '13,538.5k / 53.5k' },
+        { label: '缓存读 / 写', value: '13,193.2k / 0' },
+        { label: 'API 耗时', value: '218.2s' }
+      ],
+      coverage: ['轮次覆盖 2/2 · 100%', '模型明细 100%', '工具拆分 暂无独立 token'],
+      signals: [
+        { severity: 'warning', title: 'T02 Token 高于本会话均值', detail: '7,880.2k tok · 规则提示' },
+        { severity: 'warning', title: '8 处工具错误需要复核', detail: '不是模型结论' }
+      ],
+      turns: [
+        { id: 'turn-02', index: '02', total: '7,880.2k', cache: '97.7%', io: '7,850.1k / 30.1k', tools: 88, context: '25%' },
+        { id: 'turn-01', index: '01', total: '5,711.8k', cache: '96.6%', io: '5,688.4k / 23.4k', tools: 74, context: '18%' }
+      ]
+    },
+    trust: {
+      provider: 'Codex', status: '等待报告', reason: '当前 Provider 暂未接通 MCP Guard 扫描。',
+      live: [
+        { label: 'notion', status: 'needs-auth', detail: '需要认证' },
+        { label: 'filesystem', status: 'failed', detail: '启动失败' }
+      ]
+    }
   },
   diagnostics: {
     verdict: '本机可工作；1 个认证阻塞与 2 个观测盲区需要处理。',

@@ -190,6 +190,13 @@
     )
   }
 
+  function formatObservedTokens(value) {
+    if (!Number.isFinite(value)) return '—'
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+    return String(value)
+  }
+
   function DataEvidenceRow({ label, value, state = 'exact', note, onClick, active = false }) {
     const Component = window.EvidenceRow
     if (Component && !onClick) return <Component label={label} value={value} state={state} note={note} />
@@ -202,7 +209,8 @@
   }
 
   function SampleSource({ children = '结构仿真 · 不连接 Provider / SQLite' }) {
-    return <div className="sample-source"><span>示例数据</span><i></i><b>{children}</b></div>
+    const live = window.sampleData?.meta?.live
+    return <div className="sample-source"><span>{live ? '真实数据' : '示例数据'}</span><i></i><b>{live ? '本机 SQLite + trace archive · 只读快照' : children}</b></div>
   }
 
   function SemanticLegend() {
@@ -244,21 +252,27 @@
 
   function AnalyticsField({ selectedProvider, onProvider }) {
     const days = getSample('analyticsDays', ACTIVE_DAYS)
+    const providers = getSample('providers', PROVIDERS)
+    const analytics = window.sampleData?.analytics || {}
     const [selectedDay, setSelectedDay] = useState(days[days.length - 1]?.day || '')
     const max = Math.max(...days.map((day) => day.amount), 1)
     const current = days.find((day) => day.day === selectedDay) || days[0]
+    const knownState = analytics.knownTurns === analytics.turns ? 'exact' : 'lowerBound'
+    const peakTotal = [...days].sort((a, b) => b.amount - a.amount).slice(0, 3).reduce((sum, day) => sum + day.amount, 0)
+    const observedTotal = days.reduce((sum, day) => sum + day.amount, 0)
+    const peakShare = observedTotal ? Math.round(peakTotal / observedTotal * 100) : 0
     return (
       <div className="analytics-chapter-grid">
         <article className="story-lead">
           <span className="chapter-code">00 · THE FIELD</span>
-          <DataStatus status="lowerBound" label="近 30 天 · 已知下界" />
-          <DataKnown value="3.96M" state="lowerBound" suffix=" 已知 Token" className="story-number" />
-          <h2>Token 没有均匀发生：三个高峰日承载了 23% 的已知量。</h2>
+          <DataStatus status={knownState} label={`近 30 天 · ${knownState === 'exact' ? '字段完整' : '已知下界'}`} />
+          <DataKnown value={formatObservedTokens(analytics.totalKnown)} state={knownState} suffix=" 已知 Token" className="story-number" />
+          <h2>Token 没有均匀发生：三个高峰日承载了 {peakShare}% 的已知量。</h2>
           <p>每一列是活跃日，长度仅编码已上报 Token。斜纹表示该日存在缺字段轮次；保留已知量，但不伪装成完整总量。</p>
           <div className="metric-strip">
-            <span><b>24</b><small>活跃日</small></span>
-            <span><b>31</b><small>轮次</small></span>
-            <span><b>28/31</b><small>完整</small></span>
+            <span><b>{analytics.activeDays ?? days.filter((day) => day.amount > 0).length}</b><small>活跃日</small></span>
+            <span><b>{analytics.turns ?? '—'}</b><small>轮次</small></span>
+            <span><b>{analytics.knownTurns ?? '—'}/{analytics.turns ?? '—'}</b><small>完整</small></span>
           </div>
           <SampleSource />
         </article>
@@ -292,7 +306,7 @@
             </div>
           )}
           <div className="provider-picks" aria-label="Provider 高亮">
-            {PROVIDERS.map((provider) => (
+            {providers.map((provider) => (
               <button type="button" key={provider.id} className={selectedProvider === provider.id ? 'active' : ''} onClick={() => onProvider(selectedProvider === provider.id ? null : provider.id)}>
                 <i className={`provider-dot provider-${provider.id}`}></i>{provider.short}
               </button>
@@ -305,6 +319,7 @@
 
   function AnalyticsCoverage({ selectedProvider, onProvider }) {
     const providers = getSample('providers', PROVIDERS)
+    const analytics = window.sampleData?.analytics || {}
     const max = Math.max(...providers.map((provider) => provider.tokens), 1)
     const selected = providers.find((provider) => provider.id === selectedProvider)
     return (
@@ -312,7 +327,7 @@
         <article className="story-lead">
           <span className="chapter-code">01 · COVERAGE</span>
           <DataStatus status="partial" label="近 30 天 · 证据优先" />
-          <div className="ratio-number story-number"><b>28</b><span>/31</span></div>
+          <div className="ratio-number story-number"><b>{analytics.knownTurns ?? '—'}</b><span>/{analytics.turns ?? '—'}</span></div>
           <small className="story-unit">轮次具备完整 Token</small>
           <h2>覆盖度先于排名；不完整的总量只能是下界。</h2>
           <p>颜色只表示 Provider 类别，长度只表示已知 Token。选中状态使用青色轮廓，不复用为数据色。</p>
@@ -354,7 +369,7 @@
     const filtered = selectedProvider ? allTools.filter((tool) => tool.provider === selectedProvider) : allTools
     const tools = filtered.length ? filtered : allTools
     const max = Math.max(...tools.map((tool) => tool.calls), 1)
-    const top = [...tools].sort((a, b) => b.calls - a.calls)[0]
+    const top = [...tools].sort((a, b) => b.calls - a.calls)[0] || { calls: 0, name: '暂无调用' }
     return (
       <div className="analytics-chapter-grid">
         <article className="story-lead">
@@ -379,11 +394,9 @@
             ))}
           </div>
           <div className="latency-ledger">
-            <DataSectionTitle index="MCP" title="完成调用延迟" meta="近 90 天" />
-            <DataEvidenceRow label="browser" value="P50 1.2s · P95 4.8s · 1 fail" state="warn" />
-            <DataEvidenceRow label="github" value="P50 0.8s · P95 2.4s · 0 fail" state="trueZero" />
-            <DataEvidenceRow label="filesystem" value="P50 0.3s · P95 0.9s · 0 fail" state="trueZero" />
-            <p>仅统计已完成调用；失败数不折算为延迟。</p>
+            <DataSectionTitle index="AVG" title="完成调用耗时" meta="近 30 天" />
+            {tools.slice(0, 3).map((tool) => <DataEvidenceRow key={tool.name} label={tool.name} value={`AVG ${tool.avg} · ${tool.failures} fail`} state={tool.failures ? 'warn' : 'exact'} />)}
+            <p>仅统计 SQLite 中已完成且带 duration 的调用；失败数不折算为延迟。</p>
           </div>
         </div>
       </div>
@@ -391,18 +404,20 @@
   }
 
   function AnalyticsRisk({ selectedProvider, onProvider }) {
-    const provider = PROVIDERS.find((item) => item.id === selectedProvider)
+    const providers = getSample('providers', PROVIDERS)
+    const provider = providers.find((item) => item.id === selectedProvider)
     const supported = !provider || provider.danger === 'classified'
-    const cells = Array.from({ length: 90 }, (_, index) => {
-      const events = { 7: 'warn', 18: 'warn', 31: 'danger', 44: 'warn', 63: 'warn', 77: 'danger', 86: 'warn' }
-      return { index, status: events[index] || 'trueZero' }
-    })
+    const sourceCells = getSample('riskDays', Array.from({ length: 90 }, (_, index) => ({ id: `risk-${index}`, level: 'zero' })))
+    const cells = sourceCells.map((cell, index) => ({ index, status: cell.level === 'zero' ? 'trueZero' : cell.level, providers: cell.providers }))
+    const scopedCells = selectedProvider ? cells.map((cell) => { const level = cell.providers?.[selectedProvider] || 'zero'; return { ...cell, status: level === 'zero' ? 'trueZero' : level } }) : cells
+    const dangerCount = scopedCells.filter((cell) => cell.status === 'danger').length
+    const warnCount = scopedCells.filter((cell) => cell.status === 'warn').length
     return (
       <div className="analytics-chapter-grid">
         <article className="story-lead">
           <span className="chapter-code">03 · RISK</span>
           <DataStatus status={supported ? 'exact' : 'unsupported'} label={supported ? '近 90 天 · 观测不拦截' : `${provider.label} · 分类未支持`} />
-          <DataKnown value={supported ? '2' : '—'} state={supported ? 'exact' : 'unsupported'} suffix={supported ? ' danger · 6 warn' : ''} className="story-number" />
+          <DataKnown value={supported ? String(dangerCount) : '—'} state={supported ? (dangerCount ? 'exact' : 'trueZero') : 'unsupported'} suffix={supported ? ` danger · ${warnCount} warn` : ''} className="story-number" />
           <h2>{supported ? '危险事件很稀疏；能力盲区却不能被画成安全。' : `${provider.label} 没有分类能力，不能得出“零危险”。`}</h2>
           <p>红色与黄色只表示已分类事件。空格是“可分类范围内无事件”；unsupported 另列说明，不与真实 0 混为一谈。</p>
           <SampleSource>danger verdict · provider capability</SampleSource>
@@ -410,11 +425,11 @@
         <div className="analytics-visual risk-panel">
           <div className="visual-meta"><span>90 DAYS · MAY 10 — AUG 07</span><span>{provider ? provider.short : 'ALL CLASSIFIED EVENTS'}</span></div>
           <div className={`risk-grid ${supported ? '' : 'unsupported'}`} aria-label="近 90 天危险操作矩阵">
-            {cells.map((cell) => <i key={cell.index} className={`risk-cell state-${supported ? cell.status : 'unsupported'}`} title={`Day ${cell.index + 1} · ${supported ? stateLabel(cell.status) : '未支持分类'}`}></i>)}
+            {scopedCells.map((cell) => <i key={cell.index} className={`risk-cell state-${supported ? cell.status : 'unsupported'}`} title={`Day ${cell.index + 1} · ${supported ? stateLabel(cell.status) : '未支持分类'}`}></i>)}
           </div>
           <SemanticLegend />
           <div className="capability-ledger">
-            {PROVIDERS.map((item) => (
+            {providers.map((item) => (
               <button type="button" key={item.id} className={selectedProvider === item.id ? 'active' : ''} onClick={() => onProvider(selectedProvider === item.id ? null : item.id)}>
                 <span><i className={`provider-dot provider-${item.id}`}></i>{item.label}</span>
                 <DataKnown value={item.danger === 'classified' ? item.dangerText : '—'} state={item.danger} />
@@ -439,7 +454,7 @@
     const statePanel = SurfaceState({ kind: displayState, noun: '分析记录' })
     return (
       <section className="data-surface analytics-surface" data-screen-label="分析 · 四章叙事">
-        <DataViewHeader eyebrow="ANALYTICS" title="从量到证据，再到能力盲区" summary="四章共享同一事实口径；高亮只改变聚焦，不改变汇总。" trailing={<DataStatus status={displayState === 'partial' ? 'partial' : 'exact'} label={displayState === 'partial' ? '部分完整' : '结构仿真'} />} />
+        <DataViewHeader eyebrow="ANALYTICS" title="从量到证据，再到能力盲区" summary="四章共享同一事实口径；高亮只改变聚焦，不改变汇总。" trailing={<DataStatus status={displayState === 'partial' ? 'partial' : 'exact'} label={window.sampleData?.meta?.live ? '本机 SQLite' : displayState === 'partial' ? '部分完整' : '结构仿真'} />} />
         <nav className="chapter-tabs" aria-label="分析章节">
           {chapters.map((chapter) => (
             <button type="button" key={chapter.id} className={active === chapter.id ? 'active' : ''} onClick={() => setActive(chapter.id)} aria-current={active === chapter.id ? 'page' : undefined}>
@@ -465,6 +480,10 @@
     const issues = getSample('diagnostics', DIAGNOSTIC_ISSUES)
     const [selectedId, setSelectedId] = useState(issues[0]?.id)
     const selected = issues.find((issue) => issue.id === selectedId) || issues[0]
+    const actionable = issues.filter((issue) => issue.verdict === 'partial' || issue.verdict === 'error').length
+    const clear = issues.filter((issue) => issue.verdict === 'exact' || issue.verdict === 'trueZero').length
+    const partial = issues.filter((issue) => issue.verdict === 'partial').length
+    const unsupported = issues.filter((issue) => issue.verdict === 'unsupported').length
     const statePanel = SurfaceState({ kind: displayState, noun: '诊断证据' })
     return (
       <section className="data-surface diagnostics-surface" data-screen-label="诊断 · Verdict 与证据通道">
@@ -472,11 +491,11 @@
         {statePanel || (
           <>
             <div className="verdict-band">
-              <div className="verdict-main"><DataStatus status="warn" label="需要关注" /><b>1</b><span>项会影响统计解释</span></div>
-              <DataEvidenceRow label="CHECKS" value="4" />
-              <DataEvidenceRow label="CLEAR" value="2" />
-              <DataEvidenceRow label="PARTIAL" value="1" state="partial" />
-              <DataEvidenceRow label="UNSUPPORTED" value="1" state="unsupported" />
+              <div className="verdict-main"><DataStatus status={actionable ? 'warn' : 'exact'} label={actionable ? '需要关注' : '检查通过'} /><b>{actionable}</b><span>项会影响统计解释</span></div>
+              <DataEvidenceRow label="CHECKS" value={String(issues.length)} />
+              <DataEvidenceRow label="CLEAR" value={String(clear)} />
+              <DataEvidenceRow label="PARTIAL" value={String(partial)} state={partial ? 'partial' : 'trueZero'} />
+              <DataEvidenceRow label="UNSUPPORTED" value={String(unsupported)} state={unsupported ? 'unsupported' : 'trueZero'} />
             </div>
             <div className="diagnostics-workspace">
               <div className="issue-channel">
@@ -516,20 +535,24 @@
 
   function ExecutionGraphSurface({ displayState = 'ready' }) {
     const sessions = getSample('graphSessions', GRAPH_SESSIONS)
+    const live = Boolean(window.sampleData?.meta?.live)
+    const totalTurns = live ? window.sampleData?.chat?.turns?.length ?? sessions.length : sessions.length
     const flatNodes = useMemo(() => sessions.flatMap((session) => session.nodes.map((node) => ({ ...node, session }))), [sessions])
     const [selectedId, setSelectedId] = useState(flatNodes[1]?.id)
     const selected = flatNodes.find((node) => node.id === selectedId) || flatNodes[0]
+    const partialCount = flatNodes.filter((node) => node.status === 'partial').length
+    const errorCount = flatNodes.filter((node) => node.status === 'error' || node.status === 'failed').length
     const statePanel = SurfaceState({ kind: displayState, noun: '执行节点' })
     return (
       <section className="data-surface graph-surface" data-screen-label="拓扑 · Session wall 与节点证据">
-        <DataViewHeader eyebrow="EXECUTION GRAPH" title="会话墙比蜘蛛网更诚实" summary="会话保持稳定泳道；选择节点后在右侧查看证据，不让布局重新跳动。" trailing={<DataStatus status={displayState === 'partial' ? 'partial' : 'exact'} label="示例拓扑" />} />
+        <DataViewHeader eyebrow="EXECUTION GRAPH" title="会话墙比蜘蛛网更诚实" summary="会话保持稳定泳道；选择节点后在右侧查看证据，不让布局重新跳动。" trailing={<DataStatus status={displayState === 'partial' ? 'partial' : 'exact'} label={window.sampleData?.meta?.live ? '真实 archive' : '示例拓扑'} />} />
         {statePanel || (
           <>
             <div className="graph-summary-strip">
-              <DataEvidenceRow label="SESSIONS" value="3" />
-              <DataEvidenceRow label="NODES" value="12" />
-              <DataEvidenceRow label="PARTIAL" value="2" state="partial" />
-              <DataEvidenceRow label="ERRORS" value="0" state="trueZero" />
+              <DataEvidenceRow label={live ? 'VISIBLE TURNS' : 'TURNS'} value={live ? `${sessions.length} / ${totalTurns}` : String(sessions.length)} />
+              <DataEvidenceRow label={live ? 'VISIBLE NODES' : 'NODES'} value={String(flatNodes.length)} />
+              <DataEvidenceRow label={live ? 'VISIBLE PARTIAL' : 'PARTIAL'} value={String(partialCount)} state={partialCount ? 'partial' : 'trueZero'} />
+              <DataEvidenceRow label={live ? 'VISIBLE ERRORS' : 'ERRORS'} value={String(errorCount)} state={errorCount ? 'error' : 'trueZero'} />
               <div className="graph-legend"><span><i className="kind-model"></i>MODEL</span><span><i className="kind-tool"></i>TOOL</span><span><i className="kind-result"></i>RESULT</span></div>
             </div>
             <div className="graph-workspace">
@@ -560,7 +583,7 @@
                   <h2>{selected.label}</h2>
                   <p>{selected.detail}</p>
                   <DataEvidenceRow label="PROVIDER" value={selected.session.provider.toUpperCase()} />
-                  <DataEvidenceRow label="DURATION" value={selected.duration} state={selected.duration === '0ms' ? 'trueZero' : selected.duration === '—' ? 'unknown' : 'exact'} />
+                  <DataEvidenceRow label="DURATION" value={selected.duration} state={selected.duration === '不适用' ? 'notApplicable' : selected.duration === '—' ? 'unknown' : 'exact'} />
                   <DataEvidenceRow label="TOKEN" value={selected.tokens} state={selected.tokens.startsWith('≥') ? 'lowerBound' : selected.tokens === '—' ? 'unknown' : selected.tokens === '不适用' ? 'notApplicable' : 'exact'} />
                   <DataEvidenceRow label="SOURCE" value={selected.source} state={selected.status === 'partial' ? 'partial' : 'exact'} />
                   <SampleSource>session / turn / span 结构仿真</SampleSource>
@@ -575,18 +598,23 @@
   }
 
   function formatDuration(ms) {
+    if (!Number.isFinite(ms)) return '—'
     if (ms >= 60000) return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
     return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`
   }
 
   function SegmentsSurface({ displayState = 'ready' }) {
     const segments = getSample('segments', SEGMENTS)
+    const live = Boolean(window.sampleData?.meta?.live)
+    const totalTurns = live ? window.sampleData?.chat?.turns?.length ?? segments.length : segments.length
     const providers = ['all', ...new Set(segments.map((segment) => segment.provider))]
     const [filter, setFilter] = useState('all')
     const visible = filter === 'all' ? segments : segments.filter((segment) => segment.provider === filter)
     const [selectedId, setSelectedId] = useState(segments[3]?.id)
     const selected = segments.find((segment) => segment.id === selectedId) || visible[0]
-    const total = Math.max(...segments.map((segment) => segment.durationMs), 1)
+    const total = Math.max(...segments.map((segment) => Number.isFinite(segment.durationMs) ? segment.durationMs : 0), 1)
+    const totalDuration = segments.reduce((sum, segment) => sum + (Number.isFinite(segment.durationMs) ? segment.durationMs : 0), 0)
+    const dominant = [...segments].filter((segment) => Number.isFinite(segment.durationMs)).sort((a, b) => b.durationMs - a.durationMs)[0]
     const statePanel = SurfaceState({ kind: displayState, noun: '执行分段' })
     const selectFilter = (provider) => {
       setFilter(provider)
@@ -597,12 +625,12 @@
     }
     return (
       <section className="data-surface segments-surface" data-screen-label="分段 · 时间 Ribbon 与账本">
-        <DataViewHeader eyebrow="SEGMENTS" title="七分钟里，等待与工作各自发生在哪里" summary="Ribbon 编码耗时，账本保留精确字段；过滤不会改变全局结论。" trailing={<DataStatus status={displayState === 'partial' ? 'partial' : 'exact'} label="6 个分段" />} />
+        <DataViewHeader eyebrow="SEGMENTS" title="每一轮耗时发生在哪里" summary={live ? 'Ribbon 最多展示最近 12 轮；只编码已知 duration，未知值保持 —，Provider 过滤不改变账本事实。' : 'Ribbon 编码真实 Turn duration，账本保留工具数与 Token 覆盖；过滤不会改变全局结论。'} trailing={<DataStatus status={displayState === 'partial' ? 'partial' : 'exact'} label={live ? `最近 ${segments.length} / ${totalTurns} 轮` : `${segments.length} 个真实 Turn`} />} />
         {statePanel || (
           <>
             <div className="segment-conclusion">
-              <div><DataKnown value="7m 23s" state="exact" className="conclusion-number" /><span>总历时</span></div>
-              <p><b>界面实施占 71%</b>，是本次会话的主导阶段；Provider 回补的 Token 仍只是已知下界。</p>
+              <div><DataKnown value={dominant ? formatDuration(totalDuration) : '—'} state={dominant ? 'exact' : 'unknown'} className="conclusion-number" /><span>{live ? '所示轮次已知总历时' : '总历时'}</span></div>
+              <p>{dominant ? <><b>T{dominant.index} 占 {totalDuration ? Math.round(dominant.durationMs / totalDuration * 100) : 0}%</b>，是当前快照耗时最长的一轮；Token 缺字段的轮次仍只显示已知状态。</> : '当前会话没有可用 Turn。'}</p>
               <div className="segment-filters" aria-label="Provider 过滤">
                 {providers.map((provider) => <button type="button" key={provider} className={filter === provider ? 'active' : ''} onClick={() => selectFilter(provider)}>{provider === 'all' ? 'ALL' : provider.toUpperCase()}</button>)}
               </div>
@@ -613,7 +641,7 @@
                   type="button"
                   key={segment.id}
                   className={`segment-block kind-${segment.kind} provider-${segment.provider} state-${segment.status} ${selectedId === segment.id ? 'active' : ''} ${filter !== 'all' && filter !== segment.provider ? 'dimmed' : ''}`}
-                  style={{ flexGrow: Math.max(0.08, segment.durationMs / total) }}
+                  style={{ flexGrow: Number.isFinite(segment.durationMs) ? Math.max(0.08, segment.durationMs / total) : 0.08 }}
                   onClick={() => setSelectedId(segment.id)}
                   aria-pressed={selectedId === segment.id}
                 >
@@ -641,7 +669,7 @@
                   <p>{selected.note}</p>
                   <DataEvidenceRow label="PROVIDER" value={selected.provider.toUpperCase()} />
                   <DataEvidenceRow label="DURATION" value={formatDuration(selected.durationMs)} />
-                  <DataEvidenceRow label="TOKEN" value={selected.token} state={selected.token.startsWith('≥') ? 'lowerBound' : selected.token === '不适用' ? 'notApplicable' : 'exact'} />
+                  <DataEvidenceRow label="TOKEN" value={selected.token} state={selected.token.startsWith('≥') ? 'lowerBound' : selected.token === '不适用' ? 'notApplicable' : selected.token === '—' ? 'unknown' : 'exact'} />
                   <DataEvidenceRow label="TOOL FAILURES" value={String(selected.failures)} state={selected.failures === 0 ? 'trueZero' : 'exact'} />
                   <SampleSource>turn timing · tool spans · 结构仿真</SampleSource>
                 </aside>
