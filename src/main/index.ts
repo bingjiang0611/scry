@@ -29,6 +29,7 @@ import { migrateLegacyUserData } from './user-data-migration'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import {
   normalizeAgentStartRequest,
+  runTerminationHint,
   type AgentInputAttachment,
   type AgentStartRequest,
   type RuntimeProvider
@@ -1635,7 +1636,14 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       const storageSessionId = nativeSessionId ?? runId
       const runtimeErr = err instanceof AgentRuntimeError ? err : null
       const message = String(err?.message ?? err)
-      const classified = runtimeErr ? { category: runtimeErr.brief.stage, hint: runtimeErr.brief.nextAction } : classifyError(message)
+      const terminalReason = [...runState.items].reverse().find(
+        (event) => event.kind === 'harness' && event.stage === 'result' && event.terminationReason
+      )?.terminationReason
+      const classified = terminalReason
+        ? { category: terminalReason, hint: runTerminationHint(terminalReason) }
+        : runtimeErr
+          ? { category: runtimeErr.brief.stage, hint: runtimeErr.brief.nextAction }
+          : classifyError(message)
       const { category, hint } = classified
       let providerTurnId: string | undefined
       try {

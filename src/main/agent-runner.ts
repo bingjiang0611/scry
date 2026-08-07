@@ -47,7 +47,13 @@ export interface RunOpts {
 }
 
 export interface RunHandle {
-  promise: Promise<{ sessionId?: string; providerTurnId?: string; stopped?: boolean; mcpStatus?: McpLiveStatus[] }>
+  promise: Promise<{
+    sessionId?: string
+    providerTurnId?: string
+    stopped?: boolean
+    status?: 'completed' | 'failed' | 'interrupted'
+    mcpStatus?: McpLiveStatus[]
+  }>
   interrupt: () => void
   getSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
@@ -235,6 +241,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   const promise = (async () => {
     let mcpStatus: McpLiveStatus[] | undefined
     let runErr: unknown
+    let providerStatus: 'completed' | 'failed' = 'completed'
     let streamedAssistantText = ''
     try {
       for await (const msg of q) {
@@ -258,6 +265,9 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
           }
         }
         if (m.type === 'result') captureSessionId(m.session_id)
+        if (m.type === 'result' && (m.subtype !== 'success' || (msg as { is_error?: boolean }).is_error === true)) {
+          providerStatus = 'failed'
+        }
         const events = normalizeSdkMessage(msg, ctx)
         if (m.type === 'stream_event') {
           for (const event of events) {
@@ -282,7 +292,13 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       if (!stopped) runErr = err // 用户主动 interrupt 引发的中断不算错误
     }
     if (runErr) throw runErr
-    return { sessionId, providerTurnId, stopped, mcpStatus }
+    return {
+      sessionId,
+      providerTurnId,
+      stopped,
+      status: stopped ? ('interrupted' as const) : providerStatus,
+      mcpStatus
+    }
   })()
 
   return {

@@ -1816,6 +1816,37 @@ body.pane-resizing * {
   font-size: 12px;
 }
 
+.termination-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent);
+  border-radius: 7px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.termination-notice svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 1px;
+}
+
+.termination-notice div {
+  display: grid;
+  gap: 1px;
+}
+
+.termination-notice b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
 /* composer */
 /* 顶层 error boundary 兜底界面（替代黑屏） */
 .err-boundary {

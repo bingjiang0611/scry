@@ -186,6 +186,30 @@ describe('normalizeSdkMessage', () => {
     })
   })
 
+  it('保留结构化 stop_reason，并区分输出截断与输入溢出', () => {
+    expect(normalizeSdkMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      stop_reason: 'max_tokens',
+      result: 'partial'
+    }, ctx())[0]).toMatchObject({
+      isError: false,
+      providerStopReason: 'max_tokens',
+      terminationReason: 'output_token_limit'
+    })
+
+    expect(normalizeSdkMessage({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      errors: ['context_length_exceeded: prompt is too long']
+    }, ctx())[0]).toMatchObject({
+      isError: true,
+      terminationReason: 'input_context_overflow'
+    })
+  })
+
   it('保留 Qoder result errors 中的具体失败原因', () => {
     const evs = normalizeSdkMessage(
       {

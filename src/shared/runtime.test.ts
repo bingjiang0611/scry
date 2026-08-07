@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  classifyRunTermination,
   normalizeAgentQuestionRequest,
   normalizeAgentQuestionResponse,
   normalizeAgentStartRequest,
@@ -9,6 +10,23 @@ import {
   runtimeProviderForAgentId,
   runtimeProviderForProviderId
 } from './runtime'
+
+describe('provider termination semantics', () => {
+  it('separates input overflow from output truncation using structured reasons first', () => {
+    expect(classifyRunTermination({ rawReason: 'max_tokens' })).toBe('output_token_limit')
+    expect(classifyRunTermination({ rawReason: 'length' })).toBe('output_token_limit')
+    expect(classifyRunTermination({ message: 'output token limit reached' })).toBe('output_token_limit')
+    expect(classifyRunTermination({ rawReason: 'model_context_window_exceeded' })).toBe('model_context_window_exceeded')
+    expect(classifyRunTermination({ message: 'context_length_exceeded: prompt is too long' })).toBe('input_context_overflow')
+    expect(classifyRunTermination({ message: 'input token limit exceeded' })).toBe('input_context_overflow')
+  })
+
+  it('does not guess a direction from an ambiguous token-limit phrase', () => {
+    expect(classifyRunTermination({ message: 'token limit reached' })).toBeUndefined()
+    expect(classifyRunTermination({ subtype: 'error_max_turns' })).toBe('max_turns')
+    expect(classifyRunTermination({ subtype: 'error_max_budget_usd' })).toBe('budget_exceeded')
+  })
+})
 
 describe('runtime frontdoor mapping', () => {
   it('maps supported UI agents to runtime providers without falling back for unknown agents', () => {

@@ -5,6 +5,7 @@ import type { BillingProvider } from '../../shared/billing'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  classifyRunTermination,
   normalizeAgentQuestionRequest,
   type AgentPermissionMode,
   type AgentRunControlCatalog
@@ -623,6 +624,11 @@ export function createOpenCodeAdapter(homeDir = homedir()): ProviderAdapter {
           const upstream = String(info.providerID ?? '')
           const sourceProvider = billingProvider(upstream)
           const cost = typeof info.cost === 'number' ? info.cost : undefined
+          const providerStopReason = typeof info.finish === 'string' && info.finish.trim() ? info.finish.trim() : undefined
+          const terminationReason = classifyRunTermination({
+            rawReason: providerStopReason,
+            message: info.error ? errorText(info.error) : undefined
+          })
           request.emit(newEvent(request.runId, {
             kind: 'harness',
             stage: 'result',
@@ -656,6 +662,8 @@ export function createOpenCodeAdapter(homeDir = homedir()): ProviderAdapter {
               usageSource: 'opencode_session'
             }] : undefined,
             isError: !!info.error,
+            ...(terminationReason ? { terminationReason } : {}),
+            ...(providerStopReason ? { providerStopReason } : {}),
             runtimeMetadata: { modelProvider: upstream, source: 'opencode_server', finish: info.finish }
           }, timing?.ts))
           if (info.error && !stopped) throw new Error(`OpenCode Provider 失败：${errorText(info.error)}`)

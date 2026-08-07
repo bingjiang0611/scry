@@ -62,6 +62,21 @@ describe('Claude Agent SDK launch options', () => {
     expect(emitted.filter((event) => event.kind === 'model').map((event) => event.text).join('')).toBe('OK')
   })
 
+  it('propagates a non-success SDK result as a failed Provider run', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          errors: ['context_length_exceeded: prompt is too long']
+        }
+      }
+    })
+
+    await expect(runAgent('probe', 'run-probe', () => {}, {}).promise).resolves.toMatchObject({ status: 'failed' })
+  })
+
   it('captures the root native prompt id without letting task notifications replace it', async () => {
     let release = (): void => {}
     const waiting = new Promise<void>((resolve) => { release = resolve })

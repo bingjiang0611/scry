@@ -10,6 +10,7 @@ import {
   mcpPayloadFailed,
   fileOpOf
 } from '../shared/trace.js'
+import { classifyRunTermination } from '../shared/runtime.js'
 import { classifyDanger } from './danger.js'
 
 export interface NormalizeCtx {
@@ -416,6 +417,16 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
     const resultErrors = Array.isArray(m.errors)
       ? m.errors.filter((error): error is string => typeof error === 'string' && !!error.trim())
       : []
+    const providerStopReason = typeof m.stop_reason === 'string' && m.stop_reason.trim()
+      ? m.stop_reason.trim()
+      : typeof m.terminal_reason === 'string' && m.terminal_reason.trim()
+        ? m.terminal_reason.trim()
+        : undefined
+    const terminationReason = classifyRunTermination({
+      rawReason: providerStopReason,
+      subtype: m.subtype,
+      message: resultErrors.join('\n') || resultText
+    })
     // probe 实测：modelUsage 是会话级更完整的 SDK usage 聚合，顶层 usage.input_tokens 会少算（只末轮）。
     // 故 token 从 modelUsage 求和；缺 modelUsage 时退回顶层 usage。美元成本只保留 SDK 原始值，不再按公开价补估算。
     const mu = m.modelUsage as
@@ -483,7 +494,13 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
         durationMs: m.duration_ms as number | undefined,
         durationApiMs: m.duration_api_ms as number | undefined,
         modelUsage: hasMu ? modelUsage : undefined,
-        isError: m.subtype !== 'success'
+        isError: m.subtype !== 'success' || m.is_error === true,
+        ...(terminationReason ? { terminationReason } : {}),
+        ...(providerStopReason ? { providerStopReason } : {}),
+        runtimeMetadata: {
+          resultSubtype: m.subtype,
+          stopReason: providerStopReason ?? null
+        }
       })
     ]
   }

@@ -678,6 +678,46 @@ describe('Codex provider adapter', () => {
     })
   })
 
+  it('preserves a native output-limit completion as an incomplete result', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-length' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-length' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-length',
+      prompt: 'write a long answer',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => {
+      expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything())
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-length',
+      turnId: 'turn-length',
+      turn: { id: 'turn-length', status: 'completed', finish_reason: 'length' }
+    })
+
+    await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+    expect(events.at(-1)).toMatchObject({
+      kind: 'harness',
+      stage: 'result',
+      isError: false,
+      providerStopReason: 'length',
+      terminationReason: 'output_token_limit'
+    })
+  })
+
   it('rejects an active turn when its app-server generation dies before completion', async () => {
     let resolveFailure: (error: Error) => void = () => {}
     appServer.failureForCurrentGeneration.mockReturnValue(new Promise((resolve) => {

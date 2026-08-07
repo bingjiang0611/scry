@@ -5,11 +5,15 @@ import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import {
+  isIncompleteRunTermination,
   normalizeAgentQuestionRequest,
+  runTerminationHint,
+  runTerminationLabel,
   type AgentIntervention,
   type AgentInputAttachment,
   type AgentQuestionRequest,
-  type AgentQuestionResponse
+  type AgentQuestionResponse,
+  type RunTerminationReason
 } from '@shared/runtime'
 import { AskUserQuestionInline, AskUserQuestionResult } from './AskUserQuestionDialog'
 import { ModalFrame } from './Modals'
@@ -1012,6 +1016,19 @@ function TurnFooter({ items }: { items: TraceEvent[] }) {
   )
 }
 
+export function TerminationNotice({ reason }: { reason: RunTerminationReason }) {
+  if (!isIncompleteRunTermination(reason)) return null
+  return (
+    <div className="termination-notice" role="status">
+      <Icon name="alert" />
+      <div>
+        <b>{runTerminationLabel(reason)}</b>
+        <span>{runTerminationHint(reason)}</span>
+      </div>
+    </div>
+  )
+}
+
 function AssistantTurnImpl({
   turn,
   selectedId,
@@ -1270,6 +1287,9 @@ function AssistantTurnImpl({
             />
           </div>
         ))}
+      {turn.done && result?.terminationReason && (
+        <TerminationNotice reason={result.terminationReason} />
+      )}
       {turn.error && (
         <div className="errline">
           <div className="errmain">

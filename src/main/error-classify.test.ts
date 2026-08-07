@@ -15,8 +15,17 @@ describe('classifyError', () => {
   it('网络 → network', () => {
     expect(classifyError('fetch failed: ECONNREFUSED').category).toBe('network')
   })
-  it('上下文超长 → context', () => {
-    expect(classifyError('prompt is too long: token limit').category).toBe('context')
+  it('输入上下文超长 → input_context_overflow', () => {
+    expect(classifyError('context_length_exceeded: prompt is too long').category).toBe('input_context_overflow')
+    expect(classifyError('context_length_exceeded: prompt is too long').hint).toContain('compact')
+  })
+  it('输出达到上限 → output_token_limit', () => {
+    const result = classifyError('finish_reason: length')
+    expect(result.category).toBe('output_token_limit')
+    expect(result.hint).toContain('继续生成')
+  })
+  it('模糊 token limit 不再误导用户精简上下文', () => {
+    expect(classifyError('token limit reached')).toEqual({ category: 'unknown', hint: '' })
   })
   it('mcp → mcp', () => {
     expect(classifyError('MCP server connection timed out').category).toBe('mcp')

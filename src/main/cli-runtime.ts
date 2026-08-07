@@ -12,6 +12,7 @@ import type {
   RuntimeObservedMcpServer,
   RuntimeProvider
 } from '../shared/runtime'
+import { classifyRunTermination } from '../shared/runtime'
 import type { EmitFn, RunHandle } from './agent-runner'
 
 let counter = 0
@@ -932,6 +933,7 @@ function resultTraceFromUsage(
 ): TraceEvent {
   const modelUsage = modelUsageRows(usage?.modelUsage)
   const rawUsage = usage?.usage
+  const terminationReason = classifyRunTermination({ rawReason: usage?.stopReason, message: usage?.stopReason })
   const capabilityWarnings = capabilityWarningsFromObserved(runtimeProvider, capabilityMetadata, observedMcpServers)
   return {
     id: newId(),
@@ -958,6 +960,8 @@ function resultTraceFromUsage(
     durationMs: usage?.durationMs,
     modelUsage,
     isError: isError || usage?.isError === true,
+    ...(terminationReason ? { terminationReason } : {}),
+    ...(usage?.stopReason ? { providerStopReason: usage.stopReason } : {}),
     runtimeProvider,
     runtimeFailureStage: failureBrief?.stage,
     runtimeMetadata: {
