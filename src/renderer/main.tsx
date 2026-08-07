@@ -3,6 +3,10 @@ import { App } from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { applyTheme, browserThemeStorage, readStoredTheme } from './theme'
 import './styles.css'
+import './analytics-evidence.css'
+import './diagnostics-evidence.css'
+import './inventory-evidence.css'
+import './session-evidence.css'
 
 applyTheme(readStoredTheme(browserThemeStorage()), document.documentElement)
 

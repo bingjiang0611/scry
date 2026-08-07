@@ -1,10 +1,10 @@
-// 全局弹窗：设置 / Skills（列表+开关，软屏蔽）/ MCP（列表+连接测试）。
+// 全局弹窗：设置 / Skills 证据账本 / MCP Fleet。
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
-import { Icon, type IconName } from './primitives/Icon'
+import { Icon } from './primitives/Icon'
 import type { AppTheme } from '../theme'
 
 export function ModalFrame({
@@ -149,6 +149,61 @@ export function SettingsModal({
   )
 }
 
+type InventoryState = 'enabled' | 'disabled' | 'connected' | 'pending' | 'failed' | 'needs-auth' | 'required' | 'passed' | 'unknown' | 'unsupported'
+
+interface EvidenceValue {
+  state: InventoryState
+  label: string
+  detail?: string
+  role?: 'alert' | 'status'
+}
+
+function EvidenceState({ value, quiet = false }: { value: EvidenceValue; quiet?: boolean }) {
+  return (
+    <span
+      className={'inventory-state inventory-state--' + value.state + (quiet ? ' inventory-state--quiet' : '')}
+      data-semantic-state={value.state}
+      title={value.detail ?? value.label}
+      role={value.role}
+      aria-live={value.role ? 'polite' : undefined}
+    >
+      <i aria-hidden="true" />
+      <span>{value.label}</span>
+    </span>
+  )
+}
+
+function InventorySwitch({
+  checked,
+  disabled,
+  label,
+  title,
+  onChange,
+  className = ''
+}: {
+  checked: boolean
+  disabled: boolean
+  label: string
+  title?: string
+  onChange: (checked: boolean) => void
+  className?: string
+}) {
+  return (
+    <label className={'inventory-switch' + (className ? ' ' + className : '')} title={title}>
+      <input type="checkbox" aria-label={label} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+      <span className="inventory-switch__track" aria-hidden="true"><span /></span>
+    </label>
+  )
+}
+
+function scopeClass(scope: string): string {
+  return scope === 'project' || scope === '.mcp.json' ? 'project' : scope === 'user' ? 'user' : 'unknown'
+}
+
+function scopeShortLabel(scope: string): string {
+  return scope === 'project' || scope === '.mcp.json' ? '项目' : scope === 'user' ? '用户' : scope || '未知'
+}
+
 export function SkillsModal({
   skills,
   capability,
@@ -167,57 +222,129 @@ export function SkillsModal({
   const canManage = capability?.mode === 'manage'
   const titleId = useId()
   const searchRef = useRef<HTMLInputElement>(null)
-  const [q, setQ] = useState('')
-  const ql = q.trim().toLowerCase()
-  const filtered = ql
-    ? skills.filter((s) => s.name.toLowerCase().includes(ql) || s.description.toLowerCase().includes(ql))
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLowerCase()
+  const filtered = normalizedQuery
+    ? skills.filter((skill) => [skill.name, skill.description, skill.dir, skill.scope].some((value) => value.toLowerCase().includes(normalizedQuery)))
     : skills
   const groups: Record<string, SkillMeta[]> = {}
-  for (const s of filtered) (groups[s.scope] ??= []).push(s)
+  for (const skill of filtered) (groups[skill.scope] ??= []).push(skill)
+  const scopes = ['project', 'user', ...Object.keys(groups).filter((scope) => scope !== 'project' && scope !== 'user')]
+  const manageDetail = canManage
+    ? 'Scry 可写入当前 Provider 的 Skill 配置'
+    : capability?.mode === 'read'
+      ? 'Provider 原生状态 · Scry 只读'
+      : capability?.state === 'unsupported' || capability?.mode === 'none'
+        ? '当前 Provider 不支持由 Scry 管理'
+        : '管理能力尚未确认'
+
   return (
-    <ModalFrame labelledBy={titleId} initialFocusRef={searchRef} className="skills-modal" onClose={onClose}>
-        <div className="modal-head">
-          <b id={titleId}>Skills</b>{' '}
-          <span className="dim">
-            {filtered.length}
-            {ql ? `/${skills.length}` : ''}
-          </span>
-          {refreshing && <span className="dim">读取中…</span>}
-          {capability && capability.state !== 'ready' && <span className="dim">{capability.reason ?? capability.state}</span>}
+    <ModalFrame labelledBy={titleId} initialFocusRef={searchRef} className="skills-modal inventory-modal inventory-modal--skills" onClose={onClose}>
+      <div className="modal-head inventory-modal__head">
+        <div className="inventory-modal__title">
+          <span className="inventory-modal__eyebrow">Capability inventory</span>
+          <div className="inventory-modal__title-line">
+            <b id={titleId}>Skills</b>
+            {capability?.providerId && <span className="inventory-provider">{capability.providerId}</span>}
+          </div>
+          <p>查看当前 Provider 在这个工作目录里实际发现了什么，以及 Scry 是否有权管理它。</p>
+        </div>
+        <div className="inventory-modal__head-actions">
+          {refreshing && <EvidenceState value={{ state: 'pending', label: '读取中…', role: 'status' }} quiet />}
           <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 状态" aria-label="刷新 Skills">
             <Icon name="refresh" />
           </button>
-          <button className="modal-x" onClick={onClose} aria-label="关闭 Skills">
-            <Icon name="x" />
-          </button>
+          <button className="modal-x" onClick={onClose} aria-label="关闭 Skills"><Icon name="x" /></button>
         </div>
-        <input ref={searchRef} className="modal-search" placeholder="搜索 skill…" aria-label="搜索 Skills" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="modal-body">
-          {filtered.length === 0 && (
-            <div className="dim pad">{refreshing && skills.length === 0 ? '正在读取 Skill…' : skills.length === 0 ? '未发现 skill' : '无匹配'}</div>
-          )}
-          {Object.entries(groups).map(([scope, list]) => (
-            <div key={scope}>
-              <div className="mcp-scope">{scope === 'project' ? '项目 Skills' : '用户 Skills'}</div>
-              {list.map((s) => (
-                <div key={s.name} className="skill-row">
-                  <div className="skill-tog">
-                    <span className={`skill-name ${s.enabled ? '' : 'off'}`}>{s.name}</span>
-                    <label className="switch skill-switch">
-                      <input type="checkbox" aria-label={`启用 Skill ${s.name}`} checked={s.enabled} disabled={!canManage} onChange={(e) => onToggle(s.name, e.target.checked)} />
-                      <span className="slider" aria-hidden="true" />
-                      <span className="skill-switch-state" aria-hidden="true">{s.enabled ? '已启用' : '已关闭'}</span>
-                    </label>
-                  </div>
-                  <div className="skill-desc" title={s.description}>{s.description}</div>
-                </div>
-              ))}
-            </div>
-          ))}
+      </div>
+
+      {capability && capability.state !== 'ready' && (
+        <div className="inventory-capability-note" role={capability.state === 'unknown' ? 'alert' : 'status'}>
+          {capability.reason ?? capability.state}
         </div>
-        <div className="modal-foot dim">
-          {canManage ? '当前 Provider 支持由 Scry 管理 Skill 开关。' : '当前 Provider 的 Skill 目录仅供读取；Scry 不修改其私有配置。'}
-        </div>
+      )}
+
+      <div className="inventory-toolbar">
+        <label className="inventory-search">
+          <span>搜索</span>
+          <input
+            ref={searchRef}
+            type="search"
+            className="modal-search"
+            placeholder="名称、描述、来源或 scope"
+            aria-label="搜索 Skills"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query && <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">清除</button>}
+        </label>
+        <span className="inventory-toolbar__count" aria-live="polite">显示 {filtered.length} / {skills.length}</span>
+      </div>
+
+      <div className="modal-body inventory-modal__body">
+        {filtered.length === 0 && (
+          <div className="inventory-empty" role="status">
+            <strong>{refreshing && skills.length === 0 ? '正在读取 Skill…' : skills.length === 0 ? '未发现 Skill' : '没有匹配的 Skill'}</strong>
+            <p>{skills.length === 0 ? '当前 Provider 与工作目录没有返回 Skill 条目。' : '换一个关键词，或清空搜索查看全部条目。'}</p>
+            {query && <button type="button" onClick={() => setQuery('')}>清空搜索</button>}
+          </div>
+        )}
+
+        {scopes.map((scope) => {
+          const list = groups[scope]
+          if (!list?.length) return null
+          const groupLabel = scope === 'project' ? '项目 Skills' : scope === 'user' ? '用户 Skills' : (scope || '来源未知') + ' Skills'
+          const groupHint = scope === 'project' ? '随当前仓库生效' : scope === 'user' ? '来自用户目录，可跨项目复用' : 'Provider 返回的原始 scope'
+          const groupId = titleId + '-skills-' + (scope || 'unknown')
+          return (
+            <section className="skill-group" key={scope} aria-labelledby={groupId}>
+              <div className="skill-group__head">
+                <div><h2 id={groupId}>{groupLabel}</h2><p>{groupHint}</p></div>
+                <span>{list.length}</span>
+              </div>
+              <div className="skill-ledger">
+                {list.map((skill) => {
+                  const configValue: EvidenceValue = {
+                    state: skill.enabled ? 'enabled' : 'disabled',
+                    label: skill.enabled ? '已启用' : '已关闭',
+                    detail: manageDetail
+                  }
+                  return (
+                    <article className="skill-ledger__row" key={skill.scope + ':' + skill.name}>
+                      <InventorySwitch
+                        checked={skill.enabled}
+                        disabled={!canManage}
+                        label={(skill.enabled ? '关闭' : '启用') + ' Skill ' + skill.name}
+                        title={manageDetail}
+                        onChange={(enabled) => onToggle(skill.name, enabled)}
+                        className="skill-switch"
+                      />
+                      <div className="skill-ledger__main">
+                        <div className="skill-ledger__name-line">
+                          <strong>{skill.name}</strong>
+                          <span className={'inventory-scope inventory-scope--' + scopeClass(scope)}>{scopeShortLabel(scope)}</span>
+                        </div>
+                        <p title={skill.description}>{skill.description}</p>
+                        <div className="skill-ledger__source"><span>来源</span><code title={skill.dir}>{skill.dir}</code></div>
+                      </div>
+                      <div className="skill-ledger__status">
+                        <span>配置状态</span>
+                        <EvidenceState value={configValue} />
+                        <small>{canManage ? '可管理' : capability?.mode === 'read' ? '只读' : capability?.state === 'unsupported' || capability?.mode === 'none' ? '不支持管理' : '管理能力未知'}</small>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
+          )
+        })}
+      </div>
+
+      <div className="modal-foot inventory-footnote">
+        <span>配置证据</span>
+        <p>{canManage ? '当前 Provider 支持由 Scry 管理 Skill 开关。' : '当前 Provider 的 Skill 目录仅供读取；Scry 不修改其私有配置。'}</p>
+      </div>
     </ModalFrame>
   )
 }
@@ -228,17 +355,52 @@ const MCP_SCOPE_LABEL: Record<string, string> = {
   user: '用户 MCP（~/.claude.json）'
 }
 
-const LIVE_LABEL: Record<McpLiveStatus['status'], { cls: string; text: string; icon: IconName }> = {
-  connected: { cls: 'mcp-ok', text: 'connected', icon: 'check' },
-  failed: { cls: 'mcp-bad', text: 'failed', icon: 'x' },
-  'needs-auth': { cls: 'mcp-bad', text: '需认证', icon: 'alert' },
-  'needs-client-registration': { cls: 'mcp-bad', text: '需配置 OAuth Client', icon: 'alert' },
-  pending: { cls: 'mcp-neutral', text: 'pending', icon: 'clock' },
-  disabled: { cls: 'mcp-neutral', text: 'disabled', icon: 'square' }
+const LIVE_STATE: Record<McpLiveStatus['status'], InventoryState> = {
+  connected: 'connected',
+  failed: 'failed',
+  'needs-auth': 'needs-auth',
+  'needs-client-registration': 'required',
+  pending: 'pending',
+  disabled: 'disabled'
 }
 
-function labelForLiveStatus(status: string): { cls: string; text: string; icon: IconName } {
-  return LIVE_LABEL[status as McpLiveStatus['status']] ?? { cls: 'mcp-neutral', text: status || 'unknown', icon: 'alert' }
+const LIVE_TEXT: Record<McpLiveStatus['status'], string> = {
+  connected: 'connected',
+  failed: 'failed',
+  'needs-auth': '需认证',
+  'needs-client-registration': '需配置 OAuth Client',
+  pending: 'pending',
+  disabled: 'disabled'
+}
+
+function evidenceForRuntime(value: McpLiveStatus | undefined, capability: CapabilityEnvelope<McpSnapshot> | null | undefined): EvidenceValue {
+  if (!value) {
+    if (capability?.state === 'unsupported' || capability?.mode === 'none') {
+      return { state: 'unsupported', label: '不支持', detail: capability.reason ?? 'Provider 不提供 MCP 运行态' }
+    }
+    return {
+      state: 'unknown',
+      label: '未知',
+      detail: capability?.data?.runtime === null ? '尚未探测 Provider 运行态' : 'Provider 未返回此 Server 的运行态'
+    }
+  }
+  const state = LIVE_STATE[value.status]
+  if (!state) return { state: 'unknown', label: value.status || 'unknown', detail: 'Provider 返回了未识别的运行态' }
+  return {
+    state,
+    label: LIVE_TEXT[value.status] + (value.status === 'connected' && value.tools != null ? ' · ' + value.tools + ' tools' : ''),
+    detail: value.serverName || value.serverVersion ? [value.serverName, value.serverVersion].filter(Boolean).join(' · ') : '来自当前 Provider 原生运行时'
+  }
+}
+
+function McpEvidenceCell({ label, value, className = '' }: { label: string; value: EvidenceValue; className?: string }) {
+  return (
+    <div className={'mcp-evidence-cell' + (className ? ' ' + className : '')}>
+      <span className="mcp-evidence-cell__label">{label}</span>
+      <EvidenceState value={value} />
+      {value.detail && <small>{value.detail}</small>}
+    </div>
+  )
 }
 
 export function McpModal({
@@ -274,171 +436,243 @@ export function McpModal({
   const loading = loadingConfig || refreshing
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const liveByName = new Map(live.map((l) => [l.name, l]))
-  const groups: Record<string, McpMeta[]> = {}
-  for (const m of mcps) (groups[m.scope] ??= []).push(m)
+  const liveByName = new Map(live.map((item) => [item.name, item]))
+  const connectedCount = live.filter((item) => item.status === 'connected').length
+  const testEvidenceCount = Object.values(status).filter((item) => item.ok != null || item.testing).length
+
   return (
-    <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} onClose={onClose}>
-        <div className="modal-head">
-          <b id={titleId}>MCP servers</b> <span className="dim">{mcps.length}</span>
-          {loading && <span className="dim" role="status" aria-live="polite">{loadingConfig ? '读取配置中…' : '正在检测全部 MCP…'}</span>}
-          {capability && capability.state !== 'ready' && (
-            <span className="dim" role={capability.state === 'unknown' ? 'alert' : 'status'}>
-              {capability.reason ?? capability.state}
-            </span>
-          )}
+    <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} className="inventory-modal inventory-modal--mcp" onClose={onClose}>
+      <div className="modal-head inventory-modal__head">
+        <div className="inventory-modal__title">
+          <span className="inventory-modal__eyebrow">Capability fleet</span>
+          <div className="inventory-modal__title-line">
+            <b id={titleId}>MCP</b>
+            {capability?.providerId && <span className="inventory-provider">{capability.providerId}</span>}
+          </div>
+          <p>配置、Provider 运行态、本次测试与认证是四份独立证据，不折叠成一个模糊的“健康”结论。</p>
+        </div>
+        <div className="inventory-modal__head-actions">
+          {loading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? '读取配置中…' : '正在检测全部 MCP…', role: 'status' }} quiet />}
           <button
-            className={`modal-refresh${readsRuntime ? ' mcp-refresh-all' : ''}`}
+            className={'modal-refresh' + (readsRuntime ? ' mcp-refresh-all' : '')}
             onClick={onRefresh}
             disabled={loading || authenticationInProgress}
-            title={readsRuntime
-              ? '启动已授权 MCP，并刷新当前 Provider 的全部原生运行状态'
-              : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
+            title={readsRuntime ? '启动已授权 MCP，并刷新当前 Provider 的全部原生运行状态' : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
             aria-label={readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
           >
             {refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
             {readsRuntime && <span>{refreshing ? '检测中…' : '检测全部'}</span>}
           </button>
-          <button ref={closeRef} className="modal-x" onClick={onClose} aria-label="关闭 MCP">
-            <Icon name="x" />
-          </button>
+          <button ref={closeRef} className="modal-x" onClick={onClose} aria-label="关闭 MCP"><Icon name="x" /></button>
         </div>
-        <div className="modal-body">
-          {mcps.length === 0 && <div className="dim pad">{loadingConfig ? '正在读取 MCP 配置…' : '未发现 MCP 配置'}</div>}
-          {Object.entries(groups).map(([scope, list]) => (
-            <div key={scope}>
-              <div className="mcp-scope">{MCP_SCOPE_LABEL[scope] ?? scope}</div>
-              {list.map((m, index) => {
-                const targetId = m.targetId ?? m.name
-                const st = status[targetId]
-                const lv = liveByName.get(m.name)
-                const lvLabel = lv ? labelForLiveStatus(lv.status) : undefined
-                // 开关跟 SDK 真实态走：有 live 就按它(disabled=关，其余=开)，没 live 退回配置读取
-                const enabled = lv ? lv.status !== 'disabled' : m.enabled
+      </div>
+
+      <div className="inventory-fleet-summary" aria-label="MCP 证据摘要">
+        <span>{mcps.length} 个配置项</span>
+        <span>{live.length > 0 ? connectedCount + ' 已连接 · ' + (live.length - connectedCount) + ' 其他运行态' : 'Provider 运行态未返回'}</span>
+        <span>{testEvidenceCount} 个测试证据</span>
+      </div>
+
+      {capability && capability.state !== 'ready' && (
+        <div className="inventory-capability-note" role={capability.state === 'unknown' ? 'alert' : 'status'}>
+          {capability.reason ?? capability.state}
+        </div>
+      )}
+
+      <div className="inventory-state-legend" aria-label="状态语义说明">
+        <span>状态语义</span>
+        <EvidenceState value={{ state: 'unknown', label: '未知：还没有证据' }} quiet />
+        <EvidenceState value={{ state: 'unsupported', label: '不支持：能力不存在' }} quiet />
+      </div>
+
+      <div className="modal-body inventory-modal__body inventory-modal__body--mcp">
+        {mcps.length === 0 ? (
+          <div className="inventory-empty" role="status">
+            <strong>{loadingConfig ? '正在读取 MCP 配置…' : '未发现 MCP 配置'}</strong>
+            <p>{loadingConfig ? '等待当前 Provider 返回配置清单。' : '没有配置证据不等于运行正常，也不等于连接失败。'}</p>
+          </div>
+        ) : (
+          <div className="mcp-fleet-wrap">
+            <table className="mcp-fleet">
+              <caption className="inventory-sr-only">MCP Fleet：配置、运行态、本次测试和认证独立展示</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Server / 来源</th>
+                  <th scope="col">配置</th>
+                  <th scope="col">Provider 运行态</th>
+                  <th scope="col">本次测试</th>
+                  <th scope="col">认证</th>
+                  <th scope="col"><span className="inventory-sr-only">操作</span></th>
+                </tr>
+              </thead>
+              {mcps.map((mcp, index) => {
+                const targetId = mcp.targetId ?? mcp.name
+                const currentStatus = status[targetId]
+                const runtime = liveByName.get(mcp.name)
+                const runtimeValue = evidenceForRuntime(runtime, capability)
                 const open = expanded === targetId
-                const toolsId = `${titleId}-tools-${scope}-${index}`
-                const authLimited = st && !st.testing && !st.ok && /40[13]/.test(st.error ?? '')
-                const canAuthenticate = Boolean(
-                  onReauthenticate && capability?.data?.operations?.authenticate.includes(targetId)
-                )
-                const needsAuth = lv?.status === 'needs-auth'
-                const needsClientRegistration = lv?.status === 'needs-client-registration'
+                const toolsId = titleId + '-tools-' + index
+                const authLimited = currentStatus?.ok === false && /40[13]/.test(currentStatus.error ?? '')
+                const canAuthenticate = Boolean(onReauthenticate && capability?.data?.operations?.authenticate.includes(targetId))
+                const needsAuth = runtime?.status === 'needs-auth'
+                const needsClientRegistration = runtime?.status === 'needs-client-registration'
+
+                let testValue: EvidenceValue
+                if (currentStatus?.testing) {
+                  testValue = { state: 'pending', label: '测试中', detail: '正在执行 initialize / tools/list…', role: 'status' }
+                } else if (currentStatus?.ok === true) {
+                  testValue = {
+                    state: 'passed',
+                    label: '通过',
+                    detail: '本次测试成功' + (currentStatus.tools != null ? ' · ' + currentStatus.tools + ' tools' : ''),
+                    role: 'status'
+                  }
+                } else if (currentStatus?.ok === false) {
+                  testValue = authLimited
+                    ? { state: 'needs-auth', label: '需认证（测试无 token）', detail: '测试握手没带 OAuth token；真实连接以当前 Provider 原生运行时为准', role: 'alert' }
+                    : { state: 'failed', label: '失败', detail: '本次测试失败' + (currentStatus.error ? ' · ' + currentStatus.error : ''), role: 'alert' }
+                } else if (canManage) {
+                  testValue = { state: 'unknown', label: '未测试', detail: '尚未执行单项 initialize / tools/list' }
+                } else if (readsRuntime || capability?.state === 'unsupported' || capability?.mode === 'none') {
+                  testValue = { state: 'unsupported', label: '不支持单项直测', detail: '使用 Provider 原生运行态；Scry 不伪造测试结果' }
+                } else {
+                  testValue = { state: 'unknown', label: '未知', detail: '测试能力尚未确认' }
+                }
+
+                let authValue: EvidenceValue
+                if (currentStatus?.authenticating) {
+                  authValue = { state: 'pending', label: '认证中', detail: '等待浏览器完成授权…', role: 'status' }
+                } else if (currentStatus?.authOk === true) {
+                  authValue = currentStatus.authError
+                    ? { state: 'pending', label: '已授权 · 待确认', detail: '授权流程已完成；运行状态未确认 · ' + currentStatus.authError, role: 'status' }
+                    : { state: 'passed', label: '认证成功', detail: '认证成功，运行状态已刷新', role: 'status' }
+                } else if (currentStatus?.authOk === false || currentStatus?.authError) {
+                  authValue = { state: 'failed', label: '认证失败', detail: '认证失败' + (currentStatus.authError ? ' · ' + currentStatus.authError : ''), role: 'alert' }
+                } else if (needsClientRegistration) {
+                  authValue = { state: 'required', label: '需配置 OAuth Client', detail: '需在 Provider 中配置 OAuth Client ID' }
+                } else if (needsAuth) {
+                  authValue = { state: 'required', label: '需要认证', detail: canAuthenticate ? '可由 Scry 启动 Provider 原生 OAuth' : '请在 Provider 客户端完成认证' }
+                } else if (capability?.data?.operations) {
+                  authValue = capability.data.operations.authenticate.includes(targetId)
+                    ? { state: 'unknown', label: '未执行', detail: '当前没有认证流程结果' }
+                    : { state: 'unsupported', label: 'Scry 不支持', detail: 'Provider 未声明此目标可由 Scry 发起认证' }
+                } else {
+                  authValue = { state: 'unknown', label: '未知', detail: 'Provider 未返回认证能力证据' }
+                }
+
+                const configValue: EvidenceValue = {
+                  state: mcp.enabled ? 'enabled' : 'disabled',
+                  label: mcp.enabled ? '已启用' : '已关闭',
+                  detail: canManage
+                    ? '配置文件中的当前值 · Scry 可管理'
+                    : capability?.mode === 'read'
+                      ? '配置文件中的当前值 · Scry 只读'
+                      : '配置文件中的当前值 · 管理能力未知'
+                }
+
                 return (
-                  <div key={scope + m.name} className="mcp-row">
-                    <div className="mcp-main">
-                      <label className="switch" title="当前 Provider 支持管理时，可持久化启用或禁用">
-                        <input type="checkbox" aria-label={`启用 MCP ${m.name}`} checked={enabled} disabled={!canManage || authenticationInProgress} onChange={(e) => onToggle(m.name, e.target.checked)} />
-                        <span className="slider" />
-                      </label>
-                      <span className={`mcp-name ${enabled ? '' : 'off'}`}>{m.name}</span>
-                      <span className="mcp-transport">{m.transport}</span>
-                      {/* live 状态来自 SDK init；pending 是真实的未收敛/待刷新态，不显示成 connected */}
-                      {lv && lvLabel && (
-                        <span className={lvLabel.cls} title="来自当前 Provider 原生运行时的真实状态">
-                          <Icon name={lvLabel.icon} />
-                          {lvLabel.text}
-                          {lv.status === 'connected' && lv.tools != null ? ` · ${lv.tools} tools` : ''}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mcp-detail" title={m.detail}>
-                      {m.detail}
-                    </div>
-                    <div className="mcp-actions">
-                      {canManage && (
-                        <button className="mcp-test" onClick={() => onTest(targetId)} disabled={st?.testing || authenticationInProgress}>
-                          {st?.testing ? (
-                            <>
-                              <span className="spinner" /> 测试中…
-                            </>
-                          ) : (
-                            '测试连接'
+                  <tbody key={mcp.scope + ':' + targetId}>
+                    <tr className={'mcp-fleet__row mcp-fleet__row--' + runtimeValue.state}>
+                      <th scope="row">
+                        <div className="mcp-server-cell">
+                          <div className="mcp-server-cell__name">
+                            <strong>{mcp.name}</strong>
+                            <span>{mcp.transport}</span>
+                            <span className={'inventory-scope inventory-scope--' + scopeClass(mcp.scope)} title={MCP_SCOPE_LABEL[mcp.scope] ?? mcp.scope}>
+                              {scopeShortLabel(mcp.scope)}
+                            </span>
+                          </div>
+                          <code title={mcp.detail}>{mcp.detail}</code>
+                          {currentStatus?.ok && currentStatus.toolNames && currentStatus.toolNames.length > 0 && (
+                            <button
+                              className="mcp-tools-toggle"
+                              type="button"
+                              aria-expanded={open}
+                              aria-controls={toolsId}
+                              onClick={() => setExpanded(open ? null : targetId)}
+                            >
+                              <span aria-hidden="true">{open ? '−' : '+'}</span>
+                              {currentStatus.toolNames.length} tools
+                            </button>
                           )}
-                        </button>
-                      )}
-                      {canManage && st && (
-                        <span
-                          className={`mcp-test-result ${st.testing ? '' : st.ok ? 'ok' : authLimited ? 'warn' : 'bad'}`}
-                          role={!st.testing && !st.ok ? 'alert' : 'status'}
-                          aria-live="polite"
-                          title={authLimited ? '测试握手没带 OAuth token；真实连接以当前 Provider 原生运行时为准' : undefined}
-                        >
-                          {st.testing
-                            ? '正在执行 initialize / tools/list…'
-                            : st.ok
-                              ? `本次测试成功${st.tools != null ? ` · ${st.tools} tools` : ''}`
-                              : authLimited
-                                ? '需认证（测试无 token）'
-                                : `本次测试失败${st.error ? ` · ${st.error}` : ''}`}
-                        </span>
-                      )}
-                      {st?.ok && st.toolNames && st.toolNames.length > 0 && (
-                        <button
-                          className="mcp-test"
-                          aria-expanded={open}
-                          aria-controls={toolsId}
-                          onClick={() => setExpanded(open ? null : targetId)}
-                        >
-                          {open ? '收起工具' : `查看工具 (${st.toolNames.length})`}
-                        </button>
-                      )}
-                      {needsAuth && canAuthenticate && (
-                        <button
-                          className="mcp-test"
-                          onClick={() => onReauthenticate?.(targetId)}
-                          disabled={authenticationInProgress}
-                          aria-label={`重新认证 MCP ${m.name}`}
-                        >
-                          {st?.authenticating ? (
-                            <><span className="spinner" /> 认证中…</>
-                          ) : '重新认证'}
-                        </button>
-                      )}
-                      {(st?.authenticating || st?.authOk != null || st?.authError) && (
-                        <span
-                          className={`mcp-test-result ${st.authenticating ? '' : st.authOk ? st.authError ? 'warn' : 'ok' : 'bad'}`}
-                          role={!st.authenticating && !st.authOk ? 'alert' : 'status'}
-                          aria-live="polite"
-                        >
-                          {st.authenticating
-                            ? '等待浏览器完成授权…'
-                            : st.authOk
-                              ? st.authError
-                                ? `授权流程已完成；运行状态未确认 · ${st.authError}`
-                                : '认证成功，运行状态已刷新'
-                              : `认证失败${st.authError ? ` · ${st.authError}` : ''}`}
-                        </span>
-                      )}
-                      {needsClientRegistration ? (
-                        <span className="mcp-runtime">需在 Provider 中配置 OAuth Client ID</span>
-                      ) : needsAuth && !canAuthenticate ? (
-                        <span className="mcp-runtime">请在 Provider 客户端完成认证</span>
-                      ) : null}
-                    </div>
-                    {open && st?.toolNames && (
-                      <div id={toolsId} className="mcp-tools">
-                        {st.toolNames.map((t) => (
-                          <span key={t} className="mcp-tool">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
+                        </div>
+                      </th>
+                      <td>
+                        <div className="mcp-evidence-cell mcp-evidence-cell--config">
+                          <span className="mcp-evidence-cell__label">配置</span>
+                          <div className="mcp-config-toggle">
+                            <InventorySwitch
+                              checked={mcp.enabled}
+                              disabled={!canManage || authenticationInProgress}
+                              label={(mcp.enabled ? '关闭' : '启用') + ' MCP ' + mcp.name}
+                              title={configValue.detail}
+                              onChange={(enabled) => onToggle(mcp.name, enabled)}
+                            />
+                            <EvidenceState value={configValue} quiet />
+                          </div>
+                          <small>{configValue.detail}</small>
+                        </div>
+                      </td>
+                      <td><McpEvidenceCell label="运行态" value={runtimeValue} /></td>
+                      <td><McpEvidenceCell label="测试" value={testValue} /></td>
+                      <td><McpEvidenceCell label="认证" value={authValue} /></td>
+                      <td className="mcp-fleet__actions">
+                        {canManage && (
+                          <button className="mcp-test" onClick={() => onTest(targetId)} disabled={currentStatus?.testing || authenticationInProgress}>
+                            {currentStatus?.testing ? <><span className="spinner" /> 测试中…</> : '测试连接'}
+                          </button>
+                        )}
+                        {needsAuth && canAuthenticate && (
+                          <button
+                            className="mcp-test"
+                            onClick={() => onReauthenticate?.(targetId)}
+                            disabled={authenticationInProgress}
+                            aria-label={'重新认证 MCP ' + mcp.name}
+                          >
+                            {currentStatus?.authenticating ? <><span className="spinner" /> 认证中…</> : '重新认证'}
+                          </button>
+                        )}
+                        {needsClientRegistration ? (
+                          <small>需在 Provider 中配置 OAuth Client ID</small>
+                        ) : needsAuth && !canAuthenticate ? (
+                          <small>请在 Provider 客户端完成认证</small>
+                        ) : !canManage ? (
+                          <small>{readsRuntime ? '运行态只读' : '操作能力未知'}</small>
+                        ) : null}
+                      </td>
+                    </tr>
+                    {open && currentStatus?.toolNames && (
+                      <tr className="mcp-tools-row">
+                        <td colSpan={6}>
+                          <div id={toolsId} className="mcp-tools-drawer">
+                            <div><strong>本次测试返回的工具</strong><small>来自 initialize / tools/list</small></div>
+                            <div className="mcp-tools-drawer__list">
+                              {currentStatus.toolNames.map((tool) => <code key={tool}>{tool}</code>)}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </div>
+                  </tbody>
                 )
               })}
-            </div>
-          ))}
-        </div>
-        <div className="modal-foot dim">
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="modal-foot inventory-footnote">
+        <span>证据边界</span>
+        <p>
           {capability?.data?.operations?.authenticate.length
             ? '支持认证的远程 MCP 可直接在 Scry 完成 Provider 原生 OAuth；凭据由 Provider 保存在本机（OpenCode 使用 Scry 私有目录），不会上传。'
             : canManage
-            ? '当前 Provider 支持由 Scry 管理 MCP 开关与连接测试。'
-            : capability?.mode === 'read'
-              ? '当前 Provider 只暴露原生 MCP 配置/运行状态，不提供单项直测；使用顶部「检测全部」读取原生运行状态。Scry 不把读取能力伪装成持久化开关。'
-              : '当前 Provider 没有可用的 MCP 配置/运行状态接口。'}
-        </div>
+              ? '当前 Provider 支持由 Scry 管理 MCP 开关与连接测试。'
+              : capability?.mode === 'read'
+                ? '当前 Provider 只暴露原生 MCP 配置/运行状态，不提供单项直测；使用顶部「检测全部」读取原生运行状态。Scry 不把读取能力伪装成持久化开关。'
+                : '当前 Provider 没有可用的 MCP 配置/运行状态接口。'}
+        </p>
+      </div>
     </ModalFrame>
   )
 }

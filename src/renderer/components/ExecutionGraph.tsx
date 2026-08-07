@@ -1,4 +1,4 @@
-// Execution Graph 拓扑（蓝本 graph.html）：full verdict 卡 + latency 节点树 + 右侧 span 详情。
+// Execution Graph 拓扑：稳定横向泳道 + 右侧 span 详情。
 // Session → Turn → llm_request(message_id) → tool/skill/mcp/agent → subagent(parentToolUseId 嵌套)。
 // 数据来自内存 turns（实时）。诚实：per-LLM token/cost 我们没有；latbar 用真实 durationMs，账单口径只显示 result usage token。
 import {
@@ -161,12 +161,9 @@ function TurnBlock({
   const preview = parsedUser.command ?? (parsedUser.injectedSkill ? `Skill · ${parsedUser.injectedSkill}` : parsedUser.body) ?? ''
 
   return (
-    <div className="turn-block">
-      <div className={`turn-head ${running ? 'running' : ''}`}>
+    <section className={`graph-turn-lane ${running ? 'is-running' : ''}`}>
+      <header className="graph-lane-head">
         <span className="num">
-          <span className="turn-toggle" aria-hidden="true">
-            <Icon name="chevronRight" />
-          </span>
           TURN {String(idx + 1).padStart(2, '0')}
         </span>
         <span className="preview">{preview || '(无预览)'}</span>
@@ -192,50 +189,37 @@ function TurnBlock({
             </span>
           )}
         </span>
-      </div>
+      </header>
 
-      {groups.length === 0 && <div className="gempty" style={{ padding: '8px 20px', textAlign: 'left' }}>（本轮无工具调用）</div>}
+      {groups.length === 0 && <div className="graph-lane-empty">本轮没有结构化工具调用</div>}
 
-      {groups.map((grp, gi) => (
-        <div key={grp.mid + gi}>
-          <div className="gnode depth-0">
-            <div className="gutter" />
-            <div className="gcontent">
-              <div className="gline" style={{ cursor: 'default' }}>
-                <span className="gtype llm">
-                  <span className="st" />
-                  LLM
-                </span>
-                <span className="gname">{grp.mid === '(no-msg)' ? 'llm_request' : grp.mid.replace(/^msg_/, '').slice(0, 14)}</span>
-                <span className="gargs">{aggregateCalls(grp.items).totalCalls} 个调用</span>
-              </div>
+      <div className="graph-lane-track">
+        {groups.map((grp, gi) => (
+          <div className="graph-lane-group" key={grp.mid + gi}>
+            <div className="graph-llm-node">
+              <span className="gtype llm"><span className="st" />LLM</span>
+              <b>{grp.mid === '(no-msg)' ? 'llm_request' : grp.mid.replace(/^msg_/, '').slice(0, 14)}</b>
+              <small>{aggregateCalls(grp.items).totalCalls} 个调用</small>
+            </div>
+            <div className="graph-call-run">
+              {grp.items.map((event) => {
+                const kids = event.toolUseId ? childrenByParent.get(event.toolUseId) : undefined
+                return (
+                  <div className="graph-call-cluster" key={event.id}>
+                    <GLine ev={event} selectedId={selectedId} onSelect={onSelect} maxDur={maxDur} />
+                    {kids?.length ? (
+                      <div className="graph-child-run" aria-label={`${toolDisplayName(event)} 子调用`}>
+                        {kids.map((child) => <GLine key={child.id} ev={child} selectedId={selectedId} onSelect={onSelect} maxDur={maxDur} />)}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
             </div>
           </div>
-          {grp.items.map((e, ei) => {
-            const kids = e.toolUseId ? childrenByParent.get(e.toolUseId) : undefined
-            const last = ei === grp.items.length - 1 && !kids?.length
-            return (
-              <div key={e.id}>
-                <div className={`gnode ${last ? 'last' : ''}`}>
-                  <div className="gutter" />
-                  <div className="gcontent">
-                    <GLine ev={e} selectedId={selectedId} onSelect={onSelect} maxDur={maxDur} />
-                  </div>
-                </div>
-                {kids?.map((k, ki) => (
-                  <div className={`gnode sub ${ki === kids.length - 1 ? 'last' : ''}`} key={k.id}>
-                    <div className="gutter" />
-                    <div className="gcontent">
-                      <GLine ev={k} selectedId={selectedId} onSelect={onSelect} maxDur={maxDur} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
-          })}
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -253,12 +237,14 @@ function GraphDetail({
   id,
   ev,
   turns,
+  dangerClassification,
   onOpenInChat
 }: {
   id?: string
   ev: TraceEvent | null
   turns: Turn[]
-  onOpenInChat: () => void
+  dangerClassification: 'classified' | 'unsupported' | 'unknown'
+  onOpenInChat: (ev: TraceEvent) => void
 }) {
   if (!ev) {
     return (
@@ -371,9 +357,17 @@ function GraphDetail({
           <div style={{ font: '12px/1.5 var(--font-mono)', color: ev.danger.level === 'danger' ? 'var(--bad)' : 'var(--warn)' }}>
             <span className={`sdot ${ev.danger.level === 'danger' ? 'bad' : 'warn'}`} /> {ev.danger.reason}（观测·审计放行，不阻断）
           </div>
-        ) : (
+        ) : dangerClassification === 'classified' ? (
           <div style={{ font: '12px/1.5 var(--font-mono)', color: 'var(--ok)' }}>
-            <span className="sdot ok" /> 无危险标记。
+            <span className="sdot ok" /> 完整分类范围内无危险标记。
+          </div>
+        ) : dangerClassification === 'unsupported' ? (
+          <div style={{ font: '12px/1.5 var(--font-mono)', color: 'var(--dim2)' }}>
+            <span className="sdot" /> 当前 Provider 未支持危险分类；未标记不等于安全。
+          </div>
+        ) : (
+          <div style={{ font: '12px/1.5 var(--font-mono)', color: 'var(--dim2)' }}>
+            <span className="sdot" /> 危险分类能力未知；未标记不等于安全。
           </div>
         )}
       </div>
@@ -381,7 +375,7 @@ function GraphDetail({
       <div className="gp-section last">
         <h4>ACTIONS</h4>
         <div className="gp-actions">
-          <button className="btn ghost" onClick={onOpenInChat}>
+          <button className="btn ghost" onClick={() => onOpenInChat(ev)}>
             在对话中打开
           </button>
           <button className="btn ghost" onClick={() => copy(ev.id)}>
@@ -417,7 +411,7 @@ export function ExecutionGraph({
   selectedId: string | null
   onSelect: (ev: TraceEvent) => void
   busy?: boolean
-  onOpenInChat?: () => void
+  onOpenInChat?: (ev: TraceEvent) => void
 }) {
   const detailPane = useResizablePane({
     id: 'graph-detail',
@@ -439,6 +433,17 @@ export function ExecutionGraph({
     ? results.reduce((sum, event) => sum + (hasTokenUsage(event) ? resultTokenTotal(event) : 0), 0)
     : null
   const dangers = all.filter((e) => e.danger && e.stage !== 'tool_result')
+  const graphRuntimeProvider = [...all].reverse().find((event) => event.runtimeProvider)?.runtimeProvider
+  const graphProviderId = [...all].reverse().find((event) => event.providerId)?.providerId
+  const dangerClassification = graphRuntimeProvider != null
+    ? graphRuntimeProvider === 'claude_sdk' || graphRuntimeProvider === 'qoder_cli'
+      ? 'classified'
+      : 'unsupported'
+    : graphProviderId === 'claude' || graphProviderId === 'qoder'
+      ? 'classified'
+      : graphProviderId === 'codex' || graphProviderId === 'opencode'
+        ? 'unsupported'
+        : 'unknown'
   const agents = calls.agents
   const v = verdictState(turns, busy)
   const toolSub = calls.tools.slice(0, 3).map((t) => `${t.name} ${t.count}`).join(' · ') || '—'
@@ -453,52 +458,21 @@ export function ExecutionGraph({
   return (
     <div className="graph-pane" style={graphStyle}>
       <div className="gtree">
-        <div className={`verdict-card full ${v.cls}`}>
-          <div className="verdict-left">
-            <div className="lbl">SESSION · {turns[0]?.runId.slice(0, 14) ?? '—'}</div>
-            <div className={`judgement ${v.cls}`}>
-              <span className={`sdot ${v.cls}`} style={{ width: 10, height: 10 }} />
-              {v.judge}
-            </div>
-            <div className="since">
-              {results.length} 轮完成 · {calls.totalCalls} 次调用{dangers.length > 0 ? ` · ${dangers.length} 处危险` : ''}
-            </div>
-          </div>
-          <div className="verdict-right">
-            <div className="verdict-pillar accent">
-              <div className="nm">
-                <span className="sdot" />
-                token · so far
-              </div>
-              <div className="v">{fmtTokenCoverage(totalTokens, tokenKnownTurns, turns.length)}</div>
-              <div className="sub">{turns.length} turns</div>
-            </div>
-            <div className="verdict-pillar ok">
-              <div className="nm">
-                <span className="sdot" />
-                calls
-              </div>
-              <div className="v">{calls.totalCalls}</div>
-              <div className="sub">{toolSub}</div>
-            </div>
-            <div className="verdict-pillar ok">
-              <div className="nm">
-                <span className="sdot" />
-                subagent
-              </div>
-              <div className="v">{agents.length > 0 ? `${agents.reduce((s, a) => s + a.count, 0)} · ${agents[0].name}` : '0'}</div>
-              <div className="sub">{agents.length > 0 ? 'parent 链已挂' : '无'}</div>
-            </div>
-            <div className={`verdict-pillar ${dangers.some((d) => d.danger!.level === 'danger') ? 'bad' : dangers.length ? 'warn' : ''}`}>
-              <div className="nm">
-                <span className="sdot" />
-                危险
-              </div>
-              <div className="v">{dangers.length}</div>
-              <div className="sub">{dangers.length > 0 ? '审计·未拦截' : '无'}</div>
-            </div>
-          </div>
-        </div>
+        <header className="graph-evidence-header">
+          <div><span>TOPOLOGY · SESSION WALL</span><h2>执行拓扑</h2><p>每一行固定为一轮；选择节点只更新右侧证据，不改变几何位置。</p></div>
+          <em className={v.cls}><i className={`sdot ${v.cls}`} />{v.judge}</em>
+        </header>
+        <section className="graph-summary-strip" aria-label="拓扑会话摘要">
+          <span><small>SESSION</small><b>{turns[0]?.runId.slice(0, 14) ?? '—'}</b><em>{results.length}/{turns.length} 轮完成</em></span>
+          <span className="accent"><small>Token</small><b>{fmtTokenCoverage(totalTokens, tokenKnownTurns, turns.length)}</b><em>{tokenKnownTurns}/{turns.length} 轮已捕获</em></span>
+          <span><small>Calls</small><b>{calls.totalCalls}</b><em>{toolSub}</em></span>
+          <span><small>Subagent</small><b>{agents.length > 0 ? agents.reduce((sum, agent) => sum + agent.count, 0) : 0}</b><em>{agents[0]?.name ?? '已观测 0'}</em></span>
+          <span className={dangers.length > 0 ? (dangers.some((danger) => danger.danger!.level === 'danger') ? 'bad' : 'warn') : dangerClassification}>
+            <small>危险</small>
+            <b>{dangers.length > 0 ? dangers.length : dangerClassification === 'classified' ? 0 : '—'}</b>
+            <em>{dangers.length > 0 ? '审计·未拦截' : dangerClassification === 'classified' ? '完整分类范围内无事件' : dangerClassification === 'unsupported' ? '分类未支持' : '能力未知'}</em>
+          </span>
+        </section>
 
         {turns.map((t, i) => (
           <TurnBlock key={t.runId} turn={t} idx={i} selectedId={selectedId} onSelect={onSelect} />
@@ -517,7 +491,13 @@ export function ExecutionGraph({
         onPointerDown={detailPane.startResize}
         onKeyDown={detailPane.onKeyDown}
       />
-      <GraphDetail id="graph-detail-pane" ev={selected} turns={turns} onOpenInChat={onOpenInChat} />
+      <GraphDetail
+        id="graph-detail-pane"
+        ev={selected}
+        turns={turns}
+        dangerClassification={dangerClassification}
+        onOpenInChat={onOpenInChat}
+      />
     </div>
   )
 }
