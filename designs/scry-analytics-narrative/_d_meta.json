@@ -1,0 +1,24 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Analytics Narrative": {
+      "versions": [
+        {
+          "path": "Scry Analytics Narrative.html",
+          "createdAt": "2026-08-07T09:19:04.218Z",
+          "status": "needs-review",
+          "subtitle": "Run Streak 参考方向 · Analytics 数据叙事原型",
+          "viewport": {
+            "width": 1280,
+            "height": 720
+          },
+          "section": "Analytics"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-07T09:19:04.219Z",
+  "updatedAt": "2026-08-07T09:19:04.219Z"
+}
