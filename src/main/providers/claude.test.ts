@@ -170,6 +170,22 @@ describe('Claude provider adapter', () => {
     )
   })
 
+  it('forwards the Claude runner terminal status to the shared Provider lifecycle', async () => {
+    runner.runAgent.mockReturnValue({
+      promise: Promise.resolve({ sessionId: 'session-failed', status: 'failed' }),
+      interrupt: vi.fn(),
+      getSessionId: vi.fn(() => 'session-failed')
+    })
+
+    await expect(createClaudeAdapter('/tmp/scry-home').run({
+      runId: 'run-failed',
+      prompt: 'probe',
+      cwd: '/repo',
+      attachments: [],
+      emit: vi.fn()
+    }).promise).resolves.toMatchObject({ externalSessionId: 'session-failed', status: 'failed' })
+  })
+
   it('runs authorized MCP servers with the exact approved inherited environment', () => {
     runner.runAgent.mockReturnValue({
       promise: Promise.resolve({}),

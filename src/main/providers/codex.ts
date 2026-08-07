@@ -11,6 +11,7 @@ import {
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  classifyRunTermination,
   normalizeAgentQuestionRequest,
   type AgentPermissionMode,
   type AgentRunControlCatalog
@@ -1105,6 +1106,19 @@ export function createCodexAdapter(
               const turnError = record(turn.error)
               const effectiveError = Object.keys(turnError).length > 0 ? turnError : lastTurnError
               const errorMessage = typeof effectiveError?.message === 'string' ? effectiveError.message : undefined
+              const providerStopReason = [
+                turn.stopReason,
+                turn.stop_reason,
+                turn.finishReason,
+                turn.finish_reason,
+                effectiveError?.code,
+                effectiveError?.type
+              ]
+                .find((value): value is string => typeof value === 'string' && !!value.trim())
+              const terminationReason = classifyRunTermination({
+                rawReason: providerStopReason,
+                message: effectiveError ? JSON.stringify(effectiveError).slice(0, 4_000) : errorMessage
+              })
               const finalUsage = turnUsage ?? lastRequestUsage
               const billingProvider = authMode === 'apiKey' ? 'openai' : authMode === 'chatgpt' ? 'codex' : undefined
               const accountLabel = authMode === 'apiKey'
@@ -1125,6 +1139,8 @@ export function createCodexAdapter(
                 reasoningTokens: finalUsage?.reasoningOutputTokens,
                 contextTokens: lastRequestUsage?.inputTokens,
                 isError: turn.status === 'failed',
+                ...(terminationReason ? { terminationReason } : {}),
+                ...(providerStopReason ? { providerStopReason } : {}),
                 modelUsage: model ? [{
                   model,
                   inputTokens: finalUsage?.inputTokens,

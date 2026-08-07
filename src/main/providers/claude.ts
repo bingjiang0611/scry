@@ -188,6 +188,7 @@ export function createClaudeAdapter(homeDir = homedir()): ProviderAdapter {
           externalSessionId: result.sessionId,
           providerTurnId: result.providerTurnId,
           stopped: result.stopped,
+          status: result.status,
           mcp: result.mcpStatus ? { configured: listMcp(request.cwd, homeDir), runtime: result.mcpStatus } : undefined
         })),
         interrupt: handle.interrupt,

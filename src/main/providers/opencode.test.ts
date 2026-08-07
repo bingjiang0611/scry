@@ -419,7 +419,7 @@ describe('OpenCode provider adapter', () => {
               cost: 0,
               providerID: 'anthropic',
               modelID: 'model-1',
-              finish: 'stop'
+              finish: 'length'
             },
             parts: []
           }
@@ -472,7 +472,9 @@ describe('OpenCode provider adapter', () => {
         stage: 'result',
         messageId: 'message-1',
         durationMs: 3_000,
-        isError: false
+        isError: false,
+        providerStopReason: 'length',
+        terminationReason: 'output_token_limit'
       })
       expect(emitted.at(-1)?.ts).toBe('1970-01-01T00:00:04.000Z')
     } finally {

@@ -1,6 +1,8 @@
 // A1：把 SDK / claude 的错误信息归类，给用户可见的恢复提示（借鉴 CodePilot error-classifier 的分类思路，按观测关键路径裁剪）。
 // 纯函数，便于单测。
 
+import { classifyRunTermination, runTerminationHint } from '../shared/runtime'
+
 export interface ClassifiedError {
   category: string
   hint: string
@@ -20,8 +22,9 @@ export function classifyError(message: string): ClassifiedError {
   if (m.includes('econnrefused') || m.includes('etimedout') || m.includes('network') || m.includes('fetch failed')) {
     return { category: 'network', hint: '网络问题：检查连接 / 代理' }
   }
-  if (m.includes('context') || m.includes('too long') || m.includes('token limit')) {
-    return { category: 'context', hint: '上下文超长：开新会话或精简后重试' }
+  const termination = classifyRunTermination({ message })
+  if (termination) {
+    return { category: termination, hint: runTerminationHint(termination) }
   }
   if (m.includes('mcp')) {
     return { category: 'mcp', hint: 'MCP 连接问题：到 MCP 面板「测试连接」排查' }

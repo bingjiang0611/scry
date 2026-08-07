@@ -1,4 +1,11 @@
-import type { AgentInputAttachment, AgentIntervention, AgentQuestionRequest, RuntimeFailureStage, RuntimeProvider } from './runtime.js'
+import type {
+  AgentInputAttachment,
+  AgentIntervention,
+  AgentQuestionRequest,
+  RunTerminationReason,
+  RuntimeFailureStage,
+  RuntimeProvider
+} from './runtime.js'
 import type { ProviderId } from './provider.js'
 import type { BillingProvider } from './billing.js'
 
@@ -363,6 +370,8 @@ export interface TraceEvent {
   accountLabel?: string
   usageSource?: string
   runtimeFailureStage?: RuntimeFailureStage
+  terminationReason?: RunTerminationReason
+  providerStopReason?: string
   runtimeMetadata?: Record<string, unknown>
   intervention?: AgentIntervention
 }
