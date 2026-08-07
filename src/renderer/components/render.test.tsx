@@ -1472,6 +1472,8 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       />
     )
     expect(chatHtml).toContain('<span>Commands</span>')
+    expect(chatHtml).toContain('准备在 project 开始')
+    expect(chatHtml).toContain('还没有会话轮次')
     expect(chatHtml).not.toContain('Commands ·')
     expect(chatHtml).not.toContain('browser-use')
     expect(chatHtml).toContain('code-fix')
@@ -3418,6 +3420,32 @@ describe('ExecutionGraph 渲染：调用拓扑树', () => {
     expect(html).toContain('query · list · 2 次调用')
   })
 
+  it('Token 未上报显示 unknown，显式零值才显示 0', () => {
+    const renderGraph = (results: Partial<TraceEvent>[]): string => renderToStaticMarkup(
+      <ExecutionGraph
+        turns={results.map((result, index) => ({
+          runId: `run-token-truth-${index}`,
+          userText: 'x',
+          done: true,
+          items: [ev({ id: `result-token-truth-${index}`, kind: 'harness', stage: 'result', ...result })]
+        }))}
+        selectedId={null}
+        onSelect={() => {}}
+      />
+    )
+
+    const unknown = renderGraph([{}])
+    expect(unknown).toContain('<span>— tok</span>')
+    expect(unknown).toContain('<div class="v">—</div>')
+
+    const zero = renderGraph([{ tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }])
+    expect(zero).toContain('<span>0 tok</span>')
+    expect(zero).toContain('<div class="v">0</div>')
+
+    const partial = renderGraph([{ tokensIn: 10, tokensOut: 5 }, {}])
+    expect(partial).toContain('<div class="v">≥ 15</div>')
+  })
+
   it('空会话出占位', () => {
     const html = renderToStaticMarkup(<ExecutionGraph turns={[]} selectedId={null} onSelect={() => {}} />)
     expect(html).toContain('调用拓扑树')
@@ -3441,6 +3469,33 @@ describe('SegmentsView 渲染：主体内容对齐容器', () => {
     const html = renderToStaticMarkup(<SegmentsView turns={[t]} />)
     expect(html).toContain('seg-shell')
     expect(html).toContain('会话切成')
+  })
+
+  it('Token 未上报显示 unknown，显式零值才显示 0', () => {
+    const renderSegments = (results: Partial<TraceEvent>[]): string => renderToStaticMarkup(
+      <SegmentsView
+        turns={results.map((result, index) => ({
+          runId: `seg-token-truth-${index}`,
+          userText: 'x',
+          done: true,
+          items: [
+            ev({ id: `seg-read-token-truth-${index}`, kind: 'tool', stage: 'tool:Read', tool: 'Read' }),
+            ev({ id: `seg-result-token-truth-${index}`, kind: 'harness', stage: 'result', ...result })
+          ]
+        }))}
+      />
+    )
+
+    const unknown = renderSegments([{}])
+    expect(unknown).toContain('<div class="val accent">—</div>')
+    expect(unknown).toContain('Provider 未上报 Token')
+
+    const zero = renderSegments([{ tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }])
+    expect(zero).toContain('<div class="val accent">0</div>')
+    expect(zero).not.toContain('Provider 未上报 Token')
+
+    const partial = renderSegments([{ tokensIn: 10, tokensOut: 5 }, {}])
+    expect(partial).toContain('<div class="val accent">≥ 15</div>')
   })
 })
 
@@ -4042,6 +4097,10 @@ describe('AnalyticsView 渲染：时间序列 + 四 Provider 覆盖', () => {
 
   it('5 KPI 用真实 totals（token/turns/tools/danger）', () => {
     expect(html).toContain('3.42M')
+    expect(html).toContain('ALL-TIME KNOWN LOWER BOUND')
+    expect(html).toContain('≥ 3.42M')
+    expect(html).toContain('≥ 120.0k')
+    expect(html).toContain('全时段已知下界')
     expect(html).not.toContain('$12.47')
     expect(html).toContain('847')
     expect(html).toContain('3.42M') // tin+tout = 3.42M

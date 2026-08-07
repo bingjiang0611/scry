@@ -29,6 +29,7 @@ import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
 import { useAgentSession } from './hooks/useAgentSession'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
+import packageJson from '../../package.json'
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -37,8 +38,8 @@ type AppStyle = CSSProperties & {
 
 const SIDEBAR_MIN = 220
 const SIDEBAR_MAX = 320
-const PANEL_MIN = 320
-const PANEL_MAX = 400
+const PANEL_MIN = 360
+const PANEL_MAX = 420
 const REVIEW_PANEL_MIN = 420
 const REVIEW_PANEL_MAX = 960
 const WORKSPACE_PANEL_MIN = 420
@@ -431,7 +432,7 @@ export function App() {
   })
   const overviewPane = useResizablePane({
     id: 'overview-panel',
-    defaultWidth: 340,
+    defaultWidth: 380,
     min: PANEL_MIN,
     max: PANEL_MAX,
     side: 'right'
@@ -1049,6 +1050,7 @@ export function App() {
       sidebar={
         <Sidebar
           id="sidebar-pane"
+          version={packageJson.version}
           projects={projects}
           activeCwd={cwd}
           activeSessionId={activeSessionId}

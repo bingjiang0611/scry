@@ -157,6 +157,7 @@ export function ChatView({
   onRescan
 }: ChatViewProps) {
   const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
+  const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const modelValue = runControls.model
@@ -202,11 +203,34 @@ export function ChatView({
     <>
       <div className="body">
         <div className="chat" ref={scrollRef}>
-          {turns.length === 0 && !cwd && (
-            <div className="unbound-empty">
-              <span className="unbound-icon"><Icon name="message" /></span>
-              <strong>不绑定项目</strong>
-              <span>可直接发起任务；需要读写项目文件时再选择工作目录。</span>
+          {turns.length === 0 && (
+            <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
+              <div className="welcome-kicker">
+                <span className="welcome-ready-dot" />
+                {cwd ? 'WORKSPACE CONTEXT' : 'LOCAL-FIRST AGENT WORKBENCH'}
+              </div>
+              <span className="unbound-icon"><Icon name={cwd ? 'folder' : 'message'} /></span>
+              <strong>{cwd ? `准备在 ${workspaceName ?? '当前项目'} 开始` : '不绑定项目，也能开始'}</strong>
+              <span className="welcome-copy">
+                {cwd
+                  ? '还没有会话轮次。发出第一条任务后，执行、工具与结果会进入同一条本机证据时间线。'
+                  : '可直接发起任务；需要读写项目文件时再选择工作目录。所有可观测证据留在本机。'}
+              </span>
+              <div className="welcome-readiness" aria-label="本机就绪状态">
+                <span><b>{agents.length}</b><small>已发现 Provider</small></span>
+                <span><b>{recent.length}</b><small>最近工作目录</small></span>
+                <span><b>LOCAL</b><small>证据优先</small></span>
+              </div>
+              {!cwd && recent.length > 0 && (
+                <div className="welcome-recent" aria-label="最近工作目录">
+                  {recent.slice(0, 3).map((path) => (
+                    <button type="button" key={path} onClick={() => onPickRecent(path)} title={path}>
+                      <Icon name="folder" />
+                      <span>{path.split('/').filter(Boolean).at(-1) || path}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {turns.map((turn) => (

@@ -134,6 +134,11 @@ export function fmtTok(n?: number | null): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
+export function fmtTokenCoverage(value: number | null, knownTurns: number, totalTurns: number): string {
+  if (value == null || knownTurns === 0) return '—'
+  return `${knownTurns < totalTurns ? '≥ ' : ''}${fmtTok(value)}`
+}
+
 type TokenCacheAccounting = 'separate' | 'input_includes_cache'
 
 function tokenCacheAccounting(e: Pick<TraceEvent, 'providerId' | 'runtimeProvider' | 'billingProvider'> | undefined): TokenCacheAccounting {
@@ -168,7 +173,7 @@ export function resultTokenTotal(e: TraceEvent | undefined): number {
   )
 }
 
-function hasTokenUsage(e: TraceEvent | undefined): boolean {
+export function hasTokenUsage(e: TraceEvent | undefined): boolean {
   return !!e && (e.tokensIn != null || e.tokensOut != null || e.cacheReadTokens != null || e.cacheCreationTokens != null)
 }
 
@@ -803,7 +808,9 @@ export interface RichSegment {
   turnStart: number // 1-based
   turnEnd: number
   cost: number
-  totalTokens: number
+  totalTokens: number | null
+  tokenKnownTurns: number
+  tokenTotalTurns: number
   apiMs: number | null
   tools: number
   reads: number
@@ -823,7 +830,9 @@ export interface SegmentReport {
   sessionTurns: number
   totalApiMs: number | null
   totalCost: number
-  totalTokens: number
+  totalTokens: number | null
+  tokenKnownTurns: number
+  tokenTotalTurns: number
   skillSwitches: number
   subagents: number
 }
@@ -937,7 +946,10 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
   const apiValues = turnResults.map((result) => result?.durationApiMs).filter((value): value is number => value != null)
   const totalApiMs = apiValues.length > 0 ? apiValues.reduce((sum, value) => sum + value, 0) : null
   const totalCost = turnResults.reduce((sum, result) => sum + (result?.costUsd ?? 0), 0)
-  const totalTokens = turnResults.reduce((sum, result) => sum + (result ? resultTokenTotal(result) : 0), 0)
+  const tokenKnownTurns = turnResults.filter(hasTokenUsage).length
+  const totalTokens = tokenKnownTurns > 0
+    ? turnResults.reduce((sum, result) => sum + (hasTokenUsage(result) ? resultTokenTotal(result) : 0), 0)
+    : null
 
   const actLabels = (e: TraceEvent): SegAct[] => {
     if (e.kind === 'agent') return [{ label: e.name ?? 'Task', count: 0, agent: true }]
@@ -956,7 +968,10 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
     const items = segTurns.flatMap((t) => logicalCallEventsForTurn(t.items))
     const segmentResults = segTurns.map((turn) => resultOf(turn))
     const cost = segmentResults.reduce((sum, result) => sum + (result?.costUsd ?? 0), 0)
-    const totalTokensForSegment = segmentResults.reduce((sum, result) => sum + (result ? resultTokenTotal(result) : 0), 0)
+    const tokenKnownTurnsForSegment = segmentResults.filter(hasTokenUsage).length
+    const totalTokensForSegment = tokenKnownTurnsForSegment > 0
+      ? segmentResults.reduce((sum, result) => sum + (hasTokenUsage(result) ? resultTokenTotal(result) : 0), 0)
+      : null
     const segmentApiValues = segmentResults.map((result) => result?.durationApiMs).filter((value): value is number => value != null)
     const apiMs = segmentApiValues.length > 0
       ? segmentApiValues.reduce((sum, value) => sum + value, 0)
@@ -1003,6 +1018,8 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
       turnEnd: g.idx[g.idx.length - 1] + 1,
       cost,
       totalTokens: totalTokensForSegment,
+      tokenKnownTurns: tokenKnownTurnsForSegment,
+      tokenTotalTurns: segTurns.length,
       apiMs,
       tools,
       reads,
@@ -1025,7 +1042,17 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
       if (s !== base && base.cost > 0) s.costDeltaVsBase = Math.round((s.cost / base.cost - 1) * 100)
     }
   }
-  return { segments, sessionTurns: turns.length, totalApiMs, totalCost, totalTokens, skillSwitches, subagents }
+  return {
+    segments,
+    sessionTurns: turns.length,
+    totalApiMs,
+    totalCost,
+    totalTokens,
+    tokenKnownTurns,
+    tokenTotalTurns: turns.length,
+    skillSwitches,
+    subagents
+  }
 }
 
 // 解析用户消息：claude code 把斜杠命令 /cmd args 存成 <command-name>/<command-args> 标签
