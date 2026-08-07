@@ -3810,6 +3810,138 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(failedHtml).toContain('role="alert"')
     expect(failedHtml).toContain('本次测试失败 · initialize timeout')
   })
+
+  it('仅对 Provider 声明支持的 needs-auth 目标提供重新认证与可访问反馈', () => {
+    const capability: ComponentProps<typeof McpModal>['capability'] = {
+      providerId: 'codex',
+      cwd: '/repo',
+      mode: 'read',
+      state: 'ready',
+      data: {
+        configured: [],
+        runtime: [],
+        operations: { authenticate: ['github-target'] }
+      }
+    }
+    const authenticatingHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'github-target', name: 'github', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{ 'github-target': { authenticating: true } }}
+        live={[{ name: 'github', status: 'needs-auth' }]}
+        refreshing={false}
+        capability={capability}
+        onTest={() => {}}
+        onReauthenticate={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(authenticatingHtml).toContain('aria-label="重新认证 MCP github"')
+    expect(authenticatingHtml).toMatch(/<button class="mcp-test" disabled="" aria-label="重新认证 MCP github">/)
+    expect(authenticatingHtml).toContain('等待浏览器完成授权…')
+    expect(authenticatingHtml).toContain('role="status" aria-live="polite"')
+
+    const successHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'github-target', name: 'github', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{ 'github-target': { authenticating: false, authOk: true } }}
+        live={[{ name: 'github', status: 'connected' }]}
+        refreshing={false}
+        capability={capability}
+        onTest={() => {}}
+        onReauthenticate={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(successHtml).toContain('认证成功，运行状态已刷新')
+    expect(successHtml).not.toContain('aria-label="重新认证 MCP github"')
+
+    const unverifiedHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'github-target', name: 'github', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{ 'github-target': { authenticating: false, authOk: true, authError: '连接状态仍为 pending' } }}
+        live={[{ name: 'github', status: 'needs-auth' }]}
+        refreshing={false}
+        capability={capability}
+        onTest={() => {}}
+        onReauthenticate={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(unverifiedHtml).toContain('授权流程已完成；运行状态未确认 · 连接状态仍为 pending')
+    expect(unverifiedHtml).toContain('role="status" aria-live="polite"')
+
+    const failedHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'github-target', name: 'github', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{ 'github-target': { authenticating: false, authOk: false, authError: '用户取消授权' } }}
+        live={[{ name: 'github', status: 'needs-auth' }]}
+        refreshing={false}
+        capability={capability}
+        onTest={() => {}}
+        onReauthenticate={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(failedHtml).toContain('role="alert" aria-live="polite"')
+    expect(failedHtml).toContain('认证失败 · 用户取消授权')
+  })
+
+  it('OAuth Client 未注册和不支持认证的 Provider 只展示被动指引', () => {
+    const clientRegistrationHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'remote-target', name: 'remote', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{}}
+        live={[{ name: 'remote', status: 'needs-client-registration' }]}
+        refreshing={false}
+        capability={{
+          providerId: 'opencode',
+          cwd: '/repo',
+          mode: 'read',
+          state: 'ready',
+          data: { configured: [], runtime: [], operations: { authenticate: ['remote-target'] } }
+        }}
+        onTest={() => {}}
+        onReauthenticate={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(clientRegistrationHtml).toContain('需配置 OAuth Client')
+    expect(clientRegistrationHtml).toContain('需在 Provider 中配置 OAuth Client ID')
+    expect(clientRegistrationHtml).not.toContain('aria-label="重新认证 MCP remote"')
+
+    const unsupportedHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'remote-target', name: 'remote', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{}}
+        live={[{ name: 'remote', status: 'needs-auth' }]}
+        refreshing={false}
+        capability={{
+          providerId: 'claude',
+          cwd: '/repo',
+          mode: 'manage',
+          state: 'ready',
+          data: { configured: [], runtime: [], operations: { authenticate: [] } }
+        }}
+        onTest={() => {}}
+        onReauthenticate={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(unsupportedHtml).toContain('请在 Provider 客户端完成认证')
+    expect(unsupportedHtml).not.toContain('aria-label="重新认证 MCP remote"')
+  })
 })
 
 describe('Skill/MCP 操作能力渲染', () => {

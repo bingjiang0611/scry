@@ -148,6 +148,31 @@ export function mergeMcpLiveSnapshot(
   return runtime ?? (clearUnknownRuntime ? [] : current)
 }
 
+export function reconcileMcpAuthStatus(
+  current: Record<string, McpStatus>,
+  configured: McpMeta[],
+  runtime: McpLiveStatus[]
+): Record<string, McpStatus> {
+  const configuredByTarget = new Map(configured.map((item) => [item.targetId ?? item.name, item]))
+  const runtimeByName = new Map(runtime.map((item) => [item.name, item]))
+  return Object.fromEntries(Object.entries(current).flatMap(([targetId, state]) => {
+    const target = configuredByTarget.get(targetId)
+    if (!target) return []
+    const live = runtimeByName.get(target.name)
+    if (state.authenticating || live?.status !== 'connected') return [[targetId, state]]
+    const next = { ...state }
+    delete next.authOk
+    delete next.authError
+    return [[targetId, next]]
+  }))
+}
+
+export function mcpAuthVerificationError(snapshot: McpSnapshot, targetId: string): string | undefined {
+  const target = snapshot.configured.find((item) => (item.targetId ?? item.name) === targetId)
+  const live = target && snapshot.runtime?.find((item) => item.name === target.name)
+  return live?.status === 'connected' ? undefined : `刷新后运行状态为 ${live?.status ?? '未返回'}`
+}
+
 export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId: string): boolean {
   return providerIdForAgentId(currentAgentId) !== providerIdForAgentId(nextAgentId)
 }
@@ -213,6 +238,8 @@ export function useIntegrations(cwd: string | null) {
   const mcpLiveRequestSeq = useRef(0)
   const mcpTestCounter = useRef(0)
   const mcpTestRequests = useRef(new Map<string, number>())
+  const mcpAuthCounter = useRef(0)
+  const mcpAuthRequests = useRef(new Map<string, number>())
   const mcpToggleCounter = useRef(0)
   const mcpToggleRequests = useRef(new Map<string, number>())
   const mcpConfigPromiseRef = useRef<Promise<McpLiveStatus[]> | null>(null)
@@ -360,6 +387,9 @@ export function useIntegrations(cwd: string | null) {
     }
     setMcps(result.data.configured)
     setMcpLive((current) => mergeMcpLiveSnapshot(current, result.data?.runtime, clearUnknownRuntime))
+    if (result.data.runtime) {
+      setMcpStatus((current) => reconcileMcpAuthStatus(current, result.data!.configured, result.data!.runtime!))
+    }
     return result.data.runtime ?? []
   }, [])
 
@@ -447,22 +477,114 @@ export function useIntegrations(cwd: string | null) {
     const key = `${contextKey(context)}\0${targetId}`
     const seq = ++mcpTestCounter.current
     mcpTestRequests.current.set(key, seq)
-    setMcpStatus((prev) => ({ ...prev, [targetId]: { testing: true } }))
+    setMcpStatus((prev) => ({ ...prev, [targetId]: { ...prev[targetId], testing: true } }))
     try {
       const result = await window.scry.testMcp(context, targetId)
       if (mcpTestRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
       setMcpStatus((prev) => ({
         ...prev,
-        [targetId]: { ...(result.data ?? { ok: false, error: result.reason ?? '当前 Provider 不支持 MCP 测试' }), testing: false }
+        [targetId]: {
+          ...prev[targetId],
+          ...(result.data ?? { ok: false, error: result.reason ?? '当前 Provider 不支持 MCP 测试' }),
+          testing: false
+        }
       }))
     } catch (error) {
       if (mcpTestRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
       setMcpStatus((prev) => ({
         ...prev,
-        [targetId]: { ok: false, error: error instanceof Error ? error.message : String(error), testing: false }
+        [targetId]: {
+          ...prev[targetId],
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          testing: false
+        }
       }))
     }
   }, [])
+
+  const reauthenticateMcp = useCallback(async (targetId: string): Promise<void> => {
+    const context = providerContextRef.current
+    const key = `${contextKey(context)}\0${targetId}`
+    const seq = ++mcpAuthCounter.current
+    mcpAuthRequests.current.set(key, seq)
+    setMcpStatus((prev) => ({
+      ...prev,
+      [targetId]: {
+        ...prev[targetId],
+        authenticating: true,
+        authOk: undefined,
+        authError: undefined
+      }
+    }))
+    try {
+      const result = await window.scry.reauthenticateMcp(context, targetId)
+      if (mcpAuthRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
+      if (!result.data?.ok) {
+        const authenticated = result.data?.status === 'authenticated-unverified'
+        setMcpStatus((prev) => ({
+          ...prev,
+          [targetId]: {
+            ...prev[targetId],
+            authenticating: false,
+            authOk: authenticated,
+            authError: result.data?.error ?? result.reason ?? 'MCP 认证失败'
+          }
+        }))
+        return
+      }
+      setMcpStatus((prev) => ({
+        ...prev,
+        [targetId]: {
+          ...prev[targetId],
+          authenticating: false,
+          authOk: true,
+          authError: undefined
+        }
+      }))
+      let refreshed: CapabilityEnvelope<McpSnapshot>
+      try {
+        refreshed = await window.scry.mcpSnapshot(context, true)
+      } catch (error) {
+        if (mcpAuthRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
+        setMcpStatus((prev) => ({
+          ...prev,
+          [targetId]: {
+            ...prev[targetId],
+            authenticating: false,
+            authOk: true,
+            authError: error instanceof Error ? error.message : String(error)
+          }
+        }))
+        return
+      }
+      if (mcpAuthRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
+      applyMcpSnapshot(refreshed, true)
+      const verificationError = refreshed.data
+        ? mcpAuthVerificationError(refreshed.data, targetId)
+        : refreshed.reason ?? '运行状态刷新失败'
+      setMcpStatus((prev) => ({
+        ...prev,
+        [targetId]: {
+          ...prev[targetId],
+          authenticating: false,
+          authOk: true,
+          authError: verificationError
+        }
+      }))
+    } catch (error) {
+      if (mcpAuthRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
+      setMcpStatus((prev) => ({
+        ...prev,
+        [targetId]: {
+          ...prev[targetId],
+          authenticating: false,
+          authOk: false,
+          authError: error instanceof Error ? error.message : String(error)
+        }
+      }))
+    }
+  }, [applyMcpSnapshot])
 
   const setCurrentMcpGuardReport = useCallback(
     (report: McpGuardReport): void => {
@@ -551,6 +673,7 @@ export function useIntegrations(cwd: string | null) {
     ++mcpConfigRequestSeq.current
     ++mcpLiveRequestSeq.current
     mcpTestRequests.current.clear()
+    mcpAuthRequests.current.clear()
     mcpToggleRequests.current.clear()
     mcpConfigPromiseRef.current = null
     setSkills([])
@@ -741,6 +864,7 @@ export function useIntegrations(cwd: string | null) {
     toggleSkill,
     toggleMcp,
     testMcp,
+    reauthenticateMcp,
     setCurrentMcpGuardReport,
     scanMcpGuard,
     syncBillingAdmin,

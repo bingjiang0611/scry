@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 const runner = vi.hoisted(() => ({ captureInit: vi.fn(), runAgent: vi.fn() }))
-const mcp = vi.hoisted(() => ({ testMcpConfig: vi.fn() }))
+const mcp = vi.hoisted(() => ({ listMcp: vi.fn(), testMcpConfig: vi.fn() }))
 const sdk = vi.hoisted(() => ({ query: vi.fn() }))
 const locate = vi.hoisted(() => ({ runtimeCliEnv: vi.fn() }))
+const childProcess = vi.hoisted(() => ({ execFile: vi.fn() }))
+vi.mock('node:child_process', async () => ({
+  ...await vi.importActual<typeof import('node:child_process')>('node:child_process'),
+  execFile: childProcess.execFile
+}))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: sdk.query }))
 vi.mock('../agent-runner', () => ({ captureInit: runner.captureInit, getClaudeVersion: () => 'test', runAgent: runner.runAgent }))
 vi.mock('../claude-locate', () => ({
@@ -15,7 +22,7 @@ vi.mock('../mcp-config', async () => {
   return {
     ...actual,
     findMcpConfigByTargetId: () => ({ config: { command: '/bin/mcp' } }),
-    listMcp: () => [{ targetId: 'target-scry-e2e', name: 'scry-e2e', scope: '.mcp.json', transport: 'stdio', detail: '/bin/mcp', enabled: true }],
+    listMcp: mcp.listMcp,
     testMcpConfig: mcp.testMcpConfig,
     toggleMcp: vi.fn()
   }
@@ -26,12 +33,105 @@ vi.mock('../skill-config', () => ({
   setSkillEnabled: vi.fn()
 }))
 
-import { createClaudeAdapter } from './claude'
+import { claudeMcpLoginArgs, createClaudeAdapter, runClaudeMcpLogin } from './claude'
+
+describe('claudeMcpLoginArgs', () => {
+  beforeEach(() => {
+    childProcess.execFile.mockReset()
+  })
+
+  it('loads only the temporary config before terminating options for an untrusted MCP server name', () => {
+    expect(claudeMcpLoginArgs('--help', '/tmp/auth.json')).toEqual([
+      '--mcp-config', '/tmp/auth.json', '--strict-mcp-config', 'mcp', 'login', '--', '--help'
+    ])
+  })
+
+  it('rejects control characters in an MCP server name', () => {
+    expect(() => claudeMcpLoginArgs('remote\nname', '/tmp/auth.json')).toThrow('无效字符')
+  })
+
+  it('writes one exact target to a private temporary config and always removes it', async () => {
+    let observedPath = ''
+    let observedConfig: unknown
+    let observedMode = 0
+    let observedDirectoryMode = 0
+    childProcess.execFile.mockImplementation((
+      _executable: unknown,
+      cliArgs: string[],
+      options: { shell?: boolean },
+      callback: (error: Error | null) => void
+    ) => {
+      observedPath = cliArgs[1]
+      observedConfig = JSON.parse(readFileSync(observedPath, 'utf8'))
+      observedMode = statSync(observedPath).mode & 0o777
+      observedDirectoryMode = statSync(dirname(observedPath)).mode & 0o777
+      expect(options.shell).toBe(false)
+      callback(null)
+      return {} as never
+    })
+
+    await expect(runClaudeMcpLogin(
+      '/bin/claude',
+      'remote',
+      { type: 'http', url: 'https://exact.example.test/mcp', headers: { Authorization: 'Bearer config-secret' } },
+      '/repo',
+      { PATH: '/runtime/bin' }
+    )).resolves.toEqual({ ok: true, status: 'authenticated' })
+
+    expect(observedConfig).toEqual({
+      mcpServers: {
+        remote: {
+          type: 'http',
+          url: 'https://exact.example.test/mcp',
+          headers: { Authorization: 'Bearer config-secret' }
+        }
+      }
+    })
+    expect(observedMode).toBe(0o600)
+    expect(observedDirectoryMode).toBe(0o700)
+    expect(childProcess.execFile).toHaveBeenCalledWith(
+      '/bin/claude',
+      ['--mcp-config', observedPath, '--strict-mcp-config', 'mcp', 'login', '--', 'remote'],
+      expect.objectContaining({ cwd: '/repo', env: { PATH: '/runtime/bin' }, shell: false }),
+      expect.any(Function)
+    )
+    expect(existsSync(observedPath)).toBe(false)
+  })
+
+  it('removes the private temporary config after a redacted CLI failure', async () => {
+    let observedPath = ''
+    childProcess.execFile.mockImplementation((
+      _executable: unknown,
+      cliArgs: string[],
+      _options: unknown,
+      callback: (error: Error | null) => void
+    ) => {
+      observedPath = cliArgs[1]
+      callback(new Error('Authorization: Bearer cli-secret'))
+      return {} as never
+    })
+
+    const result = await runClaudeMcpLogin(
+      '/bin/claude',
+      'remote',
+      { type: 'http', url: 'https://exact.example.test/mcp' },
+      '/repo',
+      { PATH: '/runtime/bin' }
+    )
+
+    expect(result).toMatchObject({ ok: false, status: 'failed', error: expect.stringContaining('[redacted]') })
+    expect(result.error).not.toContain('cli-secret')
+    expect(existsSync(observedPath)).toBe(false)
+  })
+})
 
 describe('Claude provider adapter', () => {
   beforeEach(() => {
     runner.captureInit.mockReset()
     runner.runAgent.mockReset()
+    mcp.listMcp.mockReset().mockReturnValue([
+      { targetId: 'target-scry-e2e', name: 'scry-e2e', scope: '.mcp.json', transport: 'stdio', detail: '/bin/mcp', enabled: true }
+    ])
     mcp.testMcpConfig.mockReset()
     sdk.query.mockReset()
     locate.runtimeCliEnv.mockReset().mockImplementation((_base, options) => ({
@@ -76,8 +176,17 @@ describe('Claude provider adapter', () => {
     expect(runner.captureInit).not.toHaveBeenCalled()
   })
 
-  it('refreshes MCP status with a direct protocol test instead of a model probe', async () => {
-    mcp.testMcpConfig.mockResolvedValue({ ok: true, tools: 3 })
+  it('refreshes MCP status through the native SDK without a model prompt', async () => {
+    const close = vi.fn()
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      mcpServerStatus: vi.fn().mockResolvedValue([{
+        name: 'scry-e2e',
+        status: 'connected',
+        tools: [{ name: 'one' }, { name: 'two' }, { name: 'three' }]
+      }]),
+      close
+    })
     const result = await createClaudeAdapter('/tmp/scry-home').mcp!.snapshot(
       { providerId: 'claude', cwd: '/repo' },
       true,
@@ -92,7 +201,123 @@ describe('Claude provider adapter', () => {
       state: 'ready',
       data: { runtime: [{ name: 'scry-e2e', status: 'connected', tools: 3 }] }
     })
+    expect(mcp.testMcpConfig).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledOnce()
     expect(runner.captureInit).not.toHaveBeenCalled()
+  })
+
+  it('redacts credentials from native MCP refresh failures', async () => {
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockRejectedValue(new Error('Authorization: Bearer refresh-secret')),
+      close: vi.fn()
+    })
+
+    const result = await createClaudeAdapter('/tmp/scry-home').mcp!.snapshot(
+      { providerId: 'claude', cwd: '/repo' },
+      true,
+      {
+        cwd: '/repo', fingerprint: 'sha256:snapshot', env: {},
+        targets: [{ targetId: 'target-scry-e2e', name: 'scry-e2e', enabled: true, config: { command: '/bin/mcp' } }]
+      }
+    )
+
+    expect(result.reason).toContain('[redacted]')
+    expect(result.reason).not.toContain('refresh-secret')
+  })
+
+  it('logs in the exact remote MCP and verifies the native status before reporting success', async () => {
+    mcp.listMcp.mockReturnValue([
+      { targetId: 'remote-target', name: 'remote', scope: '.mcp.json', transport: 'http', detail: 'https://mcp.example.test', enabled: true }
+    ])
+    const close = vi.fn()
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      mcpServerStatus: vi.fn().mockResolvedValue([{ name: 'remote', status: 'connected', tools: [] }]),
+      close
+    })
+    const login = vi.fn().mockResolvedValue({ ok: true, status: 'authenticated' as const })
+    const adapter = createClaudeAdapter('/tmp/scry-home', login)
+    const execution = {
+      cwd: '/repo',
+      fingerprint: 'sha256:remote',
+      env: {},
+      targets: [{
+        targetId: 'remote-target',
+        name: 'remote',
+        enabled: true,
+        config: { type: 'http', url: 'https://mcp.example.test' }
+      }]
+    }
+
+    await expect(adapter.mcp!.snapshot({ providerId: 'claude', cwd: '/repo' })).resolves.toMatchObject({
+      data: { operations: { authenticate: ['remote-target'] } }
+    })
+    await expect(adapter.mcp!.reauthenticate?.(
+      { providerId: 'claude', cwd: '/repo' },
+      'remote-target',
+      execution,
+      { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+    )).resolves.toMatchObject({
+      state: 'ready',
+      data: { ok: true, status: 'authenticated' }
+    })
+    expect(login).toHaveBeenCalledWith(
+      '/bin/claude',
+      'remote',
+      { type: 'http', url: 'https://mcp.example.test' },
+      '/repo',
+      expect.objectContaining({ CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1' })
+    )
+    expect(sdk.query).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        cwd: '/repo',
+        strictMcpConfig: true,
+        mcpServers: { remote: { type: 'http', url: 'https://mcp.example.test' } }
+      })
+    }))
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('reports completed Claude authentication separately when native verification times out', async () => {
+    mcp.listMcp.mockReturnValue([
+      { targetId: 'remote-target', name: 'remote', scope: '.mcp.json', transport: 'http', detail: 'https://mcp.example.test', enabled: true }
+    ])
+    const close = vi.fn()
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      mcpServerStatus: vi.fn(() => new Promise(() => {})),
+      close
+    })
+    const adapter = createClaudeAdapter(
+      '/tmp/scry-home',
+      vi.fn().mockResolvedValue({ ok: true, status: 'authenticated' as const })
+    )
+    vi.useFakeTimers()
+    try {
+      const result = adapter.mcp!.reauthenticate!(
+        { providerId: 'claude', cwd: '/repo' },
+        'remote-target',
+        {
+          cwd: '/repo', fingerprint: 'sha256:remote', env: {},
+          targets: [{
+            targetId: 'remote-target', name: 'remote', enabled: true,
+            config: { type: 'http', url: 'https://mcp.example.test' }
+          }]
+        },
+        { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+      )
+      await vi.advanceTimersByTimeAsync(15_000)
+      await expect(result).resolves.toMatchObject({
+        data: {
+          ok: false,
+          status: 'authenticated-unverified',
+          error: expect.stringContaining('状态校验超时')
+        }
+      })
+      expect(close).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('forwards an explicit setting-source allowlist without changing the default', async () => {

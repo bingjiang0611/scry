@@ -3,7 +3,9 @@ import type { CapabilityEnvelope } from '@shared/provider'
 import {
   authoritativeRefreshAfterToggle,
   mergeMcpLiveSnapshot,
+  mcpAuthVerificationError,
   parseRunControlPreferences,
+  reconcileMcpAuthStatus,
   runControlSendBlockedReason
 } from './useIntegrations'
 
@@ -36,6 +38,53 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
     expect(mergeMcpLiveSnapshot(cached, undefined)).toBe(cached)
     expect(mergeMcpLiveSnapshot(cached, [])).toEqual([])
     expect(mergeMcpLiveSnapshot(cached, null, true)).toEqual([])
+  })
+
+  it('仅在权威运行态确认连接后清理过时认证结果', () => {
+    const current = {
+      connected: { ok: false, authOk: false, authError: '旧错误' },
+      required: { ok: false, authOk: false, authError: '仍失败' },
+      failed: { ok: false, authOk: false, authError: '校验失败' },
+      pending: { ok: false, authOk: true, authError: '已认证，等待连接' },
+      active: { ok: false, authenticating: true, authError: '等待中' },
+      removed: { ok: false, authOk: true }
+    }
+    const configured = [
+      { targetId: 'connected', name: 'connected', scope: 'user', transport: 'http', detail: '', enabled: true },
+      { targetId: 'required', name: 'required', scope: 'user', transport: 'http', detail: '', enabled: true },
+      { targetId: 'failed', name: 'failed', scope: 'user', transport: 'http', detail: '', enabled: true },
+      { targetId: 'pending', name: 'pending', scope: 'user', transport: 'http', detail: '', enabled: true },
+      { targetId: 'active', name: 'active', scope: 'user', transport: 'http', detail: '', enabled: true }
+    ]
+    expect(reconcileMcpAuthStatus(current, configured, [
+      { name: 'connected', status: 'connected' },
+      { name: 'required', status: 'needs-auth' },
+      { name: 'failed', status: 'failed' },
+      { name: 'pending', status: 'pending' },
+      { name: 'active', status: 'connected' }
+    ])).toEqual({
+      connected: { ok: false },
+      required: current.required,
+      failed: current.failed,
+      pending: current.pending,
+      active: current.active
+    })
+  })
+
+  it('按精确 targetId 判定认证后连接是否收敛', () => {
+    const base = {
+      configured: [
+        { targetId: 'first-target', name: 'shared', scope: 'user', transport: 'http', detail: '', enabled: true },
+        { targetId: 'second-target', name: 'other', scope: 'project', transport: 'http', detail: '', enabled: true }
+      ],
+      runtime: [
+        { name: 'shared', status: 'connected' as const },
+        { name: 'other', status: 'needs-auth' as const }
+      ]
+    }
+    expect(mcpAuthVerificationError(base, 'first-target')).toBeUndefined()
+    expect(mcpAuthVerificationError(base, 'second-target')).toBe('刷新后运行状态为 needs-auth')
+    expect(mcpAuthVerificationError({ ...base, runtime: null }, 'first-target')).toBe('刷新后运行状态为 未返回')
   })
 })
 

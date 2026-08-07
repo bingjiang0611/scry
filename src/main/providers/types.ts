@@ -1,6 +1,7 @@
 import type {
   AccountSnapshot,
   CapabilityEnvelope,
+  McpAuthResult,
   McpSnapshot,
   McpTestResult,
   ProviderCommand,
@@ -48,6 +49,17 @@ export interface AuthorizedMcpExecution {
   env: NodeJS.ProcessEnv
 }
 
+export interface McpAuthLoopback {
+  redirectUri: string
+  waitForCallback(): Promise<string>
+  close(): void
+}
+
+export interface McpAuthInteraction {
+  openExternal(url: string): Promise<void>
+  prepareLoopbackCallback(): Promise<McpAuthLoopback>
+}
+
 export interface ProviderRunRequest {
   runId: string
   prompt: string
@@ -91,6 +103,12 @@ export interface McpFacet {
     name: string,
     execution?: AuthorizedMcpExecution
   ): Promise<CapabilityEnvelope<McpTestResult>>
+  reauthenticate?(
+    context: ProviderContext,
+    targetId: string,
+    execution: AuthorizedMcpExecution | undefined,
+    interaction: McpAuthInteraction
+  ): Promise<CapabilityEnvelope<McpAuthResult>>
 }
 
 export interface CommandsFacet {

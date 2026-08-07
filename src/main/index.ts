@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { getClaudeVersion } from './agent-runner'
 import { detectAgents, detectAgentsFast, shellEnv, warmShellEnv } from './claude-locate'
@@ -38,6 +38,8 @@ import { capabilityUnavailable, type DeleteSessionResult, type ProviderContext, 
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
+import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
+import { ProviderOperationGate } from './provider-operation-gate'
 import { appendCoalescedTrace } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import {
@@ -173,6 +175,7 @@ const sessionRevisionByContext = new Map<string, number>()
 const sessionAliasesByContext = new Map<string, Map<string, string>>()
 const contextAdmission = new ContextAdmission()
 const recordingBlockedSessions = new Map<string, string>()
+const providerOperationGate = new ProviderOperationGate()
 const recordingRecoveryHint = '不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复'
 const deletingSessions = new Set<string>()
 let currentCwd: string | undefined
@@ -198,7 +201,8 @@ const providerRegistry = new ProviderRegistry(
     homeDir,
     process.env.SCRY_PROVIDER_TRANSPORTS,
     join(app.getPath('userData'), 'codex-home-v1'),
-    codexSessionIds
+    codexSessionIds,
+    join(app.getPath('userData'), 'provider-auth', 'opencode')
   ),
   {
     disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS),
@@ -209,6 +213,22 @@ const codexHookGrantStore = () => createCodexHookGrantStore(app.getPath('userDat
 const mcpExecutionTrust = new McpExecutionTrust()
 
 const providerContextKey = (providerId: ProviderId, cwd: string): string => `${providerId}\0${cwd}`
+const withProviderOperation = async <T>(providerId: ProviderId, operation: () => T | Promise<T>): Promise<T> => {
+  const lease = providerOperationGate.acquireOperation(providerId)
+  if (!lease.ok) throw new Error('当前 Provider 正在认证 MCP，请等待认证完成或超时后重试')
+  try {
+    return await operation()
+  } finally {
+    lease.release()
+  }
+}
+const canonicalProviderCwd = (cwd?: string): string => {
+  try {
+    return realpathSync(cwd ?? process.cwd())
+  } catch {
+    return cwd ?? process.cwd()
+  }
+}
 const providerSessionKey = (providerId: ProviderId, cwd: string, sessionId: string): string =>
   `${providerContextKey(providerId, cwd)}\0${sessionId}`
 
@@ -719,20 +739,84 @@ handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
   return true
 })
 
-handleTrusted('agent:listSkills', (_e, context: ProviderContext) => providerRegistry.listSkills(context))
+handleTrusted('agent:listSkills', (_e, context: ProviderContext) =>
+  withProviderOperation(context.providerId, () => providerRegistry.listSkills(context))
+)
 handleTrusted('agent:toggleSkill', (_e, p: { context: ProviderContext; name: string; enabled: boolean }) =>
-  providerRegistry.setSkillEnabled(p.context, p.name, p.enabled)
+  withProviderOperation(p.context.providerId, () => providerRegistry.setSkillEnabled(p.context, p.name, p.enabled))
 )
 handleTrusted('agent:mcpSnapshot', async (_e, p: { context: ProviderContext; refresh?: boolean }) => {
+  if (!p.refresh) return providerRegistry.mcpSnapshot(p.context, false)
+  return withProviderOperation(p.context.providerId, async () => {
   const snapshot = p.refresh ? await ensureMcpExecutionAuthorized(p.context, 'live') : null
   return providerRegistry.mcpSnapshot(p.context, p.refresh, authorizedMcpExecution(snapshot))
+  })
 })
 handleTrusted('agent:testMcp', async (_e, p: { context: ProviderContext; targetId: string }) => {
-  const snapshot = await ensureMcpExecutionAuthorized(p.context, `test:${p.targetId}`, p.targetId)
-  return providerRegistry.testMcp(p.context, p.targetId, authorizedMcpExecution(snapshot))
+  return withProviderOperation(p.context.providerId, async () => {
+    const snapshot = await ensureMcpExecutionAuthorized(p.context, `test:${p.targetId}`, p.targetId)
+    return providerRegistry.testMcp(p.context, p.targetId, authorizedMcpExecution(snapshot))
+  })
+})
+handleTrusted('agent:reauthenticateMcp', async (_e, p: { context: ProviderContext; targetId: string }) => {
+  const canonicalCwd = canonicalProviderCwd(p.context.cwd)
+  const authKey = p.context.providerId
+  const authLease = providerOperationGate.acquireAuthentication(authKey)
+  if (!authLease.ok) {
+    throw new Error(authLease.blockedBy === 'authentication'
+      ? '当前 Provider 正在认证 MCP，请等待当前流程完成'
+      : '当前 Provider 正在执行其他操作，请等待完成后再认证 MCP')
+  }
+  const active = runs.activeStates().find((run) => !run.done && run.providerId === p.context.providerId)
+  if (active) {
+    authLease.release()
+    throw new Error('当前 Provider 正在执行会话，请等待本轮结束后再认证 MCP')
+  }
+  try {
+    const snapshot = await ensureMcpExecutionAuthorized(p.context, `auth:${p.targetId}`, p.targetId)
+    const normalizedContext = { ...p.context, cwd: snapshot?.cwd ?? canonicalCwd }
+    const result = await providerRegistry.reauthenticateMcp(
+      normalizedContext,
+      p.targetId,
+      authorizedMcpExecution(snapshot),
+      {
+        openExternal: async (url) => {
+          if (!isSafeOAuthAuthorizationUrl(url)) throw new Error('Provider 返回了不安全的 MCP OAuth 授权地址')
+          await shell.openExternal(url)
+        },
+        prepareLoopbackCallback: () => prepareOAuthLoopback()
+      }
+    )
+    if (snapshot) {
+      const verified = buildMcpExecutionSnapshot({
+        providerId: p.context.providerId,
+        cwd: p.context.cwd,
+        homeDir,
+        settingSources: p.context.providerId === 'claude' ? process.env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
+        env: shellEnv(),
+        selectedTargetId: p.targetId
+      })
+      if (verified.errors.length > 0 || verified.fingerprint !== snapshot.fingerprint) {
+        if (result.data?.status === 'authenticated' || result.data?.status === 'authenticated-unverified') {
+          return {
+            ...result,
+            data: {
+              ok: false,
+              status: 'authenticated-unverified' as const,
+              error: '认证期间 MCP 配置发生变化；凭据可能已更新，但当前连接状态不再可信，请重新检测'
+            }
+          }
+        }
+        throw new Error('MCP 配置在认证期间发生变化；本次状态不再可信，请重新检测后操作')
+      }
+    }
+    return result
+  } finally {
+    authLease.release()
+  }
 })
 handleTrusted('agent:toggleMcp', (_e, p: { context: ProviderContext; name: string; enabled: boolean }) =>
-  providerRegistry.setMcpEnabled(p.context, p.name, p.enabled)
+  withProviderOperation(p.context.providerId, () => providerRegistry.setMcpEnabled(p.context, p.name, p.enabled))
 )
 handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
   if (providerRegistry.isDisabled(context.providerId)) {
@@ -756,9 +840,15 @@ handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
     observedAt: Date.now()
   }
 })
-handleTrusted('agent:listCommands', (_e, context: ProviderContext) => providerRegistry.listCommands(context))
-handleTrusted('agent:runControls', (_e, context: ProviderContext) => providerRegistry.runControls(context))
-handleTrusted('agent:providerAccount', (_e, context: ProviderContext) => providerRegistry.account(context))
+handleTrusted('agent:listCommands', (_e, context: ProviderContext) =>
+  withProviderOperation(context.providerId, () => providerRegistry.listCommands(context))
+)
+handleTrusted('agent:runControls', (_e, context: ProviderContext) =>
+  withProviderOperation(context.providerId, () => providerRegistry.runControls(context))
+)
+handleTrusted('agent:providerAccount', (_e, context: ProviderContext) =>
+  withProviderOperation(context.providerId, () => providerRegistry.account(context))
+)
 
 // 单目录会话列表（当前工作目录）：只列 app 自己起过的会话
 handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
@@ -1042,8 +1132,19 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '不要手工覆盖 runtimeProvider；由 Provider adapter descriptor 选择原生 transport'
     })
   }
+  const lifecycleKey = providerId
+  const startLease = providerOperationGate.acquireOperation(lifecycleKey)
+  if (!startLease.ok) {
+    throw new AgentRuntimeError('当前 Provider 正在认证 MCP，已拒绝启动新一轮', {
+      provider: runtimeProvider,
+      stage: 'frontdoor',
+      cwd,
+      nextAction: '等待浏览器认证完成或超时后再发送'
+    })
+  }
   const admissionKey = providerContextKey(providerId, cwd ?? '')
-  return contextAdmission.run(admissionKey, async () => {
+  try {
+    return await contextAdmission.run(admissionKey, async () => {
     await startupManagedRecovery
     const contextKey = providerContextKey(providerId, cwd ?? '')
     let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
@@ -1810,8 +1911,11 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       runs.remove(runId)
       resolveSettled?.()
     })
-  return { runId }
-  })
+      return { runId }
+    })
+  } finally {
+    startLease.release()
+  }
 })
 
 // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。

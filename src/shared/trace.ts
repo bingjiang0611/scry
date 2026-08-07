@@ -76,7 +76,7 @@ export interface SlashCmd {
 // MCP 真实状态：来自当前 runtime 的 init/live 信息；Claude SDK 下和终端 /mcp 一致（含 needs-auth）。
 export interface McpLiveStatus {
   name: string
-  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+  status: 'connected' | 'failed' | 'needs-auth' | 'needs-client-registration' | 'pending' | 'disabled'
   serverName?: string
   serverVersion?: string
   tools?: number
