@@ -3715,6 +3715,84 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).toContain('class="mcp-neutral"')
     expect(html).toContain('disconnected')
   })
+
+  it('只读 Provider 不再展示无效的单项测试按钮，改为明确检测全部运行态', () => {
+    const html = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ name: 'github', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{}}
+        live={[{ name: 'github', status: 'connected', tools: 7 }]}
+        refreshing={false}
+        capability={{
+          providerId: 'codex',
+          cwd: '/repo',
+          mode: 'read',
+          state: 'degraded',
+          reason: '配置已读取；刷新后读取 Codex app-server 运行状态',
+          data: { configured: [], runtime: null }
+        }}
+        onTest={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+
+    expect(html).toContain('aria-label="检测全部 MCP 运行状态"')
+    expect(html).toContain('检测全部')
+    expect(html).toContain('connected · 7 tools')
+    expect(html).not.toContain('测试连接')
+    expect(html).toContain('不提供单项直测')
+  })
+
+  it('检测全部与逐项直测始终展示进行中和最终结果', () => {
+    const refreshingHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ name: 'github', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{}}
+        live={[]}
+        refreshing
+        capability={{
+          providerId: 'codex',
+          cwd: '/repo',
+          mode: 'read',
+          state: 'ready',
+          data: { configured: [], runtime: [] }
+        }}
+        onTest={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(refreshingHtml).toContain('正在检测全部 MCP…')
+    expect(refreshingHtml).toContain('检测中…')
+    expect(refreshingHtml).toMatch(/class="modal-refresh mcp-refresh-all"[^>]*disabled=""/)
+    expect(refreshingHtml).toContain('aria-label="检测全部 MCP 运行状态"')
+
+    const failedHtml = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'github-target', name: 'github', scope: 'user', transport: 'http', detail: 'https://mcp.example.test', enabled: true }]}
+        status={{ 'github-target': { ok: false, error: 'initialize timeout' } }}
+        live={[{ name: 'github', status: 'connected', tools: 3 }]}
+        refreshing={false}
+        capability={{
+          providerId: 'claude',
+          cwd: '/repo',
+          mode: 'manage',
+          state: 'ready',
+          data: { configured: [], runtime: [] }
+        }}
+        onTest={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    expect(failedHtml).toContain('connected')
+    expect(failedHtml).toContain('role="alert"')
+    expect(failedHtml).toContain('本次测试失败 · initialize timeout')
+  })
 })
 
 describe('Skill/MCP 操作能力渲染', () => {

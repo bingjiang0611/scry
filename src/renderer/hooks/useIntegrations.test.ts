@@ -35,6 +35,7 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
     expect(mergeMcpLiveSnapshot(cached, null)).toBe(cached)
     expect(mergeMcpLiveSnapshot(cached, undefined)).toBe(cached)
     expect(mergeMcpLiveSnapshot(cached, [])).toEqual([])
+    expect(mergeMcpLiveSnapshot(cached, null, true)).toEqual([])
   })
 })
 

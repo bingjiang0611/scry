@@ -142,9 +142,10 @@ export async function authoritativeRefreshAfterToggle<T>(
 
 export function mergeMcpLiveSnapshot(
   current: McpLiveStatus[],
-  runtime: McpLiveStatus[] | null | undefined
+  runtime: McpLiveStatus[] | null | undefined,
+  clearUnknownRuntime = false
 ): McpLiveStatus[] {
-  return runtime ?? current
+  return runtime ?? (clearUnknownRuntime ? [] : current)
 }
 
 export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId: string): boolean {
@@ -348,11 +349,17 @@ export function useIntegrations(cwd: string | null) {
     }
   }, [])
 
-  const applyMcpSnapshot = useCallback((result: CapabilityEnvelope<McpSnapshot>): McpLiveStatus[] => {
+  const applyMcpSnapshot = useCallback((
+    result: CapabilityEnvelope<McpSnapshot>,
+    clearUnknownRuntime = false
+  ): McpLiveStatus[] => {
     setMcpCapability(result)
-    if (!result.data) return []
+    if (!result.data) {
+      if (clearUnknownRuntime) setMcpLive([])
+      return []
+    }
     setMcps(result.data.configured)
-    setMcpLive((current) => mergeMcpLiveSnapshot(current, result.data?.runtime))
+    setMcpLive((current) => mergeMcpLiveSnapshot(current, result.data?.runtime, clearUnknownRuntime))
     return result.data.runtime ?? []
   }, [])
 
@@ -381,7 +388,21 @@ export function useIntegrations(cwd: string | null) {
     try {
       const result = await window.scry.mcpSnapshot(context, true)
       if (seq === mcpLiveRequestSeq.current && contextKey(context) === contextKey(providerContextRef.current)) {
-        applyMcpSnapshot(result)
+        applyMcpSnapshot(result, true)
+      }
+    } catch (error) {
+      if (seq === mcpLiveRequestSeq.current && contextKey(context) === contextKey(providerContextRef.current)) {
+        setMcpLive([])
+        setMcpCapability((current) => ({
+          providerId: context.providerId,
+          cwd: context.cwd,
+          mode: current?.providerId === context.providerId ? current.mode : 'none',
+          state: 'unknown',
+          data: current?.providerId === context.providerId && current.data
+            ? { ...current.data, runtime: null }
+            : null,
+          reason: error instanceof Error ? error.message : String(error)
+        }))
       }
     } finally {
       if (seq === mcpLiveRequestSeq.current) setMcpRefreshing(false)
