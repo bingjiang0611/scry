@@ -1100,6 +1100,7 @@ export function OverviewPanel({
               const interventionKey = `${row.runId}:intervention`
               const mcpCount = row.groups.mcp.reduce((sum, item) => sum + item.count, 0)
               const skillCount = row.groups.skill.reduce((sum, item) => sum + item.count, 0)
+              const agentCount = row.groups.agent.reduce((sum, item) => sum + item.count, 0)
               const hooksCount = row.hooks.logicalRuns
               const timingAvailable = Boolean(row.timing.apiMs != null || row.timing.totalCalls > 0)
               const mcpExpanded = mcpCount > 0 && expandedTurnCallGroups.has(mcpKey)
@@ -1172,6 +1173,13 @@ export function OverviewPanel({
                         controls: `turn-skill-${row.turnNo}`,
                         onToggle: (event) => toggleTurnCallGroup(skillKey, event)
                       })}
+                      <span
+                        className={`turn-call-group agent${agentCount === 0 ? ' empty' : ''}`}
+                        title={`本轮子 Agent 调用 ${agentCount} 次`}
+                      >
+                        <span className="turn-call-kind">子Agent</span>
+                        <span className="turn-call-count">{agentCount}</span>
+                      </span>
                       {renderTurnDetailToggle({
                         kind: 'hooks', count: hooksCount, expanded: hooksExpanded,
                         controls: `turn-hooks-${row.turnNo}`,
@@ -1214,7 +1222,7 @@ export function OverviewPanel({
               )
             })}
           </div>
-          <div className="psrc">每轮展示人工介入、MCP、Skill、Hook 与文件数量；介入明细直接列出问题和最终选择，点 Txx 跳回对话。</div>
+          <div className="psrc">每轮展示人工介入、MCP、Skill、子 Agent、Hook 与文件数量；介入明细直接列出问题和最终选择，点 Txx 跳回对话。</div>
         </div>
       )}
         </div>
