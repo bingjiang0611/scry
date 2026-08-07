@@ -510,6 +510,7 @@ function renderTurnCallDetail(kind: 'mcp' | 'skill', items: TurnCallItem[]): Rea
 export function OverviewPanel({
   turns,
   sessionId = null,
+  selected,
   usage,
   stats,
   runtimeProvider,
@@ -568,13 +569,17 @@ export function OverviewPanel({
   const sessionClarifications = sessionInterventions.filter((intervention) => intervention.kind === 'clarification').length
   const sessionPermissions = sessionInterventions.filter((intervention) => intervention.kind === 'permission').length
   const results = turns.map(resultOf).filter((event): event is TraceEvent => event != null)
-  const sumObserved = (pick: (event: TraceEvent) => number | undefined): number | null => {
+  const sumObserved = (pick: (event: TraceEvent) => number | undefined): { value: number | null; known: number } => {
     const values = results.map(pick).filter((value): value is number => value != null)
-    return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : null
+    return {
+      value: values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : null,
+      known: values.length
+    }
   }
+  const formatObserved = (evidence: { value: number | null; known: number }, format: (value: number) => string = fmtTok): string =>
+    evidence.value == null ? '—' : `${evidence.known < turns.length ? '≥ ' : ''}${format(evidence.value)}`
   const tin = sumObserved((e) => e.tokensIn)
   const tout = sumObserved((e) => e.tokensOut)
-  const totalTokens = tin == null && tout == null ? null : (tin ?? 0) + (tout ?? 0)
   // verdict foot 用全会话累计（和 cost/tokens pillar 一致，不混最后一轮）。
   const cacheR = sumObserved((e) => e.cacheReadTokens)
   const cacheW = sumObserved((e) => e.cacheCreationTokens)
@@ -666,6 +671,11 @@ export function OverviewPanel({
 
   // verdict 状态（诚实）：高危→bad；运行中/有报错/可疑→warn；否则 ok。error 绝不显绿。
   const dangerHi = dangers.filter((e) => e.danger!.level === 'danger').length
+  const dangerClassification = runtimeProvider == null
+    ? 'unknown'
+    : runtimeProvider === 'claude_sdk' || runtimeProvider === 'qoder_cli'
+      ? 'classified'
+      : 'unsupported'
   const toolErrors = all.filter(isOverviewToolErrorEvent).length
   const turnError = turns.some((t) => !!t.error)
   const hasError = toolErrors > 0 || turnError
@@ -729,6 +739,10 @@ export function OverviewPanel({
   return (
     <aside className="panel">
       <div className="ov-topbar">
+        <div className="overview-panel-title">
+          <div><strong>总览</strong><span>{busy ? '当前执行' : '会话证据'}</span></div>
+          <em><i aria-hidden="true" />本机真实数据</em>
+        </div>
         <div className="panel-tabs" role="tablist" aria-label="面板视图">
           <button
             type="button"
@@ -792,101 +806,66 @@ export function OverviewPanel({
       )}
 
       {isOverviewTab && turns.length > 0 && (
-        <div className={`verdict-card ${vstate}`}>
-          <div className="verdict-left">
-            <div className="lbl">
-              本会话 · {turns.length} 轮
-              {busy && (
-                <span className="live">
-                  <span className="dot" />
-                  运行中
-                </span>
-              )}
-            </div>
-            <div className={`judgement ${vstate}`}>
+        <section className={`overview-verdict ${vstate}`} aria-label="当前会话判词与尺度">
+          <header className="overview-verdict-line">
+            <div>
               <span className={`sdot ${vstate}`} />
-              {judge}
+              <strong>{judge}</strong>
+              <small>
+                {results.length} 轮完成 · {toolErrors} 处工具报错
+                {sessionInterventions.length > 0 ? ` · ${sessionInterventions.length} 次人工介入` : ''}
+              </small>
             </div>
-            <div className="since">
-              {results.length} 轮完成 · {calls.totalCalls} 次调用
-              {sessionInterventions.length > 0 ? ` · ${sessionInterventions.length} 次人工介入` : ''}
-              {dangers.length > 0 ? ` · ${dangers.length} 处危险（审计放行）` : ''}
+            <em>{calls.totalCalls} calls</em>
+          </header>
+          <div className="overview-metric-grid">
+            <div className="overview-metric accent">
+              <span>总 Token</span>
+              <strong>{billingTokenText}</strong>
+              <small>{billing.knownTokenResultCount}/{billing.resultTurns} 轮已捕获</small>
             </div>
-          </div>
-          <div className="verdict-right">
-            <div className="verdict-pillar accent">
-              <div className="nm">
-                <span className="sdot" />
-                总 Token
-              </div>
-              <div className="v">{billingTokenText}</div>
-              <div className="sub">
-                {billing.knownTokenResultCount}/{billing.resultTurns} 轮已捕获
-              </div>
+            <div className="overview-metric">
+              <span>输入 / 输出</span>
+              <strong>{formatObserved(tin)} / {formatObserved(tout)}</strong>
+              <small>input / output · 缺失轮次保留为下界</small>
             </div>
-            <div className="verdict-pillar">
-              <div className="nm">
-                <span className="sdot" />
-                输入/输出
-              </div>
-              <div className="v">{fmtTok(totalTokens)}</div>
-              <div className="sub">
-                in {fmtTok(tin)} · out {fmtTok(tout)}
-              </div>
-            </div>
-            <div className="verdict-pillar">
-              <div className="nm">
-                <span className="sdot" />
-                调用
-              </div>
-              <div className="v">{calls.totalCalls}</div>
-              <div className="sub">{callSub}</div>
+            <div className="overview-metric">
+              <span>调用</span>
+              <strong>{calls.totalCalls}</strong>
+              <small>{callSub}</small>
             </div>
             {dangers.length > 0 ? (
               <button
                 type="button"
-                className={`verdict-pillar verdict-pillar-action ${dangerHi > 0 ? 'bad' : 'warn'}`}
+                className={`overview-metric overview-metric-action ${dangerHi > 0 ? 'bad' : 'warn'}`}
                 onClick={showDangerAudit}
                 title={`查看本会话 ${dangers.length} 处危险操作`}
                 aria-label={`查看本会话 ${dangers.length} 处危险操作`}
               >
-                <div className="nm">
-                  <span className="sdot" />
-                  危险
-                </div>
-                <div className="v">{dangers.length}</div>
-                <div className="sub danger-view-hint">
-                  审计·未拦截 <Icon name="chevronRight" />
-                </div>
+                <span>危险</span>
+                <strong>{dangers.length}</strong>
+                <small>审计·未拦截 <Icon name="chevronRight" /></small>
               </button>
+            ) : dangerClassification === 'classified' ? (
+              <div className="overview-metric true-zero">
+                <span>危险</span>
+                <strong>0</strong>
+                <small>完整分类范围内无事件</small>
+              </div>
             ) : (
-              <div className="verdict-pillar">
-                <div className="nm">
-                  <span className="sdot" />
-                  危险
-                </div>
-                <div className="v">0</div>
-                <div className="sub">无</div>
+              <div className="overview-metric unsupported">
+                <span>危险</span>
+                <strong>—</strong>
+                <small>{dangerClassification === 'unsupported' ? '当前 Provider 分类未支持' : '能力状态未知'}</small>
               </div>
             )}
           </div>
-          {(cacheR != null || cacheW != null || apiMs != null) && (
-            <div className="verdict-foot">
-              <span className="it">
-                <span>cache·r</span>
-                <b>{fmtTok(cacheR)}</b>
-              </span>
-              <span className="it">
-                <span>cache·w</span>
-                <b>{fmtTok(cacheW)}</b>
-              </span>
-              <span className="it">
-                <span>api</span>
-                <b>{apiMs == null ? '—' : `${(apiMs / 1000).toFixed(1)}s`}</b>
-              </span>
-            </div>
-          )}
-        </div>
+          <footer className="overview-metric-foot">
+            <span><b>cache·r</b>{formatObserved(cacheR)}</span>
+            <span><b>cache·w</b>{formatObserved(cacheW)}</span>
+            <span><b>api</b>{formatObserved(apiMs, (value) => `${(value / 1000).toFixed(1)}s`)}</span>
+          </footer>
+        </section>
       )}
 
       {isOverviewTab && turns.length > 0 && (
@@ -1126,9 +1105,10 @@ export function OverviewPanel({
                 if (row.firstEvent) onSelect(row.firstEvent)
               }
               const label = `跳到第 ${row.turnNo} 轮，对话中共 ${row.total} 次工具/Skill/MCP/子 Agent 调用`
+              const isSelectedTurn = selected?.runId === row.runId
               return (
                 <div
-                  className="turn-call-row"
+                  className={`turn-call-row ${isSelectedTurn ? 'is-selected' : ''}`}
                   key={row.runId}
                   title={row.userText || label}
                 >
@@ -1138,6 +1118,7 @@ export function OverviewPanel({
                     onClick={action}
                     title={label}
                     aria-label={label}
+                    aria-current={isSelectedTurn ? 'true' : undefined}
                   >
                     T{String(row.turnNo).padStart(2, '0')}
                   </button>

@@ -2243,10 +2243,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
   it('verdict 卡：聚合 token + 无报错无危险 → 判决"完成"（非假绿前提下的 ok 态）', () => {
     expect(html).toContain('3.0k tok') // 跨轮累计本会话 token（含 cache）
     expect(html).not.toContain('$0.1234')
-    expect(html).toContain('本会话 · 1 轮') // 会话标签（不造假 sess_id）
-    expect(html).toContain('judgement ok') // 无 error/danger → ok
+    expect(html).toContain('1 轮完成')
+    expect(html).toContain('overview-verdict ok') // 无 error/danger → ok
     expect(html).toContain('完成')
-    expect(html).toContain('verdict-foot') // cache·r/cache·w/api foot
+    expect(html).toContain('overview-metric-foot') // cache·r/cache·w/api foot
   })
 
   it('历史会话合并 archive 与 transcript usage 时仍按用户 turn 展示轮数', () => {
@@ -2282,7 +2282,6 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       <OverviewPanel turns={[mergedTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(mergedHtml).toContain('本会话 · 1 轮')
     expect(mergedHtml).toContain('1 轮完成')
     expect(mergedHtml).toContain('1/1 轮已捕获')
     expect(mergedHtml).toContain('35 tok')
@@ -3165,20 +3164,20 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
       ]
     }
     const html = panel(t)
-    expect(html).toContain('judgement warn')
+    expect(html).toContain('overview-verdict warn')
     expect(html).toContain('处工具报错')
-    expect(html).not.toContain('judgement ok') // 失败会话顶绿色健康判决 = 假状态
+    expect(html).not.toContain('overview-verdict ok') // 失败会话顶绿色健康判决 = 假状态
   })
 
   it('高危操作 → 卡 bad + 判决 bad + 危险 pillar 标"审计·未拦截"（非 blocked）', () => {
     const { t } = dangerTurn()
     const html = panel(t)
-    expect(html).toContain('verdict-card bad')
-    expect(html).toContain('judgement bad')
+    expect(html).toContain('overview-verdict bad')
+    expect(html).toContain('overview-verdict-line')
     expect(html).toContain('1 处高危操作')
     expect(html).toContain('rm -rf 强删')
     expect(html).toContain('审计·未拦截') // P3 是观测不拦截，诚实标注
-    expect(html).toContain('class="verdict-pillar verdict-pillar-action bad"')
+    expect(html).toContain('class="overview-metric overview-metric-action bad"')
     expect(html).toContain('aria-label="查看本会话 1 处危险操作"')
     expect(html).toContain('class="panel-section danger-audit-section"')
     expect(html).toContain('class="callrow danger-audit-row"')
@@ -3191,7 +3190,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     const html = renderToStaticMarkup(
       <OverviewPanel turns={[t]} selected={dangerEv} onSelect={() => {}} usage={null} stats={null} />
     )
-    expect(html).toContain('<div class="judgement bad"><span class="sdot bad"></span>1 处高危操作</div>')
+    expect(html).toContain('<span class="sdot bad"></span><strong>1 处高危操作</strong>')
     expect(html).not.toContain('title="会话状态')
   })
 
@@ -3205,7 +3204,37 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     const html = panel(t, true)
     expect(html).toContain('运行中')
     expect(html).toContain('运行中')
-    expect(html).toContain('judgement warn')
+    expect(html).toContain('overview-verdict warn')
+  })
+
+  it('输入输出、缓存与 API 缺失部分轮次时都显示已知下界', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[
+          {
+            runId: 'coverage-1',
+            userText: 'one',
+            done: true,
+            items: [ev({ id: 'coverage-result-1', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5, cacheReadTokens: 7, cacheCreationTokens: 2, durationApiMs: 1000 })]
+          },
+          {
+            runId: 'coverage-2',
+            userText: 'two',
+            done: true,
+            items: [ev({ id: 'coverage-result-2', kind: 'harness', stage: 'result', tokensIn: 3 })]
+          }
+        ]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+      />
+    )
+
+    expect(html).toContain('<strong>13 / ≥ 5</strong>')
+    expect(html).toContain('<b>cache·r</b>≥ 7')
+    expect(html).toContain('<b>cache·w</b>≥ 2')
+    expect(html).toContain('<b>api</b>≥ 1.0s')
   })
 })
 
@@ -3293,8 +3322,8 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
   })
 
   it('会话总调用拆分为工具、MCP、Skill、子 Agent，四项之和等于总数', () => {
-    expect(html).toContain('4 次调用')
-    expect(html).toContain('调用</div><div class="v">4</div>')
+    expect(html).toContain('4 calls')
+    expect(html).toContain('<span>调用</span><strong>4</strong>')
     expect(html).toContain('工具 1 · MCP 1 · Skill 1 · 子Agent 1')
     expect(html).toContain('TOP TOOLS<span class="more">工具 1 · MCP 1</span>')
   })
@@ -3336,9 +3365,10 @@ describe('ExecutionGraph 渲染：调用拓扑树', () => {
     expect(html).toContain('SUBAGENT') // subagent gtype 徽章
     expect(html).toContain('120 tok') // turn-head token
     expect(html).not.toContain('$0.500')
-    expect(html).toContain('verdict-card full') // 顶部 full verdict 卡
+    expect(html).toContain('graph-evidence-header')
+    expect(html).toContain('graph-turn-lane')
     expect(html).toContain('调整拓扑详情面板宽度') // 右侧详情面板可拖拽
-    expect(html).toContain('aria-hidden="true"') // TURN 箭头只做方向提示，不再点击折叠
+    expect(html).toContain('graph-child-run')
   })
 
   it('孤儿 parent id 的调用仍作为顶层节点展示', () => {
@@ -3436,14 +3466,34 @@ describe('ExecutionGraph 渲染：调用拓扑树', () => {
 
     const unknown = renderGraph([{}])
     expect(unknown).toContain('<span>— tok</span>')
-    expect(unknown).toContain('<div class="v">—</div>')
+    expect(unknown).toContain('<span class="accent"><small>Token</small><b>—</b>')
 
     const zero = renderGraph([{ tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }])
     expect(zero).toContain('<span>0 tok</span>')
-    expect(zero).toContain('<div class="v">0</div>')
+    expect(zero).toContain('<span class="accent"><small>Token</small><b>0</b>')
 
     const partial = renderGraph([{ tokensIn: 10, tokensOut: 5 }, {}])
-    expect(partial).toContain('<div class="v">≥ 15</div>')
+    expect(partial).toContain('<span class="accent"><small>Token</small><b>≥ 15</b>')
+  })
+
+  it('详情面板沿用 Provider 危险分类能力，未支持时不把无标记写成安全', () => {
+    const call = ev({
+      id: 'codex-graph-call',
+      kind: 'tool',
+      stage: 'tool:Bash',
+      tool: 'Bash',
+      providerId: 'codex'
+    })
+    const html = renderToStaticMarkup(
+      <ExecutionGraph
+        turns={[{ runId: 'codex-graph', userText: 'x', done: true, items: [call] }]}
+        selectedId={call.id}
+        onSelect={() => {}}
+      />
+    )
+
+    expect(html).toContain('当前 Provider 未支持危险分类；未标记不等于安全')
+    expect(html).not.toContain('完整分类范围内无危险标记')
   })
 
   it('空会话出占位', () => {
@@ -3455,7 +3505,7 @@ describe('ExecutionGraph 渲染：调用拓扑树', () => {
 import { SegmentsView } from './SegmentsView'
 
 describe('SegmentsView 渲染：主体内容对齐容器', () => {
-  it('渲染统一对齐的 seg-shell', () => {
+  it('渲染时间带、段账本与证据详情', () => {
     const t: Turn = {
       runId: 'seg',
       userText: 'x',
@@ -3467,7 +3517,9 @@ describe('SegmentsView 渲染：主体内容对齐容器', () => {
       ]
     }
     const html = renderToStaticMarkup(<SegmentsView turns={[t]} />)
-    expect(html).toContain('seg-shell')
+    expect(html).toContain('segment-ribbon')
+    expect(html).toContain('segment-ledger')
+    expect(html).toContain('segment-inspector')
     expect(html).toContain('会话切成')
   })
 
@@ -3487,15 +3539,81 @@ describe('SegmentsView 渲染：主体内容对齐容器', () => {
     )
 
     const unknown = renderSegments([{}])
-    expect(unknown).toContain('<div class="val accent">—</div>')
+    expect(unknown).toContain('<small>Token</small><b>—</b>')
+    expect(unknown).toContain('<small>API</small><b>—</b>')
     expect(unknown).toContain('Provider 未上报 Token')
+    expect(unknown).toContain('<small>最大已知下界</small>')
+    expect(unknown).toContain('<small>最长已知 API</small>')
+    expect(unknown).toContain('role="group"')
+    expect(unknown).not.toContain('role="listitem"')
 
     const zero = renderSegments([{ tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }])
-    expect(zero).toContain('<div class="val accent">0</div>')
+    expect(zero).toContain('<small>Token</small><b>0</b>')
     expect(zero).not.toContain('Provider 未上报 Token')
 
     const partial = renderSegments([{ tokensIn: 10, tokensOut: 5 }, {}])
-    expect(partial).toContain('<div class="val accent">≥ 15</div>')
+    expect(partial).toContain('<small>Token</small><b>≥ 15</b>')
+  })
+
+  it('其他段有 API 证据时，当前段缺失仍显示未知而不是 0%', () => {
+    const html = renderToStaticMarkup(
+      <SegmentsView
+        turns={[
+          {
+            runId: 'seg-api-unknown',
+            userText: '先读',
+            done: true,
+            items: [
+              ev({ id: 'seg-api-read', kind: 'tool', stage: 'tool:Read', tool: 'Read' }),
+              ev({ id: 'seg-api-result-unknown', kind: 'harness', stage: 'result' })
+            ]
+          },
+          {
+            runId: 'seg-api-known',
+            userText: '再跑 skill',
+            done: true,
+            items: [
+              ev({ id: 'seg-api-skill', kind: 'skill', stage: 'skill:test', name: 'test' }),
+              ev({ id: 'seg-api-result-known', kind: 'harness', stage: 'result', durationApiMs: 1000 })
+            ]
+          }
+        ]}
+      />
+    )
+
+    expect(html).toContain('turn 01 · API 覆盖未知')
+    expect(html).not.toContain('turn 01 · 0% 已知 API 时间')
+  })
+
+  it('同段缺一轮 API 或 output 时只展示已知下界，不给精确排名与百分比', () => {
+    const html = renderToStaticMarkup(
+      <SegmentsView
+        turns={[
+          {
+            runId: 'seg-partial-1',
+            userText: 'one',
+            done: true,
+            items: [ev({ id: 'seg-partial-result-1', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5, durationApiMs: 1000 })]
+          },
+          {
+            runId: 'seg-partial-2',
+            userText: 'two',
+            done: true,
+            items: [ev({ id: 'seg-partial-result-2', kind: 'harness', stage: 'result', tokensIn: 3 })]
+          }
+        ]}
+      />
+    )
+
+    expect(html).toContain('<strong>≥ 18 tok</strong>')
+    expect(html).toContain('<small>最大已知下界</small>')
+    expect(html).not.toContain('<small>最高 Token</small>')
+    expect(html).toContain('<small>最长已知 API</small>')
+    expect(html).not.toContain('<small>最慢段</small>')
+    expect(html).toContain('<small>Token</small><b>≥ 18</b><em>输入 2/2 轮 · 输出 1/2 轮</em>')
+    expect(html).toContain('<small>API</small><b>≥ 1.0s</b><em>1/2 轮已捕获 · 已知下界</em>')
+    expect(html).toContain('1/2 轮 API 已捕获；会话占比未知')
+    expect(html).not.toContain('100% 会话 API 时间')
   })
 })
 
@@ -3503,6 +3621,37 @@ import { DiagnosticsView } from './DiagnosticsView'
 import { McpModal, SettingsModal, SkillsModal } from './Modals'
 
 describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => {
+  const readyProps: ComponentProps<typeof DiagnosticsView> = {
+    agents: [{ id: 'codex', name: 'Codex', bin: 'codex', path: '/usr/local/bin/codex', version: '1.2.3' }],
+    diag: { sdkVersion: '^0.3.186', settingSources: 'none' },
+    mcpLive: [],
+    mcps: [],
+    mcpCapability: {
+      providerId: 'codex',
+      mode: 'none',
+      state: 'unsupported',
+      data: null,
+      reason: '当前 Provider 不暴露 MCP'
+    },
+    stats: {
+      status: 'ready',
+      totals: { cost: null, tin: null, tout: null, turns: 1 },
+      topTools: [],
+      byCwd: [],
+      byModel: [],
+      toolStats: [],
+      dangerTrend: [],
+      providerCoverage: [
+        { providerId: 'claude', turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, dangerCoverage: 'classified' }
+      ]
+    },
+    turns: [],
+    projects: [{ cwd: '/repo', name: 'repo', mtime: 1, sessions: [] }],
+    usage: { status: 'ready', cost: null, tin: 10, tout: 5, turns: 1, invalidLines: 0 },
+    onReprobe: () => {}
+  }
+  const renderDiagnostics = (overrides: Partial<ComponentProps<typeof DiagnosticsView>> = {}): string =>
+    renderToStaticMarkup(<DiagnosticsView {...readyProps} {...overrides} />)
   const html = renderToStaticMarkup(
     <DiagnosticsView
       agents={[
@@ -3615,9 +3764,9 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
         onReprobe={() => {}}
       />
     )
-    expect(incomplete).toContain('verdict-card full warn')
+    expect(incomplete).toContain('class="de-verdict-band" data-tone="warn"')
     expect(incomplete).toContain('诊断 IPC 尚未返回')
-    expect(incomplete).not.toContain('verdict-card full ok')
+    expect(incomplete).not.toContain('class="de-verdict-band" data-tone="exact"')
     expect(incomplete).not.toContain('运行正常')
   })
 
@@ -3706,6 +3855,73 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
     expect(warningHtml).not.toContain('runtime capability warning')
     expect(warningHtml).not.toContain('运行正常')
   })
+
+  it('partial usage 保留已解析 turns 与 Token 下界，不降级成 unknown', () => {
+    const partial = renderDiagnostics({
+      usage: { status: 'partial', cost: null, tin: 100, tout: 20, turns: 3, invalidLines: 2 }
+    })
+
+    expect(partial).toContain('账本证据仅部分可用')
+    expect(partial).toContain('>≥ 3</span>')
+    expect(partial).toContain('Token ≥ 120')
+    expect(partial).toContain('3 turns · 2 invalid lines · Token ≥ 120')
+  })
+
+  it('capabilityWarnings 缺字段保持 unknown，只有显式空数组才是真实 0', () => {
+    const missing = renderDiagnostics({
+      turns: [{
+        runId: 'codex-missing-capability-warnings',
+        userText: 'x',
+        done: true,
+        items: [ev({ id: 'codex-missing-result', kind: 'harness', stage: 'result', runtimeProvider: 'codex_cli' })]
+      }]
+    })
+    const explicitZero = renderDiagnostics({
+      turns: [{
+        runId: 'qoder-explicit-capability-warnings',
+        userText: 'x',
+        done: true,
+        items: [ev({
+          id: 'qoder-explicit-result',
+          kind: 'harness',
+          stage: 'result',
+          runtimeProvider: 'qoder_cli',
+          runtimeMetadata: { capabilityWarnings: [] }
+        })]
+      }]
+    })
+
+    expect(missing).toContain('Runtime capability 证据未知')
+    expect(missing).toContain('result 缺少 capabilityWarnings 字段')
+    expect(missing).not.toContain('Runtime capability 警告为真实 0')
+    expect(explicitZero).toContain('Runtime capability 警告为真实 0')
+    expect(explicitZero).toContain('capabilityWarnings 显式数组 · 0 项')
+  })
+
+  it('危险审计真实 0 需要完整分类覆盖，unsupported 与混合覆盖分别保留语义', () => {
+    const statsWithCoverage = (providerCoverage: NonNullable<NonNullable<typeof readyProps.stats>['providerCoverage']>) => ({
+      ...readyProps.stats!,
+      providerCoverage
+    })
+    const unsupported = renderDiagnostics({
+      stats: statsWithCoverage([
+        { providerId: 'codex', turns: 2, inputKnownTurns: 2, outputKnownTurns: 2, cacheReadKnownTurns: 2, cacheWriteKnownTurns: 0, dangerCoverage: 'unsupported' }
+      ])
+    })
+    const mixed = renderDiagnostics({
+      stats: statsWithCoverage([
+        { providerId: 'claude', turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, dangerCoverage: 'classified' },
+        { providerId: 'opencode', turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 0, cacheWriteKnownTurns: 0, dangerCoverage: 'unsupported' }
+      ])
+    })
+    const classified = renderDiagnostics({ stats: statsWithCoverage(readyProps.stats!.providerCoverage!) })
+
+    expect(unsupported).toContain('当前样本的危险分类未支持')
+    expect(unsupported).not.toContain('完整分类覆盖内危险审计为真实 0')
+    expect(mixed).toContain('危险审计仅部分覆盖')
+    expect(mixed).not.toContain('完整分类覆盖内危险审计为真实 0')
+    expect(classified).toContain('完整分类覆盖内危险审计为真实 0')
+  })
 })
 
 describe('McpModal 渲染：pending 不伪装 connected', () => {
@@ -3771,6 +3987,38 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).not.toContain('connected')
   })
 
+  it('Fleet 把配置、运行态、本次测试和认证作为四份独立证据，并以 targetId 关联操作结果', () => {
+    const html = renderToStaticMarkup(
+      <McpModal
+        mcps={[{ targetId: 'fleet-target', name: 'fleet', scope: 'project', transport: 'http', detail: 'https://mcp.example.test', enabled: false }]}
+        status={{ 'fleet-target': { ok: false, error: 'timeout', authOk: true } }}
+        live={[{ name: 'fleet', status: 'connected', tools: 2 }]}
+        refreshing={false}
+        capability={{
+          providerId: 'claude',
+          cwd: '/repo',
+          mode: 'manage',
+          state: 'ready',
+          data: { configured: [], runtime: [], operations: { authenticate: ['fleet-target'] } }
+        }}
+        onTest={() => {}}
+        onReauthenticate={() => {}}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+    const row = html.slice(html.indexOf('mcp-fleet__row'), html.indexOf('</tbody>'))
+    expect(html).toContain('<th scope="col">配置</th>')
+    expect(html).toContain('<th scope="col">Provider 运行态</th>')
+    expect(html).toContain('<th scope="col">本次测试</th>')
+    expect(html).toContain('<th scope="col">认证</th>')
+    expect(row).toContain('inventory-state--disabled')
+    expect(row).toContain('connected · 2 tools')
+    expect(row).toContain('本次测试失败 · timeout')
+    expect(row).toContain('认证成功，运行状态已刷新')
+  })
+
   it('Provider 返回未知运行态时诚实降级展示，不让整个 renderer 崩溃', () => {
     const html = renderToStaticMarkup(
       <McpModal
@@ -3784,7 +4032,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         onClose={() => {}}
       />
     )
-    expect(html).toContain('class="mcp-neutral"')
+    expect(html).toContain('data-semantic-state="unknown"')
     expect(html).toContain('disconnected')
   })
 
@@ -4011,8 +4259,8 @@ describe('Skill/MCP 操作能力渲染', () => {
       />
     )
     expect(html).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
-    expect(html).toContain('class="modal skills-modal"')
-    expect(html).toContain('class="switch skill-switch"')
+    expect(html).toContain('inventory-modal--skills')
+    expect(html).toContain('class="inventory-switch skill-switch"')
     expect(html).toContain('已启用')
     expect(html).toContain('Skill 目录仅供读取')
   })
@@ -4058,7 +4306,7 @@ describe('Skill/MCP 操作能力渲染', () => {
 
 import { AnalyticsView } from './AnalyticsView'
 
-describe('AnalyticsView 渲染：时间序列 + 四 Provider 覆盖', () => {
+describe('AnalyticsView 渲染：四章真实证据叙事', () => {
   const html = renderToStaticMarkup(
     <AnalyticsView
       projects={[{ cwd: '/a/scry', name: 'scry', mtime: 0, sessions: [{ sessionId: 's1', externalSessionId: 's1', providerId: 'claude', mtime: 0, preview: 'x', count: 1 }] }]}
@@ -4095,44 +4343,40 @@ describe('AnalyticsView 渲染：时间序列 + 四 Provider 覆盖', () => {
     />
   )
 
-  it('5 KPI 用真实 totals（token/turns/tools/danger）', () => {
-    expect(html).toContain('3.42M')
-    expect(html).toContain('ALL-TIME KNOWN LOWER BOUND')
-    expect(html).toContain('≥ 3.42M')
-    expect(html).toContain('≥ 120.0k')
-    expect(html).toContain('全时段已知下界')
+  it('00–03 四章使用真实字段且近 30 天部分覆盖显示下界', () => {
+    expect(html).toContain('从量到证据，再到能力盲区')
+    expect(html).toContain('00</span>近 30 天')
+    expect(html).toContain('01</span>Provider 覆盖')
+    expect(html).toContain('02</span>工具与延迟')
+    expect(html).toContain('03</span>风险与盲区')
+    expect(html).toContain('≥ 47.9k')
+    expect(html).toContain('4/5')
     expect(html).not.toContain('$12.47')
     expect(html).toContain('847')
-    expect(html).toContain('3.42M') // tin+tout = 3.42M
-    expect(html).toContain('危险操作')
+    expect(html).toContain('UNKNOWN ≠ 0 · UNSUPPORTED ≠ SAFE')
   })
 
-  it('模型分布 + 项目轮次 + 常用工具 + MCP 用真实聚合', () => {
-    expect(html).toContain('claude-sonnet-4-6')
-    expect(html).toContain('scry')
-    expect(html).toContain('项目会话轮次')
-    expect(html).toContain('300')
+  it('工具、MCP、项目索引均来自传入聚合，不展示旧模型卡墙', () => {
+    expect(html).toContain('Bash')
+    expect(html).toContain('mcp__obsidian__search')
+    expect(html).toContain('1 个项目索引')
     expect(html).not.toContain('$5.42')
-    expect(html).toContain('常用工具')
-    expect(html).toContain('mcp:obsidian')
+    expect(html).not.toContain('模型 Token 分布')
   })
 
-  it('渲染 30/90 天、环比、P50/P95 与四 Provider coverage', () => {
-    expect(html).toContain('最近 30 天')
-    expect(html).toContain('最近 90 天')
-    expect(html).toContain('+20.0%')
-    expect(html).toContain('900ms')
-    expect(html).toContain('2.2s')
+  it('渲染 30/90 天、日期选择、P50/P95 与四 Provider coverage', () => {
+    expect(html).toContain('30 LOCAL DAYS')
+    expect(html).toContain('90 LOCAL DAYS')
+    expect(html).toContain('P50 900ms')
+    expect(html).toContain('P95 2.2s')
     expect(html).toContain('Claude')
     expect(html).toContain('OpenCode')
-    expect(html).toContain('unsupported')
+    expect(html).toContain('未支持')
+    expect(html).toContain('aria-pressed="true"')
   })
 
-  it('cache 只展示可证明比例，不伪造 per-tool token share 或 Markdown 星号', () => {
-    expect(html).toContain('40.0%')
-    expect(html).toContain('30.0%')
-    expect(html).toContain('上游分母不可证明')
-    expect(html).toContain('不估算 per-tool Token share')
+  it('不伪造 per-tool Token share 或 Markdown 星号', () => {
+    expect(html).toContain('不制造 Token 份额')
     expect(html).not.toContain('**')
   })
 })

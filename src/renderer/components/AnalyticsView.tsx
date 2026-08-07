@@ -1,214 +1,415 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import type { ProviderId } from '@shared/provider'
 import type { DbStats } from '@shared/trace'
 import type { ProjectMeta } from '../env'
-import { basename } from '../format'
 import { Icon } from './primitives/Icon'
 
-function fmtTok(n: number | null): string {
-  if (n == null) return 'unknown'
-  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
-  return String(n)
-}
-function fmtCoveredTok(n: number | null, knownTurns: number, turns: number): string {
-  if (n == null || knownTurns === 0) return 'unknown'
-  return `${knownTurns < turns ? '≥ ' : ''}${fmtTok(n)}`
-}
-function fmtKnownTokenLowerBound(n: number | null): string {
-  return n == null ? 'unknown' : `≥ ${fmtTok(n)}`
-}
-function fmtMs(ms: number | null): string {
-  if (ms == null) return 'unknown'
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
-}
-function fmtPct(value: number | null): string {
-  if (value == null) return '无基线'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
-}
-function modelColor(model: string): string {
-  if (model.includes('sonnet')) return 'var(--accent)'
-  if (model.includes('haiku')) return 'var(--ok)'
-  if (model.includes('opus')) return 'var(--user)'
-  return 'var(--edit)'
+type EvidenceState = 'exact' | 'lower' | 'unknown' | 'unsupported' | 'zero' | 'warn' | 'danger'
+type ChapterId = 'field' | 'coverage' | 'operations' | 'risk'
+
+const providers: { id: ProviderId; label: string; short: string }[] = [
+  { id: 'claude', label: 'Claude Code', short: 'CLAUDE' },
+  { id: 'codex', label: 'Codex', short: 'CODEX' },
+  { id: 'qoder', label: 'Qoder', short: 'QODER' },
+  { id: 'opencode', label: 'OpenCode', short: 'OPENCODE' }
+]
+
+const chapters: { id: ChapterId; index: string; label: string }[] = [
+  { id: 'field', index: '00', label: '近 30 天' },
+  { id: 'coverage', index: '01', label: 'Provider 覆盖' },
+  { id: 'operations', index: '02', label: '工具与延迟' },
+  { id: 'risk', index: '03', label: '风险与盲区' }
+]
+
+const stateLabel: Record<EvidenceState, string> = {
+  exact: '精确值',
+  lower: '已知下界',
+  unknown: '未知',
+  unsupported: '未支持',
+  zero: '真实 0',
+  warn: 'Warn',
+  danger: 'Danger'
 }
 
-const providerLabel = { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode' } as const
+function fmtTok(value: number | null): string {
+  if (value == null) return '—'
+  if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`
+  if (value >= 1e3) return `${(value / 1e3).toFixed(1)}k`
+  return String(value)
+}
+
+function fmtMs(value: number | null): string {
+  if (value == null) return '—'
+  return value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`
+}
+
+function fmtRate(value: number | null): string {
+  return value == null ? '—' : `${(value * 100).toFixed(1)}%`
+}
+
+function coverageState(known: number, turns: number): EvidenceState {
+  if (turns === 0) return 'zero'
+  if (known === 0) return 'unknown'
+  return known < turns ? 'lower' : 'exact'
+}
+
+function EvidenceValue({ value, state, suffix }: { value: string; state: EvidenceState; suffix?: string }) {
+  return (
+    <span className={`ae-value is-${state}`} data-state={state} title={stateLabel[state]}>
+      <b>{state === 'unknown' || state === 'unsupported' ? '—' : value}</b>
+      {suffix && <small>{suffix}</small>}
+    </span>
+  )
+}
+
+function EvidenceStatus({ state, label }: { state: EvidenceState; label?: string }) {
+  return <span className={`ae-status is-${state}`}><i />{label ?? stateLabel[state]}</span>
+}
+
+function EvidenceRow({ label, value, state = 'exact', note }: { label: string; value: string; state?: EvidenceState; note?: string }) {
+  return (
+    <div className="ae-evidence-row">
+      <span>{label}</span><i />
+      <EvidenceValue value={value} state={state} />
+      {note && <small>{note}</small>}
+    </div>
+  )
+}
+
+function ProviderDot({ id }: { id: ProviderId }) {
+  return <i className={`ae-provider-dot is-${id}`} />
+}
 
 export function AnalyticsView({ stats, projects }: { stats: DbStats | null; projects: ProjectMeta[] }) {
-  const tokenDaily = stats?.tokenDaily ?? []
-  const dangerDaily = stats?.dangerDaily ?? []
-  const cacheReuse = stats?.cacheReuse ?? []
-  const mcpLatency = stats?.mcpLatency ?? []
-  const providerCoverage = stats?.providerCoverage ?? []
-  const comparison = stats?.comparison
   const status = stats?.status ?? (stats ? 'ready' : 'unavailable')
-  const empty = !stats || (stats.topTools.length === 0 && stats.byModel.length === 0 && stats.byCwd.length === 0 && stats.totals.turns === 0)
+  const [chapter, setChapter] = useState<ChapterId>('field')
+  const [selectedDay, setSelectedDay] = useState('')
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId | null>(null)
 
-  const derived = useMemo(() => {
+  const evidence = useMemo(() => {
     if (!stats) return null
-    const tokens = stats.totals.tin == null && stats.totals.tout == null ? null : (stats.totals.tin ?? 0) + (stats.totals.tout ?? 0)
-    const toolCalls = stats.totals.toolCalls ?? (stats.toolStats.reduce((sum, tool) => sum + tool.n, 0) || stats.topTools.reduce((sum, tool) => sum + tool.n, 0))
-    const dangerN = stats.totals.dangerEvents ?? stats.dangerTrend.reduce((sum, item) => sum + item.n, 0)
-    const models = [...stats.byModel].sort((a, b) => (b.tin ?? 0) + (b.tout ?? 0) - ((a.tin ?? 0) + (a.tout ?? 0)))
-    const modelTokenSum = models.reduce((sum, model) => sum + (model.tin ?? 0) + (model.tout ?? 0), 0) || 1
-    let acc = 0
-    const stops = models.map((model) => {
-      const from = (acc / modelTokenSum) * 100
-      acc += (model.tin ?? 0) + (model.tout ?? 0)
-      return `${modelColor(model.model)} ${from}% ${(acc / modelTokenSum) * 100}%`
-    }).join(', ')
-    const tools = [...stats.toolStats].sort((a, b) => b.n - a.n)
-    const maxToolN = Math.max(1, ...tools.map((tool) => tool.n))
-    const maxCwdTurns = Math.max(1, ...stats.byCwd.map((cwd) => cwd.turns))
-    const proj = [...stats.byCwd].sort((a, b) => b.turns - a.turns).map((cwd) => ({
-      cwd: cwd.cwd,
-      name: basename(cwd.cwd),
-      turns: cwd.turns,
-      sessions: projects.find((project) => project.cwd === cwd.cwd)?.sessions.length ?? null
-    }))
-    const dmax = Math.max(1, ...stats.dangerTrend.map((item) => item.n))
-    const dailyTotals = tokenDaily.map((day) => day.turns === 0 ? 0 : day.input != null && day.output != null ? day.input + day.output : null)
-    const maxDaily = Math.max(1, ...dailyTotals.map((value) => value ?? 0))
-    const maxDanger = Math.max(1, ...dangerDaily.map((day) => day.danger + day.warn))
-    return {
-      tokens,
-      toolCalls,
-      dangerN,
-      models,
-      conic: models.length ? `conic-gradient(${stops})` : 'var(--border3)',
-      tools,
-      maxToolN,
-      proj,
-      maxCwdTurns,
-      dmax,
-      dailyTotals,
-      maxDaily,
-      maxDanger
-    }
-  }, [stats, projects, tokenDaily, dangerDaily])
+    const tokenDaily = stats.tokenDaily
+    const days = (tokenDaily ?? []).map((day) => {
+      const knownFields = day.inputKnownTurns + day.outputKnownTurns
+      const observed = knownFields > 0 ? (day.input ?? 0) + (day.output ?? 0) : null
+      const complete = day.turns > 0 && day.inputKnownTurns === day.turns && day.outputKnownTurns === day.turns
+      const state: EvidenceState = day.turns === 0
+        ? 'zero'
+        : knownFields === 0
+          ? 'unknown'
+          : complete
+            ? observed === 0 ? 'zero' : 'exact'
+            : 'lower'
+      return { ...day, observed, state }
+    })
+    const current = stats.comparison?.current
+    const observedWindow = days.some((day) => day.observed != null)
+      ? days.reduce((sum, day) => sum + (day.observed ?? 0), 0)
+      : current?.tokens ?? null
+    const recentState: EvidenceState = !current
+      ? 'unknown'
+      : current.turns === 0
+        ? 'zero'
+        : current.tokenKnownTurns === 0 && observedWindow == null
+          ? 'unknown'
+          : current.tokenKnownTurns < current.turns
+            ? 'lower'
+            : observedWindow === 0 ? 'zero' : 'exact'
+    const maxDay = Math.max(1, ...days.map((day) => day.observed ?? 0))
+    const activeDays = days.filter((day) => day.turns > 0)
+    const peakKnown = [...days].sort((a, b) => (b.observed ?? 0) - (a.observed ?? 0)).slice(0, 3).reduce((sum, day) => sum + (day.observed ?? 0), 0)
+    const peakShare = observedWindow && observedWindow > 0 ? Math.round((peakKnown / observedWindow) * 100) : null
 
-  if (status === 'unavailable' || status === 'query_error') {
+    const tools = stats.toolStats.length > 0
+      ? [...stats.toolStats].sort((a, b) => b.n - a.n).map((tool) => ({ ...tool, avgMs: tool.avgMs as number | null, errors: tool.errors as number | null }))
+      : stats.topTools.map((tool) => ({ tool: tool.tool, n: tool.n, avgMs: null, errors: null }))
+    const maxToolCalls = Math.max(1, ...tools.map((tool) => tool.n))
+    const dangerReady = stats.dangerDaily !== undefined && stats.dangerDaily.length > 0
+    const dangerCount = dangerReady ? stats.dangerDaily!.reduce((sum, day) => sum + day.danger, 0) : null
+    const warnCount = dangerReady ? stats.dangerDaily!.reduce((sum, day) => sum + day.warn, 0) : null
+    return {
+      days,
+      tokenDailyReady: tokenDaily !== undefined && tokenDaily.length > 0,
+      observedWindow,
+      recentState,
+      current,
+      maxDay,
+      activeDays,
+      peakShare,
+      tools,
+      maxToolCalls,
+      dangerReady,
+      dangerCount,
+      warnCount
+    }
+  }, [stats])
+
+  if (status === 'unavailable' || status === 'query_error' || !stats || !evidence) {
     return (
-      <main className="a-pane">
-        <div className="a-status"><Icon name="alert" /><div><b>统计暂不可用</b><span>{status === 'query_error' ? 'SQLite 查询失败；详细原因已写入本地日志。' : 'SQLite 尚未初始化，Scry 其他功能不受影响。'}</span></div></div>
+      <main className="analytics-evidence">
+        <div className="ae-source-error">
+          <Icon name="alert" />
+          <div><b>统计暂不可用</b><span>{status === 'query_error' ? 'SQLite 查询失败；详细原因已写入本地日志。' : 'SQLite 尚未初始化，Scry 其他功能不受影响。'}</span></div>
+        </div>
       </main>
     )
   }
 
+  const currentDay = evidence.days.find((day) => day.day === selectedDay) ?? evidence.days.at(-1)
+  const currentInputState = currentDay ? (currentDay.turns === 0 ? 'zero' : coverageState(currentDay.inputKnownTurns, currentDay.turns)) : 'unknown'
+  const currentOutputState = currentDay ? (currentDay.turns === 0 ? 'zero' : coverageState(currentDay.outputKnownTurns, currentDay.turns)) : 'unknown'
+  const selectedCoverage = selectedProvider ? stats.providerCoverage?.find((row) => row.providerId === selectedProvider) : undefined
+  const selectedCache = selectedProvider ? stats.cacheReuse?.find((row) => row.providerId === selectedProvider) : undefined
+  const selectedMeta = selectedProvider ? providers.find((provider) => provider.id === selectedProvider) : undefined
+  const riskUnsupported = selectedCoverage?.dangerCoverage === 'unsupported'
+  const riskCapabilityUnknown = selectedProvider !== null && selectedCoverage === undefined
+
+  const toggleProvider = (providerId: ProviderId) => {
+    setSelectedProvider((current) => current === providerId ? null : providerId)
+  }
+
+  const recentHeadline = evidence.recentState === 'zero'
+    ? '近 30 天没有会话；这是查询成功后的真实 0。'
+    : evidence.recentState === 'unknown'
+      ? '近 30 天存在会话，但没有可验证的 Token 字段。'
+      : !evidence.tokenDailyReady
+        ? '近 30 天汇总可读，但日级证据字段缺失。'
+      : evidence.peakShare == null
+        ? '每一天都保留来源与覆盖状态。'
+        : `三个高峰日承载了 ${evidence.peakShare}% 的已知 Token。`
+
   return (
-    <main className="a-pane">
-      <div className="a-hero">
-        <div className="a-hero-copy">
-          <span className="surface-kicker">01 · LOCAL EVIDENCE LEDGER</span>
-          <h2>跨会话分析</h2>
-          <p>每个数字都带着范围、来源与覆盖率。</p>
-          <div className="sub">本地 SQLite · 统计窗口 30 / 60 / 90 天 · 未知值不按 0 计</div>
-        </div>
-        {derived && !empty && (
-          <div className="a-hero-reading" aria-label="全时段已知 Token 下界">
-            <span>ALL-TIME KNOWN LOWER BOUND</span>
-            <strong>{fmtKnownTokenLowerBound(derived.tokens)}</strong>
-            <em>{stats.totals.turns.toLocaleString()} turns · SQLite 汇总已上报字段</em>
+    <main className="analytics-evidence">
+      <div className="ae-shell">
+        <header className="ae-header">
+          <div>
+            <span>ANALYTICS · LOCAL EVIDENCE LEDGER</span>
+            <h1>从量到证据，再到能力盲区</h1>
+            <p>四章共享同一事实口径；高亮只改变聚焦，不改写 SQLite 汇总。</p>
           </div>
-        )}
+          <EvidenceStatus state="exact" label="本机 SQLite" />
+        </header>
+
+        <nav className="ae-tabs" aria-label="分析章节">
+          {chapters.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              className={chapter === item.id ? 'active' : ''}
+              onClick={() => setChapter(item.id)}
+              aria-current={chapter === item.id ? 'page' : undefined}
+            >
+              <span>{item.index}</span>{item.label}
+            </button>
+          ))}
+          <span className="ae-focus">{(chapter === 'coverage' || chapter === 'risk') && selectedMeta ? `${selectedMeta.short} HIGHLIGHT` : 'ALL PROVIDERS'}</span>
+        </nav>
+
+        <section className="ae-chapter" hidden={chapter !== 'field'} aria-label="近 30 天">
+          <article className="ae-story">
+            <span className="ae-code">00 · THE FIELD</span>
+            <EvidenceStatus state={evidence.recentState} label={`近 30 天 · ${stateLabel[evidence.recentState]}`} />
+            <EvidenceValue
+              value={`${evidence.recentState === 'lower' ? '≥ ' : ''}${fmtTok(evidence.recentState === 'zero' ? 0 : evidence.observedWindow)}`}
+              state={evidence.recentState}
+              suffix="已知 Token"
+            />
+            <h2>{recentHeadline}</h2>
+            <p>每一列代表一个本地日期，长度只编码 Provider 已上报的输入与输出 Token。斜纹保留已知量并标明缺字段，不用 0 补齐。</p>
+            <div className="ae-metrics">
+              <span><b>{evidence.activeDays.length}</b><small>活跃日</small></span>
+              <span><b>{evidence.current?.turns ?? '—'}</b><small>轮次</small></span>
+              <span><b>{evidence.current ? `${evidence.current.tokenKnownTurns}/${evidence.current.turns}` : '—'}</b><small>完整 Token</small></span>
+              <span><b>{projects.length}</b><small>项目索引</small></span>
+            </div>
+            <div className="ae-source"><span>真实数据</span><i /><b>本机 SQLite · tokenDaily / comparison</b></div>
+          </article>
+
+          <div className="ae-visual ae-field-panel">
+            <div className="ae-visual-meta"><span>OBSERVED TOKEN · 30 LOCAL DAYS</span><span>选择日期查看证据</span></div>
+            {!evidence.tokenDailyReady ? (
+              <div className="ae-unknown-panel"><EvidenceValue value="—" state="unknown" /><p>当前 preload 没有返回 tokenDaily，不能把缺失的时间序列画成 0。</p></div>
+            ) : (
+              <div className="ae-day-field" role="list" aria-label="近 30 天已知 Token">
+                {evidence.days.map((day, index) => {
+                  const active = currentDay?.day === day.day
+                  return (
+                    <button
+                      type="button"
+                      key={day.day}
+                      className={`ae-day is-${day.state} ${active ? 'active' : ''}`}
+                      onClick={() => setSelectedDay(day.day)}
+                      aria-pressed={active}
+                      aria-label={`${day.day}，${stateLabel[day.state]}，${day.state === 'lower' ? '至少 ' : ''}${fmtTok(day.state === 'zero' ? 0 : day.observed)} Token`}
+                    >
+                      <span><i style={{ height: `${day.observed == null ? 100 : Math.max(day.observed === 0 ? 2 : 7, (day.observed / evidence.maxDay) * 100)}%` }} /></span>
+                      {(index === 0 || index === Math.floor(evidence.days.length / 2) || index === evidence.days.length - 1) && <time>{day.day.slice(5)}</time>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            {currentDay && (
+              <div className="ae-day-ledger">
+                <header><b>{currentDay.day}</b><EvidenceStatus state={currentDay.state} /></header>
+                <EvidenceRow label="OBSERVED TOKEN" value={`${currentDay.state === 'lower' ? '≥ ' : ''}${fmtTok(currentDay.observed ?? (currentDay.turns === 0 ? 0 : null))}`} state={currentDay.state} />
+                <EvidenceRow label="INPUT" value={`${currentInputState === 'lower' ? '≥ ' : ''}${fmtTok(currentDay.turns === 0 ? 0 : currentDay.input)}`} state={currentInputState} note={`${currentDay.inputKnownTurns}/${currentDay.turns} turns`} />
+                <EvidenceRow label="OUTPUT" value={`${currentOutputState === 'lower' ? '≥ ' : ''}${fmtTok(currentDay.turns === 0 ? 0 : currentDay.output)}`} state={currentOutputState} note={`${currentDay.outputKnownTurns}/${currentDay.turns} turns`} />
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="ae-chapter" hidden={chapter !== 'coverage'} aria-label="Provider 覆盖">
+          <article className="ae-story">
+            <span className="ae-code">01 · COVERAGE</span>
+            <EvidenceStatus state={evidence.recentState} label="近 30 天 · 证据优先" />
+            <div className="ae-ratio">
+              <b>{evidence.current?.tokenKnownTurns ?? '—'}</b><span>/{evidence.current?.turns ?? '—'}</span>
+            </div>
+            <small className="ae-unit">轮次具备完整输入 + 输出 Token</small>
+            <h2>覆盖度先于排名；不完整的总量只能是下界。</h2>
+            <p>Provider 色只表示来源。青色轮廓是当前选择，不复用为数据色；点击任意行查看字段覆盖、缓存口径与危险分类能力。</p>
+            <div className="ae-source"><span>真实数据</span><i /><b>providerCoverage / cacheReuse · 近 30 天</b></div>
+          </article>
+
+          <div className="ae-visual ae-provider-panel">
+            <div className="ae-provider-head"><span>PROVIDER</span><span>TURNS</span><span>INPUT</span><span>OUTPUT</span><span>DANGER</span></div>
+            <div className="ae-provider-list">
+              {providers.map((provider, index) => {
+                const row = stats.providerCoverage?.find((item) => item.providerId === provider.id)
+                return (
+                  <button type="button" key={provider.id} className={selectedProvider === provider.id ? 'active' : ''} onClick={() => toggleProvider(provider.id)} aria-pressed={selectedProvider === provider.id}>
+                    <span className="ae-provider-name"><i>{String(index + 1).padStart(2, '0')}</i><ProviderDot id={provider.id} /><b>{provider.label}</b><small>{provider.short}</small></span>
+                    <EvidenceValue value={row ? String(row.turns) : '—'} state={!row ? 'unknown' : row.turns === 0 ? 'zero' : 'exact'} />
+                    <EvidenceValue value={row ? `${row.inputKnownTurns}/${row.turns}` : '—'} state={!row ? 'unknown' : row.turns === 0 ? 'zero' : 'exact'} />
+                    <EvidenceValue value={row ? `${row.outputKnownTurns}/${row.turns}` : '—'} state={!row ? 'unknown' : row.turns === 0 ? 'zero' : 'exact'} />
+                    <EvidenceStatus state={!row ? 'unknown' : row.dangerCoverage === 'unsupported' ? 'unsupported' : 'exact'} label={!row ? '未知' : row.dangerCoverage === 'unsupported' ? '未支持' : '已分类'} />
+                  </button>
+                )
+              })}
+            </div>
+            <div className={`ae-selection ${selectedMeta ? '' : 'is-empty'}`}>
+              {selectedMeta ? (
+                <>
+                  <header><ProviderDot id={selectedMeta.id} /><b>{selectedMeta.label}</b></header>
+                  <EvidenceRow label="TOKEN INPUT" value={selectedCoverage ? `${selectedCoverage.inputKnownTurns}/${selectedCoverage.turns} turns` : '—'} state={!selectedCoverage ? 'unknown' : selectedCoverage.turns === 0 ? 'zero' : 'exact'} note={selectedCoverage && selectedCoverage.inputKnownTurns < selectedCoverage.turns ? '部分轮次 input token 未知' : undefined} />
+                  <EvidenceRow label="TOKEN OUTPUT" value={selectedCoverage ? `${selectedCoverage.outputKnownTurns}/${selectedCoverage.turns} turns` : '—'} state={!selectedCoverage ? 'unknown' : selectedCoverage.turns === 0 ? 'zero' : 'exact'} note={selectedCoverage && selectedCoverage.outputKnownTurns < selectedCoverage.turns ? '部分轮次 output token 未知' : undefined} />
+                  <EvidenceRow
+                    label="CACHE REUSE"
+                    value={fmtRate(selectedCache?.reuseRate ?? null)}
+                    state={!selectedCache || selectedCache.reuseRate == null ? 'unknown' : selectedCache.reuseRate === 0 ? 'zero' : 'exact'}
+                    note={!selectedCache ? '统计字段未返回' : selectedCache.denominator === 'separate_input' ? 'read / (input + read + write)' : selectedCache.denominator === 'input_includes_cache' ? 'cached input / input' : '上游分母不可证明'}
+                  />
+                  <EvidenceRow label="DANGER" value={selectedCoverage?.dangerCoverage === 'classified' ? '已分类' : '—'} state={!selectedCoverage ? 'unknown' : selectedCoverage.dangerCoverage === 'unsupported' ? 'unsupported' : 'exact'} note={selectedCoverage?.dangerCoverage === 'unsupported' ? '未支持不等于安全' : '观测与分类，不代表拦截'} />
+                </>
+              ) : <p>选择一个 Provider 查看字段覆盖、缓存计算口径与能力盲区。</p>}
+            </div>
+          </div>
+        </section>
+
+        <section className="ae-chapter" hidden={chapter !== 'operations'} aria-label="工具与延迟">
+          <article className="ae-story">
+            <span className="ae-code">02 · OPERATIONS</span>
+            <EvidenceStatus state={!evidence.tools[0] || evidence.tools[0].n === 0 ? 'zero' : 'exact'} label="全时段 · 调用次数排序" />
+            <EvidenceValue value={String(evidence.tools[0]?.n ?? 0)} state={!evidence.tools[0] || evidence.tools[0].n === 0 ? 'zero' : 'exact'} suffix={`${evidence.tools[0]?.tool ?? 'tool'} calls`} />
+            <h2>{evidence.tools.length === 0 ? '没有已记录的工具调用。' : `${evidence.tools[0].tool} 是调用最多的一类工具。`}</h2>
+            <p>条长只编码调用次数；平均耗时和失败次数来自已完成的 tool span。没有 tool-level Token 归因，因此不制造 Token 份额。</p>
+            <div className="ae-source"><span>真实数据</span><i /><b>toolStats 全时段 · mcpLatency 近 90 天</b></div>
+          </article>
+
+          <div className="ae-visual ae-operations-panel">
+            <div className="ae-tool-head"><span>TOOL</span><span>CALLS</span><span>AVG</span><span>FAIL</span></div>
+            <div className="ae-tool-list">
+              {evidence.tools.length === 0 ? (
+                <div className="ae-zero-panel"><EvidenceValue value="0" state="zero" /><p>SQLite 查询成功，当前没有工具调用记录。</p></div>
+              ) : evidence.tools.slice(0, 10).map((tool, index) => (
+                <div className="ae-tool-row" key={tool.tool}>
+                  <span className="ae-tool-name"><i>{String(index + 1).padStart(2, '0')}</i><b title={tool.tool}>{tool.tool}</b><small>{tool.tool.startsWith('mcp') ? 'MCP' : 'NATIVE'}</small></span>
+                  <span className="ae-tool-bar"><i style={{ width: `${(tool.n / evidence.maxToolCalls) * 100}%` }} /></span>
+                  <b>{tool.n}</b>
+                  <EvidenceValue value={fmtMs(tool.avgMs)} state={tool.avgMs == null ? 'unknown' : tool.avgMs === 0 ? 'zero' : 'exact'} />
+                  <EvidenceValue value={tool.errors == null ? '—' : String(tool.errors)} state={tool.errors == null ? 'unknown' : tool.errors === 0 ? 'zero' : 'exact'} />
+                </div>
+              ))}
+            </div>
+            <div className="ae-latency">
+              <header><span>LATENCY LEDGER</span><b>MCP · 近 90 天</b></header>
+              {stats.mcpLatency === undefined ? (
+                <EvidenceRow label="MCP LATENCY" value="—" state="unknown" note="当前 preload 未返回该字段" />
+              ) : stats.mcpLatency.length === 0 ? (
+                <EvidenceRow label="COMPLETED MCP CALLS" value="0" state="zero" note="查询成功，无已完成样本" />
+              ) : stats.mcpLatency.map((server) => (
+                <div className="ae-latency-row" key={server.server}>
+                  <b title={server.server}>{server.server}</b>
+                  <span>{server.calls} calls</span>
+                  <EvidenceValue value={`P50 ${fmtMs(server.p50Ms)}`} state={server.p50Ms == null ? 'unknown' : server.p50Ms === 0 ? 'zero' : 'exact'} />
+                  <EvidenceValue value={`P95 ${fmtMs(server.p95Ms)}`} state={server.p95Ms == null ? 'unknown' : server.p95Ms === 0 ? 'zero' : 'exact'} />
+                  <EvidenceValue value={server.calls ? `${((server.errors / server.calls) * 100).toFixed(1)}% fail` : '—'} state={server.calls === 0 ? 'unknown' : server.errors === 0 ? 'zero' : 'exact'} />
+                </div>
+              ))}
+              <p>百分位仅使用已完成且带 duration 的调用，算法为 nearest-rank。</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="ae-chapter" hidden={chapter !== 'risk'} aria-label="风险与盲区">
+          <article className="ae-story">
+            <span className="ae-code">03 · RISK</span>
+            <EvidenceStatus
+              state={riskUnsupported ? 'unsupported' : riskCapabilityUnknown || !evidence.dangerReady ? 'unknown' : evidence.dangerCount === 0 && evidence.warnCount === 0 ? 'zero' : 'exact'}
+              label={riskUnsupported ? `${selectedMeta?.label} · 分类未支持` : riskCapabilityUnknown ? `${selectedMeta?.label} · 能力未知` : '近 90 天 · 可分类范围'}
+            />
+            <EvidenceValue
+              value={riskUnsupported || evidence.dangerCount == null ? '—' : String(evidence.dangerCount)}
+              state={riskUnsupported ? 'unsupported' : riskCapabilityUnknown || !evidence.dangerReady ? 'unknown' : evidence.dangerCount === 0 && evidence.warnCount === 0 ? 'zero' : 'exact'}
+              suffix={!riskUnsupported && evidence.warnCount != null ? `danger · ${evidence.warnCount} warn` : undefined}
+            />
+            <h2>{riskUnsupported ? `${selectedMeta?.label} 没有危险分类能力，不能得出“零危险”。` : riskCapabilityUnknown ? `${selectedMeta?.label} 的分类能力字段未知，不能推断安全状态。` : selectedMeta ? `${selectedMeta.label} 的能力已高亮；矩阵仍是可分类 Provider 汇总。` : '已分类事件与能力盲区必须分开阅读。'}</h2>
+            <p>红色与黄色只表示可分类 Provider 的已记录事件。空格是该范围内的真实 0；unsupported 使用斜纹，不会伪装成安全。</p>
+            <div className="ae-source"><span>真实数据</span><i /><b>dangerDaily 近 90 天 · providerCoverage capability</b></div>
+          </article>
+
+          <div className="ae-visual ae-risk-panel">
+            <div className="ae-visual-meta"><span>90 LOCAL DAYS · CLASSIFIED EVENTS</span><span>{selectedMeta ? `${selectedMeta.short} CAPABILITY · AGGREGATE GRID` : 'ALL CLASSIFIED PROVIDERS'}</span></div>
+            {riskCapabilityUnknown || !evidence.dangerReady ? (
+              <div className="ae-unknown-panel"><EvidenceValue value="—" state="unknown" /><p>{riskCapabilityUnknown ? '当前 preload 没有返回所选 Provider 的分类能力，不能推断风险状态。' : '当前 preload 没有返回完整的 dangerDaily，不能把缺失矩阵画成 0。'}</p></div>
+            ) : (
+              <div className={`ae-risk-grid ${riskUnsupported ? 'is-unsupported' : ''}`} aria-label="近 90 天危险操作矩阵">
+                {stats.dangerDaily!.map((day) => {
+                  const cellState: EvidenceState = riskUnsupported ? 'unsupported' : day.danger > 0 ? 'danger' : day.warn > 0 ? 'warn' : 'zero'
+                  return <i key={day.day} className={`is-${cellState} ${day.danger > 0 ? 'has-danger' : day.warn > 0 ? 'has-warn' : ''}`} title={`${day.day} · ${riskUnsupported ? '未支持分类' : `${day.danger} danger · ${day.warn} warn`}`} />
+                })}
+              </div>
+            )}
+            <div className="ae-legend"><EvidenceStatus state="danger" /><EvidenceStatus state="warn" /><EvidenceStatus state="zero" /><EvidenceStatus state="unsupported" /></div>
+            <div className="ae-capabilities">
+              {providers.map((provider) => {
+                const row = stats.providerCoverage?.find((item) => item.providerId === provider.id)
+                const capabilityState: EvidenceState = !row ? 'unknown' : row.dangerCoverage === 'unsupported' ? 'unsupported' : 'exact'
+                return (
+                  <button type="button" key={provider.id} className={selectedProvider === provider.id ? 'active' : ''} onClick={() => toggleProvider(provider.id)} aria-pressed={selectedProvider === provider.id}>
+                    <span><ProviderDot id={provider.id} />{provider.label}</span>
+                    <EvidenceValue value={row?.dangerCoverage === 'classified' ? '已分类' : '—'} state={capabilityState} />
+                    <small>{!row ? '能力字段未知' : row.dangerCoverage === 'unsupported' ? '未支持 · 不等于安全' : row.turns === 0 ? '无会话样本 · 能力可用' : '分类可用 · 观测不拦截'}</small>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="ae-reasons">
+              <header><span>ALL-TIME CLASSIFIED REASONS</span><b>SQLite dangerTrend</b></header>
+              {stats.dangerTrend.length === 0 ? <EvidenceRow label="CLASSIFIED EVENTS" value="0" state="zero" /> : stats.dangerTrend.slice(0, 6).map((reason) => (
+                <EvidenceRow key={`${reason.level}-${reason.reason}`} label={reason.reason} value={String(reason.n)} state={reason.n === 0 ? 'zero' : 'exact'} note={reason.level} />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <footer className="ae-footer">
+          <div className="ae-source"><span>本机证据</span><i /><b>{stats.totals.turns.toLocaleString()} 轮全时段记录 · {projects.length} 个项目索引</b></div>
+          <span>UNKNOWN ≠ 0 · UNSUPPORTED ≠ SAFE</span>
+        </footer>
       </div>
-
-      {empty || !derived ? <div className="a-gap">还没有跨会话数据——完成几个 Provider 会话后再看这里。</div> : <>
-        <div className="kpi-strip">
-          <div className="kpi"><div className="lbl">累计 Token</div><div className="val accent">{fmtKnownTokenLowerBound(derived.tokens)}</div><div className="sub">Provider 上报 · 全时段已知下界</div></div>
-          <div className="kpi"><div className="lbl">会话轮次</div><div className="val">{stats.totals.turns}</div><div className="sub">近 30 天 {comparison?.current.turns ?? 0} · {fmtPct(comparison?.change.turnsPct ?? null)}</div></div>
-          <div className="kpi"><div className="lbl">近 30 天 Token</div><div className="val">{fmtCoveredTok(comparison?.current.tokens ?? null, comparison?.current.tokenKnownTurns ?? 0, comparison?.current.turns ?? 0)}</div><div className="sub"><span className="a-delta">{fmtPct(comparison?.change.tokensPct ?? null)}</span> · {comparison?.current.tokenKnownTurns ?? 0}/{comparison?.current.turns ?? 0} 完整</div></div>
-          <div className="kpi"><div className="lbl">工具调用</div><div className="val">{derived.toolCalls.toLocaleString()}</div><div className="sub">近 30 天 {comparison?.current.toolCalls ?? 0} · {fmtPct(comparison?.change.toolCallsPct ?? null)}</div></div>
-          <div className="kpi"><div className="lbl">危险操作</div><div className="val bad">{derived.dangerN}</div><div className="sub">近 30 天 {comparison?.current.danger ?? 0} · {fmtPct(comparison?.change.dangerPct ?? null)}</div></div>
-        </div>
-
-        <div className="a-wide-grid">
-          <section className="d-card a-time-card">
-            <div className="h"><h3>Token 趋势 · 近 30 天</h3><span className="sub">输入 + 输出 · Provider 上报</span></div>
-            <div className="a-token-chart" aria-label="最近 30 天 Token 趋势">
-              {tokenDaily.map((day, index) => {
-                const total = derived.dailyTotals[index]
-                const missing = total == null
-                return <div className="a-token-day" key={day.day} title={`${day.day} · token ${fmtTok(total)} · input ${fmtTok(day.input)} (${day.inputKnownTurns}/${day.turns}) · output ${fmtTok(day.output)} (${day.outputKnownTurns}/${day.turns})`}>
-                  <i className={missing ? 'missing' : ''} style={{ height: missing ? '100%' : `${Math.max(total === 0 ? 2 : 5, ((total ?? 0) / derived.maxDaily) * 100)}%` }} />
-                  {(index === 0 || index === 14 || index === 29) && <span>{day.day.slice(5)}</span>}
-                </div>
-              })}
-            </div>
-            <div className="a-chart-note">缺字段显示斜纹，不用 0 补齐；无会话的日期为真实 0。</div>
-          </section>
-
-          <section className="d-card a-time-card">
-            <div className="h"><h3>危险操作 · 近 90 天</h3><span className="sub">Claude / Qoder 可分类 · Codex / OpenCode 未支持</span></div>
-            <div className="a-heatmap" aria-label="最近 90 天危险操作热力图">
-              {dangerDaily.map((day) => {
-                const total = day.danger + day.warn
-                return <i key={day.day} className={day.danger ? 'danger' : day.warn ? 'warn' : ''} style={{ opacity: total ? 0.35 + (total / derived.maxDanger) * 0.65 : 1 }} title={`${day.day} · danger ${day.danger} · warn ${day.warn}`} />
-              })}
-            </div>
-            <div className="a-chart-note">热力格只表示已分类事件；unsupported Provider 不解释为“0 危险”。</div>
-          </section>
-        </div>
-
-        <div className="a-grid">
-          <div className="col">
-            <section className="d-card">
-              <div className="h"><h3>常用工具</h3><span className="sub">调用分布，不代表 Token 份额</span></div>
-              <div className="a-tool-head"><span>tool</span><span className="num">calls</span><span className="num">avg dur</span><span className="num">fail%</span><span>dist</span></div>
-              {derived.tools.slice(0, 10).map((tool) => {
-                const isMcp = tool.tool.startsWith('mcp')
-                const failPct = tool.n ? (tool.errors / tool.n) * 100 : 0
-                return <div className="a-tool-row" key={tool.tool}>
-                  <span className={`nm ${isMcp ? 'mcp' : ''}`} title={tool.tool}>{isMcp ? `mcp:${tool.tool.split('__')[1]}` : tool.tool}</span>
-                  <span className="num">{tool.n}</span><span className="num">{fmtMs(tool.avgMs)}</span><span className={`num ${failPct >= 5 ? 'warn' : ''}`}>{failPct.toFixed(1)}%</span>
-                  <span className="dist"><i style={{ width: `${Math.round((tool.n / derived.maxToolN) * 100)}%` }} /></span>
-                </div>
-              })}
-              <div className="a-chart-note">四个 Provider 均未提供 tool-level Token 归因，因此不估算 per-tool Token share。</div>
-            </section>
-
-            {mcpLatency.length > 0 && <section className="d-card">
-              <div className="h"><h3>MCP 延迟 · 近 90 天</h3><span className="sub">仅统计已完成调用 · nearest-rank</span></div>
-              <div className="a-mcp-head"><span>server</span><span>calls</span><span>P50</span><span>P95</span><span>fail%</span></div>
-              {mcpLatency.map((server) => <div className="a-mcp-row" key={server.server}><span className="nm">{server.server}</span><span>{server.calls}</span><span>{fmtMs(server.p50Ms)}</span><span>{fmtMs(server.p95Ms)}</span><span className={server.errors ? 'warn' : ''}>{server.calls ? ((server.errors / server.calls) * 100).toFixed(1) : '0.0'}%</span></div>)}
-            </section>}
-
-            <section className="d-card">
-              <div className="h"><h3>缓存 Token · 近 30 天</h3><span className="sub">按 Provider 语义计算</span></div>
-              {cacheReuse.map((row) => {
-                const formula = row.denominator === 'separate_input' ? 'read / (input + read + write)' : row.denominator === 'input_includes_cache' ? 'cached input / input' : '上游分母不可证明'
-                return <div className="a-cache-row" data-provider={row.providerId} key={row.providerId}>
-                  <b>{providerLabel[row.providerId]}</b><strong>{row.reuseRate == null ? 'unknown' : `${(row.reuseRate * 100).toFixed(1)}%`}</strong>
-                  <span>read {fmtTok(row.cacheReadTokens)} · write {fmtTok(row.cacheWriteTokens)} · comparable {row.comparableTurns}/{row.turns}</span><em>{formula}</em>
-                </div>
-              })}
-            </section>
-          </div>
-
-          <div className="col">
-            {derived.models.length > 0 && <section className="d-card">
-              <div className="h"><h3>模型 Token 分布</h3><span className="sub">输入 + 输出</span></div>
-              <div className="a-donutwrap"><div className="a-donut" style={{ background: derived.conic }}><div className="center"><div className="t">{fmtKnownTokenLowerBound(derived.tokens)}</div><div className="u">已知 Token</div></div></div><div className="a-legend">{derived.models.map((model) => <div className="item" key={model.model}><span className="sw" style={{ background: modelColor(model.model) }} />{model.model}<b>{fmtTok(model.tin == null && model.tout == null ? null : (model.tin ?? 0) + (model.tout ?? 0))}</b></div>)}</div></div>
-            </section>}
-
-            <section className="d-card">
-              <div className="h"><h3>Provider 覆盖 · 近 30 天</h3><span className="sub">已知值 / 轮次 · 已映射 {providerCoverage.reduce((sum, row) => sum + row.turns, 0)}/{comparison?.current.turns ?? 0}</span></div>
-              <div className="a-coverage-head"><span>Provider</span><span>in</span><span>out</span><span>cache R</span><span>cache W</span><span>danger</span></div>
-              {providerCoverage.map((row) => <div className="a-coverage-row" data-provider={row.providerId} key={row.providerId}><b>{providerLabel[row.providerId]}</b><span>{row.inputKnownTurns}/{row.turns}</span><span>{row.outputKnownTurns}/{row.turns}</span><span>{row.cacheReadKnownTurns}/{row.turns}</span><span>{row.cacheWriteKnownTurns}/{row.turns}</span><em className={row.dangerCoverage}>{row.dangerCoverage}</em></div>)}
-            </section>
-
-            {derived.proj.length > 0 && <section className="d-card">
-              <div className="h"><h3>项目会话轮次</h3><span className="sub">按工作目录聚合</span></div>
-              {derived.proj.map((project) => <div className="a-proj-row" key={project.cwd}><span className="nm">{project.name}</span><span className="num">{project.sessions ?? project.turns}</span><span className="num cost">{project.turns}</span><span className="bar"><i style={{ width: `${Math.round((project.turns / derived.maxCwdTurns) * 100)}%` }} /></span></div>)}
-            </section>}
-
-            {stats.dangerTrend.length > 0 && <section className="d-card">
-              <div className="h"><h3>危险原因分布</h3><span className="sub">全时段已分类事件</span></div>
-              {stats.dangerTrend.slice(0, 8).map((item) => <div className="a-dbar" key={`${item.level}-${item.reason}`}><span className="nm" title={item.reason}>{item.reason}</span><span className="n">{item.n}</span><span className="bar"><i className={item.level === 'danger' ? 'danger' : 'warn'} style={{ width: `${Math.round((item.n / derived.dmax) * 100)}%` }} /></span></div>)}
-            </section>}
-          </div>
-        </div>
-      </>}
     </main>
   )
 }

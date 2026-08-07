@@ -201,7 +201,14 @@ export function ChatView({
 
   return (
     <>
-      <div className="body">
+      <div className="body chat-body">
+        {turns.length > 0 && (
+          <div className="chat-evidence-source" role="note" aria-label="会话证据来源">
+            <span><i aria-hidden="true" />本机真实会话</span>
+            <code title={cwd ?? '未绑定工作目录'}>{workspaceName ?? '不绑定项目'}</code>
+            <b>{selectedAgentName} · runtime / local archive · 未捕获字段保持未知</b>
+          </div>
+        )}
         <div className="chat" ref={scrollRef}>
           {turns.length === 0 && (
             <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>

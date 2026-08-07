@@ -469,6 +469,7 @@ export function App() {
   const draftAttachmentsRef = useRef<DraftAttachment[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [focusedTurnRunId, setFocusedTurnRunId] = useState<string | null>(null)
+  const [pendingChatEvent, setPendingChatEvent] = useState<{ eventId: string; runId: string } | null>(null)
   // 斜杠命令面板：输入以 / 开头且无空白时弹出；命令清单由当前 Provider 原生能力提供。
   const [slashCmds, setSlashCmds] = useState<SlashCmd[]>([])
   const [slashReason, setSlashReason] = useState<string | null>(null)
@@ -592,18 +593,32 @@ export function App() {
       setView('chat')
       if (target === 'event' && ev) {
         setFocusedTurnRunId(null)
-        const eventId = ev.id
-        const eventTarget = [...document.querySelectorAll<HTMLElement>('[data-trace-event-id]')].find(
-          (el) => el.dataset.traceEventId === eventId
-        )
-        const chat = scrollRef.current ?? eventTarget?.closest<HTMLDivElement>('.chat')
-        if (chat && eventTarget) scrollChatTargetIntoView(chat, eventTarget)
+        setPendingChatEvent({ eventId: ev.id, runId })
         return
       }
+      setPendingChatEvent(null)
       setFocusedTurnRunId(runId)
     },
     [session]
   )
+
+  useEffect(() => {
+    if (!pendingChatEvent || view !== 'chat') return
+    const { eventId, runId } = pendingChatEvent
+    const frame = requestAnimationFrame(() => {
+      const eventTarget = [...document.querySelectorAll<HTMLElement>('[data-trace-event-id]')].find(
+        (el) => el.dataset.traceEventId === eventId
+      )
+      const turnTarget =
+        turnRefs.current.get(runId) ??
+        [...document.querySelectorAll<HTMLDivElement>('.turn[data-run-id]')].find((el) => el.dataset.runId === runId)
+      const target = eventTarget ?? turnTarget
+      const chat = scrollRef.current ?? target?.closest<HTMLDivElement>('.chat')
+      if (chat && target) scrollChatTargetIntoView(chat, target, 'smooth')
+      setPendingChatEvent((current) => current?.eventId === eventId ? null : current)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [pendingChatEvent, session.turns.length, view])
 
   useEffect(() => {
     if (!focusedTurnRunId || view !== 'chat') return
@@ -1133,7 +1148,7 @@ export function App() {
                 selectedId={session.selected?.id ?? null}
                 onSelect={session.setSelected}
                 busy={session.busy}
-                onOpenInChat={() => setView('chat')}
+                onOpenInChat={(event) => openTurnInChat(event.runId, event, 'event')}
               />
             ) : null}
           </div>
