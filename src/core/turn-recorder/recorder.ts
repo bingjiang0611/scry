@@ -622,6 +622,22 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
   let transportCellByOuterCall = new Map<string, string>()
   let lastAt: string | undefined
 
+  const addAssistant = (text: string, at: string, messageId?: string, dedupeLastModel = false): void => {
+    if (!current) return
+    lastAssistant = text
+    const previous = [...current.events].reverse().find((event) => event.kind === 'model' && event.stage === 'text')
+    if (previous?.text === text && (dedupeLastModel || current.events.at(-1) === previous)) return
+    current.events.push({
+      id: `codex-assistant-${stableHash([current.providerTurnId, at, text]).slice(0, 16)}`,
+      ts: at,
+      runId,
+      kind: 'model',
+      stage: 'text',
+      text,
+      ...(messageId ? { messageId } : {})
+    })
+  }
+
   const finishUsage = (at: string): void => {
     if (!current || usageFinished) return
     usageFinished = true
@@ -897,21 +913,15 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       continue
     }
     if (type === 'event_msg' && payload.type === 'agent_message') {
-      lastAssistant = stringAt(payload, 'message', 'text') ?? textContent(payload.content) ?? lastAssistant
+      const assistant = stringAt(payload, 'message', 'text') ?? textContent(payload.content)
+      if (assistant) addAssistant(assistant, at, stringAt(payload, 'id'))
       continue
     }
     if (type === 'event_msg' && payload.type === 'task_complete') {
       finishUsage(at)
       current.completedAt = at
       const assistant = stringAt(payload, 'last_agent_message', 'lastAgentMessage') ?? lastAssistant
-      if (assistant) current.events.push({
-        id: `codex-assistant-${stableHash([current.providerTurnId, assistant]).slice(0, 16)}`,
-        ts: at,
-        runId,
-        kind: 'model',
-        stage: 'text',
-        text: assistant
-      })
+      if (assistant) addAssistant(assistant, at, stringAt(payload, 'id'), true)
       if (payload.error != null) current.events.push({
         id: `codex-error-${stableHash([current.providerTurnId, payload.error]).slice(0, 16)}`,
         ts: at,
@@ -944,11 +954,26 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       continue
     }
     if (itemType === 'message' && stringAt(payload, 'role') === 'assistant') {
-      lastAssistant = textContent(payload.content) ?? lastAssistant
+      const assistant = textContent(payload.content)
+      if (assistant) addAssistant(assistant, at, stringAt(payload, 'id'))
       continue
     }
     if (itemType === 'agent_message') {
-      lastAssistant = stringAt(payload, 'message', 'text') ?? textContent(payload.content) ?? lastAssistant
+      const assistant = stringAt(payload, 'message', 'text') ?? textContent(payload.content)
+      if (assistant) addAssistant(assistant, at, stringAt(payload, 'id'))
+      continue
+    }
+    if (itemType === 'reasoning') {
+      const thinking = textContent(payload.summary) ?? stringAt(payload, 'text')
+      if (thinking) current.events.push({
+        id: `codex-thinking-${stableHash([current.providerTurnId, at, thinking]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'model',
+        stage: 'thinking',
+        thinking,
+        ...(stringAt(payload, 'id') ? { messageId: stringAt(payload, 'id') } : {})
+      })
       continue
     }
 
@@ -1529,6 +1554,7 @@ async function finalizeOpenTurn(
     if (evidence.errors.value) evidence.errors = partial(evidence.errors.value, source, reason)
     if (evidence.usage.value) evidence.usage = partial(evidence.usage.value, source, reason)
     if (evidence.hooks.value) evidence.hooks = partial(evidence.hooks.value, source, reason)
+    if (evidence.modelSegments?.value) evidence.modelSegments = partial(evidence.modelSegments.value, source, reason)
     if (evidence.dangerousOperations.value) {
       evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)
     }
@@ -1537,7 +1563,10 @@ async function finalizeOpenTurn(
     }
   }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
-  if (!enablement.config.capture.assistant) evidence.assistant = disabled('assistant capture disabled by config')
+  if (!enablement.config.capture.assistant) {
+    evidence.assistant = disabled('assistant capture disabled by config')
+    evidence.modelSegments = disabled('assistant capture disabled by config')
+  }
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
   const completedAt = open.closingAt ?? timestampOf(payload)
   const startedMs = Date.parse(open.startedAt)

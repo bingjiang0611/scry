@@ -11,6 +11,7 @@ import {
   type TurnCallStatus,
   type TurnEvidence,
   type TurnHookCall,
+  type TurnModelSegment,
   type TurnUsage
 } from '../../shared/turn-record.js'
 
@@ -119,38 +120,59 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   }
 }
 
-function assistantTextFrom(events: TraceEvent[]): string {
-  const output: string[] = []
+export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
+  const output: TurnModelSegment[] = []
+  const eventOrder = new Map(events.map((event, index) => [event, index]))
   let run: TraceEvent[] = []
   let runKey: string | undefined
 
   const flush = (): void => {
     if (!run.length) return
-    const deltas = run
-      .filter((event) => event.stage === 'text_delta')
-      .map((event) => event.text ?? '')
-      .join('')
-    for (const event of run) {
-      const text = event.text ?? ''
-      if (event.stage === 'text' && deltas && text === deltas) continue
-      output.push(text)
-    }
+    const first = run[0]
+    const kind = first.stage === 'thinking' ? 'thinking' : 'text'
+    const deltas = kind === 'text'
+      ? run.filter((event) => event.stage === 'text_delta').map((event) => event.text ?? '').join('')
+      : ''
+    const text = kind === 'thinking'
+      ? run.map((event) => event.thinking ?? '').join('')
+      : run.map((event) => event.stage === 'text' && deltas && event.text === deltas ? '' : event.text ?? '').join('')
+    const providerItemId = typeof first.runtimeMetadata?.codexItemId === 'string'
+      ? first.runtimeMetadata.codexItemId
+      : undefined
+    if (text) output.push({
+      order: eventOrder.get(first) ?? 0,
+      at: first.ts,
+      kind,
+      text,
+      ...(first.messageId ? { messageId: first.messageId } : {}),
+      ...(providerItemId ? { providerItemId } : {}),
+      ...(first.parentToolUseId ? { parentId: first.parentToolUseId } : {}),
+      ...(first.agentId ? { agentId: first.agentId } : {})
+    })
     run = []
     runKey = undefined
   }
 
   for (const event of events) {
-    if (event.kind !== 'model' || !['text', 'text_delta'].includes(event.stage) || event.text == null) {
+    const isText = event.kind === 'model' && ['text', 'text_delta'].includes(event.stage) && event.text != null
+    const isThinking = event.kind === 'model' && event.stage === 'thinking' && event.thinking != null
+    if (!isText && !isThinking) {
       flush()
       continue
     }
-    const key = JSON.stringify([event.messageId ?? null, event.agentId ?? null, event.parentToolUseId ?? null])
+    const key = JSON.stringify([
+      isThinking ? 'thinking' : 'text',
+      event.messageId ?? null,
+      event.runtimeMetadata?.codexItemId ?? null,
+      event.agentId ?? null,
+      event.parentToolUseId ?? null
+    ])
     if (runKey !== undefined && runKey !== key) flush()
     runKey = key
     run.push(event)
   }
   flush()
-  return output.join('')
+  return output
 }
 
 function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number>): TurnHookCall[] {
@@ -250,7 +272,8 @@ export function aggregateTurnEvidence(args: {
       return refs.map((ref) => callFromEvent(event, resultById, ref, eventOrder.get(event), resultOrder(event)))
     })
   const hooks = aggregateHooks(args.events, eventOrder)
-  const assistantText = assistantTextFrom(args.events)
+  const modelSegments = modelSegmentsFrom(args.events)
+  const assistantText = modelSegments.filter((segment) => segment.kind === 'text').map((segment) => segment.text).join('')
   const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
   for (const event of args.events) {
     if (event.stage !== 'tool_result' && event.filePath && event.fileOp) fileMap.set(event.filePath, event.fileOp)
@@ -273,7 +296,6 @@ export function aggregateTurnEvidence(args: {
   const usage = usageFrom(args.events)
   const modelTiming = deriveModelTiming(args.events)
   const interventions = args.events.flatMap((event) => event.intervention ? [event.intervention] : [])
-
   return {
     user: args.userText != null
       ? available({ text: args.userText, textHash: hash(args.userText) }, [source])
@@ -283,6 +305,9 @@ export function aggregateTurnEvidence(args: {
       : assistantText
         ? available({ text: assistantText, textHash: hash(assistantText) }, [source])
         : partial({}, [source], 'assistant text was not present in captured events'),
+    modelSegments: observable.assistant
+      ? available(modelSegments, [source])
+      : unavailable('provider does not expose model output to lifecycle hooks', [source]),
     tools: observable.tools ? available(tools, [source]) : unavailable('provider tool events were not observable', [source]),
     skills: observable.skills ? available(skills, [source]) : unavailable('provider skill events were not observable', [source]),
     mcps: observable.mcps ? available(mcps, [source]) : unavailable('provider MCP events were not observable', [source]),
