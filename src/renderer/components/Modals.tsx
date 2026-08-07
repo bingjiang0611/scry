@@ -204,6 +204,47 @@ function scopeShortLabel(scope: string): string {
   return scope === 'project' || scope === '.mcp.json' ? '项目' : scope === 'user' ? '用户' : scope || '未知'
 }
 
+function observedTime(observedAt: number | undefined): string {
+  if (!observedAt) return '尚未观测'
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(observedAt)
+}
+
+function InventoryContext({
+  capability,
+  kind,
+  summary
+}: {
+  capability?: CapabilityEnvelope<unknown> | null
+  kind: 'Skills' | 'MCP'
+  summary: string
+}) {
+  const provider = capability?.providerId ?? 'Provider 未知'
+  const cwd = capability?.cwd || '不绑定项目'
+  return (
+    <div className="inventory-context" aria-label={`${kind} 查询上下文`}>
+      <div className="inventory-context__item">
+        <span>Provider</span>
+        <strong>{provider}</strong>
+      </div>
+      <i className="inventory-context__divider" aria-hidden="true" />
+      <div className="inventory-context__item inventory-context__cwd">
+        <span>工作目录</span>
+        <code title={cwd}>{cwd}</code>
+      </div>
+      <span className="inventory-context__spacer" />
+      <b className="inventory-context__summary">{summary}</b>
+      <time className="inventory-context__time" dateTime={capability?.observedAt ? new Date(capability.observedAt).toISOString() : undefined}>
+        {observedTime(capability?.observedAt)}
+      </time>
+    </div>
+  )
+}
+
 export function SkillsModal({
   skills,
   capability,
@@ -257,6 +298,12 @@ export function SkillsModal({
           <button className="modal-x" onClick={onClose} aria-label="关闭 Skills"><Icon name="x" /></button>
         </div>
       </div>
+
+      <InventoryContext
+        capability={capability}
+        kind="Skills"
+        summary={`${filtered.length} 个结果 · ${canManage ? '可管理' : capability?.mode === 'read' ? '只读' : '管理能力未确认'}`}
+      />
 
       {capability && capability.state !== 'ready' && (
         <div className="inventory-capability-note" role={capability.state === 'unknown' ? 'alert' : 'status'}>
@@ -467,11 +514,11 @@ export function McpModal({
         </div>
       </div>
 
-      <div className="inventory-fleet-summary" aria-label="MCP 证据摘要">
-        <span>{mcps.length} 个配置项</span>
-        <span>{live.length > 0 ? connectedCount + ' 已连接 · ' + (live.length - connectedCount) + ' 其他运行态' : 'Provider 运行态未返回'}</span>
-        <span>{testEvidenceCount} 个测试证据</span>
-      </div>
+      <InventoryContext
+        capability={capability}
+        kind="MCP"
+        summary={`${mcps.length} 配置 · ${live.length > 0 ? connectedCount + ' 已连接 / ' + live.length + ' 运行态' : '运行态未返回'} · ${testEvidenceCount} 测试证据`}
+      />
 
       {capability && capability.state !== 'ready' && (
         <div className="inventory-capability-note" role={capability.state === 'unknown' ? 'alert' : 'status'}>

@@ -121,6 +121,46 @@ const RUN_CONTROL_PROPS = {
   onPermissionMode: () => {}
 }
 
+const renderWelcome = (overrides: Partial<ComponentProps<typeof ChatView>> = {}): string => {
+  const props: ComponentProps<typeof ChatView> = {
+    turns: [],
+    selectedId: null,
+    scrollRef: createRef<HTMLDivElement>(),
+    textareaRef: createRef<HTMLTextAreaElement>(),
+    cwd: null,
+    recent: [],
+    agents: [],
+    selectedAgentId: 'claude',
+    ...RUN_CONTROL_PROPS,
+    input: '',
+    busy: false,
+    draftAttachments: [],
+    queuedPrompts: [],
+    slashOpen: false,
+    slashLoading: false,
+    slashCmds: [],
+    slashSel: 0,
+    onSelect: () => {},
+    onInput: () => {},
+    onChooseFolder: () => {},
+    onPickRecent: () => {},
+    onRemoveRecent: () => {},
+    onRetrySlash: () => {},
+    onPickSlash: () => {},
+    onSlashSel: () => {},
+    onHideSlash: () => {},
+    onSend: () => {},
+    onStop: () => {},
+    onPasteImages: () => {},
+    onPasteClipboardImage: () => {},
+    onRemoveDraftAttachment: () => {},
+    onRemoveQueuedPrompt: () => {},
+    onSelectAgent: () => {},
+    onRescan: () => {}
+  }
+  return renderToStaticMarkup(<ChatView {...props} {...overrides} />)
+}
+
 describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍可组合渲染', () => {
   const html = renderToStaticMarkup(<App />)
 
@@ -198,6 +238,7 @@ describe('ViewChrome 顶栏', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
         cwd={null}
+        hasSession
         view="chat"
         agent={undefined}
         showPanel
@@ -209,6 +250,10 @@ describe('ViewChrome 顶栏', () => {
     )
 
     expect(html).toContain('title="纵览面板"')
+    expect(html).toContain('aria-label="会话视图"')
+    expect(html).toContain('对话')
+    expect(html).toContain('拓扑')
+    expect(html).toContain('分段')
     expect(html).not.toContain('title="工作区文件"')
   })
 })
@@ -1433,51 +1478,82 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       'nextcr-code-review'
     ])
 
-    const chatHtml = renderToStaticMarkup(
-      <ChatView
-        turns={[]}
-        selectedId={null}
-        scrollRef={createRef<HTMLDivElement>()}
-        textareaRef={createRef<HTMLTextAreaElement>()}
-        cwd="/tmp/project"
-        recent={[]}
-        agents={[]}
-        selectedAgentId="claude"
-        {...RUN_CONTROL_PROPS}
-        input="/code"
-        busy={false}
-        draftAttachments={[]}
-        queuedPrompts={[]}
-        slashOpen
-        slashLoading={false}
-        slashCmds={commands}
-        slashSel={0}
-        onSelect={() => {}}
-        onInput={() => {}}
-        onChooseFolder={() => {}}
-        onPickRecent={() => {}}
-        onRemoveRecent={() => {}}
-        onRetrySlash={() => {}}
-        onPickSlash={() => {}}
-        onSlashSel={() => {}}
-        onHideSlash={() => {}}
-        onSend={() => {}}
-        onStop={() => {}}
-        onPasteImages={() => {}}
-        onPasteClipboardImage={() => {}}
-        onRemoveDraftAttachment={() => {}}
-        onRemoveQueuedPrompt={() => {}}
-        onSelectAgent={() => {}}
-        onRescan={() => {}}
-      />
-    )
+    const chatHtml = renderWelcome({
+      cwd: '/tmp/project',
+      agents: [{
+        id: 'claude',
+        name: 'Claude Code',
+        bin: 'claude',
+        path: '/usr/local/bin/claude',
+        version: '2.1.170',
+        transport: 'local-cli',
+        health: { state: 'ready', transport: 'local-cli' }
+      }],
+      input: '/code',
+      slashOpen: true,
+      slashCmds: commands
+    })
     expect(chatHtml).toContain('<span>Commands</span>')
-    expect(chatHtml).toContain('准备在 project 开始')
-    expect(chatHtml).toContain('还没有会话轮次')
+    expect(chatHtml).toContain('准备好观察下一次执行')
+    expect(chatHtml).toContain('class="welcome-layout"')
+    expect(chatHtml).toContain('class="welcome-provider is-selected"')
+    expect(chatHtml).toContain('data-tone="ok"')
+    expect(chatHtml).toContain('Provider 就绪')
+    expect(chatHtml).toContain('健康')
+    expect(chatHtml).toContain('/usr/local/bin/claude')
+    expect(chatHtml).toContain('运行上下文')
+    expect(chatHtml).toContain('开始一项可追溯任务')
+    expect(chatHtml).toContain('aria-label="描述任务"')
     expect(chatHtml).not.toContain('Commands ·')
     expect(chatHtml).not.toContain('browser-use')
     expect(chatHtml).toContain('code-fix')
     expect(chatHtml).toContain('nextcr-code-review')
+  })
+
+  it('ChatView 在 0 agents 探测中与探测完成后使用不同的诚实状态', () => {
+    const scanningHtml = renderWelcome({ agentScanning: true })
+    expect(scanningHtml).toContain('data-tone="neutral"')
+    expect(scanningHtml).toContain('Provider 探测中')
+    expect(scanningHtml).toContain('正在探测本机 Provider')
+    expect(scanningHtml).toContain('正在探测本机 agent CLI')
+    expect(scanningHtml).not.toContain('Provider 就绪')
+    expect(scanningHtml).not.toContain('未检测到可用 Provider')
+    expect(scanningHtml).not.toContain('已发现')
+
+    const completeHtml = renderWelcome({ agentScanning: false })
+    expect(completeHtml).toContain('data-tone="warn"')
+    expect(completeHtml).toContain('Provider 未就绪')
+    expect(completeHtml).toContain('未检测到可用 Provider')
+    expect(completeHtml).toContain('完整探测未返回可用 agent CLI')
+    expect(completeHtml).not.toContain('Provider 就绪')
+  })
+
+  it('ChatView 不把全部 unknown / unavailable Provider 标成已发现或就绪', () => {
+    const html = renderWelcome({
+      agents: [{
+        id: 'claude',
+        name: 'Claude Code',
+        bin: 'claude',
+        path: '/usr/local/bin/claude',
+        health: { state: 'unknown', transport: 'Agent SDK' }
+      }, {
+        id: 'codex',
+        name: 'Codex',
+        bin: 'codex',
+        path: '/usr/local/bin/codex',
+        health: { state: 'unavailable', transport: 'app-server' }
+      }]
+    })
+    expect(html).toContain('data-tone="warn"')
+    expect(html).toContain('Provider 未就绪')
+    expect(html).toContain('2 个 Provider 均未确认可用')
+    expect(html).toContain('0 个可用 · 0 个健康 · 2 个未知或不可用')
+    expect(html).toContain('data-health="unknown"')
+    expect(html).toContain('状态未知')
+    expect(html).toContain('data-health="unavailable"')
+    expect(html).toContain('不可用')
+    expect(html).not.toContain('Provider 就绪')
+    expect(html).not.toContain('已发现')
   })
 
   it('ChatView 渲染运行中输入队列和图片附件', () => {
@@ -3615,6 +3691,62 @@ describe('SegmentsView 渲染：主体内容对齐容器', () => {
     expect(html).toContain('1/2 轮 API 已捕获；会话占比未知')
     expect(html).not.toContain('100% 会话 API 时间')
   })
+
+  it('完整状态明确限定为 API+Token 覆盖', () => {
+    const html = renderToStaticMarkup(
+      <SegmentsView
+        turns={[{
+          runId: 'seg-complete-scope',
+          userText: '完整覆盖',
+          done: true,
+          items: [ev({
+            id: 'seg-complete-result',
+            kind: 'harness',
+            stage: 'result',
+            tokensIn: 0,
+            tokensOut: 0,
+            durationApiMs: 0
+          })]
+        }]}
+      />
+    )
+
+    expect(html).toContain('API + TOKEN')
+    expect(html).toContain('API+Token 完整')
+    expect(html).not.toContain('>完整</em>')
+  })
+
+  it('inspector footer 只显示当前段重读，不借用全会话最差段', () => {
+    const html = renderToStaticMarkup(
+      <SegmentsView
+        turns={[
+          {
+            runId: 'seg-selected-clean',
+            userText: '先执行基线',
+            done: true,
+            items: [
+              ev({ id: 'seg-selected-bash', kind: 'tool', stage: 'tool:Bash', tool: 'Bash' }),
+              ev({ id: 'seg-selected-result', kind: 'harness', stage: 'result' })
+            ]
+          },
+          {
+            runId: 'seg-global-worst',
+            userText: '再运行 skill',
+            done: true,
+            items: [
+              ev({ id: 'seg-global-skill', kind: 'skill', stage: 'skill:test', name: 'test' }),
+              ev({ id: 'seg-global-read-1', kind: 'tool', stage: 'tool:Read', tool: 'Read', fileOp: 'read', filePath: '/repo/a.ts' }),
+              ev({ id: 'seg-global-read-2', kind: 'tool', stage: 'tool:Read', tool: 'Read', fileOp: 'read', filePath: '/repo/a.ts' }),
+              ev({ id: 'seg-global-result', kind: 'harness', stage: 'result' })
+            ]
+          }
+        ]}
+      />
+    )
+
+    expect(html).toContain('RE-READ 0 OBSERVED')
+    expect(html).not.toContain('RE-READ 1')
+  })
 })
 
 import { DiagnosticsView } from './DiagnosticsView'
@@ -4261,6 +4393,10 @@ describe('Skill/MCP 操作能力渲染', () => {
     expect(html).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
     expect(html).toContain('inventory-modal--skills')
     expect(html).toContain('class="inventory-switch skill-switch"')
+    expect(html).toContain('aria-label="Skills 查询上下文"')
+    expect(html).toContain('<strong>qoder</strong>')
+    expect(html).toContain('<code title="/repo">/repo</code>')
+    expect(html).toContain('尚未观测')
     expect(html).toContain('已启用')
     expect(html).toContain('Skill 目录仅供读取')
   })
@@ -4299,6 +4435,9 @@ describe('Skill/MCP 操作能力渲染', () => {
       />
     )
     expect(mcpHtml).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
+    expect(mcpHtml).toContain('aria-label="MCP 查询上下文"')
+    expect(mcpHtml).toContain('<strong>opencode</strong>')
+    expect(mcpHtml).toContain('<code title="/repo">/repo</code>')
     expect(mcpHtml).toContain('connected')
     expect(mcpHtml).toContain('只暴露原生 MCP 配置/运行状态')
   })
@@ -4373,6 +4512,11 @@ describe('AnalyticsView 渲染：四章真实证据叙事', () => {
     expect(html).toContain('OpenCode')
     expect(html).toContain('未支持')
     expect(html).toContain('aria-pressed="true"')
+  })
+
+  it('真实 0 日期只画基线，不伪装成满高 Token 柱', () => {
+    expect(html).toContain('aria-label="2026-07-01，真实 0，0 Token"')
+    expect(html).toMatch(/aria-label="2026-07-01，真实 0，0 Token"[^>]*><span><i style="height:2%"/)
   })
 
   it('不伪造 per-tool Token share 或 Markdown 星号', () => {

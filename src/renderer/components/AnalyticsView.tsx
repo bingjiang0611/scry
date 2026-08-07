@@ -242,7 +242,7 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
                       aria-pressed={active}
                       aria-label={`${day.day}，${stateLabel[day.state]}，${day.state === 'lower' ? '至少 ' : ''}${fmtTok(day.state === 'zero' ? 0 : day.observed)} Token`}
                     >
-                      <span><i style={{ height: `${day.observed == null ? 100 : Math.max(day.observed === 0 ? 2 : 7, (day.observed / evidence.maxDay) * 100)}%` }} /></span>
+                      <span><i style={{ height: `${day.state === 'zero' ? 2 : day.observed == null ? 100 : Math.max(7, (day.observed / evidence.maxDay) * 100)}%` }} /></span>
                       {(index === 0 || index === Math.floor(evidence.days.length / 2) || index === evidence.days.length - 1) && <time>{day.day.slice(5)}</time>}
                     </button>
                   )

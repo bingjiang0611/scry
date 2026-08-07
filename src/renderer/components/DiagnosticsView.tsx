@@ -696,14 +696,13 @@ export function DiagnosticsView({
 
       <div className="de-shell">
         <section className="de-verdict-band" data-tone={verdictState}>
-          <div className="de-verdict-main">
-            <span>系统状态</span>
+          <div className="de-verdict-main" title={verdictDetail}>
+            <span className="de-verdict-label">系统状态</span>
             <div className={`judgement ${vstate}`}>
               <StatusMark state={verdictState} label={verdictTitle} />
             </div>
             <b>{attentionCount}</b>
             <p>{attentionCount > 0 ? '项会影响当前解释' : '项需要处置'}</p>
-            <small>{verdictDetail}</small>
           </div>
           {[
             { label: 'CHECKS', value: issues.length, state: 'exact' as const },

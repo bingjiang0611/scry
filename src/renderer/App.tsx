@@ -36,10 +36,10 @@ type AppStyle = CSSProperties & {
   '--overview-panel-w': string
 }
 
-const SIDEBAR_MIN = 220
+const SIDEBAR_MIN = 190
 const SIDEBAR_MAX = 320
 const PANEL_MIN = 360
-const PANEL_MAX = 420
+const PANEL_MAX = 400
 const REVIEW_PANEL_MIN = 420
 const REVIEW_PANEL_MAX = 960
 const WORKSPACE_PANEL_MIN = 420
@@ -424,8 +424,10 @@ export function App() {
   })
   const [showPanel, setShowPanel] = useState(true)
   const sidebarPane = useResizablePane({
-    id: 'sidebar',
-    defaultWidth: 256,
+    // The evidence-system shell deliberately resets the old 256px default once;
+    // subsequent user resizing is still persisted under this geometry version.
+    id: 'sidebar-evidence-system',
+    defaultWidth: 230,
     min: SIDEBAR_MIN,
     max: SIDEBAR_MAX,
     side: 'left'
@@ -1127,6 +1129,7 @@ export function App() {
           <>
         <ViewChrome
           cwd={cwd}
+          hasSession={Boolean(activeSessionId)}
           view={view}
           agent={integrations.selectedAgent}
           agentScanning={integrations.agentsScanning}
@@ -1164,6 +1167,7 @@ export function App() {
             recent={recent}
             agents={integrations.agents}
             selectedAgentId={integrations.selectedId}
+            agentScanning={integrations.agentsScanning}
             agentLocked={activeSessionId != null || session.busy}
             runControls={integrations.runControls}
             runControlCatalog={integrations.runControlCatalog}
