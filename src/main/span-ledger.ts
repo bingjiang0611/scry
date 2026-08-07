@@ -481,6 +481,18 @@ export function spanRowsFromItems(args: {
         intervention.durationMs
       ])
     }
+    if (e.kind === 'harness' && e.stage === 'context_compaction') {
+      const tStart = tsMs(e.ts, nowMs)
+      rows.spans.push([
+        e.id, sessionId ?? null, e.runId, null, null, null, null, e.agentId ?? null,
+        tStart, tStart, e.durationMs ?? null, null,
+        'harness', 'context_compaction', e.compaction?.trigger ?? null, null, null, 0,
+        preview(e.compaction ? JSON.stringify(e.compaction) : null), null,
+        null, null, null, null, null, null, cwd ?? null,
+        null, null
+      ])
+      continue
+    }
     if (e.stage === 'tool_result' || e.stage === 'text_delta') continue // 不落 span
     if (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') {
       const r = e.toolUseId ? results.get(e.toolUseId) : undefined

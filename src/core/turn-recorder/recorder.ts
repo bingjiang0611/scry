@@ -225,7 +225,25 @@ function lifecycleTraceEvents(args: {
   const toolUseId = toolUseIdOf(args.payload)
   const input = toolInputOf(args.payload)
   const out: TraceEvent[] = []
-  if (/^PreToolUse(?::|$)/.test(args.event) || args.event === 'tool.execute.before') {
+  if (args.event === 'session.compacted' || args.event === 'session.next.compaction.ended') {
+    const providerEventId = stringAt(args.payload, 'messageID', 'messageId', 'id')
+    const trigger: 'auto' | 'manual' | undefined =
+      args.payload.reason === 'auto' ? 'auto' : args.payload.reason === 'manual' ? 'manual' : undefined
+    const compaction = {
+      ...(trigger ? { trigger } : {}),
+      ...(providerEventId ? { providerEventId } : {})
+    }
+    out.push({
+      id: `compaction-${providerEventId ?? stableHash([args.event, args.payload]).slice(0, 16)}`,
+      ts: at,
+      runId: args.runId,
+      kind: 'harness',
+      stage: 'context_compaction',
+      compaction,
+      input: compaction,
+      runtimeMetadata: { source: `recorder_hook:${args.event}` }
+    })
+  } else if (/^PreToolUse(?::|$)/.test(args.event) || args.event === 'tool.execute.before') {
     if (toolName) {
       const cls = classifyTool(toolName, input)
       const mcp = parseMcp(toolName, input)
@@ -917,6 +935,19 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       if (assistant) addAssistant(assistant, at, stringAt(payload, 'id'))
       continue
     }
+    if (type === 'event_msg' && payload.type === 'context_compacted') {
+      current.events.push({
+        id: `codex-compaction-${stableHash([current.providerTurnId, at]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'harness',
+        stage: 'context_compaction',
+        compaction: {},
+        input: {},
+        runtimeMetadata: { source: 'codex_rollout_context_compacted' }
+      })
+      continue
+    }
     if (type === 'event_msg' && payload.type === 'task_complete') {
       finishUsage(at)
       current.completedAt = at
@@ -1554,6 +1585,7 @@ async function finalizeOpenTurn(
     if (evidence.errors.value) evidence.errors = partial(evidence.errors.value, source, reason)
     if (evidence.usage.value) evidence.usage = partial(evidence.usage.value, source, reason)
     if (evidence.hooks.value) evidence.hooks = partial(evidence.hooks.value, source, reason)
+    if (evidence.compactions?.value) evidence.compactions = partial(evidence.compactions.value, source, reason)
     if (evidence.modelSegments?.value) evidence.modelSegments = partial(evidence.modelSegments.value, source, reason)
     if (evidence.dangerousOperations.value) {
       evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)

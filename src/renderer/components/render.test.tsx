@@ -1874,6 +1874,23 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
   })
 })
 
+describe('OverviewPanel compact count', () => {
+  it('展示当前会话的 compact 次数', () => {
+    const compactTurn: Turn = {
+      ...turn,
+      items: [
+        ...turn.items,
+        ev({ id: 'compact-1', kind: 'harness', stage: 'context_compaction', compaction: { trigger: 'auto' } })
+      ]
+    }
+    const html = renderToStaticMarkup(
+      <OverviewPanel turns={[compactTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(html).toContain('<span class="fname">Compact</span><span class="dim">1 次</span>')
+  })
+})
+
 describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足迹 + git diff + 累计 + sqlite 分析', () => {
   const billingState = {
     adminConnections: [

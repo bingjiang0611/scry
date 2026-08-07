@@ -356,6 +356,41 @@ describe('OpenCode provider adapter', () => {
     ]))
   })
 
+  it('records one completed OpenCode compaction and ignores duplicate delivery', () => {
+    const events: TraceEvent[] = []
+    const request = {
+      runId: 'run-compact',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event: TraceEvent) => events.push(event)
+    } satisfies ProviderRunRequest
+    const compacted = {
+      id: 'event-compact',
+      type: 'session.next.compaction.ended',
+      properties: {
+        timestamp: Date.parse('2026-08-07T00:00:00.000Z'),
+        sessionID: 'session-compact',
+        messageID: 'message-compact',
+        reason: 'manual',
+        text: 'summary',
+        recent: ''
+      }
+    }
+
+    emitOpenCodeEvent(request, compacted, 'session-compact')
+    emitOpenCodeEvent(request, compacted, 'session-compact')
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: 'harness',
+        stage: 'context_compaction',
+        ts: '2026-08-07T00:00:00.000Z',
+        compaction: { trigger: 'manual', providerEventId: 'message-compact' }
+      })
+    ])
+  })
+
   it('保留 OpenCode shell bridge 的多 MCP 调用并识别业务失败', () => {
     const events: TraceEvent[] = []
     const request = {

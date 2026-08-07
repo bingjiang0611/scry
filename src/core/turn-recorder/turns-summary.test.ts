@@ -86,6 +86,28 @@ describe('turn CLI model timing summaries', () => {
     })
   })
 
+  it('汇总 compact 总数、触发方式，并让旧记录保持 unknown', () => {
+    const exact = <T>(value: T): Evidence<T> => ({ status: 'available', quality: 'exact', source: ['fixture'], value })
+    const summary = summarizeTurnRecords([
+      record(1, undefined, {
+        compactions: exact([
+          { eventId: 'compact-1', at: '2026-01-01T00:00:00.000Z', trigger: 'auto' },
+          { eventId: 'compact-2', at: '2026-01-01T00:00:01.000Z', trigger: 'manual' }
+        ])
+      }),
+      record(2)
+    ], 'session-1')
+
+    expect(summary.compactions).toMatchObject({
+      total: 2,
+      auto: 1,
+      manual: 1,
+      unknownTrigger: 0,
+      coverage: { knownTurns: 1, totalTurns: 2, complete: false }
+    })
+    expect(summary.perTurn.map((turn) => turn.compactions)).toEqual([2, null])
+  })
+
   it('does not turn unavailable overview evidence into zero or an OK verdict', () => {
     const missing = <T>(): Evidence<T> => ({ status: 'unavailable', quality: 'unavailable', source: [], omissionReason: 'not observed' })
     const summary = summarizeTurnRecords([record(1, undefined, {

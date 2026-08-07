@@ -6,6 +6,7 @@ import {
   type EvidenceQuality,
   type EvidenceStatus,
   type TurnCall,
+  type TurnCompaction,
   type TurnFile,
   type TurnHookCall
 } from '../../shared/turn-record.js'
@@ -613,6 +614,30 @@ const interventionEvidence = (record: AgentTurnRecord): Evidence<AgentInterventi
     omissionReason: 'record predates human intervention evidence'
   }
 
+const compactionEvidence = (record: AgentTurnRecord): Evidence<TurnCompaction[]> =>
+  record.compactions ?? {
+    status: 'unavailable',
+    quality: 'unavailable',
+    source: [],
+    omissionReason: 'record predates context compaction evidence'
+  }
+
+function summarizeCompactions(selected: AgentTurnRecord[]) {
+  const coverage = evidenceCoverage(selected, compactionEvidence)
+  const values = selected.flatMap((record) => {
+    const evidence = compactionEvidence(record)
+    return availableArray(evidence) ? evidence.value : []
+  })
+  const known = coverage.knownTurns > 0
+  return {
+    total: known ? values.length : null,
+    auto: known ? values.filter((value) => value.trigger === 'auto').length : null,
+    manual: known ? values.filter((value) => value.trigger === 'manual').length : null,
+    unknownTrigger: known ? values.filter((value) => value.trigger == null).length : null,
+    coverage
+  }
+}
+
 function summarizeInterventions(selected: AgentTurnRecord[]) {
   const coverage = evidenceCoverage(selected, interventionEvidence)
   const requested = selected.flatMap((record) => {
@@ -683,6 +708,7 @@ export function summarizeTurnRecords(
   const errors = summarizeEvidenceCount(selected, (record) => record.errors)
   const dangers = summarizeEvidenceCount(selected, (record) => record.dangerousOperations)
   const interventions = summarizeInterventions(selected)
+  const compactions = summarizeCompactions(selected)
   return {
     scope: options.scope ?? (sessionId || uniqueSessions.size === 1 ? 'session' : 'workspace'),
     sessionId: effectiveSessionId,
@@ -709,6 +735,7 @@ export function summarizeTurnRecords(
       const turnInterventions = availableArray(evidence)
         ? evidence.value.filter((intervention) => intervention.resolution !== 'provider_cancelled')
         : null
+      const turnCompactions = compactionEvidence(record)
       return {
         sequence: record.sequence,
         turnIndex: record.turnIndex,
@@ -722,6 +749,7 @@ export function summarizeTurnRecords(
           subagents: turnCalls.subagents.total
         },
         errors: availableArray(record.errors) ? record.errors.value.length : null,
+        compactions: availableArray(turnCompactions) ? turnCompactions.value.length : null,
         interventions: turnInterventions?.length ?? null,
         interventionQuestions: turnInterventions?.reduce(
           (sum, intervention) => sum + intervention.request.questions.length,
@@ -736,6 +764,7 @@ export function summarizeTurnRecords(
     errors,
     dangerousOperations: dangers,
     interventions,
+    compactions,
     wall: {
       cumulativeMs: sumKnown(selected.map((record) => record.durationMs)),
       knownTurns: selected.filter((record) => finite(record.durationMs)).length,

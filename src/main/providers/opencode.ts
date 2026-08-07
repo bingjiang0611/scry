@@ -43,6 +43,7 @@ const record = (value: unknown): Record<string, unknown> =>
 interface OpenCodeEventState {
   starts: Set<string>
   results: Set<string>
+  compactions: Set<string>
   mcpByToolUseId: Map<string, ParsedMcp>
 }
 
@@ -54,6 +55,7 @@ const eventState = (request: ProviderRunRequest): OpenCodeEventState => {
   const created = {
     starts: new Set<string>(),
     results: new Set<string>(),
+    compactions: new Set<string>(),
     mcpByToolUseId: new Map<string, ParsedMcp>()
   }
   eventStates.set(request, created)
@@ -375,6 +377,25 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
   const payload = record(event.properties ?? event.data)
   if (payload.sessionID !== sessionId) return
   const type = String(event.type ?? '')
+  if (type === 'session.next.compaction.ended') {
+    const providerEventId = String(payload.messageID ?? event.id ?? '')
+    if (!providerEventId || eventState(request).compactions.has(providerEventId)) return
+    eventState(request).compactions.add(providerEventId)
+    const trigger: 'auto' | 'manual' | undefined =
+      payload.reason === 'auto' ? 'auto' : payload.reason === 'manual' ? 'manual' : undefined
+    const compaction = { ...(trigger ? { trigger } : {}), providerEventId }
+    const timestamp = typeof payload.timestamp === 'number' && Number.isFinite(payload.timestamp)
+      ? new Date(payload.timestamp).toISOString()
+      : undefined
+    request.emit(newEvent(request.runId, {
+      kind: 'harness',
+      stage: 'context_compaction',
+      compaction,
+      input: compaction,
+      runtimeMetadata: { source: 'opencode_compaction_ended' }
+    }, timestamp))
+    return
+  }
   if (type === 'session.next.text.delta' || (type === 'message.part.delta' && payload.field === 'text')) {
     request.emit(newEvent(request.runId, { kind: 'model', stage: 'text_delta', text: String(payload.delta ?? '') }))
     return

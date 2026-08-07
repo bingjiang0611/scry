@@ -1,5 +1,5 @@
 import type { ProviderId } from './provider.js'
-import type { DangerLevel, DiffFile, TurnDiffCollection, TurnDiffReason, TurnDiffStatus } from './trace.js'
+import type { CompactionTrigger, DangerLevel, DiffFile, TurnDiffCollection, TurnDiffReason, TurnDiffStatus } from './trace.js'
 import type { AgentIntervention } from './runtime.js'
 
 export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
@@ -145,6 +145,16 @@ export interface TurnError {
   toolUseId?: string
 }
 
+export interface TurnCompaction {
+  eventId: string
+  at: string
+  trigger?: CompactionTrigger
+  preTokens?: number
+  postTokens?: number
+  durationMs?: number
+  agentId?: string
+}
+
 export interface TurnEvidence {
   user: Evidence<{ text?: string; textHash?: string }>
   assistant: Evidence<{ text?: string; textHash?: string }>
@@ -153,6 +163,7 @@ export interface TurnEvidence {
   mcps: Evidence<TurnCall[]>
   hooks: Evidence<TurnHookCall[]>
   usage: Evidence<TurnUsage>
+  compactions?: Evidence<TurnCompaction[]>
   modelSegments?: Evidence<TurnModelSegment[]>
   modelTiming?: Evidence<TurnModelTiming>
   files: Evidence<TurnFile[]>
@@ -300,6 +311,28 @@ function isModelSegmentsEvidence(value: unknown): value is Evidence<TurnModelSeg
   return Array.isArray(raw.value) && raw.value.every(isModelSegment)
 }
 
+function isCompaction(value: unknown): value is TurnCompaction {
+  if (!value || typeof value !== 'object') return false
+  const raw = value as Record<string, unknown>
+  return (
+    typeof raw.eventId === 'string' &&
+    raw.eventId.length > 0 &&
+    typeof raw.at === 'string' &&
+    (raw.trigger === undefined || raw.trigger === 'auto' || raw.trigger === 'manual') &&
+    (raw.preTokens === undefined || isNonNegativeNumber(raw.preTokens)) &&
+    (raw.postTokens === undefined || isNonNegativeNumber(raw.postTokens)) &&
+    (raw.durationMs === undefined || isNonNegativeNumber(raw.durationMs)) &&
+    (raw.agentId === undefined || typeof raw.agentId === 'string')
+  )
+}
+
+function isCompactionsEvidence(value: unknown): value is Evidence<TurnCompaction[]> {
+  if (!isEvidence(value)) return false
+  const raw = value as Evidence<unknown>
+  if (raw.value === undefined) return raw.status !== 'available' && raw.status !== 'partial'
+  return Array.isArray(raw.value) && raw.value.every(isCompaction)
+}
+
 export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
   if (!value || typeof value !== 'object') return false
   const raw = value as Record<string, unknown>
@@ -327,6 +360,7 @@ export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
     'errors'
   ].every((key) => isEvidence(raw[key]))
   return requiredEvidence &&
+    (raw.compactions === undefined || isCompactionsEvidence(raw.compactions)) &&
     (raw.modelSegments === undefined || isModelSegmentsEvidence(raw.modelSegments)) &&
     (raw.modelTiming === undefined || isModelTimingEvidence(raw.modelTiming)) &&
     (raw.interventions === undefined || isEvidence(raw.interventions))

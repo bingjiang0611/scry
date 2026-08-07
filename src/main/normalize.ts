@@ -180,6 +180,35 @@ function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: No
 
 function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeCtx): TraceEvent[] {
   const subtype = typeof m.subtype === 'string' ? m.subtype : ''
+  if (subtype === 'compact_boundary') {
+    const rawMetadata = m.compact_metadata ?? m.compactMetadata
+    const metadata = rawMetadata && typeof rawMetadata === 'object'
+      ? rawMetadata as Record<string, unknown>
+      : {}
+    const number = (snake: string, camel: string): number | undefined => {
+      const value = metadata[snake] ?? metadata[camel]
+      return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+    }
+    const trigger: 'auto' | 'manual' | undefined =
+      metadata.trigger === 'auto' ? 'auto' : metadata.trigger === 'manual' ? 'manual' : undefined
+    const preTokens = number('pre_tokens', 'preTokens')
+    const postTokens = number('post_tokens', 'postTokens')
+    const durationMs = number('duration_ms', 'durationMs')
+    const compaction = {
+      ...(trigger ? { trigger } : {}),
+      ...(preTokens != null ? { preTokens } : {}),
+      ...(postTokens != null ? { postTokens } : {}),
+      ...(typeof m.uuid === 'string' ? { providerEventId: m.uuid } : {})
+    }
+    return [base(ctx, {
+      kind: 'harness',
+      stage: 'context_compaction',
+      durationMs,
+      compaction,
+      input: compaction,
+      runtimeMetadata: { source: 'provider_compact_boundary' }
+    })]
+  }
   if ((subtype === 'local_command_output' || subtype === 'informational') && typeof m.content === 'string') {
     return [base(ctx, {
       kind: 'model',

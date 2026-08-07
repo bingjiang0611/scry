@@ -555,6 +555,10 @@ export function OverviewPanel({
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
   const dangerAuditRef = useRef<HTMLDivElement>(null)
   const all = useMemo(() => turns.flatMap((t) => t.items), [turns])
+  const compactions = useMemo(
+    () => all.filter((event) => event.kind === 'harness' && event.stage === 'context_compaction'),
+    [all]
+  )
   const sessionInterventions = useMemo(() => humanInterventions(all), [all])
   const sessionQuestions = sessionInterventions.reduce(
     (total, intervention) => total + intervention.request.questions.length,
@@ -893,6 +897,10 @@ export function OverviewPanel({
             <span className="dim session-id" title={sessionId ?? '尚未捕获 sessionId'}>
               {sessionId ?? '（尚未捕获）'}
             </span>
+          </div>
+          <div className="filerow">
+            <span className="fname">Compact</span>
+            <span className="dim">{compactions.length} 次</span>
           </div>
         </div>
       )}
