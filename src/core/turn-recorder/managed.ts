@@ -222,6 +222,7 @@ function recordEvidence(record: AgentTurnRecord): TurnEvidence {
     mcps: record.mcps,
     hooks: record.hooks,
     usage: record.usage,
+    ...(record.modelSegments ? { modelSegments: record.modelSegments } : {}),
     ...(record.modelTiming ? { modelTiming: record.modelTiming } : {}),
     files: record.files,
     diff: record.diff,

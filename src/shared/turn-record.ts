@@ -103,6 +103,17 @@ export interface TurnModelTiming {
   activityCoverage?: { timedCalls: number; totalCalls: number }
 }
 
+export interface TurnModelSegment {
+  order: number
+  at: string
+  kind: 'text' | 'thinking'
+  text: string
+  messageId?: string
+  providerItemId?: string
+  parentId?: string
+  agentId?: string
+}
+
 export interface TurnFile {
   path: string
   operation: 'read' | 'write' | 'edit'
@@ -142,6 +153,7 @@ export interface TurnEvidence {
   mcps: Evidence<TurnCall[]>
   hooks: Evidence<TurnHookCall[]>
   usage: Evidence<TurnUsage>
+  modelSegments?: Evidence<TurnModelSegment[]>
   modelTiming?: Evidence<TurnModelTiming>
   files: Evidence<TurnFile[]>
   diff: Evidence<TurnDiffSnapshotRecord[]>
@@ -264,6 +276,30 @@ function isModelTimingEvidence(value: unknown): value is Evidence<TurnModelTimin
   return raw.value === undefined || isModelTiming(raw.value)
 }
 
+function isModelSegment(value: unknown): value is TurnModelSegment {
+  if (!value || typeof value !== 'object') return false
+  const raw = value as Record<string, unknown>
+  return (
+    Number.isSafeInteger(raw.order) &&
+    Number(raw.order) >= 0 &&
+    typeof raw.at === 'string' &&
+    (raw.kind === 'text' || raw.kind === 'thinking') &&
+    typeof raw.text === 'string' &&
+    raw.text.length > 0 &&
+    (raw.messageId === undefined || typeof raw.messageId === 'string') &&
+    (raw.providerItemId === undefined || typeof raw.providerItemId === 'string') &&
+    (raw.parentId === undefined || typeof raw.parentId === 'string') &&
+    (raw.agentId === undefined || typeof raw.agentId === 'string')
+  )
+}
+
+function isModelSegmentsEvidence(value: unknown): value is Evidence<TurnModelSegment[]> {
+  if (!isEvidence(value)) return false
+  const raw = value as Evidence<unknown>
+  if (raw.value === undefined) return raw.status !== 'available' && raw.status !== 'partial'
+  return Array.isArray(raw.value) && raw.value.every(isModelSegment)
+}
+
 export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
   if (!value || typeof value !== 'object') return false
   const raw = value as Record<string, unknown>
@@ -291,6 +327,7 @@ export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
     'errors'
   ].every((key) => isEvidence(raw[key]))
   return requiredEvidence &&
+    (raw.modelSegments === undefined || isModelSegmentsEvidence(raw.modelSegments)) &&
     (raw.modelTiming === undefined || isModelTimingEvidence(raw.modelTiming)) &&
     (raw.interventions === undefined || isEvidence(raw.interventions))
 }

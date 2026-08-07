@@ -74,4 +74,19 @@ describe('AgentTurnRecord model timing compatibility', () => {
     ;((malformed.modelTiming as { value: { cumulativeMs: unknown } }).value).cumulativeMs = -1
     expect(isAgentTurnRecord(malformed)).toBe(false)
   })
+
+  it('accepts valid optional model segments and rejects malformed ordering', () => {
+    const valid = record()
+    valid.modelSegments = {
+      status: 'available',
+      quality: 'exact',
+      source: ['fixture'],
+      value: [{ order: 0, at: '2026-01-01T00:00:00.000Z', kind: 'text', text: 'working' }]
+    }
+    expect(isAgentTurnRecord(valid)).toBe(true)
+
+    const malformed = structuredClone(valid)
+    ;((malformed.modelSegments as { value: Array<{ order: number }> }).value)[0].order = -1
+    expect(isAgentTurnRecord(malformed)).toBe(false)
+  })
 })

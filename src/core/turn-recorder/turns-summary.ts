@@ -130,6 +130,70 @@ export function compactModelTiming(record: AgentTurnRecord): CompactModelTiming 
   }
 }
 
+export function turnTimeline(record: AgentTurnRecord) {
+  const events: Array<Record<string, unknown> & { order: number }> = []
+  for (const segment of record.modelSegments?.value ?? []) {
+    events.push({
+      order: segment.order,
+      type: 'model',
+      kind: segment.kind,
+      at: segment.at,
+      text: segment.text,
+      ...(segment.messageId ? { messageId: segment.messageId } : {}),
+      ...(segment.providerItemId ? { providerItemId: segment.providerItemId } : {}),
+      ...(segment.parentId ? { parentId: segment.parentId } : {}),
+      ...(segment.agentId ? { agentId: segment.agentId } : {})
+    })
+  }
+  for (const { call, category } of orderedCalls([record]).calls) {
+    if (call.order != null) events.push({
+      order: call.order,
+      type: category,
+      phase: 'start',
+      name: call.name,
+      status: call.status,
+      ...(call.id ? { id: call.id } : {}),
+      ...(call.parentId ? { parentId: call.parentId } : {}),
+      ...(call.startedAt ? { at: call.startedAt } : {}),
+      ...(call.input !== undefined ? { input: call.input } : {})
+    })
+    if (call.completedOrder != null) events.push({
+      order: call.completedOrder,
+      type: category,
+      phase: 'result',
+      name: call.name,
+      status: call.status,
+      ...(call.id ? { id: call.id } : {}),
+      ...(call.completedAt ? { at: call.completedAt } : {}),
+      ...(call.outputSummary ? { outputSummary: call.outputSummary } : {}),
+      ...(call.error ? { error: call.error } : {})
+    })
+  }
+  events.sort((left, right) => left.order - right.order)
+  const evidence = record.modelSegments
+  return {
+    sequence: record.sequence,
+    recordId: record.recordId,
+    provider: record.provider.id,
+    sessionId: record.sessionId,
+    turnIndex: record.turnIndex,
+    modelCoverage: evidence
+      ? {
+          status: evidence.status,
+          quality: evidence.quality,
+          source: evidence.source,
+          ...(evidence.omissionReason ? { omissionReason: evidence.omissionReason } : {})
+        }
+      : {
+          status: 'unavailable',
+          quality: 'unavailable',
+          source: [],
+          omissionReason: 'record predates model segment capture'
+        },
+    events
+  }
+}
+
 function legacyAgentCall(call: TurnCall): boolean {
   const input = call.input && typeof call.input === 'object'
     ? call.input as Record<string, unknown>

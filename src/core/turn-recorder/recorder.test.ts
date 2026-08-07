@@ -844,6 +844,9 @@ describe('Codex rollout recorder evidence', () => {
     const lines = [
       { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'codex-turn-1' } },
       { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'run workflow' } },
+      { timestamp: '2026-07-19T12:00:00.050Z', type: 'event_msg', payload: { type: 'agent_message', message: '先检查' } },
+      { timestamp: '2026-07-19T12:00:00.051Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '先检查' }] } },
+      { timestamp: '2026-07-19T12:00:00.060Z', type: 'response_item', payload: { type: 'reasoning', id: 'reasoning-1', summary: [{ type: 'summary_text', text: '定位文件' }] } },
       {
         timestamp: '2026-07-19T12:00:00.100Z',
         type: 'response_item',
@@ -859,6 +862,8 @@ describe('Codex rollout recorder evidence', () => {
         type: 'response_item',
         payload: { type: 'function_call_output', call_id: 'call-1', output: 'ok' }
       },
+      { timestamp: '2026-07-19T12:00:00.250Z', type: 'event_msg', payload: { type: 'agent_message', message: '完成' } },
+      { timestamp: '2026-07-19T12:00:00.251Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '完成' }] } },
       {
         timestamp: '2026-07-19T12:00:00.300Z',
         type: 'event_msg',
@@ -902,7 +907,7 @@ describe('Codex rollout recorder evidence', () => {
       {
         timestamp: '2026-07-19T12:00:01.000Z',
         type: 'event_msg',
-        payload: { type: 'task_complete', turn_id: 'codex-turn-1', last_agent_message: 'done' }
+        payload: { type: 'task_complete', turn_id: 'codex-turn-1', last_agent_message: '完成' }
       }
     ]
     await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
@@ -945,6 +950,12 @@ describe('Codex rollout recorder evidence', () => {
         reasoningTokens: 3
       }
     })
+    expect(record.assistant.value?.text).toBe('先检查完成')
+    expect(record.modelSegments?.value).toEqual([
+      expect.objectContaining({ order: 0, kind: 'text', text: '先检查' }),
+      expect.objectContaining({ order: 1, kind: 'thinking', text: '定位文件', messageId: 'reasoning-1' }),
+      expect.objectContaining({ order: 5, kind: 'text', text: '完成' })
+    ])
   })
 
   it('真实 Stop 早于 task_complete 时按完整 rollout 去重，并恢复 namespace、逐项错误、skill 与 usage', async () => {

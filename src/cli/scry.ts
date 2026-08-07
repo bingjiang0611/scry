@@ -5,7 +5,7 @@ import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
 import { RECORDER_VERSION, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
-import { compactModelTiming, summarizeTurnRecords } from '../core/turn-recorder/turns-summary.js'
+import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
@@ -166,6 +166,14 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print(record)
     return 0
   }
+  if (action === 'timeline') {
+    const selector = args.positionals[2]
+    if (!selector) throw new Error('usage: scry turns timeline <sequence|recordId> --workspace <root>')
+    const record = await showRecord(dataRoot, selector)
+    if (!record) return 4
+    print(turnTimeline(record))
+    return 0
+  }
   if (action === 'summary') {
     if (args.positionals[2] && args.flags.has('all')) {
       throw new Error('scry turns summary accepts either <sessionId> or --all, not both')
@@ -188,7 +196,7 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print(result)
     return result.ok ? 0 : 4
   }
-  throw new Error('usage: scry turns list|show|summary [sessionId|--all]|export|verify ...')
+  throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|verify ...')
 }
 
 async function doctorCommand(args: ParsedArgs): Promise<number> {

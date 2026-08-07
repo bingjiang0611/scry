@@ -10,7 +10,7 @@ import {
   aggregateSegments as aggregateUiSegments
 } from '../../renderer/format'
 import { aggregateTurnEvidence } from './aggregate'
-import { compactModelTiming, summarizeTurnRecords } from './turns-summary'
+import { compactModelTiming, summarizeTurnRecords, turnTimeline } from './turns-summary'
 
 function emptyEvidence(): Evidence<never[]> {
   return { status: 'available', quality: 'exact', source: ['fixture'], value: [] }
@@ -53,6 +53,26 @@ function record(
 }
 
 describe('turn CLI model timing summaries', () => {
+  it('按原始 order 交错输出模型过程、思考和工具生命周期', () => {
+    const exact = <T>(value: T): Evidence<T> => ({ status: 'available', quality: 'exact', source: ['fixture'], value })
+    const timeline = turnTimeline(record(1, undefined, {
+      modelSegments: exact([
+        { order: 0, at: '2026-01-01T00:00:00.000Z', kind: 'text', text: '先检查' },
+        { order: 3, at: '2026-01-01T00:00:00.003Z', kind: 'thinking', text: '核对结果' }
+      ]),
+      tools: exact([{
+        id: 'bash-1', category: 'tool', order: 1, completedOrder: 2, name: 'Bash', status: 'success', outputSummary: 'ok'
+      }])
+    }))
+
+    expect(timeline.events).toEqual([
+      expect.objectContaining({ order: 0, type: 'model', kind: 'text', text: '先检查' }),
+      expect.objectContaining({ order: 1, type: 'tool', phase: 'start', name: 'Bash' }),
+      expect.objectContaining({ order: 2, type: 'tool', phase: 'result', outputSummary: 'ok' }),
+      expect.objectContaining({ order: 3, type: 'model', kind: 'thinking', text: '核对结果' })
+    ])
+  })
+
   it('keeps old records readable without turning unknown timing into zero', () => {
     expect(compactModelTiming(record(1))).toEqual({
       status: 'unavailable',

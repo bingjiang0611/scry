@@ -140,6 +140,16 @@ interface AgentTurnRecord {
   mcps: Evidence<TurnCall[]>
   hooks: Evidence<TurnHookCall[]>
   usage: Evidence<TurnUsage>
+  modelSegments?: Evidence<Array<{
+    order: number
+    at: string
+    kind: 'text' | 'thinking'
+    text: string
+    messageId?: string
+    providerItemId?: string
+    parentId?: string
+    agentId?: string
+  }>>
   files: Evidence<Array<{ path: string; operation: 'read' | 'write' | 'edit' }>>
   diff: Evidence<TurnDiffSnapshot[]>
   dangerousOperations: Evidence<TurnDanger[]>
@@ -193,7 +203,7 @@ scry turns export --workspace <root> --after <sequence> --limit <n>
 ```text
 scry recorder hook --provider <id> --event <event> --workspace <root> --stdin --quiet
 scry recorder recover --workspace <root>
-scry turns list|show|summary|export|verify --workspace <root>
+scry turns list|show|timeline|summary|export|verify --workspace <root>
 scry doctor --workspace <root> [--json]
 ```
 
@@ -202,6 +212,8 @@ Hook 模式默认静默；可恢复错误写 health/log 并以 0 返回，不改
 Recorder handler 由 sample-workspace 生成器在 Provider 可见的 command 上注入结构化 `SCRY_HANDLER_ID=turn-recorder-v1`；Core 同时识别 marker 与 `scry-recorder.sh` 命令，确保 Recorder 自身不进入 Hook 统计。
 
 `turns summary` 默认选择最新 session，以 Scry 纵览的四类互斥逻辑调用、人工介入、Hook 实例/生命周期、结构化/推断文件足迹和 result usage 口径输出；显式传 `<sessionId>` 可选择其他会话，只有 `--all` 才汇总整个 workspace。人工介入按已回答或用户主动取消计数，Provider 自动取消只进入 requested，不虚增人工介入；旧记录缺少分类、事件顺序、介入事实、Hook 原始生命周期或上下文窗口时保留推断/不可用标记，不伪装成 exact 或 0。
+
+`modelSegments` 是向后兼容的可选证据：连续流式 delta 合并为一段，最终 snapshot 与同一 delta 串相等时去重；可见过程文字与 Provider 明文暴露的 thinking 按原始 `order` 保存，不尝试解密或推断未暴露的内部思维。`turns timeline <sequence|recordId>` 通过同一 `order` 与 Tool、Skill、MCP、子 Agent 生命周期交错输出；旧记录缺少该字段时明确返回 `unavailable`。
 
 ## 8. 配置、范围与无发布止损
 

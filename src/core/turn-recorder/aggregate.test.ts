@@ -356,10 +356,12 @@ describe('aggregateTurnEvidence', () => {
       { id: 'd1', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '你', messageId: 'm1' },
       { id: 'd2', ts: '2026-01-01T00:00:00.001Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '好', messageId: 'm1' },
       { id: 'snapshot', ts: '2026-01-01T00:00:00.002Z', runId: 'r', kind: 'model', stage: 'text', text: '你好', messageId: 'm1' },
-      { id: 'tool', ts: '2026-01-01T00:00:00.003Z', runId: 'r', kind: 'tool', stage: 'tool:Read', tool: 'Read' },
-      { id: 'text', ts: '2026-01-01T00:00:00.004Z', runId: 'r', kind: 'model', stage: 'text', text: '完成', messageId: 'm2' }
+      { id: 'thinking', ts: '2026-01-01T00:00:00.003Z', runId: 'r', kind: 'model', stage: 'thinking', thinking: '检查文件', messageId: 'reasoning-1' },
+      { id: 'tool', ts: '2026-01-01T00:00:00.004Z', runId: 'r', kind: 'tool', stage: 'tool:Read', tool: 'Read' },
+      { id: 'text', ts: '2026-01-01T00:00:00.005Z', runId: 'r', kind: 'model', stage: 'text', text: '完成', messageId: 'm2' }
     ]
-    const assistant = aggregateTurnEvidence({ events }).assistant
+    const evidence = aggregateTurnEvidence({ events })
+    const assistant = evidence.assistant
     const text = '你好完成'
 
     expect(assistant).toEqual({
@@ -370,6 +372,16 @@ describe('aggregateTurnEvidence', () => {
         text,
         textHash: `sha256:${createHash('sha256').update(text).digest('hex')}`
       }
+    })
+    expect(evidence.modelSegments).toEqual({
+      status: 'available',
+      quality: 'exact',
+      source: ['trace_events'],
+      value: [
+        { order: 0, at: events[0].ts, kind: 'text', text: '你好', messageId: 'm1' },
+        { order: 3, at: events[3].ts, kind: 'thinking', text: '检查文件', messageId: 'reasoning-1' },
+        { order: 5, at: events[5].ts, kind: 'text', text: '完成', messageId: 'm2' }
+      ]
     })
   })
 

@@ -5,7 +5,7 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.14 \
+npm install -g @ali/scry-turn-recorder@0.2.15 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
@@ -21,6 +21,8 @@ scry upgrade          # 立即升级到 registry 的 latest
 ```bash
 scry doctor --workspace "$PWD"
 scry turns list --workspace "$PWD"
+scry turns show <sequence|recordId> --workspace "$PWD"
+scry turns timeline <sequence|recordId> --workspace "$PWD"
 scry turns summary --workspace "$PWD"
 scry turns summary <sessionId> --workspace "$PWD"
 scry turns summary --all --workspace "$PWD"
@@ -65,11 +67,12 @@ scry recorder restart --workspace "$PWD"
 }
 ```
 
-创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/summary/export/verify` 仍可只读已有数据。
+创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/timeline/summary/export/verify` 仍可只读已有数据。
 
 ## 数据口径
 
 - `turns summary` 默认汇总最新 session，与 Scry 当前会话纵览使用同一公开口径；`--all` 才汇总整个 workspace。
+- 新记录的 `modelSegments` 按原始事件顺序保留可见过程文字和 Provider 明文暴露的 thinking；`turns timeline` 将它们与 Tool、Skill、MCP、子 Agent 的开始/结果交错输出。旧记录缺少该字段时明确标为 `unavailable`。
 - `普通工具`、`MCP`、`Skill`、`子 Agent` 是四个互斥列；总调用等于四列之和，同一次 MCP 或子 Agent 不会再重复计入普通工具。
 - Hook 同时报告“处理器实例”和“生命周期事件”；文件同时报告结构化文件证据与 Bash 推断读取，并保留 quality/coverage，不能拿不同分母直接比较。
 - Codex 的顶层轮次会合并其子 Agent rollout，但 Token 和最终回复只取顶层权威值，避免重复累计。
