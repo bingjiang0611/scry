@@ -1,10 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { tmpdir, userInfo } from 'node:os'
-import { isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
 import { Agent as UndiciAgent, type Dispatcher } from 'undici'
 import { runtimeCliEnv } from '../claude-locate'
@@ -53,14 +53,259 @@ export function sanitizeOpenCodeAuth(value: unknown): Record<string, Record<stri
   return safe
 }
 
-async function isolatedOpenCodeAuthContent(env: NodeJS.ProcessEnv): Promise<string> {
-  const merged: Record<string, Record<string, unknown>> = {}
+export function openCodeMcpAuthFile(env: NodeJS.ProcessEnv): string {
   const configuredDataHome = env.XDG_DATA_HOME?.trim()
   const dataHome = configuredDataHome && isAbsolute(configuredDataHome)
     ? configuredDataHome
     : join(env.HOME?.trim() || userInfo().homedir, '.local', 'share')
+  return join(dataHome, 'opencode', 'mcp-auth.json')
+}
+
+const openCodeMcpAuthWrites = new Map<string, Promise<void>>()
+const OPEN_CODE_MCP_AUTH_WRITE_ATTEMPTS = 5
+
+function parseOpenCodeMcpAuth(contents: Buffer, source: string): Record<string, unknown> {
   try {
-    Object.assign(merged, sanitizeOpenCodeAuth(JSON.parse(await readFile(join(dataHome, 'opencode', 'auth.json'), 'utf8'))))
+    const value = JSON.parse(contents.toString('utf8')) as unknown
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected object')
+    return value as Record<string, unknown>
+  } catch {
+    throw new Error(`OpenCode MCP OAuth 凭据文件格式无效：${source}`)
+  }
+}
+
+async function readOptionalOpenCodeMcpAuth(source: string): Promise<Record<string, unknown> | null> {
+  try {
+    return parseOpenCodeMcpAuth(await readFile(source), source)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, canonicalJson(child)])
+  )
+}
+
+type OpenCodeMcpTarget = AuthorizedMcpExecution['targets'][number]
+
+function digestOpenCodeMcpIdentity(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(canonicalJson(value))).digest('hex')
+}
+
+export function openCodeMcpCredentialKey(cwd: string, target: OpenCodeMcpTarget): string {
+  return digestOpenCodeMcpIdentity({ cwd, targetId: target.targetId })
+}
+
+function privateOpenCodeMcpAuthFile(directory: string, cwd: string, target: OpenCodeMcpTarget): string {
+  return join(directory, `${openCodeMcpCredentialKey(cwd, target)}.json`)
+}
+
+interface PrivateOpenCodeMcpAuth {
+  version: 1
+  workspaceDigest: string
+  targetId: string
+  configDigest: string
+  serverName: string
+  credential: unknown
+}
+
+function openCodeMcpWorkspaceDigest(cwd: string): string {
+  return digestOpenCodeMcpIdentity({ cwd })
+}
+
+function openCodeMcpConfigDigest(target: OpenCodeMcpTarget): string {
+  return digestOpenCodeMcpIdentity({ targetId: target.targetId, config: target.config })
+}
+
+function parsePrivateOpenCodeMcpAuth(contents: Buffer, source: string): PrivateOpenCodeMcpAuth {
+  try {
+    const value = JSON.parse(contents.toString('utf8')) as Record<string, unknown>
+    if (
+      value?.version !== 1
+      || typeof value.workspaceDigest !== 'string'
+      || typeof value.targetId !== 'string'
+      || typeof value.configDigest !== 'string'
+      || typeof value.serverName !== 'string'
+      || !Object.hasOwn(value, 'credential')
+    ) throw new Error('invalid envelope')
+    return value as unknown as PrivateOpenCodeMcpAuth
+  } catch {
+    throw new Error(`Scry OpenCode MCP OAuth 凭据文件格式无效：${source}`)
+  }
+}
+
+async function readOptionalPrivateOpenCodeMcpAuth(source: string): Promise<PrivateOpenCodeMcpAuth | null> {
+  try {
+    return parsePrivateOpenCodeMcpAuth(await readFile(source), source)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
+
+export async function persistPrivateOpenCodeMcpAuth(
+  source: string,
+  directory: string,
+  cwd: string,
+  target: OpenCodeMcpTarget
+): Promise<void> {
+  const isolated = parseOpenCodeMcpAuth(await readFile(source), source)
+  if (!Object.hasOwn(isolated, target.name)) {
+    throw new Error(`OpenCode 未保存 MCP ${target.name} 的 OAuth 凭据`)
+  }
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const destination = privateOpenCodeMcpAuthFile(directory, cwd, target)
+  const previous = openCodeMcpAuthWrites.get(destination) ?? Promise.resolve()
+  const write = previous.catch(() => {}).then(async () => {
+    const contents = Buffer.from(JSON.stringify({
+      version: 1,
+      workspaceDigest: openCodeMcpWorkspaceDigest(cwd),
+      targetId: target.targetId,
+      configDigest: openCodeMcpConfigDigest(target),
+      serverName: target.name,
+      credential: isolated[target.name]
+    } satisfies PrivateOpenCodeMcpAuth))
+    const temporary = `${destination}.scry-${randomBytes(8).toString('hex')}`
+    try {
+      await writeFile(temporary, contents, { mode: 0o600 })
+      await rename(temporary, destination)
+    } catch (error) {
+      await rm(temporary, { force: true })
+      throw error
+    }
+  })
+  openCodeMcpAuthWrites.set(destination, write)
+  try {
+    await write
+  } finally {
+    if (openCodeMcpAuthWrites.get(destination) === write) openCodeMcpAuthWrites.delete(destination)
+  }
+}
+
+/** Build an isolated Provider seed; Scry-private credentials are matched to exact workspace/config identities. */
+export interface OpenCodeMcpAuthSeedOptions {
+  /** Only a complete target inventory may prove that an omitted private credential is stale. */
+  completeTargetInventory?: boolean
+}
+
+export async function openCodeMcpAuthSeed(
+  providerFile: string,
+  scryPrivateDirectory?: string,
+  execution?: AuthorizedMcpExecution,
+  options: OpenCodeMcpAuthSeedOptions = {}
+): Promise<Buffer | null> {
+  // A Provider-global file has only server names, not endpoint identities. It is safe only in
+  // legacy/non-App callers; production Scry uses its identity-bound private directory instead.
+  const provider = scryPrivateDirectory ? null : await readOptionalOpenCodeMcpAuth(providerFile)
+  const merged = { ...(provider ?? {}) }
+  if (scryPrivateDirectory && execution) {
+    const workspaceDigest = openCodeMcpWorkspaceDigest(execution.cwd)
+    const targetsById = new Map(execution.targets.map((target) => [target.targetId, target]))
+    for (const target of execution.targets.filter((item) => item.enabled)) {
+      const path = privateOpenCodeMcpAuthFile(scryPrivateDirectory, execution.cwd, target)
+      const managed = await readOptionalPrivateOpenCodeMcpAuth(path)
+      if (!managed) continue
+      if (
+        managed.workspaceDigest !== workspaceDigest
+        || managed.targetId !== target.targetId
+        || managed.configDigest !== openCodeMcpConfigDigest(target)
+        || managed.serverName !== target.name
+      ) {
+        await rm(path, { force: true })
+        continue
+      }
+      merged[target.name] = managed.credential
+    }
+    if (options.completeTargetInventory !== false) {
+      try {
+        for (const name of await readdir(scryPrivateDirectory)) {
+          if (!name.endsWith('.json')) continue
+          const path = join(scryPrivateDirectory, name)
+          let candidate: PrivateOpenCodeMcpAuth
+          try {
+            candidate = parsePrivateOpenCodeMcpAuth(await readFile(path), path)
+          } catch {
+            continue
+          }
+          if (candidate.workspaceDigest === workspaceDigest && !targetsById.has(candidate.targetId)) {
+            await rm(path, { force: true })
+          }
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    }
+  }
+  return Object.keys(merged).length > 0 ? Buffer.from(JSON.stringify(merged)) : null
+}
+
+export async function persistOpenCodeMcpAuth(
+  source: string,
+  destination: string,
+  serverName: string
+): Promise<void> {
+  const previous = openCodeMcpAuthWrites.get(destination) ?? Promise.resolve()
+  const write = previous.catch(() => {}).then(async () => {
+    const isolated = parseOpenCodeMcpAuth(await readFile(source), source)
+    if (!Object.hasOwn(isolated, serverName)) {
+      throw new Error(`OpenCode 未保存 MCP ${serverName} 的 OAuth 凭据`)
+    }
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 })
+    for (let attempt = 1; attempt <= OPEN_CODE_MCP_AUTH_WRITE_ATTEMPTS; attempt += 1) {
+      let before: Buffer | null = null
+      let current: Record<string, unknown> = {}
+      try {
+        before = await readFile(destination)
+        current = parseOpenCodeMcpAuth(before, destination)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      const contents = Buffer.from(JSON.stringify({ ...current, [serverName]: isolated[serverName] }))
+      const temporary = `${destination}.scry-${randomBytes(8).toString('hex')}`
+      try {
+        await writeFile(temporary, contents, { mode: 0o600 })
+        let latest: Buffer | null = null
+        try {
+          latest = await readFile(destination)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        const unchanged = before === null ? latest === null : latest !== null && before.equals(latest)
+        if (!unchanged) {
+          await rm(temporary, { force: true })
+          if (attempt === OPEN_CODE_MCP_AUTH_WRITE_ATTEMPTS) {
+            throw new Error('OpenCode MCP OAuth 凭据文件在写入期间持续变化，请重试')
+          }
+          continue
+        }
+        await rename(temporary, destination)
+        return
+      } catch (error) {
+        await rm(temporary, { force: true })
+        throw error
+      }
+    }
+  })
+  openCodeMcpAuthWrites.set(destination, write)
+  try {
+    await write
+  } finally {
+    if (openCodeMcpAuthWrites.get(destination) === write) openCodeMcpAuthWrites.delete(destination)
+  }
+}
+
+async function isolatedOpenCodeAuthContent(env: NodeJS.ProcessEnv): Promise<string> {
+  const merged: Record<string, Record<string, unknown>> = {}
+  const dataHome = dirname(openCodeMcpAuthFile(env))
+  try {
+    Object.assign(merged, sanitizeOpenCodeAuth(JSON.parse(await readFile(join(dataHome, 'auth.json'), 'utf8'))))
   } catch {
     // Missing or malformed source auth means the isolated process starts unauthenticated.
   }
@@ -183,6 +428,7 @@ export function openCodeMcpConfig(execution?: AuthorizedMcpExecution): Record<st
           type: 'remote',
           url: config.url,
           ...(config.headers && typeof config.headers === 'object' ? { headers: config.headers } : {}),
+          ...(Object.hasOwn(config, 'oauth') ? { oauth: config.oauth } : {}),
           ...(typeof config.timeout === 'number' ? { timeout: config.timeout } : {}),
           enabled: true
         }]
@@ -202,6 +448,7 @@ export class OpenCodeServerManager {
   private active: (OpenCodeServerState & {
     process: ChildProcessWithoutNullStreams
     dispatcher: Dispatcher
+    mcpAuthFile: string
   }) | null = null
   private starting: Promise<OpenCodeServerState> | null = null
   private pendingChild: ChildProcessWithoutNullStreams | null = null
@@ -211,7 +458,11 @@ export class OpenCodeServerManager {
   private lastExit: OpenCodeServerExitDiagnostic | undefined
   private readonly expectedStops = new WeakSet<ChildProcessWithoutNullStreams>()
 
-  constructor(private readonly executable: () => string | undefined) {}
+  constructor(
+    private readonly executable: () => string | undefined,
+    private readonly privateMcpAuthDirectory?: string,
+    private readonly mcpAuthSeedOptions: OpenCodeMcpAuthSeedOptions = {}
+  ) {}
 
   get state(): OpenCodeServerState | null {
     return this.active
@@ -242,6 +493,18 @@ export class OpenCodeServerManager {
     }
   }
 
+  async persistMcpAuth(target: OpenCodeMcpTarget, cwd: string): Promise<void> {
+    const active = this.active
+    const root = this.hookConfigDir
+    if (!active || !root) throw new Error('OpenCode server 当前未运行，无法保存 MCP OAuth 凭据')
+    const source = join(root, 'data', 'opencode', 'mcp-auth.json')
+    if (this.privateMcpAuthDirectory) {
+      await persistPrivateOpenCodeMcpAuth(source, this.privateMcpAuthDirectory, cwd, target)
+      return
+    }
+    await persistOpenCodeMcpAuth(source, active.mcpAuthFile, target.name)
+  }
+
   private async start(cwd: string, generation: number, mcpExecution?: AuthorizedMcpExecution): Promise<OpenCodeServerState> {
     const executable = this.executable()
     if (!executable) throw new Error('OpenCode executable 未找到')
@@ -255,6 +518,14 @@ export class OpenCodeServerManager {
     }
     const port = await freePort()
     const sourceEnv = runtimeCliEnv()
+    const providerMcpAuthFile = openCodeMcpAuthFile(sourceEnv)
+    const mcpAuthFile = providerMcpAuthFile
+    const mcpAuthSeed = await openCodeMcpAuthSeed(
+      providerMcpAuthFile,
+      this.privateMcpAuthDirectory,
+      mcpExecution,
+      this.mcpAuthSeedOptions
+    )
     const isolatedAuthContent = await isolatedOpenCodeAuthContent(sourceEnv)
     if (generation !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
     this.hookConfigDir = await mkdtemp(join(tmpdir(), 'scry-opencode-'))
@@ -266,6 +537,11 @@ export class OpenCodeServerManager {
       await Promise.all(['xdg-config', 'data', 'state', 'cache', 'runtime', 'config-dirs', 'data-dirs'].map((dir) =>
         mkdir(join(this.hookConfigDir!, dir), { mode: 0o700 })
       ))
+      if (mcpAuthSeed) {
+        const isolatedMcpAuthDir = join(this.hookConfigDir, 'data', 'opencode')
+        await mkdir(isolatedMcpAuthDir, { recursive: true, mode: 0o700 })
+        await writeFile(join(isolatedMcpAuthDir, 'mcp-auth.json'), mcpAuthSeed, { mode: 0o600 })
+      }
       isolatedConfigPath = join(this.hookConfigDir, 'safe-config.json')
       await mkdir(join(this.hookConfigDir, 'managed'), { mode: 0o700 })
       await writeFile(isolatedConfigPath, JSON.stringify({ mcp: openCodeMcpConfig(mcpExecution) }), { mode: 0o600 })
@@ -349,6 +625,7 @@ export class OpenCodeServerManager {
         pid: child.pid,
         process: child,
         dispatcher,
+        mcpAuthFile,
         client: createOpencodeClient({
           baseUrl: url,
           directory: cwd,

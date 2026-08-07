@@ -56,10 +56,53 @@ describe('ProviderRegistry', () => {
       mode: 'none',
       data: null
     })
+    await expect(registry.reauthenticateMcp(
+      { providerId: 'codex', cwd: '/repo' },
+      'scry-e2e',
+      undefined,
+      { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+    )).resolves.toMatchObject({
+      state: 'unsupported',
+      mode: 'none',
+      data: null
+    })
     await expect(registry.runControls({ providerId: 'codex', cwd: '/repo' })).resolves.toMatchObject({
       state: 'unsupported',
       data: null
     })
+  })
+
+  it('routes MCP authentication through the exact provider facet', async () => {
+    const reauthenticate = vi.fn().mockResolvedValue({
+      providerId: 'codex',
+      cwd: '/repo',
+      mode: 'read',
+      state: 'ready',
+      data: { ok: true, status: 'authenticated' }
+    })
+    const base: ProviderAdapter = {
+      ...adapter('codex'),
+      mcp: {
+        snapshot: vi.fn(),
+        reauthenticate
+      }
+    }
+    const registry = new ProviderRegistry([base])
+    const execution = { cwd: '/repo', fingerprint: 'sha256:test', targets: [], env: {} }
+    const interaction = { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+
+    await expect(registry.reauthenticateMcp(
+      { providerId: 'codex', cwd: '/repo' },
+      'target-id',
+      execution,
+      interaction
+    )).resolves.toMatchObject({ data: { ok: true, status: 'authenticated' } })
+    expect(reauthenticate).toHaveBeenCalledWith(
+      { providerId: 'codex', cwd: '/repo' },
+      'target-id',
+      execution,
+      interaction
+    )
   })
 
   it('uses the legacy full-access path when run controls are disabled', async () => {

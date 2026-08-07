@@ -1276,6 +1276,7 @@ export function App() {
               refreshing={integrations.mcpRefreshing}
               capability={integrations.mcpCapability}
               onTest={integrations.testMcp}
+              onReauthenticate={integrations.reauthenticateMcp}
               onToggle={integrations.toggleMcp}
               onRefresh={integrations.pullMcpLive}
               onClose={() => setShowMcp(false)}

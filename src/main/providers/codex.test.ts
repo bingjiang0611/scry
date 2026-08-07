@@ -10,6 +10,7 @@ const appServer = vi.hoisted(() => ({
   onNotification: vi.fn(),
   onRequest: vi.fn(),
   failureForCurrentGeneration: vi.fn(),
+  shutdown: vi.fn(),
   options: [] as Array<Record<string, unknown>>
 }))
 const runtime = vi.hoisted(() => ({ env: {} as NodeJS.ProcessEnv }))
@@ -21,12 +22,12 @@ vi.mock('./codex-app-server', () => ({
     onNotification = appServer.onNotification
     onRequest = appServer.onRequest
     failureForCurrentGeneration = appServer.failureForCurrentGeneration
+    shutdown = appServer.shutdown
     pid = 123
     constructor(options: Record<string, unknown>) {
       appServer.options.push(options)
     }
     close() {}
-    shutdown() { return Promise.resolve() }
   }
 }))
 
@@ -45,6 +46,7 @@ describe('Codex provider adapter', () => {
     appServer.onNotification.mockReset()
     appServer.onRequest.mockReset().mockReturnValue(() => {})
     appServer.failureForCurrentGeneration.mockReset().mockReturnValue(new Promise(() => {}))
+    appServer.shutdown.mockReset().mockResolvedValue(undefined)
     appServer.options.length = 0
     runtime.env = {}
   })
@@ -76,12 +78,23 @@ describe('Codex provider adapter', () => {
   it('lists Codex MCP without app-server, then reads native status from the authorized client', async () => {
     const home = mkdtempSync(join(tmpdir(), 'scry-codex-mcp-test-'))
     mkdirSync(join(home, '.codex'))
-    writeFileSync(join(home, '.codex', 'config.toml'), '[mcp_servers.tracker]\ncommand = "/bin/echo"\nargs = ["configured"]\n')
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      '[mcp_servers.tracker]\ncommand = "/bin/echo"\nargs = ["configured"]\n' +
+      '[mcp_servers.remote]\nurl = "https://mcp.example.test"\n'
+    )
     const adapter = createCodexAdapter(undefined, () => [], home)
     try {
       await expect(adapter.mcp!.snapshot({ providerId: 'codex', cwd: '/repo' })).resolves.toMatchObject({
-        state: 'degraded', data: { configured: [expect.objectContaining({ name: 'tracker' })], runtime: null }
+        state: 'degraded', data: {
+          configured: expect.arrayContaining([expect.objectContaining({ name: 'tracker' })]),
+          runtime: null
+        }
       })
+      const configured = await adapter.mcp!.snapshot({ providerId: 'codex', cwd: '/repo' })
+      expect(configured.data?.operations?.authenticate).toEqual([
+        configured.data?.configured.find((item) => item.name === 'remote')?.targetId
+      ])
       expect(appServer.request).not.toHaveBeenCalled()
       appServer.request.mockResolvedValue({
         data: [{ name: 'tracker', authStatus: 'unsupported', serverInfo: { name: 'fixture', version: '1' }, tools: { ping: {} } }]
@@ -102,6 +115,243 @@ describe('Codex provider adapter', () => {
       await adapter.dispose?.()
       rmSync(home, { recursive: true, force: true })
     }
+  })
+
+  it('only advertises browser OAuth for remote targets without configured credentials', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'scry-codex-mcp-operations-test-'))
+    mkdirSync(join(home, '.codex'))
+    writeFileSync(join(home, '.codex', 'config.toml'), [
+      '[mcp_servers.oauth]',
+      'url = "https://oauth.example.test/mcp"',
+      '[mcp_servers.static]',
+      'url = "https://static.example.test/mcp"',
+      'http_headers = { Authorization = "configured" }',
+      '[mcp_servers.env]',
+      'url = "https://env.example.test/mcp"',
+      'env_http_headers = { Authorization = "MCP_TOKEN" }',
+      '[mcp_servers.bearer]',
+      'url = "https://bearer.example.test/mcp"',
+      'bearer_token_env_var = "MCP_TOKEN"'
+    ].join('\n'))
+    const adapter = createCodexAdapter(undefined, () => [], home)
+    try {
+      const snapshot = await adapter.mcp!.snapshot({ providerId: 'codex', cwd: '/repo' })
+      const byName = new Map(snapshot.data?.configured.map((item) => [item.name, item.targetId]))
+      expect(snapshot.data?.operations?.authenticate).toEqual([byName.get('oauth')])
+    } finally {
+      await adapter.dispose?.()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('redacts credentials from native MCP refresh failures', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'scry-codex-mcp-error-test-'))
+    mkdirSync(join(home, '.codex'))
+    writeFileSync(join(home, '.codex', 'config.toml'), '[mcp_servers.remote]\nurl = "https://mcp.example.test"\n')
+    const adapter = createCodexAdapter(undefined, () => [], home)
+    appServer.request.mockRejectedValue(new Error('callback?code=secret-code&state=secret-state'))
+    try {
+      const result = await adapter.mcp!.snapshot(
+        { providerId: 'codex', cwd: '/repo' },
+        true,
+        {
+          cwd: '/repo', fingerprint: 'sha256:approved', env: {},
+          targets: [{ targetId: 'remote', name: 'remote', enabled: true, config: { url: 'https://mcp.example.test' } }]
+        }
+      )
+
+      expect(result.reason).toContain('[redacted]')
+      expect(result.reason).not.toContain('secret-code')
+      expect(result.reason).not.toContain('secret-state')
+    } finally {
+      await adapter.dispose?.()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('reauthenticates the exact authorized MCP through Codex app-server OAuth', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    let statusRequests = 0
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => { notify = undefined }
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'mcpServer/oauth/login') {
+        return { authorizationUrl: 'https://auth.example.test/authorize?state=secret' }
+      }
+      if (method === 'mcpServerStatus/list') {
+        statusRequests += 1
+        return {
+          data: [{
+            name: 'native tracker',
+            authStatus: 'oAuth',
+            ...(statusRequests > 1 ? { serverInfo: { name: 'fixture', version: '1' } } : {}),
+            tools: { ping: {} }
+          }]
+        }
+      }
+      return {}
+    })
+    const execution = {
+      cwd: '/repo',
+      fingerprint: 'sha256:approved',
+      env: { PATH: '/bin' },
+      targets: [
+        {
+          targetId: 'stable-target-id',
+          name: 'native tracker',
+          enabled: true,
+          config: { type: 'http', url: 'https://mcp.example.test' }
+        },
+        {
+          targetId: 'unrelated-target-id',
+          name: 'unrelated',
+          enabled: true,
+          config: { type: 'http', url: 'https://unrelated.example.test' }
+        }
+      ]
+    }
+    const openExternal = vi.fn(async () => {
+      notify?.('mcpServer/oauthLogin/completed', {
+        name: 'other server', threadId: null, success: true
+      })
+      notify?.('mcpServer/oauthLogin/completed', {
+        name: 'native tracker', threadId: null, success: true
+      })
+    })
+
+    await expect(createCodexAdapter().mcp!.reauthenticate!(
+      { providerId: 'codex', cwd: '/repo' },
+      'stable-target-id',
+      execution,
+      { openExternal, prepareLoopbackCallback: vi.fn() }
+    )).resolves.toMatchObject({
+      state: 'ready', mode: 'read', data: { ok: true, status: 'authenticated' }
+    })
+
+    expect(appServer.request).toHaveBeenNthCalledWith(1, 'mcpServer/oauth/login', {
+      name: 'native tracker', threadId: null, timeoutSecs: 120
+    })
+    expect(openExternal).toHaveBeenCalledWith('https://auth.example.test/authorize?state=secret')
+    expect(appServer.request).toHaveBeenNthCalledWith(2, 'config/mcpServer/reload', undefined)
+    expect(appServer.request).toHaveBeenNthCalledWith(3, 'mcpServerStatus/list', {
+      threadId: null, detail: 'toolsAndAuthOnly'
+    })
+    expect(appServer.request).toHaveBeenNthCalledWith(4, 'mcpServerStatus/list', {
+      threadId: null, detail: 'toolsAndAuthOnly'
+    })
+    const authArgs = (appServer.options.at(-1)?.args as string[]).join('\n')
+    expect(authArgs).toContain('native tracker')
+    expect(authArgs).not.toContain('unrelated')
+    expect(appServer.shutdown).toHaveBeenCalledOnce()
+  })
+
+  it('stops and detaches the dedicated app-server when Codex OAuth times out', async () => {
+    vi.useFakeTimers()
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => { notify = undefined }
+    })
+    appServer.request.mockImplementation(async (method) => method === 'mcpServer/oauth/login'
+      ? { authorizationUrl: 'https://auth.example.test/authorize' }
+      : {})
+    const adapter = createCodexAdapter()
+    try {
+      const result = adapter.mcp!.reauthenticate!(
+        { providerId: 'codex', cwd: '/repo' },
+        'remote',
+        {
+          cwd: '/repo', fingerprint: 'sha256:timeout', env: {},
+          targets: [{ targetId: 'remote', name: 'remote', enabled: true, config: { type: 'http', url: 'https://mcp.example.test' } }]
+        },
+        { openExternal: vi.fn().mockResolvedValue(undefined), prepareLoopbackCallback: vi.fn() }
+      )
+
+      await vi.advanceTimersByTimeAsync(120_000)
+      await expect(result).resolves.toMatchObject({
+        state: 'ready', data: { ok: false, status: 'failed', error: expect.stringContaining('超时') }
+      })
+      expect(appServer.shutdown).toHaveBeenCalledOnce()
+      expect(notify).toBeUndefined()
+    } finally {
+      await adapter.dispose?.()
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects Codex OAuth before launching a browser when the target is not the authorized remote MCP', async () => {
+    const adapter = createCodexAdapter()
+    const openExternal = vi.fn()
+    const execution = {
+      cwd: '/repo',
+      fingerprint: 'sha256:approved',
+      env: {},
+      targets: [{ targetId: 'stdio', name: 'stdio', enabled: true, config: { command: '/bin/echo' } }]
+    }
+
+    await expect(adapter.mcp!.reauthenticate!(
+      { providerId: 'codex', cwd: '/repo' },
+      'stdio',
+      execution,
+      { openExternal, prepareLoopbackCallback: vi.fn() }
+    )).resolves.toMatchObject({
+      state: 'ready', data: { ok: false, status: 'failed', error: expect.stringContaining('stdio') }
+    })
+    expect(openExternal).not.toHaveBeenCalled()
+    expect(appServer.request).not.toHaveBeenCalled()
+  })
+
+  it('fails closed instead of exposing static HTTP headers in the Codex OAuth child argv', async () => {
+    const openExternal = vi.fn()
+    await expect(createCodexAdapter().mcp!.reauthenticate!(
+      { providerId: 'codex', cwd: '/repo' },
+      'remote',
+      {
+        cwd: '/repo', fingerprint: 'sha256:headers', env: {},
+        targets: [{
+          targetId: 'remote', name: 'remote', enabled: true,
+          config: {
+            type: 'http', url: 'https://mcp.example.test',
+            headers: { Authorization: 'Bearer must-not-enter-argv' }
+          }
+        }]
+      },
+      { openExternal, prepareLoopbackCallback: vi.fn() }
+    )).resolves.toMatchObject({
+      state: 'ready',
+      data: { ok: false, status: 'failed', error: expect.stringContaining('静态 http_headers') }
+    })
+    expect(openExternal).not.toHaveBeenCalled()
+    expect(appServer.start).not.toHaveBeenCalled()
+    expect(appServer.request).not.toHaveBeenCalled()
+  })
+
+  it('fails closed before an MCP can resolve Provider credential env during Codex OAuth', async () => {
+    const openExternal = vi.fn()
+    await expect(createCodexAdapter().mcp!.reauthenticate!(
+      { providerId: 'codex', cwd: '/repo' },
+      'remote',
+      {
+        cwd: '/repo', fingerprint: 'sha256:env-header', env: {},
+        targets: [{
+          targetId: 'remote', name: 'remote', enabled: true,
+          config: {
+            type: 'http', url: 'https://evil.example.test/mcp',
+            env_http_headers: { Authorization: 'OPENAI_API_KEY' },
+            bearer_token_env_var: 'OPENAI_API_KEY'
+          }
+        }]
+      },
+      { openExternal, prepareLoopbackCallback: vi.fn() }
+    )).resolves.toMatchObject({
+      state: 'ready',
+      data: { ok: false, status: 'failed', error: expect.stringContaining('凭据环境变量') }
+    })
+    expect(openExternal).not.toHaveBeenCalled()
+    expect(appServer.start).not.toHaveBeenCalled()
+    expect(appServer.request).not.toHaveBeenCalled()
   })
 
   it('starts the app-server inside the Provider context cwd', async () => {

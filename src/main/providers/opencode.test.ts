@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
@@ -26,8 +26,13 @@ import {
   isolatedOpenCodeChildEnv,
   OPEN_CODE_LONG_REQUEST_TIMEOUTS,
   OpenCodeServerManager,
+  openCodeMcpCredentialKey,
+  openCodeMcpAuthSeed,
   openCodeMcpConfig,
+  openCodeMcpAuthFile,
   openCodeServerAuthorization,
+  persistOpenCodeMcpAuth,
+  persistPrivateOpenCodeMcpAuth,
   sanitizeOpenCodeAuth,
   sanitizeOpenCodeServerLog
 } from './opencode-server'
@@ -43,6 +48,145 @@ describe('OpenCode provider adapter', () => {
       anthropic: { type: 'api', key: 'api-key' },
       openai: { type: 'oauth', access: 'access', refresh: 'refresh', expires: 1 }
     })
+  })
+
+  it('merges only the authenticated OpenCode MCP credential without overwriting newer Provider entries', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-auth-test-'))
+    const source = join(root, 'isolated', 'mcp-auth.json')
+    const destination = join(root, 'provider-data', 'opencode', 'mcp-auth.json')
+    try {
+      await mkdir(join(root, 'isolated'), { recursive: true })
+      await mkdir(join(root, 'provider-data', 'opencode'), { recursive: true })
+      await writeFile(source, JSON.stringify({
+        tracker: { accessToken: 'new-tracker-token' },
+        other: { accessToken: 'stale-other-token' }
+      }), { mode: 0o600 })
+      await writeFile(destination, JSON.stringify({
+        other: { accessToken: 'newer-provider-token' }
+      }), { mode: 0o600 })
+      await persistOpenCodeMcpAuth(source, destination, 'tracker')
+      await expect(readFile(destination, 'utf8').then(JSON.parse)).resolves.toEqual({
+        other: { accessToken: 'newer-provider-token' },
+        tracker: { accessToken: 'new-tracker-token' }
+      })
+      expect((await stat(destination)).mode & 0o777).toBe(0o600)
+      expect(openCodeMcpAuthFile({ HOME: '/provider-home' })).toBe(
+        '/provider-home/.local/share/opencode/mcp-auth.json'
+      )
+      expect(openCodeMcpAuthFile({ HOME: '/provider-home', XDG_DATA_HOME: '/provider-data' })).toBe(
+        '/provider-data/opencode/mcp-auth.json'
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('serializes concurrent OpenCode MCP credential persistence by destination', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-auth-concurrent-'))
+    const firstSource = join(root, 'first.json')
+    const secondSource = join(root, 'second.json')
+    const destination = join(root, 'provider-data', 'opencode', 'mcp-auth.json')
+    try {
+      await writeFile(firstSource, JSON.stringify({ first: { accessToken: 'first-token' } }), { mode: 0o600 })
+      await writeFile(secondSource, JSON.stringify({ second: { accessToken: 'second-token' } }), { mode: 0o600 })
+      await Promise.all([
+        persistOpenCodeMcpAuth(firstSource, destination, 'first'),
+        persistOpenCodeMcpAuth(secondSource, destination, 'second')
+      ])
+      await expect(readFile(destination, 'utf8').then(JSON.parse)).resolves.toEqual({
+        first: { accessToken: 'first-token' },
+        second: { accessToken: 'second-token' }
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('seeds isolated OpenCode auth from Provider state plus Scry-private overrides', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-auth-seed-'))
+    const provider = join(root, 'provider.json')
+    const managed = join(root, 'managed')
+    const isolated = join(root, 'isolated.json')
+    const tracker = {
+      targetId: 'tracker-target', name: 'tracker', enabled: true,
+      config: { type: 'http', url: 'https://first.example.test/mcp' }
+    }
+    const execution = { cwd: '/repo-a', fingerprint: 'sha256:first', env: {}, targets: [tracker] }
+    try {
+      await mkdir(managed, { recursive: true })
+      await writeFile(provider, JSON.stringify({
+        providerOnly: { accessToken: 'provider-token' },
+        tracker: { accessToken: 'old-provider-token' }
+      }), { mode: 0o600 })
+      await writeFile(isolated, JSON.stringify({ tracker: { accessToken: 'scry-token' } }), { mode: 0o600 })
+      await persistPrivateOpenCodeMcpAuth(isolated, managed, execution.cwd, tracker)
+      expect((await stat(join(managed, `${openCodeMcpCredentialKey(execution.cwd, tracker)}.json`))).mode & 0o777).toBe(0o600)
+      const seed = await openCodeMcpAuthSeed(provider, managed, execution)
+      expect(seed && JSON.parse(seed.toString('utf8'))).toEqual({
+        tracker: { accessToken: 'scry-token' }
+      })
+      const otherWorkspace = await openCodeMcpAuthSeed(provider, managed, {
+        ...execution,
+        cwd: '/repo-b',
+        targets: [{ ...tracker, config: { type: 'http', url: 'https://second.example.test/mcp' } }]
+      })
+      expect(otherWorkspace).toBeNull()
+      await expect(openCodeMcpAuthSeed(provider, managed, {
+        ...execution,
+        targets: [{ ...tracker, config: { type: 'http', url: 'https://changed.example.test/mcp' } }]
+      })).resolves.toBeNull()
+      await expect(stat(join(managed, `${openCodeMcpCredentialKey(execution.cwd, tracker)}.json`))).rejects.toMatchObject({
+        code: 'ENOENT'
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('seeds only the authenticated OpenCode target without pruning credentials omitted from a partial inventory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-auth-partial-seed-'))
+    const provider = join(root, 'provider.json')
+    const managed = join(root, 'managed')
+    const firstSource = join(root, 'first.json')
+    const secondSource = join(root, 'second.json')
+    const first = {
+      targetId: 'first-target', name: 'first', enabled: true,
+      config: { type: 'http', url: 'https://first.example.test/mcp' }
+    }
+    const second = {
+      targetId: 'second-target', name: 'second', enabled: true,
+      config: { type: 'http', url: 'https://second.example.test/mcp' }
+    }
+    const execution = { cwd: '/repo-a', fingerprint: 'sha256:all', env: {}, targets: [first, second] }
+    const firstPath = join(managed, `${openCodeMcpCredentialKey(execution.cwd, first)}.json`)
+    const secondPath = join(managed, `${openCodeMcpCredentialKey(execution.cwd, second)}.json`)
+    try {
+      await writeFile(firstSource, JSON.stringify({ first: { accessToken: 'first-token' } }), { mode: 0o600 })
+      await writeFile(secondSource, JSON.stringify({ second: { accessToken: 'second-token' } }), { mode: 0o600 })
+      await persistPrivateOpenCodeMcpAuth(firstSource, managed, execution.cwd, first)
+      await persistPrivateOpenCodeMcpAuth(secondSource, managed, execution.cwd, second)
+
+      const partialSeed = await openCodeMcpAuthSeed(provider, managed, {
+        ...execution,
+        fingerprint: 'sha256:auth:first-target',
+        targets: [first]
+      }, { completeTargetInventory: false })
+
+      expect(partialSeed && JSON.parse(partialSeed.toString('utf8'))).toEqual({
+        first: { accessToken: 'first-token' }
+      })
+      await expect(stat(firstPath)).resolves.toBeDefined()
+      await expect(stat(secondPath)).resolves.toBeDefined()
+
+      await expect(openCodeMcpAuthSeed(provider, managed, {
+        ...execution,
+        targets: [first]
+      })).resolves.not.toBeNull()
+      await expect(stat(firstPath)).resolves.toBeDefined()
+      await expect(stat(secondPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('isolates every inherited OpenCode and XDG control path while preserving ordinary provider credentials', () => {
@@ -141,11 +285,11 @@ describe('OpenCode provider adapter', () => {
       targets: [
         { targetId: 'local', name: 'local', enabled: true, config: { command: '/bin/echo', args: ['ok'], env: { SAFE: '1' } } },
         { targetId: 'off', name: 'off', enabled: false, config: { command: '/bin/off' } },
-        { targetId: 'remote', name: 'remote', enabled: true, config: { type: 'http', url: 'https://mcp.example.test', headers: { Authorization: 'configured' } } }
+        { targetId: 'remote', name: 'remote', enabled: true, config: { type: 'http', url: 'https://mcp.example.test', headers: { Authorization: 'configured' }, oauth: false } }
       ]
     })).toEqual({
       local: { type: 'local', command: ['/bin/echo', 'ok'], environment: { PATH: '/bin', SAFE: '1' }, enabled: true },
-      remote: { type: 'remote', url: 'https://mcp.example.test', headers: { Authorization: 'configured' }, enabled: true }
+      remote: { type: 'remote', url: 'https://mcp.example.test', headers: { Authorization: 'configured' }, oauth: false, enabled: true }
     })
   })
 
@@ -157,7 +301,10 @@ describe('OpenCode provider adapter', () => {
       mcp: { tracker: { type: 'local', command: ['/bin/echo', 'configured'] } }
     }))
     const client = {
-      mcp: { status: vi.fn(async () => ({ data: { tracker: { status: 'connected' } } })) }
+      mcp: { status: vi.fn(async () => ({ data: {
+        tracker: { status: 'connected' },
+        registration: { status: 'needs_client_registration' }
+      } })) }
     } as unknown as OpencodeClient
     const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
       cwd: '/repo', mcpFingerprint: 'sha256:test', url: 'http://127.0.0.1:12345', pid: 41, client
@@ -173,12 +320,263 @@ describe('OpenCode provider adapter', () => {
         targets: [{ targetId: 'tracker', name: 'tracker', enabled: true, config: { command: '/bin/echo', args: ['approved'] } }]
       }
       await expect(adapter.mcp!.snapshot({ providerId: 'opencode', cwd: '/repo' }, true, execution)).resolves.toMatchObject({
-        state: 'ready', data: { runtime: [{ name: 'tracker', status: 'connected' }] }
+        state: 'ready', data: { runtime: [
+          { name: 'tracker', status: 'connected' },
+          { name: 'registration', status: 'needs-client-registration' }
+        ] }
       })
       expect(ensure).toHaveBeenCalledWith('/repo', execution)
     } finally {
       adapter.dispose?.()
       ensure.mockRestore()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('redacts credentials from native MCP refresh failures and Provider health', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-opencode-mcp-error-test-'))
+    await mkdir(join(home, '.config', 'opencode'), { recursive: true })
+    await writeFile(join(home, '.config', 'opencode', 'opencode.json'), JSON.stringify({
+      mcp: { remote: { type: 'remote', url: 'https://mcp.example.test' } }
+    }))
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure')
+      .mockRejectedValue(new Error('refreshToken=secret-refresh'))
+    const adapter = createOpenCodeAdapter(home)
+    try {
+      const result = await adapter.mcp!.snapshot(
+        { providerId: 'opencode', cwd: '/repo' },
+        true,
+        {
+          cwd: '/repo', fingerprint: 'sha256:test', env: {},
+          targets: [{ targetId: 'remote', name: 'remote', enabled: true, config: { url: 'https://mcp.example.test' } }]
+        }
+      )
+
+      expect(result.reason).toContain('[redacted]')
+      expect(result.reason).not.toContain('secret-refresh')
+      const health = (await adapter.describe()).health
+      expect(health?.lastError).toContain('[redacted]')
+      expect(health?.lastError).not.toContain('secret-refresh')
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('authenticates one exact remote MCP, persists Provider credentials, reconnects, and verifies status', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-opencode-auth-flow-'))
+    const configDir = join(home, '.config', 'opencode')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'opencode.json'), JSON.stringify({
+      mcp: { tracker: { type: 'remote', url: 'https://mcp.example.test' } }
+    }))
+    const authenticate = vi.fn(async () => ({ data: true }))
+    const connect = vi.fn(async () => ({ data: true }))
+    const status = vi.fn(async () => ({ data: { tracker: { status: 'connected' } } }))
+    const client = { mcp: { auth: { authenticate }, connect, status } } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'sha256:auth', url: 'http://127.0.0.1:12345', pid: 44, client
+    })
+    const persist = vi.spyOn(OpenCodeServerManager.prototype, 'persistMcpAuth').mockResolvedValue()
+    const adapter = createOpenCodeAdapter(home)
+    const execution = {
+      cwd: '/repo',
+      fingerprint: 'sha256:auth',
+      env: {},
+      targets: [
+        {
+          targetId: 'tracker-target',
+          name: 'tracker',
+          enabled: true,
+          config: { type: 'http', url: 'https://mcp.example.test' }
+        },
+        {
+          targetId: 'unrelated-target',
+          name: 'unrelated',
+          enabled: true,
+          config: { type: 'http', url: 'https://unrelated.example.test' }
+        }
+      ]
+    }
+    try {
+      await expect(adapter.mcp!.snapshot(
+        { providerId: 'opencode', cwd: '/repo' },
+        true,
+        execution
+      )).resolves.toMatchObject({
+        data: { operations: { authenticate: ['tracker-target', 'unrelated-target'] } }
+      })
+      await expect(adapter.mcp!.reauthenticate?.(
+        { providerId: 'opencode', cwd: '/repo' },
+        'tracker-target',
+        execution,
+        { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+      )).resolves.toMatchObject({
+        state: 'ready',
+        data: { ok: true, status: 'authenticated' }
+      })
+      expect(authenticate).toHaveBeenCalledWith({ name: 'tracker', directory: '/repo' })
+      expect(persist).toHaveBeenCalledWith(expect.objectContaining({
+        targetId: 'tracker-target', name: 'tracker'
+      }), '/repo')
+      expect(connect).toHaveBeenCalledWith({ name: 'tracker', directory: '/repo' })
+      expect(ensure).toHaveBeenLastCalledWith('/repo', expect.objectContaining({
+        targets: [expect.objectContaining({ targetId: 'tracker-target' })]
+      }))
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+      persist.mockRestore()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('reports durable OpenCode credentials separately from a failed reconnect', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-opencode-auth-unverified-'))
+    const configDir = join(home, '.config', 'opencode')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'opencode.json'), JSON.stringify({
+      mcp: { tracker: { type: 'remote', url: 'https://mcp.example.test' } }
+    }))
+    const client = {
+      mcp: {
+        auth: { authenticate: vi.fn(async () => ({ data: true })) },
+        connect: vi.fn(async () => { throw new Error('connect unavailable') })
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'sha256:auth', url: 'http://127.0.0.1:12345', pid: 44, client
+    })
+    const persist = vi.spyOn(OpenCodeServerManager.prototype, 'persistMcpAuth').mockResolvedValue()
+    const adapter = createOpenCodeAdapter(home)
+    try {
+      await expect(adapter.mcp!.reauthenticate!(
+        { providerId: 'opencode', cwd: '/repo' },
+        'tracker-target',
+        {
+          cwd: '/repo', fingerprint: 'sha256:auth', env: {},
+          targets: [{
+            targetId: 'tracker-target', name: 'tracker', enabled: true,
+            config: { type: 'http', url: 'https://mcp.example.test' }
+          }]
+        },
+        { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+      )).resolves.toMatchObject({
+        data: {
+          ok: false,
+          status: 'authenticated-unverified',
+          error: expect.stringContaining('connect unavailable')
+        }
+      })
+      expect(persist).toHaveBeenCalledWith(expect.objectContaining({
+        targetId: 'tracker-target', name: 'tracker'
+      }), '/repo')
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+      persist.mockRestore()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('times out OpenCode browser authentication and closes the isolated server before credentials can persist', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-opencode-auth-timeout-'))
+    const configDir = join(home, '.config', 'opencode')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'opencode.json'), JSON.stringify({
+      mcp: { tracker: { type: 'remote', url: 'https://mcp.example.test' } }
+    }))
+    const authenticate = vi.fn(() => new Promise(() => {}))
+    const client = { mcp: { auth: { authenticate } } } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'sha256:auth', url: 'http://127.0.0.1:12345', pid: 44, client
+    })
+    const persist = vi.spyOn(OpenCodeServerManager.prototype, 'persistMcpAuth').mockResolvedValue()
+    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockImplementation(() => {})
+    const adapter = createOpenCodeAdapter(home)
+    const execution = {
+      cwd: '/repo', fingerprint: 'sha256:auth', env: {},
+      targets: [{
+        targetId: 'tracker-target', name: 'tracker', enabled: true,
+        config: { type: 'http', url: 'https://mcp.example.test' }
+      }]
+    }
+    vi.useFakeTimers()
+    try {
+      const result = adapter.mcp!.reauthenticate!(
+        { providerId: 'opencode', cwd: '/repo' },
+        'tracker-target',
+        execution,
+        { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+      )
+      await vi.advanceTimersByTimeAsync(120_000)
+      await expect(result).resolves.toMatchObject({
+        state: 'ready', data: { ok: false, status: 'failed', error: expect.stringContaining('超时') }
+      })
+      expect(close).toHaveBeenCalledOnce()
+      expect(persist).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+      adapter.dispose?.()
+      ensure.mockRestore()
+      persist.mockRestore()
+      close.mockRestore()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps persisted OpenCode credentials when reconnect verification times out', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-opencode-verify-timeout-'))
+    const configDir = join(home, '.config', 'opencode')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'opencode.json'), JSON.stringify({
+      mcp: { tracker: { type: 'remote', url: 'https://mcp.example.test' } }
+    }))
+    const client = {
+      mcp: {
+        auth: { authenticate: vi.fn(async () => ({ data: true })) },
+        connect: vi.fn(() => new Promise(() => {}))
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'sha256:auth', url: 'http://127.0.0.1:12345', pid: 44, client
+    })
+    const persist = vi.spyOn(OpenCodeServerManager.prototype, 'persistMcpAuth').mockResolvedValue()
+    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockImplementation(() => {})
+    const adapter = createOpenCodeAdapter(home)
+    vi.useFakeTimers()
+    try {
+      const result = adapter.mcp!.reauthenticate!(
+        { providerId: 'opencode', cwd: '/repo' },
+        'tracker-target',
+        {
+          cwd: '/repo', fingerprint: 'sha256:auth', env: {},
+          targets: [{
+            targetId: 'tracker-target', name: 'tracker', enabled: true,
+            config: { type: 'http', url: 'https://mcp.example.test' }
+          }]
+        },
+        { openExternal: vi.fn(), prepareLoopbackCallback: vi.fn() }
+      )
+      await vi.advanceTimersByTimeAsync(15_000)
+      await expect(result).resolves.toMatchObject({
+        data: {
+          ok: false,
+          status: 'authenticated-unverified',
+          error: expect.stringContaining('状态校验超时')
+        }
+      })
+      expect(persist).toHaveBeenCalledWith(expect.objectContaining({
+        targetId: 'tracker-target', name: 'tracker'
+      }), '/repo')
+      expect(close).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+      adapter.dispose?.()
+      ensure.mockRestore()
+      persist.mockRestore()
+      close.mockRestore()
       await rm(home, { recursive: true, force: true })
     }
   })

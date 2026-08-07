@@ -109,6 +109,9 @@ export interface McpStatus {
   tools?: number
   toolNames?: string[]
   error?: string
+  authenticating?: boolean
+  authOk?: boolean
+  authError?: string
 }
 
 export function updateMcpLiveAfterToggle(live: McpLiveStatus[], name: string, enabled: boolean): McpLiveStatus[] {
