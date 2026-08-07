@@ -361,6 +361,37 @@ describe('aggregateHooks', () => {
     expect(summary.groups[0].scripts[0].instances).toHaveLength(2)
   })
 
+  it('Hook 未上报 durationMs 时按 started/response 时间戳补算实例耗时', () => {
+    const summary = aggregateHooks([
+      ev({
+        id: 'timed-start',
+        ts: '2026-08-07T00:00:00.000Z',
+        kind: 'hook',
+        stage: 'hook_started',
+        hookId: 'timed-hook',
+        hookEvent: 'Stop',
+        hookName: 'Stop'
+      }),
+      ev({
+        id: 'timed-response',
+        ts: '2026-08-07T00:00:01.250Z',
+        kind: 'hook',
+        stage: 'hook_response',
+        hookId: 'timed-hook',
+        hookEvent: 'Stop',
+        hookName: 'Stop',
+        hookOutcome: 'success'
+      })
+    ])
+
+    expect(summary.groups[0].scripts[0].instances[0]).toMatchObject({
+      durationMs: 1250,
+      durationSource: 'observed',
+      startedAtMs: Date.parse('2026-08-07T00:00:00.000Z'),
+      completedAtMs: Date.parse('2026-08-07T00:00:01.250Z')
+    })
+  })
+
   it('cancelled 单独计数，并只在有可靠证据时区分超时', () => {
     const command = 'python3 $CLAUDE_PROJECT_DIR/.claude/hooks/trace_pre.py'
     const configured = [{

@@ -1307,6 +1307,55 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(hookHtml).toContain('security_reminder_hook.py')
   })
 
+  it('HOOKS 周期行按处理器运行区间并集展示占用耗时', () => {
+    const hookTurn: Turn = {
+      runId: 'run-hook-phase-timing',
+      userText: '检查 Hook 耗时',
+      done: true,
+      items: [
+        ev({
+          id: 'pre-a',
+          ts: '2026-08-07T00:00:03.000Z',
+          kind: 'hook',
+          stage: 'hook_response',
+          hookId: 'pre-a',
+          hookEvent: 'PreToolUse',
+          hookName: 'PreToolUse:Bash',
+          hookOutcome: 'success',
+          durationMs: 3000
+        }),
+        ev({
+          id: 'pre-b',
+          ts: '2026-08-07T00:00:04.000Z',
+          kind: 'hook',
+          stage: 'hook_response',
+          hookId: 'pre-b',
+          hookEvent: 'PreToolUse',
+          hookName: 'PreToolUse:Bash',
+          hookOutcome: 'success',
+          durationMs: 3000
+        }),
+        ev({
+          id: 'stop-untimed',
+          ts: '2026-08-07T00:00:05.000Z',
+          kind: 'hook',
+          stage: 'hook_response',
+          hookId: 'stop-untimed',
+          hookEvent: 'Stop',
+          hookName: 'Stop',
+          hookOutcome: 'success'
+        })
+      ]
+    }
+
+    const html = renderToStaticMarkup(<AssistantTurn turn={hookTurn} selectedId={null} onSelect={() => {}} />)
+
+    expect(html).toContain('耗时 ~4.0s')
+    expect(html).toContain('按 2/2 个处理器实例的运行区间合并去重')
+    expect(html).toContain('耗时 —')
+    expect(html).toContain('无法可靠计算周期耗时')
+  })
+
   it('用户气泡保留长链接的完整 href', () => {
     const url = 'https://alidocs.dingtalk.com/i/nodes/93NwLYZXWvxXroNzCNEKwjB58kyEqBQm?cid=7886930%3A4041342848&utm_source=im&utm_scene=team_space&iframeQuery=utm_medium%3D'
     const userHtml = renderToStaticMarkup(<UserMessage text={`技术方案：\n${url}`} />)

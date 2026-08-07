@@ -196,6 +196,9 @@ function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeCtx): Tr
   const command = typeof m.command === 'string' ? m.command : undefined
   const outcome = typeof m.outcome === 'string' ? m.outcome : subtype === 'hook_started' ? 'started' : 'progress'
   const exitCode = typeof m.exit_code === 'number' ? m.exit_code : undefined
+  const durationMs = typeof m.duration_ms === 'number' && Number.isFinite(m.duration_ms) && m.duration_ms >= 0
+    ? m.duration_ms
+    : undefined
   return [
     base(ctx, {
       kind: 'hook',
@@ -208,6 +211,7 @@ function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeCtx): Tr
       hookCommand: command,
       hookOutcome: outcome,
       hookExitCode: exitCode,
+      durationMs,
       text: output || stdout || stderr,
       output,
       input: {

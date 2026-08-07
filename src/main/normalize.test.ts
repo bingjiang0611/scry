@@ -587,6 +587,7 @@ describe('normalizeSdkMessage', () => {
         stderr: '',
         exit_code: 0,
         outcome: 'success',
+        duration_ms: 348,
         session_id: 'sess-1'
       },
       ctx()
@@ -599,6 +600,7 @@ describe('normalizeSdkMessage', () => {
       hookEvent: 'PreToolUse',
       hookOutcome: 'success',
       hookExitCode: 0,
+      durationMs: 348,
       text: 'branch ok',
       isError: false
     })

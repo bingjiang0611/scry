@@ -335,6 +335,9 @@ export interface HookInstanceRow {
   configuredCommands: HookConfiguredCommand[]
   outcome?: string
   durationMs?: number
+  durationSource?: 'provider' | 'observed'
+  startedAtMs?: number
+  completedAtMs?: number
   isError: boolean
   last: TraceEvent
 }
@@ -503,6 +506,15 @@ function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
 }
 
+function hookTimestampMs(value: string): number | undefined {
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : undefined
+}
+
+function nonNegativeDuration(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
 function hookSource(value: unknown): HookConfiguredCommand['source'] | undefined {
   return value === 'user' || value === 'project' || value === 'local' || value === 'plugin' ? value : undefined
 }
@@ -620,6 +632,22 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
     const instanceKey = hookRunIdentity(e)
     const input = e.input as Record<string, unknown> | undefined
     const previousInstance = script.instanceMap.get(instanceKey)
+    const eventAtMs = hookTimestampMs(e.ts)
+    const startedAtMs = e.stage === 'hook_started' && eventAtMs != null
+      ? previousInstance?.startedAtMs == null ? eventAtMs : Math.min(previousInstance.startedAtMs, eventAtMs)
+      : previousInstance?.startedAtMs
+    const completedAtMs = e.stage === 'hook_response' && eventAtMs != null
+      ? previousInstance?.completedAtMs == null ? eventAtMs : Math.max(previousInstance.completedAtMs, eventAtMs)
+      : previousInstance?.completedAtMs
+    const providerDurationMs = nonNegativeDuration(e.durationMs)
+      ?? (previousInstance?.durationSource === 'provider' ? previousInstance.durationMs : undefined)
+    const observedDurationMs = startedAtMs != null && completedAtMs != null && completedAtMs >= startedAtMs
+      ? completedAtMs - startedAtMs
+      : undefined
+    const durationMs = providerDurationMs ?? observedDurationMs ?? previousInstance?.durationMs
+    const durationSource = providerDurationMs != null
+      ? 'provider' as const
+      : observedDurationMs != null ? 'observed' as const : previousInstance?.durationSource
     script.instanceMap.set(instanceKey, {
       key: instanceKey,
       hookId: e.hookId ?? previousInstance?.hookId,
@@ -631,7 +659,10 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
         e.hookConfiguredCommands
       ),
       outcome: e.hookOutcome ?? previousInstance?.outcome,
-      durationMs: e.durationMs ?? previousInstance?.durationMs,
+      durationMs,
+      durationSource,
+      startedAtMs,
+      completedAtMs,
       isError: previousInstance?.isError === true || e.isError === true || e.hookOutcome === 'error' || e.hookOutcome === 'failure',
       last: e
     })

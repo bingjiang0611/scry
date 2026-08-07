@@ -4249,6 +4249,17 @@ button.turn-call-group:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.hook-phase-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.hook-phase-duration {
+  color: var(--fg);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
 .hook-phase-count {
   color: var(--dim2);
   font-size: 10.5px;
