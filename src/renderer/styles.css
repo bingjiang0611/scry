@@ -2648,7 +2648,7 @@ button.mitem:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-/* 每轮调用：摘要只保留 MCP / Skill / Hooks / 文件，明细各自独立展开。 */
+/* 每轮调用：摘要保留 MCP / Skill / 子 Agent / Hooks / 文件，明细各自独立展开。 */
 .turn-calls-section h4 .more {
   color: var(--dim2);
 }
@@ -2773,6 +2773,12 @@ button.turn-call-group:focus-visible {
 }
 .turn-call-group.skill {
   border-color: rgba(246, 187, 92, 0.28);
+}
+.turn-call-group.agent {
+  border-color: color-mix(in srgb, var(--agent) 36%, var(--border3));
+}
+.turn-call-group.agent.empty {
+  opacity: 0.42;
 }
 .turn-call-group.hooks {
   border-color: rgba(199, 132, 255, 0.28);
