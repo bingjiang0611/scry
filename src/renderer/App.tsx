@@ -14,8 +14,6 @@ import { AppShell } from './components/AppShell'
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
 import { ChatView } from './components/ChatView'
-import { ExecutionGraph } from './components/ExecutionGraph'
-import { SegmentsView } from './components/SegmentsView'
 import { DiagnosticsView } from './components/DiagnosticsView'
 import { AnalyticsView } from './components/AnalyticsView'
 import { ViewChrome, type AppView } from './components/ViewChrome'
@@ -457,7 +455,7 @@ export function App() {
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [view, setView] = useState<AppView>('chat') // 对话/拓扑/分段/诊断/分析
+  const [view, setView] = useState<AppView>('chat') // 对话/诊断/分析
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
   const shouldStickToBottomRef = useRef(true)
@@ -1127,96 +1125,78 @@ export function App() {
           <AnalyticsView stats={integrations.stats} projects={projects} />
         ) : (
           <>
-        <ViewChrome
-          cwd={cwd}
-          hasSession={Boolean(activeSessionId)}
-          view={view}
-          agent={integrations.selectedAgent}
-          agentScanning={integrations.agentsScanning}
-          showPanel={panelVisible && !workspaceOpen && !turnDiffReview}
-          canTogglePanel={view === 'chat' && Boolean(cwd || activeSessionId)}
-          showWorkspace={workspaceOpen && panelVisible}
-          onView={changeView}
-          onTogglePanel={toggleOverviewPanel}
-          onToggleWorkspace={toggleWorkspacePanel}
-        />
+            <ViewChrome
+              cwd={cwd}
+              hasSession={Boolean(activeSessionId)}
+              view={view}
+              agent={integrations.selectedAgent}
+              agentScanning={integrations.agentsScanning}
+              showPanel={panelVisible && !workspaceOpen && !turnDiffReview}
+              canTogglePanel={view === 'chat' && Boolean(cwd || activeSessionId)}
+              showWorkspace={workspaceOpen && panelVisible}
+              onView={changeView}
+              onTogglePanel={toggleOverviewPanel}
+              onToggleWorkspace={toggleWorkspacePanel}
+            />
 
-        {view !== 'chat' && (
-          <div className="body">
-            {view === 'segments' ? (
-              <SegmentsView turns={session.turns} />
-            ) : view === 'graph' ? (
-              <ExecutionGraph
-                turns={session.turns}
-                selectedId={session.selected?.id ?? null}
-                onSelect={session.setSelected}
-                busy={session.busy}
-                onOpenInChat={(event) => openTurnInChat(event.runId, event, 'event')}
-              />
-            ) : null}
-          </div>
-        )}
-
-        {view === 'chat' && (
-          <ChatView
-            turns={session.turns}
-            selectedId={session.selected?.id ?? null}
-            scrollRef={scrollRef}
-            textareaRef={taRef}
-            cwd={cwd}
-            recent={recent}
-            agents={integrations.agents}
-            selectedAgentId={integrations.selectedId}
-            agentScanning={integrations.agentsScanning}
-            agentLocked={activeSessionId != null || session.busy}
-            runControls={integrations.runControls}
-            runControlCatalog={integrations.runControlCatalog}
-            runControlsLoading={integrations.runControlsLoading}
-            runControlsReason={integrations.runControlCapability?.reason}
-            input={input}
-            composerError={composerError}
-            sendBlockedReason={providerSendBlockedReason}
-            submitting={composerSubmitting}
-            busy={session.busy}
-            draftAttachments={draftAttachments}
-            queuedPrompts={queuedPrompts}
-            slashOpen={slashOpen}
-            slashLoading={slashLoading}
-            slashCmds={slashCmds}
-            slashReason={slashReason}
-            slashSel={slashSel}
-            pendingQuestions={session.pendingQuestions}
-            focusedTurnRunId={focusedTurnRunId}
-            onTurnRef={setTurnRef}
-            onSelect={session.setSelected}
-            onOpenDiff={openTurnDiffReview}
-            onAnswerQuestion={session.answerQuestion}
-            onInput={(value) => {
-              setInput(value)
-              setComposerError(null)
-              setSlashHidden(false)
-            }}
-            onChooseFolder={chooseFolder}
-            onUnbindProject={unbindProject}
-            onPickRecent={pickRecent}
-            onRemoveRecent={removeRecentFolder}
-            onRetrySlash={retrySlash}
-            onPickSlash={pickSlash}
-            onSlashSel={setSlashSel}
-            onHideSlash={() => setSlashHidden(true)}
-            onSend={send}
-            onStop={stopRun}
-            onPasteImages={addPastedImages}
-            onPasteClipboardImage={addClipboardImage}
-            onRemoveDraftAttachment={removeDraftAttachment}
-            onRemoveQueuedPrompt={removeQueuedPrompt}
-            onSelectAgent={integrations.setSelectedId}
-            onRunModel={integrations.setRunModel}
-            onRunEffort={integrations.setRunEffort}
-            onPermissionMode={integrations.setPermissionMode}
-            onRescan={integrations.rescan}
-          />
-        )}
+            <ChatView
+              turns={session.turns}
+              selectedId={session.selected?.id ?? null}
+              scrollRef={scrollRef}
+              textareaRef={taRef}
+              cwd={cwd}
+              recent={recent}
+              agents={integrations.agents}
+              selectedAgentId={integrations.selectedId}
+              agentScanning={integrations.agentsScanning}
+              agentLocked={activeSessionId != null || session.busy}
+              runControls={integrations.runControls}
+              runControlCatalog={integrations.runControlCatalog}
+              runControlsLoading={integrations.runControlsLoading}
+              runControlsReason={integrations.runControlCapability?.reason}
+              input={input}
+              composerError={composerError}
+              sendBlockedReason={providerSendBlockedReason}
+              submitting={composerSubmitting}
+              busy={session.busy}
+              draftAttachments={draftAttachments}
+              queuedPrompts={queuedPrompts}
+              slashOpen={slashOpen}
+              slashLoading={slashLoading}
+              slashCmds={slashCmds}
+              slashReason={slashReason}
+              slashSel={slashSel}
+              pendingQuestions={session.pendingQuestions}
+              focusedTurnRunId={focusedTurnRunId}
+              onTurnRef={setTurnRef}
+              onSelect={session.setSelected}
+              onOpenDiff={openTurnDiffReview}
+              onAnswerQuestion={session.answerQuestion}
+              onInput={(value) => {
+                setInput(value)
+                setComposerError(null)
+                setSlashHidden(false)
+              }}
+              onChooseFolder={chooseFolder}
+              onUnbindProject={unbindProject}
+              onPickRecent={pickRecent}
+              onRemoveRecent={removeRecentFolder}
+              onRetrySlash={retrySlash}
+              onPickSlash={pickSlash}
+              onSlashSel={setSlashSel}
+              onHideSlash={() => setSlashHidden(true)}
+              onSend={send}
+              onStop={stopRun}
+              onPasteImages={addPastedImages}
+              onPasteClipboardImage={addClipboardImage}
+              onRemoveDraftAttachment={removeDraftAttachment}
+              onRemoveQueuedPrompt={removeQueuedPrompt}
+              onSelectAgent={integrations.setSelectedId}
+              onRunModel={integrations.setRunModel}
+              onRunEffort={integrations.setRunEffort}
+              onPermissionMode={integrations.setPermissionMode}
+              onRescan={integrations.rescan}
+            />
           </>
         )}
         </>

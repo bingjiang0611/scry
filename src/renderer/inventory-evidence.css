@@ -446,12 +446,12 @@
 
 .skill-ledger__row {
   min-width: 0;
-  min-height: 88px;
+  min-height: 82px;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) minmax(136px, 0.24fr);
+  grid-template-columns: minmax(0, 1fr) minmax(164px, 0.26fr);
   align-items: center;
-  gap: 14px;
-  padding: 12px 6px 12px 2px;
+  gap: 18px;
+  padding: 11px 6px 11px 2px;
   border-bottom: 1px solid var(--border3);
 }
 
@@ -519,6 +519,14 @@
   gap: 7px;
   padding-left: 14px;
   border-left: 1px solid var(--border3);
+}
+
+.skill-ledger__status-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .skill-ledger__status small {
@@ -918,18 +926,21 @@
   }
 
   .skill-ledger__row {
-    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .skill-ledger__status {
-    grid-column: 2;
+    grid-column: 1;
     align-self: auto;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: flex-start;
-    padding: 1px 0 0;
+    gap: 10px;
+    padding: 3px 0 0;
     border-left: 0;
   }
+
+  .skill-ledger__status-line { justify-content: flex-start; }
 
 }
 

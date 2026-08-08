@@ -358,14 +358,6 @@ export function SkillsModal({
                   }
                   return (
                     <article className="skill-ledger__row" key={skill.scope + ':' + skill.name}>
-                      <InventorySwitch
-                        checked={skill.enabled}
-                        disabled={!canManage}
-                        label={(skill.enabled ? '关闭' : '启用') + ' Skill ' + skill.name}
-                        title={manageDetail}
-                        onChange={(enabled) => onToggle(skill.name, enabled)}
-                        className="skill-switch"
-                      />
                       <div className="skill-ledger__main">
                         <div className="skill-ledger__name-line">
                           <strong>{skill.name}</strong>
@@ -376,7 +368,16 @@ export function SkillsModal({
                       </div>
                       <div className="skill-ledger__status">
                         <span>配置状态</span>
-                        <EvidenceState value={configValue} />
+                        <div className="skill-ledger__status-line">
+                          <EvidenceState value={configValue} />
+                          <InventorySwitch
+                            checked={skill.enabled}
+                            disabled={!canManage}
+                            label={(skill.enabled ? '关闭' : '启用') + ' Skill ' + skill.name}
+                            title={manageDetail}
+                            onChange={(enabled) => onToggle(skill.name, enabled)}
+                          />
+                        </div>
                         <small>{canManage ? '可管理' : capability?.mode === 'read' ? '只读' : capability?.state === 'unsupported' || capability?.mode === 'none' ? '不支持管理' : '管理能力未知'}</small>
                       </div>
                     </article>

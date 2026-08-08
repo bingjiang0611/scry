@@ -1,7 +1,7 @@
 import type { DetectedAgent } from '../env'
 import { Icon } from './primitives/Icon'
 
-export type AppView = 'chat' | 'graph' | 'segments' | 'diagnostics' | 'analytics'
+export type AppView = 'chat' | 'diagnostics' | 'analytics'
 
 interface ViewChromeProps {
   cwd: string | null
@@ -42,22 +42,6 @@ export function ViewChrome({
             onClick={() => onView('chat')}
           >
             <Icon name="message" /> 对话
-          </button>
-          <button
-            type="button"
-            className={`vtab ${view === 'graph' ? 'active' : ''}`}
-            aria-current={view === 'graph' ? 'page' : undefined}
-            onClick={() => onView('graph')}
-          >
-            <Icon name="graph" /> 拓扑
-          </button>
-          <button
-            type="button"
-            className={`vtab ${view === 'segments' ? 'active' : ''}`}
-            aria-current={view === 'segments' ? 'page' : undefined}
-            onClick={() => onView('segments')}
-          >
-            <Icon name="chart" /> 分段
           </button>
         </nav>
       )}

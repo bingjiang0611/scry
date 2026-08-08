@@ -260,24 +260,25 @@ export function ChatView({
           {turns.length === 0 && (
             <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
               <header className="welcome-heading">
-                <div className="welcome-kicker"><span className="welcome-ready-dot" />LOCAL WORKSPACE</div>
-                <h1>准备好观察下一次执行。</h1>
+                <div className="welcome-kicker"><span className="welcome-ready-dot" />NEW SESSION · LOCAL EVIDENCE</div>
+                <h1>开始一次可追溯执行。</h1>
                 <p>
                   {cwd
-                    ? `已绑定 ${workspaceName ?? '当前项目'}；先核对 Provider、权限与模型，再从下方输入任务。`
+                    ? `已绑定 ${workspaceName ?? '当前项目'}；核对 Provider、权限与模型后即可输入任务。`
                     : '可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。'}
                 </p>
               </header>
 
+              <div className="welcome-ready-line" data-tone={providerReadiness.tone} role="status">
+                <span className="welcome-runtime-pulse" aria-hidden="true" />
+                <span><b>{providerReadiness.summary}</b><small>{providerReadiness.detail}</small></span>
+              </div>
+
               <div className="welcome-layout">
                 <section className="welcome-primary" aria-labelledby="welcome-provider-title">
-                  <div className="welcome-ready-line" data-tone={providerReadiness.tone} role="status">
-                    <span className="welcome-runtime-pulse" aria-hidden="true" />
-                    <span><b>{providerReadiness.summary}</b><small>{providerReadiness.detail}</small></span>
-                  </div>
                   <div className="welcome-section-head">
                     <span>01</span>
-                    <h2 id="welcome-provider-title">{providerReadiness.title}</h2>
+                    <h2 id="welcome-provider-title">Provider</h2>
                     <em>{providerReadiness.meta}</em>
                   </div>
                   <div className="welcome-provider-list" aria-label="Provider 探测结果">
@@ -397,8 +398,8 @@ export function ChatView({
         <div className="composer-shell evidence-composer-shell">
         {turns.length === 0 && (
           <div className="welcome-composer-heading">
-            <span><small>00</small><b>开始一项可追溯任务</b></span>
-            <em>证据默认开启</em>
+            <span><small>任务</small><b>告诉 Agent 要完成什么</b></span>
+            <em>本机证据已开启</em>
           </div>
         )}
         <div className="composer-top">
