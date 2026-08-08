@@ -50,10 +50,47 @@ function activeProviderId() {
 
 function WelcomeSurface() {
   const live = Boolean(sampleData.meta?.live)
+  const { welcome } = window.getCoreData()
+  const [activeProviderId, setActiveProviderId] = React.useState(welcome.providers[0]?.id || '')
+  const activeProvider = welcome.providers.find((provider) => provider.id === activeProviderId)
+  const readyCount = welcome.providers.filter((provider) => provider.state === 'ready').length
   return (
     <main className="surface cold-start-surface" data-screen-label="欢迎页 · 未绑定项目会话">
-      <div className="cold-chat-body"><div className="unbound-empty-real"><span><ScryIcon name="message" size={18} /></span><strong>不绑定项目</strong><p>{live ? '选择 Provider 与工作目录后再发起任务；当前真实数据验收页保持只读。' : '可直接发起任务；需要读写项目文件时再选择工作目录。'}</p><SampleStamp compact /></div></div>
-      <RuntimeComposer cwd={null} provider={live ? 'Provider 未选择' : 'Codex'} providerKnown={!live} model={live ? '模型未选择' : '按 Provider 上报'} />
+      <div className="cold-chat-body welcome-live-scroll">
+        <div className="welcome-live-field">
+          <header className="welcome-live-heading">
+            <div className="surface-kicker"><i></i>NEW SESSION · LOCAL EVIDENCE</div>
+            <h1>开始一次可追溯执行。</h1>
+            <p>可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。</p>
+          </header>
+          <section aria-labelledby="welcome-live-provider-title">
+            <div className="welcome-live-section-head">
+              <span>01</span>
+              <h2 id="welcome-live-provider-title">Provider</h2>
+              <em>{readyCount} 可用 · {welcome.providers.length} 个适配器</em>
+            </div>
+            <div className="welcome-live-status" role="status">
+              <i aria-hidden="true"></i>
+              <span><b>{readyCount}/{welcome.providers.length} 个 Provider 可用</b><small>结构预览；运行状态以 Scry 本机探测为准</small></span>
+            </div>
+            <div className="welcome-live-providers" aria-label="Provider 结构预览">
+              {welcome.providers.map((provider) => {
+                const active = provider.id === activeProviderId
+                return (
+                  <button type="button" key={provider.id} className={cx('welcome-live-provider', active && 'is-selected')} onClick={() => setActiveProviderId(provider.id)} aria-pressed={active}>
+                    <i className={`provider-swatch provider-${provider.id}`} aria-hidden="true"></i>
+                    <span><b>{provider.name}</b><small>{provider.detail}</small></span>
+                    <StatusMark state={provider.state} label={provider.stateLabel} compact />
+                    <ScryIcon name="chevronRight" size={13} />
+                  </button>
+                )
+              })}
+            </div>
+            <p className="welcome-live-boundary"><b>边界：</b>未支持不是 0；未知表示尚无足够观测。</p>
+          </section>
+        </div>
+      </div>
+      <RuntimeComposer cwd={null} provider={activeProvider?.name || (live ? 'Provider 未选择' : 'Codex')} providerKnown={Boolean(activeProvider)} model="按 Provider 上报" />
     </main>
   )
 }

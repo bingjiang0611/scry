@@ -8996,7 +8996,7 @@ select:focus-visible,
 
 /* Welcome / zero-turn readiness field */
 .welcome-field {
-  width: min(100% - 48px, 1040px);
+  width: min(100% - 48px, 840px);
   min-height: auto;
   display: block;
   margin: 0 auto;
@@ -9047,17 +9047,7 @@ select:focus-visible,
   text-wrap: pretty;
 }
 
-.welcome-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(278px, 0.8fr);
-  gap: clamp(28px, 4cqi, 44px);
-  margin-top: 0;
-}
-
-.welcome-primary,
-.welcome-secondary {
-  min-width: 0;
-}
+.welcome-provider-field { min-width: 0; }
 
 .welcome-ready-line {
   min-height: 48px;
@@ -9065,7 +9055,6 @@ select:focus-visible,
   align-items: center;
   gap: 11px;
   padding: 8px 0;
-  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 
@@ -9138,11 +9127,7 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-.welcome-provider-list,
-.welcome-recent,
-.welcome-context-ledger {
-  border-bottom: 1px solid var(--border);
-}
+.welcome-provider-list { border-bottom: 1px solid var(--border); }
 
 .welcome-provider {
   position: relative;
@@ -9238,105 +9223,6 @@ select:focus-visible,
 
 .welcome-boundary b { color: var(--dim); }
 
-.welcome-context-ledger > span {
-  min-width: 0;
-  min-height: 48px;
-  display: grid;
-  grid-template-columns: minmax(78px, 0.65fr) minmax(0, 1fr);
-  align-content: center;
-  align-items: baseline;
-  gap: 3px 10px;
-  padding: 7px 1px;
-  border-bottom: 1px solid var(--border3);
-}
-
-.welcome-context-ledger > span:last-child { border-bottom: 0; }
-
-.welcome-context-ledger small {
-  grid-row: 1 / span 2;
-  color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.welcome-context-ledger b,
-.welcome-context-ledger em {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.welcome-context-ledger b {
-  color: var(--fg);
-  font: 650 12px/1.25 var(--font-mono);
-}
-
-.welcome-context-ledger b.is-danger { color: var(--bad); }
-
-.welcome-context-ledger em {
-  color: var(--dim2);
-  font: 10px/1.25 var(--font-mono);
-  font-style: normal;
-}
-
-.welcome-recent-section { margin-top: 22px; }
-
-.welcome-recent {
-  display: block;
-}
-
-.welcome-recent button {
-  width: 100%;
-  min-height: 52px;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 14px;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 6px 8px 8px;
-  border: 0;
-  border-bottom: 1px solid var(--border3);
-  border-radius: 0;
-  background: transparent;
-  color: var(--dim);
-  text-align: left;
-  transition: background-color 140ms ease-out, transform 140ms var(--ease-out);
-}
-
-.welcome-recent button:last-child { border-bottom: 0; }
-.welcome-recent button.is-selected { background: var(--selected-soft); }
-.welcome-recent button:active { transform: scale(0.995); }
-
-.welcome-recent button > span {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.welcome-recent button b,
-.welcome-recent button small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.welcome-recent button b {
-  color: var(--fg);
-  font: 650 13px/1.25 var(--font-ui);
-}
-
-.welcome-recent button small {
-  color: var(--dim2);
-  font: 11.5px/1.25 var(--font-mono);
-}
-
-.welcome-recent button > .ico {
-  width: 14px;
-  height: 14px;
-  color: var(--dim2);
-}
-
 .welcome-list-empty {
   min-height: 58px;
   display: flex;
@@ -9381,8 +9267,7 @@ select:focus-visible,
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .welcome-provider:hover:not(.is-selected),
-  .welcome-recent button:hover:not(.is-selected) {
+  .welcome-provider:hover:not(.is-selected) {
     background: var(--surface-hover);
     color: var(--fg);
   }
@@ -9743,31 +9628,12 @@ button.turn-id.turn-call-open:focus-visible {
     text-align: left;
   }
 
-  .welcome-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 22px;
-  }
-
-  .welcome-secondary {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 24px;
-    padding-top: 4px;
-    border-top: 1px solid var(--border3);
-  }
-
-  .welcome-recent-section { margin-top: 0; }
 }
 
 @container main-pane (max-width: 520px) {
-  .welcome-field { width: min(100% - 28px, 1040px); }
+  .welcome-field { width: min(100% - 28px, 840px); }
 
   .welcome-heading h1 { font-size: 28px; }
-
-  .welcome-secondary {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
-  }
 
   .welcome-composer-heading em { display: none; }
 }

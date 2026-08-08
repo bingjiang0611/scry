@@ -118,15 +118,10 @@
   font-weight: 760;
 }
 
-.welcome-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(286px, 0.78fr);
-  gap: clamp(34px, 5cqw, 72px);
+.welcome-focus {
+  width: min(820px, 100%);
   margin-top: 26px;
 }
-
-.welcome-primary,
-.welcome-secondary { min-width: 0; }
 
 .welcome-ready-line {
   min-height: 46px;
@@ -210,7 +205,6 @@
 .composer-hint { margin: 7px 2px 0; color: var(--ink-4); font: 8.5px/1.4 var(--font-mono); }
 
 .welcome-section { margin-top: 38px; }
-.welcome-secondary .welcome-section:first-child { margin-top: 0; }
 .provider-readiness-list,
 .recent-project-list { border-top: 1px solid var(--hair); }
 
@@ -582,9 +576,6 @@
   .surface.welcome-surface,
   .surface.chat-surface { padding-right: 20px; padding-left: 20px; }
 
-  .welcome-layout { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .welcome-secondary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; padding-top: 8px; border-top: 1px solid var(--hair-soft); }
-  .welcome-secondary .welcome-section { margin-top: 28px; }
   .welcome-surface .view-heading h1 { font-size: clamp(29px, 7cqw, 38px); }
 
   .chat-run-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -603,7 +594,6 @@
   .surface.welcome-surface,
   .surface.chat-surface { padding: 20px 14px 28px; }
 
-  .welcome-secondary { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .welcome-composer-footer { align-items: flex-end; }
   .composer-context { display: grid; gap: 5px; }
   .composer-context .composer-permission { display: none; }

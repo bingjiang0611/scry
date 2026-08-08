@@ -243,103 +243,52 @@ function WelcomeComposer({ provider, project, onSubmit }) {
   )
 }
 
-function WelcomeSurface({ onStart, onOpenProject }) {
+function WelcomeSurface({ onStart }) {
   const { welcome } = getCoreData()
   const [activeProviderId, setActiveProviderId] = React.useState(welcome.providers[0]?.id || '')
-  const [activeProjectId, setActiveProjectId] = React.useState(welcome.projects[0]?.id || '')
   const activeProvider = welcome.providers.find((provider) => provider.id === activeProviderId)
-  const activeProject = welcome.projects.find((project) => project.id === activeProjectId)
+  const activeProject = welcome.projects[0]
 
   return (
     <main className="surface welcome-surface" data-screen-label="欢迎页 · 本地就绪场">
       <ViewHeader
-        eyebrow="LOCAL WORKSPACE"
-        title="准备好观察下一次执行。"
-        detail="先确认 Provider、权限与工作区，再把任务交给 Scry。"
+        eyebrow="NEW SESSION · LOCAL EVIDENCE"
+        title="开始一次可追溯执行。"
+        detail="可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。"
         trailing={<SampleStamp />}
       />
 
-      <div className="welcome-layout">
-        <section className="welcome-primary" aria-labelledby="welcome-start-title">
+      <div className="welcome-focus">
+        <section aria-labelledby="provider-ready-title">
+          <SectionTitle id="provider-ready-title" index="01" title="Provider" meta={`${welcome.providers.length} 个适配器`} />
           <div className="welcome-ready-line">
             <span className="ready-pulse" aria-hidden="true"></span>
             <span><b>3 个运行时可用</b><small>1 项 usage 待首次运行 · 2 项危险分类未支持</small></span>
           </div>
-
-          <div className="welcome-composer-block">
-            <SectionTitle id="welcome-start-title" index="00" title="开始一项可追溯任务" meta="证据默认开启" />
-            <WelcomeComposer
-              provider={activeProvider}
-              project={activeProject}
-              onSubmit={onStart}
-            />
-            <p className="composer-hint">Enter 换行 · ⌘↵ 执行 · 示例原型不会真的启动 Provider</p>
+          <div className="provider-readiness-list">
+            {welcome.providers.map((provider) => (
+              <ProviderReadiness
+                key={provider.id}
+                provider={provider}
+                active={provider.id === activeProviderId}
+                onSelect={setActiveProviderId}
+              />
+            ))}
           </div>
-
-          <section className="welcome-section" aria-labelledby="provider-ready-title">
-            <SectionTitle id="provider-ready-title" index="01" title="Provider 就绪" meta={`${welcome.providers.length} 个适配器`} />
-            <div className="provider-readiness-list">
-              {welcome.providers.map((provider) => (
-                <ProviderReadiness
-                  key={provider.id}
-                  provider={provider}
-                  active={provider.id === activeProviderId}
-                  onSelect={setActiveProviderId}
-                />
-              ))}
-            </div>
-            <p className="semantic-note">
-              <b>边界：</b>“未支持”表示没有该能力，不是 0；“未知”表示尚无足够观测；“部分”只展示已知事实。
-            </p>
-          </section>
+          <p className="semantic-note">
+            <b>边界：</b>“未支持”表示没有该能力，不是 0；“未知”表示尚无足够观测；“部分”只展示已知事实。
+          </p>
         </section>
 
-        <aside className="welcome-secondary" aria-label="本地工作区状态">
-          <section className="welcome-section permission-section" aria-labelledby="permission-title">
-            <SectionTitle id="permission-title" index="02" title="本机权限" meta="执行前核对" />
-            <div className="evidence-ledger">
-              {welcome.permissions.map((item) => (
-                <EvidenceRow
-                  key={item.label}
-                  label={item.label}
-                  value={item.value}
-                  state={item.state}
-                  detail={item.detail}
-                />
-              ))}
-            </div>
-          </section>
-
-          <section className="welcome-section recent-section" aria-labelledby="recent-project-title">
-            <SectionTitle id="recent-project-title" index="03" title="最近项目" meta="本机历史" />
-            <div className="recent-project-list">
-              {welcome.projects.map((project) => {
-                const active = project.id === activeProjectId
-                return (
-                  <button
-                    type="button"
-                    key={project.id}
-                    className={`recent-project ${active ? 'is-selected' : ''}`}
-                    onClick={() => {
-                      setActiveProjectId(project.id)
-                      if (onOpenProject) onOpenProject(project)
-                    }}
-                    aria-pressed={active}
-                  >
-                    <span className="selection-anchor" aria-hidden="true"></span>
-                    <span className={`provider-swatch provider-${project.provider}`} aria-hidden="true"></span>
-                    <span className="recent-project-copy">
-                      <span><b>{project.name}</b><time>{project.activity}</time></span>
-                      <small>{project.path}</small>
-                      <em>{project.summary}</em>
-                    </span>
-                    <ScryIcon name="chevronRight" size={14} />
-                  </button>
-                )
-              })}
-            </div>
-          </section>
-        </aside>
+        <div className="welcome-composer-block">
+          <SectionTitle id="welcome-start-title" index="02" title="任务" meta="证据默认开启" />
+          <WelcomeComposer
+            provider={activeProvider}
+            project={activeProject}
+            onSubmit={onStart}
+          />
+          <p className="composer-hint">Enter 换行 · ⌘↵ 执行 · 示例原型不会真的启动 Provider</p>
+        </div>
       </div>
     </main>
   )
@@ -593,6 +542,7 @@ function OverviewPanel({ selectedEvent, onSelectEvent }) {
 }
 
 Object.assign(window, {
+  getCoreData,
   WelcomeSurface,
   ChatSurface,
   OverviewPanel,

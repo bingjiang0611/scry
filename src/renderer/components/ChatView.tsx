@@ -159,13 +159,7 @@ export function ChatView({
   onRescan
 }: ChatViewProps) {
   const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  const permissionLabel = {
-    default: 'Provider 原生权限',
-    auto_review: '自动复核',
-    full_access: '完全访问'
-  }[runControls.permissionMode]
   const healthyAgentCount = agents.filter((agent) => agent.health?.state === 'ready').length
   const degradedAgentCount = agents.filter((agent) => agent.health?.state === 'degraded').length
   const availableAgentCount = healthyAgentCount + degradedAgentCount
@@ -269,104 +263,60 @@ export function ChatView({
                 </p>
               </header>
 
-              <div className="welcome-ready-line" data-tone={providerReadiness.tone} role="status">
-                <span className="welcome-runtime-pulse" aria-hidden="true" />
-                <span><b>{providerReadiness.summary}</b><small>{providerReadiness.detail}</small></span>
-              </div>
-
-              <div className="welcome-layout">
-                <section className="welcome-primary" aria-labelledby="welcome-provider-title">
-                  <div className="welcome-section-head">
-                    <span>01</span>
-                    <h2 id="welcome-provider-title">Provider</h2>
-                    <em>{providerReadiness.meta}</em>
-                  </div>
-                  <div className="welcome-provider-list" aria-label="Provider 探测结果">
-                    {agents.map((agent) => {
-                      const selected = agent.id === selectedAgentId
-                      const healthState = agent.health?.state ?? (agentScanning ? 'scanning' : 'unknown')
-                      const state = healthState === 'ready'
-                        ? '健康'
-                        : healthState === 'degraded'
-                          ? '降级'
-                          : healthState === 'unavailable'
-                            ? '不可用'
-                            : healthState === 'scanning'
-                              ? '探测中'
-                              : '状态未知'
-                      return (
-                        <button
-                          type="button"
-                          className={`welcome-provider ${selected ? 'is-selected' : ''}`}
-                          data-provider={agent.id}
-                          data-health={healthState}
-                          key={agent.id}
-                          aria-pressed={selected}
-                          disabled={agentLocked}
-                          onClick={() => onSelectAgent(agent.id)}
-                        >
-                          <i aria-hidden="true" />
-                          <span>
-                            <span><b>{agent.name}</b><em>{state}</em></span>
-                            <code title={agent.path}>{agent.path}</code>
-                            <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
-                          </span>
-                          <Icon name="chevronRight" />
-                        </button>
-                      )
-                    })}
-                    {agents.length === 0 && (
-                      <div className="welcome-list-empty" role="status">
-                        {agentScanning
-                          ? '正在探测本机 agent CLI…'
-                          : '完整探测未返回可用 agent CLI；可在下方 Provider 选择器重新扫描。'}
-                      </div>
-                    )}
-                  </div>
-                  <p className="welcome-boundary"><b>边界：</b>未发现不等于未安装；未上报的状态保持未知。</p>
-                </section>
-
-                <aside className="welcome-secondary" aria-label="本地执行上下文">
-                  <section aria-labelledby="welcome-context-title">
-                    <div className="welcome-section-head">
-                      <span>02</span>
-                      <h2 id="welcome-context-title">运行上下文</h2>
-                      <em>执行前核对</em>
+              <section className="welcome-provider-field" aria-labelledby="welcome-provider-title">
+                <div className="welcome-section-head">
+                  <span>01</span>
+                  <h2 id="welcome-provider-title">Provider</h2>
+                  <em>{providerReadiness.meta}</em>
+                </div>
+                <div className="welcome-ready-line" data-tone={providerReadiness.tone} role="status">
+                  <span className="welcome-runtime-pulse" aria-hidden="true" />
+                  <span><b>{providerReadiness.summary}</b><small>{providerReadiness.detail}</small></span>
+                </div>
+                <div className="welcome-provider-list" aria-label="Provider 探测结果">
+                  {agents.map((agent) => {
+                    const selected = agent.id === selectedAgentId
+                    const healthState = agent.health?.state ?? (agentScanning ? 'scanning' : 'unknown')
+                    const state = healthState === 'ready'
+                      ? '健康'
+                      : healthState === 'degraded'
+                        ? '降级'
+                        : healthState === 'unavailable'
+                          ? '不可用'
+                          : healthState === 'scanning'
+                            ? '探测中'
+                            : '状态未知'
+                    return (
+                      <button
+                        type="button"
+                        className={`welcome-provider ${selected ? 'is-selected' : ''}`}
+                        data-provider={agent.id}
+                        data-health={healthState}
+                        key={agent.id}
+                        aria-pressed={selected}
+                        disabled={agentLocked}
+                        onClick={() => onSelectAgent(agent.id)}
+                      >
+                        <i aria-hidden="true" />
+                        <span>
+                          <span><b>{agent.name}</b><em>{state}</em></span>
+                          <code title={agent.path}>{agent.path}</code>
+                          <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
+                        </span>
+                        <Icon name="chevronRight" />
+                      </button>
+                    )
+                  })}
+                  {agents.length === 0 && (
+                    <div className="welcome-list-empty" role="status">
+                      {agentScanning
+                        ? '正在探测本机 agent CLI…'
+                        : '完整探测未返回可用 agent CLI；可在下方 Provider 选择器重新扫描。'}
                     </div>
-                    <div className="welcome-context-ledger">
-                      <span><small>Provider</small><b>{selectedAgent?.name ?? 'Provider 未知'}</b><em>{selectedAgent?.version ?? '版本未知'}</em></span>
-                      <span><small>工作目录</small><b>{workspaceName ?? '不绑定项目'}</b><em title={cwd ?? '不绑定项目'}>{cwd ?? '按需选择'}</em></span>
-                      <span><small>权限</small><b className={runControls.permissionMode === 'full_access' ? 'is-danger' : ''}>{permissionLabel}</b><em>当前 composer 配置</em></span>
-                      <span><small>模型</small><b>{selectedModel?.label ?? 'Provider 默认'}</b><em>{runControls.effort ? `effort · ${runControls.effort}` : 'effort 由 Provider 决定'}</em></span>
-                    </div>
-                  </section>
-
-                  <section className="welcome-recent-section" aria-labelledby="welcome-recent-title">
-                    <div className="welcome-section-head">
-                      <span>03</span>
-                      <h2 id="welcome-recent-title">最近工作目录</h2>
-                      <em>本机历史</em>
-                    </div>
-                    <div className="welcome-recent" aria-label="最近工作目录">
-                      {recent.slice(0, 3).map((path) => (
-                        <button
-                          type="button"
-                          className={cwd === path ? 'is-selected' : ''}
-                          key={path}
-                          onClick={() => onPickRecent(path)}
-                          title={path}
-                          aria-pressed={cwd === path}
-                        >
-                          <Icon name="folder" />
-                          <span><b>{path.split('/').filter(Boolean).at(-1) || path}</b><small>{path}</small></span>
-                          <Icon name="chevronRight" />
-                        </button>
-                      ))}
-                      {recent.length === 0 && <div className="welcome-list-empty" role="status">当前没有可显示的本机工作目录历史。</div>}
-                    </div>
-                  </section>
-                </aside>
-              </div>
+                  )}
+                </div>
+                <p className="welcome-boundary"><b>边界：</b>未发现不等于未安装；未上报的状态保持未知。</p>
+              </section>
             </div>
           )}
           {turns.map((turn) => {
