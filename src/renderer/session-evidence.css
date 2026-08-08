@@ -584,9 +584,22 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .chat-evidence-source code { max-width: none; color: var(--dim3); font: inherit; }
 .chat-evidence-source b { color: var(--dim3); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 
+/* transcript、零 turn 欢迎区、composer 共用同一条正文列：列宽与两侧 gutter 只在这里定义。 */
+.chat-body,
+.runtime-composer {
+  --evidence-column: 880px;
+  --evidence-gutter: clamp(20px, 3.2cqi, 38px);
+}
+
 .chat-body .chat-transcript {
-  padding: 20px clamp(20px, 3.2cqi, 38px) 34px;
+  padding: 20px var(--evidence-gutter) 34px;
   scroll-padding-block: 42px;
+}
+
+/* welcome 的左右边界要和 composer 卡片重合：composer 卡片是 min(880px, 100%)
+   去掉两侧 gutter，welcome 在 transcript 内容盒里取同一宽度再居中。 */
+.chat-body .welcome-field {
+  width: min(100%, calc(var(--evidence-column) - 2 * var(--evidence-gutter)));
 }
 
 .chat-body .transcript-turn {
@@ -816,9 +829,9 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .chat-body .turn-footer .sep { display: none; }
 
 .runtime-composer {
-  width: min(880px, 100%);
+  width: min(var(--evidence-column), 100%);
   max-width: none;
-  padding: 8px clamp(20px, 3.2cqi, 38px) 10px;
+  padding: 8px var(--evidence-gutter) 10px;
 }
 
 .runtime-composer .evidence-composer-shell {
