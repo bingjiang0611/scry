@@ -517,8 +517,10 @@ export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirecto
   let lastError: string | undefined
   const modelCache = new Map<string, { expiresAt: number; catalog: AgentRunControlCatalog }>()
   const rememberFailure = (error: unknown): void => {
+    const message = sanitizeMcpAuthError(error)
+    if (message === 'OpenCode 需要工作目录') return
     lastErrorAt = Date.now()
-    lastError = sanitizeMcpAuthError(error)
+    lastError = message
   }
 
   const clientFor = async (context: ProviderContext, mcpExecution?: AuthorizedMcpExecution): Promise<OpencodeClient> => {

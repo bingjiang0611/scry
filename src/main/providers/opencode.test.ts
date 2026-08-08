@@ -278,6 +278,19 @@ describe('OpenCode provider adapter', () => {
     })
   })
 
+  it('does not degrade Provider health when an unbound session requests workspace metadata', async () => {
+    const adapter = createOpenCodeAdapter()
+    try {
+      await expect(adapter.runControls!.read({ providerId: 'opencode' })).resolves.toMatchObject({
+        state: 'degraded',
+        reason: 'OpenCode 需要工作目录'
+      })
+      await expect(adapter.describe()).resolves.toMatchObject({ health: { state: 'unknown' } })
+    } finally {
+      adapter.dispose?.()
+    }
+  })
+
   it('keeps MCP disabled until authorization and converts only approved configs into isolated OpenCode format', () => {
     expect(openCodeMcpConfig()).toEqual({})
     expect(openCodeMcpConfig({
