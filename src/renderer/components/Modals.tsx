@@ -204,6 +204,14 @@ function scopeShortLabel(scope: string): string {
   return scope === 'project' || scope === '.mcp.json' ? '项目' : scope === 'user' ? '用户' : scope || '未知'
 }
 
+export function filterSkillsForScope(skills: SkillMeta[], scope: 'project' | 'user', query = ''): SkillMeta[] {
+  const normalizedQuery = query.trim().toLowerCase()
+  return skills.filter((skill) =>
+    skill.scope === scope &&
+    (!normalizedQuery || [skill.name, skill.description, skill.dir].some((value) => value.toLowerCase().includes(normalizedQuery)))
+  )
+}
+
 function observedTime(observedAt: number | undefined): string {
   if (!observedAt) return '尚未观测'
   return new Intl.DateTimeFormat('zh-CN', {
@@ -263,14 +271,13 @@ export function SkillsModal({
   const canManage = capability?.mode === 'manage'
   const titleId = useId()
   const searchRef = useRef<HTMLInputElement>(null)
+  const [scope, setScope] = useState<'project' | 'user'>('project')
   const [query, setQuery] = useState('')
-  const normalizedQuery = query.trim().toLowerCase()
-  const filtered = normalizedQuery
-    ? skills.filter((skill) => [skill.name, skill.description, skill.dir, skill.scope].some((value) => value.toLowerCase().includes(normalizedQuery)))
-    : skills
-  const groups: Record<string, SkillMeta[]> = {}
-  for (const skill of filtered) (groups[skill.scope] ??= []).push(skill)
-  const scopes = ['project', 'user', ...Object.keys(groups).filter((scope) => scope !== 'project' && scope !== 'user')]
+  const scopeSkills = filterSkillsForScope(skills, scope)
+  const filtered = filterSkillsForScope(skills, scope, query)
+  const projectCount = skills.filter((skill) => skill.scope === 'project').length
+  const userCount = skills.filter((skill) => skill.scope === 'user').length
+  const scopeLabel = scope === 'project' ? '项目 Skill' : '用户 Skill'
   const manageDetail = canManage
     ? 'Scry 可写入当前 Provider 的 Skill 配置'
     : capability?.mode === 'read'
@@ -311,6 +318,31 @@ export function SkillsModal({
         </div>
       )}
 
+      <div className="skill-scope-tabs" role="tablist" aria-label="Skill 来源">
+        <button
+          type="button"
+          id={titleId + '-project-tab'}
+          role="tab"
+          aria-selected={scope === 'project'}
+          aria-controls={titleId + '-skills-panel'}
+          className={scope === 'project' ? 'active' : ''}
+          onClick={() => setScope('project')}
+        >
+          项目 Skill <span>{projectCount}</span>
+        </button>
+        <button
+          type="button"
+          id={titleId + '-user-tab'}
+          role="tab"
+          aria-selected={scope === 'user'}
+          aria-controls={titleId + '-skills-panel'}
+          className={scope === 'user' ? 'active' : ''}
+          onClick={() => setScope('user')}
+        >
+          用户 Skill <span>{userCount}</span>
+        </button>
+      </div>
+
       <div className="inventory-toolbar">
         <label className="inventory-search">
           <span>搜索</span>
@@ -318,50 +350,44 @@ export function SkillsModal({
             ref={searchRef}
             type="search"
             className="modal-search"
-            placeholder="名称、描述、来源或 scope"
+            placeholder={`搜索${scopeLabel}`}
             aria-label="搜索 Skills"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
           {query && <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">清除</button>}
         </label>
-        <span className="inventory-toolbar__count" aria-live="polite">显示 {filtered.length} / {skills.length}</span>
+        <span className="inventory-toolbar__count" aria-live="polite">显示 {filtered.length} / {scopeSkills.length}</span>
       </div>
 
-      <div className="modal-body inventory-modal__body">
+      <div
+        className="modal-body inventory-modal__body"
+        id={titleId + '-skills-panel'}
+        role="tabpanel"
+        aria-labelledby={titleId + '-' + scope + '-tab'}
+      >
         {filtered.length === 0 && (
           <div className="inventory-empty" role="status">
-            <strong>{refreshing && skills.length === 0 ? '正在读取 Skill…' : skills.length === 0 ? '未发现 Skill' : '没有匹配的 Skill'}</strong>
-            <p>{skills.length === 0 ? '当前 Provider 与工作目录没有返回 Skill 条目。' : '换一个关键词，或清空搜索查看全部条目。'}</p>
+            <strong>{refreshing && skills.length === 0 ? '正在读取 Skill…' : scopeSkills.length === 0 ? `未发现${scopeLabel}` : `${scopeLabel}中没有匹配结果`}</strong>
+            <p>{scopeSkills.length === 0 ? `当前 Provider 没有返回${scopeLabel}。` : '换一个关键词，或清空搜索查看全部条目。'}</p>
             {query && <button type="button" onClick={() => setQuery('')}>清空搜索</button>}
           </div>
         )}
 
-        {scopes.map((scope) => {
-          const list = groups[scope]
-          if (!list?.length) return null
-          const groupLabel = scope === 'project' ? '项目 Skills' : scope === 'user' ? '用户 Skills' : (scope || '来源未知') + ' Skills'
-          const groupHint = scope === 'project' ? '随当前仓库生效' : scope === 'user' ? '来自用户目录，可跨项目复用' : 'Provider 返回的原始 scope'
-          const groupId = titleId + '-skills-' + (scope || 'unknown')
-          return (
-            <section className="skill-group" key={scope} aria-labelledby={groupId}>
-              <div className="skill-group__head">
-                <div><h2 id={groupId}>{groupLabel}</h2><p>{groupHint}</p></div>
-                <span>{list.length}</span>
-              </div>
-              <div className="skill-ledger">
-                {list.map((skill) => {
-                  const configValue: EvidenceValue = {
-                    state: skill.enabled ? 'enabled' : 'disabled',
-                    label: skill.enabled ? '已启用' : '已关闭',
-                    detail: manageDetail
-                  }
-                  return (
-                    <article className="skill-ledger__row" key={skill.scope + ':' + skill.name}>
+        {filtered.length > 0 && (
+          <div className="skill-ledger">
+            {filtered.map((skill) => {
+              const configValue: EvidenceValue = {
+                state: skill.enabled ? 'enabled' : 'disabled',
+                label: skill.enabled ? '已启用' : '已关闭',
+                detail: manageDetail
+              }
+              return (
+                <article className="skill-ledger__row" key={skill.scope + ':' + skill.name}>
                       <div className="skill-ledger__main">
                         <div className="skill-ledger__name-line">
                           <strong>{skill.name}</strong>
-                          <span className={'inventory-scope inventory-scope--' + scopeClass(scope)}>{scopeShortLabel(scope)}</span>
+                          <span className={'inventory-scope inventory-scope--' + scopeClass(skill.scope)}>{scopeShortLabel(skill.scope)}</span>
                         </div>
                         <p title={skill.description}>{skill.description}</p>
                         <div className="skill-ledger__source"><span>来源</span><code title={skill.dir}>{skill.dir}</code></div>
@@ -380,13 +406,11 @@ export function SkillsModal({
                         </div>
                         <small>{canManage ? '可管理' : capability?.mode === 'read' ? '只读' : capability?.state === 'unsupported' || capability?.mode === 'none' ? '不支持管理' : '管理能力未知'}</small>
                       </div>
-                    </article>
-                  )
-                })}
-              </div>
-            </section>
-          )
-        })}
+                </article>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <div className="modal-foot inventory-footnote">

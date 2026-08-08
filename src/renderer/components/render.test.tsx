@@ -28,12 +28,10 @@ import {
   shouldQueuePrompt,
   takeNextQueuedPrompt
 } from '../App'
-import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
-import { McpTrustPanel, type McpGuardReport } from './McpTrustPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
 import { pathContains, WorkspacePanel, workspaceReferenceToken } from './WorkspacePanel'
@@ -1970,251 +1968,6 @@ describe('OverviewPanel compact count', () => {
 })
 
 describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足迹 + git diff + 累计 + sqlite 分析', () => {
-  const billingState = {
-    adminConnections: [
-      { provider: 'anthropic', envVar: 'ANTHROPIC_ADMIN_API_KEY', configured: false, status: 'missing_key' },
-      { provider: 'openai', envVar: 'OPENAI_ADMIN_API_KEY', configured: false, status: 'missing_key' }
-    ],
-    gatewayConnections: [
-      {
-        provider: 'anthropic',
-        label: 'https://gateway.example.com',
-        baseUrlEnvVar: 'ANTHROPIC_BASE_URL',
-        tokenEnvVar: 'ANTHROPIC_AUTH_TOKEN',
-        configured: true,
-        status: 'ready',
-        sourceKind: 'gateway_reported',
-        note: '三方网关已配置；SDK usage 可观测，官方账单仍为 unavailable'
-      }
-    ],
-    rawUsageRows: 2,
-    ledgerRows: 3,
-    sourceSummaries: [
-      {
-        source: 'anthropic_gateway_response',
-        sourceKind: 'gateway_reported',
-        costSource: 'gateway_reported',
-        confidence: 'provider_reported',
-        rows: 2,
-        cost: 0.1275,
-        tokens: 2520
-      }
-    ],
-    reconciliation: [
-      {
-        provider: 'anthropic',
-        label: 'anthropic',
-        costUnit: 'usd',
-        sdkEstimate: 0.5,
-        providerReported: 0.1275,
-        officialBill: 0,
-        officialTelemetry: 0,
-        deltaOfficialVsSdk: null,
-        confidence: 'provider_reported',
-        note: '三方 gateway/provider reported 已导入；official bill unavailable'
-      },
-      {
-        provider: 'codex',
-        label: 'codex',
-        costUnit: 'usd',
-        sdkEstimate: 0,
-        providerReported: 0,
-        officialBill: 0,
-        officialTelemetry: 0,
-        deltaOfficialVsSdk: null,
-        confidence: 'provider_reported',
-        note: 'Codex CLI result rows are tracked under the codex billing provider'
-      },
-      {
-        provider: 'qoder',
-        label: 'qoder',
-        costUnit: 'usd',
-        sdkEstimate: 0,
-        providerReported: 0,
-        officialBill: 0,
-        officialTelemetry: 0,
-        deltaOfficialVsSdk: null,
-        confidence: 'provider_reported',
-        note: 'Qoder CLI result rows are tracked under the qoder billing provider'
-      }
-    ],
-    rollups: [
-      {
-        granularity: 'day',
-        projectKey: '/fixture/sample-workspace',
-        model: 'claude-opus-4-8',
-        costSource: 'gateway_reported',
-        confidence: 'provider_reported',
-        rows: 2,
-        cost: 0.1275,
-        tokens: 2520
-      }
-    ],
-    priceVersions: [
-      {
-        id: 'price:anthropic:claude-opus-4-8:2026-07',
-        provider: 'anthropic',
-        model: 'claude-opus-4-8',
-        currency: 'USD',
-        source: 'fixture-contract',
-        effectiveFrom: 1782864000000,
-        frozenLedgerRows: 2
-      }
-    ],
-    preflight: {
-      status: 'refused',
-      confidence: 'inferred',
-      evidence: 'usage_ledger priced rows=2; history too sparse for PR estimate'
-    },
-    advice: [
-      {
-        title: '按项目查看高 Token 窗口',
-        detail: '先从最高 day/week rollup 对应项目回看 token-heavy sessions。',
-        confidence: 'inferred',
-        evidence: 'usage_rollup:day:/fixture/sample-workspace'
-      }
-    ],
-    teamCosts: [
-      {
-        team: 'platform',
-        project: '/fixture/sample-workspace',
-        owner: 'billing',
-        workflow: 'workflow-orchestrator',
-        cost: 0.1275,
-        confidence: 'provider_reported'
-      }
-    ],
-    gatewayPolicies: [
-      {
-        provider: 'anthropic-compatible',
-        label: 'fixture gateway policy',
-        source: 'gateway-config-import',
-        budgetUsd: 25,
-        rpm: 120,
-        tpm: 200000,
-        keysHosted: false
-      }
-    ],
-    sharedReportExport: {
-      availableFormats: ['markdown', 'json'],
-      plannedFormats: ['csv', 'bi'],
-      includesTranscript: false,
-      evidence:
-        'available markdown report + normalized JSON state; teamCosts=1; usage_ledger rows=3; transcript excluded by default'
-    },
-    audit: {
-      auditRows: 2,
-      retentionMode: 'aggregate-only',
-      redactionMode: 'secrets-and-prompts',
-      contractPriceRows: 1,
-      chargebackRows: 1,
-      showbackCost: 0.1275
-    }
-  } satisfies NonNullable<ComponentProps<typeof OverviewPanel>['billingState']>
-  const mcpGuardReport: McpGuardReport = {
-    schemaVersion: '0.1',
-    scan: {
-      id: 'scan_fixture',
-      tool: 'mcpguard',
-      toolVersion: '0.1.0',
-      ruleVersion: '2026.07.03',
-      startedAt: '2026-07-04T00:00:00.000Z',
-      mcpSpecVersion: '2025-11-25',
-      mode: 'static',
-      offline: true,
-      redactionPolicy: 'hash_secret_values_keep_key_names',
-      analyzers: [{ name: 'config-static', version: '0.1.0' }]
-    },
-    targets: [
-      {
-        targetId: 'target-danger',
-        serverName: 'rate-danger',
-        client: 'claude',
-        scope: 'project',
-        transport: 'stdio',
-        sourceType: 'local_config',
-        sourcePath: '/fixture/sample-workspace/.mcp.json',
-        command: 'npx',
-        args: ['-y', 'remote-mcp'],
-        envKeys: ['ANTHROPIC_AUTH_TOKEN'],
-        roots: ['/Users/example'],
-        serverDigest: 'sha256:danger',
-        toolFingerprints: [
-          { name: 'read_all', kind: 'tool', canonicalHash: 'sha256:read', changed: false },
-          { name: 'write_all', kind: 'tool', canonicalHash: 'sha256:write', changed: false }
-        ],
-        enabled: true,
-        introspection: { status: 'not_observed', reason: 'static_only' }
-      },
-      {
-        targetId: 'target-safe',
-        serverName: 'rate-safe',
-        client: 'claude',
-        scope: 'user',
-        transport: 'stdio',
-        sourceType: 'local_config',
-        sourcePath: '/Users/example/.claude.json',
-        command: '/usr/local/bin/rate-safe',
-        args: [],
-        envKeys: [],
-        roots: [],
-        serverDigest: 'sha256:safe',
-        toolFingerprints: [{ name: 'search', kind: 'tool', canonicalHash: 'sha256:search', changed: false }],
-        enabled: true,
-        introspection: { status: 'not_observed', reason: 'static_only' }
-      }
-    ],
-    summary: { status: 'block', critical: 0, high: 1, medium: 1, low: 0, info: 0 },
-    sessionAuthPosture: { status: 'not_analyzed', missingAuthCount: null, items: [] },
-    findings: [
-      {
-        findingInstanceId: 'finding-1',
-        dedupeKey: 'finding-1',
-        fingerprint: 'sha256:finding-1',
-        title: 'Runtime package manager in MCP launch path',
-        severity: 'high',
-        confidence: 'high',
-        affectedTargets: [{ targetId: 'target-danger', role: 'subject' }],
-        rule: { id: 'MCP-CMD-002', version: '2026.07.03', source: 'mcpguard-rules' },
-        category: 'launch',
-        firstSeen: null,
-        baselineSeen: null,
-        evidence: [],
-        relationships: [],
-        impact: 'Remote code could execute.',
-        references: [],
-        policy: { profile: 'enterprise-default', decision: 'block', exceptionId: null, allowException: true },
-        recommendation: 'Pin the package before launch.'
-      },
-      {
-        findingInstanceId: 'finding-2',
-        dedupeKey: 'finding-2',
-        fingerprint: 'sha256:finding-2',
-        title: 'Sensitive environment key is passed to MCP server',
-        severity: 'medium',
-        confidence: 'high',
-        affectedTargets: [{ targetId: 'target-danger', role: 'subject' }],
-        rule: { id: 'MCP-ENV-001', version: '2026.07.03', source: 'mcpguard-rules' },
-        category: 'secret',
-        firstSeen: null,
-        baselineSeen: null,
-        evidence: [],
-        relationships: [],
-        impact: 'Credentials may be exposed.',
-        references: [],
-        policy: { profile: 'enterprise-default', decision: 'warn', exceptionId: null, allowException: true },
-        recommendation: 'Move credentials to a scoped secret store.'
-      }
-    ],
-    audit: {
-      reportHash: 'sha256:0123456789abcdef',
-      signedBundle: null,
-      generatedFor: 'local-only'
-    },
-    errors: [],
-    skipped: [{ targetId: 'target-danger', reason: 'dynamic_introspection_disabled' }]
-  }
-
   const html = renderToStaticMarkup(
     <OverviewPanel
       turns={[turn]}
@@ -2226,7 +1979,6 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
         { path: '/x/other.ts', added: 1, deleted: 0 }
       ]}
       usage={{ cost: 0.5, tin: 3000, tout: 400, turns: 2 }}
-      billingState={billingState}
       stats={{
         status: 'ready',
         totals: { cost: 0.5, tin: 3000, tout: 400, turns: 2 },
@@ -2244,78 +1996,6 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       }}
     />
   )
-  const billingHtml = renderToStaticMarkup(
-    <OverviewPanel
-      turns={[turn]}
-      initialPanelTab="billing"
-      selected={null}
-      onSelect={() => {}}
-      usage={null}
-      stats={null}
-      billingState={billingState}
-    />
-  )
-  const billingNoStateHtml = renderToStaticMarkup(
-    <OverviewPanel turns={[turn]} initialPanelTab="billing" selected={null} onSelect={() => {}} usage={null} stats={null} />
-  )
-  const partialBillingState = { ...billingState } as Record<string, unknown>
-  delete partialBillingState.audit
-  delete partialBillingState.preflight
-  delete partialBillingState.sharedReportExport
-  delete partialBillingState.reconciliation
-  delete partialBillingState.gatewayPolicies
-  const billingPartialStateHtml = renderToStaticMarkup(
-    <OverviewPanel
-      turns={[turn]}
-      initialPanelTab="billing"
-      selected={null}
-      onSelect={() => {}}
-      usage={null}
-      stats={null}
-      billingState={partialBillingState as unknown as ComponentProps<typeof OverviewPanel>['billingState']}
-    />
-  )
-  const mcpTrustEmptyHtml = renderToStaticMarkup(
-    <OverviewPanel
-      turns={[turn]}
-      initialPanelTab="mcpTrust"
-      selected={null}
-      onSelect={() => {}}
-      usage={null}
-      stats={null}
-      mcpLive={[
-        { name: 'rate-danger', status: 'needs-auth' },
-        { name: 'rate-broken', status: 'failed', tools: 0 }
-      ]}
-      mcps={[{ name: 'rate-danger', scope: 'project', transport: 'stdio', detail: 'npx remote-mcp', enabled: true }]}
-    />
-  )
-  const mcpTrustReportHtml = renderToStaticMarkup(
-    <McpTrustPanel
-      report={mcpGuardReport}
-      mcpLive={[{ name: 'rate-danger', status: 'needs-auth', tools: 2 }]}
-      mcps={[{ name: 'rate-danger', scope: 'project', transport: 'stdio', detail: 'npx remote-mcp', enabled: true }]}
-    />
-  )
-  const mcpTrustScanningHtml = renderToStaticMarkup(
-    <McpTrustPanel
-      scanning
-      refreshing
-      onScan={async () => mcpGuardReport}
-      onRefreshLive={async () => {}}
-      onReportChange={() => {}}
-      mcpLive={[]}
-      mcps={[]}
-    />
-  )
-  const qoderMcpTrustEmptyHtml = renderToStaticMarkup(
-    <McpTrustPanel
-      runtimeProvider="qoder_cli"
-      mcpLive={[]}
-      mcps={[{ name: 'rate-danger', scope: 'project', transport: 'stdio', detail: 'npx remote-mcp', enabled: true }]}
-    />
-  )
-
   it('verdict 卡：聚合 token + 无报错无危险 → 判决"完成"（非假绿前提下的 ok 态）', () => {
     expect(html).toContain('3.0k tok') // 跨轮累计本会话 token（含 cache）
     expect(html).not.toContain('$0.1234')
@@ -2962,233 +2642,13 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('dea0c990-714d-4888-aed0-7a13952d84ad')
   })
 
-  it('面板 tab：默认展示纵览，账单卫士内容收进独立 tab', () => {
-    expect(html).toContain('面板视图')
-    expect(html).toContain('纵览')
-    expect(html).toContain('账单卫士')
-    expect(html).toContain('MCP 信任')
-    expect(html).not.toContain('BILLING GUARDIAN')
-    expect(html).not.toContain('Source reconciliation')
-    expect(html).not.toContain('尚未导入扫描报告')
-    expect(html).not.toContain('class="ov-title"')
-    expect(html).not.toContain('session dea0c990')
+  it('总览只保留纵览内容，不再提供账单卫士和 MCP 信任入口', () => {
+    expect(html).not.toContain('面板视图')
+    expect(html).not.toContain('账单卫士')
+    expect(html).not.toContain('MCP 信任')
+    expect(html).toContain('轮次数据')
+    expect(html).toContain('会话数据')
   })
-
-  it('账单卫士 tab：标题、口径和默认异常空态尽量中文展示', () => {
-    expect(billingHtml).toContain('账单卫士')
-    expect(billingHtml).toContain('本会话可验证 token')
-    expect(billingHtml).toContain('仅看 token，不算金额')
-    expect(billingHtml).toContain('总 Token')
-    expect(billingHtml).toContain('缓存读/写')
-    expect(billingHtml).toContain('轮次覆盖')
-    expect(billingHtml).toContain('模型明细')
-    expect(billingHtml).toContain('工具拆分')
-    expect(billingHtml).toContain('暂无独立 token')
-    expect(billingHtml).not.toContain('工具级精确分摊')
-    expect(billingHtml).not.toContain('未分摊 token')
-    expect(billingHtml).not.toContain('工作流未精确归因')
-    expect(billingHtml).toContain('暂无符合规则的 token/上下文提示')
-    expect(billingHtml).not.toContain('BILLING GUARDIAN')
-    expect(billingHtml).not.toContain('known est.')
-  })
-
-  it('账单卫士 tab：token 口径下移除来源对账和网关/Admin 操作入口', () => {
-    expect(billingHtml).not.toContain('来源对账')
-    expect(billingHtml).not.toContain('3 条账本记录')
-    expect(billingHtml).not.toContain('金额对账字段已隐藏')
-    expect(billingHtml).not.toContain('token 口径观察本地 usage')
-    expect(billingHtml).not.toContain('Anthropic 网关')
-    expect(billingHtml).not.toContain('anthropic_gateway_response')
-    expect(billingHtml).not.toContain('同步 Admin 数据')
-    expect(billingHtml).not.toContain('导入网关示例数据')
-    expect(billingHtml).not.toContain('Source reconciliation')
-    expect(billingHtml).not.toContain('Load gateway fixture')
-  })
-
-  it('账单卫士 tab：billingState 尚未加载时保留本地估算视图，不伪造对账数据', () => {
-    expect(billingNoStateHtml).toContain('账单卫士')
-    expect(billingNoStateHtml).toContain('本会话可验证 token')
-    expect(billingNoStateHtml).toContain('高 Token 轮次')
-    expect(billingNoStateHtml).not.toContain('来源对账')
-  })
-
-  it('账单卫士 tab：partial billingState 不影响右栏会话视图，不补假治理状态', () => {
-    expect(billingPartialStateHtml).not.toContain('状态未知 · 缺少 preflight 字段')
-    expect(billingPartialStateHtml).not.toContain('状态未知 · 缺少 sharedReportExport 字段')
-    expect(billingPartialStateHtml).not.toContain('审计/合约价/分摊状态未知；账单卫士状态缺少 audit 字段。')
-    expect(billingPartialStateHtml).not.toContain('网关策略状态未知；账单卫士状态缺少 gatewayPolicies 字段。')
-    expect(billingPartialStateHtml).not.toContain('审计日志</span><span class="dim">0 行')
-    expect(billingPartialStateHtml).not.toContain('合约价导入</span><span class="dim">0 行')
-    expect(billingPartialStateHtml).not.toContain('分摊 / 展示账单</span><span class="dim">0 行 · $0.0000')
-    expect(billingPartialStateHtml).not.toContain('已支持  · 计划  · 对话 不含')
-    expect(billingPartialStateHtml).not.toContain('暂无网关/供应商上报或官方 Admin 数据；当前只有本地 SDK 估算。')
-    expect(billingPartialStateHtml).not.toContain('暂无网关策略/配置导入；Scry 不托管网关密钥。')
-  })
-
-  it('账单卫士 tab：只展示本会话高 Token 轮次，不展示 Token 关联线索', () => {
-    expect(billingHtml).toContain('高 Token 轮次')
-    expect(billingHtml).toContain('role="button"')
-    expect(billingHtml).toContain('tabindex="0"')
-    expect(billingHtml).toContain('点跳到这轮对话')
-    expect(billingHtml).toContain('aria-label="跳到第 1 轮对话，总 Token 3.0k tok"')
-    expect(billingHtml).toContain('class="billing-token-table"')
-    expect(billingHtml).toContain('缓存命中率')
-    expect(billingHtml).toContain('输入/输出')
-    expect(billingHtml).toContain('缓存读写')
-    expect(billingHtml).toContain('T01')
-    expect(billingHtml).toContain('35.7%')
-    expect(billingHtml).toContain('1.7k')
-    expect(billingHtml).toContain('1.3k')
-    expect(billingHtml).toContain('44%')
-    expect(billingHtml).not.toContain('Token 关联线索')
-    expect(billingHtml).not.toContain('缓存占大头')
-    expect(billingHtml).not.toContain('输入/输出 1.7k')
-    expect(billingHtml).not.toContain('缓存读写 1.3k')
-    expect(billingHtml).not.toContain('工具 3 次')
-    expect(billingHtml).not.toContain('in/out 1.7k')
-    expect(billingHtml).not.toContain('cache 1.3k')
-    expect(billingHtml).not.toContain('不能相加，不是工具自身用量')
-    expect(billingHtml).not.toContain('同轮关联')
-    expect(billingHtml).not.toContain('所在轮次 token')
-    expect(billingHtml).not.toContain('归因方法=按轮次关联')
-    expect(billingHtml).not.toContain('Top cost turns')
-    expect(billingHtml).not.toContain('Related evidence')
-  })
-
-  it('账单卫士 tab：移除个人分析、模型和企业治理噪音', () => {
-    expect(billingHtml).not.toContain('个人分析')
-    expect(billingHtml).not.toContain('价格冻结')
-    expect(billingHtml).not.toContain('PR 预估')
-    expect(billingHtml).not.toContain('数据不足 · 推断')
-    expect(billingHtml).not.toContain('模型用量')
-    expect(billingHtml).not.toContain('团队与网关')
-    expect(billingHtml).not.toContain('fixture gateway policy')
-    expect(billingHtml).not.toContain('密钥托管 否')
-    expect(billingHtml).not.toContain('共享报告导出')
-    expect(billingHtml).not.toContain('已支持 markdown/json')
-    expect(billingHtml).not.toContain('计划 csv/bi')
-    expect(billingHtml).not.toContain('对话 不含')
-    expect(billingHtml).not.toContain('审计与分摊')
-    expect(billingHtml).not.toContain('留存 / 脱敏')
-    expect(billingHtml).not.toContain('仅聚合 · 密钥和 prompt 脱敏')
-    expect(billingHtml).not.toContain('分摊 / 展示账单')
-    expect(billingHtml).not.toContain('Team &amp; gateway')
-    expect(billingHtml).not.toContain('Audit &amp; showback')
-  })
-
-  it('MCP 信任 tab：会话授权缺口独立展示，不伪造扫描报告', () => {
-    expect(mcpTrustEmptyHtml).toContain('MCP 信任')
-    expect(mcpTrustEmptyHtml).toContain('运行时 MCP')
-    expect(mcpTrustEmptyHtml).toContain('1 个 MCP server 需要授权')
-    expect(mcpTrustEmptyHtml).toContain('rate-danger')
-    expect(mcpTrustEmptyHtml).toContain('需授权')
-    expect(mcpTrustEmptyHtml).toContain('rate-broken')
-    expect(mcpTrustEmptyHtml).toContain('失败')
-    expect(mcpTrustEmptyHtml).toContain('刷新 MCP 状态')
-    expect(mcpTrustEmptyHtml).toContain('扫描当前 MCP')
-    expect(mcpTrustEmptyHtml).not.toContain('尚未导入扫描报告')
-    expect(mcpTrustEmptyHtml).not.toContain('导入 mcpguard JSON')
-    expect(mcpTrustEmptyHtml).not.toContain('第三方证据标签 · 非官方认证')
-    expect(mcpTrustEmptyHtml).not.toContain('Fleet inventory')
-  })
-
-  it('MCP 信任 tab：Qoder 空 live 不展示 Claude 配置静默差异', () => {
-    expect(qoderMcpTrustEmptyHtml).toContain('Qoder 暂无逐项 MCP live 状态')
-    expect(qoderMcpTrustEmptyHtml).not.toContain('配置中启用但未被当前运行时 live 捕获')
-    expect(qoderMcpTrustEmptyHtml).not.toContain('rate-danger')
-  })
-
-  it('MCP 信任 tab：一键扫描有独立加载态，不再展示手动导入入口', () => {
-    expect(mcpTrustScanningHtml).toContain('刷新中…')
-    expect(mcpTrustScanningHtml).toContain('扫描中…')
-    expect(mcpTrustScanningHtml).not.toContain('导入 mcpguard JSON')
-    expect(mcpTrustScanningHtml).not.toContain('尚未导入扫描报告')
-  })
-
-  it('MCP 信任 tab：有 mcpguard 报告后展示 P3 风险治理和 P4 证据标签', () => {
-    expect(mcpTrustReportHtml).toContain('策略状态')
-    expect(mcpTrustReportHtml).toContain('阻断')
-    expect(mcpTrustReportHtml).toContain('高危发现')
-    expect(mcpTrustReportHtml).toContain('MCP-CMD-002')
-    expect(mcpTrustReportHtml).toContain('rate-danger')
-    expect(mcpTrustReportHtml).toContain('Fleet inventory')
-    expect(mcpTrustReportHtml).toContain('scanned')
-    expect(mcpTrustReportHtml).toContain('policy-pass')
-    expect(mcpTrustReportHtml).toContain('sandbox-ready')
-    expect(mcpTrustReportHtml).toContain('supply-chain-reviewed')
-    expect(mcpTrustReportHtml).toContain('标签只代表报告证据，不是官方认证')
-    expect(mcpTrustReportHtml).toContain('会话授权姿态')
-    expect(mcpTrustReportHtml).toContain('not_analyzed')
-    expect(mcpTrustReportHtml).not.toContain('官方认证通过')
-  })
-
-  it('MCP 信任 tab：报告状态由 App 层按 cwd 归属，切 tab 不丢、切 cwd 不串', () => {
-    let reportsByCwd: Record<string, McpGuardReport> = {}
-    const scryCwd = '/a/scry'
-    const sampleWorkspaceCwd = '/b/sample-workspace'
-    const sampleWorkspaceReport: McpGuardReport = {
-      ...mcpGuardReport,
-      scan: { ...mcpGuardReport.scan, id: 'scan_sample_workspace' },
-      targets: [{ ...mcpGuardReport.targets[1], targetId: 'target-sample-workspace', serverName: 'sample-workspace-safe' }],
-      summary: { status: 'pass', critical: 0, high: 0, medium: 0, low: 0, info: 0 },
-      findings: []
-    }
-
-    reportsByCwd = setMcpGuardReportForCwd(reportsByCwd, scryCwd, mcpGuardReport)
-    const afterTabSwitch = reportsByCwd
-
-    expect(getMcpGuardReportForCwd(afterTabSwitch, scryCwd)).toBe(mcpGuardReport)
-    expect(getMcpGuardReportForCwd(afterTabSwitch, sampleWorkspaceCwd)).toBeNull()
-
-    reportsByCwd = setMcpGuardReportForCwd(reportsByCwd, sampleWorkspaceCwd, sampleWorkspaceReport)
-    expect(getMcpGuardReportForCwd(reportsByCwd, sampleWorkspaceCwd)).toBe(sampleWorkspaceReport)
-    expect(getMcpGuardReportForCwd(reportsByCwd, scryCwd)).toBe(mcpGuardReport)
-
-    const overviewReportHtml = renderToStaticMarkup(
-      <OverviewPanel
-        turns={[turn]}
-        initialPanelTab="mcpTrust"
-        mcpGuardReport={getMcpGuardReportForCwd(reportsByCwd, scryCwd)}
-        selected={null}
-        onSelect={() => {}}
-        usage={null}
-        stats={null}
-        mcpLive={[{ name: 'rate-danger', status: 'needs-auth', tools: 2 }]}
-        mcps={[{ name: 'rate-danger', scope: 'project', transport: 'stdio', detail: 'npx remote-mcp', enabled: true }]}
-      />
-    )
-    expect(overviewReportHtml).toContain('Fleet inventory')
-    expect(overviewReportHtml).toContain('MCP-CMD-002')
-
-    const overviewOtherCwdHtml = renderToStaticMarkup(
-      <OverviewPanel
-        turns={[turn]}
-        initialPanelTab="mcpTrust"
-        mcpGuardReport={getMcpGuardReportForCwd(reportsByCwd, '/empty-project')}
-        selected={null}
-        onSelect={() => {}}
-        usage={null}
-        stats={null}
-        mcpLive={[{ name: 'sample-workspace-safe', status: 'connected', tools: 1 }]}
-        mcps={[{ name: 'sample-workspace-safe', scope: 'project', transport: 'stdio', detail: 'sample-workspace-safe', enabled: true }]}
-      />
-    )
-    expect(overviewOtherCwdHtml).not.toContain('尚未导入扫描报告')
-    expect(overviewOtherCwdHtml).not.toContain('MCP-CMD-002')
-    expect(overviewOtherCwdHtml).not.toContain('Fleet inventory')
-
-    const controlledEmptyHtml = renderToStaticMarkup(
-      <McpTrustPanel
-        report={null}
-        mcpLive={[{ name: 'rate-safe', status: 'connected', tools: 1 }]}
-        mcps={[{ name: 'rate-safe', scope: 'project', transport: 'stdio', detail: 'rate-safe', enabled: true }]}
-      />
-    )
-    expect(controlledEmptyHtml).not.toContain('尚未导入扫描报告')
-    expect(controlledEmptyHtml).not.toContain('MCP-CMD-002')
-    expect(controlledEmptyHtml).not.toContain('Fleet inventory')
-  })
-
   it('全会话文件足迹列出文件', () => {
     expect(html).toContain('文件足迹')
     expect(html).toContain('probe.txt')
@@ -3418,7 +2878,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
 })
 
 import { DiagnosticsView } from './DiagnosticsView'
-import { McpModal, SettingsModal, SkillsModal } from './Modals'
+import { filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
 
 describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => {
   const readyProps: ComponentProps<typeof DiagnosticsView> = {
@@ -4051,7 +3511,10 @@ describe('Skill/MCP 操作能力渲染', () => {
   it('只读 Provider 禁用 Skill 开关并保留原生状态', () => {
     const html = renderToStaticMarkup(
       <SkillsModal
-        skills={[{ name: 'scry-e2e-audit', dir: '/skill', scope: 'project', description: 'audit', enabled: true }]}
+        skills={[
+          { name: 'scry-e2e-audit', dir: '/skill', scope: 'project', description: 'audit', enabled: true },
+          { name: 'user-home', dir: '/home-skill', scope: 'user', description: 'shared', enabled: true }
+        ]}
         capability={{ providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [] }}
         onToggle={() => {}}
         onRefresh={() => {}}
@@ -4068,6 +3531,14 @@ describe('Skill/MCP 操作能力渲染', () => {
     expect(html).toContain('尚未观测')
     expect(html).toContain('已启用')
     expect(html).toContain('Skill 目录仅供读取')
+    expect(html).toContain('role="tablist" aria-label="Skill 来源"')
+    expect(html).toContain('项目 Skill <span>1</span>')
+    expect(html).toContain('用户 Skill <span>1</span>')
+    expect(html).not.toContain('user-home')
+    expect(filterSkillsForScope([
+      { name: 'project-audit', dir: '/repo', scope: 'project', description: 'audit', enabled: true },
+      { name: 'user-home', dir: '/home', scope: 'user', description: 'shared', enabled: true }
+    ], 'user')).toEqual([{ name: 'user-home', dir: '/home', scope: 'user', description: 'shared', enabled: true }])
   })
 
   it('可管理 Provider 允许 Skill 开关，MCP 只读 Provider 保持 disabled/connected 真值', () => {

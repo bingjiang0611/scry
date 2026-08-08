@@ -1,18 +1,15 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
-import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import {
   mcpCallsForEvent,
   type TraceEvent,
   type DbStats,
   type Diagnostics,
   type DiffFile,
-  type HookConfiguredCommand,
-  type McpLiveStatus
+  type HookConfiguredCommand
 } from '@shared/trace'
-import type { BillingGuardianState } from '@shared/billing'
 import type { AgentIntervention, RuntimeProvider } from '@shared/runtime'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
-import type { McpMeta } from '../env'
 import { buildTurnTimingBreakdown, type TurnTimingBreakdown } from '../turn-timing'
 import {
   aggregateHooks,
@@ -30,10 +27,9 @@ import {
   logicalCallEventsForTurn,
   resultOf
 } from '../format'
-import type { BillingTurnRow, FileRow, HookInstanceRow, HookScriptRow, HookSummary, Turn } from '../format'
+import type { FileRow, HookInstanceRow, HookScriptRow, HookSummary, Turn } from '../format'
 import { HooksSummary } from './ChatTurn'
 import { Icon } from './primitives/Icon'
-import { McpTrustPanel, type McpGuardReport } from './McpTrustPanel'
 import { TurnTimingDetails } from './TurnTimingDetails'
 
 // TOP TOOLS 排名：合并普通工具 + MCP（按 server 汇总），取前 6，配 mini-bar。
@@ -265,46 +261,6 @@ function logicalHookRows(commands: HookConfiguredCommand[], runtimeCommand?: str
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-function fmtShare(part: number, total: number): string | null {
-  if (total <= 0 || part <= 0) return null
-  return `${((part / total) * 100).toFixed(1).replace(/\.0$/, '')}%`
-}
-
-function highTokenTurnCacheHitRate(t: BillingTurnRow): string {
-  return fmtShare(t.cacheReadTokens, t.promptTokens) ?? '—'
-}
-
-function highTokenTurnIoTokens(t: BillingTurnRow): string {
-  const io = t.tokensIn + t.tokensOut
-  return io > 0 ? fmtTok(io) : '—'
-}
-
-function highTokenTurnCacheTokens(t: BillingTurnRow): string {
-  const cache = t.cacheReadTokens + t.cacheCreationTokens
-  return cache > 0 ? fmtTok(cache) : '—'
-}
-
-function highTokenTurnContext(t: BillingTurnRow): string {
-  return t.contextPct != null ? `${t.contextPct}%` : '—'
-}
-
-function highTokenTurnTitle(t: BillingTurnRow): string {
-  const io = t.tokensIn + t.tokensOut
-  const cache = t.cacheReadTokens + t.cacheCreationTokens
-  const cacheHitRate = highTokenTurnCacheHitRate(t)
-  const cacheShare = fmtShare(cache, t.tokensTotal)
-  const ioShare = fmtShare(io, t.tokensTotal)
-  const reason =
-    cacheHitRate !== '—' && cache >= io * 2
-      ? `缓存命中率 ${cacheHitRate}`
-      : ioShare && io >= cache * 2
-        ? `输入/输出占大头 ${ioShare}`
-        : cacheHitRate !== '—' || cacheShare || ioShare
-          ? `用量分布接近${cacheHitRate !== '—' ? `，缓存命中率 ${cacheHitRate}` : cacheShare ? `，缓存 ${cacheShare}` : ''}${ioShare ? `，输入/输出 ${ioShare}` : ''}`
-          : '本轮用量偏高'
-  return `${t.label} · ${fmtKnownTokens(t.tokensTotal, t.tokenKnown ? 1 : 0)} · ${reason} · 点跳到这轮对话`
-}
-
 type TurnCallKind = 'tool' | 'mcp' | 'skill' | 'agent'
 
 interface TurnCallItem {
@@ -514,44 +470,24 @@ export function OverviewPanel({
   usage,
   stats,
   runtimeProvider,
-  mcpLive = [],
-  mcps = [],
-  mcpGuardReport = null,
-  mcpGuardScanning = false,
-  mcpRefreshing = false,
   gitDiff = [],
   busy = false,
-  initialPanelTab = 'overview',
   onSelect,
-  onOpenTurn,
-  onMcpGuardReportChange,
-  onMcpGuardScan,
-  onMcpRefresh
+  onOpenTurn
 }: {
   turns: Turn[]
   sessionId?: string | null
   selected: TraceEvent | null
   usage: { cost: number | null; tin: number | null; tout: number | null; turns: number } | null
   stats: DbStats | null
-  billingState?: BillingGuardianState | null
   runtimeProvider?: RuntimeProvider
-  mcpLive?: McpLiveStatus[]
-  mcps?: McpMeta[]
-  mcpGuardReport?: McpGuardReport | null
-  mcpGuardScanning?: boolean
-  mcpRefreshing?: boolean
   gitDiff?: DiffFile[]
   diag?: Diagnostics | null
   busy?: boolean
-  initialPanelTab?: 'overview' | 'billing' | 'mcpTrust'
   onSelect: (ev: TraceEvent) => void
   onOpenTurn?: (runId: string, ev?: TraceEvent | null, target?: 'turn' | 'event') => void
-  onMcpGuardReportChange?: (report: McpGuardReport) => void
-  onMcpGuardScan?: () => Promise<McpGuardReport>
-  onMcpRefresh?: () => Promise<void> | void
 }) {
   const [filesFolded, setFilesFolded] = useState(false)
-  const [panelTab, setPanelTab] = useState<'overview' | 'billing' | 'mcpTrust'>(initialPanelTab)
   const [overviewDataTab, setOverviewDataTab] = useState<'turns' | 'session'>('turns')
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
   const dangerAuditRef = useRef<HTMLDivElement>(null)
@@ -708,14 +644,6 @@ export function OverviewPanel({
     const ev = all.find(pred)
     if (ev) onSelect(ev)
   }
-  const keyboardActivate =
-    (action: () => void) =>
-    (ev: KeyboardEvent<HTMLDivElement>): void => {
-      if (ev.key === 'Enter' || ev.key === ' ') {
-        ev.preventDefault()
-        action()
-      }
-    }
   const toggleTurnCallGroup = (key: string, ev: MouseEvent<HTMLButtonElement>): void => {
     ev.preventDefault()
     ev.stopPropagation()
@@ -733,9 +661,6 @@ export function OverviewPanel({
       dangerAuditRef.current?.focus({ preventScroll: true })
     })
   }
-  const isOverviewTab = panelTab === 'overview'
-  const isBillingTab = panelTab === 'billing'
-  const isTrustTab = panelTab === 'mcpTrust'
   return (
     <aside className="panel overview-dossier" data-screen-label="总览 · 当前会话证据" aria-label="当前执行总览">
       <div className="ov-topbar">
@@ -743,39 +668,10 @@ export function OverviewPanel({
           <div><strong>总览</strong><span>{busy ? '当前执行' : '会话证据'}</span></div>
           <em><i aria-hidden="true" />本机真实数据</em>
         </div>
-        <div className="panel-tabs" role="tablist" aria-label="面板视图">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isOverviewTab}
-            className={isOverviewTab ? 'active' : ''}
-            onClick={() => setPanelTab('overview')}
-          >
-            纵览
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isBillingTab}
-            className={isBillingTab ? 'active' : ''}
-            onClick={() => setPanelTab('billing')}
-          >
-            账单卫士
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isTrustTab}
-            className={isTrustTab ? 'active' : ''}
-            onClick={() => setPanelTab('mcpTrust')}
-          >
-            MCP 信任
-          </button>
-        </div>
       </div>
       <div className="ov-scroll overview-scroll-content">
 
-      {isOverviewTab && (
+      {(
         <div className={`ctx-gauge ${ctx ? (ctx.pct >= 80 ? 'hot' : ctx.pct >= 50 ? 'warm' : '') : 'empty'}`}>
           <div
             className="ring"
@@ -805,7 +701,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && turns.length > 0 && (
+      {turns.length > 0 && (
         <section className={`overview-verdict ${vstate}`} aria-label="当前会话判词与尺度">
           <header className="overview-verdict-line">
             <div>
@@ -868,7 +764,7 @@ export function OverviewPanel({
         </section>
       )}
 
-      {isOverviewTab && turns.length > 0 && (
+      {turns.length > 0 && (
         <div className="panel-section">
           <h4>会话</h4>
           <div className="filerow">
@@ -884,7 +780,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && turns.length > 0 && (
+      {turns.length > 0 && (
         <div className="overview-data-tabs" role="tablist" aria-label="纵览数据维度">
           <button
             type="button"
@@ -911,160 +807,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isBillingTab && (
-        <div className="panel-section billing-section">
-          <h4>
-            账单卫士
-            <span className="more">
-              {billing.resultTurns === 0
-                ? '等待结果'
-                : billing.knownTokenResultCount === 0
-                  ? 'token 未捕获'
-                  : billing.missingTokenResultCount > 0
-                    ? '部分 token'
-                    : 'Token 统计'}
-            </span>
-          </h4>
-          <div className="billing-source">
-            <span className="source-pill estimate" title="来自当前 Provider 的原生 result/usage/modelUsage；只展示本会话能证明的 token。">
-              {billing.sourceLabel}
-            </span>
-            <span className="source-pill off" title="不同厂商和模型价格不可直接混算；这里统一只看 token，不换算金额。">
-              {billing.officialBillLabel}
-            </span>
-          </div>
-          <div className="billing-grid">
-            <div>
-              <span>总 Token</span>
-              <b>{billingTokenText}</b>
-            </div>
-            <div>
-              <span>输入/输出</span>
-              <b>{fmtTok(billing.tokensIn + billing.tokensOut)}</b>
-            </div>
-            <div>
-              <span>缓存读/写</span>
-              <b>
-                {fmtTok(billing.cacheReadTokens)} / {fmtTok(billing.cacheCreationTokens)}
-              </b>
-            </div>
-            <div>
-              <span>API 耗时</span>
-              <b>{billing.apiMs == null ? '—' : `${(billing.apiMs / 1000).toFixed(1)}s`}</b>
-            </div>
-          </div>
-          <div className="billing-coverage">
-            <span title="带 token usage 的 result / 全部 result；表示本会话有多少轮能做 token 统计。">
-              轮次覆盖 {billing.knownTokenResultCount}/{billing.resultTurns} · {billing.tokenCoveragePct}%
-            </span>
-            <span title="modelUsage token 合计 / 本会话 token 合计；用于确认模型层明细是否完整。">
-              模型明细 {billing.modelTokenCoveragePct}%
-            </span>
-            <span title={`${fmtTok(billing.workflowUnattributedTokens)} token 只能归到对应轮次；工具/Skill/MCP/Hook 没有独立 token 字段，所以不拆给具体工具。`}>
-              工具拆分 暂无独立 token
-            </span>
-          </div>
-
-          {billing.signals.length > 0 ? (
-            <details className="billing-details billing-priority" open>
-              <summary>
-                行动信号 <span>{billing.signals.length}</span>
-              </summary>
-              {billing.signals.map((s, i) => {
-                const action = (): void => {
-                  if (s.evidence) onSelect(s.evidence)
-                }
-                return (
-                  <div
-                    className="billing-row click"
-                    key={`${s.title}-${i}`}
-                    onClick={action}
-                    onKeyDown={keyboardActivate(action)}
-                    role="button"
-                    tabIndex={0}
-                    title={s.action}
-                  >
-                    <span className={`sdot ${s.severity === 'bad' ? 'bad' : s.severity === 'warn' ? 'warn' : 'ok'}`} />
-                    <span className="fname">{s.title}</span>
-                    <span className="dim">{s.detail}</span>
-                  </div>
-                )
-              })}
-            </details>
-          ) : (
-            <div className="dim pad2">暂无符合规则的 token/上下文提示</div>
-          )}
-
-          {billing.topTokenTurns.length > 0 && (
-            <details className="billing-details billing-priority" open>
-              <summary>
-                高 Token 轮次 <span>{billing.topTokenTurns.length}</span>
-              </summary>
-              <div className="billing-token-table">
-                <div className="billing-token-row head">
-                  <span>轮次</span>
-                  <span>总 Token</span>
-                  <span>缓存命中率</span>
-                  <span>输入/输出</span>
-                  <span>缓存读写</span>
-                  <span>工具</span>
-                  <span>上下文</span>
-                </div>
-                {billing.topTokenTurns.map((t) => {
-                  const action = (): void => {
-                    if (onOpenTurn) {
-                      onOpenTurn(t.runId, t.result ?? null)
-                      return
-                    }
-                    if (t.result) onSelect(t.result)
-                  }
-                  const total = fmtKnownTokens(t.tokensTotal, t.tokenKnown ? 1 : 0)
-                  return (
-                    <div
-                      className="billing-token-row click"
-                      key={t.runId}
-                      onClick={action}
-                      onKeyDown={keyboardActivate(action)}
-                      role="button"
-                      tabIndex={0}
-                      title={highTokenTurnTitle(t)}
-                      aria-label={`跳到第 ${t.turnNo} 轮对话，总 Token ${total}`}
-                    >
-                      <span className="turn-id">T{String(t.turnNo).padStart(2, '0')}</span>
-                      <span className="tok-total">{total}</span>
-                      <span>{highTokenTurnCacheHitRate(t)}</span>
-                      <span>{highTokenTurnIoTokens(t)}</span>
-                      <span>{highTokenTurnCacheTokens(t)}</span>
-                      <span>{t.toolCount > 0 ? t.toolCount : '—'}</span>
-                      <span>{highTokenTurnContext(t)}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </details>
-          )}
-
-          <div className="psrc">
-            按轮次统计 token；工具/Skill/MCP/Hook 没有独立 token 字段，所以不把整轮 token 分摊给具体工具。不同厂商/模型不在这里换算金额。
-          </div>
-        </div>
-      )}
-
-      {isTrustTab && (
-        <McpTrustPanel
-          report={mcpGuardReport}
-          scanning={mcpGuardScanning}
-          refreshing={mcpRefreshing}
-          onScan={onMcpGuardScan}
-          onRefreshLive={onMcpRefresh}
-          onReportChange={onMcpGuardReportChange}
-          runtimeProvider={runtimeProvider}
-          mcpLive={mcpLive}
-          mcps={mcps}
-        />
-      )}
-
-      {isOverviewTab && (
+      {(
         <div
           id="overview-turns-panel"
           role="tabpanel"
@@ -1217,7 +960,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && (
+      {(
         <div
           id="overview-session-panel"
           role="tabpanel"
@@ -1245,7 +988,7 @@ export function OverviewPanel({
           )}
         </div>
       )}
-      {isOverviewTab && topTools.rows.length > 0 && (
+      {topTools.rows.length > 0 && (
         <div className="panel-section top-tools-section">
           <h4>
             TOP TOOLS<span className="more">工具 {calls.ordinaryToolTotal} · MCP {calls.mcpTotal}</span>
@@ -1276,7 +1019,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && turns.length > 0 && (
+      {turns.length > 0 && (
         <div className="panel-section hooks-section">
           <h4 className="hooks-heading">
             <span>HOOKS</span>
@@ -1454,7 +1197,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && dangers.length > 0 && (
+      {dangers.length > 0 && (
         <div className="panel-section danger-audit-section" ref={dangerAuditRef} tabIndex={-1}>
           <h4>
             <Icon name="alert" /> 危险操作审计（本会话）
@@ -1480,7 +1223,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && hasSkillSeg && (
+      {hasSkillSeg && (
         <div className="panel-section segment-section">
           <h4>
             段落（按 skill）
@@ -1536,7 +1279,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && (
+      {(
         <div className="panel-section">
           <h4>调用明细（本会话）</h4>
 
@@ -1642,7 +1385,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab && (
+      {(
         <div className="panel-section">
           <h4>
             <button
@@ -1697,8 +1440,7 @@ export function OverviewPanel({
         </div>
       )}
 
-      {isOverviewTab &&
-        gitDiff.length > 0 &&
+      {gitDiff.length > 0 &&
         (() => {
           // P2 §8.4：工具足迹 vs 最终 diff 对照——diff 里的文件，工具碰过标 check，没碰过标 alert（diff 异常）
           const touched = new Set(structured.map((f) => f.path))
@@ -1725,7 +1467,7 @@ export function OverviewPanel({
           )
         })()}
 
-      {isOverviewTab && usage && usage.turns > 0 && (
+      {usage && usage.turns > 0 && (
         <div className="panel-section">
           <h4>
             累计 Token 用量<span className="more">全部会话</span>

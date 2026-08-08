@@ -197,6 +197,59 @@
   white-space: nowrap;
 }
 
+.skill-scope-tabs {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: none;
+  gap: 2px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-scope-tabs button {
+  position: relative;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dim2);
+  font: 620 12.5px/1 var(--font-ui);
+  transition: color 140ms ease-out, transform 140ms var(--ease-out);
+}
+
+.skill-scope-tabs button::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 8px;
+  height: 2px;
+  background: transparent;
+  content: "";
+}
+
+.skill-scope-tabs button.active {
+  color: var(--fg);
+}
+
+.skill-scope-tabs button.active::after {
+  background: var(--selected);
+}
+
+.skill-scope-tabs button:focus-visible {
+  outline: 2px solid var(--selected);
+  outline-offset: -4px;
+}
+
+.skill-scope-tabs button:active {
+  transform: scale(0.98);
+}
+
+.skill-scope-tabs button span {
+  margin-left: 6px;
+  color: var(--dim3);
+  font: 600 10px/1 var(--font-mono);
+}
+
 .inventory-toolbar {
   min-width: 0;
   display: flex;
@@ -404,40 +457,6 @@
 .inventory-switch input:disabled + .inventory-switch__track {
   border-style: dashed;
   opacity: 0.55;
-}
-
-.skill-group {
-  padding-top: 14px;
-}
-
-.skill-group + .skill-group {
-  padding-top: 18px;
-}
-
-.skill-group__head {
-  min-height: 42px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 2px 9px;
-}
-
-.skill-group__head h2 {
-  margin: 0;
-  color: var(--fg);
-  font: 650 14px/1.25 var(--font-ui);
-}
-
-.skill-group__head p {
-  margin: 4px 0 0;
-  color: var(--dim2);
-  font: 12px/1.4 var(--font-ui);
-}
-
-.skill-group__head > span {
-  color: var(--dim2);
-  font: 650 11px/1 var(--font-mono);
 }
 
 .skill-ledger {
@@ -860,6 +879,10 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .skill-scope-tabs button:hover:not(.active) {
+    color: var(--dim);
+  }
+
   .skill-ledger__row:hover,
   .mcp-fleet__row:hover > th,
   .mcp-fleet__row:hover > td {
@@ -890,6 +913,11 @@
   }
 
   .inventory-toolbar {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .skill-scope-tabs {
     padding-right: 18px;
     padding-left: 18px;
   }
@@ -990,6 +1018,7 @@
 @media (prefers-reduced-motion: reduce) {
   .inventory-switch__track,
   .inventory-switch__track > span,
+  .skill-scope-tabs button,
   .inventory-modal__head-actions .modal-refresh,
   .inventory-modal__head-actions .modal-x,
   .inventory-search button,
