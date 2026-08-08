@@ -109,6 +109,12 @@
   border-radius: var(--r-md);
 }
 
+.inventory-modal__head-actions .modal-refresh:focus-visible,
+.inventory-modal__head-actions .modal-x:focus-visible {
+  outline-offset: -3px;
+  background: var(--surface-hover);
+}
+
 .inventory-modal__head-actions .modal-refresh:active,
 .inventory-modal__head-actions .modal-x:active,
 .inventory-search button:active,
@@ -331,7 +337,7 @@
 
 .inventory-modal .inventory-modal__body {
   min-height: 0;
-  padding: 0 22px 16px;
+  padding: 0 0 16px;
   overscroll-behavior: contain;
   scrollbar-color: var(--border2) transparent;
   scrollbar-width: thin;
@@ -459,10 +465,6 @@
   opacity: 0.55;
 }
 
-.skill-ledger {
-  border-top: 1px solid var(--border);
-}
-
 .skill-ledger__row {
   min-width: 0;
   min-height: 82px;
@@ -470,8 +472,9 @@
   grid-template-columns: minmax(0, 1fr) minmax(164px, 0.26fr);
   align-items: center;
   gap: 18px;
-  padding: 11px 6px 11px 2px;
+  padding: 11px 22px;
   border-bottom: 1px solid var(--border3);
+  transition: background-color 140ms ease-out;
 }
 
 .skill-ledger__main {
@@ -558,7 +561,7 @@
   display: grid;
   align-content: center;
   justify-items: start;
-  padding: 30px 2px;
+  padding: 30px 22px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -614,14 +617,13 @@
 }
 
 .inventory-modal .inventory-modal__body--mcp {
-  padding-right: 18px;
-  padding-left: 18px;
+  padding-right: 0;
+  padding-left: 0;
 }
 
 .mcp-fleet-wrap {
   min-width: 0;
   overflow-x: auto;
-  border-top: 1px solid var(--border);
   scrollbar-color: var(--border2) transparent;
   scrollbar-width: thin;
 }
@@ -661,7 +663,7 @@
 
 .mcp-fleet thead th:first-child {
   width: 23%;
-  padding-left: 6px;
+  padding-left: 22px;
 }
 
 .mcp-fleet thead th:nth-child(2) { width: 13%; }
@@ -669,21 +671,27 @@
 .mcp-fleet thead th:nth-child(4) { width: 18%; }
 .mcp-fleet thead th:nth-child(5) { width: 17%; }
 .mcp-fleet thead th:nth-child(6) { width: 13%; }
+.mcp-fleet thead th:last-child { padding-right: 22px; }
 
 .mcp-fleet__row > th,
 .mcp-fleet__row > td {
   height: 92px;
   padding: 10px;
   border-bottom: 1px solid var(--border3);
+  transition: background-color 140ms ease-out;
 }
 
 .mcp-fleet__row > th {
-  padding-left: 6px;
+  padding-left: 22px;
   font-weight: inherit;
 }
 
 .mcp-fleet__row > td {
   border-left: 1px solid var(--border3);
+}
+
+.mcp-fleet__row > td:last-child {
+  padding-right: 22px;
 }
 
 .mcp-fleet__row--needs-auth > th:first-child,
@@ -901,6 +909,12 @@
   }
 }
 
+.skill-ledger__row:focus-within,
+.mcp-fleet tbody:focus-within .mcp-fleet__row > th,
+.mcp-fleet tbody:focus-within .mcp-fleet__row > td {
+  background: var(--surface-hover);
+}
+
 @media (max-width: 860px) {
   .inventory-modal .inventory-modal__head {
     gap: 14px;
@@ -948,14 +962,16 @@
     margin-left: auto;
   }
 
-  .inventory-modal .inventory-modal__body {
+  .skill-ledger__row {
+    grid-template-columns: minmax(0, 1fr);
     padding-right: 18px;
     padding-left: 18px;
   }
 
-  .skill-ledger__row {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  .mcp-fleet thead th:first-child,
+  .mcp-fleet__row > th { padding-left: 18px; }
+  .mcp-fleet thead th:last-child,
+  .mcp-fleet__row > td:last-child { padding-right: 18px; }
 
   .skill-ledger__status {
     grid-column: 1;

@@ -9381,8 +9381,8 @@ select:focus-visible,
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .welcome-provider:hover,
-  .welcome-recent button:hover {
+  .welcome-provider:hover:not(.is-selected),
+  .welcome-recent button:hover:not(.is-selected) {
     background: var(--surface-hover);
     color: var(--fg);
   }
