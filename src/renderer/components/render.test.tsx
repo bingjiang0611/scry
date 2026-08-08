@@ -217,8 +217,8 @@ describe('ViewChrome 顶栏', () => {
       />
     )
     expect(html).toContain('对话')
-    expect(html).toContain('拓扑')
-    expect(html).toContain('分段')
+    expect(html).not.toContain('拓扑')
+    expect(html).not.toContain('分段')
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('title="工作区文件"')
     expect(html).toContain('文件')
@@ -252,8 +252,8 @@ describe('ViewChrome 顶栏', () => {
     expect(html).toContain('title="纵览面板"')
     expect(html).toContain('aria-label="会话视图"')
     expect(html).toContain('对话')
-    expect(html).toContain('拓扑')
-    expect(html).toContain('分段')
+    expect(html).not.toContain('拓扑')
+    expect(html).not.toContain('分段')
     expect(html).not.toContain('title="工作区文件"')
   })
 })
@@ -1494,15 +1494,15 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       slashCmds: commands
     })
     expect(chatHtml).toContain('<span>Commands</span>')
-    expect(chatHtml).toContain('准备好观察下一次执行')
+    expect(chatHtml).toContain('开始一次可追溯执行')
     expect(chatHtml).toContain('class="welcome-layout"')
     expect(chatHtml).toContain('class="welcome-provider is-selected"')
     expect(chatHtml).toContain('data-tone="ok"')
-    expect(chatHtml).toContain('Provider 就绪')
+    expect(chatHtml).toContain('<h2 id="welcome-provider-title">Provider</h2>')
     expect(chatHtml).toContain('健康')
     expect(chatHtml).toContain('/usr/local/bin/claude')
     expect(chatHtml).toContain('运行上下文')
-    expect(chatHtml).toContain('开始一项可追溯任务')
+    expect(chatHtml).toContain('告诉 Agent 要完成什么')
     expect(chatHtml).toContain('aria-label="描述任务"')
     expect(chatHtml).not.toContain('Commands ·')
     expect(chatHtml).not.toContain('browser-use')
@@ -1513,7 +1513,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
   it('ChatView 在 0 agents 探测中与探测完成后使用不同的诚实状态', () => {
     const scanningHtml = renderWelcome({ agentScanning: true })
     expect(scanningHtml).toContain('data-tone="neutral"')
-    expect(scanningHtml).toContain('Provider 探测中')
+    expect(scanningHtml).toContain('<h2 id="welcome-provider-title">Provider</h2>')
     expect(scanningHtml).toContain('正在探测本机 Provider')
     expect(scanningHtml).toContain('正在探测本机 agent CLI')
     expect(scanningHtml).not.toContain('Provider 就绪')
@@ -1522,7 +1522,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
 
     const completeHtml = renderWelcome({ agentScanning: false })
     expect(completeHtml).toContain('data-tone="warn"')
-    expect(completeHtml).toContain('Provider 未就绪')
+    expect(completeHtml).toContain('<h2 id="welcome-provider-title">Provider</h2>')
     expect(completeHtml).toContain('未检测到可用 Provider')
     expect(completeHtml).toContain('完整探测未返回可用 agent CLI')
     expect(completeHtml).not.toContain('Provider 就绪')
@@ -1545,7 +1545,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       }]
     })
     expect(html).toContain('data-tone="warn"')
-    expect(html).toContain('Provider 未就绪')
+    expect(html).toContain('<h2 id="welcome-provider-title">Provider</h2>')
     expect(html).toContain('2 个 Provider 均未确认可用')
     expect(html).toContain('0 个可用 · 0 个健康 · 2 个未知或不可用')
     expect(html).toContain('data-health="unknown"')
@@ -3417,338 +3417,6 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
   })
 })
 
-import { ExecutionGraph } from './ExecutionGraph'
-
-describe('ExecutionGraph 渲染：调用拓扑树', () => {
-  it('按 Turn / llm_request 分组渲染工具节点，subagent 嵌套', () => {
-    const t: Turn = {
-      runId: 'run-x',
-      userText: 'x',
-      done: true,
-      items: [
-        ev({ id: 'm1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu-bash', messageId: 'msg_1' }),
-        ev({ id: 'm2', kind: 'agent', stage: 'agent:general-purpose', name: 'general-purpose', tool: 'Agent', toolUseId: 'tu-agent', messageId: 'msg_1' }),
-        // subagent 子步骤：parentToolUseId 指向 Agent 的 toolUseId
-        ev({ id: 'm3', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu-sub', parentToolUseId: 'tu-agent', messageId: 'msg_2' }),
-        ev({ id: 'r', kind: 'harness', stage: 'result', costUsd: 0.5, tokensIn: 100, tokensOut: 20 })
-      ]
-    }
-    const html = renderToStaticMarkup(<ExecutionGraph turns={[t]} selectedId={null} onSelect={() => {}} />)
-    expect(html).toContain('TURN 01') // turn-head
-    expect(html).toContain('LLM') // llm_request 节点 gtype 徽章
-    expect(html).toContain('Bash')
-    expect(html).toContain('general-purpose') // 子 agent 节点
-    expect(html).toContain('SUBAGENT') // subagent gtype 徽章
-    expect(html).toContain('120 tok') // turn-head token
-    expect(html).not.toContain('$0.500')
-    expect(html).toContain('graph-evidence-header')
-    expect(html).toContain('graph-turn-lane')
-    expect(html).toContain('调整拓扑详情面板宽度') // 右侧详情面板可拖拽
-    expect(html).toContain('graph-child-run')
-  })
-
-  it('孤儿 parent id 的调用仍作为顶层节点展示', () => {
-    const t: Turn = {
-      runId: 'run-orphan-graph',
-      userText: '继续',
-      done: true,
-      items: [
-        ev({
-          id: 'orphan-call',
-          kind: 'tool',
-          stage: 'tool:RootBash',
-          tool: 'RootBash',
-          toolUseId: 'orphan-call',
-          parentToolUseId: 'missing-parent',
-          messageId: 'msg-root'
-        })
-      ]
-    }
-
-    const html = renderToStaticMarkup(<ExecutionGraph turns={[t]} selectedId={null} onSelect={() => {}} />)
-
-    expect(html).toContain('RootBash')
-  })
-
-  it('Turn 与会话汇总共用 Provider-aware Token 和逻辑调用口径', () => {
-    const t: Turn = {
-      runId: 'run-codex',
-      userText: '/rate-workflow 1',
-      done: true,
-      items: [
-        ev({
-          id: 'skill',
-          kind: 'skill',
-          stage: 'skill:rate-workflow',
-          name: 'rate-workflow',
-          toolUseId: 'skill-1',
-          input: { source: 'tool_use' }
-        }),
-        ev({
-          id: 'skill-path',
-          kind: 'skill',
-          stage: 'skill:rate-workflow',
-          name: 'rate-workflow',
-          toolUseId: 'read-skill',
-          input: { source: 'skill_path_in_command' }
-        }),
-        ev({
-          id: 'multi-mcp',
-          kind: 'tool',
-          stage: 'tool:Bash',
-          tool: 'Bash',
-          toolUseId: 'mcp-1',
-          isMcp: true,
-          mcpCalls: [
-            { server: 'coop', action: 'query', tool: 'mcporter:coop.query' },
-            { server: 'group-env', action: 'list', tool: 'mcporter:group-env.list' }
-          ]
-        }),
-        ev({
-          id: 'codex-result',
-          kind: 'harness',
-          stage: 'result',
-          providerId: 'codex',
-          tokensIn: 100,
-          tokensOut: 20,
-          cacheReadTokens: 80
-        })
-      ]
-    }
-    const html = renderToStaticMarkup(<ExecutionGraph turns={[t]} selectedId={null} onSelect={() => {}} />)
-
-    expect(html).toContain('120 tok')
-    expect(html).not.toContain('200 tok')
-    expect(html).toContain('3 calls')
-    expect(html).not.toContain('4 calls')
-    expect(html).toContain('3 个调用')
-    expect(html).toContain('coop · group-env')
-    expect(html).toContain('query · list · 2 次调用')
-  })
-
-  it('Token 未上报显示 unknown，显式零值才显示 0', () => {
-    const renderGraph = (results: Partial<TraceEvent>[]): string => renderToStaticMarkup(
-      <ExecutionGraph
-        turns={results.map((result, index) => ({
-          runId: `run-token-truth-${index}`,
-          userText: 'x',
-          done: true,
-          items: [ev({ id: `result-token-truth-${index}`, kind: 'harness', stage: 'result', ...result })]
-        }))}
-        selectedId={null}
-        onSelect={() => {}}
-      />
-    )
-
-    const unknown = renderGraph([{}])
-    expect(unknown).toContain('<span>— tok</span>')
-    expect(unknown).toContain('<span class="accent"><small>Token</small><b>—</b>')
-
-    const zero = renderGraph([{ tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }])
-    expect(zero).toContain('<span>0 tok</span>')
-    expect(zero).toContain('<span class="accent"><small>Token</small><b>0</b>')
-
-    const partial = renderGraph([{ tokensIn: 10, tokensOut: 5 }, {}])
-    expect(partial).toContain('<span class="accent"><small>Token</small><b>≥ 15</b>')
-  })
-
-  it('详情面板沿用 Provider 危险分类能力，未支持时不把无标记写成安全', () => {
-    const call = ev({
-      id: 'codex-graph-call',
-      kind: 'tool',
-      stage: 'tool:Bash',
-      tool: 'Bash',
-      providerId: 'codex'
-    })
-    const html = renderToStaticMarkup(
-      <ExecutionGraph
-        turns={[{ runId: 'codex-graph', userText: 'x', done: true, items: [call] }]}
-        selectedId={call.id}
-        onSelect={() => {}}
-      />
-    )
-
-    expect(html).toContain('当前 Provider 未支持危险分类；未标记不等于安全')
-    expect(html).not.toContain('完整分类范围内无危险标记')
-  })
-
-  it('空会话出占位', () => {
-    const html = renderToStaticMarkup(<ExecutionGraph turns={[]} selectedId={null} onSelect={() => {}} />)
-    expect(html).toContain('调用拓扑树')
-  })
-})
-
-import { SegmentsView } from './SegmentsView'
-
-describe('SegmentsView 渲染：主体内容对齐容器', () => {
-  it('渲染时间带、段账本与证据详情', () => {
-    const t: Turn = {
-      runId: 'seg',
-      userText: 'x',
-      done: true,
-      items: [
-        ev({ id: 'sg1', kind: 'skill', stage: 'skill:workflow-orchestrator', name: 'workflow-orchestrator' }),
-        ev({ id: 'sg2', kind: 'tool', stage: 'tool:Read', tool: 'Read', fileOp: 'read', filePath: '/a/SKILL.md' }),
-        ev({ id: 'sg3', kind: 'harness', stage: 'result', costUsd: 0.01, durationApiMs: 1200 })
-      ]
-    }
-    const html = renderToStaticMarkup(<SegmentsView turns={[t]} />)
-    expect(html).toContain('segment-ribbon')
-    expect(html).toContain('segment-ledger')
-    expect(html).toContain('segment-inspector')
-    expect(html).toContain('会话切成')
-  })
-
-  it('Token 未上报显示 unknown，显式零值才显示 0', () => {
-    const renderSegments = (results: Partial<TraceEvent>[]): string => renderToStaticMarkup(
-      <SegmentsView
-        turns={results.map((result, index) => ({
-          runId: `seg-token-truth-${index}`,
-          userText: 'x',
-          done: true,
-          items: [
-            ev({ id: `seg-read-token-truth-${index}`, kind: 'tool', stage: 'tool:Read', tool: 'Read' }),
-            ev({ id: `seg-result-token-truth-${index}`, kind: 'harness', stage: 'result', ...result })
-          ]
-        }))}
-      />
-    )
-
-    const unknown = renderSegments([{}])
-    expect(unknown).toContain('<small>Token</small><b>—</b>')
-    expect(unknown).toContain('<small>API</small><b>—</b>')
-    expect(unknown).toContain('Provider 未上报 Token')
-    expect(unknown).toContain('<small>最大已知下界</small>')
-    expect(unknown).toContain('<small>最长已知 API</small>')
-    expect(unknown).toContain('role="group"')
-    expect(unknown).not.toContain('role="listitem"')
-
-    const zero = renderSegments([{ tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }])
-    expect(zero).toContain('<small>Token</small><b>0</b>')
-    expect(zero).not.toContain('Provider 未上报 Token')
-
-    const partial = renderSegments([{ tokensIn: 10, tokensOut: 5 }, {}])
-    expect(partial).toContain('<small>Token</small><b>≥ 15</b>')
-  })
-
-  it('其他段有 API 证据时，当前段缺失仍显示未知而不是 0%', () => {
-    const html = renderToStaticMarkup(
-      <SegmentsView
-        turns={[
-          {
-            runId: 'seg-api-unknown',
-            userText: '先读',
-            done: true,
-            items: [
-              ev({ id: 'seg-api-read', kind: 'tool', stage: 'tool:Read', tool: 'Read' }),
-              ev({ id: 'seg-api-result-unknown', kind: 'harness', stage: 'result' })
-            ]
-          },
-          {
-            runId: 'seg-api-known',
-            userText: '再跑 skill',
-            done: true,
-            items: [
-              ev({ id: 'seg-api-skill', kind: 'skill', stage: 'skill:test', name: 'test' }),
-              ev({ id: 'seg-api-result-known', kind: 'harness', stage: 'result', durationApiMs: 1000 })
-            ]
-          }
-        ]}
-      />
-    )
-
-    expect(html).toContain('turn 01 · API 覆盖未知')
-    expect(html).not.toContain('turn 01 · 0% 已知 API 时间')
-  })
-
-  it('同段缺一轮 API 或 output 时只展示已知下界，不给精确排名与百分比', () => {
-    const html = renderToStaticMarkup(
-      <SegmentsView
-        turns={[
-          {
-            runId: 'seg-partial-1',
-            userText: 'one',
-            done: true,
-            items: [ev({ id: 'seg-partial-result-1', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5, durationApiMs: 1000 })]
-          },
-          {
-            runId: 'seg-partial-2',
-            userText: 'two',
-            done: true,
-            items: [ev({ id: 'seg-partial-result-2', kind: 'harness', stage: 'result', tokensIn: 3 })]
-          }
-        ]}
-      />
-    )
-
-    expect(html).toContain('<strong>≥ 18 tok</strong>')
-    expect(html).toContain('<small>最大已知下界</small>')
-    expect(html).not.toContain('<small>最高 Token</small>')
-    expect(html).toContain('<small>最长已知 API</small>')
-    expect(html).not.toContain('<small>最慢段</small>')
-    expect(html).toContain('<small>Token</small><b>≥ 18</b><em>输入 2/2 轮 · 输出 1/2 轮</em>')
-    expect(html).toContain('<small>API</small><b>≥ 1.0s</b><em>1/2 轮已捕获 · 已知下界</em>')
-    expect(html).toContain('1/2 轮 API 已捕获；会话占比未知')
-    expect(html).not.toContain('100% 会话 API 时间')
-  })
-
-  it('完整状态明确限定为 API+Token 覆盖', () => {
-    const html = renderToStaticMarkup(
-      <SegmentsView
-        turns={[{
-          runId: 'seg-complete-scope',
-          userText: '完整覆盖',
-          done: true,
-          items: [ev({
-            id: 'seg-complete-result',
-            kind: 'harness',
-            stage: 'result',
-            tokensIn: 0,
-            tokensOut: 0,
-            durationApiMs: 0
-          })]
-        }]}
-      />
-    )
-
-    expect(html).toContain('API + TOKEN')
-    expect(html).toContain('API+Token 完整')
-    expect(html).not.toContain('>完整</em>')
-  })
-
-  it('inspector footer 只显示当前段重读，不借用全会话最差段', () => {
-    const html = renderToStaticMarkup(
-      <SegmentsView
-        turns={[
-          {
-            runId: 'seg-selected-clean',
-            userText: '先执行基线',
-            done: true,
-            items: [
-              ev({ id: 'seg-selected-bash', kind: 'tool', stage: 'tool:Bash', tool: 'Bash' }),
-              ev({ id: 'seg-selected-result', kind: 'harness', stage: 'result' })
-            ]
-          },
-          {
-            runId: 'seg-global-worst',
-            userText: '再运行 skill',
-            done: true,
-            items: [
-              ev({ id: 'seg-global-skill', kind: 'skill', stage: 'skill:test', name: 'test' }),
-              ev({ id: 'seg-global-read-1', kind: 'tool', stage: 'tool:Read', tool: 'Read', fileOp: 'read', filePath: '/repo/a.ts' }),
-              ev({ id: 'seg-global-read-2', kind: 'tool', stage: 'tool:Read', tool: 'Read', fileOp: 'read', filePath: '/repo/a.ts' }),
-              ev({ id: 'seg-global-result', kind: 'harness', stage: 'result' })
-            ]
-          }
-        ]}
-      />
-    )
-
-    expect(html).toContain('RE-READ 0 OBSERVED')
-    expect(html).not.toContain('RE-READ 1')
-  })
-})
-
 import { DiagnosticsView } from './DiagnosticsView'
 import { McpModal, SettingsModal, SkillsModal } from './Modals'
 
@@ -4392,7 +4060,8 @@ describe('Skill/MCP 操作能力渲染', () => {
     )
     expect(html).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
     expect(html).toContain('inventory-modal--skills')
-    expect(html).toContain('class="inventory-switch skill-switch"')
+    expect(html).toContain('class="skill-ledger__status-line"')
+    expect(html).toContain('class="inventory-switch"')
     expect(html).toContain('aria-label="Skills 查询上下文"')
     expect(html).toContain('<strong>qoder</strong>')
     expect(html).toContain('<code title="/repo">/repo</code>')

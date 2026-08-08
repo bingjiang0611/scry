@@ -1,6 +1,6 @@
 # Scry
 
-Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它在应用内驱动本机 agent CLI，把终端里的执行过程呈现为可检查的对话、工具调用、文件足迹、拓扑、分段、用量与诊断信息。
+Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它在应用内驱动本机 agent CLI，把终端里的执行过程呈现为可检查的对话、工具调用、文件足迹、会话纵览、用量与诊断信息。
 
 > 当前状态：**MVP / WIP**。项目主要在 macOS 上开发和验证，暂不提供已签名、公证的安装包。
 
@@ -9,7 +9,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 - 在桌面界面中启动和停止 agent turn，流式查看模型输出与工具调用。
 - 按工作目录管理新会话、历史会话和最近项目。
 - 汇总 token、cost、duration、tool/MCP 调用与文件读写足迹。
-- 提供对话、执行拓扑、分段分析、账单卫士、MCP 信任和诊断视图。
+- 提供对话、会话纵览、账单卫士、MCP 信任、跨会话分析和诊断视图。
 - 通过 Provider adapter 接入 Claude、Codex、Qoder 和 OpenCode；各 Provider 的可用能力取决于本机 CLI/SDK 与登录状态。
 - 提供独立的 `@ali/scry-turn-recorder` CLI，在本地记录顶层 agent turn。
 
@@ -97,7 +97,7 @@ typecheck、tests、CLI build，并固定发布到内网 registry；不要从陈
 Electron、electron-vite、React 18、TypeScript、SQLite，以及各 Provider 的本地 CLI/SDK。
 
 ```text
-Renderer (React)     对话、拓扑、分段、分析、诊断与右侧详情
+Renderer (React)     对话、分析、诊断与右侧会话纵览
        ↑ IPC
 Preload              最小化暴露 window.scry API
        ↑ IPC

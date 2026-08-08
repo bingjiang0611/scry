@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 
 export type IconName =
   | 'plus' | 'minus' | 'search' | 'folder' | 'file' | 'box' | 'cube' | 'tool' | 'bulb' | 'message'
-  | 'graph' | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
+  | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
   | 'image' | 'send' | 'settings'
 
@@ -41,15 +41,6 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
-  graph: (
-    <>
-      <circle cx="6" cy="6" r="2" />
-      <circle cx="18" cy="6" r="2" />
-      <circle cx="6" cy="18" r="2" />
-      <circle cx="18" cy="18" r="2" />
-      <path d="M6 8v8M18 8v8M8 6h8M8 18h8" />
-    </>
-  ),
   chart: (
     <>
       <path d="M3 3v18h18" />

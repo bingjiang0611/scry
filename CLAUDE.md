@@ -40,9 +40,9 @@ Scry 是观测系统，用户信任「看到的数字/状态是真的」。每�
 
 - **partial state 只能防崩溃，不能补业务事实**：数组类字段缺失可兜底成 `[]` 让列表不炸；但 `preflight`、`sharedReportExport`、`audit`、`reconciliation`、`gatewayPolicies` 这类治理/账单对象缺失时，必须显示「状态未知 / 缺少字段」，不能补 `0`、空格式、`refused`、空策略等看似确定的业务值。今天 review loop 抓到的 blocker 就是 `billingGuard` 把缺失 `audit` 渲染成「审计日志 0 行」。
 - **账单卫士兼容旧 IPC 时要补反例测试**：只测完整 `BillingGuardianState` 不够，必须有 partial `billingState` 用例，断言不出现假 `0 行`、假 `$0.0000`、假空导出格式、假「暂无策略」。
-- **App shell 顶栏必须区分 compact / with-filter**：welcome、graph、segments 没有 timeline filter，顶栏应是 compact 单行；chat 才用 `with-filter` 两排布局。不要为了 chat 的 filter 把所有页面顶栏撑高。
-- **窄宽度要测**：右栏拖到较宽或 1024px 窗口时，主区会被压窄。`对话/拓扑/分段` 必须 `white-space: nowrap` 且保持完整，filter 自己横向滚动；不要让 tab 文案换行把顶栏撑高。
-- **右侧面板语义**：`OverviewPanel` 只属于 chat；graph/segments 不展示对话右栏。Graph 里的右侧详情是拓扑自己的 span detail，可单独拖拽，不等同于 chat 右栏。
+- **App shell 顶栏保持 compact**：会话只保留对话视图；Provider、工作区与纵览入口维持单行，不为历史视图预留空槽。
+- **窄宽度要测**：右栏拖到较宽或 1024px 窗口时，主区会被压窄。对话标题与状态必须 `white-space: nowrap`，工具区自行收拢，不能让顶栏文案换行撑高。
+- **右侧面板语义**：`OverviewPanel` 只解释当前对话会话；跨会话证据属于分析页，不混入当前会话纵览。
 - **中文化检查不要只看主屏**：侧边栏、composer、右栏 tab、账单卫士按钮（如「同步 Admin 数据」「导入网关示例数据」）都要中文化；但协议名、工具名、model、source id 保持英文事实值。
 
 ## 改完代码后的验证 profile
@@ -99,7 +99,7 @@ PATH="$HOME/.nvm/versions/node/v22.22.1/bin:$PATH" npm run start -- --remoteDebu
 - 选择 cwd、最近目录、历史会话、新会话。
 - Chat 视图输入低成本 prompt,例如“只回复 OK,不读文件、不调用工具”,观察 turn lifecycle。
 - Stop 路径:启动后停止,确认 stop 返回和 `turnDone` 状态。
-- Graph / Segments / Analytics / Diagnostics 导航。
+- Chat / Analytics / Diagnostics 导航。
 - 右栏 `纵览` / `账单卫士` / `MCP 信任`。
 - splitter 拖拽、键盘调整、折叠恢复。
 - CLI detection、MCP list/test、skills list/toggle 按改动面选择。
