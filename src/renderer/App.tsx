@@ -1238,16 +1238,7 @@ export function App() {
             selected={session.selected}
             usage={integrations.usage}
             stats={integrations.stats}
-            billingState={integrations.billingState}
             runtimeProvider={panelRuntimeProvider}
-            mcpLive={integrations.mcpLive}
-            mcps={integrations.mcps}
-            mcpGuardReport={integrations.mcpGuardReport}
-            mcpGuardScanning={integrations.mcpGuardScanning}
-            mcpRefreshing={integrations.mcpRefreshing}
-            onMcpGuardReportChange={integrations.setCurrentMcpGuardReport}
-            onMcpGuardScan={integrations.selectedProviderId === 'claude' ? integrations.scanMcpGuard : undefined}
-            onMcpRefresh={() => integrations.pullMcpLive()}
             gitDiff={integrations.gitDiff}
             diag={integrations.diag}
             busy={session.busy}
