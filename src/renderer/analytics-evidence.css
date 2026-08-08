@@ -809,9 +809,9 @@
 .analytics-evidence .ae-source-error span { color: var(--dim); font: 11px/1.6 var(--font-mono); }
 
 @media (hover: hover) and (pointer: fine) {
-  .analytics-evidence .ae-tabs button:hover,
-  .analytics-evidence .ae-provider-list > button:hover,
-  .analytics-evidence .ae-capabilities > button:hover {
+  .analytics-evidence .ae-tabs button:hover:not(.active),
+  .analytics-evidence .ae-provider-list > button:hover:not(.active),
+  .analytics-evidence .ae-capabilities > button:hover:not(.active) {
     background: var(--surface-hover);
     color: var(--fg);
   }
