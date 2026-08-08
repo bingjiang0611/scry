@@ -63,12 +63,7 @@ function WelcomeSurface() {
             <h1>开始一次可追溯执行。</h1>
             <p>可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。</p>
           </header>
-          <section aria-labelledby="welcome-live-provider-title">
-            <div className="welcome-live-section-head">
-              <span>01</span>
-              <h2 id="welcome-live-provider-title">Provider</h2>
-              <em>{readyCount} 可用 · {welcome.providers.length} 个适配器</em>
-            </div>
+          <section aria-label="Provider">
             <div className="welcome-live-status" role="status">
               <i aria-hidden="true"></i>
               <span><b>{readyCount}/{welcome.providers.length} 个 Provider 可用</b><small>结构预览；运行状态以 Scry 本机探测为准</small></span>
@@ -86,7 +81,6 @@ function WelcomeSurface() {
                 )
               })}
             </div>
-            <p className="welcome-live-boundary"><b>边界：</b>未支持不是 0；未知表示尚无足够观测。</p>
           </section>
         </div>
       </div>
