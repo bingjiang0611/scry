@@ -333,7 +333,8 @@ export function createAppSessionStore(
           mtime: sessions[0].ts
         }
       })
-      .sort((a, b) => b.mtime - a.mtime)
+      // Chats（不绑定工作目录）优先级最低：真实项目按最近活跃排前，它恒在末尾。
+      .sort((a, b) => Number(!a.cwd) - Number(!b.cwd) || b.mtime - a.mtime)
   }
 
   const remove = (args: { providerId: SessionProviderId; cwd: string; externalSessionId: string }): void => {
