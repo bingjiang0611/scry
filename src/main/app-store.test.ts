@@ -116,6 +116,34 @@ describe('app-store', () => {
     }
   })
 
+  it('Chats 分组优先级最低，即使最近活跃也排在真实项目之后', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.record({
+        providerId: 'claude',
+        runtimeProvider: 'claude_sdk',
+        externalSessionId: 'bound',
+        cwd: '/repo/a',
+        prompt: 'older bound task'
+      })
+      store.record({
+        providerId: 'qoder',
+        runtimeProvider: 'qoder_cli',
+        externalSessionId: 'unbound',
+        cwd: '',
+        prompt: 'newest unbound task'
+      })
+
+      const projects = store.listProjects()
+      expect(projects.map((p) => p.cwd)).toEqual(['/repo/a', ''])
+      // 不绑定分组确实更新，依然被排到末尾
+      expect(projects.at(-1)!.mtime).toBeGreaterThanOrEqual(projects[0].mtime)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('隔离相同 external session id，并把无证据老数据标成 legacy_unknown', () => {
     const dir = tempDir()
     try {
