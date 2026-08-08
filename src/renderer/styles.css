@@ -8994,13 +8994,16 @@ select:focus-visible,
   background: var(--selected-soft);
 }
 
-/* Welcome / zero-turn readiness field */
+/* Welcome / zero-turn readiness field
+   列宽由 session-evidence.css 的 --evidence-column / --evidence-gutter 接管（与 composer 共用一条正文列），
+   这里只管垂直节奏：内容垂直居中，留白分到上下两侧，不在内容与 composer 之间开洞。 */
 .welcome-field {
-  width: min(100% - 48px, 840px);
-  min-height: auto;
-  display: block;
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  gap: 20px;
   margin: 0 auto;
-  padding: clamp(22px, 3cqi, 34px) 0 24px;
+  padding: 26px 0;
   color: var(--fg);
   text-align: left;
 }
@@ -9028,69 +9031,63 @@ select:focus-visible,
 }
 
 .welcome-heading {
-  padding-bottom: 16px;
+  display: grid;
+  gap: 10px;
 }
 
 .welcome-heading h1 {
-  max-width: 700px;
-  margin: 12px 0 0;
+  max-width: 620px;
+  margin: 0;
   color: var(--fg);
-  font: 720 clamp(28px, 3.7cqi, 38px)/1.08 var(--font-ui);
-  letter-spacing: -0.045em;
-}
-
-.welcome-heading p {
-  max-width: 680px;
-  margin: 8px 0 0;
-  color: var(--dim);
-  font: 14px/1.6 var(--font-ui);
+  font: 720 clamp(24px, 2.9cqi, 30px)/1.16 var(--font-ui);
+  letter-spacing: -0.012em;
   text-wrap: pretty;
 }
 
-.welcome-provider-field { min-width: 0; }
+.welcome-heading p {
+  max-width: 560px;
+  margin: 0;
+  color: var(--dim);
+  font: 13px/1.75 var(--font-ui);
+  text-wrap: pretty;
+}
 
-.welcome-ready-line {
-  min-height: 48px;
-  display: flex;
+.welcome-provider-field {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+/* 就绪表头：计量跟在文字旁边（不钉到右边缘），右端只放「重新扫描」这个动作。 */
+.welcome-provider-head {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
-  gap: 11px;
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  gap: 4px 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border3);
 }
 
-.welcome-runtime-pulse {
-  width: 8px;
-  height: 8px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--dim2);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dim2) 12%, transparent);
+.welcome-provider-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
 }
 
-.welcome-ready-line[data-tone='ok'] .welcome-runtime-pulse {
-  background: var(--ok);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 12%, transparent);
-}
-
-.welcome-ready-line[data-tone='warn'] .welcome-runtime-pulse {
-  background: var(--warn);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 12%, transparent);
-}
-
-.welcome-ready-line > span:last-child {
+.welcome-ready-title {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 10px;
 }
 
-.welcome-ready-line b {
+.welcome-provider-head b {
   color: var(--fg);
-  font: 650 13.5px/1.25 var(--font-ui);
+  font: 650 13px/1.25 var(--font-ui);
 }
 
-.welcome-ready-line small {
+.welcome-provider-head small {
   overflow: hidden;
   color: var(--dim2);
   font: 11.5px/1.35 var(--font-mono);
@@ -9098,61 +9095,111 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-.welcome-provider-list { border-bottom: 1px solid var(--border); }
+/* 分段计量：一段一个 Provider，可用为 --ok，不可用为 --dim3。 */
+.welcome-ready-meter {
+  flex: none;
+  display: flex;
+  gap: 3px;
+}
+
+.welcome-ready-meter i {
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--dim3);
+}
+
+.welcome-ready-meter i[data-on='true'] { background: var(--ok); }
+
+.welcome-provider-head[data-tone='warn'] .welcome-ready-meter i[data-on='true'] { background: var(--warn); }
+
+.welcome-rescan {
+  flex: none;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim2);
+  font: 11.5px/1 var(--font-ui);
+  cursor: pointer;
+  transition: background-color 130ms var(--ease-out), color 130ms var(--ease-out);
+}
+
+.welcome-rescan:hover:not(:disabled) {
+  border-color: var(--border2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.welcome-rescan:disabled { color: var(--dim3); cursor: default; }
+
+.welcome-rescan[data-busy='true'] .ico { animation: welcome-rescan-spin 900ms linear infinite; }
+
+@keyframes welcome-rescan-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-rescan[data-busy='true'] .ico { animation: none; }
+}
+
+/* Provider 卡片矩阵：2×2 取代满宽表格行，状态与名字待在一起。 */
+.welcome-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
 
 .welcome-provider {
   position: relative;
-  width: 100%;
-  min-height: 60px;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 7px minmax(0, 1fr);
-  align-items: center;
-  gap: 11px;
-  padding: 7px 8px 7px 10px;
-  border: 0;
-  border-bottom: 1px solid var(--border3);
-  border-radius: 0;
-  box-shadow: none;
-  background: transparent;
+  gap: 5px;
+  padding: 11px 12px 10px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-md);
+  background: var(--surface-faint);
   color: var(--dim);
   text-align: left;
-  transition: background-color 140ms ease-out, transform 140ms var(--ease-out);
+  cursor: pointer;
+  transition: border-color 140ms var(--ease-out), background-color 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
 }
 
-.welcome-provider:last-child { border-bottom: 0; }
+.welcome-provider:disabled { cursor: default; }
+.welcome-provider:active:not(:disabled) { transform: scale(0.995); }
+
 .welcome-provider.is-selected {
+  border-color: var(--selected-line);
   background: var(--selected-soft);
-  box-shadow: inset 2px 0 0 var(--selected);
 }
-.welcome-provider:active { transform: scale(0.995); }
 
-.welcome-provider > i {
+.welcome-provider-top {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.welcome-provider-top > i {
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--dim2);
 }
 
-.welcome-provider[data-provider='claude'] > i { background: var(--provider-claude); }
-.welcome-provider[data-provider='codex'] > i { background: var(--provider-codex); }
-.welcome-provider[data-provider='qoder'] > i { background: var(--provider-qoder); }
-.welcome-provider[data-provider='opencode'] > i { background: var(--provider-opencode); }
-
-.welcome-provider > span {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.welcome-provider > span > span {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
+.welcome-provider[data-provider='claude'] .welcome-provider-top > i { background: var(--provider-claude); }
+.welcome-provider[data-provider='codex'] .welcome-provider-top > i { background: var(--provider-codex); }
+.welcome-provider[data-provider='qoder'] .welcome-provider-top > i { background: var(--provider-qoder); }
+.welcome-provider[data-provider='opencode'] .welcome-provider-top > i { background: var(--provider-opencode); }
 
 .welcome-provider b {
+  min-width: 0;
   overflow: hidden;
   color: var(--fg);
   font: 650 13px/1.25 var(--font-ui);
@@ -9160,26 +9207,48 @@ select:focus-visible,
   white-space: nowrap;
 }
 
+/* 可用是常态 → 纯文字；不可用是例外 → 才上色块，避免几个绿胶囊平均叫嗓。 */
 .welcome-provider em {
   flex: none;
-  color: var(--dim2);
-  font: 650 10px/1 var(--font-mono);
+  color: var(--ok);
+  font: 650 9.5px/1 var(--font-mono);
   font-style: normal;
+  letter-spacing: 0.06em;
 }
 
-.welcome-provider[data-health='available'] em { color: var(--ok); }
-.welcome-provider[data-health='unavailable'] em { color: var(--bad); }
+.welcome-provider[data-health='unavailable'] em {
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--bad-soft);
+  color: var(--bad);
+}
 
-.welcome-provider code,
+.welcome-provider-check {
+  flex: none;
+  margin-left: auto;
+  color: var(--selected);
+}
+
 .welcome-provider small {
+  min-width: 0;
   overflow: hidden;
-  color: var(--dim2);
+  color: var(--dim);
   font: 11.5px/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.welcome-provider code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim3);
+  font: 11px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .welcome-list-empty {
+  grid-column: 1 / -1;
   min-height: 58px;
   display: flex;
   align-items: center;
@@ -9188,44 +9257,80 @@ select:focus-visible,
   font: 13px/1.5 var(--font-ui);
 }
 
-.welcome-composer-heading {
-  min-width: 0;
-  min-height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 5px 7px;
-  border-bottom: 1px solid var(--border3);
-}
+/* 已绑定项目：上下文条本身就是工作目录切换入口，切换只重新绑定。 */
+.welcome-context { position: relative; min-width: 0; }
 
-.welcome-composer-heading > span {
+.welcome-context-btn {
+  width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-faint);
+  color: var(--dim);
+  font: 12px/1.35 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 130ms var(--ease-out), background-color 130ms var(--ease-out);
 }
 
-.welcome-composer-heading small,
-.welcome-composer-heading em {
-  color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
-  font-style: normal;
-  letter-spacing: 0.09em;
-}
+.welcome-context-btn:hover { border-color: var(--border2); background: var(--surface-hover); }
+.welcome-context-btn .ico { flex: none; color: var(--dim2); }
+.welcome-context-btn .chev { margin-left: auto; opacity: 0.7; }
+.welcome-context-btn b { flex: none; color: var(--fg); font-weight: 650; }
 
-.welcome-composer-heading b {
+.welcome-context-btn code {
+  min-width: 0;
   overflow: hidden;
-  color: var(--fg);
-  font: 650 13px/1.25 var(--font-ui);
+  color: var(--dim3);
+  font: 11px/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* composer 的 .menu 是向上弹（bottom: 100%），这里在正文里必须向下弹。 */
+.welcome-context-menu {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: 0;
+  min-width: 320px;
+  max-width: 100%;
+}
+
+.welcome-context-item > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.welcome-context-item b {
+  overflow: hidden;
+  color: var(--fg);
+  font: 650 12.5px/1.3 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 完整路径是选项之间的主要区分信息（同父目录的子项目很常见）。 */
+.welcome-context-item code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim3);
+  font: 11px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-context-item:disabled { cursor: default; opacity: 1; }
+.welcome-context-item:disabled:hover { background: transparent; }
+
 @media (hover: hover) and (pointer: fine) {
-  .welcome-provider:hover:not(.is-selected) {
+  .welcome-provider:hover:not(.is-selected):not(:disabled) {
+    border-color: var(--border2);
     background: var(--surface-hover);
-    color: var(--fg);
   }
 }
 
@@ -9586,10 +9691,15 @@ button.turn-id.turn-call-open:focus-visible {
 
 }
 
-@container main-pane (max-width: 520px) {
-  .welcome-heading h1 { font-size: 28px; }
+/* 窄主区：卡片矩阵收成一列，「重新扫描」只留图标（可访问名称靠 aria-label）。 */
+@container main-pane (max-width: 640px) {
+  .welcome-provider-grid { grid-template-columns: minmax(0, 1fr); }
 
-  .welcome-composer-heading em { display: none; }
+  .welcome-rescan > span { display: none; }
+}
+
+@container main-pane (max-width: 520px) {
+  .welcome-heading h1 { font-size: 24px; }
 }
 
 /* ============================================================

@@ -806,18 +806,10 @@ export function App() {
     }
   }
 
+  // 选一个工作目录 = 只重新绑定，停在新会话空态。
+  // 曾经的行为是该目录有历史会话就直接打开最近那条（pickSession(sessions[0])），
+  // 结果“换项目”变成“被扔进一个旧对话”，绑定后的工作目录也没机会看清。
   const pickRecent = async (dir: string): Promise<void> => {
-    const firstSession = projects.find((project) => project.cwd === dir)?.sessions[0] ?? null
-    if (firstSession) {
-      await pickSession(
-        dir,
-        firstSession.sessionId,
-        firstSession.providerId,
-        firstSession.externalSessionId,
-        firstSession.runId
-      )
-      return
-    }
     if (dir !== cwd && !confirmWorkspaceTransition()) return
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current

@@ -156,6 +156,96 @@ export function CliPicker({
   )
 }
 
+// welcome 空态里的工作目录切换：只重新绑定，不打开该目录下的历史会话。
+// 每一项都带完整路径——同父目录的子项目光靠 basename 区分不了。
+export function WelcomeProjectContext({
+  cwd,
+  recent,
+  onChoose,
+  onUnbind,
+  onPick
+}: {
+  cwd: string
+  recent: string[]
+  onChoose: () => void
+  onUnbind: () => void
+  onPick: (dir: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const menuId = useId()
+  const others = recent.filter((dir) => dir !== cwd)
+  return (
+    <div className="welcome-context">
+      <button
+        type="button"
+        className="welcome-context-btn"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={menuId}
+        aria-haspopup="menu"
+        title={cwd}
+      >
+        <Icon name="folder" />
+        <b>{basename(cwd)}</b>
+        <code>{cwd}</code>
+        <Icon name="chevronDown" className="chev" />
+      </button>
+      {open && (
+        <div id={menuId} className="menu welcome-context-menu" onMouseLeave={() => setOpen(false)}>
+          <div className="mhdr">工作目录</div>
+          <button type="button" className="mitem welcome-context-item" title={cwd} disabled>
+            <Icon name="folder" />
+            <span>
+              <b>{basename(cwd)}</b>
+              <code>{cwd}</code>
+            </span>
+            <span className="ck"><Icon name="check" /> 当前</span>
+          </button>
+          {others.map((dir) => (
+            <button
+              type="button"
+              key={dir}
+              className="mitem welcome-context-item"
+              title={dir}
+              onClick={() => {
+                setOpen(false)
+                onPick(dir)
+              }}
+            >
+              <Icon name="folder" />
+              <span>
+                <b>{basename(dir)}</b>
+                <code>{dir}</code>
+              </span>
+            </button>
+          ))}
+          <div className="mdiv" />
+          <button
+            type="button"
+            className="mitem"
+            onClick={() => {
+              setOpen(false)
+              onChoose()
+            }}
+          >
+            <Icon name="folder" /> 选择其他文件夹…
+          </button>
+          <button
+            type="button"
+            className="mitem"
+            onClick={() => {
+              setOpen(false)
+              onUnbind()
+            }}
+          >
+            <Icon name="message" /> 不绑定项目
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export interface RunControlSelectOption {
   value: string
   label: string
