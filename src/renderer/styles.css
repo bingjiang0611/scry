@@ -9055,6 +9055,7 @@ select:focus-visible,
   align-items: center;
   gap: 11px;
   padding: 8px 0;
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 
@@ -9094,36 +9095,6 @@ select:focus-visible,
   color: var(--dim2);
   font: 11.5px/1.35 var(--font-mono);
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.welcome-section-head {
-  min-width: 0;
-  min-height: 43px;
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding-top: 7px;
-  border-bottom: 1px solid var(--border);
-}
-
-.welcome-section-head > span {
-  color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
-  letter-spacing: 0.09em;
-}
-
-.welcome-section-head h2 {
-  margin: 0;
-  color: var(--fg);
-  font: 660 13px/1.25 var(--font-ui);
-}
-
-.welcome-section-head em {
-  color: var(--dim2);
-  font: 600 10px/1 var(--font-mono);
-  font-style: normal;
   white-space: nowrap;
 }
 
@@ -9196,8 +9167,7 @@ select:focus-visible,
   font-style: normal;
 }
 
-.welcome-provider[data-health='ready'] em { color: var(--ok); }
-.welcome-provider[data-health='degraded'] em { color: var(--warn); }
+.welcome-provider[data-health='available'] em { color: var(--ok); }
 .welcome-provider[data-health='unavailable'] em { color: var(--bad); }
 
 .welcome-provider code,
@@ -9214,14 +9184,6 @@ select:focus-visible,
   height: 14px;
   color: var(--dim2);
 }
-
-.welcome-boundary {
-  margin: 9px 0 0;
-  color: var(--dim2);
-  font: 11.5px/1.5 var(--font-mono);
-}
-
-.welcome-boundary b { color: var(--dim); }
 
 .welcome-list-empty {
   min-height: 58px;
@@ -9631,8 +9593,6 @@ button.turn-id.turn-call-open:focus-visible {
 }
 
 @container main-pane (max-width: 520px) {
-  .welcome-field { width: min(100% - 28px, 840px); }
-
   .welcome-heading h1 { font-size: 28px; }
 
   .welcome-composer-heading em { display: none; }

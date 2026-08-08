@@ -1496,8 +1496,14 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('class="welcome-provider-field"')
     expect(chatHtml).toContain('class="welcome-provider is-selected"')
     expect(chatHtml).toContain('data-tone="ok"')
-    expect(chatHtml).toContain('<h2 id="welcome-provider-title">Provider</h2>')
-    expect(chatHtml).toContain('健康')
+    expect(chatHtml).not.toContain('welcome-section-head')
+    expect(chatHtml).not.toContain('welcome-boundary')
+    expect(chatHtml).toContain('1/1 个 Provider 可用')
+    expect(chatHtml).toContain('data-health="available"')
+    expect(chatHtml).toContain('可用')
+    expect(chatHtml).not.toContain('健康')
+    expect(chatHtml).not.toContain('降级')
+    expect(chatHtml).not.toContain('状态未知')
     expect(chatHtml).toContain('/usr/local/bin/claude')
     expect(chatHtml).not.toContain('运行上下文')
     expect(chatHtml).not.toContain('最近工作目录')
@@ -1512,22 +1518,35 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
   it('ChatView 在 0 agents 探测中与探测完成后使用不同的诚实状态', () => {
     const scanningHtml = renderWelcome({ agentScanning: true })
     expect(scanningHtml).toContain('data-tone="neutral"')
-    expect(scanningHtml).toContain('<h2 id="welcome-provider-title">Provider</h2>')
-    expect(scanningHtml).toContain('正在探测本机 Provider')
+    expect(scanningHtml).toContain('正在检测本机 Provider')
     expect(scanningHtml).toContain('正在探测本机 agent CLI')
     expect(scanningHtml).not.toContain('Provider 就绪')
     expect(scanningHtml).not.toContain('未检测到可用 Provider')
     expect(scanningHtml).not.toContain('已发现')
 
+    const fastHtml = renderWelcome({
+      agentScanning: true,
+      agents: [{
+        id: 'claude',
+        name: 'Claude Code',
+        bin: 'claude',
+        path: '/usr/local/bin/claude'
+      }]
+    })
+    expect(fastHtml).toContain('1/1 个 Provider 可用')
+    expect(fastHtml).toContain('正在补齐版本信息')
+    expect(fastHtml).toContain('data-health="available"')
+    expect(fastHtml).not.toContain('探测中')
+    expect(fastHtml).not.toContain('状态未知')
+
     const completeHtml = renderWelcome({ agentScanning: false })
     expect(completeHtml).toContain('data-tone="warn"')
-    expect(completeHtml).toContain('<h2 id="welcome-provider-title">Provider</h2>')
     expect(completeHtml).toContain('未检测到可用 Provider')
     expect(completeHtml).toContain('完整探测未返回可用 agent CLI')
     expect(completeHtml).not.toContain('Provider 就绪')
   })
 
-  it('ChatView 不把全部 unknown / unavailable Provider 标成已发现或就绪', () => {
+  it('ChatView 将运行期细节收敛为可用 / 不可用两种 executable 状态', () => {
     const html = renderWelcome({
       agents: [{
         id: 'claude',
@@ -1544,15 +1563,15 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       }]
     })
     expect(html).toContain('data-tone="warn"')
-    expect(html).toContain('<h2 id="welcome-provider-title">Provider</h2>')
-    expect(html).toContain('2 个 Provider 均未确认可用')
-    expect(html).toContain('0 个可用 · 0 个健康 · 2 个未知或不可用')
-    expect(html).toContain('data-health="unknown"')
-    expect(html).toContain('状态未知')
+    expect(html).toContain('1/2 个 Provider 可用')
+    expect(html).toContain('1 个不可用；请检查 CLI 路径或重新扫描')
+    expect(html).toContain('data-health="available"')
     expect(html).toContain('data-health="unavailable"')
+    expect(html).toContain('可用')
     expect(html).toContain('不可用')
-    expect(html).not.toContain('Provider 就绪')
-    expect(html).not.toContain('已发现')
+    expect(html).not.toContain('健康')
+    expect(html).not.toContain('降级')
+    expect(html).not.toContain('状态未知')
   })
 
   it('ChatView 渲染运行中输入队列和图片附件', () => {

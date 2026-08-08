@@ -160,45 +160,33 @@ export function ChatView({
 }: ChatViewProps) {
   const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  const healthyAgentCount = agents.filter((agent) => agent.health?.state === 'ready').length
-  const degradedAgentCount = agents.filter((agent) => agent.health?.state === 'degraded').length
-  const availableAgentCount = healthyAgentCount + degradedAgentCount
-  const unresolvedAgentCount = agents.length - availableAgentCount
-  const providerReadiness = agentScanning
-    ? {
-        tone: 'neutral',
-        title: 'Provider 探测中',
-        summary: '正在探测本机 Provider',
-        detail: agents.length > 0
-          ? `已返回 ${agents.length} 个候选；完整健康状态尚未确认`
-          : 'CLI 路径与 runtime 健康状态尚未返回',
-        meta: '正在探测'
-      }
-    : agents.length > 0 && healthyAgentCount === agents.length
+  const unavailableAgentCount = agents.filter((agent) => agent.health?.state === 'unavailable').length
+  const availableAgentCount = agents.length - unavailableAgentCount
+  const providerReadiness = agents.length > 0
+    ? unavailableAgentCount === 0
       ? {
           tone: 'ok',
-          title: 'Provider 就绪',
-          summary: `${healthyAgentCount} 个 Provider 健康`,
-          detail: '仅表示本机 CLI / runtime 探测结果，不代表账号或用量状态',
-          meta: `${healthyAgentCount} 个健康`
+          summary: `${availableAgentCount}/${agents.length} 个 Provider 可用`,
+          detail: agentScanning
+            ? '已发现本机可执行文件；正在补齐版本信息'
+            : '本机可执行文件已确认；账号与用量状态在运行后采集'
         }
-      : availableAgentCount > 0
-        ? {
-            tone: 'warn',
-            title: 'Provider 部分可用',
-            summary: `${availableAgentCount}/${agents.length} 个 Provider 可用`,
-            detail: `${healthyAgentCount} 个健康 · ${degradedAgentCount} 个降级 · ${unresolvedAgentCount} 个未知或不可用`,
-            meta: `${availableAgentCount} 可用 · ${healthyAgentCount} 健康`
-          }
-        : {
-            tone: 'warn',
-            title: 'Provider 未就绪',
-            summary: agents.length > 0 ? `${agents.length} 个 Provider 均未确认可用` : '未检测到可用 Provider',
-            detail: agents.length > 0
-              ? `0 个可用 · 0 个健康 · ${unresolvedAgentCount} 个未知或不可用`
-              : '完整探测已结束；请检查 CLI 路径或重新扫描',
-            meta: '0 个可用'
-          }
+      : {
+          tone: 'warn',
+          summary: `${availableAgentCount}/${agents.length} 个 Provider 可用`,
+          detail: `${unavailableAgentCount} 个不可用；请检查 CLI 路径或重新扫描`
+        }
+    : agentScanning
+      ? {
+          tone: 'neutral',
+          summary: '正在检测本机 Provider',
+          detail: '正在读取 CLI 路径'
+        }
+      : {
+          tone: 'warn',
+          summary: '未检测到可用 Provider',
+          detail: '请检查 CLI 路径或重新扫描'
+        }
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const modelValue = runControls.model
@@ -263,12 +251,7 @@ export function ChatView({
                 </p>
               </header>
 
-              <section className="welcome-provider-field" aria-labelledby="welcome-provider-title">
-                <div className="welcome-section-head">
-                  <span>01</span>
-                  <h2 id="welcome-provider-title">Provider</h2>
-                  <em>{providerReadiness.meta}</em>
-                </div>
+              <section className="welcome-provider-field" aria-label="Provider">
                 <div className="welcome-ready-line" data-tone={providerReadiness.tone} role="status">
                   <span className="welcome-runtime-pulse" aria-hidden="true" />
                   <span><b>{providerReadiness.summary}</b><small>{providerReadiness.detail}</small></span>
@@ -276,30 +259,21 @@ export function ChatView({
                 <div className="welcome-provider-list" aria-label="Provider 探测结果">
                   {agents.map((agent) => {
                     const selected = agent.id === selectedAgentId
-                    const healthState = agent.health?.state ?? (agentScanning ? 'scanning' : 'unknown')
-                    const state = healthState === 'ready'
-                      ? '健康'
-                      : healthState === 'degraded'
-                        ? '降级'
-                        : healthState === 'unavailable'
-                          ? '不可用'
-                          : healthState === 'scanning'
-                            ? '探测中'
-                            : '状态未知'
+                    const available = agent.health?.state !== 'unavailable'
                     return (
                       <button
                         type="button"
                         className={`welcome-provider ${selected ? 'is-selected' : ''}`}
                         data-provider={agent.id}
-                        data-health={healthState}
+                        data-health={available ? 'available' : 'unavailable'}
                         key={agent.id}
                         aria-pressed={selected}
-                        disabled={agentLocked}
+                        disabled={agentLocked || !available}
                         onClick={() => onSelectAgent(agent.id)}
                       >
                         <i aria-hidden="true" />
                         <span>
-                          <span><b>{agent.name}</b><em>{state}</em></span>
+                          <span><b>{agent.name}</b><em>{available ? '可用' : '不可用'}</em></span>
                           <code title={agent.path}>{agent.path}</code>
                           <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
                         </span>
@@ -315,7 +289,6 @@ export function ChatView({
                     </div>
                   )}
                 </div>
-                <p className="welcome-boundary"><b>边界：</b>未发现不等于未安装；未上报的状态保持未知。</p>
               </section>
             </div>
           )}
