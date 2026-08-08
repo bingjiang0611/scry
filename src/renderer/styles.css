@@ -9105,7 +9105,7 @@ select:focus-visible,
   width: 100%;
   min-height: 60px;
   display: grid;
-  grid-template-columns: 7px minmax(0, 1fr) 14px;
+  grid-template-columns: 7px minmax(0, 1fr);
   align-items: center;
   gap: 11px;
   padding: 7px 8px 7px 10px;
@@ -9177,12 +9177,6 @@ select:focus-visible,
   font: 11.5px/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.welcome-provider > .ico {
-  width: 14px;
-  height: 14px;
-  color: var(--dim2);
 }
 
 .welcome-list-empty {

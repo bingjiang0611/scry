@@ -157,7 +157,7 @@ export function recordTurn(args: {
     db.prepare(
       `INSERT INTO projects (cwd, name, last_seen_at) VALUES (?, ?, ?)
        ON CONFLICT(cwd) DO UPDATE SET last_seen_at = excluded.last_seen_at`
-    ).run(cwd, cwd ? basename(cwd) : '不绑定项目', ts)
+    ).run(cwd, cwd ? basename(cwd) : 'Chats', ts)
     const internalSessionId = args.sessionId && args.providerId
       ? scrySessionId(args.providerId, cwd, args.sessionId)
       : undefined
