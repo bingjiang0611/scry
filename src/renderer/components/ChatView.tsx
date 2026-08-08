@@ -12,7 +12,7 @@ import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
 import { AssistantTurn, UserMessage } from './ChatTurn'
-import { WorkdirPicker, CliPicker, RunControlSelect } from './Pickers'
+import { WorkdirPicker, CliPicker, RunControlSelect, WelcomeProjectContext } from './Pickers'
 import { Icon } from './primitives/Icon'
 
 interface ChatViewProps {
@@ -242,21 +242,54 @@ export function ChatView({
           {turns.length === 0 && (
             <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
               <header className="welcome-heading">
-                <div className="welcome-kicker"><span className="welcome-ready-dot" />NEW SESSION · LOCAL EVIDENCE</div>
+                <div className="welcome-kicker"><span className="welcome-ready-dot" />新会话 · 本机证据</div>
                 <h1>开始一次可追溯执行。</h1>
                 <p>
                   {cwd
-                    ? `已绑定 ${workspaceName ?? '当前项目'}；核对 Provider、权限与模型后即可输入任务。`
+                    ? '核对 Provider、权限与模型后即可输入任务，执行证据默认保留在本机。'
                     : '可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。'}
                 </p>
               </header>
 
+              {cwd && (
+                <WelcomeProjectContext
+                  cwd={cwd}
+                  recent={recent}
+                  onChoose={onChooseFolder}
+                  onUnbind={onUnbindProject}
+                  onPick={onPickRecent}
+                />
+              )}
+
               <section className="welcome-provider-field" aria-label="Provider">
-                <div className="welcome-ready-line" data-tone={providerReadiness.tone} role="status">
-                  <span className="welcome-runtime-pulse" aria-hidden="true" />
-                  <span><b>{providerReadiness.summary}</b><small>{providerReadiness.detail}</small></span>
+                <div className="welcome-provider-head" data-tone={providerReadiness.tone}>
+                  <div role="status">
+                    <span className="welcome-ready-title">
+                      <b>{providerReadiness.summary}</b>
+                      {agents.length > 0 && (
+                        <span className="welcome-ready-meter" aria-hidden="true">
+                          {agents.map((agent) => (
+                            <i key={agent.id} data-on={agent.health?.state !== 'unavailable' ? 'true' : 'false'} />
+                          ))}
+                        </span>
+                      )}
+                    </span>
+                    <small>{providerReadiness.detail}</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="welcome-rescan"
+                    data-busy={agentScanning ? 'true' : undefined}
+                    disabled={agentScanning}
+                    onClick={onRescan}
+                    aria-label="重新扫描 PATH"
+                    title="重新扫描 PATH，重新探测本机 agent CLI"
+                  >
+                    <Icon name="refresh" />
+                    <span>{agentScanning ? '扫描中…' : '重新扫描'}</span>
+                  </button>
                 </div>
-                <div className="welcome-provider-list" aria-label="Provider 探测结果">
+                <div className="welcome-provider-grid" aria-label="Provider 探测结果">
                   {agents.map((agent) => {
                     const selected = agent.id === selectedAgentId
                     const available = agent.health?.state !== 'unavailable'
@@ -271,12 +304,14 @@ export function ChatView({
                         disabled={agentLocked || !available}
                         onClick={() => onSelectAgent(agent.id)}
                       >
-                        <i aria-hidden="true" />
-                        <span>
-                          <span><b>{agent.name}</b><em>{available ? '可用' : '不可用'}</em></span>
-                          <code title={agent.path}>{agent.path}</code>
-                          <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
+                        <span className="welcome-provider-top">
+                          <i aria-hidden="true" />
+                          <b>{agent.name}</b>
+                          <em>{available ? '可用' : '不可用'}</em>
+                          {selected && <Icon name="check" className="welcome-provider-check" />}
                         </span>
+                        <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
+                        <code title={agent.path}>{agent.path}</code>
                       </button>
                     )
                   })}
@@ -284,7 +319,7 @@ export function ChatView({
                     <div className="welcome-list-empty" role="status">
                       {agentScanning
                         ? '正在探测本机 agent CLI…'
-                        : '完整探测未返回可用 agent CLI；可在下方 Provider 选择器重新扫描。'}
+                        : '完整探测未返回可用 agent CLI；可点「重新扫描」或在下方 Provider 选择器重试。'}
                     </div>
                   )}
                 </div>
@@ -318,12 +353,6 @@ export function ChatView({
 
       <div className="composer runtime-composer">
         <div className="composer-shell evidence-composer-shell">
-        {turns.length === 0 && (
-          <div className="welcome-composer-heading">
-            <span><small>任务</small><b>告诉 Agent 要完成什么</b></span>
-            <em>本机证据已开启</em>
-          </div>
-        )}
         <div className="composer-top">
           <WorkdirPicker
             cwd={cwd}
