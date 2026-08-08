@@ -76,7 +76,6 @@ function WelcomeSurface() {
                     <i className={`provider-swatch provider-${provider.id}`} aria-hidden="true"></i>
                     <span><b>{provider.name}</b><small>{provider.detail}</small></span>
                     <StatusMark state={provider.state} label={provider.stateLabel} compact />
-                    <ScryIcon name="chevronRight" size={13} />
                   </button>
                 )
               })}

@@ -277,7 +277,6 @@ export function ChatView({
                           <code title={agent.path}>{agent.path}</code>
                           <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
                         </span>
-                        <Icon name="chevronRight" />
                       </button>
                     )
                   })}

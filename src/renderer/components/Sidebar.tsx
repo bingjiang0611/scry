@@ -188,9 +188,11 @@ export function Sidebar({
               >
                 <Icon name="chevronRight" className="chev" />
                 <span className="pname">{p.name}</span>
-                <span className="ppath" aria-hidden="true">
-                  {p.cwd}
-                </span>
+                {p.cwd && (
+                  <span className="ppath" aria-hidden="true">
+                    {p.cwd}
+                  </span>
+                )}
                 <span className="pcnt">{p.sessions.length}</span>
               </button>
               {open && (

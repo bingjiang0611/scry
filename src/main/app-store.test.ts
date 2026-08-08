@@ -102,7 +102,7 @@ describe('app-store', () => {
       expect(store.listProjects()).toEqual([
         expect.objectContaining({
           cwd: '',
-          name: '不绑定项目',
+          name: 'Chats',
           sessions: [expect.objectContaining({
             sessionId: 'session-unbound',
             externalSessionId: 'session-unbound',

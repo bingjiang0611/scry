@@ -538,7 +538,7 @@ describe('Sidebar 项目分组', () => {
       <Sidebar
         projects={[{
           cwd: '',
-          name: '不绑定项目',
+          name: 'Chats',
           mtime: 2,
           sessions: [{ sessionId: 's-unbound', externalSessionId: 's-unbound', providerId: 'qoder', mtime: 2, preview: '无工作目录任务', count: 1 }]
         }]}
@@ -552,7 +552,8 @@ describe('Sidebar 项目分组', () => {
     )
 
     expect(html).toContain('class="sb-proj-head on"')
-    expect(html).toContain('aria-label="不绑定项目 · 未关联工作目录"')
+    expect(html).toContain('aria-label="Chats · 未关联工作目录"')
+    expect(html).not.toContain('class="ppath"')
     expect(html).toContain('class="sb-sess active"')
     expect(html).toContain('class="sb-session-main"')
     expect(html).toContain('<span class="sb-provider">qoder</span>')
@@ -1498,6 +1499,8 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('data-tone="ok"')
     expect(chatHtml).not.toContain('welcome-section-head')
     expect(chatHtml).not.toContain('welcome-boundary')
+    // Provider 行不再带右侧 chevron（chevronRight 的 path）
+    expect(chatHtml).not.toContain('m9 6 6 6-6 6')
     expect(chatHtml).toContain('1/1 个 Provider 可用')
     expect(chatHtml).toContain('data-health="available"')
     expect(chatHtml).toContain('可用')

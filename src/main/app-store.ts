@@ -319,7 +319,7 @@ export function createAppSessionStore(
         sessions.sort((a, b) => b.ts - a.ts)
         return {
           cwd,
-          name: cwd ? basename(cwd) : '不绑定项目',
+          name: cwd ? basename(cwd) : 'Chats',
           sessions: sessions.map((session) => ({
             sessionId: session.sessionId,
             ...(session.runId ? { runId: session.runId } : {}),
