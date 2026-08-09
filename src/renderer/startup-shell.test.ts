@@ -13,7 +13,7 @@ describe('renderer 启动画布', () => {
   })
 
   it('启动根节点跟随主题画布，不把透明的主区固定成深色', () => {
-    expect(html).toContain('background: var(--bg, #0b0d12);')
+    expect(html).toContain('background: var(--bg, #07090d);')
     expect(html).not.toContain('background: #0b0d12;')
   })
 })

@@ -10796,3 +10796,82 @@ button.turn-id.turn-call-open:focus-visible {
     transition-duration: 1ms !important;
   }
 }
+
+/* macOS: let each app column paint through the native titlebar, matching T3 Code's hiddenInset shell. */
+.aux-view-topbar {
+  display: none;
+}
+
+:root[data-platform='macos'] {
+  --window-titlebar-h: 52px;
+}
+
+:root[data-platform='macos'] .sidebar {
+  padding-top: 0;
+}
+
+:root[data-platform='macos'] .sb-brand {
+  height: var(--window-titlebar-h);
+  min-height: var(--window-titlebar-h);
+  padding: 0 8px 0 80px;
+  border-bottom: 1px solid var(--border3);
+  container-name: sidebar-brand;
+  container-type: inline-size;
+}
+
+:root[data-platform='macos'] .topbar,
+:root[data-platform='macos'] .surface-topbar,
+:root[data-platform='macos'] .aux-view-topbar {
+  height: var(--window-titlebar-h);
+  min-height: var(--window-titlebar-h);
+}
+
+:root[data-platform='macos'] .aux-view-topbar {
+  display: block;
+  border-bottom: 1px solid var(--border3);
+  background: var(--main-surface);
+  -webkit-app-region: drag;
+}
+
+:root[data-platform='macos'] .main-area > .aux-view-topbar + .d-pane,
+:root[data-platform='macos'] .main-area > .aux-view-topbar + .analytics-evidence {
+  grid-row: 2;
+}
+
+:root[data-platform='macos'] .topbar {
+  background: var(--main-surface);
+}
+
+:root[data-platform='macos'] .sb-brand,
+:root[data-platform='macos'] .topbar,
+:root[data-platform='macos'] .surface-topbar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+:root[data-platform='macos'] .topbar button,
+:root[data-platform='macos'] .topbar input,
+:root[data-platform='macos'] .topbar select,
+:root[data-platform='macos'] .topbar textarea,
+:root[data-platform='macos'] .topbar a,
+:root[data-platform='macos'] .topbar [role='button'],
+:root[data-platform='macos'] .surface-topbar button,
+:root[data-platform='macos'] .surface-topbar input,
+:root[data-platform='macos'] .surface-topbar select,
+:root[data-platform='macos'] .surface-topbar textarea,
+:root[data-platform='macos'] .surface-topbar a,
+:root[data-platform='macos'] .surface-topbar [role='button'] {
+  -webkit-app-region: no-drag;
+}
+
+/* The left pane can collapse to zero while native traffic lights stay put. */
+:root[data-platform='macos'] .app.sidebar-collapsed .topbar,
+:root[data-platform='macos'] .app.sidebar-collapsed.right-panel-maximized .surface-topbar {
+  padding-left: 80px;
+}
+
+@container sidebar-brand (max-width: 100px) {
+  :root[data-platform='macos'] .sb-brand .ver {
+    display: none;
+  }
+}

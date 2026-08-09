@@ -31,6 +31,7 @@ import {
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
+import { AppShell } from './AppShell'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
@@ -184,6 +185,19 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).toContain('aria-label="调整左侧栏宽度"')
     expect(html).toContain('aria-controls="sidebar-pane"')
     expect(html).not.toContain('aria-label="调整右侧面板宽度"')
+  })
+
+  it('左侧栏折叠时为 macOS 窗口控件暴露布局状态', () => {
+    const collapsed = renderToStaticMarkup(
+      <AppShell
+        style={{}}
+        sidebarCollapsed
+        sidebar={<aside />}
+        sidebarSplitter={<div />}
+        main={<main />}
+      />
+    )
+    expect(collapsed).toContain('sidebar-collapsed')
   })
 })
 
