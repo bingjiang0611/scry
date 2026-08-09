@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Right Surface Workbench": {
+      "versions": [
+        {
+          "path": "Scry Right Surface Workbench.html",
+          "createdAt": "2026-08-09T04:55:45.041Z",
+          "status": "needs-review",
+          "subtitle": "统一纵览、文件、Diff、终端与 Agent 的右侧 Surface 原型",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-09T04:55:45.042Z",
+  "updatedAt": "2026-08-09T04:58:36.091Z"
+}
