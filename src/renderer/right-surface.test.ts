@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
-import { TerminalSurface } from './components/TerminalSurface'
+import { TerminalSurface, terminalStartErrorMessage } from './components/TerminalSurface'
 import {
   RIGHT_SURFACE_DEFINITIONS,
   createRightSurfaceState,
@@ -158,6 +158,12 @@ describe('right surface catalog', () => {
 })
 
 describe('terminal surface tabs', () => {
+  it('只展示主进程的可操作错误，不暴露 Electron IPC 包装文案', () => {
+    expect(terminalStartErrorMessage(new Error(
+      "Error invoking remote method 'terminal:start': Error: 当前绑定的工作目录已不存在"
+    ))).toBe('当前绑定的工作目录已不存在')
+  })
+
   it('用可关联的 tab / tabpanel 和 roving tabindex 渲染初始终端', () => {
     const html = renderToStaticMarkup(createElement(TerminalSurface, { cwd: '/repo', active: true }))
     const tabId = html.match(/id="([^"]+-terminal-\d+-tab)"/)?.[1]

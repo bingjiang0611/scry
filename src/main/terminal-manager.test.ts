@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -151,6 +151,29 @@ describe('TerminalManager', () => {
     const { manager, pty } = fixture(current)
 
     expect(() => manager.start({ cwd: other, cols: 80, rows: 24 })).toThrow('当前工作区')
+    expect(pty.calls).toHaveLength(0)
+  })
+
+  it('当前绑定的历史工作目录已删除时返回可操作错误', () => {
+    const cwd = workspace()
+    const { manager, pty } = fixture(cwd)
+    rmSync(cwd, { recursive: true, force: true })
+
+    expect(() => manager.start({ cwd, cols: 80, rows: 24 })).toThrow(
+      '当前绑定的工作目录已不存在或不是文件夹，请重新绑定项目后再启动终端'
+    )
+    expect(pty.calls).toHaveLength(0)
+  })
+
+  it('拒绝不存在或不是文件夹的终端 cwd', () => {
+    const cwd = workspace()
+    const missing = join(cwd, 'missing')
+    const file = join(cwd, 'file.txt')
+    writeFileSync(file, 'not a directory')
+    const { manager, pty } = fixture(cwd)
+
+    expect(() => manager.start({ cwd: missing, cols: 80, rows: 24 })).toThrow('终端工作目录不存在或不是文件夹')
+    expect(() => manager.start({ cwd: file, cols: 80, rows: 24 })).toThrow('终端工作目录不存在或不是文件夹')
     expect(pty.calls).toHaveLength(0)
   })
 

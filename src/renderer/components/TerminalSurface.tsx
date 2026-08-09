@@ -55,6 +55,11 @@ function exitText(event: TerminalExitEvent): string {
   return event.code == null ? 'Shell 已退出' : `Shell 已退出 · code ${event.code}`
 }
 
+export function terminalStartErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '')
+}
+
 function TerminalPane({
   tabKey,
   tabId,
@@ -128,7 +133,7 @@ function TerminalPane({
       })
     } catch (startError) {
       if (sequence !== startSequenceRef.current) return
-      const message = startError instanceof Error ? startError.message : String(startError)
+      const message = terminalStartErrorMessage(startError)
       setError(message)
       onStatus(tabKey, 'error')
       terminal.reset()
