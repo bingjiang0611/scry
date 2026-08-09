@@ -848,6 +848,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 .runtime-composer .input,
 .runtime-composer textarea { min-height: 74px; padding: 8px 4px 12px; font-size: 14px; line-height: 1.55; }
+.runtime-composer textarea:focus-visible { outline: none; }
 .runtime-composer .composer-bottom { margin-top: 0; }
 .runtime-composer .composer-controls { gap: 2px; }
 .runtime-composer .composer-controls > .wdpick {
