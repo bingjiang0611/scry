@@ -12,7 +12,7 @@ import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
 import { AssistantTurn, UserMessage } from './ChatTurn'
-import { WorkdirPicker, CliPicker, RunControlSelect, WelcomeProjectContext } from './Pickers'
+import { WorkdirPicker, CliPicker, RunControlSelect } from './Pickers'
 import { Icon } from './primitives/Icon'
 
 interface ChatViewProps {
@@ -215,6 +215,8 @@ export function ChatView({
       description: option.description
     }))
   ]
+  const composerStatus = composerError ?? sendBlockedReason
+  const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
 
   useEffect(() => {
     if (!slashOpen) return
@@ -250,16 +252,6 @@ export function ChatView({
                     : '可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。'}
                 </p>
               </header>
-
-              {cwd && (
-                <WelcomeProjectContext
-                  cwd={cwd}
-                  recent={recent}
-                  onChoose={onChooseFolder}
-                  onUnbind={onUnbindProject}
-                  onPick={onPickRecent}
-                />
-              )}
 
               <section className="welcome-provider-field" aria-label="Provider">
                 <div className="welcome-provider-head" data-tone={providerReadiness.tone}>
@@ -353,16 +345,6 @@ export function ChatView({
 
       <div className="composer runtime-composer">
         <div className="composer-shell evidence-composer-shell">
-        <div className="composer-top">
-          <WorkdirPicker
-            cwd={cwd}
-            recent={recent}
-            onChoose={onChooseFolder}
-            onUnbind={onUnbindProject}
-            onPick={onPickRecent}
-            onRemove={onRemoveRecent}
-          />
-        </div>
         {slashOpen && (
           <div className="slash-menu" ref={slashMenuRef}>
             <div className="slash-head">
@@ -450,7 +432,8 @@ export function ChatView({
           ref={textareaRef}
           className="input"
           aria-label="描述任务"
-          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : busy ? '运行中，输入后 Enter 加入队列…' : `给 ${selectedAgentName} 一个任务…（/ 唤起命令，Enter 发送，Shift+Enter 换行）`}
+          aria-describedby={composerStatus ? 'composer-status' : undefined}
+          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : busy ? '运行中，可继续输入并加入队列…' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
           value={input}
           onChange={(event) => onInput(event.target.value)}
           onPaste={(event) => {
@@ -501,9 +484,17 @@ export function ChatView({
             }
           }}
         />
-        {(composerError || sendBlockedReason) && <div className="composer-error" role="alert">{composerError ?? sendBlockedReason}</div>}
+        {composerStatus && <div id="composer-status" className="composer-error" role="alert">{composerStatus}</div>}
         <div className="composer-bottom">
-          <div className="composer-controls" aria-label="运行配置">
+          <div className="composer-controls" role="group" aria-label="会话与运行配置">
+            <WorkdirPicker
+              cwd={cwd}
+              recent={recent}
+              onChoose={onChooseFolder}
+              onUnbind={onUnbindProject}
+              onPick={onPickRecent}
+              onRemove={onRemoveRecent}
+            />
             <CliPicker
               agents={agents}
               selectedId={selectedAgentId}
@@ -547,17 +538,20 @@ export function ChatView({
           </div>
           <div className="spacer" />
           <button
+            type="button"
             className="send"
             onClick={onSend}
             disabled={submitting || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
             aria-busy={submitting}
-            title={sendBlockedReason ?? (submitting ? '正在启动' : busy ? '加入队列' : '发送')}
+            aria-label={sendActionLabel}
+            aria-describedby={composerStatus ? 'composer-status' : undefined}
+            title={sendBlockedReason ?? sendActionLabel}
           >
-            <Icon name="send" />
+            <Icon name="arrowUp" />
             <span className="send-label">{submitting ? '启动中' : busy ? '排队' : '发送'}</span>
           </button>
           {busy && (
-            <button className="stop" onClick={onStop}>
+            <button type="button" className="stop" onClick={onStop}>
               <Icon name="square" /> 停止
             </button>
           )}

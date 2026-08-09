@@ -6,7 +6,7 @@ export type IconName =
   | 'plus' | 'minus' | 'search' | 'folder' | 'file' | 'box' | 'cube' | 'tool' | 'bulb' | 'message'
   | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
-  | 'image' | 'send' | 'settings' | 'overview' | 'diff' | 'terminal' | 'agents' | 'panel'
+  | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'diff' | 'terminal' | 'agents' | 'panel'
   | 'expand' | 'collapse' | 'trash'
 
 const PATHS: Record<IconName, ReactNode> = {
@@ -100,6 +100,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M22 2 11 13" />
     </>
   ),
+  arrowUp: <path d="M12 19V5m-7 7 7-7 7 7" />,
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />
