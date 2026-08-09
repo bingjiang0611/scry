@@ -617,6 +617,7 @@ export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): Pars
   let cur: ParsedTurn | null = null
   let pendingBeforeFirstTurn: TraceEvent[] = []
   let suppressMetaAssistant = false
+  const seenAssistantUsage = new Set<string>()
   for (const line of content.split('\n')) {
     if (!line.trim()) continue
     let o: Record<string, unknown>
@@ -675,7 +676,15 @@ export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): Pars
         const msg = o.message as Record<string, unknown> | undefined
         cur.items.push(...normalizeSdkMessage(o, lineCtx))
         const usageResult = transcriptUsageResult(msg, lineCtx)
-        if (usageResult) cur.items.push(usageResult)
+        if (usageResult) {
+          const messageId = typeof msg?.id === 'string' ? msg.id : undefined
+          const requestId = typeof o.requestId === 'string' ? o.requestId : undefined
+          const usageKey = messageId || requestId ? JSON.stringify([messageId ?? '', requestId ?? '']) : undefined
+          if (!usageKey || !seenAssistantUsage.has(usageKey)) {
+            if (usageKey) seenAssistantUsage.add(usageKey)
+            cur.items.push(usageResult)
+          }
+        }
       }
     } finally {
       syncTranscriptContext(ctx, lineCtx)
