@@ -49,6 +49,7 @@ export interface TerminalPtyFactory {
 
 export interface TerminalManagerOptions {
   getCurrentCwd(): string | undefined
+  defaultCwd: string
   onData(event: TerminalDataEvent): void
   onExit(event: TerminalExitEvent): void
   pty?: TerminalPtyFactory
@@ -129,6 +130,7 @@ function resolveTerminalDirectory(path: string, missingMessage: string): string 
 export class TerminalManager {
   private readonly sessions = new Map<string, ManagedTerminal>()
   private readonly getCurrentCwd: () => string | undefined
+  private readonly defaultCwd: string
   private readonly onData: (event: TerminalDataEvent) => void
   private readonly onExit: (event: TerminalExitEvent) => void
   private readonly pty: TerminalPtyFactory
@@ -139,6 +141,7 @@ export class TerminalManager {
 
   constructor(options: TerminalManagerOptions) {
     this.getCurrentCwd = options.getCurrentCwd
+    this.defaultCwd = options.defaultCwd
     this.onData = options.onData
     this.onExit = options.onExit
     this.pty = options.pty ?? defaultPtyFactory
@@ -151,7 +154,7 @@ export class TerminalManager {
   }
 
   start(request: TerminalStartRequest): TerminalSessionInfo {
-    if (!request || typeof request.cwd !== 'string' || request.cwd.length === 0) {
+    if (!request || (request.cwd !== null && (typeof request.cwd !== 'string' || request.cwd.length === 0))) {
       throw new Error('终端 cwd 无效')
     }
     assertDimensions(request.cols, request.rows)
@@ -160,16 +163,24 @@ export class TerminalManager {
     }
 
     const boundCwd = this.getCurrentCwd()
-    if (!boundCwd) throw new Error('当前未绑定工作区，无法启动终端')
-    const currentCwd = resolveTerminalDirectory(
-      boundCwd,
-      '当前绑定的工作目录已不存在或不是文件夹，请重新绑定项目后再启动终端'
-    )
-    const cwd = resolveTerminalDirectory(
-      request.cwd,
-      '终端工作目录不存在或不是文件夹'
-    )
-    if (cwd !== currentCwd) throw new Error('终端只能在当前工作区启动')
+    if ((request.cwd === null) !== !boundCwd) throw new Error('终端工作上下文已变化，请重试')
+    const currentCwd = boundCwd
+      ? resolveTerminalDirectory(
+          boundCwd,
+          '当前绑定的工作目录已不存在或不是文件夹，请重新绑定项目后再启动终端'
+        )
+      : resolveTerminalDirectory(
+          this.defaultCwd,
+          '用户主目录已不存在或不是文件夹，无法启动终端'
+        )
+    if (request.cwd !== null) {
+      const requestedCwd = resolveTerminalDirectory(
+        request.cwd,
+        '终端工作目录不存在或不是文件夹'
+      )
+      if (requestedCwd !== currentCwd) throw new Error('终端只能在当前工作区启动')
+    }
+    const cwd = currentCwd
 
     const id = `terminal-${randomUUID()}`
     const pty = this.pty.spawn(this.shell, [...this.args], {

@@ -31,7 +31,7 @@ export const RIGHT_SURFACE_DEFINITIONS: readonly RightSurfaceDefinition[] = [
   {
     kind: 'terminal',
     label: '终端',
-    description: '在当前工作区中运行本地 shell。',
+    description: '启动本机 Shell；未绑定时从用户主目录开始。',
     icon: 'terminal'
   },
   {

@@ -351,6 +351,7 @@ export function App() {
     if (hasSurfaceContext) dispatchRightSurface({ type: 'show' })
   }, [hasSurfaceContext])
   const workspaceOpen = rightSurface.openIds.includes('files')
+  const terminalOpen = rightSurface.openIds.includes('terminal')
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
 
@@ -952,7 +953,7 @@ export function App() {
     '--sidebar-w': `${sidebarPane.visibleWidth}px`,
     '--overview-panel-w': `${surfacePane.visibleWidth}px`
   }
-  const rightPanelMounted = hasSurfaceContext || rightSurface.visible
+  const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen
   const panelVisible = rightPanelMounted && view === 'chat' && rightSurface.visible && !surfacePane.collapsed
   const panelRuntimeProvider = useMemo(
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
@@ -1246,10 +1247,8 @@ export function App() {
               ) : (
                 <div className="surface-unavailable"><b>没有可审阅的改动</b><span>从对话中的改动入口打开本轮 Diff。</span></div>
               ),
-              terminal: cwd ? (
+              terminal: (
                 <TerminalSurface cwd={cwd} active={panelVisible && rightSurface.activeId === 'terminal'} />
-              ) : (
-                <div className="surface-unavailable"><b>终端不可用</b><span>先绑定一个工作区。</span></div>
               ),
               agents: <AgentsSurface turns={session.turns} busy={session.busy} />
             }}
