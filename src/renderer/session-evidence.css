@@ -835,25 +835,47 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 .runtime-composer .evidence-composer-shell {
-  padding: 7px 9px 8px;
-  border-color: var(--border);
-  border-radius: 9px;
+  padding: 10px 12px 11px;
+  border-color: var(--border2);
+  border-radius: 20px;
   background: var(--panel2);
+  box-shadow: 0 12px 30px -22px rgba(0, 0, 0, 0.45);
 }
 
-.runtime-composer .evidence-composer-shell:focus-within { border-color: var(--selected-line); box-shadow: 0 0 0 1px var(--selected-soft); }
-.runtime-composer .composer-top { margin-bottom: 0; }
-.runtime-composer .composer-shell .wdbtn { min-height: 34px; font-size: 11.5px; }
+.runtime-composer .evidence-composer-shell:focus-within {
+  border-color: var(--selected-line);
+  box-shadow: 0 0 0 1px var(--selected-soft), 0 14px 32px -24px rgba(0, 0, 0, 0.48);
+}
 .runtime-composer .input,
-.runtime-composer textarea { min-height: 52px; padding: 8px 5px; font-size: 14px; line-height: 1.55; }
-.runtime-composer .composer-bottom { margin-top: 2px; }
+.runtime-composer textarea { min-height: 74px; padding: 8px 4px 12px; font-size: 14px; line-height: 1.55; }
+.runtime-composer .composer-bottom { margin-top: 0; }
 .runtime-composer .composer-controls { gap: 2px; }
+.runtime-composer .composer-controls > .wdpick {
+  min-width: 0;
+  max-width: min(190px, 29cqi);
+  flex: 0 1 auto;
+}
+.runtime-composer .composer-controls .wdbtn,
 .runtime-composer .composer-controls .clibtn,
-.runtime-composer .run-control-select select { height: 34px; font-size: 11px; }
+.runtime-composer .run-control-select select { height: 36px; font-size: 11.5px; }
+.runtime-composer .composer-controls .wdbtn {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding-inline: 8px;
+}
+.runtime-composer .workdir-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-composer .wdbtn > .ico { flex: none; }
 .runtime-composer .run-control-select select { max-width: min(178px, 31cqi); padding-right: 21px; padding-left: 7px; }
 .runtime-composer .composer .send,
-.runtime-composer .send { width: 36px; height: 36px; }
-.runtime-composer .stop { height: 34px; padding-inline: 10px; font-size: 11px; }
+.runtime-composer .send { width: 38px; height: 38px; min-height: 38px; border-radius: 50%; }
+.runtime-composer .send .ico { width: 15px; height: 15px; }
+.runtime-composer .stop { height: 36px; min-height: 36px; padding-inline: 10px; border-radius: 18px; font-size: 11px; }
 
 /* Overview · 360–400px evidence dossier ----------------------------------------- */
 

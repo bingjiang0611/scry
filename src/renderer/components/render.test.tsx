@@ -173,7 +173,7 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).toContain('aria-pressed="false"')
     expect(html).toContain('不绑定项目')
     expect(html).toContain('可直接发起任务')
-    expect(html).toContain('aria-label="运行配置"')
+    expect(html).toContain('aria-label="会话与运行配置"')
     expect(html).toContain('aria-label="模型"')
     expect(html).toContain('aria-label="权限"')
     expect(html).not.toContain('纵览面板')
@@ -1477,12 +1477,26 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="Effort"')
     expect(chatHtml).toContain('aria-label="权限"')
     const controls = chatHtml.match(/<div class="composer-controls"[\s\S]*?<div class="spacer"/u)?.[0] ?? ''
-    expect(controls).toContain('aria-label="运行配置"')
+    expect(chatHtml).not.toContain('class="composer-top"')
+    expect(controls).toContain('role="group"')
+    expect(controls).toContain('aria-label="会话与运行配置"')
+    expect(controls).toContain('class="wdpick"')
     expect(controls).toContain('class="run-control-scroll"')
+    expect(controls.indexOf('工作目录：')).toBeLessThan(controls.indexOf('Agent'))
     expect(controls.indexOf('Agent')).toBeLessThan(controls.indexOf('aria-label="模型"'))
     expect(controls.indexOf('class="clipick"')).toBeLessThan(controls.indexOf('class="run-control-scroll"'))
     expect(controls.indexOf('aria-label="模型"')).toBeLessThan(controls.indexOf('aria-label="Effort"'))
     expect(controls.indexOf('aria-label="Effort"')).toBeLessThan(controls.indexOf('aria-label="权限"'))
+    expect(chatHtml).toContain('aria-label="发送"')
+    expect(chatHtml).toContain('M12 19V5m-7 7 7-7 7 7')
+  })
+
+  it('Composer 用描述关系说明阻塞原因，不把错误文案伪装成发送动作名', () => {
+    const chatHtml = renderWelcome({ sendBlockedReason: '当前 Provider 不可发送' })
+    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).toContain('aria-describedby="composer-status"')
+    expect(chatHtml).toContain('aria-label="发送"')
+    expect(chatHtml).not.toContain('aria-label="当前 Provider 不可发送"')
   })
 
   it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () => {
@@ -1536,8 +1550,8 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="重新扫描 PATH"')
     expect(chatHtml).toContain('重新扫描')
     expect(chatHtml).not.toContain('data-busy')
-    // 已绑定时上下文条给出完整路径，并且它本身就是工作目录切换入口
-    expect(chatHtml).toContain('class="welcome-context"')
+    // 项目选择只保留在 composer 底部控制栏，不在 welcome 正文重复出现。
+    expect(chatHtml).not.toContain('class="welcome-context"')
     expect(chatHtml).toContain('/tmp/project')
     expect(chatHtml).not.toContain('运行上下文')
     expect(chatHtml).not.toContain('最近工作目录')

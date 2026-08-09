@@ -808,6 +808,7 @@ export function App() {
   // 曾经的行为是该目录有历史会话就直接打开最近那条（pickSession(sessions[0])），
   // 结果“换项目”变成“被扔进一个旧对话”，绑定后的工作目录也没机会看清。
   const pickRecent = async (dir: string): Promise<void> => {
+    if (dir === cwd) return
     const cwdChanged = dir !== cwd
     if (cwdChanged && !confirmWorkspaceTransition()) return
     const seq = ++sessionSelectionSeqRef.current

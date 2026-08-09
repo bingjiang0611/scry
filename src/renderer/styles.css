@@ -2302,7 +2302,7 @@ body.pane-resizing * {
   position: relative;
   display: flex;
   align-items: center;
-  height: 40px;
+  min-height: 48px;
 }
 .wdrecent-pick {
   flex: 1;
@@ -2314,9 +2314,25 @@ body.pane-resizing * {
   color: inherit;
   font: inherit;
 }
-.wdrecent-pick span {
+.wdrecent-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+.wdrecent-copy b,
+.wdrecent-copy code {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wdrecent-copy b {
+  color: var(--fg);
+  font: 600 12px/1.2 var(--font-ui);
+}
+.wdrecent-copy code {
+  color: var(--dim3);
+  font: 10px/1.2 var(--font-mono);
 }
 .wdrecent-remove {
   position: absolute;
@@ -9256,76 +9272,6 @@ select:focus-visible,
   color: var(--dim2);
   font: 13px/1.5 var(--font-ui);
 }
-
-/* 已绑定项目：上下文条本身就是工作目录切换入口，切换只重新绑定。 */
-.welcome-context { position: relative; min-width: 0; }
-
-.welcome-context-btn {
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--border3);
-  border-radius: var(--r-sm);
-  background: var(--surface-faint);
-  color: var(--dim);
-  font: 12px/1.35 var(--font-ui);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 130ms var(--ease-out), background-color 130ms var(--ease-out);
-}
-
-.welcome-context-btn:hover { border-color: var(--border2); background: var(--surface-hover); }
-.welcome-context-btn .ico { flex: none; color: var(--dim2); }
-.welcome-context-btn .chev { margin-left: auto; opacity: 0.7; }
-.welcome-context-btn b { flex: none; color: var(--fg); font-weight: 650; }
-
-.welcome-context-btn code {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--dim3);
-  font: 11px/1.35 var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* composer 的 .menu 是向上弹（bottom: 100%），这里在正文里必须向下弹。 */
-.welcome-context-menu {
-  top: calc(100% + 6px);
-  bottom: auto;
-  left: 0;
-  min-width: 320px;
-  max-width: 100%;
-}
-
-.welcome-context-item > span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.welcome-context-item b {
-  overflow: hidden;
-  color: var(--fg);
-  font: 650 12.5px/1.3 var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 完整路径是选项之间的主要区分信息（同父目录的子项目很常见）。 */
-.welcome-context-item code {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--dim3);
-  font: 11px/1.3 var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.welcome-context-item:disabled { cursor: default; opacity: 1; }
-.welcome-context-item:disabled:hover { background: transparent; }
 
 @media (hover: hover) and (pointer: fine) {
   .welcome-provider:hover:not(.is-selected):not(:disabled) {
