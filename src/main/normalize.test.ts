@@ -463,6 +463,132 @@ describe('normalizeSdkMessage', () => {
     })
   })
 
+  it('保留 Agent 后台启动状态，且只归一原 Agent toolUseId 的 task 生命周期', () => {
+    const c = ctx()
+    normalizeSdkMessage({
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: 'agent-bg',
+          name: 'Agent',
+          input: { description: '检查 Provider', prompt: '检查 Provider', run_in_background: true }
+        }]
+      }
+    }, c)
+
+    const [launch] = normalizeSdkMessage({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'agent-bg', content: 'running in background' }] },
+      tool_use_result: { status: 'async_launched', agentId: 'task-agent-1', totalTokens: 999 }
+    }, c)
+    expect(launch).toMatchObject({
+      tool: 'Agent',
+      toolUseId: 'agent-bg',
+      runtimeMetadata: { source: 'provider_agent_result', agentStatus: 'async_launched' }
+    })
+    expect(launch.agentId).toBeUndefined()
+    expect(launch).not.toHaveProperty('tokensIn')
+
+    const [started] = normalizeSdkMessage({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'task-agent-1',
+      tool_use_id: 'agent-bg',
+      description: '检查 Provider',
+      subagent_type: 'Explore',
+      usage: { total_tokens: 100, tool_uses: 1, duration_ms: 20 }
+    }, c)
+    const [progress] = normalizeSdkMessage({
+      type: 'system',
+      subtype: 'task_progress',
+      task_id: 'task-agent-1',
+      last_tool_name: 'Read',
+      summary: '正在读取配置',
+      usage: { total_tokens: 200, tool_uses: 2, duration_ms: 40 }
+    }, c)
+    const [notification] = normalizeSdkMessage({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: 'task-agent-1',
+      status: 'stopped',
+      summary: '用户停止',
+      usage: { total_tokens: 300, tool_uses: 3, duration_ms: 60 }
+    }, c)
+
+    expect(started).toMatchObject({
+      kind: 'harness',
+      stage: 'agent_activity',
+      toolUseId: 'agent-bg',
+      input: { activity: 'task_started', taskId: 'task-agent-1' }
+    })
+    expect(progress).toMatchObject({
+      kind: 'harness',
+      stage: 'agent_activity',
+      toolUseId: 'agent-bg',
+      input: { activity: 'task_progress', taskId: 'task-agent-1', lastToolName: 'Read' }
+    })
+    expect(notification).toMatchObject({
+      kind: 'tool',
+      stage: 'tool_result',
+      tool: 'Agent',
+      toolUseId: 'agent-bg',
+      isError: false,
+      runtimeMetadata: { source: 'provider_task_notification', agentStatus: 'stopped', taskId: 'task-agent-1' }
+    })
+    for (const item of [started, progress, notification]) {
+      expect(item).not.toHaveProperty('tokensIn')
+      expect(item).not.toHaveProperty('durationMs')
+    }
+    expect(normalizeSdkMessage({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'bash-task',
+      tool_use_id: 'not-an-agent',
+      description: '后台 shell'
+    }, c)).toEqual([])
+  })
+
+  it('保留 remote_launched 判别状态', () => {
+    const c = ctx()
+    normalizeSdkMessage({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'agent-remote', name: 'Agent', input: { description: '远程检查' } }] }
+    }, c)
+    const [result] = normalizeSdkMessage({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'agent-remote', content: 'remote launched' }] },
+      tool_use_result: { status: 'remote_launched', taskId: 'remote-task-1' }
+    }, c)
+    expect(result.runtimeMetadata).toMatchObject({ agentStatus: 'remote_launched' })
+  })
+
+  it('多个 tool_result 共用无 toolUseId 的 outer result 时不猜 Agent 状态归属', () => {
+    const c = ctx()
+    normalizeSdkMessage({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'agent-a', name: 'Agent', input: { description: 'A' } },
+          { type: 'tool_use', id: 'agent-b', name: 'Agent', input: { description: 'B' } }
+        ]
+      }
+    }, c)
+    const results = normalizeSdkMessage({
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'agent-a', content: 'a' },
+          { type: 'tool_result', tool_use_id: 'agent-b', content: 'b' }
+        ]
+      },
+      tool_use_result: { status: 'async_launched', agentId: 'ambiguous' }
+    }, c)
+
+    expect(results).toHaveLength(2)
+    expect(results.every((result) => result.runtimeMetadata?.agentStatus == null)).toBe(true)
+  })
+
   it('Claude/Qoder MCP 即使 shell exit 0，业务 success=false 仍标记失败', () => {
     const c = ctx()
     normalizeSdkMessage(
@@ -1148,11 +1274,20 @@ describe('parseTranscriptToTurns', () => {
 describe('normalizeSdkMessage stream_event（C1 token 流式）', () => {
   it('content_block_delta 的 text_delta → model/text_delta', () => {
     const evs = normalizeSdkMessage(
-      { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '你好' } } },
+      {
+        type: 'stream_event',
+        parent_tool_use_id: 'agent-parent',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '你好' } }
+      },
       ctx()
     )
     expect(evs).toHaveLength(1)
-    expect(evs[0]).toMatchObject({ kind: 'model', stage: 'text_delta', text: '你好' })
+    expect(evs[0]).toMatchObject({
+      kind: 'model',
+      stage: 'text_delta',
+      text: '你好',
+      parentToolUseId: 'agent-parent'
+    })
   })
 
   it('非 text_delta 的 stream_event（thinking_delta/工具入参/start）忽略', () => {

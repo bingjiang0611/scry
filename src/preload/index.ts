@@ -38,6 +38,12 @@ import type {
 } from '../shared/workspace'
 import type { ScanReport } from '../cli/mcpguard-core'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
+import type {
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalSessionInfo,
+  TerminalStartRequest
+} from '../shared/terminal'
 
 export interface SessionMeta {
   sessionId: string
@@ -84,6 +90,10 @@ const api = {
   workspaceRename: (request: WorkspaceRenameRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:rename', request),
   workspaceMove: (request: WorkspaceMoveRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:move', request),
   workspaceTrash: (request: WorkspacePathRequest): Promise<true> => ipcRenderer.invoke('workspace:trash', request),
+  terminalStart: (request: TerminalStartRequest): Promise<TerminalSessionInfo> => ipcRenderer.invoke('terminal:start', request),
+  terminalWrite: (id: string, data: string): Promise<true> => ipcRenderer.invoke('terminal:write', { id, data }),
+  terminalResize: (id: string, cols: number, rows: number): Promise<true> => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
+  terminalClose: (id: string): Promise<true> => ipcRenderer.invoke('terminal:close', { id }),
   setCwd: (dir: string | null): Promise<string | null> => ipcRenderer.invoke('agent:setCwd', dir),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   listSessions: (context: ProviderContext): Promise<SessionMeta[]> => ipcRenderer.invoke('agent:listSessions', context),
@@ -136,6 +146,18 @@ const api = {
     }
     ipcRenderer.on('agent:trace', l)
     return () => ipcRenderer.removeListener('agent:trace', l)
+  },
+  onTerminalData: (cb: (event: TerminalDataEvent) => void): (() => void) => {
+    const listener = (_: unknown, events: TerminalDataEvent[]): void => {
+      for (const event of events) cb(event)
+    }
+    ipcRenderer.on('terminal:data', listener)
+    return () => ipcRenderer.removeListener('terminal:data', listener)
+  },
+  onTerminalExit: (cb: (event: TerminalExitEvent) => void): (() => void) => {
+    const listener = (_: unknown, event: TerminalExitEvent): void => cb(event)
+    ipcRenderer.on('terminal:exit', listener)
+    return () => ipcRenderer.removeListener('terminal:exit', listener)
   },
   onTurnDone: (cb: (e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; stopped?: boolean }) => void): (() => void) => {
     const l = (_: unknown, e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; stopped?: boolean }): void => cb(e)

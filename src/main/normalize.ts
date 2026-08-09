@@ -22,6 +22,8 @@ export interface NormalizeCtx {
   latestContextTokens?: number // 最近一次 assistant usage 的完整 prompt；result.usage 可能是累计值，不能当当前上下文
   lastInferredSkill?: string // 从注入文本 / skill 文件路径推断的 skill；只用于压连续重复
   toolUseById?: Map<string, TraceEvent> // SDK tool_result 不重复携带工具身份时，用对应 tool_use 补全
+  agentToolUseIds?: Set<string> // task_* 只回指已观测的 Agent tool_use，不把其他后台任务混进来
+  agentTaskToolUseById?: Map<string, string> // 仅保留由 Agent tool_use 建立的 task_id 别名
 }
 
 // Anthropic content block（assistant message.content[] 里的元素）
@@ -178,8 +180,86 @@ function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: No
   })
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function agentTaskToolUseId(
+  message: Record<string, unknown>,
+  ctx: NormalizeCtx
+): { toolUseId: string; taskId?: string } | undefined {
+  const direct = stringValue(message.tool_use_id ?? message.toolUseId)
+  const taskId = stringValue(message.task_id ?? message.taskId)
+  let toolUseId: string | undefined
+  if (direct) {
+    if (!ctx.agentToolUseIds?.has(direct)) return undefined
+    toolUseId = direct
+  } else if (taskId) {
+    toolUseId = ctx.agentTaskToolUseById?.get(taskId)
+  }
+  if (!toolUseId) return undefined
+  if (taskId) (ctx.agentTaskToolUseById ??= new Map()).set(taskId, toolUseId)
+  return { toolUseId, ...(taskId ? { taskId } : {}) }
+}
+
+function normalizeAgentTaskMessage(
+  message: Record<string, unknown>,
+  ctx: NormalizeCtx,
+  subtype: 'task_started' | 'task_progress' | 'task_notification'
+): TraceEvent[] {
+  const identity = agentTaskToolUseId(message, ctx)
+  if (!identity) return []
+  const source = `provider_${subtype}`
+  if (subtype === 'task_notification') {
+    const status = stringValue(message.status)
+    if (status !== 'completed' && status !== 'failed' && status !== 'stopped') return []
+    const summary = stringValue(message.summary)
+    return [base(ctx, {
+      kind: 'tool',
+      stage: 'tool_result',
+      tool: 'Agent',
+      toolUseId: identity.toolUseId,
+      text: summary,
+      output: summary,
+      isError: status === 'failed',
+      runtimeMetadata: {
+        source,
+        agentStatus: status,
+        ...(identity.taskId ? { taskId: identity.taskId } : {})
+      }
+    })]
+  }
+
+  const description = stringValue(message.description)
+  const summary = stringValue(message.summary)
+  const lastToolName = stringValue(message.last_tool_name ?? message.lastToolName)
+  const subagentType = stringValue(message.subagent_type ?? message.subagentType)
+  return [base(ctx, {
+    kind: 'harness',
+    stage: 'agent_activity',
+    tool: 'Agent',
+    toolUseId: identity.toolUseId,
+    input: {
+      activity: subtype,
+      ...(identity.taskId ? { taskId: identity.taskId } : {}),
+      ...(description ? { description } : {}),
+      ...(summary ? { summary } : {}),
+      ...(lastToolName ? { lastToolName } : {}),
+      ...(subagentType ? { subagentType } : {})
+    },
+    runtimeMetadata: {
+      source,
+      agentStatus: 'running',
+      ...(identity.taskId ? { taskId: identity.taskId } : {})
+    }
+  })]
+}
+
 function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeCtx): TraceEvent[] {
   const subtype = typeof m.subtype === 'string' ? m.subtype : ''
+  if (subtype === 'task_started' || subtype === 'task_progress' || subtype === 'task_notification') {
+    return normalizeAgentTaskMessage(m, ctx, subtype)
+  }
   if (subtype === 'compact_boundary') {
     const rawMetadata = m.compact_metadata ?? m.compactMetadata
     const metadata = rawMetadata && typeof rawMetadata === 'object'
@@ -364,7 +444,10 @@ export function normalizeBlocks(
           ...fo,
           ...(danger ? { danger } : {})
         })
-      if (b.id) (ctx.toolUseById ??= new Map()).set(b.id, event)
+      if (b.id) {
+        (ctx.toolUseById ??= new Map()).set(b.id, event)
+        if (cls.kind === 'agent') (ctx.agentToolUseIds ??= new Set()).add(b.id)
+      }
       out.push(event)
     }
   }
@@ -393,6 +476,7 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
       const out: TraceEvent[] = []
       const resultBlocks = (content as Array<Record<string, unknown>>).filter((block) => block.type === 'tool_result')
       const outerFailure = outerToolResultFailure(m)
+      const outerResult = outerToolResultRecord(m)
       for (const b of content as Array<Record<string, unknown>>) {
         if (b.type === 'text' && typeof b.text === 'string') {
           const name = injectedSkillName(b.text)
@@ -402,6 +486,19 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
           const started = ctx.toolUseById?.get(toolUseId)
           ctx.toolUseById?.delete(toolUseId)
           const output = typeof b.content === 'string' ? b.content : JSON.stringify(b.content)
+          const outerResultToolUseId = stringValue(outerResult?.toolUseId ?? outerResult?.tool_use_id)
+          const resultMetadataApplies = outerResultToolUseId
+            ? outerResultToolUseId === toolUseId
+            : resultBlocks.length === 1
+          const agentResultStatus = started?.kind === 'agent' && resultMetadataApplies
+            ? stringValue(outerResult?.status)
+            : undefined
+          if (agentResultStatus === 'async_launched' || agentResultStatus === 'remote_launched') {
+            const taskId = stringValue(
+              outerResult?.taskId ?? outerResult?.task_id ?? outerResult?.agentId ?? outerResult?.agent_id
+            )
+            if (taskId) (ctx.agentTaskToolUseById ??= new Map()).set(taskId, toolUseId)
+          }
           out.push(
             base(ctx, {
               kind: 'tool',
@@ -423,7 +520,10 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
                   outerFailure.toolUseId === toolUseId ||
                   (!outerFailure.toolUseId && resultBlocks.length === 1)
                 )) ||
-                (started?.isMcp === true && mcpPayloadFailed(output))
+                (started?.isMcp === true && mcpPayloadFailed(output)),
+              ...(agentResultStatus ? {
+                runtimeMetadata: { source: 'provider_agent_result', agentStatus: agentResultStatus }
+              } : {})
             })
           )
         }
@@ -436,7 +536,12 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
     const e = m.event as Record<string, unknown> | undefined
     const delta = e?.delta as Record<string, unknown> | undefined
     if (e?.type === 'content_block_delta' && delta?.type === 'text_delta' && typeof delta.text === 'string') {
-      return [base(ctx, { kind: 'model', stage: 'text_delta', text: delta.text })]
+      return [base(ctx, {
+        kind: 'model',
+        stage: 'text_delta',
+        text: delta.text,
+        parentToolUseId: (m.parent_tool_use_id as string | null) ?? null
+      })]
     }
     return []
   }
@@ -572,13 +677,18 @@ function isClaudeTaskNotification(line: Record<string, unknown>, text: string): 
   return originKind === 'task-notification' || text.trimStart().startsWith('<task-notification>')
 }
 
-function outerToolResultFailure(message: Record<string, unknown>): { failed: boolean; toolUseId?: string } | undefined {
+function outerToolResultRecord(message: Record<string, unknown>): Record<string, unknown> | undefined {
   let raw = message.toolUseResult ?? message.tool_use_result
   if (typeof raw === 'string') {
     try { raw = JSON.parse(raw) as unknown } catch { return undefined }
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
-  const result = raw as Record<string, unknown>
+  return raw as Record<string, unknown>
+}
+
+function outerToolResultFailure(message: Record<string, unknown>): { failed: boolean; toolUseId?: string } | undefined {
+  const result = outerToolResultRecord(message)
+  if (!result) return undefined
   const exitCode = typeof result.exitCode === 'number'
     ? result.exitCode
     : typeof result.exit_code === 'number'
@@ -609,6 +719,8 @@ function syncTranscriptContext(ctx: NormalizeCtx, lineCtx: NormalizeCtx): void {
   ctx.latestContextTokens = lineCtx.latestContextTokens
   ctx.lastInferredSkill = lineCtx.lastInferredSkill
   ctx.toolUseById = lineCtx.toolUseById
+  ctx.agentToolUseIds = lineCtx.agentToolUseIds
+  ctx.agentTaskToolUseById = lineCtx.agentTaskToolUseById
 }
 
 // 把整个 transcript jsonl 解析成对话轮次（加载历史会话用）

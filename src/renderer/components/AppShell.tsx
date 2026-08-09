@@ -2,7 +2,9 @@ import type { CSSProperties, ReactNode } from 'react'
 
 export interface AppShellProps {
   style: CSSProperties
-  rightPanelMode?: 'overview' | 'review' | 'workspace'
+  rightPanelMode?: 'overview' | 'review' | 'workspace' | 'surface'
+  rightPanelMaximized?: boolean
+  rightPanelHidden?: boolean
   sidebar: ReactNode
   sidebarSplitter: ReactNode
   main: ReactNode
@@ -11,10 +13,24 @@ export interface AppShellProps {
   modals?: ReactNode
 }
 
-export function AppShell({ style, rightPanelMode = 'overview', sidebar, sidebarSplitter, main, rightSplitter, rightPanel, modals }: AppShellProps) {
+export function AppShell({
+  style,
+  rightPanelMode = 'overview',
+  rightPanelMaximized = false,
+  rightPanelHidden = false,
+  sidebar,
+  sidebarSplitter,
+  main,
+  rightSplitter,
+  rightPanel,
+  modals
+}: AppShellProps) {
   const hasRightPanel = Boolean(rightPanel)
   return (
-    <div className={`app app-shell ${hasRightPanel ? `has-right-panel right-panel-${rightPanelMode}` : ''}`} style={style}>
+    <div
+      className={`app app-shell ${hasRightPanel ? `has-right-panel right-panel-${rightPanelMode}` : ''}${hasRightPanel && rightPanelMaximized ? ' right-panel-maximized' : ''}${hasRightPanel && rightPanelHidden ? ' right-panel-hidden' : ''}`}
+      style={style}
+    >
       {sidebar}
       {sidebarSplitter}
       <div className="main-area" id="main-pane">
@@ -23,7 +39,7 @@ export function AppShell({ style, rightPanelMode = 'overview', sidebar, sidebarS
       {hasRightPanel && (
         <>
           {rightSplitter}
-          <div className="right-panel-slot" id="overview-pane">
+          <div className="right-panel-slot" id="right-surface-pane">
             {rightPanel}
           </div>
         </>

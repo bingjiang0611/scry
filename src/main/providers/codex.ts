@@ -1168,6 +1168,7 @@ export function createCodexAdapter(
               if (!isRoot) {
                 const turn = record(params.turn)
                 if (child?.parentToolUseId) {
+                  const childStatus = canonicalTurnStatus(turn.status, stopped)
                   runRequest.emit(newEvent(runRequest.runId, {
                     kind: 'tool',
                     stage: 'tool_result',
@@ -1176,7 +1177,12 @@ export function createCodexAdapter(
                     name: child.name,
                     agentId: notificationThreadId,
                     output: JSON.stringify(turn),
-                    isError: turn.status === 'failed'
+                    isError: childStatus === 'failed',
+                    runtimeMetadata: {
+                      source: 'codex_child_turn',
+                      agentStatus: childStatus,
+                      nativeTurnStatus: turn.status
+                    }
                   }))
                 }
                 return

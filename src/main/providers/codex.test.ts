@@ -1525,7 +1525,7 @@ describe('Codex provider adapter', () => {
     })
     notify?.('turn/completed', {
       threadId: 'thread-child',
-      turn: { id: 'turn-child', status: 'completed', error: null }
+      turn: { id: 'turn-child', status: 'interrupted', error: null }
     })
     const childPrematurelyFinishedRoot = await Promise.race([
       handle.promise.then(() => true),
@@ -1593,6 +1593,16 @@ describe('Codex provider adapter', () => {
         input: expect.objectContaining({ receiverThreadIds: ['thread-child'] })
       })
     ]))
+    expect(events.find((event) => event.stage === 'tool_result' && event.agentId === 'thread-child')).toMatchObject({
+      tool: 'Agent',
+      toolUseId: 'spawn-1',
+      isError: false,
+      runtimeMetadata: {
+        source: 'codex_child_turn',
+        agentStatus: 'interrupted',
+        nativeTurnStatus: 'interrupted'
+      }
+    })
     expect(events.find((event) => event.kind === 'harness' && event.stage === 'result')).toMatchObject({
       tokensIn: 10,
       tokensOut: 2

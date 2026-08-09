@@ -9,6 +9,7 @@ const asarPath = join(resources, 'app.asar')
 const unpacked = join(resources, 'app.asar.unpacked')
 const qoderRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 'dist', '_bundled', 'qodercli')
 const qoderIndexRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 'dist', 'index.js')
+const ptyRootRelative = join('node_modules', 'node-pty')
 const maxBytes = Number(process.env.SCRY_APP_MAX_BYTES || 380 * 1024 * 1024)
 const scryCli = join(resources, 'bin', 'scry')
 const scryCliPackage = join(resources, 'scry-cli', 'package.json')
@@ -62,6 +63,11 @@ const sdkIndexInAsar = entries.includes(`/${qoderIndexRelative.replaceAll('\\', 
 const sdkIndexUnpacked = existsSync(join(unpacked, qoderIndexRelative))
 if (!sdkIndexInAsar && !sdkIndexUnpacked) throw new Error('排除 Qoder CLI 时误删了 Qoder SDK JavaScript adapter')
 
+const ptyPrebuild = join(unpacked, ptyRootRelative, 'prebuilds', `darwin-${process.arch}`, 'pty.node')
+const ptySpawnHelper = join(unpacked, ptyRootRelative, 'prebuilds', `darwin-${process.arch}`, 'spawn-helper')
+if (!existsSync(ptyPrebuild)) throw new Error(`packaged app 缺少 node-pty native binding：${ptyPrebuild}`)
+accessSync(ptySpawnHelper, constants.X_OK)
+
 accessSync(scryCli, constants.X_OK)
 if (!existsSync(scryCliPackage)) throw new Error('packaged app 缺少 App 私有 Scry CLI package.json')
 const expectedCliVersion = JSON.parse(readFileSync(scryCliPackage, 'utf8')).version
@@ -74,4 +80,4 @@ const bytes = directoryBytes(appPath)
 if (bytes > maxBytes) {
   throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes`)
 }
-console.log(JSON.stringify({ appPath, bytes, maxBytes, preload: 'cjs', qoderBundledCli: false, qoderSdk: true, scryCliBundled: true, scryCliVersion: actualCliVersion }))
+console.log(JSON.stringify({ appPath, bytes, maxBytes, preload: 'cjs', qoderBundledCli: false, qoderSdk: true, nodePty: true, scryCliBundled: true, scryCliVersion: actualCliVersion }))
