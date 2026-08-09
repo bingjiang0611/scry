@@ -236,6 +236,7 @@ async function getTerminalManager(): Promise<TerminalManager> {
       .then((env) => {
         const manager = createTerminalManager({
           getCurrentCwd: () => currentCwd,
+          defaultCwd: homeDir,
           onData: queueTerminalData,
           onExit: sendTerminalExit,
           shell: env.SHELL || process.env.SHELL || '/bin/zsh',

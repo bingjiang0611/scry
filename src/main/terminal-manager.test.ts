@@ -88,12 +88,13 @@ function workspace(): string {
   return realpathSync(root)
 }
 
-function fixture(cwd: string) {
+function fixture(cwd: string, defaultCwd = cwd) {
   const pty = new FakePtyFactory()
   const data: TerminalDataEvent[] = []
   const exits: TerminalExitEvent[] = []
   const manager = createTerminalManager({
     getCurrentCwd: () => cwd,
+    defaultCwd,
     onData: (event) => data.push(event),
     onExit: (event) => exits.push(event),
     pty,
@@ -156,7 +157,8 @@ describe('TerminalManager', () => {
 
   it('当前绑定的历史工作目录已删除时返回可操作错误', () => {
     const cwd = workspace()
-    const { manager, pty } = fixture(cwd)
+    const defaultCwd = workspace()
+    const { manager, pty } = fixture(cwd, defaultCwd)
     rmSync(cwd, { recursive: true, force: true })
 
     expect(() => manager.start({ cwd, cols: 80, rows: 24 })).toThrow(
@@ -177,17 +179,55 @@ describe('TerminalManager', () => {
     expect(pty.calls).toHaveLength(0)
   })
 
-  it('未绑定工作区时拒绝启动', () => {
-    const cwd = workspace()
+  it('未绑定工作区时只在 main 指定的用户主目录启动', () => {
+    const defaultCwd = workspace()
+    const other = workspace()
     const pty = new FakePtyFactory()
     const manager = createTerminalManager({
       getCurrentCwd: () => undefined,
+      defaultCwd,
       onData: () => {},
       onExit: () => {},
       pty
     })
 
-    expect(() => manager.start({ cwd, cols: 80, rows: 24 })).toThrow('未绑定工作区')
+    const session = manager.start({ cwd: null, cols: 80, rows: 24 })
+    expect(session.cwd).toBe(defaultCwd)
+    expect(pty.calls[0].options.cwd).toBe(defaultCwd)
+    expect(() => manager.start({ cwd: other, cols: 80, rows: 24 })).toThrow('工作上下文已变化')
+    expect(pty.calls).toHaveLength(1)
+  })
+
+  it('绑定状态在 Shell 环境初始化期间变化时拒绝迟到的启动请求', () => {
+    const cwd = workspace()
+    const pty = new FakePtyFactory()
+    const manager = createTerminalManager({
+      getCurrentCwd: () => cwd,
+      defaultCwd: workspace(),
+      onData: () => {},
+      onExit: () => {},
+      pty
+    })
+
+    expect(() => manager.start({ cwd: null, cols: 80, rows: 24 })).toThrow('工作上下文已变化')
+    expect(pty.calls).toHaveLength(0)
+  })
+
+  it('用户主目录不可用时返回可操作错误且不回退其他目录', () => {
+    const defaultCwd = workspace()
+    const pty = new FakePtyFactory()
+    const manager = createTerminalManager({
+      getCurrentCwd: () => undefined,
+      defaultCwd,
+      onData: () => {},
+      onExit: () => {},
+      pty
+    })
+    rmSync(defaultCwd, { recursive: true, force: true })
+
+    expect(() => manager.start({ cwd: null, cols: 80, rows: 24 })).toThrow(
+      '用户主目录已不存在或不是文件夹，无法启动终端'
+    )
     expect(pty.calls).toHaveLength(0)
   })
 

@@ -3,7 +3,7 @@ export const TERMINAL_MAX_INPUT_BYTES = 64 * 1024
 export const TERMINAL_MAX_DIMENSION = 1_000
 
 export interface TerminalStartRequest {
-  cwd: string
+  cwd: string | null
   cols: number
   rows: number
 }

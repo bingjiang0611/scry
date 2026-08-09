@@ -179,4 +179,12 @@ describe('terminal surface tabs', () => {
     expect(html).toContain('role="tabpanel"')
     expect(html).toContain(`aria-labelledby="${tabId}"`)
   })
+
+  it('未绑定项目时渲染从用户主目录启动的真实终端', () => {
+    const html = renderToStaticMarkup(createElement(TerminalSurface, { cwd: null, active: true }))
+
+    expect(html).toContain('class="terminal-surface"')
+    expect(html).toContain('初始目录为用户主目录')
+    expect(html).not.toContain('工作目录 null')
+  })
 })

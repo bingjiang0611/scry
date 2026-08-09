@@ -72,7 +72,7 @@ function TerminalPane({
   tabKey: string
   tabId: string
   panelId: string
-  cwd: string
+  cwd: string | null
   active: boolean
   onControls: (key: string, controls: TerminalControls | null) => void
   onStatus: (key: string, status: 'starting' | 'running' | 'exited' | 'error') => void
@@ -217,7 +217,11 @@ function TerminalPane({
       tabIndex={0}
       hidden={!active}
     >
-      <div ref={hostRef} className="terminal-xterm" aria-label={`终端，工作目录 ${cwd}`} />
+      <div
+        ref={hostRef}
+        className="terminal-xterm"
+        aria-label={cwd ? `终端，工作目录 ${cwd}` : '终端，未绑定项目，初始目录为用户主目录'}
+      />
       {(error || exit) && (
         <button type="button" className="terminal-restart" onClick={() => void start()}>
           <Icon name="refresh" /> 重新启动
@@ -227,7 +231,7 @@ function TerminalPane({
   )
 }
 
-export function TerminalSurface({ cwd, active }: { cwd: string; active: boolean }) {
+export function TerminalSurface({ cwd, active }: { cwd: string | null; active: boolean }) {
   const rootId = useId().replaceAll(':', '')
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [nextTerminalTab(1)])
   const [activeKey, setActiveKey] = useState(() => tabs[0].key)
@@ -347,12 +351,12 @@ export function TerminalSurface({ cwd, active }: { cwd: string; active: boolean 
           <div className="terminal-empty">
             <Icon name="terminal" lg />
             <strong>没有打开的终端</strong>
-            <span>终端以当前 macOS 用户权限在工作区内运行。</span>
+            <span>终端以当前 macOS 用户权限运行；未绑定项目时从用户主目录启动。</span>
             <button type="button" className="btn" onClick={addTab}>启动终端</button>
           </div>
         ) : tabs.map((tab) => (
           <TerminalPane
-            key={`${cwd}:${tab.key}`}
+            key={`${cwd ?? '~'}:${tab.key}`}
             tabKey={tab.key}
             tabId={`${rootId}-${tab.key}-tab`}
             panelId={`${rootId}-${tab.key}-panel`}

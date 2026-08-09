@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -72,9 +72,13 @@ function connectCdp(url) {
 async function main() {
   const port = await freePort()
   const userDataDir = join(temp, 'userData')
+  const home = join(temp, 'home')
   const workspace = join(temp, 'workspace')
   mkdirSync(userDataDir, { recursive: true })
+  mkdirSync(home, { recursive: true })
   mkdirSync(workspace, { recursive: true })
+  const canonicalHome = realpathSync(home)
+  const canonicalWorkspace = realpathSync(workspace)
   writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
     sessionId: 'smoke-run',
     runId: 'smoke-run',
@@ -92,7 +96,7 @@ async function main() {
   ], {
     env: {
       ...process.env,
-      HOME: join(temp, 'home'),
+      HOME: home,
       ELECTRON_ENABLE_LOGGING: '1',
       ELECTRON_DISABLE_SECURITY_WARNINGS: '0'
     },
@@ -174,15 +178,19 @@ async function main() {
     const unboundPanel = await waitFor('.right-surface-panel')
     const unboundOpened = !!unboundPanel
       && document.querySelector('button[title="右侧工作区"]')?.getAttribute('aria-pressed') === 'true'
+    const unboundTerminal = unboundPanel ? await openSurface('终端', '.terminal-surface') : null
+    const unboundTerminalRunning = unboundTerminal ? await waitFor('.terminal-state.running') : null
     document.querySelector('button[aria-label="隐藏右侧工作区"]')?.click()
     await new Promise((resolve) => setTimeout(resolve, 50))
-    const unboundClosed = !document.querySelector('.right-surface-panel')
+    const unboundHidden = document.querySelector('.app')?.classList.contains('right-panel-hidden') === true
       && document.querySelector('button[title="右侧工作区"]')?.getAttribute('aria-pressed') === 'false'
+    const unboundTerminalRetained = !!document.querySelector('.terminal-surface')
 
     const recent = await waitFor('button.sb-sess')
     recent?.click()
+    await new Promise((resolve) => setTimeout(resolve, 100))
     const panel = await waitFor('.right-surface-panel')
-    const terminal = panel ? await openSurface('终端', '.terminal-surface') : null
+    const terminal = panel ? await waitFor('.terminal-surface') : null
     const agents = terminal ? await openSurface('Agents', '.agents-surface') : null
     const activeTab = document.querySelector('[role="tab"][aria-selected="true"]')
     const terminalPanel = document.querySelector('.surface-content-terminal')
@@ -206,7 +214,10 @@ async function main() {
       unboundButton: !!unboundButton,
       unboundInitiallyHidden,
       unboundOpened,
-      unboundClosed,
+      unboundTerminal: !!unboundTerminal,
+      unboundTerminalRunning: !!unboundTerminalRunning,
+      unboundHidden,
+      unboundTerminalRetained,
       panel: !!panel,
       terminal: !!terminal,
       agents: !!agents,
@@ -222,7 +233,10 @@ async function main() {
     unboundButton: true,
     unboundInitiallyHidden: true,
     unboundOpened: true,
-    unboundClosed: true,
+    unboundTerminal: true,
+    unboundTerminalRunning: true,
+    unboundHidden: true,
+    unboundTerminalRetained: true,
     panel: true,
     terminal: true,
     agents: true,
@@ -302,44 +316,91 @@ async function main() {
   })()`)
   assert.notEqual(subframeIpc, 'allowed', 'an untrusted subframe reached privileged IPC')
 
-  const terminalSmoke = await evaluate(`new Promise(async (resolve) => {
-    const marker = '__SCRY_TERMINAL_OK__'
-    let output = ''
-    let terminalId = null
-    let settled = false
-    let offData = () => {}
-    let offExit = () => {}
-    const finish = async (result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      offData()
-      offExit()
-      if (terminalId) await window.scry.terminalClose(terminalId).catch(() => {})
-      resolve(result)
-    }
-    const timeout = setTimeout(() => void finish({ ok: false, error: 'timeout', output }), 12_000)
-    try {
-      await window.scry.setCwd(${JSON.stringify(workspace)})
-      offData = window.scry.onTerminalData((event) => {
-        if (event.id !== terminalId) return
-        output += event.data
-        if (output.includes(marker)) void finish({ ok: true, output })
-      })
-      offExit = window.scry.onTerminalExit((event) => {
-        if (event.id === terminalId && !output.includes(marker)) {
-          void finish({ ok: false, error: 'early-exit', event, output })
+  const terminalSmoke = await evaluate(`(async () => {
+    const probe = (cwd, marker) => new Promise((resolve) => {
+      let output = ''
+      let session = null
+      let settled = false
+      let offData = () => {}
+      let offExit = () => {}
+      const finish = async (result, close = false) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        offData()
+        offExit()
+        if (close && session) await window.scry.terminalClose(session.id).catch(() => {})
+        resolve(result)
+      }
+      const timeout = setTimeout(() => void finish({ ok: false, error: 'timeout', output }, true), 12_000)
+      void (async () => {
+        try {
+          offData = window.scry.onTerminalData((event) => {
+            if (event.id !== session?.id) return
+            output += event.data
+            const markerIndex = output.indexOf(marker + ':')
+            if (markerIndex >= 0 && output.indexOf(String.fromCharCode(10), markerIndex) >= 0) {
+              void finish({ ok: true, id: session.id, cwd: session.cwd, output })
+            }
+          })
+          offExit = window.scry.onTerminalExit((event) => {
+            if (event.id === session?.id && !output.includes(marker + ':')) {
+              void finish({ ok: false, error: 'early-exit', event, output })
+            }
+          })
+          session = await window.scry.terminalStart({ cwd, cols: 80, rows: 24 })
+          await window.scry.terminalResize(session.id, 100, 30)
+          const slash = String.fromCharCode(92)
+          const encodedMarker = slash + '137' + slash + '137' + marker.slice(2)
+          await window.scry.terminalWrite(
+            session.id,
+            "printf '" + encodedMarker + ":'; pwd -P" + String.fromCharCode(13)
+          )
+        } catch (error) {
+          await finish({ ok: false, error: String(error), output }, true)
         }
+      })()
+    })
+    const waitForExit = (id) => new Promise((resolve) => {
+      let settled = false
+      let timer = 0
+      let off = () => {}
+      const finish = (value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        off()
+        resolve(value)
+      }
+      off = window.scry.onTerminalExit((event) => {
+        if (event.id === id) finish(true)
       })
-      const session = await window.scry.terminalStart({ cwd: ${JSON.stringify(workspace)}, cols: 80, rows: 24 })
-      terminalId = session.id
-      await window.scry.terminalResize(session.id, 100, 30)
-      await window.scry.terminalWrite(session.id, "printf '__SCRY_TERMINAL_OK__\\n'\\r")
-    } catch (error) {
-      await finish({ ok: false, error: String(error), output })
+      timer = setTimeout(() => finish(false), 2_000)
+    })
+
+    await window.scry.setCwd(null)
+    const unbound = await probe(null, '__SCRY_TERMINAL_HOME_OK__')
+    const unboundExit = waitForExit(unbound.id)
+    await window.scry.setCwd(${JSON.stringify(workspace)})
+    const unboundExited = await unboundExit
+    let oldWriteRejected = false
+    try {
+      await window.scry.terminalWrite(unbound.id, 'pwd' + String.fromCharCode(13))
+    } catch {
+      oldWriteRejected = true
     }
-  })`)
-  assert.equal(terminalSmoke.ok, true, `packaged PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
+    const bound = await probe(${JSON.stringify(workspace)}, '__SCRY_TERMINAL_WORKSPACE_OK__')
+    if (bound.id) await window.scry.terminalClose(bound.id).catch(() => {})
+    return { unbound, unboundExited, oldWriteRejected, bound }
+  })()`)
+  assert.equal(terminalSmoke.unbound.ok, true, `packaged unbound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
+  assert.equal(terminalSmoke.unbound.cwd, canonicalHome)
+  assert.ok(terminalSmoke.unbound.output.includes(`__SCRY_TERMINAL_HOME_OK__:${canonicalHome}`))
+  assert.equal(terminalSmoke.unboundExited, true)
+  assert.equal(terminalSmoke.oldWriteRejected, true)
+  assert.equal(terminalSmoke.bound.ok, true, `packaged bound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
+  assert.equal(terminalSmoke.bound.cwd, canonicalWorkspace)
+  assert.ok(terminalSmoke.bound.output.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`))
 
   const popupOpened = await evaluate(`window.open('file:///scry-smoke') !== null`)
   assert.equal(popupOpened, false)
