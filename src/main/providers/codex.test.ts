@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TraceEvent } from '../../shared/trace'
+import multiAgentWire from './test-fixtures/codex-multi-agent-wire-slice.json'
 
 const appServer = vi.hoisted(() => ({
   request: vi.fn(),
@@ -1702,6 +1703,55 @@ describe('Codex provider adapter', () => {
     expect(rootCommand).toMatchObject({ kind: 'tool' })
     expect(rootCommand?.agentId).toBeUndefined()
     expect(rootCommand?.parentToolUseId).toBeUndefined()
+  })
+
+  it('replays the real Codex 0.145.0 completed-only subagent registration shape', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: multiAgentWire.rootThreadId } }
+      if (method === 'turn/start') return { turn: { id: multiAgentWire.rootTurnId } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-real-child-wire',
+      prompt: 'fan out',
+      cwd: '/workspace/repo',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    for (const notification of multiAgentWire.notifications) notify?.(notification.method, notification.params)
+    notify?.('turn/completed', {
+      threadId: multiAgentWire.rootThreadId,
+      turn: { id: multiAgentWire.rootTurnId, status: 'completed', error: null }
+    })
+    await handle.promise
+
+    expect(multiAgentWire.capturedWith.cli).toBe('codex-cli 0.145.0')
+    expect(events.filter((event) => event.toolUseId === 'call_S2JPiq0sMnJYS7kswVdvzEjB')).toEqual([
+      expect.objectContaining({
+        kind: 'agent',
+        agentId: multiAgentWire.childThreadId,
+        name: 'alpha'
+      }),
+      expect.objectContaining({
+        kind: 'tool',
+        stage: 'tool_result',
+        agentId: multiAgentWire.childThreadId
+      })
+    ])
+    expect(events.find((event) => event.toolUseId === 'call_2W1NboHClVo0VqAf1y3ZFinO')).toMatchObject({
+      kind: 'harness',
+      agentId: multiAgentWire.childThreadId,
+      input: expect.objectContaining({ agentThreadId: multiAgentWire.rootThreadId })
+    })
   })
 
   it('records one update_plan call when app-server also emits a plan ThreadItem snapshot', async () => {

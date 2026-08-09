@@ -7,6 +7,7 @@ import {
   appBundleRootForExecutable,
   detectAgentsFast,
   isAcceptedQoderPath,
+  mergeLoginShellEnv,
   normalizeAgentVersion,
   resolveCommandOnPath,
   resolveRecorderCliPath,
@@ -22,6 +23,31 @@ import {
 describe('runtime CLI discovery constraints', () => {
   const npmBin = '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli'
   const appBundleBin = '/Applications/QoderWork.app/Contents/Resources/bin/qodercli'
+
+  it('只从登录 shell 补齐运行和 Provider 变量，不导入无关 secret', () => {
+    expect(mergeLoginShellEnv(
+      { HOME: '/Users/example', DATABASE_URL: 'inherited-value' },
+      {
+        PATH: '/shell/bin:/usr/bin',
+        SSH_AUTH_SOCK: '/tmp/agent.sock',
+        HTTPS_PROXY: 'http://proxy.example.test',
+        OPENAI_API_KEY: 'provider-key',
+        AWS_PROFILE: 'bedrock-profile',
+        DATABASE_URL: 'must-not-import',
+        GITHUB_TOKEN: 'must-not-import',
+        NPM_TOKEN: 'must-not-import',
+        CLAUDE_CODE_ENTRYPOINT: 'nested-session'
+      }
+    )).toEqual({
+      HOME: '/Users/example',
+      DATABASE_URL: 'inherited-value',
+      PATH: '/shell/bin:/usr/bin',
+      SSH_AUTH_SOCK: '/tmp/agent.sock',
+      HTTPS_PROXY: 'http://proxy.example.test',
+      OPENAI_API_KEY: 'provider-key',
+      AWS_PROFILE: 'bedrock-profile'
+    })
+  })
 
   it('normalizes CLI version banners without exposing product-name noise', () => {
     expect(normalizeAgentVersion('2.1.150 (Claude Code)')).toBe('2.1.150')

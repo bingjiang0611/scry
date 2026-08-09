@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { ProviderId, SessionProviderId } from '../shared/provider'
@@ -15,6 +15,46 @@ export interface UsageResultEvent {
 export type { UsageStats } from '../shared/trace'
 
 export const usageJsonlPath = (userDataDir: string): string => join(userDataDir, 'usage.jsonl')
+
+interface ParsedUsageRow {
+  providerId: SessionProviderId
+  cwd?: string
+  cost?: number | null
+  tin?: number | null
+  tout?: number | null
+}
+
+let usageScanCache: {
+  file: string
+  size: number
+  mtimeMs: number
+  rows: ParsedUsageRow[]
+  invalidLines: number
+} | null = null
+
+function invalidateUsageScan(file: string): void {
+  if (usageScanCache?.file === file) usageScanCache = null
+}
+
+function scanUsage(file: string): { rows: ParsedUsageRow[]; invalidLines: number; sourceBytes: number } {
+  const stat = statSync(file)
+  if (usageScanCache?.file === file && usageScanCache.size === stat.size && usageScanCache.mtimeMs === stat.mtimeMs) {
+    return { rows: usageScanCache.rows, invalidLines: usageScanCache.invalidLines, sourceBytes: stat.size }
+  }
+  const rows: ParsedUsageRow[] = []
+  let invalidLines = 0
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const parsed = JSON.parse(line) as Omit<ParsedUsageRow, 'providerId'> & { providerId?: SessionProviderId }
+      rows.push({ ...parsed, providerId: parsed.providerId ?? 'legacy_unknown' })
+    } catch {
+      invalidLines++
+    }
+  }
+  usageScanCache = { file, size: stat.size, mtimeMs: stat.mtimeMs, rows, invalidLines }
+  return { rows, invalidLines, sourceBytes: stat.size }
+}
 
 function cleanupAtomicTemps(file: string): void {
   const dir = dirname(file)
@@ -45,6 +85,7 @@ function writeUsageAtomic(file: string, source: string): void {
     closeSync(fd)
     fd = undefined
     renameSync(temp, file)
+    invalidateUsageScan(file)
   } catch (error) {
     if (fd !== undefined) closeSync(fd)
     try { unlinkSync(temp) } catch { /* temp may already have been renamed */ }
@@ -81,7 +122,9 @@ export function appendUsage(
       tout: ev.tokensOut ?? null,
       ts: ev.ts
     }
-    appendFileSync(usageJsonlPath(userDataDir), JSON.stringify(row) + '\n')
+    const file = usageJsonlPath(userDataDir)
+    appendFileSync(file, JSON.stringify(row) + '\n')
+    invalidateUsageScan(file)
   } catch {
     /* usage.jsonl is best-effort; sqlite remains the structured source */
   }
@@ -98,14 +141,12 @@ export function readUsageStats(
   let tinRows = 0
   let toutRows = 0
   let turns = 0
-  let parsedLines = 0
-  let invalidLines = 0
-  let source: string
+  let scan: ReturnType<typeof scanUsage>
   try {
-    source = readFileSync(usageJsonlPath(userDataDir), 'utf8')
+    scan = scanUsage(usageJsonlPath(userDataDir))
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') return { status: 'ready', cost: null, tin: null, tout: null, turns: 0, invalidLines: 0 }
+    if (code === 'ENOENT') return { status: 'ready', cost: null, tin: null, tout: null, turns: 0, invalidLines: 0, sourceBytes: 0 }
     return {
       status: 'unavailable',
       cost: null,
@@ -116,45 +157,32 @@ export function readUsageStats(
       error: error instanceof Error ? error.message : String(error)
     }
   }
-  for (const line of source.split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const o = JSON.parse(line) as {
-          providerId?: SessionProviderId
-          cwd?: string
-          cost?: number | null
-          tin?: number | null
-          tout?: number | null
-        }
-        parsedLines++
-        const providerId = o.providerId ?? 'legacy_unknown'
-        if (filter.providerId && providerId !== filter.providerId) continue
-        if (filter.cwd != null && o.cwd !== filter.cwd) continue
-        if (typeof o.cost === 'number') {
-          cost += o.cost
-          costRows++
-        }
-        if (typeof o.tin === 'number') {
-          tin += o.tin
-          tinRows++
-        }
-        if (typeof o.tout === 'number') {
-          tout += o.tout
-          toutRows++
-        }
-        turns++
-      } catch {
-        invalidLines++
-      }
+  for (const row of scan.rows) {
+    if (filter.providerId && row.providerId !== filter.providerId) continue
+    if (filter.cwd != null && row.cwd !== filter.cwd) continue
+    if (typeof row.cost === 'number') {
+      cost += row.cost
+      costRows++
+    }
+    if (typeof row.tin === 'number') {
+      tin += row.tin
+      tinRows++
+    }
+    if (typeof row.tout === 'number') {
+      tout += row.tout
+      toutRows++
+    }
+    turns++
   }
   return {
-    status: invalidLines === 0 ? 'ready' : parsedLines === 0 ? 'query_error' : 'partial',
+    status: scan.invalidLines === 0 ? 'ready' : scan.rows.length === 0 ? 'query_error' : 'partial',
     cost: costRows ? cost : null,
     tin: tinRows ? tin : null,
     tout: toutRows ? tout : null,
     turns,
-    invalidLines,
-    ...(invalidLines > 0 ? { error: `${invalidLines} 行 usage 记录无法解析` } : {})
+    invalidLines: scan.invalidLines,
+    sourceBytes: scan.sourceBytes,
+    ...(scan.invalidLines > 0 ? { error: `${scan.invalidLines} 行 usage 记录无法解析` } : {})
   }
 }
 

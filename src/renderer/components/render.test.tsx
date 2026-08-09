@@ -3159,13 +3159,13 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
 
   it('partial usage 保留已解析 turns 与 Token 下界，不降级成 unknown', () => {
     const partial = renderDiagnostics({
-      usage: { status: 'partial', cost: null, tin: 100, tout: 20, turns: 3, invalidLines: 2 }
+      usage: { status: 'partial', cost: null, tin: 100, tout: 20, turns: 3, invalidLines: 2, sourceBytes: 1536 }
     })
 
     expect(partial).toContain('账本证据仅部分可用')
     expect(partial).toContain('>≥ 3</span>')
     expect(partial).toContain('Token ≥ 120')
-    expect(partial).toContain('3 turns · 2 invalid lines · Token ≥ 120')
+    expect(partial).toContain('3 turns · 2 invalid lines · 1.5 KiB · Token ≥ 120')
   })
 
   it('capabilityWarnings 缺字段保持 unknown，只有显式空数组才是真实 0', () => {
