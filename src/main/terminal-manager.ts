@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import type {
   TerminalCloseRequest,
@@ -113,6 +113,19 @@ function defaultArgs(): string[] {
   return process.platform === 'win32' ? [] : ['-l']
 }
 
+function resolveTerminalDirectory(path: string, missingMessage: string): string {
+  try {
+    const resolved = realpathSync(path)
+    if (!statSync(resolved).isDirectory()) throw new Error(missingMessage)
+    return resolved
+  } catch (error) {
+    if (error instanceof Error && error.message === missingMessage) throw error
+    const code = (error as NodeJS.ErrnoException)?.code
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw new Error(missingMessage)
+    throw error
+  }
+}
+
 export class TerminalManager {
   private readonly sessions = new Map<string, ManagedTerminal>()
   private readonly getCurrentCwd: () => string | undefined
@@ -146,10 +159,16 @@ export class TerminalManager {
       throw new Error(`最多同时运行 ${TERMINAL_MAX_SESSIONS} 个终端`)
     }
 
-    const cwd = realpathSync(request.cwd)
     const boundCwd = this.getCurrentCwd()
     if (!boundCwd) throw new Error('当前未绑定工作区，无法启动终端')
-    const currentCwd = realpathSync(boundCwd)
+    const currentCwd = resolveTerminalDirectory(
+      boundCwd,
+      '当前绑定的工作目录已不存在或不是文件夹，请重新绑定项目后再启动终端'
+    )
+    const cwd = resolveTerminalDirectory(
+      request.cwd,
+      '终端工作目录不存在或不是文件夹'
+    )
     if (cwd !== currentCwd) throw new Error('终端只能在当前工作区启动')
 
     const id = `terminal-${randomUUID()}`

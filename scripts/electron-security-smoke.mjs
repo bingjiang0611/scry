@@ -167,6 +167,18 @@ async function main() {
       return waitFor(selector)
     }
 
+    const unboundButton = await waitFor('button[title="右侧工作区"]')
+    const unboundInitiallyHidden = !document.querySelector('.right-surface-panel')
+      && unboundButton?.getAttribute('aria-pressed') === 'false'
+    unboundButton?.click()
+    const unboundPanel = await waitFor('.right-surface-panel')
+    const unboundOpened = !!unboundPanel
+      && document.querySelector('button[title="右侧工作区"]')?.getAttribute('aria-pressed') === 'true'
+    document.querySelector('button[aria-label="隐藏右侧工作区"]')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const unboundClosed = !document.querySelector('.right-surface-panel')
+      && document.querySelector('button[title="右侧工作区"]')?.getAttribute('aria-pressed') === 'false'
+
     const recent = await waitFor('button.sb-sess')
     recent?.click()
     const panel = await waitFor('.right-surface-panel')
@@ -191,6 +203,10 @@ async function main() {
     const reopened = document.querySelector('.app')?.classList.contains('right-panel-hidden') === false
 
     return {
+      unboundButton: !!unboundButton,
+      unboundInitiallyHidden,
+      unboundOpened,
+      unboundClosed,
       panel: !!panel,
       terminal: !!terminal,
       agents: !!agents,
@@ -203,6 +219,10 @@ async function main() {
     }
   })()`)
   assert.deepEqual(surfaceSmoke, {
+    unboundButton: true,
+    unboundInitiallyHidden: true,
+    unboundOpened: true,
+    unboundClosed: true,
     panel: true,
     terminal: true,
     agents: true,

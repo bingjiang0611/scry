@@ -344,8 +344,12 @@ export function App() {
   } = workspace
   const [rightSurface, dispatchRightSurface] = useReducer(
     reduceRightSurfaceState,
-    createRightSurfaceState()
+    createRightSurfaceState({ visible: false })
   )
+  const hasSurfaceContext = Boolean(cwd || activeSessionId)
+  useEffect(() => {
+    if (hasSurfaceContext) dispatchRightSurface({ type: 'show' })
+  }, [hasSurfaceContext])
   const workspaceOpen = rightSurface.openIds.includes('files')
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
@@ -948,7 +952,7 @@ export function App() {
     '--sidebar-w': `${sidebarPane.visibleWidth}px`,
     '--overview-panel-w': `${surfacePane.visibleWidth}px`
   }
-  const rightPanelMounted = Boolean(cwd || activeSessionId)
+  const rightPanelMounted = hasSurfaceContext || rightSurface.visible
   const panelVisible = rightPanelMounted && view === 'chat' && rightSurface.visible && !surfacePane.collapsed
   const panelRuntimeProvider = useMemo(
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
@@ -1108,7 +1112,7 @@ export function App() {
               agent={integrations.selectedAgent}
               agentScanning={integrations.agentsScanning}
               showPanel={panelVisible}
-              canTogglePanel={view === 'chat' && Boolean(cwd || activeSessionId)}
+              canTogglePanel={view === 'chat'}
               showWorkspace={workspaceOpen && rightSurface.activeId === 'files' && panelVisible}
               onView={changeView}
               onTogglePanel={toggleOverviewPanel}

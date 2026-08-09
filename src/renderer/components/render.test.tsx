@@ -162,12 +162,14 @@ const renderWelcome = (overrides: Partial<ComponentProps<typeof ChatView>> = {})
 describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍可组合渲染', () => {
   const html = renderToStaticMarkup(<App />)
 
-  it('未选 cwd 首屏直接渲染不绑定项目的 composer，不挂空白纵览面板', () => {
+  it('未选 cwd 首屏渲染不绑定项目的 composer 与看板入口，不自动展开面板', () => {
     expect(html).toContain('app app-shell')
     expect(html).not.toContain('has-right-panel')
     expect(html).toContain('id="sidebar-pane"')
     expect(html).toContain('id="main-pane"')
-    expect(html).not.toContain('id="overview-pane"')
+    expect(html).not.toContain('id="right-surface-pane"')
+    expect(html).toContain('title="右侧工作区"')
+    expect(html).toContain('aria-pressed="false"')
     expect(html).toContain('不绑定项目')
     expect(html).toContain('可直接发起任务')
     expect(html).toContain('aria-label="运行配置"')
@@ -200,6 +202,9 @@ describe('ViewChrome 顶栏', () => {
     )
     expect(html).toContain('正在检测 agent…')
     expect(html).not.toContain('未检测到 agent')
+    expect(html).toContain('title="右侧工作区"')
+    expect(html).not.toContain('title="工作区文件"')
+    expect(html).not.toContain('aria-label="会话视图"')
   })
 
   it('聊天页只保留视图切换和面板入口，不混入集成入口', () => {
