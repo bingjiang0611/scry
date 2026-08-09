@@ -38,14 +38,42 @@ async function shellPathAsync(): Promise<string> {
   return shellPathCache
 }
 
-// app 启动方式不同，进程环境差异巨大：从终端 `npm run dev` 继承完整环境；从 Finder/launchd 打开的
-// 打包 app 只有极简环境（缺完整 PATH、缺 GUI 登录会话相关变量），导致 SDK spawn 的 claude 读不到
-// Keychain 登录态 → "Not logged in"（实测：完整环境/launchd-osascript 都能认证，唯独 env-i 极简环境失败）。
-// 解法：捞用户登录+交互 shell 的完整环境，spawn claude 时显式传入，让它拿到与终端等价的环境。
-// 清掉嵌套会话污染（CLAUDECODE 等）。缓存一次。
+// Finder/launchd 的 PATH 很短；只从登录 shell 补齐 CLI、桌面会话、代理和 Provider 自身变量。
+// 不能把用户 shell 里的任意 secret 全量注入每一家 Provider 子进程。进程原本继承的环境保持不变。
 let shellEnvCache: Record<string, string> | null = null
 let shellEnvPromise: Promise<Record<string, string>> | null = null
-const SHELL_ENV_TIMEOUT_MS = 30_000
+const SHELL_ENV_TIMEOUT_MS = 5_000
+
+const LOGIN_SHELL_ENV_NAMES = new Set([
+  'PATH', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'COLORTERM',
+  'DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'SSH_AUTH_SOCK', 'WAYLAND_DISPLAY',
+  'HOMEBREW_PREFIX', 'HOMEBREW_CELLAR', 'HOMEBREW_REPOSITORY',
+  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR', 'XDG_CURRENT_DESKTOP',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+  'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS',
+  'NPM_CONFIG_PREFIX', 'npm_config_prefix', 'PNPM_HOME',
+  'CODEX_HOME'
+])
+const LOGIN_SHELL_ENV_PREFIXES = [
+  'SCRY_', 'ANTHROPIC_', 'OPENAI_', 'CLAUDE_', 'CODEX_', 'QODER_', 'OPENCODE_',
+  'AWS_', 'AZURE_', 'GOOGLE_', 'GCP_'
+]
+
+function loginShellEnvAllowed(name: string): boolean {
+  return LOGIN_SHELL_ENV_NAMES.has(name) || LOGIN_SHELL_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
+}
+
+export function mergeLoginShellEnv(
+  inherited: Record<string, string>,
+  captured: Record<string, string>
+): Record<string, string> {
+  const out = { ...inherited }
+  for (const [name, value] of Object.entries(captured)) {
+    if (loginShellEnvAllowed(name)) out[name] = value
+  }
+  return sanitizeNestedAgentEnv(out)
+}
 
 function fallbackShellEnv(): Record<string, string> {
   return sanitizeNestedAgentEnv({
@@ -60,17 +88,18 @@ export function warmShellEnv(): Promise<Record<string, string>> {
   const shell = process.env.SHELL || '/bin/zsh'
   shellEnvPromise = execFileText(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: SHELL_ENV_TIMEOUT_MS }).then((raw) => {
     const out = fallbackShellEnv()
+    const captured: Record<string, string> = {}
     const s = raw.indexOf('__AS_ENV_S__')
     const e = raw.indexOf('__AS_ENV_E__')
     const capturedLoginEnv = s >= 0 && e > s
     if (capturedLoginEnv) {
       for (const line of raw.slice(s + '__AS_ENV_S__'.length, e).split('\n')) {
         const i = line.indexOf('=')
-        if (i > 0) out[line.slice(0, i)] = line.slice(i + 1)
+        if (i > 0) captured[line.slice(0, i)] = line.slice(i + 1)
       }
     }
-    shellEnvCache = sanitizeNestedAgentEnv(out)
-    shellPathCache = capturedLoginEnv ? shellEnvCache.PATH ?? '' : ''
+    shellEnvCache = mergeLoginShellEnv(out, captured)
+    shellPathCache = capturedLoginEnv ? captured.PATH ?? '' : ''
     shellEnvPromise = null
     return shellEnvCache
   })

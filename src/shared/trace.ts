@@ -310,6 +310,7 @@ export interface UsageStats {
   tout: number | null
   turns: number
   invalidLines: number
+  sourceBytes?: number
   error?: string
 }
 

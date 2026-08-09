@@ -813,6 +813,7 @@ export function createCodexAdapter(
       let lastTurnError: Record<string, unknown> | undefined
       let planUpdateSeq = 0
       const childAgents = new Map<string, { parentToolUseId?: string; name?: string }>()
+      const seenSubAgentActivities = new Set<string>()
       type ResponseTimingState = {
         boundaryMs?: number
         responses: Set<string>
@@ -1053,7 +1054,6 @@ export function createCodexAdapter(
                   timingState(receiverThreadId, observedAtMs)
                 }
               } else if (
-                method === 'item/started' &&
                 item.type === 'subAgentActivity' &&
                 item.kind === 'started' &&
                 typeof item.agentThreadId === 'string' &&
@@ -1065,9 +1065,14 @@ export function createCodexAdapter(
                   name: typeof item.agentPath === 'string' ? item.agentPath : existing?.name
                 })
               }
-              // subAgentActivity 是瞬时活动通知；app-server 会用相同 id 同时发送
-              // item/started 与 item/completed。只记录 started，避免父 Task 卡重复。
-              if (!(item.type === 'subAgentActivity' && method === 'item/completed')) {
+              // Codex 版本间既有 started+completed，也有只发 completed 的形态；按 item id 去重，
+              // 不能固定丢 completed，否则真实 multi-agent wire 会漏掉整个子线程登记。
+              const subAgentActivityId = item.type === 'subAgentActivity' && typeof item.id === 'string'
+                ? item.id
+                : undefined
+              const duplicateSubAgentActivity = subAgentActivityId != null && seenSubAgentActivities.has(subAgentActivityId)
+              if (!duplicateSubAgentActivity) {
+                if (subAgentActivityId) seenSubAgentActivities.add(subAgentActivityId)
                 for (const event of traceFromItem(
                   runRequest.runId,
                   item,

@@ -27,6 +27,7 @@ describe('usage-jsonl', () => {
         tout: 26,
         turns: 2,
         invalidLines: 1,
+        sourceBytes: expect.any(Number),
         error: '1 行 usage 记录无法解析'
       })
     } finally {
@@ -38,7 +39,7 @@ describe('usage-jsonl', () => {
     const dir = tempDir()
     try {
       expect(readUsageStats(dir)).toEqual({
-        status: 'ready', cost: null, tin: null, tout: null, turns: 0, invalidLines: 0
+        status: 'ready', cost: null, tin: null, tout: null, turns: 0, invalidLines: 0, sourceBytes: 0
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -51,10 +52,10 @@ describe('usage-jsonl', () => {
       appendUsage(dir, { providerId: 'qoder', runtimeProvider: 'qoder_cli' }, { tokensIn: 8, tokensOut: 2, ts: '2026-07-04T00:00:00.000Z' })
       appendUsage(dir, { providerId: 'opencode', runtimeProvider: 'opencode_server' }, { costUsd: 0, tokensIn: 0, tokensOut: 0, ts: '2026-07-04T00:00:01.000Z' })
       expect(readUsageStats(dir, { providerId: 'qoder' })).toEqual({
-        status: 'ready', cost: null, tin: 8, tout: 2, turns: 1, invalidLines: 0
+        status: 'ready', cost: null, tin: 8, tout: 2, turns: 1, invalidLines: 0, sourceBytes: expect.any(Number)
       })
       expect(readUsageStats(dir, { providerId: 'opencode' })).toEqual({
-        status: 'ready', cost: 0, tin: 0, tout: 0, turns: 1, invalidLines: 0
+        status: 'ready', cost: 0, tin: 0, tout: 0, turns: 1, invalidLines: 0, sourceBytes: expect.any(Number)
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -68,7 +69,7 @@ describe('usage-jsonl', () => {
       appendUsage(dir, { providerId: 'qoder', runtimeProvider: 'qoder_cli', cwd: '/repo' }, { tokensIn: 30, tokensOut: 10, ts: '2026-07-04T00:00:01.000Z' })
 
       expect(readUsageStats(dir, { providerId: 'qoder', cwd: '' })).toEqual({
-        status: 'ready', cost: null, tin: 3, tout: 1, turns: 1, invalidLines: 0
+        status: 'ready', cost: null, tin: 3, tout: 1, turns: 1, invalidLines: 0, sourceBytes: expect.any(Number)
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -82,6 +83,20 @@ describe('usage-jsonl', () => {
       expect(readUsageStats(dir)).toMatchObject({
         status: 'query_error', turns: 0, invalidLines: 2
       })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('append 后使 size+mtime 解析缓存失效', () => {
+    const dir = tempDir()
+    try {
+      appendUsage(dir, { providerId: 'codex', runtimeProvider: 'codex_cli' }, { tokensIn: 4, tokensOut: 1, ts: '2026-07-04T00:00:00.000Z' })
+      const first = readUsageStats(dir)
+      appendUsage(dir, { providerId: 'codex', runtimeProvider: 'codex_cli' }, { tokensIn: 6, tokensOut: 2, ts: '2026-07-04T00:00:01.000Z' })
+      const second = readUsageStats(dir)
+      expect(second).toMatchObject({ turns: 2, tin: 10, tout: 3 })
+      expect(second.sourceBytes).toBeGreaterThan(first.sourceBytes ?? 0)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

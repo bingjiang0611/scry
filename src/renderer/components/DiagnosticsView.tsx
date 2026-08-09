@@ -107,6 +107,12 @@ function statusForMcp(status: McpLiveStatus['status']): EvidenceState {
   return 'warn'
 }
 
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MiB`
+}
+
 function StatusMark({ state, label }: { state: EvidenceState; label?: string }) {
   return (
     <span className={`de-status de-status-${state}`}>
@@ -440,7 +446,9 @@ export function DiagnosticsView({
         when: 'usage IPC',
         source: '当前用量账本',
         finding: usageAvailable
-          ? `${usage.turns} turns · ${usage.invalidLines} invalid lines · Token ${tokenValue}`
+          ? `${usage.turns} turns · ${usage.invalidLines} invalid lines · ${
+              usage.sourceBytes == null ? '文件容量未知' : fmtBytes(usage.sourceBytes)
+            } · Token ${tokenValue}`
           : `usage ${usage?.status ?? 'unknown'}${usage?.error ? ` · ${usage.error}` : ''}`,
         state:
           !usageAvailable

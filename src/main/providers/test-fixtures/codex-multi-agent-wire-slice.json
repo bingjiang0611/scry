@@ -1,0 +1,74 @@
+{
+  "capturedWith": {
+    "cli": "codex-cli 0.145.0",
+    "model": "gpt-5.6-luna",
+    "effort": "low"
+  },
+  "rootThreadId": "019fcfd6-17bb-72f0-ae12-a1f2dee6e3e5",
+  "rootTurnId": "019fcfd6-1806-7de1-8564-de69fd55bffb",
+  "childThreadId": "019fcfd6-2883-77e0-9013-4410ede70371",
+  "notifications": [
+    {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "019fcfd6-2883-77e0-9013-4410ede70371",
+        "status": { "type": "idle" }
+      }
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "subAgentActivity",
+          "id": "call_S2JPiq0sMnJYS7kswVdvzEjB",
+          "kind": "started",
+          "agentThreadId": "019fcfd6-2883-77e0-9013-4410ede70371",
+          "agentPath": "/root/alpha"
+        },
+        "threadId": "019fcfd6-17bb-72f0-ae12-a1f2dee6e3e5",
+        "turnId": "019fcfd6-1806-7de1-8564-de69fd55bffb",
+        "completedAtMs": 1785898346687
+      }
+    },
+    {
+      "method": "turn/started",
+      "params": {
+        "threadId": "019fcfd6-2883-77e0-9013-4410ede70371",
+        "turn": {
+          "id": "019fcfd6-28bf-7e00-a873-4554526dc845",
+          "status": "inProgress",
+          "startedAt": 1785898346
+        }
+      }
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "subAgentActivity",
+          "id": "call_2W1NboHClVo0VqAf1y3ZFinO",
+          "kind": "interacted",
+          "agentThreadId": "019fcfd6-17bb-72f0-ae12-a1f2dee6e3e5",
+          "agentPath": "/root"
+        },
+        "threadId": "019fcfd6-2883-77e0-9013-4410ede70371",
+        "turnId": "019fcfd6-28bf-7e00-a873-4554526dc845",
+        "completedAtMs": 1785898349265
+      }
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "019fcfd6-2883-77e0-9013-4410ede70371",
+        "turn": {
+          "id": "019fcfd6-28bf-7e00-a873-4554526dc845",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1785898346,
+          "completedAt": 1785898350,
+          "durationMs": 3792
+        }
+      }
+    }
+  ]
+}
