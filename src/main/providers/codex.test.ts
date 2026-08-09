@@ -1392,7 +1392,7 @@ describe('Codex provider adapter', () => {
         total: {
           inputTokens: 1100,
           cachedInputTokens: 660,
-          cacheWriteInputTokens: 0,
+          cacheWriteInputTokens: 20,
           outputTokens: 110,
           reasoningOutputTokens: 11,
           totalTokens: 1210
@@ -1400,7 +1400,7 @@ describe('Codex provider adapter', () => {
         last: {
           inputTokens: 100,
           cachedInputTokens: 60,
-          cacheWriteInputTokens: 0,
+          cacheWriteInputTokens: 2,
           outputTokens: 10,
           reasoningOutputTokens: 1,
           totalTokens: 110
@@ -1412,7 +1412,7 @@ describe('Codex provider adapter', () => {
       total: {
         inputTokens: 1400,
         cachedInputTokens: 850,
-        cacheWriteInputTokens: 0,
+        cacheWriteInputTokens: 30,
         outputTokens: 160,
         reasoningOutputTokens: 16,
         totalTokens: 1560
@@ -1420,7 +1420,7 @@ describe('Codex provider adapter', () => {
       last: {
         inputTokens: 200,
         cachedInputTokens: 125,
-        cacheWriteInputTokens: 0,
+        cacheWriteInputTokens: 3,
         outputTokens: 30,
         reasoningOutputTokens: 3,
         totalTokens: 230
@@ -1444,6 +1444,7 @@ describe('Codex provider adapter', () => {
       tokensIn: 400,
       tokensOut: 60,
       cacheReadTokens: 250,
+      cacheCreationTokens: 12,
       reasoningTokens: 6,
       contextTokens: 200,
       modelUsage: [{
@@ -1451,6 +1452,7 @@ describe('Codex provider adapter', () => {
         inputTokens: 400,
         outputTokens: 60,
         cacheReadTokens: 250,
+        cacheCreationTokens: 12,
         reasoningTokens: 6,
         contextWindow: 200_000
       }]

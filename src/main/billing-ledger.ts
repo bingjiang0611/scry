@@ -288,8 +288,9 @@ function estimateRows(rows: UsageLedgerObject[], prices: LocalModelPriceVersion[
     const cacheWrite = row.cacheWriteTokens ?? 0
     const reasoning = row.reasoningTokens ?? 0
     if (input + output + cacheRead + cacheWrite + reasoning === 0 || price.inputPerMillion == null || price.outputPerMillion == null) return row
-    // Anthropic reports uncached input and cache reads as disjoint counters; OpenAI input includes cached tokens.
-    const uncachedInput = row.provider === 'anthropic' ? input : Math.max(0, input - cacheRead)
+    // Anthropic counters are disjoint; OpenAI/Codex input includes cache reads and cache writes.
+    const includedCacheWrite = row.provider === 'openai' || row.provider === 'codex' ? cacheWrite : 0
+    const uncachedInput = row.provider === 'anthropic' ? input : Math.max(0, input - cacheRead - includedCacheWrite)
     const normalOutput = price.reasoningPerMillion == null ? output : Math.max(0, output - reasoning)
     const cost = (
       uncachedInput * price.inputPerMillion +

@@ -166,6 +166,42 @@ describe('Billing Guardian P1 ledger normalizer', () => {
     })
   })
 
+  it('OpenAI 价格表不会把 inclusive input/output 里的 cache write 和 reasoning 重复计价', () => {
+    const rows = sdkUsageLedgerRowsFromItems({
+      runId: 'run-openai-inclusive-priced',
+      items: [resultEvent({
+        costUsd: undefined,
+        billingProvider: 'openai',
+        usageSource: 'codex_app_server',
+        modelUsage: [{
+          model: 'gpt-inclusive',
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadTokens: 300,
+          cacheCreationTokens: 200,
+          reasoningTokens: 50,
+          billingProvider: 'openai',
+          usageSource: 'codex_app_server'
+        }]
+      })],
+      nowMs: 1783000000000,
+      priceVersions: [{
+        id: 'openai:gpt-inclusive:2026-07-01',
+        provider: 'openai',
+        model: 'gpt-inclusive',
+        currency: 'USD',
+        inputPerMillion: 2,
+        outputPerMillion: 10,
+        cacheReadPerMillion: 0.2,
+        cacheWritePerMillion: 0.4,
+        reasoningPerMillion: 20,
+        effectiveFrom: 1782864000000
+      }]
+    })
+
+    expect(rows[0]).toMatchObject({ cost: 0.00364, costSource: 'price_table' })
+  })
+
   it('Anthropic 价格表不会从独立 input token 中再扣一次 cache read', () => {
     const rows = sdkUsageLedgerRowsFromItems({
       runId: 'run-anthropic-priced',

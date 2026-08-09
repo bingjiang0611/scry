@@ -679,6 +679,30 @@ describe('humanEvent', () => {
 })
 
 describe('parseTranscriptToTurns', () => {
+  it('同一 Claude request 的重复 assistant block 只统计一次 usage，缺少身份的记录仍保留', () => {
+    const assistant = (messageId?: string, requestId?: string) => JSON.stringify({
+      type: 'assistant',
+      ...(requestId ? { requestId } : {}),
+      message: {
+        ...(messageId ? { id: messageId } : {}),
+        role: 'assistant',
+        model: 'claude-sonnet-4-5',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'text', text: messageId ?? 'unkeyed' }]
+      }
+    })
+    const turns = parseTranscriptToTurns([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '继续' } }),
+      assistant('msg-1', 'req-1'),
+      assistant('msg-1', 'req-1'),
+      assistant()
+    ].join('\n'), ctx())
+
+    const usage = turns[0].items.filter((event) => event.text === 'transcript assistant usage')
+    expect(usage).toHaveLength(2)
+    expect(usage.map((event) => event.tokensIn)).toEqual([10, 10])
+  })
+
   it('Claude task-notification 作为当前真实轮的 continuation，三条通知不制造新轮且不丢后续工具证据', () => {
     const user = (promptId: string, content: string, extra: Record<string, unknown> = {}) => JSON.stringify({
       type: 'user',
