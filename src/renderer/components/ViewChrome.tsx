@@ -80,10 +80,10 @@ export function ViewChrome({
               type="button"
               className={`tb-action panel-pill ${showPanel ? 'on' : ''}`}
               onClick={onTogglePanel}
-              title="纵览面板"
+              title="右侧工作区"
               aria-pressed={showPanel}
             >
-              <Icon name="grid" /> 纵览
+              <Icon name="panel" /> 面板
             </button>
           </>
         )}

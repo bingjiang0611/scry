@@ -110,7 +110,9 @@ async function main() {
   await cdp.send('Runtime.enable')
   const evaluate = async (expression) => {
     const response = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
-    if (response.exceptionDetails) throw new Error(response.exceptionDetails.text || 'renderer evaluation failed')
+    if (response.exceptionDetails) {
+      throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
+    }
     return response.result?.value
   }
 
@@ -125,7 +127,10 @@ async function main() {
     'object',
     `packaged preload did not expose window.scry\n${stderr.slice(-4000)}`
   )
-  for (const key of ['start', 'stop', 'activeRuns', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills']) {
+  for (const key of [
+    'start', 'stop', 'activeRuns', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills',
+    'terminalStart', 'terminalWrite', 'terminalResize', 'terminalClose', 'onTerminalData', 'onTerminalExit'
+  ]) {
     assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
   }
   const csp = await evaluate(`new Promise((resolve) => {
@@ -138,6 +143,76 @@ async function main() {
     setTimeout(() => resolve({ violated, executed: window.__scryInlineScriptRan === true }), 50)
   })`)
   assert.deepEqual(csp, { violated: true, executed: false })
+
+  const surfaceSmoke = await evaluate(`(async () => {
+    const waitFor = async (selector, timeout = 4_000) => {
+      const deadline = Date.now() + timeout
+      let node = null
+      while (!node && Date.now() < deadline) {
+        node = document.querySelector(selector)
+        if (!node) await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      return node
+    }
+    const openSurface = async (label, selector) => {
+      document.querySelector('button[aria-label="添加 Surface"]')?.click()
+      const deadline = Date.now() + 2_000
+      let item = null
+      while (!item && Date.now() < deadline) {
+        item = [...document.querySelectorAll('[role="menuitem"]')]
+          .find((node) => node.textContent?.trim().startsWith(label)) || null
+        if (!item) await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      item?.click()
+      return waitFor(selector)
+    }
+
+    const recent = await waitFor('button.sb-sess')
+    recent?.click()
+    const panel = await waitFor('.right-surface-panel')
+    const terminal = panel ? await openSurface('终端', '.terminal-surface') : null
+    const agents = terminal ? await openSurface('Agents', '.agents-surface') : null
+    const activeTab = document.querySelector('[role="tab"][aria-selected="true"]')
+    const terminalPanel = document.querySelector('.surface-content-terminal')
+
+    document.querySelector('button[aria-label="最大化右侧工作区"]')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const maximized = document.querySelector('.app')?.classList.contains('right-panel-maximized') === true
+    document.querySelector('button[aria-label="恢复右侧工作区"]')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const restored = document.querySelector('.app')?.classList.contains('right-panel-maximized') === false
+
+    document.querySelector('button[aria-label="隐藏右侧工作区"]')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const hidden = document.querySelector('.app')?.classList.contains('right-panel-hidden') === true
+    const terminalRetained = !!document.querySelector('.terminal-surface')
+    document.querySelector('button[title="右侧工作区"]')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const reopened = document.querySelector('.app')?.classList.contains('right-panel-hidden') === false
+
+    return {
+      panel: !!panel,
+      terminal: !!terminal,
+      agents: !!agents,
+      agentsActive: activeTab?.textContent?.includes('Agents') === true,
+      terminalHiddenButMounted: terminalPanel?.hidden === true && terminalRetained,
+      maximized,
+      restored,
+      hidden,
+      reopened
+    }
+  })()`)
+  assert.deepEqual(surfaceSmoke, {
+    panel: true,
+    terminal: true,
+    agents: true,
+    agentsActive: true,
+    terminalHiddenButMounted: true,
+    maximized: true,
+    restored: true,
+    hidden: true,
+    reopened: true
+  })
 
   const transportPicker = await evaluate(`(async () => {
     const deadline = Date.now() + 2_000
@@ -207,6 +282,45 @@ async function main() {
   })()`)
   assert.notEqual(subframeIpc, 'allowed', 'an untrusted subframe reached privileged IPC')
 
+  const terminalSmoke = await evaluate(`new Promise(async (resolve) => {
+    const marker = '__SCRY_TERMINAL_OK__'
+    let output = ''
+    let terminalId = null
+    let settled = false
+    let offData = () => {}
+    let offExit = () => {}
+    const finish = async (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      offData()
+      offExit()
+      if (terminalId) await window.scry.terminalClose(terminalId).catch(() => {})
+      resolve(result)
+    }
+    const timeout = setTimeout(() => void finish({ ok: false, error: 'timeout', output }), 12_000)
+    try {
+      await window.scry.setCwd(${JSON.stringify(workspace)})
+      offData = window.scry.onTerminalData((event) => {
+        if (event.id !== terminalId) return
+        output += event.data
+        if (output.includes(marker)) void finish({ ok: true, output })
+      })
+      offExit = window.scry.onTerminalExit((event) => {
+        if (event.id === terminalId && !output.includes(marker)) {
+          void finish({ ok: false, error: 'early-exit', event, output })
+        }
+      })
+      const session = await window.scry.terminalStart({ cwd: ${JSON.stringify(workspace)}, cols: 80, rows: 24 })
+      terminalId = session.id
+      await window.scry.terminalResize(session.id, 100, 30)
+      await window.scry.terminalWrite(session.id, "printf '__SCRY_TERMINAL_OK__\\n'\\r")
+    } catch (error) {
+      await finish({ ok: false, error: String(error), output })
+    }
+  })`)
+  assert.equal(terminalSmoke.ok, true, `packaged PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
+
   const popupOpened = await evaluate(`window.open('file:///scry-smoke') !== null`)
   assert.equal(popupOpened, false)
   await new Promise((resolveWait) => setTimeout(resolveWait, 150))
@@ -223,6 +337,8 @@ async function main() {
     appPath,
     rendererUrl: page.url,
     preloadKeys: boundary.preloadKeys.length,
+    terminal: true,
+    surfaces: surfaceSmoke,
     modal,
     subframeIpc,
     popupDenied: true,

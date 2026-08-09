@@ -76,6 +76,15 @@ import type {
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
 } from '../shared/workspace'
+import { createTerminalManager, type TerminalManager } from './terminal-manager'
+import type {
+  TerminalCloseRequest,
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalResizeRequest,
+  TerminalStartRequest,
+  TerminalWriteRequest
+} from '../shared/terminal'
 import { editContextMenuTemplate, shouldShowEditContextMenu } from './edit-context-menu'
 import {
   canonicalOrObservedTurnTiming,
@@ -179,6 +188,78 @@ const providerOperationGate = new ProviderOperationGate()
 const recordingRecoveryHint = '不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复'
 const deletingSessions = new Set<string>()
 let currentCwd: string | undefined
+let terminalManager: TerminalManager | undefined
+let terminalManagerPromise: Promise<TerminalManager> | undefined
+let terminalDataBuffer: TerminalDataEvent[] = []
+let terminalDataBytes = 0
+let terminalDataTimer: ReturnType<typeof setTimeout> | null = null
+const TERMINAL_OUTPUT_FLUSH_BYTES = 1024 * 1024
+
+function rendererCanReceive(): boolean {
+  return Boolean(win && !win.isDestroyed() && !win.webContents.isDestroyed())
+}
+
+function flushTerminalData(): void {
+  if (terminalDataTimer) {
+    clearTimeout(terminalDataTimer)
+    terminalDataTimer = null
+  }
+  if (terminalDataBuffer.length === 0) return
+  const batch = terminalDataBuffer
+  terminalDataBuffer = []
+  terminalDataBytes = 0
+  if (rendererCanReceive()) win?.webContents.send('terminal:data', batch)
+}
+
+function queueTerminalData(event: TerminalDataEvent): void {
+  if (!rendererCanReceive()) return
+  const last = terminalDataBuffer.at(-1)
+  if (last?.id === event.id) last.data += event.data
+  else terminalDataBuffer.push({ ...event })
+  terminalDataBytes += Buffer.byteLength(event.data, 'utf8')
+  if (terminalDataBytes >= TERMINAL_OUTPUT_FLUSH_BYTES) {
+    flushTerminalData()
+  } else if (!terminalDataTimer) {
+    terminalDataTimer = setTimeout(flushTerminalData, 16)
+  }
+}
+
+function sendTerminalExit(event: TerminalExitEvent): void {
+  flushTerminalData()
+  if (rendererCanReceive()) win?.webContents.send('terminal:exit', event)
+}
+
+async function getTerminalManager(): Promise<TerminalManager> {
+  if (terminalManager) return terminalManager
+  if (!terminalManagerPromise) {
+    terminalManagerPromise = warmShellEnv()
+      .then((env) => {
+        const manager = createTerminalManager({
+          getCurrentCwd: () => currentCwd,
+          onData: queueTerminalData,
+          onExit: sendTerminalExit,
+          shell: env.SHELL || process.env.SHELL || '/bin/zsh',
+          env
+        })
+        terminalManager = manager
+        return manager
+      })
+      .catch((error) => {
+        terminalManagerPromise = undefined
+        throw error
+      })
+  }
+  return terminalManagerPromise
+}
+
+function closeAllTerminals(): void {
+  try {
+    terminalManager?.closeAll()
+  } catch (error) {
+    console.warn('[scry] terminal cleanup failed:', (error as Error)?.message)
+  }
+  flushTerminalData()
+}
 
 const homeDir = homedir()
 const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
@@ -379,7 +460,8 @@ function bumpSessionRevision(key: string): void {
 
 function setCurrentCwd(dir: string | undefined): void {
   if (dir !== currentCwd) {
-    // Provider adapters 自己按 cwd 管理原生 transport/cache；这里只更新当前工作目录。
+    // 本机 Shell 不得在切换工作区后继续后台运行；Provider adapters 则各自按 cwd 管理 transport/cache。
+    closeAllTerminals()
   }
   currentCwd = dir
 }
@@ -542,6 +624,15 @@ function createWindow(): void {
       sandbox: true
     }
   })
+  const createdWindow = win
+  createdWindow.on('closed', () => {
+    closeAllTerminals()
+    if (win === createdWindow) win = null
+  })
+  createdWindow.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) closeAllTerminals()
+  })
+  createdWindow.webContents.on('render-process-gone', () => closeAllTerminals())
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error(`[scry] preload failed: ${preloadPath}`, error)
   })
@@ -719,6 +810,34 @@ handleTrusted('workspace:move', (event, request: WorkspaceMoveRequest) => {
 handleTrusted('workspace:trash', (event, request: WorkspacePathRequest) => {
   assertWorkspaceSender(event.sender.id)
   return trashWorkspaceEntry(request, (path) => shell.trashItem(path))
+})
+
+handleTrusted('terminal:start', async (event, request: TerminalStartRequest) => {
+  const manager = await getTerminalManager()
+  if (isShuttingDown || !rendererCanReceive()) throw new Error('终端窗口已关闭')
+  assertTrustedIpcEvent(event)
+  return manager.start(request)
+})
+handleTrusted('terminal:write', async (event, request: TerminalWriteRequest) => {
+  const manager = await getTerminalManager()
+  if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
+  assertTrustedIpcEvent(event)
+  manager.write(request)
+  return true as const
+})
+handleTrusted('terminal:resize', async (event, request: TerminalResizeRequest) => {
+  const manager = await getTerminalManager()
+  if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
+  assertTrustedIpcEvent(event)
+  manager.resize(request)
+  return true as const
+})
+handleTrusted('terminal:close', async (event, request: TerminalCloseRequest) => {
+  const manager = await getTerminalManager()
+  if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
+  assertTrustedIpcEvent(event)
+  manager.close(request)
+  return true as const
 })
 
 handleTrusted('agent:setCwd', (_e, dir: string | null) => {
@@ -2027,6 +2146,7 @@ app.on('before-quit', (event) => {
   if (quitCleanupStarted) return
   isShuttingDown = true
   quitCleanupStarted = true
+  closeAllTerminals()
   const cleanup = settleRunsForShutdown(runs.unsettledControls(), {
     cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),

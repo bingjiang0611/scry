@@ -12,6 +12,8 @@ asarUnpack:
   # better-sqlite3 是原生模块，.node 二进制必须解包到 asar 外才能 spawn/dlopen 加载
   - node_modules/better-sqlite3/**
   - node_modules/bindings/**
+  # node-pty 提供真实交互式终端；native binding 与 spawn-helper 必须位于真实文件系统。
+  - node_modules/node-pty/**
 
 # 只允许生产构建与运行时依赖进入 asar。不能依赖 electron-builder 的默认 files：
 # checkout 内被 Git ignore 的 .claude/.local 也可能被默认打包，泄露本机运行日志与会话元数据。

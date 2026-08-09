@@ -220,8 +220,8 @@ describe('ViewChrome 顶栏', () => {
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('title="工作区文件"')
     expect(html).toContain('文件')
-    expect(html).toContain('title="纵览面板"')
-    expect(html).toContain('纵览')
+    expect(html).toContain('title="右侧工作区"')
+    expect(html).toContain('面板')
     expect(html).not.toContain('title="Skills"')
     expect(html).not.toContain('title="MCP"')
     expect(html).not.toContain('sample-workspace')
@@ -247,7 +247,7 @@ describe('ViewChrome 顶栏', () => {
       />
     )
 
-    expect(html).toContain('title="纵览面板"')
+    expect(html).toContain('title="右侧工作区"')
     expect(html).toContain('aria-label="会话视图"')
     expect(html).toContain('对话')
     expect(html).not.toContain('拓扑')

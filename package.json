@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.49",
+  "version": "0.2.50",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "private": true,
   "license": "MIT",
@@ -16,6 +16,7 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
+    "postinstall": "node scripts/prepare-node-pty.mjs",
     "dev": "electron-vite dev",
     "build:cli": "tsc -p tsconfig.cli.json && rm -rf packages/turn-recorder-cli/dist && tsc -p tsconfig.recorder.json",
     "build": "electron-vite build",
@@ -38,7 +39,10 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.186",
     "@opencode-ai/sdk": "^1.17.18",
     "@qoder-ai/qoder-agent-sdk": "^1.0.17",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^12.11.1",
+    "node-pty": "^1.1.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "undici": "^7.28.0",
