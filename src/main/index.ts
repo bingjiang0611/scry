@@ -77,6 +77,7 @@ import type {
   WorkspaceWriteRequest
 } from '../shared/workspace'
 import { createTerminalManager, type TerminalManager } from './terminal-manager'
+import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import type {
   TerminalCloseRequest,
   TerminalDataEvent,
@@ -617,7 +618,8 @@ function createWindow(): void {
     minWidth: 860,
     title: 'Scry',
     show: false,
-    backgroundColor: '#0b0d12',
+    backgroundColor: windowBackgroundColor('dark'),
+    ...windowTitleBarOptions(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -715,7 +717,7 @@ function handleTrusted<TArgs extends unknown[], TResult>(
 handleTrusted('app:setTheme', (_event, theme: unknown) => {
   if (theme !== 'dark' && theme !== 'light') throw new Error('无效的界面主题')
   nativeTheme.themeSource = theme
-  win?.setBackgroundColor(theme === 'light' ? '#f3f5f7' : '#0c0d0f')
+  win?.setBackgroundColor(windowBackgroundColor(theme))
   return true as const
 })
 

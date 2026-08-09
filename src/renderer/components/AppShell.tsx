@@ -5,6 +5,7 @@ export interface AppShellProps {
   rightPanelMode?: 'overview' | 'review' | 'workspace' | 'surface'
   rightPanelMaximized?: boolean
   rightPanelHidden?: boolean
+  sidebarCollapsed?: boolean
   sidebar: ReactNode
   sidebarSplitter: ReactNode
   main: ReactNode
@@ -18,6 +19,7 @@ export function AppShell({
   rightPanelMode = 'overview',
   rightPanelMaximized = false,
   rightPanelHidden = false,
+  sidebarCollapsed = false,
   sidebar,
   sidebarSplitter,
   main,
@@ -28,7 +30,7 @@ export function AppShell({
   const hasRightPanel = Boolean(rightPanel)
   return (
     <div
-      className={`app app-shell ${hasRightPanel ? `has-right-panel right-panel-${rightPanelMode}` : ''}${hasRightPanel && rightPanelMaximized ? ' right-panel-maximized' : ''}${hasRightPanel && rightPanelHidden ? ' right-panel-hidden' : ''}`}
+      className={`app app-shell ${hasRightPanel ? `has-right-panel right-panel-${rightPanelMode}` : ''}${hasRightPanel && rightPanelMaximized ? ' right-panel-maximized' : ''}${hasRightPanel && rightPanelHidden ? ' right-panel-hidden' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
       style={style}
     >
       {sidebar}

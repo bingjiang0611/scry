@@ -1043,6 +1043,7 @@ export function App() {
       rightPanelMode="surface"
       rightPanelMaximized={panelVisible && rightSurface.maximized}
       rightPanelHidden={!panelVisible}
+      sidebarCollapsed={sidebarPane.collapsed}
       sidebar={
         <Sidebar
           id="sidebar-pane"
@@ -1085,6 +1086,7 @@ export function App() {
       }
       main={
         <>
+        {view !== 'chat' && <div className="aux-view-topbar" aria-hidden="true" />}
         {view === 'diagnostics' ? (
           <DiagnosticsView
             agents={integrations.agents}

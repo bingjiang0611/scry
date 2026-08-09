@@ -8,6 +8,8 @@ import './diagnostics-evidence.css'
 import './inventory-evidence.css'
 import './session-evidence.css'
 
+document.documentElement.dataset.platform =
+  navigator.userAgent.includes('Electron') && navigator.platform.startsWith('Mac') ? 'macos' : 'other'
 applyTheme(readStoredTheme(browserThemeStorage()), document.documentElement)
 
 createRoot(document.getElementById('root')!).render(

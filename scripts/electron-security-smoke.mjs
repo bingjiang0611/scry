@@ -248,6 +248,150 @@ async function main() {
     reopened: true
   })
 
+  const windowChrome = await evaluate(`(() => {
+    const inspect = (selector) => {
+      const node = document.querySelector(selector)
+      if (!node) return null
+      const style = getComputedStyle(node)
+      const rect = node.getBoundingClientRect()
+      return {
+        top: Math.round(rect.top),
+        height: Math.round(rect.height),
+        background: style.backgroundColor,
+        drag: style.getPropertyValue('-webkit-app-region'),
+        paddingLeft: style.paddingLeft
+      }
+    }
+    const topbarAction = document.querySelector('.topbar button')
+    const surfaceAction = document.querySelector('.surface-topbar button')
+    const root = document.documentElement
+    const previousTheme = root.dataset.theme
+    root.dataset.theme = 'light'
+    const lightBackgrounds = {
+      sidebar: inspect('.sidebar')?.background,
+      brand: inspect('.sb-brand')?.background,
+      main: inspect('.main-area')?.background,
+      topbar: inspect('.topbar')?.background,
+      surface: inspect('.right-surface-panel')?.background,
+      surfaceTopbar: inspect('.surface-topbar')?.background
+    }
+    if (previousTheme) root.dataset.theme = previousTheme
+    else delete root.dataset.theme
+    return {
+      platform: document.documentElement.dataset.platform,
+      sidebar: inspect('.sidebar'),
+      brand: inspect('.sb-brand'),
+      main: inspect('.main-area'),
+      topbar: inspect('.topbar'),
+      surface: inspect('.right-surface-panel'),
+      surfaceTopbar: inspect('.surface-topbar'),
+      topbarActionDrag: topbarAction
+        ? getComputedStyle(topbarAction).getPropertyValue('-webkit-app-region')
+        : null,
+      surfaceActionDrag: surfaceAction
+        ? getComputedStyle(surfaceAction).getPropertyValue('-webkit-app-region')
+        : null,
+      lightBackgrounds
+    }
+  })()`)
+  assert.equal(windowChrome.platform, 'macos')
+  assert.deepEqual(
+    [windowChrome.brand?.top, windowChrome.topbar?.top, windowChrome.surfaceTopbar?.top],
+    [0, 0, 0],
+    'macOS app columns must extend to the top window edge'
+  )
+  assert.deepEqual(
+    [windowChrome.brand?.height, windowChrome.topbar?.height, windowChrome.surfaceTopbar?.height],
+    [52, 52, 52],
+    'macOS app chrome must share the 52px integrated titlebar height'
+  )
+  assert.equal(windowChrome.brand?.paddingLeft, '80px', 'sidebar chrome must reserve the traffic-light safe area')
+  assert.deepEqual(
+    [windowChrome.brand?.drag, windowChrome.topbar?.drag, windowChrome.surfaceTopbar?.drag],
+    ['drag', 'drag', 'drag'],
+    'integrated titlebars must remain draggable'
+  )
+  assert.deepEqual(
+    [windowChrome.topbarActionDrag, windowChrome.surfaceActionDrag],
+    ['no-drag', 'no-drag'],
+    'titlebar actions must remain interactive'
+  )
+  assert.equal(windowChrome.brand?.background, 'rgba(0, 0, 0, 0)')
+  assert.equal(windowChrome.topbar?.background, windowChrome.main?.background)
+  assert.equal(windowChrome.surfaceTopbar?.background, windowChrome.surface?.background)
+  assert.equal(windowChrome.lightBackgrounds.brand, 'rgba(0, 0, 0, 0)')
+  assert.equal(windowChrome.lightBackgrounds.topbar, windowChrome.lightBackgrounds.main)
+  assert.equal(windowChrome.lightBackgrounds.surfaceTopbar, windowChrome.lightBackgrounds.surface)
+  assert.equal(windowChrome.lightBackgrounds.main, 'rgb(255, 255, 255)')
+  assert.notEqual(windowChrome.lightBackgrounds.main, windowChrome.main?.background)
+
+  const collapsedChrome = await evaluate(`(async () => {
+    const waitFor = async (predicate, timeout = 2_000) => {
+      const deadline = Date.now() + timeout
+      while (!predicate() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      return predicate()
+    }
+    const splitter = document.querySelector('.sidebar-resizer')
+    splitter?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    const collapsed = await waitFor(() => document.querySelector('.app')?.classList.contains('sidebar-collapsed') === true)
+    const mainLeft = Math.round(document.querySelector('.main-area')?.getBoundingClientRect().left ?? -1)
+    const mainActionLeft = Math.round(document.querySelector('.topbar button')?.getBoundingClientRect().left ?? -1)
+
+    const diagnosticsButton = [...document.querySelectorAll('button.sb-navitem')]
+      .find((node) => node.textContent?.includes('诊断'))
+    diagnosticsButton?.click()
+    const diagnostics = await waitFor(() => !!document.querySelector('.diagnostics-evidence-page'))
+    const auxTopbar = document.querySelector('.aux-view-topbar')
+    const auxRect = auxTopbar?.getBoundingClientRect()
+    const auxDrag = auxTopbar ? getComputedStyle(auxTopbar).getPropertyValue('-webkit-app-region') : null
+    const diagnosticsTop = Math.round(document.querySelector('.diagnostics-evidence-page')?.getBoundingClientRect().top ?? -1)
+
+    document.querySelector('button.sb-sess')?.click()
+    const chatRestored = await waitFor(() => !!document.querySelector('.topbar'))
+
+    document.querySelector('button[aria-label="最大化右侧工作区"]')?.click()
+    const maximized = await waitFor(() => document.querySelector('.app')?.classList.contains('right-panel-maximized') === true)
+    const surfaceLeft = Math.round(document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1)
+    const surfaceActionLeft = Math.round(document.querySelector('.surface-topbar button')?.getBoundingClientRect().left ?? -1)
+
+    document.querySelector('button[aria-label="恢复右侧工作区"]')?.click()
+    await waitFor(() => document.querySelector('.app')?.classList.contains('right-panel-maximized') === false)
+    splitter?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    const restored = await waitFor(() => document.querySelector('.app')?.classList.contains('sidebar-collapsed') === false)
+    return {
+      collapsed,
+      mainLeft,
+      mainActionLeft,
+      diagnostics,
+      auxTop: Math.round(auxRect?.top ?? -1),
+      auxHeight: Math.round(auxRect?.height ?? -1),
+      auxDrag,
+      diagnosticsTop,
+      chatRestored,
+      maximized,
+      surfaceLeft,
+      surfaceActionLeft,
+      restored
+    }
+  })()`)
+  assert.equal(collapsedChrome.collapsed, true)
+  assert.ok(collapsedChrome.mainLeft < 16, `collapsed sidebar did not release its layout width: ${JSON.stringify(collapsedChrome)}`)
+  assert.ok(collapsedChrome.mainActionLeft >= 80, `collapsed main chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
+  assert.equal(collapsedChrome.diagnostics, true)
+  assert.deepEqual(
+    [collapsedChrome.auxTop, collapsedChrome.auxHeight, collapsedChrome.auxDrag],
+    [0, 52, 'drag'],
+    `auxiliary view is missing integrated window chrome: ${JSON.stringify(collapsedChrome)}`
+  )
+  assert.ok(collapsedChrome.diagnosticsTop >= 52, `Diagnostics overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
+  assert.equal(collapsedChrome.chatRestored, true)
+  assert.equal(collapsedChrome.maximized, true)
+  assert.ok(collapsedChrome.surfaceLeft < 16, `maximized Surface did not move into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
+  assert.ok(collapsedChrome.surfaceActionLeft >= 80, `collapsed Surface chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
+  assert.equal(collapsedChrome.restored, true)
+
   const transportPicker = await evaluate(`(async () => {
     const deadline = Date.now() + 2_000
     let recent
