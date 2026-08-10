@@ -3619,6 +3619,26 @@ button.turn-call-group:focus-visible {
 .gdrow .gd-del {
   color: var(--bad);
 }
+.gdrow.click {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.gdrow.click:hover {
+  background: var(--panel3);
+}
+.gdrow.click:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.gdrow .gd-open {
+  width: 13px;
+  height: 13px;
+  color: var(--dim2);
+  flex: none;
+}
 /* compact verdict card（蓝本侧栏 SESSION 锚点；内联用，抽 primitive 是 PR#9） */
 .verdict-card {
   display: grid;
@@ -5474,6 +5494,18 @@ button.toptool {
   color: var(--dim2);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tool-row .meta .edit-lines {
+  flex: none;
+  display: inline-flex;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.tool-row .meta .edit-lines .add {
+  color: var(--ok);
+}
+.tool-row .meta .edit-lines .del {
+  color: var(--bad);
 }
 .tool-row .meta .bar {
   flex: 0 0 54px;

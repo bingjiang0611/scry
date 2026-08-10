@@ -689,13 +689,41 @@ export function parseNumstat(stdout: string, repoRoot: string): DiffFile[] {
   return out
 }
 
+// 「工作区未提交改动」= 当前工作树 vs HEAD，语义上独立于每轮 turn diff。
+// 直接 `git diff HEAD` 会漏掉未跟踪新文件，所以复用 beginGitTurnDiff 的快照树：
+// 它已经把 untracked（排除 ignored）用隔离 index/object dir 暂存成一棵 tree，不动真实 index。
 export async function gitNumstat(cwd: string): Promise<DiffFile[]> {
+  const capture = await beginGitTurnDiff(cwd)
   try {
-    const { stdout: rootOut } = await pexecFile('git', ['-C', cwd, 'rev-parse', '--show-toplevel'])
-    const repoRoot = rootOut.trim()
-    const { stdout } = await pexecFile('git', ['-C', cwd, 'diff', '--numstat', '-z', 'HEAD', '--', '.'])
-    return parseNumstat(stdout, repoRoot)
+    if (capture.status !== 'ready' || !capture.repoRoot || !capture.beforeTree) return []
+    if (capture.baselineClean) return [] // 工作树与 HEAD 一致
+    const stdout = await gitCommand(
+      snapshotGitArgs(capture.filterOverrides ?? [], [
+        'diff',
+        '--no-renames',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--numstat',
+        '-z',
+        'HEAD',
+        capture.beforeTree,
+        '--',
+        ...(capture.pathspec ?? ['.'])
+      ]),
+      {
+        cwd: capture.repoRoot,
+        env: {
+          ...process.env,
+          GIT_OBJECT_DIRECTORY: capture.objectDir,
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs
+        },
+        deadline: Date.now() + TURN_DIFF_BEGIN_DEADLINE_MS
+      }
+    )
+    return parseNumstat(stdout, capture.repoRoot)
   } catch {
-    return [] // 非 git 仓 / git 不可用 / 无 HEAD：静默空
+    return [] // 非 git 仓 / git 不可用 / 无 HEAD / 超时：静默空
+  } finally {
+    await cancelGitTurnDiff(capture)
   }
 }

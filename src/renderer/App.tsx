@@ -19,7 +19,7 @@ import { AnalyticsView } from './components/AnalyticsView'
 import { ViewChrome, type AppView } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
 import { SkillsModal, McpModal, SettingsModal } from './components/Modals'
-import { TurnDiffReviewPanel, type TurnDiffReview } from './components/TurnDiffReviewPanel'
+import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { TerminalSurface } from './components/TerminalSurface'
@@ -30,6 +30,7 @@ import {
   type RightSurfaceAction
 } from './right-surface'
 import type { ParsedTurn } from './env'
+import { resolveTurnDiffReview } from './turn-diff'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
@@ -484,7 +485,7 @@ export function App() {
     max: PANEL_MAX,
     side: 'right'
   })
-  const [turnDiffReview, setTurnDiffReview] = useState<TurnDiffReview | null>(null)
+  const [turnDiffSelection, setTurnDiffSelection] = useState<{ runId: string; initialPath?: string } | null>(null)
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -1052,33 +1053,50 @@ export function App() {
     setView(next)
   }
   const openTurnDiffReview = useCallback(
-    (turn: { runId: string; userText: string }, turnDiff: TurnDiffSnapshot, initialPath?: string): void => {
+    (turn: { runId: string; userText: string }, _turnDiff: TurnDiffSnapshot, initialPath?: string): void => {
       surfacePane.restore()
-      setTurnDiffReview({ runId: turn.runId, userText: turn.userText, turnDiff, initialPath })
+      setTurnDiffSelection({ runId: turn.runId, ...(initialPath ? { initialPath } : {}) })
       dispatchRightSurface({ type: 'open', kind: 'diff' })
     },
     [surfacePane.restore]
   )
+  // 顶栏 Diff 直接打开时没有显式选择：退回当前会话最近一个可审阅的 captured 轮次。
+  // 依赖 session.turns，所以切会话/cwd 后跟着新会话重新派生，不会留着上个会话的 snapshot。
+  const diffReview = useMemo(() => {
+    const selected = turnDiffSelection
+      ? resolveTurnDiffReview(session.turns, turnDiffSelection.initialPath, turnDiffSelection.runId)
+      : null
+    return selected ?? resolveTurnDiffReview(session.turns)
+  }, [session.turns, turnDiffSelection])
+  const openSessionDiff = useCallback(
+    (path?: string): void => {
+      const review = resolveTurnDiffReview(session.turns, path)
+      if (!review) return
+      surfacePane.restore()
+      setTurnDiffSelection({ runId: review.runId, ...(review.initialPath ? { initialPath: review.initialPath } : {}) })
+      dispatchRightSurface({ type: 'open', kind: 'diff' })
+    },
+    [session.turns, surfacePane.restore]
+  )
   useEffect(() => {
-    setTurnDiffReview(null)
-    dispatchRightSurface({ type: 'close', kind: 'diff' })
+    setTurnDiffSelection(null)
   }, [activeSessionId, cwd])
   const handleRightSurfaceAction = useCallback((action: RightSurfaceAction): void => {
     if (action.type === 'close' && action.kind === 'files') {
       if (!confirmWorkspaceTransition()) return
       setWorkspaceDirty(false)
     }
-    if (action.type === 'close' && action.kind === 'diff') setTurnDiffReview(null)
+    if (action.type === 'close' && action.kind === 'diff') setTurnDiffSelection(null)
     dispatchRightSurface(action)
   }, [confirmWorkspaceTransition])
   useEffect(() => {
-    if (!turnDiffReview || rightSurface.activeId !== 'diff' || !panelVisible) return
+    if (!diffReview || rightSurface.activeId !== 'diff' || !panelVisible) return
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') handleRightSurfaceAction({ type: 'close', kind: 'diff' })
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [handleRightSurfaceAction, panelVisible, rightSurface.activeId, turnDiffReview])
+  }, [diffReview, handleRightSurfaceAction, panelVisible, rightSurface.activeId])
   const removeQueuedPrompt = (index: number): void => {
     if (index === 0 && queuedStartInFlightRef.current) {
       setComposerError('队首消息正在启动，完成前不能移除')
@@ -1297,6 +1315,7 @@ export function App() {
                   busy={session.busy}
                   onSelect={session.setSelected}
                   onOpenTurn={openTurnInChat}
+                  onOpenSessionDiff={openSessionDiff}
                 />
               ),
               files: cwd ? (
@@ -1310,13 +1329,16 @@ export function App() {
               ) : (
                 <div className="surface-unavailable"><b>文件不可用</b><span>先绑定一个工作区。</span></div>
               ),
-              diff: turnDiffReview ? (
+              diff: diffReview ? (
                 <TurnDiffReviewPanel
-                  review={turnDiffReview}
+                  review={diffReview}
                   onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'diff' })}
                 />
               ) : (
-                <div className="surface-unavailable"><b>没有可审阅的改动</b><span>从对话中的改动入口打开本轮 Diff。</span></div>
+                <div className="surface-unavailable">
+                  <b>本会话还没有可审阅的改动</b>
+                  <span>某一轮产生 Git 净改动后，这里会自动定位到最近可审阅的轮次。</span>
+                </div>
               ),
               terminal: (
                 <TerminalSurface cwd={cwd} active={panelVisible && rightSurface.activeId === 'terminal'} />

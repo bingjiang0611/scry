@@ -960,6 +960,94 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(filesHtml).not.toContain('R ·')
   })
 
+  it('Edit 卡展示本次工具输入的 action-level +/-，并明确不是 Git 净改动', () => {
+    const editTurn: Turn = {
+      ...turn,
+      items: [
+        ev({
+          id: 'edit-1',
+          kind: 'tool',
+          stage: 'tool:Edit',
+          tool: 'Edit',
+          fileOp: 'edit',
+          filePath: '/repo/src/a.ts',
+          input: { file_path: '/repo/src/a.ts', old_string: 'one\ntwo\n', new_string: 'ONE\nTWO\nTHREE\n' }
+        })
+      ]
+    }
+    const editHtml = renderToStaticMarkup(<AssistantTurn turn={editTurn} selectedId={null} onSelect={() => {}} />)
+
+    expect(editHtml).toContain('edit-lines')
+    expect(editHtml).toContain('>+3<')
+    expect(editHtml).toContain('>−2<')
+    expect(editHtml).toContain('本次 Edit 工具输入：写入 new_string 3 行、替换掉 old_string 2 行')
+    expect(editHtml).toContain('不是本轮 Git 净改动')
+    // action-level 计数不得改写卡片语义：标题仍是工具名，不冒充「本轮改动」
+    expect(editHtml).not.toContain('本轮改动')
+  })
+
+  it('Edit 卡只在轮次结束且该文件真的在本轮快照里时才接到 Diff 面板', () => {
+    const editEvent = ev({
+      id: 'edit-1',
+      kind: 'tool',
+      stage: 'tool:Edit',
+      tool: 'Edit',
+      fileOp: 'edit',
+      filePath: '/repo/src/a.ts',
+      input: { file_path: '/repo/src/a.ts', old_string: 'a', new_string: 'b' }
+    })
+    const diffEvent = ev({
+      id: 'turn-diff',
+      kind: 'harness',
+      stage: 'turn_diff',
+      turnDiff: {
+        version: 1,
+        status: 'captured',
+        files: [{ path: '/repo/src/a.ts', added: 1, deleted: 1 }],
+        repoRoot: '/repo',
+        scope: '.',
+        beforeAt: '2026-08-10T00:00:00.000Z',
+        afterAt: '2026-08-10T00:00:01.000Z',
+        captureMs: 9,
+        cleanup: 'ok'
+      }
+    })
+    const linkTitle = '点开工具输入，同时在右侧 Diff 中定位该文件的本轮改动'
+
+    const linked = renderToStaticMarkup(
+      <AssistantTurn
+        turn={{ ...turn, items: [editEvent, diffEvent] }}
+        selectedId={null}
+        onSelect={() => {}}
+        onOpenDiff={() => {}}
+      />
+    )
+    expect(linked).toContain(linkTitle)
+
+    // 运行中：本轮 Diff 还没定稿，不给假入口
+    const running = renderToStaticMarkup(
+      <AssistantTurn
+        turn={{ ...turn, done: false, items: [editEvent, diffEvent] }}
+        selectedId={null}
+        onSelect={() => {}}
+        onOpenDiff={() => {}}
+      />
+    )
+    expect(running).not.toContain(linkTitle)
+
+    // 该文件没有净改动：不联动，但 action-level 计数仍照实显示
+    const otherFile = renderToStaticMarkup(
+      <AssistantTurn
+        turn={{ ...turn, items: [editEvent, { ...diffEvent, turnDiff: { ...diffEvent.turnDiff!, files: [{ path: '/repo/src/b.ts', added: 1, deleted: 0 }] } }] }}
+        selectedId={null}
+        onSelect={() => {}}
+        onOpenDiff={() => {}}
+      />
+    )
+    expect(otherFile).not.toContain(linkTitle)
+    expect(otherFile).toContain('edit-lines')
+  })
+
   it('本轮 patch 可渲染右侧 Review，并正确计算 unified diff 行号', () => {
     const patch = [
       'diff --git a/src/a.ts b/src/a.ts',
@@ -2751,11 +2839,14 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(partialHtml).not.toContain('成功 426 · 0')
   })
 
-  it('GIT DIFF 段：独立成段 + 工具足迹对照（check 碰过 / alert 未碰）', () => {
-    expect(html).toContain('GIT DIFF')
+  it('工作区未提交改动段：独立语义 + 工具足迹对照（check 碰过 / alert 未碰）', () => {
+    expect(html).toContain('工作区未提交改动（vs HEAD）')
     expect(html).toContain('2 files · +6 −2')
     expect(html).toContain('gd-add') // probe.txt 在工具足迹内
     expect(html).toContain('gd-del') // other.ts 被改但工具没碰过
+    expect(html).toContain('当前工作树对比 HEAD（含未跟踪新文件，不含 ignored）')
+    // 没有任何 captured turnDiff 时，不能把工作区 diff 冒充成本会话改动
+    expect(html).not.toContain('本会话改动')
   })
 
   it('总览不展示 sqlite 跨会话分析，避免和当前会话总览混杂', () => {
@@ -2823,6 +2914,84 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
   it('总览不渲染 sqlite 跨会话工具和目录排行', () => {
     expect(html).not.toContain('proj-x')
     expect(html).not.toContain('sqlite')
+  })
+})
+
+describe('OverviewPanel 本会话改动：来自各轮 turnDiff 累计，不冒充工作区 diff', () => {
+  const diffTurn = (runId: string, files: { path: string; added: number; deleted: number }[]): Turn => ({
+    runId,
+    userText: `轮 ${runId}`,
+    done: true,
+    items: [
+      ev({
+        id: `${runId}-diff`,
+        runId,
+        kind: 'harness',
+        stage: 'turn_diff',
+        turnDiff: {
+          version: 1,
+          status: 'captured',
+          files,
+          repoRoot: '/repo',
+          scope: '.',
+          beforeAt: '2026-08-10T00:00:00.000Z',
+          afterAt: '2026-08-10T00:00:01.000Z',
+          captureMs: 7,
+          cleanup: 'ok'
+        }
+      })
+    ]
+  })
+  const turns = [
+    diffTurn('r1', [{ path: '/repo/src/a.ts', added: 3, deleted: 1 }, { path: '/repo/src/b.ts', added: 2, deleted: 0 }]),
+    diffTurn('r2', [{ path: '/repo/src/a.ts', added: 5, deleted: 4 }])
+  ]
+
+  it('汇总 unique files 与各轮累计 +/−，并标明是累计活动量', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel
+        turns={turns}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+        onOpenSessionDiff={() => {}}
+      />
+    )
+    expect(html).toContain('本会话改动（2 轮快照累计）')
+    expect(html).toContain('2 files · +10 −5')
+    expect(html).toContain('src/a.ts')
+    expect(html).toContain('>+8<')
+    expect(html).toContain('>−5<')
+    expect(html).toContain('2 轮')
+    expect(html).toContain('+/− 是各轮累计活动量，不是当前工作树净改动')
+    expect(html).toContain('gdrow click')
+  })
+
+  it('工作区未提交改动仍是独立段，两个数字不互相顶替', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel
+        turns={turns}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+        gitDiff={[{ path: '/repo/src/a.ts', added: 4, deleted: 5 }]}
+        onOpenSessionDiff={() => {}}
+      />
+    )
+    expect(html).toContain('本会话改动（2 轮快照累计）')
+    expect(html).toContain('2 files · +10 −5')
+    expect(html).toContain('工作区未提交改动（vs HEAD）')
+    expect(html).toContain('1 files · +4 −5')
+  })
+
+  it('没有 onOpenSessionDiff 时不渲染假可点行', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel turns={turns} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+    expect(html).toContain('本会话改动（2 轮快照累计）')
+    expect(html).not.toContain('gdrow click')
   })
 })
 

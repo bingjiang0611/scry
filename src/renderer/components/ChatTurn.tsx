@@ -35,6 +35,7 @@ import {
   toolMeta
 } from '../format'
 import type { FileRow, HookGroup, HookScriptRow, HookSummary, Turn } from '../format'
+import { displayDiffPath, editActionLineCounts, turnDiffOf } from '../turn-diff'
 
 function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
   const event = turn.items.find((item) => item.providerId || item.runtimeProvider)
@@ -193,6 +194,7 @@ function ToolItem({
   intervention,
   queuedQuestionCount = 0,
   onAnswerQuestion,
+  onOpenFileDiff,
   turnDone = false
 }: {
   ev: TraceEvent
@@ -203,6 +205,7 @@ function ToolItem({
   intervention?: AgentIntervention
   queuedQuestionCount?: number
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
+  onOpenFileDiff?: () => void
   turnDone?: boolean
 }) {
   const isAskUserQuestion = ev.tool === 'AskUserQuestion' || !!intervention
@@ -213,6 +216,7 @@ function ToolItem({
   const op = ev.fileOp === 'read' ? 'r' : ev.fileOp === 'write' ? 'w' : ev.fileOp === 'edit' ? 'e' : null
   const inp = ev.input as Record<string, unknown> | undefined
   const isEdit = ev.tool === 'Edit' && (typeof inp?.old_string === 'string' || typeof inp?.new_string === 'string')
+  const editLines = isEdit ? editActionLineCounts(ev.input) : null
   const questionRequest = useMemo(
     () =>
       pendingQuestion ??
@@ -244,8 +248,10 @@ function ToolItem({
         className="tool-row"
         aria-expanded={hasDetail ? shownOpen : undefined}
         aria-controls={hasDetail ? detailId : undefined}
+        title={onOpenFileDiff ? '点开工具输入，同时在右侧 Diff 中定位该文件的本轮改动' : undefined}
         onClick={() => {
           onSelect()
+          onOpenFileDiff?.()
           if (hasDetail && !lockedOpen) setOpen((v) => !v)
         }}
       >
@@ -257,6 +263,15 @@ function ToolItem({
         {op && <span className={`op ${op}`}>{op.toUpperCase()}</span>}
         <span className="arg">{toolArg(ev)}</span>
         <span className="meta">
+          {editLines && (
+            <span
+              className="tok edit-lines"
+              title={`本次 Edit 工具输入：写入 new_string ${editLines.added} 行、替换掉 old_string ${editLines.deleted} 行。不是本轮 Git 净改动${onOpenFileDiff ? '；点卡片看本轮该文件的净 Diff' : ''}`}
+            >
+              <b className="add">+{editLines.added}</b>
+              <b className="del">−{editLines.deleted}</b>
+            </span>
+          )}
           {ev.durationMs != null && <span className="dur">{fmtDur(ev.durationMs)}</span>}
           {durPct > 0 && (
             <span className={`bar ${durPct >= 70 ? 'slow' : ''}`} aria-hidden="true">
@@ -431,13 +446,6 @@ function SubagentBlock({
       )}
     </div>
   )
-}
-
-function displayDiffPath(path: string, repoRoot?: string): string {
-  const normalized = path.replace(/\\/g, '/')
-  const root = repoRoot?.replace(/\\/g, '/').replace(/\/$/, '')
-  if (root && normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1)
-  return basename(path)
 }
 
 function FilesSummary({
@@ -1058,7 +1066,19 @@ function AssistantTurnImpl({
       })
   }, [turn.items])
   const result = resultOf({ items })
-  const turnDiff = [...items].reverse().find((e) => e.kind === 'harness' && e.stage === 'turn_diff')?.turnDiff
+  const turnDiff = turnDiffOf(items)
+  const diffPaths = useMemo(
+    () => new Set(turnDiff?.status === 'captured' ? turnDiff.files.map((file) => file.path) : []),
+    [turnDiff]
+  )
+  // 轮次跑完且该文件真的出现在本轮 Git 快照里，才把工具卡接到同一个 Diff 面板；
+  // 运行中或该文件没有净改动时不给假入口。
+  const openFileDiffFor = (event: TraceEvent): (() => void) | undefined => {
+    if (!onOpenDiff || !turnDiff || !turn.done) return undefined
+    const path = event.filePath
+    if (!path || !diffPaths.has(path)) return undefined
+    return () => onOpenDiff(turn, turnDiff, path)
+  }
   const { structured } = useMemo(() => aggregateFiles(items), [items])
   const hookSummary = useMemo(() => aggregateHooks(items), [items])
   const hasFiles =
@@ -1227,6 +1247,7 @@ function AssistantTurnImpl({
               intervention={ev.toolUseId ? interventionsByQuestionId.get(ev.toolUseId) : undefined}
               queuedQuestionCount={pendingQuestions.length}
               onAnswerQuestion={onAnswerQuestion}
+              onOpenFileDiff={openFileDiffFor(ev)}
               turnDone={turn.done}
             />
           )
