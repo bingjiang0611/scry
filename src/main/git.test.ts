@@ -62,6 +62,76 @@ describe('parseNumstat（P2 git diff）', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it('工作区未提交改动纳入未跟踪新文件（中文路径 / binary / 空文件），排除 ignored 且不动真实 index', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-git-untracked-'))
+    try {
+      await writeFile(join(root, 'tracked.txt'), 'before\n')
+      await writeFile(join(root, '.gitignore'), 'ignored.txt\n')
+      await pexecFile('git', ['init'], { cwd: root })
+      await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
+      await pexecFile('git', ['config', 'user.email', 'scry@example.invalid'], { cwd: root })
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      await writeFile(join(root, 'tracked.txt'), 'after\n')
+      await writeFile(join(root, '新文件.md'), '一\n二\n')
+      await writeFile(join(root, 'blob.bin'), Buffer.from([0, 1, 2, 0, 255]))
+      await writeFile(join(root, 'empty.txt'), '')
+      await writeFile(join(root, 'ignored.txt'), 'noise\n')
+
+      const canonicalRoot = await realpath(root)
+      const indexBefore = await stat(join(root, '.git', 'index'))
+      const files = await gitNumstat(root)
+      const byPath = new Map(files.map((file) => [file.path, file]))
+
+      expect(byPath.get(join(canonicalRoot, 'tracked.txt'))).toEqual({
+        path: join(canonicalRoot, 'tracked.txt'),
+        added: 1,
+        deleted: 1
+      })
+      expect(byPath.get(join(canonicalRoot, '新文件.md'))).toEqual({
+        path: join(canonicalRoot, '新文件.md'),
+        added: 2,
+        deleted: 0
+      })
+      expect(byPath.get(join(canonicalRoot, 'blob.bin'))).toEqual({
+        path: join(canonicalRoot, 'blob.bin'),
+        added: 0,
+        deleted: 0,
+        binary: true
+      })
+      expect(byPath.get(join(canonicalRoot, 'empty.txt'))).toEqual({
+        path: join(canonicalRoot, 'empty.txt'),
+        added: 0,
+        deleted: 0
+      })
+      expect(byPath.has(join(canonicalRoot, 'ignored.txt'))).toBe(false)
+
+      const indexAfter = await stat(join(root, '.git', 'index'))
+      expect(indexAfter.mtimeMs).toBe(indexBefore.mtimeMs)
+      const { stdout: staged } = await pexecFile('git', ['diff', '--cached', '--name-only'], { cwd: root })
+      expect(staged.trim()).toBe('')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('工作树与 HEAD 一致时返回空，不编造改动', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-git-clean-'))
+    try {
+      await writeFile(join(root, 'a.txt'), 'same\n')
+      await pexecFile('git', ['init'], { cwd: root })
+      await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
+      await pexecFile('git', ['config', 'user.email', 'scry@example.invalid'], { cwd: root })
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      await expect(gitNumstat(root)).resolves.toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('parsePorcelainPaths（定向候选发现）', () => {

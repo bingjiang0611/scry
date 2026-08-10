@@ -1,14 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { TurnDiffPatchReason, TurnDiffSnapshot } from '@shared/trace'
-import { basename } from '../format'
+import type { TurnDiffPatchReason } from '@shared/trace'
+import { displayDiffPath as displayPath, type TurnDiffReview } from '../turn-diff'
 import { Icon } from './primitives/Icon'
-
-export interface TurnDiffReview {
-  runId: string
-  userText: string
-  turnDiff: TurnDiffSnapshot
-  initialPath?: string
-}
 
 interface DiffLine {
   kind: 'meta' | 'hunk' | 'add' | 'del' | 'context'
@@ -45,12 +38,6 @@ export function parseUnifiedDiff(patch: string): DiffLine[] {
     }
     return { kind: 'meta', text }
   })
-}
-
-function displayPath(path: string, repoRoot?: string): string {
-  const normalized = path.replace(/\\/g, '/')
-  const root = repoRoot?.replace(/\\/g, '/').replace(/\/$/, '')
-  return root && normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : basename(path)
 }
 
 function patchReasonText(reason?: TurnDiffPatchReason): string {
