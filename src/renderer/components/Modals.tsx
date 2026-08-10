@@ -1,9 +1,17 @@
 // 全局弹窗：设置 / Skills 证据账本 / MCP Fleet。
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject
+} from 'react'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
-import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
+import type { AccountSnapshot, CapabilityEnvelope, McpSnapshot } from '@shared/provider'
 import { Icon } from './primitives/Icon'
 import type { AppTheme } from '../theme'
 
@@ -204,11 +212,87 @@ function scopeShortLabel(scope: string): string {
   return scope === 'project' || scope === '.mcp.json' ? '项目' : scope === 'user' ? '用户' : scope || '未知'
 }
 
-export function filterSkillsForScope(skills: SkillMeta[], scope: 'project' | 'user', query = ''): SkillMeta[] {
+type SkillScopeFilter = 'project' | 'user' | 'provider'
+
+function skillMatchesScope(skill: SkillMeta, scope: SkillScopeFilter): boolean {
+  if (scope === 'project') return skill.scope === 'project'
+  if (scope === 'user') return skill.scope === 'user'
+  return skill.scope !== 'project' && skill.scope !== 'user'
+}
+
+export function filterSkillsForScope(skills: SkillMeta[], scope: SkillScopeFilter, query = ''): SkillMeta[] {
   const normalizedQuery = query.trim().toLowerCase()
   return skills.filter((skill) =>
-    skill.scope === scope &&
+    skillMatchesScope(skill, scope) &&
     (!normalizedQuery || [skill.name, skill.description, skill.dir].some((value) => value.toLowerCase().includes(normalizedQuery)))
+  )
+}
+
+type AccountUsageEvidence = {
+  quota?: string
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function nonNegativeFinite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function evidenceNumber(value: number): string {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(value)
+}
+
+export function accountUsageEvidence(usage: unknown): AccountUsageEvidence {
+  const root = record(usage)
+  if (!root) return {}
+  const quota = record(root.userQuota)
+  const total = nonNegativeFinite(quota?.total)
+  const remaining = nonNegativeFinite(quota?.remaining)
+  const used = nonNegativeFinite(quota?.used)
+  const unit = typeof quota?.unit === 'string' && quota.unit.trim() ? quota.unit.trim() : '额度'
+  const quotaText = total != null && remaining != null
+    ? `${evidenceNumber(remaining)} / ${evidenceNumber(total)} ${unit}`
+    : total != null && used != null
+      ? `${evidenceNumber(used)} / ${evidenceNumber(total)} ${unit} 已使用`
+      : undefined
+  return quotaText ? { quota: quotaText } : {}
+}
+
+function ProviderAccountEvidence({
+  capability,
+  refreshing
+}: {
+  capability?: CapabilityEnvelope<AccountSnapshot> | null
+  refreshing: boolean
+}) {
+  const usage = accountUsageEvidence(capability?.data?.usage)
+  const state: EvidenceValue = refreshing && !capability
+    ? { state: 'pending', label: '读取中…', role: 'status' }
+    : capability?.state === 'ready'
+      ? { state: 'connected', label: '已读取' }
+      : capability?.state === 'unsupported'
+        ? { state: 'unsupported', label: '不支持', detail: capability?.reason }
+        : { state: 'unknown', label: '账号证据未知', detail: capability?.reason, role: capability ? 'alert' : undefined }
+  const accountLabel = capability?.data?.accountLabel || 'Provider 未上报'
+  const plan = capability?.data?.plan || 'Provider 未上报'
+
+  return (
+    <section className="inventory-account" aria-label="Provider 账号与额度证据">
+      <div className="inventory-account__heading">
+        <span>Provider account</span>
+        <EvidenceState value={state} quiet />
+      </div>
+      <div className="inventory-account__facts">
+        <div><span>账号</span><strong title={accountLabel}>{accountLabel}</strong></div>
+        <div><span>计划</span><strong title={plan}>{plan}</strong></div>
+        <div><span>账户额度</span><strong>{usage.quota ?? 'Provider 未上报'}</strong></div>
+      </div>
+      {capability?.reason && capability.state !== 'ready' && <p>{capability.reason}</p>}
+    </section>
   )
 }
 
@@ -256,6 +340,8 @@ function InventoryContext({
 export function SkillsModal({
   skills,
   capability,
+  account,
+  accountRefreshing = false,
   refreshing = false,
   onToggle,
   onRefresh,
@@ -263,6 +349,8 @@ export function SkillsModal({
 }: {
   skills: SkillMeta[]
   capability?: CapabilityEnvelope<SkillMeta[]> | null
+  account?: CapabilityEnvelope<AccountSnapshot> | null
+  accountRefreshing?: boolean
   refreshing?: boolean
   onToggle: (name: string, enabled: boolean) => void
   onRefresh: () => void
@@ -271,13 +359,53 @@ export function SkillsModal({
   const canManage = capability?.mode === 'manage'
   const titleId = useId()
   const searchRef = useRef<HTMLInputElement>(null)
-  const [scope, setScope] = useState<'project' | 'user'>('project')
+  const initialScope: SkillScopeFilter = skills.some((skill) => skill.scope === 'project')
+    ? 'project'
+    : skills.some((skill) => skill.scope === 'user')
+      ? 'user'
+      : skills.length > 0
+        ? 'provider'
+        : 'project'
+  const [scope, setScope] = useState<SkillScopeFilter>(initialScope)
+  const scopeChosenRef = useRef(false)
   const [query, setQuery] = useState('')
   const scopeSkills = filterSkillsForScope(skills, scope)
   const filtered = filterSkillsForScope(skills, scope, query)
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
   const userCount = skills.filter((skill) => skill.scope === 'user').length
-  const scopeLabel = scope === 'project' ? '项目 Skill' : '用户 Skill'
+  const providerCount = skills.length - projectCount - userCount
+  const scopeLabel = scope === 'project' ? '项目 Skill' : scope === 'user' ? '用户 Skill' : 'Provider Skill'
+  const visibleScopes: SkillScopeFilter[] = providerCount > 0
+    ? ['project', 'user', 'provider']
+    : ['project', 'user']
+  useEffect(() => {
+    if (!visibleScopes.includes(scope)) {
+      setScope(projectCount > 0 ? 'project' : 'user')
+      return
+    }
+    if (scopeChosenRef.current || skills.length === 0 || filterSkillsForScope(skills, scope).length > 0) return
+    setScope(projectCount > 0 ? 'project' : userCount > 0 ? 'user' : 'provider')
+  }, [projectCount, providerCount, scope, skills, userCount])
+  const chooseScope = (next: SkillScopeFilter): void => {
+    scopeChosenRef.current = true
+    setScope(next)
+  }
+  const onScopeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+    const current = visibleScopes.indexOf(scope)
+    const next = event.key === 'Home'
+      ? visibleScopes[0]
+      : event.key === 'End'
+        ? visibleScopes.at(-1)
+        : event.key === 'ArrowRight'
+          ? visibleScopes[(current + 1) % visibleScopes.length]
+          : event.key === 'ArrowLeft'
+            ? visibleScopes[(current - 1 + visibleScopes.length) % visibleScopes.length]
+            : undefined
+    if (!next) return
+    event.preventDefault()
+    chooseScope(next)
+    window.requestAnimationFrame(() => document.getElementById(`${titleId}-${next}-tab`)?.focus())
+  }
   const manageDetail = canManage
     ? 'Scry 可写入当前 Provider 的 Skill 配置'
     : capability?.mode === 'read'
@@ -299,7 +427,7 @@ export function SkillsModal({
         </div>
         <div className="inventory-modal__head-actions">
           {refreshing && <EvidenceState value={{ state: 'pending', label: '读取中…', role: 'status' }} quiet />}
-          <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 状态" aria-label="刷新 Skills">
+          <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 与账号证据" aria-label="刷新 Skills 与账号证据">
             <Icon name="refresh" />
           </button>
           <button className="modal-x" onClick={onClose} aria-label="关闭 Skills"><Icon name="x" /></button>
@@ -312,6 +440,8 @@ export function SkillsModal({
         summary={`${filtered.length} 个结果 · ${canManage ? '可管理' : capability?.mode === 'read' ? '只读' : '管理能力未确认'}`}
       />
 
+      <ProviderAccountEvidence capability={account} refreshing={accountRefreshing} />
+
       {capability && capability.state !== 'ready' && (
         <div className="inventory-capability-note" role={capability.state === 'unknown' ? 'alert' : 'status'}>
           {capability.reason ?? capability.state}
@@ -323,10 +453,12 @@ export function SkillsModal({
           type="button"
           id={titleId + '-project-tab'}
           role="tab"
+          tabIndex={scope === 'project' ? 0 : -1}
           aria-selected={scope === 'project'}
           aria-controls={titleId + '-skills-panel'}
           className={scope === 'project' ? 'active' : ''}
-          onClick={() => setScope('project')}
+          onClick={() => chooseScope('project')}
+          onKeyDown={onScopeKeyDown}
         >
           项目 Skill <span>{projectCount}</span>
         </button>
@@ -334,13 +466,30 @@ export function SkillsModal({
           type="button"
           id={titleId + '-user-tab'}
           role="tab"
+          tabIndex={scope === 'user' ? 0 : -1}
           aria-selected={scope === 'user'}
           aria-controls={titleId + '-skills-panel'}
           className={scope === 'user' ? 'active' : ''}
-          onClick={() => setScope('user')}
+          onClick={() => chooseScope('user')}
+          onKeyDown={onScopeKeyDown}
         >
           用户 Skill <span>{userCount}</span>
         </button>
+        {providerCount > 0 && (
+          <button
+            type="button"
+            id={titleId + '-provider-tab'}
+            role="tab"
+            tabIndex={scope === 'provider' ? 0 : -1}
+            aria-selected={scope === 'provider'}
+            aria-controls={titleId + '-skills-panel'}
+            className={scope === 'provider' ? 'active' : ''}
+            onClick={() => chooseScope('provider')}
+            onKeyDown={onScopeKeyDown}
+          >
+            Provider Skill <span>{providerCount}</span>
+          </button>
+        )}
       </div>
 
       <div className="inventory-toolbar">

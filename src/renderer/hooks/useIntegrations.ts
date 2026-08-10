@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BillingGuardianState } from '@shared/billing'
-import type { CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
+import type { AccountSnapshot, CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
 import type { DbStats, Diagnostics, DiffFile, McpLiveStatus, UsageStats } from '@shared/trace'
 import {
   providerIdForAgentId,
@@ -17,6 +17,11 @@ import type { McpGuardReport } from '../components/McpTrustPanel'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
 
 const contextKey = (context: ProviderContext): string => `${context.providerId}\0${context.cwd ?? ''}`
+export const capabilityMatchesContext = <T>(
+  capability: CapabilityEnvelope<T> | null,
+  context: ProviderContext
+): capability is CapabilityEnvelope<T> =>
+  capability !== null && contextKey(capability) === contextKey(context)
 const modelKey = (model: AgentModelRef): string => `${model.providerId ?? ''}\0${model.id}`
 const RUN_CONTROL_PREFERENCES_KEY = 'scry:run-control-preferences:v1'
 const PROVIDER_IDS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode']
@@ -195,6 +200,14 @@ export function runControlSendBlockedReason(
     : null
 }
 
+export function requestRunControlsForSelectedProvider<T>(
+  providerId: ProviderId,
+  cwd: string | null,
+  request: (context: ProviderContext) => Promise<T>
+): Promise<T> {
+  return request({ providerId, cwd: cwd ?? undefined })
+}
+
 export function useIntegrations(cwd: string | null) {
   const storedRunControlPreferences = useMemo(readRunControlPreferences, [])
   const initialProviderId = providerIdForAgentId(storedRunControlPreferences.selectedAgentId) ?? 'claude'
@@ -214,6 +227,8 @@ export function useIntegrations(cwd: string | null) {
   const [skills, setSkills] = useState<SkillMeta[]>([])
   const [skillCapability, setSkillCapability] = useState<CapabilityEnvelope<SkillMeta[]> | null>(null)
   const [skillsRefreshing, setSkillsRefreshing] = useState(false)
+  const [accountCapability, setAccountCapability] = useState<CapabilityEnvelope<AccountSnapshot> | null>(null)
+  const [accountRefreshing, setAccountRefreshing] = useState(false)
   const [mcps, setMcps] = useState<McpMeta[]>([])
   const [mcpStatus, setMcpStatus] = useState<Record<string, McpStatus>>({})
   const [mcpLive, setMcpLive] = useState<McpLiveStatus[]>([])
@@ -234,6 +249,7 @@ export function useIntegrations(cwd: string | null) {
   const integrationRequestSeq = useRef(0)
   const usageRequestSeq = useRef(0)
   const skillRefreshRequestSeq = useRef(0)
+  const accountRequestSeq = useRef(0)
   const mcpConfigRequestSeq = useRef(0)
   const mcpLiveRequestSeq = useRef(0)
   const mcpTestCounter = useRef(0)
@@ -375,6 +391,33 @@ export function useIntegrations(cwd: string | null) {
       if (seq === skillRefreshRequestSeq.current) setSkillsRefreshing(false)
     }
   }, [])
+
+  const refreshAccount = useCallback(async (): Promise<void> => {
+    const context = providerContextRef.current
+    const seq = ++accountRequestSeq.current
+    setAccountRefreshing(true)
+    try {
+      const result = await window.scry.providerAccount(context)
+      if (seq !== accountRequestSeq.current || contextKey(context) !== contextKey(providerContextRef.current)) return
+      setAccountCapability(result)
+    } catch (error) {
+      if (seq !== accountRequestSeq.current || contextKey(context) !== contextKey(providerContextRef.current)) return
+      setAccountCapability({
+        providerId: context.providerId,
+        cwd: context.cwd,
+        mode: 'none',
+        state: 'unknown',
+        data: null,
+        reason: error instanceof Error ? error.message : String(error)
+      })
+    } finally {
+      if (seq === accountRequestSeq.current) setAccountRefreshing(false)
+    }
+  }, [])
+
+  const refreshProviderInventory = useCallback(async (): Promise<void> => {
+    await Promise.all([refreshSkills(), refreshAccount()])
+  }, [refreshAccount, refreshSkills])
 
   const applyMcpSnapshot = useCallback((
     result: CapabilityEnvelope<McpSnapshot>,
@@ -670,6 +713,7 @@ export function useIntegrations(cwd: string | null) {
     ++usageRequestSeq.current
     setUsage(null)
     const skillSeq = ++skillRefreshRequestSeq.current
+    ++accountRequestSeq.current
     ++mcpConfigRequestSeq.current
     ++mcpLiveRequestSeq.current
     mcpTestRequests.current.clear()
@@ -682,6 +726,8 @@ export function useIntegrations(cwd: string | null) {
     setMcpLive([])
     setSkillCapability(null)
     setSkillsRefreshing(true)
+    setAccountCapability(null)
+    setAccountRefreshing(true)
     setMcpCapability(null)
     setMcpConfigRefreshing(false)
     setMcpRefreshing(false)
@@ -698,23 +744,10 @@ export function useIntegrations(cwd: string | null) {
           setSkillsRefreshing(false)
         }
       })
+    void refreshAccount()
     void refreshMcp().catch(() => {})
     if (cwd) loadUsage()
-  }, [cwd, loadGitDiff, loadUsage, providerContext, refreshMcp])
-
-  useEffect(() => {
-    if (typeof window.scry.runControls !== 'function') return
-    const providerIds = new Set(
-      agents
-        .map((agent) => providerIdForAgentId(agent.id))
-        .filter((providerId): providerId is ProviderId => providerId != null)
-    )
-    for (const providerId of providerIds) {
-      const context = { providerId, cwd: cwd ?? undefined }
-      if (runControlCatalogByContext.current.has(contextKey(context))) continue
-      void requestRunControlCatalog(context).catch(() => {})
-    }
-  }, [agents, cwd, requestRunControlCatalog])
+  }, [cwd, loadGitDiff, loadUsage, providerContext, refreshAccount, refreshMcp])
 
   useEffect(() => {
     const seq = ++runControlRequestSeq.current
@@ -746,7 +779,7 @@ export function useIntegrations(cwd: string | null) {
       setRunControlsLoading(false)
       return
     }
-    void requestRunControlCatalog(context)
+    void requestRunControlsForSelectedProvider(selectedProviderId, cwd, requestRunControlCatalog)
       .then((result) => {
         if (
           seq !== runControlRequestSeq.current ||
@@ -821,6 +854,13 @@ export function useIntegrations(cwd: string | null) {
     return () => timers.forEach((id) => window.clearTimeout(id))
   }, [loadBillingState, loadDiag, loadStats, loadUsage])
 
+  const currentSkillCapability = capabilityMatchesContext(skillCapability, providerContext)
+    ? skillCapability
+    : null
+  const currentAccountCapability = capabilityMatchesContext(accountCapability, providerContext)
+    ? accountCapability
+    : null
+
   return {
     agents,
     agentsHydrated,
@@ -838,9 +878,11 @@ export function useIntegrations(cwd: string | null) {
     setRunModel,
     setRunEffort,
     setPermissionMode,
-    skills,
-    skillCapability,
+    skills: currentSkillCapability ? skills : [],
+    skillCapability: currentSkillCapability,
     skillsRefreshing,
+    accountCapability: currentAccountCapability,
+    accountRefreshing,
     mcps,
     mcpStatus,
     mcpLive,
@@ -858,6 +900,8 @@ export function useIntegrations(cwd: string | null) {
     diag,
     rescan,
     refreshSkills,
+    refreshAccount,
+    refreshProviderInventory,
     loadMcpLive,
     refreshMcp,
     pullMcpLive,

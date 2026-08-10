@@ -132,7 +132,7 @@ async function main() {
     `packaged preload did not expose window.scry\n${stderr.slice(-4000)}`
   )
   for (const key of [
-    'start', 'stop', 'activeRuns', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills',
+    'start', 'stop', 'activeRuns', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills', 'onFocusedRun',
     'terminalStart', 'terminalWrite', 'terminalResize', 'terminalClose', 'onTerminalData', 'onTerminalExit'
   ]) {
     assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)

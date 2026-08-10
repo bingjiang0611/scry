@@ -94,6 +94,19 @@ export function replayPendingQuestionDeltas(
   )
 }
 
+export function restoredRunRuntimeState(
+  runId: string | null,
+  questionSnapshot: AgentQuestionRequest[],
+  questionDeltas: PendingQuestionDelta[],
+  lifecycleDeltas: RunLifecycleDelta[]
+): { pendingQuestions: AgentQuestionRequest[]; running: boolean } {
+  const terminal = runId != null && lifecycleDeltas.some((delta) => delta.event.runId === runId)
+  return {
+    pendingQuestions: terminal ? [] : replayPendingQuestionDeltas(questionSnapshot, questionDeltas),
+    running: runId != null && !terminal
+  }
+}
+
 export const parsedSessionTurns = (sessionId: string, parsed: ParsedTurn[]): Turn[] =>
   parsed.map((turn, index) => {
     const restored: Turn = {
@@ -187,7 +200,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     (
       sessionId: string,
       parsed: ParsedTurn[],
-      options: { activeRun?: ActiveRun | null } = {}
+      options: { activeRun?: ActiveRun | null; preserveFocusDeltas?: boolean } = {}
     ): void => {
       const activeRun = options.activeRun && !options.activeRun.done ? options.activeRun : null
       focusedRunIdRef.current = activeRun?.runId ?? null
@@ -200,6 +213,12 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
         activeRun && focusQuestionDeltasRef.current?.runId === activeRun.runId
           ? focusQuestionDeltasRef.current.deltas
           : []
+      const runtimeState = restoredRunRuntimeState(
+        activeRun?.runId ?? null,
+        activeRun?.pendingQuestions ?? [],
+        questionDeltas,
+        lifecycleDeltas
+      )
       setTurns((prev) => {
         const snapshot = sessionTurnsWithActiveRun(sessionId, parsed, activeRun)
         if (!activeRun) return snapshot
@@ -211,13 +230,12 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
         )
       })
       setSelected(null)
-      setPendingQuestions(
-        replayPendingQuestionDeltas(activeRun?.pendingQuestions ?? [], questionDeltas)
-      )
-      const terminal = lifecycleDeltas.some((delta) => delta.event.runId === activeRun?.runId)
-      setRunning(Boolean(activeRun && !terminal))
-      focusLifecycleDeltasRef.current = null
-      focusQuestionDeltasRef.current = null
+      setPendingQuestions(runtimeState.pendingQuestions)
+      setRunning(runtimeState.running)
+      if (!options.preserveFocusDeltas) {
+        focusLifecycleDeltasRef.current = null
+        focusQuestionDeltasRef.current = null
+      }
     },
     []
   )
@@ -346,11 +364,22 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
           : []
         if (currentLifecycle.length > 0) {
           setTurns((prev) => replayRunLifecycleDeltas(prev, currentLifecycle))
-          setRunning(false)
         }
-        setPendingQuestions((prev) =>
-          replayPendingQuestionDeltas(questionSnapshot ?? prev, currentQuestions)
+        const runtimeState = restoredRunRuntimeState(
+          runId ?? null,
+          questionSnapshot ?? [],
+          currentQuestions,
+          currentLifecycle
         )
+        setPendingQuestions((prev) =>
+          restoredRunRuntimeState(
+            runId ?? null,
+            questionSnapshot ?? prev,
+            currentQuestions,
+            currentLifecycle
+          ).pendingQuestions
+        )
+        setRunning(runtimeState.running)
         setRestoring(false)
       })
 

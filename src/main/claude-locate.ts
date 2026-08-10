@@ -69,8 +69,9 @@ export function mergeLoginShellEnv(
   captured: Record<string, string>
 ): Record<string, string> {
   const out = { ...inherited }
+  const hasInheritedCodexHome = Object.prototype.hasOwnProperty.call(inherited, 'CODEX_HOME')
   for (const [name, value] of Object.entries(captured)) {
-    if (loginShellEnvAllowed(name)) out[name] = value
+    if (loginShellEnvAllowed(name) && (name !== 'CODEX_HOME' || !hasInheritedCodexHome)) out[name] = value
   }
   return sanitizeNestedAgentEnv(out)
 }

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  exactSessionPermissionDescription,
+  exactSessionPermissionSuggestions,
+  MAX_AGENT_PERMISSION_SESSION_DESCRIPTION_LENGTH,
   classifyRunTermination,
   normalizeAgentQuestionRequest,
   normalizeAgentQuestionResponse,
@@ -91,6 +94,59 @@ describe('runtime frontdoor mapping', () => {
       questionId: 'permission-1',
       behavior: 'cancelled'
     })).toBe('reject')
+  })
+
+  it('only offers session permission when requested and explains its exact scope', () => {
+    const onceOnly = agentPermissionQuestion(
+      'run-1',
+      'permission-once',
+      '权限请求',
+      '允许执行命令？',
+      'git status',
+      false
+    )
+    expect(onceOnly.questions[0].options.map((option) => option.label)).toEqual(['允许一次', '拒绝'])
+
+    const exactSession = agentPermissionQuestion(
+      'run-1',
+      'permission-session',
+      '权限请求',
+      '允许执行命令？',
+      'git status',
+      true,
+      'claude:permission:Bash',
+      '仅允许当前 Provider 运行的 1 条精确规则'
+    )
+    expect(exactSession.questions[0].options.find((option) => option.label === '本次会话允许')).toEqual({
+      label: '本次会话允许',
+      description: '仅允许当前 Provider 运行的 1 条精确规则'
+    })
+  })
+
+  it('redacts and bounds exact session permission details', () => {
+    const secret = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789'
+    const suggestions = exactSessionPermissionSuggestions([{
+      type: 'addRules',
+      destination: 'session',
+      behavior: 'allow',
+      rules: [
+        { toolName: 'Bash', ruleContent: `curl --token ${secret}` },
+        { toolName: 'Read', ruleContent: '/repo/package.json' }
+      ]
+    }])
+    const description = exactSessionPermissionDescription(suggestions)
+    expect(description).toContain('Bash → curl --token «REDACTED»')
+    expect(description).toContain('Read → /repo/package.json')
+    expect(description).not.toContain(secret)
+
+    const longDescription = exactSessionPermissionDescription(exactSessionPermissionSuggestions([{
+      type: 'addRules',
+      destination: 'session',
+      behavior: 'allow',
+      rules: [{ toolName: 'Bash', ruleContent: `echo ${'x'.repeat(5_000)}` }]
+    }]))
+    expect(longDescription).toBeUndefined()
+    expect(MAX_AGENT_PERMISSION_SESSION_DESCRIPTION_LENGTH).toBe(1_200)
   })
 
   it('keeps an explicit cwd instead of reading mutable navigation state later', () => {

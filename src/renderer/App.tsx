@@ -301,6 +301,41 @@ export async function restoreActiveSessionSelection(
   return true
 }
 
+export async function restoreFocusedRunSelection(
+  run: ActiveRun,
+  effects: {
+    prepareRunFocus: (runId: string) => void
+    selectContext: (context: { providerId: ProviderId; cwd: string | null; sessionId: string }) => void
+    loadSession: (context: {
+      providerId: ProviderId
+      cwd: string
+      externalSessionId: string
+    }) => Promise<ParsedTurn[] | null>
+    replaceWithParsedSession: (
+      sessionId: string,
+      parsed: ParsedTurn[],
+      options: { activeRun: ActiveRun; preserveFocusDeltas?: boolean }
+    ) => void
+    isCurrent?: () => boolean
+  }
+): Promise<boolean> {
+  if (run.done || !run.providerId || (effects.isCurrent && !effects.isCurrent())) return false
+  const externalSessionId = run.externalSessionId ?? run.sessionId
+  const sessionId = externalSessionId ?? run.runId
+  const cwd = run.cwd ?? ''
+  effects.prepareRunFocus(run.runId)
+  effects.selectContext({ providerId: run.providerId, cwd: run.cwd ?? null, sessionId })
+  effects.replaceWithParsedSession(sessionId, [], {
+    activeRun: run,
+    preserveFocusDeltas: Boolean(externalSessionId)
+  })
+  if (!externalSessionId) return true
+  const parsed = await effects.loadSession({ providerId: run.providerId, cwd, externalSessionId }).catch(() => null)
+  if (effects.isCurrent && !effects.isCurrent()) return false
+  effects.replaceWithParsedSession(sessionId, parsed ?? [], { activeRun: run })
+  return true
+}
+
 interface NewConversationEffects {
   clearTurns: (options?: { preserveRunning?: boolean }) => void
   newSession: () => Promise<boolean>
@@ -507,6 +542,27 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
+    const offFocusedRun =
+      typeof window.scry.onFocusedRun === 'function'
+        ? window.scry.onFocusedRun((run) => {
+            const seq = ++sessionSelectionSeqRef.current
+            const isCurrent = (): boolean => !cancelled && seq === sessionSelectionSeqRef.current
+            shouldStickToBottomRef.current = true
+            markRunStarted(run.runId)
+            void restoreFocusedRunSelection(run, {
+              prepareRunFocus: session.prepareRunFocus,
+              selectContext: ({ providerId, cwd: nextCwd, sessionId }) => {
+                integrations.setSelectedId(providerId)
+                setCwd(nextCwd)
+                selectSessionId(sessionId)
+                setView('chat')
+              },
+              loadSession: (context) => window.scry.loadSession(context),
+              replaceWithParsedSession: session.replaceWithParsedSession,
+              isCurrent
+            })
+          })
+        : () => {}
     const offSession =
       typeof window.scry.onSession === 'function'
         ? window.scry.onSession((event) => {
@@ -548,9 +604,18 @@ export function App() {
       })
     return () => {
       cancelled = true
+      offFocusedRun()
       offSession()
     }
-  }, [integrations.setSelectedId, loadProjects, markRunStarted, selectSessionId, setCwd])
+  }, [
+    integrations.setSelectedId,
+    loadProjects,
+    markRunStarted,
+    selectSessionId,
+    session.prepareRunFocus,
+    session.replaceWithParsedSession,
+    setCwd
+  ])
 
   useEffect(() => {
     if (workspace.hydrated && activeRunHydrated && integrations.agentsHydrated) window.scry.rendererReady?.()
@@ -936,8 +1001,11 @@ export function App() {
 
   const openSkills = (): void => {
     setShowSkills(true)
-    if (!integrations.skillCapability && !integrations.skillsRefreshing) {
-      void integrations.refreshSkills()
+    if (
+      (!integrations.skillCapability && !integrations.skillsRefreshing) ||
+      (!integrations.accountCapability && !integrations.accountRefreshing)
+    ) {
+      void integrations.refreshProviderInventory()
     }
   }
   const openMcp = (): void => {
@@ -1262,11 +1330,14 @@ export function App() {
         <>
           {showSkills && (
             <SkillsModal
+              key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
               skills={integrations.skills}
               capability={integrations.skillCapability}
-              refreshing={integrations.skillsRefreshing}
+              account={integrations.accountCapability}
+              accountRefreshing={integrations.accountRefreshing}
+              refreshing={integrations.skillsRefreshing || integrations.accountRefreshing}
               onToggle={integrations.toggleSkill}
-              onRefresh={integrations.refreshSkills}
+              onRefresh={() => { void integrations.refreshProviderInventory() }}
               onClose={() => setShowSkills(false)}
             />
           )}

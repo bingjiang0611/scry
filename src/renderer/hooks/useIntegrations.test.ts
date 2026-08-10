@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CapabilityEnvelope } from '@shared/provider'
 import {
   authoritativeRefreshAfterToggle,
+  capabilityMatchesContext,
   mergeMcpLiveSnapshot,
   mcpAuthVerificationError,
   parseRunControlPreferences,
   reconcileMcpAuthStatus,
+  requestRunControlsForSelectedProvider,
   runControlSendBlockedReason
 } from './useIntegrations'
 
@@ -17,6 +19,20 @@ const result = (data: boolean | null, state: CapabilityEnvelope<boolean>['state'
 })
 
 describe('Skill/MCP 操作后的权威状态同步', () => {
+  it('Provider 或 cwd 改变后不暴露旧上下文的能力证据', () => {
+    const capability: CapabilityEnvelope<boolean> = {
+      providerId: 'qoder',
+      cwd: '/repo-a',
+      mode: 'read',
+      state: 'ready',
+      data: true
+    }
+
+    expect(capabilityMatchesContext(capability, { providerId: 'qoder', cwd: '/repo-a' })).toBe(true)
+    expect(capabilityMatchesContext(capability, { providerId: 'qoder', cwd: '/repo-b' })).toBe(false)
+    expect(capabilityMatchesContext(capability, { providerId: 'codex', cwd: '/repo-a' })).toBe(false)
+  })
+
   it('操作成功后执行一次 provider 回读并返回权威快照', async () => {
     const refresh = vi.fn().mockResolvedValue({ enabled: false })
 
@@ -89,6 +105,16 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
 })
 
 describe('Agent 切换时的运行控制门禁', () => {
+  it('Claude 选中时只请求 Claude 的运行控制，不预热 Codex', async () => {
+    const request = vi.fn().mockResolvedValue(null)
+
+    await requestRunControlsForSelectedProvider('claude', '/repo', request)
+
+    expect(request).toHaveBeenCalledOnce()
+    expect(request).toHaveBeenCalledWith({ providerId: 'claude', cwd: '/repo' })
+    expect(request).not.toHaveBeenCalledWith(expect.objectContaining({ providerId: 'codex' }))
+  })
+
   it('目录读取期间仅允许 Provider 默认模型和默认审批立即发送', () => {
     expect(runControlSendBlockedReason(null, true, { permissionMode: 'default' })).toBeNull()
     expect(runControlSendBlockedReason(null, true, {

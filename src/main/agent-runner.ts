@@ -1,11 +1,13 @@
 // 模式 A：用 Claude Agent SDK 驱动 claude，把 message stream 归一化成 TraceEvent 流式 emit。
 // 支持多轮对话（resume）+ 工作目录（cwd）+ 中断（interrupt）+ subagent 内部明细（tail transcript 一层）。
 
-import { query, type HookInput, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { query, type HookInput, type PermissionUpdate, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { type TraceEvent, type McpLiveStatus } from '../shared/trace'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  exactSessionPermissionDescription,
+  exactSessionPermissionSuggestions,
   normalizeAgentQuestionRequest,
   type AgentInputAttachment,
   type AgentPermissionMode,
@@ -172,7 +174,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         signal: AbortSignal
         toolUseID: string
         agentID?: string
-        suggestions?: unknown[]
+        suggestions?: PermissionUpdate[]
         title?: string
         description?: string
       }
@@ -198,26 +200,30 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       }
       if (permissionMode === 'full_access') return { behavior: 'allow' as const }
       const detail = permission.description ?? JSON.stringify(input).slice(0, 1_200)
+      const sessionSuggestions = exactSessionPermissionSuggestions(permission.suggestions)
+      const sessionDescription = exactSessionPermissionDescription(sessionSuggestions)
       const request = agentPermissionQuestion(
         runId,
         permission.toolUseID,
         permission.title ?? '权限请求',
         `允许 ${toolName} 执行这项操作吗？`,
         detail,
-        true,
-        `claude:permission:${toolName}`
+        sessionDescription !== undefined,
+        `claude:permission:${toolName}`,
+        sessionDescription
       )
       const response = await opts.requestUserInput!(request, permission.signal)
       const decision = agentPermissionDecision(request, response)
       if (decision === 'reject') {
         return { behavior: 'deny' as const, message: '用户拒绝了操作', interrupt: false, decisionClassification: 'user_reject' as const }
       }
+      const applySessionSuggestions = decision === 'session' && sessionDescription !== undefined
       return {
         behavior: 'allow' as const,
-        ...(decision === 'session' && permission.suggestions?.length
-          ? { updatedPermissions: permission.suggestions }
+        ...(applySessionSuggestions
+          ? { updatedPermissions: sessionSuggestions }
           : {}),
-        decisionClassification: decision === 'session' ? 'user_permanent' as const : 'user_temporary' as const
+        decisionClassification: applySessionSuggestions ? 'user_permanent' as const : 'user_temporary' as const
       }
     }
   }

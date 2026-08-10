@@ -10,14 +10,15 @@ export function createBuiltInProviderAdapters(
   transportSpec?: string,
   codexHomeDir?: string,
   codexSessionIds: () => readonly string[] = () => [],
-  openCodeMcpAuthDirectory?: string
+  openCodeMcpAuthDirectory?: string,
+  openCodeSessionStateDirectory?: string
 ): ProviderAdapter[] {
   return selectProviderTransports(
     [
       createClaudeAdapter(homeDir),
       createCodexAdapter(codexHomeDir, codexSessionIds, homeDir),
       createQoderAdapter(homeDir),
-      createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory)
+      createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory)
     ],
     transportSpec
   )

@@ -285,7 +285,8 @@ const providerRegistry = new ProviderRegistry(
     process.env.SCRY_PROVIDER_TRANSPORTS,
     join(app.getPath('userData'), 'codex-home-v1'),
     codexSessionIds,
-    join(app.getPath('userData'), 'provider-auth', 'opencode')
+    join(app.getPath('userData'), 'provider-auth', 'opencode'),
+    join(app.getPath('userData'), 'provider-state', 'opencode-v1')
   ),
   {
     disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS),
@@ -1726,6 +1727,14 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     deleteRunAttachments(app.getPath('userData'), runId)
     try { await cancelGitTurnDiff(await turnDiffCapture) } catch { /* preserve the original registration error */ }
     throw error
+  }
+  // `agent:start` can also be invoked through the preload bridge (for example by
+  // the regression runner), so publish the authoritative focused snapshot after
+  // registration and before the Provider can emit trace or questions.
+  try {
+    win?.webContents.send('agent:focusedRun', runState)
+  } catch (error) {
+    console.warn('[scry] focused run renderer notification failed:', runId, error)
   }
   let terminalArchiveArgs: ArchiveTraceTurnArgs | undefined
   let terminalArchiveCommitted = false

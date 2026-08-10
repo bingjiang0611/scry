@@ -23,6 +23,7 @@ import {
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
   restoreActiveSessionSelection,
+  restoreFocusedRunSelection,
   scrollChatToBottomIfNeeded,
   scrollChatTargetIntoView,
   shouldQueuePrompt,
@@ -375,6 +376,94 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
     expect(restored).toBe(true)
     expect(calls).toEqual(['prepare:run-2', 'adopt:run-2', 'load:session-1'])
     expect(replacement).toEqual({ sessionId: 'session-1', parsed: archived, activeRun })
+  })
+
+  it('preload 直接启动的新 focused run 会先绑定焦点，再恢复历史和待回答问题', async () => {
+    const pendingQuestion: AgentQuestionRequest = {
+      runId: 'run-claude',
+      questionId: 'question-1',
+      providerId: 'claude',
+      questions: [{
+        question: '继续执行？',
+        header: '确认',
+        multiSelect: false,
+        options: [{ label: '继续', description: '继续当前任务' }]
+      }]
+    }
+    const activeRun: ActiveRun = {
+      runId: 'run-claude',
+      providerId: 'claude',
+      cwd: '/repo/claude',
+      externalSessionId: 'session-claude',
+      sessionId: 'session-claude',
+      userText: '执行 Claude 任务',
+      pendingQuestions: [pendingQuestion],
+      items: [],
+      done: false
+    }
+    const archived: ParsedTurn[] = [{ runId: 'older-run', userText: '上一轮', items: [], done: true }]
+    const calls: string[] = []
+    let resolveHistory: ((turns: ParsedTurn[]) => void) | undefined
+    let replacement: { sessionId: string; parsed: ParsedTurn[]; activeRun: ActiveRun } | undefined
+
+    const restoring = restoreFocusedRunSelection(activeRun, {
+      prepareRunFocus: (runId) => calls.push(`prepare:${runId}`),
+      selectContext: (context) => calls.push(`select:${context.providerId}:${context.cwd}:${context.sessionId}`),
+      loadSession: async () => new Promise<ParsedTurn[]>((resolve) => {
+        calls.push('load')
+        resolveHistory = resolve
+      }),
+      replaceWithParsedSession: (sessionId, parsed, options) => {
+        calls.push('replace')
+        replacement = { sessionId, parsed, activeRun: options.activeRun }
+      }
+    })
+
+    expect(calls).toEqual([
+      'prepare:run-claude',
+      'select:claude:/repo/claude:session-claude',
+      'replace',
+      'load'
+    ])
+    expect(replacement).toEqual({ sessionId: 'session-claude', parsed: [], activeRun })
+    expect(replacement?.activeRun.pendingQuestions).toEqual([pendingQuestion])
+    resolveHistory?.(archived)
+    await expect(restoring).resolves.toBe(true)
+    expect(calls).toEqual([
+      'prepare:run-claude',
+      'select:claude:/repo/claude:session-claude',
+      'replace',
+      'load',
+      'replace'
+    ])
+    expect(replacement).toEqual({ sessionId: 'session-claude', parsed: archived, activeRun })
+  })
+
+  it('focused run 恢复历史期间发生新的手工选择时，不用旧异步结果覆盖界面', async () => {
+    const activeRun: ActiveRun = {
+      runId: 'run-claude',
+      providerId: 'claude',
+      cwd: '/repo/claude',
+      externalSessionId: 'session-claude',
+      userText: '执行 Claude 任务',
+      items: [],
+      done: false
+    }
+    let current = true
+    let resolveHistory: ((turns: ParsedTurn[]) => void) | undefined
+    const replacements: string[] = []
+    const restoring = restoreFocusedRunSelection(activeRun, {
+      prepareRunFocus: () => {},
+      selectContext: () => {},
+      loadSession: async () => new Promise<ParsedTurn[]>((resolve) => { resolveHistory = resolve }),
+      replaceWithParsedSession: (sessionId) => replacements.push(sessionId),
+      isCurrent: () => current
+    })
+
+    current = false
+    resolveHistory?.([])
+    await expect(restoring).resolves.toBe(false)
+    expect(replacements).toEqual(['session-claude'])
   })
 
   it('后台会话捕获或完成时只刷新列表，不抢走当前会话高亮', () => {
@@ -2952,7 +3041,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
 })
 
 import { DiagnosticsView } from './DiagnosticsView'
-import { filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
+import { accountUsageEvidence, filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
 
 describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => {
   const readyProps: ComponentProps<typeof DiagnosticsView> = {
@@ -3613,6 +3702,76 @@ describe('Skill/MCP 操作能力渲染', () => {
       { name: 'project-audit', dir: '/repo', scope: 'project', description: 'audit', enabled: true },
       { name: 'user-home', dir: '/home', scope: 'user', description: 'shared', enabled: true }
     ], 'user')).toEqual([{ name: 'user-home', dir: '/home', scope: 'user', description: 'shared', enabled: true }])
+  })
+
+  it('不丢弃 Provider 原生 Skill scope，并只展示账号级配额', () => {
+    const providerSkill = {
+      name: 'scry-e2e-audit',
+      dir: '/repo/.opencode/skills/scry-e2e-audit',
+      scope: 'opencode',
+      description: 'Repository audit',
+      enabled: true
+    }
+    const html = renderToStaticMarkup(
+      <SkillsModal
+        skills={[providerSkill]}
+        capability={{ providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [providerSkill] }}
+        account={{
+          providerId: 'qoder',
+          cwd: '/repo',
+          mode: 'read',
+          state: 'ready',
+          data: {
+            accountLabel: 'dev@example.test',
+            plan: 'pro',
+            usage: {
+              userQuota: { total: 1_000, remaining: 625, unit: 'credits' },
+              session: { total_credits: 12.5, model_usage: { performance: { credits: 12.5 } } }
+            }
+          }
+        }}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+
+    expect(filterSkillsForScope([providerSkill], 'provider')).toEqual([providerSkill])
+    expect(html).toContain('Provider Skill <span>1</span>')
+    expect(html).toContain('scry-e2e-audit')
+    expect(html).toContain('dev@example.test')
+    expect(html).toContain('pro')
+    expect(html).toContain('625 / 1,000 credits')
+    expect(html).not.toContain('12.5 credits')
+    expect(html).not.toContain('会话 credits')
+  })
+
+  it('账号能力未知时不把缺失额度补成 0', () => {
+    const html = renderToStaticMarkup(
+      <SkillsModal
+        skills={[]}
+        capability={{ providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [] }}
+        account={{
+          providerId: 'qoder',
+          cwd: '/repo',
+          mode: 'read',
+          state: 'unknown',
+          data: null,
+          reason: 'authentication required'
+        }}
+        onToggle={() => {}}
+        onRefresh={() => {}}
+        onClose={() => {}}
+      />
+    )
+
+    expect(html).toContain('账号证据未知')
+    expect(html).toContain('authentication required')
+    expect(html).not.toContain('0 credits')
+    expect(accountUsageEvidence({ userQuota: { percentage: 75 } })).toEqual({})
+    expect(accountUsageEvidence({ userQuota: { total: 100, used: 25, unit: 'credits' } })).toEqual({
+      quota: '25 / 100 credits 已使用'
+    })
   })
 
   it('可管理 Provider 允许 Skill 开关，MCP 只读 Provider 保持 disabled/connected 真值', () => {

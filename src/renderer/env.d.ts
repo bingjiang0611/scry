@@ -3,7 +3,7 @@ import type { DetectedAgent, ParsedTurn, ProjectMeta, ScryApi, SessionMeta } fro
 export type { DetectedAgent, ParsedTurn, ProjectMeta, SessionMeta }
 export type { McpMeta, SkillMeta } from '@shared/provider'
 
-type OptionalBridgeMethod = 'rendererReady' | 'setTheme' | 'detectFast' | 'catalogHealth' | 'runControls'
+type OptionalBridgeMethod = 'rendererReady' | 'setTheme' | 'detectFast' | 'catalogHealth' | 'runControls' | 'onFocusedRun'
 type RendererScryApi = Omit<ScryApi, OptionalBridgeMethod> & Partial<Pick<ScryApi, OptionalBridgeMethod>>
 
 declare global {
