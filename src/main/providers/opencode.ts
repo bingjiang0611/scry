@@ -1,5 +1,7 @@
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { isAbsolute, relative, sep } from 'node:path'
 import {
   capabilityReady,
   capabilityUnknown,
@@ -27,7 +29,14 @@ import {
 import { resolveRuntimeCliBin, shellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../cli-runtime'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
-import { OpenCodeServerManager, sanitizeOpenCodeServerLog } from './opencode-server'
+import {
+  OpenCodeServerManager,
+  openCodeHookTraceCursor,
+  readOpenCodeHookTrace,
+  sanitizeOpenCodeServerLog,
+  type OpenCodeHookTraceRecord,
+  type OpenCodeServerState
+} from './opencode-server'
 import { effortOption, permissionOptions } from './run-controls'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
@@ -53,6 +62,7 @@ interface OpenCodeEventState {
   starts: Set<string>
   results: Set<string>
   compactions: Set<string>
+  hookResults: Set<string>
   mcpByToolUseId: Map<string, ParsedMcp>
 }
 
@@ -65,10 +75,123 @@ const eventState = (request: ProviderRunRequest): OpenCodeEventState => {
     starts: new Set<string>(),
     results: new Set<string>(),
     compactions: new Set<string>(),
+    hookResults: new Set<string>(),
     mcpByToolUseId: new Map<string, ParsedMcp>()
   }
   eventStates.set(request, created)
   return created
+}
+
+const canonicalExistingPath = async (path: string): Promise<string | undefined> => {
+  if (!isAbsolute(path)) return undefined
+  try {
+    return await realpath(path)
+  } catch {
+    return undefined
+  }
+}
+
+const pathInside = (root: string, candidate: string): boolean => {
+  const suffix = relative(root, candidate)
+  return suffix === '' || (!isAbsolute(suffix) && suffix !== '..' && !suffix.startsWith(`..${sep}`))
+}
+
+export async function openCodeSkillScope(
+  cwd: string,
+  location: string,
+  homeDir = homedir()
+): Promise<'project' | 'user' | 'unknown'> {
+  const [canonicalCwd, canonicalLocation, canonicalHome] = await Promise.all([
+    canonicalExistingPath(cwd),
+    canonicalExistingPath(location),
+    canonicalExistingPath(homeDir)
+  ])
+  if (!canonicalLocation) return 'unknown'
+  if (canonicalCwd && pathInside(canonicalCwd, canonicalLocation)) return 'project'
+  if (canonicalHome && pathInside(canonicalHome, canonicalLocation)) return 'user'
+  return 'unknown'
+}
+
+export function emitOpenCodeHookEvents(
+  request: ProviderRunRequest,
+  records: OpenCodeHookTraceRecord[],
+  sessionId: string,
+  tracePath: string
+): void {
+  const state = eventState(request)
+  const pending = new Map<string, OpenCodeHookTraceRecord>()
+  const invalid = new Set<string>()
+  const completed = new Set<string>()
+  const pairs = new Map<string, { start: OpenCodeHookTraceRecord; response: OpenCodeHookTraceRecord }>()
+  for (const record of records) {
+    if (record.sessionId !== sessionId) continue
+    const key = `${record.sessionId}\0${record.callId}\0${record.tool}`
+    if (invalid.has(key) || state.hookResults.has(key)) continue
+    if (completed.has(key)) {
+      completed.delete(key)
+      pairs.delete(key)
+      invalid.add(key)
+      continue
+    }
+    if (record.stage === 'hook_started') {
+      if (!pending.has(key)) pending.set(key, record)
+      else {
+        pending.delete(key)
+        invalid.add(key)
+      }
+      continue
+    }
+    const start = pending.get(key)
+    if (!start) {
+      invalid.add(key)
+      continue
+    }
+    pending.delete(key)
+    completed.add(key)
+    pairs.set(key, { start, response: record })
+  }
+  for (const { start, response } of pairs.values()) {
+    const key = `${start.sessionId}\0${start.callId}\0${start.tool}`
+    if (invalid.has(key) || state.hookResults.has(key)) continue
+    state.hookResults.add(key)
+    const hookId = `opencode:${start.sessionId}:${start.callId}`
+    request.emit(newEvent(request.runId, {
+      kind: 'hook',
+      stage: 'hook_started',
+      tool: start.tool,
+      name: 'ToolExecute',
+      hookId,
+      hookName: `OpenCode:${start.tool}`,
+      hookEvent: 'ToolExecute',
+      hookOutcome: 'started',
+      toolUseId: start.callId,
+      runtimeMetadata: {
+        source: 'opencode_native_plugin_hook',
+        sourceTracePath: tracePath,
+        sourceRecordSha256: start.recordSha256,
+        sourceRecordHashBasis: 'jsonl_utf8_with_lf',
+        nativeHookEvent: 'tool.execute.before'
+      }
+    }, start.timestamp))
+    request.emit(newEvent(request.runId, {
+      kind: 'hook',
+      stage: 'hook_response',
+      tool: response.tool,
+      name: 'ToolExecute',
+      hookId,
+      hookName: `OpenCode:${response.tool}`,
+      hookEvent: 'ToolExecute',
+      hookOutcome: 'success',
+      toolUseId: response.callId,
+      runtimeMetadata: {
+        source: 'opencode_native_plugin_hook',
+        sourceTracePath: tracePath,
+        sourceRecordSha256: response.recordSha256,
+        sourceRecordHashBasis: 'jsonl_utf8_with_lf',
+        nativeHookEvent: 'tool.execute.after'
+      }
+    }, response.timestamp))
+  }
 }
 
 function normalizeOpenCodeTool(rawName: string, rawInput: unknown): {
@@ -501,13 +624,17 @@ function openCodeAuthenticationTargets(execution: AuthorizedMcpExecution | undef
     .map((target) => target.targetId)
 }
 
-export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirectory?: string): ProviderAdapter {
+export function createOpenCodeAdapter(
+  homeDir = homedir(),
+  privateMcpAuthDirectory?: string,
+  sessionStateRoot?: string
+): ProviderAdapter {
   const executable = (): string | undefined => process.env.SCRY_OPENCODE_PATH?.trim() || resolveRuntimeCliBin('opencode')
   const managers = new Map<string, OpenCodeServerManager>()
   const managerFor = (cwd: string): OpenCodeServerManager => {
     let manager = managers.get(cwd)
     if (!manager) {
-      manager = new OpenCodeServerManager(executable, privateMcpAuthDirectory)
+      manager = new OpenCodeServerManager(executable, privateMcpAuthDirectory, {}, sessionStateRoot)
       managers.set(cwd, manager)
     }
     return manager
@@ -523,18 +650,23 @@ export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirecto
     lastError = message
   }
 
-  const clientFor = async (context: ProviderContext, mcpExecution?: AuthorizedMcpExecution): Promise<OpencodeClient> => {
+  const serverFor = async (
+    context: ProviderContext,
+    mcpExecution?: AuthorizedMcpExecution
+  ): Promise<OpenCodeServerState> => {
     if (!context.cwd) throw new Error('OpenCode 需要工作目录')
     try {
       const state = await managerFor(context.cwd).ensure(context.cwd, mcpExecution)
       lastOkAt = Date.now()
       lastError = undefined
-      return state.client
+      return state
     } catch (error) {
       rememberFailure(error)
       throw error
     }
   }
+  const clientFor = async (context: ProviderContext, mcpExecution?: AuthorizedMcpExecution): Promise<OpencodeClient> =>
+    (await serverFor(context, mcpExecution)).client
 
   return {
     id: 'opencode',
@@ -582,7 +714,8 @@ export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirecto
       const manager = request.cwd ? managerFor(request.cwd) : undefined
       const promise = (async () => {
         try {
-          client = await clientFor(context, request.mcpExecution)
+          const server = await serverFor(context, request.mcpExecution)
+          client = server.client
           if (stopped) return { externalSessionId, providerTurnId, stopped }
           const permission = openCodePermissionRules(request.permissionMode)
           const model = request.model
@@ -610,6 +743,8 @@ export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirecto
             await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
             return { externalSessionId, providerTurnId, stopped }
           }
+          const hookTracePath = server.hookTracePath
+          const hookTraceOffset = await openCodeHookTraceCursor(hookTracePath)
           const eventOptions = {
             signal: eventController.signal,
             // The generated SDK does not expose sseSleepFn in this method's type,
@@ -666,6 +801,18 @@ export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirecto
             eventController.abort()
             await events
             if (responseError == null && eventError != null) responseError = eventError
+            if (hookTracePath) {
+              try {
+                emitOpenCodeHookEvents(
+                  request,
+                  await readOpenCodeHookTrace(hookTracePath, hookTraceOffset),
+                  externalSessionId!,
+                  hookTracePath
+                )
+              } catch (error) {
+                if (responseError == null) responseError = error
+              }
+            }
           }
           if (responseError != null) throw responseError
           const info = record(response!.info)
@@ -891,16 +1038,17 @@ export function createOpenCodeAdapter(homeDir = homedir(), privateMcpAuthDirecto
             client.v2.skill.list({ location: { directory: context.cwd } }),
             'skill.list'
           )
-          const data: SkillMeta[] = (response.data ?? []).map((raw) => {
+          const data: SkillMeta[] = await Promise.all((response.data ?? []).map(async (raw) => {
             const skill = record(raw)
+            const location = String(skill.location ?? '')
             return {
               name: String(skill.name ?? ''),
-              dir: String(skill.location ?? ''),
-              scope: 'opencode',
+              dir: location,
+              scope: context.cwd ? await openCodeSkillScope(context.cwd, location, homeDir) : 'unknown',
               description: String(skill.description ?? ''),
               enabled: true
             }
-          })
+          }))
           return capabilityReady(context, 'read', data)
         } catch (error) {
           rememberFailure(error)

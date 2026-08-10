@@ -13,6 +13,7 @@ import {
   removePendingQuestion,
   replayPendingQuestionDeltas,
   replayRunLifecycleDeltas,
+  restoredRunRuntimeState,
   sessionTurnsWithActiveRun,
   upsertPendingQuestion
 } from './useAgentSession'
@@ -213,5 +214,26 @@ describe('useAgentSession state reducers', () => {
         { kind: 'error', event: { runId: 'r1', message: 'stopped late', hint: 'ignored elsewhere' } }
       ])
     ).toMatchObject([{ runId: 'r1', done: true, error: 'stopped late' }])
+  })
+
+  it.each([
+    { kind: 'done' as const, event: { runId: 'r1' } },
+    { kind: 'error' as const, event: { runId: 'r1', message: 'stopped late', hint: 'retry' } }
+  ])('keeps $kind terminal when a question opens before history restoration resolves', (terminalDelta) => {
+    const staleTurn: Turn[] = [{ runId: 'r1', userText: 'prompt', items: [], done: false }]
+    const openedAfterSnapshot = questionRequest('r1', 'tool-1')
+    const runtime = restoredRunRuntimeState(
+      'r1',
+      [],
+      [{ kind: 'open', request: openedAfterSnapshot }],
+      [terminalDelta]
+    )
+    const turns = replayRunLifecycleDeltas(staleTurn, [terminalDelta])
+
+    expect(runtime).toEqual({ pendingQuestions: [], running: false })
+    expect(turns[0]).toMatchObject({
+      done: true,
+      ...(terminalDelta.kind === 'error' ? { error: 'stopped late', errorHint: 'retry' } : {})
+    })
   })
 })

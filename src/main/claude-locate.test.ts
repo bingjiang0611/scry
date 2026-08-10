@@ -49,6 +49,21 @@ describe('runtime CLI discovery constraints', () => {
     })
   })
 
+  it('保留 launcher 显式 CODEX_HOME，仅在 Finder 环境缺失时从登录 shell 补齐', () => {
+    expect(mergeLoginShellEnv(
+      { HOME: '/Users/example', CODEX_HOME: '/tmp/formal-codex-home' },
+      { PATH: '/shell/bin:/usr/bin', CODEX_HOME: '/Users/example/.codex' }
+    )).toMatchObject({
+      PATH: '/shell/bin:/usr/bin',
+      CODEX_HOME: '/tmp/formal-codex-home'
+    })
+
+    expect(mergeLoginShellEnv(
+      { HOME: '/Users/example' },
+      { CODEX_HOME: '/Users/example/.codex' }
+    ).CODEX_HOME).toBe('/Users/example/.codex')
+  })
+
   it('normalizes CLI version banners without exposing product-name noise', () => {
     expect(normalizeAgentVersion('2.1.150 (Claude Code)')).toBe('2.1.150')
     expect(normalizeAgentVersion('codex-cli 0.142.5')).toBe('0.142.5')

@@ -326,22 +326,24 @@ describe('Qoder provider adapter', () => {
     expect(sdk.query).not.toHaveBeenCalled()
   })
 
-  it('reads discovered Skill metadata from the native context usage catalog', async () => {
+  it('reads discovered Skill metadata and normalizes non-user/project sources to unknown', async () => {
     sdk.query.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue({}),
       getContextUsage: vi.fn().mockResolvedValue({
         skills: {
-          totalSkills: 2,
-          includedSkills: 2,
+          totalSkills: 3,
+          includedSkills: 3,
           skillFrontmatter: [
             { name: 'scry-e2e-audit', source: 'project', tokens: 0 },
-            { name: 'browser-use', source: 'user', tokens: 0 }
+            { name: 'browser-use', source: 'user', tokens: 0 },
+            { name: 'local-helper', source: 'local', tokens: 0 }
           ]
         }
       }),
       supportedCommands: vi.fn().mockResolvedValue([
         { name: 'scry-e2e-audit', description: 'Repository audit', argumentHint: '' },
-        { name: 'browser-use', description: 'Browser control', argumentHint: '' }
+        { name: 'browser-use', description: 'Browser control', argumentHint: '' },
+        { name: 'local-helper', description: 'Local helper', argumentHint: '' }
       ]),
       close: sdk.close
     })
@@ -352,16 +354,28 @@ describe('Qoder provider adapter', () => {
       state: 'ready',
       data: [
         { name: 'scry-e2e-audit', scope: 'project', description: 'Repository audit', enabled: true },
-        { name: 'browser-use', scope: 'user', description: 'Browser control', enabled: true }
+        { name: 'browser-use', scope: 'user', description: 'Browser control', enabled: true },
+        { name: 'local-helper', scope: 'unknown', description: 'Local helper', enabled: true }
       ]
     })
     await adapter.dispose?.()
   })
 
-  it('keeps the control transport alive while reading commands without sending a model prompt', async () => {
+  it('classifies only catalog-backed Skill commands and leaves other command sources unknown', async () => {
     sdk.query.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue({}),
-      supportedCommands: vi.fn().mockResolvedValue([{ name: 'help', description: 'Help', argumentHint: '' }]),
+      supportedCommands: vi.fn().mockResolvedValue([
+        { name: 'help', description: 'Help', argumentHint: '' },
+        { name: 'scry-e2e-audit', description: 'Repository audit', argumentHint: '<path>' },
+        { name: 'project-command', description: 'Project command', argumentHint: '' }
+      ]),
+      getContextUsage: vi.fn().mockResolvedValue({
+        skills: {
+          totalSkills: 1,
+          includedSkills: 1,
+          skillFrontmatter: [{ name: 'scry-e2e-audit', source: 'project', tokens: 0 }]
+        }
+      }),
       mcpServerStatus: vi.fn().mockResolvedValue([]),
       getUsageInfo: vi.fn().mockResolvedValue(null),
       accountInfo: vi.fn().mockResolvedValue({ userId: 'user-1' }),
@@ -369,11 +383,101 @@ describe('Qoder provider adapter', () => {
     })
     const adapter = createQoderAdapter()
     const result = await adapter.commands!.list({ providerId: 'qoder', cwd: '/repo' })
-    expect(result).toMatchObject({ state: 'ready', data: [{ name: 'help' }] })
+    expect(result).toMatchObject({
+      state: 'ready',
+      data: [
+        { name: 'help', source: undefined },
+        { name: 'scry-e2e-audit', argumentHint: '<path>', source: 'skill' },
+        { name: 'project-command', source: undefined }
+      ]
+    })
     expect(sdk.query).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.objectContaining({ [Symbol.asyncIterator]: expect.any(Function) }) }))
     expect(sdk.close).not.toHaveBeenCalled()
     await adapter.dispose?.()
     expect(sdk.close).toHaveBeenCalledOnce()
+  })
+
+  it('keeps commands readable but their sources unknown when the Skill catalog fails', async () => {
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      supportedCommands: vi.fn().mockResolvedValue([{ name: 'help', description: 'Help', argumentHint: '' }]),
+      getContextUsage: vi.fn().mockRejectedValue(new Error('catalog unavailable')),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+
+    await expect(adapter.commands!.list({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
+      state: 'degraded',
+      reason: expect.stringContaining('catalog unavailable'),
+      data: [{ name: 'help', source: undefined }]
+    })
+    await adapter.dispose?.()
+  })
+
+  it('preserves native account quota without exposing control-session credits as chat usage', async () => {
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getUsageInfo: vi.fn().mockResolvedValue({
+        userType: 'Pro',
+        userQuota: { total: 100, used: 25, remaining: 75, unit: 'credits' },
+        session: { total_credits: 1.25, model_usage: { performance: { credits: 1.25 } } }
+      }),
+      accountInfo: vi.fn().mockResolvedValue({ email: 'user@example.test', subscriptionType: 'Pro' }),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+
+    const result = await adapter.account!.read({ providerId: 'qoder', cwd: '/repo' })
+    expect(result).toMatchObject({
+      mode: 'read',
+      state: 'ready',
+      data: {
+        accountLabel: 'user@example.test',
+        plan: 'Pro',
+        usage: {
+          userQuota: { total: 100, used: 25, remaining: 75, unit: 'credits' }
+        }
+      }
+    })
+    expect(result.data?.usage).not.toHaveProperty('session')
+    await adapter.dispose?.()
+  })
+
+  it('keeps an empty native account response unknown instead of reporting ready', async () => {
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getUsageInfo: vi.fn().mockResolvedValue(null),
+      accountInfo: vi.fn().mockResolvedValue({}),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+
+    await expect(adapter.account!.read({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
+      mode: 'read',
+      state: 'unknown',
+      data: null,
+      reason: expect.stringContaining('未返回账号或用量证据')
+    })
+    await adapter.dispose?.()
+  })
+
+  it('ignores blank account fields and falls back to trimmed native evidence', async () => {
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getUsageInfo: vi.fn().mockResolvedValue({ userType: '  Team  ' }),
+      accountInfo: vi.fn().mockResolvedValue({ email: '  ', name: '  Ada  ', userId: 'ignored' }),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+
+    await expect(adapter.account!.read({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
+      state: 'ready',
+      data: {
+        accountLabel: 'Ada',
+        plan: 'Team'
+      }
+    })
+    await adapter.dispose?.()
   })
 
   it('reads model efforts from the native Qoder catalog', async () => {
@@ -714,6 +818,94 @@ describe('Qoder provider adapter', () => {
       expect.objectContaining({ runId: 'run-question', questionId: 'tool-1' }),
       expect.any(AbortSignal)
     )
+    await run.promise
+  })
+
+  it('only offers and returns Qoder safe exact addRules session suggestions', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const requests: Array<{ questions: Array<{ question: string; options: Array<{ label: string; description: string }> }> }> = []
+    const requestUserInput = vi.fn(async (request) => {
+      requests.push(request)
+      return {
+        runId: request.runId,
+        questionId: request.questionId,
+        behavior: 'answered' as const,
+        answers: { [request.questions[0].question]: '本次会话允许' }
+      }
+    })
+    const run = createQoderAdapter().run({
+      runId: 'run-permission-scope',
+      prompt: 'work',
+      attachments: [],
+      emit: vi.fn(),
+      requestUserInput
+    })
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool
+    const sessionSuggestion = {
+      type: 'addRules' as const,
+      rules: [
+        { toolName: 'mcp__tracker__read', ruleContent: 'resource:1' },
+        { toolName: 'mcp__tracker__read', ruleContent: 'resource:2' }
+      ],
+      behavior: 'allow' as const,
+      destination: 'session' as const
+    }
+    const persistentSuggestion = {
+      ...sessionSuggestion,
+      destination: 'userSettings' as const
+    }
+    const exactRule = [{ toolName: 'mcp__tracker__read', ruleContent: 'resource:1' }]
+    const unsafeSessionSuggestions = [
+      { type: 'setMode' as const, mode: 'acceptEdits' as const, destination: 'session' as const },
+      { type: 'addDirectories' as const, directories: ['/tmp'], destination: 'session' as const },
+      { type: 'removeDirectories' as const, directories: ['/tmp'], destination: 'session' as const },
+      { type: 'replaceRules' as const, rules: exactRule, behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'removeRules' as const, rules: exactRule, behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: 'mcp__tracker__read' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: ' ', ruleContent: 'resource:1' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: 'mcp__tracker__read', ruleContent: ' ' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: '*', ruleContent: '*' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [...exactRule, { toolName: 'Read' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: exactRule, behavior: 'deny' as const, destination: 'session' as const }
+    ]
+
+    await expect(canUseTool(
+      'mcp__tracker__read',
+      { id: '1' },
+      {
+        signal: new AbortController().signal,
+        toolUseID: 'tool-session',
+        suggestions: [persistentSuggestion, ...unsafeSessionSuggestions, sessionSuggestion]
+      }
+    )).resolves.toEqual({
+      behavior: 'allow',
+      updatedPermissions: [sessionSuggestion],
+      decisionClassification: 'user_permanent'
+    })
+    await expect(canUseTool(
+      'mcp__tracker__read',
+      { id: '2' },
+      {
+        signal: new AbortController().signal,
+        toolUseID: 'tool-unsafe',
+        suggestions: [persistentSuggestion, ...unsafeSessionSuggestions]
+      }
+    )).resolves.toEqual({ behavior: 'allow', decisionClassification: 'user_temporary' })
+
+    expect(requests[0].questions[0].options).toContainEqual(expect.objectContaining({
+      label: '本次会话允许',
+      description: expect.stringContaining('mcp__tracker__read → resource:1')
+    }))
+    expect(requests[0].questions[0].options).toContainEqual(expect.objectContaining({
+      label: '本次会话允许',
+      description: expect.stringContaining('mcp__tracker__read → resource:2')
+    }))
+    expect(requests[1].questions[0].options.map((option) => option.label)).toEqual(['允许一次', '拒绝'])
     await run.promise
   })
 

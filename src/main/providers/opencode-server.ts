@@ -1,10 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { constants as fsConstants, existsSync, type Stats } from 'node:fs'
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { createHash, randomBytes } from 'node:crypto'
 import { tmpdir, userInfo } from 'node:os'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
 import { Agent as UndiciAgent, type Dispatcher } from 'undici'
 import { runtimeCliEnv } from '../claude-locate'
@@ -323,7 +324,8 @@ export function isolatedOpenCodeChildEnv(
   configPath: string,
   configDir: string,
   authContent: string,
-  serverPassword: string
+  serverPassword: string,
+  sessionDatabasePath?: string
 ): NodeJS.ProcessEnv {
   const inherited = Object.fromEntries(
     Object.entries(sourceEnv).filter(([key]) => !key.startsWith('OPENCODE_') && !key.startsWith('XDG_'))
@@ -331,6 +333,7 @@ export function isolatedOpenCodeChildEnv(
   const openCodeApiKey = sourceEnv.OPENCODE_API_KEY?.trim()
   return {
     ...inherited,
+    HOME: root,
     ...(openCodeApiKey ? { OPENCODE_API_KEY: openCodeApiKey } : {}),
     XDG_CONFIG_HOME: join(root, 'xdg-config'),
     XDG_DATA_HOME: join(root, 'data'),
@@ -345,11 +348,59 @@ export function isolatedOpenCodeChildEnv(
     OPENCODE_CONFIG_DIR: configDir,
     OPENCODE_CONFIG_CONTENT: '{}',
     OPENCODE_AUTH_CONTENT: authContent,
-    OPENCODE_DB: join(root, 'data', 'opencode.db'),
+    OPENCODE_DB: sessionDatabasePath ?? join(root, 'data', 'opencode.db'),
     OPENCODE_SERVER_USERNAME: 'opencode',
     OPENCODE_SERVER_PASSWORD: serverPassword,
-    OPENCODE_DISABLE_PROJECT_CONFIG: 'true'
+    OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
+    OPENCODE_DISABLE_CLAUDE_CODE: 'true'
   }
+}
+
+async function ensurePrivateOpenCodeDirectory(path: string): Promise<void> {
+  await mkdir(path, { recursive: true, mode: 0o700 })
+  const before = await lstat(path)
+  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined
+  if (!before.isDirectory() || (uid !== undefined && before.uid !== uid)) {
+    throw new Error(`OpenCode session state 目录不可信：${path}`)
+  }
+  await chmod(path, 0o700)
+  const after = await lstat(path)
+  if (!after.isDirectory() || (after.mode & 0o777) !== 0o700 || (uid !== undefined && after.uid !== uid)) {
+    throw new Error(`OpenCode session state 目录权限不安全：${path}`)
+  }
+}
+
+export async function openCodeSessionDatabase(stateRoot: string, cwd: string): Promise<string> {
+  if (!isAbsolute(stateRoot)) throw new Error('OpenCode session state 根目录必须使用绝对路径')
+  const canonicalCwd = await realpath(cwd)
+  if (!(await stat(canonicalCwd)).isDirectory()) throw new Error('OpenCode 工作目录不是目录')
+  await ensurePrivateOpenCodeDirectory(stateRoot)
+  const workspaceDigest = createHash('sha256').update(canonicalCwd).digest('hex')
+  const workspaceDirectory = join(stateRoot, workspaceDigest)
+  await ensurePrivateOpenCodeDirectory(workspaceDirectory)
+  const database = join(workspaceDirectory, 'opencode.db')
+  let handle
+  try {
+    handle = await open(database, fsConstants.O_CREAT | fsConstants.O_RDWR | fsConstants.O_NOFOLLOW, 0o600)
+    const uid = typeof process.getuid === 'function' ? process.getuid() : undefined
+    const before = await handle.stat()
+    if (!before.isFile() || (uid !== undefined && before.uid !== uid)) {
+      throw new Error('OpenCode session database 不是 Scry 私有普通文件')
+    }
+    await handle.chmod(0o600)
+    const after = await handle.stat()
+    if (!after.isFile() || (after.mode & 0o777) !== 0o600 || (uid !== undefined && after.uid !== uid)) {
+      throw new Error('OpenCode session database 权限不安全')
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+      throw new Error('OpenCode session database 不允许符号链接（symlink）')
+    }
+    throw error
+  } finally {
+    await handle?.close()
+  }
+  return database
 }
 
 export function openCodeServerAuthorization(serverPassword: string): string {
@@ -402,6 +453,9 @@ async function waitForOpenCodeHealth(
 export interface OpenCodeServerState {
   cwd: string
   mcpFingerprint: string
+  projectFingerprint?: string
+  projectContentFingerprint?: string
+  hookTracePath?: string
   url: string
   pid?: number
   client: OpencodeClient
@@ -444,6 +498,322 @@ export function openCodeMcpConfig(execution?: AuthorizedMcpExecution): Record<st
   )
 }
 
+const OPEN_CODE_PROJECT_CONFIG_LIMIT = 1_000_000
+const OPEN_CODE_PROJECT_FILE_LIMIT = 4_000_000
+const OPEN_CODE_PROJECT_TOTAL_LIMIT = 16_000_000
+const OPEN_CODE_PROJECT_FILE_COUNT_LIMIT = 512
+
+export interface OpenCodeProjectProjection {
+  cwd: string
+  instructions: string[]
+  skillRoot?: string
+  fingerprint: string
+  contentFingerprint: string
+}
+
+export interface OpenCodeHookTraceRecord {
+  version: 1
+  stage: 'hook_started' | 'hook_response'
+  sessionId: string
+  callId: string
+  tool: string
+  timestamp: string
+  recordSha256: string
+}
+
+function pathWithin(root: string, candidate: string): boolean {
+  const suffix = relative(root, candidate)
+  return suffix === '' || (!isAbsolute(suffix) && suffix !== '..' && !suffix.startsWith(`..${sep}`))
+}
+
+async function assertNoProjectSymlink(root: string, candidate: string): Promise<void> {
+  const suffix = relative(root, candidate)
+  if (!pathWithin(root, candidate)) throw new Error(`OpenCode 项目路径逃逸项目目录：${suffix}`)
+  let current = root
+  for (const segment of suffix.split(sep).filter(Boolean)) {
+    current = join(current, segment)
+    if ((await lstat(current)).isSymbolicLink()) {
+      throw new Error(`OpenCode 项目配置不允许符号链接（symlink）：${relative(root, current)}`)
+    }
+  }
+}
+
+async function projectFile(
+  root: string,
+  rawPath: unknown
+): Promise<{ path: string; digest: string; size: number }> {
+  if (typeof rawPath !== 'string' || !rawPath.trim() || rawPath.includes('\0')) {
+    throw new Error('OpenCode instruction 必须是可信的项目本地路径')
+  }
+  const source = rawPath.trim()
+  const segments = source.split(/[\\/]+/)
+  if (
+    isAbsolute(source)
+    || segments.includes('..')
+    || /^(?:[a-z][a-z0-9+.-]*:|\\\\)/i.test(source)
+    || /[*?\[\]{}]/.test(source)
+  ) {
+    throw new Error(`OpenCode instruction 路径必须是项目目录内的可信本地文件：${source}`)
+  }
+  const lexical = resolve(root, source)
+  if (!pathWithin(root, lexical)) throw new Error(`OpenCode instruction 路径逃逸项目目录：${source}`)
+  await assertNoProjectSymlink(root, lexical)
+  const info = await stat(lexical)
+  if (!info.isFile()) throw new Error(`OpenCode instruction 路径不是普通文件：${source}`)
+  const extension = extname(lexical).toLowerCase()
+  if (extension !== '.md') {
+    throw new Error(`OpenCode instruction 仅允许项目内 Markdown 文件：${source}`)
+  }
+  if (info.size > OPEN_CODE_PROJECT_FILE_LIMIT) throw new Error(`OpenCode instruction 文件过大：${source}`)
+  const canonical = await realpath(lexical)
+  if (!pathWithin(root, canonical)) throw new Error(`OpenCode instruction 路径逃逸项目目录：${source}`)
+  const contents = await readFile(canonical)
+  return {
+    path: canonical,
+    digest: createHash('sha256').update(contents).digest('hex'),
+    size: contents.length
+  }
+}
+
+async function projectSkillTree(root: string): Promise<{
+  root?: string
+  files: Array<{ path: string; digest: string; size: number }>
+}> {
+  const lexicalRoot = join(root, '.opencode', 'skills')
+  let rootInfo
+  try {
+    rootInfo = await lstat(lexicalRoot)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { files: [] }
+    throw error
+  }
+  if (rootInfo.isSymbolicLink()) throw new Error('OpenCode 项目 Skill 根目录不允许符号链接（symlink）')
+  if (!rootInfo.isDirectory()) throw new Error('OpenCode 项目 Skill 根路径不是目录')
+  const canonicalRoot = await realpath(lexicalRoot)
+  if (!pathWithin(root, canonicalRoot)) throw new Error('OpenCode 项目 Skill 根目录逃逸项目目录')
+  const files: Array<{ path: string; digest: string; size: number }> = []
+  let totalSize = 0
+  let entryCount = 0
+  let hasSkill = false
+  const visit = async (directory: string, depth = 0): Promise<void> => {
+    if (depth > 20) throw new Error('OpenCode 项目 Skill 目录深度超限')
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+    for (const entry of entries) {
+      entryCount += 1
+      if (entryCount > OPEN_CODE_PROJECT_FILE_COUNT_LIMIT) throw new Error('OpenCode 项目 Skill 条目数量超限')
+      const path = join(directory, entry.name)
+      if (entry.isSymbolicLink()) {
+        throw new Error(`OpenCode 项目 Skill 不允许符号链接（symlink）：${relative(root, path)}`)
+      }
+      if (entry.isDirectory()) {
+        await visit(path, depth + 1)
+        continue
+      }
+      if (!entry.isFile()) throw new Error(`OpenCode 项目 Skill 包含特殊文件：${relative(root, path)}`)
+      const info = await stat(path)
+      if (info.size > OPEN_CODE_PROJECT_FILE_LIMIT) throw new Error(`OpenCode 项目 Skill 文件过大：${relative(root, path)}`)
+      totalSize += info.size
+      if (totalSize > OPEN_CODE_PROJECT_TOTAL_LIMIT) throw new Error('OpenCode 项目 Skill 总大小超限')
+      const canonical = await realpath(path)
+      if (!pathWithin(canonicalRoot, canonical)) throw new Error(`OpenCode 项目 Skill 路径逃逸：${relative(root, path)}`)
+      const contents = await readFile(canonical)
+      files.push({
+        path: canonical,
+        digest: createHash('sha256').update(contents).digest('hex'),
+        size: contents.length
+      })
+      if (entry.name === 'SKILL.md') hasSkill = true
+    }
+  }
+  await visit(canonicalRoot)
+  return hasSkill ? { root: canonicalRoot, files } : { files: [] }
+}
+
+function projectionFingerprint(
+  cwd: string,
+  instructions: string[],
+  skillRoot: string | undefined,
+  files: Map<string, { digest: string; size: number }>
+): { fingerprint: string; contentFingerprint: string } {
+  const manifest = [...files.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([path, value]) => ({ path: relative(cwd, path), ...value }))
+  const structure = {
+    instructions: instructions.map((path) => relative(cwd, path)),
+    skillRoot: skillRoot ? relative(cwd, skillRoot) : null
+  }
+  return {
+    fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(structure)).digest('hex')}`,
+    contentFingerprint: `sha256:${createHash('sha256').update(JSON.stringify(manifest)).digest('hex')}`
+  }
+}
+
+export async function readOpenCodeProjectProjection(cwd: string): Promise<OpenCodeProjectProjection> {
+  const canonicalCwd = await realpath(cwd)
+  if (!(await stat(canonicalCwd)).isDirectory()) throw new Error('OpenCode 工作目录不是目录')
+  const configPath = join(canonicalCwd, 'opencode.json')
+  let config: Record<string, unknown> = {}
+  try {
+    const configInfo = await lstat(configPath)
+    if (configInfo.isSymbolicLink()) throw new Error('OpenCode 项目配置不允许符号链接（symlink）：opencode.json')
+    if (!configInfo.isFile()) throw new Error('OpenCode 项目配置不是普通文件：opencode.json')
+    if (configInfo.size > OPEN_CODE_PROJECT_CONFIG_LIMIT) throw new Error('OpenCode 项目配置文件过大')
+    const parsed = JSON.parse(await readFile(configPath, 'utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('expected object')
+    config = parsed as Record<string, unknown>
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      if (error instanceof SyntaxError) throw new Error('OpenCode 项目配置不是有效 JSON')
+      throw error
+    }
+  }
+
+  if (config.instructions !== undefined && !Array.isArray(config.instructions)) {
+    throw new Error('OpenCode 项目 instructions 必须是路径数组')
+  }
+  const files = new Map<string, { digest: string; size: number }>()
+  const instructions: string[] = []
+  for (const item of config.instructions ?? []) {
+    const file = await projectFile(canonicalCwd, item)
+    if (!instructions.includes(file.path)) instructions.push(file.path)
+    files.set(file.path, { digest: file.digest, size: file.size })
+  }
+  const skills = await projectSkillTree(canonicalCwd)
+  for (const file of skills.files) files.set(file.path, { digest: file.digest, size: file.size })
+  const totalSize = [...files.values()].reduce((sum, file) => sum + file.size, 0)
+  if (totalSize > OPEN_CODE_PROJECT_TOTAL_LIMIT) throw new Error('OpenCode 项目配置投影总大小超限')
+  const fingerprints = projectionFingerprint(canonicalCwd, instructions, skills.root, files)
+  return {
+    cwd: canonicalCwd,
+    instructions,
+    ...(skills.root ? { skillRoot: skills.root } : {}),
+    ...fingerprints
+  }
+}
+
+export async function assertOpenCodeProjectProjection(projection: OpenCodeProjectProjection): Promise<void> {
+  const current = await readOpenCodeProjectProjection(projection.cwd)
+  if (
+    current.fingerprint !== projection.fingerprint
+    || current.contentFingerprint !== projection.contentFingerprint
+  ) {
+    throw new Error('OpenCode 项目配置投影 hash/fingerprint 已变化，拒绝继续启动')
+  }
+}
+
+export function openCodeSafeConfig(
+  execution: AuthorizedMcpExecution | undefined,
+  projection: OpenCodeProjectProjection,
+  observerPluginPath: string
+): Record<string, unknown> {
+  if (!isAbsolute(observerPluginPath)) throw new Error('Scry OpenCode observer plugin 必须使用绝对路径')
+  return {
+    mcp: openCodeMcpConfig(execution),
+    ...(projection.instructions.length > 0 ? { instructions: projection.instructions } : {}),
+    ...(projection.skillRoot ? { skills: { paths: [projection.skillRoot] } } : {}),
+    // Project plugins are executable JavaScript. Scry has no OpenCode plugin trust grant yet,
+    // so a local path/hash check is not authorization to execute them.
+    plugin: [pathToFileURL(observerPluginPath).href]
+  }
+}
+
+export function openCodeHookObserverSource(tracePath: string): string {
+  return `import { appendFile } from "node:fs/promises"
+
+const tracePath = ${JSON.stringify(tracePath)}
+const text = (value) => typeof value === "string" && value.length > 0 ? value.slice(0, 512) : null
+const record = async (stage, input = {}) => {
+  const sessionId = text(input.sessionID) ?? text(input.sessionId) ?? text(input.session_id)
+  const callId = text(input.callID) ?? text(input.callId) ?? text(input.call_id)
+  const tool = text(input.tool) ?? text(input.toolName) ?? text(input.name)
+  if (!sessionId || !callId || !tool) return
+  const line = JSON.stringify({ version: 1, stage, sessionId, callId, tool, timestamp: new Date().toISOString() }) + "\\n"
+  try { await appendFile(tracePath, line, { encoding: "utf8", mode: 0o600 }) } catch {}
+}
+
+export const ScryHookObserver = async () => ({
+  "tool.execute.before": async (input) => record("hook_started", input),
+  "tool.execute.after": async (input) => record("hook_response", input),
+})
+`
+}
+
+const OPEN_CODE_HOOK_TRACE_TURN_LIMIT = 4 * 1024 * 1024
+
+function assertOpenCodeHookTraceFile(info: Stats): void {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined
+  if (!info.isFile() || (info.mode & 0o777) !== 0o600 || (uid !== undefined && info.uid !== uid)) {
+    throw new Error('OpenCode Hook trace 不是 Scry 私有普通文件')
+  }
+}
+
+export async function openCodeHookTraceCursor(path?: string): Promise<number> {
+  if (!path) return 0
+  let handle
+  try {
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    const info = await handle.stat()
+    assertOpenCodeHookTraceFile(info)
+    return info.size
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('OpenCode Hook trace 文件缺失')
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Error('OpenCode Hook trace 不是可信普通文件')
+    throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+export async function readOpenCodeHookTrace(path: string, offset: number): Promise<OpenCodeHookTraceRecord[]> {
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('OpenCode Hook trace cursor 无效')
+  let handle
+  try {
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    const info = await handle.stat()
+    assertOpenCodeHookTraceFile(info)
+    if (offset > info.size) throw new Error('OpenCode Hook trace 在当前 turn 内被截断')
+    const length = info.size - offset
+    if (length > OPEN_CODE_HOOK_TRACE_TURN_LIMIT) throw new Error('OpenCode Hook trace 当前 turn 数据超过 4 MiB 上限')
+    const contents = Buffer.allocUnsafe(length)
+    let read = 0
+    while (read < length) {
+      const result = await handle.read(contents, read, length - read, offset + read)
+      if (result.bytesRead === 0) throw new Error('OpenCode Hook trace 在读取期间被截断')
+      read += result.bytesRead
+    }
+    if (contents.length === 0) return []
+    if (contents.at(-1) !== 0x0a) throw new Error('OpenCode Hook trace 包含未完成记录')
+    return contents.toString('utf8').split('\n').filter(Boolean).map((line): OpenCodeHookTraceRecord => {
+      let raw: unknown
+      try {
+        raw = JSON.parse(line)
+      } catch {
+        throw new Error('OpenCode Hook trace 包含无效 JSON')
+      }
+      const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+      if (
+        item.version !== 1
+        || (item.stage !== 'hook_started' && item.stage !== 'hook_response')
+        || typeof item.sessionId !== 'string' || !item.sessionId || item.sessionId.length > 512
+        || typeof item.callId !== 'string' || !item.callId || item.callId.length > 512
+        || typeof item.tool !== 'string' || !item.tool || item.tool.length > 512
+        || typeof item.timestamp !== 'string' || !Number.isFinite(Date.parse(item.timestamp))
+      ) throw new Error('OpenCode Hook trace 记录格式无效')
+      return {
+        ...(item as unknown as Omit<OpenCodeHookTraceRecord, 'recordSha256'>),
+        recordSha256: `sha256:${createHash('sha256').update(`${line}\n`).digest('hex')}`
+      }
+    })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('OpenCode Hook trace 文件缺失')
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Error('OpenCode Hook trace 不是可信普通文件')
+    throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
 export class OpenCodeServerManager {
   private active: (OpenCodeServerState & {
     process: ChildProcessWithoutNullStreams
@@ -461,7 +831,8 @@ export class OpenCodeServerManager {
   constructor(
     private readonly executable: () => string | undefined,
     private readonly privateMcpAuthDirectory?: string,
-    private readonly mcpAuthSeedOptions: OpenCodeMcpAuthSeedOptions = {}
+    private readonly mcpAuthSeedOptions: OpenCodeMcpAuthSeedOptions = {},
+    private readonly sessionStateRoot?: string
   ) {}
 
   get state(): OpenCodeServerState | null {
@@ -477,14 +848,26 @@ export class OpenCodeServerManager {
   }
 
   async ensure(cwd: string, mcpExecution?: AuthorizedMcpExecution): Promise<OpenCodeServerState> {
+    const projection = await readOpenCodeProjectProjection(cwd)
     const mcpFingerprint = mcpExecution?.fingerprint ?? 'none'
-    if (this.active?.cwd === cwd && this.active.mcpFingerprint === mcpFingerprint && this.active.process.exitCode === null) return this.active
+    if (
+      this.active?.cwd === projection.cwd
+      && this.active.mcpFingerprint === mcpFingerprint
+      && this.active.projectFingerprint === projection.fingerprint
+      && this.active.projectContentFingerprint === projection.contentFingerprint
+      && this.active.process.exitCode === null
+    ) return this.active
     if (this.starting) {
       const starting = await this.starting
-      if (starting.cwd === cwd && starting.mcpFingerprint === mcpFingerprint) return starting
+      if (
+        starting.cwd === projection.cwd
+        && starting.mcpFingerprint === mcpFingerprint
+        && starting.projectFingerprint === projection.fingerprint
+        && starting.projectContentFingerprint === projection.contentFingerprint
+      ) return starting
     }
     this.close()
-    const starting = this.start(cwd, this.startGeneration, mcpExecution)
+    const starting = this.start(projection, this.startGeneration, mcpExecution)
     this.starting = starting
     try {
       return await starting
@@ -505,7 +888,13 @@ export class OpenCodeServerManager {
     await persistOpenCodeMcpAuth(source, active.mcpAuthFile, target.name)
   }
 
-  private async start(cwd: string, generation: number, mcpExecution?: AuthorizedMcpExecution): Promise<OpenCodeServerState> {
+  private async start(
+    projection: OpenCodeProjectProjection,
+    generation: number,
+    mcpExecution?: AuthorizedMcpExecution
+  ): Promise<OpenCodeServerState> {
+    const cwd = projection.cwd
+    await assertOpenCodeProjectProjection(projection)
     const executable = this.executable()
     if (!executable) throw new Error('OpenCode executable 未找到')
     if (process.platform === 'darwin') {
@@ -527,10 +916,14 @@ export class OpenCodeServerManager {
       this.mcpAuthSeedOptions
     )
     const isolatedAuthContent = await isolatedOpenCodeAuthContent(sourceEnv)
+    const sessionDatabasePath = this.sessionStateRoot
+      ? await openCodeSessionDatabase(this.sessionStateRoot, cwd)
+      : undefined
     if (generation !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
     this.hookConfigDir = await mkdtemp(join(tmpdir(), 'scry-opencode-'))
     let isolatedConfigPath: string
     let isolatedConfigDir: string
+    let hookTracePath: string
     try {
       isolatedConfigDir = join(this.hookConfigDir, 'config')
       await mkdir(isolatedConfigDir, { mode: 0o700 })
@@ -543,8 +936,17 @@ export class OpenCodeServerManager {
         await writeFile(join(isolatedMcpAuthDir, 'mcp-auth.json'), mcpAuthSeed, { mode: 0o600 })
       }
       isolatedConfigPath = join(this.hookConfigDir, 'safe-config.json')
+      hookTracePath = join(this.hookConfigDir, 'hook-trace.jsonl')
+      const observerPluginPath = join(this.hookConfigDir, 'scry-hook-observer.mjs')
       await mkdir(join(this.hookConfigDir, 'managed'), { mode: 0o700 })
-      await writeFile(isolatedConfigPath, JSON.stringify({ mcp: openCodeMcpConfig(mcpExecution) }), { mode: 0o600 })
+      await writeFile(hookTracePath, '', { mode: 0o600 })
+      await writeFile(observerPluginPath, openCodeHookObserverSource(hookTracePath), { mode: 0o600 })
+      await writeFile(
+        isolatedConfigPath,
+        JSON.stringify(openCodeSafeConfig(mcpExecution, projection, observerPluginPath)),
+        { mode: 0o600 }
+      )
+      await assertOpenCodeProjectProjection(projection)
       if (generation !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
     } catch (error) {
       const dir = this.hookConfigDir
@@ -562,7 +964,8 @@ export class OpenCodeServerManager {
         isolatedConfigPath,
         isolatedConfigDir,
         isolatedAuthContent,
-        serverPassword
+        serverPassword,
+        sessionDatabasePath
       ),
       stdio: ['pipe', 'pipe', 'pipe']
     })
@@ -592,6 +995,7 @@ export class OpenCodeServerManager {
     const url = `http://127.0.0.1:${port}`
     try {
       await waitForOpenCodeHealth(url, authorization, child, () => spawnError)
+      await assertOpenCodeProjectProjection(projection)
       if (generation !== this.startGeneration || this.pendingChild !== child) {
         throw new Error('OpenCode server 启动已取消')
       }
@@ -621,6 +1025,9 @@ export class OpenCodeServerManager {
       const state = {
         cwd,
         mcpFingerprint: mcpExecution?.fingerprint ?? 'none',
+        projectFingerprint: projection.fingerprint,
+        projectContentFingerprint: projection.contentFingerprint,
+        hookTracePath,
         url,
         pid: child.pid,
         process: child,

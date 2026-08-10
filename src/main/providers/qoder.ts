@@ -1,4 +1,4 @@
-import { qodercliAuth, query, type AccountInfo, type McpServerStatus, type Query, type SlashCommand, type UsageInfo } from '@qoder-ai/qoder-agent-sdk'
+import { qodercliAuth, query, type AccountInfo, type McpServerStatus, type PermissionUpdate, type Query, type SlashCommand, type UsageInfo } from '@qoder-ai/qoder-agent-sdk'
 import { spawn } from 'node:child_process'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -7,6 +7,8 @@ import { capabilityReady, capabilityUnknown, type AccountSnapshot, type McpSnaps
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
+  exactSessionPermissionDescription,
+  exactSessionPermissionSuggestions,
   normalizeAgentQuestionRequest,
   type AgentPermissionMode,
   type AgentRunControlCatalog
@@ -41,6 +43,26 @@ const newId = (): string => `qoder-${Date.now().toString(36)}-${(counter++).toSt
 
 function missingFile(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+function qoderSkillScope(source: string): 'project' | 'user' | 'unknown' {
+  const normalized = source.trim().toLowerCase()
+  return normalized === 'project' || normalized === 'user' ? normalized : 'unknown'
+}
+
+function qoderAccountUsage(usage: UsageInfo | null): Omit<UsageInfo, 'session'> | undefined {
+  if (!usage) return undefined
+  const { session: _controlSession, ...accountUsage } = usage
+  return Object.keys(accountUsage).length > 0 ? accountUsage : undefined
+}
+
+function firstNonBlank(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const normalized = value.trim()
+    if (normalized) return normalized
+  }
+  return undefined
 }
 
 function projectCommandMatch(prompt: string): RegExpMatchArray | null {
@@ -450,7 +472,7 @@ function qoderTrace(event: TraceEvent): TraceEvent {
 export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
   const controls = new Map<string, QoderControlSession>()
   const skillCache = new Map<string, Cached<{ data: SkillMeta[]; total: number; included: number }>>()
-  const commandCache = new Map<string, Cached<SlashCommand[]>>()
+  const commandCache = new Map<string, Cached<{ commands: SlashCommand[]; skillNames?: Set<string>; reason?: string }>>()
   const modelCache = new Map<string, Cached<AgentRunControlCatalog>>()
   const accountCache = new Map<string, Cached<{ usage: UsageInfo | null; account: AccountInfo }>>()
   let lastHookFallbackError: string | undefined
@@ -660,7 +682,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                       signal: AbortSignal
                       toolUseID: string
                       agentID?: string
-                      suggestions?: unknown[]
+                      suggestions?: PermissionUpdate[]
                       title?: string
                       description?: string
                     }
@@ -692,14 +714,17 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                       }
                     }
                     if ((request.permissionMode ?? 'default') === 'full_access') return { behavior: 'allow' as const }
+                    const sessionSuggestions = exactSessionPermissionSuggestions(permission.suggestions)
+                    const sessionDescription = exactSessionPermissionDescription(sessionSuggestions)
                     const question = agentPermissionQuestion(
                       request.runId,
                       permission.toolUseID,
                       permission.title ?? '权限请求',
                       `允许 ${toolName} 执行这项操作吗？`,
                       permission.description ?? JSON.stringify(input).slice(0, 1_200),
-                      true,
-                      `qoder:permission:${toolName}`
+                      sessionDescription !== undefined,
+                      `qoder:permission:${toolName}`,
+                      sessionDescription
                     )
                     const response = await request.requestUserInput!(question, permission.signal)
                     const decision = agentPermissionDecision(question, response)
@@ -711,12 +736,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                         decisionClassification: 'user_reject' as const
                       }
                     }
+                    const applySessionSuggestions = decision === 'session' && sessionDescription !== undefined
                     return {
                       behavior: 'allow' as const,
-                      ...(decision === 'session' && permission.suggestions?.length
-                        ? { updatedPermissions: permission.suggestions }
+                      ...(applySessionSuggestions
+                        ? { updatedPermissions: sessionSuggestions }
                         : {}),
-                      decisionClassification: decision === 'session' ? 'user_permanent' as const : 'user_temporary' as const
+                      decisionClassification: applySessionSuggestions ? 'user_permanent' as const : 'user_temporary' as const
                     }
                   }
                 }
@@ -954,7 +980,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 data: (skills?.skillFrontmatter ?? []).map((skill) => ({
                   name: skill.name,
                   dir: skill.source,
-                  scope: skill.source,
+                  scope: qoderSkillScope(skill.source),
                   description: descriptions.get(skill.name) ?? '',
                   enabled: true
                 })),
@@ -980,20 +1006,39 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           const key = context.cwd ?? ''
           let value = commandCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            value = { data: await withControl(context, (q) => q.supportedCommands()), observedAt: Date.now() }
+            value = {
+              data: await withControl(context, async (q) => {
+                const commands = await q.supportedCommands()
+                try {
+                  const usage = await q.getContextUsage()
+                  const skills = usage.skills
+                  return {
+                    commands,
+                    skillNames: new Set((skills?.skillFrontmatter ?? []).map((skill) => skill.name)),
+                    ...(skills && skills.includedSkills < skills.totalSkills
+                      ? { reason: `Qoder 仅返回 ${skills.includedSkills}/${skills.totalSkills} 个已加载 Skill，其他命令来源保持未知` }
+                      : {})
+                  }
+                } catch (error) {
+                  return { commands, reason: `Qoder Skill catalog 读取失败，命令来源保持未知：${String((error as Error).message)}` }
+                }
+              }),
+              observedAt: Date.now()
+            }
             commandCache.set(key, value)
           }
-          return capabilityReady(
+          const ready = capabilityReady(
             context,
             'read',
-            value.data.map((command) => ({
+            value.data.commands.map((command) => ({
               name: command.name,
               description: command.description,
               argumentHint: command.argumentHint || undefined,
-              source: 'builtin' as const
+              source: value.data.skillNames?.has(command.name) ? 'skill' as const : undefined
             })),
             value.observedAt
           )
+          return value.data.reason ? { ...ready, state: 'degraded' as const, reason: value.data.reason } : ready
         } catch (error) {
           return capabilityUnknown(context, 'read', String((error as Error).message))
         }
@@ -1009,10 +1054,16 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             value = { data: { usage, account }, observedAt: Date.now() }
             accountCache.set(key, value)
           }
+          const accountLabel = firstNonBlank(value.data.account.email, value.data.account.name, value.data.account.userId)
+          const plan = firstNonBlank(value.data.account.subscriptionType, value.data.usage?.userType)
+          const usage = qoderAccountUsage(value.data.usage)
+          if (!accountLabel && !plan && !usage) {
+            return capabilityUnknown<AccountSnapshot>(context, 'read', 'Qoder 未返回账号或用量证据')
+          }
           const data: AccountSnapshot = {
-            accountLabel: value.data.account.email ?? value.data.account.name ?? value.data.account.userId,
-            plan: value.data.account.subscriptionType ?? value.data.usage?.userType,
-            usage: value.data.usage
+            ...(accountLabel ? { accountLabel } : {}),
+            ...(plan ? { plan } : {}),
+            ...(usage ? { usage } : {})
           }
           return capabilityReady(context, 'read', data, value.observedAt)
         } catch (error) {

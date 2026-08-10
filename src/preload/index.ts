@@ -169,6 +169,11 @@ const api = {
     ipcRenderer.on('agent:session', l)
     return () => ipcRenderer.removeListener('agent:session', l)
   },
+  onFocusedRun: (cb: (run: ActiveRun) => void): (() => void) => {
+    const l = (_: unknown, run: ActiveRun): void => cb(run)
+    ipcRenderer.on('agent:focusedRun', l)
+    return () => ipcRenderer.removeListener('agent:focusedRun', l)
+  },
   onQuestion: (cb: (request: AgentQuestionRequest) => void): (() => void) => {
     const l = (_: unknown, request: AgentQuestionRequest): void => cb(request)
     ipcRenderer.on('agent:userQuestion', l)

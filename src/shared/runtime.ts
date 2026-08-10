@@ -1,4 +1,5 @@
 import type { ProviderId } from './provider.js'
+import { maskSecrets } from './trace.js'
 
 export type RuntimeBackend = 'local' | 'api'
 export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server'
@@ -338,6 +339,54 @@ function boundedControlValue(value: unknown): string | undefined {
 
 export type AgentPermissionDecision = 'once' | 'session' | 'reject'
 
+type PermissionSuggestion = {
+  type: string
+  destination: string
+  behavior?: string
+  rules?: Array<{ toolName: string; ruleContent?: string }>
+}
+
+export function exactSessionPermissionSuggestions<T extends PermissionSuggestion>(
+  suggestions: readonly T[] | undefined
+): Array<T & {
+  type: 'addRules'
+  destination: 'session'
+  behavior: 'allow'
+  rules: Array<{ toolName: string; ruleContent: string }>
+}> {
+  return (suggestions ?? []).filter((suggestion): suggestion is T & {
+    type: 'addRules'
+    destination: 'session'
+    behavior: 'allow'
+    rules: Array<{ toolName: string; ruleContent: string }>
+  } => suggestion.destination === 'session'
+    && suggestion.type === 'addRules'
+    && suggestion.behavior === 'allow'
+    && Array.isArray(suggestion.rules)
+    && suggestion.rules.length > 0
+    && suggestion.rules.every((rule) => {
+      const toolName = typeof rule?.toolName === 'string' ? rule.toolName.trim() : ''
+      const ruleContent = typeof rule?.ruleContent === 'string' ? rule.ruleContent.trim() : ''
+      return Boolean(toolName && ruleContent && !toolName.includes('*') && !ruleContent.includes('*'))
+    }))
+}
+
+export const MAX_AGENT_PERMISSION_SESSION_DESCRIPTION_LENGTH = 1_200
+
+export function exactSessionPermissionDescription(
+  suggestions: ReadonlyArray<{ rules: ReadonlyArray<{ toolName: string; ruleContent: string }> }>
+): string | undefined {
+  const rules = suggestions.flatMap((suggestion) => suggestion.rules)
+  if (rules.length === 0) return undefined
+  const details = rules.map((rule) => {
+    const toolName = maskSecrets(rule.toolName)?.replace(/\s+/g, ' ').trim() ?? ''
+    const ruleContent = maskSecrets(rule.ruleContent)?.replace(/\s+/g, ' ').trim() ?? ''
+    return `• ${toolName} → ${ruleContent}`
+  })
+  const description = `仅在当前 Provider 运行内允许 ${rules.length} 条精确规则：\n${details.join('\n')}`
+  return description.length <= MAX_AGENT_PERMISSION_SESSION_DESCRIPTION_LENGTH ? description : undefined
+}
+
 export function agentPermissionQuestion(
   runId: string,
   questionId: string,
@@ -345,7 +394,8 @@ export function agentPermissionQuestion(
   question: string,
   description: string,
   allowSession = true,
-  source = 'permission_request'
+  source = 'permission_request',
+  sessionDescription = '允许这类操作直到当前原生会话结束'
 ): AgentQuestionRequest {
   return {
     runId,
@@ -358,7 +408,7 @@ export function agentPermissionQuestion(
       multiSelect: false,
       options: [
         { label: '允许一次', description },
-        ...(allowSession ? [{ label: '本次会话允许', description: '允许这类操作直到当前原生会话结束' }] : []),
+        ...(allowSession ? [{ label: '本次会话允许', description: sessionDescription }] : []),
         { label: '拒绝', description: '拒绝本次操作并让 Agent 继续处理结果' }
       ]
     }]

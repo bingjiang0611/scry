@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { Dispatcher } from 'undici'
 import type { TraceEvent } from '../../shared/trace'
@@ -15,13 +17,16 @@ vi.mock('../claude-locate', () => ({
 
 import {
   createOpenCodeAdapter,
+  emitOpenCodeHookEvents,
   emitOpenCodeEvent,
   handleOpenCodePermission,
   handleOpenCodeQuestion,
   openCodePermissionRules,
-  openCodeRunControlCatalog
+  openCodeRunControlCatalog,
+  openCodeSkillScope
 } from './opencode'
 import {
+  assertOpenCodeProjectProjection,
   createOpenCodeFetch,
   isolatedOpenCodeChildEnv,
   OPEN_CODE_LONG_REQUEST_TIMEOUTS,
@@ -30,11 +35,19 @@ import {
   openCodeMcpAuthSeed,
   openCodeMcpConfig,
   openCodeMcpAuthFile,
+  openCodeHookObserverSource,
+  openCodeHookTraceCursor,
+  openCodeSessionDatabase,
+  openCodeSafeConfig,
   openCodeServerAuthorization,
   persistOpenCodeMcpAuth,
   persistPrivateOpenCodeMcpAuth,
+  readOpenCodeHookTrace,
+  readOpenCodeProjectProjection,
   sanitizeOpenCodeAuth,
-  sanitizeOpenCodeServerLog
+  sanitizeOpenCodeServerLog,
+  type OpenCodeProjectProjection,
+  type OpenCodeServerState
 } from './opencode-server'
 
 describe('OpenCode provider adapter', () => {
@@ -191,6 +204,7 @@ describe('OpenCode provider adapter', () => {
 
   it('isolates every inherited OpenCode and XDG control path while preserving ordinary provider credentials', () => {
     const env = isolatedOpenCodeChildEnv({
+      HOME: '/outside/home',
       PATH: '/usr/bin',
       ANTHROPIC_API_KEY: 'provider-key',
       OPENCODE_API_KEY: 'zen-key',
@@ -199,7 +213,7 @@ describe('OpenCode provider adapter', () => {
       OPENCODE_PLUGIN_META_FILE: '/outside/plugins.json',
       XDG_DATA_HOME: '/outside/data',
       XDG_DATA_DIRS: '/outside/data-dirs'
-    }, '/isolated', '/isolated/safe-config.json', '/isolated/config', '{"openai":{"type":"oauth"}}', 'random-password')
+    }, '/isolated', '/isolated/safe-config.json', '/isolated/config', '{"openai":{"type":"oauth"}}', 'random-password', '/persistent/opencode.db')
 
     expect(env).toMatchObject({
       PATH: '/usr/bin',
@@ -208,17 +222,384 @@ describe('OpenCode provider adapter', () => {
       XDG_DATA_HOME: '/isolated/data',
       XDG_DATA_DIRS: '/isolated/data-dirs',
       XDG_RUNTIME_DIR: '/isolated/runtime',
-      OPENCODE_DB: '/isolated/data/opencode.db',
+      OPENCODE_DB: '/persistent/opencode.db',
       OPENCODE_CONFIG: '/isolated/safe-config.json',
       OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth"}}',
       OPENCODE_SERVER_USERNAME: 'opencode',
-      OPENCODE_SERVER_PASSWORD: 'random-password'
+      OPENCODE_SERVER_PASSWORD: 'random-password',
+      OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
+      OPENCODE_DISABLE_CLAUDE_CODE: 'true',
+      HOME: '/isolated'
     })
     expect(env).not.toHaveProperty('OPENCODE_WORKSPACE_ID')
     expect(env).not.toHaveProperty('OPENCODE_PLUGIN_META_FILE')
     expect(openCodeServerAuthorization('random-password')).toBe(
       `Basic ${Buffer.from('opencode:random-password').toString('base64')}`
     )
+  })
+
+  it('keeps the OpenCode session database stable per canonical workspace with private permissions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-session-db-'))
+    const stateRoot = join(root, 'provider-state', 'opencode-v1')
+    const repo = join(root, 'repo')
+    const otherRepo = join(root, 'other-repo')
+    const repoAlias = join(root, 'repo-alias')
+    try {
+      await mkdir(repo)
+      await mkdir(otherRepo)
+      await symlink(repo, repoAlias)
+
+      const database = await openCodeSessionDatabase(stateRoot, repo)
+      await writeFile(database, 'persistent-session-state')
+      const resumedDatabase = await openCodeSessionDatabase(stateRoot, repoAlias)
+      const otherDatabase = await openCodeSessionDatabase(stateRoot, otherRepo)
+
+      expect(resumedDatabase).toBe(database)
+      expect(otherDatabase).not.toBe(database)
+      expect(await readFile(resumedDatabase, 'utf8')).toBe('persistent-session-state')
+      expect((await stat(stateRoot)).mode & 0o777).toBe(0o700)
+      expect((await stat(dirname(database))).mode & 0o777).toBe(0o700)
+      expect((await stat(database)).mode & 0o777).toBe(0o600)
+      expect(dirname(database)).toMatch(/[a-f0-9]{64}$/)
+
+      const outsideDatabase = join(root, 'outside.db')
+      await writeFile(outsideDatabase, 'untrusted')
+      await rm(database)
+      await symlink(outsideDatabase, database)
+      await expect(openCodeSessionDatabase(stateRoot, repo)).rejects.toThrow(/符号链接|symlink/i)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('projects canonical project instructions and Skills without executing untrusted project plugins', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-project-config-'))
+    const repo = join(root, 'repo')
+    const skillRoot = join(repo, '.opencode', 'skills')
+    const skill = join(skillRoot, 'scry-e2e-audit', 'SKILL.md')
+    const plugin = join(repo, '.opencode', 'plugins', 'scry-e2e-hooks.js')
+    const observer = join(root, 'run-owned', 'scry-hook-observer.mjs')
+    try {
+      await mkdir(join(skillRoot, 'scry-e2e-audit'), { recursive: true })
+      await mkdir(join(repo, '.opencode', 'plugins'), { recursive: true })
+      await writeFile(join(repo, 'AGENTS.md'), '# project instructions\n')
+      await writeFile(join(repo, 'CLAUDE.md'), '# more project instructions\n')
+      await writeFile(skill, '---\nname: scry-e2e-audit\ndescription: fixture\n---\n')
+      await writeFile(plugin, 'export const Fixture = async () => ({})\n')
+      await mkdir(join(root, '.config', 'opencode'), { recursive: true })
+      await writeFile(join(root, 'opencode.json'), JSON.stringify({ plugin: ['ancestor-package'] }))
+      await writeFile(join(root, '.config', 'opencode', 'opencode.json'), JSON.stringify({ plugin: ['user-package'] }))
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({
+        instructions: ['AGENTS.md', 'CLAUDE.md'],
+        plugin: ['./.opencode/plugins/scry-e2e-hooks.js'],
+        permission: { '*': 'allow' },
+        provider: { forbidden: { npm: '@untrusted/provider' } },
+        mcp: { forbidden: { type: 'local', command: ['/bin/false'] } }
+      }))
+
+      const projection = await readOpenCodeProjectProjection(repo)
+      const config = openCodeSafeConfig(undefined, projection, observer)
+      const canonicalRepo = await realpath(repo)
+      const canonicalSkillRoot = await realpath(skillRoot)
+      const canonicalPlugin = await realpath(plugin)
+
+      expect(projection).toMatchObject({
+        cwd: canonicalRepo,
+        instructions: [join(canonicalRepo, 'AGENTS.md'), join(canonicalRepo, 'CLAUDE.md')],
+        skillRoot: canonicalSkillRoot,
+        fingerprint: expect.stringMatching(/^sha256:/),
+        contentFingerprint: expect.stringMatching(/^sha256:/)
+      })
+      expect(config).toEqual({
+        mcp: {},
+        instructions: [join(canonicalRepo, 'AGENTS.md'), join(canonicalRepo, 'CLAUDE.md')],
+        skills: { paths: [canonicalSkillRoot] },
+        plugin: [pathToFileURL(observer).href]
+      })
+      expect(config.plugin).not.toContain(pathToFileURL(canonicalPlugin).href)
+      expect(config).not.toHaveProperty('permission')
+      expect(config).not.toHaveProperty('provider')
+      await expect(assertOpenCodeProjectProjection(projection)).resolves.toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reuses an OpenCode server only while projected instruction and Skill contents stay unchanged', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-project-reuse-'))
+    const repo = join(root, 'repo')
+    const instruction = join(repo, 'AGENTS.md')
+    try {
+      await mkdir(repo)
+      await writeFile(instruction, '# original\n')
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ instructions: ['AGENTS.md'] }))
+      const projection = await readOpenCodeProjectProjection(repo)
+      const process = { exitCode: null, killed: true }
+      const dispatcher = { destroy: vi.fn() } as unknown as Dispatcher
+      const active = {
+        cwd: projection.cwd,
+        mcpFingerprint: 'none',
+        projectFingerprint: projection.fingerprint,
+        projectContentFingerprint: projection.contentFingerprint,
+        url: 'http://127.0.0.1:12345',
+        client: {} as OpencodeClient,
+        process,
+        dispatcher,
+        mcpAuthFile: ''
+      }
+      const manager = new OpenCodeServerManager(() => '/bin/opencode')
+      const internals = manager as unknown as {
+        active: typeof active | null
+        start: (projection: OpenCodeProjectProjection, generation: number) => Promise<OpenCodeServerState>
+      }
+      internals.active = active
+      const replacement: OpenCodeServerState = {
+        cwd: projection.cwd,
+        mcpFingerprint: 'none',
+        projectFingerprint: projection.fingerprint,
+        projectContentFingerprint: 'replacement',
+        url: 'http://127.0.0.1:54321',
+        client: {} as OpencodeClient
+      }
+      const start = vi.spyOn(internals, 'start').mockResolvedValue(replacement)
+
+      await expect(manager.ensure(repo)).resolves.toBe(active)
+      expect(start).not.toHaveBeenCalled()
+
+      await writeFile(instruction, '# changed\n')
+      const changed = await readOpenCodeProjectProjection(repo)
+      expect(changed.fingerprint).toBe(projection.fingerprint)
+      expect(changed.contentFingerprint).not.toBe(projection.contentFingerprint)
+      await expect(manager.ensure(repo)).resolves.toBe(replacement)
+      expect(start).toHaveBeenCalledOnce()
+      expect(start.mock.calls[0]?.[0].contentFingerprint).toBe(changed.contentFingerprint)
+      expect(dispatcher.destroy).toHaveBeenCalledOnce()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores project plugins while projected instructions and Skills fail closed on unsafe paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-project-config-deny-'))
+    const repo = join(root, 'repo')
+    const instruction = join(repo, 'AGENTS.md')
+    const outside = join(root, 'outside.md')
+    try {
+      await mkdir(repo, { recursive: true })
+      await writeFile(instruction, '# original\n')
+      await writeFile(outside, '# outside\n')
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({
+        instructions: ['AGENTS.md'],
+        plugin: ['untrusted-package']
+      }))
+      const projection = await readOpenCodeProjectProjection(repo)
+
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({
+        instructions: ['AGENTS.md'],
+        plugin: ['../outside.js', ['./plugin.js', { arbitrary: true }]]
+      }))
+      const ignoredPlugins = await readOpenCodeProjectProjection(repo)
+      expect(ignoredPlugins.fingerprint).toBe(projection.fingerprint)
+      expect(ignoredPlugins.contentFingerprint).toBe(projection.contentFingerprint)
+
+      await writeFile(instruction, '# mutated\n')
+      const mutated = await readOpenCodeProjectProjection(repo)
+      expect(mutated.fingerprint).toBe(projection.fingerprint)
+      expect(mutated.contentFingerprint).not.toBe(projection.contentFingerprint)
+      await expect(assertOpenCodeProjectProjection(projection)).rejects.toThrow(/变化|hash|fingerprint/i)
+
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ instructions: ['../outside.md'] }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/项目目录|逃逸|可信/i)
+
+      await rm(instruction)
+      await symlink(outside, instruction)
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ instructions: ['AGENTS.md'] }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/符号链接|symlink/i)
+
+      await rm(instruction)
+      await writeFile(instruction, '# safe\n')
+      await mkdir(join(repo, '.opencode', 'skills'), { recursive: true })
+      await symlink(join(root, 'outside-skills'), join(repo, '.opencode', 'skills', 'escaped'))
+      await mkdir(join(root, 'outside-skills'), { recursive: true })
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/符号链接|symlink/i)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('classifies native Skill scope from canonical project and home locations', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-skill-scope-'))
+    const home = join(root, 'home')
+    const repo = join(home, 'repo')
+    const projectSkill = join(repo, '.opencode', 'skills', 'project', 'SKILL.md')
+    const userSkill = join(home, '.config', 'opencode', 'skills', 'user', 'SKILL.md')
+    const outsideSkill = join(root, 'outside', 'SKILL.md')
+    const escapedSkill = join(repo, '.opencode', 'skills', 'escaped', 'SKILL.md')
+    try {
+      await mkdir(join(repo, '.opencode', 'skills', 'project'), { recursive: true })
+      await mkdir(join(home, '.config', 'opencode', 'skills', 'user'), { recursive: true })
+      await mkdir(join(root, 'outside'), { recursive: true })
+      await mkdir(join(repo, '.opencode', 'skills', 'escaped'), { recursive: true })
+      await writeFile(projectSkill, '# project\n')
+      await writeFile(userSkill, '# user\n')
+      await writeFile(outsideSkill, '# outside\n')
+      await symlink(outsideSkill, escapedSkill)
+
+      await expect(openCodeSkillScope(repo, projectSkill, home)).resolves.toBe('project')
+      await expect(openCodeSkillScope(repo, userSkill, home)).resolves.toBe('user')
+      await expect(openCodeSkillScope(repo, outsideSkill, home)).resolves.toBe('unknown')
+      await expect(openCodeSkillScope(repo, escapedSkill, home)).resolves.toBe('unknown')
+      await expect(openCodeSkillScope(repo, '<built-in>', home)).resolves.toBe('unknown')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('records authoritative OpenCode plugin hooks independently from the fixture marker', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-hook-observer-'))
+    const trace = join(root, 'hook-trace.jsonl')
+    const observer = join(root, 'observer.mjs')
+    try {
+      const source = openCodeHookObserverSource(trace)
+      expect(source).not.toContain('.scry-e2e')
+      expect(source).not.toContain('hook-events.jsonl')
+      await writeFile(observer, source, { mode: 0o600 })
+      const module = await import(`${pathToFileURL(observer).href}?test=${Date.now()}`)
+      const hooks = await module.ScryHookObserver()
+      await hooks['tool.execute.before']({ tool: 'read', sessionID: 'session-1', callID: 'call-1' })
+      await hooks['tool.execute.after']({ tool: 'read', sessionID: 'session-1', callID: 'call-1' }, {})
+
+      expect(await openCodeHookTraceCursor(trace)).toBeGreaterThan(0)
+      expect((await stat(trace)).isFile()).toBe(true)
+      const records = await readOpenCodeHookTrace(trace, 0)
+      expect(records).toEqual([
+        expect.objectContaining({ version: 1, stage: 'hook_started', sessionId: 'session-1', callId: 'call-1', tool: 'read', recordSha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) }),
+        expect.objectContaining({ version: 1, stage: 'hook_response', sessionId: 'session-1', callId: 'call-1', tool: 'read', recordSha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) })
+      ])
+      const lines = (await readFile(trace, 'utf8')).trimEnd().split('\n')
+      expect(records.map((record) => record.recordSha256)).toEqual(
+        lines.map((line) => `sha256:${createHash('sha256').update(`${line}\n`).digest('hex')}`)
+      )
+      await chmod(trace, 0o700)
+      await expect(openCodeHookTraceCursor(trace)).rejects.toThrow(/私有普通文件/)
+      await chmod(trace, 0o600)
+      const alias = join(root, 'hook-trace-alias.jsonl')
+      await symlink(trace, alias)
+      await expect(openCodeHookTraceCursor(alias)).rejects.toThrow(/普通文件|可信/)
+      const publicTrace = join(root, 'public-trace.jsonl')
+      await writeFile(publicTrace, '', { mode: 0o644 })
+      await expect(openCodeHookTraceCursor(publicTrace)).rejects.toThrow(/私有普通文件/)
+      const oversized = join(root, 'oversized-trace.jsonl')
+      await writeFile(oversized, Buffer.alloc(4 * 1024 * 1024 + 1, 0x20), { mode: 0o600 })
+      await expect(readOpenCodeHookTrace(oversized, 0)).rejects.toThrow(/4 MiB/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('emits only paired native OpenCode hook records for the exact session', () => {
+    const events: TraceEvent[] = []
+    const request = {
+      runId: 'run-hooks', prompt: 'inspect', cwd: '/repo', attachments: [],
+      emit: (event: TraceEvent) => events.push(event)
+    } satisfies ProviderRunRequest
+    const records = [
+      { version: 1 as const, stage: 'hook_started' as const, sessionId: 'session-1', callId: 'call-1', tool: 'read', timestamp: '2026-08-09T00:00:00.000Z', recordSha256: `sha256:${'1'.repeat(64)}` },
+      { version: 1 as const, stage: 'hook_response' as const, sessionId: 'other-session', callId: 'call-1', tool: 'read', timestamp: '2026-08-09T00:00:00.001Z', recordSha256: `sha256:${'2'.repeat(64)}` },
+      { version: 1 as const, stage: 'hook_response' as const, sessionId: 'session-1', callId: 'orphan', tool: 'write', timestamp: '2026-08-09T00:00:00.002Z', recordSha256: `sha256:${'3'.repeat(64)}` },
+      { version: 1 as const, stage: 'hook_response' as const, sessionId: 'session-1', callId: 'call-1', tool: 'read', timestamp: '2026-08-09T00:00:00.003Z', recordSha256: `sha256:${'4'.repeat(64)}` }
+    ]
+
+    emitOpenCodeHookEvents(request, records, 'session-1', '/run-owned/hook-trace.jsonl')
+
+    expect(events).toEqual([
+      expect.objectContaining({ kind: 'hook', stage: 'hook_started', hookId: 'opencode:session-1:call-1', hookEvent: 'ToolExecute', hookOutcome: 'started', toolUseId: 'call-1' }),
+      expect.objectContaining({ kind: 'hook', stage: 'hook_response', hookId: 'opencode:session-1:call-1', hookEvent: 'ToolExecute', hookOutcome: 'success', toolUseId: 'call-1' })
+    ])
+    expect(events[1]).not.toHaveProperty('hookExitCode')
+    expect(events.every((event) => event.runtimeMetadata?.source === 'opencode_native_plugin_hook')).toBe(true)
+    expect(events.every((event) => event.runtimeMetadata?.sourceTracePath === '/run-owned/hook-trace.jsonl')).toBe(true)
+    expect(events.every((event) => event.runtimeMetadata?.sourceRecordHashBasis === 'jsonl_utf8_with_lf')).toBe(true)
+    expect(events.map((event) => event.runtimeMetadata?.nativeHookEvent)).toEqual([
+      'tool.execute.before',
+      'tool.execute.after'
+    ])
+    expect(events.map((event) => event.runtimeMetadata?.sourceRecordSha256)).toEqual([
+      `sha256:${'1'.repeat(64)}`,
+      `sha256:${'4'.repeat(64)}`
+    ])
+  })
+
+  it('drops incomplete, reversed, and tool-mismatched OpenCode hook lifecycles', () => {
+    const events: TraceEvent[] = []
+    const request = {
+      runId: 'run-invalid-hooks', prompt: 'inspect', cwd: '/repo', attachments: [],
+      emit: (event: TraceEvent) => events.push(event)
+    } satisfies ProviderRunRequest
+    const record = (
+      stage: 'hook_started' | 'hook_response',
+      callId: string,
+      tool: string,
+      index: number
+    ) => ({
+      version: 1 as const, stage, sessionId: 'session-1', callId, tool,
+      timestamp: `2026-08-09T00:00:00.00${index}Z`, recordSha256: `sha256:${String(index).repeat(64)}`
+    })
+
+    emitOpenCodeHookEvents(request, [
+      record('hook_started', 'start-only', 'read', 1),
+      record('hook_response', 'reversed', 'read', 2),
+      record('hook_started', 'reversed', 'read', 3),
+      record('hook_started', 'mismatch', 'read', 4),
+      record('hook_response', 'mismatch', 'write', 5),
+      record('hook_started', 'ambiguous', 'read', 6),
+      record('hook_response', 'ambiguous', 'read', 7),
+      record('hook_started', 'ambiguous', 'read', 8)
+    ], 'session-1', '/run-owned/hook-trace.jsonl')
+
+    expect(events).toEqual([])
+  })
+
+  it('returns canonical project, user, and unknown scopes from native Skill metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-skill-list-'))
+    const home = join(root, 'home')
+    const repo = join(home, 'repo')
+    const projectSkill = join(repo, '.opencode', 'skills', 'project', 'SKILL.md')
+    const userSkill = join(home, '.config', 'opencode', 'skills', 'user', 'SKILL.md')
+    const outsideSkill = join(root, 'outside', 'SKILL.md')
+    await Promise.all([
+      mkdir(join(repo, '.opencode', 'skills', 'project'), { recursive: true }),
+      mkdir(join(home, '.config', 'opencode', 'skills', 'user'), { recursive: true }),
+      mkdir(join(root, 'outside'), { recursive: true })
+    ])
+    await Promise.all([
+      writeFile(projectSkill, '# project\n'),
+      writeFile(userSkill, '# user\n'),
+      writeFile(outsideSkill, '# outside\n')
+    ])
+    const client = {
+      v2: { skill: { list: vi.fn(async () => ({ data: { location: {}, data: [
+        { name: 'project', location: projectSkill, description: 'project' },
+        { name: 'user', location: userSkill, description: 'user' },
+        { name: 'outside', location: outsideSkill, description: 'outside' }
+      ] } })) } }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: repo, mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 41, client
+    })
+    const adapter = createOpenCodeAdapter(home)
+    try {
+      const result = await adapter.skills!.list({ providerId: 'opencode', cwd: repo })
+      expect(result.data).toEqual([
+        expect.objectContaining({ name: 'project', scope: 'project', dir: projectSkill }),
+        expect.objectContaining({ name: 'user', scope: 'user', dir: userSkill }),
+        expect.objectContaining({ name: 'outside', scope: 'unknown', dir: outsideSkill })
+      ])
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('disables Undici header/body timeouts only for synchronous long-running session requests', async () => {
@@ -850,26 +1231,35 @@ describe('OpenCode provider adapter', () => {
   })
 
   it('returns the native message id/timing and aborts the SSE subscription after a successful slash command', async () => {
+    const hookRoot = await mkdtemp(join(tmpdir(), 'scry-opencode-run-hooks-'))
+    const hookTracePath = join(hookRoot, 'hook-trace.jsonl')
+    await writeFile(hookTracePath, '', { mode: 0o600 })
     const emitted: TraceEvent[] = []
     let subscriptionSignal: AbortSignal | undefined
     let retryDelaySettled = false
     const client = {
       session: {
         create: vi.fn(async () => ({ data: { id: 'session-1' } })),
-        command: vi.fn(async () => ({
-          data: {
-            info: {
-              id: 'message-1',
-              time: { created: 1_000, completed: 4_000 },
-              tokens: { input: 3, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
-              cost: 0,
-              providerID: 'anthropic',
-              modelID: 'model-1',
-              finish: 'length'
-            },
-            parts: []
+        command: vi.fn(async () => {
+          await appendFile(hookTracePath, [
+            JSON.stringify({ version: 1, stage: 'hook_started', sessionId: 'session-1', callId: 'call-1', tool: 'read', timestamp: '2026-08-09T00:00:00.000Z' }),
+            JSON.stringify({ version: 1, stage: 'hook_response', sessionId: 'session-1', callId: 'call-1', tool: 'read', timestamp: '2026-08-09T00:00:00.010Z' })
+          ].join('\n') + '\n')
+          return {
+            data: {
+              info: {
+                id: 'message-1',
+                time: { created: 1_000, completed: 4_000 },
+                tokens: { input: 3, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+                cost: 0,
+                providerID: 'anthropic',
+                modelID: 'model-1',
+                finish: 'length'
+              },
+              parts: []
+            }
           }
-        })),
+        }),
         abort: vi.fn(async () => ({ data: true }))
       },
       event: {
@@ -891,6 +1281,7 @@ describe('OpenCode provider adapter', () => {
       mcpFingerprint: 'none',
       url: 'http://127.0.0.1:12345',
       pid: 42,
+      hookTracePath,
       client
     })
     const adapter = createOpenCodeAdapter()
@@ -913,6 +1304,17 @@ describe('OpenCode provider adapter', () => {
       expect(handle.getProviderTurnId?.()).toBe('message-1')
       expect(subscriptionSignal?.aborted).toBe(true)
       expect(retryDelaySettled).toBe(true)
+      expect(emitted.filter((event) => event.kind === 'hook')).toEqual([
+        expect.objectContaining({
+          stage: 'hook_started', hookId: 'opencode:session-1:call-1', hookOutcome: 'started',
+          runtimeMetadata: expect.objectContaining({ sourceTracePath: hookTracePath, sourceRecordSha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) })
+        }),
+        expect.objectContaining({
+          stage: 'hook_response', hookId: 'opencode:session-1:call-1', hookOutcome: 'success',
+          runtimeMetadata: expect.objectContaining({ sourceTracePath: hookTracePath, sourceRecordSha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) })
+        })
+      ])
+      expect(emitted.find((event) => event.stage === 'hook_response')).not.toHaveProperty('hookExitCode')
       expect(emitted.at(-1)).toMatchObject({
         kind: 'harness',
         stage: 'result',
@@ -926,6 +1328,7 @@ describe('OpenCode provider adapter', () => {
     } finally {
       adapter.dispose?.()
       ensure.mockRestore()
+      await rm(hookRoot, { recursive: true, force: true })
     }
   })
 

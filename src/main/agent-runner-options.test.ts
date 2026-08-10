@@ -177,6 +177,140 @@ describe('Claude Agent SDK launch options', () => {
     expect(sdk.query.mock.calls[0][0].options).not.toHaveProperty('permissionMode')
   })
 
+  it('returns only exact session-scoped suggestions and asks again for a different rule', async () => {
+    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    const requestUserInput = vi.fn(async (request) => ({
+      runId: request.runId,
+      questionId: request.questionId,
+      behavior: 'answered' as const,
+      answers: { [request.questions[0].question]: '本次会话允许' }
+    }))
+    const run = runAgent('probe', 'run-probe', () => {}, { requestUserInput, permissionMode: 'default' })
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool
+    const persistentSuggestion = {
+      type: 'addRules' as const,
+      rules: [{ toolName: 'Bash', ruleContent: 'Bash(pwd)' }],
+      behavior: 'allow' as const,
+      destination: 'projectSettings' as const
+    }
+    const bearerToken = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    const firstSessionSuggestion = {
+      type: 'addRules' as const,
+      rules: [
+        { toolName: 'Bash', ruleContent: `curl -H "Authorization: Bearer ${bearerToken}" https://example.test` },
+        { toolName: 'Read', ruleContent: '/repo/package.json' }
+      ],
+      behavior: 'allow' as const,
+      destination: 'session' as const
+    }
+    const secondSessionSuggestion = {
+      ...firstSessionSuggestion,
+      rules: [{ toolName: 'Bash', ruleContent: 'Bash(git status)' }]
+    }
+
+    await expect(canUseTool(
+      'Bash',
+      { command: 'pwd' },
+      {
+        signal: new AbortController().signal,
+        toolUseID: 'tool-session-1',
+        suggestions: [persistentSuggestion, firstSessionSuggestion]
+      }
+    )).resolves.toEqual({
+      behavior: 'allow',
+      updatedPermissions: [firstSessionSuggestion],
+      decisionClassification: 'user_permanent'
+    })
+    await expect(canUseTool(
+      'Bash',
+      { command: 'git status' },
+      {
+        signal: new AbortController().signal,
+        toolUseID: 'tool-session-2',
+        suggestions: [secondSessionSuggestion]
+      }
+    )).resolves.toEqual({
+      behavior: 'allow',
+      updatedPermissions: [secondSessionSuggestion],
+      decisionClassification: 'user_permanent'
+    })
+
+    expect(requestUserInput).toHaveBeenCalledTimes(2)
+    expect(requestUserInput.mock.calls[0][0].questions[0].options).toContainEqual(expect.objectContaining({
+      label: '本次会话允许',
+      description: expect.stringContaining('Bash → curl -H "Authorization: «REDACTED»" https://example.test')
+    }))
+    expect(requestUserInput.mock.calls[0][0].questions[0].options).toContainEqual(expect.objectContaining({
+      label: '本次会话允许',
+      description: expect.stringContaining('Read → /repo/package.json')
+    }))
+    expect(requestUserInput.mock.calls[0][0].questions[0].options[1].description).not.toContain(bearerToken)
+    expect(requestUserInput.mock.calls[1][0].questions[0].options).toContainEqual(expect.objectContaining({
+      label: '本次会话允许',
+      description: expect.stringContaining('1 条精确规则')
+    }))
+    await run.promise
+  })
+
+  it('does not offer or claim session permission without safe exact session suggestions', async () => {
+    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    const requests: Array<{ questions: Array<{ question: string; options: Array<{ label: string }> }> }> = []
+    const requestUserInput = vi.fn(async (request) => {
+      requests.push(request)
+      return {
+        runId: request.runId,
+        questionId: request.questionId,
+        behavior: 'answered' as const,
+        // Forge the hidden answer to verify main still fails closed.
+        answers: { [request.questions[0].question]: '本次会话允许' }
+      }
+    })
+    const run = runAgent('probe', 'run-probe', () => {}, { requestUserInput, permissionMode: 'default' })
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool
+    const persistentSuggestion = {
+      type: 'addRules' as const,
+      rules: [{ toolName: 'Bash', ruleContent: 'Bash(pwd)' }],
+      behavior: 'allow' as const,
+      destination: 'localSettings' as const
+    }
+    const exactRule = [{ toolName: 'Bash', ruleContent: 'Bash(pwd)' }]
+    const unsafeSessionSuggestions = [
+      { type: 'setMode' as const, mode: 'acceptEdits' as const, destination: 'session' as const },
+      { type: 'addDirectories' as const, directories: ['/tmp'], destination: 'session' as const },
+      { type: 'removeDirectories' as const, directories: ['/tmp'], destination: 'session' as const },
+      { type: 'replaceRules' as const, rules: exactRule, behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'removeRules' as const, rules: exactRule, behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: 'Bash' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: ' ', ruleContent: 'Bash(pwd)' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: 'Bash', ruleContent: ' ' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: '*', ruleContent: '*' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [{ toolName: 'Bash', ruleContent: 'Bash(*)' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: [...exactRule, { toolName: 'Read' }], behavior: 'allow' as const, destination: 'session' as const },
+      { type: 'addRules' as const, rules: exactRule, behavior: 'ask' as const, destination: 'session' as const }
+    ]
+
+    for (const [toolUseID, suggestions] of [
+      ['tool-missing', undefined],
+      ['tool-empty', []],
+      ['tool-persistent', [persistentSuggestion]],
+      ['tool-unsafe-session', unsafeSessionSuggestions]
+    ] as const) {
+      const result = await canUseTool(
+        'Bash',
+        { command: 'pwd' },
+        { signal: new AbortController().signal, toolUseID, ...(suggestions === undefined ? {} : { suggestions }) }
+      )
+      expect(result).toEqual({ behavior: 'allow', decisionClassification: 'user_temporary' })
+    }
+
+    expect(requests).toHaveLength(4)
+    for (const request of requests) {
+      expect(request.questions[0].options.map((option) => option.label)).toEqual(['允许一次', '拒绝'])
+    }
+    await run.promise
+  })
+
   it('returns a non-interrupting denial when the user cancels a question', async () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {}
