@@ -320,7 +320,7 @@ describe('aggregateHooks', () => {
     })
     expect(preToolUse.scripts[1].unsuccessful.map((event) => event.hookId)).toEqual(['hk-2'])
     expect(preToolUse.scripts[1].lastError?.hookId).toBe('hk-2')
-    expect(r.groups[0]).toMatchObject({ event: 'SessionStart', logicalRuns: 1, pending: 1, triggerRuns: null })
+    expect(r.groups[0]).toMatchObject({ event: 'SessionStart', logicalRuns: 1, pending: 1, triggerRuns: 1 })
   })
 
   it('全局桥接命令优先用 expected-marker 展示逻辑脚本短名', () => {
@@ -357,6 +357,7 @@ describe('aggregateHooks', () => {
 
     const summary = aggregateHooks(items)
     expect(summary).toMatchObject({ logicalRuns: 2, responses: 2, rawEvents: 4 })
+    expect(summary.groups[0]).toMatchObject({ triggerRuns: 2, logicalRuns: 2 })
     expect(summary.groups[0].scripts[0]).toMatchObject({ logicalRuns: 2, responses: 2, rawEvents: 4 })
     expect(summary.groups[0].scripts[0].instances).toHaveLength(2)
   })
