@@ -524,6 +524,44 @@ describe('Qoder provider adapter', () => {
     await adapter.dispose?.()
   })
 
+  it('bounds a control session that never initializes and retries with a fresh session', async () => {
+    vi.useFakeTimers()
+    try {
+      sdk.query.mockReturnValueOnce({
+        initializationResult: vi.fn().mockReturnValue(new Promise(() => {})),
+        close: sdk.close
+      })
+      const adapter = createQoderAdapter()
+      const pending = adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })
+      await vi.advanceTimersByTimeAsync(20_000)
+
+      await expect(pending).resolves.toMatchObject({
+        state: 'degraded',
+        data: { models: [] },
+        reason: expect.stringContaining('未完成初始化')
+      })
+      expect(sdk.close).toHaveBeenCalled()
+
+      sdk.query.mockReturnValueOnce({
+        initializationResult: vi.fn().mockResolvedValue({
+          models: [{ value: 'ultimate', displayName: 'Ultimate', isEnabled: true, efforts: [] }]
+        }),
+        close: sdk.close
+      })
+      const retry = adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })
+      await vi.advanceTimersByTimeAsync(0)
+
+      await expect(retry).resolves.toMatchObject({
+        state: 'ready',
+        data: { models: [{ model: { id: 'ultimate' } }] }
+      })
+      expect(sdk.query).toHaveBeenCalledTimes(2)
+      await adapter.dispose?.()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('deduplicates streamed text and treats impossible all-zero usage as unknown', async () => {
     const close = vi.fn().mockResolvedValue(undefined)
     sdk.query.mockReturnValue({

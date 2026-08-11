@@ -36,6 +36,8 @@ interface QoderControlSession {
 }
 
 const PROBE_TTL_MS = 30_000
+const CONTROL_READY_TIMEOUT_MS = 20_000
+const CONTROL_READY_TIMEOUT_REASON = `Qoder 控制会话 ${CONTROL_READY_TIMEOUT_MS / 1000} 秒内未完成初始化`
 const QODER_MCP_AUTH_TIMEOUT_MS = 120_000
 const MAX_PROJECT_COMMAND_BYTES = 256 * 1024
 let counter = 0
@@ -510,10 +512,20 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
     if (session.idleTimer) clearTimeout(session.idleTimer)
     session.active++
     try {
-      const initialized = await session.ready
+      const initialized = await Promise.race([
+        session.ready,
+        new Promise<never>((_resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(CONTROL_READY_TIMEOUT_REASON)), CONTROL_READY_TIMEOUT_MS)
+          void session.ready.catch(() => {}).finally(() => clearTimeout(timer))
+        })
+      ])
       return await read(session.query, initialized)
     } catch (error) {
-      if (/transport|closed|process|broken pipe/i.test(String((error as Error).message))) closeControl(key, session)
+      const message = String((error as Error).message)
+      // 初始化没完成的会话不会自愈：留在 controls 里会让后续读取一直 await 同一个死 promise。
+      if (message === CONTROL_READY_TIMEOUT_REASON || /transport|closed|process|broken pipe/i.test(message)) {
+        closeControl(key, session)
+      }
       throw error
     } finally {
       session.active--
