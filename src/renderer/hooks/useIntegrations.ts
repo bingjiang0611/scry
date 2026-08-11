@@ -117,6 +117,172 @@ const fallbackRunControlCatalog = (permissionMode: AgentPermissionMode): AgentRu
   }]
 })
 
+const RUN_CONTROL_CATALOG_KEY = 'scry:run-control-catalog:v1'
+const RUN_CONTROL_CATALOG_MAX_CONTEXTS = 8
+const RUN_CONTROL_CATALOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+const parseEffortOption = (value: unknown): AgentRunControlCatalog['models'][number]['efforts'][number] | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const id = boundedPreferenceValue(record.id)
+  if (!id) return undefined
+  return {
+    id,
+    label: boundedPreferenceValue(record.label) ?? id,
+    ...(boundedPreferenceValue(record.description) ? { description: boundedPreferenceValue(record.description) } : {}),
+    ...(record.isDefault === true ? { isDefault: true } : {})
+  }
+}
+
+const parseModelOption = (value: unknown): AgentRunControlCatalog['models'][number] | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const model = record.model
+  if (!model || typeof model !== 'object' || Array.isArray(model)) return undefined
+  const id = boundedPreferenceValue((model as Record<string, unknown>).id)
+  if (!id) return undefined
+  const providerId = boundedPreferenceValue((model as Record<string, unknown>).providerId)
+  return {
+    model: { id, ...(providerId ? { providerId } : {}) },
+    label: boundedPreferenceValue(record.label) ?? id,
+    ...(boundedPreferenceValue(record.description) ? { description: boundedPreferenceValue(record.description) } : {}),
+    ...(record.isDefault === true ? { isDefault: true } : {}),
+    efforts: (Array.isArray(record.efforts) ? record.efforts : []).flatMap((effort) => {
+      const parsed = parseEffortOption(effort)
+      return parsed ? [parsed] : []
+    })
+  }
+}
+
+const parsePermissionOption = (value: unknown): AgentRunControlCatalog['permissions'][number] | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const id = record.id
+  if (id !== 'default' && id !== 'auto_review' && id !== 'full_access') return undefined
+  const label = boundedPreferenceValue(record.label)
+  const description = boundedPreferenceValue(record.description)
+  return label && description ? { id, label, description } : undefined
+}
+
+export function parseRunControlCatalogCache(
+  raw: string | null,
+  now = Date.now()
+): Map<string, CapabilityEnvelope<AgentRunControlCatalog>> {
+  const cache = new Map<string, CapabilityEnvelope<AgentRunControlCatalog>>()
+  if (!raw) return cache
+  try {
+    const stored = JSON.parse(raw) as unknown
+    const entries = stored && typeof stored === 'object' && Array.isArray((stored as Record<string, unknown>).entries)
+      ? ((stored as Record<string, unknown>).entries as unknown[])
+      : []
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+      const record = entry as Record<string, unknown>
+      const providerId = PROVIDER_IDS.find((candidate) => candidate === record.providerId)
+      const observedAt = typeof record.observedAt === 'number' && Number.isFinite(record.observedAt)
+        ? record.observedAt
+        : undefined
+      if (!providerId || observedAt === undefined) continue
+      if (observedAt > now || now - observedAt > RUN_CONTROL_CATALOG_MAX_AGE_MS) continue
+      const cwd = typeof record.cwd === 'string' && record.cwd.length <= 4_096
+        ? record.cwd
+        : undefined
+      if (record.cwd !== undefined && cwd === undefined) continue
+      const models = (Array.isArray(record.models) ? record.models : []).flatMap((model) => {
+        const parsed = parseModelOption(model)
+        return parsed ? [parsed] : []
+      })
+      const permissions = (Array.isArray(record.permissions) ? record.permissions : []).flatMap((permission) => {
+        const parsed = parsePermissionOption(permission)
+        return parsed ? [parsed] : []
+      })
+      if (models.length === 0 || permissions.length === 0) continue
+      const context: ProviderContext = { providerId, ...(cwd ? { cwd } : {}) }
+      cache.set(contextKey(context), {
+        ...context,
+        mode: 'read',
+        // 上一次运行留下的目录只用于立刻渲染选项；运行权限仍要等本次 Provider 探测确认，保持 fail closed。
+        state: 'unknown',
+        data: { models, permissions },
+        reason: `最后已知模型目录（${new Date(observedAt).toLocaleString()} 读取）；正在向 Provider 复核运行权限`,
+        observedAt
+      })
+      if (cache.size >= RUN_CONTROL_CATALOG_MAX_CONTEXTS) break
+    }
+  } catch {
+    return new Map()
+  }
+  return cache
+}
+
+export function serializeRunControlCatalogCache(
+  cache: Map<string, CapabilityEnvelope<AgentRunControlCatalog>>
+): string {
+  const entries = [...cache.values()]
+    .flatMap((envelope) =>
+      envelope.data && envelope.data.models.length > 0
+        ? [{
+            providerId: envelope.providerId,
+            ...(envelope.cwd ? { cwd: envelope.cwd } : {}),
+            observedAt: envelope.observedAt ?? Date.now(),
+            models: envelope.data.models,
+            permissions: envelope.data.permissions
+          }]
+        : []
+    )
+    .sort((left, right) => right.observedAt - left.observedAt)
+    .slice(0, RUN_CONTROL_CATALOG_MAX_CONTEXTS)
+  return JSON.stringify({ entries })
+}
+
+function readRunControlCatalogCache(): Map<string, CapabilityEnvelope<AgentRunControlCatalog>> {
+  if (typeof window === 'undefined') return new Map()
+  try {
+    return parseRunControlCatalogCache(window.localStorage.getItem(RUN_CONTROL_CATALOG_KEY))
+  } catch {
+    return new Map()
+  }
+}
+
+function writeRunControlCatalogCache(cache: Map<string, CapabilityEnvelope<AgentRunControlCatalog>>): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(RUN_CONTROL_CATALOG_KEY, serializeRunControlCatalogCache(cache))
+  } catch {
+    // localStorage 不可用时退化为仅进程内缓存，不影响本次会话的模型选择。
+  }
+}
+
+export function isAuthoritativeRunControlCatalog(
+  result: CapabilityEnvelope<AgentRunControlCatalog>
+): boolean {
+  return result.data != null && (
+    result.state === 'ready' ||
+    (result.state === 'degraded' && result.data.models.length > 0)
+  )
+}
+
+export function shouldKeepCachedRunControlCatalog(
+  cached: AgentRunControlCatalog | undefined,
+  result: CapabilityEnvelope<AgentRunControlCatalog>
+): boolean {
+  if (!cached || cached.models.length === 0) return false
+  return !isAuthoritativeRunControlCatalog(result)
+}
+
+export function retainCachedRunControlCatalog(
+  cached: CapabilityEnvelope<AgentRunControlCatalog>,
+  result: CapabilityEnvelope<AgentRunControlCatalog>
+): CapabilityEnvelope<AgentRunControlCatalog> {
+  return {
+    ...cached,
+    state: 'unknown',
+    reason: result.reason
+      ? `当前显示最后已知模型目录；${result.reason}`
+      : cached.reason ?? '当前显示最后已知模型目录；Provider 尚未确认本次运行权限'
+  }
+}
+
 export function resolveRunControlSelection(
   catalog: AgentRunControlCatalog,
   current: AgentRunControls
@@ -187,13 +353,14 @@ export function runControlSendBlockedReason(
   loading: boolean,
   controls: AgentRunControls
 ): string | null {
-  if (
-    capability === null &&
-    loading &&
+  const usesProviderDefaults =
     controls.permissionMode === 'default' &&
     controls.model == null &&
     controls.effort == null
-  ) return null
+  if (usesProviderDefaults && (
+    (capability === null && loading) ||
+    (capability?.state === 'unknown' && (capability.data?.models.length ?? 0) > 0)
+  )) return null
   return !capability || capability.data == null ||
     (capability.state !== 'ready' && capability.state !== 'degraded')
     ? capability?.reason ?? '运行权限能力尚未确认，暂不能发送'
@@ -211,18 +378,26 @@ export function requestRunControlsForSelectedProvider<T>(
 export function useIntegrations(cwd: string | null) {
   const storedRunControlPreferences = useMemo(readRunControlPreferences, [])
   const initialProviderId = providerIdForAgentId(storedRunControlPreferences.selectedAgentId) ?? 'claude'
+  const storedRunControlCatalogs = useMemo(readRunControlCatalogCache, [])
+  const initialRunControlCatalog = storedRunControlCatalogs.get(
+    contextKey({ providerId: initialProviderId, cwd: cwd ?? undefined })
+  )
   const [agents, setAgents] = useState<DetectedAgent[]>([])
   const [agentsHydrated, setAgentsHydrated] = useState(false)
   const [agentsScanning, setAgentsScanning] = useState(true)
   const [selectedId, setSelectedId] = useState(storedRunControlPreferences.selectedAgentId)
-  const [runControls, setRunControls] = useState<AgentRunControls>(
-    storedRunControlPreferences.controlsByProvider[initialProviderId] ?? { permissionMode: 'default' }
-  )
+  const [runControls, setRunControls] = useState<AgentRunControls>(() => {
+    const stored = storedRunControlPreferences.controlsByProvider[initialProviderId] ??
+      { permissionMode: 'default' as const }
+    return initialRunControlCatalog?.data
+      ? resolveRunControlSelection(initialRunControlCatalog.data, stored)
+      : stored
+  })
   const [runControlCatalog, setRunControlCatalog] = useState<AgentRunControlCatalog>(
-    fallbackRunControlCatalog('default')
+    initialRunControlCatalog?.data ?? fallbackRunControlCatalog('default')
   )
   const [runControlCapability, setRunControlCapability] =
-    useState<CapabilityEnvelope<AgentRunControlCatalog> | null>(null)
+    useState<CapabilityEnvelope<AgentRunControlCatalog> | null>(initialRunControlCatalog ?? null)
   const [runControlsLoading, setRunControlsLoading] = useState(false)
   const [skills, setSkills] = useState<SkillMeta[]>([])
   const [skillCapability, setSkillCapability] = useState<CapabilityEnvelope<SkillMeta[]> | null>(null)
@@ -266,9 +441,7 @@ export function useIntegrations(cwd: string | null) {
       return controls ? [[providerId, controls]] : []
     })
   ))
-  const runControlCatalogByContext = useRef(
-    new Map<string, CapabilityEnvelope<AgentRunControlCatalog>>()
-  )
+  const runControlCatalogByContext = useRef(storedRunControlCatalogs)
   const runControlCatalogRequests = useRef(
     new Map<string, Promise<CapabilityEnvelope<AgentRunControlCatalog>>>()
   )
@@ -282,7 +455,10 @@ export function useIntegrations(cwd: string | null) {
       if (typeof fn !== 'function') return Promise.reject(new Error('运行控制接口不可用'))
       const request = fn(context)
         .then((result) => {
-          if (result.data) runControlCatalogByContext.current.set(key, result)
+          if (isAuthoritativeRunControlCatalog(result)) {
+            runControlCatalogByContext.current.set(key, result)
+            writeRunControlCatalogCache(runControlCatalogByContext.current)
+          }
           return result
         })
         .finally(() => runControlCatalogRequests.current.delete(key))
@@ -785,8 +961,8 @@ export function useIntegrations(cwd: string | null) {
           seq !== runControlRequestSeq.current ||
           contextKey(context) !== contextKey(providerContextRef.current)
         ) return
-        if (!result.data && cached?.data) {
-          setRunControlCapability(result)
+        if (shouldKeepCachedRunControlCatalog(cached?.data ?? undefined, result)) {
+          setRunControlCapability(retainCachedRunControlCatalog(cached!, result))
           return
         }
         const catalog = result.data ?? fallbackRunControlCatalog('default')
