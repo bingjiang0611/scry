@@ -1676,6 +1676,22 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).not.toContain('aria-label="当前 Provider 不可发送"')
   })
 
+  it('可选模型后台读取时保持自动模型语义，不把 composer 伪装成阻塞态', () => {
+    const chatHtml = renderWelcome({
+      runControlsLoading: true,
+      runControlCatalog: {
+        models: [],
+        permissions: RUN_CONTROL_PROPS.runControlCatalog.permissions
+      }
+    })
+
+    expect(chatHtml).toMatch(/aria-label="模型"[^>]*aria-busy="true"/)
+    expect(chatHtml).toContain('自动模型')
+    expect(chatHtml).toContain('正在后台读取可选模型；当前使用 Provider 默认模型')
+    expect(chatHtml).not.toContain('读取模型…')
+    expect(chatHtml).not.toContain('id="composer-status"')
+  })
+
   it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () => {
     const commands = [
       { name: 'browser-use', description: 'Browser automation' },
