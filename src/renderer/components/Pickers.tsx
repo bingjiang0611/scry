@@ -251,6 +251,7 @@ export function RunControlSelect({
     <label className={`run-control-select ${tone ?? ''}`} title={selected?.description}>
       <select
         aria-label={ariaLabel}
+        aria-busy={loading}
         value={value}
         disabled={disabled || loading}
         onChange={(event) => onChange(event.target.value)}

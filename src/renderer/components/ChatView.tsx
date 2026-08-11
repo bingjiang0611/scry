@@ -200,7 +200,13 @@ export function ChatView({
     return counts
   }, new Map<string, number>())
   const modelOptions = [
-    { value: '', label: runControlsLoading ? '读取模型…' : '自动模型', description: runControlsReason ?? '使用 Provider 默认模型' },
+    {
+      value: '',
+      label: '自动模型',
+      description: runControlsReason ?? (
+        runControlsLoading ? '正在后台读取可选模型；当前使用 Provider 默认模型' : '使用 Provider 默认模型'
+      )
+    },
     ...runControlCatalog.models.map((option) => ({
       value: JSON.stringify([option.model.providerId ?? null, option.model.id]),
       label: modelLabelCounts.get(option.label)! > 1 ? `${option.label} · ${option.model.id}` : option.label,
