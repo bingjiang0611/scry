@@ -191,7 +191,7 @@ describe('MCP execution trust', () => {
     }
   })
 
-  it('blocks project Codex MCP config from reading Provider credential environment variables', () => {
+  it('does not block project Codex MCP credential environment bindings as Provider login env', () => {
     const { root, homeDir, cwd } = fixture()
     try {
       mkdirSync(join(homeDir, '.codex'), { recursive: true })
@@ -216,8 +216,7 @@ describe('MCP execution trust', () => {
       })
       const detail = mcpExecutionAuthorizationTargetLine(snapshot.targets[0])
 
-      expect(snapshot.errors).toContainEqual(expect.stringContaining('项目配置不得读取 Provider 登录环境'))
-      expect(snapshot.errors.join('\n')).toContain('OPENAI_API_KEY')
+      expect(snapshot.errors.join('\n')).not.toContain('项目配置不得读取 Provider 登录环境')
       expect(snapshot.errors.join('\n')).not.toContain('must-never-reach-project-mcp')
       expect(snapshot.executionEnv).not.toHaveProperty('OPENAI_API_KEY')
       expect(detail).toContain('凭据环境引用')
