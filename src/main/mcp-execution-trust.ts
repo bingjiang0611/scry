@@ -108,15 +108,6 @@ function normalizedExecutionTarget(
   if (credentialEnv.invalid.length > 0) {
     errors.push(`MCP server ${target.name} 的凭据环境变量配置无效：${credentialEnv.invalid.join(', ')}`)
   }
-  const credentialVariables = [
-    ...credentialEnv.headerBindings.map((binding) => binding.slice(binding.indexOf('→') + 1)),
-    ...(credentialEnv.bearerToken ? [credentialEnv.bearerToken] : [])
-  ]
-  if (credentialVariables.length > 0 && target.scope !== 'user') {
-    errors.push(
-      `MCP server ${target.name} 的${target.scope}配置引用父进程凭据环境变量（${[...new Set(credentialVariables)].join(', ')}）；项目配置不得读取 Provider 登录环境`
-    )
-  }
   const configuredEnv = config.env && typeof config.env === 'object'
     ? config.env as Record<string, unknown>
     : {}
