@@ -582,6 +582,11 @@ function triggerRunsForHook(items: TraceEvent[], event: string, trigger: string)
   return calls.size > 0 ? calls.size : null
 }
 
+function triggerRunsFromHandlers(scripts: HookScriptRow[]): number | null {
+  const runs = scripts.map((script) => script.logicalRuns)
+  return runs.length > 0 && runs.every((count) => count === runs[0]) ? runs[0] : null
+}
+
 export function aggregateHooks(items: TraceEvent[]): HookSummary {
   const hooks = items.filter((e) => e.kind === 'hook')
   const groups = new Map<string, HookGroupDraft>()
@@ -722,10 +727,11 @@ export function aggregateHooks(items: TraceEvent[]): HookSummary {
     const responses = scripts.reduce((sum, s) => sum + s.responses, 0)
     const pending = scripts.reduce((sum, s) => sum + s.pending, 0)
     const logicalRuns = responses + pending
-    const triggerRuns = triggerRunsForHook(items, g.event, g.trigger)
+    const toolTriggerRuns = triggerRunsForHook(items, g.event, g.trigger)
+    const triggerRuns = toolTriggerRuns ?? triggerRunsFromHandlers(scripts)
     return {
       ...g,
-      toolCalls: triggerRuns ?? 0,
+      toolCalls: toolTriggerRuns ?? 0,
       triggerRuns,
       scripts,
       responses,

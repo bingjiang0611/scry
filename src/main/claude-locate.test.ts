@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -244,6 +244,7 @@ describe('runtime CLI discovery constraints', () => {
       expect(runtimeCliEnv(base, { managedRecorder: true })).toMatchObject({
         SCRY_RECORDER_MANAGED: '1',
         SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION,
+        SCRY_RECORDER_VERIFIED_VERSION: RECORDER_VERSION,
         SCRY_CLI_PATH: scry
       })
     } finally {
@@ -270,6 +271,25 @@ printf '%s\\n' '${RECORDER_VERSION}'
         QODER_ORGANIZATION_ID: 'd',
         QODER_MEMBER_ID: 'e'
       }, { managedRecorder: true })).toMatchObject({ SCRY_CLI_PATH: scry })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reuses a managed-recorder version check while the pinned CLI file is unchanged', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-cli-probe-cache-'))
+    try {
+      const scry = join(dir, 'scry')
+      const calls = join(dir, 'calls')
+      writeFileSync(scry, `#!/bin/sh
+printf x >> '${calls}'
+printf '%s\n' '${RECORDER_VERSION}'
+`)
+      chmodSync(scry, 0o755)
+      const base = { PATH: `${dir}:/usr/bin:/bin` }
+      runtimeCliEnv(base, { managedRecorder: true })
+      runtimeCliEnv(base, { managedRecorder: true })
+      expect(readFileSync(calls, 'utf8')).toBe('x')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

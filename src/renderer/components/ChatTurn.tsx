@@ -800,9 +800,12 @@ export function HooksSummary({
                 <span className="hook-phase-event">{phase.event}</span>
                 <span className="hook-phase-stats">
                   <span className="hook-phase-duration" title={timingTitle}>{timingLabel}</span>
-                  <span className="hook-phase-count">
+                  <span
+                    className="hook-phase-count"
+                    title="触发次数优先按唯一工具调用 ID 统计；无法关联工具时，仅在各处理器实例数一致时推导。右侧数字是处理器实例数。"
+                  >
                     {phase.triggerRuns != null && <>{phase.triggerRuns} 次触发 · </>}
-                    {phase.logicalRuns} 次调用
+                    {phase.logicalRuns} 个处理器实例
                   </span>
                 </span>
                 <Icon name="chevronRight" className="hook-row-chev" />

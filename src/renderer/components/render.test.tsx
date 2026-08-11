@@ -1173,6 +1173,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     const postPhaseHtml = hookHtml.slice(post, stop)
 
     expect(hookHtml).toContain('3 个周期 · 7 个处理器实例')
+    expect(hookHtml).toContain('1 次触发 · 4 个处理器实例')
     expect(hookHtml.match(/class="turn-hook-phase"/g)).toHaveLength(3)
     expect(pre).toBeGreaterThan(-1)
     expect(post).toBeGreaterThan(pre)

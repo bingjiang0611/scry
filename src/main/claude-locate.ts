@@ -14,6 +14,7 @@ export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex
 // 捞它的真实 PATH——nvm 在 .zshrc 里、只有交互 shell 才 source，这样 app 解析 claude 和用户终端
 // 完全一致（优先用户日常那个版本）。sentinel 包裹，过滤 shell 启动打印的 banner 等杂项。缓存一次。
 let shellPathCache: string | null = null
+const verifiedRecorderCliVersions = new Set<string>()
 function shellPath(): string {
   if (shellPathCache === null) void warmShellEnv()
   return shellPathCache ?? ''
@@ -496,6 +497,11 @@ export function resolveRecorderCliPath(
   return resolveCommandOnPath('scry', trustedPath) ?? resolveCommandOnPath('scry', fallbackPath)
 }
 
+function recorderCliVersionKey(path: string): string {
+  const file = statSync(path)
+  return `${path}\0${file.dev}\0${file.ino}\0${file.size}\0${file.mtimeMs}\0${RECORDER_VERSION}`
+}
+
 export function runtimeCliEnv(
   base?: Record<string, string>,
   options: { managedRecorder?: boolean } = {}
@@ -516,21 +522,28 @@ export function runtimeCliEnv(
       throw new Error(`Scry managed recorder requires scry CLI ${RECORDER_VERSION}`)
     }
     if (scryCliPath !== bundledCliPath) {
+      let verificationKey = ''
+      let cached = false
       let actualVersion = ''
       try {
-        actualVersion = execFileSync(scryCliPath, ['--version'], {
-          encoding: 'utf8',
-          timeout: 5_000,
-          env: sanitizeProviderEnv(runtimeBase)
-        }).trim()
+        verificationKey = recorderCliVersionKey(scryCliPath)
+        cached = verifiedRecorderCliVersions.has(verificationKey)
+        if (!cached) {
+          actualVersion = execFileSync(scryCliPath, ['--version'], {
+            encoding: 'utf8',
+            timeout: 5_000,
+            env: sanitizeProviderEnv(runtimeBase)
+          }).trim()
+        }
       } catch {
         throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
       }
-      if (actualVersion !== RECORDER_VERSION) {
+      if (!cached && actualVersion !== RECORDER_VERSION) {
         throw new Error(
           `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}`
         )
       }
+      if (!cached) verifiedRecorderCliVersions.add(verificationKey)
     }
   }
   return sanitizeProviderEnv({
@@ -538,7 +551,8 @@ export function runtimeCliEnv(
     SCRY_CLI_PATH: scryCliPath ?? '',
     ...(options.managedRecorder ? {
       SCRY_RECORDER_MANAGED: '1',
-      SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION
+      SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION,
+      SCRY_RECORDER_VERIFIED_VERSION: RECORDER_VERSION
     } : {}),
     PATH: runtimeBase.PATH ?? process.env.PATH ?? ''
   })
