@@ -31,6 +31,7 @@ import { AgentRuntimeError } from '../cli-runtime'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import {
   OpenCodeServerManager,
+  OpenCodeProjectPluginSecurityError,
   openCodeHookTraceCursor,
   readOpenCodeHookTrace,
   sanitizeOpenCodeServerLog,
@@ -39,6 +40,7 @@ import {
 } from './opencode-server'
 import { effortOption, permissionOptions } from './run-controls'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
+import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 
 let counter = 0
@@ -652,16 +654,25 @@ export function createOpenCodeAdapter(
 
   const serverFor = async (
     context: ProviderContext,
-    mcpExecution?: AuthorizedMcpExecution
+    mcpExecution?: AuthorizedMcpExecution,
+    pluginTrust?: OpenCodeProjectPluginAuthorization
   ): Promise<OpenCodeServerState> => {
     if (!context.cwd) throw new Error('OpenCode 需要工作目录')
     try {
-      const state = await managerFor(context.cwd).ensure(context.cwd, mcpExecution)
+      const state = await managerFor(context.cwd).ensure(context.cwd, mcpExecution, pluginTrust)
       lastOkAt = Date.now()
       lastError = undefined
       return state
     } catch (error) {
       rememberFailure(error)
+      if (error instanceof OpenCodeProjectPluginSecurityError) {
+        throw new AgentRuntimeError(error.message, {
+          provider: 'opencode_server',
+          stage: 'capability',
+          cwd: context.cwd,
+          nextAction: '项目 plugin 声明、内容或授权已变化；请重新发送任务并确认最新 OpenCode plugin 授权'
+        })
+      }
       throw error
     }
   }
@@ -714,7 +725,8 @@ export function createOpenCodeAdapter(
       const manager = request.cwd ? managerFor(request.cwd) : undefined
       const promise = (async () => {
         try {
-          const server = await serverFor(context, request.mcpExecution)
+          if (!request.cwd) throw new Error('OpenCode 需要工作目录')
+          const server = await serverFor(context, request.mcpExecution, request.openCodePluginTrust)
           client = server.client
           if (stopped) return { externalSessionId, providerTurnId, stopped }
           const permission = openCodePermissionRules(request.permissionMode)

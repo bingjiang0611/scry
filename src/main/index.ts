@@ -60,6 +60,11 @@ import {
   type CodexHookTrustGrant
 } from './codex-hook-trust'
 import {
+  createOpenCodePluginGrantStore,
+  type OpenCodeProjectPluginAuthorization
+} from './opencode-plugin-trust'
+import { readOpenCodeProjectProjection } from './providers/opencode-server'
+import {
   createWorkspaceEntry,
   listWorkspace,
   moveWorkspaceEntry,
@@ -294,6 +299,7 @@ const providerRegistry = new ProviderRegistry(
   }
 )
 const codexHookGrantStore = () => createCodexHookGrantStore(app.getPath('userData'))
+const openCodePluginGrantStore = () => createOpenCodePluginGrantStore(app.getPath('userData'))
 const mcpExecutionTrust = new McpExecutionTrust()
 
 const providerContextKey = (providerId: ProviderId, cwd: string): string => `${providerId}\0${cwd}`
@@ -404,6 +410,73 @@ async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]
     )
   }
   return trust
+}
+
+async function resolveOpenCodePluginTrust(cwd: string): Promise<OpenCodeProjectPluginAuthorization | undefined> {
+  let projection
+  try {
+    projection = await readOpenCodeProjectProjection(cwd)
+  } catch (error) {
+    throw new AgentRuntimeError(`OpenCode 项目 plugin 预检失败：${String((error as Error).message)}`, {
+      provider: 'opencode_server',
+      stage: 'capability',
+      cwd,
+      nextAction: '修复 opencode.json plugin 声明；Scry 仅允许本仓内 ./ 相对普通文件'
+    })
+  }
+  if (projection.plugins.length === 0) return undefined
+
+  const store = openCodePluginGrantStore()
+  if (!store.isGranted(projection.cwd, projection.pluginFingerprint)) {
+    const list = projection.plugins.map((plugin, index) => [
+      `${index + 1}. ${plugin.path}`,
+      `   SHA-256 ${plugin.digest}（${plugin.size} bytes）`
+    ].join('\n'))
+    const options = {
+      type: 'warning' as const,
+      title: '授权当前仓库的 OpenCode plugin',
+      message: `OpenCode 已发现 ${projection.plugins.length} 个项目 plugin`,
+      detail: [
+        `仓库：${projection.cwd}`,
+        '',
+        ...list,
+        '',
+        '允许后，Scry 只执行上面列出的精确文件字节，并将其复制到 Scry 私有 0600 快照。',
+        '以后同一组路径和 SHA-256 自动放行；任一增删或内容变化都会重新询问。',
+        '这是 Scry 的本地授权，不会伪造或修改 OpenCode 自身的信任状态。'
+      ].join('\n'),
+      buttons: ['允许当前 plugin 并启动', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    }
+    const result = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 0) {
+      throw new AgentRuntimeError('已取消 OpenCode 项目 plugin 授权', {
+        provider: 'opencode_server',
+        stage: 'capability',
+        cwd,
+        nextAction: '如需执行当前项目 plugin，请再次发送任务并在授权对话框中选择允许'
+      })
+    }
+    try {
+      store.grant(projection.cwd, projection.pluginFingerprint, projection.plugins.length)
+    } catch (error) {
+      throw new AgentRuntimeError(`OpenCode 项目 plugin 授权保存失败：${String((error as Error).message)}`, {
+        provider: 'opencode_server',
+        stage: 'capability',
+        cwd,
+        nextAction: '检查 Scry userData 目录写权限后重试'
+      })
+    }
+  }
+  return {
+    cwd: projection.cwd,
+    fingerprint: projection.pluginFingerprint,
+    plugins: projection.plugins
+  }
 }
 
 async function ensureMcpExecutionAuthorized(
@@ -1416,6 +1489,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const codexHookTrust = providerId === 'codex' && cwd
     ? await resolveCodexHookTrust(cwd)
     : []
+  const openCodePluginTrust = providerId === 'opencode' && cwd
+    ? await resolveOpenCodePluginTrust(cwd)
+    : undefined
   const mcpExecution = authorizedMcpExecution(
     await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
   )
@@ -1672,6 +1748,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       effort: request.effort,
       permissionMode: request.permissionMode,
       codexHookTrust,
+      openCodePluginTrust,
       managedRecorder: managedRecorderEnabled,
       mcpExecution,
       emit,
