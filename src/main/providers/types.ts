@@ -21,6 +21,7 @@ import type {
 } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
 import type { CodexHookInspection, CodexHookTrustGrant } from '../codex-hook-trust'
+import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 
 export interface ProviderRunResult {
   externalSessionId?: string
@@ -71,6 +72,7 @@ export interface ProviderRunRequest {
   permissionMode?: AgentPermissionMode
   bypassHookTrust?: boolean
   codexHookTrust?: CodexHookTrustGrant[]
+  openCodePluginTrust?: OpenCodeProjectPluginAuthorization
   managedRecorder?: boolean
   mcpExecution?: AuthorizedMcpExecution
   emit: (event: TraceEvent) => void

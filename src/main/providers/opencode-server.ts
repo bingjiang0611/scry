@@ -11,6 +11,11 @@ import { Agent as UndiciAgent, type Dispatcher } from 'undici'
 import { runtimeCliEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig } from '../mcp-config'
 import type { AuthorizedMcpExecution } from './types'
+import {
+  openCodeProjectPluginFingerprint,
+  type OpenCodeProjectPluginMetadata,
+  type OpenCodeProjectPluginAuthorization
+} from '../opencode-plugin-trust'
 
 export const OPEN_CODE_LONG_REQUEST_TIMEOUTS = {
   headersTimeout: 0,
@@ -325,10 +330,13 @@ export function isolatedOpenCodeChildEnv(
   configDir: string,
   authContent: string,
   serverPassword: string,
-  sessionDatabasePath?: string
+  sessionDatabasePath?: string,
+  projectRoot?: string
 ): NodeJS.ProcessEnv {
   const inherited = Object.fromEntries(
-    Object.entries(sourceEnv).filter(([key]) => !key.startsWith('OPENCODE_') && !key.startsWith('XDG_'))
+    Object.entries(sourceEnv).filter(
+      ([key]) => !key.startsWith('OPENCODE_') && !key.startsWith('XDG_') && key !== 'SCRY_OPENCODE_PROJECT_ROOT'
+    )
   )
   const openCodeApiKey = sourceEnv.OPENCODE_API_KEY?.trim()
   return {
@@ -352,7 +360,8 @@ export function isolatedOpenCodeChildEnv(
     OPENCODE_SERVER_USERNAME: 'opencode',
     OPENCODE_SERVER_PASSWORD: serverPassword,
     OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
-    OPENCODE_DISABLE_CLAUDE_CODE: 'true'
+    OPENCODE_DISABLE_CLAUDE_CODE: 'true',
+    ...(projectRoot ? { SCRY_OPENCODE_PROJECT_ROOT: projectRoot } : {})
   }
 }
 
@@ -455,6 +464,7 @@ export interface OpenCodeServerState {
   mcpFingerprint: string
   projectFingerprint?: string
   projectContentFingerprint?: string
+  projectPluginFingerprint?: string
   hookTracePath?: string
   url: string
   pid?: number
@@ -507,8 +517,23 @@ export interface OpenCodeProjectProjection {
   cwd: string
   instructions: string[]
   skillRoot?: string
+  plugins: OpenCodeProjectPluginMetadata[]
+  pluginFingerprint: string
   fingerprint: string
   contentFingerprint: string
+}
+
+export class OpenCodeProjectPluginSecurityError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'OpenCodeProjectPluginSecurityError'
+  }
+}
+
+function pluginSecurityError(message: string, cause?: unknown): OpenCodeProjectPluginSecurityError {
+  return new OpenCodeProjectPluginSecurityError(message, {
+    ...(cause instanceof Error ? { cause } : {})
+  })
 }
 
 export interface OpenCodeHookTraceRecord {
@@ -575,6 +600,75 @@ async function projectFile(
   }
 }
 
+async function projectPluginFile(root: string, rawPath: unknown): Promise<OpenCodeProjectPluginMetadata> {
+  if (typeof rawPath !== 'string' || !rawPath.trim() || rawPath.includes('\0')) {
+    throw pluginSecurityError('OpenCode plugin 必须是项目内本地相对普通文件')
+  }
+  const source = rawPath.trim()
+  const segments = source.split(/[\\/]+/)
+  if (
+    !(source.startsWith('./') || source.startsWith('.\\'))
+    || isAbsolute(source)
+    || segments.includes('..')
+    || /^(?:[a-z][a-z0-9+.-]*:|\\\\)/i.test(source)
+    || /[*?\[\]{}]/.test(source)
+  ) {
+    throw pluginSecurityError(`OpenCode plugin 仅允许 ./ 开头的项目内本地相对文件，拒绝 URL、package 或逃逸路径：${source}`)
+  }
+  const lexical = resolve(root, source)
+  if (!pathWithin(root, lexical)) throw pluginSecurityError(`OpenCode plugin 路径逃逸项目目录：${source}`)
+  try {
+    await assertNoProjectSymlink(root, lexical)
+  } catch (error) {
+    throw pluginSecurityError(
+      `OpenCode plugin 路径不可信：${source}（${error instanceof Error ? error.message : String(error)}）`,
+      error
+    )
+  }
+  let handle
+  try {
+    handle = await open(lexical, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK)
+  } catch (error) {
+    throw pluginSecurityError(`OpenCode plugin 无法安全打开：${source}`, error)
+  }
+  try {
+    let info
+    try {
+      info = await handle.stat()
+    } catch (error) {
+      throw pluginSecurityError(`OpenCode plugin 无法校验文件类型：${source}`, error)
+    }
+    if (!info.isFile()) throw pluginSecurityError(`OpenCode plugin 路径不是普通文件：${source}`)
+    if (info.size > OPEN_CODE_PROJECT_FILE_LIMIT) throw pluginSecurityError(`OpenCode plugin 文件过大：${source}`)
+    const contents = await handle.readFile()
+    if (contents.length !== info.size) throw pluginSecurityError(`OpenCode plugin 读取期间发生变化：${source}`)
+    const canonical = await realpath(lexical)
+    if (!pathWithin(root, canonical)) throw pluginSecurityError(`OpenCode plugin 路径逃逸项目目录：${source}`)
+    const canonicalInfo = await stat(canonical)
+    if (canonicalInfo.dev !== info.dev || canonicalInfo.ino !== info.ino) {
+      throw pluginSecurityError(`OpenCode plugin 路径在校验期间被替换：${source}`)
+    }
+    if (!['.js', '.mjs'].includes(extname(canonical).toLowerCase())) {
+      throw pluginSecurityError(`OpenCode plugin 单文件快照仅支持 .js/.mjs：${source}`)
+    }
+    const pluginSource = contents.toString('utf8')
+    if (/(?:\b(?:import|export)\s+(?:[^'"`;]+?\s+from\s+)?|\bimport\s*\()\s*['"`]\.{1,2}\//m.test(pluginSource)) {
+      throw pluginSecurityError(`OpenCode plugin 单文件快照不支持相对 import/export：${source}`)
+    }
+    return {
+      path: canonical,
+      digest: createHash('sha256').update(contents).digest('hex'),
+      size: contents.length,
+      contents
+    }
+  } catch (error) {
+    if (error instanceof OpenCodeProjectPluginSecurityError) throw error
+    throw pluginSecurityError(`OpenCode plugin 安全校验失败：${source}`, error)
+  } finally {
+    await handle.close()
+  }
+}
+
 async function projectSkillTree(root: string): Promise<{
   root?: string
   files: Array<{ path: string; digest: string; size: number }>
@@ -634,6 +728,7 @@ function projectionFingerprint(
   cwd: string,
   instructions: string[],
   skillRoot: string | undefined,
+  plugins: OpenCodeProjectPluginMetadata[],
   files: Map<string, { digest: string; size: number }>
 ): { fingerprint: string; contentFingerprint: string } {
   const manifest = [...files.entries()]
@@ -641,7 +736,8 @@ function projectionFingerprint(
     .map(([path, value]) => ({ path: relative(cwd, path), ...value }))
   const structure = {
     instructions: instructions.map((path) => relative(cwd, path)),
-    skillRoot: skillRoot ? relative(cwd, skillRoot) : null
+    skillRoot: skillRoot ? relative(cwd, skillRoot) : null,
+    plugins: plugins.map((plugin) => relative(cwd, plugin.path))
   }
   return {
     fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(structure)).digest('hex')}`,
@@ -672,6 +768,9 @@ export async function readOpenCodeProjectProjection(cwd: string): Promise<OpenCo
   if (config.instructions !== undefined && !Array.isArray(config.instructions)) {
     throw new Error('OpenCode 项目 instructions 必须是路径数组')
   }
+  if (config.plugin !== undefined && !Array.isArray(config.plugin)) {
+    throw pluginSecurityError('OpenCode 项目 plugin 必须是路径数组')
+  }
   const files = new Map<string, { digest: string; size: number }>()
   const instructions: string[] = []
   for (const item of config.instructions ?? []) {
@@ -679,14 +778,22 @@ export async function readOpenCodeProjectProjection(cwd: string): Promise<OpenCo
     if (!instructions.includes(file.path)) instructions.push(file.path)
     files.set(file.path, { digest: file.digest, size: file.size })
   }
+  const plugins: OpenCodeProjectPluginMetadata[] = []
+  for (const item of config.plugin ?? []) {
+    const plugin = await projectPluginFile(canonicalCwd, item)
+    if (!plugins.some((candidate) => candidate.path === plugin.path)) plugins.push(plugin)
+    files.set(plugin.path, { digest: plugin.digest, size: plugin.size })
+  }
   const skills = await projectSkillTree(canonicalCwd)
   for (const file of skills.files) files.set(file.path, { digest: file.digest, size: file.size })
   const totalSize = [...files.values()].reduce((sum, file) => sum + file.size, 0)
   if (totalSize > OPEN_CODE_PROJECT_TOTAL_LIMIT) throw new Error('OpenCode 项目配置投影总大小超限')
-  const fingerprints = projectionFingerprint(canonicalCwd, instructions, skills.root, files)
+  const fingerprints = projectionFingerprint(canonicalCwd, instructions, skills.root, plugins, files)
   return {
     cwd: canonicalCwd,
     instructions,
+    plugins,
+    pluginFingerprint: openCodeProjectPluginFingerprint(plugins),
     ...(skills.root ? { skillRoot: skills.root } : {}),
     ...fingerprints
   }
@@ -694,6 +801,9 @@ export async function readOpenCodeProjectProjection(cwd: string): Promise<OpenCo
 
 export async function assertOpenCodeProjectProjection(projection: OpenCodeProjectProjection): Promise<void> {
   const current = await readOpenCodeProjectProjection(projection.cwd)
+  if (current.pluginFingerprint !== projection.pluginFingerprint) {
+    throw pluginSecurityError('OpenCode 项目 plugin 声明或内容已变化，原授权失效')
+  }
   if (
     current.fingerprint !== projection.fingerprint
     || current.contentFingerprint !== projection.contentFingerprint
@@ -702,19 +812,78 @@ export async function assertOpenCodeProjectProjection(projection: OpenCodeProjec
   }
 }
 
+function assertOpenCodePluginAuthorization(
+  projection: OpenCodeProjectProjection,
+  authorization: OpenCodeProjectPluginAuthorization
+): void {
+  if (authorization.cwd !== projection.cwd || authorization.fingerprint !== projection.pluginFingerprint) {
+    throw pluginSecurityError('OpenCode 项目 plugin 授权与当前 canonical cwd/fingerprint 不匹配')
+  }
+  if (openCodeProjectPluginFingerprint(authorization.plugins) !== authorization.fingerprint) {
+    throw pluginSecurityError('OpenCode 项目 plugin 授权载荷 fingerprint 无效')
+  }
+  if (authorization.plugins.length !== projection.plugins.length) {
+    throw pluginSecurityError('OpenCode 项目 plugin 授权列表与当前声明不匹配')
+  }
+  authorization.plugins.forEach((plugin, index) => {
+    const current = projection.plugins[index]
+    const actualDigest = createHash('sha256').update(plugin.contents).digest('hex')
+    if (
+      !current
+      || plugin.path !== current.path
+      || plugin.digest !== current.digest
+      || plugin.size !== current.size
+      || plugin.size !== plugin.contents.length
+      || actualDigest !== plugin.digest
+    ) throw pluginSecurityError('OpenCode 项目 plugin 授权字节与当前投影不匹配')
+  })
+}
+
+export async function writeOpenCodePluginSnapshots(
+  directory: string,
+  projection: OpenCodeProjectProjection,
+  authorization?: OpenCodeProjectPluginAuthorization
+): Promise<string[]> {
+  if (!authorization) return []
+  assertOpenCodePluginAuthorization(projection, authorization)
+  const snapshotDir = join(directory, 'project-plugin-snapshots')
+  await mkdir(snapshotDir, { mode: 0o700 })
+  const snapshots: string[] = []
+  for (const [index, plugin] of authorization.plugins.entries()) {
+    const snapshot = join(snapshotDir, `plugin-${index}${extname(plugin.path).toLowerCase()}`)
+    await writeFile(snapshot, plugin.contents, { flag: 'wx', mode: 0o600 })
+    await chmod(snapshot, 0o600)
+    const handle = await open(snapshot, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    try {
+      const info = await handle.stat()
+      const contents = await handle.readFile()
+      if (
+        !info.isFile()
+        || (info.mode & 0o777) !== 0o600
+        || contents.length !== plugin.size
+        || createHash('sha256').update(contents).digest('hex') !== plugin.digest
+      ) throw new Error('Scry OpenCode plugin 快照完整性校验失败')
+    } finally {
+      await handle.close()
+    }
+    snapshots.push(snapshot)
+  }
+  return snapshots
+}
+
 export function openCodeSafeConfig(
   execution: AuthorizedMcpExecution | undefined,
   projection: OpenCodeProjectProjection,
-  observerPluginPath: string
+  observerPluginPath: string,
+  pluginSnapshots: string[] = []
 ): Record<string, unknown> {
   if (!isAbsolute(observerPluginPath)) throw new Error('Scry OpenCode observer plugin 必须使用绝对路径')
+  if (pluginSnapshots.some((path) => !isAbsolute(path))) throw new Error('Scry OpenCode plugin 快照必须使用绝对路径')
   return {
     mcp: openCodeMcpConfig(execution),
     ...(projection.instructions.length > 0 ? { instructions: projection.instructions } : {}),
     ...(projection.skillRoot ? { skills: { paths: [projection.skillRoot] } } : {}),
-    // Project plugins are executable JavaScript. Scry has no OpenCode plugin trust grant yet,
-    // so a local path/hash check is not authorization to execute them.
-    plugin: [pathToFileURL(observerPluginPath).href]
+    plugin: [pathToFileURL(observerPluginPath).href, ...pluginSnapshots.map((path) => pathToFileURL(path).href)]
   }
 }
 
@@ -847,14 +1016,23 @@ export class OpenCodeServerManager {
     }
   }
 
-  async ensure(cwd: string, mcpExecution?: AuthorizedMcpExecution): Promise<OpenCodeServerState> {
+  async ensure(
+    cwd: string,
+    mcpExecution?: AuthorizedMcpExecution,
+    pluginTrust?: OpenCodeProjectPluginAuthorization
+  ): Promise<OpenCodeServerState> {
     const projection = await readOpenCodeProjectProjection(cwd)
+    if (pluginTrust && (
+      pluginTrust.cwd !== projection.cwd || pluginTrust.fingerprint !== projection.pluginFingerprint
+    )) throw pluginSecurityError('OpenCode 项目 plugin 授权已失效，拒绝启动')
+    const pluginFingerprint = pluginTrust?.fingerprint ?? 'none'
     const mcpFingerprint = mcpExecution?.fingerprint ?? 'none'
     if (
       this.active?.cwd === projection.cwd
       && this.active.mcpFingerprint === mcpFingerprint
       && this.active.projectFingerprint === projection.fingerprint
       && this.active.projectContentFingerprint === projection.contentFingerprint
+      && this.active.projectPluginFingerprint === pluginFingerprint
       && this.active.process.exitCode === null
     ) return this.active
     if (this.starting) {
@@ -864,10 +1042,11 @@ export class OpenCodeServerManager {
         && starting.mcpFingerprint === mcpFingerprint
         && starting.projectFingerprint === projection.fingerprint
         && starting.projectContentFingerprint === projection.contentFingerprint
+        && starting.projectPluginFingerprint === pluginFingerprint
       ) return starting
     }
     this.close()
-    const starting = this.start(projection, this.startGeneration, mcpExecution)
+    const starting = this.start(projection, this.startGeneration, mcpExecution, pluginTrust)
     this.starting = starting
     try {
       return await starting
@@ -891,7 +1070,8 @@ export class OpenCodeServerManager {
   private async start(
     projection: OpenCodeProjectProjection,
     generation: number,
-    mcpExecution?: AuthorizedMcpExecution
+    mcpExecution?: AuthorizedMcpExecution,
+    pluginTrust?: OpenCodeProjectPluginAuthorization
   ): Promise<OpenCodeServerState> {
     const cwd = projection.cwd
     await assertOpenCodeProjectProjection(projection)
@@ -941,9 +1121,10 @@ export class OpenCodeServerManager {
       await mkdir(join(this.hookConfigDir, 'managed'), { mode: 0o700 })
       await writeFile(hookTracePath, '', { mode: 0o600 })
       await writeFile(observerPluginPath, openCodeHookObserverSource(hookTracePath), { mode: 0o600 })
+      const pluginSnapshots = await writeOpenCodePluginSnapshots(this.hookConfigDir, projection, pluginTrust)
       await writeFile(
         isolatedConfigPath,
-        JSON.stringify(openCodeSafeConfig(mcpExecution, projection, observerPluginPath)),
+        JSON.stringify(openCodeSafeConfig(mcpExecution, projection, observerPluginPath, pluginSnapshots)),
         { mode: 0o600 }
       )
       await assertOpenCodeProjectProjection(projection)
@@ -965,7 +1146,8 @@ export class OpenCodeServerManager {
         isolatedConfigDir,
         isolatedAuthContent,
         serverPassword,
-        sessionDatabasePath
+        sessionDatabasePath,
+        cwd
       ),
       stdio: ['pipe', 'pipe', 'pipe']
     })
@@ -1027,6 +1209,7 @@ export class OpenCodeServerManager {
         mcpFingerprint: mcpExecution?.fingerprint ?? 'none',
         projectFingerprint: projection.fingerprint,
         projectContentFingerprint: projection.contentFingerprint,
+        projectPluginFingerprint: pluginTrust?.fingerprint ?? 'none',
         hookTracePath,
         url,
         pid: child.pid,

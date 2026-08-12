@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { appendFile, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -31,6 +32,7 @@ import {
   isolatedOpenCodeChildEnv,
   OPEN_CODE_LONG_REQUEST_TIMEOUTS,
   OpenCodeServerManager,
+  OpenCodeProjectPluginSecurityError,
   openCodeMcpCredentialKey,
   openCodeMcpAuthSeed,
   openCodeMcpConfig,
@@ -47,7 +49,8 @@ import {
   sanitizeOpenCodeAuth,
   sanitizeOpenCodeServerLog,
   type OpenCodeProjectProjection,
-  type OpenCodeServerState
+  type OpenCodeServerState,
+  writeOpenCodePluginSnapshots
 } from './opencode-server'
 
 describe('OpenCode provider adapter', () => {
@@ -211,9 +214,10 @@ describe('OpenCode provider adapter', () => {
       OPENCODE_DB: '/outside/opencode.db',
       OPENCODE_WORKSPACE_ID: 'outside-workspace',
       OPENCODE_PLUGIN_META_FILE: '/outside/plugins.json',
+      SCRY_OPENCODE_PROJECT_ROOT: '/outside/repo',
       XDG_DATA_HOME: '/outside/data',
       XDG_DATA_DIRS: '/outside/data-dirs'
-    }, '/isolated', '/isolated/safe-config.json', '/isolated/config', '{"openai":{"type":"oauth"}}', 'random-password', '/persistent/opencode.db')
+    }, '/isolated', '/isolated/safe-config.json', '/isolated/config', '{"openai":{"type":"oauth"}}', 'random-password', '/persistent/opencode.db', '/canonical/repo')
 
     expect(env).toMatchObject({
       PATH: '/usr/bin',
@@ -229,6 +233,7 @@ describe('OpenCode provider adapter', () => {
       OPENCODE_SERVER_PASSWORD: 'random-password',
       OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
       OPENCODE_DISABLE_CLAUDE_CODE: 'true',
+      SCRY_OPENCODE_PROJECT_ROOT: '/canonical/repo',
       HOME: '/isolated'
     })
     expect(env).not.toHaveProperty('OPENCODE_WORKSPACE_ID')
@@ -272,7 +277,7 @@ describe('OpenCode provider adapter', () => {
     }
   })
 
-  it('projects canonical project instructions and Skills without executing untrusted project plugins', async () => {
+  it('projects canonical project plugins but only merges approved Scry-owned snapshots', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-opencode-project-config-'))
     const repo = join(root, 'repo')
     const skillRoot = join(repo, '.opencode', 'skills')
@@ -307,6 +312,13 @@ describe('OpenCode provider adapter', () => {
         cwd: canonicalRepo,
         instructions: [join(canonicalRepo, 'AGENTS.md'), join(canonicalRepo, 'CLAUDE.md')],
         skillRoot: canonicalSkillRoot,
+        plugins: [{
+          path: canonicalPlugin,
+          digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+          size: expect.any(Number),
+          contents: expect.any(Buffer)
+        }],
+        pluginFingerprint: expect.stringMatching(/^sha256:/),
         fingerprint: expect.stringMatching(/^sha256:/),
         contentFingerprint: expect.stringMatching(/^sha256:/)
       })
@@ -320,6 +332,21 @@ describe('OpenCode provider adapter', () => {
       expect(config).not.toHaveProperty('permission')
       expect(config).not.toHaveProperty('provider')
       await expect(assertOpenCodeProjectProjection(projection)).resolves.toBeUndefined()
+
+      await mkdir(join(root, 'run-owned'))
+      const snapshots = await writeOpenCodePluginSnapshots(join(root, 'run-owned'), projection, {
+        cwd: projection.cwd,
+        fingerprint: projection.pluginFingerprint,
+        plugins: projection.plugins
+      })
+      const trustedConfig = openCodeSafeConfig(undefined, projection, observer, snapshots)
+      expect(trustedConfig.plugin).toEqual([
+        pathToFileURL(observer).href,
+        pathToFileURL(snapshots[0]!).href
+      ])
+      expect(snapshots[0]).not.toBe(canonicalPlugin)
+      expect(await readFile(snapshots[0]!, 'utf8')).toBe(await readFile(canonicalPlugin, 'utf8'))
+      expect((await stat(snapshots[0]!)).mode & 0o777).toBe(0o600)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -341,6 +368,7 @@ describe('OpenCode provider adapter', () => {
         mcpFingerprint: 'none',
         projectFingerprint: projection.fingerprint,
         projectContentFingerprint: projection.contentFingerprint,
+        projectPluginFingerprint: 'none',
         url: 'http://127.0.0.1:12345',
         client: {} as OpencodeClient,
         process,
@@ -358,6 +386,7 @@ describe('OpenCode provider adapter', () => {
         mcpFingerprint: 'none',
         projectFingerprint: projection.fingerprint,
         projectContentFingerprint: 'replacement',
+        projectPluginFingerprint: 'none',
         url: 'http://127.0.0.1:54321',
         client: {} as OpencodeClient
       }
@@ -379,7 +408,70 @@ describe('OpenCode provider adapter', () => {
     }
   })
 
-  it('ignores project plugins while projected instructions and Skills fail closed on unsafe paths', async () => {
+  it('does not reuse active or starting OpenCode servers across plugin authorization fingerprints', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-opencode-project-plugin-cache-'))
+    const repo = join(root, 'repo')
+    try {
+      await mkdir(repo)
+      await writeFile(join(repo, 'plugin.js'), 'export const Fixture = async () => ({})\n')
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./plugin.js'] }))
+      const projection = await readOpenCodeProjectProjection(repo)
+      const authorization = {
+        cwd: projection.cwd,
+        fingerprint: projection.pluginFingerprint,
+        plugins: projection.plugins
+      }
+      const process = { exitCode: null, killed: true }
+      const dispatcher = { destroy: vi.fn() } as unknown as Dispatcher
+      const active = {
+        cwd: projection.cwd,
+        mcpFingerprint: 'none',
+        projectFingerprint: projection.fingerprint,
+        projectContentFingerprint: projection.contentFingerprint,
+        projectPluginFingerprint: 'none',
+        url: 'http://127.0.0.1:12345',
+        client: {} as OpencodeClient,
+        process,
+        dispatcher,
+        mcpAuthFile: ''
+      }
+      const manager = new OpenCodeServerManager(() => '/bin/opencode')
+      const internals = manager as unknown as {
+        active: typeof active | null
+        starting: Promise<OpenCodeServerState> | null
+        start: (
+          projection: OpenCodeProjectProjection,
+          generation: number,
+          mcpExecution?: unknown,
+          pluginTrust?: unknown
+        ) => Promise<OpenCodeServerState>
+      }
+      const approved: OpenCodeServerState = {
+        cwd: projection.cwd,
+        mcpFingerprint: 'none',
+        projectFingerprint: projection.fingerprint,
+        projectContentFingerprint: projection.contentFingerprint,
+        projectPluginFingerprint: projection.pluginFingerprint,
+        url: 'http://127.0.0.1:54321',
+        client: {} as OpencodeClient
+      }
+      const start = vi.spyOn(internals, 'start').mockResolvedValue(approved)
+
+      internals.active = active
+      await expect(manager.ensure(repo, undefined, authorization)).resolves.toBe(approved)
+      expect(start).toHaveBeenCalledOnce()
+
+      start.mockClear()
+      internals.active = null
+      internals.starting = Promise.resolve({ ...approved, projectPluginFingerprint: 'none' })
+      await expect(manager.ensure(repo, undefined, authorization)).resolves.toBe(approved)
+      expect(start).toHaveBeenCalledOnce()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('invalidates project plugin content and fails closed on unsafe plugin/instruction/Skill paths', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-opencode-project-config-deny-'))
     const repo = join(root, 'repo')
     const instruction = join(repo, 'AGENTS.md')
@@ -390,19 +482,61 @@ describe('OpenCode provider adapter', () => {
       await writeFile(outside, '# outside\n')
       await writeFile(join(repo, 'opencode.json'), JSON.stringify({
         instructions: ['AGENTS.md'],
-        plugin: ['untrusted-package']
+        plugin: []
       }))
       const projection = await readOpenCodeProjectProjection(repo)
 
       await writeFile(join(repo, 'opencode.json'), JSON.stringify({
         instructions: ['AGENTS.md'],
-        plugin: ['../outside.js', ['./plugin.js', { arbitrary: true }]]
+        plugin: ['untrusted-package']
       }))
-      const ignoredPlugins = await readOpenCodeProjectProjection(repo)
-      expect(ignoredPlugins.fingerprint).toBe(projection.fingerprint)
-      expect(ignoredPlugins.contentFingerprint).toBe(projection.contentFingerprint)
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/本地相对|URL|package|逃逸/i)
+
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({
+        instructions: ['AGENTS.md'],
+        plugin: ['../outside.js']
+      }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/本地相对|URL|package|逃逸/i)
+
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({
+        instructions: ['AGENTS.md'],
+        plugin: [['./plugin.js', { arbitrary: true }]]
+      }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/本地相对|普通文件/i)
+
+      await writeFile(join(repo, 'plugin.txt'), 'export const plugin = 1\n')
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./plugin.txt'] }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/\.js|\.mjs/i)
+
+      await mkdir(join(repo, 'plugin-dir'))
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./plugin-dir'] }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/普通文件/i)
+
+      if (process.platform !== 'win32') {
+        const fifo = join(repo, 'plugin-fifo.js')
+        const mkfifo = spawnSync('/usr/bin/mkfifo', [fifo])
+        expect(mkfifo.status).toBe(0)
+        await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./plugin-fifo.js'] }))
+        await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/普通文件/i)
+      }
+
+      const outsidePlugin = join(root, 'outside-plugin.js')
+      await writeFile(outsidePlugin, 'export const plugin = 1\n')
+      await symlink(outsidePlugin, join(repo, 'linked-plugin.js'))
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./linked-plugin.js'] }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/符号链接|symlink/i)
+
+      await writeFile(join(repo, 'large-plugin.js'), Buffer.alloc(4_000_001, 0x20))
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./large-plugin.js'] }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/过大|超限/i)
+
+      await writeFile(join(repo, 'dependency.js'), 'export const dependency = 1\n')
+      await writeFile(join(repo, 'plugin.js'), 'export { dependency } from "./dependency.js"\n')
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./plugin.js'] }))
+      await expect(readOpenCodeProjectProjection(repo)).rejects.toThrow(/单文件|相对 import|export/i)
 
       await writeFile(instruction, '# mutated\n')
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ instructions: ['AGENTS.md'] }))
       const mutated = await readOpenCodeProjectProjection(repo)
       expect(mutated.fingerprint).toBe(projection.fingerprint)
       expect(mutated.contentFingerprint).not.toBe(projection.contentFingerprint)
@@ -418,6 +552,19 @@ describe('OpenCode provider adapter', () => {
 
       await rm(instruction)
       await writeFile(instruction, '# safe\n')
+      const plugin = join(repo, 'plugin.js')
+      await writeFile(plugin, 'export const plugin = 1\n')
+      await writeFile(join(repo, 'opencode.json'), JSON.stringify({ plugin: ['./plugin.js'] }))
+      const trusted = await readOpenCodeProjectProjection(repo)
+      await writeFile(plugin, 'export const plugin = 2\n')
+      const changedPlugin = await readOpenCodeProjectProjection(repo)
+      expect(changedPlugin.pluginFingerprint).not.toBe(trusted.pluginFingerprint)
+      await expect(writeOpenCodePluginSnapshots(join(root, 'stale-snapshot'), changedPlugin, {
+        cwd: trusted.cwd,
+        fingerprint: trusted.pluginFingerprint,
+        plugins: trusted.plugins
+      })).rejects.toThrow(/授权|fingerprint|不匹配/i)
+
       await mkdir(join(repo, '.opencode', 'skills'), { recursive: true })
       await symlink(join(root, 'outside-skills'), join(repo, '.opencode', 'skills', 'escaped'))
       await mkdir(join(root, 'outside-skills'), { recursive: true })
@@ -672,6 +819,34 @@ describe('OpenCode provider adapter', () => {
     }
   })
 
+  it('reports invalid OpenCode project plugin authorization as a capability error with reauthorization action', async () => {
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockRejectedValue(
+      new OpenCodeProjectPluginSecurityError('OpenCode 项目 plugin 授权已失效，拒绝启动')
+    )
+    const adapter = createOpenCodeAdapter()
+    try {
+      const handle = adapter.run({
+        runId: 'run-invalid-plugin-trust',
+        prompt: 'inspect',
+        cwd: '/repo',
+        attachments: [],
+        emit: () => {}
+      })
+      await expect(handle.promise).rejects.toMatchObject({
+        name: 'AgentRuntimeError',
+        brief: {
+          provider: 'opencode_server',
+          stage: 'capability',
+          cwd: '/repo',
+          nextAction: expect.stringMatching(/重新.*授权|最新.*授权/)
+        }
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
   it('keeps MCP disabled until authorization and converts only approved configs into isolated OpenCode format', () => {
     expect(openCodeMcpConfig()).toEqual({})
     expect(openCodeMcpConfig({
@@ -719,7 +894,7 @@ describe('OpenCode provider adapter', () => {
           { name: 'registration', status: 'needs-client-registration' }
         ] }
       })
-      expect(ensure).toHaveBeenCalledWith('/repo', execution)
+      expect(ensure).toHaveBeenCalledWith('/repo', execution, undefined)
     } finally {
       adapter.dispose?.()
       ensure.mockRestore()
