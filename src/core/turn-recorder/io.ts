@@ -21,6 +21,14 @@ export async function writeJsonAtomic(path: string, value: unknown, options: { s
     await handle.close()
     handle = undefined
     await rename(temp, path)
+    if (options.sync !== false) {
+      const parent = await open(dirname(path), 'r')
+      try {
+        await parent.sync()
+      } finally {
+        await parent.close()
+      }
+    }
   } catch (error) {
     try { await handle?.close() } catch { /* preserve original error */ }
     await rm(temp, { force: true }).catch(() => {})

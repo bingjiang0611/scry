@@ -187,10 +187,14 @@ function qoderOptions(
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
   permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false,
-  mcpExecution?: AuthorizedMcpExecution
+  mcpExecution?: AuthorizedMcpExecution,
+  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
 ): Record<string, unknown> {
   const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!executable) throw new Error('Qoder CLI 未找到')
+  const runtimeEnv = runtimeCliEnv(undefined, managedRecorder ? { managedRecorder: true } : {})
+  delete runtimeEnv.SCRY_MANAGED_RUN_ID
+  delete runtimeEnv.SCRY_MANAGED_PROMPT_HASH
   const permissions = permissionMode === 'full_access'
     ? { permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true }
     : { permissionMode: permissionMode === 'auto_review' ? 'auto' : 'default' }
@@ -200,7 +204,11 @@ function qoderOptions(
     resume,
     pathToQoderCLIExecutable: executable,
     env: {
-      ...runtimeCliEnv(undefined, managedRecorder ? { managedRecorder: true } : {}),
+      ...runtimeEnv,
+      ...(managedRecorder && managedIdentity ? {
+        SCRY_MANAGED_RUN_ID: managedIdentity.runId,
+        SCRY_MANAGED_PROMPT_HASH: managedIdentity.promptHash
+      } : {}),
       // Scry owns cancellation through the run's AbortController. Let Qoder wait for
       // background shell tasks instead of force-stopping them after ten minutes.
       QODERCLI_PRINT_BG_WAIT_CEILING_MS: '0'
@@ -572,7 +580,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 undefined,
                 request.permissionMode,
                 request.managedRecorder === true,
-                request.mcpExecution
+                request.mcpExecution,
+                request.managedRecorderIdentity
               ),
               abortController: controller
             } as never
@@ -674,7 +683,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               },
               request.permissionMode,
               request.managedRecorder === true,
-              request.mcpExecution
+              request.mcpExecution,
+              request.managedRecorderIdentity
             ),
             ...(request.model && !request.effort ? { model: request.model.id } : {}),
             ...(request.model && request.effort

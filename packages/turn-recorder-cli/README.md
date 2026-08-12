@@ -5,7 +5,7 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.16 \
+npm install -g @ali/scry-turn-recorder@0.2.17 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
@@ -30,6 +30,8 @@ scry turns export --workspace "$PWD" --after 0 --limit 100
 ```
 
 Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，首事件由 `scry recorder hook --start-daemon` 直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。Agent、skill 和用户提示词不应主动调用这些记录命令。
+
+需要在正式 record 落盘后唤醒外部 uploader 时，`scry.config.json` 的 `commitHook` 必须声明 workspace 相对的 `entry` 与完整 `files` 清单。Scry App 首次使用会展示完整 bundle 指纹；批准后只执行复制到 Scry userData 的冻结副本，入口或任一依赖变化都会重新询问。CLI/daemon 不会自动信任 workspace 配置；其宿主需显式设置绝对、可执行的 `SCRY_RECORDER_COMMIT_HOOK`，并在修改后执行 `scry recorder restart --workspace <repo>`。record 持久化且 runtime 清理后，recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON，并仅在回调 exit 0 后推进 durable ACK；失败、超时或进程中断会在下一次 hook/recovery 重试。
 
 Scry 启动且启用精确记录的 Claude、Codex、Qoder 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
 身份，Scry App 在 result、Hook 与 diff 全部收齐后，把 trace archive 使用的同一份
@@ -56,6 +58,18 @@ scry recorder restart --workspace "$PWD"
   "enabled": true,
   "workspaceId": "my-workspace",
   "dataDir": ".scry",
+  "commitHook": {
+    "entry": ".claude/hooks/scry-record-committed.py",
+    "files": [
+      ".claude/hooks/scry-record-committed.py",
+      ".claude/hooks/scry_turn_uploader.py",
+      ".claude/hooks/flush.py",
+      ".claude/hooks/session_identity.py",
+      ".claude/workflow/archive_snapshot.py",
+      "agent-adapters/shims/run-hook-async.py",
+      "agent-adapters/scripts/generate.py"
+    ]
+  },
   "repositories": { "mode": "discover-nested-git", "maxDepth": 2 },
   "capture": {
     "prompt": true,

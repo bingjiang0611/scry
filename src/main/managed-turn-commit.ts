@@ -6,6 +6,9 @@ import type { ProviderId } from '../shared/provider.js'
 import type { AgentTurnRecord } from '../shared/turn-record.js'
 import {
   commitManagedRecorderTurn,
+  isManagedRecorderProvider,
+  isManagedProviderRuntimePair,
+  managedRecorderAllowsMissingProviderTurnId,
   managedRecorderMode,
   prepareManagedRecorderTurn,
   type ManagedRecorderProviderId,
@@ -27,7 +30,7 @@ interface ManagedTurnJournal {
   request: {
     cwd: string
     sessionId: string
-    providerTurnId: string
+    providerTurnId?: string
     providerId: ManagedRecorderProviderId
     runtimeProvider: RuntimeProvider
     turn: TraceArchiveTurn
@@ -50,16 +53,17 @@ function validManagedRequest(value: unknown): value is ManagedTurnJournal['reque
   if (!isRecord(value) || !isRecord(value.turn) || !isRecord(value.timing)) return false
   const turn = value.turn
   const timing = value.timing
-  const validProviderRuntime =
-    (value.providerId === 'claude' && value.runtimeProvider === 'claude_sdk') ||
-    (value.providerId === 'codex' && value.runtimeProvider === 'codex_cli') ||
-    (value.providerId === 'qoder' && value.runtimeProvider === 'qoder_cli')
+  const validProviderTurnIdentity =
+    (typeof value.providerTurnId === 'string' && value.providerTurnId.length > 0 && turn.providerTurnId === value.providerTurnId) ||
+    (value.providerTurnId === undefined && turn.providerTurnId === undefined &&
+      (value.providerId === 'qoder' || value.providerId === 'opencode') &&
+      typeof value.status === 'string' &&
+      managedRecorderAllowsMissingProviderTurnId(value.providerId, value.status as AgentTurnRecord['status']))
   return typeof value.cwd === 'string' && value.cwd.length > 0 &&
     typeof value.sessionId === 'string' && value.sessionId.length > 0 &&
-    typeof value.providerTurnId === 'string' && value.providerTurnId.length > 0 &&
-    validProviderRuntime &&
+    validProviderTurnIdentity &&
+    isManagedProviderRuntimePair(value.providerId, value.runtimeProvider) &&
     typeof turn.runId === 'string' && turn.runId.length > 0 &&
-    (turn.providerTurnId === undefined || typeof turn.providerTurnId === 'string') &&
     typeof turn.userText === 'string' &&
     Array.isArray(turn.items) && isRecord(turn.turnEvidence) && turn.done === true &&
     typeof turn.status === 'string' && typeof value.status === 'string' &&
@@ -86,7 +90,7 @@ function managedArtifactIdentity(value: unknown): {
   const request = value.request
   if (
     typeof request.cwd !== 'string' || typeof request.sessionId !== 'string' ||
-    (request.providerId !== 'claude' && request.providerId !== 'codex' && request.providerId !== 'qoder')
+    (typeof request.providerId !== 'string' || !isManagedRecorderProvider(request.providerId as ProviderId))
   ) return null
   return { cwd: request.cwd, sessionId: request.sessionId, providerId: request.providerId }
 }
@@ -104,7 +108,7 @@ export interface ManagedTraceTurnCommitInput {
   userDataDir: string
   cwd: string
   sessionId: string
-  providerTurnId: string
+  providerTurnId?: string
   providerId: ManagedRecorderProviderId
   runtimeProvider: RuntimeProvider
   turn: TraceArchiveTurn
@@ -116,6 +120,25 @@ export interface ManagedTurnRecovery {
   recovered: number
   pending: number
   errors: string[]
+}
+
+export async function managedRecoveryScopes(
+  userDataDir: string
+): Promise<Array<{ cwd: string; providerId: ManagedRecorderProviderId }>> {
+  const scopes = new Map<string, { cwd: string; providerId: ManagedRecorderProviderId }>()
+  for (const [root, valid] of [
+    [progressRoot(userDataDir), validProgress],
+    [journalRoot(userDataDir), validJournal]
+  ] as const) {
+    for (const name of await listFiles(root)) {
+      if (!name.endsWith('.json')) continue
+      const value = await readJson<ManagedTurnProgress & ManagedTurnJournal>(join(root, name))
+      if (!valid(value)) continue
+      const { cwd, providerId } = value.request
+      scopes.set(`${providerId}\0${cwd}`, { cwd, providerId })
+    }
+  }
+  return [...scopes.values()]
 }
 
 function journalRoot(userDataDir: string): string {
@@ -303,7 +326,14 @@ function matchingArchiveTurn(input: ManagedTraceTurnCommitInput): TraceArchiveTu
 }
 
 function assertManagedTraceInput(input: ManagedTraceTurnCommitInput): void {
-  if (!input.providerTurnId || input.turn.providerTurnId !== input.providerTurnId) {
+  if (!isManagedProviderRuntimePair(input.providerId, input.runtimeProvider)) {
+    throw new Error('managed recorder Provider id differs from runtime provider')
+  }
+  const permitsMissingProviderTurnId =
+    !input.providerTurnId && !input.turn.providerTurnId && (
+      managedRecorderAllowsMissingProviderTurnId(input.providerId, input.status)
+    )
+  if (!permitsMissingProviderTurnId && (!input.providerTurnId || input.turn.providerTurnId !== input.providerTurnId)) {
     throw new Error('managed recorder archive turn id differs from authoritative Provider turn id')
   }
   if (!input.turn.turnEvidence) {
@@ -402,7 +432,8 @@ async function replayJournal(
   path: string,
   userDataDir: string,
   journal: ManagedTurnJournal,
-  waitMs: number
+  waitMs: number,
+  commitHookEnv?: NodeJS.ProcessEnv
 ): Promise<'recovered' | 'pending'> {
   const input: ManagedTraceTurnCommitInput = {
     ...journal.request,
@@ -432,7 +463,8 @@ async function replayJournal(
       userText: archiveCommitted.request.turn.userText,
       evidence,
       timing: archiveCommitted.request.timing,
-      status: archiveCommitted.request.status
+      status: archiveCommitted.request.status,
+      env: commitHookEnv
     })
     if (committed.status === 'disabled' || committed.status === 'pending' || committed.status === 'prepared') {
       throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')
@@ -494,8 +526,9 @@ export function canonicalOrObservedTurnTiming(
   // boundary covers the complete user query.
   if (providerId === 'claude' && observedTiming) return observedTiming
   const canonical = canonicalTurnTiming(events)
-  if (canonical || providerId !== 'qoder' || status === 'completed') return canonical
-  return observedTiming
+  if (canonical) return canonical
+  if ((providerId === 'qoder' || providerId === 'opencode') && status !== 'completed') return observedTiming
+  return null
 }
 
 export async function commitManagedTraceTurn(
@@ -503,9 +536,10 @@ export async function commitManagedTraceTurn(
   options: {
     waitMs?: number
     removeArtifact?: (path: string) => Promise<void>
+    commitHookEnv?: NodeJS.ProcessEnv
   } = {}
 ): Promise<{ recorder: 'disabled' | 'committed'; recordId?: string }> {
-  const mode = await managedRecorderMode(input.cwd)
+  const mode = await managedRecorderMode(input.cwd, options.commitHookEnv)
   if (mode.status === 'disabled') {
     const existing = matchingArchiveTurn(input)
     if (existing) {
@@ -575,7 +609,8 @@ export async function commitManagedTraceTurn(
       userText: input.turn.userText,
       evidence,
       timing: input.timing,
-      status: input.status
+      status: input.status,
+      env: options.commitHookEnv
     })
     if (committed.status !== 'committed' && committed.status !== 'duplicate') {
       throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')
@@ -608,7 +643,13 @@ export async function persistManagedTraceProgress(
 
 export async function recoverManagedTraceProgress(
   userDataDir: string,
-  options: { cwd?: string; sessionId?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
+  options: {
+    cwd?: string
+    sessionId?: string
+    providerId?: ManagedRecorderProviderId
+    waitMs?: number
+    commitHookEnv?: NodeJS.ProcessEnv
+  } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
   let pending = 0
@@ -653,7 +694,7 @@ export async function recoverManagedTraceProgress(
       }
       await commitManagedTraceTurn(
         input,
-        { waitMs: options.waitMs ?? 250 }
+        { waitMs: options.waitMs ?? 250, commitHookEnv: options.commitHookEnv }
       )
       recovered++
     } catch (error) {
@@ -666,7 +707,13 @@ export async function recoverManagedTraceProgress(
 
 export async function recoverManagedTraceTurns(
   userDataDir: string,
-  options: { cwd?: string; sessionId?: string; providerId?: ManagedRecorderProviderId; waitMs?: number } = {}
+  options: {
+    cwd?: string
+    sessionId?: string
+    providerId?: ManagedRecorderProviderId
+    waitMs?: number
+    commitHookEnv?: NodeJS.ProcessEnv
+  } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
   let pending = 0
@@ -689,7 +736,7 @@ export async function recoverManagedTraceTurns(
     if (options.providerId && journal.request.providerId !== options.providerId) continue
     const result = await withDirectoryLock(
       lockPath(userDataDir, journal.request.turn.runId),
-      () => replayJournal(path, userDataDir, journal, options.waitMs ?? 250),
+      () => replayJournal(path, userDataDir, journal, options.waitMs ?? 250, options.commitHookEnv),
       { waitMs: options.waitMs ?? 250 }
     ).catch((error) => {
       errors.push(error instanceof Error ? error.message : String(error))

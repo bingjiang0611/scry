@@ -1,3 +1,4 @@
+import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { GitTurnDiffCapture } from './git.js'
@@ -23,6 +24,8 @@ export interface RecorderOpenTurnState {
   closingAt?: string
   prompt?: string
   promptHash?: string
+  managedRunId?: string
+  managedPromptHash?: string
   startFingerprint: string
   transcriptPath?: string
   transcriptStartOffset?: number
@@ -95,4 +98,19 @@ export async function recorderPendingHealth(
     }
   }
   return { pendingCount, oldestPendingAgeMs }
+}
+
+export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
+  for (const provider of ['claude', 'codex', 'qoder', 'opencode'] as const) {
+    const providerRoot = join(dataRoot, 'runtime', provider)
+    for (const session of await listFiles(providerRoot)) {
+      try {
+        await access(recorderOpenPath(join(providerRoot, session)))
+        return true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true
+      }
+    }
+  }
+  return false
 }

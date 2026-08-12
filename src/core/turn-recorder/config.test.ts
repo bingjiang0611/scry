@@ -54,4 +54,36 @@ describe('recorder storage location', () => {
       await rm(outside, { recursive: true, force: true })
     }
   })
+
+  it('commitHook 只接受 entry 在显式 files 清单中的 workspace 相对路径', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-commit-hook-config-'))
+    try {
+      await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+        ...config,
+        commitHook: {
+          entry: '.claude/hooks/notify.py',
+          files: ['.claude/hooks/notify.py', '.claude/hooks/uploader.py']
+        }
+      }))
+      const enabled = await resolveRecorderEnablement(root)
+      expect(enabled).toMatchObject({
+        enabled: true,
+        config: { commitHook: { entry: '.claude/hooks/notify.py', files: expect.any(Array) } }
+      })
+
+      await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+        ...config,
+        commitHook: { entry: '../notify.py', files: ['../notify.py'] }
+      }))
+      await expect(resolveRecorderLocation(root)).resolves.toMatchObject({ valid: false, reason: 'invalid_config' })
+
+      await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+        ...config,
+        commitHook: { entry: '.claude/hooks/notify.py', files: ['.claude/hooks/uploader.py'] }
+      }))
+      await expect(resolveRecorderLocation(root)).resolves.toMatchObject({ valid: false, reason: 'invalid_config' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

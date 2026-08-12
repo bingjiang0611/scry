@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -12,6 +12,7 @@ import {
   canonicalTurnTiming,
   commitManagedTraceTurn,
   deleteManagedTurnArtifacts,
+  managedRecoveryScopes,
   managedSessionRunIds,
   persistManagedTraceProgress,
   recoverManagedTraceProgress,
@@ -240,6 +241,67 @@ describe('managed trace turn coordinator', () => {
     }
   })
 
+  it('managed commit 只使用显式授予的 commitHook capability 唤醒 uploader', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const hookDir = join(userDataDir, 'trusted-hook')
+    const hook = join(hookDir, 'record-committed.sh')
+    const capture = join(workspace, 'record-committed.jsonl')
+    await mkdir(hookDir, { recursive: true })
+    await writeFile(hook, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
+    await chmod(hook, 0o700)
+    await startManaged(workspace)
+
+    await expect(commitManagedTraceTurn(input(workspace, userDataDir), {
+      commitHookEnv: {
+        ...process.env,
+        SCRY_RECORDER_COMMIT_HOOK: hook,
+        SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'test-grant-v1'
+      }
+    })).resolves.toMatchObject({ recorder: 'committed' })
+
+    expect(JSON.parse((await readFile(capture, 'utf8')).trim())).toMatchObject({
+      schemaVersion: 1,
+      event: 'record-committed',
+      workspace,
+      provider: 'codex',
+      sessionId: 'session-1',
+      sequence: 1
+    })
+  })
+
+  it('冷启动 recovery scope 按 cwd/provider 去重且 capability env 不落入 progress', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = input(workspace, userDataDir)
+    await persistManagedTraceProgress(request)
+
+    expect(await managedRecoveryScopes(userDataDir)).toEqual([{ cwd: workspace, providerId: 'codex' }])
+    const progressDir = join(userDataDir, 'managed-turn-progress')
+    const persisted = JSON.parse(await readFile(join(progressDir, readdirSync(progressDir)[0]!), 'utf8'))
+    expect(JSON.stringify(persisted)).not.toContain('SCRY_RECORDER_COMMIT_HOOK')
+  })
+
+  it('冷启动 progress recovery 使用内存中的已授权 capability env', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const hook = join(userDataDir, 'trusted-recovery-hook.sh')
+    const capture = join(userDataDir, 'recovery-notification.jsonl')
+    await writeFile(hook, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
+    await chmod(hook, 0o700)
+    await startManaged(workspace)
+    await persistManagedTraceProgress(input(workspace, userDataDir))
+
+    await expect(recoverManagedTraceProgress(userDataDir, {
+      cwd: workspace,
+      providerId: 'codex',
+      waitMs: 0,
+      commitHookEnv: {
+        ...process.env,
+        SCRY_RECORDER_COMMIT_HOOK: hook,
+        SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'startup-grant-v1'
+      }
+    })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+    expect(JSON.parse((await readFile(capture, 'utf8')).trim())).toMatchObject({ workspace, provider: 'codex' })
+  })
+
   it('500-turn legacy monolith 后仍以 segment 提交下一轮且不留下 recovery dead-end', async () => {
     const { workspace, userDataDir } = await fixture()
     const legacy = traceArchivePath(userDataDir, workspace, 'session-1', 'codex')
@@ -417,6 +479,53 @@ describe('managed trace turn coordinator', () => {
     }))
     expect(record).toMatchObject({ provider: { id: 'qoder' }, status: 'failed' })
     expect(record.assistant).toEqual(archive?.turns[0].turnEvidence?.assistant)
+  })
+
+  it('Qoder 极早中断无 Provider turn id 时可持久化 progress 并提交 archive 与 canonical record', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        prompt: '/rate-workflow 1',
+        timestamp: '2026-07-29T12:00:00.000Z'
+      }
+    })
+    const request = input(workspace, userDataDir)
+    request.sessionId = 'qoder-session'
+    request.providerTurnId = undefined
+    request.providerId = 'qoder'
+    request.runtimeProvider = 'qoder_cli'
+    request.status = 'interrupted'
+    request.turn = {
+      ...request.turn,
+      providerTurnId: undefined,
+      status: 'interrupted',
+      items: []
+    }
+    request.turn.turnEvidence = aggregateTurnEvidence({
+      userText: request.turn.userText,
+      events: request.turn.items,
+      source: 'scry_provider_adapter'
+    })
+
+    await expect(persistManagedTraceProgress(request)).resolves.toBeUndefined()
+    await expect(commitManagedTraceTurn(request)).resolves.toMatchObject({ recorder: 'committed' })
+    const [record] = await listRecords(join(workspace, '.scry'))
+    const [turn] = readTraceArchive({
+      cwd: workspace,
+      sessionId: 'qoder-session',
+      providerId: 'qoder',
+      userDataDir
+    })?.turns ?? []
+
+    expect(record).toMatchObject({ provider: { id: 'qoder' }, status: 'interrupted' })
+    expect(record.providerTurnId).toBeUndefined()
+    expect(turn).toMatchObject({ runId: 'run-1', status: 'interrupted' })
+    expect(turn.providerTurnId).toBeUndefined()
   })
 
   it('recorder disabled 时 Qoder failure 无 Provider turn id 仍写入 Scry archive', async () => {

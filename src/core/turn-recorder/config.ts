@@ -6,6 +6,7 @@ export interface RecorderConfig {
   enabled: boolean
   workspaceId: string
   dataDir: string
+  commitHook?: RecorderCommitHookConfig
   repositories: {
     mode: 'workspace-only' | 'discover-nested-git'
     maxDepth?: number
@@ -18,6 +19,11 @@ export interface RecorderConfig {
     diff: boolean
     hooks: boolean
   }
+}
+
+export interface RecorderCommitHookConfig {
+  entry: string
+  files: string[]
 }
 
 export type RecorderEnablement =
@@ -53,6 +59,22 @@ function parseConfig(raw: unknown): RecorderConfig {
   if (!relativeDataDir || isAbsolute(dataDir) || relativeDataDir.startsWith('..')) {
     throw new Error('dataDir must be a workspace-relative subdirectory')
   }
+  const commitHookRaw = record(root.commitHook)
+  const commitHook = commitHookRaw && typeof commitHookRaw.entry === 'string'
+    ? {
+        entry: commitHookRaw.entry.trim(),
+        files: [...new Set(stringArray(commitHookRaw.files).map((item) => item.trim()))]
+      }
+    : undefined
+  if (commitHook) {
+    const paths = [commitHook.entry, ...commitHook.files]
+    if (
+      !commitHook.entry || !commitHook.files.includes(commitHook.entry) ||
+      paths.some((path) => !path || isAbsolute(path) || relative('.', path).startsWith('..'))
+    ) {
+      throw new Error('commitHook requires a workspace-relative entry included in files')
+    }
+  }
   const repositories = record(root.repositories) ?? {}
   const mode = repositories.mode === 'discover-nested-git' ? 'discover-nested-git' : 'workspace-only'
   const maxDepth = typeof repositories.maxDepth === 'number' && Number.isInteger(repositories.maxDepth)
@@ -64,6 +86,7 @@ function parseConfig(raw: unknown): RecorderConfig {
     enabled: root.enabled !== false,
     workspaceId: root.workspaceId.trim(),
     dataDir,
+    ...(commitHook ? { commitHook } : {}),
     repositories: { mode, maxDepth, exclude: stringArray(repositories.exclude) },
     capture: {
       prompt: captureRaw.prompt !== false,
