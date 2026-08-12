@@ -1859,12 +1859,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       providerTurnId?: string
       stopped?: boolean
       status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
-      recordingFailure?: { message: string }
     }>
     interrupt: () => void
     getExternalSessionId: () => string | undefined
     getProviderTurnId?: () => string | undefined
-    getRecordingFailure?: () => { message: string } | undefined
   } | null = null
   let interrupted = false
   let observedProviderStartedAt: string | undefined
@@ -1873,7 +1871,6 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     providerTurnId?: string
     stopped?: boolean
     status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
-    recordingFailure?: { message: string }
   }> => {
     if (interrupted) return { stopped: true }
     observedProviderStartedAt = new Date().toISOString()
@@ -1889,7 +1886,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       codexHookTrust,
       openCodePluginTrust,
       managedRecorder: managedRecorderEnabled,
-      ...(managedRecorderEnabled && (providerId === 'qoder' || providerId === 'opencode') ? {
+      ...(managedRecorderEnabled && providerId === 'qoder' ? {
         managedRecorderIdentity: {
           runId,
           promptHash: createHash('sha256').update(displayPrompt).digest('hex')
@@ -2012,32 +2009,6 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       const alreadyDone = runState.done
       runState.done = true
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
-      if (r.recordingFailure) {
-        const message = `Provider 已完成，但 Scry 精确记录不完整：${r.recordingFailure.message}`
-        runState.error = message
-        runState.errorHint = recordingRecoveryHint
-        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
-        win?.webContents.send('agent:error', {
-          runId,
-          message,
-          category: 'recording',
-          hint: runState.errorHint
-        })
-        await turnDiffDone
-        recordTurn({
-          runId,
-          sessionId: storageSessionId,
-          cwd,
-          userText: displayPrompt,
-          items: runState.items,
-          providerId,
-          runtimeProvider,
-          billingProvider: [...runState.items].reverse().find(
-            (event) => event.kind === 'harness' && event.stage === 'result'
-          )?.billingProvider
-        })
-        return
-      }
       terminalArchiveArgs = completionArchiveArgs
       try {
         // Provider 已完成时先落一份 durable canonical snapshot。若 App 在等待 Git diff
@@ -2132,12 +2103,6 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       } catch (error) {
         console.warn('[scry] Provider turn getter failed at terminal boundary:', runId, error)
       }
-      let providerRecordingFailure: { message: string } | undefined
-      try {
-        providerRecordingFailure = h?.getRecordingFailure?.()
-      } catch (error) {
-        console.warn('[scry] Provider recording failure getter failed at terminal boundary:', runId, error)
-      }
       terminalArchiveArgs = {
         providerId,
         runtimeProvider,
@@ -2207,35 +2172,6 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         })
       }
       mirrorSessionTranscript(providerId, cwd, nativeSessionId)
-      if (providerRecordingFailure) {
-        const providerMessage = stopped ? 'Provider 已中断' : 'Provider 已失败'
-        const recordingMessage = `${providerMessage}，且 Scry 精确记录不完整：${providerRecordingFailure.message}`
-        runState.error = recordingMessage
-        runState.errorHint = recordingRecoveryHint
-        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
-        terminalArchiveArgs = undefined
-        flushTraceSend()
-        win?.webContents.send('agent:error', {
-          runId,
-          message: recordingMessage,
-          category: 'recording',
-          hint: runState.errorHint
-        })
-        await turnDiffDone
-        recordTurn({
-          runId,
-          sessionId: storageSessionId,
-          cwd,
-          userText: displayPrompt,
-          items: runState.items,
-          providerId,
-          runtimeProvider,
-          billingProvider: [...runState.items].reverse().find(
-            (event) => event.kind === 'harness' && event.stage === 'result'
-          )?.billingProvider
-        })
-        return
-      }
       try {
         await persistTerminalProgress(terminalArchiveArgs)
       } catch (progressError) {

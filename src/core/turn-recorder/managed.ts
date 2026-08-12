@@ -38,27 +38,25 @@ export interface ManagedTurnTiming {
   durationMs: number
 }
 
-export type ManagedRecorderProviderId = Extract<ProviderId, 'claude' | 'codex' | 'qoder' | 'opencode'>
+export type ManagedRecorderProviderId = Extract<ProviderId, 'claude' | 'codex' | 'qoder'>
 
 const QODER_PROVISIONAL_START_TOLERANCE_MS = 5_000
 
 export function isManagedRecorderProvider(provider: ProviderId): provider is ManagedRecorderProviderId {
-  return provider === 'claude' || provider === 'codex' || provider === 'qoder' || provider === 'opencode'
+  return provider === 'claude' || provider === 'codex' || provider === 'qoder'
 }
 
 export function managedRecorderAllowsMissingProviderTurnId(
   provider: ManagedRecorderProviderId,
   status: AgentTurnRecord['status']
 ): boolean {
-  return (provider === 'qoder' && status === 'interrupted') ||
-    (provider === 'opencode' && (status === 'failed' || status === 'interrupted'))
+  return provider === 'qoder' && status === 'interrupted'
 }
 
 export function isManagedProviderRuntimePair(provider: unknown, runtimeProvider: unknown): boolean {
   return (provider === 'claude' && runtimeProvider === 'claude_sdk') ||
     (provider === 'codex' && runtimeProvider === 'codex_cli') ||
-    (provider === 'qoder' && runtimeProvider === 'qoder_cli') ||
-    (provider === 'opencode' && runtimeProvider === 'opencode_server')
+    (provider === 'qoder' && runtimeProvider === 'qoder_cli')
 }
 
 export interface PrepareManagedTurnInput {
@@ -300,7 +298,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   if (mode.status === 'disabled') return mode
   assertExactText(input.evidence.user, input.userText, 'user')
   if (
-    (input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode') &&
+    (input.provider === 'claude' || input.provider === 'qoder') &&
     input.status !== 'completed'
   ) {
     assertOptionalAssistantText(input.evidence.assistant)
@@ -353,7 +351,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         candidate.providerTurnId === input.providerTurnId
     )
     const provisional = candidates.filter((candidate) => candidate.managedByScry && !candidate.providerTurnId)
-    const supportsProvisionalIdentity = input.provider === 'qoder' || input.provider === 'opencode'
+    const supportsProvisionalIdentity = input.provider === 'qoder'
     const matchingProvisional = supportsProvisionalIdentity
       ? provisional.filter((candidate) => managedProvisionalMatches(candidate, input))
       : []
@@ -489,7 +487,7 @@ export async function recoverManagedRecorderTurns(
   let pending = 0
   const providers: ManagedRecorderProviderId[] = options.provider
     ? [options.provider]
-    : ['claude', 'codex', 'qoder', 'opencode']
+    : ['claude', 'codex', 'qoder']
   for (const provider of providers) {
     const providerRoot = join(enablement.dataRoot, 'runtime', provider)
     for (const sessionDir of await listFiles(providerRoot)) {

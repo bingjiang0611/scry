@@ -56,7 +56,7 @@ function validManagedRequest(value: unknown): value is ManagedTurnJournal['reque
   const validProviderTurnIdentity =
     (typeof value.providerTurnId === 'string' && value.providerTurnId.length > 0 && turn.providerTurnId === value.providerTurnId) ||
     (value.providerTurnId === undefined && turn.providerTurnId === undefined &&
-      (value.providerId === 'qoder' || value.providerId === 'opencode') &&
+      value.providerId === 'qoder' &&
       typeof value.status === 'string' &&
       managedRecorderAllowsMissingProviderTurnId(value.providerId, value.status as AgentTurnRecord['status']))
   return typeof value.cwd === 'string' && value.cwd.length > 0 &&
@@ -92,7 +92,11 @@ function managedArtifactIdentity(value: unknown): {
     typeof request.cwd !== 'string' || typeof request.sessionId !== 'string' ||
     (typeof request.providerId !== 'string' || !isManagedRecorderProvider(request.providerId as ProviderId))
   ) return null
-  return { cwd: request.cwd, sessionId: request.sessionId, providerId: request.providerId }
+  return {
+    cwd: request.cwd,
+    sessionId: request.sessionId,
+    providerId: request.providerId as ManagedRecorderProviderId
+  }
 }
 
 function managedIdentityMatches(
@@ -527,7 +531,7 @@ export function canonicalOrObservedTurnTiming(
   if (providerId === 'claude' && observedTiming) return observedTiming
   const canonical = canonicalTurnTiming(events)
   if (canonical) return canonical
-  if ((providerId === 'qoder' || providerId === 'opencode') && status !== 'completed') return observedTiming
+  if (providerId === 'qoder' && status !== 'completed') return observedTiming
   return null
 }
 
