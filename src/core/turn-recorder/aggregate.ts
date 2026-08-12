@@ -134,9 +134,14 @@ export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
     const deltas = kind === 'text'
       ? run.filter((event) => event.stage === 'text_delta').map((event) => event.text ?? '').join('')
       : ''
+    const authoritativeText = kind === 'text'
+      ? [...run].reverse().find((event) =>
+          event.stage === 'text' && event.runtimeMetadata?.replacesStreamedText === true
+        )?.text
+      : undefined
     const text = kind === 'thinking'
       ? run.map((event) => event.thinking ?? '').join('')
-      : run.map((event) => event.stage === 'text' && deltas && event.text === deltas ? '' : event.text ?? '').join('')
+      : authoritativeText ?? run.map((event) => event.stage === 'text' && deltas && event.text === deltas ? '' : event.text ?? '').join('')
     const providerItemId = typeof first.runtimeMetadata?.codexItemId === 'string'
       ? first.runtimeMetadata.codexItemId
       : undefined

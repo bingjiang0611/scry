@@ -179,14 +179,38 @@ function residualTiming(events: TraceEvent[]): DerivedModelTiming | undefined {
   ).length
   const occupiedActivityMs = calls.length === 0 ? 0 : intervalUnionMs(intervals)
   if (occupiedActivityMs == null) return undefined
+  const resultMs = timestampMs(result.ts)
+  const turnStartMs = resultMs != null ? resultMs - wallMs : undefined
+  const inconsistentWall =
+    occupiedActivityMs > wallMs ||
+    (turnStartMs != null && resultMs != null && intervals.some(
+      (interval) =>
+        interval.startMs != null &&
+        interval.endMs != null &&
+        (interval.startMs < turnStartMs || interval.endMs > resultMs)
+    ))
+  if (inconsistentWall) {
+    return {
+      status: 'unavailable',
+      quality: 'unavailable',
+      value: {
+        method: 'non_call_residual',
+        activityCoverage: {
+          timedCalls: timedActivityCalls,
+          totalCalls: calls.length
+        }
+      },
+      omissionReason: 'turn wall-clock is inconsistent with observed activity intervals'
+    }
+  }
 
   return {
     status: 'partial',
     quality: 'estimated',
     value: {
       method: 'non_call_residual',
-      cumulativeMs: Math.max(0, wallMs - occupiedActivityMs),
-      occupiedMs: Math.max(0, wallMs - occupiedActivityMs),
+      cumulativeMs: wallMs - occupiedActivityMs,
+      occupiedMs: wallMs - occupiedActivityMs,
       overlapMs: 0,
       activityCoverage: {
         timedCalls: timedActivityCalls,

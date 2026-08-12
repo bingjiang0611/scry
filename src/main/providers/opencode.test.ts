@@ -8,7 +8,14 @@ import { pathToFileURL } from 'node:url'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { Dispatcher } from 'undici'
 import type { TraceEvent } from '../../shared/trace'
+import { aggregateTurnEvidence } from '../../core/turn-recorder/aggregate'
 import type { ProviderRunRequest } from './types'
+
+const { handleRecorderHookMock } = vi.hoisted(() => ({ handleRecorderHookMock: vi.fn() }))
+
+vi.mock('../../core/turn-recorder/recorder', () => ({
+  handleRecorderHook: handleRecorderHookMock
+}))
 
 vi.mock('../claude-locate', () => ({
   resolveRuntimeCliBin: () => '/bin/opencode',
@@ -1276,9 +1283,10 @@ describe('OpenCode provider adapter', () => {
         sessionID: 'session-1',
         part: {
           type: 'tool',
+          messageID: 'assistant-tool-1',
           callID: 'call-1',
           tool: 'read',
-          state: { input: { filePath: '/repo/README.md' } }
+          state: { input: { filePath: '/repo/README.md' }, time: { start: 1_000 } }
         }
       }
     }
@@ -1291,13 +1299,22 @@ describe('OpenCode provider adapter', () => {
       ...base,
       properties: {
         ...base.properties,
-        part: { ...base.properties.part, state: { ...base.properties.part.state, status: 'completed', output: 'ok' } }
+        part: {
+          ...base.properties.part,
+          state: { ...base.properties.part.state, status: 'completed', output: 'ok', time: { start: 1_000, end: 4_000 } }
+        }
       }
     }, 'session-1')
 
     expect(events).toEqual([
-      expect.objectContaining({ kind: 'tool', stage: 'tool:Read', tool: 'Read', toolUseId: 'call-1', fileOp: 'read', filePath: '/repo/README.md' }),
-      expect.objectContaining({ kind: 'tool', stage: 'tool_result', toolUseId: 'call-1', output: 'ok', isError: false })
+      expect.objectContaining({
+        kind: 'tool', stage: 'tool:Read', tool: 'Read', toolUseId: 'call-1', messageId: 'assistant-tool-1',
+        fileOp: 'read', filePath: '/repo/README.md', ts: '1970-01-01T00:00:01.000Z'
+      }),
+      expect.objectContaining({
+        kind: 'tool', stage: 'tool_result', tool: 'Read', toolUseId: 'call-1', messageId: 'assistant-tool-1',
+        durationMs: 3_000, ts: '1970-01-01T00:00:04.000Z', output: 'ok', isError: false
+      })
     ])
   })
 
@@ -1321,6 +1338,144 @@ describe('OpenCode provider adapter', () => {
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'skill', stage: 'skill:scry-e2e-audit', tool: 'Skill', name: 'scry-e2e-audit', toolUseId: 'skill-1' })
     ]))
+  })
+
+  it.each(['message.removed', 'message.part.removed'])('%s clears streamed text and a retry replaces it', (type) => {
+    const events: TraceEvent[] = []
+    const request = {
+      runId: `run-${type}`,
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event: TraceEvent) => events.push(event)
+    } satisfies ProviderRunRequest
+    const emit = (event: unknown) => emitOpenCodeEvent(request, event, 'session-remove')
+    emit({
+      type: 'session.next.text.delta',
+      properties: { sessionID: 'session-remove', assistantMessageID: 'assistant-remove', delta: 'stale' }
+    })
+    emit({
+      type,
+      properties: { sessionID: 'session-remove', messageID: 'assistant-remove', partID: 'part-remove' }
+    })
+    emit({
+      type: 'session.next.text.delta',
+      properties: { sessionID: 'session-remove', assistantMessageID: 'assistant-remove', delta: 'retry' }
+    })
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stage: 'text', text: '', messageId: 'assistant-remove',
+        runtimeMetadata: expect.objectContaining({ replacesStreamedText: true })
+      }),
+      expect.objectContaining({
+        stage: 'text', text: 'retry', messageId: 'assistant-remove',
+        runtimeMetadata: expect.objectContaining({ replacesStreamedText: true })
+      })
+    ]))
+    expect(aggregateTurnEvidence({ events }).assistant.value?.text).toBe('retry')
+  })
+
+  it('uses response parts only as a tail fallback and does not duplicate streamed text', async () => {
+    const emitted: TraceEvent[] = []
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-text-tail' } })),
+        command: vi.fn(async () => ({
+          data: {
+            info: {
+              id: 'assistant-text-tail', parentID: 'user-text-tail', role: 'assistant',
+              time: { created: 1_000, completed: 2_000 },
+              tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+              cost: 0, providerID: 'anthropic', modelID: 'model-1'
+            },
+            parts: [{ type: 'text', text: 'hello', messageID: 'assistant-text-tail' }]
+          }
+        })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: {
+        subscribe: vi.fn(async () => ({ stream: (async function * () {
+          yield {
+            type: 'session.next.text.delta',
+            properties: {
+              sessionID: 'session-text-tail', assistantMessageID: 'assistant-text-tail', delta: 'hello'
+            }
+          }
+        })() }))
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 48, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await adapter.run({
+        runId: 'run-text-tail', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise
+      expect(emitted.filter((event) => event.kind === 'model' && (event.stage === 'text' || event.stage === 'text_delta')))
+        .toEqual([expect.objectContaining({
+          stage: 'text_delta', text: 'hello', messageId: 'assistant-text-tail'
+        })])
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('uses the authoritative response text when the observation stream only delivered a prefix', async () => {
+    const emitted: TraceEvent[] = []
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-text-prefix' } })),
+        command: vi.fn(async () => ({
+          data: {
+            info: {
+              id: 'assistant-text-prefix', parentID: 'user-text-prefix', role: 'assistant',
+              time: { created: 1_000, completed: 2_000 },
+              tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+              cost: 0, providerID: 'anthropic', modelID: 'model-1'
+            },
+            parts: [{ type: 'text', text: 'hello', messageID: 'assistant-text-prefix' }]
+          }
+        })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: {
+        subscribe: vi.fn(async () => ({ stream: (async function * () {
+          yield {
+            type: 'session.next.text.delta',
+            properties: {
+              sessionID: 'session-text-prefix', assistantMessageID: 'assistant-text-prefix', delta: 'hel'
+            }
+          }
+        })() }))
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 50, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await adapter.run({
+        runId: 'run-text-prefix', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise
+      expect(emitted.filter((event) => event.kind === 'model' && (event.stage === 'text' || event.stage === 'text_delta')))
+        .toEqual([
+          expect.objectContaining({ stage: 'text_delta', text: 'hel', messageId: 'assistant-text-prefix' }),
+          expect.objectContaining({
+            stage: 'text', text: 'hello', messageId: 'assistant-text-prefix',
+            runtimeMetadata: expect.objectContaining({ replacesStreamedText: true })
+          })
+        ])
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
   })
 
   it('records one completed OpenCode compaction and ignores duplicate delivery', () => {
@@ -1504,6 +1659,574 @@ describe('OpenCode provider adapter', () => {
       adapter.dispose?.()
       ensure.mockRestore()
       await rm(hookRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('aggregates every assistant message in the native OpenCode user turn', async () => {
+    const emitted: TraceEvent[] = []
+    const parentID = 'user-root'
+    const first = {
+      id: 'assistant-1', sessionID: 'session-aggregate', role: 'assistant', parentID,
+      time: { created: 1_100, completed: 4_000 },
+      tokens: { input: 10, output: 2, reasoning: 1, cache: { read: 100, write: 3 } },
+      cost: 0.1, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const final = {
+      id: 'assistant-2', sessionID: 'session-aggregate', role: 'assistant', parentID,
+      time: { created: 4_100, completed: 8_000 },
+      tokens: { input: 20, output: 4, reasoning: 2, cache: { read: 200, write: 6 } },
+      cost: 0.2, providerID: 'anthropic', modelID: 'model-a', finish: 'stop'
+    }
+    const foreign = {
+      id: 'assistant-foreign', sessionID: 'session-aggregate', role: 'assistant', parentID: 'other-user',
+      time: { created: 100, completed: 9_000 },
+      tokens: { input: 999, output: 999, reasoning: 999, cache: { read: 999, write: 999 } },
+      cost: 99, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-aggregate' } })),
+        command: vi.fn(async () => ({ data: { info: final, parts: [] } })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: {
+        subscribe: vi.fn(async () => ({ stream: (async function * () {
+          yield {
+            type: 'message.updated',
+            properties: {
+              sessionID: 'session-aggregate',
+              info: { id: parentID, sessionID: 'session-aggregate', role: 'user', time: { created: 1_000 } }
+            }
+          }
+          yield { type: 'message.updated', properties: { sessionID: 'session-aggregate', info: first } }
+          yield {
+            type: 'message.updated',
+            properties: { sessionID: 'session-aggregate', info: { ...first, time: { created: 1_100 } } }
+          }
+          yield { type: 'message.updated', properties: { sessionID: 'session-aggregate', info: foreign } }
+          yield { type: 'message.updated', properties: { sessionID: 'session-aggregate', info: final } }
+        })() }))
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 45, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      const handle = adapter.run({
+        runId: 'run-aggregate', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      })
+      await expect(handle.promise).resolves.toMatchObject({
+        externalSessionId: 'session-aggregate', providerTurnId: parentID, stopped: false
+      })
+      expect(emitted.at(-1)).toMatchObject({
+        kind: 'harness', stage: 'result', messageId: parentID,
+        durationMs: 7_000,
+        tokensIn: 30,
+        tokensOut: 6,
+        reasoningTokens: 3,
+        cacheReadTokens: 300,
+        cacheCreationTokens: 9,
+        costUsd: expect.closeTo(0.3),
+        usageSource: 'opencode_turn_messages',
+        modelUsage: [{
+          model: 'model-a', inputTokens: 30, outputTokens: 6, reasoningTokens: 3,
+          cacheReadTokens: 300, cacheCreationTokens: 9, costUsd: expect.closeTo(0.3),
+          billingProvider: 'anthropic', upstreamProvider: 'anthropic', usageSource: 'opencode_turn_messages',
+          costSource: 'provider_reported', costConfidence: 'provider_reported', costUnit: 'usd'
+        }],
+        runtimeMetadata: expect.objectContaining({
+          aggregatedAssistantMessages: 2,
+          messageCoverage: 'observed_chain',
+          timingBoundary: 'user_message'
+        })
+      })
+      expect(emitted.at(-1)?.ts).toBe('1970-01-01T00:00:08.000Z')
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('uses a complete message snapshot instead of stale SSE messages for usage and timing', async () => {
+    const emitted: TraceEvent[] = []
+    const parentID = 'user-authoritative'
+    const stale = {
+      id: 'assistant-stale', sessionID: 'session-authoritative', role: 'assistant', parentID,
+      time: { created: 1_100, completed: 12_000 },
+      tokens: { input: 100, output: 20, reasoning: 10, cache: { read: 1_000, write: 30 } },
+      cost: 1, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const final = {
+      id: 'assistant-current', sessionID: 'session-authoritative', role: 'assistant', parentID,
+      time: { created: 4_100, completed: 8_000 },
+      tokens: { input: 20, output: 4, reasoning: 2, cache: { read: 200, write: 6 } },
+      cost: 0.2, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-authoritative' } })),
+        command: vi.fn(async () => ({ data: { info: final, parts: [] } })),
+        messages: vi.fn(async () => ({ data: [
+          { info: { id: parentID, sessionID: 'session-authoritative', role: 'user', time: { created: 1_000 } }, parts: [] },
+          { info: final, parts: [] }
+        ] })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {
+        yield { type: 'message.updated', properties: { sessionID: 'session-authoritative', info: stale } }
+        yield {
+          type: 'session.next.text.delta',
+          properties: { sessionID: 'session-authoritative', assistantMessageID: stale.id, delta: 'stale answer' }
+        }
+        yield { type: 'message.updated', properties: { sessionID: 'session-authoritative', info: final } }
+      })() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 54, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await adapter.run({
+        runId: 'run-authoritative', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise
+      expect(emitted.at(-1)).toMatchObject({
+        durationMs: 7_000, tokensIn: 20, tokensOut: 4, reasoningTokens: 2,
+        cacheReadTokens: 200, cacheCreationTokens: 6, costUsd: 0.2,
+        runtimeMetadata: expect.objectContaining({ aggregatedAssistantMessages: 1, messageSnapshotStatus: 'complete' })
+      })
+      expect(aggregateTurnEvidence({ events: emitted }).assistant.value?.text).toBeUndefined()
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('fills aggregation gaps from the authoritative bounded session message snapshot', async () => {
+    const emitted: TraceEvent[] = []
+    const parentID = 'user-snapshot'
+    const first = {
+      id: 'assistant-snapshot-1', sessionID: 'session-snapshot', role: 'assistant', parentID,
+      time: { created: 1_100, completed: 4_000 },
+      tokens: { input: 10, output: 2, reasoning: 1, cache: { read: 100, write: 3 } },
+      cost: 0, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const final = {
+      id: 'assistant-snapshot-2', sessionID: 'session-snapshot', role: 'assistant', parentID,
+      time: { created: 4_100, completed: 8_000 },
+      tokens: { input: 20, output: 4, reasoning: 2, cache: { read: 200, write: 6 } },
+      cost: 0, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-snapshot' } })),
+        command: vi.fn(async () => ({ data: { info: final, parts: [] } })),
+        messages: vi.fn(async () => ({ data: [
+          { info: { id: parentID, sessionID: 'session-snapshot', role: 'user', time: { created: 1_000 } } },
+          { info: first },
+          { info: final }
+        ] })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {})() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 49, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await adapter.run({
+        runId: 'run-snapshot', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise
+      expect(client.session.messages).toHaveBeenCalledWith({
+        sessionID: 'session-snapshot', directory: '/repo', limit: 1_000
+      })
+      expect(emitted.at(-1)).toMatchObject({
+        durationMs: 7_000, tokensIn: 30, tokensOut: 6, reasoningTokens: 3,
+        cacheReadTokens: 300, cacheCreationTokens: 9,
+        runtimeMetadata: expect.objectContaining({
+          aggregatedAssistantMessages: 2, messageSnapshotStatus: 'complete'
+        })
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('replays every authoritative assistant part in the current user turn', async () => {
+    const emitted: TraceEvent[] = []
+    const parentID = 'user-parts'
+    const first = {
+      id: 'assistant-parts-1', sessionID: 'session-parts', role: 'assistant', parentID,
+      time: { created: 1_100, completed: 4_000 },
+      tokens: { input: 10, output: 2, reasoning: 1, cache: { read: 100, write: 3 } },
+      cost: 0, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const final = {
+      id: 'assistant-parts-2', sessionID: 'session-parts', role: 'assistant', parentID,
+      time: { created: 4_100, completed: 8_000 },
+      tokens: { input: 20, output: 4, reasoning: 2, cache: { read: 200, write: 6 } },
+      cost: 0, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-parts' } })),
+        command: vi.fn(async () => ({ data: {
+          info: final,
+          parts: [
+            { type: 'text', text: 'final ', messageID: final.id },
+            { type: 'text', text: 'answer', messageID: final.id }
+          ]
+        } })),
+        messages: vi.fn(async () => ({ data: [
+          { info: { id: parentID, sessionID: 'session-parts', role: 'user', time: { created: 1_000 } }, parts: [] },
+          { info: first, parts: [{ type: 'text', text: 'first answer', messageID: first.id }] },
+          { info: final, parts: [
+            { type: 'text', text: 'ignored stale answer', messageID: final.id, ignored: true },
+            { type: 'text', text: 'final ', messageID: final.id },
+            { type: 'text', text: 'answer', messageID: final.id }
+          ] }
+        ] })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {})() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 53, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await adapter.run({
+        runId: 'run-parts', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise
+      expect(emitted.filter((event) => event.kind === 'model' && event.stage === 'text')).toEqual([
+        expect.objectContaining({ messageId: first.id, text: 'first answer' }),
+        expect.objectContaining({ messageId: final.id, text: 'final answer' })
+      ])
+      expect(aggregateTurnEvidence({ events: emitted }).assistant.value?.text).toBe('first answerfinal answer')
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it.each([
+    ['ignored-only', [{ type: 'text', text: 'stale', messageID: 'assistant-empty', ignored: true }]],
+    ['empty', []]
+  ])('clears stale streamed text when the complete snapshot is %s', async (_case, parts) => {
+    const emitted: TraceEvent[] = []
+    const parentID = 'user-empty'
+    const final = {
+      id: 'assistant-empty', sessionID: 'session-empty', role: 'assistant', parentID,
+      time: { created: 1_100, completed: 2_000 },
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: 0, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-empty' } })),
+        command: vi.fn(async () => ({ data: { info: final, parts } })),
+        messages: vi.fn(async () => ({ data: [
+          { info: { id: parentID, sessionID: 'session-empty', role: 'user', time: { created: 1_000 } }, parts: [] },
+          { info: final, parts }
+        ] })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {
+        yield {
+          type: 'session.next.text.delta',
+          properties: { sessionID: 'session-empty', assistantMessageID: final.id, delta: 'stale' }
+        }
+      })() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 55, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await adapter.run({
+        runId: `run-empty-${_case}`, prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise
+      expect(emitted).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'model', stage: 'text', text: '', messageId: final.id,
+          runtimeMetadata: expect.objectContaining({ replacesStreamedText: true })
+        })
+      ]))
+      expect(aggregateTurnEvidence({ events: emitted }).assistant.value?.text).toBeUndefined()
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('does not publish definite timing or usage from a bounded message snapshot', async () => {
+    const emitted: TraceEvent[] = []
+    const parentID = 'user-bounded'
+    const final = {
+      id: 'assistant-bounded', sessionID: 'session-bounded', role: 'assistant', parentID,
+      time: { created: 4_100, completed: 8_000 },
+      tokens: { input: 20, output: 4, reasoning: 2, cache: { read: 200, write: 6 } },
+      cost: 0.2, providerID: 'anthropic', modelID: 'model-a'
+    }
+    const rows: Array<{ info: unknown }> = Array.from({ length: 998 }, (_, index) => ({
+      info: {
+        id: `old-${index}`, sessionID: 'session-bounded', role: 'assistant', parentID: `old-user-${index}`,
+        time: { created: index, completed: index + 1 },
+        tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+        cost: 0, providerID: 'anthropic', modelID: 'model-a'
+      }
+    }))
+    rows.push(
+      { info: { id: parentID, sessionID: 'session-bounded', role: 'user', time: { created: 4_000, completed: 4_000 } } },
+      { info: final }
+    )
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-bounded' } })),
+        command: vi.fn(async () => ({ data: { info: final, parts: [] } })),
+        messages: vi.fn(async () => ({ data: rows })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {})() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 52, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await adapter.run({
+        runId: 'run-bounded', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise
+      expect(emitted.at(-1)).toMatchObject({
+        kind: 'harness', stage: 'result', messageId: parentID,
+        durationMs: undefined, tokensIn: undefined, tokensOut: undefined,
+        cacheReadTokens: undefined, cacheCreationTokens: undefined, costUsd: undefined,
+        runtimeMetadata: expect.objectContaining({
+          messageSnapshotStatus: 'bounded', messageCoverage: 'bounded_snapshot', timingBoundary: 'unavailable'
+        })
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('opens one managed recorder lifecycle before the OpenCode command', async () => {
+    const calls: string[] = []
+    const emitted: TraceEvent[] = []
+    handleRecorderHookMock.mockImplementationOnce(async () => {
+      calls.push('recorder')
+      return { status: 'started' }
+    })
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-managed' } })),
+        command: vi.fn(async () => {
+          calls.push('command')
+          return {
+            data: {
+              info: {
+                id: 'assistant-managed', parentID: 'user-managed', role: 'assistant',
+                time: { created: 1_000, completed: 2_000 },
+                tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+                cost: 0, providerID: 'anthropic', modelID: 'model-1'
+              },
+              parts: [{ type: 'text', text: 'managed answer', messageID: 'assistant-managed' }]
+            }
+          }
+        }),
+        messages: vi.fn(async () => ({ data: [
+          { info: { id: 'user-managed', sessionID: 'session-managed', role: 'user', time: { created: 900 } } },
+          { info: {
+            id: 'assistant-managed', parentID: 'user-managed', role: 'assistant',
+            time: { created: 1_000, completed: 2_000 },
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            cost: 0, providerID: 'anthropic', modelID: 'model-1'
+          } }
+        ] })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {})() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 46, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await expect(adapter.run({
+        runId: 'run-managed', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', managedRecorder: true,
+        managedRecorderIdentity: { runId: 'run-managed', promptHash: 'a'.repeat(64) },
+        emit: (event) => emitted.push(event)
+      }).promise).resolves.toMatchObject({ providerTurnId: 'user-managed' })
+      expect(calls).toEqual(['recorder', 'command'])
+      expect(emitted).toContainEqual(expect.objectContaining({
+        kind: 'model', stage: 'text', text: 'managed answer', messageId: 'assistant-managed',
+        runtimeMetadata: { source: 'opencode_response_parts' }
+      }))
+      expect(handleRecorderHookMock).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'opencode', event: 'chat.message', workspace: '/repo', managed: true,
+        env: expect.objectContaining({
+          SCRY_MANAGED_RUN_ID: 'run-managed', SCRY_MANAGED_PROMPT_HASH: 'a'.repeat(64)
+        }),
+        payload: expect.objectContaining({ session_id: 'session-managed', prompt: '/rate-workflow 1' })
+      }))
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('keeps Provider completed but reports recording failure when the managed snapshot is incomplete', async () => {
+    handleRecorderHookMock.mockResolvedValueOnce({ status: 'started' })
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-managed-snapshot' } })),
+        command: vi.fn(async () => ({ data: {
+          info: {
+            id: 'assistant-managed-snapshot', parentID: 'user-managed-snapshot', role: 'assistant',
+            time: { created: 1_000, completed: 2_000 },
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            cost: 0, providerID: 'anthropic', modelID: 'model-1'
+          },
+          parts: []
+        } })),
+        messages: vi.fn(async () => { throw new Error('snapshot unavailable') }),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {})() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 51, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      const handle = adapter.run({
+        runId: 'run-managed-snapshot', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', managedRecorder: true,
+        managedRecorderIdentity: { runId: 'run-managed-snapshot', promptHash: 'b'.repeat(64) },
+        emit: () => {}
+      })
+      await expect(handle.promise).resolves.toMatchObject({
+        providerTurnId: 'user-managed-snapshot',
+        recordingFailure: { message: expect.stringContaining('无法取得完整权威消息快照') }
+      })
+      expect(handle.getRecordingFailure?.()).toEqual({
+        message: expect.stringContaining('无法取得完整权威消息快照')
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('preserves the recording failure when OpenCode also returns a Provider error', async () => {
+    const emitted: TraceEvent[] = []
+    handleRecorderHookMock.mockResolvedValueOnce({ status: 'started' })
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-managed-provider-error' } })),
+        command: vi.fn(async () => ({ data: {
+          info: {
+            id: 'assistant-managed-provider-error', parentID: 'user-managed-provider-error', role: 'assistant',
+            time: { created: 1_000, completed: 2_000 },
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            cost: 0, providerID: 'anthropic', modelID: 'model-1', error: { message: 'provider failed' }
+          },
+          parts: []
+        } })),
+        messages: vi.fn(async () => { throw new Error('snapshot unavailable') }),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: { subscribe: vi.fn(async () => ({ stream: (async function * () {})() })) }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 54, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      const handle = adapter.run({
+        runId: 'run-managed-provider-error', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', managedRecorder: true,
+        managedRecorderIdentity: { runId: 'run-managed-provider-error', promptHash: 'c'.repeat(64) },
+        emit: (event) => emitted.push(event)
+      })
+      await expect(handle.promise).rejects.toThrow('OpenCode Provider 失败')
+      expect(handle.getProviderTurnId?.()).toBe('user-managed-provider-error')
+      expect(handle.getRecordingFailure?.()).toEqual({
+        message: expect.stringContaining('无法取得完整权威消息快照')
+      })
+      expect(emitted.at(-1)).toMatchObject({
+        kind: 'harness', stage: 'result', isError: true,
+        durationMs: undefined, tokensIn: undefined, tokensOut: undefined,
+        runtimeMetadata: expect.objectContaining({ messageCoverage: 'incomplete_snapshot' })
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
+  it('keeps a successful Provider result when the observation stream fails', async () => {
+    const emitted: TraceEvent[] = []
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-observation' } })),
+        command: vi.fn(async () => ({
+          data: {
+            info: {
+              id: 'assistant-observation', parentID: 'user-observation', role: 'assistant',
+              time: { created: 1_000, completed: 2_000 },
+              tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+              cost: 0, providerID: 'anthropic', modelID: 'model-1'
+            },
+            parts: []
+          }
+        })),
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: {
+        subscribe: vi.fn(async () => ({ stream: (async function * () {
+          throw new Error('SSE observation failed')
+        })() }))
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 47, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      await expect(adapter.run({
+        runId: 'run-observation', prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: (event) => emitted.push(event)
+      }).promise).resolves.toMatchObject({ providerTurnId: 'user-observation', stopped: false })
+      expect(emitted.at(-1)).toMatchObject({
+        kind: 'harness', stage: 'result',
+        runtimeMetadata: expect.objectContaining({
+          observationStatus: 'partial', observationError: 'SSE observation failed'
+        })
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
     }
   })
 

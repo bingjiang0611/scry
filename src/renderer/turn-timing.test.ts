@@ -413,6 +413,75 @@ describe('buildTurnTimingBreakdown', () => {
     expect(timing.phases[0]).toMatchObject({ kind: 'unsegmented', observedMs: 7000, toolMs: 3000 })
   })
 
+  it('活动区间超出整轮窗口时标记数据异常，不把负余量截成零', () => {
+    const bash = event({
+      id: 'bash',
+      kind: 'tool',
+      stage: 'tool:Bash',
+      tool: 'Bash',
+      toolUseId: 'bash',
+      ts: '2026-07-18T00:00:00.000Z'
+    })
+    const items = [
+      bash,
+      event({ id: 'bash-result', kind: 'tool', stage: 'tool_result', toolUseId: 'bash', ts: '2026-07-18T00:00:07.000Z' }),
+      event({ id: 'result', kind: 'harness', stage: 'result', ts: '2026-07-18T00:00:10.000Z', durationMs: 5_000 })
+    ]
+
+    const timing = buildTurnTimingBreakdown(items, [bash])
+    expect(timing).toMatchObject({
+      wallMs: 5_000,
+      occupiedCallMs: 7_000,
+      wallConsistency: 'invalid',
+      apiSource: 'unknown'
+    })
+    expect(timing.apiMs).toBeUndefined()
+    expect(timing.phases[0].observedMs).toBeUndefined()
+  })
+
+  it('活动占用未超过 wall 但时间戳落在整轮窗口外时仍标记异常', () => {
+    const read = event({
+      id: 'read',
+      kind: 'tool',
+      stage: 'tool:Read',
+      tool: 'Read',
+      toolUseId: 'read',
+      ts: '2026-07-18T00:00:00.000Z'
+    })
+    const items = [
+      read,
+      event({ id: 'read-result', kind: 'tool', stage: 'tool_result', toolUseId: 'read', ts: '2026-07-18T00:00:02.000Z' }),
+      event({ id: 'result', kind: 'harness', stage: 'result', ts: '2026-07-18T00:00:10.000Z', durationMs: 5_000 })
+    ]
+
+    expect(buildTurnTimingBreakdown(items, [read])).toMatchObject({
+      wallMs: 5_000,
+      occupiedCallMs: 2_000,
+      wallConsistency: 'invalid',
+      apiSource: 'unknown'
+    })
+  })
+
+  it('Provider API 时长超过整轮墙钟时标记数据异常', () => {
+    const items = [
+      event({
+        id: 'result',
+        kind: 'harness',
+        stage: 'result',
+        ts: '2026-07-18T00:00:10.000Z',
+        durationMs: 10_000,
+        durationApiMs: 12_000
+      })
+    ]
+
+    expect(buildTurnTimingBreakdown(items, [])).toMatchObject({
+      wallMs: 10_000,
+      wallConsistency: 'invalid',
+      apiSource: 'unknown',
+      apiMs: undefined
+    })
+  })
+
   it('纯文本轮也消费 recorder 的 residual 兜底，不把已有估算显示成未采集', () => {
     const items = [
       event({

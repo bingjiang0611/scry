@@ -2167,7 +2167,7 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
     expect(html).not.toContain('已回答')
   })
 
-  it('使用结构化 intervention 展示所在轮次、问题、答案与人工介入计数', () => {
+  it('使用结构化 intervention 展示所在轮次、问题、答案与结构化介入计数', () => {
     const completed: Turn = {
       ...askTurn,
       done: true,
@@ -2212,8 +2212,8 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
     expect(turnHtml).toContain('MCP, Skill')
     expect(turnHtml).toContain('等待 2.0s')
     expect(turnHtml).toContain('human</span> <b>1 · 2Q</b>')
-    expect(overviewHtml).toContain('1 次人工介入')
-    expect(overviewHtml).toContain('aria-label="介入 1，展开明细"')
+    expect(overviewHtml).toContain('1 次结构化介入')
+    expect(overviewHtml).toContain('aria-label="结构化介入 1，展开明细"')
     expect(overviewHtml).toContain('T01')
   })
 })
@@ -2264,13 +2264,17 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       }}
     />
   )
-  it('verdict 卡：聚合 token + 无报错无危险 → 判决"完成"（非假绿前提下的 ok 态）', () => {
+  it('verdict 卡：聚合 token + 无报错无危险 → 只声明 Provider 轮次已结束', () => {
     expect(html).toContain('3.0k tok') // 跨轮累计本会话 token（含 cache）
     expect(html).not.toContain('$0.1234')
-    expect(html).toContain('1 轮完成')
+    expect(html).toContain('1 轮已结束')
     expect(html).toContain('overview-verdict ok') // 无 error/danger → ok
-    expect(html).toContain('完成')
-    expect(html).toContain('overview-metric-foot') // cache·r/cache·w/api foot
+    expect(html).toContain('轮次已结束')
+    expect(html).toContain('Provider 终态不代表用户目标完成')
+    expect(html).toContain('输入+输出+缓存')
+    expect(html).toContain('reasoning 单列')
+    expect(html).toMatch(/<b>reason<\/b>—/)
+    expect(html).toContain('overview-metric-foot') // cache·r/cache·w/reason/api foot
   })
 
   it('历史会话合并 archive 与 transcript usage 时仍按用户 turn 展示轮数', () => {
@@ -2306,7 +2310,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       <OverviewPanel turns={[mergedTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(mergedHtml).toContain('1 轮完成')
+    expect(mergedHtml).toContain('1 轮已结束')
     expect(mergedHtml).toContain('1/1 轮已捕获')
     expect(mergedHtml).toContain('35 tok')
     expect(mergedHtml).not.toContain('47 tok')
@@ -2369,7 +2373,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('aria-label="跳到第 1 轮，对话中共 3 次工具/Skill/MCP/子 Agent 调用"')
     expect(html).toContain('创建并读回文件')
     expect(html).toContain('turn-call-group turn-call-toggle timing')
-    expect(html).toContain('title="查看模型响应耗时与工具调用耗时"')
+    expect(html).toContain('title="查看模型响应耗时与非模型耗时"')
     expect(html).toContain('<span class="turn-call-count">2 项</span>')
     expect(html).toContain('aria-label="展开第 1 轮耗时明细"')
     expect(html).toContain('aria-controls="turn-timing-1"')
@@ -3088,7 +3092,9 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     }
     const html = panel(t, true)
     expect(html).toContain('运行中')
-    expect(html).toContain('运行中')
+    expect(html).toContain('正在等待 Provider 终态')
+    expect(html).not.toContain('轮已结束')
+    expect(html).not.toContain('Provider 终态不代表用户目标完成')
     expect(html).toContain('overview-verdict warn')
   })
 
@@ -3100,7 +3106,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
             runId: 'coverage-1',
             userText: 'one',
             done: true,
-            items: [ev({ id: 'coverage-result-1', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5, cacheReadTokens: 7, cacheCreationTokens: 2, durationApiMs: 1000 })]
+            items: [ev({ id: 'coverage-result-1', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5, reasoningTokens: 4, cacheReadTokens: 7, cacheCreationTokens: 2, durationApiMs: 1000 })]
           },
           {
             runId: 'coverage-2',
@@ -3119,6 +3125,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).toContain('<strong>13 / ≥ 5</strong>')
     expect(html).toContain('<b>cache·r</b>≥ 7')
     expect(html).toContain('<b>cache·w</b>≥ 2')
+    expect(html).toContain('<b>reason</b>≥ 4')
     expect(html).toContain('<b>api</b>≥ 1.0s')
   })
 })
@@ -3186,7 +3193,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
   })
 
   it('每轮调用展示介入、MCP、Skill、子 Agent、Hooks、文件计数，五项明细默认收起', () => {
-    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮展示人工介入'))
+    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮展示结构化介入'))
     expect(html).toContain('每轮调用')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle intervention')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle mcp')
@@ -3195,7 +3202,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle hooks')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle file')
     expect(turnCallHtml).toContain('aria-expanded="false"')
-    expect(turnCallHtml).toContain('aria-label="介入 0，无明细"')
+    expect(turnCallHtml).toContain('aria-label="结构化介入 0，无明细"')
     expect(turnCallHtml).toContain('aria-label="MCP 1，展开明细"')
     expect(turnCallHtml).toContain('aria-label="Skill 1，展开明细"')
     expect(turnCallHtml).toContain('title="本轮子 Agent 调用 1 次"')

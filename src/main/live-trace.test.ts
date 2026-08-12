@@ -26,6 +26,21 @@ describe('appendCoalescedTrace', () => {
     expect(second.text).toBe('K')
   })
 
+  it('用 Provider 权威正文替换同 message 的不完整流式前缀', () => {
+    const items: TraceEvent[] = []
+    appendCoalescedTrace(items, { ...delta('prefix', 'hel'), messageId: 'message-1' })
+    appendCoalescedTrace(items, {
+      ...delta('authoritative', 'hello'),
+      stage: 'text',
+      messageId: 'message-1',
+      runtimeMetadata: { replacesStreamedText: true }
+    })
+
+    expect(items).toEqual([
+      expect.objectContaining({ stage: 'text', text: 'hello', runtimeMetadata: { replacesStreamedText: true } })
+    ])
+  })
+
   it('does not merge root and child output or a delta with its final snapshot', () => {
     const items: TraceEvent[] = []
     appendCoalescedTrace(items, delta('root', '根'))

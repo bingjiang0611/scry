@@ -85,6 +85,127 @@ describe('managed canonical recorder', () => {
     expect(isManagedRecorderProvider('claude')).toBe(true)
   })
 
+  it('includes OpenCode in the managed recorder provider set', () => {
+    expect(isManagedRecorderProvider('opencode')).toBe(true)
+  })
+
+  it('OpenCode 用受信 managed 身份绑定 parent user ID 后准备并提交', async () => {
+    const root = await workspace()
+    const runId = 'run-opencode'
+    const evidence = canonicalEvidence()
+    const archiveFingerprint = stableHash({ runId, evidence, timing })
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'chat.message',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'opencode-session',
+        prompt: '/expanded project command body',
+        timestamp: timing.startedAt
+      },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('/rate-workflow 1').digest('hex')
+      }
+    })
+    const prepared = await prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'opencode',
+      sessionId: 'opencode-session',
+      runId,
+      providerTurnId: 'parent-user-id',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint
+    })
+
+    expect(prepared).toMatchObject({ status: 'prepared' })
+    if (prepared.status !== 'prepared') return
+    await expect(commitManagedRecorderTurn({
+      workspace: root,
+      provider: 'opencode',
+      sessionId: 'opencode-session',
+      runId,
+      recordId: prepared.recordId,
+      archiveFingerprint,
+      providerTurnId: 'parent-user-id',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed'
+    })).resolves.toMatchObject({ status: 'committed' })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record).toMatchObject({
+      provider: { id: 'opencode' },
+      providerTurnId: 'parent-user-id',
+      status: 'completed'
+    })
+  })
+
+  it.each(['failed', 'interrupted'] as const)('OpenCode %s 允许无 Provider turn id', async (status) => {
+    const root = await workspace()
+    const runId = `run-opencode-${status}`
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'chat.message',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'opencode-session', prompt: '/rate-workflow 1', timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('/rate-workflow 1').digest('hex')
+      }
+    })
+    const evidence = aggregateTurnEvidence({ userText: '/rate-workflow 1', events: [], source: 'scry_provider_adapter' })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'opencode',
+      sessionId: 'opencode-session',
+      runId,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status,
+      archiveFingerprint: stableHash({ runId, evidence, timing })
+    })).resolves.toMatchObject({ status: 'prepared' })
+  })
+
+  it('OpenCode completed 拒绝缺少 Provider turn id', async () => {
+    const root = await workspace()
+    const runId = 'run-opencode-completed-without-id'
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'chat.message',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'opencode-session', prompt: '/rate-workflow 1', timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('/rate-workflow 1').digest('hex')
+      }
+    })
+    const evidence = canonicalEvidence()
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'opencode',
+      sessionId: 'opencode-session',
+      runId,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint: stableHash({ runId, evidence, timing })
+    })).rejects.toThrow('requires an authoritative Provider turn id')
+  })
+
   it('Codex 非 completed 轮次仍保持 exact assistant 的原有 fail-closed 语义', async () => {
     const root = await workspace()
     await startManaged(root)

@@ -15,6 +15,7 @@ import {
   hookCommandLabel,
   logicalCallEventsForTurn,
   parseUserMessage,
+  resultTokenTotal,
   resultOf,
   toolArg,
   toolDisplayName,
@@ -828,6 +829,14 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     expect(b.models[0].totalTokens).toBe(120)
   })
 
+  it('OpenCode 即使由 OpenAI 上游计费也保留独立 cache 口径', () => {
+    expect(resultTokenTotal({
+      id: 'result-opencode-openai', runId: 'run', ts: new Date(0).toISOString(),
+      kind: 'harness', stage: 'result', providerId: 'opencode', runtimeProvider: 'opencode_server',
+      billingProvider: 'openai', tokensIn: 10, tokensOut: 2, cacheReadTokens: 7, cacheCreationTokens: 3
+    })).toBe(22)
+  })
+
   it('有其他轮次作基线时才把相对异常称为 Token 突增', () => {
     const turns: Turn[] = [
       { runId: 'baseline', userText: 'baseline', done: true, items: [ev({ kind: 'harness', stage: 'result', tokensIn: 3_000, tokensOut: 2_000 })] },
@@ -1003,6 +1012,27 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     })
 
     expect(result).toMatchObject({ tokensIn: undefined, tokensOut: undefined, cacheReadTokens: undefined })
+  })
+
+  it('多条 usage result 会聚合 reasoning token', () => {
+    const result = resultOf({
+      runId: 'reasoning', userText: 'reasoning', done: true,
+      items: [
+        ev({
+          id: 'r1', kind: 'harness', stage: 'result', reasoningTokens: 7,
+          modelUsage: [{ model: 'model-a', reasoningTokens: 7 }]
+        }),
+        ev({
+          id: 'r2', kind: 'harness', stage: 'result', reasoningTokens: 11,
+          modelUsage: [{ model: 'model-a', reasoningTokens: 11 }]
+        })
+      ]
+    })
+
+    expect(result?.reasoningTokens).toBe(18)
+    expect(result?.modelUsage).toEqual([
+      expect.objectContaining({ model: 'model-a', reasoningTokens: 18 })
+    ])
   })
 
   it('高 Token 轮次保留最高 10 条，并按 token 从高到低排序', () => {
@@ -1183,6 +1213,24 @@ describe('applyTraceBatch（性能：批量合并，语义不变）', () => {
     )
     expect(out[0].items).toHaveLength(2) // 两个 delta 合一 + 工具
     expect(out[0].items[0].text).toBe('你好')
+  })
+
+  it('Provider 权威正文替换同 message 的流式前缀', () => {
+    const out = applyTraceBatch(
+      [],
+      [
+        e({ id: 'prefix', kind: 'model', stage: 'text_delta', text: 'hel', messageId: 'm1' }),
+        e({
+          id: 'authoritative', kind: 'model', stage: 'text', text: 'hello', messageId: 'm1',
+          runtimeMetadata: { replacesStreamedText: true }
+        })
+      ],
+      new Set()
+    )
+
+    expect(out[0].items).toEqual([
+      expect.objectContaining({ stage: 'text', text: 'hello', messageId: 'm1' })
+    ])
   })
 
   it('按 id 去重，不丢不重', () => {

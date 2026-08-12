@@ -28,6 +28,7 @@ export interface ProviderRunResult {
   providerTurnId?: string
   stopped?: boolean
   status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  recordingFailure?: { message: string }
   mcp?: McpSnapshot
 }
 
@@ -36,6 +37,7 @@ export interface ProviderRunHandle {
   interrupt: () => void
   getExternalSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
+  getRecordingFailure?: () => { message: string } | undefined
 }
 
 export interface AuthorizedMcpExecution {

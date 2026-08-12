@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -146,6 +147,33 @@ function asClaude(request: ManagedTraceTurnCommitInput): ManagedTraceTurnCommitI
   }
 }
 
+function asOpenCode(request: ManagedTraceTurnCommitInput): ManagedTraceTurnCommitInput {
+  return {
+    ...request,
+    providerId: 'opencode',
+    runtimeProvider: 'opencode_server'
+  }
+}
+
+async function startManagedOpenCode(workspace: string, runId = 'run-1'): Promise<void> {
+  await handleRecorderHook({
+    provider: 'opencode',
+    event: 'chat.message',
+    workspace,
+    managed: true,
+    payload: {
+      session_id: 'session-1',
+      prompt: '/expanded project command body',
+      timestamp: '2026-07-29T12:00:00.000Z'
+    },
+    env: {
+      ...process.env,
+      SCRY_MANAGED_RUN_ID: runId,
+      SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('/rate-workflow 1').digest('hex')
+    }
+  })
+}
+
 async function startManaged(workspace: string, provider: 'claude' | 'codex' = 'codex'): Promise<void> {
   await handleRecorderHook({
     provider,
@@ -172,7 +200,10 @@ describe('managed trace turn coordinator', () => {
 
     expect(canonicalOrObservedTurnTiming([], 'qoder', 'failed', observed)).toEqual(observed)
     expect(canonicalOrObservedTurnTiming([], 'qoder', 'interrupted', observed)).toEqual(observed)
+    expect(canonicalOrObservedTurnTiming([], 'opencode', 'failed', observed)).toEqual(observed)
+    expect(canonicalOrObservedTurnTiming([], 'opencode', 'interrupted', observed)).toEqual(observed)
     expect(canonicalOrObservedTurnTiming([], 'qoder', 'completed', observed)).toBeNull()
+    expect(canonicalOrObservedTurnTiming([], 'opencode', 'completed', observed)).toBeNull()
     expect(canonicalOrObservedTurnTiming([], 'codex', 'failed', observed)).toBeNull()
   })
 
@@ -195,6 +226,69 @@ describe('managed trace turn coordinator', () => {
       completedAt: '2026-07-29T12:00:10.000Z',
       durationMs: 2_000
     })
+  })
+
+  it('OpenCode 使用 opencode_server 提交 live canonical turn', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await startManagedOpenCode(workspace)
+    const request = asOpenCode(input(workspace, userDataDir))
+
+    await expect(commitManagedTraceTurn(request)).resolves.toMatchObject({ recorder: 'committed' })
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: 'opencode',
+      userDataDir
+    })?.runtimeProvider).toBe('opencode_server')
+    const [record] = await listRecords(join(workspace, '.scry'))
+    expect(record).toMatchObject({ provider: { id: 'opencode' }, providerTurnId: 'turn-1' })
+  })
+
+  it('OpenCode 拒绝错误 runtime provider', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = asOpenCode(input(workspace, userDataDir))
+    request.runtimeProvider = 'codex_cli'
+
+    await expect(commitManagedTraceTurn(request)).rejects.toThrow(
+      'managed recorder Provider id differs from runtime provider'
+    )
+  })
+
+  it('OpenCode failed 无 Provider turn id 时可用 observed timing 直接提交并从 progress 恢复', async () => {
+    const failedRequest = (workspace: string, userDataDir: string): ManagedTraceTurnCommitInput => {
+      const request = asOpenCode(input(workspace, userDataDir))
+      request.providerTurnId = undefined
+      request.status = 'failed'
+      request.turn = {
+        ...request.turn,
+        providerTurnId: undefined,
+        status: 'failed',
+        items: [],
+        turnEvidence: aggregateTurnEvidence({
+          userText: request.turn.userText,
+          events: [],
+          source: 'scry_provider_adapter'
+        })
+      }
+      return request
+    }
+
+    const live = await fixture()
+    await startManagedOpenCode(live.workspace)
+    await expect(commitManagedTraceTurn(failedRequest(live.workspace, live.userDataDir)))
+      .resolves.toMatchObject({ recorder: 'committed' })
+
+    const recovered = await fixture()
+    await startManagedOpenCode(recovered.workspace)
+    await persistManagedTraceProgress(failedRequest(recovered.workspace, recovered.userDataDir))
+    await expect(recoverManagedTraceProgress(recovered.userDataDir, {
+      cwd: recovered.workspace,
+      providerId: 'opencode',
+      waitMs: 100
+    })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+    const [record] = await listRecords(join(recovered.workspace, '.scry'))
+    expect(record).toMatchObject({ provider: { id: 'opencode' }, status: 'failed' })
+    expect(record.providerTurnId).toBeUndefined()
   })
 
   it('archive 与 CLI record 复用同一 evidence 和 result timing', async () => {
