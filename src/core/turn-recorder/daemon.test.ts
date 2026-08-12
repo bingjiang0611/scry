@@ -61,6 +61,24 @@ describe('turn recorder daemon', () => {
     await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
   })
 
+  it('无 open turn 时不运行 recovery poll', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    let recoveryRuns = 0
+    const daemon = await listenRecorderDaemon({
+      workspace: root,
+      idleMs: 5_000,
+      env,
+      recoveryProbe: () => { recoveryRuns++ }
+    })
+    try {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_200))
+      expect(recoveryRuns).toBe(0)
+    } finally {
+      await daemon.close()
+    }
+  })
+
   it('存在未终态 open turn 时跨过 idle timeout 仍保持运行', async () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
@@ -151,6 +169,57 @@ describe('turn recorder daemon', () => {
       await expect.poll(async () => (await listRecords(join(root, '.scry'))).length, { timeout: 4_000 }).toBe(1)
       await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
         { providerTurnId: 'aborted-turn', status: 'interrupted' }
+      ])
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('未观测到终态时退避 recovery poll，rollout 变为终态后仍会提交', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'delayed-abort.jsonl')
+    await mkdir(join(rollout, '..'), { recursive: true })
+    await writeFile(rollout, [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'delayed-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'wait for abort' } }
+    ].map((line) => JSON.stringify(line)).join('\n'))
+    let recoveryRuns = 0
+    const daemon = await listenRecorderDaemon({
+      workspace: root,
+      idleMs: 5_000,
+      env,
+      recoveryProbe: () => { recoveryRuns++ }
+    })
+    try {
+      await sendRecorderDaemonHook({
+        workspace: root,
+        provider: 'codex',
+        event: 'turn.started',
+        payload: {
+          session_id: 'delayed-session',
+          turn_id: 'delayed-turn',
+          prompt: 'wait for abort',
+          rollout_path: rollout,
+          timestamp: '2026-07-19T12:00:00.000Z'
+        },
+        env
+      })
+
+      await expect.poll(() => recoveryRuns, { timeout: 2_000 }).toBe(1)
+      await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_200))
+      expect(recoveryRuns).toBe(1)
+
+      await appendFile(rollout, `\n${JSON.stringify({
+        timestamp: '2026-07-19T12:00:02.500Z',
+        type: 'event_msg',
+        payload: { type: 'turn_aborted', turn_id: 'delayed-turn', reason: 'interrupted' }
+      })}\n`)
+      await expect.poll(async () => (await listRecords(join(root, '.scry'))).length, { timeout: 2_500 }).toBe(1)
+      expect(recoveryRuns).toBe(2)
+      await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
+        { providerTurnId: 'delayed-turn', status: 'interrupted' }
       ])
     } finally {
       await daemon.close()

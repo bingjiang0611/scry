@@ -67,7 +67,7 @@ npm run build
 桌面 App 已自带同源 CLI，并固定通过 App Resources 内的绝对路径驱动 Provider/Hook；安装或更新 App 时会同步更新其私有 CLI，不依赖用户 `PATH` 中的全局版本。下面的 npm 安装仅用于没有桌面 App 的 headless/独立终端环境。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.17 \
+npm install -g @ali/scry-turn-recorder@0.2.18 \
   --registry=https://registry.anpm.alibaba-inc.com
 scry doctor --workspace /path/to/workspace
 ```
@@ -82,7 +82,7 @@ CLI 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生
 若 npm 的系统全局目录不可写，可安装到用户目录，并确保 `~/.local/bin` 在 `PATH`：
 
 ```bash
-npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.17 \
+npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.18 \
   --registry=https://registry.anpm.alibaba-inc.com
 export PATH="$HOME/.local/bin:$PATH"
 ```

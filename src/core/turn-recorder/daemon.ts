@@ -13,6 +13,7 @@ const PROTOCOL_VERSION = '1'
 const DEFAULT_IDLE_MS = 30 * 60 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
 const RECOVERY_POLL_MS = 1_000
+const MAX_RECOVERY_POLL_MS = 15_000
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_SOCKET_BYTES = 100
 const STARTING_TTL_MS = 10_000
@@ -354,6 +355,7 @@ export async function listenRecorderDaemon(args: {
   idleMs?: number
   env?: NodeJS.ProcessEnv
   idleCloseProbe?: () => Promise<void> | void
+  recoveryProbe?: () => Promise<void> | void
 }): Promise<RecorderDaemonHandle> {
   const env = args.env ?? process.env
   const enablement = await recorderEnablement(args.workspace, env)
@@ -369,17 +371,40 @@ export async function listenRecorderDaemon(args: {
   let lastRequestAt: string | undefined
   let idleTimer: NodeJS.Timeout | undefined
   let recoveryTimer: NodeJS.Timeout | undefined
-  let recoveryInFlight: Promise<void> | undefined
+  let recoveryInFlight: Promise<{ recovered: number; pending: number }> | undefined
+  let recoveryDelayMs = RECOVERY_POLL_MS
+  let recoveryScheduleGeneration = 0
   let closing: Promise<void> | undefined
   let activityGeneration = 0
 
-  const runRecovery = (): Promise<void> => {
+  const runRecovery = (): Promise<{ recovered: number; pending: number }> => {
     if (recoveryInFlight) return recoveryInFlight
-    recoveryInFlight = recoverRecorder(enablement.workspaceRoot, env)
-      .then(() => undefined)
-      .catch(() => undefined)
+    recoveryInFlight = Promise.resolve(args.recoveryProbe?.())
+      .then(() => recoverRecorder(enablement.workspaceRoot, env))
+      .catch(() => ({ recovered: 0, pending: 0 }))
       .finally(() => { recoveryInFlight = undefined })
     return recoveryInFlight
+  }
+
+  const scheduleRecovery = (reset = false): void => {
+    if (closing) return
+    if (reset) recoveryDelayMs = RECOVERY_POLL_MS
+    if (recoveryTimer) clearTimeout(recoveryTimer)
+    const generation = ++recoveryScheduleGeneration
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = undefined
+      void (async () => {
+        if (!await recorderHasOpenTurn(enablement.dataRoot)) return
+        const result = await runRecovery()
+        if (closing || generation !== recoveryScheduleGeneration) return
+        if (!await recorderHasOpenTurn(enablement.dataRoot)) return
+        recoveryDelayMs = result.recovered > 0
+          ? RECOVERY_POLL_MS
+          : Math.min(MAX_RECOVERY_POLL_MS, recoveryDelayMs * 2)
+        scheduleRecovery()
+      })()
+    }, recoveryDelayMs)
+    recoveryTimer.unref()
   }
 
   let closeDaemon: () => Promise<void>
@@ -469,6 +494,7 @@ export async function listenRecorderDaemon(args: {
       }
       const payload = await readJsonBody(request)
       const result = await handleRecorderHook({ provider, event, workspace: enablement.workspaceRoot, payload, env })
+      scheduleRecovery(true)
       writeJson(response, 200, { ok: true, status: result.status })
     } catch (error) {
       errorCount++
@@ -487,7 +513,7 @@ export async function listenRecorderDaemon(args: {
     if (closing) return closing
     closing = new Promise<void>((resolvePromise) => {
       if (idleTimer) clearTimeout(idleTimer)
-      if (recoveryTimer) clearInterval(recoveryTimer)
+      if (recoveryTimer) clearTimeout(recoveryTimer)
       server.close(() => resolvePromise())
     }).then(async () => {
       await recoveryInFlight
@@ -513,10 +539,7 @@ export async function listenRecorderDaemon(args: {
     throw error
   }
   scheduleIdle()
-  recoveryTimer = setInterval(() => {
-    void runRecovery()
-  }, RECOVERY_POLL_MS)
-  recoveryTimer.unref()
+  scheduleRecovery(true)
   return { socketPath, closed, close }
 }
 
