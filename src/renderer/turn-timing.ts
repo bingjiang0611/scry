@@ -42,6 +42,7 @@ export interface ModelResponsePhase {
 
 export interface TurnTimingBreakdown {
   wallMs?: number
+  wallConsistency?: 'valid' | 'invalid'
   apiMs?: number
   apiSource: TimingSource
   apiObservation?: 'response' | 'phase' | 'residual'
@@ -253,7 +254,7 @@ export function buildTurnTimingBreakdown(
       ? derivedModelTiming.value
       : undefined
   const derivedResidualTiming =
-    derivedModelTiming?.value.method === 'non_call_residual'
+    derivedModelTiming?.status !== 'unavailable' && derivedModelTiming?.value.method === 'non_call_residual'
       ? derivedModelTiming.value
       : undefined
   const hasResponseBoundaryEvents = responseTiming != null
@@ -399,9 +400,35 @@ export function buildTurnTimingBreakdown(
   const timedCalls = calls.filter((call) => call.durationMs != null)
   const cumulativeCallMs = timedCalls.reduce((sum, call) => sum + (call.durationMs ?? 0), 0)
   const occupiedCallMs = intervalUnionMs(timedCalls)
+  const responseIntervals = items
+    .filter((event) => event.kind === 'model' && event.stage === 'response_completed')
+    .map((event) => {
+      const endMs = timestampMs(event.ts)
+      const durationMs = finiteDuration(event.durationMs)
+      return {
+        startMs: endMs != null && durationMs != null ? endMs - durationMs : undefined,
+        endMs
+      }
+    })
+  const activityIntervals = [
+    ...timedCalls.map((call) => ({ startMs: call.startMs, endMs: call.endMs })),
+    ...responseIntervals
+  ]
+  const providerApiMs = finiteDuration(resultEvent?.durationApiMs)
+  const wallConsistencyInvalid =
+    wallMs != null && (
+      (providerApiMs != null && providerApiMs > wallMs) ||
+      (occupiedCallMs != null && occupiedCallMs > wallMs) ||
+      (turnStart != null && resultTs != null && activityIntervals.some(
+        (interval) =>
+          interval.startMs != null &&
+          interval.endMs != null &&
+          (interval.startMs < turnStart || interval.endMs > resultTs)
+      ))
+    )
   const residualApiMs =
-    wallMs != null && occupiedCallMs != null
-      ? Math.max(0, wallMs - occupiedCallMs)
+    wallMs != null && occupiedCallMs != null && !wallConsistencyInvalid
+      ? wallMs - occupiedCallMs
       : undefined
   const unsegmentedPhase = phases.find((phase) => phase.kind === 'unsegmented')
   if (unsegmentedPhase && unsegmentedPhase.observedMs == null && residualApiMs != null) {
@@ -412,21 +439,25 @@ export function buildTurnTimingBreakdown(
 
   const apiPhases = phases.filter((phase) => phase.kind !== 'tail')
   const phaseTimedApiPhases = apiPhases.filter((phase) => phase.observedMs != null)
-  const providerApiMs = finiteDuration(resultEvent?.durationApiMs)
   const responseApiMs = responseTiming?.cumulativeMs
   const phaseObservedApiMs =
     phaseTimedApiPhases.length > 0
       ? phaseTimedApiPhases.reduce((sum, phase) => sum + (phase.observedMs ?? 0), 0)
       : undefined
-  const observedApiMs = responseApiMs ?? phaseObservedApiMs ?? derivedResidualTiming?.cumulativeMs
+  const observedApiMs = wallConsistencyInvalid
+    ? undefined
+    : responseApiMs ?? phaseObservedApiMs ?? derivedResidualTiming?.cumulativeMs
   const timedApiPhases = responseTiming?.timedCalls ?? phaseTimedApiPhases.length
   const totalApiPhases = responseTiming?.totalCalls ?? apiPhases.length
   return {
     wallMs,
-    apiMs: providerApiMs ?? observedApiMs,
-    apiSource: providerApiMs != null ? 'provider' : observedApiMs != null ? 'observed' : 'unknown',
+    wallConsistency: wallMs == null ? undefined : wallConsistencyInvalid ? 'invalid' : 'valid',
+    apiMs: wallConsistencyInvalid ? undefined : providerApiMs ?? observedApiMs,
+    apiSource: wallConsistencyInvalid ? 'unknown' : providerApiMs != null ? 'provider' : observedApiMs != null ? 'observed' : 'unknown',
     apiObservation:
-      providerApiMs != null
+      wallConsistencyInvalid
+        ? undefined
+        : providerApiMs != null
         ? undefined
         : responseApiMs != null
           ? 'response'

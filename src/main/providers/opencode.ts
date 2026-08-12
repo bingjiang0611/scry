@@ -23,9 +23,11 @@ import {
   fileOpOf,
   mcpPayloadFailed,
   parseMcp,
+  type ModelUsageRow,
   type ParsedMcp,
   type TraceEvent
 } from '../../shared/trace'
+import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 import { resolveRuntimeCliBin, shellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../cli-runtime'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
@@ -66,6 +68,10 @@ interface OpenCodeEventState {
   compactions: Set<string>
   hookResults: Set<string>
   mcpByToolUseId: Map<string, ParsedMcp>
+  toolStartedAt: Map<string, number>
+  streamedTextByMessageId: Map<string, string>
+  clearedTextMessageIds: Set<string>
+  messages: Map<string, Record<string, unknown>>
 }
 
 const eventStates = new WeakMap<ProviderRunRequest, OpenCodeEventState>()
@@ -78,7 +84,11 @@ const eventState = (request: ProviderRunRequest): OpenCodeEventState => {
     results: new Set<string>(),
     compactions: new Set<string>(),
     hookResults: new Set<string>(),
-    mcpByToolUseId: new Map<string, ParsedMcp>()
+    mcpByToolUseId: new Map<string, ParsedMcp>(),
+    toolStartedAt: new Map<string, number>(),
+    streamedTextByMessageId: new Map<string, string>(),
+    clearedTextMessageIds: new Set<string>(),
+    messages: new Map<string, Record<string, unknown>>()
   }
   eventStates.set(request, created)
   return created
@@ -306,6 +316,247 @@ function openCodeResultTiming(info: Record<string, unknown>): { ts: string; dura
   }
 }
 
+function openCodeMessageRole(info: Record<string, unknown>): string | undefined {
+  if (typeof info.role === 'string') return info.role
+  return typeof info.type === 'string' ? info.type : undefined
+}
+
+function openCodeMessageId(info: Record<string, unknown>): string | undefined {
+  return typeof info.id === 'string' && info.id ? info.id : undefined
+}
+
+function openCodeMessageParentId(info: Record<string, unknown>): string | undefined {
+  return typeof info.parentID === 'string' && info.parentID ? info.parentID : undefined
+}
+
+function openCodeCompletedAt(info: Record<string, unknown>): number | undefined {
+  const completed = record(info.time).completed
+  return typeof completed === 'number' && Number.isFinite(completed) ? completed : undefined
+}
+
+function rememberOpenCodeMessage(state: OpenCodeEventState, info: Record<string, unknown>): void {
+  const id = openCodeMessageId(info)
+  if (!id) return
+  const existing = state.messages.get(id)
+  if (existing && openCodeCompletedAt(existing) != null && openCodeCompletedAt(info) == null) return
+  state.messages.set(id, info)
+}
+
+interface OpenCodeTurnAggregate {
+  providerTurnId?: string
+  timing?: { ts: string; durationMs: number }
+  tokensIn?: number
+  tokensOut?: number
+  reasoningTokens?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+  costUsd?: number
+  modelUsage?: ModelUsageRow[]
+  messageCount: number
+  timingBoundary: 'user_message' | 'assistant_chain' | 'final_message'
+  messageCoverage: 'observed_chain' | 'final_message_only'
+}
+
+function aggregateOpenCodeTurn(
+  finalInfo: Record<string, unknown>,
+  observedMessages: Map<string, Record<string, unknown>>
+): OpenCodeTurnAggregate {
+  const messages = new Map(observedMessages)
+  const finalId = openCodeMessageId(finalInfo)
+  if (finalId) messages.set(finalId, finalInfo)
+  const parentId = openCodeMessageParentId(finalInfo)
+  const assistants = parentId
+    ? [...messages.values()].filter((info) =>
+        openCodeMessageRole(info) === 'assistant' && openCodeMessageParentId(info) === parentId
+      )
+    : [finalInfo]
+  if (finalId && !assistants.some((info) => openCodeMessageId(info) === finalId)) assistants.push(finalInfo)
+  assistants.sort((left, right) => {
+    const leftCreated = record(left.time).created
+    const rightCreated = record(right.time).created
+    const leftMs = typeof leftCreated === 'number' && Number.isFinite(leftCreated) ? leftCreated : Number.MAX_SAFE_INTEGER
+    const rightMs = typeof rightCreated === 'number' && Number.isFinite(rightCreated) ? rightCreated : Number.MAX_SAFE_INTEGER
+    return leftMs - rightMs || String(openCodeMessageId(left) ?? '').localeCompare(String(openCodeMessageId(right) ?? ''))
+  })
+
+  let tokensIn = 0
+  let tokensOut = 0
+  let reasoningTokens = 0
+  let cacheReadTokens = 0
+  let cacheCreationTokens = 0
+  let hasUsage = false
+  let costUsd = 0
+  let hasCompleteCost = assistants.length > 0
+  const modelRows = new Map<string, ModelUsageRow>()
+  const modelCosts = new Map<string, { total: number; complete: boolean }>()
+  for (const info of assistants) {
+    const tokens = record(info.tokens)
+    const cache = record(tokens.cache)
+    const input = typeof tokens.input === 'number' && Number.isFinite(tokens.input) ? tokens.input : undefined
+    const output = typeof tokens.output === 'number' && Number.isFinite(tokens.output) ? tokens.output : undefined
+    const reasoning = typeof tokens.reasoning === 'number' && Number.isFinite(tokens.reasoning) ? tokens.reasoning : undefined
+    const cacheRead = typeof cache.read === 'number' && Number.isFinite(cache.read) ? cache.read : undefined
+    const cacheWrite = typeof cache.write === 'number' && Number.isFinite(cache.write) ? cache.write : undefined
+    if ([input, output, reasoning, cacheRead, cacheWrite].some((value) => value != null)) {
+      hasUsage = true
+      tokensIn += input ?? 0
+      tokensOut += output ?? 0
+      reasoningTokens += reasoning ?? 0
+      cacheReadTokens += cacheRead ?? 0
+      cacheCreationTokens += cacheWrite ?? 0
+    }
+    const cost = typeof info.cost === 'number' && Number.isFinite(info.cost) ? info.cost : undefined
+    if (cost == null) hasCompleteCost = false
+    else costUsd += cost
+
+    const model = typeof info.modelID === 'string' && info.modelID ? info.modelID : undefined
+    if (!model) continue
+    const upstream = typeof info.providerID === 'string' ? info.providerID : ''
+    const key = `${upstream}\0${model}`
+    const current = modelRows.get(key) ?? {
+      model,
+      billingProvider: billingProvider(upstream),
+      upstreamProvider: upstream || undefined,
+      usageSource: 'opencode_turn_messages'
+    }
+    current.inputTokens = (current.inputTokens ?? 0) + (input ?? 0)
+    current.outputTokens = (current.outputTokens ?? 0) + (output ?? 0)
+    current.reasoningTokens = (current.reasoningTokens ?? 0) + (reasoning ?? 0)
+    current.cacheReadTokens = (current.cacheReadTokens ?? 0) + (cacheRead ?? 0)
+    current.cacheCreationTokens = (current.cacheCreationTokens ?? 0) + (cacheWrite ?? 0)
+    modelRows.set(key, current)
+    const modelCost = modelCosts.get(key) ?? { total: 0, complete: true }
+    if (cost == null) modelCost.complete = false
+    else modelCost.total += cost
+    modelCosts.set(key, modelCost)
+  }
+  for (const [key, row] of modelRows) {
+    const cost = modelCosts.get(key)
+    if (cost?.complete) {
+      row.costUsd = cost.total
+      row.costSource = 'provider_reported'
+      row.costConfidence = 'provider_reported'
+      row.costUnit = 'usd'
+    }
+  }
+
+  const completed = assistants
+    .map((info) => openCodeCompletedAt(info))
+    .filter((value): value is number => value != null)
+  const created = assistants
+    .map((info) => record(info.time).created)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const userInfo = parentId ? messages.get(parentId) : undefined
+  const userCreated = userInfo && openCodeMessageRole(userInfo) === 'user'
+    ? record(userInfo.time).created
+    : undefined
+  const startedAt = typeof userCreated === 'number' && Number.isFinite(userCreated)
+    ? userCreated
+    : created.length > 0
+      ? Math.min(...created)
+      : undefined
+  const completedAt = completed.length > 0 ? Math.max(...completed) : undefined
+  const timing = startedAt != null && completedAt != null && completedAt >= startedAt
+    ? { ts: new Date(completedAt).toISOString(), durationMs: completedAt - startedAt }
+    : openCodeResultTiming(finalInfo)
+  const timingBoundary: OpenCodeTurnAggregate['timingBoundary'] =
+    typeof userCreated === 'number' && Number.isFinite(userCreated)
+      ? 'user_message'
+      : assistants.length > 1
+        ? 'assistant_chain'
+        : 'final_message'
+
+  return {
+    providerTurnId: parentId ?? finalId,
+    timing,
+    tokensIn: hasUsage ? tokensIn : undefined,
+    tokensOut: hasUsage ? tokensOut : undefined,
+    reasoningTokens: hasUsage ? reasoningTokens : undefined,
+    cacheReadTokens: hasUsage ? cacheReadTokens : undefined,
+    cacheCreationTokens: hasUsage ? cacheCreationTokens : undefined,
+    costUsd: hasCompleteCost ? costUsd : undefined,
+    modelUsage: modelRows.size > 0 ? [...modelRows.values()] : undefined,
+    messageCount: assistants.length,
+    timingBoundary,
+    messageCoverage: parentId && (messages.has(parentId) || assistants.length > 1)
+      ? 'observed_chain'
+      : 'final_message_only'
+  }
+}
+
+function emitOpenCodeResponseParts(
+  request: ProviderRunRequest,
+  parts: unknown[],
+  messageId: string | undefined
+): void {
+  const textByMessage = new Map<string | undefined, string[]>()
+  for (const rawPart of parts) {
+    const part = record(rawPart)
+    if (part.type !== 'text' || part.ignored === true || typeof part.text !== 'string' || !part.text) continue
+    const partMessageId = typeof part.messageID === 'string' ? part.messageID : messageId
+    const text = textByMessage.get(partMessageId) ?? []
+    text.push(part.text)
+    textByMessage.set(partMessageId, text)
+  }
+  for (const [partMessageId, textParts] of textByMessage) {
+    const text = textParts.join('')
+    const streamed = partMessageId ? eventState(request).streamedTextByMessageId.get(partMessageId) : undefined
+    if (streamed === text) continue
+    request.emit(newEvent(request.runId, {
+      kind: 'model',
+      stage: 'text',
+      text,
+      messageId: partMessageId,
+      runtimeMetadata: {
+        source: 'opencode_response_parts',
+        ...(streamed === undefined ? {} : { replacesStreamedText: true })
+      }
+    }))
+  }
+  if (textByMessage.size === 0 && messageId && eventState(request).streamedTextByMessageId.has(messageId)) {
+    request.emit(newEvent(request.runId, {
+      kind: 'model',
+      stage: 'text',
+      text: '',
+      messageId,
+      runtimeMetadata: { source: 'opencode_response_parts', replacesStreamedText: true }
+    }))
+  }
+}
+
+function emitOpenCodeTurnResponseParts(
+  request: ProviderRunRequest,
+  rows: Array<{ info?: unknown; parts?: unknown }> | undefined,
+  finalInfo: Record<string, unknown>,
+  finalParts: unknown[]
+): void {
+  const parentId = openCodeMessageParentId(finalInfo)
+  const finalId = openCodeMessageId(finalInfo)
+  if (!rows || !parentId) {
+    emitOpenCodeResponseParts(request, finalParts, finalId)
+    return
+  }
+  const assistants = rows
+    .map((row) => ({ info: record(row.info), parts: Array.isArray(row.parts) ? row.parts : [] }))
+    .filter(({ info }) => openCodeMessageRole(info) === 'assistant' && openCodeMessageParentId(info) === parentId)
+    .sort((left, right) => {
+      const leftTime = record(left.info.time)
+      const rightTime = record(right.info.time)
+      const leftCreated = typeof leftTime.created === 'number' ? leftTime.created : Number.POSITIVE_INFINITY
+      const rightCreated = typeof rightTime.created === 'number' ? rightTime.created : Number.POSITIVE_INFINITY
+      return leftCreated - rightCreated || String(openCodeMessageId(left.info) ?? '').localeCompare(String(openCodeMessageId(right.info) ?? ''))
+    })
+  let emittedFinal = false
+  for (const assistant of assistants) {
+    const messageId = openCodeMessageId(assistant.info)
+    const parts = assistant.parts.length > 0 || messageId !== finalId ? assistant.parts : finalParts
+    if (parts.length === 0 && !eventState(request).streamedTextByMessageId.has(messageId ?? '')) continue
+    emitOpenCodeResponseParts(request, parts, messageId)
+    if (messageId === finalId) emittedFinal = true
+  }
+  if (!emittedFinal) emitOpenCodeResponseParts(request, finalParts, finalId)
+}
+
 function abortableSseSleep(signal: AbortSignal): (delayMs: number) => Promise<void> {
   return (delayMs) => new Promise((resolve) => {
     if (signal.aborted) {
@@ -511,6 +762,43 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
   const payload = record(event.properties ?? event.data)
   if (payload.sessionID !== sessionId) return
   const type = String(event.type ?? '')
+  if (type === 'message.updated') {
+    rememberOpenCodeMessage(eventState(request), record(payload.info))
+    return
+  }
+  if (type === 'message.removed') {
+    const messageId = String(payload.messageID ?? '')
+    if (messageId) {
+      const state = eventState(request)
+      state.messages.delete(messageId)
+      state.streamedTextByMessageId.delete(messageId)
+      state.clearedTextMessageIds.add(messageId)
+      request.emit(newEvent(request.runId, {
+        kind: 'model',
+        stage: 'text',
+        text: '',
+        messageId,
+        runtimeMetadata: { source: 'opencode_message_removed', replacesStreamedText: true }
+      }))
+    }
+    return
+  }
+  if (type === 'message.part.removed') {
+    const messageId = String(payload.messageID ?? record(payload.part).messageID ?? '')
+    if (messageId) {
+      const state = eventState(request)
+      state.streamedTextByMessageId.delete(messageId)
+      state.clearedTextMessageIds.add(messageId)
+      request.emit(newEvent(request.runId, {
+        kind: 'model',
+        stage: 'text',
+        text: '',
+        messageId,
+        runtimeMetadata: { source: 'opencode_message_part_removed', replacesStreamedText: true }
+      }))
+    }
+    return
+  }
   if (type === 'session.next.compaction.ended') {
     const providerEventId = String(payload.messageID ?? event.id ?? '')
     if (!providerEventId || eventState(request).compactions.has(providerEventId)) return
@@ -531,7 +819,33 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
     return
   }
   if (type === 'session.next.text.delta' || (type === 'message.part.delta' && payload.field === 'text')) {
-    request.emit(newEvent(request.runId, { kind: 'model', stage: 'text_delta', text: String(payload.delta ?? '') }))
+    const messageId = typeof payload.assistantMessageID === 'string'
+      ? payload.assistantMessageID
+      : typeof payload.messageID === 'string'
+        ? payload.messageID
+        : undefined
+    if (messageId) {
+      const state = eventState(request)
+      const streamed = state.streamedTextByMessageId.get(messageId) ?? ''
+      const text = `${streamed}${String(payload.delta ?? '')}`
+      state.streamedTextByMessageId.set(messageId, text)
+      if (state.clearedTextMessageIds.has(messageId)) {
+        request.emit(newEvent(request.runId, {
+          kind: 'model',
+          stage: 'text',
+          text,
+          messageId,
+          runtimeMetadata: { source: 'opencode_retry_text', replacesStreamedText: true }
+        }))
+        return
+      }
+    }
+    request.emit(newEvent(request.runId, {
+      kind: 'model',
+      stage: 'text_delta',
+      text: String(payload.delta ?? ''),
+      messageId
+    }))
     return
   }
   if (type === 'session.next.reasoning.delta' || (type === 'message.part.delta' && payload.field === 'reasoning')) {
@@ -540,12 +854,30 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
   }
   const part = type === 'message.part.updated' ? record(payload.part) : payload
   const toolState = record(part.state)
+  const toolTime = record(toolState.time)
   const isPartTool = type === 'message.part.updated' && part.type === 'tool'
   const toolUseId = String(part.callID ?? '')
+  const messageId = typeof part.messageID === 'string'
+    ? part.messageID
+    : typeof payload.assistantMessageID === 'string'
+      ? payload.assistantMessageID
+      : undefined
+  const state = eventState(request)
+  const eventTimestamp = typeof payload.timestamp === 'number' && Number.isFinite(payload.timestamp)
+    ? payload.timestamp
+    : undefined
+  const toolStateStart = typeof toolTime.start === 'number' && Number.isFinite(toolTime.start)
+    ? toolTime.start
+    : undefined
+  const nativeStart = toolStateStart ?? state.toolStartedAt.get(toolUseId) ?? eventTimestamp
+  const nativeEnd = typeof toolTime.end === 'number' && Number.isFinite(toolTime.end)
+    ? toolTime.end
+    : eventTimestamp
   const status = String(toolState.status ?? '')
   const isToolStart = type === 'session.next.tool.called' || (isPartTool && ['running', 'completed', 'error'].includes(status))
   if (isToolStart && toolUseId && !eventState(request).starts.has(toolUseId)) {
     eventState(request).starts.add(toolUseId)
+    if (nativeStart != null) state.toolStartedAt.set(toolUseId, nativeStart)
     const normalized = normalizeOpenCodeTool(String(part.tool ?? ''), isPartTool ? toolState.input : part.input)
     const { toolName, input } = normalized
     const classified = classifyTool(toolName, input)
@@ -557,10 +889,11 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
       tool: toolName,
       name: classified.name,
       toolUseId,
+      messageId,
       input,
       ...mcp,
       ...fileOpOf(toolName, input)
-    }))
+    }, nativeStart == null ? undefined : new Date(nativeStart).toISOString()))
   }
   const isToolResult = type === 'session.next.tool.success' || type === 'session.next.tool.failed' || (isPartTool && ['completed', 'error'].includes(status))
   if (isToolResult && toolUseId && !eventState(request).results.has(toolUseId)) {
@@ -570,14 +903,21 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
     const output = typeof value === 'string' ? value : JSON.stringify(value)
     const mcp = eventState(request).mcpByToolUseId.get(toolUseId)
     eventState(request).mcpByToolUseId.delete(toolUseId)
+    const normalized = normalizeOpenCodeTool(String(part.tool ?? ''), isPartTool ? toolState.input : part.input)
     request.emit(newEvent(request.runId, {
       kind: 'tool',
       stage: 'tool_result',
+      tool: normalized.toolName,
       toolUseId,
+      messageId,
+      durationMs: nativeStart != null && nativeEnd != null && nativeEnd >= nativeStart
+        ? nativeEnd - nativeStart
+        : undefined,
       output,
       ...(mcp ?? {}),
       isError: failed || (mcp?.isMcp === true && mcpPayloadFailed(output))
-    }))
+    }, nativeEnd == null ? undefined : new Date(nativeEnd).toISOString()))
+    state.toolStartedAt.delete(toolUseId)
   }
 }
 
@@ -716,6 +1056,7 @@ export function createOpenCodeAdapter(
     run: (request) => {
       let externalSessionId = request.resume
       let providerTurnId: string | undefined
+      let recordingFailure: { message: string } | undefined
       let stopped = false
       let client: OpencodeClient | undefined
       const permissionController = new AbortController()
@@ -755,6 +1096,30 @@ export function createOpenCodeAdapter(
             await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
             return { externalSessionId, providerTurnId, stopped }
           }
+          if (request.managedRecorder) {
+            if (!request.cwd || !request.managedRecorderIdentity) {
+              throw new Error('OpenCode managed recorder 缺少受信任轮次身份')
+            }
+            const opened = await handleRecorderHook({
+              provider: 'opencode',
+              event: 'chat.message',
+              workspace: request.cwd,
+              managed: true,
+              env: {
+                ...process.env,
+                SCRY_MANAGED_RUN_ID: request.managedRecorderIdentity.runId,
+                SCRY_MANAGED_PROMPT_HASH: request.managedRecorderIdentity.promptHash
+              },
+              payload: {
+                session_id: externalSessionId,
+                prompt: request.prompt,
+                timestamp: new Date().toISOString()
+              }
+            })
+            if (opened.status !== 'started' && opened.status !== 'duplicate') {
+              throw new Error(`OpenCode managed recorder 无法建立轮次身份：${opened.reason ?? opened.status}`)
+            }
+          }
           const hookTracePath = server.hookTracePath
           const hookTraceOffset = await openCodeHookTraceCursor(hookTracePath)
           const eventOptions = {
@@ -766,7 +1131,7 @@ export function createOpenCodeAdapter(
           } as unknown as Parameters<typeof client.event.subscribe>[1]
           const subscription = await client.event.subscribe({ directory: request.cwd }, eventOptions)
           const stream = subscription.stream as AsyncGenerator<unknown>
-          let eventError: unknown
+          let observationError: unknown
           const events = (async () => {
             try {
               for await (const event of stream) {
@@ -775,7 +1140,7 @@ export function createOpenCodeAdapter(
                 emitOpenCodeEvent(request, event, externalSessionId!)
               }
             } catch (error) {
-              if (!stopped && !eventController.signal.aborted) eventError = error
+              if (!stopped && !eventController.signal.aborted) observationError = error
             }
           })()
           const slash = request.prompt.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
@@ -812,7 +1177,6 @@ export function createOpenCodeAdapter(
           } finally {
             eventController.abort()
             await events
-            if (responseError == null && eventError != null) responseError = eventError
             if (hookTracePath) {
               try {
                 emitOpenCodeHookEvents(
@@ -822,19 +1186,75 @@ export function createOpenCodeAdapter(
                   hookTracePath
                 )
               } catch (error) {
-                if (responseError == null) responseError = error
+                observationError ??= error
               }
             }
           }
           if (responseError != null) throw responseError
           const info = record(response!.info)
-          providerTurnId = typeof info.id === 'string' && info.id ? info.id : undefined
-          const timing = openCodeResultTiming(info)
-          const tokens = record(info.tokens)
-          const cache = record(tokens.cache)
+          providerTurnId = openCodeMessageParentId(info)
+          let messageSnapshotStatus: 'complete' | 'bounded' | 'failed' | 'unavailable' = 'unavailable'
+          let messageSnapshotRows: Array<{ info?: unknown; parts?: unknown }> | undefined
+          if (typeof client.session.messages === 'function') {
+            try {
+              const rows = await unwrap<Array<{ info?: unknown; parts?: unknown }>>(client.session.messages({
+                sessionID: externalSessionId,
+                directory: request.cwd,
+                limit: 1_000
+              }), 'session.messages')
+              messageSnapshotRows = rows
+              messageSnapshotStatus = rows.length === 1_000 ? 'bounded' : 'complete'
+              const state = eventState(request)
+              if (messageSnapshotStatus === 'complete') {
+                const snapshotMessageIds = new Set(rows.map((row) => openCodeMessageId(record(row.info))).filter(Boolean))
+                for (const messageId of state.streamedTextByMessageId.keys()) {
+                  if (snapshotMessageIds.has(messageId)) continue
+                  request.emit(newEvent(request.runId, {
+                    kind: 'model',
+                    stage: 'text',
+                    text: '',
+                    messageId,
+                    runtimeMetadata: { source: 'opencode_message_snapshot', replacesStreamedText: true }
+                  }))
+                  state.streamedTextByMessageId.delete(messageId)
+                  state.clearedTextMessageIds.delete(messageId)
+                }
+                state.messages.clear()
+              }
+              for (const row of rows) rememberOpenCodeMessage(state, record(row.info))
+            } catch (error) {
+              messageSnapshotStatus = 'failed'
+              observationError ??= error
+            }
+          }
+          const parentId = openCodeMessageParentId(info)
+          const snapshotHasParentUser = !!parentId && !!messageSnapshotRows?.some((row) => {
+            const candidate = record(row.info)
+            return openCodeMessageId(candidate) === parentId && openCodeMessageRole(candidate) === 'user'
+          })
+          if (request.managedRecorder) {
+            if (messageSnapshotStatus !== 'complete') {
+              recordingFailure = { message: `OpenCode managed recorder 无法取得完整权威消息快照：${messageSnapshotStatus}` }
+            } else if (!parentId) {
+              recordingFailure = { message: 'OpenCode managed recorder 缺少权威 user message id' }
+            } else if (!snapshotHasParentUser) {
+              recordingFailure = { message: 'OpenCode managed recorder 权威消息快照缺少父 user message' }
+            }
+          }
+          const aggregate = aggregateOpenCodeTurn(info, eventState(request).messages)
+          providerTurnId = request.managedRecorder ? parentId : aggregate.providerTurnId
+          emitOpenCodeTurnResponseParts(
+            request,
+            messageSnapshotStatus === 'complete' ? messageSnapshotRows : undefined,
+            info,
+            Array.isArray(response!.parts) ? response!.parts : []
+          )
+          const aggregateUnavailable =
+            messageSnapshotStatus === 'bounded' || messageSnapshotStatus === 'failed' || recordingFailure !== undefined
+          const timing = aggregateUnavailable ? undefined : aggregate.timing
           const upstream = String(info.providerID ?? '')
           const sourceProvider = billingProvider(upstream)
-          const cost = typeof info.cost === 'number' ? info.cost : undefined
+          const cost = aggregateUnavailable ? undefined : aggregate.costUsd
           const providerStopReason = typeof info.finish === 'string' && info.finish.trim() ? info.finish.trim() : undefined
           const terminationReason = classifyRunTermination({
             rawReason: providerStopReason,
@@ -845,42 +1265,46 @@ export function createOpenCodeAdapter(
             stage: 'result',
             messageId: providerTurnId,
             durationMs: timing?.durationMs,
-            tokensIn: typeof tokens.input === 'number' ? tokens.input : undefined,
-            tokensOut: typeof tokens.output === 'number' ? tokens.output : undefined,
-            reasoningTokens: typeof tokens.reasoning === 'number' ? tokens.reasoning : undefined,
-            cacheReadTokens: typeof cache.read === 'number' ? cache.read : undefined,
-            cacheCreationTokens: typeof cache.write === 'number' ? cache.write : undefined,
+            tokensIn: aggregateUnavailable ? undefined : aggregate.tokensIn,
+            tokensOut: aggregateUnavailable ? undefined : aggregate.tokensOut,
+            reasoningTokens: aggregateUnavailable ? undefined : aggregate.reasoningTokens,
+            cacheReadTokens: aggregateUnavailable ? undefined : aggregate.cacheReadTokens,
+            cacheCreationTokens: aggregateUnavailable ? undefined : aggregate.cacheCreationTokens,
             costUsd: cost,
             costSource: cost === undefined ? undefined : 'provider_reported',
             costConfidence: cost === undefined ? undefined : 'provider_reported',
             costUnit: cost === undefined ? undefined : 'usd',
             billingProvider: sourceProvider,
             upstreamProvider: upstream || undefined,
-            usageSource: 'opencode_session',
-            modelUsage: typeof info.modelID === 'string' ? [{
-              model: info.modelID,
-              inputTokens: typeof tokens.input === 'number' ? tokens.input : undefined,
-              outputTokens: typeof tokens.output === 'number' ? tokens.output : undefined,
-              reasoningTokens: typeof tokens.reasoning === 'number' ? tokens.reasoning : undefined,
-              cacheReadTokens: typeof cache.read === 'number' ? cache.read : undefined,
-              cacheCreationTokens: typeof cache.write === 'number' ? cache.write : undefined,
-              costUsd: cost,
-              costSource: cost === undefined ? undefined : 'provider_reported',
-              costConfidence: cost === undefined ? undefined : 'provider_reported',
-              costUnit: cost === undefined ? undefined : 'usd',
-              billingProvider: sourceProvider,
-              upstreamProvider: upstream || undefined,
-              usageSource: 'opencode_session'
-            }] : undefined,
+            usageSource: aggregateUnavailable ? undefined : 'opencode_turn_messages',
+            modelUsage: aggregateUnavailable ? undefined : aggregate.modelUsage,
             isError: !!info.error,
             ...(terminationReason ? { terminationReason } : {}),
             ...(providerStopReason ? { providerStopReason } : {}),
-            runtimeMetadata: { modelProvider: upstream, source: 'opencode_server', finish: info.finish }
+            runtimeMetadata: {
+              modelProvider: upstream,
+              source: 'opencode_server',
+              finish: info.finish,
+              aggregatedAssistantMessages: aggregate.messageCount,
+              messageCoverage: recordingFailure
+                ? 'incomplete_snapshot'
+                : messageSnapshotStatus === 'bounded'
+                  ? 'bounded_snapshot'
+                  : messageSnapshotStatus === 'failed'
+                    ? 'failed_snapshot'
+                    : aggregate.messageCoverage,
+              timingBoundary: aggregateUnavailable ? 'unavailable' : aggregate.timingBoundary,
+              messageSnapshotStatus,
+              observationStatus: observationError == null ? 'complete' : 'partial',
+              ...(observationError == null ? {} : {
+                observationError: sanitizeOpenCodeServerLog(errorText(observationError)).slice(0, 500)
+              })
+            }
           }, timing?.ts))
           if (info.error && !stopped) throw new Error(`OpenCode Provider 失败：${errorText(info.error)}`)
           lastOkAt = Date.now()
           lastError = undefined
-          return { externalSessionId, providerTurnId, stopped }
+          return { externalSessionId, providerTurnId, stopped, recordingFailure }
         } catch (error) {
           permissionController.abort()
           requestController.abort()
@@ -905,7 +1329,8 @@ export function createOpenCodeAdapter(
         promise,
         interrupt,
         getExternalSessionId: () => externalSessionId,
-        getProviderTurnId: () => providerTurnId
+        getProviderTurnId: () => providerTurnId,
+        getRecordingFailure: () => recordingFailure
       }
     },
     mcp: {

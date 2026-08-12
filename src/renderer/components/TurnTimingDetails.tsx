@@ -22,6 +22,7 @@ function metric(label: string, value: string, source: string, title: string): Re
 }
 
 function modelWallMs(timing: TurnTimingBreakdown): number | undefined {
+  if (timing.wallConsistency === 'invalid') return undefined
   const measured = timing.apiObservation === 'response' && timing.occupiedApiMs != null
     ? timing.occupiedApiMs
     : timing.apiMs
@@ -30,6 +31,7 @@ function modelWallMs(timing: TurnTimingBreakdown): number | undefined {
 }
 
 function modelSource(timing: TurnTimingBreakdown): string {
+  if (timing.wallConsistency === 'invalid') return '数据异常'
   if (timing.apiSource === 'provider') return 'SDK 原值'
   if (timing.apiSource === 'observed' && timing.apiObservation === 'residual') return '~估算'
   if (timing.apiSource === 'observed') return '~观测'
@@ -38,10 +40,14 @@ function modelSource(timing: TurnTimingBreakdown): string {
 
 export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
   const modelMs = modelWallMs(timing)
-  const toolMs = timing.wallMs != null && modelMs != null
+  const nonModelMs = timing.wallConsistency === 'invalid'
+    ? undefined
+    : timing.wallMs != null && modelMs != null
     ? Math.max(0, timing.wallMs - modelMs)
     : timing.occupiedCallMs
-  const toolSource = timing.wallMs != null && modelMs != null
+  const nonModelSource = timing.wallConsistency === 'invalid'
+    ? '数据异常'
+    : timing.wallMs != null && modelMs != null
     ? '整轮剩余'
     : timing.occupiedCallMs != null
       ? '~工具事件观测'
@@ -67,14 +73,18 @@ export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
           '根 Agent 与子 Agent 的模型响应区间合并去重；同一时段只计算一次。'
         )}
         {metric(
-          '工具调用耗时',
-          toolMs == null ? (timing.totalCalls === 0 ? '0ms' : '—') : durationText(toolMs),
-          toolSource,
-          '整轮墙钟扣除模型响应后的剩余时间；模型与其他活动重叠时优先归入模型响应。'
+          '非模型耗时',
+          nonModelMs == null && timing.wallConsistency !== 'invalid'
+            ? (timing.totalCalls === 0 ? '0ms' : '—')
+            : durationText(nonModelMs),
+          nonModelSource,
+          '整轮墙钟扣除模型响应后的剩余时间，包括 Tool、MCP、Skill、子 Agent 调度、Hook、IPC 与等待；模型与其他活动重叠时优先归入模型响应。'
         )}
       </div>
       <div className="turn-timing-note">
-        口径：以整轮墙钟划分。模型响应区间优先归入模型；其余时间统一计入工具调用，包括 Tool、MCP、Skill、子 Agent 调度、Hook、IPC 与等待。两项可相加；“~”表示事件时间戳观测或估算，缺少可靠数据时显示“—”。
+        {timing.wallConsistency === 'invalid'
+          ? '数据异常：整轮墙钟与活动时间不一致，无法可靠划分模型响应与非模型耗时。'
+          : '口径：以整轮墙钟划分。模型响应区间优先归入模型；其余时间统一计入非模型耗时，包括 Tool、MCP、Skill、子 Agent 调度、Hook、IPC 与等待。两项可相加；“~”表示事件时间戳观测或估算，缺少可靠数据时显示“—”。'}
       </div>
     </div>
   )

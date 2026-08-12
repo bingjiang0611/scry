@@ -142,6 +142,7 @@ export function fmtTokenCoverage(value: number | null, knownTurns: number, total
 type TokenCacheAccounting = 'separate' | 'input_includes_cache'
 
 function tokenCacheAccounting(e: Pick<TraceEvent, 'providerId' | 'runtimeProvider' | 'billingProvider'> | undefined): TokenCacheAccounting {
+  if (e?.providerId === 'opencode' || e?.runtimeProvider === 'opencode_server') return 'separate'
   if (
     e?.providerId === 'codex' ||
     e?.runtimeProvider === 'codex_cli' ||
@@ -857,6 +858,7 @@ function aggregateModelUsage(rows: ModelUsageRow[]): ModelUsageRow[] | undefined
         model: row.model,
         inputTokens: 0,
         outputTokens: 0,
+        reasoningTokens: 0,
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
         cacheCreation5mTokens: 0,
@@ -869,6 +871,7 @@ function aggregateModelUsage(rows: ModelUsageRow[]): ModelUsageRow[] | undefined
       } satisfies ModelUsageRow)
     prev.inputTokens = (prev.inputTokens ?? 0) + (row.inputTokens ?? 0)
     prev.outputTokens = (prev.outputTokens ?? 0) + (row.outputTokens ?? 0)
+    prev.reasoningTokens = (prev.reasoningTokens ?? 0) + (row.reasoningTokens ?? 0)
     prev.cacheReadTokens = (prev.cacheReadTokens ?? 0) + (row.cacheReadTokens ?? 0)
     prev.cacheCreationTokens = (prev.cacheCreationTokens ?? 0) + (row.cacheCreationTokens ?? 0)
     prev.cacheCreation5mTokens = (prev.cacheCreation5mTokens ?? 0) + (row.cacheCreation5mTokens ?? 0)
@@ -906,6 +909,7 @@ export function resultOf(t: Turn | Pick<Turn, 'items'>): TraceEvent | undefined 
     costUnit: costKnown ? 'usd' : undefined,
     tokensIn: sumObserved((event) => event.tokensIn),
     tokensOut: sumObserved((event) => event.tokensOut),
+    reasoningTokens: sumObserved((event) => event.reasoningTokens),
     cacheReadTokens: sumObserved((event) => event.cacheReadTokens),
     cacheCreationTokens: sumObserved((event) => event.cacheCreationTokens),
     cacheCreation5mTokens: sumObserved((event) => event.cacheCreation5mTokens),
@@ -1562,6 +1566,34 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
       updated[existingIndex] = ev
       next[i] = { ...next[i], items: updated }
       continue
+    }
+    if (
+      ev.kind === 'model' && ev.stage === 'text' &&
+      ev.runtimeMetadata?.replacesStreamedText === true && ev.messageId
+    ) {
+      const first = items.findIndex((candidate) =>
+        candidate.kind === 'model' &&
+        (candidate.stage === 'text' || candidate.stage === 'text_delta') &&
+        candidate.messageId === ev.messageId &&
+        candidate.agentId === ev.agentId &&
+        candidate.parentToolUseId === ev.parentToolUseId
+      )
+      if (first >= 0) {
+        if (!mutated) {
+          next = [...next]
+          mutated = true
+        }
+        const updated = items.filter((candidate) => !(
+          candidate.kind === 'model' &&
+          (candidate.stage === 'text' || candidate.stage === 'text_delta') &&
+          candidate.messageId === ev.messageId &&
+          candidate.agentId === ev.agentId &&
+          candidate.parentToolUseId === ev.parentToolUseId
+        ))
+        updated.splice(first, 0, ev)
+        next[i] = { ...next[i], items: updated }
+        continue
+      }
     }
     const last = items[items.length - 1]
     const merged =

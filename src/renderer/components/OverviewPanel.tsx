@@ -382,7 +382,7 @@ const TURN_DETAIL_LABEL: Record<TurnDetailKind, string> = {
   skill: 'Skill',
   hooks: 'Hooks',
   file: '文件',
-  intervention: '介入'
+  intervention: '结构化介入'
 }
 
 function humanInterventions(events: TraceEvent[]): AgentIntervention[] {
@@ -522,6 +522,7 @@ export function OverviewPanel({
   // verdict foot 用全会话累计（和 cost/tokens pillar 一致，不混最后一轮）。
   const cacheR = sumObserved((e) => e.cacheReadTokens)
   const cacheW = sumObserved((e) => e.cacheCreationTokens)
+  const reasoning = sumObserved((e) => e.reasoningTokens)
   const apiMs = sumObserved((e) => e.durationApiMs)
   // Context% = 最近一轮的当前上下文占用（顶层 usage 完整 prompt）÷ 模型窗口。诚实的"现在装了多满"。
   const ctx = useMemo(() => {
@@ -619,7 +620,7 @@ export function OverviewPanel({
   const turnError = turns.some((t) => !!t.error)
   const hasError = toolErrors > 0 || turnError
   let vstate: 'ok' | 'warn' | 'bad' = 'ok'
-  let judge = '完成'
+  let judge = '轮次已结束'
   if (busy) {
     vstate = 'warn'
     judge = '运行中'
@@ -628,10 +629,10 @@ export function OverviewPanel({
     judge = `${dangerHi} 处高危操作`
   } else if (hasError) {
     vstate = 'warn'
-    judge = toolErrors > 0 ? `完成 · ${toolErrors} 处工具报错` : '完成 · 有报错'
+    judge = toolErrors > 0 ? `轮次已结束 · ${toolErrors} 处工具报错` : '轮次已结束 · 有报错'
   } else if (dangers.length > 0) {
     vstate = 'warn'
-    judge = `完成 · ${dangers.length} 处可疑操作`
+    judge = `轮次已结束 · ${dangers.length} 处可疑操作`
   }
   const callSub = [
     `工具 ${calls.ordinaryToolTotal}`,
@@ -719,17 +720,20 @@ export function OverviewPanel({
               <span className={`sdot ${vstate}`} />
               <strong>{judge}</strong>
               <small>
-                {results.length} 轮完成 · {toolErrors} 处工具报错
-                {sessionInterventions.length > 0 ? ` · ${sessionInterventions.length} 次人工介入` : ''}
+                {busy
+                  ? '正在等待 Provider 终态'
+                  : `${results.length} 轮已结束 · ${toolErrors} 处工具报错${
+                      sessionInterventions.length > 0 ? ` · ${sessionInterventions.length} 次结构化介入` : ''
+                    } · Provider 终态不代表用户目标完成`}
               </small>
             </div>
             <em>{calls.totalCalls} calls</em>
           </header>
           <div className="overview-metric-grid">
             <div className="overview-metric accent">
-              <span>总 Token</span>
+              <span>输入+输出+缓存</span>
               <strong>{billingTokenText}</strong>
-              <small>{billing.knownTokenResultCount}/{billing.resultTurns} 轮已捕获</small>
+              <small>{billing.knownTokenResultCount}/{billing.resultTurns} 轮已捕获 · reasoning 单列</small>
             </div>
             <div className="overview-metric">
               <span>输入 / 输出</span>
@@ -770,6 +774,7 @@ export function OverviewPanel({
           <footer className="overview-metric-foot">
             <span><b>cache·r</b>{formatObserved(cacheR)}</span>
             <span><b>cache·w</b>{formatObserved(cacheW)}</span>
+            <span><b>reason</b>{formatObserved(reasoning)}</span>
             <span><b>api</b>{formatObserved(apiMs, (value) => `${(value / 1000).toFixed(1)}s`)}</span>
           </footer>
         </section>
@@ -887,7 +892,7 @@ export function OverviewPanel({
                         <button
                           type="button"
                           className="turn-call-group turn-call-toggle timing"
-                          title={timingExpanded ? '收起耗时明细' : '查看模型响应耗时与工具调用耗时'}
+                          title={timingExpanded ? '收起耗时明细' : '查看模型响应耗时与非模型耗时'}
                           aria-label={timingToggleLabel}
                           aria-expanded={timingExpanded}
                           aria-controls={`turn-timing-${row.turnNo}`}
@@ -965,7 +970,7 @@ export function OverviewPanel({
               )
             })}
           </div>
-          <div className="psrc">每轮展示人工介入、MCP、Skill、子 Agent、Hook 与文件数量；介入明细直接列出问题和最终选择，点 Txx 跳回对话。</div>
+          <div className="psrc">每轮展示结构化介入、MCP、Skill、子 Agent、Hook 与文件数量；介入仅统计结构化问答/权限请求，不对普通文本（如“请登录”）做 NLP 推断。</div>
         </div>
       )}
         </div>
@@ -981,7 +986,7 @@ export function OverviewPanel({
       {(sessionInterventions.length > 0 || (stats?.interventions?.requested ?? 0) > 0) && (
         <div className="panel-section intervention-summary-section">
           <h4>
-            人工介入
+            结构化介入
             <span className="more">本会话 {sessionInterventions.length} 次 · {sessionQuestions} 个问题</span>
           </h4>
           <div className="intervention-summary-grid">
@@ -991,9 +996,9 @@ export function OverviewPanel({
           </div>
           {stats?.interventions && (
             <div className="psrc">
-              SQLite 历史累计：人工介入 {stats.interventions.total} 次 · 问题 {stats.interventions.questions} 个
+              SQLite 历史累计：结构化介入 {stats.interventions.total} 次 · 问题 {stats.interventions.questions} 个
               {stats.interventions.requested > stats.interventions.total
-                ? ` · 另有 ${stats.interventions.requested - stats.interventions.total} 次由 Provider 取消，不计入人工介入`
+                ? ` · 另有 ${stats.interventions.requested - stats.interventions.total} 次由 Provider 取消，不计入结构化介入`
                 : ''}
             </div>
           )}

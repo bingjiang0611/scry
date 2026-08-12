@@ -413,6 +413,25 @@ describe('aggregateTurnEvidence', () => {
     })
   })
 
+  it('以 Provider 权威正文替换不完整的流式前缀', () => {
+    const evidence = aggregateTurnEvidence({ events: [
+      {
+        id: 'prefix', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'model',
+        stage: 'text_delta', text: 'hel', messageId: 'm1'
+      },
+      {
+        id: 'authoritative', ts: '2026-01-01T00:00:00.001Z', runId: 'r', kind: 'model',
+        stage: 'text', text: 'hello', messageId: 'm1',
+        runtimeMetadata: { source: 'opencode_response_parts', replacesStreamedText: true }
+      }
+    ] })
+
+    expect(evidence.assistant.value?.text).toBe('hello')
+    expect(evidence.modelSegments?.value).toEqual([
+      expect.objectContaining({ text: 'hello', messageId: 'm1' })
+    ])
+  })
+
   it('按事件顺序保留根 Agent 与子 Agent 的相邻可见输出', () => {
     const events: TraceEvent[] = [
       { id: 'root', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'model', stage: 'text_delta', text: '根', parentToolUseId: null },

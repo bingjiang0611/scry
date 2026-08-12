@@ -112,6 +112,7 @@ import {
   resolveGrantedCommitHookCapability
 } from './commit-hook-trust'
 import { redeliverGrantedCommitHooksAtStartup } from './commit-hook-startup'
+import { providerRecordingPolicy } from './provider-recording-policy'
 import {
   denyRendererPermissions,
   isAllowedRendererRequest,
@@ -1859,10 +1860,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       providerTurnId?: string
       stopped?: boolean
       status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+      recordingFailure?: { message: string }
     }>
     interrupt: () => void
     getExternalSessionId: () => string | undefined
     getProviderTurnId?: () => string | undefined
+    getRecordingFailure?: () => { message: string } | undefined
   } | null = null
   let interrupted = false
   let observedProviderStartedAt: string | undefined
@@ -1871,6 +1874,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     providerTurnId?: string
     stopped?: boolean
     status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+    recordingFailure?: { message: string }
   }> => {
     if (interrupted) return { stopped: true }
     observedProviderStartedAt = new Date().toISOString()
@@ -1886,7 +1890,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       codexHookTrust,
       openCodePluginTrust,
       managedRecorder: managedRecorderEnabled,
-      ...(managedRecorderEnabled && providerId === 'qoder' ? {
+      ...(managedRecorderEnabled && (providerId === 'qoder' || providerId === 'opencode') ? {
         managedRecorderIdentity: {
           runId,
           promptHash: createHash('sha256').update(displayPrompt).digest('hex')
@@ -2009,6 +2013,35 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       const alreadyDone = runState.done
       runState.done = true
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
+      const recordingPolicy = providerRecordingPolicy('completed', r.recordingFailure)
+      if (!recordingPolicy.allowCanonicalCommit) {
+        const { message, category } = recordingPolicy.rendererError
+        runState.error = message
+        runState.errorHint = recordingRecoveryHint
+        if (recordingPolicy.blockSession) {
+          recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+        }
+        win?.webContents.send('agent:error', {
+          runId,
+          message,
+          category,
+          hint: runState.errorHint
+        })
+        await turnDiffDone
+        recordTurn({
+          runId,
+          sessionId: storageSessionId,
+          cwd,
+          userText: displayPrompt,
+          items: runState.items,
+          providerId,
+          runtimeProvider,
+          billingProvider: [...runState.items].reverse().find(
+            (event) => event.kind === 'harness' && event.stage === 'result'
+          )?.billingProvider
+        })
+        return
+      }
       terminalArchiveArgs = completionArchiveArgs
       try {
         // Provider 已完成时先落一份 durable canonical snapshot。若 App 在等待 Git diff
@@ -2103,6 +2136,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       } catch (error) {
         console.warn('[scry] Provider turn getter failed at terminal boundary:', runId, error)
       }
+      let providerRecordingFailure: { message: string } | undefined
+      try {
+        providerRecordingFailure = h?.getRecordingFailure?.()
+      } catch (error) {
+        console.warn('[scry] Provider recording failure getter failed at terminal boundary:', runId, error)
+      }
       terminalArchiveArgs = {
         providerId,
         runtimeProvider,
@@ -2172,6 +2211,37 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         })
       }
       mirrorSessionTranscript(providerId, cwd, nativeSessionId)
+      const recordingPolicy = providerRecordingPolicy(stopped ? 'interrupted' : 'failed', providerRecordingFailure)
+      if (!recordingPolicy.allowCanonicalCommit) {
+        const { message: recordingMessage, category } = recordingPolicy.rendererError
+        runState.error = recordingMessage
+        runState.errorHint = recordingRecoveryHint
+        if (recordingPolicy.blockSession) {
+          recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+        }
+        terminalArchiveArgs = undefined
+        flushTraceSend()
+        win?.webContents.send('agent:error', {
+          runId,
+          message: recordingMessage,
+          category,
+          hint: runState.errorHint
+        })
+        await turnDiffDone
+        recordTurn({
+          runId,
+          sessionId: storageSessionId,
+          cwd,
+          userText: displayPrompt,
+          items: runState.items,
+          providerId,
+          runtimeProvider,
+          billingProvider: [...runState.items].reverse().find(
+            (event) => event.kind === 'harness' && event.stage === 'result'
+          )?.billingProvider
+        })
+        return
+      }
       try {
         await persistTerminalProgress(terminalArchiveArgs)
       } catch (progressError) {
