@@ -33,7 +33,7 @@ Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不�
 
 需要在正式 record 落盘后唤醒外部 uploader 时，`scry.config.json` 的 `commitHook` 必须声明 workspace 相对的 `entry` 与完整 `files` 清单。Scry App 首次使用会展示完整 bundle 指纹；批准后只执行复制到 Scry userData 的冻结副本，入口或任一依赖变化都会重新询问。CLI/daemon 不会自动信任 workspace 配置；其宿主需显式设置绝对、可执行的 `SCRY_RECORDER_COMMIT_HOOK`，并在修改后执行 `scry recorder restart --workspace <repo>`。record 持久化且 runtime 清理后，recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON，并仅在回调 exit 0 后推进 durable ACK；失败、超时或进程中断会在下一次 hook/recovery 重试。
 
-Scry 启动且启用精确记录的 Claude、Codex、Qoder 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
+Scry 启动且启用精确记录的 Claude、Codex、Qoder、OpenCode 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
 身份，Scry App 在 result、Hook 与 diff 全部收齐后，把 trace archive 使用的同一份
 canonical evidence 两阶段提交到 CLI record；managed turn 禁止回退 rollout 近似重建。
 
