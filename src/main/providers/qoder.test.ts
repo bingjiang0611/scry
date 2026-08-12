@@ -598,7 +598,11 @@ describe('Qoder provider adapter', () => {
 
   it('managed Qoder 返回 native promptId 与失败状态，并只在显式启用时注入 managed 环境', async () => {
     sdk.runtimeCliEnv.mockImplementation((_base?: Record<string, string>, options: { managedRecorder?: boolean } = {}) =>
-      options?.managedRecorder ? { SCRY_RECORDER_MANAGED: '1' } : {}
+      options?.managedRecorder ? {
+        SCRY_RECORDER_MANAGED: '1',
+        SCRY_MANAGED_RUN_ID: 'stale-run',
+        SCRY_MANAGED_PROMPT_HASH: 'b'.repeat(64)
+      } : {}
     )
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {
@@ -628,6 +632,10 @@ describe('Qoder provider adapter', () => {
       cwd: '/repo',
       attachments: [],
       managedRecorder: true,
+      managedRecorderIdentity: {
+        runId: 'run-managed',
+        promptHash: 'a'.repeat(64)
+      },
       emit: vi.fn()
     })
 
@@ -637,7 +645,11 @@ describe('Qoder provider adapter', () => {
       status: 'failed'
     })
     expect(handle.getProviderTurnId?.()).toBe('qoder-turn')
-    expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({ SCRY_RECORDER_MANAGED: '1' })
+    expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({
+      SCRY_RECORDER_MANAGED: '1',
+      SCRY_MANAGED_RUN_ID: 'run-managed',
+      SCRY_MANAGED_PROMPT_HASH: 'a'.repeat(64)
+    })
   })
 
   it('通过 Qoder control API 执行 /plugins reload，不把它发送给模型', async () => {

@@ -3,8 +3,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { getClaudeVersion } from './agent-runner'
-import { detectAgents, detectAgentsFast, shellEnv, warmShellEnv } from './claude-locate'
+import { detectAgents, detectAgentsFast, packagedRecorderCliPath, shellEnv, warmShellEnv } from './claude-locate'
 import { AgentRuntimeError } from './cli-runtime'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
@@ -44,10 +45,12 @@ import { appendCoalescedTrace } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import {
   isManagedRecorderProvider,
+  managedRecorderAllowsMissingProviderTurnId,
   managedRecorderMode,
   recoverManagedRecorderTurns,
   type ManagedTurnTiming
 } from '../core/turn-recorder/managed'
+import { resolveRecorderEnablement } from '../core/turn-recorder/config'
 import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
@@ -100,8 +103,15 @@ import {
   recoverManagedTraceTurns,
   cleanupManagedTurnTemps,
   deleteManagedTurnArtifacts,
+  managedRecoveryScopes,
   managedSessionRunIds
 } from './managed-turn-commit'
+import {
+  createCommitHookTrustStore,
+  inspectCommitHookBundle,
+  resolveGrantedCommitHookCapability
+} from './commit-hook-trust'
+import { redeliverGrantedCommitHooksAtStartup } from './commit-hook-startup'
 import {
   denyRendererPermissions,
   isAllowedRendererRequest,
@@ -479,6 +489,115 @@ async function resolveOpenCodePluginTrust(cwd: string): Promise<OpenCodeProjectP
   }
 }
 
+function withoutCommitHookCapability(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const copy = { ...env }
+  delete copy.SCRY_RECORDER_COMMIT_HOOK
+  delete copy.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT
+  return copy
+}
+
+async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessEnv> {
+  const enablement = await resolveRecorderEnablement(cwd)
+  if (!enablement.enabled || !enablement.config.commitHook) return process.env
+
+  const baseEnv = withoutCommitHookCapability()
+  let inspection
+  try {
+    inspection = await inspectCommitHookBundle(cwd, enablement.config.commitHook)
+  } catch (error) {
+    console.warn('[scry] recorder commit hook bundle inspection failed:', cwd, error)
+    return baseEnv
+  }
+
+  const store = createCommitHookTrustStore(app.getPath('userData'))
+  let granted = await store.isGranted(inspection.workspace, inspection.fingerprint)
+  if (granted) {
+    try {
+      const capability = await store.materialize(inspection)
+      const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
+      return {
+        ...baseEnv,
+        ...capability.env,
+        ...(recorderCli ? { SCRY_CLI_PATH: recorderCli } : {}),
+        SCRY_RECORDER_MANAGED: '1'
+      }
+    } catch (error) {
+      console.warn('[scry] recorder commit hook materialization failed:', cwd, error)
+      await store.revoke(inspection.workspace, inspection.fingerprint).catch(() => undefined)
+      granted = false
+    }
+  }
+  if (!granted) {
+    const detail = [
+      `仓库：${inspection.workspace}`,
+      `入口：${inspection.entry}`,
+      `文件：${inspection.files.length} 个`,
+      `指纹：${inspection.fingerprint}`,
+      '',
+      '允许后，Scry 会把已检查的完整回调包冻结到应用数据目录，只执行冻结副本。',
+      '仓库中的入口或任一依赖内容变化后都会重新询问；取消不会影响本地 record 落盘。'
+    ].join('\n')
+    const options = {
+      type: 'warning' as const,
+      title: '授权当前仓库的 Scry 提交回调',
+      message: '该仓库请求在每条 Scry record 落盘后运行上传回调',
+      detail,
+      buttons: ['允许当前回调包', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    }
+    const result = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 0) return baseEnv
+    try {
+      await store.grant(inspection.workspace, inspection.fingerprint)
+    } catch (error) {
+      console.warn('[scry] recorder commit hook grant failed:', cwd, error)
+      return baseEnv
+    }
+  }
+
+  try {
+    const capability = await store.materialize(inspection)
+    const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
+    return {
+      ...baseEnv,
+      ...capability.env,
+      ...(recorderCli ? { SCRY_CLI_PATH: recorderCli } : {}),
+      SCRY_RECORDER_MANAGED: '1'
+    }
+  } catch (error) {
+    console.warn('[scry] recorder commit hook materialization failed:', cwd, error)
+    return baseEnv
+  }
+}
+
+async function resolveGrantedManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessEnv> {
+  const baseEnv = withoutCommitHookCapability()
+  const enablement = await resolveRecorderEnablement(cwd)
+  if (!enablement.enabled || !enablement.config.commitHook) return baseEnv
+  try {
+    const capability = await resolveGrantedCommitHookCapability(
+      cwd,
+      enablement.config.commitHook,
+      app.getPath('userData')
+    )
+    if (!capability) return baseEnv
+    const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
+    return {
+      ...baseEnv,
+      ...capability.env,
+      ...(recorderCli ? { SCRY_CLI_PATH: recorderCli } : {}),
+      SCRY_RECORDER_MANAGED: '1'
+    }
+  } catch (error) {
+    console.warn('[scry] granted recorder commit hook recovery capability failed:', cwd, error)
+    return baseEnv
+  }
+}
+
 async function ensureMcpExecutionAuthorized(
   context: ProviderContext,
   operation: McpExecutionOperation,
@@ -563,6 +682,7 @@ interface ArchiveTraceTurnArgs {
   error?: string
   errorHint?: string
   observedTiming?: ManagedTurnTiming
+  commitHookEnv?: NodeJS.ProcessEnv
 }
 
 function observedTurnTiming(startedAt: string | undefined, completedAt: string): ManagedTurnTiming | undefined {
@@ -612,8 +732,14 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
   if (!args.sessionId) return
   const archiveCwd = args.cwd ?? ''
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (args.cwd && isManagedRecorderProvider(args.providerId) && (await managedRecorderMode(args.cwd)).status === 'enabled') {
-    if (!args.providerTurnId) throw new Error('managed recorder requires an authoritative Provider turn id')
+  if (
+    args.cwd && isManagedRecorderProvider(args.providerId) &&
+    (await managedRecorderMode(args.cwd, args.commitHookEnv)).status === 'enabled'
+  ) {
+    const permitsMissingProviderTurnId = managedRecorderAllowsMissingProviderTurnId(args.providerId, args.status)
+    if (!args.providerTurnId && !permitsMissingProviderTurnId) {
+      throw new Error('managed recorder requires an authoritative Provider turn id')
+    }
     if (!timing) throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     await persistManagedTraceProgress({
       cwd: args.cwd,
@@ -640,7 +766,10 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
 
 async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
   if (!args.sessionId) {
-    if (args.cwd && isManagedRecorderProvider(args.providerId) && (await managedRecorderMode(args.cwd)).status === 'enabled') {
+    if (
+      args.cwd && isManagedRecorderProvider(args.providerId) &&
+      (await managedRecorderMode(args.cwd, args.commitHookEnv)).status === 'enabled'
+    ) {
       throw new Error('managed recorder requires an authoritative Provider session id')
     }
     return
@@ -648,25 +777,26 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
   const archiveCwd = args.cwd ?? ''
   const { turn, timing } = buildTraceArchiveTurn(args)
   if (args.cwd && isManagedRecorderProvider(args.providerId)) {
-    const mode = await managedRecorderMode(args.cwd)
+    const mode = await managedRecorderMode(args.cwd, args.commitHookEnv)
     if (mode.status === 'enabled' && !timing) {
       throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     }
-    if (mode.status === 'enabled' && !args.providerTurnId) {
+    const permitsMissingProviderTurnId = managedRecorderAllowsMissingProviderTurnId(args.providerId, args.status)
+    if (mode.status === 'enabled' && !args.providerTurnId && !permitsMissingProviderTurnId) {
       throw new Error('managed recorder requires an authoritative Provider turn id')
     }
     if (mode.status === 'enabled' && timing) {
       await commitManagedTraceTurn({
         cwd: args.cwd,
         sessionId: args.sessionId,
-        providerTurnId: args.providerTurnId ?? '',
+        providerTurnId: args.providerTurnId,
         providerId: args.providerId,
         runtimeProvider: args.runtimeProvider,
         userDataDir: app.getPath('userData'),
         turn,
         timing,
         status: args.status
-      })
+      }, { commitHookEnv: args.commitHookEnv })
       return
     }
   }
@@ -1443,24 +1573,30 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
   }
   let managedRecorderEnabled = false
+  let managedCommitHookEnv: NodeJS.ProcessEnv | undefined
   let recoveredManagedTurns = traceProgressRecovery.recovered
   if (isManagedRecorderProvider(providerId) && cwd) {
     managedRecorderEnabled = (await managedRecorderMode(cwd)).status === 'enabled'
+    managedCommitHookEnv = managedRecorderEnabled
+      ? await resolveManagedCommitHookEnv(cwd)
+      : undefined
     const journalRecovery = await recoverManagedTraceTurns(app.getPath('userData'), {
       cwd,
       providerId,
       ...(resume ? { sessionId: resume } : {}),
-      waitMs: 250
+      waitMs: 250,
+      commitHookEnv: managedCommitHookEnv
     })
     const progressRecovery = await recoverManagedTraceProgress(app.getPath('userData'), {
       cwd,
       providerId,
       ...(resume ? { sessionId: resume } : {}),
-      waitMs: 250
+      waitMs: 250,
+      commitHookEnv: managedCommitHookEnv
     })
     const recorderRecovery = resume
-      ? await recoverManagedRecorderTurns(cwd, process.env, { sessionId: resume, provider: providerId })
-      : await recoverManagedRecorderTurns(cwd, process.env, { provider: providerId })
+      ? await recoverManagedRecorderTurns(cwd, managedCommitHookEnv, { sessionId: resume, provider: providerId })
+      : await recoverManagedRecorderTurns(cwd, managedCommitHookEnv, { provider: providerId })
     // 同一轮可能同时留下 progress、journal 与 recorder open；三层计数不能相加，
     // 否则会把一个待恢复 turn 报成三轮。这里只需要 fail closed。
     const pending = Math.max(progressRecovery.pending, journalRecovery.pending, recorderRecovery.pending)
@@ -1723,10 +1859,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       providerTurnId?: string
       stopped?: boolean
       status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+      recordingFailure?: { message: string }
     }>
     interrupt: () => void
     getExternalSessionId: () => string | undefined
     getProviderTurnId?: () => string | undefined
+    getRecordingFailure?: () => { message: string } | undefined
   } | null = null
   let interrupted = false
   let observedProviderStartedAt: string | undefined
@@ -1735,6 +1873,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     providerTurnId?: string
     stopped?: boolean
     status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+    recordingFailure?: { message: string }
   }> => {
     if (interrupted) return { stopped: true }
     observedProviderStartedAt = new Date().toISOString()
@@ -1750,6 +1889,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       codexHookTrust,
       openCodePluginTrust,
       managedRecorder: managedRecorderEnabled,
+      ...(managedRecorderEnabled && (providerId === 'qoder' || providerId === 'opencode') ? {
+        managedRecorderIdentity: {
+          runId,
+          promptHash: createHash('sha256').update(displayPrompt).digest('hex')
+        }
+      } : {}),
       mcpExecution,
       emit,
       onExternalSessionId: publishSessionId,
@@ -1835,9 +1980,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         items: runState.items,
         done: true,
         status: completionStatus,
-        observedTiming
+        observedTiming,
+        commitHookEnv: managedCommitHookEnv
       }
-      terminalArchiveArgs = completionArchiveArgs
       if (cwd) {
         try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
           console.warn('[scry] terminal attachment ownership update failed:', runId, error)
@@ -1867,6 +2012,33 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       const alreadyDone = runState.done
       runState.done = true
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
+      if (r.recordingFailure) {
+        const message = `Provider 已完成，但 Scry 精确记录不完整：${r.recordingFailure.message}`
+        runState.error = message
+        runState.errorHint = recordingRecoveryHint
+        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+        win?.webContents.send('agent:error', {
+          runId,
+          message,
+          category: 'recording',
+          hint: runState.errorHint
+        })
+        await turnDiffDone
+        recordTurn({
+          runId,
+          sessionId: storageSessionId,
+          cwd,
+          userText: displayPrompt,
+          items: runState.items,
+          providerId,
+          runtimeProvider,
+          billingProvider: [...runState.items].reverse().find(
+            (event) => event.kind === 'harness' && event.stage === 'result'
+          )?.billingProvider
+        })
+        return
+      }
+      terminalArchiveArgs = completionArchiveArgs
       try {
         // Provider 已完成时先落一份 durable canonical snapshot。若 App 在等待 Git diff
         // 期间崩溃，下一次启动仍能用同一用户输入、模型输出、调用与权威 result timing
@@ -1960,6 +2132,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       } catch (error) {
         console.warn('[scry] Provider turn getter failed at terminal boundary:', runId, error)
       }
+      let providerRecordingFailure: { message: string } | undefined
+      try {
+        providerRecordingFailure = h?.getRecordingFailure?.()
+      } catch (error) {
+        console.warn('[scry] Provider recording failure getter failed at terminal boundary:', runId, error)
+      }
       terminalArchiveArgs = {
         providerId,
         runtimeProvider,
@@ -1973,6 +2151,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         done: true,
         status: stopped ? 'interrupted' : 'failed',
         observedTiming,
+        commitHookEnv: managedCommitHookEnv,
         ...(stopped ? {} : { error: message, errorHint: hint })
       }
       if (cwd) {
@@ -2028,6 +2207,35 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         })
       }
       mirrorSessionTranscript(providerId, cwd, nativeSessionId)
+      if (providerRecordingFailure) {
+        const providerMessage = stopped ? 'Provider 已中断' : 'Provider 已失败'
+        const recordingMessage = `${providerMessage}，且 Scry 精确记录不完整：${providerRecordingFailure.message}`
+        runState.error = recordingMessage
+        runState.errorHint = recordingRecoveryHint
+        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+        terminalArchiveArgs = undefined
+        flushTraceSend()
+        win?.webContents.send('agent:error', {
+          runId,
+          message: recordingMessage,
+          category: 'recording',
+          hint: runState.errorHint
+        })
+        await turnDiffDone
+        recordTurn({
+          runId,
+          sessionId: storageSessionId,
+          cwd,
+          userText: displayPrompt,
+          items: runState.items,
+          providerId,
+          runtimeProvider,
+          billingProvider: [...runState.items].reverse().find(
+            (event) => event.kind === 'harness' && event.stage === 'result'
+          )?.billingProvider
+        })
+        return
+      }
       try {
         await persistTerminalProgress(terminalArchiveArgs)
       } catch (progressError) {
@@ -2211,15 +2419,36 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('[scry] legacy userData migration skipped:', (e as Error)?.message)
   }
-  startupManagedRecovery = recoverTraceTurnProgress(app.getPath('userData'))
-    .then(async (traceProgress) => {
+  startupManagedRecovery = (async () => {
+    try {
+      const traceProgress = await recoverTraceTurnProgress(app.getPath('userData'))
       if (traceProgress.pending > 0) console.warn('[scry] trace turn progress recovery pending:', traceProgress)
-      const journals = await recoverManagedTraceTurns(app.getPath('userData'))
-      if (journals.pending > 0) console.warn('[scry] managed turn recovery pending:', journals)
-      const progress = await recoverManagedTraceProgress(app.getPath('userData'))
-      if (progress.pending > 0) console.warn('[scry] managed turn progress recovery pending:', progress)
-    })
-    .catch((error) => console.warn('[scry] managed turn startup recovery failed:', error))
+      for (const scope of await managedRecoveryScopes(app.getPath('userData'))) {
+        const commitHookEnv = await resolveGrantedManagedCommitHookEnv(scope.cwd)
+        const journals = await recoverManagedTraceTurns(app.getPath('userData'), { ...scope, commitHookEnv })
+        if (journals.pending > 0) console.warn('[scry] managed turn recovery pending:', scope, journals)
+        const progress = await recoverManagedTraceProgress(app.getPath('userData'), { ...scope, commitHookEnv })
+        if (progress.pending > 0) console.warn('[scry] managed turn progress recovery pending:', scope, progress)
+      }
+    } catch (error) {
+      console.warn('[scry] managed turn startup recovery failed:', error)
+    }
+    try {
+      const recorderCli = packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH
+      const redelivery = await redeliverGrantedCommitHooksAtStartup(app.getPath('userData'), {
+        env: withoutCommitHookCapability(),
+        extendCapabilityEnv: () => ({
+          ...(recorderCli ? { SCRY_CLI_PATH: recorderCli } : {}),
+          SCRY_RECORDER_MANAGED: '1'
+        })
+      })
+      if (redelivery.errors.length > 0) {
+        console.warn('[scry] recorder commit hook startup redelivery failed:', redelivery.errors)
+      }
+    } catch (error) {
+      console.warn('[scry] recorder commit hook startup redelivery failed:', error)
+    }
+  })()
   createWindow()
   setTimeout(() => initDb(), 800)
   app.on('activate', () => {

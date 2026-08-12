@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -59,6 +59,147 @@ describe('turn recorder daemon', () => {
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 50, env })
     await daemon.closed
     await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
+  })
+
+  it('存在未终态 open turn 时跨过 idle timeout 仍保持运行', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 50, env })
+    try {
+      await sendRecorderDaemonHook({
+        workspace: root,
+        provider: 'claude',
+        event: 'UserPromptSubmit',
+        payload: { session_id: 'long-running', prompt: 'still working' },
+        env
+      })
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 150))
+      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: true })
+    } finally {
+      await daemon.close()
+    }
+    await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
+  })
+
+  it('idle close 检查期间到达新 start 时不会关闭已写入 open 的 daemon', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    let releaseProbe = (): void => {}
+    let enterProbe = (): void => {}
+    const probeEntered = new Promise<void>((resolvePromise) => { enterProbe = resolvePromise })
+    const probeRelease = new Promise<void>((resolvePromise) => { releaseProbe = resolvePromise })
+    let probed = false
+    const daemon = await listenRecorderDaemon({
+      workspace: root,
+      idleMs: 50,
+      env,
+      idleCloseProbe: async () => {
+        if (probed) return
+        probed = true
+        enterProbe()
+        await probeRelease
+      }
+    })
+    try {
+      await probeEntered
+      await sendRecorderDaemonHook({
+        workspace: root,
+        provider: 'claude',
+        event: 'UserPromptSubmit',
+        payload: { session_id: 'idle-race', prompt: 'arrived during idle close' },
+        env
+      })
+      releaseProbe()
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
+      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: true })
+    } finally {
+      releaseProbe()
+      await daemon.close()
+    }
+  })
+
+  it('无终态 hook 时轮询 Codex rollout 并提交 turn_aborted', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'aborted.jsonl')
+    await mkdir(join(rollout, '..'), { recursive: true })
+    await writeFile(rollout, [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'aborted-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'stop me' } }
+    ].map((line) => JSON.stringify(line)).join('\n'))
+    const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
+    try {
+      await sendRecorderDaemonHook({
+        workspace: root,
+        provider: 'codex',
+        event: 'turn.started',
+        payload: {
+          session_id: 'codex-session',
+          turn_id: 'aborted-turn',
+          prompt: 'stop me',
+          rollout_path: rollout,
+          timestamp: '2026-07-19T12:00:00.000Z'
+        },
+        env
+      })
+      await appendFile(rollout, `\n${JSON.stringify({
+        timestamp: '2026-07-19T12:00:01.000Z',
+        type: 'event_msg',
+        payload: { type: 'turn_aborted', turn_id: 'aborted-turn', reason: 'interrupted' }
+      })}\n`)
+
+      await expect.poll(async () => (await listRecords(join(root, '.scry'))).length, { timeout: 4_000 }).toBe(1)
+      await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
+        { providerTurnId: 'aborted-turn', status: 'interrupted' }
+      ])
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('daemon recovery 提交 Codex turn_aborted 后触发 commit callback', async () => {
+    const root = await workspace()
+    const hook = join(root, 'commit-hook.sh')
+    const capture = join(root, 'commit-hook.jsonl')
+    await writeFile(hook, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
+    await chmod(hook, 0o700)
+    const env = {
+      ...process.env,
+      SCRY_RECORDER_SOCKET: socketPath(root),
+      SCRY_RECORDER_COMMIT_HOOK: hook
+    }
+    const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'callback-aborted.jsonl')
+    await mkdir(join(rollout, '..'), { recursive: true })
+    await writeFile(rollout, [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'callback-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'interrupt me' } }
+    ].map((line) => JSON.stringify(line)).join('\n'))
+    const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
+    try {
+      await sendRecorderDaemonHook({
+        workspace: root,
+        provider: 'codex',
+        event: 'turn.started',
+        payload: {
+          session_id: 'callback-session',
+          turn_id: 'callback-turn',
+          prompt: 'interrupt me',
+          rollout_path: rollout,
+          timestamp: '2026-07-19T12:00:00.000Z'
+        },
+        env
+      })
+      await appendFile(rollout, `\n${JSON.stringify({
+        timestamp: '2026-07-19T12:00:01.000Z',
+        type: 'event_msg',
+        payload: { type: 'turn_aborted', turn_id: 'callback-turn', reason: 'interrupted' }
+      })}\n`)
+
+      await expect.poll(async () => JSON.parse((await readFile(capture, 'utf8')).trim()), { timeout: 4_000 })
+        .toMatchObject({ event: 'record-committed', provider: 'codex', sessionId: 'callback-session', sequence: 1 })
+    } finally {
+      await daemon.close()
+    }
   })
 
   it('不会用第二个 serve 覆盖仍在运行的 socket', async () => {

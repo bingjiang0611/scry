@@ -6,11 +6,13 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement } from './recorder.js'
 import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
 
 const PROTOCOL_VERSION = '1'
 const DEFAULT_IDLE_MS = 30 * 60 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
+const RECOVERY_POLL_MS = 1_000
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_SOCKET_BYTES = 100
 const STARTING_TTL_MS = 10_000
@@ -351,6 +353,7 @@ export async function listenRecorderDaemon(args: {
   socketPath?: string
   idleMs?: number
   env?: NodeJS.ProcessEnv
+  idleCloseProbe?: () => Promise<void> | void
 }): Promise<RecorderDaemonHandle> {
   const env = args.env ?? process.env
   const enablement = await recorderEnablement(args.workspace, env)
@@ -365,7 +368,40 @@ export async function listenRecorderDaemon(args: {
   let errorCount = 0
   let lastRequestAt: string | undefined
   let idleTimer: NodeJS.Timeout | undefined
+  let recoveryTimer: NodeJS.Timeout | undefined
+  let recoveryInFlight: Promise<void> | undefined
   let closing: Promise<void> | undefined
+  let activityGeneration = 0
+
+  const runRecovery = (): Promise<void> => {
+    if (recoveryInFlight) return recoveryInFlight
+    recoveryInFlight = recoverRecorder(enablement.workspaceRoot, env)
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => { recoveryInFlight = undefined })
+    return recoveryInFlight
+  }
+
+  let closeDaemon: () => Promise<void>
+  const scheduleIdle = (): void => {
+    if (idleTimer) clearTimeout(idleTimer)
+    const scheduledGeneration = activityGeneration
+    idleTimer = setTimeout(() => {
+      void (async () => {
+        await runRecovery()
+        if (closing || activityGeneration !== scheduledGeneration) return
+        const hasOpenTurn = await recorderHasOpenTurn(enablement.dataRoot)
+        if (closing || activityGeneration !== scheduledGeneration) return
+        if (hasOpenTurn) {
+          if (!closing) scheduleIdle()
+          return
+        }
+        await args.idleCloseProbe?.()
+        if (closing || activityGeneration !== scheduledGeneration) return
+        await closeDaemon()
+      })()
+    }, idleMs)
+  }
 
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 })
   const previousOwner = await readJson<DaemonOwner>(markerPath)
@@ -403,6 +439,7 @@ export async function listenRecorderDaemon(args: {
   await rm(socketPath, { force: true })
 
   const server: Server = createServer(async (request, response) => {
+    activityGeneration++
     requestCount++
     lastRequestAt = new Date().toISOString()
     if (idleTimer) clearTimeout(idleTimer)
@@ -441,16 +478,19 @@ export async function listenRecorderDaemon(args: {
       if (!response.headersSent) writeJson(response, statusCode, { ok: false, error: message })
       else response.end()
     } finally {
-      if (!closing) idleTimer = setTimeout(() => void close(), idleMs)
+      if (!closing) scheduleIdle()
     }
   })
 
   const closed = new Promise<void>((resolvePromise) => server.once('close', resolvePromise))
-  const close = async (): Promise<void> => {
+  const close = closeDaemon = async (): Promise<void> => {
     if (closing) return closing
     closing = new Promise<void>((resolvePromise) => {
       if (idleTimer) clearTimeout(idleTimer)
+      if (recoveryTimer) clearInterval(recoveryTimer)
       server.close(() => resolvePromise())
+    }).then(async () => {
+      await recoveryInFlight
     }).finally(async () => {
       await rm(socketPath, { force: true }).catch(() => undefined)
       await removeOwnedMarker(markerPath, instanceId).catch(() => undefined)
@@ -472,7 +512,11 @@ export async function listenRecorderDaemon(args: {
     await removeOwnedMarker(markerPath, instanceId)
     throw error
   }
-  idleTimer = setTimeout(() => void close(), idleMs)
+  scheduleIdle()
+  recoveryTimer = setInterval(() => {
+    void runRecovery()
+  }, RECOVERY_POLL_MS)
+  recoveryTimer.unref()
   return { socketPath, closed, close }
 }
 
@@ -482,7 +526,7 @@ export async function serveRecorderDaemon(args: {
   env?: NodeJS.ProcessEnv
 }): Promise<void> {
   const handle = await listenRecorderDaemon(args)
-  void recoverRecorder(args.workspace, args.env).catch(() => undefined)
+  await recoverRecorder(args.workspace, args.env).catch(() => undefined)
   const shutdown = (): void => { void handle.close() }
   process.once('SIGTERM', shutdown)
   process.once('SIGINT', shutdown)

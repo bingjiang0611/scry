@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.62",
+  "version": "0.2.63",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "private": true,
   "license": "MIT",

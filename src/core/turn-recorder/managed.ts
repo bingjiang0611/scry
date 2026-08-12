@@ -26,6 +26,7 @@ import {
   RECORDER_VERSION,
   clearRuntimeTurn,
   commitRecord,
+  drainCommitNotifications,
   listRecords,
   stableHash,
   updateHealth
@@ -37,10 +38,27 @@ export interface ManagedTurnTiming {
   durationMs: number
 }
 
-export type ManagedRecorderProviderId = Extract<ProviderId, 'claude' | 'codex' | 'qoder'>
+export type ManagedRecorderProviderId = Extract<ProviderId, 'claude' | 'codex' | 'qoder' | 'opencode'>
+
+const QODER_PROVISIONAL_START_TOLERANCE_MS = 5_000
 
 export function isManagedRecorderProvider(provider: ProviderId): provider is ManagedRecorderProviderId {
-  return provider === 'claude' || provider === 'codex' || provider === 'qoder'
+  return provider === 'claude' || provider === 'codex' || provider === 'qoder' || provider === 'opencode'
+}
+
+export function managedRecorderAllowsMissingProviderTurnId(
+  provider: ManagedRecorderProviderId,
+  status: AgentTurnRecord['status']
+): boolean {
+  return (provider === 'qoder' && status === 'interrupted') ||
+    (provider === 'opencode' && (status === 'failed' || status === 'interrupted'))
+}
+
+export function isManagedProviderRuntimePair(provider: unknown, runtimeProvider: unknown): boolean {
+  return (provider === 'claude' && runtimeProvider === 'claude_sdk') ||
+    (provider === 'codex' && runtimeProvider === 'codex_cli') ||
+    (provider === 'qoder' && runtimeProvider === 'qoder_cli') ||
+    (provider === 'opencode' && runtimeProvider === 'opencode_server')
 }
 
 export interface PrepareManagedTurnInput {
@@ -48,7 +66,7 @@ export interface PrepareManagedTurnInput {
   provider: ManagedRecorderProviderId
   sessionId: string
   runId: string
-  providerTurnId: string
+  providerTurnId?: string
   userText: string
   evidence: TurnEvidence
   timing: ManagedTurnTiming
@@ -81,6 +99,25 @@ function canonicalPath(root: string, generation: number): string {
 
 function hashText(text: string): string {
   return `sha256:${createHash('sha256').update(text).digest('hex')}`
+}
+
+function rawTextHash(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+function managedProvisionalMatches(
+  candidate: RecorderOpenTurnState,
+  input: PrepareManagedTurnInput
+): boolean {
+  const inputPromptHash = rawTextHash(input.userText)
+  if (candidate.managedRunId || candidate.managedPromptHash) {
+    return candidate.managedRunId === input.runId && candidate.managedPromptHash === inputPromptHash
+  }
+  if (candidate.promptHash !== inputPromptHash) return false
+  const opened = Date.parse(candidate.startedAt)
+  const started = Date.parse(input.timing.startedAt)
+  return Number.isFinite(opened) && Number.isFinite(started) &&
+    Math.abs(opened - started) <= QODER_PROVISIONAL_START_TOLERANCE_MS
 }
 
 function assertExactText(
@@ -204,7 +241,7 @@ function recordDraft(
       ...(input.evidence.usage.value?.model ? { model: input.evidence.usage.value.model } : {})
     },
     sessionId: open.sessionId,
-    providerTurnId: input.providerTurnId,
+    ...(input.providerTurnId ? { providerTurnId: input.providerTurnId } : {}),
     generation: open.generation,
     turnIndex: open.turnIndex,
     ...input.timing,
@@ -262,7 +299,10 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
   assertExactText(input.evidence.user, input.userText, 'user')
-  if ((input.provider === 'claude' || input.provider === 'qoder') && input.status !== 'completed') {
+  if (
+    (input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode') &&
+    input.status !== 'completed'
+  ) {
     assertOptionalAssistantText(input.evidence.assistant)
   } else {
     assertExactText(input.evidence.assistant, undefined, 'assistant')
@@ -278,12 +318,9 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
       }
     }
-    const providerDuplicate = await recordByProviderTurnId(
-      enablement.dataRoot,
-      input.provider,
-      input.sessionId,
-      input.providerTurnId
-    )
+    const providerDuplicate = input.providerTurnId
+      ? await recordByProviderTurnId(enablement.dataRoot, input.provider, input.sessionId, input.providerTurnId)
+      : undefined
     if (providerDuplicate) {
       assertDuplicateMatchesInput(providerDuplicate, input)
       return {
@@ -316,19 +353,34 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         candidate.providerTurnId === input.providerTurnId
     )
     const provisional = candidates.filter((candidate) => candidate.managedByScry && !candidate.providerTurnId)
+    const supportsProvisionalIdentity = input.provider === 'qoder' || input.provider === 'opencode'
+    const matchingProvisional = supportsProvisionalIdentity
+      ? provisional.filter((candidate) => managedProvisionalMatches(candidate, input))
+      : []
     if (
       matches.length === 0 &&
-      input.provider === 'qoder' &&
+      supportsProvisionalIdentity &&
       current?.managedByScry &&
       !current.providerTurnId &&
-      provisional.length === 1
+      matchingProvisional.length === 1 &&
+      matchingProvisional[0] === current
     ) {
       const bound = { ...current, providerTurnId: input.providerTurnId }
       await writeJsonAtomic(recorderOpenPath(root), bound, { sync: false })
       matches = [bound]
     }
-    if (matches.length === 0 && candidates.length === 0) {
-      return { status: 'pending' as const, reason: 'managed recorder open identity is not available yet' }
+    if (!input.providerTurnId) {
+      const permitsMissingProviderTurnId = managedRecorderAllowsMissingProviderTurnId(input.provider, input.status)
+      if (!permitsMissingProviderTurnId) {
+        throw new Error('managed recorder requires an authoritative Provider turn id')
+      }
+      matches = matchingProvisional
+    }
+    if (matches.length === 0) {
+      if (candidates.length === 0) {
+        return { status: 'pending' as const, reason: 'managed recorder open identity is not available yet' }
+      }
+      throw new Error('managed recorder Provider turn id differs from the open lifecycle identity')
     }
     if (matches.length !== 1) {
       throw new Error('managed recorder Provider turn id differs from the open lifecycle identity')
@@ -394,7 +446,7 @@ export async function commitManagedRecorderTurn(input: {
   runId: string
   recordId: string
   archiveFingerprint: string
-  providerTurnId: string
+  providerTurnId?: string
   userText: string
   evidence: TurnEvidence
   timing: ManagedTurnTiming
@@ -404,7 +456,7 @@ export async function commitManagedRecorderTurn(input: {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
   const { enablement } = mode
-  return withDirectoryLock(recorderSessionLock(enablement.dataRoot, input.provider, input.sessionId), async () => {
+  const result = await withDirectoryLock(recorderSessionLock(enablement.dataRoot, input.provider, input.sessionId), async () => {
     const duplicate = await recordById(enablement.dataRoot, input.recordId)
     const root = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
     const existing = await handoffForRun(root, input.runId)
@@ -421,6 +473,8 @@ export async function commitManagedRecorderTurn(input: {
     await writeJsonAtomic(existing.path, committedHandoff)
     return commitHandoff(enablement, root, committedHandoff)
   }, { waitMs: SESSION_LOCK_WAIT_MS })
+  await drainCommitNotifications(enablement.dataRoot, input.env)
+  return result
 }
 
 export async function recoverManagedRecorderTurns(
@@ -433,7 +487,9 @@ export async function recoverManagedRecorderTurns(
   const { enablement } = mode
   let recovered = 0
   let pending = 0
-  const providers: ManagedRecorderProviderId[] = options.provider ? [options.provider] : ['claude', 'codex', 'qoder']
+  const providers: ManagedRecorderProviderId[] = options.provider
+    ? [options.provider]
+    : ['claude', 'codex', 'qoder', 'opencode']
   for (const provider of providers) {
     const providerRoot = join(enablement.dataRoot, 'runtime', provider)
     for (const sessionDir of await listFiles(providerRoot)) {
@@ -479,5 +535,6 @@ export async function recoverManagedRecorderTurns(
       }
     }
   }
+  await drainCommitNotifications(enablement.dataRoot, env)
   return { recovered, pending }
 }

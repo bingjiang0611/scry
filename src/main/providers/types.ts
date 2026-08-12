@@ -74,6 +74,7 @@ export interface ProviderRunRequest {
   codexHookTrust?: CodexHookTrustGrant[]
   openCodePluginTrust?: OpenCodeProjectPluginAuthorization
   managedRecorder?: boolean
+  managedRecorderIdentity?: { runId: string; promptHash: string }
   mcpExecution?: AuthorizedMcpExecution
   emit: (event: TraceEvent) => void
   onExternalSessionId?: (sessionId: string) => void

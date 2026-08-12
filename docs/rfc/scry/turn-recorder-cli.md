@@ -238,6 +238,18 @@ sample-workspace 根目录新增：
   "enabled": true,
   "workspaceId": "sample-workspace",
   "dataDir": ".scry",
+  "commitHook": {
+    "entry": ".claude/hooks/scry-record-committed.py",
+    "files": [
+      ".claude/hooks/scry-record-committed.py",
+      ".claude/hooks/scry_turn_uploader.py",
+      ".claude/hooks/flush.py",
+      ".claude/hooks/session_identity.py",
+      ".claude/workflow/archive_snapshot.py",
+      "agent-adapters/shims/run-hook-async.py",
+      "agent-adapters/scripts/generate.py"
+    ]
+  },
   "repositories": {
     "mode": "discover-nested-git",
     "maxDepth": 2,

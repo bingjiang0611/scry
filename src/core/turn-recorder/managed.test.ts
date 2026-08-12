@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -194,6 +194,12 @@ describe('managed canonical recorder', () => {
 
   it('Qoder hook 未暴露 promptId 时先去重 provisional open，再绑定 App 取得的 native turn ID', async () => {
     const root = await workspace()
+    const managedPromptHash = createHash('sha256').update('/rate-workflow 1').digest('hex')
+    const env = {
+      ...process.env,
+      SCRY_MANAGED_RUN_ID: 'run-qoder',
+      SCRY_MANAGED_PROMPT_HASH: managedPromptHash
+    }
     const direct = {
       session_id: 'qoder-session',
       prompt: '/rate-workflow 1\n\n[attachment injected for Provider]',
@@ -208,10 +214,10 @@ describe('managed canonical recorder', () => {
     }
 
     await expect(handleRecorderHook({
-      provider: 'qoder', event: 'UserPromptSubmit', workspace: root, managed: true, payload: direct
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root, managed: true, payload: direct, env
     })).resolves.toMatchObject({ status: 'started' })
     await expect(handleRecorderHook({
-      provider: 'qoder', event: 'UserPromptSubmit', workspace: root, managed: true, payload: bridge
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root, managed: true, payload: bridge, env
     })).resolves.toMatchObject({ status: 'duplicate' })
 
     const evidence = canonicalEvidence()
@@ -358,6 +364,190 @@ describe('managed canonical recorder', () => {
     })
 
     expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
+  })
+
+  it('Qoder 极早中断可用唯一 managed provisional open 准备并提交无 Provider turn id 的记录', async () => {
+    const root = await workspace()
+    const env = {
+      ...process.env,
+      SCRY_MANAGED_RUN_ID: 'run-qoder-interrupted',
+      SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('/rate-workflow 1').digest('hex')
+    }
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        prompt: '/expanded project command body',
+        timestamp: timing.startedAt
+      },
+      env
+    })
+    const evidence = aggregateTurnEvidence({
+      userText: '/rate-workflow 1',
+      events: [],
+      source: 'scry_provider_adapter'
+    })
+    const archiveFingerprint = stableHash({ runId: 'run-qoder-interrupted', evidence, timing })
+    const prepared = await prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'qoder',
+      sessionId: 'qoder-session',
+      runId: 'run-qoder-interrupted',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'interrupted',
+      archiveFingerprint
+    })
+
+    expect(prepared).toMatchObject({ status: 'prepared' })
+    if (prepared.status !== 'prepared') return
+    const committed = await commitManagedRecorderTurn({
+      workspace: root,
+      provider: 'qoder',
+      sessionId: 'qoder-session',
+      runId: 'run-qoder-interrupted',
+      recordId: prepared.recordId,
+      archiveFingerprint,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'interrupted'
+    })
+    const [record] = await listRecords(join(root, '.scry'))
+
+    expect(committed.status).toBe('committed')
+    expect(record).toMatchObject({ provider: { id: 'qoder' }, status: 'interrupted' })
+    expect(record.providerTurnId).toBeUndefined()
+  })
+
+  it('Qoder 无 Provider turn id 时拒绝多个 managed provisional open', async () => {
+    const root = await workspace()
+    const env = {
+      ...process.env,
+      SCRY_MANAGED_RUN_ID: 'run-qoder-ambiguous',
+      SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('second').digest('hex')
+    }
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'qoder-session', prompt: 'expanded first', timestamp: timing.startedAt },
+      env
+    })
+    const runtimeRoot = join(root, '.scry', 'runtime', 'qoder', safeKey('qoder-session'))
+    const first = JSON.parse(await readFile(join(runtimeRoot, 'open.json'), 'utf8')) as Record<string, unknown>
+    const pending = join(runtimeRoot, 'turns', '00000002', 'pending-open.json')
+    await mkdir(join(pending, '..'), { recursive: true })
+    await writeFile(pending, JSON.stringify({
+      ...first,
+      generation: 2,
+      turnIndex: 2,
+      prompt: 'expanded second'
+    }))
+    const evidence = aggregateTurnEvidence({ userText: 'second', events: [], source: 'scry_provider_adapter' })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'qoder',
+      sessionId: 'qoder-session',
+      runId: 'run-qoder-ambiguous',
+      userText: 'second',
+      evidence,
+      timing,
+      status: 'interrupted',
+      archiveFingerprint: stableHash({ runId: 'run-qoder-ambiguous', evidence, timing })
+    })).rejects.toThrow('Provider turn id differs from the open lifecycle identity')
+  })
+
+  it('Qoder 无 Provider turn id 时拒绝唯一但 prompt 不匹配的 provisional open', async () => {
+    const root = await workspace()
+    const env = {
+      ...process.env,
+      SCRY_MANAGED_RUN_ID: 'run-qoder-wrong-prompt',
+      SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('stale prompt').digest('hex')
+    }
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        prompt: 'new prompt',
+        timestamp: timing.startedAt
+      },
+      env
+    })
+    const evidence = aggregateTurnEvidence({ userText: 'new prompt', events: [], source: 'scry_provider_adapter' })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'qoder',
+      sessionId: 'qoder-session',
+      runId: 'run-qoder-wrong-prompt',
+      userText: 'new prompt',
+      evidence,
+      timing,
+      status: 'interrupted',
+      archiveFingerprint: stableHash({ runId: 'run-qoder-wrong-prompt', evidence, timing })
+    })).rejects.toThrow('Provider turn id differs from the open lifecycle identity')
+  })
+
+  it('managed identity 只接受受控环境，不采信 hook payload 伪造字段', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        prompt: 'prompt',
+        scry_managed_run_id: 'forged-run',
+        scry_managed_prompt_hash: 'a'.repeat(64),
+        timestamp: timing.startedAt
+      },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: 'bad\nrun',
+        SCRY_MANAGED_PROMPT_HASH: 'not-a-hash'
+      }
+    })
+
+    const open = JSON.parse(await readFile(join(
+      root, '.scry', 'runtime', 'qoder', safeKey('qoder-session'), 'open.json'
+    ), 'utf8')) as Record<string, unknown>
+    expect(open.managedRunId).toBeUndefined()
+    expect(open.managedPromptHash).toBeUndefined()
+  })
+
+  it('Qoder 无 Provider turn id 时拒绝唯一但开始时间过旧的 provisional open', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'qoder-session', prompt: '/rate-workflow 1', timestamp: '2026-07-29T11:59:00.000Z' }
+    })
+    const evidence = aggregateTurnEvidence({ userText: '/rate-workflow 1', events: [], source: 'scry_provider_adapter' })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'qoder',
+      sessionId: 'qoder-session',
+      runId: 'run-qoder-stale-open',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'interrupted',
+      archiveFingerprint: stableHash({ runId: 'run-qoder-stale-open', evidence, timing })
+    })).rejects.toThrow('Provider turn id differs from the open lifecycle identity')
   })
 
   it('通用 recovery 只重放 archive_committed，不提交 prepared', async () => {
@@ -571,5 +761,38 @@ describe('managed canonical recorder', () => {
     expect(await recoverManagedRecorderTurns(root, process.env, { sessionId: 'session-1' }))
       .toEqual({ recovered: 0, pending: 1 })
     expect(await readHealth(join(root, '.scry'))).toMatchObject({ pendingCount: 1 })
+  })
+
+  it('Qoder 相同 prompt 的不同 managed run 不会被错误去重', async () => {
+    const root = await workspace()
+    const promptHash = createHash('sha256').update('same').digest('hex')
+    const start = (runId: string) => handleRecorderHook({
+      provider: 'qoder' as const,
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'qoder-session',
+        prompt: 'same',
+        timestamp: timing.startedAt
+      },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: promptHash
+      }
+    })
+
+    await expect(start('run-a')).resolves.toMatchObject({ status: 'started' })
+    await expect(start('run-b')).resolves.toMatchObject({ status: 'started' })
+
+    const runtimeRoot = join(root, '.scry', 'runtime', 'qoder', safeKey('qoder-session'))
+    const open = JSON.parse(await readFile(join(runtimeRoot, 'open.json'), 'utf8')) as {
+      generation: number
+      managedRunId?: string
+    }
+    expect(open).toMatchObject({ generation: 2, managedRunId: 'run-b' })
+    await expect(readFile(join(runtimeRoot, 'turns', '00000001', 'pending-open.json'), 'utf8'))
+      .resolves.toContain('run-a')
   })
 })

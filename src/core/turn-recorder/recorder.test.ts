@@ -1,4 +1,4 @@
-import { access, appendFile, mkdir, mkdtemp, open as openFile, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'
+import { access, appendFile, chmod, mkdir, mkdtemp, open as openFile, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
-import { commitRecord, exportRecords, listRecords, readHealth, safeKey, verifyStore } from './store'
+import { commitRecord, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
 
 const roots: string[] = []
 const pexecFile = promisify(execFile)
@@ -27,6 +27,14 @@ async function workspace(): Promise<string> {
     capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: false, hooks: true }
   }))
   return root
+}
+
+async function commitHook(root: string, exitCode = 0): Promise<{ path: string; capture: string }> {
+  const path = join(root, 'commit-hook.sh')
+  const capture = join(root, 'commit-hook.jsonl')
+  await writeFile(path, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\nexit ${exitCode}\n`)
+  await chmod(path, 0o700)
+  return { path, capture }
 }
 
 const payload = (sessionId: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -761,6 +769,201 @@ describe('lifecycle/transcript merge', () => {
 })
 
 describe('Codex rollout recorder evidence', () => {
+  it('从 archived_sessions 恢复 turn_aborted，并按 interrupted 提交原 open 轮次', async () => {
+    const root = await workspace()
+    const codexHome = join(root, '.codex')
+    const active = join(codexHome, 'sessions', '2026', '07', '19', 'rollout-aborted.jsonl')
+    const archived = join(codexHome, 'archived_sessions', 'rollout-aborted.jsonl')
+    await mkdir(join(active, '..'), { recursive: true })
+    const startLines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'codex-turn-aborted' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'cancel this work' } },
+      {
+        timestamp: '2026-07-19T12:00:00.100Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'exec_command',
+          call_id: 'call-aborted',
+          arguments: JSON.stringify({ cmd: 'git status --short' })
+        }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.300Z',
+        type: 'response_item',
+        payload: { type: 'function_call_output', call_id: 'call-aborted', output: 'clean' }
+      }
+    ]
+    await writeFile(active, `${startLines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('codex-session-aborted', {
+        prompt: 'cancel this work',
+        turn_id: 'codex-turn-aborted',
+        rollout_path: active
+      })
+    })
+
+    await mkdir(join(codexHome, 'archived_sessions'), { recursive: true })
+    await writeFile(archived, `${[
+      ...startLines,
+      {
+        timestamp: '2026-07-19T12:00:01.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'turn_aborted',
+          turn_id: 'codex-turn-aborted',
+          reason: 'interrupted',
+          started_at: 1784462400,
+          completed_at: 1784462408,
+          duration_ms: 7469
+        }
+      }
+    ].map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await unlink(active)
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record).toMatchObject({
+      sessionId: 'codex-session-aborted',
+      providerTurnId: 'codex-turn-aborted',
+      status: 'interrupted',
+      completedAt: '2026-07-19T12:00:08.000Z',
+      durationMs: 7469,
+      user: { value: { text: 'cancel this work' } }
+    })
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ id: 'call-aborted', name: 'Bash', status: 'success' })
+    ])
+  })
+
+  it('拒绝 active duration 明显长于墙钟的 turn_aborted 终态', async () => {
+    const root = await workspace()
+    const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'bad-abort-timing.jsonl')
+    await mkdir(join(rollout, '..'), { recursive: true })
+    await writeFile(rollout, [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'bad-timing-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'bad timing' } },
+      {
+        timestamp: '2026-07-19T12:00:02.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'turn_aborted',
+          turn_id: 'bad-timing-turn',
+          reason: 'interrupted',
+          started_at: 1784462400,
+          completed_at: 1784462402,
+          duration_ms: 4000
+        }
+      }
+    ].map((line) => JSON.stringify(line)).join('\n'))
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('bad-timing-session', {
+        prompt: 'bad timing',
+        turn_id: 'bad-timing-turn',
+        rollout_path: rollout,
+        timestamp: '2026-07-19T12:00:00.000Z'
+      })
+    })
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+  })
+
+  it('不使用其他 turn 的 turn_aborted 终态关闭当前 open', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'wrong-aborted-turn.jsonl')
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'target-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'target prompt' } },
+      {
+        timestamp: '2026-07-19T12:00:01.000Z',
+        type: 'event_msg',
+        payload: { type: 'turn_aborted', turn_id: 'different-turn', reason: 'interrupted' }
+      }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('codex-session-wrong-abort', {
+        prompt: 'target prompt',
+        turn_id: 'target-turn',
+        rollout_path: rollout
+      })
+    })
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+  })
+
+  it('已有权威 Codex turn id 时拒绝缺失 turn_id 的终态', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'missing-aborted-turn-id.jsonl')
+    await writeFile(rollout, `${[
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'target-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'target prompt' } },
+      { timestamp: '2026-07-19T12:00:01.000Z', type: 'event_msg', payload: { type: 'turn_aborted', reason: 'interrupted' } }
+    ].map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('codex-session-missing-abort-id', {
+        prompt: 'target prompt', turn_id: 'target-turn', rollout_path: rollout
+      })
+    })
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+  })
+
+  it('recovery 与同 session 新 start 串行，不让旧 open 覆盖或删除新轮', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'recovery-start-race.jsonl')
+    await writeFile(rollout, `${[
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'old-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'old prompt' } },
+      { timestamp: '2026-07-19T12:00:01.000Z', type: 'event_msg', payload: { type: 'turn_aborted', turn_id: 'old-turn', reason: 'interrupted' } }
+    ].map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn.started', workspace: root,
+      payload: payload('codex-race-session', { prompt: 'old prompt', turn_id: 'old-turn', rollout_path: rollout })
+    })
+    let releaseRecovery = (): void => {}
+    const recoveryBlocked = new Promise<void>((resolve) => { releaseRecovery = resolve })
+    let recoveryLocked = (): void => {}
+    const recoveryHasLock = new Promise<void>((resolve) => { recoveryLocked = resolve })
+    const recovery = recoverRecorder(root, process.env, async () => {
+      recoveryLocked()
+      await recoveryBlocked
+    })
+    await recoveryHasLock
+    const next = handleRecorderHook({
+      provider: 'codex', event: 'turn.started', workspace: root,
+      payload: payload('codex-race-session', {
+        prompt: 'new prompt', turn_id: 'new-turn', rollout_path: rollout, timestamp: '2026-07-19T12:00:02.000Z'
+      })
+    })
+    releaseRecovery()
+
+    await expect(recovery).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(next).resolves.toMatchObject({ status: 'started' })
+    const open = JSON.parse(await readFile(join(
+      root, '.scry', 'runtime', 'codex', safeKey('codex-race-session'), 'open.json'
+    ), 'utf8')) as Record<string, unknown>
+    expect(open).toMatchObject({ generation: 2, providerTurnId: 'new-turn', prompt: 'new prompt', status: 'open' })
+    await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
+      { generation: 1, providerTurnId: 'old-turn', status: 'interrupted' }
+    ])
+  })
+
   it('只按 context_compacted 记录一次 Codex rollout compact', async () => {
     const root = await workspace()
     const rollout = join(root, 'compact-rollout.jsonl')
@@ -1511,6 +1714,85 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
 })
 
 describe('record store cursor and recovery semantics', () => {
+  it('records 作为 durable outbox，只向 callback 发送无敏感字段的提交通知', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'notify-safe', 'do not leak this prompt')
+    const hook = await commitHook(root)
+    const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
+
+    await expect(drainCommitNotifications(join(root, '.scry'), env)).resolves.toEqual({ delivered: 1, pending: 0 })
+    const notification = JSON.parse((await readFile(hook.capture, 'utf8')).trim()) as Record<string, unknown>
+    expect(notification).toEqual({
+      schemaVersion: 1,
+      event: 'record-committed',
+      workspace: root,
+      provider: 'claude',
+      sessionId: 'notify-safe',
+      recordId: expect.any(String),
+      sequence: 1
+    })
+    expect(JSON.stringify(notification)).not.toContain('do not leak this prompt')
+    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+      .resolves.toContain('"ackedThrough":1')
+  })
+
+  it('callback 失败时保留未 ACK sequence，成功重试后推进 ACK', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'notify-retry')
+    const failed = await commitHook(root, 1)
+    const base = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: failed.path }
+
+    await expect(drainCommitNotifications(join(root, '.scry'), base))
+      .resolves.toEqual({ delivered: 0, pending: 1 })
+    await expect(access(join(root, '.scry', 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
+    const hook = await commitHook(root)
+    await expect(drainCommitNotifications(join(root, '.scry'), {
+      ...base,
+      SCRY_RECORDER_COMMIT_HOOK: hook.path
+    })).resolves.toEqual({ delivered: 1, pending: 0 })
+    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+      .resolves.toContain('"ackedThrough":1')
+  })
+
+  it('duplicate commit 只重试既有未 ACK 通知，不创建第二条 sequence', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'notify-duplicate')
+    const [record] = await listRecords(join(root, '.scry'))
+    const { sequence: _sequence, ...draft } = record
+    const hook = await commitHook(root)
+    const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
+
+    await expect(commitRecord(join(root, '.scry'), draft)).resolves.toMatchObject({ status: 'duplicate', record: { sequence: 1 } })
+    await expect(drainCommitNotifications(join(root, '.scry'), env)).resolves.toEqual({ delivered: 1, pending: 0 })
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(1)
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
+    await expect(drainCommitNotifications(join(root, '.scry'), env)).resolves.toEqual({ delivered: 0, pending: 0 })
+  })
+
+  it('冷启动只重投最新正式 record，不改写已推进的 ACK', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'redeliver-1')
+    await completeTurn(root, 'redeliver-2')
+    const hook = await commitHook(root)
+    const env = {
+      ...process.env,
+      SCRY_RECORDER_COMMIT_HOOK: hook.path,
+      SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'redelivery-test-v1'
+    }
+    await expect(drainCommitNotifications(join(root, '.scry'), env)).resolves.toEqual({ delivered: 2, pending: 0 })
+    const statePath = join(root, '.scry', 'notifications', 'commit-hook-state.json')
+    const before = await readFile(statePath, 'utf8')
+    await writeFile(hook.capture, '')
+
+    await expect(redeliverLatestCommitNotification(join(root, '.scry'), env)).resolves.toMatchObject({
+      delivered: true,
+      sequence: 2
+    })
+    const notifications = (await readFile(hook.capture, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    expect(notifications).toEqual([expect.objectContaining({ sessionId: 'redeliver-2', sequence: 2 })])
+    expect(await readFile(statePath, 'utf8')).toBe(before)
+  })
+
   it('recover 强制收敛 closing 运行态，不把它无限保留为 pending', async () => {
     const root = await workspace()
     await handleRecorderHook({

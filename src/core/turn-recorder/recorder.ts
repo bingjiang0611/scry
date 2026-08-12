@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { open as openFile, readdir, rm, stat } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
 import { disabled, partial, type AgentTurnRecord } from '../../shared/turn-record.js'
@@ -27,6 +27,7 @@ import {
   RECORDER_VERSION,
   clearRuntimeTurn,
   commitRecord,
+  drainCommitNotifications,
   listRecords,
   recordError,
   stableHash,
@@ -48,6 +49,8 @@ export interface RecorderHookResult {
   record?: AgentTurnRecord
 }
 
+export type RecorderRecoveryProbe = (open: Readonly<OpenTurnState>) => Promise<void> | void
+
 interface StoredLifecycleEvent {
   schemaVersion: 1
   id: string
@@ -62,6 +65,10 @@ interface TranscriptRead {
   observed: boolean
   identityMatched?: boolean
   complete?: boolean
+  terminalStatus?: AgentTurnRecord['status']
+  completedAt?: string
+  startedAt?: string
+  durationMs?: number
   toolStreamComplete?: boolean
   userText?: string
   events: TraceEvent[]
@@ -124,6 +131,17 @@ function promptOf(payload: Record<string, unknown>): string | undefined {
 function timestampOf(payload: Record<string, unknown>): string {
   const value = stringAt(payload, 'timestamp', 'ts', 'created_at', 'createdAt')
   return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString()
+}
+
+function epochSecondsAt(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = payload[key]
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) continue
+    const millis = Math.round(value * 1_000)
+    const date = new Date(millis)
+    if (Number.isFinite(date.getTime())) return date.toISOString()
+  }
+  return undefined
 }
 
 function summarize(value: unknown, max = 500): string | undefined {
@@ -292,6 +310,8 @@ interface ParsedTranscriptTurn {
   userText: string
   startedAt?: string
   completedAt?: string
+  durationMs?: number
+  terminalStatus?: AgentTurnRecord['status']
   events: TraceEvent[]
   observable: TranscriptRead['observable']
   childThreads: Array<{ sessionId: string; parentToolUseId?: string; name?: string }>
@@ -949,8 +969,12 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       continue
     }
     if (type === 'event_msg' && payload.type === 'task_complete') {
+      const turnId = stringAt(payload, 'turn_id', 'turnId')
+      if (current.providerTurnId && turnId !== current.providerTurnId) continue
+      if (current.terminalStatus) continue
       finishUsage(at)
       current.completedAt = at
+      current.terminalStatus = terminalStatus(payload, payload.error != null ? 'failed' : 'completed')
       const assistant = stringAt(payload, 'last_agent_message', 'lastAgentMessage') ?? lastAssistant
       if (assistant) addAssistant(assistant, at, stringAt(payload, 'id'), true)
       if (payload.error != null) current.events.push({
@@ -963,6 +987,33 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
         output: summarize(payload.error),
         isError: true
       })
+      continue
+    }
+    if (type === 'event_msg' && payload.type === 'turn_aborted') {
+      const turnId = stringAt(payload, 'turn_id', 'turnId')
+      if (current.providerTurnId && turnId !== current.providerTurnId) continue
+      if (current.terminalStatus) continue
+      const canonicalCompletedAt = epochSecondsAt(payload, 'completed_at', 'completedAt')
+      const canonicalStartedAt = epochSecondsAt(payload, 'started_at', 'startedAt')
+      const durationMs = typeof payload.duration_ms === 'number' && Number.isFinite(payload.duration_ms) && payload.duration_ms >= 0
+        ? Math.round(payload.duration_ms)
+        : undefined
+      const hasCanonicalTiming = !!canonicalCompletedAt || !!canonicalStartedAt || durationMs != null
+      const canonicalWallMs = canonicalCompletedAt && canonicalStartedAt
+        ? Date.parse(canonicalCompletedAt) - Date.parse(canonicalStartedAt)
+        : undefined
+      if (hasCanonicalTiming && (
+        !canonicalCompletedAt || !canonicalStartedAt || durationMs == null ||
+        canonicalWallMs == null || canonicalWallMs < 0 || durationMs > canonicalWallMs + 999
+      )) {
+        continue
+      }
+      const completedAt = canonicalCompletedAt ?? at
+      finishUsage(completedAt)
+      current.completedAt = completedAt
+      if (canonicalStartedAt) current.startedAt = canonicalStartedAt
+      if (durationMs != null) current.durationMs = durationMs
+      current.terminalStatus = terminalStatus(payload, 'interrupted')
       continue
     }
     if (type !== 'response_item') continue
@@ -1216,6 +1267,10 @@ async function parseTranscriptSnapshot(args: {
       observed: parsed.recognized,
       ...(identityMatched != null ? { identityMatched } : {}),
       complete: args.stable && !snapshot.truncated && enriched.complete,
+      ...(turn?.terminalStatus ? { terminalStatus: turn.terminalStatus } : {}),
+      ...(turn?.completedAt ? { completedAt: turn.completedAt } : {}),
+      ...(turn?.startedAt ? { startedAt: turn.startedAt } : {}),
+      ...(turn?.durationMs != null ? { durationMs: turn.durationMs } : {}),
       toolStreamComplete: args.stable && !snapshot.truncated && !!turn && turn.pendingToolCalls.size === 0,
       ...(turn?.userText ? { userText: turn.userText } : {}),
       events: enriched.events,
@@ -1266,6 +1321,30 @@ async function parseTranscriptSnapshot(args: {
   }
 }
 
+function archivedCodexTranscriptPath(path: string): string | undefined {
+  const marker = `${sep}sessions${sep}`
+  const index = path.lastIndexOf(marker)
+  if (index < 0) return undefined
+  return join(path.slice(0, index), 'archived_sessions', basename(path))
+}
+
+async function readableTranscriptPath(path: string, provider: ProviderId): Promise<string> {
+  try {
+    await stat(path)
+    return path
+  } catch {
+    if (provider !== 'codex') return path
+  }
+  const archived = archivedCodexTranscriptPath(path)
+  if (!archived) return path
+  try {
+    await stat(archived)
+    return archived
+  } catch {
+    return path
+  }
+}
+
 async function stableTranscript(
   path: string,
   runId: string,
@@ -1274,6 +1353,7 @@ async function stableTranscript(
   providerTurnId?: string,
   startOffset?: number
 ): Promise<TranscriptRead> {
+  path = await readableTranscriptPath(path, provider)
   let previous = -1
   let latestSize = -1
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -1416,6 +1496,14 @@ async function beginOpenTurn(
   const turnIndex = session.lastTurnIndex + 1
   const prompt = promptOf(payload)
   const promptHash = prompt ? createHash('sha256').update(prompt).digest('hex') : undefined
+  const rawManagedRunId = managedByScry ? stringAt(payload, 'scry_managed_run_id') : undefined
+  const rawManagedPromptHash = managedByScry ? stringAt(payload, 'scry_managed_prompt_hash') : undefined
+  const managedRunId = rawManagedRunId && rawManagedRunId.length <= 256 && !/[\r\n]/.test(rawManagedRunId)
+    ? rawManagedRunId
+    : undefined
+  const managedPromptHash = rawManagedPromptHash && /^[a-f0-9]{64}$/.test(rawManagedPromptHash)
+    ? rawManagedPromptHash
+    : undefined
   const providerTurnId = providerTurnIdOf(payload, provider)
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
@@ -1438,6 +1526,8 @@ async function beginOpenTurn(
     startFingerprint: stableHash({ event, payload }),
     ...(enablement.config.capture.prompt && prompt ? { prompt } : {}),
     ...(promptHash ? { promptHash } : {}),
+    ...(managedRunId ? { managedRunId } : {}),
+    ...(managedPromptHash ? { managedPromptHash } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
@@ -1600,8 +1690,9 @@ async function finalizeOpenTurn(
     evidence.modelSegments = disabled('assistant capture disabled by config')
   }
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
-  const completedAt = open.closingAt ?? timestampOf(payload)
-  const startedMs = Date.parse(open.startedAt)
+  const completedAt = transcript.completedAt ?? open.closingAt ?? timestampOf(payload)
+  const startedAt = transcript.startedAt ?? open.startedAt
+  const startedMs = Date.parse(startedAt)
   const completedMs = Date.parse(completedAt)
   const recordId = stableHash({
     workspace: enablement.config.workspaceId,
@@ -1624,10 +1715,12 @@ async function finalizeOpenTurn(
     ...(open.providerTurnId ? { providerTurnId: open.providerTurnId } : {}),
     generation: open.generation,
     turnIndex: open.turnIndex,
-    startedAt: open.startedAt,
+    startedAt,
     completedAt,
-    durationMs: Number.isFinite(startedMs) && Number.isFinite(completedMs) ? Math.max(0, completedMs - startedMs) : 0,
-    status: terminalStatus(payload, fallbackStatus),
+    durationMs: transcript.durationMs ?? (
+      Number.isFinite(startedMs) && Number.isFinite(completedMs) ? Math.max(0, completedMs - startedMs) : 0
+    ),
+    status: transcript.terminalStatus ?? terminalStatus(payload, fallbackStatus),
     ...evidence
   }
   const committed = await commitRecord(enablement.dataRoot, draft)
@@ -1674,6 +1767,24 @@ function isSynthetic(payload: Record<string, unknown>): boolean {
   return payload.isMeta === true || payload.synthetic === true || stringAt(payload, 'source') === 'synthetic'
 }
 
+function trustedManagedIdentityPayload(
+  payload: Record<string, unknown>,
+  managed: boolean | undefined,
+  env: NodeJS.ProcessEnv
+): Record<string, unknown> {
+  const trusted = { ...payload }
+  delete trusted.scry_managed_run_id
+  delete trusted.scry_managed_prompt_hash
+  if (!managed) return trusted
+  const runId = env.SCRY_MANAGED_RUN_ID?.trim()
+  const promptHash = env.SCRY_MANAGED_PROMPT_HASH?.trim()
+  if (runId && runId.length <= 256 && !/[\r\n]/.test(runId) && promptHash && /^[a-f0-9]{64}$/.test(promptHash)) {
+    trusted.scry_managed_run_id = runId
+    trusted.scry_managed_prompt_hash = promptHash
+  }
+  return trusted
+}
+
 async function isCommittedProviderTurn(
   dataRoot: string,
   root: string,
@@ -1691,6 +1802,10 @@ async function isCommittedProviderTurn(
 }
 
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
+  input = {
+    ...input,
+    payload: trustedManagedIdentityPayload(input.payload, input.managed, input.env ?? process.env)
+  }
   const enablement = await resolveRecorderEnablement(input.workspace, input.env)
   if (!enablement.enabled) return { status: 'disabled', reason: enablement.reason }
   const sessionId = sessionIdOf(input.payload)
@@ -1719,13 +1834,24 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       if (START_EVENTS.has(input.event)) {
         const providerTurnId = incomingProviderTurnId
         const startFingerprint = stableHash({ event: input.event, payload: input.payload })
+        const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
+        const incomingManagedPromptHash = stringAt(input.payload, 'scry_managed_prompt_hash')
+        const hasManagedIdentity = !!(
+          open?.managedRunId || open?.managedPromptHash ||
+          incomingManagedRunId || incomingManagedPromptHash
+        )
+        const sameManagedIdentity = hasManagedIdentity &&
+          !!open?.managedRunId && !!open.managedPromptHash &&
+          open.managedRunId === incomingManagedRunId &&
+          open.managedPromptHash === incomingManagedPromptHash
         const sameManagedQoderPrompt = input.provider === 'qoder' &&
           input.managed === true &&
           open?.managedByScry === true &&
           !providerTurnId &&
           !open.providerTurnId &&
           !!open.prompt &&
-          open.prompt === promptOf(input.payload)
+          open.prompt === promptOf(input.payload) &&
+          (hasManagedIdentity ? sameManagedIdentity : true)
         if (
           providerTurnId &&
           providerTurnId !== open?.providerTurnId &&
@@ -1813,6 +1939,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         ...pending
       })
     }
+    await drainCommitNotifications(enablement.dataRoot, input.env ?? process.env)
     return result
   } catch (error) {
     await recordError(enablement.dataRoot, error)
@@ -1843,33 +1970,60 @@ export async function refreshRecorderPendingHealth(dataRoot: string): Promise<vo
   await updateHealth(dataRoot, await pendingHealth(dataRoot))
 }
 
-export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<{ recovered: number; pending: number }> {
+export async function recoverRecorder(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+  probe?: RecorderRecoveryProbe
+): Promise<{ recovered: number; pending: number }> {
   const enablement = await resolveRecorderEnablement(workspace, env)
   if (!enablement.enabled) return { recovered: 0, pending: 0 }
   let recovered = 0
   let pending = 0
   let managedPresent = false
   for (const item of await runtimeSessions(enablement.dataRoot)) {
-    const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
-    if (!open) continue
-    if (open.managedByScry) {
-      managedPresent = true
-      continue
-    }
-    if (open.status !== 'closing') continue
+    const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
+    if (!initial) continue
     const result = await withDirectoryLock(
-      sessionLock(enablement.dataRoot, item.provider, open.sessionId),
-      () => finalizeOpenTurn(
-        enablement,
-        open,
-        { timestamp: open.closingAt ?? new Date().toISOString() },
-        'completed',
-        { allowUnstableTranscript: true }
-      ),
+      sessionLock(enablement.dataRoot, item.provider, initial.sessionId),
+      async () => {
+        const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
+        if (!open) return { status: 'idle' as const }
+        if (open.provider !== item.provider || open.sessionId !== initial.sessionId) {
+          return { status: 'idle' as const }
+        }
+        if (open.managedByScry) return { status: 'managed' as const }
+        await probe?.(open)
+        if (open.status === 'open') {
+          if (!open.transcriptPath) return { status: 'idle' as const }
+          const transcript = await stableTranscript(
+            open.transcriptPath,
+            `${open.provider}:${open.sessionId}:${open.generation}`,
+            open.provider,
+            open.promptHash,
+            open.providerTurnId,
+            open.transcriptStartOffset
+          )
+          if (!transcript.terminalStatus || !transcript.completedAt || transcript.identityMatched === false) {
+            return { status: 'idle' as const }
+          }
+          open.status = 'closing'
+          open.closingAt = transcript.completedAt
+          await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
+        }
+        if (open.status !== 'closing') return { status: 'idle' as const }
+        return finalizeOpenTurn(
+          enablement,
+          open,
+          { timestamp: open.closingAt ?? new Date().toISOString() },
+          'completed',
+          { allowUnstableTranscript: true }
+        )
+      },
       { waitMs: SESSION_LOCK_WAIT_MS }
     )
-    if (result.status === 'pending') pending++
-    else recovered++
+    if (result.status === 'managed') managedPresent = true
+    else if (result.status === 'pending') pending++
+    else if (result.status === 'committed' || result.status === 'duplicate') recovered++
   }
   if (managedPresent) {
     const managed = await recoverManagedRecorderTurns(workspace, env)
@@ -1880,6 +2034,7 @@ export async function recoverRecorder(workspace: string, env: NodeJS.ProcessEnv 
     ...(await pendingHealth(enablement.dataRoot)),
     ...(recovered ? { increment: { recoveredRecords: recovered } } : {})
   })
+  await drainCommitNotifications(enablement.dataRoot, env)
   return { recovered, pending }
 }
 
