@@ -28,7 +28,7 @@ import {
   resultOf
 } from '../format'
 import type { FileRow, HookInstanceRow, HookScriptRow, HookSummary, Turn } from '../format'
-import { displayDiffPath, sessionDiffSummary } from '../turn-diff'
+import { displayDiffPath, sessionDiffSummary, sessionNetDiffSummary } from '../turn-diff'
 import { HooksSummary } from './ChatTurn'
 import { Icon } from './primitives/Icon'
 import { TurnTimingDetails } from './TurnTimingDetails'
@@ -642,7 +642,8 @@ export function OverviewPanel({
   ].join(' · ')
   const diffAdd = gitDiff.reduce((s, d) => s + d.added, 0)
   const diffDel = gitDiff.reduce((s, d) => s + d.deleted, 0)
-  const sessionDiff = useMemo(() => sessionDiffSummary(turns), [turns])
+  const sessionNetDiff = useMemo(() => sessionNetDiffSummary(turns), [turns])
+  const sessionActivity = useMemo(() => sessionDiffSummary(turns), [turns])
   const sessionDiffRepoRoot = useMemo(() => {
     for (let index = turns.length - 1; index >= 0; index--) {
       const root = turns[index].items.find((item) => item.turnDiff?.repoRoot)?.turnDiff?.repoRoot
@@ -1456,42 +1457,44 @@ export function OverviewPanel({
         </div>
       )}
 
-      {sessionDiff.turnCount > 0 && (
+      {(sessionNetDiff || sessionActivity.turnCount > 0) && (
         <div className="panel-section">
           <h4>
             {onOpenSessionDiff ? (
               <button
                 type="button"
                 className="panel-section-heading"
-                title="本会话全部已捕获轮次 Git 快照的累计活动量：同一行跨轮反复改会重复计入，不等于工作树净改动；点击打开最近可审阅轮次"
+                title={sessionNetDiff
+                  ? '本会话从第一轮开始前基线到当前的真实 Git 净改动；点击在右侧 Diff 中审阅'
+                  : '旧会话仅有逐轮快照累计活动量：同一行跨轮反复改会重复计入，不等于工作树净改动'}
                 onClick={() => onOpenSessionDiff()}
               >
-                本会话改动（{sessionDiff.turnCount} 轮快照累计）
+                {sessionNetDiff ? '本会话净改动' : `本会话活动（${sessionActivity.turnCount} 轮快照累计）`}
                 <span className="more">
-                  {sessionDiff.files.length} files · +{sessionDiff.added} −{sessionDiff.deleted}{' '}
+                  {(sessionNetDiff?.files ?? sessionActivity.files).length} files · +{sessionNetDiff?.added ?? sessionActivity.added} −{sessionNetDiff?.deleted ?? sessionActivity.deleted}{' '}
                   <Icon name="chevronRight" />
                 </span>
               </button>
             ) : (
               <>
-                本会话改动（{sessionDiff.turnCount} 轮快照累计）
+                {sessionNetDiff ? '本会话净改动' : `本会话活动（${sessionActivity.turnCount} 轮快照累计）`}
                 <span className="more">
-                  {sessionDiff.files.length} files · +{sessionDiff.added} −{sessionDiff.deleted}
+                  {(sessionNetDiff?.files ?? sessionActivity.files).length} files · +{sessionNetDiff?.added ?? sessionActivity.added} −{sessionNetDiff?.deleted ?? sessionActivity.deleted}
                 </span>
               </>
             )}
           </h4>
-          {sessionDiff.files.map((file) =>
+          {(sessionNetDiff?.files ?? sessionActivity.files).map((file) =>
             onOpenSessionDiff ? (
               <button
                 type="button"
                 className="gdrow click"
                 key={file.path}
-                title={`${file.path} · ${file.turns} 轮改过 · 在右侧 Diff 中打开最近一轮`}
+                title={sessionNetDiff ? `${file.path} · 在右侧会话 Diff 中打开` : `${file.path} · 在右侧最近一轮 Diff 中打开`}
                 onClick={() => onOpenSessionDiff(file.path)}
               >
                 <span className="gd-path">{displayDiffPath(file.path, sessionDiffRepoRoot)}</span>
-                {file.turns > 1 && <span className="dim">{file.turns} 轮</span>}
+                {'turns' in file && file.turns > 1 && <span className="dim">{file.turns} 轮</span>}
                 {file.binary && !file.added && !file.deleted ? (
                   <span className="dim">binary</span>
                 ) : (
@@ -1505,13 +1508,17 @@ export function OverviewPanel({
             ) : (
               <div className="gdrow" key={file.path} title={file.path}>
                 <span className="gd-path">{displayDiffPath(file.path, sessionDiffRepoRoot)}</span>
-                {file.turns > 1 && <span className="dim">{file.turns} 轮</span>}
+                {'turns' in file && file.turns > 1 && <span className="dim">{file.turns} 轮</span>}
                 <span className="gd-add">+{file.added}</span>
                 <span className="gd-del">−{file.deleted}</span>
               </div>
             )
           )}
-          <div className="psrc">来源=每轮 Git 工作树快照；+/− 是各轮累计活动量，不是当前工作树净改动</div>
+          <div className="psrc">
+            {sessionNetDiff
+              ? '来源=会话首轮前 Git 基线 → 当前工作树；+/− 是真实净改动'
+              : '来源=旧会话每轮 Git 工作树快照；+/− 是累计活动量，不是当前工作树净改动'}
+          </div>
         </div>
       )}
 

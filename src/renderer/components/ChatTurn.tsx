@@ -568,6 +568,74 @@ function FilesSummary({
   )
 }
 
+function fileWord(count: number): string {
+  return `${count} ${count === 1 ? 'file' : 'files'}`
+}
+
+// 会话结束摘要（Codex 风格）：贴在对话流末尾，展示整段会话「第一轮前基线 → 当前」的真实净改动。
+// 权威来源是 main 落的 session_diff 快照，数字直接取快照每文件净增删，不做逐轮累计。
+export function SessionSummary({
+  sessionDiff,
+  onOpenDiff
+}: {
+  sessionDiff: TurnDiffSnapshot
+  onOpenDiff: (initialPath?: string) => void
+}) {
+  const files = sessionDiff.files
+  const added = files.reduce((sum, file) => sum + file.added, 0)
+  const deleted = files.reduce((sum, file) => sum + file.deleted, 0)
+  return (
+    <details className="files-summary diff session-summary" aria-label="本会话改动摘要" open>
+      <summary
+        onClick={(event) => {
+          event.preventDefault()
+          onOpenDiff()
+        }}
+        title="整段会话从第一轮开始前基线到当前的真实 Git 净改动；会话开始前已有的脏改动不计入"
+      >
+        <Icon name="file" /> 本会话改动 · Edited {fileWord(files.length)}
+        <span className="fh-file-count">{fileWord(files.length)}</span>
+        <span className="fh-count diff-count">
+          <b className="add">+{added}</b>
+          <b className="del">−{deleted}</b>
+        </span>
+        <span className="fh-review">
+          Review <Icon name="chevronRight" />
+        </span>
+        <span className="fh-total">{files.length}</span>
+      </summary>
+      <div className="files-body">
+        {files.length > 0 ? (
+          files.map((file) => (
+            <button
+              type="button"
+              className="file-row diff-row"
+              key={file.path}
+              title={`${file.path} · 在右侧 Review 中打开`}
+              onClick={() => onOpenDiff(file.path)}
+            >
+              <span className="path">{displayDiffPath(file.path, sessionDiff.repoRoot)}</span>
+              <span className="line-diff">
+                {file.binary ? (
+                  <span className="binary">binary</span>
+                ) : (
+                  <>
+                    <b className="add">+{file.added}</b>
+                    <b className="del">−{file.deleted}</b>
+                  </>
+                )}
+              </span>
+              <Icon name="chevronRight" className="diff-row-open" />
+            </button>
+          ))
+        ) : (
+          <div className="files-empty">本会话无净改动</div>
+        )}
+      </div>
+    </details>
+  )
+}
+
 interface TurnHookTriggerRow {
   trigger: string
   toolCalls: number

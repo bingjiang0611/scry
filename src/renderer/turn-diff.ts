@@ -1,6 +1,6 @@
 // 统一 Diff 联动的唯一派生层：权威模型仍是每轮 harness/turn_diff 携带的 TurnDiffSnapshot，
 // 这里只做选择与汇总，不引入第二套 diff 状态。
-import type { TraceEvent, TurnDiffSnapshot } from '@shared/trace'
+import type { DiffFile, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import { basename, type Turn } from './format'
 
 export interface TurnDiffReview {
@@ -8,6 +8,8 @@ export interface TurnDiffReview {
   userText: string
   turnDiff: TurnDiffSnapshot
   initialPath?: string
+  /** 'turn' = 单轮 diff；'session' = 会话净 diff（第一轮前基线 → 当前）。缺省按单轮处理。 */
+  scope?: 'turn' | 'session'
 }
 
 export interface SessionDiffFile {
@@ -66,6 +68,52 @@ export function resolveTurnDiffReview(turns: readonly Turn[], path?: string, run
     }
   }
   return null
+}
+
+export function sessionDiffOf(items: readonly TraceEvent[]): TurnDiffSnapshot | undefined {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const event = items[index]
+    if (event.kind === 'harness' && event.stage === 'session_diff') return event.turnDiff
+  }
+  return undefined
+}
+
+/**
+ * 右栏「会话净改动」的权威入口：从最近一轮往前找第一条可审阅的 session_diff 快照
+ * （main 用贯穿会话的 baseline 算出的「第一轮前基线 → 当前」真实净 diff）。
+ * 给了 path 就要求该文件真的在净 diff 里，保证按文件定位落到正确视图。
+ */
+export function sessionNetDiffReview(turns: readonly Turn[], path?: string): TurnDiffReview | null {
+  const turn = turns.at(-1)
+  if (!turn) return null
+  const turnDiff = sessionDiffOf(turn.items)
+  if (!reviewable(turnDiff)) return null
+  if (path && !turnDiff.files.some((file) => file.path === path)) return null
+  return {
+    runId: turn.runId,
+    userText: turn.userText,
+    turnDiff,
+    scope: 'session',
+    ...(path ? { initialPath: path } : {})
+  }
+}
+
+/**
+ * 会话结束摘要用的真实净改动：直接取最近一条 session_diff 快照本身的每文件净增删，
+ * 不做逐轮累计（同一行跨轮反复改在快照里已净算一次）。没有可审阅快照就返回 null，不编空摘要。
+ */
+export function sessionNetDiffSummary(
+  turns: readonly Turn[]
+): { files: DiffFile[]; added: number; deleted: number } | null {
+  const turn = turns.at(-1)
+  if (!turn) return null
+  const turnDiff = sessionDiffOf(turn.items)
+  if (!reviewable(turnDiff)) return null
+  return {
+    files: turnDiff.files,
+    added: turnDiff.files.reduce((sum, file) => sum + file.added, 0),
+    deleted: turnDiff.files.reduce((sum, file) => sum + file.deleted, 0)
+  }
 }
 
 export function sessionDiffSummary(turns: readonly Turn[]): SessionDiffSummary {

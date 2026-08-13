@@ -330,7 +330,7 @@ function normalizeArchive(archive: TraceArchive): TraceArchive {
     ...turn,
     items: Array.isArray(turn.items)
       ? turn.items.map((event) => {
-          if (event.stage !== 'turn_diff') return event
+          if (event.stage !== 'turn_diff' && event.stage !== 'session_diff') return event
           const turnDiff = normalizeTurnDiffSnapshot(event.turnDiff)
           return {
             ...event,

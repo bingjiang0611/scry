@@ -5,7 +5,10 @@ import {
   displayDiffPath,
   editActionLineCounts,
   resolveTurnDiffReview,
+  sessionDiffOf,
   sessionDiffSummary,
+  sessionNetDiffReview,
+  sessionNetDiffSummary,
   turnDiffOf
 } from './turn-diff'
 
@@ -30,6 +33,25 @@ function turn(runId: string, userText: string, turnDiff?: TurnDiffSnapshot): Tur
   ]
   if (turnDiff) {
     items.push({ id: `${runId}-diff`, ts: '2026-08-10T00:00:01.000Z', runId, kind: 'harness', stage: 'turn_diff', turnDiff })
+  }
+  return { runId, userText, items, done: true }
+}
+
+// 一轮里可以同时带「本轮 turn_diff」和「会话 session_diff」；测试要证明会话选择器读的是
+// 权威 session_diff（净 diff），而不是逐轮累计。
+function sessionTurn(
+  runId: string,
+  userText: string,
+  opts: { turn?: TurnDiffSnapshot; session?: TurnDiffSnapshot } = {}
+): Turn {
+  const items: TraceEvent[] = [
+    { id: `${runId}-text`, ts: '2026-08-10T00:00:00.000Z', runId, kind: 'model', stage: 'text', text: 'ok' }
+  ]
+  if (opts.turn) {
+    items.push({ id: `${runId}-td`, ts: '2026-08-10T00:00:01.000Z', runId, kind: 'harness', stage: 'turn_diff', turnDiff: opts.turn })
+  }
+  if (opts.session) {
+    items.push({ id: `${runId}-sd`, ts: '2026-08-10T00:00:02.000Z', runId, kind: 'harness', stage: 'session_diff', turnDiff: opts.session })
   }
   return { runId, userText, items, done: true }
 }
@@ -153,5 +175,116 @@ describe('displayDiffPath', () => {
     expect(displayDiffPath('/repo/src/a.ts', '/repo/')).toBe('src/a.ts')
     expect(displayDiffPath('/other/src/a.ts', '/repo')).toBe('a.ts')
     expect(displayDiffPath('/repo/中文/文件.md', '/repo')).toBe('中文/文件.md')
+  })
+})
+
+describe('sessionDiffOf', () => {
+  it('取最后一条 session_diff，迟到的重复事件覆盖旧快照', () => {
+    const late = snapshot({ files: [{ path: '/repo/a.ts', added: 3, deleted: 0 }] })
+    const items = sessionTurn('r1', '改 a', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }).items
+    items.push({ id: 'r1-sd2', ts: 'z', runId: 'r1', kind: 'harness', stage: 'session_diff', turnDiff: late })
+    expect(sessionDiffOf(items)).toBe(late)
+  })
+
+  it('没有 session_diff 事件时返回 undefined，不把 turn_diff 当会话 diff', () => {
+    const items = turn('r1', '改 a', snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] })).items
+    expect(sessionDiffOf(items)).toBeUndefined()
+  })
+})
+
+describe('sessionNetDiffReview（右栏会话净 diff 入口）', () => {
+  it('取最近一条 session_diff，标 scope=session，且不是逐轮累计', () => {
+    // 同一文件跨两轮反复改：逐轮 turn_diff 之和会是 +8/−3，但会话净 diff 快照只有 +3/−0。
+    const turns = [
+      sessionTurn('r1', '一', {
+        turn: snapshot({ files: [{ path: '/repo/a.ts', added: 5, deleted: 3 }] }),
+        session: snapshot({ files: [{ path: '/repo/a.ts', added: 5, deleted: 3 }] })
+      }),
+      sessionTurn('r2', '二', {
+        turn: snapshot({ files: [{ path: '/repo/a.ts', added: 3, deleted: 0 }] }),
+        session: snapshot({ files: [{ path: '/repo/a.ts', added: 3, deleted: 0 }] })
+      })
+    ]
+    const review = sessionNetDiffReview(turns)
+    expect(review?.runId).toBe('r2')
+    expect(review?.scope).toBe('session')
+    expect(review?.turnDiff.files).toEqual([{ path: '/repo/a.ts', added: 3, deleted: 0 }])
+  })
+
+  it('会话净 diff 覆盖不同轮改过的文件全集', () => {
+    const turns = [
+      sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 2, deleted: 0 }] }) }),
+      sessionTurn('r2', '二', {
+        session: snapshot({
+          files: [
+            { path: '/repo/a.ts', added: 2, deleted: 0 },
+            { path: '/repo/b.ts', added: 4, deleted: 1 }
+          ]
+        })
+      })
+    ]
+    expect(sessionNetDiffReview(turns)?.turnDiff.files.map((file) => file.path)).toEqual(['/repo/a.ts', '/repo/b.ts'])
+  })
+
+  it('给了 path 时只认最新会话净快照，不复活旧快照里已消失的文件', () => {
+    const turns = [
+      sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }),
+      sessionTurn('r2', '二', { session: snapshot({ files: [{ path: '/repo/b.ts', added: 1, deleted: 0 }] }) })
+    ]
+    expect(sessionNetDiffReview(turns, '/repo/a.ts')).toBeNull()
+    expect(sessionNetDiffReview(turns, '/repo/b.ts')?.initialPath).toBe('/repo/b.ts')
+    expect(sessionNetDiffReview(turns, '/repo/never.ts')).toBeNull()
+  })
+
+  it('最新 session_diff 为 timeout / failed / 空文件时不回退旧快照', () => {
+    const turns = [
+      sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }),
+      sessionTurn('r2', '二', { session: snapshot({ status: 'timeout', reason: 'deadline', files: [] }) }),
+      sessionTurn('r3', '三', { session: snapshot({ files: [] }) })
+    ]
+    expect(sessionNetDiffReview(turns)).toBeNull()
+  })
+
+  it('最后一轮缺少 session_diff 时不沿用历史快照，避免恢复会话后展示过期状态', () => {
+    const turns = [
+      sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }),
+      turn('r2', '恢复后继续', snapshot({ files: [{ path: '/repo/b.ts', added: 1, deleted: 0 }] }))
+    ]
+    expect(sessionNetDiffReview(turns)).toBeNull()
+    expect(sessionNetDiffSummary(turns)).toBeNull()
+  })
+
+  it('没有任何 session_diff 时返回 null，不退回 turn_diff', () => {
+    const turns = [turn('r1', '一', snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }))]
+    expect(sessionNetDiffReview(turns)).toBeNull()
+  })
+})
+
+describe('sessionNetDiffSummary（结束摘要 = 快照本身的真实净改动）', () => {
+  it('直接取快照每文件净增删，不做逐轮累计', () => {
+    const turns = [
+      sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 5, deleted: 3 }] }) }),
+      sessionTurn('r2', '二', {
+        session: snapshot({
+          files: [
+            { path: '/repo/a.ts', added: 3, deleted: 0 },
+            { path: '/repo/b.ts', added: 2, deleted: 2 }
+          ]
+        })
+      })
+    ]
+    expect(sessionNetDiffSummary(turns)).toEqual({
+      files: [
+        { path: '/repo/a.ts', added: 3, deleted: 0 },
+        { path: '/repo/b.ts', added: 2, deleted: 2 }
+      ],
+      added: 5,
+      deleted: 2
+    })
+  })
+
+  it('没有可审阅 session_diff 时返回 null，不编空摘要', () => {
+    expect(sessionNetDiffSummary([turn('r1', '一', snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }))])).toBeNull()
+    expect(sessionNetDiffSummary([sessionTurn('r1', '一', { session: snapshot({ status: 'failed', reason: 'git_error', files: [] }) })])).toBeNull()
   })
 })
