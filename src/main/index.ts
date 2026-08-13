@@ -10,7 +10,7 @@ import { AgentRuntimeError } from './cli-runtime'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin } from './db'
-import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, type GitTurnDiffCapture } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
@@ -27,7 +27,7 @@ import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore,
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { migrateLegacyUserData } from './user-data-migration'
-import type { ActiveRun, TraceEvent } from '../shared/trace'
+import type { ActiveRun, TraceEvent, TurnDiffSnapshot } from '../shared/trace'
 import {
   normalizeAgentStartRequest,
   runTerminationHint,
@@ -199,6 +199,16 @@ function attachmentPrompt(prompt: string, attachments: PreparedAttachment[]): st
 const sessionByContext = new Map<string, string>()
 const sessionRevisionByContext = new Map<string, number>()
 const sessionAliasesByContext = new Map<string, Map<string, string>>()
+// 会话级净 diff 的持久 baseline：每个 (provider,cwd) 上下文只保留一份「会话第一轮开始前」
+// 捕获的 git 快照，贯穿整个会话存活（其 temp objectDir 不随逐轮 finish 清理）。
+// revision 记录创建时的 contextRevision，切换/adopt 后 revision 不符即视为失效，绝不串会话。
+const sessionDiffBaselineByContext = new Map<string, { revision: number; capture: Promise<GitTurnDiffCapture> }>()
+const discardSessionBaseline = (key: string): void => {
+  const entry = sessionDiffBaselineByContext.get(key)
+  if (!entry) return
+  sessionDiffBaselineByContext.delete(key)
+  void entry.capture.then(cancelGitTurnDiff).catch(() => undefined)
+}
 const contextAdmission = new ContextAdmission()
 const recordingBlockedSessions = new Map<string, string>()
 const providerOperationGate = new ProviderOperationGate()
@@ -1062,6 +1072,7 @@ handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
     bumpSessionRevision(key)
     sessionByContext.delete(key)
     sessionAliasesByContext.delete(key)
+    discardSessionBaseline(key)
   }
   return true
 })
@@ -1217,6 +1228,7 @@ handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
   setCurrentCwd(cwd || undefined)
   const key = providerContextKey(payload.providerId, cwd)
   bumpSessionRevision(key)
+  discardSessionBaseline(key)
   sessionAliasesByContext.delete(key)
   const catalogSession = appSessionStore().load().find((session) =>
     session.providerId === payload.providerId && session.cwd === cwd &&
@@ -1348,7 +1360,10 @@ handleTrusted(
         return result
       }
       const key = providerContextKey(providerId, cwd)
-      if (sessionByContext.get(key) === externalSessionId) sessionByContext.delete(key)
+      if (sessionByContext.get(key) === externalSessionId) {
+        sessionByContext.delete(key)
+        discardSessionBaseline(key)
+      }
       recordingBlockedSessions.delete(deletionKey)
         return result
       })
@@ -1763,6 +1778,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     throw error
   }
   const turnDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
+  // 会话级 baseline：仅在真正新会话（无 resume）时（重）建，且必须在首轮任何文件改动前捕获。
+  // resume/续接不重建，保留「会话第一轮开始前」的原始基线，否则会把之前几轮误当成会话前脏改动。
+  let sessionBaselineReady: Promise<unknown> = Promise.resolve()
+  if (cwd && contextKey && !resume) {
+    discardSessionBaseline(contextKey)
+    const capture = beginGitTurnDiff(cwd)
+    sessionDiffBaselineByContext.set(contextKey, { revision: contextRevision, capture })
+    sessionBaselineReady = capture.catch(() => undefined)
+  }
   let turnDiffPromise: Promise<void> | null = null
   const finalizeTurnDiff = (): Promise<void> => {
     turnDiffPromise ??= turnDiffCapture
@@ -1819,6 +1843,44 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       .then((capture) => cancelGitTurnDiff(capture))
       .catch((error) => console.warn('[scry] turn diff cancellation failed:', runId, error))
     return turnDiffPromise
+  }
+  // 会话级净 diff：在逐轮 turnDone 后，用贯穿会话的 baseline 对当前工作树重算「基线 → 此刻」，
+  // 落一条 harness/session_diff。它是右栏会话 diff 与结束摘要的权威来源；找不到/失效即静默降级，
+  // 绝不编造数字。非消费式，baseline 继续供后续轮复用。
+  let sessionDiffPromise: Promise<void> | null = null
+  const finalizeSessionDiff = (): Promise<void> => {
+    if (!cwd || !contextKey) return Promise.resolve()
+    sessionDiffPromise ??= (async () => {
+      const entry = sessionDiffBaselineByContext.get(contextKey)
+      if (!entry || entry.revision !== contextRevision) return
+      let baseline: GitTurnDiffCapture
+      try {
+        baseline = await entry.capture
+      } catch {
+        return
+      }
+      if (baseline.status !== 'ready') return
+      let snapshot: TurnDiffSnapshot
+      try {
+        snapshot = await snapshotSessionNetDiff(baseline)
+      } catch (error) {
+        console.warn('[scry] session diff capture failed:', runId, error)
+        return
+      }
+      const event: TraceEvent = {
+        id: `s-${evSeq++}`,
+        ts: new Date().toISOString(),
+        runId,
+        kind: 'harness',
+        stage: 'session_diff',
+        providerId,
+        runtimeProvider,
+        turnDiff: snapshot
+      }
+      appendCoalescedTrace(runState.items, event)
+      if (runs.isFocused(runId)) queueTrace(event)
+    })().catch((error) => console.warn('[scry] session diff finalization failed:', runId, error))
+    return sessionDiffPromise
   }
   let notifiedSessionId = resume
   const publishSessionId = (sessionId: string | undefined): void => {
@@ -1935,6 +1997,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       if (!contextKey) return
       bumpSessionRevision(contextKey)
       contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
+      const sessionBaseline = sessionDiffBaselineByContext.get(contextKey)
+      if (sessionBaseline) sessionBaseline.revision = contextRevision
       if (observedSessionId) sessionByContext.set(contextKey, observedSessionId)
       else sessionByContext.delete(contextKey)
     },
@@ -1961,7 +2025,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   let terminalArchiveArgs: ArchiveTraceTurnArgs | undefined
   let terminalArchiveCommitted = false
-  const runtimePromise = turnDiffCapture.then(runProvider)
+  const runtimePromise = Promise.all([turnDiffCapture, sessionBaselineReady]).then(runProvider)
   runtimePromise
     .then(async (r) => {
       const turnDiffDone = finalizeTurnDiff()
@@ -2070,6 +2134,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         })
       }
       await turnDiffDone
+      await finalizeSessionDiff()
       try {
         await archiveTraceTurn(completionArchiveArgs)
         terminalArchiveCommitted = true
@@ -2264,6 +2329,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         win?.webContents.send('agent:error', { runId, message, category, hint })
       }
       await turnDiffDone
+      await finalizeSessionDiff()
       let exactRecorded = true
       try {
         await archiveTraceTurn(terminalArchiveArgs)
@@ -2471,6 +2537,7 @@ app.on('before-quit', (event) => {
   isShuttingDown = true
   quitCleanupStarted = true
   closeAllTerminals()
+  for (const key of [...sessionDiffBaselineByContext.keys()]) discardSessionBaseline(key)
   const cleanup = settleRunsForShutdown(runs.unsettledControls(), {
     cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),

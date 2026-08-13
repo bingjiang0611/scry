@@ -58,15 +58,20 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
   const added = turnDiff.files.reduce((sum, file) => sum + file.added, 0)
   const deleted = turnDiff.files.reduce((sum, file) => sum + file.deleted, 0)
   const hasTransientPatch = turnDiff.files.some((file) => file.patchStatus != null)
+  const sessionScope = review.scope === 'session'
 
   return (
-    <aside className="panel diff-review-panel" aria-label="本轮改动 Review">
+    <aside className="panel diff-review-panel" aria-label={sessionScope ? '本会话净改动 Review' : '本轮改动 Review'}>
       <header className="diff-review-head">
         <div className="diff-review-title">
           <Icon name="file" />
           <div>
             <b>Review</b>
-            <span title={review.runId}>本轮改动 · {review.runId}</span>
+            {sessionScope ? (
+              <span>本会话净改动（第一轮前基线 → 当前）</span>
+            ) : (
+              <span title={review.runId}>本轮改动 · {review.runId}</span>
+            )}
           </div>
         </div>
         <button type="button" className="diff-review-close" onClick={onClose} title="关闭 Review（Esc）" aria-label="关闭 Review">

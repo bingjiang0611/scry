@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, it, expect } from 'vitest'
-import { beginGitTurnDiff, finishGitTurnDiff, gitNumstat, parseNumstat, parsePorcelainPaths } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
 
 const pexecFile = promisify(execFile)
 
@@ -617,4 +617,124 @@ describe('每轮 Git 工作树快照', () => {
       await rm(root, { recursive: true, force: true })
     }
   }, 15_000)
+})
+
+describe('snapshotSessionNetDiff（会话净 diff：基线 → 当前，非消费式）', () => {
+  async function initRepo(prefix: string): Promise<string> {
+    const root = await mkdtemp(join(tmpdir(), prefix))
+    await pexecFile('git', ['init'], { cwd: root })
+    await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
+    await pexecFile('git', ['config', 'user.email', 'scry@example.invalid'], { cwd: root })
+    return root
+  }
+
+  it('多轮反复改同一文件只净算一次，且 baseline 非消费可跨轮多次复用', async () => {
+    const root = await initRepo('scry-session-net-')
+    try {
+      await writeFile(join(root, 'f.ts'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      const canonicalRoot = await realpath(root)
+      const fPath = join(canonicalRoot, 'f.ts')
+
+      const baseline = await beginGitTurnDiff(root)
+      expect(baseline.status).toBe('ready')
+
+      // 第一轮：base → v1，整行替换（逐轮 diff = +1/−1）
+      await writeFile(join(root, 'f.ts'), 'v1\n')
+      const afterTurn1 = await snapshotSessionNetDiff(baseline)
+      expect(afterTurn1.status).toBe('captured')
+      expect(new Map(afterTurn1.files.map((f) => [f.path, f])).get(fPath)).toMatchObject({ added: 1, deleted: 1 })
+
+      // 第二轮：改回 base 再追加一行 → 会话净 diff（base → base+extra）应为 +1/−0，
+      // 绝不是逐轮累计。同一 baseline 再次调用，证明非消费。
+      await writeFile(join(root, 'f.ts'), 'base\nextra\n')
+      const afterTurn2 = await snapshotSessionNetDiff(baseline)
+      expect(afterTurn2.status).toBe('captured')
+      expect(new Map(afterTurn2.files.map((f) => [f.path, f])).get(fPath)).toMatchObject({ added: 1, deleted: 0 })
+
+      // 第三轮：改回与 baseline 完全一致 → 净 diff 为空（真实净改动，不是活动量累计）。
+      await writeFile(join(root, 'f.ts'), 'base\n')
+      const afterTurn3 = await snapshotSessionNetDiff(baseline)
+      expect(afterTurn3.status).toBe('captured')
+      expect(afterTurn3.files).toEqual([])
+
+      await cancelGitTurnDiff(baseline)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 20_000)
+
+  it('会话开始前已有的脏改动折进基线，不计入会话净 diff', async () => {
+    const root = await initRepo('scry-session-predirty-')
+    try {
+      await writeFile(join(root, 'tracked.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      const canonicalRoot = await realpath(root)
+
+      // 会话开始「前」就已存在的脏改动：改了 tracked.txt，并有一个未跟踪文件。
+      await writeFile(join(root, 'tracked.txt'), 'pre-session dirty\n')
+      await writeFile(join(root, 'pre-existing.txt'), 'noise\n')
+
+      const baseline = await beginGitTurnDiff(root)
+      expect(baseline.status).toBe('ready')
+      expect(baseline.baselineClean).toBe(false)
+
+      // 会话中只动另一个新文件。
+      await writeFile(join(root, 'session.txt'), 'hello\n')
+      const net = await snapshotSessionNetDiff(baseline)
+      expect(net.status).toBe('captured')
+      const byPath = new Map(net.files.map((f) => [f.path, f]))
+      expect(byPath.get(join(canonicalRoot, 'session.txt'))).toMatchObject({ added: 1, deleted: 0 })
+      // 会话前的脏改动不出现：它们已在 beforeTree 里被抵消。
+      expect(byPath.has(join(canonicalRoot, 'tracked.txt'))).toBe(false)
+      expect(byPath.has(join(canonicalRoot, 'pre-existing.txt'))).toBe(false)
+
+      await cancelGitTurnDiff(baseline)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 20_000)
+
+  it('覆盖会话内新增未跟踪文件与删除已跟踪文件', async () => {
+    const root = await initRepo('scry-session-untracked-del-')
+    try {
+      await writeFile(join(root, 'keep.txt'), 'keep\n')
+      await writeFile(join(root, 'del.txt'), 'gone\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      const canonicalRoot = await realpath(root)
+
+      const baseline = await beginGitTurnDiff(root)
+      expect(baseline.status).toBe('ready')
+
+      await writeFile(join(root, 'added.txt'), 'a\nb\n')
+      await rm(join(root, 'del.txt'))
+      const net = await snapshotSessionNetDiff(baseline)
+      expect(net.status).toBe('captured')
+      const byPath = new Map(net.files.map((f) => [f.path, f]))
+      expect(byPath.get(join(canonicalRoot, 'added.txt'))).toMatchObject({ added: 2, deleted: 0 })
+      expect(byPath.get(join(canonicalRoot, 'del.txt'))).toMatchObject({ added: 0, deleted: 1 })
+      expect(byPath.has(join(canonicalRoot, 'keep.txt'))).toBe(false)
+
+      await cancelGitTurnDiff(baseline)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 20_000)
+
+  it('baseline 未就绪时降级为对应终态、files 为空且不抛，cancel 安全', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-session-nogit-'))
+    try {
+      const baseline = await beginGitTurnDiff(root) // 非 git 仓
+      expect(baseline.status).toBe('unavailable')
+      const net = await snapshotSessionNetDiff(baseline)
+      expect(net.status).toBe('unavailable')
+      expect(net.files).toEqual([])
+      await expect(cancelGitTurnDiff(baseline)).resolves.toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

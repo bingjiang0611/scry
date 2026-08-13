@@ -392,10 +392,11 @@ async function writeTargetedSnapshotTree(options: {
   return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
 }
 
-async function finishGitTurnDiffImpl(
+async function computeGitTurnDiff(
   capture: GitTurnDiffCapture,
   deadlineMs: number,
-  options: GitTurnDiffFinishOptions
+  options: GitTurnDiffFinishOptions,
+  consume: boolean
 ): Promise<TurnDiffSnapshot> {
   const started = Date.now()
   const afterAt = new Date(started).toISOString()
@@ -407,7 +408,7 @@ async function finishGitTurnDiffImpl(
       [],
       afterAt,
       0,
-      await cleanupCapture(capture)
+      consume ? await cleanupCapture(capture) : 'ok'
     )
   }
   const deadline = started + deadlineMs
@@ -566,7 +567,7 @@ async function finishGitTurnDiffImpl(
     status = reason === 'deadline' ? 'timeout' : 'failed'
   }
   const finishMs = Date.now() - started
-  const cleanup = await cleanupCapture(capture)
+  const cleanup = consume ? await cleanupCapture(capture) : 'ok'
   return terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection)
 }
 
@@ -659,8 +660,21 @@ export function finishGitTurnDiff(
   deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
   options: GitTurnDiffFinishOptions = {}
 ): Promise<TurnDiffSnapshot> {
-  capture.finishPromise ??= finishGitTurnDiffImpl(capture, deadlineMs, options)
+  capture.finishPromise ??= computeGitTurnDiff(capture, deadlineMs, options, true)
   return capture.finishPromise
+}
+
+// 会话级净改动：拿一个「会话第一轮开始前」捕获、且贯穿整个会话存活的 baseline capture，
+// 把当前工作树快照进它自己的 object store，再 diff baseline.beforeTree → 当前树。
+// 与逐轮 finishGitTurnDiff 的关键区别：非消费式——不清理 baseline，可跨轮多次调用，
+// 每次都得到「基线 → 此刻」的真实净 diff（同一行跨轮反复改只净算一次），
+// 会话开始前已有的脏改动已折进 beforeTree 因而自然被排除。
+export function snapshotSessionNetDiff(
+  baseline: GitTurnDiffCapture,
+  deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
+  options: GitTurnDiffFinishOptions = {}
+): Promise<TurnDiffSnapshot> {
+  return computeGitTurnDiff(baseline, deadlineMs, options, false)
 }
 
 export async function cancelGitTurnDiff(capture: GitTurnDiffCapture): Promise<void> {

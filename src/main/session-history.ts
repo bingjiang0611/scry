@@ -119,6 +119,7 @@ function canonicalUserText(text: string): string {
 
 function traceEventKey(event: TraceEvent): string {
   if (event.kind === 'harness' && event.stage === 'turn_diff') return `turn_diff:${event.runId}`
+  if (event.kind === 'harness' && event.stage === 'session_diff') return `session_diff:${event.runId}`
   if (event.toolUseId) return `tool:${event.kind}:${event.stage}:${event.toolUseId}`
   if (event.messageId) return `message:${event.kind}:${event.stage}:${event.messageId}`
   if (event.kind === 'hook' && event.hookId) {
@@ -131,12 +132,14 @@ function traceEventKey(event: TraceEvent): string {
 }
 
 function keepLastTurnDiff(items: TraceEvent[]): TraceEvent[] {
+  const isDiff = (event: TraceEvent): boolean =>
+    event.kind === 'harness' && (event.stage === 'turn_diff' || event.stage === 'session_diff')
   const last = new Map<string, number>()
   items.forEach((event, index) => {
-    if (event.kind === 'harness' && event.stage === 'turn_diff') last.set(event.runId, index)
+    if (isDiff(event)) last.set(`${event.stage}:${event.runId}`, index)
   })
   return items.filter(
-    (event, index) => event.kind !== 'harness' || event.stage !== 'turn_diff' || last.get(event.runId) === index
+    (event, index) => !isDiff(event) || last.get(`${event.stage}:${event.runId}`) === index
   )
 }
 

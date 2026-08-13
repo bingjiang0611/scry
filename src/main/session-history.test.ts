@@ -370,6 +370,43 @@ describe('session history merge', () => {
     })
   })
 
+  it('同一 run 的迟到 session_diff 只保留最后一条，且与 turn_diff 共存', () => {
+    const snapshot = (added: number) => ({
+      version: 1 as const,
+      status: 'captured' as const,
+      files: [{ path: '/repo/a.ts', added, deleted: 0 }],
+      beforeAt: '2026-07-14T00:00:00.000Z',
+      afterAt: '2026-07-14T00:00:01.000Z',
+      captureMs: 2,
+      cleanup: 'ok' as const
+    })
+    const archive: TraceArchive = {
+      version: 2,
+      cwd: '/repo',
+      sessionId: 'sess',
+      providerId: 'codex',
+      turns: [
+        {
+          runId: 'run-1',
+          userText: 'edit',
+          items: [
+            { id: 'td', ts: '2026-07-14T00:00:01.000Z', runId: 'run-1', kind: 'harness', stage: 'turn_diff', turnDiff: snapshot(1) },
+            { id: 'sd-old', ts: '2026-07-14T00:00:02.000Z', runId: 'run-1', kind: 'harness', stage: 'session_diff', turnDiff: snapshot(2) },
+            { id: 'sd-new', ts: '2026-07-14T00:00:03.000Z', runId: 'run-1', kind: 'harness', stage: 'session_diff', turnDiff: snapshot(5) }
+          ],
+          done: true,
+          ts: 1
+        }
+      ]
+    }
+
+    const turns = mergeSessionTurns([], archive)
+    const sessionDiffs = turns[0].items.filter((item) => item.stage === 'session_diff')
+    expect(sessionDiffs).toHaveLength(1)
+    expect(sessionDiffs[0]).toMatchObject({ id: 'sd-new', turnDiff: { files: [{ added: 5 }] } })
+    expect(turns[0].items.filter((item) => item.stage === 'turn_diff')).toHaveLength(1)
+  })
+
   it('四 Provider 历史归档回放时重新识别 MCP 业务失败并补齐工具身份', () => {
     const archive: TraceArchive = {
       version: 2,

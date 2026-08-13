@@ -30,7 +30,7 @@ import {
   takeNextQueuedPrompt
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
-import { AssistantTurn, UserMessage } from './ChatTurn'
+import { AssistantTurn, SessionSummary, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
 import { AppShell } from './AppShell'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
@@ -160,6 +160,50 @@ const renderWelcome = (overrides: Partial<ComponentProps<typeof ChatView>> = {})
   }
   return renderToStaticMarkup(<ChatView {...props} {...overrides} />)
 }
+
+describe('ChatView 会话结束摘要（贴在对话流末尾）', () => {
+  const sessionTurn: Turn = {
+    runId: 'run-1',
+    userText: '改两个文件',
+    done: true,
+    items: [
+      {
+        id: 'sd-1',
+        ts: '2026-08-10T00:00:02.000Z',
+        runId: 'run-1',
+        kind: 'harness',
+        stage: 'session_diff',
+        turnDiff: {
+          version: 1,
+          status: 'captured',
+          files: [{ path: '/repo/src/a.ts', added: 4, deleted: 1 }],
+          repoRoot: '/repo',
+          scope: '.',
+          beforeAt: '2026-08-10T00:00:00.000Z',
+          afterAt: '2026-08-10T00:00:02.000Z',
+          captureMs: 9,
+          cleanup: 'ok'
+        }
+      }
+    ]
+  }
+
+  it('会话空闲且有 onOpenSessionDiff 时展示结束摘要', () => {
+    const html = renderWelcome({ turns: [sessionTurn], busy: false, cwd: '/repo', onOpenSessionDiff: () => {} })
+    expect(html).toContain('本会话改动 · Edited 1 file')
+    expect(html).toContain('src/a.ts')
+  })
+
+  it('运行中不展示结束摘要，避免与流式状态打架', () => {
+    const html = renderWelcome({ turns: [sessionTurn], busy: true, cwd: '/repo', onOpenSessionDiff: () => {} })
+    expect(html).not.toContain('本会话改动 · Edited')
+  })
+
+  it('没有 onOpenSessionDiff 时不渲染摘要', () => {
+    const html = renderWelcome({ turns: [sessionTurn], busy: false, cwd: '/repo' })
+    expect(html).not.toContain('本会话改动 · Edited')
+  })
+})
 
 describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍可组合渲染', () => {
   const html = renderToStaticMarkup(<App />)
@@ -984,6 +1028,38 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(editHtml).toContain('不是本轮 Git 净改动')
     // action-level 计数不得改写卡片语义：标题仍是工具名，不冒充「本轮改动」
     expect(editHtml).not.toContain('本轮改动')
+  })
+
+  it('SessionSummary 渲染会话结束摘要：Edited N files + 真实净 +/− + 文件列表 + Review', () => {
+    const html = renderToStaticMarkup(
+      <SessionSummary
+        onOpenDiff={() => {}}
+        sessionDiff={{
+          version: 1,
+          status: 'captured',
+          files: [
+            { path: '/repo/src/a.ts', added: 5, deleted: 3 },
+            { path: '/repo/assets/logo.png', added: 0, deleted: 0, binary: true },
+            { path: '/repo/src/b.ts', added: 2, deleted: 0 }
+          ],
+          repoRoot: '/repo',
+          scope: '.',
+          beforeAt: '2026-08-10T00:00:00.000Z',
+          afterAt: '2026-08-10T00:00:05.000Z',
+          captureMs: 12,
+          cleanup: 'ok'
+        }}
+      />
+    )
+    expect(html).toContain('本会话改动 · Edited 3 files')
+    // 净增删直接取快照本身（+7/−3），不是逐轮累计
+    expect(html).toContain('>+7<')
+    expect(html).toContain('>−3<')
+    expect(html).toContain('src/a.ts')
+    expect(html).toContain('src/b.ts')
+    expect(html).toContain('binary')
+    expect(html).toContain('Review')
+    expect(html).toContain('class="files-summary diff session-summary"')
   })
 
   it('Edit 卡只在轮次结束且该文件真的在本轮快照里时才接到 Diff 面板', () => {
@@ -2979,13 +3055,13 @@ describe('OverviewPanel 本会话改动：来自各轮 turnDiff 累计，不冒�
         onOpenSessionDiff={() => {}}
       />
     )
-    expect(html).toContain('本会话改动（2 轮快照累计）')
+    expect(html).toContain('本会话活动（2 轮快照累计）')
     expect(html).toContain('2 files · +10 −5')
     expect(html).toContain('src/a.ts')
     expect(html).toContain('>+8<')
     expect(html).toContain('>−5<')
     expect(html).toContain('2 轮')
-    expect(html).toContain('+/− 是各轮累计活动量，不是当前工作树净改动')
+    expect(html).toContain('+/− 是累计活动量，不是当前工作树净改动')
     expect(html).toContain('gdrow click')
   })
 
@@ -3001,7 +3077,7 @@ describe('OverviewPanel 本会话改动：来自各轮 turnDiff 累计，不冒�
         onOpenSessionDiff={() => {}}
       />
     )
-    expect(html).toContain('本会话改动（2 轮快照累计）')
+    expect(html).toContain('本会话活动（2 轮快照累计）')
     expect(html).toContain('2 files · +10 −5')
     expect(html).toContain('工作区未提交改动（vs HEAD）')
     expect(html).toContain('1 files · +4 −5')
@@ -3011,7 +3087,7 @@ describe('OverviewPanel 本会话改动：来自各轮 turnDiff 累计，不冒�
     const html = renderToStaticMarkup(
       <OverviewPanel turns={turns} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
-    expect(html).toContain('本会话改动（2 轮快照累计）')
+    expect(html).toContain('本会话活动（2 轮快照累计）')
     expect(html).not.toContain('gdrow click')
   })
 })
