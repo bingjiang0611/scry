@@ -11,6 +11,7 @@ import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
+import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker } from './session-diff'
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
@@ -27,7 +28,7 @@ import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore,
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { migrateLegacyUserData } from './user-data-migration'
-import type { ActiveRun, TraceEvent, TurnDiffSnapshot } from '../shared/trace'
+import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffSnapshot } from '../shared/trace'
 import {
   normalizeAgentStartRequest,
   runTerminationHint,
@@ -41,7 +42,7 @@ import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
 import { ProviderOperationGate } from './provider-operation-gate'
-import { appendCoalescedTrace } from './live-trace'
+import { appendCoalescedTrace, upsertTraceById } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import {
   isManagedRecorderProvider,
@@ -199,16 +200,11 @@ function attachmentPrompt(prompt: string, attachments: PreparedAttachment[]): st
 const sessionByContext = new Map<string, string>()
 const sessionRevisionByContext = new Map<string, number>()
 const sessionAliasesByContext = new Map<string, Map<string, string>>()
-// 会话级净 diff 的持久 baseline：每个 (provider,cwd) 上下文只保留一份「会话第一轮开始前」
-// 捕获的 git 快照，贯穿整个会话存活（其 temp objectDir 不随逐轮 finish 清理）。
-// revision 记录创建时的 contextRevision，切换/adopt 后 revision 不符即视为失效，绝不串会话。
-const sessionDiffBaselineByContext = new Map<string, { revision: number; capture: Promise<GitTurnDiffCapture> }>()
-const discardSessionBaseline = (key: string): void => {
-  const entry = sessionDiffBaselineByContext.get(key)
-  if (!entry) return
-  sessionDiffBaselineByContext.delete(key)
-  void entry.capture.then(cancelGitTurnDiff).catch(() => undefined)
-}
+// 会话级净 diff 的持久 baseline registry：每个 (provider,cwd) 上下文一份贯穿会话的 Git 快照。
+// revision + 原生 session id 双重锚定，绝不串会话；找不到可复用基线时当场重锚并标 origin=resumed，
+// 不再像旧实现那样在 resume/loadSession 之后彻底不落 session_diff。
+const sessionDiffBaselines = new SessionDiffBaselineRegistry()
+const discardSessionBaseline = (key: string): void => sessionDiffBaselines.discard(key)
 const contextAdmission = new ContextAdmission()
 const recordingBlockedSessions = new Map<string, string>()
 const providerOperationGate = new ProviderOperationGate()
@@ -708,10 +704,14 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
   turn: TraceArchiveTurn
   timing: ManagedTurnTiming | null
 } {
-  const persistedItems = args.items.map((event) => {
-    const { hookConfiguredCommands: _currentConfig, ...persisted } = event
-    return persisted
-  })
+  // 运行中 Diff 预览只服务实时 UI：它是终态同一条 Git capture 的临时重算，
+  // 落盘会在 archive 对账里重复计入 diff 证据，也会让重启后回放出过期临时快照。
+  const persistedItems = args.items
+    .filter((event) => !(event.kind === 'harness' && isDiffPreviewStage(event.stage)))
+    .map((event) => {
+      const { hookConfiguredCommands: _currentConfig, ...persisted } = event
+      return persisted
+    })
   const turnEvidence = aggregateTurnEvidence({
     userText: args.userText,
     events: persistedItems,
@@ -1713,6 +1713,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if (resume || runState.externalSessionId) return
     appSessionStore().remove({ providerId, cwd: catalogCwd, externalSessionId: runId })
   }
+  // emit 早于 diffPreviewer 构造，这里留一个前向钩子；构造完成后接上真正的预览刷新。
+  let notifyDiffChange: () => void = () => {}
+  // 结构化 write/edit 的 start → tool_result 关联器：预览只跟着「已落盘」的结果走。
+  const writeCompletions = new WriteCompletionTracker()
   const emit = (rawEvent: TraceEvent): void => {
     const ev = hookConfig ? attachConfiguredHookCommands(rawEvent, hookConfig) : rawEvent
     turnChangeJournal?.record(ev)
@@ -1725,6 +1729,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     }
     appendCoalescedTrace(runState.items, ev)
     if (runs.isFocused(runId)) queueTrace(ev) // 后台 run 继续归档，只把当前会话 trace 推给 UI。
+    // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
+    // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
+    if (writeCompletions.observe(ev)) notifyDiffChange()
   }
   emit({
     id: `c-${evSeq++}`,
@@ -1778,18 +1785,56 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     throw error
   }
   const turnDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
-  // 会话级 baseline：仅在真正新会话（无 resume）时（重）建，且必须在首轮任何文件改动前捕获。
-  // resume/续接不重建，保留「会话第一轮开始前」的原始基线，否则会把之前几轮误当成会话前脏改动。
+  // 会话级 baseline 必须在本轮任何文件改动前就位。ensure() 命中同 revision + 同 session 的既有基线时
+  // 复用「会话第一轮开始前」的原始快照（resume/续接不重锚，否则会把前几轮误当成会话前脏改动）；
+  // 恢复/选择会话/应用重启后进程内没有基线时当场重锚并标 origin=resumed，照实说明只覆盖「自重锚以来」。
   let sessionBaselineReady: Promise<unknown> = Promise.resolve()
-  if (cwd && contextKey && !resume) {
-    discardSessionBaseline(contextKey)
-    const capture = beginGitTurnDiff(cwd)
-    sessionDiffBaselineByContext.set(contextKey, { revision: contextRevision, capture })
-    sessionBaselineReady = capture.catch(() => undefined)
+  let sessionBaselineOrigin: TurnDiffBaselineOrigin | undefined
+  let sessionBaselineCapture: Promise<GitTurnDiffCapture> | null = null
+  if (cwd && contextKey) {
+    const baseline = sessionDiffBaselines.ensure({
+      key: contextKey,
+      revision: contextRevision,
+      cwd,
+      ...(resume ? { sessionId: resume } : {})
+    })
+    sessionBaselineOrigin = baseline.origin
+    sessionBaselineCapture = baseline.capture
+    sessionBaselineReady = baseline.capture.catch(() => undefined)
   }
+  // 运行中预览：用本轮 capture 与会话基线做非消费式重算，让长轮次里 Files / 会话改动行数 / Diff
+  // 三处都有真实 Git 数据可看，并被明确标成临时快照。终态一发布即封口，预览不会覆盖或倒退终态。
+  const diffPreviewer = new RunDiffPreviewer({
+    runId,
+    turnCapture: cwd ? turnDiffCapture : null,
+    sessionCapture: sessionBaselineCapture,
+    ...(sessionBaselineOrigin ? { sessionBaselineOrigin } : {}),
+    hints: () => turnChangeJournal?.snapshot() ?? {},
+    emit: ({ stage, id, snapshot }) => {
+      const event: TraceEvent = {
+        id,
+        ts: new Date().toISOString(),
+        runId,
+        kind: 'harness',
+        stage,
+        providerId,
+        runtimeProvider,
+        turnDiff: snapshot
+      }
+      upsertTraceById(runState.items, event)
+      if (runs.isFocused(runId)) queueTrace(event)
+    },
+    onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
+  })
+  notifyDiffChange = () => void diffPreviewer.notifyChange()
   let turnDiffPromise: Promise<void> | null = null
   const finalizeTurnDiff = (): Promise<void> => {
-    turnDiffPromise ??= turnDiffCapture
+    // 终态第一次进入收口就把所有 scope 封口，再等全局 idle：idle 等的是全部在途预览链，
+    // 只封 turn 的话 session 链还能继续续 trailing，收口要么白等，要么让迟到的预览
+    // 落到终态之后。封口后算完的预览一律丢弃——终态覆盖预览，不倒退。
+    diffPreviewer.sealAll()
+    turnDiffPromise ??= diffPreviewer.idle()
+      .then(() => turnDiffCapture)
       .then((capture) => finishGitTurnDiff(capture, undefined, turnChangeJournal?.snapshot()))
       .then((turnDiff) => {
         const event: TraceEvent = {
@@ -1803,7 +1848,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           turnDiff
         }
         appendCoalescedTrace(runState.items, event)
-        if (runs.isFocused(runId)) queueTrace(event)
+        // 终态在 done=true 之后才算完，isFocused 此刻已是 false；用 isViewed 判定
+        // 「renderer 是否还在看这个 run」，否则归档里有 diff 而当前 UI 永远收不到。
+        if (runs.isViewed(runId)) queueTrace(event)
         if (turnDiff.status === 'failed' || turnDiff.status === 'timeout') {
           console.warn('[scry] turn diff capture degraded:', runId, turnDiff.reason, turnDiff.captureMs)
         }
@@ -1839,7 +1886,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     return turnDiffPromise
   }
   const cancelTurnDiff = (): Promise<void> => {
-    turnDiffPromise ??= turnDiffCapture
+    diffPreviewer.sealAll()
+    turnDiffPromise ??= diffPreviewer.idle()
+      .then(() => turnDiffCapture)
       .then((capture) => cancelGitTurnDiff(capture))
       .catch((error) => console.warn('[scry] turn diff cancellation failed:', runId, error))
     return turnDiffPromise
@@ -1850,9 +1899,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   let sessionDiffPromise: Promise<void> | null = null
   const finalizeSessionDiff = (): Promise<void> => {
     if (!cwd || !contextKey) return Promise.resolve()
+    // 同 finalizeTurnDiff：终态收口先全封口，再等全局 idle，不给任何 scope 留续 trailing 的机会。
+    diffPreviewer.sealAll()
     sessionDiffPromise ??= (async () => {
-      const entry = sessionDiffBaselineByContext.get(contextKey)
-      if (!entry || entry.revision !== contextRevision) return
+      await diffPreviewer.idle()
+      const entry = sessionDiffBaselines.get(contextKey, contextRevision, observedSessionId ?? resume)
+      if (!entry) return
       let baseline: GitTurnDiffCapture
       try {
         baseline = await entry.capture
@@ -1875,10 +1927,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         stage: 'session_diff',
         providerId,
         runtimeProvider,
-        turnDiff: snapshot
+        turnDiff: { ...snapshot, baseline: entry.origin }
       }
       appendCoalescedTrace(runState.items, event)
-      if (runs.isFocused(runId)) queueTrace(event)
+      if (runs.isViewed(runId)) queueTrace(event)
     })().catch((error) => console.warn('[scry] session diff finalization failed:', runId, error))
     return sessionDiffPromise
   }
@@ -1889,6 +1941,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if ((sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
       sessionByContext.set(contextKey, sessionId)
       sessionAliasesByContext.set(contextKey, new Map([[runId, sessionId]]))
+      // 首轮建基线时还拿不到原生 session id；现在补上，之后别的会话认不走这份基线。
+      sessionDiffBaselines.bind(contextKey, contextRevision, sessionId)
     }
     runState.sessionId = sessionId
     runState.externalSessionId = sessionId
@@ -1997,8 +2051,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       if (!contextKey) return
       bumpSessionRevision(contextKey)
       contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
-      const sessionBaseline = sessionDiffBaselineByContext.get(contextKey)
-      if (sessionBaseline) sessionBaseline.revision = contextRevision
+      // 基线仍描述同一份工作树，跟着新 revision/session id 走，不重锚。
+      sessionDiffBaselines.rebind(contextKey, contextRevision, observedSessionId)
       if (observedSessionId) sessionByContext.set(contextKey, observedSessionId)
       else sessionByContext.delete(contextKey)
     },
@@ -2537,7 +2591,7 @@ app.on('before-quit', (event) => {
   isShuttingDown = true
   quitCleanupStarted = true
   closeAllTerminals()
-  for (const key of [...sessionDiffBaselineByContext.keys()]) discardSessionBaseline(key)
+  sessionDiffBaselines.disposeAll()
   const cleanup = settleRunsForShutdown(runs.unsettledControls(), {
     cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),

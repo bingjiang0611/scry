@@ -59,6 +59,10 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
   const deleted = turnDiff.files.reduce((sum, file) => sum + file.deleted, 0)
   const hasTransientPatch = turnDiff.files.some((file) => file.patchStatus != null)
   const sessionScope = review.scope === 'session'
+  const preview = review.preview === true
+  // baseline='resumed' 表示会话首轮前的基线不在本次运行内，是恢复该会话时重锚的：
+  // 净 diff 只覆盖「自恢复以来」，不能冒充整段会话。
+  const sessionRangeText = turnDiff.baseline === 'resumed' ? '自恢复以来 → 当前' : '第一轮前基线 → 当前'
 
   return (
     <aside className="panel diff-review-panel" aria-label={sessionScope ? '本会话净改动 Review' : '本轮改动 Review'}>
@@ -68,9 +72,9 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
           <div>
             <b>Review</b>
             {sessionScope ? (
-              <span>本会话净改动（第一轮前基线 → 当前）</span>
+              <span>本会话净改动（{sessionRangeText}）{preview ? ' · 运行中预览' : ''}</span>
             ) : (
-              <span title={review.runId}>本轮改动 · {review.runId}</span>
+              <span title={review.runId}>{preview ? '本轮改动（运行中预览）' : '本轮改动'} · {review.runId}</span>
             )}
           </div>
         </div>
@@ -78,6 +82,12 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
           <Icon name="x" />
         </button>
       </header>
+
+      {preview && (
+        <div className="diff-review-notice warn">
+          <Icon name="alert" /> 运行中的临时 Git 快照，本轮结束后会被终态覆盖。
+        </div>
+      )}
 
       <div className="diff-review-summary">
         <div className="diff-review-prompt" title={review.userText}>

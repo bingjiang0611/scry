@@ -35,7 +35,7 @@ import {
   toolMeta
 } from '../format'
 import type { FileRow, HookGroup, HookScriptRow, HookSummary, Turn } from '../format'
-import { displayDiffPath, editActionLineCounts, turnDiffOf } from '../turn-diff'
+import { displayDiffPath, editActionLineCounts, turnDiffViewOf } from '../turn-diff'
 
 function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
   const event = turn.items.find((item) => item.providerId || item.runtimeProvider)
@@ -451,10 +451,13 @@ function SubagentBlock({
 function FilesSummary({
   structured,
   turnDiff,
+  preview = false,
   onOpenDiff
 }: {
   structured: FileRow[]
   turnDiff?: TurnDiffSnapshot
+  /** true = 运行中的临时 Git 快照，本轮结束后会被终态取代。 */
+  preview?: boolean
   onOpenDiff?: (initialPath?: string) => void
 }) {
   const diffMode = turnDiff?.status === 'captured'
@@ -483,10 +486,12 @@ function FilesSummary({
           onOpenDiff()
         }}
         title={diffMode
-          ? '本轮开始/结束 Git 工作树快照的净变化；同目录外部并发修改也会计入，ignored 文件不统计'
+          ? preview
+            ? '运行中的临时 Git 快照：本轮开始 → 此刻的净变化，本轮结束后会被终态快照取代'
+            : '本轮开始/结束 Git 工作树快照的净变化；同目录外部并发修改也会计入，ignored 文件不统计'
           : `${structuredScope}${turnDiff ? `；精确行数不可用：${turnDiff.reason ?? turnDiff.status}` : ''}`}
       >
-        <Icon name="file" /> {diffMode ? '本轮改动' : '本轮文件（工具证据）'}
+        <Icon name="file" /> {diffMode ? (preview ? '本轮改动（运行中预览）' : '本轮改动') : '本轮文件（工具证据）'}
         {diffMode ? (
           <>
             <span className="fh-file-count">{diffFiles.length} files</span>
@@ -576,14 +581,28 @@ function fileWord(count: number): string {
 // 权威来源是 main 落的 session_diff 快照，数字直接取快照每文件净增删，不做逐轮累计。
 export function SessionSummary({
   sessionDiff,
+  preview = false,
   onOpenDiff
 }: {
   sessionDiff: TurnDiffSnapshot
+  /** true = 运行中的临时净 diff 快照，本轮结束后会被终态取代。 */
+  preview?: boolean
   onOpenDiff: (initialPath?: string) => void
 }) {
   const files = sessionDiff.files
   const added = files.reduce((sum, file) => sum + file.added, 0)
   const deleted = files.reduce((sum, file) => sum + file.deleted, 0)
+  const resumed = sessionDiff.baseline === 'resumed'
+  const heading = preview
+    ? '本会话改动（运行中预览）'
+    : resumed
+      ? '本会话改动（自恢复以来）'
+      : '本会话改动'
+  const title = resumed
+    ? '会话首轮前的基线不在本次运行内，净改动只覆盖「自在 Scry 中恢复该会话以来」到当前的真实 Git 变化，不含更早的历史改动'
+    : preview
+      ? '运行中的临时净 diff：会话第一轮开始前基线 → 此刻，本轮结束后会被终态取代'
+      : '整段会话从第一轮开始前基线到当前的真实 Git 净改动；会话开始前已有的脏改动不计入'
   return (
     <details className="files-summary diff session-summary" aria-label="本会话改动摘要" open>
       <summary
@@ -591,9 +610,9 @@ export function SessionSummary({
           event.preventDefault()
           onOpenDiff()
         }}
-        title="整段会话从第一轮开始前基线到当前的真实 Git 净改动；会话开始前已有的脏改动不计入"
+        title={title}
       >
-        <Icon name="file" /> 本会话改动 · Edited {fileWord(files.length)}
+        <Icon name="file" /> {heading} · Edited {fileWord(files.length)}
         <span className="fh-file-count">{fileWord(files.length)}</span>
         <span className="fh-count diff-count">
           <b className="add">+{added}</b>
@@ -1137,7 +1156,9 @@ function AssistantTurnImpl({
       })
   }, [turn.items])
   const result = resultOf({ items })
-  const turnDiff = turnDiffOf(items)
+  const turnDiffView = turnDiffViewOf(items)
+  const turnDiff = turnDiffView?.turnDiff
+  const turnDiffPreview = turnDiffView?.preview === true
   const diffPaths = useMemo(
     () => new Set(turnDiff?.status === 'captured' ? turnDiff.files.map((file) => file.path) : []),
     [turnDiff]
@@ -1250,6 +1271,7 @@ function AssistantTurnImpl({
         <FilesSummary
           structured={structured}
           turnDiff={turnDiff}
+          preview={turnDiffPreview}
           onOpenDiff={turnDiff && onOpenDiff ? (initialPath) => onOpenDiff(turn, turnDiff, initialPath) : undefined}
         />
       )}

@@ -16,7 +16,7 @@ import {
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { normalizeTurnDiffSnapshot, type TraceEvent } from '../shared/trace'
+import { isDiffSnapshotStage, normalizeTurnDiffSnapshot, type TraceEvent } from '../shared/trace'
 import type { AgentInputAttachment } from '../shared/runtime'
 import { providerIdForRuntime, type RuntimeProvider } from '../shared/runtime'
 import type { ProviderId } from '../shared/provider'
@@ -330,7 +330,7 @@ function normalizeArchive(archive: TraceArchive): TraceArchive {
     ...turn,
     items: Array.isArray(turn.items)
       ? turn.items.map((event) => {
-          if (event.stage !== 'turn_diff' && event.stage !== 'session_diff') return event
+          if (!isDiffSnapshotStage(event.stage)) return event
           const turnDiff = normalizeTurnDiffSnapshot(event.turnDiff)
           return {
             ...event,

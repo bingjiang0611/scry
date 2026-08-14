@@ -56,6 +56,16 @@ export class RunRegistry<
     return this.focusedRunId === runId && Boolean(state && !state.done)
   }
 
+  /**
+   * renderer 当前是否还在看这个 run——终态之后也算。终态 enrichment（turn_diff /
+   * session_diff）是在 done=true 之后才算完的，那一刻 isFocused 已经是 false，
+   * 但 registry entry 要到 runtime promise settle 才移除，焦点身份仍然有效。
+   * 仍然要求它是被聚焦的那个 run：后台 run 与已切走的会话一律为 false。
+   */
+  isViewed(runId: string): boolean {
+    return this.focusedRunId === runId && this.entries.has(runId)
+  }
+
   focus(runId: string | null): boolean {
     if (runId == null) {
       this.focusedRunId = null

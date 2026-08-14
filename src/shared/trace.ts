@@ -102,6 +102,33 @@ export interface DiffFile {
 
 export type TurnDiffStatus = 'captured' | 'unavailable' | 'timeout' | 'failed'
 export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error'
+
+// Diff 快照的四个 harness stage。`*_preview` 是运行中的临时快照（同一 Git capture 的非消费式重算），
+// 终态 `turn_diff` / `session_diff` 一到达就在展示上取代它，且不写入会话 archive。
+export const TURN_DIFF_STAGE = 'turn_diff'
+export const SESSION_DIFF_STAGE = 'session_diff'
+export const TURN_DIFF_PREVIEW_STAGE = 'turn_diff_preview'
+export const SESSION_DIFF_PREVIEW_STAGE = 'session_diff_preview'
+
+export function isDiffSnapshotStage(stage: string): boolean {
+  return (
+    stage === TURN_DIFF_STAGE ||
+    stage === SESSION_DIFF_STAGE ||
+    stage === TURN_DIFF_PREVIEW_STAGE ||
+    stage === SESSION_DIFF_PREVIEW_STAGE
+  )
+}
+
+export function isDiffPreviewStage(stage: string): boolean {
+  return stage === TURN_DIFF_PREVIEW_STAGE || stage === SESSION_DIFF_PREVIEW_STAGE
+}
+
+/**
+ * 会话净 diff 的基线来源：`session_start` = 会话第一轮开始前捕获的原始基线；
+ * `resumed` = 该基线在本进程内不存在（恢复/选择会话/重启后）而当场重锚，
+ * 净 diff 只覆盖「自重锚以来」，UI 必须照实说明，不得冒充整段会话。
+ */
+export type TurnDiffBaselineOrigin = 'session_start' | 'resumed'
 export type TurnDiffPatchStatus = 'captured' | 'truncated' | 'binary' | 'unavailable'
 export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget'
 export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
@@ -128,6 +155,8 @@ export interface TurnDiffSnapshot {
   captureMs: number
   cleanup: 'ok' | 'failed'
   collection?: TurnDiffCollection
+  /** 仅 session_diff / session_diff_preview 携带：净 diff 的基线是会话首轮前还是恢复后重锚。 */
+  baseline?: TurnDiffBaselineOrigin
 }
 
 function nonNegativeInteger(value: unknown): number | null {
@@ -202,6 +231,9 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
           ...(fallbackReason ? { fallbackReason } : {})
         }
       : undefined
+  const baseline = raw.baseline === 'session_start' || raw.baseline === 'resumed'
+    ? (raw.baseline as TurnDiffBaselineOrigin)
+    : undefined
   return {
     version: 1,
     status: raw.status as TurnDiffStatus,
@@ -213,7 +245,8 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     afterAt: raw.afterAt,
     captureMs,
     cleanup: raw.cleanup,
-    ...(collection ? { collection } : {})
+    ...(collection ? { collection } : {}),
+    ...(baseline ? { baseline } : {})
   }
 }
 

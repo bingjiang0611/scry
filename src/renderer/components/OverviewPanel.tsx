@@ -644,6 +644,28 @@ export function OverviewPanel({
   const diffDel = gitDiff.reduce((s, d) => s + d.deleted, 0)
   const sessionNetDiff = useMemo(() => sessionNetDiffSummary(turns), [turns])
   const sessionActivity = useMemo(() => sessionDiffSummary(turns), [turns])
+  const sessionNetResumed = sessionNetDiff?.baseline === 'resumed'
+  const sessionNetHeading = sessionNetDiff
+    ? sessionNetDiff.preview
+      ? '本会话净改动（运行中预览）'
+      : sessionNetResumed
+        ? '本会话净改动（自恢复以来）'
+        : '本会话净改动'
+    : `本会话活动（${sessionActivity.turnCount} 轮快照累计）`
+  const sessionNetSource = sessionNetDiff
+    ? sessionNetDiff.preview
+      ? '来源=运行中临时 Git 快照（基线 → 此刻）；本轮结束后由终态取代'
+      : sessionNetResumed
+        ? '来源=恢复会话时重锚的 Git 基线 → 当前工作树；+/− 只覆盖自恢复以来的净改动'
+        : '来源=会话首轮前 Git 基线 → 当前工作树；+/− 是真实净改动'
+    : '来源=旧会话每轮 Git 工作树快照；+/− 是累计活动量，不是当前工作树净改动'
+  const sessionNetTitle = sessionNetDiff
+    ? sessionNetDiff.preview
+      ? '运行中的临时 Git 净改动快照；点击在右侧 Diff 中审阅，本轮结束后由终态取代'
+      : sessionNetResumed
+        ? '会话首轮前基线不在本次运行内；净改动只覆盖自在 Scry 中恢复该会话以来的真实 Git 变化，点击在右侧 Diff 中审阅'
+        : '本会话从第一轮开始前基线到当前的真实 Git 净改动；点击在右侧 Diff 中审阅'
+    : '旧会话仅有逐轮快照累计活动量：同一行跨轮反复改会重复计入，不等于工作树净改动'
   const sessionDiffRepoRoot = useMemo(() => {
     for (let index = turns.length - 1; index >= 0; index--) {
       const root = turns[index].items.find((item) => item.turnDiff?.repoRoot)?.turnDiff?.repoRoot
@@ -1464,12 +1486,10 @@ export function OverviewPanel({
               <button
                 type="button"
                 className="panel-section-heading"
-                title={sessionNetDiff
-                  ? '本会话从第一轮开始前基线到当前的真实 Git 净改动；点击在右侧 Diff 中审阅'
-                  : '旧会话仅有逐轮快照累计活动量：同一行跨轮反复改会重复计入，不等于工作树净改动'}
+                title={sessionNetTitle}
                 onClick={() => onOpenSessionDiff()}
               >
-                {sessionNetDiff ? '本会话净改动' : `本会话活动（${sessionActivity.turnCount} 轮快照累计）`}
+                {sessionNetHeading}
                 <span className="more">
                   {(sessionNetDiff?.files ?? sessionActivity.files).length} files · +{sessionNetDiff?.added ?? sessionActivity.added} −{sessionNetDiff?.deleted ?? sessionActivity.deleted}{' '}
                   <Icon name="chevronRight" />
@@ -1477,7 +1497,7 @@ export function OverviewPanel({
               </button>
             ) : (
               <>
-                {sessionNetDiff ? '本会话净改动' : `本会话活动（${sessionActivity.turnCount} 轮快照累计）`}
+                {sessionNetHeading}
                 <span className="more">
                   {(sessionNetDiff?.files ?? sessionActivity.files).length} files · +{sessionNetDiff?.added ?? sessionActivity.added} −{sessionNetDiff?.deleted ?? sessionActivity.deleted}
                 </span>
@@ -1515,9 +1535,7 @@ export function OverviewPanel({
             )
           )}
           <div className="psrc">
-            {sessionNetDiff
-              ? '来源=会话首轮前 Git 基线 → 当前工作树；+/− 是真实净改动'
-              : '来源=旧会话每轮 Git 工作树快照；+/− 是累计活动量，不是当前工作树净改动'}
+            {sessionNetSource}
           </div>
         </div>
       )}
