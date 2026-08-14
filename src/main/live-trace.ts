@@ -1,5 +1,15 @@
 import type { TraceEvent } from '../shared/trace'
 
+/**
+ * 按 id 原地替换或追加。运行中 Diff 预览用固定 id 反复发布，必须替换而不是堆积
+ * （renderer 的 applyTraceBatch 对同 id 事件同样是原地替换，两侧语义一致）。
+ */
+export function upsertTraceById(items: TraceEvent[], event: TraceEvent): void {
+  const index = items.findIndex((candidate) => candidate.id === event.id)
+  if (index >= 0) items[index] = { ...event }
+  else items.push({ ...event })
+}
+
 export function appendCoalescedTrace(items: TraceEvent[], event: TraceEvent): void {
   if (
     event.kind === 'model' && event.stage === 'text' &&

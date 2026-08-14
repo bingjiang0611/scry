@@ -152,6 +152,11 @@ export interface GitTurnDiffCapture {
   pathspec?: string[]
   excludedPaths?: string[]
   finishPromise?: Promise<TurnDiffSnapshot>
+  /**
+   * 同一个 capture 上所有重算的串行链。运行中预览与终态都用 capture.tempDir 下同名的
+   * after.index / discovery.index，并发会互相踩锁；一律排队执行。
+   */
+  opChain?: Promise<void>
 }
 
 export interface GitTurnDiffFinishOptions {
@@ -655,12 +660,20 @@ async function captureTurnPatches(
   return out
 }
 
+// 同一个 capture 上的重算一律排队：预览与终态共用 tempDir 下的隔离 index，
+// 并发会互相踩 index.lock，得到假的空 diff 或 git_error。
+function serializeCaptureOp<T>(capture: GitTurnDiffCapture, task: () => Promise<T>): Promise<T> {
+  const queued = (capture.opChain ?? Promise.resolve()).then(task, task)
+  capture.opChain = queued.then(() => undefined, () => undefined)
+  return queued
+}
+
 export function finishGitTurnDiff(
   capture: GitTurnDiffCapture,
   deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
   options: GitTurnDiffFinishOptions = {}
 ): Promise<TurnDiffSnapshot> {
-  capture.finishPromise ??= computeGitTurnDiff(capture, deadlineMs, options, true)
+  capture.finishPromise ??= serializeCaptureOp(capture, () => computeGitTurnDiff(capture, deadlineMs, options, true))
   return capture.finishPromise
 }
 
@@ -674,7 +687,24 @@ export function snapshotSessionNetDiff(
   deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
   options: GitTurnDiffFinishOptions = {}
 ): Promise<TurnDiffSnapshot> {
-  return computeGitTurnDiff(baseline, deadlineMs, options, false)
+  return serializeCaptureOp(baseline, () => computeGitTurnDiff(baseline, deadlineMs, options, false))
+}
+
+/**
+ * 运行中预览：对同一个 capture 做非消费式重算，得到「基线 → 此刻」的临时净 diff。
+ * 一旦终态重算已经开始（finishPromise 存在），capture 的 tempDir 归终态所有并会被消费，
+ * 此时返回 null——调用方必须丢弃这条迟到预览，绝不能用它覆盖已发布的终态。
+ */
+export function previewGitTurnDiff(
+  capture: GitTurnDiffCapture,
+  deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
+  options: GitTurnDiffFinishOptions = {}
+): Promise<TurnDiffSnapshot | null> {
+  if (capture.finishPromise) return Promise.resolve(null)
+  return serializeCaptureOp(capture, async () => {
+    if (capture.finishPromise) return null
+    return computeGitTurnDiff(capture, deadlineMs, options, false)
+  })
 }
 
 export async function cancelGitTurnDiff(capture: GitTurnDiffCapture): Promise<void> {

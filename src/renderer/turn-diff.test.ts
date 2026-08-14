@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import type { TraceEvent, TurnDiffSnapshot } from '@shared/trace'
+import {
+  SESSION_DIFF_PREVIEW_STAGE,
+  TURN_DIFF_PREVIEW_STAGE,
+  type TraceEvent,
+  type TurnDiffSnapshot
+} from '@shared/trace'
 import type { Turn } from './format'
 import {
   displayDiffPath,
@@ -7,9 +12,11 @@ import {
   resolveTurnDiffReview,
   sessionDiffOf,
   sessionDiffSummary,
+  sessionDiffViewOf,
   sessionNetDiffReview,
   sessionNetDiffSummary,
-  turnDiffOf
+  turnDiffOf,
+  turnDiffViewOf
 } from './turn-diff'
 
 function snapshot(overrides: Partial<TurnDiffSnapshot> = {}): TurnDiffSnapshot {
@@ -245,13 +252,13 @@ describe('sessionNetDiffReview（右栏会话净 diff 入口）', () => {
     expect(sessionNetDiffReview(turns)).toBeNull()
   })
 
-  it('最后一轮缺少 session_diff 时不沿用历史快照，避免恢复会话后展示过期状态', () => {
+  it('最后一轮还没落 session_diff 时回溯到最近一条权威快照，不再整轮空白（修复运行中纵览为空）', () => {
     const turns = [
       sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }),
-      turn('r2', '恢复后继续', snapshot({ files: [{ path: '/repo/b.ts', added: 1, deleted: 0 }] }))
+      turn('r2', '长轮次运行中', snapshot({ files: [{ path: '/repo/b.ts', added: 1, deleted: 0 }] }))
     ]
-    expect(sessionNetDiffReview(turns)).toBeNull()
-    expect(sessionNetDiffSummary(turns)).toBeNull()
+    expect(sessionNetDiffReview(turns)?.runId).toBe('r1')
+    expect(sessionNetDiffSummary(turns)?.files).toEqual([{ path: '/repo/a.ts', added: 1, deleted: 0 }])
   })
 
   it('没有任何 session_diff 时返回 null，不退回 turn_diff', () => {
@@ -279,12 +286,84 @@ describe('sessionNetDiffSummary（结束摘要 = 快照本身的真实净改动�
         { path: '/repo/b.ts', added: 2, deleted: 2 }
       ],
       added: 5,
-      deleted: 2
+      deleted: 2,
+      preview: false
     })
   })
 
   it('没有可审阅 session_diff 时返回 null，不编空摘要', () => {
     expect(sessionNetDiffSummary([turn('r1', '一', snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }))])).toBeNull()
     expect(sessionNetDiffSummary([sessionTurn('r1', '一', { session: snapshot({ status: 'failed', reason: 'git_error', files: [] }) })])).toBeNull()
+  })
+})
+
+function previewTurn(
+  runId: string,
+  userText: string,
+  opts: { turnPreview?: TurnDiffSnapshot; sessionPreview?: TurnDiffSnapshot; turnFinal?: TurnDiffSnapshot; sessionFinal?: TurnDiffSnapshot } = {}
+): Turn {
+  const items: TraceEvent[] = [
+    { id: `${runId}-text`, ts: '2026-08-10T00:00:00.000Z', runId, kind: 'model', stage: 'text', text: 'ok' }
+  ]
+  if (opts.turnPreview) items.push({ id: `${runId}-tp`, ts: '2026-08-10T00:00:01.000Z', runId, kind: 'harness', stage: TURN_DIFF_PREVIEW_STAGE, turnDiff: opts.turnPreview })
+  if (opts.sessionPreview) items.push({ id: `${runId}-sp`, ts: '2026-08-10T00:00:01.500Z', runId, kind: 'harness', stage: SESSION_DIFF_PREVIEW_STAGE, turnDiff: opts.sessionPreview })
+  if (opts.turnFinal) items.push({ id: `${runId}-tf`, ts: '2026-08-10T00:00:02.000Z', runId, kind: 'harness', stage: 'turn_diff', turnDiff: opts.turnFinal })
+  if (opts.sessionFinal) items.push({ id: `${runId}-sf`, ts: '2026-08-10T00:00:02.500Z', runId, kind: 'harness', stage: 'session_diff', turnDiff: opts.sessionFinal })
+  return { runId, userText, items, done: false }
+}
+
+describe('运行中预览优先级：终态永远压过预览，不倒退', () => {
+  it('turnDiffViewOf：只有预览时用预览并标 preview=true', () => {
+    const view = turnDiffViewOf(previewTurn('r1', '运行中', { turnPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 3, deleted: 0 }] }) }).items)
+    expect(view?.preview).toBe(true)
+    expect(view?.turnDiff.files).toEqual([{ path: '/repo/a.ts', added: 3, deleted: 0 }])
+  })
+
+  it('turnDiffViewOf：终态在场时用终态并标 preview=false（哪怕预览数字更大）', () => {
+    const view = turnDiffViewOf(previewTurn('r1', '完成', {
+      turnPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 9, deleted: 9 }] }),
+      turnFinal: snapshot({ files: [{ path: '/repo/a.ts', added: 3, deleted: 0 }] })
+    }).items)
+    expect(view?.preview).toBe(false)
+    expect(view?.turnDiff.files).toEqual([{ path: '/repo/a.ts', added: 3, deleted: 0 }])
+  })
+
+  it('sessionDiffViewOf：同样终态优先、预览兜底', () => {
+    expect(sessionDiffViewOf(previewTurn('r1', '运行中', { sessionPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }).items)?.preview).toBe(true)
+    expect(sessionDiffViewOf(previewTurn('r1', '完成', {
+      sessionPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 9, deleted: 0 }] }),
+      sessionFinal: snapshot({ files: [{ path: '/repo/a.ts', added: 2, deleted: 0 }] })
+    }).items)?.preview).toBe(false)
+  })
+
+  it('turnDiffOf / sessionDiffOf 只认终态：累计活动量不会把临时预览算进去', () => {
+    const items = previewTurn('r1', '运行中', {
+      turnPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 5, deleted: 0 }] }),
+      sessionPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 5, deleted: 0 }] })
+    }).items
+    expect(turnDiffOf(items)).toBeUndefined()
+    expect(sessionDiffOf(items)).toBeUndefined()
+    expect(sessionDiffSummary([{ runId: 'r1', userText: '运行中', items, done: false }]).turnCount).toBe(0)
+  })
+
+  it('sessionNetDiffSummary 透传 preview 标记与 baseline 来源', () => {
+    const preview = sessionNetDiffSummary([
+      previewTurn('r1', '运行中', { sessionPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }], baseline: 'resumed' }) })
+    ])
+    expect(preview?.preview).toBe(true)
+    expect(preview?.baseline).toBe('resumed')
+    const settled = sessionNetDiffSummary([
+      sessionTurn('r1', '完成', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }], baseline: 'session_start' }) })
+    ])
+    expect(settled?.preview).toBe(false)
+    expect(settled?.baseline).toBe('session_start')
+  })
+
+  it('sessionNetDiffReview 在只有预览时也能打开，并带 preview 标记', () => {
+    const review = sessionNetDiffReview([
+      previewTurn('r1', '运行中', { sessionPreview: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) })
+    ])
+    expect(review?.scope).toBe('session')
+    expect(review?.preview).toBe(true)
   })
 })
