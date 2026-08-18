@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared/logical-calls.js'
 import { deriveModelTiming } from '../../shared/model-timing.js'
-import { mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
+import { HOOK_DELIVERY_STAGE, mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import {
   available,
   canonicalCostUsd,
@@ -181,15 +181,41 @@ export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
   return output
 }
 
-function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number>): TurnHookCall[] {
+/**
+ * 只能证明「hook 事件触发过」的投递事件（`HOOK_DELIVERY_STAGE`）按事件名 + 子 agent 归属归并成一条，
+ * 只落首次投递时刻与投递次数：脚本身份、耗时、退出码都没观测到，不得补 name / command / completedAt / durationMs / success。
+ */
+function aggregateHookDeliveries(events: TraceEvent[], eventOrder: Map<TraceEvent, number>): TurnHookCall[] {
   const groups = new Map<string, TraceEvent[]>()
-  for (const event of events.filter((item) => item.kind === 'hook' && !isRecorderHook(item))) {
-    const key = event.hookId ? `hook:${event.hookId}` : `event:${event.id}`
+  for (const event of events) {
+    if (event.kind !== 'hook' || event.stage !== HOOK_DELIVERY_STAGE) continue
+    const key = `${event.hookEvent ?? event.name ?? 'Hook'}\u0000${event.agentId ?? ''}`
     const group = groups.get(key) ?? []
     group.push(event)
     groups.set(key, group)
   }
   return [...groups.values()].map((group) => {
+    const first = [...group].sort((left, right) => left.ts.localeCompare(right.ts))[0]
+    return {
+      ...(eventOrder.get(first) != null ? { order: eventOrder.get(first) } : {}),
+      lifecycleEvents: group.length,
+      event: first.hookEvent ?? first.name ?? 'Hook',
+      startedAt: first.ts,
+      status: 'unknown' as const
+    }
+  })
+}
+
+function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number>): TurnHookCall[] {
+  const groups = new Map<string, TraceEvent[]>()
+  for (const event of events) {
+    if (event.kind !== 'hook' || event.stage === HOOK_DELIVERY_STAGE || isRecorderHook(event)) continue
+    const key = event.hookId ? `hook:${event.hookId}` : `event:${event.id}`
+    const group = groups.get(key) ?? []
+    group.push(event)
+    groups.set(key, group)
+  }
+  const runs = [...groups.values()].map((group) => {
     const ordered = [...group].sort((left, right) => left.ts.localeCompare(right.ts))
     const first = ordered[0]
     const last = ordered.at(-1) ?? first
@@ -216,6 +242,7 @@ function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number
       ...(terminal.hookExitCode != null ? { exitCode: terminal.hookExitCode } : {})
     }
   })
+  return [...runs, ...aggregateHookDeliveries(events, eventOrder)]
 }
 
 export function aggregateTurnEvidence(args: {
@@ -278,6 +305,10 @@ export function aggregateTurnEvidence(args: {
       return refs.map((ref) => callFromEvent(event, resultById, ref, eventOrder.get(event), resultOrder(event)))
     })
   const hooks = aggregateHooks(args.events, eventOrder)
+  // 只有带脚本身份的 hook 运行才能宣称 exact；纯投递证据只能证明事件触发过。
+  const hookRunsObserved = args.events.some((event) =>
+    event.kind === 'hook' && event.stage !== HOOK_DELIVERY_STAGE && !isRecorderHook(event)
+  )
   const modelSegments = modelSegmentsFrom(args.events)
   const assistantText = modelSegments.filter((segment) => segment.kind === 'text').map((segment) => segment.text).join('')
   const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
@@ -330,7 +361,16 @@ export function aggregateTurnEvidence(args: {
     tools: observable.tools ? available(tools, [source]) : unavailable('provider tool events were not observable', [source]),
     skills: observable.skills ? available(skills, [source]) : unavailable('provider skill events were not observable', [source]),
     mcps: observable.mcps ? available(mcps, [source]) : unavailable('provider MCP events were not observable', [source]),
-    hooks: observable.hooks ? available(hooks, [source]) : unavailable('provider hook runtime events were not observable', [source]),
+    hooks: !observable.hooks
+      ? unavailable('provider hook runtime events were not observable', [source])
+      : hooks.length > 0 && !hookRunsObserved
+        ? partial(
+            hooks,
+            [source],
+            'provider only delivered hook lifecycle events; per-hook command, outcome and exit code were not observable',
+            'inferred'
+          )
+        : available(hooks, [source]),
     usage: !observable.usage
       ? unavailable('provider usage was not observable', [source])
       : usage
