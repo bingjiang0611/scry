@@ -639,6 +639,102 @@ describe('turn recorder state machine', () => {
     expect(await listRecords(join(root, '.scry'))).toEqual([])
   })
 
+  it('Codex 子 agent 自带 turn_id 的生命周期事件归属当前顶层轮，不再丢成 orphan', async () => {
+    const root = await workspace()
+    const subagent = {
+      turn_id: 'child-turn',
+      agent_id: 'agent-1',
+      agent_type: 'default'
+    }
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('sub-1', { prompt: 'spawn a sub agent', turn_id: 'parent-turn', hook_event_name: 'UserPromptSubmit' })
+    })
+    const started = await handleRecorderHook({
+      provider: 'codex',
+      event: 'PreToolUse:Bash',
+      workspace: root,
+      payload: payload('sub-1', {
+        ...subagent,
+        timestamp: '2026-07-19T12:00:00.100Z',
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_use_id: 'child-call',
+        tool_input: { command: 'echo from-subagent' }
+      })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'PostToolUse:Bash',
+      workspace: root,
+      payload: payload('sub-1', {
+        ...subagent,
+        timestamp: '2026-07-19T12:00:00.200Z',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_use_id: 'child-call',
+        tool_response: 'from-subagent'
+      })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('sub-1', { turn_id: 'parent-turn', hook_event_name: 'Stop', timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(started).toEqual({ status: 'recorded', reason: 'sub-agent turn attributed to the open parent turn' })
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ orphanEvents: 0 })
+    expect(record).toMatchObject({ providerTurnId: 'parent-turn', turnIndex: 1, status: 'completed' })
+    expect(record.tools.value).toEqual([
+      expect.objectContaining({ id: 'child-call', name: 'Bash', status: 'success', outputSummary: 'from-subagent' })
+    ])
+    expect(record.hooks).toMatchObject({ status: 'partial', quality: 'inferred' })
+    expect(record.hooks.value).toEqual([
+      expect.objectContaining({ event: 'UserPromptSubmit', lifecycleEvents: 1, status: 'unknown' }),
+      expect.objectContaining({ event: 'PreToolUse', lifecycleEvents: 1, status: 'unknown' }),
+      expect.objectContaining({ event: 'PostToolUse', lifecycleEvents: 1, status: 'unknown' }),
+      expect.objectContaining({ event: 'Stop', lifecycleEvents: 1, status: 'unknown' })
+    ])
+  })
+
+  it('子 agent 的 transcript 不改写顶层轮的 transcript 锚点', async () => {
+    const root = await workspace()
+    const parent = join(root, 'parent.jsonl')
+    const child = join(root, 'child.jsonl')
+    await writeFile(parent, `${JSON.stringify({ timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'parent-turn' } })}\n`)
+    await writeFile(child, `${JSON.stringify({ timestamp: '2026-07-19T12:00:00.100Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'child-turn' } })}\n`)
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('sub-2', { prompt: 'spawn', turn_id: 'parent-turn', hook_event_name: 'UserPromptSubmit', transcript_path: parent })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'PreToolUse:Bash',
+      workspace: root,
+      payload: payload('sub-2', {
+        turn_id: 'child-turn',
+        agent_id: 'agent-1',
+        agent_type: 'default',
+        hook_event_name: 'PreToolUse',
+        transcript_path: child,
+        tool_name: 'Bash',
+        tool_use_id: 'child-call'
+      })
+    })
+
+    const open = JSON.parse(await readFile(
+      join(root, '.scry', 'runtime', 'codex', safeKey('sub-2'), 'open.json'),
+      'utf8'
+    )) as Record<string, unknown>
+    expect(open).toMatchObject({ providerTurnId: 'parent-turn', transcriptPath: parent })
+  })
+
   it('managed Codex lifecycle 只维护身份，Stop 不用 rollout 抢先提交', async () => {
     const root = await workspace()
     await handleRecorderHook({
@@ -765,6 +861,17 @@ describe('lifecycle/transcript merge', () => {
       'life-result',
       'rollout-start'
     ])
+  })
+
+  it('transcript 带脚本身份的 hook 运行压掉 recorder 的投递事件，缺失时保留投递证据', () => {
+    const event = (overrides: Partial<TraceEvent>): TraceEvent => ({ id: 'id', ts: '2026-01-01T00:00:00Z', runId: 'r', kind: 'hook', stage: 'hook_delivery', ...overrides })
+    const lifecycle = [event({ id: 'delivery', hookEvent: 'PreToolUse', hookId: 'delivery:PreToolUse::t1' })]
+    const transcriptRun = [
+      event({ id: 'run', ts: '2026-01-01T00:00:01Z', stage: 'hook_response', hookId: 'h1', hookName: 'audit.py', hookEvent: 'PreToolUse', hookOutcome: 'success' })
+    ]
+
+    expect(mergeTurnTraceEvents(lifecycle, transcriptRun).map((item) => item.id)).toEqual(['run'])
+    expect(mergeTurnTraceEvents(lifecycle, []).map((item) => item.id)).toEqual(['delivery'])
   })
 })
 
@@ -1194,6 +1301,52 @@ describe('Codex rollout recorder evidence', () => {
       expect.objectContaining({ order: 0, kind: 'text', text: '先检查' }),
       expect.objectContaining({ order: 1, kind: 'thinking', text: '定位文件', messageId: 'reasoning-1' }),
       expect.objectContaining({ order: 5, kind: 'text', text: '完成' })
+    ])
+  })
+
+  it('rollout 里的 hook_started/hook_completed 按 Codex 事件名识别，status=stopped 记为 cancelled', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'hook-completed-rollout.jsonl')
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'hook-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'run hooks' } },
+      {
+        timestamp: '2026-07-19T12:00:00.100Z',
+        type: 'event_msg',
+        payload: { type: 'hook_started', hook_id: 'hook-ok', hook_event: 'PreToolUse', hook_name: 'branch-check.sh', command: 'sh branch-check.sh' }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.200Z',
+        type: 'event_msg',
+        payload: { type: 'hook_completed', hook_id: 'hook-ok', hook_event: 'PreToolUse', hook_name: 'branch-check.sh', command: 'sh branch-check.sh', status: 'completed', exit_code: 0 }
+      },
+      {
+        timestamp: '2026-07-19T12:00:00.300Z',
+        type: 'event_msg',
+        payload: { type: 'hook_completed', hook_id: 'hook-stopped', hook_event: 'Stop', hook_name: 'audit.py', status: 'stopped' }
+      },
+      { timestamp: '2026-07-19T12:00:01.000Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'hook-turn', last_agent_message: 'done' } }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('hook-c1', { prompt: 'run hooks', turn_id: 'hook-turn', rollout_path: rollout })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('hook-c1', { turn_id: 'hook-turn', rollout_path: rollout, timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.hooks).toMatchObject({ status: 'available', quality: 'exact' })
+    expect(record.hooks.value).toEqual([
+      expect.objectContaining({ id: 'hook-ok', event: 'PreToolUse', name: 'branch-check.sh', status: 'success', exitCode: 0, durationMs: 100 }),
+      expect.objectContaining({ id: 'hook-stopped', event: 'Stop', name: 'audit.py', status: 'cancelled' })
     ])
   })
 

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { open as openFile, readdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
-import { classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
+import { HOOK_DELIVERY_STAGE, classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
 import { disabled, partial, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
@@ -231,6 +231,43 @@ function inferredSkillEvents(
   }))
 }
 
+export function subagentScopedPayload(payload: Record<string, unknown>): boolean {
+  return !!(
+    stringAt(payload, 'agent_id', 'agentId') ||
+    stringAt(payload, 'agent_type', 'agentType') ||
+    stringAt(payload, 'agent_transcript_path', 'agentTranscriptPath')
+  )
+}
+
+/**
+ * 被投递的 hook 事件本身就是「provider 执行过该 hook 事件链」的一等证据：recorder 正是被它调起来的。
+ * 但 Codex / Claude 的 hook 载荷不带被执行脚本的 command、exit code 和 outcome，所以这里只落 hook 事件名
+ * 与投递时刻，交由 `aggregateHooks` 归并成「事件 + 投递次数」，禁止伪造脚本身份或成功状态。
+ */
+function hookDeliveryEvent(args: {
+  event: string
+  payload: Record<string, unknown>
+  runId: string
+}): TraceEvent | null {
+  const hookEvent = stringAt(args.payload, 'hook_event_name', 'hookEventName')
+  if (!hookEvent) return null
+  const at = timestampOf(args.payload)
+  const agentId = stringAt(args.payload, 'agent_id', 'agentId')
+  const scope = toolUseIdOf(args.payload) ?? at
+  return {
+    id: `hook-delivery-${stableHash([args.event, hookEvent, agentId, scope]).slice(0, 16)}`,
+    ts: at,
+    runId: args.runId,
+    kind: 'hook',
+    stage: HOOK_DELIVERY_STAGE,
+    name: hookEvent,
+    hookId: `delivery:${hookEvent}:${agentId ?? ''}:${scope}`,
+    hookEvent,
+    ...(agentId ? { agentId } : {}),
+    runtimeMetadata: { source: `recorder_hook:${args.event}` }
+  }
+}
+
 function lifecycleTraceEvents(args: {
   provider: ProviderId
   event: string
@@ -242,7 +279,10 @@ function lifecycleTraceEvents(args: {
   const toolName = toolNameOf(args.payload)
   const toolUseId = toolUseIdOf(args.payload)
   const input = toolInputOf(args.payload)
+  const agentId = stringAt(args.payload, 'agent_id', 'agentId')
   const out: TraceEvent[] = []
+  const delivery = hookDeliveryEvent(args)
+  if (delivery) out.push(delivery)
   if (args.event === 'session.compacted' || args.event === 'session.next.compaction.ended') {
     const providerEventId = stringAt(args.payload, 'messageID', 'messageId', 'id')
     const trigger: 'auto' | 'manual' | undefined =
@@ -277,6 +317,7 @@ function lifecycleTraceEvents(args: {
         tool: toolName,
         name: cls.name,
         toolUseId,
+        ...(agentId ? { agentId } : {}),
         input,
         ...mcp,
         ...file,
@@ -294,6 +335,7 @@ function lifecycleTraceEvents(args: {
       stage: 'tool_result',
       tool: toolName,
       toolUseId,
+      ...(agentId ? { agentId } : {}),
       ...(args.captureOutput ? { text: summarize(result), output: summarize(result) } : {}),
       isError: failed
     })
@@ -603,9 +645,19 @@ function explicitSkillEvent(name: string, runId: string, at: string): TraceEvent
 
 function codexHookEvent(payload: Record<string, unknown>, runId: string, at: string): TraceEvent | null {
   const type = stringAt(payload, 'type')
-  if (!type || !/^hook_(?:started|progress|response|success|cancelled|additional_context)$/.test(type)) return null
+  // Codex 的 hook 生命周期事件名是 hook_started / hook_completed；hook_response 等是 Claude / Qoder 侧的叫法。
+  if (!type || !/^hook_(?:started|progress|response|completed|success|cancelled|additional_context)$/.test(type)) return null
+  const completedStatus = stringAt(payload, 'status')
   const outcome = stringAt(payload, 'outcome')
-    ?? (type === 'hook_started' ? 'started' : type === 'hook_progress' || type === 'hook_additional_context' ? 'progress' : type === 'hook_cancelled' ? 'cancelled' : 'success')
+    ?? (type === 'hook_started'
+      ? 'started'
+      : type === 'hook_progress' || type === 'hook_additional_context'
+        ? 'progress'
+        : type === 'hook_cancelled'
+          ? 'cancelled'
+          : type === 'hook_completed' && completedStatus
+            ? completedStatus === 'completed' ? 'success' : completedStatus === 'stopped' ? 'cancelled' : 'error'
+            : 'success')
   const exitCode = typeof payload.exit_code === 'number' ? payload.exit_code : typeof payload.exitCode === 'number' ? payload.exitCode : undefined
   const hookId = stringAt(payload, 'hook_id', 'hookId', 'tool_use_id', 'toolUseId')
   const hookName = stringAt(payload, 'hook_name', 'hookName', 'name') ?? 'hook'
@@ -1461,12 +1513,15 @@ export function mergeTurnTraceEvents(
   const transcriptCallsAuthoritative = transcriptToolStreamComplete && transcriptHasLogicalCalls
   const transcriptHasAssistant = transcript.some((event) => event.kind === 'model' && event.stage === 'text')
   const transcriptHasUsage = transcript.some((event) => event.kind === 'harness' && event.stage === 'result')
+  // 带脚本身份的 transcript hook 运行是权威证据；此时 recorder 自己的投递事件只会重复计数。
+  const transcriptHasHookRuns = transcript.some((event) => event.kind === 'hook' && event.stage !== HOOK_DELIVERY_STAGE)
   const filteredLifecycle = lifecycle.filter((event) => {
     if (transcriptCallsAuthoritative && isLogicalCallEvent(event)) return false
     const key = toolEventKey(event)
     if (key && transcriptToolKeys.has(key)) return false
     if (transcriptHasAssistant && event.kind === 'model' && event.stage === 'text') return false
     if (transcriptHasUsage && event.kind === 'harness' && event.stage === 'result') return false
+    if (transcriptHasHookRuns && event.kind === 'hook' && event.stage === HOOK_DELIVERY_STAGE) return false
     if (transcript.length && event.kind === 'skill' && !event.toolUseId) return false
     return true
   })
@@ -1554,7 +1609,12 @@ async function quarantineOpenTurn(
   await updateHealth(dataRoot, { lastError: { at: new Date().toISOString(), message: `recorder turn quarantined: ${reason}` } })
 }
 
-async function storeLifecycleEvent(enablement: Extract<RecorderEnablement, { enabled: true }>, open: OpenTurnState, event: string, payload: Record<string, unknown>): Promise<void> {
+async function storeLifecycleEvent(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  open: OpenTurnState,
+  event: string,
+  payload: Record<string, unknown>
+): Promise<void> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const id = stableHash({ event, sessionId: open.sessionId, generation: open.generation, payload })
   const stored: StoredLifecycleEvent = {
@@ -1572,7 +1632,8 @@ async function storeLifecycleEvent(enablement: Extract<RecorderEnablement, { ena
     ...(transcriptPathOf(payload) ? { transcriptPath: transcriptPathOf(payload) } : {})
   }
   await writeJsonAtomic(join(turnRoot(root, open.generation), 'events', `${id}.json`), stored, { sync: false })
-  const transcriptPath = transcriptPathOf(payload)
+  // 子 agent 线程有自己的 transcript；顶层轮的 transcript 锚点不能被它改写，否则整轮证据会读错文件。
+  const transcriptPath = subagentScopedPayload(payload) ? undefined : transcriptPathOf(payload)
   if (transcriptPath && transcriptPath !== open.transcriptPath) {
     open.transcriptPath = transcriptPath
     open.transcriptStartOffset = await transcriptStartOffset(transcriptPath)
@@ -1909,6 +1970,12 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       ) {
         if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
           return { status: 'duplicate' as const }
+        }
+        // 子 agent 线程复用父会话 id，但带自己的 turn_id（Codex 实测：agent_id/agent_type 同时出现）。
+        // 这类事件属于当前打开的顶层轮，不能丢成 orphan；但它的终态只结束子 agent，不结束父轮。
+        if (subagentScopedPayload(input.payload)) {
+          await storeLifecycleEvent(enablement, open, input.event, input.payload)
+          return { status: 'recorded' as const, reason: 'sub-agent turn attributed to the open parent turn' }
         }
         const orphanId = stableHash({ event: input.event, payload: input.payload })
         await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })

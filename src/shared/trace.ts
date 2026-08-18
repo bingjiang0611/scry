@@ -124,6 +124,13 @@ export function isDiffPreviewStage(stage: string): boolean {
 }
 
 /**
+ * Hook 生命周期投递 stage。Provider 只把 hook 事件投递给外部 hook 进程（Codex 终端会话就是这样），
+ * 不暴露被执行脚本的 command / exit code / outcome 时，recorder 只能证明「该 hook 事件确实触发过」。
+ * 这类事件不得与 `hook_started` / `hook_response`（带脚本身份的真实 hook 运行）混为一谈。
+ */
+export const HOOK_DELIVERY_STAGE = 'hook_delivery'
+
+/**
  * 会话净 diff 的基线来源：`session_start` = 会话第一轮开始前捕获的原始基线；
  * `resumed` = 该基线在本进程内不存在（恢复/选择会话/重启后）而当场重锚，
  * 净 diff 只覆盖「自重锚以来」，UI 必须照实说明，不得冒充整段会话。

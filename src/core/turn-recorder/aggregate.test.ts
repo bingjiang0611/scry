@@ -68,6 +68,53 @@ describe('aggregateTurnEvidence', () => {
     ])
   })
 
+  it('只有 hook 投递证据时按事件名归并计数，标为 partial 且不伪造脚本身份或成功状态', () => {
+    const delivery = (id: string, ts: string, hookEvent: string, agentId?: string): TraceEvent => ({
+      id,
+      ts,
+      runId: 'r',
+      kind: 'hook',
+      stage: 'hook_delivery',
+      name: hookEvent,
+      hookId: `delivery:${hookEvent}:${agentId ?? ''}:${id}`,
+      hookEvent,
+      ...(agentId ? { agentId } : {})
+    })
+    const evidence = aggregateTurnEvidence({
+      events: [
+        delivery('d1', '2026-01-01T00:00:00.000Z', 'PreToolUse'),
+        delivery('d2', '2026-01-01T00:00:01.000Z', 'PostToolUse'),
+        delivery('d3', '2026-01-01T00:00:02.000Z', 'PreToolUse'),
+        delivery('d4', '2026-01-01T00:00:03.000Z', 'PreToolUse', 'sub-1')
+      ]
+    })
+
+    expect(evidence.hooks).toMatchObject({
+      status: 'partial',
+      quality: 'inferred',
+      omissionReason: 'provider only delivered hook lifecycle events; per-hook command, outcome and exit code were not observable'
+    })
+    expect(evidence.hooks.value).toEqual([
+      { order: 0, lifecycleEvents: 2, event: 'PreToolUse', startedAt: '2026-01-01T00:00:00.000Z', status: 'unknown' },
+      { order: 1, lifecycleEvents: 1, event: 'PostToolUse', startedAt: '2026-01-01T00:00:01.000Z', status: 'unknown' },
+      { order: 3, lifecycleEvents: 1, event: 'PreToolUse', startedAt: '2026-01-01T00:00:03.000Z', status: 'unknown' }
+    ])
+  })
+
+  it('同一轮里既有真实 hook 运行又有投递事件时，运行证据保持 exact', () => {
+    const events: TraceEvent[] = [
+      { id: 'run', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'hook', stage: 'hook_response', hookId: 'h1', hookName: 'audit.py', hookEvent: 'Stop', hookOutcome: 'success', hookExitCode: 0 },
+      { id: 'd1', ts: '2026-01-01T00:00:01.000Z', runId: 'r', kind: 'hook', stage: 'hook_delivery', name: 'Stop', hookEvent: 'Stop' }
+    ]
+    const evidence = aggregateTurnEvidence({ events })
+
+    expect(evidence.hooks).toMatchObject({ status: 'available', quality: 'exact' })
+    expect(evidence.hooks.value).toEqual([
+      expect.objectContaining({ id: 'h1', name: 'audit.py', status: 'success' }),
+      expect.objectContaining({ event: 'Stop', status: 'unknown', lifecycleEvents: 1 })
+    ])
+  })
+
   it('整轮 Usage 求和，并在原生聚合结果存在时忽略 transcript 影子值', () => {
     const transcript = (id: string, input: number): TraceEvent => ({
       id,
