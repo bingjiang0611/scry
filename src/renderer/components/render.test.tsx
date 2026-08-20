@@ -221,13 +221,13 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     ]
   }
 
-  it('busy 且有未完成 turn 时渲染状态条：运行中 + 时长 + runId 短码 + 停止', () => {
+  it('busy 且有未完成 turn 时渲染状态条：运行中 + 时长 + 停止', () => {
     const html = renderWelcome({ turns: [runningTurn], busy: true })
     expect(html).toContain('run-status')
     expect(html).toContain('运行中')
     expect(html).toContain('可继续输入，新消息将加入队列')
     expect(html).toMatch(/\d{2,3}:\d{2}:\d{2}/) // 已用时长（小时级长任务）
-    expect(html).toContain('run-running') // runId 前 8 位
+    expect(html).not.toContain('run-status-runid') // runId 短码已下线
     expect(html).toContain('停止')
   })
 
