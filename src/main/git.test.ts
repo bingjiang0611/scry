@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, it, expect } from 'vitest'
-import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
 
 const pexecFile = promisify(execFile)
 
@@ -594,7 +594,7 @@ describe('每轮 Git 工作树快照', () => {
     }
   }, 15_000)
 
-  it('大文件 patch 按单轮预算截断，但 numstat 仍保持完整', async () => {
+  it('大文件 patch 按单文件 32 KiB 预算截断，但 numstat 仍保持完整', async () => {
     const root = await initRepo()
     try {
       await writeFile(join(root, 'base.txt'), 'base\n')
@@ -611,12 +611,58 @@ describe('每轮 Git 工作树快照', () => {
         deleted: 0,
         patchStatus: 'truncated'
       })
-      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeLessThanOrEqual(1024 * 1024)
+      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeLessThanOrEqual(32 * 1024)
       expect(result.files[0].patch).not.toContain('�')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   }, 15_000)
+
+  it('按 basename 策略跳过 patch，但保留 numstat', async () => {
+    const root = await initRepo()
+    try {
+      await writeFile(join(root, '.factorypath'), 'before\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      const capture = await beginGitTurnDiff(root)
+      await writeFile(join(root, '.factorypath'), 'after\n')
+      const result = await finishGitTurnDiff(capture, 10_000, { patchExcludeBasenames: ['.factorypath'] })
+
+      expect(result.files[0]).toMatchObject({
+        added: 1,
+        deleted: 1,
+        patchStatus: 'unavailable',
+        patchReason: 'policy'
+      })
+      expect(result.files[0].patch).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('跨仓库按 record 级 128 KiB 收敛 patch，并保持 UTF-8 完整', () => {
+    const snapshot = (repoRoot: string, path: string, patch: string) => ({
+      version: 1 as const,
+      status: 'captured' as const,
+      files: [{ path, added: 1, deleted: 0, patch, patchStatus: 'captured' as const }],
+      repoRoot,
+      beforeAt: '2026-01-01T00:00:00.000Z',
+      afterAt: '2026-01-01T00:00:01.000Z',
+      captureMs: 1,
+      cleanup: 'ok' as const
+    })
+    const result = limitTurnDiffPatchBytes([
+      snapshot('/repo-a', '/repo-a/a.ts', 'a'.repeat(96 * 1024)),
+      snapshot('/repo-b', '/repo-b/b.ts', '你'.repeat(20 * 1024))
+    ])
+    const total = result.flatMap(({ files }) => files).reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0)
+
+    expect(total).toBeLessThanOrEqual(128 * 1024)
+    expect(result[0].files[0].patchStatus).toBe('captured')
+    expect(result[1].files[0].patchStatus).toBe('truncated')
+    expect(result[1].files[0].patch).not.toContain('�')
+  })
 })
 
 describe('snapshotSessionNetDiff（会话净 diff：基线 → 当前，非消费式）', () => {

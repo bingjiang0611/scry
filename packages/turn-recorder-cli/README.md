@@ -5,7 +5,7 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.18 \
+npm install -g @ali/scry-turn-recorder@0.2.20 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
@@ -76,7 +76,8 @@ scry recorder restart --workspace "$PWD"
     "assistant": true,
     "toolOutput": "summary",
     "diff": true,
-    "hooks": true
+    "hooks": true,
+    "patchExcludeBasenames": [".factorypath"]
   }
 }
 ```
@@ -88,6 +89,7 @@ scry recorder restart --workspace "$PWD"
 - `turns summary` 默认汇总最新 session，与 Scry 当前会话纵览使用同一公开口径；`--all` 才汇总整个 workspace。
 - 新记录的 `modelSegments` 按原始事件顺序保留可见过程文字和 Provider 明文暴露的 thinking；`turns timeline` 将它们与 Tool、Skill、MCP、子 Agent 的开始/结果交错输出。旧记录缺少该字段时明确标为 `unavailable`。
 - 新记录的 `compactions` 保存每轮上下文压缩事件；`turns list` 输出逐轮次数，`turns summary` 汇总总数及 auto/manual 触发方式。旧记录缺少该字段时保持 `unavailable`，不会误算成 0。
+- patch 正文每文件最多 32 KiB、每条 record 合计最多 128 KiB；超过上限或命中 `patchExcludeBasenames` 时仍保留增删计数，并把 diff evidence 标为 `partial` 及对应原因。工具调用骨架全部保留；单次 input 超过 8 KiB 或调用详情合计超过 128 KiB 时只省略详情并标为 `partial`。
 - `普通工具`、`MCP`、`Skill`、`子 Agent` 是四个互斥列；总调用等于四列之和，同一次 MCP 或子 Agent 不会再重复计入普通工具。
 - Hook 同时报告“处理器实例”和“生命周期事件”；文件同时报告结构化文件证据与 Bash 推断读取，并保留 quality/coverage，不能拿不同分母直接比较。
 - Codex 的顶层轮次会合并其子 Agent rollout，但 Token 和最终回复只取顶层权威值，避免重复累计。

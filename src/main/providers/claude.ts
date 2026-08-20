@@ -22,6 +22,7 @@ import {
 import { computeEnabledSkills, listSkills, setSkillEnabled } from '../skill-config'
 import {
   capabilityReady,
+  capabilityUnknown,
   capabilityUnavailable,
   type McpAuthResult,
   type McpMeta,
@@ -442,7 +443,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
             controls.observedAt
           )
         } catch (error) {
-          return capabilityUnavailable(context, 'unknown', String((error as Error).message))
+          return capabilityUnknown(context, 'read', String((error as Error).message))
         }
       }
     },

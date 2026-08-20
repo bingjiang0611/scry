@@ -137,7 +137,7 @@ export const HOOK_DELIVERY_STAGE = 'hook_delivery'
  */
 export type TurnDiffBaselineOrigin = 'session_start' | 'resumed'
 export type TurnDiffPatchStatus = 'captured' | 'truncated' | 'binary' | 'unavailable'
-export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget'
+export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget' | 'policy'
 export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
 
 export interface TurnDiffCollection {
@@ -189,7 +189,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     const patchStatus = ['captured', 'truncated', 'binary', 'unavailable'].includes(String(file.patchStatus))
       ? (file.patchStatus as TurnDiffPatchStatus)
       : undefined
-    const patchReason = ['deadline', 'git_error', 'budget'].includes(String(file.patchReason))
+    const patchReason = ['deadline', 'git_error', 'budget', 'policy'].includes(String(file.patchReason))
       ? (file.patchReason as TurnDiffPatchReason)
       : undefined
     const patchFields =

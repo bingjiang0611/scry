@@ -260,7 +260,8 @@ sample-workspace 根目录新增：
     "assistant": true,
     "toolOutput": "summary",
     "diff": true,
-    "hooks": true
+    "hooks": true,
+    "patchExcludeBasenames": [".factorypath"]
   }
 }
 ```
@@ -269,6 +270,7 @@ sample-workspace 根目录新增：
 - Core 拒绝逃逸路径和符号链接路径；Git snapshot 无论接入方是否配置 `.gitignore` 都硬排除 Recorder 自身 dataDir。
 - sample-workspace 集成模式缺少 config 时 fail closed，不创建 `.scry`。
 - nested Git 默认发现 workspace 下完整仓库集合，再套 exclude；不维护容易漏仓的四仓 allowlist。
+- `patchExcludeBasenames` 只按 basename 跳过 patch 正文，不影响 `added/deleted`；patch 正文每文件最多 32 KiB、每条 record 合计最多 128 KiB。工具调用骨架不裁剪，单次 input 最多 8 KiB、调用详情每条 record 合计最多 128 KiB；任何省略均写成 `partial/unavailable` 及原因。
 - 禁用优先级固定为：`.scry-disabled` > `SCRY_RECORDER_ENABLED=0` > `config.enabled=false` > enabled。
 - Hook/Plugin launcher 在启动 `scry` 二进制之前执行 sentinel/env 检查；disabled 时不启动二进制、不创建目录、不写日志。
 - CLI 缺失、坏二进制或超时均不得影响原 Handler；sample-workspace init 只给可操作 warning，不联网安装。

@@ -3,7 +3,7 @@
 import { execFile } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, open, realpath, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, delimiter, isAbsolute, join, relative, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { promisify } from 'node:util'
 import type {
@@ -22,6 +22,8 @@ const TURN_DIFF_BEGIN_DEADLINE_MS = 5_000
 const TURN_DIFF_FINISH_DEADLINE_MS = 20_000
 const TURN_DIFF_PATCH_DEADLINE_MS = 2_000
 const TURN_DIFF_PATCH_MAX_BYTES = 1024 * 1024
+const TURN_DIFF_PATCH_MAX_FILE_BYTES = 32 * 1024
+const TURN_DIFF_PATCH_MAX_RECORD_BYTES = 128 * 1024
 const TURN_DIFF_PATCH_MAX_FILES = 80
 const TURN_DIFF_TARGETED_DEADLINE_MS = 5_000
 const TURN_DIFF_CANDIDATE_LIMIT = 1_000
@@ -162,6 +164,7 @@ export interface GitTurnDiffCapture {
 export interface GitTurnDiffFinishOptions {
   structuredPaths?: string[]
   forceFull?: boolean
+  patchExcludeBasenames?: string[]
 }
 
 function capturePathspec(repoRoot: string, scope: string, excludedPaths: string[]): string[] {
@@ -566,7 +569,13 @@ async function computeGitTurnDiff(
       ]),
       { cwd: capture.repoRoot, env, deadline }
     )
-    files = await captureTurnPatches(capture, env, afterTree, parseNumstat(stdout, capture.repoRoot))
+    files = await captureTurnPatches(
+      capture,
+      env,
+      afterTree,
+      parseNumstat(stdout, capture.repoRoot),
+      new Set(options.patchExcludeBasenames ?? [])
+    )
   } catch (error) {
     reason = reasonOf(error)
     status = reason === 'deadline' ? 'timeout' : 'failed'
@@ -596,7 +605,8 @@ async function captureTurnPatches(
   capture: GitTurnDiffCapture,
   env: NodeJS.ProcessEnv,
   afterTree: string,
-  files: DiffFile[]
+  files: DiffFile[],
+  excludedBasenames: ReadonlySet<string>
 ): Promise<DiffFile[]> {
   if (!capture.repoRoot || !capture.beforeTree || !capture.tempDir) return files
   const deadline = Date.now() + TURN_DIFF_PATCH_DEADLINE_MS
@@ -609,6 +619,10 @@ async function captureTurnPatches(
     const file = files[index]
     if (file.binary) {
       out.push({ ...file, patchStatus: 'binary' })
+      continue
+    }
+    if (excludedBasenames.has(basename(file.path))) {
+      out.push({ ...file, patchStatus: 'unavailable', patchReason: 'policy' })
       continue
     }
     if (index >= TURN_DIFF_PATCH_MAX_FILES || remainingBytes <= 0) {
@@ -640,7 +654,7 @@ async function captureTurnPatches(
         ]),
         { cwd: capture.repoRoot, env, deadline }
       )
-      const captured = await readPatchPrefix(patchPath, remainingBytes)
+      const captured = await readPatchPrefix(patchPath, Math.min(remainingBytes, TURN_DIFF_PATCH_MAX_FILE_BYTES))
       remainingBytes -= captured.bytes
       if (!captured.patch) {
         out.push({ ...file, patchStatus: 'unavailable', patchReason: 'git_error' })
@@ -658,6 +672,35 @@ async function captureTurnPatches(
     }
   }
   return out
+}
+
+function utf8Prefix(value: string, maxBytes: number): { value: string; bytes: number } {
+  const buffer = Buffer.from(value)
+  const prefix = new StringDecoder('utf8').write(buffer.subarray(0, Math.max(0, maxBytes)))
+  return { value: prefix, bytes: Buffer.byteLength(prefix) }
+}
+
+export function limitTurnDiffPatchBytes(
+  snapshots: TurnDiffSnapshot[],
+  maxBytes = TURN_DIFF_PATCH_MAX_RECORD_BYTES
+): TurnDiffSnapshot[] {
+  let remainingBytes = Math.max(0, maxBytes)
+  return snapshots.map((snapshot) => ({
+    ...snapshot,
+    files: snapshot.files.map((file) => {
+      if (!file.patch) return file
+      const bytes = Buffer.byteLength(file.patch)
+      if (bytes <= remainingBytes) {
+        remainingBytes -= bytes
+        return file
+      }
+      const prefix = utf8Prefix(file.patch, remainingBytes)
+      remainingBytes -= prefix.bytes
+      return prefix.value
+        ? { ...file, patch: prefix.value, patchStatus: 'truncated' }
+        : { ...file, patch: undefined, patchStatus: 'unavailable', patchReason: 'budget' }
+    })
+  }))
 }
 
 // 同一个 capture 上的重算一律排队：预览与终态共用 tempDir 下的隔离 index，

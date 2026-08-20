@@ -18,6 +18,7 @@ export interface RecorderConfig {
     toolOutput: 'none' | 'summary'
     diff: boolean
     hooks: boolean
+    patchExcludeBasenames?: string[]
   }
 }
 
@@ -81,6 +82,10 @@ function parseConfig(raw: unknown): RecorderConfig {
     ? Math.max(0, Math.min(5, repositories.maxDepth))
     : 2
   const captureRaw = record(root.capture) ?? {}
+  const patchExcludeBasenames = [...new Set(stringArray(captureRaw.patchExcludeBasenames).map((item) => item.trim()))]
+  if (patchExcludeBasenames.some((item) => item.includes('/') || item.includes('\\'))) {
+    throw new Error('capture.patchExcludeBasenames entries must be basenames')
+  }
   return {
     schemaVersion: 1,
     enabled: root.enabled !== false,
@@ -93,7 +98,8 @@ function parseConfig(raw: unknown): RecorderConfig {
       assistant: captureRaw.assistant !== false,
       toolOutput: captureRaw.toolOutput === 'none' ? 'none' : DEFAULT_CAPTURE.toolOutput,
       diff: captureRaw.diff !== false,
-      hooks: captureRaw.hooks !== false
+      hooks: captureRaw.hooks !== false,
+      patchExcludeBasenames
     }
   }
 }

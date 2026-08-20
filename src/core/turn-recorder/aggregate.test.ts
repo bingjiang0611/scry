@@ -536,4 +536,73 @@ describe('aggregateTurnEvidence', () => {
       value: [intervention]
     })
   })
+
+  it('保留全部调用骨架，超预算时优先保留失败、写操作及同名首尾详情', () => {
+    const events: TraceEvent[] = Array.from({ length: 170 }, (_, index) => ({
+      id: `read-${index}`,
+      ts: `2026-01-01T00:00:${String(index % 60).padStart(2, '0')}.000Z`,
+      runId: 'r',
+      kind: 'tool',
+      stage: 'tool:Read',
+      tool: 'Read',
+      toolUseId: `read-${index}`,
+      input: { path: `/repo/${index}.ts`, padding: 'x'.repeat(1024) }
+    }))
+    events.push(
+      {
+        id: 'write', ts: '2026-01-01T00:03:00.000Z', runId: 'r', kind: 'tool', stage: 'tool:Write', tool: 'Write',
+        toolUseId: 'write', fileOp: 'write', filePath: '/repo/out.ts', input: { content: 'important mutation' }
+      },
+      {
+        id: 'failed', ts: '2026-01-01T00:03:01.000Z', runId: 'r', kind: 'tool', stage: 'tool:Bash', tool: 'Bash',
+        toolUseId: 'failed', input: { command: 'exit 1' }
+      },
+      {
+        id: 'failed-result', ts: '2026-01-01T00:03:02.000Z', runId: 'r', kind: 'tool', stage: 'tool_result',
+        tool: 'Bash', toolUseId: 'failed', isError: true, text: 'failed safely'
+      }
+    )
+
+    const evidence = aggregateTurnEvidence({ events })
+    const calls = evidence.tools.value ?? []
+    expect(evidence.tools).toMatchObject({ status: 'partial', quality: 'exact' })
+    expect(calls).toHaveLength(172)
+    expect(calls.find((call) => call.id === 'read-0')?.input).toBeDefined()
+    expect(calls.find((call) => call.id === 'read-169')?.input).toBeDefined()
+    expect(calls.find((call) => call.id === 'read-160')?.input).toBeUndefined()
+    expect(calls.find((call) => call.id === 'write')?.input).toBeDefined()
+    expect(calls.find((call) => call.id === 'failed')).toMatchObject({ input: { command: 'exit 1' }, error: 'failed safely' })
+  })
+
+  it('单次工具 input 超过 8 KiB 时只省略 input，并把 evidence 标为 partial', () => {
+    const evidence = aggregateTurnEvidence({ events: [{
+      id: 'large', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'tool', stage: 'tool:Bash',
+      tool: 'Bash', toolUseId: 'large', input: { command: 'x'.repeat(9 * 1024) }
+    }] })
+
+    expect(evidence.tools).toMatchObject({ status: 'partial', quality: 'exact' })
+    expect(evidence.tools.value?.[0].input).toBeUndefined()
+    expect(evidence.tools.value?.[0]).toMatchObject({ id: 'large', name: 'Bash', status: 'unknown' })
+  })
+
+  it('仓库快照成功但文件 patch 被省略时，diff evidence 标为 partial', () => {
+    const evidence = aggregateTurnEvidence({ events: [{
+      id: 'diff', ts: '2026-01-01T00:00:01.000Z', runId: 'r', kind: 'harness', stage: 'turn_diff',
+      turnDiff: {
+        version: 1,
+        status: 'captured',
+        files: [{ path: '/repo/.factorypath', added: 1, deleted: 1, patchStatus: 'unavailable', patchReason: 'policy' }],
+        beforeAt: '2026-01-01T00:00:00.000Z',
+        afterAt: '2026-01-01T00:00:01.000Z',
+        captureMs: 1,
+        cleanup: 'ok'
+      }
+    }] })
+
+    expect(evidence.diff).toMatchObject({
+      status: 'partial',
+      quality: 'exact',
+      omissionReason: 'one or more file patches were omitted or truncated: policy'
+    })
+  })
 })
