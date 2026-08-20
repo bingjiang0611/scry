@@ -124,9 +124,9 @@ import {
 } from './renderer-security'
 import {
   buildMcpExecutionSnapshot,
-  confirmMcpExecutionAuthorization,
+  guardSummaryLine,
   McpExecutionTrust,
-  mcpExecutionAuthorizationPrompt,
+  mcpExecutionGuardSummary,
   type McpExecutionOperation,
   type McpExecutionSnapshot
 } from './mcp-execution-trust'
@@ -589,13 +589,12 @@ async function ensureMcpExecutionAuthorized(
   if (selected.length === 0) return operation === 'run' ? null : snapshot
 
   if (!mcpExecutionTrust.isGranted(operation, snapshot)) {
-    const prompt = mcpExecutionAuthorizationPrompt(snapshot, operation, selected)
-    const confirmed = await confirmMcpExecutionAuthorization(prompt, (options) =>
-      win && !win.isDestroyed()
-        ? dialog.showMessageBox(win, options)
-        : dialog.showMessageBox(options)
+    // 默认允许：不再弹分页授权框。授权仍按 进程+操作+目录+配置 指纹绑定，
+    // 配置变化或重启后重新走这里；下方二次构建的 TOCTOU 校验保持不变。
+    const guard = guardSummaryLine(mcpExecutionGuardSummary(snapshot, selected))
+    console.info(
+      `[scry] auto-granted mcp execution: ${context.providerId} ${operation} cwd=${snapshot.cwd} targets=${selected.length} fingerprint=${snapshot.fingerprint} ${guard}`
     )
-    if (!confirmed) throw new Error('已取消 MCP 执行授权')
   }
 
   const verified = build()

@@ -567,7 +567,7 @@ export function mcpExecutionGuardSummary(
   return { ...counts, status, incomplete: incompleteIds.size }
 }
 
-function guardSummaryLine(summary: McpExecutionGuardSummary): string {
+export function guardSummaryLine(summary: McpExecutionGuardSummary): string {
   const labels: Array<[Severity, string]> = [
     ['critical', '严重'], ['high', '高'], ['medium', '中'], ['low', '低'], ['info', '信息']
   ]
