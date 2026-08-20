@@ -231,6 +231,7 @@ export interface RunControlSelectOption {
 
 export function RunControlSelect({
   ariaLabel,
+  prefix,
   value,
   options,
   onChange,
@@ -239,6 +240,7 @@ export function RunControlSelect({
   tone
 }: {
   ariaLabel: string
+  prefix?: string
   value: string
   options: RunControlSelectOption[]
   onChange: (value: string) => void
@@ -249,6 +251,10 @@ export function RunControlSelect({
   const selected = options.find((option) => option.value === value)
   return (
     <label className={`run-control-select ${tone ?? ''}`} title={selected?.description}>
+      {prefix && <span className="rc-prefix" aria-hidden="true">{prefix}</span>}
+      {/* 可见值：让整块宽度贴合当前选中项。原生 select 的宽度由最长选项决定，
+          直接显示它会在短值和箭头之间留一大段空白。 */}
+      <span className="rc-value" aria-hidden="true">{selected?.label ?? ''}</span>
       <select
         aria-label={ariaLabel}
         aria-busy={loading}

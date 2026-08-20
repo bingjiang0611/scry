@@ -7347,6 +7347,104 @@ textarea:focus-visible,
   box-shadow: none;
 }
 
+/* 运行状态条：busy 时把「运行中」从 placeholder 提升为显式状态。
+   时长按当前 run 首个事件时间戳（TraceEvent.ts）本地计时，runId 为真实 ActiveRun.runId。 */
+.run-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  padding: 0 2px 8px;
+  margin-bottom: 1px;
+  border-bottom: 1px solid var(--border);
+}
+
+.run-status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--selected);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--selected) 35%, transparent);
+  animation: run-status-pulse 1.6s var(--ease-out) infinite;
+}
+
+@keyframes run-status-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--selected) 35%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--selected) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--selected) 0%, transparent);
+  }
+}
+
+.run-status-left b {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.run-status-hint {
+  font-size: 12px;
+  color: var(--dim2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-status-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.run-status-elapsed {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+
+.run-status-runid {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--dim2);
+  background: var(--panel3);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.run-status-stop {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+/* 运行配置分组：会话环境（目录/Provider）与运行配置（模型/强度/权限）之间 */
+.run-group-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--border2);
+  flex: none;
+  align-self: center;
+}
+
 .composer-top {
   margin-bottom: 2px;
 }
@@ -7411,30 +7509,52 @@ textarea:focus-visible,
   display: contents;
 }
 
+/* 值宽度必须跟「当前选中项」一致：原生 select 的内在宽度由最长选项决定，
+   选中短选项（如 GPT-5.6-Sol）时值和箭头之间会空出一大段。
+   所以可见文本交给 .rc-value，select 透明覆盖在上层只负责交互与 a11y。 */
 .run-control-select {
   position: relative;
   min-width: 0;
   display: inline-flex;
   align-items: center;
+  height: 40px;
+  padding: 0 24px 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
   color: var(--dim);
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
 }
 
-.run-control-select select {
+/* 前缀 label（模型 / 强度 / 权限）：说明这个值是什么，不与值本身混读 */
+.rc-prefix {
+  margin-right: 6px;
+  color: var(--dim3);
+  white-space: nowrap;
+}
+
+.run-control-select .rc-value {
   min-width: 0; /* flex item 默认 min-width:auto 会拒绝收缩，宽度不足时直接顶穿容器 */
   /* 模型名最长，用主区宽度（container）约束它：窄栏里先省略号让位，
      免得它一个人占满一排、把 effort/权限挤到下一排 */
   max-width: min(210px, 34cqi);
-  height: 40px;
-  appearance: none;
-  padding: 0 25px 0 9px;
   overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: inherit;
-  font: 12px/1 var(--font-ui);
+  white-space: nowrap;
   text-overflow: ellipsis;
-  cursor: pointer;
+}
+
+.run-control-select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  opacity: 0;
+  cursor: inherit;
 }
 
 .run-control-select .chev {
@@ -7445,8 +7565,8 @@ textarea:focus-visible,
   pointer-events: none;
 }
 
-.run-control-select:hover select,
-.run-control-select select:focus-visible {
+.run-control-select:hover,
+.run-control-select:focus-within {
   border-color: var(--border2);
   background: var(--panel3);
   color: var(--fg);
@@ -7458,14 +7578,22 @@ textarea:focus-visible,
 
 .run-control-select.danger {
   color: var(--bad);
-}
-
-.run-control-select.danger select {
   border-color: color-mix(in srgb, var(--bad) 38%, transparent);
   background: color-mix(in srgb, var(--bad) 8%, transparent);
 }
 
-.run-control-select select:disabled,
+.run-control-select.danger:hover,
+.run-control-select.danger:focus-within {
+  border-color: color-mix(in srgb, var(--bad) 52%, transparent);
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad);
+}
+
+.run-control-select:has(select:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .clibtn:disabled {
   opacity: 0.5;
   cursor: default;
@@ -7496,6 +7624,9 @@ textarea:focus-visible,
   border-radius: var(--r-md);
 }
 
+/* 发送键保持图标按钮（session-evidence 皮肤把它做成 38px 圆形）：
+   文字放不进圆里会竖排折行，所以「加入队列 / 发送」只走 aria-label + title，
+   运行中的排队语义由上方 .run-status 承担。 */
 .composer .send-label {
   display: none;
 }

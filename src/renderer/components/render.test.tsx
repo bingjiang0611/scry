@@ -31,7 +31,7 @@ import {
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, SessionSummary, UserMessage } from './ChatTurn'
-import { ChatView, filterSlashCommands, imageFilesFromClipboardData } from './ChatView'
+import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
 import { AppShell } from './AppShell'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
@@ -202,6 +202,80 @@ describe('ChatView 会话结束摘要（贴在对话流末尾）', () => {
   it('没有 onOpenSessionDiff 时不渲染摘要', () => {
     const html = renderWelcome({ turns: [sessionTurn], busy: false, cwd: '/repo' })
     expect(html).not.toContain('本会话改动 · Edited')
+  })
+})
+
+describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder 里）', () => {
+  const runningTurn: Turn = {
+    runId: 'run-running-abc',
+    userText: '修复登录超时',
+    done: false,
+    items: [
+      {
+        id: 'ev-1',
+        ts: '2026-08-10T00:00:00.000Z',
+        runId: 'run-running-abc',
+        kind: 'harness',
+        stage: 'run_start'
+      }
+    ]
+  }
+
+  it('busy 且有未完成 turn 时渲染状态条：运行中 + 时长 + runId 短码 + 停止', () => {
+    const html = renderWelcome({ turns: [runningTurn], busy: true })
+    expect(html).toContain('run-status')
+    expect(html).toContain('运行中')
+    expect(html).toContain('可继续输入，新消息将加入队列')
+    expect(html).toMatch(/\d{2,3}:\d{2}:\d{2}/) // 已用时长（小时级长任务）
+    expect(html).toContain('run-running') // runId 前 8 位
+    expect(html).toContain('停止')
+  })
+
+  it('busy 时 placeholder 不再承担状态文案', () => {
+    const html = renderWelcome({ turns: [runningTurn], busy: true })
+    expect(html).not.toContain('运行中，可继续输入并加入队列')
+  })
+
+  it('空闲态不渲染状态条，停止按钮也不在 composer 底部常驻', () => {
+    const html = renderWelcome({ turns: [], busy: false })
+    expect(html).not.toContain('run-status')
+    expect(html).not.toContain('停止')
+  })
+
+  it('busy 时发送键文案为「加入队列」', () => {
+    const html = renderWelcome({ turns: [runningTurn], busy: true })
+    expect(html).toContain('加入队列')
+  })
+
+  it('配置行收敛：Provider 后有分组竖线，模型/权限带前缀 label', () => {
+    const html = renderWelcome({ turns: [runningTurn], busy: true })
+    expect(html).toContain('run-group-sep')
+    expect(html).toContain('rc-prefix" aria-hidden="true">模型')
+    expect(html).toContain('rc-prefix" aria-hidden="true">权限')
+  })
+
+  it('可见值单独渲染成 .rc-value，宽度贴合当前选中项而不是最长选项', () => {
+    const html = renderWelcome({ turns: [runningTurn], busy: true })
+    // 目录/Provider 之后的两个下拉各有一个可见值节点
+    expect(html).toContain('rc-value" aria-hidden="true">自动模型')
+    expect(html).toContain('rc-value" aria-hidden="true">默认审批')
+  })
+
+  it('发送键保持图标按钮：文字只走 aria-label，不塞进圆形按钮里折行', () => {
+    const html = renderWelcome({ turns: [runningTurn], busy: true })
+    expect(html).toContain('aria-label="加入队列"')
+    expect(html).toContain('send-label')
+  })
+})
+
+describe('formatElapsedMs', () => {
+  it('分钟级：MM:SS 补零', () => {
+    expect(formatElapsedMs(12 * 60 * 1000 + 34 * 1000)).toBe('12:34')
+    expect(formatElapsedMs(0)).toBe('00:00')
+  })
+
+  it('小时级：H:MM:SS', () => {
+    expect(formatElapsedMs((3 * 3600 + 5 * 60 + 9) * 1000)).toBe('3:05:09')
   })
 })
 
