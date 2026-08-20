@@ -255,11 +255,16 @@ export async function runScryCli(argv: string[]): Promise<number> {
   }
   switch (args.positionals[0]) {
     case '__auto_update':
-      await runBackgroundUpdate(
-        process.env.SCRY_UPDATE_CURRENT_VERSION ?? RECORDER_VERSION,
-        process.argv[1]
-      )
-      return 0
+      {
+        const result = await runBackgroundUpdate(
+          process.env.SCRY_UPDATE_CURRENT_VERSION ?? RECORDER_VERSION,
+          process.argv[1]
+        )
+        if (result?.status === 'updated' && result.latestVersion) {
+          process.stderr.write(`Scry CLI 已自动更新：${result.currentVersion} → ${result.latestVersion}\n`)
+        }
+        return 0
+      }
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
     case 'doctor': return doctorCommand(args)
