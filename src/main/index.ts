@@ -384,47 +384,25 @@ async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]
 
   const fingerprint = codexHookFingerprint(inspection.hooks)
   const store = codexHookGrantStore()
-  if (store.isGranted(cwd, fingerprint)) return trust
-
-  const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
-  const detail = [
-    `仓库：${cwd}`,
-    `启用 Hook：${enabledCount} 个（${codexHookSourceSummary(inspection)}）`,
-    `其中未信任或已修改：${pending.length} 个`,
-    '',
-    '允许后，Scry 仅把这组 Hook 的精确 key/hash 注入本次 Codex app-server 进程。',
-    '以后同一组 Hook 自动放行；任何 Hook 增删或内容 hash 变化都会重新询问。',
-    '这是 Scry 的本地授权，不会修改 Codex 自身的 Hook 信任库。',
-    ...(inspection.warnings.length > 0 ? ['', `Codex 警告：${inspection.warnings.join('；')}`] : [])
-  ].join('\n')
-  const options = {
-    type: 'warning' as const,
-    title: '授权当前仓库的 Codex Hook',
-    message: `Codex 已发现 ${pending.length} 个未信任或已修改的 Hook`,
-    detail,
-    buttons: ['允许当前 Hook 并启动', '取消'],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  }
-  const result = win && !win.isDestroyed()
-    ? await dialog.showMessageBox(win, options)
-    : await dialog.showMessageBox(options)
-  if (result.response !== 0) {
-    throw codexHookInspectionError(
-      cwd,
-      '已取消 Codex Hook 授权',
-      '如需执行当前仓库 Hook，请再次发送任务并在授权对话框中选择允许'
+  if (!store.isGranted(cwd, fingerprint)) {
+    // 默认允许：不再弹窗确认。注入的仍是这组 Hook 的精确 key/hash，
+    // 指纹绑定语义不变——Hook 增删或内容 hash 变化会生成新指纹并再次走这里。
+    const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
+    try {
+      store.grant(cwd, fingerprint, enabledCount)
+    } catch (error) {
+      throw codexHookInspectionError(
+        cwd,
+        `Codex Hook 授权保存失败：${String((error as Error).message)}`,
+        '检查 Scry userData 目录写权限后重试'
+      )
+    }
+    console.info(
+      `[scry] auto-granted codex hook trust: ${cwd} fingerprint=${fingerprint} hooks=${pending.length}/${enabledCount}（${codexHookSourceSummary(inspection)}）`
     )
-  }
-  try {
-    store.grant(cwd, fingerprint, enabledCount)
-  } catch (error) {
-    throw codexHookInspectionError(
-      cwd,
-      `Codex Hook 授权保存失败：${String((error as Error).message)}`,
-      '检查 Scry userData 目录写权限后重试'
-    )
+    if (inspection.warnings.length > 0) {
+      console.warn(`[scry] codex hook warnings: ${cwd}: ${inspection.warnings.join('；')}`)
+    }
   }
   return trust
 }
@@ -535,35 +513,17 @@ async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessE
     }
   }
   if (!granted) {
-    const detail = [
-      `仓库：${inspection.workspace}`,
-      `入口：${inspection.entry}`,
-      `文件：${inspection.files.length} 个`,
-      `指纹：${inspection.fingerprint}`,
-      '',
-      '允许后，Scry 会把已检查的完整回调包冻结到应用数据目录，只执行冻结副本。',
-      '仓库中的入口或任一依赖内容变化后都会重新询问；取消不会影响本地 record 落盘。'
-    ].join('\n')
-    const options = {
-      type: 'warning' as const,
-      title: '授权当前仓库的 Scry 提交回调',
-      message: '该仓库请求在每条 Scry record 落盘后运行上传回调',
-      detail,
-      buttons: ['允许当前回调包', '取消'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true
-    }
-    const result = win && !win.isDestroyed()
-      ? await dialog.showMessageBox(win, options)
-      : await dialog.showMessageBox(options)
-    if (result.response !== 0) return baseEnv
+    // 默认允许：不再弹窗确认。授权后仍只执行冻结到应用数据目录的精确回调包副本，
+    // 入口或任一依赖内容变化会生成新指纹并重新走这里；授权失败不影响本地 record 落盘。
     try {
       await store.grant(inspection.workspace, inspection.fingerprint)
     } catch (error) {
       console.warn('[scry] recorder commit hook grant failed:', cwd, error)
       return baseEnv
     }
+    console.info(
+      `[scry] auto-granted recorder commit hook: ${inspection.workspace} entry=${inspection.entry} files=${inspection.files.length} fingerprint=${inspection.fingerprint}`
+    )
   }
 
   try {
@@ -1169,12 +1129,13 @@ handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
   })
   const report = snapshot.report
   if (!isMcpGuardReport(report)) throw new Error('mcpguard 生成了不一致的扫描报告')
+  const issues = [...snapshot.errors, ...snapshot.warnings]
   return {
     ...context,
     mode: 'read',
-    state: snapshot.errors.length > 0 ? 'degraded' : 'ready',
+    state: issues.length > 0 ? 'degraded' : 'ready',
     data: report,
-    ...(snapshot.errors.length > 0 ? { reason: snapshot.errors.join('；') } : {}),
+    ...(issues.length > 0 ? { reason: issues.join('；') } : {}),
     observedAt: Date.now()
   }
 })

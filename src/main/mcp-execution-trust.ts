@@ -24,6 +24,7 @@ export interface McpExecutionSnapshot {
   targets: ResolvedMcpConfig[]
   report: ScanReport
   errors: string[]
+  warnings: string[]
 }
 
 function stableJson(value: unknown): string {
@@ -124,22 +125,34 @@ function normalizedExecutionTarget(
       : command.includes('/') || command.includes('\\')
         ? resolve(cwd, command)
         : resolveCommandOnPath(command, inheritedEnv.PATH ?? '')
+    // executable 缺失/不可执行是可用性问题而非安全边界：Provider 启动该 MCP 时会自行失败并报告，
+    // 不应因此拦截整个会话。保持 config.command 原值，用 unverified 标记绑定指纹——
+    // 文件日后出现或变为可执行时 identity 变为真实值，指纹变化会触发重新授权。
     if (!absolute) {
-      errors.push(`MCP server ${target.name} 的 executable 无法在登录 shell PATH 中解析：${command}`)
-    } else {
-      try {
-        const canonical = realpathSync(absolute)
-        const stat = statSync(canonical)
-        if (!stat.isFile()) throw new Error('not a regular file')
-        if (process.platform !== 'win32') accessSync(canonical, constants.X_OK)
-        config.command = canonical
-        return {
-          ...target,
-          config,
-          executableIdentity: `${canonical}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
-        }
-      } catch {
-        errors.push(`MCP server ${target.name} 的 executable 不是可信可执行文件：${absolute}`)
+      return {
+        ...target,
+        config,
+        executableIdentity: `unverified:${command}`,
+        executableError: `executable 无法在登录 shell PATH 中解析：${command}`
+      }
+    }
+    try {
+      const canonical = realpathSync(absolute)
+      const stat = statSync(canonical)
+      if (!stat.isFile()) throw new Error('not a regular file')
+      if (process.platform !== 'win32') accessSync(canonical, constants.X_OK)
+      config.command = canonical
+      return {
+        ...target,
+        config,
+        executableIdentity: `${canonical}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
+      }
+    } catch {
+      return {
+        ...target,
+        config,
+        executableIdentity: `unverified:${absolute}`,
+        executableError: `executable 不存在或不是可执行文件：${absolute}`
       }
     }
   }
@@ -167,7 +180,9 @@ export function buildMcpExecutionSnapshot(args: {
     ...minimalMcpEnv(args.env),
     ...(providerId === 'claude' ? { CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1' } : {})
   }
-  const targets = resolveProviderMcpConfigs(providerId, args.cwd, args.homeDir, args.env).map((target) =>
+  // 配置解析与 Guard 扫描必须使用同一 canonical cwd：macOS 上 /var、/tmp 等符号链接路径
+  // 若一侧 realpath 另一侧不 realpath，同一文件会算出不同 targetId，误报「MCP Guard 未识别配置目标」。
+  const targets = resolveProviderMcpConfigs(providerId, cwd, args.homeDir, args.env).map((target) =>
     normalizedExecutionTarget(
       target,
       cwd,
@@ -176,6 +191,9 @@ export function buildMcpExecutionSnapshot(args: {
       target.enabled || target.targetId === args.selectedTargetId
     )
   )
+  const warnings = targets
+    .filter((target) => target.executableError)
+    .map((target) => `MCP server ${target.name} 的 ${target.executableError}；不拦截会话，连接结果由 Provider 自行报告`)
   const credentialProxyKeys = Object.entries(args.env ?? {})
     .filter((entry): entry is [string, string] => entry[1] !== undefined)
     .filter(([key, value]) => proxyEnvValueContainsCredentials(key, value))
@@ -186,7 +204,7 @@ export function buildMcpExecutionSnapshot(args: {
       `启用的远程 MCP（${enabledRemoteTargets.map((target) => target.name).join(', ')}）无法与含凭据代理环境隔离：${credentialProxyKeys.join(', ')}`
     )
   }
-  const configPaths = providerMcpConfigPaths(providerId, args.cwd, args.homeDir, args.env)
+  const configPaths = providerMcpConfigPaths(providerId, cwd, args.homeDir, args.env)
     .filter((path) => existsSync(path))
   const report = scanMcp({ cwd, home: args.homeDir, configPaths })
   const reportIds = new Set(report.targets.map((target) => target.targetId))
@@ -226,6 +244,7 @@ export function buildMcpExecutionSnapshot(args: {
     targets,
     report,
     errors,
+    warnings,
     fingerprint: `sha256:${createHash('sha256').update(stableJson(canonical)).digest('hex')}`
   }
 }
@@ -507,6 +526,7 @@ function mcpExecutionAuthorizationTargetBlock(
   if (envKeys.length > 0) lines.push(...wrappedKeyLines('env', envKeys, target.config.env))
   if (headerKeys.length > 0) lines.push(...wrappedKeyLines('headers', headerKeys, target.config.headers))
   if (credentialEnvBindings.length > 0) lines.push(...wrappedKeyLines('凭据环境引用', credentialEnvBindings))
+  if (target.executableError) lines.push(...wrappedTextLines('警告', target.executableError))
   return {
     scope: scopeLabel(target.scope),
     continuation: `• ${name}（续）`,

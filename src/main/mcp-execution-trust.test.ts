@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -675,6 +675,74 @@ describe('MCP execution trust', () => {
       expect(detail).toContain('Guard：警告')
       expect(detail).toContain('未完整扫描 1')
       expect(detail).not.toContain('Guard：通过')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('degrades a missing executable to a warning and revokes the grant when it appears', () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      const missing = join(root, 'missing', 'server.bin')
+      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
+        mcpServers: { gone: { command: missing }, ok: { command: '/bin/echo' } }
+      }))
+      const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir })
+
+      expect(snapshot.errors).toEqual([])
+      expect(snapshot.warnings).toHaveLength(1)
+      expect(snapshot.warnings[0]).toContain('gone')
+      expect(snapshot.warnings[0]).toContain(missing)
+      const gone = snapshot.targets.find((target) => target.name === 'gone')!
+      expect(gone.config.command).toBe(missing)
+      expect(gone.executableIdentity).toBe(`unverified:${missing}`)
+      expect(gone.executableError).toContain(missing)
+      const trust = new McpExecutionTrust()
+      trust.grant('run', snapshot)
+      expect(trust.isGranted('run', snapshot)).toBe(true)
+
+      mkdirSync(join(root, 'missing'), { recursive: true })
+      writeFileSync(missing, '#!/bin/sh\n')
+      chmodSync(missing, 0o755)
+      const revived = buildMcpExecutionSnapshot({ cwd, homeDir })
+      expect(revived.errors).toEqual([])
+      expect(revived.warnings).toEqual([])
+      expect(revived.fingerprint).not.toBe(snapshot.fingerprint)
+      expect(trust.isGranted('run', revived)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('degrades a command that cannot be resolved on PATH to a warning', () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
+        mcpServers: { ghost: { command: 'scry-missing-cmd-9f8d' } }
+      }))
+      const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir, env: { PATH: '/bin:/usr/bin' } })
+
+      expect(snapshot.errors).toEqual([])
+      expect(snapshot.warnings).toHaveLength(1)
+      expect(snapshot.warnings[0]).toContain('PATH')
+      expect(snapshot.targets[0].config.command).toBe('scry-missing-cmd-9f8d')
+      expect(snapshot.targets[0].executableIdentity).toBe('unverified:scry-missing-cmd-9f8d')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('shows the unverifiable executable warning in the authorization dialog', () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
+        mcpServers: { gone: { command: '/usr/local/scry-missing-bin' } }
+      }))
+      const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir })
+      const detail = mcpExecutionAuthorizationDetail(snapshot, 'run', snapshot.targets)
+
+      expect(detail).toContain('gone')
+      expect(detail).toContain('警告：executable 不存在或不是可执行文件：/usr/local/scry-missing-bin')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
