@@ -36,7 +36,6 @@ interface UpgradeOptions {
   entryPath?: string
   checkOnly?: boolean
   allowBreaking?: boolean
-  notifyLater?: boolean
   env?: NodeJS.ProcessEnv
   now?: Date
 }
@@ -169,8 +168,7 @@ async function saveResult(
   path: string,
   result: UpgradeResult,
   now: Date,
-  previous: CliUpdateState | null,
-  notifyLater: boolean
+  previous: CliUpdateState | null
 ): Promise<void> {
   const updatedAt = result.status === 'updated' ? now.toISOString() : previous?.updatedAt
   await writeJsonAtomic(path, {
@@ -183,9 +181,7 @@ async function saveResult(
     updatedAt,
     updatedFrom: result.status === 'updated' ? result.currentVersion : previous?.updatedFrom,
     updatedTo: result.status === 'updated' ? result.latestVersion : previous?.updatedTo,
-    notifiedAt: result.status === 'updated'
-      ? (notifyLater ? undefined : updatedAt)
-      : previous?.notifiedAt
+    notifiedAt: result.status === 'updated' ? updatedAt : previous?.notifiedAt
   } satisfies CliUpdateState)
 }
 
@@ -235,19 +231,19 @@ export async function upgradeCli(options: UpgradeOptions): Promise<UpgradeResult
       message: error instanceof Error ? error.message : String(error)
     }
   }
-  await saveResult(path, result, now, previous, options.notifyLater === true).catch(() => undefined)
+  await saveResult(path, result, now, previous).catch(() => undefined)
   return result
 }
 
-export async function runBackgroundUpdate(currentVersion: string, entryPath?: string): Promise<void> {
+export async function runBackgroundUpdate(currentVersion: string, entryPath?: string): Promise<UpgradeResult | null> {
   const path = statePath()
   const state = await readJson<CliUpdateState>(path)
-  if (!isUpdateDue(state)) return
-  await withDirectoryLock(`${path}.lock`, async () => {
+  if (!isUpdateDue(state)) return null
+  return await withDirectoryLock(`${path}.lock`, async () => {
     const latestState = await readJson<CliUpdateState>(path)
-    if (!isUpdateDue(latestState)) return
-    await upgradeCli({ currentVersion, entryPath, notifyLater: true })
-  }, { waitMs: 100, ttlMs: 3 * 60 * 1_000 }).catch(() => undefined)
+    if (!isUpdateDue(latestState)) return null
+    return await upgradeCli({ currentVersion, entryPath })
+  }, { waitMs: 100, ttlMs: 3 * 60 * 1_000 }).catch(() => null)
 }
 
 export async function scheduleBackgroundUpdate(currentVersion: string, entryPath?: string): Promise<void> {
@@ -256,7 +252,7 @@ export async function scheduleBackgroundUpdate(currentVersion: string, entryPath
   const child = spawn(process.execPath, [entryPath, '__auto_update'], {
     detached: true,
     env: { ...process.env, SCRY_UPDATE_CHILD: '1', SCRY_UPDATE_CURRENT_VERSION: currentVersion },
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'inherit'],
     windowsHide: true
   })
   child.on('error', () => undefined)
