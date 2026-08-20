@@ -9,7 +9,7 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { turnChangeHints } from './change-journal.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
-import { beginGitTurnDiff, finishGitTurnDiff } from './git.js'
+import { beginGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
 import {
@@ -1691,9 +1691,12 @@ async function finalizeOpenTurn(
   }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
   const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events, transcript.toolStreamComplete === true)
-  const diffs = await Promise.all(open.captures.map(async ({ repository, capture }) =>
-    finishGitTurnDiff(capture, undefined, turnChangeHints(repository, mergedEvents))
-  ))
+  const diffs = limitTurnDiffPatchBytes(await Promise.all(open.captures.map(async ({ repository, capture }) =>
+    finishGitTurnDiff(capture, undefined, {
+      ...turnChangeHints(repository, mergedEvents),
+      patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames
+    })
+  )))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,

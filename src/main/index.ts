@@ -1784,6 +1784,13 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     deleteRunAttachments(app.getPath('userData'), runId)
     throw error
   }
+  let patchExcludeBasenames: string[] = []
+  if (cwd) {
+    const recorderEnablement = await resolveRecorderEnablement(cwd)
+    if (recorderEnablement.enabled) {
+      patchExcludeBasenames = recorderEnablement.config.capture.patchExcludeBasenames ?? []
+    }
+  }
   const turnDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
   // 会话级 baseline 必须在本轮任何文件改动前就位。ensure() 命中同 revision + 同 session 的既有基线时
   // 复用「会话第一轮开始前」的原始快照（resume/续接不重锚，否则会把前几轮误当成会话前脏改动）；
@@ -1809,7 +1816,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     turnCapture: cwd ? turnDiffCapture : null,
     sessionCapture: sessionBaselineCapture,
     ...(sessionBaselineOrigin ? { sessionBaselineOrigin } : {}),
-    hints: () => turnChangeJournal?.snapshot() ?? {},
+    hints: () => ({ ...turnChangeJournal?.snapshot(), patchExcludeBasenames }),
     emit: ({ stage, id, snapshot }) => {
       const event: TraceEvent = {
         id,
@@ -1835,7 +1842,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     diffPreviewer.sealAll()
     turnDiffPromise ??= diffPreviewer.idle()
       .then(() => turnDiffCapture)
-      .then((capture) => finishGitTurnDiff(capture, undefined, turnChangeJournal?.snapshot()))
+      .then((capture) => finishGitTurnDiff(capture, undefined, {
+        ...turnChangeJournal?.snapshot(),
+        patchExcludeBasenames
+      }))
       .then((turnDiff) => {
         const event: TraceEvent = {
           id: `d-${evSeq++}`,
@@ -1914,7 +1924,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       if (baseline.status !== 'ready') return
       let snapshot: TurnDiffSnapshot
       try {
-        snapshot = await snapshotSessionNetDiff(baseline)
+        snapshot = await snapshotSessionNetDiff(baseline, undefined, { patchExcludeBasenames })
       } catch (error) {
         console.warn('[scry] session diff capture failed:', runId, error)
         return

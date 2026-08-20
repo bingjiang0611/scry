@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared/logical-calls.js'
 import { deriveModelTiming } from '../../shared/model-timing.js'
 import { HOOK_DELIVERY_STAGE, mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
+import { limitTurnDiffPatchBytes } from './git.js'
 import {
   available,
   canonicalCostUsd,
@@ -15,6 +16,17 @@ import {
   type TurnModelSegment,
   type TurnUsage
 } from '../../shared/turn-record.js'
+
+const TURN_CALL_INPUT_MAX_BYTES = 8 * 1024
+const TURN_CALL_DETAIL_MAX_BYTES = 128 * 1024
+
+type CallSection = 'tools' | 'skills' | 'mcps'
+
+interface CallCandidate {
+  call: TurnCall
+  event: TraceEvent
+  section: CallSection
+}
 
 function hash(text: string): string {
   return `sha256:${createHash('sha256').update(text).digest('hex')}`
@@ -67,6 +79,65 @@ function callFromEvent(
         }
       : {})
   }
+}
+
+function jsonBytes(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value))
+  } catch {
+    return Number.POSITIVE_INFINITY
+  }
+}
+
+function limitCallDetails(candidates: CallCandidate[]): Set<CallSection> {
+  const omitted = new Set<CallSection>()
+  const boundaries = new Set<CallCandidate>()
+  const groups = new Map<string, CallCandidate[]>()
+  for (const candidate of candidates) {
+    const key = `${candidate.section}:${candidate.call.name}`
+    const group = groups.get(key) ?? []
+    group.push(candidate)
+    groups.set(key, group)
+    if (candidate.call.input !== undefined && jsonBytes(candidate.call.input) > TURN_CALL_INPUT_MAX_BYTES) {
+      delete candidate.call.input
+      omitted.add(candidate.section)
+    }
+  }
+  for (const group of groups.values()) {
+    boundaries.add(group[0])
+    boundaries.add(group.at(-1) ?? group[0])
+  }
+  const priority = (candidate: CallCandidate): number => {
+    if (
+      candidate.call.status === 'failed' ||
+      candidate.call.status === 'cancelled' ||
+      candidate.event.danger ||
+      (candidate.call.file && candidate.call.file.operation !== 'read')
+    ) return 0
+    return boundaries.has(candidate) ? 1 : 2
+  }
+  let remainingBytes = TURN_CALL_DETAIL_MAX_BYTES
+  for (const candidate of [...candidates].sort((left, right) =>
+    priority(left) - priority(right) || (left.call.order ?? 0) - (right.call.order ?? 0)
+  )) {
+    const detail = {
+      ...(candidate.call.input !== undefined ? { input: candidate.call.input } : {}),
+      ...(candidate.call.outputSummary ? { outputSummary: candidate.call.outputSummary } : {}),
+      ...(candidate.call.error ? { error: candidate.call.error } : {})
+    }
+    const bytes = jsonBytes(detail)
+    if (bytes <= remainingBytes) {
+      remainingBytes -= bytes
+      continue
+    }
+    if (candidate.call.input !== undefined || candidate.call.outputSummary || candidate.call.error) {
+      delete candidate.call.input
+      delete candidate.call.outputSummary
+      delete candidate.call.error
+      omitted.add(candidate.section)
+    }
+  }
+  return omitted
 }
 
 function hookStatus(event: TraceEvent): TurnCallStatus {
@@ -292,18 +363,34 @@ export function aggregateTurnEvidence(args: {
   )
   // AgentTurnRecord v1 的 Tool / Skill / MCP 是互斥 evidence 容器。Agent 为兼容 v1 仍存入
   // tools，但用 category=agent 明确分列；MCP 不能同时再进入 tools，否则总调用会重复相加。
-  const tools = starts
+  const toolCandidates: CallCandidate[] = starts
     .filter((event) => event.kind === 'agent' || (event.kind === 'tool' && !event.isMcp))
-    .map((event) => callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)))
-  const skills = starts
+    .map((event) => ({
+      call: callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)),
+      event,
+      section: 'tools'
+    }))
+  const skillCandidates: CallCandidate[] = starts
     .filter((event) => event.kind === 'skill')
-    .map((event) => callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)))
-  const mcps = starts
+    .map((event) => ({
+      call: callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)),
+      event,
+      section: 'skills'
+    }))
+  const mcpCandidates: CallCandidate[] = starts
     .filter((event) => event.kind === 'tool' && event.isMcp)
     .flatMap((event) => {
       const refs = mcpCallsForEvent(event)
-      return refs.map((ref) => callFromEvent(event, resultById, ref, eventOrder.get(event), resultOrder(event)))
+      return refs.map((ref): CallCandidate => ({
+        call: callFromEvent(event, resultById, ref, eventOrder.get(event), resultOrder(event)),
+        event,
+        section: 'mcps'
+      }))
     })
+  const omittedCallSections = limitCallDetails([...toolCandidates, ...skillCandidates, ...mcpCandidates])
+  const tools = toolCandidates.map(({ call }) => call)
+  const skills = skillCandidates.map(({ call }) => call)
+  const mcps = mcpCandidates.map(({ call }) => call)
   const hooks = aggregateHooks(args.events, eventOrder)
   // 只有带脚本身份的 hook 运行才能宣称 exact；纯投递证据只能证明事件触发过。
   const hookRunsObserved = args.events.some((event) =>
@@ -315,13 +402,19 @@ export function aggregateTurnEvidence(args: {
   for (const event of args.events) {
     if (event.stage !== 'tool_result' && event.filePath && event.fileOp) fileMap.set(event.filePath, event.fileOp)
   }
-  const diffs = args.events.flatMap((event) => {
-    const diff = event.turnDiff
-    if (!diff) return []
+  const diffSnapshots = limitTurnDiffPatchBytes(args.events.flatMap((event) => event.turnDiff ? [event.turnDiff] : []))
+  const diffs = diffSnapshots.map((diff) => {
     const { version: _version, ...record } = diff
-    return [record]
+    return record
   })
   const capturedDiffs = diffs.filter((diff) => diff.status === 'captured')
+  const incompletePatchReasons = new Set(diffs.flatMap((diff) => diff.files.flatMap((file) =>
+    file.patchStatus === 'truncated'
+      ? ['truncated']
+      : file.patchStatus === 'unavailable'
+        ? [file.patchReason ?? 'unknown']
+        : []
+  )))
   const dangers = starts.flatMap((event) =>
     event.danger ? [{ ...event.danger, tool: event.tool, toolUseId: event.toolUseId }] : []
   )
@@ -358,9 +451,21 @@ export function aggregateTurnEvidence(args: {
     modelSegments: observable.assistant
       ? available(modelSegments, [source])
       : unavailable('provider does not expose model output to lifecycle hooks', [source]),
-    tools: observable.tools ? available(tools, [source]) : unavailable('provider tool events were not observable', [source]),
-    skills: observable.skills ? available(skills, [source]) : unavailable('provider skill events were not observable', [source]),
-    mcps: observable.mcps ? available(mcps, [source]) : unavailable('provider MCP events were not observable', [source]),
+    tools: !observable.tools
+      ? unavailable('provider tool events were not observable', [source])
+      : omittedCallSections.has('tools')
+        ? partial(tools, [source], 'one or more tool call payloads were omitted by the record byte budget', 'exact')
+        : available(tools, [source]),
+    skills: !observable.skills
+      ? unavailable('provider skill events were not observable', [source])
+      : omittedCallSections.has('skills')
+        ? partial(skills, [source], 'one or more skill call payloads were omitted by the record byte budget', 'exact')
+        : available(skills, [source]),
+    mcps: !observable.mcps
+      ? unavailable('provider MCP events were not observable', [source])
+      : omittedCallSections.has('mcps')
+        ? partial(mcps, [source], 'one or more MCP call payloads were omitted by the record byte budget', 'exact')
+        : available(mcps, [source]),
     hooks: !observable.hooks
       ? unavailable('provider hook runtime events were not observable', [source])
       : hooks.length > 0 && !hookRunsObserved
@@ -397,10 +502,17 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('turn diff capture was disabled or unavailable', [source])
       : diffs.length === 0
         ? unavailable('turn diff snapshot was not captured', [source])
-        : capturedDiffs.length === diffs.length
+        : capturedDiffs.length === diffs.length && incompletePatchReasons.size === 0
           ? available(diffs, [source])
-          : capturedDiffs.length > 0
-            ? partial(diffs, [source], 'one or more repository snapshots were unavailable', 'exact')
+        : capturedDiffs.length > 0
+            ? partial(
+                diffs,
+                [source],
+                capturedDiffs.length < diffs.length
+                  ? 'one or more repository snapshots were unavailable'
+                  : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}`,
+                'exact'
+              )
             : {
                 status: 'unavailable',
                 quality: 'unavailable',

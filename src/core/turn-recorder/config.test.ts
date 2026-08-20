@@ -86,4 +86,26 @@ describe('recorder storage location', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it('读取 patch basename 排除规则并拒绝路径规则', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-patch-policy-config-'))
+    try {
+      await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+        ...config,
+        capture: { ...config.capture, patchExcludeBasenames: [' .factorypath ', '.factorypath', '*.lock'] }
+      }))
+      await expect(resolveRecorderEnablement(root)).resolves.toMatchObject({
+        enabled: true,
+        config: { capture: { patchExcludeBasenames: ['.factorypath', '*.lock'] } }
+      })
+
+      await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+        ...config,
+        capture: { ...config.capture, patchExcludeBasenames: ['config/.factorypath'] }
+      }))
+      await expect(resolveRecorderLocation(root)).resolves.toMatchObject({ valid: false, reason: 'invalid_config' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mcpCallsForEvent, mcpPayloadFailed, parseMcp } from './trace.js'
+import { mcpCallsForEvent, mcpPayloadFailed, normalizeTurnDiffSnapshot, parseMcp } from './trace.js'
 
 describe('MCP shell bridge evidence', () => {
   it('按命令顺序保留同一 shell 中的多个 mcporter call', () => {
@@ -35,5 +35,19 @@ describe('MCP shell bridge evidence', () => {
     ]))).toBe(true)
     expect(mcpPayloadFailed('{"success":true,"data":{"error":"business field"}}')).toBe(false)
     expect(mcpPayloadFailed('plain output mentions error but is not status JSON')).toBe(false)
+  })
+})
+
+describe('turn diff patch policy', () => {
+  it('保留 policy 省略原因', () => {
+    expect(normalizeTurnDiffSnapshot({
+      version: 1,
+      status: 'captured',
+      files: [{ path: '/repo/.factorypath', added: 1, deleted: 1, patchStatus: 'unavailable', patchReason: 'policy' }],
+      beforeAt: '2026-01-01T00:00:00.000Z',
+      afterAt: '2026-01-01T00:00:01.000Z',
+      captureMs: 1,
+      cleanup: 'ok'
+    })?.files[0]).toMatchObject({ patchStatus: 'unavailable', patchReason: 'policy' })
   })
 })

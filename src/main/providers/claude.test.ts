@@ -176,6 +176,22 @@ describe('Claude provider adapter', () => {
     expect(runner.captureInit).not.toHaveBeenCalled()
   })
 
+  it('keeps the declared read mode when the native command catalog is temporarily unavailable', async () => {
+    sdk.query.mockReturnValue({
+      supportedModels: vi.fn().mockRejectedValue(new Error('control process stopped')),
+      supportedCommands: vi.fn().mockResolvedValue([]),
+      close: vi.fn()
+    })
+    const result = await createClaudeAdapter('/tmp/scry-home').commands!.list({ providerId: 'claude', cwd: '/repo' })
+
+    expect(result).toMatchObject({
+      mode: 'read',
+      state: 'unknown',
+      data: null,
+      reason: 'control process stopped'
+    })
+  })
+
   it('refreshes MCP status through the native SDK without a model prompt', async () => {
     const close = vi.fn()
     sdk.query.mockReturnValue({
