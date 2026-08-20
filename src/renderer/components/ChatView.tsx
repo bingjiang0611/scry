@@ -236,7 +236,7 @@ export function ChatView({
   const composerStatus = composerError ?? sendBlockedReason
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
 
-  // 运行状态条数据：当前未完成 turn 的 runId + 首个事件时间戳（真实字段，不做假数字）
+  // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const busyTurn = busy ? turns.find((turn) => !turn.done && !turn.error) : undefined
   const runStartedAt = busyTurn?.items[0]?.ts != null ? Date.parse(busyTurn.items[0].ts) : Number.NaN
   const [, setNowTick] = useState(0)
@@ -475,11 +475,6 @@ export function ChatView({
                 <span className="run-status-elapsed" title="已用时长按当前 run 首个事件时间戳（TraceEvent.ts）计算">
                   {formatElapsedMs(elapsedMs)}
                 </span>
-              )}
-              {busyTurn && (
-                <code className="run-status-runid" title={`runId：${busyTurn.runId}（当前进行中 run，可追溯）`}>
-                  {busyTurn.runId.slice(0, 8)}
-                </code>
               )}
               <button type="button" className="stop run-status-stop" onClick={onStop}>
                 <Icon name="square" /> 停止

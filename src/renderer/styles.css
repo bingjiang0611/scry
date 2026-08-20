@@ -7418,16 +7418,6 @@ textarea:focus-visible,
   color: var(--dim);
 }
 
-.run-status-runid {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--dim2);
-  background: var(--panel3);
-  border: 1px solid var(--border2);
-  border-radius: 6px;
-  padding: 2px 7px;
-}
-
 .run-status-stop {
   min-height: 30px;
   padding: 0 12px;
