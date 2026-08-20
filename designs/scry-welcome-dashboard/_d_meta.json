@@ -1,0 +1,20 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Welcome Redesign": {
+      "versions": [
+        {
+          "path": "Scry Welcome Redesign.html",
+          "createdAt": "2026-08-08T09:20:08.169Z",
+          "status": "needs-review",
+          "subtitle": "zero-turn welcome 重设计 · 与 composer 对齐 · 重新扫描 · 切项目只换绑定",
+          "section": "Scry UI"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-08T09:20:08.169Z",
+  "updatedAt": "2026-08-08T10:05:54.618Z"
+}

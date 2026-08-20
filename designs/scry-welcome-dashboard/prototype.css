@@ -1,0 +1,1123 @@
+/* Scry Welcome 重设计原型
+   ------------------------------------------------------------------
+   token 与 chrome 全部沿用 Scry 现有实现：
+   - `_scry-tokens.css` 是 src/renderer/styles.css 第 1–135 行的原样拷贝
+   - 顶栏 / composer 的类名与尺寸照抄 styles.css，作为「不变对照组」
+   - 新增只在 `.wd-*` 命名空间下，对应两个 welcome 方案
+*/
+
+/* ── 展示台（原型外壳，不属于产品 UI） ─────────────────── */
+
+body {
+  min-height: 100vh;
+  padding: 0;
+  background: #101216;
+  font: 13px/1.5 var(--font-ui);
+}
+
+.stage {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px 40px;
+}
+
+.stage-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  width: 100%;
+  max-width: 1320px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #262b34;
+  border-radius: 10px;
+  background: rgba(16, 18, 22, 0.94);
+  backdrop-filter: blur(8px);
+  color: #b7bfcc;
+}
+
+.stage-bar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-right: 4px;
+}
+
+.stage-bar-title b {
+  color: #f4f6fa;
+  font: 650 13px/1.2 var(--font-ui);
+}
+
+.stage-bar-title span {
+  color: #7f899a;
+  font: 10.5px/1 var(--font-mono);
+  letter-spacing: 0.09em;
+}
+
+.seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #2b313b;
+  border-radius: 7px;
+  background: #16191f;
+}
+
+.seg > button {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #8b95a5;
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
+  transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+.seg > button:hover { color: #e6eaf1; }
+
+.seg > button[aria-pressed='true'] {
+  background: #262c37;
+  color: #f4f6fa;
+}
+
+.stage-spacer { flex: 1; }
+
+.stage-note {
+  max-width: 1320px;
+  color: #6f7889;
+  font: 11.5px/1.6 var(--font-mono);
+  text-align: center;
+}
+
+/* ── 应用窗口 ───────────────────────────────────────── */
+
+.app-window {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid #23262d;
+  border-radius: 11px;
+  background: var(--bg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  container-type: inline-size;
+  transition: width 220ms var(--ease-out);
+}
+
+.app-window[data-width='1000'] { width: 1000px; }
+.app-window[data-width='1280'] { width: 1280px; }
+
+.win-chrome {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.win-chrome i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3a4150;
+}
+
+.win-chrome span {
+  margin-left: 6px;
+  color: var(--dim2);
+  font: 11px/1 var(--font-ui);
+}
+
+/* 对应真实实现的 .main-area：welcome 与 composer 共用同一个 cqi 容器，
+   否则两者的 clamp(12px, 3cqi, 32px) 会算出不同内边距，左右边就对不齐。 */
+.app-shell {
+  height: 760px;
+  display: grid;
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr) max-content;
+  container-type: inline-size;
+  container-name: main-pane;
+  background: var(--main-surface);
+}
+
+/* ── 顶栏（照抄 styles.css .topbar / .tb-*） ────────────── */
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 7px 10px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.tb-spacer { grid-column: 2; min-width: 0; }
+
+.tb-statusbar {
+  grid-column: 2 / -1;
+  grid-row: 1;
+  justify-self: end;
+  width: min(100%, 680px);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tb-action,
+.tb-agent-status,
+.tb-context {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim);
+  font: 11.5px/1 var(--font-ui);
+}
+
+.tb-action { cursor: pointer; }
+.tb-action:hover { color: var(--fg); }
+
+.tb-agent-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.tb-action b,
+.tb-agent-status b,
+.tb-context b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-version { font-family: var(--font-mono); }
+
+.vtabs { display: flex; gap: 2px; }
+
+.vtab {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim);
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.vtab.active { background: var(--panel2); color: var(--fg); }
+.vtab.active .ico { color: var(--accent); }
+
+/* ── 对话区容器 ─────────────────────────────────────── */
+
+.chat-body {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.chat-transcript {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── composer（照抄 styles.css .composer / .composer-*） ── */
+
+/* width:100% 是必须的：.composer 是 .app-shell 的 grid item，auto 宽度 + margin:0 auto
+   在 grid 里会退成 shrink-to-fit，宽度变成被「运行配置」控件行撑出来的，max-width:960px
+   根本没生效——这也是现有实现里输入框左右边线会随控件多少漂移的根因。 */
+.composer {
+  width: 100%;
+  max-width: 960px;
+  margin-inline: auto;
+  padding: 8px clamp(12px, 3cqi, 32px) 12px;
+  background: transparent;
+}
+
+.composer-shell {
+  position: relative;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+}
+
+.composer-top { margin-bottom: 2px; }
+
+.wdbtn {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim);
+  font: 12.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.wdbtn:hover { background: var(--panel3); color: var(--fg); }
+.wdbtn .chev { width: 12px; height: 12px; opacity: 0.7; }
+
+.composer textarea {
+  width: 100%;
+  min-height: 56px;
+  display: block;
+  padding: 9px 6px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: 14px/1.55 var(--font-ui);
+  resize: none;
+}
+
+.composer textarea:focus { outline: 0; }
+.composer textarea::placeholder { color: var(--dim3); }
+
+.composer-bottom {
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.composer-controls {
+  min-width: 0;
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.clibtn,
+.run-control-select {
+  min-width: 0;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim);
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.clibtn:hover,
+.run-control-select:hover { border-color: var(--border2); background: var(--panel3); color: var(--fg); }
+
+.clibtn .agicon { display: inline-flex; color: var(--dim2); }
+.clibtn .chev,
+.run-control-select .chev { width: 12px; height: 12px; opacity: 0.65; }
+
+.composer .spacer { flex: 1; }
+
+.send {
+  min-width: 44px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 650 12.5px/1 var(--font-ui);
+  cursor: pointer;
+  transition: background-color 130ms var(--ease-out);
+}
+
+.send:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.send:disabled { opacity: 0.45; cursor: not-allowed; }
+.send .ico { stroke-width: 2; }
+
+.composer-hint {
+  margin-top: 6px;
+  color: var(--dim3);
+  font: 11px/1.5 var(--font-mono);
+}
+
+.composer-hint.on { color: var(--warn); }
+
+
+/* ══ Welcome 重设计：共用骨架 ══════════════════════════ */
+
+/* 宽度公式与 .composer 完全一致（max-width 960 + 同一个 clamp 内边距），
+   所以 welcome 的内容盒和下方输入框的左右边线严格对齐。 */
+.wd {
+  width: min(100%, 960px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding-inline: clamp(12px, 3cqi, 32px);
+  display: grid;
+  gap: 20px;
+  color: var(--fg);
+}
+
+/* A 垂直居中：消掉列表与 composer 之间的死空白，页面重心回到内容 */
+.wd-a { align-content: center; padding-block: 26px; }
+
+/* B 同样垂直居中：两个方案只在 Provider 形态上分岔，重心修正是共同前提 */
+.wd-b { align-content: center; padding-block: 26px; }
+
+.wd-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim2);
+  font: 700 10.5px/1 var(--font-mono);
+  letter-spacing: 0.13em;
+}
+
+.wd-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.wd-head { display: grid; gap: 10px; }
+
+.wd-head h1 {
+  max-width: 620px;
+  margin: 0;
+  color: var(--fg);
+  font: 720 clamp(24px, 2.9cqi, 30px)/1.16 var(--font-ui);
+  letter-spacing: -0.012em;
+  text-wrap: pretty;
+}
+
+.wd-head p {
+  max-width: 560px;
+  margin: 0;
+  color: var(--dim);
+  font: 13px/1.75 var(--font-ui);
+  text-wrap: pretty;
+}
+
+/* 来源脚注：保留「哪些是探测的、哪些运行后才有」的可追溯说明 */
+.wd-source {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim3);
+  font: 11px/1.5 var(--font-mono);
+}
+
+.wd-source .ico { width: 12px; height: 12px; flex: none; }
+
+/* 分段就绪计量：4 段对应 4 个 Provider，可用为 --ok，不可用为 --dim3 */
+.wd-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+
+.wd-meter-track { display: flex; gap: 3px; }
+
+.wd-meter-track i {
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--dim3);
+}
+
+.wd-meter-track i[data-on='true'] { background: var(--ok); }
+
+.wd-meter b {
+  color: var(--ok);
+  font: 650 11px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* 计量跟在文字旁边，不单独钉到右边缘（那正是现状里 badge 飞到极右的毛病） */
+.wd-a-fieldtitle {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ══ 方案 A · 就绪台：2×2 Provider 卡片矩阵 ═══════════ */
+
+.wd-a-field { display: grid; gap: 10px; }
+
+.wd-a-fieldhead {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 4px 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border3);
+}
+
+.wd-a-fieldhead > div { min-width: 0; display: grid; gap: 4px; }
+
+/* 重新掃描是动作而不是状态，放在区块标题右端是应该的；
+   被批评的是把「可用」这种状态微章甩到右边缘。样式跟顶栏 .tb-action 走。 */
+.wd-rescan {
+  flex: none;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim2);
+  font: 11.5px/1 var(--font-ui);
+  cursor: pointer;
+  transition: background-color 130ms var(--ease-out), color 130ms var(--ease-out);
+}
+
+.wd-rescan:hover:not(:disabled) {
+  border-color: var(--border2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.wd-rescan:disabled { color: var(--dim3); cursor: default; }
+
+.wd-rescan[data-busy='true'] .ico,
+.wd-b-rescan[data-busy='true'] .ico {
+  animation: wd-spin 900ms linear infinite;
+}
+
+@keyframes wd-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wd-rescan[data-busy='true'] .ico,
+  .wd-b-rescan[data-busy='true'] .ico { animation: none; }
+}
+
+.wd-a-fieldhead b {
+  color: var(--fg);
+  font: 650 13px/1.25 var(--font-ui);
+}
+
+.wd-a-fieldhead small {
+  overflow: hidden;
+  color: var(--dim2);
+  font: 11.5px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-a-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wd-card {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px 10px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-md);
+  background: var(--surface-faint);
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms var(--ease-out), background-color 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+
+.wd-card-top {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wd-card-top > i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.wd-card[data-provider='claude'] .wd-card-top > i { background: var(--provider-claude); }
+.wd-card[data-provider='codex'] .wd-card-top > i { background: var(--provider-codex); }
+.wd-card[data-provider='qoder'] .wd-card-top > i { background: var(--provider-qoder); }
+.wd-card[data-provider='opencode'] .wd-card-top > i { background: var(--provider-opencode); }
+
+.wd-card b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font: 650 13px/1.25 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态微章紧贴名字，不再被 space-between 甩到 840px 之外。
+   可用是常态 → 纯文字；不可用是例外 → 才上色块，避免 4 个绿胶囊平均叫嗓。 */
+.wd-card em {
+  flex: none;
+  color: var(--ok);
+  font: 650 9.5px/1 var(--font-mono);
+  font-style: normal;
+  letter-spacing: 0.06em;
+}
+
+.wd-card[data-health='unavailable'] em {
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.wd-card-check {
+  flex: none;
+  margin-left: auto;
+  color: var(--selected);
+  opacity: 0;
+}
+
+.wd-card small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font: 11.5px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-card code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim3);
+  font: 11px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-card.is-selected {
+  border-color: var(--selected-line);
+  background: var(--selected-soft);
+}
+
+.wd-card.is-selected .wd-card-check { opacity: 1; }
+.wd-card:active { transform: scale(0.995); }
+
+@media (hover: hover) and (pointer: fine) {
+  .wd-card:hover:not(.is-selected) {
+    border-color: var(--border2);
+    background: var(--surface-hover);
+  }
+}
+
+/* ══ 方案 B · 就绪条：Provider 折叠成一条横向仪表 ═════ */
+
+.wd-b-field { display: grid; gap: 9px; }
+
+.wd-b-bar {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.wd-b-score {
+  flex: none;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  padding: 9px 14px;
+  border-right: 1px solid var(--border3);
+}
+
+.wd-b-score b {
+  color: var(--ok);
+  font: 650 17px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.wd-b-score small {
+  color: var(--dim2);
+  font: 700 9.5px/1 var(--font-mono);
+  letter-spacing: 0.11em;
+}
+
+.wd-b-chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.wd-b-chip {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  align-content: center;
+  padding: 9px 11px;
+  border: 0;
+  border-right: 1px solid var(--border3);
+  background: transparent;
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease-out);
+}
+
+.wd-b-chip:last-child { border-right: 0; }
+
+.wd-b-chip > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wd-b-chip > span > i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.wd-b-chip[data-provider='claude'] > span > i { background: var(--provider-claude); }
+.wd-b-chip[data-provider='codex'] > span > i { background: var(--provider-codex); }
+.wd-b-chip[data-provider='qoder'] > span > i { background: var(--provider-qoder); }
+.wd-b-chip[data-provider='opencode'] > span > i { background: var(--provider-opencode); }
+
+.wd-b-chip b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font: 650 12.5px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-b-chip small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim3);
+  font: 11px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-b-chip.is-selected {
+  background: var(--selected-soft);
+  box-shadow: inset 0 2px 0 var(--selected);
+}
+
+.wd-b-chip.is-selected b { color: var(--fg); }
+.wd-b-chip.is-selected small { color: var(--dim2); }
+
+@media (hover: hover) and (pointer: fine) {
+  .wd-b-chip:hover:not(.is-selected) { background: var(--surface-hover); }
+}
+
+.wd-b-rescan {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 0;
+  border-left: 1px solid var(--border3);
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+}
+
+/* 就绪条已经很密，这里只留图标；可访问名称靠 aria-label 保住。 */
+.wd-b-rescan > span { display: none; }
+.wd-b-rescan:disabled { color: var(--dim3); cursor: default; }
+
+.wd-b-rescan:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+
+/* 选中 Provider 的事实行：名称/版本/transport/路径一次讲完 */
+.wd-b-fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim2);
+  font: 11.5px/1.5 var(--font-mono);
+}
+
+.wd-b-fact b { color: var(--fg); font-weight: 650; }
+.wd-b-fact code { color: var(--dim3); }
+.wd-b-fact hr {
+  width: 1px;
+  height: 10px;
+  margin: 0;
+  border: 0;
+  background: var(--border2);
+}
+
+/* ── 已绑定项目上下文条（两方案共用） ─────────────────── */
+
+.wd-context-wrap { position: relative; min-width: 0; }
+
+.wd-context {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-faint);
+  color: var(--dim);
+  font: 12px/1.35 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 130ms var(--ease-out), background-color 130ms var(--ease-out);
+}
+
+.wd-context:hover { border-color: var(--border2); background: var(--surface-hover); }
+
+.wd-context .ico { flex: none; color: var(--dim2); }
+.wd-context .chev { margin-left: auto; opacity: 0.7; }
+.wd-context b { flex: none; color: var(--fg); font-weight: 650; }
+.wd-context code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim3);
+  font: 11px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* menu / mitem / mhdr / mdiv / ck 的尺寸与外观照抄 styles.css，
+   只把弹出方向从向上（composer 的 .menu 是 bottom:100%）改成向下。 */
+.wd-context-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 320px;
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: var(--panel2);
+  box-shadow: var(--shadow-pop);
+  z-index: 20;
+}
+
+.wd-context-menu .mhdr {
+  padding: 8px 10px 4px;
+  color: var(--dim2);
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.wd-context-menu .mitem {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+  font: 12.5px/1.35 var(--font-ui);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wd-context-menu .mitem:hover { background: var(--panel-hi); color: var(--fg); }
+.wd-context-menu .mitem .ico { flex: none; color: var(--dim2); }
+
+.wd-context-item > span { min-width: 0; display: grid; gap: 2px; }
+.wd-context-item b { color: var(--fg); font: 650 12.5px/1.3 var(--font-ui); }
+
+/* 完整路径是选项之间的主要区分信息（同名子目录很常见），菜单里也直接摆出来。 */
+.wd-context-item code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim3);
+  font: 11px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-context-menu .ck {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ok);
+  font: 11px/1 var(--font-mono);
+}
+
+.wd-context-menu .mdiv {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
+/* 切项目后的确认：明确告知「只换绑定、没打开旧对话」，
+   否则静默重绑会让人以为没生效。 */
+.wd-context-note {
+  margin-top: 6px;
+  padding-left: 2px;
+  color: var(--ok);
+  font: 11px/1.5 var(--font-mono);
+}
+
+/* ── 窄宽度：卡片矩阵与就绪条都必须自行收拢 ─────────────── */
+
+@container main-pane (max-width: 640px) {
+  .wd-a-grid { grid-template-columns: minmax(0, 1fr); }
+  .wd-b-chips { flex-wrap: wrap; }
+  .wd-b-chip { flex: 1 1 45%; }
+  .wd-head h1 { font-size: 24px; }
+  .wd-rescan > span { display: none; }
+}
+
+
+/* ══ 现状对照组：以下规则原样取自 styles.css 的 .welcome-* ══
+   只为在同一页对比 before/after，不做任何修饰性改动。 */
+
+.welcome-field {
+  width: min(100% - 48px, 840px);
+  min-height: auto;
+  display: block;
+  margin: 0 auto;
+  padding: clamp(22px, 3cqi, 34px) 0 24px;
+  color: var(--fg);
+  text-align: left;
+}
+
+.welcome-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim2);
+  font: 700 10.5px/1 var(--font-mono);
+  letter-spacing: 0.13em;
+}
+
+.welcome-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.welcome-heading { padding-bottom: 16px; }
+
+.welcome-heading h1 {
+  max-width: 700px;
+  margin: 12px 0 0;
+  color: var(--fg);
+  font: 720 clamp(28px, 3.7cqi, 38px)/1.08 var(--font-ui);
+  letter-spacing: -0.045em;
+}
+
+.welcome-heading p {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: var(--dim);
+  font: 14px/1.6 var(--font-ui);
+  text-wrap: pretty;
+}
+
+.welcome-provider-field { min-width: 0; }
+
+.welcome-ready-line {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.welcome-runtime-pulse {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.welcome-ready-line > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.welcome-ready-line b { color: var(--fg); font: 650 13.5px/1.25 var(--font-ui); }
+
+.welcome-ready-line small {
+  overflow: hidden;
+  color: var(--dim2);
+  font: 11.5px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-provider-list { border-bottom: 1px solid var(--border); }
+
+.welcome-provider {
+  position: relative;
+  width: 100%;
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  padding: 7px 8px 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border3);
+  border-radius: 0;
+  background: transparent;
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.welcome-provider:last-child { border-bottom: 0; }
+
+.welcome-provider.is-selected {
+  background: var(--selected-soft);
+  box-shadow: inset 2px 0 0 var(--selected);
+}
+
+.welcome-provider > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dim2);
+}
+
+.welcome-provider[data-provider='claude'] > i { background: var(--provider-claude); }
+.welcome-provider[data-provider='codex'] > i { background: var(--provider-codex); }
+.welcome-provider[data-provider='qoder'] > i { background: var(--provider-qoder); }
+.welcome-provider[data-provider='opencode'] > i { background: var(--provider-opencode); }
+
+.welcome-provider > span { min-width: 0; display: grid; gap: 3px; }
+
+.welcome-provider > span > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.welcome-provider b {
+  overflow: hidden;
+  color: var(--fg);
+  font: 650 13px/1.25 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-provider em {
+  flex: none;
+  color: var(--ok);
+  font: 650 10px/1 var(--font-mono);
+  font-style: normal;
+}
+
+.welcome-provider code,
+.welcome-provider small {
+  overflow: hidden;
+  color: var(--dim2);
+  font: 11.5px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-composer-heading {
+  min-width: 0;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 5px 7px;
+  border-bottom: 1px solid var(--border3);
+}
+
+.welcome-composer-heading > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.welcome-composer-heading small,
+.welcome-composer-heading em {
+  color: var(--dim2);
+  font: 700 10px/1 var(--font-mono);
+  font-style: normal;
+  letter-spacing: 0.09em;
+}
+
+.welcome-composer-heading b {
+  overflow: hidden;
+  color: var(--fg);
+  font: 650 13px/1.25 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

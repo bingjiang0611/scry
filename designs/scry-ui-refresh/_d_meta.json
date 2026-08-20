@@ -1,0 +1,19 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry UI Refresh": {
+      "versions": [
+        {
+          "path": "Scry UI Refresh.html",
+          "createdAt": "2026-08-06T06:53:15.459Z",
+          "status": "approved",
+          "subtitle": "A · Workbench · 三栏工作台"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-06T06:53:15.460Z",
+  "updatedAt": "2026-08-06T08:11:40.704Z"
+}

@@ -1,0 +1,178 @@
+:root {
+  color-scheme: dark;
+  --bg: #07090d;
+  --panel: #0b0f15;
+  --panel2: #10151e;
+  --panel3: #151b26;
+  --panel-hi: #1b2330;
+  --border: #202633;
+  --border2: #303949;
+  --border3: #171c26;
+  --fg: #f4f6fa;
+  --dim: #b7bfcc;
+  --dim2: #7f899a;
+  --dim3: #535d6e;
+  --scrollbar-thumb: #646464;
+  --scrollbar-thumb-hover: #7c7c7c;
+  --scrollbar-thumb-active: #949494;
+  --resizer-line: #444444;
+  --accent: #6aa8ff;
+  --accent-fg: #f4f7fb;
+  --accent-soft: rgba(106, 168, 255, 0.12);
+  --accent-line: rgba(106, 168, 255, 0.4);
+  --selected: #50e3c2;
+  --selected-soft: rgba(80, 227, 194, 0.1);
+  --selected-line: rgba(80, 227, 194, 0.46);
+  --user: #6aa8ff;
+  --ok: #69cc93;
+  --ok-soft: rgba(105, 204, 147, 0.13);
+  --warn: #efb958;
+  --warn-soft: rgba(239, 185, 88, 0.14);
+  --bad: #f36c67;
+  --bad-soft: rgba(243, 108, 103, 0.14);
+  --read: #6aa8ff;
+  --write: #69cc93;
+  --edit: #d37ec8;
+  --mcp: #6aa8ff;
+  --skill: #efb958;
+  --agent: #d37ec8;
+  --provider-claude: #d37ec8;
+  --provider-codex: #6aa8ff;
+  --provider-qoder: #efa84f;
+  --provider-opencode: #70ca93;
+  --surface-faint: rgba(255, 255, 255, 0.018);
+  --surface-subtle: rgba(255, 255, 255, 0.025);
+  --surface-muted: rgba(255, 255, 255, 0.03);
+  --surface-hover: rgba(255, 255, 255, 0.035);
+  --surface-raised: rgba(255, 255, 255, 0.045);
+  --surface-strong: rgba(255, 255, 255, 0.06);
+  --surface-inset-soft: rgba(0, 0, 0, 0.08);
+  --surface-inset: rgba(0, 0, 0, 0.18);
+  --surface-inset-strong: rgba(0, 0, 0, 0.22);
+  --sidebar-surface: #0d1118;
+  --main-surface: #090c11;
+  --overview-surface: #0b0f15;
+  --image-outline: oklch(1 0 0 / 0.1);
+  --modal-overlay: rgba(0, 0, 0, 0.7);
+  --diff-add-fg: #a6e3bd;
+  --diff-del-fg: #f2aaa7;
+  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r-xs: 4px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-pill: 999px;
+  --sidebar-w: 230px;
+  --overview-panel-w: 380px;
+  --pane-resizer-w: 8px;
+  --topbar-h: 44px;
+  --statusbar-h: 26px;
+  --shadow-pop: 0 20px 64px rgba(0, 0, 0, 0.64);
+  --shadow-card: none;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --panel2: #f6f7f9;
+  --panel3: #eceff3;
+  --panel-hi: #e4e8ed;
+  --border: #d9dee5;
+  --border2: #c5ccd6;
+  --border3: #e7eaee;
+  --fg: #1d2229;
+  --dim: #4d5662;
+  --dim2: #6d7682;
+  --dim3: #929aa4;
+  --scrollbar-thumb: #b6bdc7;
+  --scrollbar-thumb-hover: #99a2ae;
+  --scrollbar-thumb-active: #7f8996;
+  --resizer-line: #d2d7dd;
+  --accent: #3f72b7;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(63, 114, 183, 0.1);
+  --accent-line: rgba(63, 114, 183, 0.45);
+  --selected: #137b66;
+  --selected-soft: rgba(19, 123, 102, 0.09);
+  --selected-line: rgba(19, 123, 102, 0.4);
+  --user: #3f72b7;
+  --ok: #18794e;
+  --ok-soft: rgba(24, 121, 78, 0.1);
+  --warn: #94620b;
+  --warn-soft: rgba(148, 98, 11, 0.1);
+  --bad: #bf3f3a;
+  --bad-soft: rgba(191, 63, 58, 0.1);
+  --read: #246fae;
+  --write: #18794e;
+  --edit: #934a84;
+  --mcp: #4f74aa;
+  --skill: #94620b;
+  --agent: #934a84;
+  --provider-claude: #a15397;
+  --provider-codex: #3f72b7;
+  --provider-qoder: #9b6206;
+  --provider-opencode: #28744a;
+  --surface-faint: rgba(29, 34, 41, 0.018);
+  --surface-subtle: rgba(29, 34, 41, 0.028);
+  --surface-muted: rgba(29, 34, 41, 0.036);
+  --surface-hover: rgba(29, 34, 41, 0.045);
+  --surface-raised: rgba(29, 34, 41, 0.06);
+  --surface-strong: rgba(29, 34, 41, 0.08);
+  --surface-inset-soft: rgba(29, 34, 41, 0.02);
+  --surface-inset: rgba(29, 34, 41, 0.035);
+  --surface-inset-strong: rgba(29, 34, 41, 0.05);
+  --sidebar-surface: #f4f6f8;
+  --main-surface: #ffffff;
+  --overview-surface: #f8fafc;
+  --image-outline: oklch(0 0 0 / 0.1);
+  --modal-overlay: rgba(29, 34, 41, 0.38);
+  --diff-add-fg: #176a45;
+  --diff-del-fg: #a93434;
+  --shadow-pop: 0 20px 56px rgba(35, 44, 57, 0.18);
+}
+
+/* 蓝本全局：mono 数字/ID/路径 + 1px hairline 网格底纹 + icon 基类 */
+.ico {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+.ico-lg {
+  width: 18px;
+  height: 18px;
+}
+svg.ico {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.btn.primary .ico,
+.send .ico,
+.stop .ico {
+  stroke-width: 2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+  background-image: none;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
