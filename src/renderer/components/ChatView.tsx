@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
 import type {
   AgentModelRef,
@@ -104,6 +104,15 @@ export function filterSlashCommands(input: string, commands: SlashCmd[]): SlashC
       return aPrefix - bPrefix || aName.localeCompare(bName)
     })
     .slice(0, 50)
+}
+
+export function formatElapsedMs(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
 export function ChatView({
@@ -217,7 +226,7 @@ export function ChatView({
     }))
   ]
   const effortOptions = [
-    { value: '', label: '默认 effort', description: '使用模型默认推理强度' },
+    { value: '', label: '默认', description: '使用模型默认推理强度' },
     ...(selectedModel?.efforts ?? []).map((option) => ({
       value: option.id,
       label: option.label,
@@ -226,6 +235,17 @@ export function ChatView({
   ]
   const composerStatus = composerError ?? sendBlockedReason
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
+
+  // 运行状态条数据：当前未完成 turn 的 runId + 首个事件时间戳（真实字段，不做假数字）
+  const busyTurn = busy ? turns.find((turn) => !turn.done && !turn.error) : undefined
+  const runStartedAt = busyTurn?.items[0]?.ts != null ? Date.parse(busyTurn.items[0].ts) : Number.NaN
+  const [, setNowTick] = useState(0)
+  useEffect(() => {
+    if (!busy || Number.isNaN(runStartedAt)) return
+    const timer = window.setInterval(() => setNowTick((n) => n + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [busy, runStartedAt])
+  const elapsedMs = Number.isNaN(runStartedAt) ? null : Math.max(0, Date.now() - runStartedAt)
 
   useEffect(() => {
     if (!slashOpen) return
@@ -443,12 +463,36 @@ export function ChatView({
             ))}
           </div>
         )}
+        {busy && (
+          <div className="run-status" role="status" aria-live="polite">
+            <span className="run-status-left">
+              <i className="run-status-dot" aria-hidden="true" />
+              <b>运行中</b>
+              <span className="run-status-hint">可继续输入，新消息将加入队列</span>
+            </span>
+            <span className="run-status-meta">
+              {elapsedMs != null && (
+                <span className="run-status-elapsed" title="已用时长按当前 run 首个事件时间戳（TraceEvent.ts）计算">
+                  {formatElapsedMs(elapsedMs)}
+                </span>
+              )}
+              {busyTurn && (
+                <code className="run-status-runid" title={`runId：${busyTurn.runId}（当前进行中 run，可追溯）`}>
+                  {busyTurn.runId.slice(0, 8)}
+                </code>
+              )}
+              <button type="button" className="stop run-status-stop" onClick={onStop}>
+                <Icon name="square" /> 停止
+              </button>
+            </span>
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           className="input"
           aria-label="描述任务"
           aria-describedby={composerStatus ? 'composer-status' : undefined}
-          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : busy ? '运行中，可继续输入并加入队列…' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
+          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
           value={input}
           onChange={(event) => onInput(event.target.value)}
           onPaste={(event) => {
@@ -517,9 +561,11 @@ export function ChatView({
               onRescan={onRescan}
               disabled={agentLocked}
             />
+            <span className="run-group-sep" aria-hidden="true" />
             <div className="run-control-scroll">
               <RunControlSelect
                 ariaLabel="模型"
+                prefix="模型"
                 value={modelValue}
                 options={modelOptions}
                 loading={runControlsLoading}
@@ -533,6 +579,7 @@ export function ChatView({
               {selectedModel && selectedModel.efforts.length > 0 && (
                 <RunControlSelect
                   ariaLabel="Effort"
+                  prefix="强度"
                   value={runControls.effort ?? ''}
                   options={effortOptions}
                   onChange={(value) => onRunEffort(value || undefined)}
@@ -540,6 +587,7 @@ export function ChatView({
               )}
               <RunControlSelect
                 ariaLabel="权限"
+                prefix="权限"
                 value={runControls.permissionMode}
                 options={runControlCatalog.permissions.map((option) => ({
                   value: option.id,
@@ -563,13 +611,8 @@ export function ChatView({
             title={sendBlockedReason ?? sendActionLabel}
           >
             <Icon name="arrowUp" />
-            <span className="send-label">{submitting ? '启动中' : busy ? '排队' : '发送'}</span>
+            <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>
           </button>
-          {busy && (
-            <button type="button" className="stop" onClick={onStop}>
-              <Icon name="square" /> 停止
-            </button>
-          )}
         </div>
         </div>
       </div>
