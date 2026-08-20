@@ -19,6 +19,9 @@ export interface ResolvedMcpConfig extends McpConfigItem {
   jsonPointer: string
   config: Record<string, unknown>
   executableIdentity?: string
+  // executable 无法校验（不存在/不可执行/PATH 解析失败）时的用户可见说明；
+  // 属于可用性问题，不作为安全错误拦截会话。
+  executableError?: string
 }
 
 export interface McpTestResult {
