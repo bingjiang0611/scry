@@ -30,7 +30,7 @@ import {
   takeNextQueuedPrompt
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
-import { AssistantTurn, SessionSummary, UserMessage } from './ChatTurn'
+import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
 import { AppShell } from './AppShell'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
@@ -161,7 +161,7 @@ const renderWelcome = (overrides: Partial<ComponentProps<typeof ChatView>> = {})
   return renderToStaticMarkup(<ChatView {...props} {...overrides} />)
 }
 
-describe('ChatView 会话结束摘要（贴在对话流末尾）', () => {
+describe('ChatView 会话净改动摘要', () => {
   const sessionTurn: Turn = {
     runId: 'run-1',
     userText: '改两个文件',
@@ -184,24 +184,47 @@ describe('ChatView 会话结束摘要（贴在对话流末尾）', () => {
           captureMs: 9,
           cleanup: 'ok'
         }
+      },
+      {
+        id: 'td-1',
+        ts: '2026-08-10T00:00:03.000Z',
+        runId: 'run-1',
+        kind: 'harness',
+        stage: 'turn_diff',
+        turnDiff: {
+          version: 1,
+          status: 'captured',
+          files: [{ path: '/repo/src/b.ts', added: 7, deleted: 0 }],
+          repoRoot: '/repo',
+          scope: '.',
+          beforeAt: '2026-08-10T00:00:00.000Z',
+          afterAt: '2026-08-10T00:00:03.000Z',
+          captureMs: 9,
+          cleanup: 'ok'
+        }
       }
     ]
   }
 
-  it('会话空闲且有 onOpenSessionDiff 时展示结束摘要', () => {
-    const html = renderWelcome({ turns: [sessionTurn], busy: false, cwd: '/repo', onOpenSessionDiff: () => {} })
-    expect(html).toContain('本会话改动 · Edited 1 file')
-    expect(html).toContain('src/a.ts')
+  it('会话空闲时在对话末尾展示整个会话的净改动，且默认收起', () => {
+    const html = renderWelcome({
+      turns: [sessionTurn],
+      busy: false,
+      cwd: '/repo',
+      onOpenSessionDiff: () => {}
+    })
+    const summary = html.match(/<details class="files-summary diff session-summary"[\s\S]*?<\/details>/)?.[0] ?? ''
+    expect(summary).toContain('本会话改动')
+    expect(summary).toContain('Edited 1 file')
+    expect(summary).toContain('src/a.ts')
+    expect(summary).toContain('>+4<')
+    expect(summary).toContain('>−1<')
+    expect(summary).not.toContain('open=""')
   })
 
-  it('运行中不展示结束摘要，避免与流式状态打架', () => {
+  it('运行中不展示会话摘要，避免把临时快照冒充终态', () => {
     const html = renderWelcome({ turns: [sessionTurn], busy: true, cwd: '/repo', onOpenSessionDiff: () => {} })
-    expect(html).not.toContain('本会话改动 · Edited')
-  })
-
-  it('没有 onOpenSessionDiff 时不渲染摘要', () => {
-    const html = renderWelcome({ turns: [sessionTurn], busy: false, cwd: '/repo' })
-    expect(html).not.toContain('本会话改动 · Edited')
+    expect(html).not.toContain('session-summary')
   })
 })
 
@@ -1104,38 +1127,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(editHtml).not.toContain('本轮改动')
   })
 
-  it('SessionSummary 渲染会话结束摘要：Edited N files + 真实净 +/− + 文件列表 + Review', () => {
-    const html = renderToStaticMarkup(
-      <SessionSummary
-        onOpenDiff={() => {}}
-        sessionDiff={{
-          version: 1,
-          status: 'captured',
-          files: [
-            { path: '/repo/src/a.ts', added: 5, deleted: 3 },
-            { path: '/repo/assets/logo.png', added: 0, deleted: 0, binary: true },
-            { path: '/repo/src/b.ts', added: 2, deleted: 0 }
-          ],
-          repoRoot: '/repo',
-          scope: '.',
-          beforeAt: '2026-08-10T00:00:00.000Z',
-          afterAt: '2026-08-10T00:00:05.000Z',
-          captureMs: 12,
-          cleanup: 'ok'
-        }}
-      />
-    )
-    expect(html).toContain('本会话改动 · Edited 3 files')
-    // 净增删直接取快照本身（+7/−3），不是逐轮累计
-    expect(html).toContain('>+7<')
-    expect(html).toContain('>−3<')
-    expect(html).toContain('src/a.ts')
-    expect(html).toContain('src/b.ts')
-    expect(html).toContain('binary')
-    expect(html).toContain('Review')
-    expect(html).toContain('class="files-summary diff session-summary"')
-  })
-
   it('Edit 卡只在轮次结束且该文件真的在本轮快照里时才接到 Diff 面板', () => {
     const editEvent = ev({
       id: 'edit-1',
@@ -1238,6 +1229,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     )
     expect(reviewHtml).toContain('Review')
     expect(reviewHtml).toContain('src/a.ts')
+    expect(reviewHtml).not.toContain('diff-file-head')
     expect(reviewHtml).toContain('unified-diff')
     expect(reviewHtml).toContain('+new')
   })

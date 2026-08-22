@@ -577,8 +577,8 @@ function fileWord(count: number): string {
   return `${count} ${count === 1 ? 'file' : 'files'}`
 }
 
-// 会话结束摘要（Codex 风格）：贴在对话流末尾，展示整段会话「第一轮前基线 → 当前」的真实净改动。
-// 权威来源是 main 落的 session_diff 快照，数字直接取快照每文件净增删，不做逐轮累计。
+// 对话流末尾只放一张会话级净改动卡：默认收起，点击时同时展开文件清单并打开右侧 Diff。
+// 数字直接来自 main 维护的会话 baseline → 当前快照，不累计逐轮活动量。
 export function SessionSummary({
   sessionDiff,
   preview = false,
@@ -599,21 +599,15 @@ export function SessionSummary({
       ? '本会话改动（自恢复以来）'
       : '本会话改动'
   const title = resumed
-    ? '会话首轮前的基线不在本次运行内，净改动只覆盖「自在 Scry 中恢复该会话以来」到当前的真实 Git 变化，不含更早的历史改动'
+    ? '净改动覆盖「自在 Scry 中恢复该会话以来」到当前；点击展开并在右侧 Diff 中审阅'
     : preview
-      ? '运行中的临时净 diff：会话第一轮开始前基线 → 此刻，本轮结束后会被终态取代'
-      : '整段会话从第一轮开始前基线到当前的真实 Git 净改动；会话开始前已有的脏改动不计入'
+      ? '运行中的临时净 diff；点击展开并在右侧 Diff 中审阅，本轮结束后会被终态取代'
+      : '整段会话从第一轮开始前基线到当前的真实 Git 净改动；点击展开并在右侧 Diff 中审阅'
   return (
-    <details className="files-summary diff session-summary" aria-label="本会话改动摘要" open>
-      <summary
-        onClick={(event) => {
-          event.preventDefault()
-          onOpenDiff()
-        }}
-        title={title}
-      >
-        <Icon name="file" /> {heading} · Edited {fileWord(files.length)}
-        <span className="fh-file-count">{fileWord(files.length)}</span>
+    <details className="files-summary diff session-summary" aria-label="本会话改动摘要">
+      <summary onClick={() => onOpenDiff()} title={title}>
+        <Icon name="file" /> {heading}
+        <span className="fh-file-count">Edited {fileWord(files.length)}</span>
         <span className="fh-count diff-count">
           <b className="add">+{added}</b>
           <b className="del">−{deleted}</b>
@@ -624,32 +618,28 @@ export function SessionSummary({
         <span className="fh-total">{files.length}</span>
       </summary>
       <div className="files-body">
-        {files.length > 0 ? (
-          files.map((file) => (
-            <button
-              type="button"
-              className="file-row diff-row"
-              key={file.path}
-              title={`${file.path} · 在右侧 Review 中打开`}
-              onClick={() => onOpenDiff(file.path)}
-            >
-              <span className="path">{displayDiffPath(file.path, sessionDiff.repoRoot)}</span>
-              <span className="line-diff">
-                {file.binary ? (
-                  <span className="binary">binary</span>
-                ) : (
-                  <>
-                    <b className="add">+{file.added}</b>
-                    <b className="del">−{file.deleted}</b>
-                  </>
-                )}
-              </span>
-              <Icon name="chevronRight" className="diff-row-open" />
-            </button>
-          ))
-        ) : (
-          <div className="files-empty">本会话无净改动</div>
-        )}
+        {files.map((file) => (
+          <button
+            type="button"
+            className="file-row diff-row"
+            key={file.path}
+            title={`${file.path} · 在右侧会话 Diff 中打开`}
+            onClick={() => onOpenDiff(file.path)}
+          >
+            <span className="path">{displayDiffPath(file.path, sessionDiff.repoRoot)}</span>
+            <span className="line-diff">
+              {file.binary ? (
+                <span className="binary">binary</span>
+              ) : (
+                <>
+                  <b className="add">+{file.added}</b>
+                  <b className="del">−{file.deleted}</b>
+                </>
+              )}
+            </span>
+            <Icon name="chevronRight" className="diff-row-open" />
+          </button>
+        ))}
       </div>
     </details>
   )

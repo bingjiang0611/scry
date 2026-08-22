@@ -101,7 +101,7 @@ export interface DiffFile {
 }
 
 export type TurnDiffStatus = 'captured' | 'unavailable' | 'timeout' | 'failed'
-export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error'
+export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error' | 'no_baseline'
 
 // Diff 快照的四个 harness stage。`*_preview` 是运行中的临时快照（同一 Git capture 的非消费式重算），
 // 终态 `turn_diff` / `session_diff` 一到达就在展示上取代它，且不写入会话 archive。
@@ -202,7 +202,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
             : {}
     return [{ path: file.path, added, deleted, ...(binary ? { binary: true } : {}), ...patchFields }]
   })
-  const reason = ['not_git', 'no_head', 'deadline', 'git_error'].includes(String(raw.reason))
+  const reason = ['not_git', 'no_head', 'deadline', 'git_error', 'no_baseline'].includes(String(raw.reason))
     ? (raw.reason as TurnDiffReason)
     : undefined
   const collectionRaw = raw.collection && typeof raw.collection === 'object'

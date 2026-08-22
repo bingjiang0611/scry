@@ -12,6 +12,14 @@ const snapshot = {
 }
 
 describe('normalizeTurnDiffSnapshot', () => {
+  it('保留会话基线缺失原因，避免历史恢复时回退旧快照', () => {
+    expect(normalizeTurnDiffSnapshot({ ...snapshot, status: 'unavailable', reason: 'no_baseline' })).toMatchObject({
+      status: 'unavailable',
+      reason: 'no_baseline',
+      files: []
+    })
+  })
+
   it('保留合法 collection 元数据且兼容旧快照', () => {
     expect(normalizeTurnDiffSnapshot(snapshot)?.collection).toBeUndefined()
     expect(normalizeTurnDiffSnapshot({

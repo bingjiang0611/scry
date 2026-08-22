@@ -104,13 +104,6 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
         <section className="diff-review-content" aria-live="polite">
           {selected ? (
             <>
-              <div className="diff-file-head" title={selected.path}>
-                <span>{displayPath(selected.path, turnDiff.repoRoot)}</span>
-                <span className="diff-file-count">
-                  <b className="add">+{selected.added}</b>
-                  <b className="del">−{selected.deleted}</b>
-                </span>
-              </div>
               {selected.patchStatus === 'truncated' && (
                 <div className="diff-review-notice warn">
                   <Icon name="alert" /> 该文件 patch 已按本轮预算截断，下面只展示已捕获部分。
@@ -158,7 +151,7 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
           )}
         </section>
 
-        <nav className="diff-file-nav" aria-label="本轮改动文件">
+        <nav className="diff-file-nav" aria-label={sessionScope ? '本会话改动文件' : '本轮改动文件'}>
           <div className="diff-file-nav-title">Files</div>
           {turnDiff.files.map((file) => (
             <button
