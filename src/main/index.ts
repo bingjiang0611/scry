@@ -1415,7 +1415,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '重新打开 Scry 后再启动'
     })
   }
-  await warmShellEnv()
+  // 登录 shell 可能被用户启动脚本卡住；发送不能等它。shellEnv() 会在未预热时使用安全 fallback。
+  void warmShellEnv()
   const cwd = request.cwd ?? currentCwd
   const catalogCwd = cwd ?? ''
   if (request.backend !== 'local') {
