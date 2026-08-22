@@ -57,9 +57,9 @@ describe('aggregateTurnEvidence', () => {
     ]
     expect(aggregateTurnEvidence({ events }).hooks.value).toEqual([
       expect.objectContaining({
-        id: 'h1',
         order: 0,
         lifecycleEvents: 2,
+        runs: 1,
         name: 'audit.py',
         event: 'PreToolUse',
         status: 'success',
@@ -95,9 +95,9 @@ describe('aggregateTurnEvidence', () => {
       omissionReason: 'provider only delivered hook lifecycle events; per-hook command, outcome and exit code were not observable'
     })
     expect(evidence.hooks.value).toEqual([
-      { order: 0, lifecycleEvents: 2, event: 'PreToolUse', startedAt: '2026-01-01T00:00:00.000Z', status: 'unknown' },
-      { order: 1, lifecycleEvents: 1, event: 'PostToolUse', startedAt: '2026-01-01T00:00:01.000Z', status: 'unknown' },
-      { order: 3, lifecycleEvents: 1, event: 'PreToolUse', startedAt: '2026-01-01T00:00:03.000Z', status: 'unknown' }
+      { order: 0, lifecycleEvents: 2, runs: 2, event: 'PreToolUse', startedAt: '2026-01-01T00:00:00.000Z', status: 'unknown' },
+      { order: 1, lifecycleEvents: 1, runs: 1, event: 'PostToolUse', startedAt: '2026-01-01T00:00:01.000Z', status: 'unknown' },
+      { order: 3, lifecycleEvents: 1, runs: 1, event: 'PreToolUse', startedAt: '2026-01-01T00:00:03.000Z', status: 'unknown' }
     ])
   })
 
@@ -110,7 +110,7 @@ describe('aggregateTurnEvidence', () => {
 
     expect(evidence.hooks).toMatchObject({ status: 'available', quality: 'exact' })
     expect(evidence.hooks.value).toEqual([
-      expect.objectContaining({ id: 'h1', name: 'audit.py', status: 'success' }),
+      expect.objectContaining({ name: 'audit.py', status: 'success' }),
       expect.objectContaining({ event: 'Stop', status: 'unknown', lifecycleEvents: 1 })
     ])
   })
