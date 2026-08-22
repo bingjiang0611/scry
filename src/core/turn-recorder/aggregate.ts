@@ -270,9 +270,58 @@ function aggregateHookDeliveries(events: TraceEvent[], eventOrder: Map<TraceEven
     return {
       ...(eventOrder.get(first) != null ? { order: eventOrder.get(first) } : {}),
       lifecycleEvents: group.length,
+      runs: group.length,
       event: first.hookEvent ?? first.name ?? 'Hook',
       startedAt: first.ts,
       status: 'unknown' as const
+    }
+  })
+}
+
+interface HookRun {
+  order?: number
+  lifecycleEvents: number
+  event: string
+  name?: string
+  command?: string
+  startedAt: string
+  completedAt?: string
+  durationMs?: number
+  status: TurnCallStatus
+}
+
+// 相同 event+name+command 的多次运行折叠成一条：保留 runs/failed 计数，丢弃逐次的 id/exitCode，
+// 大幅压缩重复命令串（同一 hook 脚本在每个工具调用上重复触发）。
+function collapseHookRuns(runs: HookRun[]): TurnHookCall[] {
+  const groups = new Map<string, HookRun[]>()
+  for (const run of runs) {
+    const key = `${run.event}\u0000${run.name ?? ''}\u0000${run.command ?? ''}`
+    const group = groups.get(key) ?? []
+    group.push(run)
+    groups.set(key, group)
+  }
+  return [...groups.values()].map((group) => {
+    const first = group[0]
+    const failed = group.filter((run) => run.status === 'failed').length
+    const orders = group.map((run) => run.order).filter((value): value is number => value != null)
+    const startedAt = group.map((run) => run.startedAt).sort()[0]
+    const completedAts = group.map((run) => run.completedAt).filter((value): value is string => !!value).sort()
+    const hasDuration = group.some((run) => run.durationMs != null)
+    const durationMs = group.reduce((sum, run) => sum + (run.durationMs ?? 0), 0)
+    const status: TurnCallStatus =
+      failed > 0 ? 'failed' : group.some((run) => run.status === 'unknown') ? 'unknown' : first.status
+    return {
+      ...(orders.length > 0 ? { order: Math.min(...orders) } : {}),
+      lifecycleEvents: group.reduce((sum, run) => sum + run.lifecycleEvents, 0),
+      runs: group.length,
+      ...(failed > 0 ? { failed } : {}),
+      event: first.event,
+      ...(first.name ? { name: first.name } : {}),
+      ...(first.command ? { command: first.command } : {}),
+      ...(startedAt ? { startedAt } : {}),
+      ...(completedAts.length > 0 ? { completedAt: completedAts[completedAts.length - 1] } : {}),
+      ...(hasDuration ? { durationMs } : {}),
+      status
     }
   })
 }
@@ -286,7 +335,7 @@ function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number
     group.push(event)
     groups.set(key, group)
   }
-  const runs = [...groups.values()].map((group) => {
+  const runs: HookRun[] = [...groups.values()].map((group) => {
     const ordered = [...group].sort((left, right) => left.ts.localeCompare(right.ts))
     const first = ordered[0]
     const last = ordered.at(-1) ?? first
@@ -300,7 +349,6 @@ function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number
         : undefined
     )
     return {
-      ...(first.hookId ? { id: first.hookId } : {}),
       ...(eventOrder.get(first) != null ? { order: eventOrder.get(first) } : {}),
       lifecycleEvents: ordered.length,
       event: last.hookEvent ?? first.hookEvent ?? last.name ?? first.name ?? 'Hook',
@@ -309,11 +357,10 @@ function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number
       startedAt: started.ts,
       ...(terminal !== started ? { completedAt: terminal.ts } : {}),
       ...(durationMs != null ? { durationMs } : {}),
-      status: hookStatus(terminal),
-      ...(terminal.hookExitCode != null ? { exitCode: terminal.hookExitCode } : {})
+      status: hookStatus(terminal)
     }
   })
-  return [...runs, ...aggregateHookDeliveries(events, eventOrder)]
+  return [...collapseHookRuns(runs), ...aggregateHookDeliveries(events, eventOrder)]
 }
 
 export function aggregateTurnEvidence(args: {

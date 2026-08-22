@@ -43,9 +43,10 @@ export interface TurnCall {
 }
 
 export interface TurnHookCall {
-  id?: string
   order?: number
   lifecycleEvents?: number
+  runs?: number
+  failed?: number
   event: string
   name?: string
   command?: string
@@ -53,7 +54,6 @@ export interface TurnHookCall {
   completedAt?: string
   durationMs?: number
   status: TurnCallStatus
-  exitCode?: number
 }
 
 export interface TurnUsage {

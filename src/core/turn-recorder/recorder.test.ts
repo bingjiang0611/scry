@@ -1283,7 +1283,7 @@ describe('Codex rollout recorder evidence', () => {
       expect.objectContaining({ name: 'rate-workflow' })
     ])
     expect(record.hooks.value).toEqual([
-      expect.objectContaining({ id: 'hook-1', event: 'UserPromptSubmit', status: 'success' })
+      expect.objectContaining({ event: 'UserPromptSubmit', status: 'success' })
     ])
     expect(record.usage).toMatchObject({
       status: 'available',
@@ -1345,8 +1345,8 @@ describe('Codex rollout recorder evidence', () => {
     const [record] = await listRecords(join(root, '.scry'))
     expect(record.hooks).toMatchObject({ status: 'available', quality: 'exact' })
     expect(record.hooks.value).toEqual([
-      expect.objectContaining({ id: 'hook-ok', event: 'PreToolUse', name: 'branch-check.sh', status: 'success', exitCode: 0, durationMs: 100 }),
-      expect.objectContaining({ id: 'hook-stopped', event: 'Stop', name: 'audit.py', status: 'cancelled' })
+      expect.objectContaining({ event: 'PreToolUse', name: 'branch-check.sh', status: 'success', durationMs: 100 }),
+      expect.objectContaining({ event: 'Stop', name: 'audit.py', status: 'cancelled' })
     ])
   })
 
