@@ -8765,13 +8765,11 @@ textarea:focus-visible,
 }
 
 .diff-review-totals .add,
-.diff-file-count .add,
 .diff-file-nav-count .add {
   color: var(--ok);
 }
 
 .diff-review-totals .del,
-.diff-file-count .del,
 .diff-file-nav-count .del {
   color: var(--bad);
 }
@@ -8792,30 +8790,6 @@ textarea:focus-visible,
   background: var(--bg);
 }
 
-.diff-file-head {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--fg);
-  font: 11.5px/1.35 var(--font-mono);
-}
-
-.diff-file-head > span:first-child {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.diff-file-count,
 .diff-file-nav-count {
   flex: none;
   display: inline-flex;

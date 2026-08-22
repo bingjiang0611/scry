@@ -252,6 +252,17 @@ describe('sessionNetDiffReview（右栏会话净 diff 入口）', () => {
     expect(sessionNetDiffReview(turns)).toBeNull()
   })
 
+  it('本轮 session_diff 落成 unavailable/no_baseline 时不回退旧快照', () => {
+    // main 侧每轮都必须落一条会话快照：基线找不到时落 unavailable + no_baseline。
+    // 一旦它静默跳过，这里就会越过本轮回到 r1，把首轮的文件与行数当成当前会话净改动。
+    const turns = [
+      sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }),
+      sessionTurn('r2', '二', { session: snapshot({ status: 'unavailable', reason: 'no_baseline', files: [] }) })
+    ]
+    expect(sessionNetDiffReview(turns)).toBeNull()
+    expect(sessionNetDiffSummary(turns)).toBeNull()
+  })
+
   it('最后一轮还没落 session_diff 时回溯到最近一条权威快照，不再整轮空白（修复运行中纵览为空）', () => {
     const turns = [
       sessionTurn('r1', '一', { session: snapshot({ files: [{ path: '/repo/a.ts', added: 1, deleted: 0 }] }) }),

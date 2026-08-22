@@ -372,7 +372,13 @@ export function ChatView({
           {!busy && turns.length > 0 && onOpenSessionDiff && (() => {
             const sessionReview = sessionNetDiffReview(turns)
             return sessionReview
-              ? <SessionSummary sessionDiff={sessionReview.turnDiff} onOpenDiff={onOpenSessionDiff} />
+              ? (
+                <SessionSummary
+                  sessionDiff={sessionReview.turnDiff}
+                  preview={sessionReview.preview}
+                  onOpenDiff={onOpenSessionDiff}
+                />
+              )
               : null
           })()}
         </div>

@@ -28,7 +28,7 @@ import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore,
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { migrateLegacyUserData } from './user-data-migration'
-import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffSnapshot } from '../shared/trace'
+import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot } from '../shared/trace'
 import {
   normalizeAgentStartRequest,
   runTerminationHint,
@@ -1864,8 +1864,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     return turnDiffPromise
   }
   // 会话级净 diff：在逐轮 turnDone 后，用贯穿会话的 baseline 对当前工作树重算「基线 → 此刻」，
-  // 落一条 harness/session_diff。它是右栏会话 diff 与结束摘要的权威来源；找不到/失效即静默降级，
-  // 绝不编造数字。非消费式，baseline 继续供后续轮复用。
+  // 落一条 harness/session_diff。它是右栏会话 diff 与对话末尾会话摘要的权威来源。
+  //
+  // 每一轮都必须落一条，失败也要落 unavailable + reason：renderer 的会话快照选取是「从最近一轮
+  // 往前找第一条带快照的轮次并停下」，静默跳过会让它越过本轮回退到上一轮的旧快照，把过期数字
+  // 当成当前会话净改动展示（实测：只有首轮落过 session_diff，后续轮次一直显示首轮的文件与行数）。
+  // 非消费式，baseline 继续供后续轮复用。
   let sessionDiffPromise: Promise<void> | null = null
   const finalizeSessionDiff = (): Promise<void> => {
     if (!cwd || !contextKey) return Promise.resolve()
@@ -1873,34 +1877,58 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     diffPreviewer.sealAll()
     sessionDiffPromise ??= (async () => {
       await diffPreviewer.idle()
+      const publishSessionDiff = (snapshot: TurnDiffSnapshot, origin?: TurnDiffBaselineOrigin): void => {
+        const event: TraceEvent = {
+          id: `s-${evSeq++}`,
+          ts: new Date().toISOString(),
+          runId,
+          kind: 'harness',
+          stage: 'session_diff',
+          providerId,
+          runtimeProvider,
+          turnDiff: origin ? { ...snapshot, baseline: origin } : snapshot
+        }
+        appendCoalescedTrace(runState.items, event)
+        if (runs.isViewed(runId)) queueTrace(event)
+      }
+      const unavailableSnapshot = (reason: TurnDiffReason): TurnDiffSnapshot => {
+        const at = new Date().toISOString()
+        return { version: 1, status: 'unavailable', reason, files: [], beforeAt: at, afterAt: at, captureMs: 0, cleanup: 'ok' }
+      }
       const entry = sessionDiffBaselines.get(contextKey, contextRevision, observedSessionId ?? resume)
-      if (!entry) return
+      if (!entry) {
+        console.warn('[scry] session diff baseline not found:', runId, {
+          contextRevision,
+          sessionId: observedSessionId ?? resume
+        })
+        publishSessionDiff(unavailableSnapshot('no_baseline'))
+        return
+      }
       let baseline: GitTurnDiffCapture
       try {
         baseline = await entry.capture
-      } catch {
+      } catch (error) {
+        console.warn('[scry] session diff baseline capture rejected:', runId, error)
+        publishSessionDiff(unavailableSnapshot('no_baseline'), entry.origin)
         return
       }
-      if (baseline.status !== 'ready') return
+      if (baseline.status !== 'ready') {
+        console.warn('[scry] session diff baseline not ready:', runId, baseline.status, baseline.reason)
+        publishSessionDiff(
+          { ...unavailableSnapshot(baseline.reason ?? 'no_baseline'), status: baseline.status },
+          entry.origin
+        )
+        return
+      }
       let snapshot: TurnDiffSnapshot
       try {
         snapshot = await snapshotSessionNetDiff(baseline, undefined, { patchExcludeBasenames })
       } catch (error) {
         console.warn('[scry] session diff capture failed:', runId, error)
+        publishSessionDiff(unavailableSnapshot('git_error'), entry.origin)
         return
       }
-      const event: TraceEvent = {
-        id: `s-${evSeq++}`,
-        ts: new Date().toISOString(),
-        runId,
-        kind: 'harness',
-        stage: 'session_diff',
-        providerId,
-        runtimeProvider,
-        turnDiff: { ...snapshot, baseline: entry.origin }
-      }
-      appendCoalescedTrace(runState.items, event)
-      if (runs.isViewed(runId)) queueTrace(event)
+      publishSessionDiff(snapshot, entry.origin)
     })().catch((error) => console.warn('[scry] session diff finalization failed:', runId, error))
     return sessionDiffPromise
   }
