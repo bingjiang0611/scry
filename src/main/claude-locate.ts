@@ -1,7 +1,7 @@
 // 扫 PATH 检测本机已安装的 agent CLI（claude code / codex / cursor / …），
 // 供 app 的 CLI 选择器（参考 open-design 的 Local CLI 下拉）。
 
-import { execFile, execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, posix, win32 } from 'node:path'
@@ -20,15 +20,41 @@ function shellPath(): string {
   return shellPathCache ?? ''
 }
 
-function execFileText(
+export function execFileText(
   file: string,
   args: string[],
   opts: { env?: NodeJS.ProcessEnv; timeout?: number } = {}
 ): Promise<string> {
   return new Promise((resolve) => {
-    execFile(file, args, { encoding: 'utf8', timeout: opts.timeout ?? 1500, env: opts.env }, (err, stdout) => {
-      resolve(err ? '' : String(stdout))
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (value: string): void => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(value)
+    }
+    const child = spawn(file, args, {
+      env: opts.env,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'ignore']
     })
+    let stdout = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk
+    })
+    child.once('error', () => finish(''))
+    child.once('close', (code) => finish(code === 0 ? stdout : ''))
+    timer = setTimeout(() => {
+      finish('')
+      try {
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL')
+        else child.kill('SIGKILL')
+      } catch {
+        child.kill('SIGKILL')
+      }
+    }, opts.timeout ?? 1500)
   })
 }
 

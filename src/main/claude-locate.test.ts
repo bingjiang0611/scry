@@ -6,6 +6,7 @@ import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import {
   appBundleRootForExecutable,
   detectAgentsFast,
+  execFileText,
   isAcceptedQoderPath,
   mergeLoginShellEnv,
   normalizeAgentVersion,
@@ -23,6 +24,13 @@ import {
 describe('runtime CLI discovery constraints', () => {
   const npmBin = '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli'
   const appBundleBin = '/Applications/QoderWork.app/Contents/Resources/bin/qodercli'
+
+  it('命令的子进程忽略 TERM 时仍在硬超时内返回', async () => {
+    const started = Date.now()
+    const output = await execFileText('/bin/sh', ['-c', "trap '' TERM; sleep 60"], { timeout: 50 })
+    expect(output).toBe('')
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
 
   it('只从登录 shell 补齐运行和 Provider 变量，不导入无关 secret', () => {
     expect(mergeLoginShellEnv(
