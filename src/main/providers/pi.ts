@@ -27,6 +27,8 @@ import {
 import { AgentRuntimeError } from '../cli-runtime'
 import { shellEnv } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
+import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
+import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 import { effortOption } from './run-controls'
 import type { ProviderAdapter, ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
 
@@ -55,6 +57,7 @@ class PiRpcProcess {
     resolve: (response: JsonRecord) => void
     reject: (error: Error) => void
     timer: ReturnType<typeof setTimeout>
+    command: string
   }>()
   private readonly listeners = new Set<(event: JsonRecord) => void>()
   private readonly failureListeners = new Set<(error: Error) => void>()
@@ -126,7 +129,9 @@ class PiRpcProcess {
         if (pending) {
           clearTimeout(pending.timer)
           this.pending.delete(message.id)
-          if (message.success === false) pending.reject(new Error(String(message.error ?? 'Pi RPC command failed')))
+          if (message.success === false) {
+            pending.reject(new PiRpcCommandError(pending.command, String(message.error ?? 'Pi RPC command failed')))
+          }
           else pending.resolve(message)
           continue
         }
@@ -165,7 +170,7 @@ class PiRpcProcess {
         this.pending.delete(id)
         reject(new Error(`Pi RPC ${String(command.type ?? 'command')} 超时`))
       }, timeoutMs)
-      this.pending.set(id, { resolve, reject, timer })
+      this.pending.set(id, { resolve, reject, timer, command: String(command.type ?? 'command') })
       this.child.stdin.write(`${JSON.stringify({ ...command, id })}\n`, (error) => {
         if (!error) return
         const pending = this.pending.get(id)
@@ -211,11 +216,130 @@ class PiRpcProcess {
   }
 }
 
+class PiRpcCommandError extends Error {
+  constructor(readonly command: string, message: string) {
+    super(message)
+    this.name = 'PiRpcCommandError'
+  }
+}
+
 interface PiProbe {
   state: JsonRecord
   models: JsonRecord[]
   levels: string[]
   commands: JsonRecord[]
+}
+
+interface PiEntrySnapshot {
+  entries: JsonRecord[]
+  leafId: string | null
+  appendCursor: string | null
+}
+
+interface PiRunState {
+  stopped: boolean
+  sessionId?: string
+  providerTurnId?: string
+  rpc?: PiRpcProcess
+}
+
+function piEntrySnapshot(response: JsonRecord): PiEntrySnapshot {
+  const data = record(response.data)
+  const rows = data.entries
+  const leafId = data.leafId
+  if (!Array.isArray(rows) || !(leafId === null || typeof leafId === 'string')) {
+    throw new Error('Pi RPC get_entries 返回了无效 session entry 快照')
+  }
+  const entries = rows.map(record)
+  const entryIds = entries.map((entry) => entry.id)
+  if (entryIds.some((id) => typeof id !== 'string' || !id) || new Set(entryIds).size !== entryIds.length) {
+    throw new Error('Pi RPC get_entries 返回了无效或重复的 session entry id')
+  }
+  if (leafId === null && entries.length > 0) {
+    throw new Error('Pi RPC get_entries 的空 leaf 与非空 entries 冲突')
+  }
+  if (leafId !== null && !entries.some((entry) => entry.id === leafId)) {
+    throw new Error('Pi RPC get_entries 的 leafId 不在 session entries 中')
+  }
+  return { entries, leafId, appendCursor: entries.length > 0 ? entryIds.at(-1) as string : null }
+}
+
+function isUserMessageEntry(entry: JsonRecord): boolean {
+  return entry.type === 'message' && record(entry.message).role === 'user'
+}
+
+export function piUserEntryIdAfterBaseline(baselineLeafId: string | null, entries: JsonRecord[]): string | null {
+  const candidates = entries.filter(isUserMessageEntry)
+  if (candidates.length === 0) return null
+  if (candidates.length !== 1) throw new Error('Pi RPC prompt 对应多个新增 user session entries')
+  const candidate = candidates[0]
+  if (typeof candidate.id !== 'string' || !candidate.id) {
+    throw new Error('Pi RPC prompt 的 user session entry 缺少稳定 id')
+  }
+  const byId = new Map(entries.map((entry) => [entry.id, entry]))
+  let parentId = candidate.parentId
+  const visited = new Set<string>()
+  while (parentId !== baselineLeafId) {
+    if (typeof parentId !== 'string' || !parentId || visited.has(parentId)) {
+      throw new Error('Pi RPC user session entry 无法回溯到 prompt 前冻结的 active leaf')
+    }
+    visited.add(parentId)
+    const parent = byId.get(parentId)
+    if (!parent) throw new Error('Pi RPC user session entry 的新增 ancestry 不完整')
+    parentId = parent.parentId
+  }
+  return candidate.id
+}
+
+async function piEntryBaseline(rpc: PiRpcProcess): Promise<PiEntrySnapshot> {
+  return piEntrySnapshot(await rpc.send({ type: 'get_entries' }))
+}
+
+async function waitForPiUserEntryId(
+  rpc: PiRpcProcess,
+  baseline: PiEntrySnapshot,
+  timeoutMs = 5_000
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const response = await rpc.send({
+      type: 'get_entries',
+      ...(baseline.appendCursor ? { since: baseline.appendCursor } : {})
+    })
+    const data = record(response.data)
+    const rows = data.entries
+    if (!Array.isArray(rows)) throw new Error('Pi RPC get_entries 返回了无效增量 entries')
+    const id = piUserEntryIdAfterBaseline(baseline.leafId, rows.map(record))
+    if (id) return id
+    if (Date.now() >= deadline) throw new Error('Pi RPC prompt 已接受，但未出现 authoritative user session entry')
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
+function explicitPiSkill(prompt: string): { command: string; name: string } | null {
+  const match = prompt.match(/^\/skill:([A-Za-z0-9._-]+)(?:\s|$)/)
+  return match ? { command: `skill:${match[1]}`, name: match[1] } : null
+}
+
+async function proveExplicitPiSkill(rpc: PiRpcProcess, request: ProviderRunRequest): Promise<TraceEvent | null> {
+  const mention = explicitPiSkill(request.prompt)
+  if (!mention) return null
+  const rows = record((await rpc.send({ type: 'get_commands' })).data).commands
+  const commands = Array.isArray(rows) ? rows.map(record) : []
+  const skill = commands.find((command) => command.name === mention.command && command.source === 'skill')
+  if (!skill) throw new Error(`Pi 命令目录未证明 /${mention.command} 是可用 Skill`)
+  const sourceInfo = record(skill.sourceInfo)
+  return piEvent(request.runId, {
+    kind: 'skill',
+    stage: `skill:${mention.name}`,
+    tool: 'Skill',
+    name: mention.name,
+    input: {
+      source: 'explicit_user_input',
+      path: sourceInfo.path ?? skill.path ?? null,
+      scope: sourceInfo.scope ?? skill.location ?? null
+    }
+  })
 }
 
 async function withPiRpc<T>(
@@ -431,7 +555,7 @@ function addAssistantUsage(aggregate: UsageAggregate, message: JsonRecord): void
 async function runPiAgent(
   profile: PiAgentProfile,
   request: ProviderRunRequest,
-  state: { stopped: boolean; sessionId?: string; rpc?: PiRpcProcess }
+  state: PiRunState
 ): Promise<ProviderRunResult> {
   if (request.permissionMode !== 'full_access') {
     throw new AgentRuntimeError('Pi 只支持显式选择“本机完全访问”后运行', {
@@ -610,12 +734,65 @@ async function runPiAgent(
       await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })
     }
     if (request.effort) await rpc.send({ type: 'set_thinking_level', level: request.effort })
+    const explicitSkillEvent = await proveExplicitPiSkill(rpc, request)
+    const entryBaseline = await piEntryBaseline(rpc)
+    if (request.managedRecorder) {
+      if (!request.cwd || !state.sessionId || !request.managedRecorderIdentity) {
+        throw new Error('Pi managed recorder 缺少 workspace、session 或受信任轮次身份')
+      }
+      const opened = await handleRecorderHook({
+        provider: 'pi',
+        event: 'UserPromptSubmit',
+        workspace: request.cwd,
+        managed: true,
+        env: {
+          ...process.env,
+          SCRY_MANAGED_RUN_ID: request.managedRecorderIdentity.runId,
+          SCRY_MANAGED_PROMPT_HASH: request.managedRecorderIdentity.promptHash
+        },
+        payload: {
+          session_id: state.sessionId,
+          prompt: request.prompt,
+          timestamp: new Date(startedAt).toISOString()
+        }
+      })
+      if (opened.status !== 'started' && opened.status !== 'duplicate') {
+        throw new Error(`Pi managed recorder 无法建立轮次身份：${opened.reason ?? opened.status}`)
+      }
+    }
+    if (explicitSkillEvent) request.emit(explicitSkillEvent)
     const images = request.attachments.map((attachment) => ({
       type: 'image',
       data: attachment.dataBase64,
       mimeType: attachment.mimeType
     }))
-    await rpc.send({ type: 'prompt', message: request.prompt, ...(images.length > 0 ? { images } : {}) })
+    try {
+      await rpc.send({ type: 'prompt', message: request.prompt, ...(images.length > 0 ? { images } : {}) })
+    } catch (error) {
+      const identity = request.managedRecorderIdentity
+      if (
+        request.managedRecorder &&
+        request.cwd &&
+        state.sessionId &&
+        identity &&
+        error instanceof PiRpcCommandError &&
+        error.command === 'prompt'
+      ) {
+        try {
+          await cancelManagedRecorderTurn({
+            workspace: request.cwd,
+            provider: 'pi',
+            sessionId: state.sessionId,
+            runId: identity.runId,
+            promptHash: identity.promptHash
+          })
+        } catch (cancelError) {
+          throw new AggregateError([error, cancelError], 'Pi prompt preflight 失败，且 provisional recorder lifecycle 撤销失败')
+        }
+      }
+      throw error
+    }
+    state.providerTurnId = await waitForPiUserEntryId(rpc, entryBaseline)
     let settlementTimer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
@@ -671,11 +848,17 @@ async function runPiAgent(
     }))
     return {
       externalSessionId: state.sessionId,
+      providerTurnId: state.providerTurnId,
       stopped: state.stopped,
       status: state.stopped ? 'interrupted' : failed ? 'failed' : 'completed'
     }
   } catch (error) {
-    if (state.stopped) return { externalSessionId: state.sessionId, stopped: true, status: 'interrupted' }
+    if (state.stopped) return {
+      externalSessionId: state.sessionId,
+      providerTurnId: state.providerTurnId,
+      stopped: true,
+      status: 'interrupted'
+    }
     throw new AgentRuntimeError(String((error as Error).message), {
       provider: 'pi_rpc',
       stage: 'runtime',
@@ -719,7 +902,7 @@ export function createPiAdapter(options: {
       }
     },
     run(request: ProviderRunRequest): ProviderRunHandle {
-      const state: { stopped: boolean; sessionId?: string; rpc?: PiRpcProcess } = { stopped: false }
+      const state: PiRunState = { stopped: false }
       const promise = (async () => {
         if (!request.agentProfileId) throw new Error('Pi Provider run 缺少 agentProfileId')
         const profile = await options.resolveProfile(request.agentProfileId)
@@ -733,7 +916,8 @@ export function createPiAdapter(options: {
           state.rpc?.notify({ type: 'abort' })
           setTimeout(() => state.rpc?.abort(), 2_000)
         },
-        getExternalSessionId: () => state.sessionId
+        getExternalSessionId: () => state.sessionId,
+        getProviderTurnId: () => state.providerTurnId
       }
     },
     skills: {

@@ -16,6 +16,7 @@ import {
   type AgentQuestionResponse
 } from '../shared/runtime'
 import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
+import { sanitizeMcpAuthError } from './providers/mcp-auth-security'
 
 let counter = 0
 const newId = (): string => `ev-${Date.now().toString(36)}-${(counter++).toString(36)}`
@@ -118,16 +119,29 @@ export function claudeTranscriptProviderTurnId(
   return matches.size === 1 ? [...matches][0] : undefined
 }
 
-async function transcriptScanStart(path: string): Promise<number> {
+interface TranscriptBaseline {
+  size: number
+  dev: number | null
+  ino: number | null
+  absent: boolean
+}
+
+async function transcriptBaseline(path: string): Promise<TranscriptBaseline | undefined> {
   try {
     const handle = await open(path, 'r')
     try {
-      return Math.max(0, (await handle.stat()).size - CLAUDE_TRANSCRIPT_IDENTITY_REWIND_BYTES)
+      const stat = await handle.stat()
+      return { size: stat.size, dev: stat.dev, ino: stat.ino, absent: false }
     } finally {
       await handle.close()
     }
-  } catch {
-    return 0
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return { size: 0, dev: null, ino: null, absent: true }
+    }
+    // A transient open/stat failure is not proof of an empty transcript. Starting
+    // from zero here could bind an older identical prompt after the file recovers.
+    return undefined
   }
 }
 
@@ -135,23 +149,37 @@ async function providerTurnIdFromTranscript(
   path: string,
   prompt: string,
   sessionId: string | undefined,
-  start: number
+  baseline: TranscriptBaseline
 ): Promise<string | undefined> {
   try {
     const handle = await open(path, 'r')
     try {
-      const size = (await handle.stat()).size
-      const boundedStart = Math.max(0, Math.min(start, size))
-      const length = Math.min(size - boundedStart, CLAUDE_TRANSCRIPT_IDENTITY_SCAN_BYTES)
+      const stat = await handle.stat()
+      if (!baseline.absent && (stat.dev !== baseline.dev || stat.ino !== baseline.ino)) return undefined
+      if (stat.size < baseline.size) return undefined
+      const size = stat.size
+      const hookOffset = baseline.size
+      const readStart = Math.max(0, hookOffset - CLAUDE_TRANSCRIPT_IDENTITY_REWIND_BYTES)
+      const length = Math.min(size - readStart, CLAUDE_TRANSCRIPT_IDENTITY_SCAN_BYTES)
       if (length <= 0) return undefined
       const buffer = Buffer.allocUnsafe(length)
-      const { bytesRead } = await handle.read(buffer, 0, length, boundedStart)
-      let content = buffer.subarray(0, bytesRead).toString('utf8')
-      if (boundedStart > 0) {
-        const newline = content.indexOf('\n')
-        content = newline >= 0 ? content.slice(newline + 1) : ''
+      const { bytesRead } = await handle.read(buffer, 0, length, readStart)
+      const bytes = buffer.subarray(0, bytesRead)
+      const lines: string[] = []
+      let lineStart = 0
+      if (readStart > 0) {
+        const firstNewline = bytes.indexOf(0x0a)
+        if (firstNewline < 0) return undefined
+        lineStart = firstNewline + 1
       }
-      return claudeTranscriptProviderTurnId(content, prompt, sessionId)
+      for (;;) {
+        const newline = bytes.indexOf(0x0a, lineStart)
+        if (newline < 0) break
+        const absoluteEnd = readStart + newline + 1
+        if (absoluteEnd > hookOffset) lines.push(bytes.subarray(lineStart, newline).toString('utf8'))
+        lineStart = newline + 1
+      }
+      return claudeTranscriptProviderTurnId(lines.join('\n'), prompt, sessionId)
     } finally {
       await handle.close()
     }
@@ -193,7 +221,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   let sessionId: string | undefined
   let providerTurnId: string | undefined
   let transcriptPath: string | undefined
-  let transcriptStart = 0
+  let frozenTranscriptBaseline: TranscriptBaseline | undefined
+  let stderrDiagnostic = ''
   const captureSessionId = (next: string | undefined): void => {
     if (!next || sessionId === next) return
     sessionId = next
@@ -210,7 +239,11 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     // 二选一防双采（RFC NIT-1）：开了 forward 就不再装 SubagentStop tail（否则 subagent 内容主流 + tail 各采一遍）。
     forwardSubagentText: true,
     // Hook 可观测：让 SDK 把 hook_started/progress/response 放进 message stream，normalize 后进右栏面板。
-    includeHookEvents: true
+    includeHookEvents: true,
+    // SDK 默认丢弃 child stderr。只在异常终态打印最近 2KB，且复用现有凭据脱敏规则。
+    stderr: (data: string) => {
+      stderrDiagnostic = sanitizeMcpAuthError(`${stderrDiagnostic}${data}`)
+    }
   }
   if (opts.captureProviderTurnId) {
     options.hooks = {
@@ -223,7 +256,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
             const path = hookString(payload, 'transcript_path', 'transcriptPath')
             if (path && path !== transcriptPath) {
               transcriptPath = path
-              transcriptStart = await transcriptScanStart(path)
+              frozenTranscriptBaseline = await transcriptBaseline(path)
             }
           }
           return { continue: true }
@@ -331,6 +364,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     let mcpStatus: McpLiveStatus[] | undefined
     let runErr: unknown
     let providerStatus: 'completed' | 'failed' = 'completed'
+    let sawTerminalResult = false
     let streamedAssistantText = ''
     try {
       for await (const msg of q) {
@@ -353,7 +387,10 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
             }))
           }
         }
-        if (m.type === 'result') captureSessionId(m.session_id)
+        if (m.type === 'result') {
+          sawTerminalResult = true
+          captureSessionId(m.session_id)
+        }
         if (opts.captureProviderTurnId && m.type === 'user' && !providerTurnId) {
           providerTurnId = nativeProviderTurnId(msg as unknown as Record<string, unknown>)
         }
@@ -383,9 +420,16 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     } catch (err) {
       if (!stopped) runErr = err // 用户主动 interrupt 引发的中断不算错误
     }
-    if (runErr) throw runErr
-    if (opts.captureProviderTurnId && !providerTurnId && transcriptPath) {
-      providerTurnId = await providerTurnIdFromTranscript(transcriptPath, prompt, sessionId, transcriptStart)
+    if (opts.captureProviderTurnId && !providerTurnId && transcriptPath && frozenTranscriptBaseline) {
+      providerTurnId = await providerTurnIdFromTranscript(transcriptPath, prompt, sessionId, frozenTranscriptBaseline)
+    }
+    if (runErr) {
+      if (stderrDiagnostic.trim()) console.warn(`[scry] Claude stderr (${runId}, redacted):`, stderrDiagnostic.trim())
+      throw runErr
+    }
+    if (!stopped && !sawTerminalResult) {
+      if (stderrDiagnostic.trim()) console.warn(`[scry] Claude stderr (${runId}, redacted):`, stderrDiagnostic.trim())
+      throw new Error('Claude Agent SDK stream ended without a terminal result')
     }
     return {
       sessionId,

@@ -1,13 +1,27 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { piProfileForExecutable } from '../pi-agent-profiles'
-import { createPiAdapter, probePiAgent } from './pi'
+import { aggregateTurnEvidence } from '../../core/turn-recorder/aggregate'
+import {
+  commitManagedRecorderTurn,
+  prepareManagedRecorderTurn,
+  recoverManagedRecorderTurns
+} from '../../core/turn-recorder/managed'
+import { listRecords, stableHash } from '../../core/turn-recorder/store'
+import { createPiAdapter, piUserEntryIdAfterBaseline, probePiAgent } from './pi'
 
 const fixtureSource = `#!/usr/bin/env node
 let buffer = ''
+let leafId = 'active-leaf'
+let entrySeq = 0
+const entries = [
+  { type: 'message', id: 'active-leaf', parentId: null, timestamp: new Date().toISOString(), message: { role: 'assistant' } },
+  { type: 'message', id: 'abandoned-user', parentId: 'active-leaf', timestamp: new Date().toISOString(), message: { role: 'user' } }
+]
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk) => {
@@ -30,11 +44,41 @@ process.stdin.on('data', (chunk) => {
       provider: 'test-provider', id: 'test-model', name: 'Test Model', thinkingLevelMap: { off: null, high: 'high' }
     }] })
     else if (command.type === 'get_available_thinking_levels') response({ levels: ['off', 'high'] })
-    else if (command.type === 'get_commands') response({ commands: [{
-      name: 'skill:review', description: 'Review code', source: 'skill',
-      sourceInfo: { scope: 'project', path: '/repo/.pi/agent/skills/review/SKILL.md' }
-    }] })
+    else if (command.type === 'get_commands') response({ commands: [
+      {
+        name: 'skill:review', description: 'Review code', source: 'skill',
+        sourceInfo: { scope: 'project', path: '/repo/.pi/agent/skills/review/SKILL.md' }
+      },
+      {
+        name: 'skill:rate-workflow', description: 'Run rate workflow', source: 'skill',
+        sourceInfo: { scope: 'project', path: '/repo/.claude/skills/rate-workflow/SKILL.md' }
+      }
+    ] })
+    else if (command.type === 'get_entries') {
+      const start = command.since == null ? 0 : entries.findIndex((entry) => entry.id === command.since) + 1
+      if (command.since != null && start === 0) {
+        send({ type: 'response', id: command.id, command: command.type, success: false, error: 'invalid cursor' })
+      } else response({ entries: entries.slice(start), leafId })
+    }
     else if (command.type === 'prompt') {
+      if (command.message === 'transport-exit') process.exit(17)
+      if (command.message === 'preflight-reject') {
+        send({ type: 'response', id: command.id, command: command.type, success: false, error: 'preflight rejected' })
+        continue
+      }
+      if (command.message !== 'no-entry') {
+        if (command.message === 'with-compact') {
+          const compact = { type: 'compaction', id: 'compact-' + (++entrySeq), parentId: leafId, timestamp: new Date().toISOString() }
+          entries.push(compact)
+          leafId = compact.id
+        }
+        const entry = {
+          type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId, timestamp: new Date().toISOString(),
+          message: { role: 'user', content: command.message.startsWith('/skill:') ? 'expanded skill content' : command.message }
+        }
+        entries.push(entry)
+        leafId = entry.id
+      }
       response()
       if (command.message === 'hang') continue
       send({ type: 'message_start', message: { role: 'assistant' } })
@@ -81,7 +125,9 @@ describe('Pi RPC Provider', () => {
         }
       })
       await expect(adapter.skills!.list({ providerId: 'pi', agentProfileId: profile.id, cwd })).resolves.toMatchObject({
-        data: [{ name: 'review', dir: '/repo/.pi/agent/skills/review', scope: 'project' }]
+        data: expect.arrayContaining([
+          { name: 'review', dir: '/repo/.pi/agent/skills/review', scope: 'project', description: 'Review code', enabled: true }
+        ])
       })
     })
   }, 20_000)
@@ -105,8 +151,9 @@ describe('Pi RPC Provider', () => {
       })
 
       await expect(handle.promise).resolves.toMatchObject({
-        externalSessionId: 'pi-session-1', stopped: false, status: 'completed'
+        externalSessionId: 'pi-session-1', providerTurnId: 'pi-user-1', stopped: false, status: 'completed'
       })
+      expect(handle.getProviderTurnId?.()).toBe('pi-user-1')
       expect(onSession).toHaveBeenCalledWith('pi-session-1')
       expect(events).toEqual(expect.arrayContaining([
         expect.objectContaining({ kind: 'model', stage: 'thinking', thinking: 'think' }),
@@ -123,6 +170,208 @@ describe('Pi RPC Provider', () => {
       ]))
     })
   }, 15_000)
+
+  it('proves an explicit skill through get_commands and emits a skill event', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-skill', prompt: '/skill:rate-workflow 85781174', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+
+      await expect(handle.promise).resolves.toMatchObject({ providerTurnId: 'pi-user-1' })
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'skill', stage: 'skill:rate-workflow', tool: 'Skill', name: 'rate-workflow',
+          input: expect.objectContaining({ source: 'explicit_user_input' })
+        })
+      ]))
+    })
+  }, 15_000)
+
+  it('opens a managed Pi lifecycle before prompting and returns its authoritative entry id', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        workspaceId: 'pi-managed-fixture',
+        dataDir: '.scry',
+        repositories: { mode: 'workspace-only' },
+        capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+      }))
+      const prompt = '/skill:rate-workflow 85781174'
+      const runId = 'run-managed-pi'
+      const events: TraceEvent[] = []
+      const startedAtMs = Date.now()
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId, prompt, cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', managedRecorder: true,
+        managedRecorderIdentity: {
+          runId,
+          promptHash: createHash('sha256').update(prompt).digest('hex')
+        },
+        emit: (event) => events.push(event)
+      })
+
+      const result = await handle.promise
+      expect(result).toMatchObject({
+        externalSessionId: 'pi-session-1', providerTurnId: 'pi-user-1', status: 'completed'
+      })
+      const completedAtMs = Date.now()
+      const evidence = aggregateTurnEvidence({ userText: prompt, events, source: 'scry_provider_adapter' })
+      const timing = {
+        startedAt: new Date(startedAtMs).toISOString(),
+        completedAt: new Date(completedAtMs).toISOString(),
+        durationMs: completedAtMs - startedAtMs
+      }
+      const archiveFingerprint = stableHash({ runId, evidence, timing })
+      const prepared = await prepareManagedRecorderTurn({
+        workspace: cwd,
+        provider: 'pi',
+        sessionId: result.externalSessionId!,
+        providerTurnId: result.providerTurnId,
+        runId,
+        userText: prompt,
+        evidence,
+        timing,
+        status: 'completed',
+        archiveFingerprint
+      })
+      expect(prepared).toMatchObject({ status: 'prepared' })
+      if (prepared.status !== 'prepared') throw new Error(`unexpected prepare status: ${prepared.status}`)
+      await expect(commitManagedRecorderTurn({
+        workspace: cwd,
+        provider: 'pi',
+        sessionId: result.externalSessionId!,
+        providerTurnId: result.providerTurnId,
+        runId,
+        recordId: prepared.recordId,
+        userText: prompt,
+        evidence,
+        timing,
+        status: 'completed',
+        archiveFingerprint
+      })).resolves.toMatchObject({ status: 'committed' })
+      await expect(listRecords(join(cwd, '.scry'))).resolves.toEqual([
+        expect.objectContaining({
+          providerTurnId: 'pi-user-1',
+          skills: expect.objectContaining({
+            value: [expect.objectContaining({ name: 'rate-workflow', category: 'skill' })]
+          })
+        })
+      ])
+      await expect(recoverManagedRecorderTurns(cwd, process.env, { provider: 'pi' }))
+        .resolves.toEqual({ recovered: 0, pending: 0 })
+    })
+  }, 15_000)
+
+  it('fails closed when an explicit skill is absent from get_commands', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.run({
+        runId: 'run-missing-skill', prompt: '/skill:missing', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      }).promise).rejects.toThrow('命令目录未证明')
+    })
+  })
+
+  it('fails closed after prompt acceptance when no authoritative user entry appears', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.run({
+        runId: 'run-no-entry', prompt: 'no-entry', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      }).promise).rejects.toThrow('prompt 已接受')
+    })
+  }, 10_000)
+
+  it('uses append order as the cursor and accepts a user descendant through prompt-time compaction', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.run({
+        runId: 'run-compact', prompt: 'with-compact', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      }).promise).resolves.toMatchObject({ providerTurnId: 'pi-user-2' })
+    })
+
+    expect(piUserEntryIdAfterBaseline('leaf-before', [
+      { type: 'compaction', id: 'compact', parentId: 'leaf-before' },
+      { type: 'message', id: 'user-next', parentId: 'compact', message: { role: 'user', content: 'expanded' } }
+    ])).toBe('user-next')
+    expect(() => piUserEntryIdAfterBaseline('leaf-before', [
+      { type: 'message', id: 'user-next', parentId: 'different-leaf', message: { role: 'user' } }
+    ])).toThrow('ancestry')
+    expect(() => piUserEntryIdAfterBaseline(null, [
+      { type: 'message', id: 'user-1', parentId: null, message: { role: 'user' } },
+      { type: 'message', id: 'user-2', parentId: 'user-1', message: { role: 'user' } }
+    ])).toThrow('多个新增')
+  })
+
+  it('cancels the exact managed provisional lifecycle when Pi rejects prompt preflight', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        workspaceId: 'pi-managed-reject-fixture',
+        dataDir: '.scry',
+        repositories: { mode: 'workspace-only' },
+        capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+      }))
+      const prompt = 'preflight-reject'
+      const runId = 'run-managed-preflight-reject'
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.run({
+        runId,
+        prompt,
+        cwd,
+        agentProfileId: profile.id,
+        attachments: [],
+        permissionMode: 'full_access',
+        managedRecorder: true,
+        managedRecorderIdentity: {
+          runId,
+          promptHash: createHash('sha256').update(prompt).digest('hex')
+        },
+        emit: vi.fn()
+      }).promise).rejects.toThrow('preflight rejected')
+      await expect(recoverManagedRecorderTurns(cwd, process.env, { provider: 'pi' }))
+        .resolves.toEqual({ recovered: 0, pending: 0 })
+    })
+  })
+
+  it('retains the managed provisional lifecycle when prompt transport outcome is uncertain', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        workspaceId: 'pi-managed-transport-fixture',
+        dataDir: '.scry',
+        repositories: { mode: 'workspace-only' },
+        capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+      }))
+      const prompt = 'transport-exit'
+      const runId = 'run-managed-transport-exit'
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.run({
+        runId,
+        prompt,
+        cwd,
+        agentProfileId: profile.id,
+        attachments: [],
+        permissionMode: 'full_access',
+        managedRecorder: true,
+        managedRecorderIdentity: {
+          runId,
+          promptHash: createHash('sha256').update(prompt).digest('hex')
+        },
+        emit: vi.fn()
+      }).promise).rejects.toThrow()
+      await expect(recoverManagedRecorderTurns(cwd, process.env, { provider: 'pi' }))
+        .resolves.toEqual({ recovered: 0, pending: 1 })
+    })
+  }, 10_000)
 
   it('fails closed when full access was not explicitly selected', async () => {
     await withFixture(async (profile, cwd) => {

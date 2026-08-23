@@ -541,10 +541,14 @@ export async function commitManagedTraceTurn(
     waitMs?: number
     removeArtifact?: (path: string) => Promise<void>
     commitHookEnv?: NodeJS.ProcessEnv
+    requireManaged?: boolean
   } = {}
 ): Promise<{ recorder: 'disabled' | 'committed'; recordId?: string }> {
   const mode = await managedRecorderMode(input.cwd, options.commitHookEnv)
   if (mode.status === 'disabled') {
+    if (options.requireManaged === true) {
+      throw new Error(`managed recorder mode changed after turn start for ${input.turn.runId}`)
+    }
     const existing = matchingArchiveTurn(input)
     if (existing) {
       const disposition = existingTurnDisposition(existing, input.turn)
@@ -698,7 +702,7 @@ export async function recoverManagedTraceProgress(
       }
       await commitManagedTraceTurn(
         input,
-        { waitMs: options.waitMs ?? 250, commitHookEnv: options.commitHookEnv }
+        { waitMs: options.waitMs ?? 250, commitHookEnv: options.commitHookEnv, requireManaged: true }
       )
       recovered++
     } catch (error) {

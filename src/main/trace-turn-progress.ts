@@ -23,6 +23,19 @@ interface TraceTurnProgress {
   }
 }
 
+interface UnresolvedTraceTurnProgress {
+  schemaVersion: 1
+  state: 'unresolved'
+  reason: 'missing_provider_session_id'
+  persistedAt: string
+  request: {
+    cwd: string
+    providerId: ProviderId
+    runtimeProvider: RuntimeProvider
+    turn: TraceArchiveTurn
+  }
+}
+
 const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
 const RUNTIMES = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc'])
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
@@ -49,6 +62,21 @@ function validProgress(value: TraceTurnProgress | null): value is TraceTurnProgr
     typeof request.sessionId === 'string' && request.sessionId.length > 0 &&
     PROVIDERS.has(request.providerId) && RUNTIMES.has(request.runtimeProvider) &&
     Boolean(
+      turn && typeof turn.runId === 'string' && turn.runId.length > 0 &&
+      typeof turn.userText === 'string' && Array.isArray(turn.items) &&
+      turn.items.every((item) => item && typeof item === 'object' && typeof item.kind === 'string' && typeof item.stage === 'string') &&
+      turn.done === true && typeof turn.status === 'string' && TERMINAL_STATUSES.has(turn.status) &&
+      typeof turn.ts === 'number' && Number.isFinite(turn.ts)
+    )
+}
+
+function validUnresolvedProgress(value: UnresolvedTraceTurnProgress | null): value is UnresolvedTraceTurnProgress {
+  const request = value?.request
+  const turn = request?.turn
+  return value?.schemaVersion === 1 && value.state === 'unresolved' &&
+    value.reason === 'missing_provider_session_id' && typeof value.persistedAt === 'string' &&
+    typeof request?.cwd === 'string' && PROVIDERS.has(request.providerId) &&
+    RUNTIMES.has(request.runtimeProvider) && Boolean(
       turn && typeof turn.runId === 'string' && turn.runId.length > 0 &&
       typeof turn.userText === 'string' && Array.isArray(turn.items) &&
       turn.items.every((item) => item && typeof item === 'object' && typeof item.kind === 'string' && typeof item.stage === 'string') &&
@@ -119,6 +147,33 @@ export async function persistTraceTurnProgress(args: {
   } satisfies TraceTurnProgress)
 }
 
+export async function persistUnresolvedTraceTurnProgress(args: {
+  userDataDir: string
+  cwd: string
+  providerId: ProviderId
+  runtimeProvider: RuntimeProvider
+  turn: TraceArchiveTurn
+  reason: 'missing_provider_session_id'
+}): Promise<void> {
+  const path = progressPath(args.userDataDir, args.turn.runId)
+  const existing = await readJson<UnresolvedTraceTurnProgress>(path)
+  const { userDataDir: _userDataDir, reason, ...request } = args
+  const next: UnresolvedTraceTurnProgress = {
+    schemaVersion: 1,
+    state: 'unresolved',
+    reason,
+    persistedAt: new Date().toISOString(),
+    request
+  }
+  if (existing) {
+    if (!validUnresolvedProgress(existing) || stableHash(existing.request) !== stableHash(request) || existing.reason !== reason) {
+      throw new Error(`trace turn progress collision for ${args.turn.runId}`)
+    }
+    return
+  }
+  await writeJsonAtomic(path, next)
+}
+
 export async function recoverTraceTurnProgress(
   userDataDir: string,
   filter: { cwd?: string; sessionId?: string; providerId?: ProviderId } = {}
@@ -130,7 +185,17 @@ export async function recoverTraceTurnProgress(
   for (const name of await listFiles(progressRoot(userDataDir))) {
     if (!name.endsWith('.json')) continue
     const path = join(progressRoot(userDataDir), name)
-    const progress = await readJson<TraceTurnProgress>(path)
+    const unresolved = await readJson<UnresolvedTraceTurnProgress>(path)
+    if (validUnresolvedProgress(unresolved)) {
+      const request = unresolved.request
+      if (filter.cwd != null && request.cwd !== filter.cwd) continue
+      if (filter.sessionId) continue
+      if (filter.providerId && request.providerId !== filter.providerId) continue
+      pending++
+      errors.push(`unresolved trace turn progress (${unresolved.reason}): ${unresolved.request.turn.runId}`)
+      continue
+    }
+    const progress = unresolved as unknown as TraceTurnProgress | null
     if (!validProgress(progress)) {
       const identity = progressIdentity(progress)
       if (!scoped || (identity && identityMatches(identity, filter))) {

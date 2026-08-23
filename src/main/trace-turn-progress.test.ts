@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   deleteTraceTurnProgressArtifacts,
   persistTraceTurnProgress,
+  persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
   traceProgressSessionRunIds
 } from './trace-turn-progress'
@@ -75,6 +76,29 @@ describe('trace turn progress', () => {
     })
     expect(deleteTraceTurnProgressArtifacts(userDataDir, new Set(['run-delete']))).toEqual({ failed: [] })
     expect(existsSync(join(userDataDir, 'trace-turn-progress'))).toBe(true)
+    await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
+  it('retains a managed terminal turn without native session id as scoped unresolved evidence', async () => {
+    const userDataDir = root()
+    await persistUnresolvedTraceTurnProgress({
+      userDataDir,
+      cwd: '/repo',
+      providerId: 'claude',
+      runtimeProvider: 'claude_sdk',
+      turn: { runId: 'run-missing-session', userText: 'same prompt', items: [], done: true, status: 'failed', ts: 1 },
+      reason: 'missing_provider_session_id'
+    })
+
+    await expect(recoverTraceTurnProgress(userDataDir, { cwd: '/other' }))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    await expect(recoverTraceTurnProgress(userDataDir, { cwd: '/repo', providerId: 'claude' }))
+      .resolves.toEqual({
+        recovered: 0,
+        pending: 1,
+        errors: ['unresolved trace turn progress (missing_provider_session_id): run-missing-session']
+      })
+    expect(deleteTraceTurnProgressArtifacts(userDataDir, new Set(['run-missing-session']))).toEqual({ failed: [] })
     await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
   })
 
