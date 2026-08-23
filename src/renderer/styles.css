@@ -1743,16 +1743,16 @@ body.pane-resizing * {
   color: var(--mcp);
   flex: none;
 }
+/* 方案 C：思考是对话主线，直接以正文呈现，无卡片背景/边框；左侧栏沟一枚菱形做身份。 */
 .thinking {
-  min-height: 40px;
-  margin: 6px 0 12px;
-  padding: 9px 12px;
-  background: rgba(246, 197, 96, 0.04);
-  border-left: 2px solid var(--skill);
-  border-radius: 0 var(--r-sm) var(--r-sm) 0;
-  color: var(--dim);
-  font-size: 12.5px;
-  cursor: pointer;
+  position: relative;
+  display: block;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 14.5px;
+  line-height: 1.82;
 }
 .thinking,
 .si-head,
@@ -1763,9 +1763,7 @@ body.pane-resizing * {
   text-align: left;
 }
 .thinking {
-  border-top: 0;
-  border-right: 0;
-  border-bottom: 0;
+  border: 0;
 }
 .si-head,
 .tool-row,
@@ -1773,23 +1771,100 @@ body.pane-resizing * {
   border: 0;
   background: transparent;
 }
-.thinking .head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-weight: 550;
-  color: var(--skill);
-  font-size: 11.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.thinking .think-mark {
+  position: absolute;
+  left: -25px;
+  top: 0.62em;
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  background: var(--skill);
+  border-radius: 1.5px;
 }
-.thinking .preview {
-  margin-top: 4px;
-  color: var(--dim);
+.thinking .think-text {
+  color: inherit;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 320px;
-  overflow: auto;
+  text-wrap: pretty;
+}
+/* 方案 C：整轮一条左轨；思考/正文/工具组都挂在轨上，工具组是退到栏沟里的脚注。 */
+.turn-flow {
+  position: relative;
+  margin: 6px 0 2px;
+  padding-left: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.turn-flow::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--border);
+}
+.tool-group { position: relative; }
+.tool-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  min-height: 22px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.tool-group-row .tg-pill {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  font: 600 10px/1 var(--font-mono);
+  color: var(--dim2);
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  transition: color .12s, border-color .12s;
+}
+.tool-group-row .tg-pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.tool-group-row:hover .tg-pill { color: var(--fg); border-color: var(--border2); }
+.tool-group-row .tg-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  font: 11.5px/1 var(--font-mono);
+  color: var(--dim3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color .12s;
+}
+.tool-group-row:hover .tg-label { color: var(--dim); }
+.tool-group-row .tg-rule { flex: 1 1 24px; min-width: 16px; height: 1px; background: var(--border3); }
+.tool-group-row .tg-fail { flex: none; font: 600 10px/1 var(--font-mono); color: var(--bad); }
+.tool-group-row .tg-dur {
+  flex: none;
+  font: 11px/1 var(--font-mono);
+  color: var(--dim3);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.tool-group-row:hover .tg-dur,
+.tool-group.open .tg-dur { opacity: 1; }
+.tool-group-row .chev { color: var(--dim3); flex: none; }
+.tool-group-body {
+  margin-top: 8px;
+  padding: 2px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border3);
+  border-radius: var(--r-md);
 }
 .skeleton {
   margin-top: 10px;

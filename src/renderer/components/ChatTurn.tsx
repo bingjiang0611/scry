@@ -145,14 +145,14 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
   )
 }
 
-function ThinkingBlock({ text, onSelect }: { text: string; onSelect: () => void }) {
+// 方案 C：思考是对话主线，直接以正文呈现（左侧栏沟一枚菱形做身份）；
+// 工具调用退成脚注折叠（见 ToolGroup）。
+function ThinkingBlock({ text }: { text: string }) {
   return (
-    <button type="button" className="thinking" onClick={onSelect} title="查看完整思考">
-      <div className="head">
-        <Icon name="bulb" /> 思考
-      </div>
-      <div className="preview">{text}</div>
-    </button>
+    <div className="thinking">
+      <span className="think-mark" aria-hidden="true" />
+      <div className="think-text">{text}</div>
+    </div>
   )
 }
 
@@ -347,6 +347,65 @@ function ToolItem({
   )
 }
 
+// 方案 C：一段连续的工具调用退成脚注——收起时只显示计数徽章 + 工具名列表 + 耗时，
+// 点开抽屉展示原有 tool-card 明细。有待回答的 AskUserQuestion 时强制展开，避免藏住输入。
+function toolGroupSummary(events: TraceEvent[]): { names: string[]; dur?: number; failed: number; count: number } {
+  const counts = new Map<string, number>()
+  for (const ev of events) {
+    const name = toolDisplayName(ev)
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  const names = [...counts].map(([name, n]) => (n > 1 ? `${name}×${n}` : name))
+  const dur = events.every((ev) => ev.durationMs != null)
+    ? events.reduce((sum, ev) => sum + ev.durationMs!, 0)
+    : undefined
+  const failed = events.filter((ev) => ev.isError).length
+  return { names, dur, failed, count: events.length }
+}
+
+function ToolGroup({
+  events,
+  forceOpen = false,
+  reveal = false,
+  children
+}: {
+  events: TraceEvent[]
+  forceOpen?: boolean
+  reveal?: boolean
+  children: ReactNode
+}) {
+  const bodyId = useId()
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (reveal) setOpen(true)
+  }, [reveal])
+  const shownOpen = forceOpen || open
+  const { names, dur, failed, count } = toolGroupSummary(events)
+  const single = count === 1 ? events[0] : null
+  const label = single ? `${toolDisplayName(single)}  ${toolArg(single)}`.trim() : names.join(' · ')
+  return (
+    <div className={shownOpen ? 'tool-group open' : 'tool-group'}>
+      <button
+        type="button"
+        className="tool-group-row"
+        aria-expanded={shownOpen}
+        aria-controls={bodyId}
+        onClick={() => !forceOpen && setOpen((v) => !v)}
+      >
+        <span className={failed ? 'tg-pill bad' : 'tg-pill'}>{count}</span>
+        <span className="tg-label" title={label}>{label}</span>
+        <span className="tg-rule" />
+        {failed > 0 && <span className="tg-fail">{failed} 失败</span>}
+        {dur != null && <span className="tg-dur" title="工具调用耗时合计">{fmtDur(dur)}</span>}
+        <Icon name={shownOpen ? 'chevronUp' : 'chevronDown'} className="chev" />
+      </button>
+      <div id={bodyId} className="tool-group-body" hidden={!shownOpen}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 // P1（RFC §8.1 NIT-2）：subagent 的内部步骤（text/thinking/工具，parentToolUseId=父 Task tool_use_id）
 // 默认折叠进父 Task 卡，避免多 subagent 会话主时间线被碎碎念淹没（forwardSubagentText 的本意是嵌套面板）。
 function SubagentBlock({
@@ -406,7 +465,7 @@ function SubagentBlock({
               }
               if (ev.kind === 'model' && ev.stage === 'thinking') {
                 flushLive()
-                out.push(<ThinkingBlock key={ev.id} text={ev.thinking ?? ''} onSelect={() => onSelect(ev)} />)
+                out.push(<ThinkingBlock key={ev.id} text={ev.thinking ?? ''} />)
                 continue
               }
               if (ev.kind === 'model' && ev.stage === 'text') {
@@ -478,7 +537,7 @@ function FilesSummary({
           : undefined
   const structuredScope = 'R/W/E 来自结构化文件工具；~R 来自 cat、sed、rg 等只读 Bash 命令推断；其他 Bash/MCP/Hook 间接文件操作仍可能未统计'
   return (
-    <details className={diffMode ? 'files-summary diff' : 'files-summary'} open>
+    <details className={diffMode ? 'files-summary diff' : 'files-summary'}>
       <summary
         onClick={(event) => {
           if (!diffMode || !onOpenDiff) return
@@ -856,7 +915,7 @@ export function HooksSummary({
     source === 'user' ? '用户' : source === 'project' ? '项目' : source === 'local' ? '本地' : '插件'
 
   return (
-    <details className="turn-hooks-summary" open>
+    <details className="turn-hooks-summary">
       <summary>
         <Icon name="tool" /> {title}
         <span className="hook-total">{phases.length} 个周期 · {summary.logicalRuns} 个处理器实例</span>
@@ -1275,6 +1334,7 @@ function AssistantTurnImpl({
         let liveKey = ''
         const flushLive = (streaming = false): void => {
           if (!live) return
+          flushTools()
           out.push(
             <div className={`model-text md${streaming ? ' streaming' : ''}`} key={liveKey || `live-${out.length}`}>
               <Markdown>{live}</Markdown>
@@ -1282,6 +1342,31 @@ function AssistantTurnImpl({
           )
           live = ''
           liveKey = ''
+        }
+        // 方案 C：把连续的 tool/skill/agent 攒进一组，遇到 text/thinking 或收尾再落成一个折叠的 ToolGroup。
+        let toolBuf: { ev: TraceEvent; node: ReactNode }[] = []
+        function flushTools(): void {
+          if (toolBuf.length === 0) return
+          const buf = toolBuf
+          toolBuf = []
+          const forceOpen = buf.some(({ ev }) =>
+            ev.tool === 'AskUserQuestion' ||
+            (ev.toolUseId ? interventionsByQuestionId.has(ev.toolUseId) : false) ||
+            pendingQuestions.some((request) => request.runId === ev.runId && request.questionId === ev.toolUseId)
+          )
+          out.push(
+            <ToolGroup
+              key={`tg-${buf[0].ev.id}`}
+              events={buf.map((b) => b.ev)}
+              forceOpen={forceOpen}
+              reveal={buf.some(({ ev }) =>
+                ev.id === selectedId ||
+                (ev.toolUseId ? childrenByParent.get(ev.toolUseId)?.some((child) => child.id === selectedId) : false)
+              )}
+            >
+              {buf.map((b) => b.node)}
+            </ToolGroup>
+          )
         }
         for (const ev of items) {
           if (ev.kind === 'harness') continue
@@ -1300,17 +1385,20 @@ function AssistantTurnImpl({
           if (ev.kind === 'model' && ev.stage === 'text') {
             live = '' // 完整块到达，丢弃当前流式预览
             liveKey = ''
-            if (ev.text)
+            if (ev.text) {
+              flushTools()
               out.push(
                 <div className="model-text md" key={ev.id}>
                   <Markdown>{ev.text}</Markdown>
                 </div>
               )
+            }
             continue
           }
           if (ev.kind === 'model' && ev.stage === 'thinking') {
             flushLive()
-            out.push(<ThinkingBlock key={ev.id} text={ev.thinking ?? ''} onSelect={() => onSelect(ev)} />)
+            flushTools()
+            out.push(<ThinkingBlock key={ev.id} text={ev.thinking ?? ''} />)
             continue
           }
           if (ev.kind === 'hook') continue // hook lifecycle 放右侧 HOOKS，避免主对话流被 started/progress/response 刷屏
@@ -1319,40 +1407,42 @@ function AssistantTurnImpl({
           const pendingQuestion = pendingQuestions.find(
             (request) => request.runId === ev.runId && request.questionId === ev.toolUseId
           )
-          out.push(
-            <ToolItem
-              key={ev.id}
-              ev={ev}
-              selected={selectedId === ev.id}
-              onSelect={() => onSelect(ev)}
-              maxDur={maxDur}
-              pendingQuestion={pendingQuestion}
-              intervention={ev.toolUseId ? interventionsByQuestionId.get(ev.toolUseId) : undefined}
-              queuedQuestionCount={pendingQuestions.length}
-              onAnswerQuestion={onAnswerQuestion}
-              onOpenFileDiff={openFileDiffFor(ev)}
-              turnDone={turn.done}
-            />
-          )
           // 若该 tool_use 催生了 subagent（其 toolUseId 是某些事件的 parentToolUseId），折叠渲染子步骤
           const kids = ev.toolUseId ? childrenByParent.get(ev.toolUseId) : undefined
-          if (kids?.length) {
-            out.push(
-              <SubagentBlock
-                key={`${ev.id}-sub`}
-                items={kids}
-                selectedId={selectedId}
-                onSelect={onSelect}
-                pendingQuestions={pendingQuestions}
-                interventions={interventions}
-                onAnswerQuestion={onAnswerQuestion}
-                turnDone={turn.done}
-              />
+          toolBuf.push({
+            ev,
+            node: (
+              <div key={ev.id}>
+                <ToolItem
+                  ev={ev}
+                  selected={selectedId === ev.id}
+                  onSelect={() => onSelect(ev)}
+                  maxDur={maxDur}
+                  pendingQuestion={pendingQuestion}
+                  intervention={ev.toolUseId ? interventionsByQuestionId.get(ev.toolUseId) : undefined}
+                  queuedQuestionCount={pendingQuestions.length}
+                  onAnswerQuestion={onAnswerQuestion}
+                  onOpenFileDiff={openFileDiffFor(ev)}
+                  turnDone={turn.done}
+                />
+                {kids?.length ? (
+                  <SubagentBlock
+                    items={kids}
+                    selectedId={selectedId}
+                    onSelect={onSelect}
+                    pendingQuestions={pendingQuestions}
+                    interventions={interventions}
+                    onAnswerQuestion={onAnswerQuestion}
+                    turnDone={turn.done}
+                  />
+                ) : null}
+              </div>
             )
-          }
+          })
         }
         flushLive(!turn.done)
-        return out
+        flushTools()
+        return <div className="turn-flow">{out}</div>
       })()}
       {unmatchedPendingQuestions.map((request) => (
         <div className="tool-card k-tool question-pending-fallback" key={`${request.runId}:${request.questionId}`}>

@@ -879,6 +879,39 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('data-trace-event-id="e2"')
   })
 
+  it('思考作为正文主线，连续工具退成默认折叠的脚注组', () => {
+    expect(html).toContain('class="turn-flow"')
+    expect(html).toContain('class="thinking"')
+    expect(html).toContain('class="think-mark"')
+    expect(html).not.toContain('查看完整思考')
+    expect(html).toContain('class="tool-group"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('class="tool-group-body" hidden=""')
+    expect(html).toContain('class="tg-pill">3</span>')
+    expect(html).toContain('Bash · Write · Read')
+    expect(html).not.toContain('class="tg-dur">0ms</span>')
+  })
+
+  it('工具脚注只在耗时数据完整时展示合计，并保留失败摘要', () => {
+    const measuredTurn: Turn = {
+      runId: 'measured-tools',
+      userText: '执行检查',
+      done: true,
+      items: [
+        ev({ id: 'bash-1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', durationMs: 120 }),
+        ev({ id: 'bash-2', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', durationMs: 380, isError: true }),
+        ev({ id: 'read-1', kind: 'tool', stage: 'tool:Read', tool: 'Read', durationMs: 42 })
+      ]
+    }
+    const measuredHtml = renderToStaticMarkup(
+      <AssistantTurn turn={measuredTurn} selectedId={null} onSelect={() => {}} />
+    )
+
+    expect(measuredHtml).toContain('Bash×2 · Read')
+    expect(measuredHtml).toContain('1 失败')
+    expect(measuredHtml).toContain('title="工具调用耗时合计">542ms</span>')
+  })
+
   it('footer 渲染出 token（蓝本 turn-footer stat 条）', () => {
     expect(html).not.toContain('$0.1234')
     expect(html).toContain('1.5k') // in = fmtTok(tokensIn 1500)
@@ -1054,6 +1087,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('本轮文件（工具证据）')
     expect(html).toContain('probe.txt')
     const filesHtml = html.match(/<details class="files-summary"[\s\S]*?<\/details>/)?.[0] ?? ''
+    expect(filesHtml).not.toContain('open=""')
     expect(filesHtml).not.toContain('Bash 触及')
     expect(filesHtml).toContain('bash-only.txt')
     expect(filesHtml).toContain('~R1')
@@ -1267,6 +1301,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
 
   it('本轮 Hook 复用逻辑调用聚合，不平铺 lifecycle 事件', () => {
     expect(html).toContain('本轮 Hook')
+    expect(html).not.toContain('<details class="turn-hooks-summary" open="">')
     expect(html).toContain('1 个处理器实例')
     expect(html).toContain('branch-check-hook.sh')
     expect(html).toContain('PreToolUse')
