@@ -50,7 +50,8 @@ const turn: Turn = {
   userText: '创建并读回文件',
   done: true,
   items: [
-    ev({ id: 'e1', kind: 'model', stage: 'thinking', thinking: '先写文件再读回' }),
+    ev({ id: 'e0', kind: 'model', stage: 'thinking', thinking: '\n\n' }),
+    ev({ id: 'e1', kind: 'model', stage: 'thinking', thinking: '**先写文件再读回**\n\n' }),
     ev({ id: 'e2', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', input: { command: 'cat /tmp/bash-only.txt' } }),
     ev({ id: 'e3', kind: 'tool', stage: 'tool:Write', tool: 'Write', fileOp: 'write', filePath: '/tmp/probe.txt', input: { content: 'hi\nthere' } }),
     ev({ id: 'e4', kind: 'tool', stage: 'tool:Read', tool: 'Read', fileOp: 'read', filePath: '/tmp/probe.txt' }),
@@ -882,7 +883,10 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
   it('思考作为正文主线，连续工具退成默认折叠的脚注组', () => {
     expect(html).toContain('class="turn-flow"')
     expect(html).toContain('class="thinking"')
+    expect(html).toContain('class="think-text md"><p><strong>先写文件再读回</strong></p>')
+    expect(html).not.toContain('**先写文件再读回**')
     expect(html).toContain('class="think-mark"')
+    expect(html.match(/class="think-mark"/g)).toHaveLength(1)
     expect(html).not.toContain('查看完整思考')
     expect(html).toContain('class="tool-group"')
     expect(html).toContain('aria-expanded="false"')

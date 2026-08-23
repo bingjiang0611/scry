@@ -148,10 +148,11 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
 // 方案 C：思考是对话主线，直接以正文呈现（左侧栏沟一枚菱形做身份）；
 // 工具调用退成脚注折叠（见 ToolGroup）。
 function ThinkingBlock({ text }: { text: string }) {
+  if (!text.trim()) return null
   return (
     <div className="thinking">
       <span className="think-mark" aria-hidden="true" />
-      <div className="think-text">{text}</div>
+      <div className="think-text md"><Markdown>{text}</Markdown></div>
     </div>
   )
 }

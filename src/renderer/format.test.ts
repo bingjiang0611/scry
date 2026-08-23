@@ -78,6 +78,19 @@ describe('tool label', () => {
     expect(toolDisplayName(item)).toBe('clarification-reporter__clarify_question_prepare')
     expect(toolArg(item)).toBe('')
   })
+
+  it('Pi 文件工具显示文件名，不重复工具名', () => {
+    const item = ev({
+      tool: 'read',
+      name: 'read',
+      input: { path: '.claude/skills/rate-workflow/SKILL.md' },
+      fileOp: 'read',
+      filePath: '.claude/skills/rate-workflow/SKILL.md'
+    })
+
+    expect(toolDisplayName(item)).toBe('read')
+    expect(toolArg(item)).toBe('SKILL.md')
+  })
 })
 
 describe('aggregateCalls', () => {
