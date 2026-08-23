@@ -81,6 +81,7 @@ const api = {
   detectFast: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detectFast'),
   detect: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detect'),
   addPiProfile: (): Promise<DetectedAgent | null> => ipcRenderer.invoke('agent:addPiProfile'),
+  removePiProfile: (id: string): Promise<true> => ipcRenderer.invoke('agent:removePiProfile', id),
   providerDescriptors: (): Promise<ProviderDescriptor[]> => ipcRenderer.invoke('agent:providerDescriptors'),
   recentFolders: (): Promise<string[]> => ipcRenderer.invoke('agent:recentFolders'),
   removeRecentFolder: (dir: string): Promise<string[]> => ipcRenderer.invoke('agent:removeRecentFolder', dir),

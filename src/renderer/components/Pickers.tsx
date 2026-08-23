@@ -1,8 +1,28 @@
 // Composer 选择器：工作目录（含 recent）/ 本地 CLI（local·api 后端 + rescan）。
 import { useEffect, useId, useRef, useState } from 'react'
+import { providerIdForAgentId } from '@shared/runtime'
 import { AGENT_ICON, basename } from '../format'
 import { Icon, type IconName } from './primitives/Icon'
 import type { DetectedAgent } from '../env'
+
+export interface AgentProviderGroup {
+  id: string
+  agents: DetectedAgent[]
+}
+
+export function groupAgentsByProvider(agents: DetectedAgent[]): AgentProviderGroup[] {
+  const groups = new Map<string, DetectedAgent[]>()
+  for (const agent of agents) {
+    const id = providerIdForAgentId(agent.id) ?? agent.id
+    groups.set(id, [...(groups.get(id) ?? []), agent])
+  }
+  return [...groups].map(([id, groupedAgents]) => ({ id, agents: groupedAgents }))
+}
+
+export function piProfileName(agent: DetectedAgent): string {
+  if (agent.id === 'pi:default') return '原生 Pi'
+  return agent.name.replace(/^Pi\s*·\s*/, '') || basename(agent.path)
+}
 
 export function WorkdirPicker({
   cwd,
@@ -156,6 +176,7 @@ export function CliPicker({
   selectedId,
   onSelect,
   onAddPi,
+  onRemovePi,
   onRescan,
   disabled = false
 }: {
@@ -163,12 +184,15 @@ export function CliPicker({
   selectedId: string
   onSelect: (id: string) => void
   onAddPi: () => void
+  onRemovePi: (id: string) => void
   onRescan: () => void
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const menuId = useId()
   const sel = agents.find((a) => a.id === selectedId)
+  const piAgents = agents.filter((agent) => providerIdForAgentId(agent.id) === 'pi')
+  const codeAgents = agents.filter((agent) => providerIdForAgentId(agent.id) !== 'pi')
   useEffect(() => {
     if (disabled) setOpen(false)
   }, [disabled])
@@ -192,12 +216,12 @@ export function CliPicker({
       {open && !disabled && (
         <div id={menuId} className="menu climenu" onMouseLeave={() => setOpen(false)}>
           <div className="cltitle">
-            Local CLI
+            本机 Agent
             <div className="dim">{sel?.name ?? '未检测到'}</div>
           </div>
-          <div className="mhdr">CODE AGENT</div>
+          <div className="mhdr">Provider</div>
           {agents.length === 0 && <div className="dim pad">未检测到 agent CLI</div>}
-          {agents.map((a) => (
+          {codeAgents.map((a) => (
             <button
               type="button"
               key={a.id}
@@ -212,15 +236,47 @@ export function CliPicker({
                 <Icon name={(AGENT_ICON[a.id] ?? 'cube') as IconName} />
               </span>{' '}
               <span className="agent-option-name">{a.name}</span>
-              {a.id === selectedId && <span className="ck"><Icon name="check" /> selected</span>}
+              {a.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
             </button>
+          ))}
+          {piAgents.length > 0 && <div className="mhdr">Pi · Profiles</div>}
+          {piAgents.map((agent) => (
+            <div className="agent-option-row" key={agent.id}>
+              <button
+                type="button"
+                className="mitem agent-option-pick"
+                title={agent.path}
+                onClick={() => {
+                  onSelect(agent.id)
+                  setOpen(false)
+                }}
+              >
+                <span className="agicon"><Icon name="cube" /></span>
+                <span className="agent-option-copy">
+                  <b>{piProfileName(agent)}</b>
+                  <small>{agent.id === 'pi:default' ? '系统检测' : '自定义 Profile'} · {agent.version ?? '版本未知'}</small>
+                </span>
+                {agent.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
+              </button>
+              {agent.id !== 'pi:default' && (
+                <button
+                  type="button"
+                  className="agent-option-remove"
+                  title="从 Scry 移除；不会删除启动器文件"
+                  aria-label={`移除 Pi Profile：${piProfileName(agent)}`}
+                  onClick={() => onRemovePi(agent.id)}
+                >
+                  <Icon name="x" />
+                </button>
+              )}
+            </div>
           ))}
           <div className="mdiv" />
           <button type="button" className="mitem" onClick={() => { onAddPi(); setOpen(false) }}>
             <Icon name="plus" /> 添加 Pi Agent…
           </button>
           <button type="button" className="mitem" onClick={() => onRescan()}>
-            <Icon name="refresh" /> Rescan PATH
+            <Icon name="refresh" /> 重新扫描 PATH
           </button>
         </div>
       )}
