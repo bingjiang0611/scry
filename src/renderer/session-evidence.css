@@ -712,7 +712,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 
 .chat-body .files-summary,
 .chat-body .turn-hooks-summary,
-.chat-body .thinking,
 .chat-body .tool-card,
 .chat-body .skillinject {
   border-color: var(--border3);
@@ -799,6 +798,29 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   border-radius: 0;
   background: var(--bg);
   font-size: 11.5px;
+}
+
+/* 方案 C：整轮左轨 + 思考主线 + 工具组脚注（对话视图内的密度收敛） */
+.chat-body .turn-flow { gap: 14px; margin: 8px 0 2px; }
+.chat-body .turn-flow > .model-text { margin: 0; }
+.chat-body .thinking { font-size: 14px; line-height: 1.78; color: var(--fg); }
+.chat-body .tool-group-body {
+  background: var(--panel);
+  border-color: var(--border3);
+  border-radius: 0;
+  padding: 0 8px;
+}
+.chat-body .tool-group-body .tool-card {
+  margin: 0;
+  padding: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--border3);
+  background: transparent;
+}
+.chat-body .tool-group-body > div:first-child .tool-card { border-top: 0; }
+.chat-body .tool-group-body .tool-card.selected {
+  background: var(--selected-soft);
+  box-shadow: inset 2px 0 var(--selected);
 }
 
 .chat-body .turn-footer {
