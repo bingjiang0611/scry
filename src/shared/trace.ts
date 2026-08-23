@@ -584,23 +584,24 @@ export function mcpPayloadFailed(output: unknown): boolean {
   return false
 }
 
-// 文件足迹：只有结构化文件工具带 file_path。
+// 文件足迹：Claude/Qoder/Codex 使用 file_path；Pi 原生工具使用 path 和小写工具名。
 // Glob/Grep 是 pattern/path 不算「读写」，Bash/MCP 的文件操作此处统计不到（已知盲区，UI 标注）。
 const FILE_OP_TOOLS: Record<string, FileOp> = {
-  Read: 'read',
-  Write: 'write',
-  Edit: 'edit',
-  MultiEdit: 'edit',
-  NotebookEdit: 'edit'
+  read: 'read',
+  write: 'write',
+  edit: 'edit',
+  multiedit: 'edit',
+  notebookedit: 'edit'
 }
 
 export function fileOpOf(
   toolName: string,
   input?: Record<string, unknown>
 ): { fileOp?: FileOp; filePath?: string } {
-  const op = FILE_OP_TOOLS[toolName]
+  const op = FILE_OP_TOOLS[toolName.toLowerCase()]
   if (!op) return {}
-  const fp = input?.file_path as string | undefined
+  const rawPath = input?.file_path ?? input?.path
+  const fp = typeof rawPath === 'string' ? rawPath : undefined
   if (!fp) return {}
   return { fileOp: op, filePath: fp }
 }

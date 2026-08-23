@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { mcpCallsForEvent, mcpPayloadFailed, normalizeTurnDiffSnapshot, parseMcp } from './trace.js'
+import { fileOpOf, mcpCallsForEvent, mcpPayloadFailed, normalizeTurnDiffSnapshot, parseMcp } from './trace.js'
+
+describe('file tool evidence', () => {
+  it('normalizes Claude file_path and Pi lowercase path contracts', () => {
+    expect(fileOpOf('Read', { file_path: '/repo/CLAUDE.md' })).toEqual({
+      fileOp: 'read',
+      filePath: '/repo/CLAUDE.md'
+    })
+    expect(fileOpOf('write', { path: '.claude/intake/REQ-1/intake.md' })).toEqual({
+      fileOp: 'write',
+      filePath: '.claude/intake/REQ-1/intake.md'
+    })
+  })
+})
 
 describe('MCP shell bridge evidence', () => {
   it('按命令顺序保留同一 shell 中的多个 mcporter call', () => {

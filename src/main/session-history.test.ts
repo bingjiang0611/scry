@@ -12,6 +12,35 @@ afterEach(() => {
 })
 
 describe('session history merge', () => {
+  it('回放旧 Pi 归档时补齐小写文件工具语义', () => {
+    const archive: TraceArchive = {
+      version: 3,
+      cwd: '/repo',
+      sessionId: 'pi-session',
+      providerId: 'pi',
+      turns: [{
+        runId: 'pi-run',
+        userText: 'inspect',
+        items: [{
+          id: 'pi-read',
+          ts: '2026-08-23T00:00:00.000Z',
+          runId: 'pi-run',
+          kind: 'tool',
+          stage: 'tool:read',
+          tool: 'read',
+          input: { path: '.claude/skills/rate-workflow/SKILL.md' }
+        }],
+        done: true,
+        ts: 1
+      }]
+    }
+
+    expect(mergeSessionTurns([], archive)[0].items[0]).toMatchObject({
+      fileOp: 'read',
+      filePath: '.claude/skills/rate-workflow/SKILL.md'
+    })
+  })
+
   it('drops transcript usage shadows when the archive has the canonical terminal result', () => {
     const archive: TraceArchive = {
       version: 3,

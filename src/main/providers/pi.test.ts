@@ -40,6 +40,8 @@ process.stdin.on('data', (chunk) => {
       send({ type: 'message_start', message: { role: 'assistant' } })
       send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'think' } })
       send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' + String.fromCodePoint(0x2028) + 'world' } })
+      send({ type: 'tool_execution_start', toolCallId: 'tool-read', toolName: 'read', args: { path: 'README.md' } })
+      send({ type: 'tool_execution_end', toolCallId: 'tool-read', toolName: 'read', result: 'contents', isError: false })
       send({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'subagent', args: { task: 'inspect' } })
       send({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'subagent', result: { content: [{ type: 'text', text: 'done' }] }, isError: false })
       send({ type: 'message_end', message: {
@@ -109,6 +111,9 @@ describe('Pi RPC Provider', () => {
       expect(events).toEqual(expect.arrayContaining([
         expect.objectContaining({ kind: 'model', stage: 'thinking', thinking: 'think' }),
         expect.objectContaining({ kind: 'model', stage: 'text_delta', text: 'hello\u2028world' }),
+        expect.objectContaining({
+          kind: 'tool', tool: 'read', toolUseId: 'tool-read', fileOp: 'read', filePath: 'README.md'
+        }),
         expect.objectContaining({ kind: 'agent', tool: 'Agent', toolUseId: 'tool-1' }),
         expect.objectContaining({
           kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 4, costUsd: 0.01,
