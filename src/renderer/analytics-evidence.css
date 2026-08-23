@@ -568,6 +568,7 @@
 .analytics-evidence .ae-provider-dot.is-codex { background: var(--provider-codex); }
 .analytics-evidence .ae-provider-dot.is-qoder { background: var(--provider-qoder); }
 .analytics-evidence .ae-provider-dot.is-opencode { background: var(--provider-opencode); }
+.analytics-evidence .ae-provider-dot.is-pi { background: var(--dim2); }
 
 .analytics-evidence .ae-selection {
   min-height: 145px;

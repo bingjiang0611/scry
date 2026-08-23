@@ -9,7 +9,7 @@ import {
   type ProviderContext,
   type SkillMeta
 } from '../../shared/provider'
-import type { BillingProvider } from '../../shared/billing'
+import { billingProviderForUpstream } from '../../shared/billing'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
@@ -415,7 +415,7 @@ function aggregateOpenCodeTurn(
     const key = `${upstream}\0${model}`
     const current = modelRows.get(key) ?? {
       model,
-      billingProvider: billingProvider(upstream),
+      billingProvider: billingProviderForUpstream(upstream),
       upstreamProvider: upstream || undefined,
       usageSource: 'opencode_turn_messages'
     }
@@ -605,13 +605,6 @@ function normalizeOpenCodeRunError(
   })
   Object.defineProperty(normalized, 'cause', { value: error, configurable: true })
   return normalized
-}
-
-function billingProvider(providerId: string): BillingProvider | undefined {
-  if (providerId === 'anthropic' || providerId === 'openai' || providerId === 'openrouter' || providerId === 'gemini') return providerId
-  if (providerId === 'google') return 'gemini'
-  if (providerId === 'opencode') return 'opencode'
-  return undefined
 }
 
 export function openCodePermissionRules(mode: AgentPermissionMode | undefined): Array<{
@@ -1253,7 +1246,7 @@ export function createOpenCodeAdapter(
             messageSnapshotStatus === 'bounded' || messageSnapshotStatus === 'failed' || recordingFailure !== undefined
           const timing = aggregateUnavailable ? undefined : aggregate.timing
           const upstream = String(info.providerID ?? '')
-          const sourceProvider = billingProvider(upstream)
+          const sourceProvider = billingProviderForUpstream(upstream)
           const cost = aggregateUnavailable ? undefined : aggregate.costUsd
           const providerStopReason = typeof info.finish === 'string' && info.finish.trim() ? info.finish.trim() : undefined
           const terminationReason = classifyRunTermination({

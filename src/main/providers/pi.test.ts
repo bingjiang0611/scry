@@ -43,7 +43,7 @@ process.stdin.on('data', (chunk) => {
       send({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'subagent', args: { task: 'inspect' } })
       send({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'subagent', result: { content: [{ type: 'text', text: 'done' }] }, isError: false })
       send({ type: 'message_end', message: {
-        role: 'assistant', provider: 'test-provider', model: 'test-model', stopReason: 'stop',
+        role: 'assistant', provider: 'openai-codex', model: 'test-model', stopReason: 'stop',
         content: [{ type: 'text', text: 'hello world' }],
         usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 1, cost: { total: 0.01 } }
       } })
@@ -110,7 +110,11 @@ describe('Pi RPC Provider', () => {
         expect.objectContaining({ kind: 'model', stage: 'thinking', thinking: 'think' }),
         expect.objectContaining({ kind: 'model', stage: 'text_delta', text: 'hello\u2028world' }),
         expect.objectContaining({ kind: 'agent', tool: 'Agent', toolUseId: 'tool-1' }),
-        expect.objectContaining({ kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 4, costUsd: 0.01 })
+        expect.objectContaining({
+          kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 4, costUsd: 0.01,
+          billingProvider: 'codex', upstreamProvider: 'openai-codex',
+          modelUsage: [expect.objectContaining({ billingProvider: 'codex', upstreamProvider: 'openai-codex' })]
+        })
       ]))
     })
   }, 15_000)

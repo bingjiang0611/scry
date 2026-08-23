@@ -212,7 +212,7 @@ describe('spanRowsFromItems（P0 行映射）', () => {
   })
 })
 
-describe('Analytics v7（四 Provider 口径 + 窗口聚合）', () => {
+describe('Analytics v7（五 Provider 口径 + 窗口聚合）', () => {
   const now = new Date(2026, 6, 22, 12).getTime()
   const daysAgo = (days: number): number => new Date(2026, 6, 22 - days, 10).getTime()
 
@@ -259,6 +259,7 @@ describe('Analytics v7（四 Provider 口径 + 窗口聚合）', () => {
     expect(coverage.qoder).toMatchObject({ turns: 1, inputKnownTurns: 0, dangerCoverage: 'classified' })
     expect(coverage.codex.dangerCoverage).toBe('unsupported')
     expect(coverage.opencode.dangerCoverage).toBe('unsupported')
+    expect(coverage.pi).toMatchObject({ turns: 0, inputKnownTurns: 0, dangerCoverage: 'unsupported' })
   })
 
   it('nearest-rank P50/P95 只使用完成的 MCP duration 样本', () => {
@@ -270,6 +271,37 @@ describe('Analytics v7（四 Provider 口径 + 窗口聚合）', () => {
       mcp: [10, 20, 30, 40].map((durationMs, index) => ({ server: 'docs', durationMs, isError: index === 3 ? 1 : 0 }))
     })
     expect(stats.mcpLatency).toEqual([{ server: 'docs', calls: 4, p50Ms: 20, p95Ms: 40, errors: 1 }])
+  })
+
+  it('Pi 轮次进入 Provider coverage 与 cache 字段覆盖统计', () => {
+    const stats = buildAnalyticsStats({
+      nowMs: now,
+      results: [{
+        tsStart: daysAgo(0),
+        providerId: 'pi',
+        inputTokens: 7,
+        outputTokens: 3,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 0
+      }],
+      tools: [],
+      dangers: [],
+      mcp: []
+    })
+
+    expect(stats.providerCoverage?.find((row) => row.providerId === 'pi')).toMatchObject({
+      turns: 1,
+      inputKnownTurns: 1,
+      outputKnownTurns: 1,
+      dangerCoverage: 'unsupported'
+    })
+    expect(stats.cacheReuse?.find((row) => row.providerId === 'pi')).toMatchObject({
+      turns: 1,
+      inputTokens: 7,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 0,
+      denominator: 'unknown'
+    })
   })
 
   it('只有前后窗口 Token coverage 都完整时才给环比', () => {

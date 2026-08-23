@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
+import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
   capabilityUnavailable,
@@ -405,6 +406,7 @@ function addAssistantUsage(aggregate: UsageAggregate, message: JsonRecord): void
   const key = `${provider ?? ''}\0${model}`
   const existing = aggregate.byModel.get(key) ?? {
     model,
+    billingProvider: billingProviderForUpstream(provider),
     upstreamProvider: provider,
     usageSource: 'pi_rpc'
   }
@@ -651,6 +653,7 @@ async function runPiAgent(
       costSource: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
       costConfidence: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
       costUnit: usage.allCostKnown && usage.byModel.size > 0 ? 'usd' : undefined,
+      billingProvider: billingProviderForUpstream(usage.upstreamProvider),
       modelUsage: [...usage.byModel.values()],
       upstreamProvider: usage.upstreamProvider,
       usageSource: 'pi_rpc',

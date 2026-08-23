@@ -11,7 +11,8 @@ const providers: { id: ProviderId; label: string; short: string }[] = [
   { id: 'claude', label: 'Claude Code', short: 'CLAUDE' },
   { id: 'codex', label: 'Codex', short: 'CODEX' },
   { id: 'qoder', label: 'Qoder', short: 'QODER' },
-  { id: 'opencode', label: 'OpenCode', short: 'OPENCODE' }
+  { id: 'opencode', label: 'OpenCode', short: 'OPENCODE' },
+  { id: 'pi', label: 'Pi', short: 'PI' }
 ]
 
 const chapters: { id: ChapterId; index: string; label: string }[] = [

@@ -1,4 +1,13 @@
 export type BillingProvider = 'anthropic' | 'openai' | 'openrouter' | 'gemini' | 'claude-code' | 'codex' | 'qoder' | 'opencode' | 'local'
+
+export function billingProviderForUpstream(providerId: string | undefined): BillingProvider | undefined {
+  if (providerId === 'anthropic' || providerId === 'openai' || providerId === 'openrouter' || providerId === 'gemini') return providerId
+  if (providerId === 'google') return 'gemini'
+  if (providerId === 'openai-codex') return 'codex'
+  if (providerId === 'opencode') return 'opencode'
+  return undefined
+}
+
 export type BillingSourceKind =
   | 'sdk_estimate'
   | 'gateway_reported'

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CapabilityEnvelope } from '@shared/provider'
 import type { AgentRunControlCatalog } from '@shared/runtime'
 import {
+  applyDataUpdatedEffects,
   authoritativeRefreshAfterToggle,
   capabilityMatchesContext,
   isAuthoritativeRunControlCatalog,
@@ -25,6 +26,16 @@ const result = (data: boolean | null, state: CapabilityEnvelope<boolean>['state'
 })
 
 describe('Skill/MCP 操作后的权威状态同步', () => {
+  it('SQLite 持久化完成后刷新分析与账单状态', () => {
+    const loadStats = vi.fn()
+    const loadBillingState = vi.fn()
+
+    applyDataUpdatedEffects({ loadStats, loadBillingState })
+
+    expect(loadStats).toHaveBeenCalledOnce()
+    expect(loadBillingState).toHaveBeenCalledOnce()
+  })
+
   it('Provider 或 cwd 改变后不暴露旧上下文的能力证据', () => {
     const capability: CapabilityEnvelope<boolean> = {
       providerId: 'qoder',
