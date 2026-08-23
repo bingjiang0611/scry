@@ -45,8 +45,7 @@ extraResources:
 
 mac:
   category: public.app-category.developer-tools
-  # 本地试跑：dir 目标最快(只出 .app 不打 dmg)，identity:null 跳过 Developer ID 签名(ad-hoc)。
-  # 分发(dmg/公证)后续再加。
+  # dir 目标只出 .app。签名身份由本机 Keychain 或 CSC_* 自动发现；没有可用身份时 builder 会跳过签名。
+  # Dock badge 依赖 macOS 通知权限，正式分发必须使用稳定的 Developer ID 身份并公证。
   target:
     - dir
-  identity: null
