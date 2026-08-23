@@ -295,6 +295,47 @@ describe('managed canonical recorder', () => {
     })).resolves.toMatchObject({ status: 'prepared' })
   })
 
+  it('Claude hook 未暴露 turn id 时按 managed run 与 prompt hash 绑定 transcript promptId', async () => {
+    const root = await workspace()
+    const env = {
+      ...process.env,
+      SCRY_MANAGED_RUN_ID: 'run-claude-provisional',
+      SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('/rate-workflow 1').digest('hex')
+    }
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'claude-provisional-session',
+        prompt: '/rate-workflow 1',
+        timestamp: timing.startedAt
+      },
+      env
+    })
+
+    const evidence = canonicalEvidence()
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'claude',
+      sessionId: 'claude-provisional-session',
+      runId: 'run-claude-provisional',
+      providerTurnId: 'transcript-prompt-id',
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint: stableHash({ runId: 'run-claude-provisional', evidence, timing }),
+      env
+    })).resolves.toMatchObject({ status: 'prepared' })
+
+    const open = JSON.parse(await readFile(join(
+      root, '.scry', 'runtime', 'claude', safeKey('claude-provisional-session'), 'open.json'
+    ), 'utf8')) as { providerTurnId?: string }
+    expect(open.providerTurnId).toBe('transcript-prompt-id')
+  })
+
   it('default recovery includes pending Claude managed turns', async () => {
     const root = await workspace()
     await handleRecorderHook({

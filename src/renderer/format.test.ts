@@ -824,6 +824,7 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     ])
 
     expect(b.totalTokens).toBe(120)
+    expect(b.tokenFormulaLabel).toBe('输入（含缓存）+输出')
     expect(b.allTurnRows[0].tokensTotal).toBe(120)
     expect(b.allTurnRows[0].promptTokens).toBe(100)
     expect(b.models[0].totalTokens).toBe(120)

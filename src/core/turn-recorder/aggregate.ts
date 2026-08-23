@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared/logical-calls.js'
 import { deriveModelTiming } from '../../shared/model-timing.js'
+import { providerDangerCoverage } from '../../shared/provider.js'
 import { HOOK_DELIVERY_STAGE, mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import { limitTurnDiffPatchBytes } from './git.js'
 import {
@@ -381,6 +382,8 @@ export function aggregateTurnEvidence(args: {
   }
 }): TurnEvidence {
   const source = args.source ?? 'trace_events'
+  const providerEvent = args.events.find((event) => event.providerId || event.runtimeProvider)
+  const dangerCoverage = providerDangerCoverage(providerEvent?.providerId, providerEvent?.runtimeProvider)
   const observable = {
     assistant: true,
     tools: true,
@@ -567,7 +570,11 @@ export function aggregateTurnEvidence(args: {
                 value: diffs,
                 omissionReason: 'no repository snapshot was captured'
               },
-    dangerousOperations: observable.tools ? available(dangers, [source]) : unavailable('tool evidence was unavailable', [source]),
+    dangerousOperations: !observable.tools
+      ? unavailable('tool evidence was unavailable', [source])
+      : dangerCoverage === 'unsupported'
+        ? unavailable('danger classification is unsupported for this Provider', [source])
+        : available(dangers, [source]),
     errors: observable.errors ? available(errors, [source]) : unavailable('provider error events were not observable', [source]),
     interventions: observable.interventions
       ? available(interventions, [source])

@@ -9,6 +9,7 @@ import {
   type HookConfiguredCommand
 } from '@shared/trace'
 import type { AgentIntervention, RuntimeProvider } from '@shared/runtime'
+import { providerDangerCoverage } from '@shared/provider'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import { buildTurnTimingBreakdown, type TurnTimingBreakdown } from '../turn-timing'
 import {
@@ -611,11 +612,7 @@ export function OverviewPanel({
 
   // verdict 状态（诚实）：高危→bad；运行中/有报错/可疑→warn；否则 ok。error 绝不显绿。
   const dangerHi = dangers.filter((e) => e.danger!.level === 'danger').length
-  const dangerClassification = runtimeProvider == null
-    ? 'unknown'
-    : runtimeProvider === 'claude_sdk' || runtimeProvider === 'qoder_cli'
-      ? 'classified'
-      : 'unsupported'
+  const dangerClassification = providerDangerCoverage(undefined, runtimeProvider) ?? 'unknown'
   const toolErrors = all.filter(isOverviewToolErrorEvent).length
   const turnError = turns.some((t) => !!t.error)
   const hasError = toolErrors > 0 || turnError
@@ -754,7 +751,7 @@ export function OverviewPanel({
           </header>
           <div className="overview-metric-grid">
             <div className="overview-metric accent">
-              <span>输入+输出+缓存</span>
+              <span>{billing.tokenFormulaLabel}</span>
               <strong>{billingTokenText}</strong>
               <small>{billing.knownTokenResultCount}/{billing.resultTurns} 轮已捕获 · reasoning 单列</small>
             </div>

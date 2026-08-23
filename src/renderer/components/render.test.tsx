@@ -2454,6 +2454,30 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('overview-metric-foot') // cache·r/cache·w/reason/api foot
   })
 
+  it('Codex 缓存已包含在 input 时展示真实 Token 加总口径', () => {
+    const codexTurn: Turn = {
+      runId: 'codex-token-label',
+      userText: 'probe',
+      done: true,
+      items: [ev({
+        id: 'codex-result',
+        kind: 'harness',
+        stage: 'result',
+        providerId: 'codex',
+        runtimeProvider: 'codex_cli',
+        tokensIn: 100,
+        tokensOut: 20,
+        cacheReadTokens: 80
+      })]
+    }
+    const codexHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[codexTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(codexHtml).toContain('输入（含缓存）+输出')
+    expect(codexHtml).not.toContain('输入+输出+缓存')
+  })
+
   it('历史会话合并 archive 与 transcript usage 时仍按用户 turn 展示轮数', () => {
     const mergedTurn: Turn = {
       runId: 'merged',

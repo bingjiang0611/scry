@@ -391,6 +391,7 @@ describe('Claude provider adapter', () => {
       cwd: '/repo',
       attachments: [],
       managedRecorder: true,
+      managedRecorderIdentity: { runId: 'run-managed', promptHash: 'prompt-hash' },
       emit: vi.fn()
     })
 
@@ -406,7 +407,11 @@ describe('Claude provider adapter', () => {
       expect.any(Function),
       expect.objectContaining({
         captureProviderTurnId: true,
-        env: expect.objectContaining({ SCRY_RECORDER_MANAGED: '1' })
+        env: expect.objectContaining({
+          SCRY_RECORDER_MANAGED: '1',
+          SCRY_MANAGED_RUN_ID: 'run-managed',
+          SCRY_MANAGED_PROMPT_HASH: 'prompt-hash'
+        })
       })
     )
   })
