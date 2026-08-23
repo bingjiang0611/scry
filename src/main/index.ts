@@ -1818,6 +1818,20 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     done: false,
     providerSettled: false
   }
+  const persistRunData = (sessionId?: string): void => {
+    const result = [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')
+    if (!recordTurn({
+      runId,
+      sessionId,
+      cwd,
+      userText: displayPrompt,
+      items: runState.items,
+      providerId,
+      runtimeProvider,
+      billingProvider: result?.billingProvider
+    })) return
+    win?.webContents.send('agent:dataUpdated', { runId })
+  }
   const cleanupProvisional = (): void => {
     if (resume || runState.externalSessionId) return
     appSessionStore().remove({ providerId, agentProfileId, cwd: catalogCwd, externalSessionId: runId })
@@ -2313,18 +2327,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           hint: runState.errorHint
         })
         await turnDiffDone
-        recordTurn({
-          runId,
-          sessionId: storageSessionId,
-          cwd,
-          userText: displayPrompt,
-          items: runState.items,
-          providerId,
-          runtimeProvider,
-          billingProvider: [...runState.items].reverse().find(
-            (event) => event.kind === 'harness' && event.stage === 'result'
-          )?.billingProvider
-        })
+        persistRunData(storageSessionId)
         return
       }
       terminalArchiveArgs = completionArchiveArgs
@@ -2375,16 +2378,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         return
       }
       // B2：把这一轮的 turn + tool_calls 结构化落 sqlite（runState 已缓冲全部事件）
-      recordTurn({
-        runId,
-        sessionId: storageSessionId,
-        cwd,
-        userText: displayPrompt,
-        items: runState.items,
-        providerId,
-        runtimeProvider,
-        billingProvider: [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')?.billingProvider
-      })
+      persistRunData(storageSessionId)
       if (canonicalLifecycle && !alreadyDone) {
         win?.webContents.send('agent:turnDone', {
           runId,
@@ -2525,18 +2519,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           hint: runState.errorHint
         })
         await turnDiffDone
-        recordTurn({
-          runId,
-          sessionId: storageSessionId,
-          cwd,
-          userText: displayPrompt,
-          items: runState.items,
-          providerId,
-          runtimeProvider,
-          billingProvider: [...runState.items].reverse().find(
-            (event) => event.kind === 'harness' && event.stage === 'result'
-          )?.billingProvider
-        })
+        persistRunData(storageSessionId)
         return
       }
       try {
@@ -2586,16 +2569,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           })
         }
       }
-      recordTurn({
-        runId,
-        sessionId: storageSessionId,
-        cwd,
-        userText: displayPrompt,
-        items: runState.items,
-        providerId,
-        runtimeProvider,
-        billingProvider: [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')?.billingProvider
-      })
+      persistRunData(storageSessionId)
       if (stopped && canonicalLifecycle && !alreadyDone && exactRecorded) {
         win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId, agentProfileId })
       }

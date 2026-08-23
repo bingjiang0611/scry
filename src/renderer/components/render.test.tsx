@@ -4276,10 +4276,11 @@ describe('AnalyticsView 渲染：四章真实证据叙事', () => {
           { providerId: 'claude', turns: 2, inputTokens: 100, cacheReadTokens: 80, cacheWriteTokens: 20, inputKnownTurns: 2, cacheReadKnownTurns: 2, cacheWriteKnownTurns: 2, comparableTurns: 2, reuseRate: 0.4, denominator: 'separate_input' },
           { providerId: 'codex', turns: 1, inputTokens: 100, cacheReadTokens: 30, cacheWriteTokens: null, inputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 0, comparableTurns: 1, reuseRate: 0.3, denominator: 'input_includes_cache' },
           { providerId: 'qoder', turns: 1, inputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, inputKnownTurns: 0, cacheReadKnownTurns: 0, cacheWriteKnownTurns: 0, comparableTurns: 0, reuseRate: null, denominator: 'unknown' },
-          { providerId: 'opencode', turns: 1, inputTokens: 80, cacheReadTokens: 20, cacheWriteTokens: 4, inputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, comparableTurns: 0, reuseRate: null, denominator: 'upstream_dependent' }
+          { providerId: 'opencode', turns: 1, inputTokens: 80, cacheReadTokens: 20, cacheWriteTokens: 4, inputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, comparableTurns: 0, reuseRate: null, denominator: 'upstream_dependent' },
+          { providerId: 'pi', turns: 2, inputTokens: 120, cacheReadTokens: 40, cacheWriteTokens: 0, inputKnownTurns: 2, cacheReadKnownTurns: 2, cacheWriteKnownTurns: 2, comparableTurns: 0, reuseRate: null, denominator: 'unknown' }
         ],
         mcpLatency: [{ server: 'obsidian', calls: 84, p50Ms: 900, p95Ms: 2200, errors: 2 }],
-        providerCoverage: (['claude', 'codex', 'qoder', 'opencode'] as const).map((providerId) => ({ providerId, turns: 1, inputKnownTurns: providerId === 'qoder' ? 0 : 1, outputKnownTurns: providerId === 'qoder' ? 0 : 1, cacheReadKnownTurns: providerId === 'qoder' ? 0 : 1, cacheWriteKnownTurns: providerId === 'claude' || providerId === 'opencode' ? 1 : 0, dangerCoverage: providerId === 'claude' || providerId === 'qoder' ? 'classified' as const : 'unsupported' as const }))
+        providerCoverage: (['claude', 'codex', 'qoder', 'opencode', 'pi'] as const).map((providerId) => ({ providerId, turns: providerId === 'pi' ? 2 : 1, inputKnownTurns: providerId === 'qoder' ? 0 : providerId === 'pi' ? 2 : 1, outputKnownTurns: providerId === 'qoder' ? 0 : providerId === 'pi' ? 2 : 1, cacheReadKnownTurns: providerId === 'qoder' ? 0 : providerId === 'pi' ? 2 : 1, cacheWriteKnownTurns: providerId === 'claude' || providerId === 'opencode' ? 1 : providerId === 'pi' ? 2 : 0, dangerCoverage: providerId === 'claude' || providerId === 'qoder' ? 'classified' as const : 'unsupported' as const }))
       }}
     />
   )
@@ -4305,13 +4306,14 @@ describe('AnalyticsView 渲染：四章真实证据叙事', () => {
     expect(html).not.toContain('模型 Token 分布')
   })
 
-  it('渲染 30/90 天、日期选择、P50/P95 与四 Provider coverage', () => {
+  it('渲染 30/90 天、日期选择、P50/P95 与五 Provider coverage', () => {
     expect(html).toContain('30 LOCAL DAYS')
     expect(html).toContain('90 LOCAL DAYS')
     expect(html).toContain('P50 900ms')
     expect(html).toContain('P95 2.2s')
     expect(html).toContain('Claude')
     expect(html).toContain('OpenCode')
+    expect(html).toContain('<b>Pi</b><small>PI</small>')
     expect(html).toContain('未支持')
     expect(html).toContain('aria-pressed="true"')
   })

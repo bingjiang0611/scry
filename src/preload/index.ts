@@ -168,6 +168,11 @@ const api = {
     ipcRenderer.on('agent:turnDone', l)
     return () => ipcRenderer.removeListener('agent:turnDone', l)
   },
+  onDataUpdated: (cb: (e: { runId: string }) => void): (() => void) => {
+    const l = (_: unknown, e: { runId: string }): void => cb(e)
+    ipcRenderer.on('agent:dataUpdated', l)
+    return () => ipcRenderer.removeListener('agent:dataUpdated', l)
+  },
   onSession: (cb: (e: { runId: string; sessionId: string; previousSessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; pending?: boolean }) => void): (() => void) => {
     const l = (_: unknown, e: { runId: string; sessionId: string; previousSessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; pending?: boolean }): void => cb(e)
     ipcRenderer.on('agent:session', l)

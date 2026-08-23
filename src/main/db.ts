@@ -149,8 +149,8 @@ export function recordTurn(args: {
   runtimeProvider?: RuntimeProvider
   providerId?: ProviderId
   billingProvider?: BillingProvider
-}): void {
-  if (!db) return
+}): boolean {
+  if (!db) return false
   try {
     const ts = Date.now()
     const cwd = args.cwd ?? ''
@@ -209,8 +209,10 @@ export function recordTurn(args: {
       for (const r of billing.usageLedger) insLedger.run(...(r as never[]))
     })
     tx()
+    return true
   } catch (e) {
     console.warn('[scry] recordTurn 失败:', (e as Error)?.message)
+    return false
   }
 }
 

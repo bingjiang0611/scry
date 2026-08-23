@@ -321,6 +321,11 @@ export async function authoritativeRefreshAfterToggle<T>(
   return result.data === true ? refresh() : null
 }
 
+export function applyDataUpdatedEffects(effects: { loadStats: () => void; loadBillingState: () => void }): void {
+  effects.loadStats()
+  effects.loadBillingState()
+}
+
 export function mergeMcpLiveSnapshot(
   current: McpLiveStatus[],
   runtime: McpLiveStatus[] | null | undefined,
@@ -865,6 +870,11 @@ export function useIntegrations(cwd: string | null) {
     loadGitDiff()
     loadDiag()
   }, [loadBillingState, loadDiag, loadGitDiff, loadStats, loadUsage])
+
+  useEffect(() => {
+    if (typeof window.scry.onDataUpdated !== 'function') return
+    return window.scry.onDataUpdated(() => applyDataUpdatedEffects({ loadStats, loadBillingState }))
+  }, [loadBillingState, loadStats])
 
   const setRunModel = useCallback((model: AgentModelRef | undefined): void => {
     setRunControls((current) => {
