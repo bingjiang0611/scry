@@ -67,6 +67,7 @@ import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
+import { DockBadgeState } from './dock-badge'
 import {
   codexHookFingerprint,
   createCodexHookGrantStore,
@@ -126,7 +127,7 @@ import {
 import { redeliverGrantedCommitHooksAtStartup } from './commit-hook-startup'
 import { providerRecordingPolicy } from './provider-recording-policy'
 import {
-  denyRendererPermissions,
+  configureRendererPermissions,
   isAllowedRendererRequest,
   isSafeExternalUrl,
   isTrustedRendererUrl,
@@ -382,6 +383,21 @@ const canonicalProviderCwd = (cwd?: string): string => {
 }
 const providerSessionKey = (providerId: ProviderId, cwd: string, sessionId: string, agentProfileId?: string): string =>
   `${providerContextKey(providerId, cwd, agentProfileId)}\0${sessionId}`
+let badgePermissionWarningShown = false
+const dockBadge = new DockBadgeState((count) => {
+  if (app.setBadgeCount(count) || process.platform !== 'darwin' || badgePermissionWarningShown) return
+  badgePermissionWarningShown = true
+  console.warn('[scry] macOS Dock badge permission is unavailable')
+})
+const activeRunSessionKey = (run: ActiveRun): string | null => {
+  if (!run.providerId) return null
+  return providerSessionKey(
+    run.providerId,
+    run.cwd ?? '',
+    run.externalSessionId ?? run.sessionId ?? run.runId,
+    run.agentProfileId
+  )
+}
 
 function codexHookInspectionError(cwd: string, message: string, nextAction: string): AgentRuntimeError {
   return new AgentRuntimeError(message, {
@@ -846,6 +862,7 @@ function createWindow(): void {
     }
   })
   const createdWindow = win
+  createdWindow.on('focus', () => dockBadge.focusWindow())
   createdWindow.on('closed', () => {
     closeAllTerminals()
     if (win === createdWindow) win = null
@@ -858,7 +875,7 @@ function createWindow(): void {
     console.error(`[scry] preload failed: ${preloadPath}`, error)
   })
   const rendererSession = win.webContents.session
-  denyRendererPermissions(rendererSession)
+  configureRendererPermissions(rendererSession, rendererEntryUrl)
   rendererSession.webRequest.onBeforeRequest((details, callback) => {
     callback(isAllowedRendererRequest(details.url, rendererEntryUrl) ? {} : { cancel: true })
   })
@@ -1149,6 +1166,7 @@ handleTrusted('agent:setCwd', (_e, dir: string | null) => {
 })
 
 handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
+  dockBadge.view(null, Boolean(win?.isFocused()))
   const cwd = context?.cwd ?? currentCwd
   if (context?.providerId) {
     const key = providerContextKey(context.providerId, cwd ?? '', context.agentProfileId)
@@ -1314,6 +1332,10 @@ handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
     }
   }
   if (!fp && !archived) return null
+  dockBadge.view(
+    providerSessionKey(payload.providerId, cwd, payload.externalSessionId, payload.agentProfileId),
+    Boolean(win?.isFocused())
+  )
   setCurrentCwd(cwd || undefined)
   const key = providerContextKey(payload.providerId, cwd, payload.agentProfileId)
   bumpSessionRevision(key)
@@ -1462,6 +1484,7 @@ handleTrusted(
         discardSessionBaseline(key)
       }
       recordingBlockedSessions.delete(deletionKey)
+      dockBadge.remove(deletionKey)
         return result
       })
     } finally {
@@ -2134,6 +2157,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     } catch (error) {
       console.warn('[scry] native session catalog update deferred:', runId, error)
     }
+    if (runs.isViewed(runId)) {
+      dockBadge.view(scopedSessionKey(sessionId), Boolean(win?.isFocused()))
+    }
     if (notifiedSessionId === sessionId) return
     notifiedSessionId = sessionId
     try {
@@ -2249,6 +2275,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     try { await cancelGitTurnDiff(await turnDiffCapture) } catch { /* preserve the original registration error */ }
     throw error
   }
+  dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
   // `agent:start` can also be invoked through the preload bridge (for example by
   // the regression runner), so publish the authoritative focused snapshot after
   // registration and before the Provider can emit trace or questions.
@@ -2259,6 +2286,13 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   let terminalArchiveArgs: ArchiveTraceTurnArgs | undefined
   let terminalArchiveCommitted = false
+  const markTerminalAttention = (sessionId: string, needsAttention: boolean): void => {
+    dockBadge.markTerminal(scopedSessionKey(sessionId), {
+      windowFocused: Boolean(win?.isFocused()),
+      sessionViewed: runs.isViewed(runId),
+      needsAttention
+    })
+  }
   const runtimePromise = Promise.all([turnDiffCapture, sessionBaselineReady]).then(runProvider)
   runtimePromise
     .then(async (r) => {
@@ -2267,6 +2301,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       const nativeSessionId = r.externalSessionId ?? observedSessionId ?? resume
       const storageSessionId = nativeSessionId ?? runId
       const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
+      const completionNeedsAttention = completionStatus === 'completed' || completionStatus === 'failed'
       const completionArchiveArgs: ArchiveTraceTurnArgs = {
         providerId,
         runtimeProvider,
@@ -2326,6 +2361,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           category,
           hint: runState.errorHint
         })
+        markTerminalAttention(storageSessionId, completionNeedsAttention)
         await turnDiffDone
         persistRunData(storageSessionId)
         return
@@ -2357,6 +2393,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           agentProfileId,
           stopped: r.stopped
         })
+        markTerminalAttention(storageSessionId, completionNeedsAttention)
       }
       await turnDiffDone
       await finalizeSessionDiff()
@@ -2375,6 +2412,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           category: 'recording',
           hint: runState.errorHint
         })
+        markTerminalAttention(storageSessionId, completionNeedsAttention)
         return
       }
       // B2：把这一轮的 turn + tool_calls 结构化落 sqlite（runState 已缓冲全部事件）
@@ -2388,6 +2426,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           agentProfileId,
           stopped: r.stopped
         })
+        markTerminalAttention(storageSessionId, completionNeedsAttention)
       }
     }, async (err) => {
       const turnDiffDone = finalizeTurnDiff()
@@ -2518,6 +2557,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           category,
           hint: runState.errorHint
         })
+        markTerminalAttention(storageSessionId, !stopped)
         await turnDiffDone
         persistRunData(storageSessionId)
         return
@@ -2542,6 +2582,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         if (!alreadyDone) win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId, agentProfileId })
       } else {
         win?.webContents.send('agent:error', { runId, message, category, hint })
+        markTerminalAttention(storageSessionId, true)
       }
       await turnDiffDone
       await finalizeSessionDiff()
@@ -2600,6 +2641,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         category: 'recording',
         hint: '保留 userData 与 workspace/.scry 后重启 Scry 检查归档'
       })
+      markTerminalAttention(
+        terminalArchiveArgs?.sessionId ?? observedSessionId ?? resume ?? runId,
+        !interrupted
+      )
     })
     .finally(() => {
       runState.providerSettled = true
@@ -2617,12 +2662,20 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
 // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
 handleTrusted('agent:activeRun', (): ActiveRun | null => runs.focusedState())
 handleTrusted('agent:activeRuns', (): ActiveRun[] => runs.activeStates())
-handleTrusted('agent:focusRun', (_event, runId: string | null): boolean => runs.focus(runId))
+handleTrusted('agent:focusRun', (_event, runId: string | null): boolean => {
+  const focused = runs.focus(runId)
+  if (!focused || !runId) return focused
+  const sessionKey = activeRunSessionKey(runs.get(runId)!.state)
+  if (sessionKey) dockBadge.view(sessionKey, Boolean(win?.isFocused()))
+  return true
+})
 handleTrusted('agent:adoptActiveRun', (_event, runId: string): ActiveRun | null => {
   const entry = runs.get(runId)
   if (!entry || entry.state.done) return null
   entry.control.adoptSession()
   runs.focus(runId)
+  const sessionKey = activeRunSessionKey(entry.state)
+  if (sessionKey) dockBadge.view(sessionKey, Boolean(win?.isFocused()))
   return entry.state
 })
 handleTrusted('agent:answerQuestion', (event, response: unknown) => {

@@ -1,10 +1,17 @@
 import type { Session } from 'electron'
 
-export function denyRendererPermissions(
-  rendererSession: Pick<Session, 'setPermissionCheckHandler' | 'setPermissionRequestHandler'>
+export function configureRendererPermissions(
+  rendererSession: Pick<Session, 'setPermissionCheckHandler' | 'setPermissionRequestHandler'>,
+  rendererEntryUrl: string
 ): void {
-  rendererSession.setPermissionCheckHandler(() => false)
-  rendererSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  rendererSession.setPermissionCheckHandler((webContents, permission) => (
+    permission === 'notifications' &&
+    webContents !== null &&
+    isTrustedRendererUrl(webContents.getURL(), rendererEntryUrl)
+  ))
+  rendererSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(permission === 'notifications' && isTrustedRendererUrl(webContents.getURL(), rendererEntryUrl))
+  })
 }
 
 export function resolveRendererEntryUrl(

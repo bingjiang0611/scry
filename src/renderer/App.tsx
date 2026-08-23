@@ -37,6 +37,7 @@ import { runControlSendBlockedReason, useIntegrations } from './hooks/useIntegra
 import { useAgentSession } from './hooks/useAgentSession'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 import packageJson from '../../package.json'
+import { requestDockBadgePermission } from './dock-badge-permission'
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -848,6 +849,7 @@ export function App() {
       setComposerError(providerSendBlockedReason)
       return
     }
+    await requestDockBadgePermission()
     if (shouldQueuePrompt(session.busy, queuedPrompts.length, queuedStartPendingRef.current)) {
       const request = currentRunRequest()
       setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments, request))

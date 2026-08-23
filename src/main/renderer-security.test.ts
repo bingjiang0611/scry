@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Session } from 'electron'
 import {
-  denyRendererPermissions,
+  configureRendererPermissions,
   isAllowedRendererRequest,
   isSafeExternalUrl,
   isTrustedRendererUrl,
@@ -13,7 +13,7 @@ describe('renderer security boundary', () => {
   const fileEntry = 'file:///Applications/Scry.app/Contents/Resources/app.asar/out/renderer/index.html'
   const devEntry = 'http://127.0.0.1:5173/'
 
-  it('denies both permission requests and check-only permission paths', () => {
+  it('只允许受信 renderer 请求通知权限，其余权限继续 fail closed', () => {
     let checkHandler: Parameters<Session['setPermissionCheckHandler']>[0] | undefined
     let requestHandler: Parameters<Session['setPermissionRequestHandler']>[0] | undefined
     const rendererSession = {
@@ -25,10 +25,27 @@ describe('renderer security boundary', () => {
       }
     }
 
-    denyRendererPermissions(rendererSession)
+    configureRendererPermissions(rendererSession, fileEntry)
     expect(checkHandler?.(null, 'geolocation', fileEntry, {} as never)).toBe(false)
+    expect(checkHandler?.({ getURL: () => fileEntry } as never, 'notifications', fileEntry, {} as never)).toBe(true)
+    expect(checkHandler?.(null, 'notifications', fileEntry, {} as never)).toBe(false)
+    expect(checkHandler?.(
+      { getURL: () => 'https://attacker.invalid/' } as never,
+      'notifications',
+      fileEntry,
+      {} as never
+    )).toBe(false)
     let granted = true
     requestHandler?.({} as never, 'media', (next) => { granted = next }, {} as never)
+    expect(granted).toBe(false)
+    requestHandler?.({ getURL: () => fileEntry } as never, 'notifications', (next) => { granted = next }, {} as never)
+    expect(granted).toBe(true)
+    requestHandler?.(
+      { getURL: () => 'https://attacker.invalid/' } as never,
+      'notifications',
+      (next) => { granted = next },
+      {} as never
+    )
     expect(granted).toBe(false)
   })
 
