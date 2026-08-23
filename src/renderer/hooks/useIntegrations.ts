@@ -16,7 +16,8 @@ import type { McpStatus } from '../format'
 import type { McpGuardReport } from '../components/McpTrustPanel'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
 
-const contextKey = (context: ProviderContext): string => `${context.providerId}\0${context.cwd ?? ''}`
+const contextKey = (context: ProviderContext): string =>
+  `${context.providerId}\0${context.agentProfileId ?? ''}\0${context.cwd ?? ''}`
 export const capabilityMatchesContext = <T>(
   capability: CapabilityEnvelope<T> | null,
   context: ProviderContext
@@ -24,7 +25,7 @@ export const capabilityMatchesContext = <T>(
   capability !== null && contextKey(capability) === contextKey(context)
 const modelKey = (model: AgentModelRef): string => `${model.providerId ?? ''}\0${model.id}`
 const RUN_CONTROL_PREFERENCES_KEY = 'scry:run-control-preferences:v1'
-const PROVIDER_IDS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode']
+const PROVIDER_IDS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
 
 export interface RunControlPreferences {
   selectedAgentId: string
@@ -188,6 +189,10 @@ export function parseRunControlCatalogCache(
         ? record.cwd
         : undefined
       if (record.cwd !== undefined && cwd === undefined) continue
+      const agentProfileId = typeof record.agentProfileId === 'string' && record.agentProfileId.length <= 240
+        ? record.agentProfileId
+        : undefined
+      if (record.agentProfileId !== undefined && agentProfileId === undefined) continue
       const models = (Array.isArray(record.models) ? record.models : []).flatMap((model) => {
         const parsed = parseModelOption(model)
         return parsed ? [parsed] : []
@@ -197,7 +202,11 @@ export function parseRunControlCatalogCache(
         return parsed ? [parsed] : []
       })
       if (models.length === 0 || permissions.length === 0) continue
-      const context: ProviderContext = { providerId, ...(cwd ? { cwd } : {}) }
+      const context: ProviderContext = {
+        providerId,
+        ...(agentProfileId ? { agentProfileId } : {}),
+        ...(cwd ? { cwd } : {})
+      }
       cache.set(contextKey(context), {
         ...context,
         mode: 'read',
@@ -223,6 +232,7 @@ export function serializeRunControlCatalogCache(
       envelope.data && envelope.data.models.length > 0
         ? [{
             providerId: envelope.providerId,
+            ...(envelope.agentProfileId ? { agentProfileId: envelope.agentProfileId } : {}),
             ...(envelope.cwd ? { cwd: envelope.cwd } : {}),
             observedAt: envelope.observedAt ?? Date.now(),
             models: envelope.data.models,
@@ -345,7 +355,7 @@ export function mcpAuthVerificationError(snapshot: McpSnapshot, targetId: string
 }
 
 export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId: string): boolean {
-  return providerIdForAgentId(currentAgentId) !== providerIdForAgentId(nextAgentId)
+  return currentAgentId !== nextAgentId
 }
 
 export function runControlSendBlockedReason(
@@ -370,17 +380,19 @@ export function runControlSendBlockedReason(
 export function requestRunControlsForSelectedProvider<T>(
   providerId: ProviderId,
   cwd: string | null,
-  request: (context: ProviderContext) => Promise<T>
+  request: (context: ProviderContext) => Promise<T>,
+  agentProfileId?: string
 ): Promise<T> {
-  return request({ providerId, cwd: cwd ?? undefined })
+  return request({ providerId, ...(agentProfileId ? { agentProfileId } : {}), cwd: cwd ?? undefined })
 }
 
 export function useIntegrations(cwd: string | null) {
   const storedRunControlPreferences = useMemo(readRunControlPreferences, [])
   const initialProviderId = providerIdForAgentId(storedRunControlPreferences.selectedAgentId) ?? 'claude'
+  const initialAgentProfileId = initialProviderId === 'pi' ? storedRunControlPreferences.selectedAgentId : undefined
   const storedRunControlCatalogs = useMemo(readRunControlCatalogCache, [])
   const initialRunControlCatalog = storedRunControlCatalogs.get(
-    contextKey({ providerId: initialProviderId, cwd: cwd ?? undefined })
+    contextKey({ providerId: initialProviderId, agentProfileId: initialAgentProfileId, cwd: cwd ?? undefined })
   )
   const [agents, setAgents] = useState<DetectedAgent[]>([])
   const [agentsHydrated, setAgentsHydrated] = useState(false)
@@ -472,11 +484,15 @@ export function useIntegrations(cwd: string | null) {
   const selectedProviderId = providerIdForAgentId(selectedId) ?? 'claude'
   const selectedRuntimeProvider = runtimeProviderForAgentId(selectedId) ?? 'claude_sdk'
   const providerContext = useMemo<ProviderContext>(
-    () => ({ providerId: selectedProviderId, cwd: cwd ?? undefined }),
-    [cwd, selectedProviderId]
+    () => ({
+      providerId: selectedProviderId,
+      ...(selectedProviderId === 'pi' ? { agentProfileId: selectedId } : {}),
+      cwd: cwd ?? undefined
+    }),
+    [cwd, selectedId, selectedProviderId]
   )
   const providerContextRef = useRef(providerContext)
-  const trustKey = `${providerContext.providerId}:${cwd ?? ''}`
+  const trustKey = `${providerContext.providerId}:${providerContext.agentProfileId ?? ''}:${cwd ?? ''}`
   const mcpGuardReport = useMemo(
     () => getMcpGuardReportForCwd(mcpGuardReportsByCwd, trustKey),
     [mcpGuardReportsByCwd, trustKey]
@@ -495,6 +511,14 @@ export function useIntegrations(cwd: string | null) {
       .catch(() => {})
       .finally(() => setAgentsScanning(false))
   }, [])
+
+  const addPiProfile = useCallback(async (): Promise<void> => {
+    const added = await window.scry.addPiProfile()
+    if (!added) return
+    setAgents((current) => [...current.filter((agent) => agent.id !== added.id), added])
+    setSelectedId(added.id)
+    rescan()
+  }, [rescan])
 
   const loadUsage = useCallback((): void => {
     const context = providerContextRef.current
@@ -864,6 +888,7 @@ export function useIntegrations(cwd: string | null) {
     const stored = runControlsByProvider.current.get(providerId) ?? { permissionMode: 'default' as const }
     const cached = runControlCatalogByContext.current.get(contextKey({
       providerId,
+      ...(providerId === 'pi' ? { agentProfileId: agentId } : {}),
       cwd: cwdRef.current ?? undefined
     }))
     if (cached?.data) {
@@ -955,7 +980,12 @@ export function useIntegrations(cwd: string | null) {
       setRunControlsLoading(false)
       return
     }
-    void requestRunControlsForSelectedProvider(selectedProviderId, cwd, requestRunControlCatalog)
+    void requestRunControlsForSelectedProvider(
+      selectedProviderId,
+      cwd,
+      requestRunControlCatalog,
+      providerContext.agentProfileId
+    )
       .then((result) => {
         if (
           seq !== runControlRequestSeq.current ||
@@ -1075,6 +1105,7 @@ export function useIntegrations(cwd: string | null) {
     gitDiff,
     diag,
     rescan,
+    addPiProfile,
     refreshSkills,
     refreshAccount,
     refreshProviderInventory,

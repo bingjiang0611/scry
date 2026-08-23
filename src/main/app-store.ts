@@ -22,6 +22,7 @@ export interface AppSession {
   runId?: string
   externalSessionId?: string
   providerId?: SessionProviderId
+  agentProfileId?: string
   runtimeProvider?: RuntimeProvider
   cwd: string
   preview: string
@@ -34,6 +35,7 @@ export interface SessionMeta {
   externalSessionId?: string
   pending?: boolean
   providerId: SessionProviderId
+  agentProfileId?: string
   runtimeProvider?: RuntimeProvider
   mtime: number
   preview: string
@@ -152,8 +154,8 @@ function writeJsonRecoverable<T>(file: string, value: T, isValid: JsonValidator<
   writeAtomic(file, value)
 }
 
-const SESSION_PROVIDERS = new Set<SessionProviderId>(['claude', 'codex', 'qoder', 'opencode', 'legacy_unknown'])
-const RUNTIME_PROVIDERS = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server'])
+const SESSION_PROVIDERS = new Set<SessionProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'legacy_unknown'])
+const RUNTIME_PROVIDERS = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc'])
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
@@ -171,6 +173,7 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
       typeof session.preview === 'string' &&
       typeof session.ts === 'number' && Number.isFinite(session.ts) &&
       (session.providerId == null || SESSION_PROVIDERS.has(session.providerId)) &&
+      (session.agentProfileId == null || (typeof session.agentProfileId === 'string' && session.agentProfileId.length <= 240)) &&
       (session.runtimeProvider == null || RUNTIME_PROVIDERS.has(session.runtimeProvider))
   })
 }
@@ -228,6 +231,7 @@ export function createAppSessionStore(
 
   const recordPending = (args: {
     providerId: ProviderId
+    agentProfileId?: string
     runtimeProvider: RuntimeProvider
     runId: string
     cwd: string
@@ -240,6 +244,7 @@ export function createAppSessionStore(
       (session) =>
         session.runId === args.runId &&
         session.providerId === args.providerId &&
+        session.agentProfileId === args.agentProfileId &&
         session.cwd === args.cwd
     )
     if (ex) ex.ts = now
@@ -248,6 +253,7 @@ export function createAppSessionStore(
         sessionId: args.runId,
         runId: args.runId,
         providerId: args.providerId,
+        agentProfileId: args.agentProfileId,
         runtimeProvider: args.runtimeProvider,
         cwd: args.cwd,
         preview: args.prompt.slice(0, 80),
@@ -258,6 +264,7 @@ export function createAppSessionStore(
 
   const record = (args: {
     providerId: ProviderId
+    agentProfileId?: string
     runtimeProvider: RuntimeProvider
     runId?: string
     externalSessionId: string
@@ -269,6 +276,7 @@ export function createAppSessionStore(
     const ex = list.find(
       (session) =>
         session.providerId === args.providerId &&
+        session.agentProfileId === args.agentProfileId &&
         session.cwd === args.cwd &&
         ((args.runId && session.runId === args.runId) || session.externalSessionId === args.externalSessionId)
     )
@@ -278,6 +286,7 @@ export function createAppSessionStore(
       ex.externalSessionId = args.externalSessionId
       ex.runId = args.runId ?? ex.runId
       ex.runtimeProvider = args.runtimeProvider
+      ex.agentProfileId = args.agentProfileId
       ex.ts = now
     }
     else
@@ -285,6 +294,7 @@ export function createAppSessionStore(
         sessionId: args.externalSessionId,
         externalSessionId: args.externalSessionId,
         providerId: args.providerId,
+        agentProfileId: args.agentProfileId,
         runtimeProvider: args.runtimeProvider,
         cwd: args.cwd,
         preview: args.prompt.slice(0, 80),
@@ -293,15 +303,18 @@ export function createAppSessionStore(
     save(list)
   }
 
-  const listSessions = (cwd: string, providerId?: SessionProviderId): SessionMeta[] =>
+  const listSessions = (cwd: string, providerId?: SessionProviderId, agentProfileId?: string): SessionMeta[] =>
     load()
-      .filter((session) => session.cwd === cwd && (!providerId || session.providerId === providerId))
+      .filter((session) => session.cwd === cwd &&
+        (!providerId || session.providerId === providerId) &&
+        (agentProfileId === undefined || session.agentProfileId === agentProfileId))
       .sort((a, b) => b.ts - a.ts)
       .map((session) => ({
         sessionId: session.sessionId,
         ...(session.runId ? { runId: session.runId } : {}),
         ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
         providerId: session.providerId!,
+        agentProfileId: session.agentProfileId,
         runtimeProvider: session.runtimeProvider,
         mtime: session.ts,
         preview: session.preview,
@@ -325,6 +338,7 @@ export function createAppSessionStore(
             ...(session.runId ? { runId: session.runId } : {}),
             ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
             providerId: session.providerId!,
+            agentProfileId: session.agentProfileId,
             runtimeProvider: session.runtimeProvider,
             mtime: session.ts,
             preview: session.preview,
@@ -337,11 +351,12 @@ export function createAppSessionStore(
       .sort((a, b) => Number(!a.cwd) - Number(!b.cwd) || b.mtime - a.mtime)
   }
 
-  const remove = (args: { providerId: SessionProviderId; cwd: string; externalSessionId: string }): void => {
+  const remove = (args: { providerId: SessionProviderId; agentProfileId?: string; cwd: string; externalSessionId: string }): void => {
     const next = load().filter(
       (session) =>
         !(
           session.providerId === args.providerId &&
+          session.agentProfileId === args.agentProfileId &&
           session.cwd === args.cwd &&
           (session.sessionId === args.externalSessionId || session.externalSessionId === args.externalSessionId)
         )

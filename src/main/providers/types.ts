@@ -67,6 +67,7 @@ export interface ProviderRunRequest {
   runId: string
   prompt: string
   cwd?: string
+  agentProfileId?: string
   resume?: string
   attachments: AgentInputAttachment[]
   model?: AgentModelRef

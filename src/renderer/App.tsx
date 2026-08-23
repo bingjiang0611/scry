@@ -249,14 +249,16 @@ export function activeRunForSession(
   activeRuns: ActiveRun[] | ActiveRun | null,
   cwd: string,
   sessionId: string,
-  providerId: SessionProviderId
+  providerId: SessionProviderId,
+  agentProfileId?: string
 ): ActiveRun | null {
   const runs = Array.isArray(activeRuns) ? activeRuns : activeRuns ? [activeRuns] : []
   return (
     runs.find((run) => {
       if (run.done) return false
       const runSessionId = run.externalSessionId ?? run.sessionId
-      return (run.cwd ?? '') === cwd && (run.runId === sessionId || runSessionId === sessionId) && run.providerId === providerId
+      return (run.cwd ?? '') === cwd && (run.runId === sessionId || runSessionId === sessionId) &&
+        run.providerId === providerId && run.agentProfileId === agentProfileId
     }) ?? null
   )
 }
@@ -268,12 +270,14 @@ export async function restoreActiveSessionSelection(
     externalSessionId?: string
     cwd: string
     providerId: ProviderId
+    agentProfileId?: string
   },
   effects: {
     prepareRunFocus: (runId: string) => void
     adoptActiveRun: (runId: string) => Promise<ActiveRun | null>
     loadSession: (context: {
       providerId: ProviderId
+      agentProfileId?: string
       cwd: string
       externalSessionId: string
     }) => Promise<ParsedTurn[] | null>
@@ -293,6 +297,7 @@ export async function restoreActiveSessionSelection(
   const parsed = args.externalSessionId
     ? await effects.loadSession({
         providerId: args.providerId,
+        agentProfileId: args.agentProfileId,
         cwd: args.cwd,
         externalSessionId: args.externalSessionId
       })
@@ -306,9 +311,10 @@ export async function restoreFocusedRunSelection(
   run: ActiveRun,
   effects: {
     prepareRunFocus: (runId: string) => void
-    selectContext: (context: { providerId: ProviderId; cwd: string | null; sessionId: string }) => void
+    selectContext: (context: { providerId: ProviderId; agentProfileId?: string; cwd: string | null; sessionId: string }) => void
     loadSession: (context: {
       providerId: ProviderId
+      agentProfileId?: string
       cwd: string
       externalSessionId: string
     }) => Promise<ParsedTurn[] | null>
@@ -325,13 +331,18 @@ export async function restoreFocusedRunSelection(
   const sessionId = externalSessionId ?? run.runId
   const cwd = run.cwd ?? ''
   effects.prepareRunFocus(run.runId)
-  effects.selectContext({ providerId: run.providerId, cwd: run.cwd ?? null, sessionId })
+  effects.selectContext({ providerId: run.providerId, agentProfileId: run.agentProfileId, cwd: run.cwd ?? null, sessionId })
   effects.replaceWithParsedSession(sessionId, [], {
     activeRun: run,
     preserveFocusDeltas: Boolean(externalSessionId)
   })
   if (!externalSessionId) return true
-  const parsed = await effects.loadSession({ providerId: run.providerId, cwd, externalSessionId }).catch(() => null)
+  const parsed = await effects.loadSession({
+    providerId: run.providerId,
+    agentProfileId: run.agentProfileId,
+    cwd,
+    externalSessionId
+  }).catch(() => null)
   if (effects.isCurrent && !effects.isCurrent()) return false
   effects.replaceWithParsedSession(sessionId, parsed ?? [], { activeRun: run })
   return true
@@ -499,7 +510,7 @@ export function App() {
   const slashRequestSeqRef = useRef(0)
   const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
   const integrationContextKeyRef = useRef('')
-  integrationContextKeyRef.current = `${integrations.providerContext.providerId}\0${integrations.providerContext.cwd ?? ''}`
+  integrationContextKeyRef.current = `${integrations.providerContext.providerId}\0${integrations.providerContext.agentProfileId ?? ''}\0${integrations.providerContext.cwd ?? ''}`
   const draftAttachmentsRef = useRef<DraftAttachment[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [focusedTurnRunId, setFocusedTurnRunId] = useState<string | null>(null)
@@ -552,8 +563,8 @@ export function App() {
             markRunStarted(run.runId)
             void restoreFocusedRunSelection(run, {
               prepareRunFocus: session.prepareRunFocus,
-              selectContext: ({ providerId, cwd: nextCwd, sessionId }) => {
-                integrations.setSelectedId(providerId)
+              selectContext: ({ providerId, agentProfileId, cwd: nextCwd, sessionId }) => {
+                integrations.setSelectedId(agentProfileId ?? providerId)
                 setCwd(nextCwd)
                 selectSessionId(sessionId)
                 setView('chat')
@@ -593,7 +604,7 @@ export function App() {
         if (cancelled || !run || run.done) return
         selectSessionId(run.externalSessionId ?? run.sessionId ?? run.runId)
         loadProjects()
-        if (run.providerId) integrations.setSelectedId(run.providerId)
+        if (run.providerId) integrations.setSelectedId(run.agentProfileId ?? run.providerId)
         if (run.cwd && run.cwd !== cwdRef.current) {
           setCwd(run.cwd)
           void window.scry.setCwd(run.cwd)
@@ -710,6 +721,7 @@ export function App() {
       expectedExternalSessionId: activeSessionIdRef.current,
       providerId: integrations.selectedProviderId,
       agentId: integrations.selectedId,
+      agentProfileId: integrations.providerContext.agentProfileId,
       runtimeProvider: runtimeProviderForAgentId(integrations.selectedId),
       model: integrations.runControls.model,
       effort: integrations.runControls.effort,
@@ -720,7 +732,8 @@ export function App() {
       integrations.runControls.model,
       integrations.runControls.permissionMode,
       integrations.selectedId,
-      integrations.selectedProviderId
+      integrations.selectedProviderId,
+      integrations.providerContext.agentProfileId
     ]
   )
 
@@ -935,7 +948,8 @@ export function App() {
     sessionId: string,
     providerId: SessionProviderId,
     externalSessionId?: string,
-    knownRunId?: string
+    knownRunId?: string,
+    agentProfileId?: string
   ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
     const cwdChanged = projectCwd !== cwd
@@ -947,7 +961,7 @@ export function App() {
     if (!runId) {
       const activeRuns = await window.scry.activeRuns()
       if (!isCurrent()) return
-      runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId)?.runId
+      runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId, agentProfileId)?.runId
     }
     await window.scry.setCwd(projectCwd || null)
     if (!isCurrent()) return
@@ -959,10 +973,10 @@ export function App() {
     setView('chat')
     setCwd(projectCwd || null)
     if (cwdChanged) setWorkspaceDirty(false)
-    integrations.setSelectedId(providerId)
+    integrations.setSelectedId(agentProfileId ?? providerId)
     if (
       await restoreActiveSessionSelection(
-        { runId, sessionId, externalSessionId, cwd: projectCwd, providerId },
+        { runId, sessionId, externalSessionId, cwd: projectCwd, providerId, agentProfileId },
         {
           prepareRunFocus: session.prepareRunFocus,
           adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
@@ -981,7 +995,7 @@ export function App() {
     await window.scry.focusRun(null)
     if (!isCurrent()) return
     if (!externalSessionId) return
-    const parsed = await window.scry.loadSession({ providerId, cwd: projectCwd, externalSessionId })
+    const parsed = await window.scry.loadSession({ providerId, agentProfileId, cwd: projectCwd, externalSessionId })
     if (!isCurrent()) return
     session.replaceWithParsedSession(sessionId, parsed ?? [], {
       activeRun: null
@@ -992,9 +1006,15 @@ export function App() {
     projectCwd: string,
     sessionId: string,
     providerId: SessionProviderId,
-    externalSessionId?: string
+    externalSessionId?: string,
+    agentProfileId?: string
   ): Promise<void> => {
-    const result = await window.scry.deleteSession({ providerId, cwd: projectCwd, externalSessionId: externalSessionId ?? sessionId })
+    const result = await window.scry.deleteSession({
+      providerId,
+      agentProfileId,
+      cwd: projectCwd,
+      externalSessionId: externalSessionId ?? sessionId
+    })
     if (!result.ok) return
     // 乐观移除：只删这一条、保持其余顺序，不全量重扫重排（避免删除后列表顺序跳动）
     workspace.removeSessionFromProjects(projectCwd, sessionId, providerId)
@@ -1143,6 +1163,7 @@ export function App() {
           activeCwd={cwd}
           activeSessionId={activeSessionId}
           activeProviderId={integrations.selectedProviderId}
+          activeAgentProfileId={integrations.providerContext.agentProfileId}
           runningRunIds={runningRunIds}
           onNewChat={newConversation}
           onPick={pickSession}
@@ -1267,6 +1288,7 @@ export function App() {
               onRemoveDraftAttachment={removeDraftAttachment}
               onRemoveQueuedPrompt={removeQueuedPrompt}
               onSelectAgent={integrations.setSelectedId}
+              onAddPiAgent={integrations.addPiProfile}
               onRunModel={integrations.setRunModel}
               onRunEffort={integrations.setRunEffort}
               onPermissionMode={integrations.setPermissionMode}

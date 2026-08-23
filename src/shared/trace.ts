@@ -53,6 +53,7 @@ export interface McpCallRef {
 export interface ActiveRun {
   runId: string
   providerId?: ProviderId
+  agentProfileId?: string
   cwd?: string
   externalSessionId?: string
   userText: string

@@ -8,7 +8,8 @@ const providerLabels = {
   claude: 'Claude',
   codex: 'Codex',
   qoder: 'Qoder',
-  opencode: 'OpenCode'
+  opencode: 'OpenCode',
+  pi: 'Pi'
 } satisfies Record<ProviderId, string>
 
 export interface QuestionDraft {

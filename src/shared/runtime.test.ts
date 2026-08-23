@@ -37,6 +37,8 @@ describe('runtime frontdoor mapping', () => {
     expect(runtimeProviderForAgentId('codex')).toBe('codex_cli')
     expect(runtimeProviderForAgentId('qoder')).toBe('qoder_cli')
     expect(runtimeProviderForAgentId('opencode')).toBe('opencode_server')
+    expect(runtimeProviderForAgentId('pi:default')).toBe('pi_rpc')
+    expect(runtimeProviderForAgentId('pi:0123456789abcdef')).toBe('pi_rpc')
     expect(runtimeProviderForAgentId('cursor')).toBeUndefined()
   })
 
@@ -44,6 +46,7 @@ describe('runtime frontdoor mapping', () => {
     expect(providerIdForRuntime('codex_cli')).toBe('codex')
     expect(providerIdForRuntime('opencode_server')).toBe('opencode')
     expect(runtimeProviderForProviderId('qoder')).toBe('qoder_cli')
+    expect(providerIdForRuntime('pi_rpc')).toBe('pi')
   })
 
   it('normalizes legacy prompt-only starts to Claude local defaults', () => {
@@ -162,6 +165,20 @@ describe('runtime frontdoor mapping', () => {
       agentId: 'opencode',
       runtimeProvider: 'opencode_server'
     })
+  })
+
+  it('keeps a Pi custom launcher identity separate from its provider and transport', () => {
+    expect(normalizeAgentStartRequest({
+      prompt: 'hi',
+      agentId: 'pi:0123456789abcdef',
+      permissionMode: 'full_access'
+    })).toMatchObject({
+      providerId: 'pi',
+      agentId: 'pi:0123456789abcdef',
+      agentProfileId: 'pi:0123456789abcdef',
+      runtimeProvider: 'pi_rpc'
+    })
+    expect(() => normalizeAgentStartRequest({ prompt: 'hi', providerId: 'pi' })).toThrow('agentProfileId')
   })
 
   it('rejects unknown agents and conflicting provider identities instead of falling back to Claude', () => {

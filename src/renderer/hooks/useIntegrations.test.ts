@@ -224,13 +224,31 @@ describe('模型目录跨进程缓存', () => {
 
     const restored = parseRunControlCatalogCache(stored, now)
 
-    expect(restored.get('qoder\u0000/repo')?.data?.models.map((model) => model.model.id)).toEqual(['ultimate'])
-    expect(restored.get('codex\u0000/repo')?.data?.models.map((model) => model.model.id)).toEqual(['gpt-5.4'])
-    expect(restored.get('qoder\u0000/other')).toBeUndefined()
-    expect(restored.get('claude\u0000/repo')).toBeUndefined()
-    expect(restored.get('qoder\u0000/repo')?.data?.models[0].efforts).toEqual([
+    expect(restored.get('qoder\u0000\u0000/repo')?.data?.models.map((model) => model.model.id)).toEqual(['ultimate'])
+    expect(restored.get('codex\u0000\u0000/repo')?.data?.models.map((model) => model.model.id)).toEqual(['gpt-5.4'])
+    expect(restored.get('qoder\u0000\u0000/other')).toBeUndefined()
+    expect(restored.get('claude\u0000\u0000/repo')).toBeUndefined()
+    expect(restored.get('qoder\u0000\u0000/repo')?.data?.models[0].efforts).toEqual([
       { id: 'high', label: 'High', isDefault: true }
     ])
+  })
+
+  it('同一 Pi Provider 的不同 Agent Profile 使用独立模型目录', () => {
+    const nativePi = {
+      ...envelope('pi', '/repo', catalog('native-model'), now - 1_000),
+      agentProfileId: 'pi:default'
+    }
+    const devAgent = {
+      ...envelope('pi', '/repo', catalog('dev-model'), now - 2_000),
+      agentProfileId: 'pi:0123456789abcdef'
+    }
+    const restored = parseRunControlCatalogCache(serializeRunControlCatalogCache(new Map([
+      ['native', nativePi],
+      ['custom', devAgent]
+    ])), now)
+
+    expect(restored.get('pi\u0000pi:default\u0000/repo')?.data?.models[0].model.id).toBe('native-model')
+    expect(restored.get('pi\u0000pi:0123456789abcdef\u0000/repo')?.data?.models[0].model.id).toBe('dev-model')
   })
 
   it('丢弃损坏、过期或未来时间戳的条目，不恢复空目录', () => {
@@ -253,8 +271,8 @@ describe('模型目录跨进程缓存', () => {
     }), now)
 
     expect(cwd.length).toBeGreaterThan(240)
-    expect(restored.get(`qoder\u0000${cwd}`)?.data?.models[0].model.id).toBe('ultimate')
-    expect(restored.get('qoder\u0000')).toBeUndefined()
+    expect(restored.get(`qoder\u0000\u0000${cwd}`)?.data?.models[0].model.id).toBe('ultimate')
+    expect(restored.get('qoder\u0000\u0000')).toBeUndefined()
   })
 
   it('恢复的目录标注来源与读取时间，且在本次探测确认前仍拒绝发送', () => {
@@ -263,7 +281,7 @@ describe('模型目录跨进程缓存', () => {
         ['qoder\u0000/repo', envelope('qoder', '/repo', catalog('ultimate'), now - 1_000)]
       ])),
       now
-    ).get('qoder\u0000/repo')!
+    ).get('qoder\u0000\u0000/repo')!
 
     expect(restored.state).toBe('unknown')
     expect(restored.reason).toContain('最后已知模型目录')

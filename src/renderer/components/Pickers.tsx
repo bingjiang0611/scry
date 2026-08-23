@@ -155,12 +155,14 @@ export function CliPicker({
   agents,
   selectedId,
   onSelect,
+  onAddPi,
   onRescan,
   disabled = false
 }: {
   agents: DetectedAgent[]
   selectedId: string
   onSelect: (id: string) => void
+  onAddPi: () => void
   onRescan: () => void
   disabled?: boolean
 }) {
@@ -214,6 +216,9 @@ export function CliPicker({
             </button>
           ))}
           <div className="mdiv" />
+          <button type="button" className="mitem" onClick={() => { onAddPi(); setOpen(false) }}>
+            <Icon name="plus" /> 添加 Pi Agent…
+          </button>
           <button type="button" className="mitem" onClick={() => onRescan()}>
             <Icon name="refresh" /> Rescan PATH
           </button>

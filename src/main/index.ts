@@ -1,11 +1,19 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { getClaudeVersion } from './agent-runner'
-import { detectAgents, detectAgentsFast, packagedRecorderCliPath, shellEnv, warmShellEnv } from './claude-locate'
+import {
+  detectAgents,
+  detectAgentsFast,
+  execFileText,
+  normalizeAgentVersion,
+  packagedRecorderCliPath,
+  shellEnv,
+  warmShellEnv
+} from './claude-locate'
 import { AgentRuntimeError } from './cli-runtime'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
@@ -31,6 +39,7 @@ import { migrateLegacyUserData } from './user-data-migration'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot } from '../shared/trace'
 import {
   normalizeAgentStartRequest,
+  providerIdForAgentId,
   runTerminationHint,
   type AgentInputAttachment,
   type AgentStartRequest,
@@ -40,6 +49,8 @@ import { capabilityUnavailable, type DeleteSessionResult, type ProviderContext, 
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
+import { probePiAgent } from './providers/pi'
+import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
 import { ProviderOperationGate } from './provider-operation-gate'
 import { appendCoalescedTrace, upsertTraceById } from './live-trace'
@@ -287,6 +298,33 @@ function closeAllTerminals(): void {
 
 const homeDir = homedir()
 const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
+const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
+const defaultPiProfile = async (): Promise<PiAgentProfile | undefined> => {
+  const detected = (await detectAgents()).find((agent) => agent.id === 'pi:default')
+  return detected ? { id: 'pi:default', label: 'Pi', executable: detected.path } : undefined
+}
+const storedPiProfiles = (): PiAgentProfile[] => {
+  try {
+    return piProfileStore().load().flatMap((stored) => {
+      try {
+        const current = piProfileForExecutable(stored.executable)
+        return [{ ...current, id: stored.id, label: stored.label }]
+      } catch {
+        return []
+      }
+    })
+  } catch {
+    return []
+  }
+}
+const listPiProfiles = async (): Promise<PiAgentProfile[]> => {
+  const builtin = await defaultPiProfile()
+  return [...(builtin ? [builtin] : []), ...storedPiProfiles().filter((profile) => profile.executable !== builtin?.executable)]
+}
+const resolvePiProfile = async (id: string): Promise<PiAgentProfile | undefined> => {
+  if (id === 'pi:default') return defaultPiProfile()
+  return storedPiProfiles().find((profile) => profile.id === id)
+}
 const appSessionStore = () =>
   createAppSessionStore(app.getPath('userData'), ({ cwd, externalSessionId }) => {
     const archive = readTraceArchive({ cwd, sessionId: externalSessionId, userDataDir: app.getPath('userData') })
@@ -308,7 +346,8 @@ const providerRegistry = new ProviderRegistry(
     join(app.getPath('userData'), 'codex-home-v1'),
     codexSessionIds,
     join(app.getPath('userData'), 'provider-auth', 'opencode'),
-    join(app.getPath('userData'), 'provider-state', 'opencode-v1')
+    join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
+    { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile }
   ),
   {
     disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS),
@@ -319,9 +358,14 @@ const codexHookGrantStore = () => createCodexHookGrantStore(app.getPath('userDat
 const openCodePluginGrantStore = () => createOpenCodePluginGrantStore(app.getPath('userData'))
 const mcpExecutionTrust = new McpExecutionTrust()
 
-const providerContextKey = (providerId: ProviderId, cwd: string): string => `${providerId}\0${cwd}`
-const withProviderOperation = async <T>(providerId: ProviderId, operation: () => T | Promise<T>): Promise<T> => {
-  const lease = providerOperationGate.acquireOperation(providerId)
+const providerContextKey = (providerId: ProviderId, cwd: string, agentProfileId?: string): string =>
+  `${providerId}\0${agentProfileId ?? ''}\0${cwd}`
+const withProviderOperation = async <T>(
+  providerId: ProviderId,
+  operation: () => T | Promise<T>,
+  agentProfileId?: string
+): Promise<T> => {
+  const lease = providerOperationGate.acquireOperation(`${providerId}\0${agentProfileId ?? ''}`)
   if (!lease.ok) throw new Error('当前 Provider 正在认证 MCP，请等待认证完成或超时后重试')
   try {
     return await operation()
@@ -336,8 +380,8 @@ const canonicalProviderCwd = (cwd?: string): string => {
     return cwd ?? process.cwd()
   }
 }
-const providerSessionKey = (providerId: ProviderId, cwd: string, sessionId: string): string =>
-  `${providerContextKey(providerId, cwd)}\0${sessionId}`
+const providerSessionKey = (providerId: ProviderId, cwd: string, sessionId: string, agentProfileId?: string): string =>
+  `${providerContextKey(providerId, cwd, agentProfileId)}\0${sessionId}`
 
 function codexHookInspectionError(cwd: string, message: string, nextAction: string): AgentRuntimeError {
   return new AgentRuntimeError(message, {
@@ -896,34 +940,108 @@ handleTrusted('app:setTheme', (_event, theme: unknown) => {
 })
 
 handleTrusted('agent:detectFast', () => {
-  const supported = new Set(['claude', 'codex', 'qoder', 'opencode'])
-  return detectAgentsFast().filter((agent) => supported.has(agent.id))
+  const detected = detectAgentsFast().flatMap((agent) => {
+    const providerId = providerIdForAgentId(agent.id)
+    if (!providerId) return []
+    return [{
+      ...agent,
+      ...(providerId === 'pi'
+        ? { agentProfileId: agent.id, runtimeProvider: 'pi_rpc' as const, transport: 'JSONL RPC subprocess' }
+        : {})
+    }]
+  })
+  const found = new Set(detected.map((agent) => agent.id))
+  return [
+    ...detected,
+    ...storedPiProfiles().filter((profile) => !found.has(profile.id)).map((profile) => ({
+      id: profile.id,
+      name: profile.label,
+      bin: basename(profile.executable),
+      path: profile.executable,
+      agentProfileId: profile.id,
+      runtimeProvider: 'pi_rpc' as const,
+      transport: 'JSONL RPC subprocess'
+    }))
+  ]
 })
 
 handleTrusted('agent:detect', async () => {
   // 先异步完成 PATH/版本探测，让 descriptor 的同步 fallback 命中已知路径，避免阻塞主进程。
   const detected = await detectAgents()
   const descriptors = await providerRegistry.describe()
-  const found = new Map(detected.map((agent) => [agent.id, agent]))
-  return descriptors
-    .map((descriptor) => {
-      const agent = found.get(descriptor.id)
-      const path = agent?.path ?? descriptor.path
-      return path && descriptor.available
-        ? {
-            id: descriptor.id,
-            name: descriptor.label,
-            bin: agent?.bin ?? descriptor.id,
-            path,
-            version: agent?.version ?? descriptor.version,
-            runtimeProvider: descriptor.runtimeProvider,
-            transport: descriptor.transport,
-            capabilities: descriptor.capabilities,
-            health: descriptor.health
-          }
-        : null
+  const descriptorByProvider = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]))
+  const agents = detected.flatMap((agent) => {
+    const providerId = providerIdForAgentId(agent.id)
+    const descriptor = providerId ? descriptorByProvider.get(providerId) : undefined
+    if (!descriptor) return []
+    return [{
+      id: agent.id,
+      name: providerId === 'pi' ? agent.name : descriptor.label,
+      bin: agent.bin,
+      path: agent.path,
+      version: agent.version ?? descriptor.version,
+      runtimeProvider: descriptor.runtimeProvider,
+      transport: descriptor.transport,
+      capabilities: descriptor.capabilities,
+      health: descriptor.health,
+      ...(providerId === 'pi' ? { agentProfileId: agent.id } : {})
+    }]
+  })
+  const found = new Set(agents.map((agent) => agent.id))
+  for (const profile of storedPiProfiles()) {
+    if (found.has(profile.id)) continue
+    const versionText = await execFileText(profile.executable, ['--version'], { env: shellEnv(), timeout: 5000 })
+    const descriptor = descriptorByProvider.get('pi')
+    if (!descriptor) continue
+    agents.push({
+      id: profile.id,
+      name: profile.label,
+      bin: basename(profile.executable),
+      path: profile.executable,
+      version: versionText ? normalizeAgentVersion(versionText) : descriptor.version,
+      runtimeProvider: descriptor.runtimeProvider,
+      transport: descriptor.transport,
+      capabilities: descriptor.capabilities,
+      health: descriptor.health,
+      agentProfileId: profile.id
     })
-    .filter((agent) => agent !== null)
+  }
+  return agents
+})
+
+handleTrusted('agent:addPiProfile', async () => {
+  const result = await dialog.showOpenDialog({ title: '选择 Pi Agent 启动器', properties: ['openFile'] })
+  if (result.canceled || result.filePaths.length === 0) return null
+  try {
+    const profile = piProfileForExecutable(result.filePaths[0])
+    const versionText = await execFileText(profile.executable, ['--version'], { env: shellEnv(), timeout: 5000 })
+    await probePiAgent(profile, currentCwd)
+    const stored = piProfileStore().add(profile)
+    const descriptor = (await providerRegistry.describe()).find((entry) => entry.id === 'pi')
+    if (!descriptor) throw new Error('Pi Provider 未注册')
+    return {
+      id: stored.id,
+      name: stored.label,
+      bin: basename(stored.executable),
+      path: stored.executable,
+      version: versionText ? normalizeAgentVersion(versionText) : descriptor.version,
+      runtimeProvider: descriptor.runtimeProvider,
+      transport: descriptor.transport,
+      capabilities: descriptor.capabilities,
+      health: descriptor.health,
+      agentProfileId: stored.id
+    }
+  } catch (error) {
+    const options = {
+      type: 'error' as const,
+      title: '无法添加 Pi Agent',
+      message: '所选启动器未通过 Pi RPC 握手',
+      detail: String((error as Error).message)
+    }
+    if (win && !win.isDestroyed()) await dialog.showMessageBox(win, options)
+    else await dialog.showMessageBox(options)
+    return null
+  }
 })
 
 handleTrusted('agent:providerDescriptors', () => providerRegistry.describe())
@@ -1027,7 +1145,7 @@ handleTrusted('agent:setCwd', (_e, dir: string | null) => {
 handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
   const cwd = context?.cwd ?? currentCwd
   if (context?.providerId) {
-    const key = providerContextKey(context.providerId, cwd ?? '')
+    const key = providerContextKey(context.providerId, cwd ?? '', context.agentProfileId)
     bumpSessionRevision(key)
     sessionByContext.delete(key)
     sessionAliasesByContext.delete(key)
@@ -1037,23 +1155,25 @@ handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
 })
 
 handleTrusted('agent:listSkills', (_e, context: ProviderContext) =>
-  withProviderOperation(context.providerId, () => providerRegistry.listSkills(context))
+  withProviderOperation(context.providerId, () => providerRegistry.listSkills(context), context.agentProfileId)
 )
 handleTrusted('agent:toggleSkill', (_e, p: { context: ProviderContext; name: string; enabled: boolean }) =>
-  withProviderOperation(p.context.providerId, () => providerRegistry.setSkillEnabled(p.context, p.name, p.enabled))
+  withProviderOperation(p.context.providerId, () => providerRegistry.setSkillEnabled(p.context, p.name, p.enabled), p.context.agentProfileId)
 )
 handleTrusted('agent:mcpSnapshot', async (_e, p: { context: ProviderContext; refresh?: boolean }) => {
+  if (p.context.providerId === 'pi') return providerRegistry.mcpSnapshot(p.context, false)
   if (!p.refresh) return providerRegistry.mcpSnapshot(p.context, false)
   return withProviderOperation(p.context.providerId, async () => {
-  const snapshot = p.refresh ? await ensureMcpExecutionAuthorized(p.context, 'live') : null
-  return providerRegistry.mcpSnapshot(p.context, p.refresh, authorizedMcpExecution(snapshot))
-  })
+    const snapshot = p.refresh ? await ensureMcpExecutionAuthorized(p.context, 'live') : null
+    return providerRegistry.mcpSnapshot(p.context, p.refresh, authorizedMcpExecution(snapshot))
+  }, p.context.agentProfileId)
 })
 handleTrusted('agent:testMcp', async (_e, p: { context: ProviderContext; targetId: string }) => {
+  if (p.context.providerId === 'pi') return providerRegistry.testMcp(p.context, p.targetId)
   return withProviderOperation(p.context.providerId, async () => {
     const snapshot = await ensureMcpExecutionAuthorized(p.context, `test:${p.targetId}`, p.targetId)
     return providerRegistry.testMcp(p.context, p.targetId, authorizedMcpExecution(snapshot))
-  })
+  }, p.context.agentProfileId)
 })
 handleTrusted('agent:reauthenticateMcp', async (_e, p: { context: ProviderContext; targetId: string }) => {
   const canonicalCwd = canonicalProviderCwd(p.context.cwd)
@@ -1113,11 +1233,14 @@ handleTrusted('agent:reauthenticateMcp', async (_e, p: { context: ProviderContex
   }
 })
 handleTrusted('agent:toggleMcp', (_e, p: { context: ProviderContext; name: string; enabled: boolean }) =>
-  withProviderOperation(p.context.providerId, () => providerRegistry.setMcpEnabled(p.context, p.name, p.enabled))
+  withProviderOperation(p.context.providerId, () => providerRegistry.setMcpEnabled(p.context, p.name, p.enabled), p.context.agentProfileId)
 )
 handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
   if (providerRegistry.isDisabled(context.providerId)) {
     return capabilityUnavailable(context, 'unsupported', '该 Provider 已通过 SCRY_DISABLED_PROVIDERS 禁用')
+  }
+  if (context.providerId === 'pi') {
+    return capabilityUnavailable(context, 'unsupported', 'Pi RPC 没有结构化 MCP 配置与连接状态接口')
   }
   const snapshot = buildMcpExecutionSnapshot({
     providerId: context.providerId,
@@ -1139,18 +1262,18 @@ handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
   }
 })
 handleTrusted('agent:listCommands', (_e, context: ProviderContext) =>
-  withProviderOperation(context.providerId, () => providerRegistry.listCommands(context))
+  withProviderOperation(context.providerId, () => providerRegistry.listCommands(context), context.agentProfileId)
 )
 handleTrusted('agent:runControls', (_e, context: ProviderContext) =>
-  withProviderOperation(context.providerId, () => providerRegistry.runControls(context))
+  withProviderOperation(context.providerId, () => providerRegistry.runControls(context), context.agentProfileId)
 )
 handleTrusted('agent:providerAccount', (_e, context: ProviderContext) =>
-  withProviderOperation(context.providerId, () => providerRegistry.account(context))
+  withProviderOperation(context.providerId, () => providerRegistry.account(context), context.agentProfileId)
 )
 
 // 单目录会话列表（当前工作目录）：只列 app 自己起过的会话
 handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
-  return appSessionStore().listSessions(context.cwd ?? '', context.providerId)
+  return appSessionStore().listSessions(context.cwd ?? '', context.providerId, context.agentProfileId)
 })
 
 // 左侧栏 Projects 分组：只从 app 会话记录按 cwd 分组（不扫 ~/.claude/projects，不采集 terminal 会话）
@@ -1186,12 +1309,12 @@ handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
   }
   if (!fp && !archived) return null
   setCurrentCwd(cwd || undefined)
-  const key = providerContextKey(payload.providerId, cwd)
+  const key = providerContextKey(payload.providerId, cwd, payload.agentProfileId)
   bumpSessionRevision(key)
   discardSessionBaseline(key)
   sessionAliasesByContext.delete(key)
   const catalogSession = appSessionStore().load().find((session) =>
-    session.providerId === payload.providerId && session.cwd === cwd &&
+    session.providerId === payload.providerId && session.agentProfileId === payload.agentProfileId && session.cwd === cwd &&
     (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
   )
   if (!catalogSession || appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
@@ -1226,11 +1349,12 @@ handleTrusted(
     const cwd = p.cwd ?? ''
     const externalSessionId = p.externalSessionId
     const providerId = p.providerId as ProviderId
-    const admissionKey = providerContextKey(providerId, cwd)
-    const deletionKey = providerSessionKey(providerId, cwd, externalSessionId)
+    const agentProfileId = p.agentProfileId
+    const admissionKey = providerContextKey(providerId, cwd, agentProfileId)
+    const deletionKey = providerSessionKey(providerId, cwd, externalSessionId, agentProfileId)
     const hasActiveSession = (): boolean => runs.unsettledStates().some((run) => {
       const sessionId = run.externalSessionId ?? run.sessionId
-      return run.providerId === providerId && (run.cwd ?? '') === cwd &&
+      return run.providerId === providerId && run.agentProfileId === agentProfileId && (run.cwd ?? '') === cwd &&
         (run.runId === externalSessionId || sessionId === externalSessionId)
     })
     const reserved = await contextAdmission.run(admissionKey, async () => {
@@ -1267,7 +1391,7 @@ handleTrusted(
       let catalogRunId: string | undefined
       try {
         catalogRunId = sessionStore.load().find((session) =>
-          session.providerId === providerId && session.cwd === cwd &&
+          session.providerId === providerId && session.agentProfileId === agentProfileId && session.cwd === cwd &&
           (session.sessionId === externalSessionId || session.externalSessionId === externalSessionId)
         )?.runId
       } catch (error) {
@@ -1280,7 +1404,7 @@ handleTrusted(
       }
       const initialRunIds = new Set(traceArchiveRunIds({ cwd, sessionId: externalSessionId, providerId, userDataDir }))
       if (catalogRunId) initialRunIds.add(catalogRunId)
-      for (const runId of usageSessionRunIds({ userDataDir, providerId, cwd, externalSessionId })) {
+      for (const runId of usageSessionRunIds({ userDataDir, providerId, agentProfileId, cwd, externalSessionId })) {
         initialRunIds.add(runId)
       }
       for (const runId of attachmentSessionRunIds(userDataDir, {
@@ -1299,7 +1423,14 @@ handleTrusted(
       const result = await deleteOwnedSessionData(initialRunIds, {
         resolveRunIds: (runIds) => resolveSessionRunIds({ providerId, cwd, externalSessionId, runIds }),
         deleteDatabase: (runIds) => deleteSessionData({ providerId, cwd, externalSessionId, runIds }),
-        deleteUsage: (runIds) => deleteUsageSessionRows({ userDataDir, providerId, cwd, externalSessionId, runIds }),
+        deleteUsage: (runIds) => deleteUsageSessionRows({
+          userDataDir,
+          providerId,
+          agentProfileId,
+          cwd,
+          externalSessionId,
+          runIds
+        }),
         deleteManaged: async (runIds) => {
           const traceProgress = deleteTraceTurnProgressArtifacts(userDataDir, runIds)
           if (traceProgress.failed.length > 0) return traceProgress
@@ -1307,7 +1438,7 @@ handleTrusted(
         },
         deleteAttachments: (runId) => deleteRunAttachments(userDataDir, runId),
         deleteTranscripts: () => deleteTranscriptCopies({ cwd, sessionId: externalSessionId, providerId, userDataDir }),
-        deleteCatalog: () => sessionStore.remove({ providerId, cwd, externalSessionId })
+        deleteCatalog: () => sessionStore.remove({ providerId, agentProfileId, cwd, externalSessionId })
       })
       if (!result.ok) {
         const failureOptions = {
@@ -1319,7 +1450,7 @@ handleTrusted(
         else await dialog.showMessageBox(failureOptions)
         return result
       }
-      const key = providerContextKey(providerId, cwd)
+      const key = providerContextKey(providerId, cwd, agentProfileId)
       if (sessionByContext.get(key) === externalSessionId) {
         sessionByContext.delete(key)
         discardSessionBaseline(key)
@@ -1406,6 +1537,7 @@ function queueTrace(ev: TraceEvent): void {
 handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const request = normalizeAgentStartRequest(payload)
   const providerId = request.providerId
+  const agentProfileId = request.agentProfileId
   const adapter = providerRegistry.get(providerId)
   const runtimeProvider = adapter.runtimeProvider
   if (isShuttingDown) {
@@ -1435,7 +1567,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '不要手工覆盖 runtimeProvider；由 Provider adapter descriptor 选择原生 transport'
     })
   }
-  const lifecycleKey = providerId
+  const lifecycleKey = `${providerId}\0${agentProfileId ?? ''}`
   const startLease = providerOperationGate.acquireOperation(lifecycleKey)
   if (!startLease.ok) {
     throw new AgentRuntimeError('当前 Provider 正在认证 MCP，已拒绝启动新一轮', {
@@ -1445,15 +1577,19 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '等待浏览器认证完成或超时后再发送'
     })
   }
-  const admissionKey = providerContextKey(providerId, cwd ?? '')
+  const admissionKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
   try {
     return await contextAdmission.run(admissionKey, async () => {
     await startupManagedRecovery
-    const contextKey = providerContextKey(providerId, cwd ?? '')
+    const contextKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
+    const scopedSessionKey = (sessionId: string): string =>
+      providerSessionKey(providerId, catalogCwd, sessionId, agentProfileId)
     let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
     let resume = sessionByContext.get(contextKey)
     const expectedSessionId = request.expectedExternalSessionId
-    const contextRuns = runs.unsettledStates().filter((run) => run.providerId === providerId && run.cwd === cwd)
+    const contextRuns = runs.unsettledStates().filter((run) =>
+      run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
+    )
     const catalogAliases = (): Array<{ runId: string; externalSessionId?: string; sessionId?: string }> => {
       const liveAliases = [...(sessionAliasesByContext.get(contextKey) ?? [])].map(([runId, externalSessionId]) => ({
         runId,
@@ -1461,7 +1597,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       }))
       try {
         return [...liveAliases, ...appSessionStore().load()
-          .filter((session) => session.providerId === providerId && session.cwd === catalogCwd && Boolean(session.runId))
+          .filter((session) => session.providerId === providerId && session.agentProfileId === agentProfileId &&
+            session.cwd === catalogCwd && Boolean(session.runId))
           .map((session) => ({
             runId: session.runId!,
             ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : {}),
@@ -1483,7 +1620,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if (!expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...catalogAliases()])) {
       throw contextChangedError()
     }
-    if (cwd && resume && deletingSessions.has(providerSessionKey(providerId, cwd, resume))) {
+    if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
       throw new AgentRuntimeError('这个会话正在删除，已拒绝启动新一轮', {
         provider: runtimeProvider,
         stage: 'frontdoor',
@@ -1511,11 +1648,13 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     // 仍可能在收口。等待真实 settled 后再继续，避免稳定拒绝并破坏 FIFO。
     contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
     resume = sessionByContext.get(contextKey)
-    const latestContextRuns = runs.unsettledStates().filter((run) => run.providerId === providerId && run.cwd === cwd)
+    const latestContextRuns = runs.unsettledStates().filter((run) =>
+      run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
+    )
     if (!expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...latestContextRuns, ...catalogAliases()])) {
       throw contextChangedError()
     }
-    if (cwd && resume && deletingSessions.has(providerSessionKey(providerId, cwd, resume))) {
+    if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
       throw new AgentRuntimeError('这个会话正在删除，已拒绝启动新一轮', {
         provider: runtimeProvider,
         stage: 'frontdoor',
@@ -1587,7 +1726,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       })
     }
   }
-  const recordingKey = resume ? providerSessionKey(providerId, catalogCwd, resume) : undefined
+  const recordingKey = resume ? scopedSessionKey(resume) : undefined
   if (recordingKey && recoveredManagedTurns > 0) recordingBlockedSessions.delete(recordingKey)
   const recordingFailure = recordingKey ? recordingBlockedSessions.get(recordingKey) : undefined
   if (recordingFailure) {
@@ -1605,9 +1744,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const openCodePluginTrust = providerId === 'opencode' && cwd
     ? await resolveOpenCodePluginTrust(cwd)
     : undefined
-  const mcpExecution = authorizedMcpExecution(
-    await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
-  )
+  const mcpExecution = providerId === 'pi'
+    ? undefined
+    : authorizedMcpExecution(await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run'))
   if (isShuttingDown) {
     throw new AgentRuntimeError('Scry 正在退出，已拒绝启动新一轮', {
       provider: runtimeProvider,
@@ -1618,12 +1757,14 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   const committedResume = sessionByContext.get(contextKey)
   const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
-  const committedRuns = runs.unsettledStates().filter((run) => run.providerId === providerId && run.cwd === cwd)
+  const committedRuns = runs.unsettledStates().filter((run) =>
+    run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
+  )
   if (
     committedResume !== resume || committedRevision !== contextRevision ||
     !expectedSessionMatches(expectedSessionId, committedResume, [...committedRuns, ...catalogAliases()])
   ) throw contextChangedError()
-  if (cwd && committedResume && deletingSessions.has(providerSessionKey(providerId, cwd, committedResume))) {
+  if (cwd && committedResume && deletingSessions.has(scopedSessionKey(committedResume))) {
     throw new AgentRuntimeError('这个会话正在删除，已拒绝启动新一轮', {
       provider: runtimeProvider,
       stage: 'frontdoor',
@@ -1661,6 +1802,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const runState: ActiveRun = {
     runId,
     providerId,
+    agentProfileId,
     cwd,
     externalSessionId: resume,
     sessionId: resume,
@@ -1672,7 +1814,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   const cleanupProvisional = (): void => {
     if (resume || runState.externalSessionId) return
-    appSessionStore().remove({ providerId, cwd: catalogCwd, externalSessionId: runId })
+    appSessionStore().remove({ providerId, agentProfileId, cwd: catalogCwd, externalSessionId: runId })
   }
   // emit 早于 diffPreviewer 构造，这里留一个前向钩子；构造完成后接上真正的预览刷新。
   let notifyDiffChange: () => void = () => {}
@@ -1684,7 +1826,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if (ev.kind === 'harness' && ev.stage === 'result') {
       appendUsage(
         app.getPath('userData'),
-        { providerId, runtimeProvider, cwd, externalSessionId: observedSessionId, runId, source: ev.usageSource },
+        { providerId, agentProfileId, runtimeProvider, cwd, externalSessionId: observedSessionId, runId, source: ev.usageSource },
         ev
       )
     }
@@ -1711,6 +1853,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       // 续接同一原生 session 时也要把侧栏元数据的 runId 更新为本轮，否则切走再点回会拿到上一轮的 stale runId。
       appSessionStore().record({
         providerId,
+        agentProfileId,
         runtimeProvider,
         runId,
         externalSessionId: resume,
@@ -1720,7 +1863,14 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     } else {
       // Ownership is durable before attachment bytes are created. A crash can no longer
       // leave a new-session attachment directory with no catalog runId to delete.
-      appSessionStore().recordPending({ providerId, runtimeProvider, runId, cwd: catalogCwd, prompt: displayPrompt })
+      appSessionStore().recordPending({
+        providerId,
+        agentProfileId,
+        runtimeProvider,
+        runId,
+        cwd: catalogCwd,
+        prompt: displayPrompt
+      })
     }
     attachments = prepareRunAttachments(
       app.getPath('userData'),
@@ -1735,10 +1885,11 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         runId,
         sessionId: resume,
         externalSessionId: resume,
-        providerId
+        providerId,
+        agentProfileId
       })
     } else {
-      win?.webContents.send('agent:session', { runId, sessionId: runId, providerId, pending: true })
+      win?.webContents.send('agent:session', { runId, sessionId: runId, providerId, agentProfileId, pending: true })
     }
   } catch (error) {
     try { cleanupProvisional() } catch { /* preserve the frontdoor error */ }
@@ -1951,7 +2102,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       }
     }
     try {
-      appSessionStore().record({ providerId, runtimeProvider, runId, externalSessionId: sessionId, cwd: catalogCwd, prompt: displayPrompt })
+      appSessionStore().record({
+        providerId,
+        agentProfileId,
+        runtimeProvider,
+        runId,
+        externalSessionId: sessionId,
+        cwd: catalogCwd,
+        prompt: displayPrompt
+      })
     } catch (error) {
       console.warn('[scry] native session catalog update deferred:', runId, error)
     }
@@ -1963,7 +2122,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         sessionId,
         previousSessionId: runId,
         externalSessionId: sessionId,
-        providerId
+        providerId,
+        agentProfileId
       })
     } catch (error) {
       console.warn('[scry] native session renderer notification failed:', runId, error)
@@ -1997,6 +2157,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       runId,
       prompt: runtimePrompt,
       cwd,
+      agentProfileId,
       resume,
       attachments,
       model: request.model,
@@ -2112,6 +2273,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       try {
         appSessionStore().record({
           providerId,
+          agentProfileId,
           runtimeProvider,
           runId,
           externalSessionId: storageSessionId,
@@ -2136,7 +2298,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         runState.error = message
         runState.errorHint = recordingRecoveryHint
         if (recordingPolicy.blockSession) {
-          recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+          recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
         }
         win?.webContents.send('agent:error', {
           runId,
@@ -2169,7 +2331,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         const message = `模型已完成，但 Scry 精确记录快照失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
-        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+        recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
         win?.webContents.send('agent:error', {
           runId,
           message,
@@ -2183,6 +2345,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           sessionId: storageSessionId,
           externalSessionId: storageSessionId,
           providerId,
+          agentProfileId,
           stopped: r.stopped
         })
       }
@@ -2191,12 +2354,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       try {
         await archiveTraceTurn(completionArchiveArgs)
         terminalArchiveCommitted = true
-        recordingBlockedSessions.delete(providerSessionKey(providerId, catalogCwd, storageSessionId))
+        recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
       } catch (error) {
         const message = `模型已完成，但 Scry 精确记录提交失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
-        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+        recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
         win?.webContents.send('agent:error', {
           runId,
           message,
@@ -2222,6 +2385,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           sessionId: storageSessionId,
           externalSessionId: storageSessionId,
           providerId,
+          agentProfileId,
           stopped: r.stopped
         })
       }
@@ -2300,7 +2464,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           if (failure.created) {
             appendUsage(
               app.getPath('userData'),
-              { providerId, runtimeProvider, cwd, externalSessionId: storageSessionId, runId, source: failure.terminal.usageSource },
+              {
+                providerId,
+                agentProfileId,
+                runtimeProvider,
+                cwd,
+                externalSessionId: storageSessionId,
+                runId,
+                source: failure.terminal.usageSource
+              },
               failure.terminal
             )
           }
@@ -2314,6 +2486,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       try {
         appSessionStore().record({
           providerId,
+          agentProfileId,
           runtimeProvider,
           runId,
           externalSessionId: storageSessionId,
@@ -2335,7 +2508,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         runState.error = recordingMessage
         runState.errorHint = recordingRecoveryHint
         if (recordingPolicy.blockSession) {
-          recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+          recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
         }
         terminalArchiveArgs = undefined
         flushTraceSend()
@@ -2366,7 +2539,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         const recordingMessage = `Provider 已结束，但 Scry 精确记录快照失败：${String((progressError as Error).message)}`
         runState.error = recordingMessage
         runState.errorHint = recordingRecoveryHint
-        recordingBlockedSessions.set(providerSessionKey(providerId, catalogCwd, storageSessionId), runState.errorHint)
+        recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
         flushTraceSend()
         win?.webContents.send('agent:error', {
           runId,
@@ -2377,7 +2550,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       }
       flushTraceSend()
       if (stopped && !canonicalLifecycle) {
-        if (!alreadyDone) win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId })
+        if (!alreadyDone) win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId, agentProfileId })
       } else {
         win?.webContents.send('agent:error', { runId, message, category, hint })
       }
@@ -2387,11 +2560,11 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       try {
         await archiveTraceTurn(terminalArchiveArgs)
         terminalArchiveCommitted = true
-        recordingBlockedSessions.delete(providerSessionKey(providerId, catalogCwd, storageSessionId))
+        recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
       } catch (archiveError) {
         exactRecorded = false
         recordingBlockedSessions.set(
-          providerSessionKey(providerId, catalogCwd, storageSessionId),
+          scopedSessionKey(storageSessionId),
           recordingRecoveryHint
         )
         console.error('[scry] exact turn archive failed:', archiveError)
@@ -2416,7 +2589,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         billingProvider: [...runState.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'result')?.billingProvider
       })
       if (stopped && canonicalLifecycle && !alreadyDone && exactRecorded) {
-        win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId })
+        win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId, agentProfileId })
       }
     })
     .catch(async (error) => {
@@ -2427,11 +2600,11 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           await archiveTraceTurn(terminalArchiveArgs)
           terminalArchiveCommitted = true
           if (terminalArchiveArgs.sessionId) {
-            recordingBlockedSessions.delete(providerSessionKey(providerId, catalogCwd, terminalArchiveArgs.sessionId))
+            recordingBlockedSessions.delete(scopedSessionKey(terminalArchiveArgs.sessionId))
           }
         } catch (archiveError) {
           if (terminalArchiveArgs.sessionId) recordingBlockedSessions.set(
-            providerSessionKey(providerId, catalogCwd, terminalArchiveArgs.sessionId),
+            scopedSessionKey(terminalArchiveArgs.sessionId),
             recordingRecoveryHint
           )
           console.error('[scry] fallback terminal archive failed:', archiveError)
@@ -2520,7 +2693,12 @@ handleTrusted('agent:stop', (_event, runId: string) => {
     if (runs.get(stopping.runId)?.control !== stopping) return
     stopping.runState.done = true
     flushTraceSend()
-    win?.webContents.send('agent:turnDone', { runId: stopping.runId, stopped: true, providerId: stopping.providerId })
+    win?.webContents.send('agent:turnDone', {
+      runId: stopping.runId,
+      stopped: true,
+      providerId: stopping.providerId,
+      agentProfileId: stopping.runState.agentProfileId
+    })
     // 控制器保留到 Provider promise 真正 settle，避免迟到 reject/error 找不到自身状态或误命中其他 run。
   }, 2000)
   return true
@@ -2528,7 +2706,11 @@ handleTrusted('agent:stop', (_event, runId: string) => {
 
 // B2-lite：累计用量统计（读 usage.jsonl 聚合）
 handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
-  readUsageStats(app.getPath('userData'), context ? { providerId: context.providerId, cwd: context.cwd ?? '' } : {})
+  readUsageStats(app.getPath('userData'), context ? {
+    providerId: context.providerId,
+    agentProfileId: context.agentProfileId,
+    cwd: context.cwd ?? ''
+  } : {})
 )
 
 app.whenReady().then(() => {
