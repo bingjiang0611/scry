@@ -652,6 +652,28 @@ describe('managed trace turn coordinator', () => {
     })?.turns).toEqual([expect.objectContaining({ runId: 'run-1', status: 'failed' })])
   })
 
+  it('fails closed when a turn frozen as managed reaches a disabled terminal mode', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await writeFile(join(workspace, 'scry.config.json'), JSON.stringify({
+      schemaVersion: 1,
+      enabled: false,
+      workspaceId: 'managed-main-fixture',
+      dataDir: '.scry',
+      repositories: { mode: 'workspace-only' },
+      capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+    }))
+    const request = input(workspace, userDataDir)
+
+    await expect(commitManagedTraceTurn(request, { requireManaged: true }))
+      .rejects.toThrow('managed recorder mode changed after turn start')
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: request.providerId,
+      userDataDir
+    })).toBeNull()
+  })
+
   it.each([
     ['status', (request: ManagedTraceTurnCommitInput) => {
       request.turn.status = 'failed'

@@ -6,12 +6,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 import {
+  cancelManagedRecorderTurn,
   commitManagedRecorderTurn,
+  isManagedProviderRuntimePair,
   isManagedRecorderProvider,
   prepareManagedRecorderTurn,
   recoverManagedRecorderTurns
 } from './managed'
 import { handleRecorderHook } from './recorder'
+import { recorderHasOpenTurn, recorderPendingHealth } from './runtime-state'
 import { commitRecord, listRecords, readHealth, safeKey, stableHash } from './store'
 
 const roots: string[] = []
@@ -87,6 +90,185 @@ describe('managed canonical recorder', () => {
 
   it('includes OpenCode in the managed recorder provider set', () => {
     expect(isManagedRecorderProvider('opencode')).toBe(true)
+  })
+
+  it('includes Pi and accepts only its pi_rpc runtime pair', () => {
+    expect(isManagedRecorderProvider('pi')).toBe(true)
+    expect(isManagedProviderRuntimePair('pi', 'pi_rpc')).toBe(true)
+    expect(isManagedProviderRuntimePair('pi', 'codex_cli')).toBe(false)
+  })
+
+  it('Pi 用受信 managed 身份把 provisional lifecycle 绑定到 session entry id', async () => {
+    const root = await workspace()
+    const runId = 'run-pi'
+    const prompt = '/skill:rate-workflow 85781174 理解prd后停下'
+    const evidence = canonicalEvidence(prompt)
+    const archiveFingerprint = stableHash({ runId, evidence, timing })
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'pi-session',
+        prompt,
+        timestamp: timing.startedAt
+      },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update(prompt).digest('hex')
+      }
+    })
+
+    const prepared = await prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session',
+      runId,
+      providerTurnId: 'pi-user-entry-1',
+      userText: prompt,
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint
+    })
+    expect(prepared).toMatchObject({ status: 'prepared' })
+    if (prepared.status !== 'prepared') return
+
+    await expect(commitManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session',
+      runId,
+      recordId: prepared.recordId,
+      archiveFingerprint,
+      providerTurnId: 'pi-user-entry-1',
+      userText: prompt,
+      evidence,
+      timing,
+      status: 'completed'
+    })).resolves.toMatchObject({ status: 'committed' })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([
+      expect.objectContaining({
+        provider: expect.objectContaining({ id: 'pi' }),
+        providerTurnId: 'pi-user-entry-1'
+      })
+    ])
+  })
+
+  it('Pi 不允许缺失 authoritative session entry id', async () => {
+    const root = await workspace()
+    const prompt = '/skill:rate-workflow 85781174 理解prd后停下'
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session',
+      runId: 'run-pi-missing-id',
+      userText: prompt,
+      evidence: canonicalEvidence(prompt),
+      timing,
+      status: 'interrupted',
+      archiveFingerprint: 'fixture'
+    })).rejects.toThrow('authoritative Provider turn id')
+  })
+
+  it('Pi interrupted turn accepts missing assistant text but keeps the entry id mandatory', async () => {
+    const root = await workspace()
+    const runId = 'run-pi-interrupted'
+    const prompt = '停止当前任务'
+    const evidence = aggregateTurnEvidence({ userText: prompt, events: [], source: 'scry_provider_adapter' })
+    const archiveFingerprint = stableHash({ runId, evidence, timing })
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'pi-session-interrupted', prompt, timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update(prompt).digest('hex')
+      }
+    })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session-interrupted',
+      runId,
+      providerTurnId: 'pi-user-entry-interrupted',
+      userText: prompt,
+      evidence,
+      timing,
+      status: 'interrupted',
+      archiveFingerprint
+    })).resolves.toMatchObject({ status: 'prepared' })
+  })
+
+  it('default managed recovery scans pending Pi lifecycles', async () => {
+    const root = await workspace()
+    const prompt = '恢复 Pi 轮次'
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'pi-session-recovery', prompt, timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: 'run-pi-recovery',
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update(prompt).digest('hex')
+      }
+    })
+
+    await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 1 })
+  })
+
+  it('Pi prompt preflight rejection cancels only the exact provisional managed lifecycle', async () => {
+    const root = await workspace()
+    const runId = 'run-pi-preflight-rejected'
+    const prompt = '/skill:rate-workflow 85781174 理解prd后停下'
+    const promptHash = createHash('sha256').update(prompt).digest('hex')
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'pi-session-rejected', prompt, timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: promptHash
+      }
+    })
+
+    await expect(recorderHasOpenTurn(join(root, '.scry'))).resolves.toBe(true)
+    await expect(recorderPendingHealth(join(root, '.scry'))).resolves.toMatchObject({ pendingCount: 1 })
+    await expect(cancelManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session-rejected',
+      runId: 'other-run',
+      promptHash
+    })).rejects.toThrow('identity differs')
+    await expect(cancelManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session-rejected',
+      runId,
+      promptHash
+    })).resolves.toMatchObject({ status: 'cancelled', generation: 1 })
+    await expect(recorderHasOpenTurn(join(root, '.scry'))).resolves.toBe(false)
+    await expect(recorderPendingHealth(join(root, '.scry'))).resolves.toMatchObject({ pendingCount: 0 })
+    await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(cancelManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session-rejected',
+      runId,
+      promptHash
+    })).resolves.toEqual({ status: 'not_found' })
   })
 
   it('OpenCode 用受信 managed 身份绑定 parent user ID 后准备并提交', async () => {

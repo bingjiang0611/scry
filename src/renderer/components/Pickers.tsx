@@ -200,6 +200,7 @@ export function CliPicker({
     <div className="clipick">
       <button
         className="clibtn"
+        data-agent-id={selectedId}
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
         title={disabled ? '同一会话不能切换 Agent；请新建会话后重新选择' : undefined}
@@ -226,6 +227,7 @@ export function CliPicker({
               type="button"
               key={a.id}
               className="mitem"
+              data-agent-id={a.id}
               title={`${a.path}${a.version ? ' · ' + a.version : ''}`}
               onClick={() => {
                 onSelect(a.id)
@@ -245,6 +247,7 @@ export function CliPicker({
               <button
                 type="button"
                 className="mitem agent-option-pick"
+                data-agent-id={agent.id}
                 title={agent.path}
                 onClick={() => {
                   onSelect(agent.id)

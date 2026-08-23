@@ -77,7 +77,7 @@ export async function recorderPendingHealth(
   let pendingCount = 0
   let oldestPendingAgeMs = 0
   const now = Date.now()
-  for (const provider of ['claude', 'codex', 'qoder', 'opencode'] as const) {
+  for (const provider of ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const) {
     const providerRoot = join(dataRoot, 'runtime', provider)
     for (const session of await listFiles(providerRoot)) {
       const root = join(providerRoot, session)
@@ -101,7 +101,7 @@ export async function recorderPendingHealth(
 }
 
 export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
-  for (const provider of ['claude', 'codex', 'qoder', 'opencode'] as const) {
+  for (const provider of ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const) {
     const providerRoot = join(dataRoot, 'runtime', provider)
     for (const session of await listFiles(providerRoot)) {
       try {

@@ -9,13 +9,27 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: sdk.query }))
 
 import { runAgent } from './agent-runner'
 
+const successResult = (sessionId = 'claude-session') => ({
+  type: 'result',
+  subtype: 'success',
+  is_error: false,
+  session_id: sessionId
+})
+
+function completedQuery(...messages: Array<Record<string, unknown>>): AsyncIterable<Record<string, unknown>> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const message of messages) yield message
+      yield successResult()
+    }
+  }
+}
+
 describe('Claude Agent SDK launch options', () => {
   beforeEach(() => sdk.query.mockReset())
 
   it('uses the selected executable and keeps the safe approval default', async () => {
-    sdk.query.mockReturnValue({
-      async *[Symbol.asyncIterator]() {}
-    })
+    sdk.query.mockReturnValue(completedQuery())
 
     await runAgent('probe', 'run-probe', () => {}, {
       claudePath: '/Users/example/.local/bin/claude',
@@ -33,7 +47,7 @@ describe('Claude Agent SDK launch options', () => {
   })
 
   it('passes model, effort, and auto-review without dangerous-skip flags', async () => {
-    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    sdk.query.mockReturnValue(completedQuery())
     await runAgent('probe', 'run-probe', () => {}, {
       model: 'claude-test',
       effort: 'high',
@@ -51,13 +65,11 @@ describe('Claude Agent SDK launch options', () => {
   })
 
   it('does not append the completed assistant snapshot after partial text deltas', async () => {
-    sdk.query.mockReturnValue({
-      async *[Symbol.asyncIterator]() {
-        yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'O' } } }
-        yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'K' } } }
-        yield { type: 'assistant', message: { content: [{ type: 'text', text: 'OK' }] } }
-      }
-    })
+    sdk.query.mockReturnValue(completedQuery(
+      { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'O' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'K' } } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'OK' }] } }
+    ))
     const emitted: Array<{ kind: string; text?: string }> = []
 
     await runAgent('probe', 'run-probe', (event) => emitted.push(event), {}).promise
@@ -86,6 +98,7 @@ describe('Claude Agent SDK launch options', () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {
         await waiting
+        yield successResult()
       }
     })
 
@@ -123,6 +136,7 @@ describe('Claude Agent SDK launch options', () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {
         await waiting
+        yield successResult()
       }
     })
 
@@ -157,10 +171,171 @@ describe('Claude Agent SDK launch options', () => {
     }
   })
 
-  it('bridges AskUserQuestion answers and keeps full access for other tools', async () => {
+  it('recovers the transcript promptId before rethrowing the original Provider error', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-claude-failed-turn-id-'))
+    const transcript = join(root, 'session.jsonl')
+    const providerError = new Error('Claude transport failed')
+    let release = (): void => {}
+    const waiting = new Promise<void>((resolve) => { release = resolve })
     sdk.query.mockReturnValue({
-      async *[Symbol.asyncIterator]() {}
+      async *[Symbol.asyncIterator]() {
+        await waiting
+        throw providerError
+      }
     })
+
+    try {
+      await writeFile(transcript, '')
+      const handle = runAgent('probe', 'run-failed-transcript-id', () => {}, { captureProviderTurnId: true })
+      const hook = sdk.query.mock.calls[0][0].options.hooks.UserPromptSubmit[0].hooks[0]
+      await hook({
+        hook_event_name: 'UserPromptSubmit',
+        session_id: 'claude-session',
+        transcript_path: transcript,
+        prompt: 'probe'
+      })
+      await writeFile(transcript, `${JSON.stringify({
+        type: 'user',
+        sessionId: 'claude-session',
+        promptId: 'failed-prompt-id',
+        message: { role: 'user', content: 'probe' }
+      })}\n`)
+      release()
+
+      await expect(handle.promise).rejects.toBe(providerError)
+      expect(handle.getProviderTurnId?.()).toBe('failed-prompt-id')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not bind an older identical transcript prompt when the current turn fails before persistence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-claude-old-turn-id-'))
+    const transcript = join(root, 'session.jsonl')
+    const providerError = new Error('Claude transport failed before current user persistence')
+    let release = (): void => {}
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        await waiting
+        throw providerError
+      }
+    })
+
+    try {
+      await writeFile(transcript, `${JSON.stringify({
+        type: 'user',
+        sessionId: 'claude-session',
+        promptId: 'old-prompt-id',
+        message: { role: 'user', content: 'same prompt' }
+      })}\n`)
+      const handle = runAgent('same prompt', 'run-failed-before-persist', () => {}, { captureProviderTurnId: true })
+      const hook = sdk.query.mock.calls[0][0].options.hooks.UserPromptSubmit[0].hooks[0]
+      await hook({
+        hook_event_name: 'UserPromptSubmit',
+        session_id: 'claude-session',
+        transcript_path: transcript,
+        prompt: 'same prompt'
+      })
+      release()
+
+      await expect(handle.promise).rejects.toBe(providerError)
+      expect(handle.getProviderTurnId?.()).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not bind a prompt from a transcript file replaced after the hook baseline', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-claude-replaced-transcript-'))
+    const transcript = join(root, 'session.jsonl')
+    let release = (): void => {}
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        await waiting
+        yield successResult()
+      }
+    })
+
+    try {
+      await writeFile(transcript, '')
+      const handle = runAgent('same prompt', 'run-replaced-transcript', () => {}, { captureProviderTurnId: true })
+      const hook = sdk.query.mock.calls[0][0].options.hooks.UserPromptSubmit[0].hooks[0]
+      await hook({
+        hook_event_name: 'UserPromptSubmit',
+        session_id: 'claude-session',
+        transcript_path: transcript,
+        prompt: 'same prompt'
+      })
+      await rm(transcript)
+      await writeFile(transcript, `${JSON.stringify({
+        type: 'user',
+        sessionId: 'claude-session',
+        promptId: 'replacement-prompt-id',
+        message: { role: 'user', content: 'same prompt' }
+      })}\n`)
+      release()
+
+      await expect(handle.promise).resolves.toMatchObject({ providerTurnId: undefined })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an SDK stream that ends without a terminal result', async () => {
+    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+
+    await expect(runAgent('probe', 'run-empty', () => {}, {}).promise)
+      .rejects.toThrow('Claude Agent SDK stream ended without a terminal result')
+  })
+
+  it('allows an interrupted stream to end without a terminal result', async () => {
+    let release = (): void => {}
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() { await waiting },
+      interrupt: release
+    })
+
+    const handle = runAgent('probe', 'run-interrupted', () => {}, {})
+    handle.interrupt()
+    await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
+  })
+
+  it('preserves an early Provider error and logs only bounded redacted stderr', async () => {
+    const providerError = new Error('Claude process terminated by signal SIGKILL')
+    const bearer = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    const apiKey = 'must-not-enter-log'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    sdk.query.mockImplementation((request) => {
+      if (!request) return completedQuery()
+      request.options.stderr(`${'x'.repeat(4_000)} Authorization: Bearer ${bearer}\nAPI_KEY=${apiKey}`)
+      return {
+        async *[Symbol.asyncIterator]() {
+          throw providerError
+        }
+      }
+    })
+
+    try {
+      const handle = runAgent('probe', 'run-early-failure', () => {}, { captureProviderTurnId: true })
+      await expect(handle.promise).rejects.toBe(providerError)
+      expect(handle.getProviderTurnId?.()).toBeUndefined()
+      const diagnostic = warn.mock.calls.flat().join(' ')
+      expect(diagnostic).toContain('Claude stderr (run-early-failure, redacted)')
+      expect(diagnostic).toContain('Authorization: [redacted]')
+      expect(diagnostic).toContain('API_KEY=[redacted]')
+      expect(diagnostic).not.toContain(bearer)
+      expect(diagnostic).not.toContain(apiKey)
+      expect(diagnostic.length).toBeLessThan(2_200)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('bridges AskUserQuestion answers and keeps full access for other tools', async () => {
+    sdk.query.mockReturnValue(completedQuery())
     const requestUserInput = vi.fn(async (request) => ({
       runId: request.runId,
       questionId: request.questionId,
@@ -206,7 +381,7 @@ describe('Claude Agent SDK launch options', () => {
   })
 
   it('bridges default tool approvals through the inline question channel', async () => {
-    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    sdk.query.mockReturnValue(completedQuery())
     const requestUserInput = vi.fn(async (request) => ({
       runId: request.runId,
       questionId: request.questionId,
@@ -224,7 +399,7 @@ describe('Claude Agent SDK launch options', () => {
   })
 
   it('returns only exact session-scoped suggestions and asks again for a different rule', async () => {
-    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    sdk.query.mockReturnValue(completedQuery())
     const requestUserInput = vi.fn(async (request) => ({
       runId: request.runId,
       questionId: request.questionId,
@@ -299,7 +474,7 @@ describe('Claude Agent SDK launch options', () => {
   })
 
   it('does not offer or claim session permission without safe exact session suggestions', async () => {
-    sdk.query.mockReturnValue({ async *[Symbol.asyncIterator]() {} })
+    sdk.query.mockReturnValue(completedQuery())
     const requests: Array<{ questions: Array<{ question: string; options: Array<{ label: string }> }> }> = []
     const requestUserInput = vi.fn(async (request) => {
       requests.push(request)
@@ -358,9 +533,7 @@ describe('Claude Agent SDK launch options', () => {
   })
 
   it('returns a non-interrupting denial when the user cancels a question', async () => {
-    sdk.query.mockReturnValue({
-      async *[Symbol.asyncIterator]() {}
-    })
+    sdk.query.mockReturnValue(completedQuery())
     runAgent('probe', 'run-probe', () => {}, {
       requestUserInput: async (request) => ({
         runId: request.runId,

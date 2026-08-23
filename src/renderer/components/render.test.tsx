@@ -22,6 +22,7 @@ import {
   enqueuePrompt,
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
+  providerContextCacheKey,
   restoreActiveSessionSelection,
   restoreFocusedRunSelection,
   scrollChatToBottomIfNeeded,
@@ -36,6 +37,7 @@ import { AppShell } from './AppShell'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
+import { CliPicker } from './Pickers'
 import { pathContains, WorkspacePanel, workspaceReferenceToken } from './WorkspacePanel'
 import { parseUnifiedDiff, TurnDiffReviewPanel } from './TurnDiffReviewPanel'
 
@@ -43,6 +45,33 @@ const ev = (e: Partial<TraceEvent> & { id: string; kind: TraceEvent['kind']; sta
   ts: '',
   runId: 'r1',
   ...e
+})
+
+describe('Pi Profile renderer identity', () => {
+  it('renders the selected and selectable agent ids into stable DOM attributes', () => {
+    const html = renderToStaticMarkup(
+      <CliPicker
+        agents={[
+          { id: 'pi:default', name: 'Pi', bin: 'pi', path: '/usr/local/bin/pi', version: '1.0.0' },
+          { id: 'pi:0123456789abcdef', name: 'Pi · custom', bin: 'custom', path: '/opt/custom', version: '2.0.0' }
+        ]}
+        selectedId="pi:default"
+        onSelect={() => undefined}
+        onAddPi={() => undefined}
+        onRemovePi={() => undefined}
+        onRescan={() => undefined}
+      />
+    )
+
+    expect(html).toContain('class="clibtn" data-agent-id="pi:default"')
+  })
+
+  it('isolates slash command caches by Pi profile as well as provider and cwd', () => {
+    const native = providerContextCacheKey({ providerId: 'pi', agentProfileId: 'pi:default', cwd: '/repo' })
+    const custom = providerContextCacheKey({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef', cwd: '/repo' })
+    expect(native).not.toBe(custom)
+    expect(native).toBe('pi\0pi:default\0/repo')
+  })
 })
 
 const turn: Turn = {

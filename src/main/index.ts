@@ -68,6 +68,7 @@ import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
 import { DockBadgeState } from './dock-badge'
+import { archiveSessionId } from './session-id'
 import {
   codexHookFingerprint,
   createCodexHookGrantStore,
@@ -159,6 +160,7 @@ import {
   deleteTraceTurnProgress,
   deleteTraceTurnProgressArtifacts,
   persistTraceTurnProgress,
+  persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
   traceProgressSessionRunIds
 } from './trace-turn-progress'
@@ -709,6 +711,7 @@ interface ArchiveTraceTurnArgs {
   errorHint?: string
   observedTiming?: ManagedTurnTiming
   commitHookEnv?: NodeJS.ProcessEnv
+  managedRecorderEnabled: boolean
 }
 
 function observedTurnTiming(startedAt: string | undefined, completedAt: string): ManagedTurnTiming | undefined {
@@ -759,20 +762,34 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
 }
 
 async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void> {
-  if (!args.sessionId) return
-  const archiveCwd = args.cwd ?? ''
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (
-    args.cwd && isManagedRecorderProvider(args.providerId) &&
-    (await managedRecorderMode(args.cwd, args.commitHookEnv)).status === 'enabled'
-  ) {
+  const archiveCwd = args.cwd ?? ''
+  const managedPolicy = args.managedRecorderEnabled && archiveCwd && isManagedRecorderProvider(args.providerId)
+  if (args.managedRecorderEnabled && !managedPolicy) {
+    throw new Error('managed recorder launch policy has no valid workspace/provider identity')
+  }
+  if (!args.sessionId) {
+    if (managedPolicy) {
+      await persistUnresolvedTraceTurnProgress({
+        userDataDir: app.getPath('userData'),
+        cwd: archiveCwd,
+        providerId: args.providerId,
+        runtimeProvider: args.runtimeProvider,
+        turn,
+        reason: 'missing_provider_session_id'
+      })
+      throw new Error('managed recorder requires an authoritative Provider session id')
+    }
+    return
+  }
+  if (managedPolicy) {
     const permitsMissingProviderTurnId = managedRecorderAllowsMissingProviderTurnId(args.providerId, args.status)
     if (!args.providerTurnId && !permitsMissingProviderTurnId) {
       throw new Error('managed recorder requires an authoritative Provider turn id')
     }
     if (!timing) throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     await persistManagedTraceProgress({
-      cwd: args.cwd,
+      cwd: archiveCwd,
       sessionId: args.sessionId,
       providerTurnId: args.providerTurnId,
       providerId: args.providerId,
@@ -795,29 +812,29 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
 }
 
 async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
+  const archiveCwd = args.cwd ?? ''
+  const managedPolicy = args.managedRecorderEnabled && archiveCwd && isManagedRecorderProvider(args.providerId)
+  if (args.managedRecorderEnabled && !managedPolicy) {
+    throw new Error('managed recorder launch policy has no valid workspace/provider identity')
+  }
   if (!args.sessionId) {
-    if (
-      args.cwd && isManagedRecorderProvider(args.providerId) &&
-      (await managedRecorderMode(args.cwd, args.commitHookEnv)).status === 'enabled'
-    ) {
+    if (managedPolicy) {
       throw new Error('managed recorder requires an authoritative Provider session id')
     }
     return
   }
-  const archiveCwd = args.cwd ?? ''
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (args.cwd && isManagedRecorderProvider(args.providerId)) {
-    const mode = await managedRecorderMode(args.cwd, args.commitHookEnv)
-    if (mode.status === 'enabled' && !timing) {
+  if (managedPolicy) {
+    if (!timing) {
       throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     }
     const permitsMissingProviderTurnId = managedRecorderAllowsMissingProviderTurnId(args.providerId, args.status)
-    if (mode.status === 'enabled' && !args.providerTurnId && !permitsMissingProviderTurnId) {
+    if (!args.providerTurnId && !permitsMissingProviderTurnId) {
       throw new Error('managed recorder requires an authoritative Provider turn id')
     }
-    if (mode.status === 'enabled' && timing) {
+    if (timing) {
       await commitManagedTraceTurn({
-        cwd: args.cwd,
+        cwd: archiveCwd,
         sessionId: args.sessionId,
         providerTurnId: args.providerTurnId,
         providerId: args.providerId,
@@ -826,7 +843,7 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
         turn,
         timing,
         status: args.status
-      }, { commitHookEnv: args.commitHookEnv })
+      }, { commitHookEnv: args.commitHookEnv, requireManaged: true })
       return
     }
   }
@@ -2212,7 +2229,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       codexHookTrust,
       openCodePluginTrust,
       managedRecorder: managedRecorderEnabled,
-      ...(managedRecorderEnabled && (providerId === 'claude' || providerId === 'qoder' || providerId === 'opencode') ? {
+      ...(managedRecorderEnabled && (providerId === 'claude' || providerId === 'qoder' || providerId === 'opencode' || providerId === 'pi') ? {
         managedRecorderIdentity: {
           runId,
           promptHash: createHash('sha256').update(displayPrompt).digest('hex')
@@ -2306,7 +2323,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         providerId,
         runtimeProvider,
         cwd,
-        sessionId: storageSessionId,
+        sessionId: archiveSessionId(managedRecorderEnabled, nativeSessionId, storageSessionId),
         providerTurnId: r.providerTurnId,
         runId,
         userText: displayPrompt,
@@ -2315,7 +2332,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         done: true,
         status: completionStatus,
         observedTiming,
-        commitHookEnv: managedCommitHookEnv
+        commitHookEnv: managedCommitHookEnv,
+        managedRecorderEnabled
       }
       if (cwd) {
         try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
@@ -2467,7 +2485,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         providerId,
         runtimeProvider,
         cwd,
-        sessionId: storageSessionId,
+        sessionId: archiveSessionId(managedRecorderEnabled, nativeSessionId, storageSessionId),
         providerTurnId,
         runId,
         userText: displayPrompt,
@@ -2477,6 +2495,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         status: stopped ? 'interrupted' : 'failed',
         observedTiming,
         commitHookEnv: managedCommitHookEnv,
+        managedRecorderEnabled,
         ...(stopped ? {} : { error: message, errorHint: hint })
       }
       if (cwd) {

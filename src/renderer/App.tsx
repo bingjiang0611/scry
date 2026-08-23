@@ -8,7 +8,7 @@ import {
   type AgentStartRequest,
   type RuntimeProvider
 } from '@shared/runtime'
-import type { ProviderId, SessionProviderId } from '@shared/provider'
+import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
 import type { WorkspaceEntry } from '@shared/workspace'
 import { AppShell } from './components/AppShell'
 import { Sidebar } from './components/Sidebar'
@@ -49,6 +49,10 @@ const SIDEBAR_MAX = 320
 const PANEL_MIN = 360
 const PANEL_MAX = 960
 const CHAT_BOTTOM_STICKY_PX = 32
+
+export function providerContextCacheKey(context: ProviderContext): string {
+  return `${context.providerId}\0${context.agentProfileId ?? ''}\0${context.cwd ?? ''}`
+}
 
 interface ChatScrollBox {
   scrollHeight: number
@@ -511,7 +515,7 @@ export function App() {
   const slashRequestSeqRef = useRef(0)
   const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
   const integrationContextKeyRef = useRef('')
-  integrationContextKeyRef.current = `${integrations.providerContext.providerId}\0${integrations.providerContext.agentProfileId ?? ''}\0${integrations.providerContext.cwd ?? ''}`
+  integrationContextKeyRef.current = providerContextCacheKey(integrations.providerContext)
   const draftAttachmentsRef = useRef<DraftAttachment[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [focusedTurnRunId, setFocusedTurnRunId] = useState<string | null>(null)
@@ -788,7 +792,7 @@ export function App() {
   useEffect(() => {
     const seq = ++slashRequestSeqRef.current
     const context = integrations.providerContext
-    const requestKey = `${context.providerId}\0${context.cwd ?? ''}`
+    const requestKey = providerContextCacheKey(context)
     const cached = slashCacheRef.current.get(requestKey)
     setSlashCmds(cached?.commands ?? [])
     setSlashReason(cached?.reason ?? null)
