@@ -1172,6 +1172,7 @@ export interface BillingSignal {
 export interface BillingAnalysis {
   sourceLabel: string
   officialBillLabel: string
+  tokenFormulaLabel: string
   totalTokens: number
   tokensIn: number
   tokensOut: number
@@ -1216,6 +1217,10 @@ export function fmtKnownTokens(value: number, knownCount: number, missingCount =
 export function analyzeBilling(turns: Turn[]): BillingAnalysis {
   const all = turns.flatMap((t) => t.items)
   const results = turns.map(resultOf).filter((event): event is TraceEvent => event != null)
+  const tokenAccountingModes = new Set(results.map(tokenCacheAccounting))
+  const tokenFormulaLabel = tokenAccountingModes.size === 1 && tokenAccountingModes.has('input_includes_cache')
+    ? '输入（含缓存）+输出'
+    : '输入+输出+缓存'
 
   const allTurnRows: BillingTurnRow[] = turns.map((t, i) => {
     const r = resultOf(t)
@@ -1434,6 +1439,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
   return {
     sourceLabel: '本会话可验证 token',
     officialBillLabel: '仅看 token，不算金额',
+    tokenFormulaLabel,
     totalTokens,
     tokensIn,
     tokensOut,

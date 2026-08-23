@@ -2166,7 +2166,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       codexHookTrust,
       openCodePluginTrust,
       managedRecorder: managedRecorderEnabled,
-      ...(managedRecorderEnabled && (providerId === 'qoder' || providerId === 'opencode') ? {
+      ...(managedRecorderEnabled && (providerId === 'claude' || providerId === 'qoder' || providerId === 'opencode') ? {
         managedRecorderIdentity: {
           runId,
           promptHash: createHash('sha256').update(displayPrompt).digest('hex')
@@ -2568,7 +2568,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           recordingRecoveryHint
         )
         console.error('[scry] exact turn archive failed:', archiveError)
-        if (canonicalLifecycle) {
+        // Provider 本身已失败且没有 native turn identity 时，recorder 报错是次生错误；
+        // 保留前面已经发送给 renderer 的真实 Provider 根因，不能再用 identity 错误覆盖它。
+        if (canonicalLifecycle && providerTurnId) {
           const recordingMessage = `Scry 精确记录提交失败：${String((archiveError as Error).message)}`
           win?.webContents.send('agent:error', {
             runId,

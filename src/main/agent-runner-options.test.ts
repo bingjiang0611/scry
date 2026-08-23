@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const sdk = vi.hoisted(() => ({ query: vi.fn() }))
 
@@ -109,6 +112,49 @@ describe('Claude Agent SDK launch options', () => {
     expect(handle.getProviderTurnId?.()).toBe('root-prompt-id')
     release()
     await expect(handle.promise).resolves.toMatchObject({ providerTurnId: 'root-prompt-id' })
+  })
+
+  it('resolves the authoritative promptId from the hook transcript when the hook has no turn id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-claude-turn-id-'))
+    const transcript = join(root, 'session.jsonl')
+    await writeFile(transcript, '')
+    let release = (): void => {}
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        await waiting
+      }
+    })
+
+    try {
+      const handle = runAgent('/rate-workflow 85781174 理解prd后停下', 'run-transcript-id', () => {}, {
+        captureProviderTurnId: true
+      })
+      const hook = sdk.query.mock.calls[0][0].options.hooks.UserPromptSubmit[0].hooks[0]
+      await hook({
+        hook_event_name: 'UserPromptSubmit',
+        session_id: 'claude-session',
+        transcript_path: transcript,
+        prompt: '/rate-workflow 85781174 理解prd后停下'
+      })
+      await writeFile(transcript, `${JSON.stringify({
+        type: 'user',
+        sessionId: 'claude-session',
+        promptId: 'authoritative-prompt-id',
+        message: {
+          role: 'user',
+          content: '<command-name>/rate-workflow</command-name><command-args>85781174 理解prd后停下</command-args>'
+        }
+      })}\n`)
+      release()
+
+      await expect(handle.promise).resolves.toMatchObject({
+        sessionId: 'claude-session',
+        providerTurnId: 'authoritative-prompt-id'
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('bridges AskUserQuestion answers and keeps full access for other tools', async () => {

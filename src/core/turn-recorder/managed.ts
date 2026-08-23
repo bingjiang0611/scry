@@ -353,7 +353,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         candidate.providerTurnId === input.providerTurnId
     )
     const provisional = candidates.filter((candidate) => candidate.managedByScry && !candidate.providerTurnId)
-    const supportsProvisionalIdentity = input.provider === 'qoder' || input.provider === 'opencode'
+    const supportsProvisionalIdentity = input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode'
     const matchingProvisional = supportsProvisionalIdentity
       ? provisional.filter((candidate) => managedProvisionalMatches(candidate, input))
       : []

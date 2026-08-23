@@ -39,6 +39,27 @@ describe('aggregateTurnEvidence', () => {
     expect(unavailable.tools).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
   })
 
+  it('OpenCode 能观测工具但未支持危险分类时不伪造精确零值', () => {
+    const evidence = aggregateTurnEvidence({
+      events: [{
+        id: 'opencode-result',
+        ts: '2026-01-01T00:00:00.000Z',
+        runId: 'run-opencode',
+        kind: 'harness',
+        stage: 'result',
+        providerId: 'opencode',
+        runtimeProvider: 'opencode_server'
+      }]
+    })
+
+    expect(evidence.tools).toMatchObject({ status: 'available', value: [] })
+    expect(evidence.dangerousOperations).toMatchObject({
+      status: 'unavailable',
+      quality: 'unavailable',
+      omissionReason: 'danger classification is unsupported for this Provider'
+    })
+  })
+
   it('过滤 Recorder 自身 hook，并保留真实 hook', () => {
     const events: TraceEvent[] = [
       { id: '1', ts: '2026-01-01T00:00:00Z', runId: 'r', kind: 'hook', stage: 'hook_response', hookName: 'turn-recorder-v1', hookEvent: 'Stop', hookOutcome: 'success' },

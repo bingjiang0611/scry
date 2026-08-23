@@ -6,6 +6,28 @@ export type SessionProviderId = ProviderId | 'legacy_unknown'
 export type ProviderCapability = 'skills' | 'mcp' | 'commands' | 'account'
 export type CapabilityMode = 'manage' | 'read' | 'none'
 export type CapabilityState = 'ready' | 'degraded' | 'unknown' | 'unsupported'
+export type DangerCoverage = 'classified' | 'unsupported'
+
+export function providerDangerCoverage(
+  providerId?: ProviderId,
+  runtimeProvider?: RuntimeProvider
+): DangerCoverage | undefined {
+  const resolved = providerId ?? (
+    runtimeProvider === 'claude_sdk'
+      ? 'claude'
+      : runtimeProvider === 'codex_cli'
+        ? 'codex'
+        : runtimeProvider === 'qoder_cli'
+          ? 'qoder'
+          : runtimeProvider === 'opencode_server'
+            ? 'opencode'
+            : runtimeProvider === 'pi_rpc'
+              ? 'pi'
+              : undefined
+  )
+  if (!resolved) return undefined
+  return resolved === 'claude' || resolved === 'qoder' ? 'classified' : 'unsupported'
+}
 
 export interface ProviderContext {
   providerId: ProviderId

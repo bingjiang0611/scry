@@ -28,7 +28,7 @@ function record(
     recordId: `${sequence}`.padStart(32, '0'),
     recorderVersion: 'test',
     workspace: { id: 'fixture', root: '/repo' },
-    provider: { id: 'codex' },
+    provider: { id: 'claude' },
     sessionId: 'session-1',
     generation: sequence,
     turnIndex: sequence,
@@ -53,6 +53,42 @@ function record(
 }
 
 describe('turn CLI model timing summaries', () => {
+  it('OpenCode 历史 record 即使写过危险精确零，summary 仍按能力口径返回未知', () => {
+    const summary = summarizeTurnRecords([record(1, undefined, {
+      provider: { id: 'opencode' },
+      dangerousOperations: emptyEvidence()
+    })], 'session-1')
+
+    expect(summary).toMatchObject({
+      verdict: { state: 'unknown', dangerousOperations: null },
+      dangerousOperations: {
+        total: null,
+        coverage: { complete: false, quality: 'unavailable' }
+      }
+    })
+  })
+
+  it('调用详情因字节预算省略时仍把完整调用骨架计为 exact coverage', () => {
+    const summary = summarizeTurnRecords([record(1, undefined, {
+      tools: {
+        status: 'partial',
+        quality: 'exact',
+        source: ['fixture'],
+        omissionReason: 'one or more tool call payloads were omitted by the record byte budget',
+        value: [
+          { id: 'read-1', category: 'tool', name: 'Read', status: 'success' },
+          { id: 'bash-1', category: 'tool', name: 'Bash', status: 'success' }
+        ]
+      }
+    })], 'session-1')
+
+    expect(summary.calls).toMatchObject({
+      total: 2,
+      ordinaryTools: { total: 2 },
+      coverage: { knownTurns: 1, totalTurns: 1, complete: true, quality: 'exact' }
+    })
+  })
+
   it('按原始 order 交错输出模型过程、思考和工具生命周期', () => {
     const exact = <T>(value: T): Evidence<T> => ({ status: 'available', quality: 'exact', source: ['fixture'], value })
     const timeline = turnTimeline(record(1, undefined, {

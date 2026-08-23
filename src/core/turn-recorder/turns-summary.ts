@@ -11,6 +11,7 @@ import {
   type TurnHookCall
 } from '../../shared/turn-record.js'
 import type { AgentIntervention } from '../../shared/runtime.js'
+import { providerDangerCoverage } from '../../shared/provider.js'
 
 export interface CompactModelTiming {
   status: EvidenceStatus
@@ -99,7 +100,9 @@ function evidenceCoverage(
 function combinedCoverage(
   selected: AgentTurnRecord[],
   evidence: Array<(record: AgentTurnRecord) => Evidence<unknown>>,
-  quality: EvidenceQuality = 'exact'
+  quality: EvidenceQuality = 'exact',
+  completeEvidence: (value: Evidence<unknown>) => boolean = (value) =>
+    value.status === 'available' && value.quality === 'exact'
 ): SummaryCoverage {
   const known = selected.filter((record) => evidence.every((pick) => {
     const value = pick(record)
@@ -107,7 +110,7 @@ function combinedCoverage(
   }))
   const complete = selected.length > 0 && known.length === selected.length && known.every((record) => evidence.every((pick) => {
     const value = pick(record)
-    return value.status === 'available' && value.quality === 'exact'
+    return completeEvidence(value)
   }))
   return {
     knownTurns: known.length,
@@ -115,6 +118,12 @@ function combinedCoverage(
     complete,
     quality: known.length === 0 ? 'unavailable' : complete ? quality : quality === 'exact' ? 'inferred' : quality
   }
+}
+
+function callCountEvidenceComplete(value: Evidence<unknown>): boolean {
+  if (value.status === 'available' && value.quality === 'exact') return true
+  return value.status === 'partial' && value.quality === 'exact' &&
+    /^one or more (?:tool|skill|MCP) call payloads were omitted by the record byte budget$/.test(value.omissionReason ?? '')
 }
 
 export function compactModelTiming(record: AgentTurnRecord): CompactModelTiming {
@@ -279,7 +288,8 @@ function summarizeCalls(selected: AgentTurnRecord[]) {
   const evidence = combinedCoverage(
     selected,
     [(record) => record.tools, (record) => record.skills, (record) => record.mcps],
-    classificationExact ? 'exact' : 'inferred'
+    classificationExact ? 'exact' : 'inferred',
+    callCountEvidenceComplete
   )
   const known = evidence.knownTurns > 0
   const ordinaryRows = countRows(ordinary.map((call) => call.name))
@@ -706,7 +716,16 @@ export function summarizeTurnRecords(
   const timeline = orderedCalls(selected)
   const calls = summarizeCalls(selected)
   const errors = summarizeEvidenceCount(selected, (record) => record.errors)
-  const dangers = summarizeEvidenceCount(selected, (record) => record.dangerousOperations)
+  const dangers = summarizeEvidenceCount(selected, (record) =>
+    providerDangerCoverage(record.provider.id) === 'unsupported'
+      ? {
+          status: 'unavailable',
+          quality: 'unavailable',
+          source: record.dangerousOperations.source,
+          omissionReason: 'danger classification is unsupported for this Provider'
+        }
+      : record.dangerousOperations
+  )
   const interventions = summarizeInterventions(selected)
   const compactions = summarizeCompactions(selected)
   return {

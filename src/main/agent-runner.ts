@@ -2,6 +2,7 @@
 // 支持多轮对话（resume）+ 工作目录（cwd）+ 中断（interrupt）+ subagent 内部明细（tail transcript 一层）。
 
 import { query, type HookInput, type PermissionUpdate, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { open } from 'node:fs/promises'
 import { type TraceEvent, type McpLiveStatus } from '../shared/trace'
 import {
   agentPermissionDecision,
@@ -14,7 +15,7 @@ import {
   type AgentQuestionRequest,
   type AgentQuestionResponse
 } from '../shared/runtime'
-import { type NormalizeCtx, normalizeSdkMessage } from './normalize'
+import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
 
 let counter = 0
 const newId = (): string => `ev-${Date.now().toString(36)}-${(counter++).toString(36)}`
@@ -85,6 +86,80 @@ function nativeProviderTurnId(input: Record<string, unknown>): string | undefine
   return hookString(input, 'prompt_id', 'promptId', 'prompt_event_id', 'promptEventId', 'turn_id', 'turnId')
 }
 
+const CLAUDE_TRANSCRIPT_IDENTITY_REWIND_BYTES = 256 * 1024
+const CLAUDE_TRANSCRIPT_IDENTITY_SCAN_BYTES = 2 * 1024 * 1024
+
+function transcriptPromptCandidates(text: string): string[] {
+  const command = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>[\s\S]*?<command-args>\s*([\s\S]*?)\s*<\/command-args>/i.exec(text)
+  return [
+    text,
+    ...(command ? [`${command[1]}${command[2].trim() ? ` ${command[2].trim()}` : ''}`] : [])
+  ]
+}
+
+export function claudeTranscriptProviderTurnId(
+  content: string,
+  prompt: string,
+  sessionId?: string
+): string | undefined {
+  const matches = new Set<string>()
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try { entry = JSON.parse(line) as Record<string, unknown> } catch { continue }
+    if (entry.type !== 'user') continue
+    if (sessionId && hookString(entry, 'sessionId', 'session_id') !== sessionId) continue
+    const text = extractUserText((entry.message as Record<string, unknown> | undefined)?.content)
+    if (isSyntheticPromptHook({ ...entry, prompt: text })) continue
+    if (!transcriptPromptCandidates(text).includes(prompt)) continue
+    const identity = nativeProviderTurnId(entry)
+    if (identity) matches.add(identity)
+  }
+  return matches.size === 1 ? [...matches][0] : undefined
+}
+
+async function transcriptScanStart(path: string): Promise<number> {
+  try {
+    const handle = await open(path, 'r')
+    try {
+      return Math.max(0, (await handle.stat()).size - CLAUDE_TRANSCRIPT_IDENTITY_REWIND_BYTES)
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return 0
+  }
+}
+
+async function providerTurnIdFromTranscript(
+  path: string,
+  prompt: string,
+  sessionId: string | undefined,
+  start: number
+): Promise<string | undefined> {
+  try {
+    const handle = await open(path, 'r')
+    try {
+      const size = (await handle.stat()).size
+      const boundedStart = Math.max(0, Math.min(start, size))
+      const length = Math.min(size - boundedStart, CLAUDE_TRANSCRIPT_IDENTITY_SCAN_BYTES)
+      if (length <= 0) return undefined
+      const buffer = Buffer.allocUnsafe(length)
+      const { bytesRead } = await handle.read(buffer, 0, length, boundedStart)
+      let content = buffer.subarray(0, bytesRead).toString('utf8')
+      if (boundedStart > 0) {
+        const newline = content.indexOf('\n')
+        content = newline >= 0 ? content.slice(newline + 1) : ''
+      }
+      return claudeTranscriptProviderTurnId(content, prompt, sessionId)
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return undefined
+  }
+}
+
 function sdkPrompt(prompt: string, attachments: AgentInputAttachment[]): string | AsyncIterable<SDKUserMessage> {
   if (attachments.length === 0) return prompt
   async function* stream(): AsyncIterable<SDKUserMessage> {
@@ -117,6 +192,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   let stopped = false
   let sessionId: string | undefined
   let providerTurnId: string | undefined
+  let transcriptPath: string | undefined
+  let transcriptStart = 0
   const captureSessionId = (next: string | undefined): void => {
     if (!next || sessionId === next) return
     sessionId = next
@@ -140,8 +217,14 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       UserPromptSubmit: [{
         hooks: [async (input: HookInput) => {
           const payload = input as unknown as Record<string, unknown>
+          captureSessionId(hookString(payload, 'session_id', 'sessionId'))
           if (!providerTurnId && !isSyntheticPromptHook(payload)) {
             providerTurnId = nativeProviderTurnId(payload)
+            const path = hookString(payload, 'transcript_path', 'transcriptPath')
+            if (path && path !== transcriptPath) {
+              transcriptPath = path
+              transcriptStart = await transcriptScanStart(path)
+            }
           }
           return { continue: true }
         }]
@@ -271,6 +354,9 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
           }
         }
         if (m.type === 'result') captureSessionId(m.session_id)
+        if (opts.captureProviderTurnId && m.type === 'user' && !providerTurnId) {
+          providerTurnId = nativeProviderTurnId(msg as unknown as Record<string, unknown>)
+        }
         if (m.type === 'result' && (m.subtype !== 'success' || (msg as { is_error?: boolean }).is_error === true)) {
           providerStatus = 'failed'
         }
@@ -298,6 +384,9 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       if (!stopped) runErr = err // 用户主动 interrupt 引发的中断不算错误
     }
     if (runErr) throw runErr
+    if (opts.captureProviderTurnId && !providerTurnId && transcriptPath) {
+      providerTurnId = await providerTurnIdFromTranscript(transcriptPath, prompt, sessionId, transcriptStart)
+    }
     return {
       sessionId,
       providerTurnId,

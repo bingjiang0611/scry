@@ -1,7 +1,7 @@
 // P0 账本核心（纯逻辑，无 electron/Database 依赖，便于单测 + headless 集成验证）。
 // db.ts 只负责 electron 路径 + 预编译语句执行；本文件负责 schema、TraceEvent→行映射、查询 SQL。
 import { type DbStats, type TraceEvent, maskSecrets } from '../shared/trace'
-import type { ProviderId } from '../shared/provider'
+import { providerDangerCoverage, type ProviderId } from '../shared/provider'
 
 // v1（旧）：保留建表兼容旧库，P0 起不再写/读。
 export const DDL_V1 = [
@@ -329,7 +329,7 @@ export function buildAnalyticsStats(args: {
       outputKnownTurns: rows.filter((row) => row.outputTokens != null).length,
       cacheReadKnownTurns: rows.filter((row) => row.cacheReadTokens != null).length,
       cacheWriteKnownTurns: rows.filter((row) => row.cacheWriteTokens != null).length,
-      dangerCoverage: (providerId === 'claude' || providerId === 'qoder' ? 'classified' : 'unsupported') as 'classified' | 'unsupported'
+      dangerCoverage: providerDangerCoverage(providerId) ?? 'unsupported'
     }
   })
   const cacheReuse = PROVIDERS.map((providerId) => {

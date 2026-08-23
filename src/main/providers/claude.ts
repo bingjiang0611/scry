@@ -31,7 +31,7 @@ import {
 } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { McpLiveStatus } from '../../shared/trace'
-import type { AuthorizedMcpExecution, ProviderAdapter } from './types'
+import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 
@@ -116,18 +116,26 @@ export const runClaudeMcpLogin: ClaudeMcpLogin = async (executable, serverName, 
   return result
 }
 
-function claudeRuntimeEnv(managedRecorder = false): Record<string, string> {
+function claudeRuntimeEnv(
+  managedRecorder = false,
+  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
+): Record<string, string> {
   return {
     ...(managedRecorder ? runtimeCliEnv(undefined, { managedRecorder: true }) : runtimeCliEnv()),
+    ...(managedRecorder && managedIdentity ? {
+      SCRY_MANAGED_RUN_ID: managedIdentity.runId,
+      SCRY_MANAGED_PROMPT_HASH: managedIdentity.promptHash
+    } : {}),
     CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1'
   }
 }
 
 function claudeRuntimeEnvForExecution(
   execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution'],
-  managedRecorder = false
+  managedRecorder = false,
+  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
 ): Record<string, string> {
-  const env = claudeRuntimeEnv(managedRecorder)
+  const env = claudeRuntimeEnv(managedRecorder, managedIdentity)
   const remoteEnabled = execution?.targets.some((target) => target.enabled && isRemoteMcpConfig(target.config))
   return execution && remoteEnabled ? authorizedMcpRuntimeEnv(env, execution.env) : env
 }
@@ -324,7 +332,11 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           cwd: request.mcpExecution?.cwd ?? request.cwd,
           skills: computeEnabledSkills(request.cwd, homeDir),
           claudePath: executable(),
-          env: claudeRuntimeEnvForExecution(request.mcpExecution, request.managedRecorder === true),
+          env: claudeRuntimeEnvForExecution(
+            request.mcpExecution,
+            request.managedRecorder === true,
+            request.managedRecorderIdentity
+          ),
           settingSources: settingSourcesFromEnv(),
           onSessionId: request.onExternalSessionId,
           captureProviderTurnId: request.managedRecorder === true,
