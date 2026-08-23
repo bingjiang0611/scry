@@ -342,7 +342,8 @@ const KNOWN_AGENTS: Array<{ id: string; name: string; bin: string }> = [
   { id: 'claude', name: 'Claude Code', bin: 'claude' },
   { id: 'codex', name: 'Codex', bin: 'codex' },
   { id: 'qoder', name: 'Qoder', bin: 'qodercli' },
-  { id: 'opencode', name: 'OpenCode', bin: 'opencode' }
+  { id: 'opencode', name: 'OpenCode', bin: 'opencode' },
+  { id: 'pi:default', name: 'Pi', bin: 'pi' }
 ]
 
 function qoderPathFromEnv(): string {

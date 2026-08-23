@@ -241,7 +241,7 @@ export interface AnalyticsToolRow { tsStart: number }
 export interface AnalyticsDangerRow { tsStart: number; level: string }
 export interface AnalyticsMcpRow { server: string; durationMs: number; isError: number }
 
-const PROVIDERS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode']
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
 const localDay = (ms: number): string => {
   const date = new Date(ms)
   const y = date.getFullYear()

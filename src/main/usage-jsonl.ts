@@ -18,6 +18,7 @@ export const usageJsonlPath = (userDataDir: string): string => join(userDataDir,
 
 interface ParsedUsageRow {
   providerId: SessionProviderId
+  agentProfileId?: string
   cwd?: string
   cost?: number | null
   tin?: number | null
@@ -101,6 +102,7 @@ export function appendUsage(
   userDataDir: string,
   context: {
     providerId: ProviderId
+    agentProfileId?: string
     runtimeProvider: RuntimeProvider
     cwd?: string
     externalSessionId?: string
@@ -112,6 +114,7 @@ export function appendUsage(
   try {
     const row = {
       providerId: context.providerId,
+      agentProfileId: context.agentProfileId ?? null,
       runtimeProvider: context.runtimeProvider,
       cwd: context.cwd ?? '',
       externalSessionId: context.externalSessionId ?? null,
@@ -132,7 +135,7 @@ export function appendUsage(
 
 export function readUsageStats(
   userDataDir: string,
-  filter: { providerId?: SessionProviderId; cwd?: string } = {}
+  filter: { providerId?: SessionProviderId; agentProfileId?: string; cwd?: string } = {}
 ): UsageStats {
   let cost = 0
   let tin = 0
@@ -159,6 +162,7 @@ export function readUsageStats(
   }
   for (const row of scan.rows) {
     if (filter.providerId && row.providerId !== filter.providerId) continue
+    if (filter.agentProfileId !== undefined && row.agentProfileId !== filter.agentProfileId) continue
     if (filter.cwd != null && row.cwd !== filter.cwd) continue
     if (typeof row.cost === 'number') {
       cost += row.cost
@@ -189,6 +193,7 @@ export function readUsageStats(
 export function deleteUsageSessionRows(args: {
   userDataDir: string
   providerId: SessionProviderId
+  agentProfileId?: string
   cwd: string
   externalSessionId: string
   runIds: ReadonlySet<string>
@@ -208,12 +213,14 @@ export function deleteUsageSessionRows(args: {
     try {
       const row = JSON.parse(line) as {
         providerId?: SessionProviderId
+        agentProfileId?: string | null
         cwd?: string
         externalSessionId?: string | null
         runId?: string | null
       }
       const identityMatch =
         (row.providerId ?? 'legacy_unknown') === args.providerId &&
+        (args.agentProfileId === undefined || row.agentProfileId === args.agentProfileId) &&
         row.cwd === args.cwd &&
         row.externalSessionId === args.externalSessionId
       const hasCompleteIdentity =
@@ -245,6 +252,7 @@ export function deleteUsageSessionRows(args: {
 export function usageSessionRunIds(args: {
   userDataDir: string
   providerId: SessionProviderId
+  agentProfileId?: string
   cwd: string
   externalSessionId: string
 }): string[] {
@@ -260,12 +268,14 @@ export function usageSessionRunIds(args: {
     try {
       const row = JSON.parse(line) as {
         providerId?: unknown
+        agentProfileId?: unknown
         cwd?: unknown
         externalSessionId?: unknown
         runId?: unknown
       }
       if (
-        row.providerId === args.providerId && row.cwd === args.cwd &&
+        row.providerId === args.providerId &&
+        (args.agentProfileId === undefined || row.agentProfileId === args.agentProfileId) && row.cwd === args.cwd &&
         row.externalSessionId === args.externalSessionId && typeof row.runId === 'string' && row.runId
       ) runIds.add(row.runId)
     } catch {

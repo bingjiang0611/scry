@@ -345,7 +345,7 @@ export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
   if (typeof raw.startedAt !== 'string' || typeof raw.completedAt !== 'string') return false
   if (!raw.workspace || typeof raw.workspace !== 'object' || !raw.provider || typeof raw.provider !== 'object') return false
   const provider = raw.provider as Record<string, unknown>
-  if (!['claude', 'codex', 'qoder', 'opencode'].includes(String(provider.id))) return false
+  if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id))) return false
   const requiredEvidence = [
     'user',
     'assistant',

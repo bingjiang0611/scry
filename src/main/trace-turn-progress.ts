@@ -23,8 +23,8 @@ interface TraceTurnProgress {
   }
 }
 
-const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode'])
-const RUNTIMES = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server'])
+const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+const RUNTIMES = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc'])
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
 export interface TraceTurnProgressRecovery {

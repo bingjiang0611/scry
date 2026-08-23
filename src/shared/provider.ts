@@ -1,7 +1,7 @@
 import type { RuntimeProvider } from './runtime.js'
 import type { McpLiveStatus } from './trace.js'
 
-export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode'
+export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
 export type SessionProviderId = ProviderId | 'legacy_unknown'
 export type ProviderCapability = 'skills' | 'mcp' | 'commands' | 'account'
 export type CapabilityMode = 'manage' | 'read' | 'none'
@@ -9,6 +9,7 @@ export type CapabilityState = 'ready' | 'degraded' | 'unknown' | 'unsupported'
 
 export interface ProviderContext {
   providerId: ProviderId
+  agentProfileId?: string
   cwd?: string
   externalSessionId?: string
 }
@@ -30,6 +31,7 @@ export interface DeleteSessionResult {
 
 export interface CapabilityEnvelope<T> {
   providerId: ProviderId
+  agentProfileId?: string
   cwd?: string
   mode: CapabilityMode
   state: CapabilityState
@@ -121,7 +123,15 @@ export function capabilityReady<T>(
   data: T,
   observedAt = Date.now()
 ): CapabilityEnvelope<T> {
-  return { providerId: context.providerId, cwd: context.cwd, mode, state: 'ready', data, observedAt }
+  return {
+    providerId: context.providerId,
+    ...(context.agentProfileId ? { agentProfileId: context.agentProfileId } : {}),
+    cwd: context.cwd,
+    mode,
+    state: 'ready',
+    data,
+    observedAt
+  }
 }
 
 export function capabilityUnavailable<T>(
@@ -129,7 +139,15 @@ export function capabilityUnavailable<T>(
   state: Extract<CapabilityState, 'unknown' | 'unsupported'>,
   reason: string
 ): CapabilityEnvelope<T> {
-  return { providerId: context.providerId, cwd: context.cwd, mode: 'none', state, data: null, reason }
+  return {
+    providerId: context.providerId,
+    ...(context.agentProfileId ? { agentProfileId: context.agentProfileId } : {}),
+    cwd: context.cwd,
+    mode: 'none',
+    state,
+    data: null,
+    reason
+  }
 }
 
 export function capabilityUnknown<T>(
@@ -137,5 +155,13 @@ export function capabilityUnknown<T>(
   mode: Exclude<CapabilityMode, 'none'>,
   reason: string
 ): CapabilityEnvelope<T> {
-  return { providerId: context.providerId, cwd: context.cwd, mode, state: 'unknown', data: null, reason }
+  return {
+    providerId: context.providerId,
+    ...(context.agentProfileId ? { agentProfileId: context.agentProfileId } : {}),
+    cwd: context.cwd,
+    mode,
+    state: 'unknown',
+    data: null,
+    reason
+  }
 }

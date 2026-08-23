@@ -276,8 +276,8 @@ type ArchiveInspection =
   | { status: 'invalid'; reason: 'untrusted' | 'corrupt' | 'identity_mismatch' | 'provider_mismatch'; error: string }
   | { status: 'valid'; archive: TraceArchive }
 
-const PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode'])
-const RUNTIME_PROVIDERS = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server'])
+const PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+const RUNTIME_PROVIDERS = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc'])
 
 function isArchiveShape(value: unknown): value is TraceArchive {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false

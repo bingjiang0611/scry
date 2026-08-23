@@ -66,6 +66,7 @@ interface ChatViewProps {
   onRemoveDraftAttachment: (id: string) => void
   onRemoveQueuedPrompt: (index: number) => void
   onSelectAgent: (agentId: string) => void
+  onAddPiAgent?: () => void
   onRunModel: (model: AgentModelRef | undefined) => void
   onRunEffort: (effort: string | undefined) => void
   onPermissionMode: (mode: AgentPermissionMode) => void
@@ -165,6 +166,7 @@ export function ChatView({
   onRemoveDraftAttachment,
   onRemoveQueuedPrompt,
   onSelectAgent,
+  onAddPiAgent = () => {},
   onRunModel,
   onRunEffort,
   onPermissionMode,
@@ -559,6 +561,7 @@ export function ChatView({
               agents={agents}
               selectedId={selectedAgentId}
               onSelect={onSelectAgent}
+              onAddPi={onAddPiAgent}
               onRescan={onRescan}
               disabled={agentLocked}
             />

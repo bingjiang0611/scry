@@ -2,7 +2,7 @@ import type { ProviderId } from './provider.js'
 import { maskSecrets } from './trace.js'
 
 export type RuntimeBackend = 'local' | 'api'
-export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server'
+export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server' | 'pi_rpc'
 
 export type RuntimeFailureStage =
   | 'discovery'
@@ -123,6 +123,7 @@ export interface AgentStartRequest {
   expectedExternalSessionId?: string | null
   providerId?: ProviderId
   agentId?: string
+  agentProfileId?: string
   backend?: RuntimeBackend
   runtimeProvider?: RuntimeProvider
   attachments?: AgentInputAttachment[]
@@ -186,6 +187,7 @@ export interface NormalizedAgentStartRequest {
   expectedExternalSessionId?: string | null
   providerId: ProviderId
   agentId: string
+  agentProfileId?: string
   backend: RuntimeBackend
   runtimeProvider?: RuntimeProvider
   attachments: AgentInputAttachment[]
@@ -269,6 +271,7 @@ export function runtimeProviderForAgentId(agentId: string | undefined): RuntimeP
   if (agentId === 'codex') return 'codex_cli'
   if (agentId === 'qoder') return 'qoder_cli'
   if (agentId === 'opencode') return 'opencode_server'
+  if (agentId === 'pi' || agentId.startsWith('pi:')) return 'pi_rpc'
   return undefined
 }
 
@@ -276,6 +279,7 @@ export function providerIdForAgentId(agentId: string | undefined): ProviderId | 
   if (!agentId) return undefined
   if (agentId === 'claude') return 'claude'
   if (agentId === 'codex' || agentId === 'qoder' || agentId === 'opencode') return agentId
+  if (agentId === 'pi' || agentId.startsWith('pi:')) return 'pi'
   return undefined
 }
 
@@ -283,6 +287,7 @@ export function providerIdForRuntime(runtimeProvider: RuntimeProvider): Provider
   if (runtimeProvider === 'codex_cli') return 'codex'
   if (runtimeProvider === 'qoder_cli') return 'qoder'
   if (runtimeProvider === 'opencode_server') return 'opencode'
+  if (runtimeProvider === 'pi_rpc') return 'pi'
   return 'claude'
 }
 
@@ -290,6 +295,7 @@ export function runtimeProviderForProviderId(providerId: ProviderId): RuntimePro
   if (providerId === 'codex') return 'codex_cli'
   if (providerId === 'qoder') return 'qoder_cli'
   if (providerId === 'opencode') return 'opencode_server'
+  if (providerId === 'pi') return 'pi_rpc'
   return 'claude_sdk'
 }
 
@@ -304,6 +310,11 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   }
   const providerId = payload.providerId ?? mappedProviderId ?? 'claude'
   const agentId = explicitAgentId ?? providerId
+  const agentProfileId = boundedControlValue(payload.agentProfileId) ??
+    (providerId === 'pi' && explicitAgentId?.startsWith('pi:') ? explicitAgentId : undefined)
+  if (providerId === 'pi' && !agentProfileId) {
+    throw new Error('Pi Provider 缺少 agentProfileId')
+  }
   const expectedRuntime = runtimeProviderForProviderId(providerId)
   const modelId = boundedControlValue(payload.model?.id)
   const modelProviderId = boundedControlValue(payload.model?.providerId)
@@ -322,6 +333,7 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
         : {}),
     providerId,
     agentId,
+    ...(agentProfileId ? { agentProfileId } : {}),
     backend: payload.backend ?? 'local',
     runtimeProvider: payload.runtimeProvider ?? expectedRuntime,
     attachments: normalizeAgentAttachments(payload.attachments),

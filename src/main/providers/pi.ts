@@ -1,0 +1,764 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { homedir } from 'node:os'
+import { dirname } from 'node:path'
+import {
+  capabilityReady,
+  capabilityUnavailable,
+  type ProviderCommand,
+  type ProviderContext,
+  type ProviderDescriptor,
+  type SkillMeta
+} from '../../shared/provider'
+import {
+  classifyRunTermination,
+  type AgentQuestionRequest,
+  type AgentQuestionResponse,
+  type AgentRunControlCatalog
+} from '../../shared/runtime'
+import {
+  classifyTool,
+  fileOpOf,
+  mcpPayloadFailed,
+  parseMcp,
+  type ModelUsageRow,
+  type TraceEvent
+} from '../../shared/trace'
+import { AgentRuntimeError } from '../cli-runtime'
+import { shellEnv } from '../claude-locate'
+import type { PiAgentProfile } from '../pi-agent-profiles'
+import { effortOption } from './run-controls'
+import type { ProviderAdapter, ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
+
+type JsonRecord = Record<string, unknown>
+
+const record = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value)
+  ? value as JsonRecord
+  : {}
+const number = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+const bounded = (value: unknown, max = 200_000): string => {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? null)
+  return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated by Scry]`
+}
+
+let eventCounter = 0
+const piEvent = (runId: string, fields: Omit<TraceEvent, 'id' | 'runId' | 'ts'>): TraceEvent => ({
+  id: `pi-${Date.now().toString(36)}-${(eventCounter++).toString(36)}`,
+  runId,
+  ts: new Date().toISOString(),
+  ...fields
+})
+
+class PiRpcProcess {
+  private readonly pending = new Map<string, {
+    resolve: (response: JsonRecord) => void
+    reject: (error: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
+  private readonly listeners = new Set<(event: JsonRecord) => void>()
+  private readonly failureListeners = new Set<(error: Error) => void>()
+  private buffer = ''
+  private stderr = ''
+  private requestSeq = 0
+  private failed: Error | null = null
+  private closing = false
+  private stdoutBytes = 0
+
+  private constructor(readonly child: ChildProcessWithoutNullStreams, readonly profile: PiAgentProfile) {
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => this.feed(chunk))
+    child.stderr.on('data', (chunk: string) => { this.stderr = `${this.stderr}${chunk}`.slice(-16_384) })
+    child.on('error', (error) => this.fail(error))
+    child.on('close', (code, signal) => {
+      if (this.buffer.trim() && !this.failed) this.fail(new Error('Pi RPC stdout 以不完整 JSONL 结束'))
+      if (!this.closing && !this.failed) {
+        this.fail(new Error(`Pi RPC 进程提前退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）：${this.stderr.trim()}`))
+      }
+    })
+  }
+
+  static start(profile: PiAgentProfile, args: string[], cwd?: string): PiRpcProcess {
+    const child = spawn(profile.executable, args, {
+      cwd: cwd || homedir(),
+      env: shellEnv(),
+      detached: process.platform !== 'win32',
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    return new PiRpcProcess(child, profile)
+  }
+
+  private feed(chunk: string): void {
+    this.stdoutBytes += Buffer.byteLength(chunk, 'utf8')
+    if (this.stdoutBytes > 64 * 1024 * 1024) {
+      this.fail(new Error('Pi RPC stdout 超过 64 MiB 安全上限'))
+      this.terminate()
+      return
+    }
+    this.buffer += chunk
+    if (Buffer.byteLength(this.buffer, 'utf8') > 16 * 1024 * 1024) {
+      this.fail(new Error('Pi RPC 单行超过 16 MiB 安全上限'))
+      this.terminate()
+      return
+    }
+    let newline: number
+    while ((newline = this.buffer.indexOf('\n')) >= 0) {
+      const raw = this.buffer.slice(0, newline).replace(/\r$/, '')
+      this.buffer = this.buffer.slice(newline + 1)
+      if (!raw) continue
+      let value: unknown
+      try {
+        value = JSON.parse(raw)
+      } catch {
+        this.fail(new Error(`Pi RPC stdout 包含非 JSONL 内容：${raw.slice(0, 240)}`))
+        this.terminate()
+        return
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        this.fail(new Error('Pi RPC 返回了非对象 JSON 行'))
+        this.terminate()
+        return
+      }
+      const message = value as JsonRecord
+      if (message.type === 'response' && typeof message.id === 'string') {
+        const pending = this.pending.get(message.id)
+        if (pending) {
+          clearTimeout(pending.timer)
+          this.pending.delete(message.id)
+          if (message.success === false) pending.reject(new Error(String(message.error ?? 'Pi RPC command failed')))
+          else pending.resolve(message)
+          continue
+        }
+      }
+      for (const listener of this.listeners) listener(message)
+    }
+  }
+
+  private fail(error: Error): void {
+    if (this.failed) return
+    this.failed = error
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pending.clear()
+    for (const listener of this.failureListeners) listener(error)
+  }
+
+  onEvent(listener: (event: JsonRecord) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  onFailure(listener: (error: Error) => void): () => void {
+    if (this.failed) listener(this.failed)
+    else this.failureListeners.add(listener)
+    return () => this.failureListeners.delete(listener)
+  }
+
+  send(command: JsonRecord, timeoutMs = 15_000): Promise<JsonRecord> {
+    if (this.failed) return Promise.reject(this.failed)
+    const id = `scry-${++this.requestSeq}`
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`Pi RPC ${String(command.type ?? 'command')} 超时`))
+      }, timeoutMs)
+      this.pending.set(id, { resolve, reject, timer })
+      this.child.stdin.write(`${JSON.stringify({ ...command, id })}\n`, (error) => {
+        if (!error) return
+        const pending = this.pending.get(id)
+        if (!pending) return
+        clearTimeout(pending.timer)
+        this.pending.delete(id)
+        reject(error)
+      })
+    })
+  }
+
+  notify(message: JsonRecord): void {
+    if (!this.failed && !this.child.stdin.destroyed) this.child.stdin.write(`${JSON.stringify(message)}\n`)
+  }
+
+  async close(): Promise<void> {
+    this.closing = true
+    this.child.stdin.end()
+    await Promise.race([
+      new Promise<void>((resolve) => this.child.once('close', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 750))
+    ])
+    if (this.child.exitCode == null && this.child.signalCode == null) this.terminate()
+  }
+
+  terminate(): void {
+    this.closing = true
+    try {
+      if (process.platform !== 'win32' && this.child.pid) process.kill(-this.child.pid, 'SIGTERM')
+      else this.child.kill('SIGTERM')
+    } catch {
+      try { this.child.kill('SIGTERM') } catch { /* already gone */ }
+    }
+  }
+
+  abort(): void {
+    this.fail(new Error('Pi RPC 已被用户中止'))
+    this.terminate()
+  }
+
+  stderrTail(): string {
+    return this.stderr
+  }
+}
+
+interface PiProbe {
+  state: JsonRecord
+  models: JsonRecord[]
+  levels: string[]
+  commands: JsonRecord[]
+}
+
+async function withPiRpc<T>(
+  profile: PiAgentProfile,
+  cwd: string | undefined,
+  args: string[],
+  operation: (rpc: PiRpcProcess) => Promise<T>
+): Promise<T> {
+  const rpc = PiRpcProcess.start(profile, args, cwd)
+  try {
+    return await operation(rpc)
+  } finally {
+    await rpc.close()
+  }
+}
+
+export async function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiProbe> {
+  return withPiRpc(profile, cwd, ['--mode', 'rpc', '--no-session', '--no-approve', '--offline'], async (rpc) => {
+    const [state, models, levels, commands] = await Promise.all([
+      rpc.send({ type: 'get_state' }),
+      rpc.send({ type: 'get_available_models' }),
+      rpc.send({ type: 'get_available_thinking_levels' }),
+      rpc.send({ type: 'get_commands' })
+    ])
+    const modelRows = record(models.data).models
+    const thinkingLevels = record(levels.data).levels
+    const commandRows = record(commands.data).commands
+    return {
+      state: record(state.data),
+      models: Array.isArray(modelRows) ? modelRows.map(record) : [],
+      levels: Array.isArray(thinkingLevels)
+        ? thinkingLevels.filter((level): level is string => typeof level === 'string')
+        : [],
+      commands: Array.isArray(commandRows) ? commandRows.map(record) : []
+    }
+  })
+}
+
+function commandCatalog(probe: PiProbe): ProviderCommand[] {
+  return probe.commands.flatMap((command) => {
+    if (typeof command.name !== 'string' || !command.name) return []
+    const source = command.source === 'skill'
+      ? 'skill' as const
+      : command.source === 'prompt'
+        ? 'custom' as const
+        : 'custom' as const
+    return [{
+      name: command.name,
+      description: typeof command.description === 'string' ? command.description : '',
+      source
+    }]
+  })
+}
+
+function skillCatalog(probe: PiProbe): SkillMeta[] {
+  return probe.commands.flatMap((command) => {
+    if (command.source !== 'skill' || typeof command.name !== 'string' || !command.name) return []
+    const sourceInfo = record(command.sourceInfo)
+    const path = typeof sourceInfo.path === 'string'
+      ? sourceInfo.path
+      : typeof command.path === 'string'
+        ? command.path
+        : ''
+    const scope = typeof sourceInfo.scope === 'string'
+      ? sourceInfo.scope
+      : typeof command.location === 'string'
+        ? command.location
+        : 'unknown'
+    return [{
+      name: command.name.replace(/^skill:/, ''),
+      dir: path ? dirname(path) : '',
+      scope,
+      description: typeof command.description === 'string' ? command.description : '',
+      enabled: true
+    }]
+  })
+}
+
+function runControlCatalog(probe: PiProbe): AgentRunControlCatalog {
+  const current = record(probe.state.model)
+  const currentKey = `${String(current.provider ?? '')}\0${String(current.id ?? '')}`
+  return {
+    models: probe.models.flatMap((model) => {
+      if (typeof model.id !== 'string' || typeof model.provider !== 'string') return []
+      const key = `${model.provider}\0${model.id}`
+      const levelMap = record(model.thinkingLevelMap)
+      const levels = key === currentKey
+        ? probe.levels
+        : model.reasoning === true
+          ? [...new Set([
+              'off', 'minimal', 'low', 'medium', 'high',
+              ...Object.entries(levelMap).filter(([, value]) => value !== null).map(([level]) => level)
+            ])]
+          : ['off']
+      return [{
+        model: { id: model.id, providerId: model.provider },
+        label: typeof model.name === 'string' ? model.name : model.id,
+        ...(key === currentKey ? { isDefault: true } : {}),
+        efforts: levels.map((level) => effortOption(level, undefined, level === probe.state.thinkingLevel))
+      }]
+    }),
+    permissions: [{
+      id: 'full_access',
+      label: '本机完全访问',
+      description: 'Pi 没有内置沙箱；launcher、Extension 与工具继承当前本机用户权限'
+    }]
+  }
+}
+
+function questionFromExtension(runId: string, event: JsonRecord): AgentQuestionRequest | null {
+  const id = typeof event.id === 'string' ? event.id : ''
+  const method = String(event.method ?? '')
+  if (!id || !['select', 'confirm', 'input', 'editor'].includes(method)) return null
+  const title = String(event.title ?? 'Pi Extension').slice(0, 120)
+  const question = method === 'confirm'
+    ? String(event.message ?? title)
+    : method === 'editor'
+      ? '请输入多行内容'
+      : method === 'input'
+        ? String(event.placeholder ?? '请输入内容')
+        : title
+  const labels = method === 'confirm'
+    ? ['确认', '取消']
+    : Array.isArray(event.options)
+      ? event.options.filter((item): item is string => typeof item === 'string').slice(0, 100)
+      : []
+  return {
+    runId,
+    questionId: id,
+    providerId: 'pi',
+    questionKind: 'clarification',
+    source: `pi_extension_ui:${method}`,
+    questions: [{
+      header: title,
+      question: question.slice(0, 2_000),
+      multiSelect: false,
+      options: labels.map((label) => ({ label, description: method === 'confirm' ? `${label}这次操作` : '选择此项' }))
+    }]
+  }
+}
+
+function extensionResponse(
+  event: JsonRecord,
+  question: AgentQuestionRequest,
+  response: AgentQuestionResponse
+): JsonRecord {
+  if (response.behavior === 'cancelled') return { type: 'extension_ui_response', id: event.id, cancelled: true }
+  const answer = response.answers[question.questions[0].question] ?? ''
+  return event.method === 'confirm'
+    ? { type: 'extension_ui_response', id: event.id, confirmed: answer === '确认' }
+    : { type: 'extension_ui_response', id: event.id, value: answer }
+}
+
+interface UsageAggregate {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  reasoning: number
+  cost: number
+  allCostKnown: boolean
+  byModel: Map<string, ModelUsageRow>
+  lastContextTokens?: number
+  lastStopReason?: string
+  lastError?: string
+  upstreamProvider?: string
+  model?: string
+}
+
+function addAssistantUsage(aggregate: UsageAggregate, message: JsonRecord): void {
+  const usage = record(message.usage)
+  const input = number(usage.input)
+  const output = number(usage.output)
+  const cacheRead = number(usage.cacheRead)
+  const cacheWrite = number(usage.cacheWrite)
+  const reasoning = number(usage.reasoning)
+  const cost = number(record(usage.cost).total)
+  aggregate.input += input ?? 0
+  aggregate.output += output ?? 0
+  aggregate.cacheRead += cacheRead ?? 0
+  aggregate.cacheWrite += cacheWrite ?? 0
+  aggregate.reasoning += reasoning ?? 0
+  aggregate.lastContextTokens = (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+  if (cost == null) aggregate.allCostKnown = false
+  else aggregate.cost += cost
+  const model = typeof message.model === 'string' ? message.model : 'unknown'
+  const provider = typeof message.provider === 'string' ? message.provider : undefined
+  const key = `${provider ?? ''}\0${model}`
+  const existing = aggregate.byModel.get(key) ?? {
+    model,
+    upstreamProvider: provider,
+    usageSource: 'pi_rpc'
+  }
+  existing.inputTokens = (existing.inputTokens ?? 0) + (input ?? 0)
+  existing.outputTokens = (existing.outputTokens ?? 0) + (output ?? 0)
+  existing.cacheReadTokens = (existing.cacheReadTokens ?? 0) + (cacheRead ?? 0)
+  existing.cacheCreationTokens = (existing.cacheCreationTokens ?? 0) + (cacheWrite ?? 0)
+  existing.reasoningTokens = (existing.reasoningTokens ?? 0) + (reasoning ?? 0)
+  if (cost != null) {
+    existing.costUsd = (existing.costUsd ?? 0) + cost
+    existing.costSource = 'provider_reported'
+    existing.costConfidence = 'provider_reported'
+    existing.costUnit = 'usd'
+  }
+  aggregate.byModel.set(key, existing)
+  aggregate.upstreamProvider = provider
+  aggregate.model = model
+  aggregate.lastStopReason = typeof message.stopReason === 'string' ? message.stopReason : aggregate.lastStopReason
+  aggregate.lastError = typeof message.errorMessage === 'string' ? message.errorMessage : aggregate.lastError
+}
+
+async function runPiAgent(
+  profile: PiAgentProfile,
+  request: ProviderRunRequest,
+  state: { stopped: boolean; sessionId?: string; rpc?: PiRpcProcess }
+): Promise<ProviderRunResult> {
+  if (request.permissionMode !== 'full_access') {
+    throw new AgentRuntimeError('Pi 只支持显式选择“本机完全访问”后运行', {
+      provider: 'pi_rpc',
+      stage: 'frontdoor',
+      cwd: request.cwd,
+      nextAction: '在权限选择器中选择“本机完全访问”；Pi 没有可映射的内置沙箱或审批模式'
+    })
+  }
+  const args = ['--mode', 'rpc', '--approve', ...(request.resume ? ['--session', request.resume] : [])]
+  const rpc = PiRpcProcess.start(profile, args, request.cwd)
+  state.rpc = rpc
+  const usage: UsageAggregate = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    reasoning: 0,
+    cost: 0,
+    allCostKnown: true,
+    byModel: new Map()
+  }
+  const abortController = new AbortController()
+  const toolNames = new Map<string, string>()
+  const toolStarts = new Map<string, number>()
+  let streamedText = false
+  let streamedThinking = false
+  let settledResolve: (() => void) | undefined
+  const settled = new Promise<void>((resolve) => { settledResolve = resolve })
+  let rpcFailureReject: ((error: Error) => void) | undefined
+  const rpcFailure = new Promise<never>((_resolve, reject) => { rpcFailureReject = reject })
+  void rpcFailure.catch(() => undefined)
+  const offFailure = rpc.onFailure((error) => rpcFailureReject?.(error))
+  const off = rpc.onEvent((event) => {
+    if (event.type === 'agent_settled') {
+      settledResolve?.()
+      return
+    }
+    if (event.type === 'message_start') {
+      const message = record(event.message)
+      if (message.role === 'assistant') {
+        streamedText = false
+        streamedThinking = false
+      }
+      return
+    }
+    if (event.type === 'message_update') {
+      const delta = record(event.assistantMessageEvent)
+      if (delta.type === 'text_delta' && typeof delta.delta === 'string') {
+        streamedText = true
+        request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: delta.delta }))
+      } else if (delta.type === 'thinking_delta' && typeof delta.delta === 'string') {
+        streamedThinking = true
+        request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: delta.delta }))
+      }
+      return
+    }
+    if (event.type === 'message_end') {
+      const message = record(event.message)
+      if (message.role !== 'assistant') return
+      addAssistantUsage(usage, message)
+      if (!streamedText || !streamedThinking) {
+        const content = Array.isArray(message.content) ? message.content.map(record) : []
+        for (const block of content) {
+          if (!streamedText && block.type === 'text' && typeof block.text === 'string') {
+            request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: block.text }))
+          }
+          if (!streamedThinking && block.type === 'thinking' && typeof block.thinking === 'string') {
+            request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: block.thinking }))
+          }
+        }
+      }
+      return
+    }
+    if (event.type === 'tool_execution_start') {
+      const toolUseId = typeof event.toolCallId === 'string' ? event.toolCallId : `pi-tool-${eventCounter++}`
+      const rawName = typeof event.toolName === 'string' ? event.toolName : 'Tool'
+      const toolName = rawName === 'subagent' ? 'Agent' : rawName
+      const input = record(event.args)
+      const classified = classifyTool(toolName, input)
+      toolNames.set(toolUseId, toolName)
+      toolStarts.set(toolUseId, Date.now())
+      request.emit(piEvent(request.runId, {
+        kind: classified.kind,
+        stage: `${classified.kind}:${classified.name}`,
+        tool: toolName,
+        name: classified.name,
+        toolUseId,
+        input,
+        ...parseMcp(rawName, input),
+        ...fileOpOf(toolName, input)
+      }))
+      return
+    }
+    if (event.type === 'tool_execution_end') {
+      const toolUseId = typeof event.toolCallId === 'string' ? event.toolCallId : undefined
+      const rawName = typeof event.toolName === 'string' ? event.toolName : toolNames.get(toolUseId ?? '') ?? 'Tool'
+      const toolName = rawName === 'subagent' ? 'Agent' : rawName
+      const output = bounded(event.result)
+      const mcp = parseMcp(rawName, record(event.args))
+      const startedAt = toolUseId ? toolStarts.get(toolUseId) : undefined
+      request.emit(piEvent(request.runId, {
+        kind: 'tool',
+        stage: 'tool_result',
+        tool: toolName,
+        toolUseId,
+        output,
+        text: output,
+        durationMs: startedAt == null ? undefined : Date.now() - startedAt,
+        ...mcp,
+        isError: event.isError === true || (mcp.isMcp && mcpPayloadFailed(output))
+      }))
+      if (toolUseId) {
+        toolNames.delete(toolUseId)
+        toolStarts.delete(toolUseId)
+      }
+      return
+    }
+    if (event.type === 'compaction_start' || event.type === 'compaction_end') {
+      request.emit(piEvent(request.runId, {
+        kind: 'harness',
+        stage: event.type,
+        compaction: { trigger: event.reason === 'manual' ? 'manual' : 'auto' },
+        runtimeMetadata: event
+      }))
+      return
+    }
+    if (event.type === 'extension_error') {
+      request.emit(piEvent(request.runId, {
+        kind: 'harness',
+        stage: 'runtime:extension_error',
+        text: bounded(event.error, 4_000),
+        isError: true,
+        runtimeMetadata: { extensionPath: event.extensionPath, event: event.event }
+      }))
+      return
+    }
+    if (event.type !== 'extension_ui_request') return
+    const question = questionFromExtension(request.runId, event)
+    if (!question || !request.requestUserInput) {
+      if (question) rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true })
+      else request.emit(piEvent(request.runId, {
+        kind: 'harness',
+        stage: 'runtime:extension_ui',
+        text: bounded(event, 4_000),
+        runtimeMetadata: { method: event.method }
+      }))
+      return
+    }
+    void request.requestUserInput(question, abortController.signal)
+      .then((response) => rpc.notify(extensionResponse(event, question, response)))
+      .catch(() => rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true }))
+  })
+  const startedAt = Date.now()
+  try {
+    const initialState = record((await rpc.send({ type: 'get_state' })).data)
+    if (typeof initialState.sessionId === 'string' && initialState.sessionId) {
+      state.sessionId = initialState.sessionId
+      request.onExternalSessionId?.(initialState.sessionId)
+    }
+    request.emit(piEvent(request.runId, {
+      kind: 'harness',
+      stage: 'runtime:init',
+      text: state.sessionId,
+      runtimeMetadata: {
+        agentProfileId: profile.id,
+        executable: profile.executable,
+        sessionId: initialState.sessionId ?? null,
+        sessionFile: initialState.sessionFile ?? null,
+        model: initialState.model ?? null,
+        thinkingLevel: initialState.thinkingLevel ?? null
+      }
+    }))
+    if (request.model) {
+      if (!request.model.providerId) throw new Error('Pi 模型选择缺少 upstream providerId')
+      await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })
+    }
+    if (request.effort) await rpc.send({ type: 'set_thinking_level', level: request.effort })
+    const images = request.attachments.map((attachment) => ({
+      type: 'image',
+      data: attachment.dataBase64,
+      mimeType: attachment.mimeType
+    }))
+    await rpc.send({ type: 'prompt', message: request.prompt, ...(images.length > 0 ? { images } : {}) })
+    let settlementTimer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        settled,
+        rpcFailure,
+        new Promise<never>((_, reject) => {
+          settlementTimer = setTimeout(
+            () => reject(new Error('Pi RPC 等待 agent_settled 超过 30 分钟')),
+            30 * 60 * 1000
+          )
+        })
+      ])
+    } finally {
+      if (settlementTimer) clearTimeout(settlementTimer)
+    }
+    const finalState = record((await rpc.send({ type: 'get_state' })).data)
+    if (typeof finalState.sessionId === 'string' && finalState.sessionId) {
+      state.sessionId = finalState.sessionId
+      request.onExternalSessionId?.(finalState.sessionId)
+    }
+    const stopReason = usage.lastError ?? usage.lastStopReason
+    const terminationReason = classifyRunTermination({ rawReason: usage.lastStopReason, message: usage.lastError })
+    const failed = !state.stopped && usage.lastStopReason === 'error'
+    request.emit(piEvent(request.runId, {
+      kind: 'harness',
+      stage: 'result',
+      text: stopReason,
+      tokensIn: usage.input,
+      tokensOut: usage.output,
+      cacheReadTokens: usage.cacheRead,
+      cacheCreationTokens: usage.cacheWrite,
+      reasoningTokens: usage.reasoning,
+      contextTokens: usage.lastContextTokens,
+      costUsd: usage.allCostKnown && usage.byModel.size > 0 ? usage.cost : undefined,
+      costSource: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
+      costConfidence: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
+      costUnit: usage.allCostKnown && usage.byModel.size > 0 ? 'usd' : undefined,
+      modelUsage: [...usage.byModel.values()],
+      upstreamProvider: usage.upstreamProvider,
+      usageSource: 'pi_rpc',
+      durationMs: Date.now() - startedAt,
+      isError: failed,
+      ...(terminationReason ? { terminationReason } : {}),
+      ...(usage.lastStopReason ? { providerStopReason: usage.lastStopReason } : {}),
+      runtimeMetadata: {
+        agentProfileId: profile.id,
+        sessionFile: finalState.sessionFile ?? null,
+        model: usage.model ?? null,
+        provider: usage.upstreamProvider ?? null,
+        stderrTail: rpc.stderrTail() || null
+      }
+    }))
+    return {
+      externalSessionId: state.sessionId,
+      stopped: state.stopped,
+      status: state.stopped ? 'interrupted' : failed ? 'failed' : 'completed'
+    }
+  } catch (error) {
+    if (state.stopped) return { externalSessionId: state.sessionId, stopped: true, status: 'interrupted' }
+    throw new AgentRuntimeError(String((error as Error).message), {
+      provider: 'pi_rpc',
+      stage: 'runtime',
+      cwd: request.cwd,
+      nextAction: '检查该 Pi Agent launcher、RPC 兼容性和 stderr 后重试'
+    })
+  } finally {
+    off()
+    offFailure()
+    abortController.abort()
+    await rpc.close()
+    if (state.rpc === rpc) state.rpc = undefined
+  }
+}
+
+export function createPiAdapter(options: {
+  listProfiles: () => Promise<PiAgentProfile[]>
+  resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
+}): ProviderAdapter {
+  const profileForContext = async (context: ProviderContext): Promise<PiAgentProfile> => {
+    if (!context.agentProfileId) throw new Error('Pi Provider 缺少 agentProfileId')
+    const profile = await options.resolveProfile(context.agentProfileId)
+    if (!profile) throw new Error(`Pi Agent Profile 不存在：${context.agentProfileId}`)
+    return profile
+  }
+  return {
+    id: 'pi',
+    runtimeProvider: 'pi_rpc',
+    async describe(): Promise<ProviderDescriptor> {
+      const profiles = await options.listProfiles().catch(() => [])
+      return {
+        id: 'pi',
+        label: 'Pi',
+        runtimeProvider: 'pi_rpc',
+        transport: 'JSONL RPC subprocess',
+        available: profiles.length > 0,
+        path: profiles[0]?.executable,
+        disabledReason: profiles.length > 0 ? undefined : '未检测到 Pi 或已保存的 Pi Agent Profile',
+        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' },
+        health: { state: profiles.length > 0 ? 'ready' : 'unavailable', transport: 'JSONL RPC subprocess' }
+      }
+    },
+    run(request: ProviderRunRequest): ProviderRunHandle {
+      const state: { stopped: boolean; sessionId?: string; rpc?: PiRpcProcess } = { stopped: false }
+      const promise = (async () => {
+        if (!request.agentProfileId) throw new Error('Pi Provider run 缺少 agentProfileId')
+        const profile = await options.resolveProfile(request.agentProfileId)
+        if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
+        return runPiAgent(profile, request, state)
+      })()
+      return {
+        promise,
+        interrupt: () => {
+          state.stopped = true
+          state.rpc?.notify({ type: 'abort' })
+          setTimeout(() => state.rpc?.abort(), 2_000)
+        },
+        getExternalSessionId: () => state.sessionId
+      }
+    },
+    skills: {
+      async list(context) {
+        try {
+          return capabilityReady(context, 'read', skillCatalog(await probePiAgent(await profileForContext(context), context.cwd)))
+        } catch (error) {
+          return capabilityUnavailable(context, 'unknown', `Pi Skill 目录探测失败：${String((error as Error).message)}`)
+        }
+      }
+    },
+    commands: {
+      async list(context) {
+        try {
+          return capabilityReady(context, 'read', commandCatalog(await probePiAgent(await profileForContext(context), context.cwd)))
+        } catch (error) {
+          return capabilityUnavailable(context, 'unknown', `Pi 命令目录探测失败：${String((error as Error).message)}`)
+        }
+      }
+    },
+    runControls: {
+      async read(context) {
+        try {
+          return capabilityReady(context, 'read', runControlCatalog(await probePiAgent(await profileForContext(context), context.cwd)))
+        } catch (error) {
+          return capabilityUnavailable(context, 'unknown', `Pi 运行能力探测失败：${String((error as Error).message)}`)
+        }
+      }
+    }
+  }
+}

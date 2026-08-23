@@ -23,6 +23,7 @@ export function Sidebar({
   activeCwd,
   activeSessionId = null,
   activeProviderId,
+  activeAgentProfileId,
   runningRunIds = new Set<string>(),
   version = '0.1.0',
   onNewChat,
@@ -46,11 +47,12 @@ export function Sidebar({
   activeCwd: string | null
   activeSessionId?: string | null
   activeProviderId?: SessionProviderId
+  activeAgentProfileId?: string
   runningRunIds?: ReadonlySet<string>
   version?: string
   onNewChat: () => void
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string) => void
-  onDelete: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
+  onDelete: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, agentProfileId?: string) => void
   onDiagnostics?: () => void
   diagnosticsActive?: boolean
   onAnalytics?: () => void
@@ -73,6 +75,7 @@ export function Sidebar({
     cwd: string
     sessionId: string
     providerId: SessionProviderId
+    agentProfileId?: string
     externalSessionId?: string
     opener: HTMLButtonElement
   } | null>(null)
@@ -198,18 +201,19 @@ export function Sidebar({
               {open && (
                 <div className="sb-sess-list">
                   {p.sessions.map((s) => {
-                    const active = s.sessionId === activeSessionId && s.providerId === activeProviderId
+                    const active = s.sessionId === activeSessionId && s.providerId === activeProviderId &&
+                      s.agentProfileId === activeAgentProfileId
                     const running = Boolean(s.runId && runningRunIds.has(s.runId))
                     return (
                       <button
                         type="button"
-                        key={`${s.providerId}:${s.sessionId}`}
+                        key={`${s.providerId}:${s.agentProfileId ?? ''}:${s.sessionId}`}
                         className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
                         data-provider={s.providerId}
                         title={`${s.preview}${s.preview ? '\n' : ''}${activeTimeTitle(s.mtime)}${running ? '\n正在运行' : ''}`}
                         aria-current={active ? 'true' : undefined}
                         aria-haspopup="menu"
-                        onClick={() => onPick(p.cwd, s.sessionId, s.providerId, s.externalSessionId, s.runId)}
+                        onClick={() => onPick(p.cwd, s.sessionId, s.providerId, s.externalSessionId, s.runId, s.agentProfileId)}
                         onContextMenu={(e) => {
                           e.preventDefault()
                           const rect = e.currentTarget.getBoundingClientRect()
@@ -219,6 +223,7 @@ export function Sidebar({
                             cwd: p.cwd,
                             sessionId: s.sessionId,
                             providerId: s.providerId,
+                            agentProfileId: s.agentProfileId,
                             externalSessionId: s.externalSessionId,
                             opener: e.currentTarget
                           })
@@ -233,6 +238,7 @@ export function Sidebar({
                             cwd: p.cwd,
                             sessionId: s.sessionId,
                             providerId: s.providerId,
+                            agentProfileId: s.agentProfileId,
                             externalSessionId: s.externalSessionId,
                             opener: e.currentTarget
                           })
@@ -295,7 +301,7 @@ export function Sidebar({
               role="menuitem"
               className="ctxitem del"
               onClick={() => {
-                onDelete(ctx.cwd, ctx.sessionId, ctx.providerId, ctx.externalSessionId)
+                onDelete(ctx.cwd, ctx.sessionId, ctx.providerId, ctx.externalSessionId, ctx.agentProfileId)
                 closeContextMenu()
               }}
             >
