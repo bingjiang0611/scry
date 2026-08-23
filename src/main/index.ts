@@ -1044,6 +1044,12 @@ handleTrusted('agent:addPiProfile', async () => {
   }
 })
 
+handleTrusted('agent:removePiProfile', (_event, id: unknown) => {
+  if (typeof id !== 'string' || !/^pi:[a-f0-9]{16}$/.test(id)) throw new Error('无效的 Pi Agent Profile')
+  piProfileStore().remove(id)
+  return true as const
+})
+
 handleTrusted('agent:providerDescriptors', () => providerRegistry.describe())
 
 handleTrusted('agent:recentFolders', () => recentStore().load())

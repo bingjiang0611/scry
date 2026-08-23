@@ -520,6 +520,16 @@ export function useIntegrations(cwd: string | null) {
     rescan()
   }, [rescan])
 
+  const removePiProfile = useCallback(async (id: string): Promise<void> => {
+    if (id === 'pi:default') return
+    await window.scry.removePiProfile(id)
+    const remaining = agents.filter((agent) => agent.id !== id)
+    setAgents(remaining)
+    if (selectedId === id) {
+      setSelectedId(remaining.find((agent) => agent.id === 'pi:default')?.id ?? remaining[0]?.id ?? 'claude')
+    }
+  }, [agents, selectedId])
+
   const loadUsage = useCallback((): void => {
     const context = providerContextRef.current
     const seq = ++usageRequestSeq.current
@@ -1106,6 +1116,7 @@ export function useIntegrations(cwd: string | null) {
     diag,
     rescan,
     addPiProfile,
+    removePiProfile,
     refreshSkills,
     refreshAccount,
     refreshProviderInventory,

@@ -13,7 +13,7 @@ import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
 import { AssistantTurn, SessionSummary, UserMessage } from './ChatTurn'
 import { sessionNetDiffReview } from '../turn-diff'
-import { WorkdirPicker, CliPicker, RunControlSelect } from './Pickers'
+import { WorkdirPicker, CliPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
 import { Icon } from './primitives/Icon'
 
 interface ChatViewProps {
@@ -67,6 +67,7 @@ interface ChatViewProps {
   onRemoveQueuedPrompt: (index: number) => void
   onSelectAgent: (agentId: string) => void
   onAddPiAgent?: () => void
+  onRemovePiAgent?: (id: string) => void
   onRunModel: (model: AgentModelRef | undefined) => void
   onRunEffort: (effort: string | undefined) => void
   onPermissionMode: (mode: AgentPermissionMode) => void
@@ -167,6 +168,7 @@ export function ChatView({
   onRemoveQueuedPrompt,
   onSelectAgent,
   onAddPiAgent = () => {},
+  onRemovePiAgent = () => {},
   onRunModel,
   onRunEffort,
   onPermissionMode,
@@ -174,21 +176,27 @@ export function ChatView({
 }: ChatViewProps) {
   const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  const unavailableAgentCount = agents.filter((agent) => agent.health?.state === 'unavailable').length
-  const availableAgentCount = agents.length - unavailableAgentCount
-  const providerReadiness = agents.length > 0
-    ? unavailableAgentCount === 0
+  const agentGroups = groupAgentsByProvider(agents)
+  const unavailableProviderCount = agentGroups.filter((group) =>
+    group.agents.every((agent) => agent.health?.state === 'unavailable')
+  ).length
+  const unavailableProfileCount = agents.filter((agent) => agent.health?.state === 'unavailable').length
+  const availableProviderCount = agentGroups.length - unavailableProviderCount
+  const providerReadiness = agentGroups.length > 0
+    ? unavailableProviderCount === 0
       ? {
-          tone: 'ok',
-          summary: `${availableAgentCount}/${agents.length} 个 Provider 可用`,
+          tone: unavailableProfileCount > 0 ? 'warn' : 'ok',
+          summary: `${availableProviderCount}/${agentGroups.length} 个 Provider 可用`,
           detail: agentScanning
             ? '已发现本机可执行文件；正在补齐版本信息'
-            : '本机可执行文件已确认；账号与用量状态在运行后采集'
+            : unavailableProfileCount > 0
+              ? `${unavailableProfileCount} 个 Profile 不可用；其他 Profile 仍可使用`
+              : '本机可执行文件已确认；账号与用量状态在运行后采集'
         }
       : {
           tone: 'warn',
-          summary: `${availableAgentCount}/${agents.length} 个 Provider 可用`,
-          detail: `${unavailableAgentCount} 个不可用；请检查 CLI 路径或重新扫描`
+          summary: `${availableProviderCount}/${agentGroups.length} 个 Provider 可用`,
+          detail: `${unavailableProviderCount} 个 Provider 不可用；请检查 CLI 路径或重新扫描`
         }
     : agentScanning
       ? {
@@ -289,10 +297,13 @@ export function ChatView({
                   <div role="status">
                     <span className="welcome-ready-title">
                       <b>{providerReadiness.summary}</b>
-                      {agents.length > 0 && (
+                      {agentGroups.length > 0 && (
                         <span className="welcome-ready-meter" aria-hidden="true">
-                          {agents.map((agent) => (
-                            <i key={agent.id} data-on={agent.health?.state !== 'unavailable' ? 'true' : 'false'} />
+                          {agentGroups.map((group) => (
+                            <i
+                              key={group.id}
+                              data-on={group.agents.some((agent) => agent.health?.state !== 'unavailable') ? 'true' : 'false'}
+                            />
                           ))}
                         </span>
                       )}
@@ -313,7 +324,64 @@ export function ChatView({
                   </button>
                 </div>
                 <div className="welcome-provider-grid" aria-label="Provider 探测结果">
-                  {agents.map((agent) => {
+                  {agentGroups.map((group) => {
+                    if (group.id === 'pi') {
+                      const selected = group.agents.some((agent) => agent.id === selectedAgentId)
+                      const availableProfiles = group.agents.filter((agent) => agent.health?.state !== 'unavailable').length
+                      return (
+                        <section
+                          className={`welcome-provider welcome-provider-group ${selected ? 'is-selected' : ''}`}
+                          data-provider="pi"
+                          data-health={availableProfiles > 0 ? 'available' : 'unavailable'}
+                          key={group.id}
+                          aria-label={`Pi，${group.agents.length} 个 Profile`}
+                        >
+                          <span className="welcome-provider-top welcome-provider-group-head">
+                            <i aria-hidden="true" />
+                            <b>Pi</b>
+                            <span className="welcome-profile-count">{group.agents.length} 个 Profile</span>
+                          </span>
+                          <div className="welcome-profile-list">
+                            {group.agents.map((agent) => {
+                              const profileSelected = agent.id === selectedAgentId
+                              const available = agent.health?.state !== 'unavailable'
+                              return (
+                                <div className="welcome-profile-row" data-health={available ? 'available' : 'unavailable'} key={agent.id}>
+                                  <button
+                                    type="button"
+                                    className={`welcome-profile-pick ${profileSelected ? 'is-selected' : ''}`}
+                                    aria-pressed={profileSelected}
+                                    disabled={agentLocked || !available}
+                                    onClick={() => onSelectAgent(agent.id)}
+                                  >
+                                    <span className="welcome-profile-title">
+                                      <b>{piProfileName(agent)}</b>
+                                      <em>{available ? '可用' : '不可用'}</em>
+                                      {profileSelected && <Icon name="check" className="welcome-provider-check" />}
+                                    </span>
+                                    <small>{agent.id === 'pi:default' ? '系统检测' : '自定义 Profile'} · {agent.version ?? '版本未知'}</small>
+                                    <code title={agent.path}>{agent.path}</code>
+                                  </button>
+                                  {agent.id !== 'pi:default' && (
+                                    <button
+                                      type="button"
+                                      className="welcome-profile-remove"
+                                      disabled={agentLocked}
+                                      title="从 Scry 移除；不会删除启动器文件"
+                                      aria-label={`移除 Pi Profile：${piProfileName(agent)}`}
+                                      onClick={() => onRemovePiAgent(agent.id)}
+                                    >
+                                      <Icon name="x" />
+                                    </button>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </section>
+                      )
+                    }
+                    const agent = group.agents[0]
                     const selected = agent.id === selectedAgentId
                     const available = agent.health?.state !== 'unavailable'
                     return (
@@ -562,6 +630,7 @@ export function ChatView({
               selectedId={selectedAgentId}
               onSelect={onSelectAgent}
               onAddPi={onAddPiAgent}
+              onRemovePi={onRemovePiAgent}
               onRescan={onRescan}
               disabled={agentLocked}
             />

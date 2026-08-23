@@ -1289,6 +1289,7 @@ export function App() {
               onRemoveQueuedPrompt={removeQueuedPrompt}
               onSelectAgent={integrations.setSelectedId}
               onAddPiAgent={integrations.addPiProfile}
+              onRemovePiAgent={integrations.removePiProfile}
               onRunModel={integrations.setRunModel}
               onRunEffort={integrations.setRunEffort}
               onPermissionMode={integrations.setPermissionMode}

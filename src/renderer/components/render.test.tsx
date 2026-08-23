@@ -1989,7 +1989,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     })
     expect(html).toContain('data-tone="warn"')
     expect(html).toContain('1/2 个 Provider 可用')
-    expect(html).toContain('1 个不可用；请检查 CLI 路径或重新扫描')
+    expect(html).toContain('1 个 Provider 不可用；请检查 CLI 路径或重新扫描')
     expect(html).toContain('data-health="available"')
     expect(html).toContain('data-health="unavailable"')
     expect(html).toContain('可用')
@@ -1997,6 +1997,41 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).not.toContain('健康')
     expect(html).not.toContain('降级')
     expect(html).not.toContain('状态未知')
+  })
+
+  it('ChatView 将多个 Pi launcher 收进同一个 Provider 下的 Profile 列表', () => {
+    const html = renderWelcome({
+      selectedAgentId: 'pi:25f2d533d0a8b391',
+      agents: [{
+        id: 'claude',
+        name: 'Claude Code',
+        bin: 'claude',
+        path: '/usr/local/bin/claude',
+        health: { state: 'ready', transport: 'Agent SDK' }
+      }, {
+        id: 'pi:default',
+        name: 'Pi',
+        bin: 'pi',
+        path: '/Users/example/.local/bin/pi',
+        version: '0.84.2',
+        health: { state: 'ready', transport: 'JSONL RPC subprocess' }
+      }, {
+        id: 'pi:25f2d533d0a8b391',
+        name: 'Pi · pi-agent',
+        bin: 'pi-agent',
+        path: '/Users/example/dev-agent/pi-agent/bin/pi-agent',
+        health: { state: 'ready', transport: 'JSONL RPC subprocess' }
+      }]
+    })
+
+    expect(html).toContain('2/2 个 Provider 可用')
+    expect(html.match(/data-provider="pi"/g)).toHaveLength(1)
+    expect(html).toContain('aria-label="Pi，2 个 Profile"')
+    expect(html).toContain('原生 Pi')
+    expect(html).toContain('系统检测 · 0.84.2')
+    expect(html).toContain('自定义 Profile · 版本未知')
+    expect(html).toContain('aria-label="移除 Pi Profile：pi-agent"')
+    expect(html).not.toContain('aria-label="移除 Pi Profile：原生 Pi"')
   })
 
   it('ChatView 渲染运行中输入队列和图片附件', () => {
