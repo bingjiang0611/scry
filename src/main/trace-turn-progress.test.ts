@@ -102,6 +102,37 @@ describe('trace turn progress', () => {
     await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
   })
 
+  it('clears legacy unresolved evidence for a failure before Provider startup', async () => {
+    const userDataDir = root()
+    await persistUnresolvedTraceTurnProgress({
+      userDataDir,
+      cwd: '/repo',
+      providerId: 'pi',
+      runtimeProvider: 'pi_rpc',
+      turn: {
+        runId: 'run-frontdoor',
+        userText: 'hello',
+        items: [{
+          id: 'result',
+          ts: '2026-08-01T00:00:00.000Z',
+          runId: 'run-frontdoor',
+          kind: 'harness',
+          stage: 'result',
+          isError: true,
+          runtimeFailureStage: 'frontdoor'
+        }],
+        done: true,
+        status: 'failed',
+        ts: 1
+      },
+      reason: 'missing_provider_session_id'
+    })
+
+    await expect(recoverTraceTurnProgress(userDataDir, { cwd: '/repo', providerId: 'pi' }))
+      .resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+    await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
   it('never overwrites a richer committed archive with a stale pre-diff snapshot', async () => {
     const userDataDir = root()
     const base = {

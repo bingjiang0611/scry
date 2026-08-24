@@ -70,6 +70,12 @@ function validProgress(value: TraceTurnProgress | null): value is TraceTurnProgr
     )
 }
 
+export function isFrontdoorFailureTurn(turn: Pick<TraceArchiveTurn, 'status' | 'items'>): boolean {
+  return turn.status === 'failed' && turn.items.some((item) =>
+    item.kind === 'harness' && item.stage === 'result' && item.runtimeFailureStage === 'frontdoor'
+  )
+}
+
 function validUnresolvedProgress(value: UnresolvedTraceTurnProgress | null): value is UnresolvedTraceTurnProgress {
   const request = value?.request
   const turn = request?.turn
@@ -191,6 +197,13 @@ export async function recoverTraceTurnProgress(
       if (filter.cwd != null && request.cwd !== filter.cwd) continue
       if (filter.sessionId) continue
       if (filter.providerId && request.providerId !== filter.providerId) continue
+      // Provider 启动前失败不可能产生原生 session id，也不是可恢复的 Provider turn。
+      // 旧版本曾把这类失败永久卡成 pending；保留它只会让修正参数后的下一次启动继续失败。
+      if (isFrontdoorFailureTurn(request.turn)) {
+        await rm(path, { force: true })
+        recovered++
+        continue
+      }
       pending++
       errors.push(`unresolved trace turn progress (${unresolved.reason}): ${unresolved.request.turn.runId}`)
       continue
