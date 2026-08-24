@@ -159,6 +159,7 @@ import {
   cleanupTraceTurnProgressTemps,
   deleteTraceTurnProgress,
   deleteTraceTurnProgressArtifacts,
+  isFrontdoorFailureTurn,
   persistTraceTurnProgress,
   persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
@@ -769,6 +770,9 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
     throw new Error('managed recorder launch policy has no valid workspace/provider identity')
   }
   if (!args.sessionId) {
+    // frontdoor 失败发生在 Provider 启动前，没有原生 session 可恢复；不能把参数校验失败
+    // 持久化成永久 pending，否则用户修正权限后仍无法开始下一轮。
+    if (isFrontdoorFailureTurn(turn)) return
     if (managedPolicy) {
       await persistUnresolvedTraceTurnProgress({
         userDataDir: app.getPath('userData'),
@@ -818,6 +822,7 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
     throw new Error('managed recorder launch policy has no valid workspace/provider identity')
   }
   if (!args.sessionId) {
+    if (isFrontdoorFailureTurn(args)) return
     if (managedPolicy) {
       throw new Error('managed recorder requires an authoritative Provider session id')
     }
