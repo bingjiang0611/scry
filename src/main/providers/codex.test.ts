@@ -757,6 +757,22 @@ describe('Codex provider adapter', () => {
     })
   })
 
+  it('hides nested support Skills from the Codex catalog', async () => {
+    appServer.request.mockResolvedValue({
+      data: [{
+        cwd: '/isolated-copy',
+        skills: [
+          { name: 'markdown-to-html', path: '/Users/test/.codex/skills/markdown-to-html/SKILL.md', enabled: true },
+          { name: 'email-marketing', path: '/Users/test/.codex/skills/markdown-to-html/templates/email-marketing/SKILL.md', enabled: true }
+        ]
+      }]
+    })
+
+    await expect(
+      createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
+    ).resolves.toMatchObject({ data: [{ name: 'markdown-to-html' }] })
+  })
+
   it('reads the Codex account without forcing a token refresh', async () => {
     appServer.request.mockImplementation(async (method, params) => {
       if (method === 'account/read') {

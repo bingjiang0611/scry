@@ -746,6 +746,11 @@ export function createCodexAdapter(
   }
 
   const skillReloads = new Set<string>()
+  const isTopLevelSkill = (path: string): boolean => {
+    const normalized = path.replaceAll('\\', '/')
+    const root = normalized.lastIndexOf('/skills/')
+    return root < 0 || normalized.slice(root + 8).split('/').length <= 2
+  }
   const skills = {
     list: async (context: ProviderContext, forceReload = false) => {
       try {
@@ -764,7 +769,7 @@ export function createCodexAdapter(
             description: String(item.description ?? item.shortDescription ?? ''),
             enabled: item.enabled !== false
           }
-        })
+        }).filter((skill) => isTopLevelSkill(skill.dir))
         const errors = group?.errors?.length ?? 0
         return errors
           ? { ...capabilityReady(context, 'manage' as const, data), state: 'degraded' as const, reason: `${errors} 个 Skill 读取错误` }
