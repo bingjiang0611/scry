@@ -545,15 +545,17 @@ export function SkillsModal({
                         <span>配置状态</span>
                         <div className="skill-ledger__status-line">
                           <EvidenceState value={configValue} />
-                          <InventorySwitch
-                            checked={skill.enabled}
-                            disabled={!canManage}
-                            label={(skill.enabled ? '关闭' : '启用') + ' Skill ' + skill.name}
-                            title={manageDetail}
-                            onChange={(enabled) => onToggle(skill.name, enabled)}
-                          />
+                          {canManage && (
+                            <InventorySwitch
+                              checked={skill.enabled}
+                              disabled={false}
+                              label={(skill.enabled ? '关闭' : '启用') + ' Skill ' + skill.name}
+                              title={manageDetail}
+                              onChange={(enabled) => onToggle(skill.name, enabled)}
+                            />
+                          )}
                         </div>
-                        <small>{canManage ? '可管理' : capability?.mode === 'read' ? '只读' : capability?.state === 'unsupported' || capability?.mode === 'none' ? '不支持管理' : '管理能力未知'}</small>
+                        <small>{canManage ? '可管理' : capability?.mode === 'read' ? '只读状态' : capability?.state === 'unsupported' || capability?.mode === 'none' ? '不支持管理' : '管理能力未知'}</small>
                       </div>
                 </article>
               )
@@ -564,7 +566,7 @@ export function SkillsModal({
 
       <div className="modal-foot inventory-footnote">
         <span>配置证据</span>
-        <p>{canManage ? '当前 Provider 支持由 Scry 管理 Skill 开关。' : '当前 Provider 的 Skill 目录仅供读取；Scry 不修改其私有配置。'}</p>
+        <p>{canManage ? '当前 Provider 支持由 Scry 管理 Skill 开关。' : capability?.mode === 'read' ? '当前 Provider 只提供 Skill 状态读取，Scry 不展示无法生效的开关。' : '当前 Provider 的 Skill 管理能力尚未确认。'}</p>
       </div>
     </ModalFrame>
   )

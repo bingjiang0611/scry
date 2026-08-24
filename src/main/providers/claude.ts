@@ -364,8 +364,12 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     skills: {
       list: async (context) => capabilityReady(context, 'manage', listSkills(context.cwd, homeDir)),
       setEnabled: async (context, name, enabled) => {
-        setSkillEnabled(name, enabled, context.cwd, homeDir)
-        return capabilityReady(context, 'manage', true)
+        try {
+          setSkillEnabled(name, enabled, context.cwd, homeDir)
+          return capabilityReady(context, 'manage', true)
+        } catch (error) {
+          return capabilityUnknown<boolean>(context, 'manage', String((error as Error).message))
+        }
       }
     },
     mcp: {

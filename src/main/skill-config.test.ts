@@ -37,6 +37,20 @@ describe('skill-config', () => {
     }
   })
 
+  it('配置损坏时拒绝覆盖，不伪报 Skill 开关成功', () => {
+    const home = tempDir()
+    try {
+      mkdirSync(join(home, '.claude'), { recursive: true })
+      const settings = join(home, '.claude', 'settings.local.json')
+      writeFileSync(settings, '{ damaged')
+
+      expect(() => setSkillEnabled('scry-e2e-audit', false, undefined, home)).toThrow()
+      expect(readFileSync(settings, 'utf8')).toBe('{ damaged')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it('开关 Skill 后重新读取返回持久化状态，并可恢复', () => {
     const home = tempDir()
     const cwd = tempDir()
