@@ -4133,7 +4133,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
 })
 
 describe('Skill/MCP 操作能力渲染', () => {
-  it('只读 Provider 禁用 Skill 开关并保留原生状态', () => {
+  it('只读 Provider 只展示原生状态，不展示无法生效的 Skill 开关', () => {
     const html = renderToStaticMarkup(
       <SkillsModal
         skills={[
@@ -4146,16 +4146,17 @@ describe('Skill/MCP 操作能力渲染', () => {
         onClose={() => {}}
       />
     )
-    expect(html).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
+    expect(html).not.toContain('type="checkbox"')
     expect(html).toContain('inventory-modal--skills')
     expect(html).toContain('class="skill-ledger__status-line"')
-    expect(html).toContain('class="inventory-switch"')
+    expect(html).not.toContain('class="inventory-switch"')
     expect(html).toContain('aria-label="Skills 查询上下文"')
     expect(html).toContain('<strong>qoder</strong>')
     expect(html).toContain('<code title="/repo">/repo</code>')
     expect(html).toContain('尚未观测')
     expect(html).toContain('已启用')
-    expect(html).toContain('Skill 目录仅供读取')
+    expect(html).toContain('只读状态')
+    expect(html).toContain('Scry 不展示无法生效的开关')
     expect(html).toContain('role="tablist" aria-label="Skill 来源"')
     expect(html).toContain('项目 Skill <span>1</span>')
     expect(html).toContain('用户 Skill <span>1</span>')

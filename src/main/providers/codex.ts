@@ -745,12 +745,14 @@ export function createCodexAdapter(
     }
   }
 
+  const skillReloads = new Set<string>()
   const skills = {
     list: async (context: ProviderContext, forceReload = false) => {
       try {
+        const reloadKey = context.cwd ?? ''
         const response = await request<{ data?: Array<{ cwd?: string; skills?: unknown[]; errors?: unknown[] }> }>('skills/list', {
           cwds: context.cwd ? [context.cwd] : [],
-          forceReload
+          forceReload: forceReload || skillReloads.delete(reloadKey)
         }, context.cwd)
         const group = response.data?.find((item) => !context.cwd || item.cwd === context.cwd) ?? response.data?.[0]
         const data: SkillMeta[] = (group?.skills ?? []).map((raw) => {
@@ -765,10 +767,26 @@ export function createCodexAdapter(
         })
         const errors = group?.errors?.length ?? 0
         return errors
-          ? { ...capabilityReady(context, 'read' as const, data), state: 'degraded' as const, reason: `${errors} 个 Skill 读取错误` }
-          : capabilityReady(context, 'read' as const, data)
+          ? { ...capabilityReady(context, 'manage' as const, data), state: 'degraded' as const, reason: `${errors} 个 Skill 读取错误` }
+          : capabilityReady(context, 'manage' as const, data)
       } catch (error) {
-        return capabilityUnknown<SkillMeta[]>(context, 'read', String((error as Error).message))
+        return capabilityUnknown<SkillMeta[]>(context, 'manage', String((error as Error).message))
+      }
+    },
+    setEnabled: async (context: ProviderContext, name: string, enabled: boolean) => {
+      try {
+        const response = await request<{ effectiveEnabled?: boolean }>('skills/config/write', { name, enabled }, context.cwd)
+        skillReloads.add(context.cwd ?? '')
+        const effectiveEnabled = response.effectiveEnabled ?? enabled
+        return effectiveEnabled === enabled
+          ? capabilityReady(context, 'manage', true)
+          : {
+              ...capabilityReady(context, 'manage', false),
+              state: 'degraded' as const,
+              reason: `Codex 未能${enabled ? '启用' : '关闭'} Skill ${name}`
+            }
+      } catch (error) {
+        return capabilityUnknown<boolean>(context, 'manage', String((error as Error).message))
       }
     }
   }
@@ -785,7 +803,7 @@ export function createCodexAdapter(
         transport: 'app-server',
         available: !!path,
         path,
-        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' },
+        capabilities: { skills: 'manage', mcp: 'read', commands: 'read', account: 'read' },
         health: {
           state: !path ? 'unavailable' : lastError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'app-server',

@@ -57,7 +57,7 @@ describe('Codex provider adapter', () => {
       id: 'codex',
       runtimeProvider: 'codex_cli',
       transport: 'app-server',
-      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' }
+      capabilities: { skills: 'manage', mcp: 'read', commands: 'read', account: 'read' }
     })
   })
 
@@ -773,19 +773,25 @@ describe('Codex provider adapter', () => {
     })
   })
 
-  it('keeps the isolated Codex Skill catalog read-only', async () => {
+  it('writes Codex Skill state and force-refreshes the native catalog', async () => {
+    let enabled = true
     appServer.request.mockImplementation(async (method, params) => {
       if (method === 'skills/list') {
-        return { data: [{ cwd: '/isolated-copy', skills: [{ name: 'scry-e2e-audit', path: '/skill', enabled: true }] }] }
+        return { data: [{ cwd: '/isolated-copy', skills: [{ name: 'scry-e2e-audit', path: '/skill', enabled }] }] }
+      }
+      if (method === 'skills/config/write') {
+        enabled = (params as { enabled: boolean }).enabled
+        return { effectiveEnabled: enabled }
       }
       throw new Error(`unexpected request: ${method} ${JSON.stringify(params)}`)
     })
     const adapter = createCodexAdapter()
     const context = { providerId: 'codex' as const, cwd: '/isolated-copy' }
 
-    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ data: [{ name: 'scry-e2e-audit', enabled: true }] })
-    expect(adapter.skills!.setEnabled).toBeUndefined()
-    expect(appServer.request).not.toHaveBeenCalledWith('skills/config/write', expect.anything())
+    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ mode: 'manage', data: [{ name: 'scry-e2e-audit', enabled: true }] })
+    await expect(adapter.skills!.setEnabled!(context, 'scry-e2e-audit', false)).resolves.toMatchObject({ state: 'ready', data: true })
+    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ data: [{ name: 'scry-e2e-audit', enabled: false }] })
+    expect(appServer.request).toHaveBeenLastCalledWith('skills/list', { cwds: ['/isolated-copy'], forceReload: true })
   })
 
   it('keeps unapproved Codex hooks out of the app-server process', async () => {
