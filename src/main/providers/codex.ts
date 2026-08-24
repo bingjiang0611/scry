@@ -655,8 +655,12 @@ export function createCodexAdapter(
       '--disable', 'external_migration',
       '--disable', 'skill_mcp_dependency_install'
     ]
+    // Trusted project configs may define optional profiles without a default; app-server strict mode still requires one.
     const projectTrustArgs = cwd
-      ? ['-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`]
+      ? [
+          '-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`,
+          '-c', 'default_permissions=":workspace"'
+        ]
       : []
     const hookTrustArgs = trustedHooks.length > 0
       ? ['-c', `hooks={state={${trustedHooks.map((hook) =>

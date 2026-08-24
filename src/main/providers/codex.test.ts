@@ -360,7 +360,10 @@ describe('Codex provider adapter', () => {
 
     await createCodexAdapter().skills!.list({ providerId: 'codex', cwd: '/isolated-copy' })
 
-    expect(appServer.options).toContainEqual(expect.objectContaining({ cwd: '/isolated-copy' }))
+    expect(appServer.options).toContainEqual(expect.objectContaining({
+      cwd: '/isolated-copy',
+      args: expect.arrayContaining(['-c', 'default_permissions=":workspace"'])
+    }))
   })
 
   it('uses CODEX_HOME discovered from the login-shell environment as isolated native state source', async () => {
