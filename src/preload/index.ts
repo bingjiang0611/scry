@@ -12,6 +12,7 @@ import type {
 import type {
   CatalogHealth,
   CapabilityEnvelope,
+  DeleteArchivedSessionsResult,
   DeleteSessionResult,
   McpAuthResult,
   McpSnapshot,
@@ -55,6 +56,8 @@ export interface SessionMeta {
   mtime: number
   preview: string
   count: number
+  pinnedAt?: number
+  archivedAt?: number
 }
 
 export interface ProjectMeta {
@@ -62,6 +65,14 @@ export interface ProjectMeta {
   name: string
   mtime: number
   sessions: SessionMeta[]
+}
+
+/** 定位单条会话：置顶 / 存档只需要这几个字段。 */
+export interface SessionRef {
+  providerId: SessionProviderId
+  agentProfileId?: string
+  cwd: string
+  externalSessionId: string
 }
 
 export type DetectedAgent = LocatedAgent & {
@@ -101,6 +112,7 @@ const api = {
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   listSessions: (context: ProviderContext): Promise<SessionMeta[]> => ipcRenderer.invoke('agent:listSessions', context),
   listProjects: (): Promise<ProjectMeta[]> => ipcRenderer.invoke('agent:listProjects'),
+  listArchivedSessions: (): Promise<ProjectMeta[]> => ipcRenderer.invoke('agent:listArchivedSessions'),
   catalogHealth: (): Promise<CatalogHealth> => ipcRenderer.invoke('agent:catalogHealth'),
   listSkills: (context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> => ipcRenderer.invoke('agent:listSkills', context),
   mcpSnapshot: (context: ProviderContext, refresh = false): Promise<CapabilityEnvelope<McpSnapshot>> =>
@@ -129,6 +141,11 @@ const api = {
   loadSession: (context: ProviderContext): Promise<ParsedTurn[] | null> => ipcRenderer.invoke('agent:loadSession', context),
   deleteSession: (context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult> =>
     ipcRenderer.invoke('agent:deleteSession', context),
+  setSessionPinned: (context: SessionRef, pinned: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('agent:setSessionPinned', context, pinned),
+  setSessionArchived: (context: SessionRef, archived: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('agent:setSessionArchived', context, archived),
+  deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
   start: (request: AgentStartRequest): Promise<{ runId: string }> => ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
   activeRuns: (): Promise<ActiveRun[]> => ipcRenderer.invoke('agent:activeRuns'),

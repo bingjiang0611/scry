@@ -1,6 +1,6 @@
-import type { DetectedAgent, ParsedTurn, ProjectMeta, ScryApi, SessionMeta } from '../preload'
+import type { DetectedAgent, ParsedTurn, ProjectMeta, ScryApi, SessionMeta, SessionRef } from '../preload'
 
-export type { DetectedAgent, ParsedTurn, ProjectMeta, SessionMeta }
+export type { DetectedAgent, ParsedTurn, ProjectMeta, SessionMeta, SessionRef }
 export type { McpMeta, SkillMeta } from '@shared/provider'
 
 type OptionalBridgeMethod = 'rendererReady' | 'setTheme' | 'detectFast' | 'catalogHealth' | 'runControls' | 'onFocusedRun' | 'onDataUpdated'

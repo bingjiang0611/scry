@@ -27,6 +27,8 @@ export interface AppSession {
   cwd: string
   preview: string
   ts: number
+  pinnedAt?: number
+  archivedAt?: number
 }
 
 export interface SessionMeta {
@@ -40,6 +42,8 @@ export interface SessionMeta {
   mtime: number
   preview: string
   count: number
+  pinnedAt?: number
+  archivedAt?: number
 }
 
 export interface ProjectMeta {
@@ -47,6 +51,14 @@ export interface ProjectMeta {
   name: string
   mtime: number
   sessions: SessionMeta[]
+}
+
+/** 定位单条 catalog 会话：Provider + profile + 工作目录 + Provider 侧会话 id。 */
+export interface AppSessionRef {
+  providerId: SessionProviderId
+  agentProfileId?: string
+  cwd: string
+  externalSessionId: string
 }
 
 export function appSessionCanResume(session: Pick<AppSession, 'runId' | 'externalSessionId'>): boolean {
@@ -157,6 +169,10 @@ function writeJsonRecoverable<T>(file: string, value: T, isValid: JsonValidator<
 const SESSION_PROVIDERS = new Set<SessionProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'legacy_unknown'])
 const RUNTIME_PROVIDERS = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc'])
 
+export function isSessionProviderId(value: unknown): value is SessionProviderId {
+  return typeof value === 'string' && SESSION_PROVIDERS.has(value as SessionProviderId)
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
@@ -174,7 +190,10 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
       typeof session.ts === 'number' && Number.isFinite(session.ts) &&
       (session.providerId == null || SESSION_PROVIDERS.has(session.providerId)) &&
       (session.agentProfileId == null || (typeof session.agentProfileId === 'string' && session.agentProfileId.length <= 240)) &&
-      (session.runtimeProvider == null || RUNTIME_PROVIDERS.has(session.runtimeProvider))
+      (session.runtimeProvider == null || RUNTIME_PROVIDERS.has(session.runtimeProvider)) &&
+      // 老索引没有这两个字段，缺失即「未置顶 / 未存档」，不能判成 schema 不匹配。
+      (session.pinnedAt == null || (typeof session.pinnedAt === 'number' && Number.isFinite(session.pinnedAt))) &&
+      (session.archivedAt == null || (typeof session.archivedAt === 'number' && Number.isFinite(session.archivedAt)))
   })
 }
 
@@ -303,69 +322,103 @@ export function createAppSessionStore(
     save(list)
   }
 
+  const toSessionMeta = (session: AppSession): SessionMeta => ({
+    sessionId: session.sessionId,
+    ...(session.runId ? { runId: session.runId } : {}),
+    ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
+    providerId: session.providerId!,
+    agentProfileId: session.agentProfileId,
+    runtimeProvider: session.runtimeProvider,
+    mtime: session.ts,
+    preview: session.preview,
+    count: 1,
+    ...(session.pinnedAt ? { pinnedAt: session.pinnedAt } : {}),
+    ...(session.archivedAt ? { archivedAt: session.archivedAt } : {})
+  })
+
   const listSessions = (cwd: string, providerId?: SessionProviderId, agentProfileId?: string): SessionMeta[] =>
     load()
       .filter((session) => session.cwd === cwd &&
         (!providerId || session.providerId === providerId) &&
         (agentProfileId === undefined || session.agentProfileId === agentProfileId))
       .sort((a, b) => b.ts - a.ts)
-      .map((session) => ({
-        sessionId: session.sessionId,
-        ...(session.runId ? { runId: session.runId } : {}),
-        ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
-        providerId: session.providerId!,
-        agentProfileId: session.agentProfileId,
-        runtimeProvider: session.runtimeProvider,
-        mtime: session.ts,
-        preview: session.preview,
-        count: 1
-      }))
+      .map(toSessionMeta)
 
-  const listProjects = (): ProjectMeta[] => {
+  const groupByCwd = (sessions: AppSession[], sortKey: (session: AppSession) => number): ProjectMeta[] => {
     const byCwd = new Map<string, AppSession[]>()
-    for (const s of load()) {
+    for (const s of sessions) {
       if (!byCwd.has(s.cwd)) byCwd.set(s.cwd, [])
       byCwd.get(s.cwd)!.push(s)
     }
     return [...byCwd.entries()]
-      .map(([cwd, sessions]) => {
-        sessions.sort((a, b) => b.ts - a.ts)
+      .map(([cwd, group]) => {
+        group.sort((a, b) => sortKey(b) - sortKey(a))
         return {
           cwd,
           name: cwd ? basename(cwd) : 'Chats',
-          sessions: sessions.map((session) => ({
-            sessionId: session.sessionId,
-            ...(session.runId ? { runId: session.runId } : {}),
-            ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
-            providerId: session.providerId!,
-            agentProfileId: session.agentProfileId,
-            runtimeProvider: session.runtimeProvider,
-            mtime: session.ts,
-            preview: session.preview,
-            count: 1
-          })),
-          mtime: sessions[0].ts
+          sessions: group.map(toSessionMeta),
+          mtime: sortKey(group[0])
         }
       })
       // Chats（不绑定工作目录）优先级最低：真实项目按最近活跃排前，它恒在末尾。
       .sort((a, b) => Number(!a.cwd) - Number(!b.cwd) || b.mtime - a.mtime)
   }
 
-  const remove = (args: { providerId: SessionProviderId; agentProfileId?: string; cwd: string; externalSessionId: string }): void => {
-    const next = load().filter(
-      (session) =>
-        !(
-          session.providerId === args.providerId &&
-          session.agentProfileId === args.agentProfileId &&
-          session.cwd === args.cwd &&
-          (session.sessionId === args.externalSessionId || session.externalSessionId === args.externalSessionId)
-        )
-    )
+  // 已存档会话从侧边栏移出，只在设置的「已存档会话」里出现。
+  const listProjects = (): ProjectMeta[] => groupByCwd(load().filter((session) => !session.archivedAt), (session) => session.ts)
+
+  const listArchivedProjects = (): ProjectMeta[] =>
+    groupByCwd(load().filter((session) => session.archivedAt), (session) => session.archivedAt ?? session.ts)
+
+  const matchesRef = (session: AppSession, ref: AppSessionRef): boolean =>
+    session.providerId === ref.providerId &&
+    session.agentProfileId === ref.agentProfileId &&
+    session.cwd === ref.cwd &&
+    (session.sessionId === ref.externalSessionId || session.externalSessionId === ref.externalSessionId)
+
+  const patchSession = (ref: AppSessionRef, patch: (session: AppSession) => void): boolean => {
+    const list = load()
+    const target = list.find((session) => matchesRef(session, ref))
+    if (!target) return false
+    patch(target)
+    save(list)
+    return true
+  }
+
+  const setPinned = (ref: AppSessionRef, pinned: boolean): boolean =>
+    patchSession(ref, (session) => {
+      if (pinned) session.pinnedAt = Date.now()
+      else delete session.pinnedAt
+    })
+
+  const setArchived = (ref: AppSessionRef, archived: boolean): boolean =>
+    patchSession(ref, (session) => {
+      if (archived) {
+        session.archivedAt = Date.now()
+        // 已存档会话不出现在侧边栏，置顶对它没有意义。
+        delete session.pinnedAt
+      } else delete session.archivedAt
+    })
+
+  const remove = (args: AppSessionRef): void => {
+    const next = load().filter((session) => !matchesRef(session, args))
     // Write the deletion tombstone to fallback first. If primary then fails, its old entry remains retryable.
     writeAtomic(`${file}.bak`, next)
     writeAtomic(file, next)
     lastHealth = { status: 'ready', source: 'primary' }
   }
 
-  return { load, save, health, recordPending, record, listSessions, listProjects, remove }
+  return {
+    load,
+    save,
+    health,
+    recordPending,
+    record,
+    listSessions,
+    listProjects,
+    listArchivedProjects,
+    setPinned,
+    setArchived,
+    remove
+  }
 }

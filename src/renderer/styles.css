@@ -6301,6 +6301,125 @@ textarea:focus-visible,
   grid-area: running;
 }
 
+/* 置顶分组跨项目平铺，行内补项目名，否则会丢掉工作目录上下文。 */
+.sb-sess-proj {
+  flex: none;
+  max-width: 92px;
+  overflow: hidden;
+  color: var(--dim3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-sess-proj::before {
+  content: '· ';
+}
+
+.sb-divider {
+  height: 1px;
+  margin: 8px 8px 0;
+  background: var(--border3);
+}
+
+/* 操作按钮是会话按钮的兄弟节点（button 不能嵌套），所以 hover 态挂在 wrapper 上。 */
+.sb-sess-row {
+  position: relative;
+}
+
+.sb-sess-row:hover .sb-sess,
+.sb-sess-row:focus-within .sb-sess {
+  background: var(--panel2);
+}
+
+.sb-sess-acts {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-left: 30px;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--panel2) 42%);
+  transition: opacity 120ms ease-out;
+}
+
+.sb-sess-row:hover .sb-sess-acts,
+.sb-sess-row:focus-within .sb-sess-acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sb-act {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.sb-act:hover {
+  background: var(--panel-hi);
+  color: var(--fg);
+}
+
+.sb-act.on {
+  color: var(--accent);
+}
+
+.sb-act .ico {
+  width: 13px;
+  height: 13px;
+}
+
+/* 存档会让会话从列表消失，给一次撤销机会，避免误点只能进设置里找回。 */
+.sb-undo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.sb-undo span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-undo button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  background: var(--panel3);
+  color: var(--fg);
+  font: 11.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.sb-undo button:hover {
+  border-color: var(--accent-line);
+}
+
 .btn,
 .mcp-test,
 .modal-x,
@@ -7041,6 +7160,335 @@ textarea:focus-visible,
     border-color: var(--border2);
     background: var(--panel3);
   }
+}
+
+/* 设置从单节弹窗变成左侧 tab + 右侧内容，宽度覆盖上面的 min(480px)。 */
+.settings-modal {
+  width: min(920px, 94vw);
+  height: min(620px, 86vh);
+}
+
+.settings-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+}
+
+.settings-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  border-right: 1px solid var(--border);
+  background: var(--panel2);
+}
+
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--dim);
+  font: 12.5px/1 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.settings-tab:hover {
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.settings-tab.active {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.settings-tab.active .ico {
+  color: var(--accent);
+}
+
+.settings-tab .cnt {
+  margin-left: auto;
+  color: var(--dim2);
+  font: 10.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-pane .settings-body {
+  align-content: start;
+  overflow-y: auto;
+}
+
+.settings-pane .theme-options {
+  max-width: 460px;
+}
+
+.arch-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 18px 12px;
+}
+
+.arch-head .settings-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.arch-danger {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--bad-soft);
+  color: var(--bad);
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
+  transition: border-color 120ms ease-out;
+}
+
+.arch-danger:hover:not(:disabled) {
+  border-color: var(--bad);
+}
+
+.arch-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.arch-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  padding: 0 18px 12px;
+}
+
+.arch-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+}
+
+.arch-search .ico {
+  color: var(--dim2);
+}
+
+.arch-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: 0;
+  color: var(--fg);
+  font: 12px/1 var(--font-ui);
+}
+
+.arch-search input::placeholder {
+  color: var(--dim3);
+}
+
+.arch-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+  color: var(--dim);
+}
+
+.arch-filter .ico {
+  color: var(--dim2);
+}
+
+.arch-filter select {
+  border: 0;
+  background: none;
+  outline: 0;
+  color: var(--fg);
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.arch-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 18px 18px;
+}
+
+.arch-group + .arch-group {
+  margin-top: 16px;
+}
+
+.arch-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  color: var(--dim);
+  font: 12px/1 var(--font-ui);
+}
+
+.arch-group-head .ico {
+  color: var(--dim2);
+}
+
+.arch-group-head b {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.arch-group-head .cnt {
+  margin-left: auto;
+  color: var(--dim3);
+  font: 10.5px/1 var(--font-mono);
+}
+
+.arch-group-body {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+}
+
+.arch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+}
+
+.arch-row + .arch-row {
+  border-top: 1px solid var(--border3);
+}
+
+.arch-row:hover {
+  background: var(--panel3);
+}
+
+.arch-row-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.arch-row-copy b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font: 550 12.5px/1.3 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arch-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim3);
+  font: 10.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.arch-row-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arch-del {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+
+.arch-del:hover {
+  border-color: var(--bad);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.arch-unarch {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  background: var(--panel3);
+  color: var(--fg);
+  font: 12px/1 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease-out;
+}
+
+.arch-unarch:hover {
+  border-color: var(--accent-line);
+}
+
+.arch-failures {
+  margin: 0 18px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bad);
+  border-radius: var(--r-md);
+  background: var(--bad-soft);
+  color: var(--fg);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.arch-empty {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 64px 18px;
+  color: var(--dim2);
+  text-align: center;
+}
+
+.arch-empty b {
+  color: var(--dim);
+  font: 550 13px/1.3 var(--font-ui);
+}
+
+.arch-empty span {
+  max-width: 320px;
+  font-size: 11.5px;
 }
 
 .skill-row,

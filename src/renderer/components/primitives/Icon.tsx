@@ -7,7 +7,7 @@ export type IconName =
   | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
   | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'diff' | 'terminal' | 'agents' | 'panel'
-  | 'expand' | 'collapse' | 'trash'
+  | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo'
 
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -129,7 +129,20 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   expand: <path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5" />,
   collapse: <path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5" />,
-  trash: <path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6" />
+  trash: <path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6" />,
+  pin: (
+    <>
+      <path d="M12 17v5" />
+      <path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9A2 2 0 0 1 15 10.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </>
+  ),
+  archive: (
+    <>
+      <rect x="3" y="4" width="18" height="5" rx="1" />
+      <path d="M20 9v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9M10 13h4" />
+    </>
+  ),
+  undo: <path d="M4 10h11a4 4 0 0 1 0 8H9M4 10l4-4M4 10l4 4" />
 }
 
 export function Icon({ name, lg, className }: { name: IconName; lg?: boolean; className?: string }) {

@@ -1,0 +1,19 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Pin & Archive": {
+      "versions": [
+        {
+          "path": "Pin & Archive.html",
+          "createdAt": "2026-08-26T15:11:46.692Z",
+          "status": "needs-review",
+          "subtitle": "侧边栏置顶+存档 · 设置›已存档会话"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-26T15:11:46.693Z",
+  "updatedAt": "2026-08-26T15:11:46.693Z"
+}

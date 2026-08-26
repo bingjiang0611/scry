@@ -1,8 +1,9 @@
-// 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 按工作目录分组的历史会话（右键删除）。
-import { useEffect, useRef, useState } from 'react'
+// 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
+// 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
+import { useState } from 'react'
 import { relTime } from '../format'
 import { Icon } from './primitives/Icon'
-import type { ProjectMeta } from '../env'
+import type { ProjectMeta, SessionMeta } from '../env'
 import type { McpMeta, SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
 import type { McpLiveStatus } from '@shared/trace'
@@ -17,6 +18,9 @@ const activeTimeTitle = (ms: number): string =>
     second: '2-digit'
   }).format(new Date(ms))}`
 
+const sessionKey = (session: SessionMeta): string =>
+  `${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
+
 export function Sidebar({
   id,
   projects,
@@ -28,7 +32,10 @@ export function Sidebar({
   version = '0.1.0',
   onNewChat,
   onPick,
-  onDelete,
+  onTogglePin,
+  onArchive,
+  archiveUndo = null,
+  onUndoArchive,
   onDiagnostics,
   diagnosticsActive = false,
   onAnalytics,
@@ -52,7 +59,10 @@ export function Sidebar({
   version?: string
   onNewChat: () => void
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
-  onDelete: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, agentProfileId?: string) => void
+  onTogglePin: (cwd: string, session: SessionMeta) => void
+  onArchive: (cwd: string, session: SessionMeta) => void
+  archiveUndo?: { preview: string } | null
+  onUndoArchive?: () => void
   onDiagnostics?: () => void
   diagnosticsActive?: boolean
   onAnalytics?: () => void
@@ -68,25 +78,6 @@ export function Sidebar({
 }) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const contextActionRef = useRef<HTMLButtonElement>(null)
-  const [ctx, setCtx] = useState<{
-    x: number
-    y: number
-    cwd: string
-    sessionId: string
-    providerId: SessionProviderId
-    agentProfileId?: string
-    externalSessionId?: string
-    opener: HTMLButtonElement
-  } | null>(null)
-  useEffect(() => {
-    if (ctx) contextActionRef.current?.focus()
-  }, [ctx])
-  const closeContextMenu = (): void => {
-    const opener = ctx?.opener
-    setCtx(null)
-    window.requestAnimationFrame(() => opener?.focus())
-  }
   const toggle = (cwd: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -94,12 +85,20 @@ export function Sidebar({
       return next
     })
   const ql = q.trim().toLowerCase()
-  const filtered = ql
-    ? projects
-        .map((p) => ({ ...p, sessions: p.sessions.filter((s) => s.preview.toLowerCase().includes(ql)) }))
-        .filter((p) => p.sessions.length > 0)
-    : projects
+  const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
+  // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名，避免丢掉工作目录上下文。
+  const pinned = projects
+    .flatMap((project) => project.sessions
+      .filter((session) => session.pinnedAt && matches(session))
+      .map((session) => ({ session, cwd: project.cwd, name: project.name })))
+    .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0))
+  const filtered = projects
+    .map((project) => ({ ...project, sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session)) }))
+    .filter((project) => project.sessions.length > 0)
   const mcpSummary = summarizeMcpNav(mcps, mcpLive)
+  const isActive = (session: SessionMeta): boolean =>
+    session.sessionId === activeSessionId && session.providerId === activeProviderId &&
+    session.agentProfileId === activeAgentProfileId
   return (
     <aside className="sidebar" id={id} aria-label="会话导航">
       <div className="sb-brand">
@@ -162,9 +161,6 @@ export function Sidebar({
         </nav>
       )}
 
-      <div className="sb-section">
-        最近 <span className="cnt">{filtered.length}</span>
-      </div>
       <div className="sb-list">
         {catalogHealth && catalogHealth.status !== 'ready' && (
           <div className="sb-empty" role="status" title={catalogHealth.reason}>
@@ -173,7 +169,33 @@ export function Sidebar({
               : '会话索引不可用；请检查 app-sessions.json 与 .bak 后重试。'}
           </div>
         )}
-        {filtered.length === 0 && <div className="sb-empty">无历史会话</div>}
+        {pinned.length > 0 && (
+          <>
+            <div className="sb-section">
+              置顶 <span className="cnt">{pinned.length}</span>
+            </div>
+            <div className="sb-pinned">
+              {pinned.map(({ session, cwd, name }) => (
+                <SessionRow
+                  key={sessionKey(session)}
+                  session={session}
+                  cwd={cwd}
+                  projectName={name}
+                  active={isActive(session)}
+                  running={Boolean(session.runId && runningRunIds.has(session.runId))}
+                  onPick={onPick}
+                  onTogglePin={onTogglePin}
+                  onArchive={onArchive}
+                />
+              ))}
+            </div>
+            <div className="sb-divider" />
+          </>
+        )}
+        <div className="sb-section">
+          最近 <span className="cnt">{filtered.length}</span>
+        </div>
+        {filtered.length === 0 && pinned.length === 0 && <div className="sb-empty">无历史会话</div>}
         {filtered.map((p) => {
           const open = !collapsed.has(p.cwd)
           const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
@@ -200,69 +222,31 @@ export function Sidebar({
               </button>
               {open && (
                 <div className="sb-sess-list">
-                  {p.sessions.map((s) => {
-                    const active = s.sessionId === activeSessionId && s.providerId === activeProviderId &&
-                      s.agentProfileId === activeAgentProfileId
-                    const running = Boolean(s.runId && runningRunIds.has(s.runId))
-                    return (
-                      <button
-                        type="button"
-                        key={`${s.providerId}:${s.agentProfileId ?? ''}:${s.sessionId}`}
-                        className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
-                        data-provider={s.providerId}
-                        title={`${s.preview}${s.preview ? '\n' : ''}${activeTimeTitle(s.mtime)}${running ? '\n正在运行' : ''}`}
-                        aria-current={active ? 'true' : undefined}
-                        aria-haspopup="menu"
-                        onClick={() => onPick(p.cwd, s.sessionId, s.providerId, s.externalSessionId, s.runId, s.agentProfileId)}
-                        onContextMenu={(e) => {
-                          e.preventDefault()
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setCtx({
-                            x: e.clientX || rect.left + 8,
-                            y: e.clientY || rect.top + 8,
-                            cwd: p.cwd,
-                            sessionId: s.sessionId,
-                            providerId: s.providerId,
-                            agentProfileId: s.agentProfileId,
-                            externalSessionId: s.externalSessionId,
-                            opener: e.currentTarget
-                          })
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return
-                          e.preventDefault()
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setCtx({
-                            x: rect.left + 8,
-                            y: rect.top + 8,
-                            cwd: p.cwd,
-                            sessionId: s.sessionId,
-                            providerId: s.providerId,
-                            agentProfileId: s.agentProfileId,
-                            externalSessionId: s.externalSessionId,
-                            opener: e.currentTarget
-                          })
-                        }}
-                      >
-                        <span className="sb-session-main">
-                          <span className="sb-provider">{s.providerId === 'legacy_unknown' ? '历史?' : s.providerId}</span>
-                          <span className="sb-sesstext">{s.preview || '(无预览)'}</span>
-                        </span>
-                        <span className="sb-session-meta">
-                          {s.count > 1 && <span className="sb-count">{s.count} 轮</span>}
-                          <span className="sb-sesstime" title={activeTimeTitle(s.mtime)}>
-                            {relTime(s.mtime)}
-                          </span>
-                        </span>
-                        {running && <span className="sb-running" role="status" aria-label="正在运行" />}
-                      </button>
-                    )
-                  })}
+                  {p.sessions.map((s) => (
+                    <SessionRow
+                      key={sessionKey(s)}
+                      session={s}
+                      cwd={p.cwd}
+                      active={isActive(s)}
+                      running={Boolean(s.runId && runningRunIds.has(s.runId))}
+                      onPick={onPick}
+                      onTogglePin={onTogglePin}
+                      onArchive={onArchive}
+                    />
+                  ))}
                 </div>
               )}
             </div>
           )
         })}
+        {archiveUndo && onUndoArchive && (
+          <div className="sb-undo" role="status">
+            <span>已存档「{archiveUndo.preview || '(无预览)'}」</span>
+            <button type="button" onClick={onUndoArchive}>
+              <Icon name="undo" /> 撤销
+            </button>
+          </div>
+        )}
       </div>
 
       {onSettings && (
@@ -273,44 +257,76 @@ export function Sidebar({
           </button>
         </div>
       )}
-
-      {ctx && (
-        <div
-          className="ctx-overlay"
-          onClick={closeContextMenu}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            closeContextMenu()
-          }}
-        >
-          <div
-            className="ctxmenu"
-            role="menu"
-            aria-label="会话操作"
-            style={{ left: ctx.x, top: ctx.y }}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape') return
-              event.preventDefault()
-              closeContextMenu()
-            }}
-          >
-            <button
-              ref={contextActionRef}
-              type="button"
-              role="menuitem"
-              className="ctxitem del"
-              onClick={() => {
-                onDelete(ctx.cwd, ctx.sessionId, ctx.providerId, ctx.externalSessionId, ctx.agentProfileId)
-                closeContextMenu()
-              }}
-            >
-              <Icon name="x" /> 删除会话
-            </button>
-          </div>
-        </div>
-      )}
     </aside>
+  )
+}
+
+// 行是 wrapper + 内部 button：会话按钮里不能再嵌按钮，操作区必须是它的兄弟节点。
+function SessionRow({
+  session,
+  cwd,
+  projectName,
+  active,
+  running,
+  onPick,
+  onTogglePin,
+  onArchive
+}: {
+  session: SessionMeta
+  cwd: string
+  projectName?: string
+  active: boolean
+  running: boolean
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
+  onTogglePin: (cwd: string, session: SessionMeta) => void
+  onArchive: (cwd: string, session: SessionMeta) => void
+}) {
+  const pinned = Boolean(session.pinnedAt)
+  return (
+    <div className="sb-sess-row">
+      <button
+        type="button"
+        className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
+        data-provider={session.providerId}
+        title={`${session.preview}${session.preview ? '\n' : ''}${activeTimeTitle(session.mtime)}${running ? '\n正在运行' : ''}`}
+        aria-current={active ? 'true' : undefined}
+        onClick={() => onPick(cwd, session.sessionId, session.providerId, session.externalSessionId, session.runId, session.agentProfileId)}
+      >
+        <span className="sb-session-main">
+          <span className="sb-provider">{session.providerId === 'legacy_unknown' ? '历史?' : session.providerId}</span>
+          <span className="sb-sesstext">{session.preview || '(无预览)'}</span>
+        </span>
+        <span className="sb-session-meta">
+          {session.count > 1 && <span className="sb-count">{session.count} 轮</span>}
+          <span className="sb-sesstime" title={activeTimeTitle(session.mtime)}>
+            {relTime(session.mtime)}
+          </span>
+          {projectName && <span className="sb-sess-proj">{projectName}</span>}
+        </span>
+        {running && <span className="sb-running" role="status" aria-label="正在运行" />}
+      </button>
+      <span className="sb-sess-acts">
+        <button
+          type="button"
+          className={`sb-act ${pinned ? 'on' : ''}`}
+          title={pinned ? '取消置顶' : '置顶会话'}
+          aria-label={pinned ? `取消置顶：${session.preview || '(无预览)'}` : `置顶会话：${session.preview || '(无预览)'}`}
+          aria-pressed={pinned}
+          onClick={() => onTogglePin(cwd, session)}
+        >
+          <Icon name="pin" />
+        </button>
+        <button
+          type="button"
+          className="sb-act"
+          title="存档会话"
+          aria-label={`存档会话：${session.preview || '(无预览)'}`}
+          onClick={() => onArchive(cwd, session)}
+        >
+          <Icon name="archive" />
+        </button>
+      </span>
+    </div>
   )
 }
 
