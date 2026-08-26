@@ -1,50 +1,28 @@
 import type { DetectedAgent } from '../env'
 import { Icon } from './primitives/Icon'
 
-export type AppView = 'chat' | 'diagnostics' | 'analytics'
-
 interface ViewChromeProps {
   cwd: string | null
-  hasSession?: boolean
-  view: AppView
   agent: DetectedAgent | undefined
   agentScanning?: boolean
   showPanel: boolean
   showWorkspace?: boolean
-  canTogglePanel?: boolean
-  onView: (view: AppView) => void
   onTogglePanel: () => void
   onToggleWorkspace?: () => void
 }
 
 export function ViewChrome({
   cwd,
-  hasSession = false,
-  view,
   agent,
   agentScanning = false,
   showPanel,
   showWorkspace = false,
-  canTogglePanel = true,
-  onView,
   onTogglePanel,
   onToggleWorkspace
 }: ViewChromeProps) {
   const agentVersion = agent?.version?.replace(/\s+\(Claude Code\)\s*$/, '')
   return (
     <header className="topbar compact">
-      {(cwd || hasSession) && (
-        <nav className="vtabs" aria-label="会话视图">
-          <button
-            type="button"
-            className={`vtab ${view === 'chat' ? 'active' : ''}`}
-            aria-current={view === 'chat' ? 'page' : undefined}
-            onClick={() => onView('chat')}
-          >
-            <Icon name="message" /> 对话
-          </button>
-        </nav>
-      )}
       <div className="tb-spacer" />
       <div className="tb-statusbar" aria-label="会话工具">
         {agent ? (
@@ -63,30 +41,26 @@ export function ViewChrome({
             <Icon name="folder" /> <b>不绑定项目</b>
           </span>
         )}
-        {canTogglePanel && (
-          <>
-            {cwd && onToggleWorkspace && (
-              <button
-                type="button"
-                className={`tb-action panel-pill ${showWorkspace ? 'on' : ''}`}
-                onClick={onToggleWorkspace}
-                title="工作区文件"
-                aria-pressed={showWorkspace}
-              >
-                <Icon name="folder" /> 文件
-              </button>
-            )}
-            <button
-              type="button"
-              className={`tb-action panel-pill ${showPanel ? 'on' : ''}`}
-              onClick={onTogglePanel}
-              title="右侧工作区"
-              aria-pressed={showPanel}
-            >
-              <Icon name="panel" /> 面板
-            </button>
-          </>
+        {cwd && onToggleWorkspace && (
+          <button
+            type="button"
+            className={`tb-action panel-pill ${showWorkspace ? 'on' : ''}`}
+            onClick={onToggleWorkspace}
+            title="工作区文件"
+            aria-pressed={showWorkspace}
+          >
+            <Icon name="folder" /> 文件
+          </button>
         )}
+        <button
+          type="button"
+          className={`tb-action panel-pill ${showPanel ? 'on' : ''}`}
+          onClick={onTogglePanel}
+          title="右侧工作区"
+          aria-pressed={showPanel}
+        >
+          <Icon name="panel" /> 面板
+        </button>
       </div>
     </header>
   )

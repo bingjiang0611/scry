@@ -6,7 +6,6 @@ import {
   reconcileUsageLedger,
   sdkUsageLedgerRowsFromItems
 } from './billing-ledger'
-import { AgentRuntimeError, runtimeFailureTrace } from './cli-runtime'
 import { DDL_V4, DDL_V5, USAGE_LEDGER_COLS, PROVIDER_RAW_USAGE_COLS, sqlInsert } from './span-ledger'
 import type { TraceEvent } from '../shared/trace'
 import type { UsageLedgerObject } from '../shared/billing'
@@ -387,17 +386,26 @@ describe('Billing Guardian P1 ledger normalizer', () => {
   })
 
   it('CLI runtime failure result 也写 canonical provider 和 failure brief，不把 runtimeProvider 写进 provider', () => {
-    const failure = runtimeFailureTrace(
-      'run-qoder-fail',
-      new AgentRuntimeError('qoder spawn denied', {
+    const failure = resultEvent({
+      runId: 'run-qoder-fail',
+      isError: true,
+      costUsd: undefined,
+      tokensIn: undefined,
+      tokensOut: undefined,
+      cacheReadTokens: undefined,
+      cacheCreationTokens: undefined,
+      modelUsage: undefined,
+      runtimeProvider: 'qoder_cli',
+      runtimeFailureStage: 'spawn',
+      runtimeMetadata: { brief: {
         provider: 'qoder_cli',
         stage: 'spawn',
         cwd: '/repo',
         commandSummary: 'qodercli -p --output-format stream-json',
         evidencePath: '/repo/.local/opendesign-adapter-samples/qoder/2026-07-05T00-00-00',
         nextAction: '检查可执行权限、cwd 是否存在、以及 GUI 环境 PATH'
-      })
-    )
+      } }
+    })
     const rows = billingRowsFromItems({
       runId: 'run-qoder-fail',
       sessionId: 'sess-qoder-fail',
@@ -428,17 +436,26 @@ describe('Billing Guardian P1 ledger normalizer', () => {
   })
 
   it('Codex version_probe failure 持久化为 codex provider ledger row 并保留 probe evidencePath', () => {
-    const failure = runtimeFailureTrace(
-      'run-codex-probe-fail',
-      new AgentRuntimeError('codex --version exited with 137', {
+    const failure = resultEvent({
+      runId: 'run-codex-probe-fail',
+      isError: true,
+      costUsd: undefined,
+      tokensIn: undefined,
+      tokensOut: undefined,
+      cacheReadTokens: undefined,
+      cacheCreationTokens: undefined,
+      modelUsage: undefined,
+      runtimeProvider: 'codex_cli',
+      runtimeFailureStage: 'version_probe',
+      runtimeMetadata: { brief: {
         provider: 'codex_cli',
         stage: 'version_probe',
         cwd: '/repo',
         commandSummary: 'codex --version && codex exec --help',
         evidencePath: '/repo/.local/opendesign-adapter-samples/codex/2026-07-05T00-00-00',
         nextAction: '运行 --version/--help，确认 CLI flag surface 与 adapter 匹配'
-      })
-    )
+      } }
+    })
     const rows = billingRowsFromItems({
       runId: 'run-codex-probe-fail',
       sessionId: 'sess-codex-probe-fail',

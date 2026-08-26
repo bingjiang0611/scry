@@ -61,10 +61,6 @@ export function archivedTranscriptPath(userDataDir: string, cwd: string, session
   return join(userDataDir, 'transcripts', ownedCwdKey(cwd), ownedSessionFileStem(sessionId) + '.jsonl')
 }
 
-export function legacyArchivedTranscriptPath(userDataDir: string, cwd: string, sessionId: string): string {
-  return join(userDataDir, 'transcripts', encodeCwd(cwd), nativeSessionFileStem(sessionId) + '.jsonl')
-}
-
 export interface TraceArchiveTurn {
   runId: string
   providerTurnId?: string
@@ -90,19 +86,6 @@ export interface TraceArchive {
   providerId?: ProviderId
   runtimeProvider?: RuntimeProvider
   turns: TraceArchiveTurn[]
-}
-
-export function legacyTraceArchivePath(userDataDir: string, cwd: string, sessionId: string): string {
-  return join(userDataDir, 'trace-archives', encodeCwd(cwd), nativeSessionFileStem(sessionId) + '.json')
-}
-
-export function legacyScopedTraceArchivePath(
-  userDataDir: string,
-  cwd: string,
-  sessionId: string,
-  providerId: ProviderId = 'claude'
-): string {
-  return join(userDataDir, 'trace-archives-v2', providerId, encodeCwd(cwd), nativeSessionFileStem(sessionId) + '.json')
 }
 
 export function traceArchivePath(userDataDir: string, cwd: string, sessionId: string, providerId: ProviderId = 'claude'): string {
@@ -175,17 +158,6 @@ export function traceArchiveTurnPath(
   turn: Pick<TraceArchiveTurn, 'runId' | 'providerTurnId'>
 ): string {
   return join(traceArchiveTurnDir(userDataDir, cwd, sessionId, providerId), `${traceArchiveTurnKey(turn)}.json`)
-}
-
-export function inferTraceArchiveProvider(archive: TraceArchive): ProviderId | undefined {
-  const identities = archiveProviderIdentities(archive)
-  return !identities.invalid && identities.ids.size === 1 ? [...identities.ids][0] : undefined
-}
-
-export function inferLegacyTraceArchiveProvider(archive: TraceArchive): ProviderId | undefined {
-  const identities = archiveProviderIdentities(archive)
-  if (identities.invalid || identities.ids.size > 1) return undefined
-  return identities.ids.size === 0 ? 'claude' : [...identities.ids][0]
 }
 
 function trustedOwnedParent(userDataDir: string, filePath: string, create: boolean): string {
@@ -283,7 +255,7 @@ function isArchiveShape(value: unknown): value is TraceArchive {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const archive = value as Partial<TraceArchive>
   if (
-    (archive.version !== 1 && archive.version !== 2 && archive.version !== 3) ||
+    archive.version !== 3 ||
     typeof archive.cwd !== 'string' ||
     typeof archive.sessionId !== 'string' ||
     !Array.isArray(archive.turns)
@@ -384,7 +356,7 @@ function inspectArchiveFile(
     return { status: 'invalid', reason: 'identity_mismatch', error: 'archive belongs to another session/cwd' }
   }
   const identities = archiveProviderIdentities(parsed)
-  if (identities.invalid || identities.ids.size > 1 || (expectedProvider && identities.ids.size === 1 && !identities.ids.has(expectedProvider))) {
+  if (identities.invalid || identities.ids.size > 1 || (expectedProvider && (identities.ids.size !== 1 || !identities.ids.has(expectedProvider)))) {
     return { status: 'invalid', reason: 'provider_mismatch', error: 'archive contains conflicting Provider identity' }
   }
   return { status: 'valid', archive: normalizeArchive(parsed) }
@@ -475,7 +447,7 @@ function archiveCandidates(args: {
   sessionId: string
   userDataDir: string
   providerId: ProviderId
-}): { current: ArchiveInspection; segmented: SegmentedArchiveInspection; valid: TraceArchive[] } {
+}): TraceArchive[] {
   const current = inspectArchiveFile(
     args.userDataDir,
     traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
@@ -483,68 +455,26 @@ function archiveCandidates(args: {
     args.sessionId,
     args.providerId
   )
-  const legacyScoped = inspectArchiveFile(
-    args.userDataDir,
-    legacyScopedTraceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
-    args.cwd,
-    args.sessionId,
-    args.providerId
-  )
-  const legacy = args.providerId === 'claude'
-    ? inspectArchiveFile(
-        args.userDataDir,
-        legacyTraceArchivePath(args.userDataDir, args.cwd, args.sessionId),
-        args.cwd,
-        args.sessionId,
-        args.providerId
-      )
-    : { status: 'missing' as const }
-  const segmented = inspectSegmentedArchives(args)
-  return {
-    current,
-    segmented,
-    valid: [legacy, legacyScoped, current]
-      .filter((candidate): candidate is Extract<ArchiveInspection, { status: 'valid' }> => candidate.status === 'valid')
-      .map((candidate) => candidate.archive)
-      .concat(segmented.valid)
-  }
+  return (current.status === 'valid' ? [current.archive] : []).concat(inspectSegmentedArchives(args).valid)
 }
 
 export function readTraceArchive(args: {
   cwd: string
   sessionId: string
   userDataDir: string
-  providerId?: ProviderId
+  providerId: ProviderId
 }): TraceArchive | null {
-  if (args.providerId) {
-    const candidates = archiveCandidates({ ...args, providerId: args.providerId })
-    return mergeArchives(candidates.valid)
-  }
-  const legacy = readArchiveFile(
-    args.userDataDir,
-    legacyTraceArchivePath(args.userDataDir, args.cwd, args.sessionId),
-    args.cwd,
-    args.sessionId
-  )
-  if (!legacy) return null
-  return legacy
+  return mergeArchives(archiveCandidates(args))
 }
 
 export function traceArchiveRunIds(args: {
   cwd: string
   sessionId: string
   userDataDir: string
-  providerId?: ProviderId
+  providerId: ProviderId
 }): string[] {
   const ids = new Set<string>()
-  const archives = args.providerId
-    ? (() => {
-        const candidates = archiveCandidates({ ...args, providerId: args.providerId })
-        return candidates.valid
-      })()
-    : [readArchiveFile(args.userDataDir, legacyTraceArchivePath(args.userDataDir, args.cwd, args.sessionId), args.cwd, args.sessionId)]
-  for (const archive of archives) {
-    if (!archive) continue
+  for (const archive of archiveCandidates(args)) {
     for (const turn of archive.turns) if (turn.runId) ids.add(turn.runId)
   }
   return [...ids]
@@ -559,14 +489,7 @@ export function findTraceArchiveTurnMatches(args: {
   providerTurnId?: string
 }): { byRunId?: TraceArchiveTurn; byProviderTurnId?: TraceArchiveTurn } {
   const archives: TraceArchive[] = []
-  const legacyPaths = [
-    ...(args.providerId === 'claude'
-      ? [legacyTraceArchivePath(args.userDataDir, args.cwd, args.sessionId)]
-      : []),
-    legacyScopedTraceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
-    traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
-  ]
-  for (const path of legacyPaths) {
+  for (const path of [traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId)]) {
     const archive = readArchiveFile(args.userDataDir, path, args.cwd, args.sessionId, args.providerId)
     if (archive) archives.push(archive)
   }
@@ -645,8 +568,6 @@ export function resolveTranscriptPath(args: {
   if (inspectTranscriptIdentity(primary, args.cwd, args.sessionId).status === 'match') return primary
   const archived = archivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
   if (trustedOwnedFile(args.userDataDir, archived)) return archived
-  const legacy = legacyArchivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
-  if (legacyTranscriptIdentityMatches(args.userDataDir, legacy, args.cwd, args.sessionId)) return legacy
   return null
 }
 
@@ -667,13 +588,13 @@ export function mirrorTranscript(args: {
   }
 }
 
-type LegacyIdentityInspection = { status: 'match' | 'foreign' } | { status: 'invalid'; error: string }
+type TranscriptIdentityInspection = { status: 'match' | 'foreign' } | { status: 'invalid'; error: string }
 
 function inspectTranscriptIdentity(
   filePath: string,
   cwd: string,
   sessionId: string
-): LegacyIdentityInspection {
+): TranscriptIdentityInspection {
   try {
     const stat = lstatSync(filePath)
     if (!stat.isFile() || stat.isSymbolicLink()) return { status: 'invalid', error: 'transcript is not a trusted regular file' }
@@ -686,7 +607,7 @@ function inspectTranscriptIdentity(
       if (typeof row.sessionId === 'string') sessions.add(row.sessionId)
     }
     if (cwds.size !== 1 || sessions.size !== 1) {
-      return { status: 'invalid', error: 'legacy transcript has missing or conflicting identity' }
+      return { status: 'invalid', error: 'transcript has missing or conflicting identity' }
     }
     return cwds.has(cwd) && sessions.has(sessionId) ? { status: 'match' } : { status: 'foreign' }
   } catch (error) {
@@ -694,42 +615,7 @@ function inspectTranscriptIdentity(
   }
 }
 
-function inspectLegacyTranscriptIdentity(
-  userDataDir: string,
-  filePath: string,
-  cwd: string,
-  sessionId: string
-): LegacyIdentityInspection {
-  if (!trustedOwnedFile(userDataDir, filePath)) return { status: 'invalid', error: 'legacy transcript is not trusted' }
-  return inspectTranscriptIdentity(filePath, cwd, sessionId)
-}
-
-function legacyTranscriptIdentityMatches(userDataDir: string, filePath: string, cwd: string, sessionId: string): boolean {
-  return inspectLegacyTranscriptIdentity(userDataDir, filePath, cwd, sessionId).status === 'match'
-}
-
 type DeleteFailure = { path: string; error: string }
-
-function inspectLegacyDeletionTarget(
-  userDataDir: string,
-  filePath: string,
-  inspect: () => LegacyIdentityInspection
-): { target?: string; failure?: DeleteFailure } {
-  try {
-    trustedOwnedParent(userDataDir, filePath, false)
-    const stat = lstatSync(filePath)
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      return { failure: { path: filePath, error: 'legacy Scry copy is not a trusted regular file' } }
-    }
-    const identity = inspect()
-    if (identity.status === 'foreign') return {}
-    if (identity.status === 'invalid') return { failure: { path: filePath, error: identity.error } }
-    return { target: filePath }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
-    return { failure: { path: filePath, error: error instanceof Error ? error.message : String(error) } }
-  }
-}
 
 export function deleteTranscriptCopies(args: {
   cwd: string
@@ -773,45 +659,6 @@ export function deleteTranscriptCopies(args: {
     const turn = archive.turns[0]
     const path = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
     exactTargets.push(path, `${path}.tmp`)
-  }
-  const legacyCandidates: Array<{ path: string; inspect: () => LegacyIdentityInspection }> = []
-  const legacyScoped = legacyScopedTraceArchivePath(args.userDataDir, args.cwd, args.sessionId, providerId)
-  for (const path of [legacyScoped, `${legacyScoped}.tmp`]) {
-    legacyCandidates.push({
-      path,
-      inspect: () => {
-        const archive = inspectArchiveFile(args.userDataDir, path, args.cwd, args.sessionId, providerId)
-        if (archive.status === 'valid') return { status: 'match' }
-        if (archive.status === 'invalid' && archive.reason === 'identity_mismatch') return { status: 'foreign' }
-        return { status: 'invalid', error: archive.status === 'invalid' ? archive.error : 'legacy archive disappeared' }
-      }
-    })
-  }
-  if (providerId === 'claude') {
-    const legacy = legacyTraceArchivePath(args.userDataDir, args.cwd, args.sessionId)
-    for (const path of [legacy, `${legacy}.tmp`]) {
-      legacyCandidates.push({
-        path,
-        inspect: () => {
-          const archive = inspectArchiveFile(args.userDataDir, path, args.cwd, args.sessionId, providerId)
-          if (archive.status === 'valid') return { status: 'match' }
-          if (archive.status === 'invalid' && archive.reason === 'identity_mismatch') return { status: 'foreign' }
-          return { status: 'invalid', error: archive.status === 'invalid' ? archive.error : 'legacy archive disappeared' }
-        }
-      })
-    }
-    const transcript = legacyArchivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
-    for (const path of [transcript, `${transcript}.tmp`]) {
-      legacyCandidates.push({
-        path,
-        inspect: () => inspectLegacyTranscriptIdentity(args.userDataDir, path, args.cwd, args.sessionId)
-      })
-    }
-  }
-  for (const candidate of legacyCandidates) {
-    const inspected = inspectLegacyDeletionTarget(args.userDataDir, candidate.path, candidate.inspect)
-    if (inspected.target) exactTargets.push(inspected.target)
-    if (inspected.failure) failed.push(inspected.failure)
   }
   for (const fp of [...new Set(exactTargets)]) {
     try {

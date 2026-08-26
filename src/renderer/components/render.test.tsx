@@ -33,7 +33,6 @@ import {
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
-import { AppShell } from './AppShell'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
@@ -359,30 +358,16 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).not.toContain('aria-label="调整右侧面板宽度"')
   })
 
-  it('左侧栏折叠时为 macOS 窗口控件暴露布局状态', () => {
-    const collapsed = renderToStaticMarkup(
-      <AppShell
-        style={{}}
-        sidebarCollapsed
-        sidebar={<aside />}
-        sidebarSplitter={<div />}
-        main={<main />}
-      />
-    )
-    expect(collapsed).toContain('sidebar-collapsed')
-  })
 })
 
 describe('ViewChrome 顶栏', () => {
-  it('完整探测尚未结束时显示检测中，而不是过早宣告未安装', () => {
+  it('显示 Agent 状态和面板入口', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
         cwd={null}
-        view="chat"
         agent={undefined}
         agentScanning
         showPanel
-        onView={() => {}}
         onTogglePanel={() => {}}
       />
     )
@@ -390,60 +375,22 @@ describe('ViewChrome 顶栏', () => {
     expect(html).not.toContain('未检测到 agent')
     expect(html).toContain('title="右侧工作区"')
     expect(html).not.toContain('title="工作区文件"')
-    expect(html).not.toContain('aria-label="会话视图"')
   })
 
-  it('聊天页只保留视图切换和面板入口，不混入集成入口', () => {
+  it('绑定项目时显示文件入口，不混入集成入口', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
         cwd="/tmp/sample-workspace"
-        view="chat"
         agent={undefined}
         showPanel
-        onView={() => {}}
         onTogglePanel={() => {}}
         onToggleWorkspace={() => {}}
       />
     )
-    expect(html).toContain('对话')
-    expect(html).not.toContain('拓扑')
-    expect(html).not.toContain('分段')
-    expect(html).toContain('aria-current="page"')
     expect(html).toContain('title="工作区文件"')
-    expect(html).toContain('文件')
     expect(html).toContain('title="右侧工作区"')
-    expect(html).toContain('面板')
     expect(html).not.toContain('title="Skills"')
     expect(html).not.toContain('title="MCP"')
-    expect(html).not.toContain('sample-workspace')
-    expect(html).not.toContain('cwd-pill')
-    expect(html).not.toContain('tb-filter')
-    expect(html).not.toContain('&gt;all&lt;')
-    expect(html).not.toContain('&gt;tool&lt;')
-    expect(html).not.toContain('&gt;mcp&lt;')
-  })
-
-  it('不绑定项目的活动会话可打开纵览，但不伪造工作区文件入口', () => {
-    const html = renderToStaticMarkup(
-      <ViewChrome
-        cwd={null}
-        hasSession
-        view="chat"
-        agent={undefined}
-        showPanel
-        canTogglePanel
-        onView={() => {}}
-        onTogglePanel={() => {}}
-        onToggleWorkspace={() => {}}
-      />
-    )
-
-    expect(html).toContain('title="右侧工作区"')
-    expect(html).toContain('aria-label="会话视图"')
-    expect(html).toContain('对话')
-    expect(html).not.toContain('拓扑')
-    expect(html).not.toContain('分段')
-    expect(html).not.toContain('title="工作区文件"')
   })
 })
 

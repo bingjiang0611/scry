@@ -7,10 +7,6 @@ import {
   archivedTranscriptPath,
   cleanupTraceArchiveTemps,
   deleteTranscriptCopies,
-  inferTraceArchiveProvider,
-  legacyArchivedTranscriptPath,
-  legacyScopedTraceArchivePath,
-  legacyTraceArchivePath,
   mirrorTranscript,
   readTraceArchive,
   resolveTranscriptPath,
@@ -236,46 +232,6 @@ describe('transcript archive mirror', () => {
     expect(readTraceArchive({ cwd: cwdB, sessionId, userDataDir, providerId: 'codex' })?.turns[0].runId).toBe('run-b')
   })
 
-  it('明确属于其他 cwd 的 legacy copy 跳过，损坏 copy 保留并报告 partial failure', () => {
-    const root = tempRoot()
-    const userDataDir = join(root, 'userData')
-    const sessionId = 'legacy-collision'
-    const cwdA = '/a/b'
-    const cwdB = '/a_b'
-    const legacy = legacyScopedTraceArchivePath(userDataDir, cwdB, sessionId, 'codex')
-    expect(legacy).toBe(legacyScopedTraceArchivePath(userDataDir, cwdA, sessionId, 'codex'))
-    mkdirSync(dirname(legacy), { recursive: true })
-    writeFileSync(legacy, JSON.stringify({
-      version: 3,
-      cwd: cwdB,
-      sessionId,
-      providerId: 'codex',
-      turns: [{ runId: 'run-b', userText: 'b', items: [], done: true, ts: 1 }]
-    }))
-
-    const collision = deleteTranscriptCopies({ cwd: cwdA, sessionId, userDataDir, providerId: 'codex' })
-    expect(collision.failed).toEqual([])
-    expect(existsSync(legacy)).toBe(true)
-
-    writeFileSync(legacy, '{broken')
-    const corrupt = deleteTranscriptCopies({ cwd: cwdB, sessionId, userDataDir, providerId: 'codex' })
-    expect(corrupt.failed).toEqual([{ path: legacy, error: expect.stringContaining('corrupt') }])
-    expect(existsSync(legacy)).toBe(true)
-  })
-
-  it('legacy transcript mirror 只有携带精确 cwd/session 身份时才参与 fallback 和删除', () => {
-    const root = tempRoot()
-    const userDataDir = join(root, 'userData')
-    const cwd = '/repo/legacy'
-    const sessionId = 'legacy-transcript'
-    const legacy = legacyArchivedTranscriptPath(userDataDir, cwd, sessionId)
-    mkdirSync(dirname(legacy), { recursive: true })
-    writeFileSync(legacy, `${JSON.stringify({ type: 'user', cwd, sessionId })}\n`)
-    expect(resolveTranscriptPath({ cwd, sessionId, userDataDir, home: join(root, 'empty-home') })).toBe(legacy)
-    expect(deleteTranscriptCopies({ cwd, sessionId, userDataDir, providerId: 'claude' }).failed).toEqual([])
-    expect(existsSync(legacy)).toBe(false)
-  })
-
   it('损坏或身份冲突的旧 monolith 不覆盖原字节，也不阻塞新的独立 segment', () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
@@ -351,61 +307,6 @@ describe('transcript archive mirror', () => {
     expect(existsSync(temp)).toBe(false)
   })
 
-  it('首次写 hashed archive 会合并 Claude 两代 legacy 与 current 的全部 runId', () => {
-    const root = tempRoot()
-    const userDataDir = join(root, 'userData')
-    const cwd = '/repo/migrate'
-    const sessionId = 'merge-history'
-    const writeArchive = (path: string, label: string, providerId?: 'claude'): void => {
-      mkdirSync(dirname(path), { recursive: true })
-      writeFileSync(path, JSON.stringify({
-        version: 3,
-        cwd,
-        sessionId,
-        ...(providerId ? { providerId } : {}),
-        turns: [
-          { runId: label, userText: label, items: [], done: true, ts: label === 'old' ? 1 : 2 },
-          { runId: 'shared', userText: label, items: [], done: true, ts: 3 }
-        ]
-      }))
-    }
-    writeArchive(legacyTraceArchivePath(userDataDir, cwd, sessionId), 'old')
-    writeArchive(legacyScopedTraceArchivePath(userDataDir, cwd, sessionId, 'claude'), 'scoped', 'claude')
-    writeArchive(traceArchivePath(userDataDir, cwd, sessionId, 'claude'), 'current', 'claude')
-
-    expect(upsertTraceArchiveTurn({
-      cwd,
-      sessionId,
-      providerId: 'claude',
-      userDataDir,
-      turn: { runId: 'new', userText: 'new', items: [], done: true }
-    })).toBe(true)
-    const archive = readTraceArchive({ cwd, sessionId, userDataDir, providerId: 'claude' })!
-    expect(new Set(archive.turns.map((turn) => turn.runId))).toEqual(new Set(['old', 'scoped', 'current', 'shared', 'new']))
-    expect(archive.turns.find((turn) => turn.runId === 'shared')?.userText).toBe('current')
-  })
-
-  it('混合 Provider 身份的 legacy archive 不参与推断且删除返回 partial', () => {
-    const root = tempRoot()
-    const userDataDir = join(root, 'userData')
-    const cwd = '/repo/mixed-provider'
-    const sessionId = 'mixed-provider'
-    const fp = legacyScopedTraceArchivePath(userDataDir, cwd, sessionId, 'codex')
-    mkdirSync(dirname(fp), { recursive: true })
-    writeFileSync(fp, JSON.stringify({
-      version: 3,
-      cwd,
-      sessionId,
-      providerId: 'codex',
-      runtimeProvider: 'claude_sdk',
-      turns: []
-    }))
-    expect(inferTraceArchiveProvider(JSON.parse(readFileSync(fp, 'utf8')))).toBeUndefined()
-    const result = deleteTranscriptCopies({ cwd, sessionId, userDataDir, providerId: 'codex' })
-    expect(result.failed).toEqual([{ path: fp, error: expect.stringContaining('conflicting Provider') }])
-    expect(existsSync(fp)).toBe(true)
-  })
-
   it('legacy monolith 到达 500 轮后用 per-turn segment 继续写入且不会重写旧文件', () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
@@ -452,29 +353,6 @@ describe('transcript archive mirror', () => {
     const archive = readTraceArchive({ cwd, sessionId, userDataDir, providerId: 'codex' })
     expect(archive?.turns).toHaveLength(502)
     expect(archive?.turns.find((turn) => turn.runId === 'run-499')?.userText).toBe('updated')
-  })
-
-  it('treats provider-less legacy archives as Claude-only during read and deletion', () => {
-    const root = tempRoot()
-    const userDataDir = join(root, 'userData')
-    const cwd = '/repo'
-    const sessionId = 'shared-session-id'
-    const legacy = legacyTraceArchivePath(userDataDir, cwd, sessionId)
-    mkdirSync(dirname(legacy), { recursive: true })
-    writeFileSync(legacy, JSON.stringify({
-      version: 1,
-      cwd,
-      sessionId,
-      turns: [{ runId: 'run-legacy', userText: 'old', items: [], done: true, ts: 1 }]
-    }))
-
-    expect(readTraceArchive({ cwd, sessionId, userDataDir, providerId: 'claude' })?.turns).toHaveLength(1)
-    expect(readTraceArchive({ cwd, sessionId, userDataDir, providerId: 'codex' })).toBeNull()
-    expect(traceArchiveRunIds({ cwd, sessionId, userDataDir, providerId: 'codex' })).toEqual([])
-    deleteTranscriptCopies({ cwd, sessionId, userDataDir, providerId: 'codex' })
-    expect(existsSync(legacy)).toBe(true)
-    deleteTranscriptCopies({ cwd, sessionId, userDataDir, providerId: 'claude' })
-    expect(existsSync(legacy)).toBe(false)
   })
 
   it('rejects symlinked Scry-owned archive and transcript parents for writes and deletion', () => {
@@ -612,7 +490,7 @@ describe('transcript archive mirror', () => {
     writeFileSync(
       fp,
       JSON.stringify({
-        version: 2,
+        version: 3,
         cwd,
         sessionId,
         providerId: 'codex',

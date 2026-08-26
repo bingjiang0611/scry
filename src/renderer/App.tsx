@@ -10,13 +10,12 @@ import {
 } from '@shared/runtime'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
 import type { WorkspaceEntry } from '@shared/workspace'
-import { AppShell } from './components/AppShell'
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
 import { ChatView } from './components/ChatView'
 import { DiagnosticsView } from './components/DiagnosticsView'
 import { AnalyticsView } from './components/AnalyticsView'
-import { ViewChrome, type AppView } from './components/ViewChrome'
+import { ViewChrome } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
 import { SkillsModal, McpModal, SettingsModal } from './components/Modals'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
@@ -38,6 +37,8 @@ import { useAgentSession } from './hooks/useAgentSession'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
+
+type AppView = 'chat' | 'diagnostics' | 'analytics'
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -1162,14 +1163,11 @@ export function App() {
   }
 
   return (
-    <AppShell
+    <div
+      className={`app app-shell${rightPanelMounted ? ` has-right-panel right-panel-surface${panelVisible && rightSurface.maximized ? ' right-panel-maximized' : ''}${!panelVisible ? ' right-panel-hidden' : ''}` : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
       style={appStyle}
-      rightPanelMode="surface"
-      rightPanelMaximized={panelVisible && rightSurface.maximized}
-      rightPanelHidden={!panelVisible}
-      sidebarCollapsed={sidebarPane.collapsed}
-      sidebar={
-        <Sidebar
+    >
+      <Sidebar
           id="sidebar-pane"
           version={packageJson.version}
           projects={projects}
@@ -1196,10 +1194,8 @@ export function App() {
           catalogHealth={catalogHealth}
           onSettings={() => setShowSettings(true)}
           themeLabel={theme === 'dark' ? '深色' : '浅色'}
-        />
-      }
-      sidebarSplitter={
-        <PaneSplitter
+      />
+      <PaneSplitter
           className="sidebar-resizer"
           label="调整左侧栏宽度"
           controls="sidebar-pane"
@@ -1210,9 +1206,8 @@ export function App() {
           active={sidebarPane.resizing}
           onPointerDown={sidebarPane.startResize}
           onKeyDown={sidebarPane.onKeyDown}
-        />
-      }
-      main={
+      />
+      <div className="main-area" id="main-pane">
         <>
         {view !== 'chat' && <div className="aux-view-topbar" aria-hidden="true" />}
         {view === 'diagnostics' ? (
@@ -1238,14 +1233,10 @@ export function App() {
           <>
             <ViewChrome
               cwd={cwd}
-              hasSession={Boolean(activeSessionId)}
-              view={view}
               agent={integrations.selectedAgent}
               agentScanning={integrations.agentsScanning}
               showPanel={panelVisible}
-              canTogglePanel={view === 'chat'}
               showWorkspace={workspaceOpen && rightSurface.activeId === 'files' && panelVisible}
-              onView={changeView}
               onTogglePanel={toggleOverviewPanel}
               onToggleWorkspace={toggleWorkspacePanel}
             />
@@ -1314,10 +1305,11 @@ export function App() {
           </>
         )}
         </>
-      }
-      rightSplitter={
-        panelVisible && !rightSurface.maximized ? (
-          <PaneSplitter
+      </div>
+      {rightPanelMounted && (
+        <>
+          {panelVisible && !rightSurface.maximized && (
+            <PaneSplitter
             className="panel-resizer"
             label="调整右侧面板宽度"
             controls="right-surface-pane"
@@ -1328,12 +1320,10 @@ export function App() {
             active={surfacePane.resizing}
             onPointerDown={surfacePane.startResize}
             onKeyDown={surfacePane.onKeyDown}
-          />
-        ) : undefined
-      }
-      rightPanel={
-        rightPanelMounted ? (
-          <RightSurfacePanel
+            />
+          )}
+          <div className="right-panel-slot" id="right-surface-pane">
+            <RightSurfacePanel
             openIds={rightSurface.openIds}
             activeId={rightSurface.activeId}
             maximized={rightSurface.maximized}
@@ -1389,11 +1379,11 @@ export function App() {
               ),
               agents: <AgentsSurface turns={session.turns} busy={session.busy} />
             }}
-          />
-        ) : undefined
-      }
-      modals={
-        <>
+            />
+          </div>
+        </>
+      )}
+      <>
           {showSkills && (
             <SkillsModal
               key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
@@ -1429,8 +1419,7 @@ export function App() {
               onClose={() => setShowSettings(false)}
             />
           )}
-        </>
-      }
-    />
+      </>
+    </div>
   )
 }

@@ -2,6 +2,13 @@ import type { TraceEvent } from '../shared/trace'
 import type { ProviderId } from '../shared/provider'
 import type { RuntimeFailureBrief, RuntimeProvider } from '../shared/runtime'
 
+export class AgentRuntimeError extends Error {
+  constructor(message: string, readonly brief: RuntimeFailureBrief) {
+    super(message)
+    this.name = 'AgentRuntimeError'
+  }
+}
+
 export function ensureFailedTerminalResult(
   items: TraceEvent[],
   args: {

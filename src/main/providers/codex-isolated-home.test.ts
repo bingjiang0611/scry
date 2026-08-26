@@ -1,6 +1,5 @@
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -98,38 +97,6 @@ describe('createCodexIsolatedHome', () => {
     const nestedPersistent = join(sourceParent, 'scry-home')
     cleanups.push(() => rmSync(sourceParent, { recursive: true, force: true }))
     expect(() => createCodexIsolatedHome(sourceParent, nestedPersistent)).toThrow('must not overlap')
-  })
-
-  it('copies only catalog-owned legacy rollouts and never overwrites stable history', () => {
-    const source = mkdtempSync(join(tmpdir(), 'scry-codex-source-'))
-    const persistent = mkdtempSync(join(tmpdir(), 'scry-codex-persistent-'))
-    const activeId = '019fac8c-b58e-7042-83f6-800768aba871'
-    const archivedId = '019fb20c-14ff-7e21-bb6f-c904048ad469'
-    const otherId = '019fad2e-0aeb-7a20-9c3e-cbeb0a49dde8'
-    const activeName = `rollout-2026-07-29T14-25-30-${activeId}.jsonl`
-    const archivedName = `rollout-2026-07-30T16-02-44-${archivedId}.jsonl`
-    const otherName = `rollout-2026-07-29T17-21-44-${otherId}.jsonl`
-    const sourceActiveDir = join(source, 'sessions', '2026', '07', '29')
-    mkdirSync(sourceActiveDir, { recursive: true })
-    mkdirSync(join(source, 'archived_sessions'))
-    writeFileSync(join(sourceActiveDir, activeName), 'legacy-active')
-    writeFileSync(join(sourceActiveDir, otherName), 'not-owned')
-    writeFileSync(join(source, 'archived_sessions', archivedName), 'legacy-archived')
-    cleanups.push(() => rmSync(source, { recursive: true, force: true }))
-    cleanups.push(() => rmSync(persistent, { recursive: true, force: true }))
-
-    createCodexIsolatedHome(source, persistent, [activeId, archivedId, 'not-a-thread-id'])
-    const targetActive = join(persistent, 'sessions', '2026', '07', '29', activeName)
-    const targetArchived = join(persistent, 'archived_sessions', archivedName)
-    expect(readFileSync(targetActive, 'utf8')).toBe('legacy-active')
-    expect(lstatSync(targetActive).isSymbolicLink()).toBe(false)
-    expect(readFileSync(targetArchived, 'utf8')).toBe('legacy-archived')
-    expect(existsSync(join(persistent, 'sessions', '2026', '07', '29', otherName))).toBe(false)
-
-    writeFileSync(targetActive, 'stable-newer')
-    writeFileSync(join(sourceActiveDir, activeName), 'legacy-older')
-    createCodexIsolatedHome(source, persistent, [activeId])
-    expect(readFileSync(targetActive, 'utf8')).toBe('stable-newer')
   })
 
   it('rejects a session-root symlink and leaves its target intact', () => {

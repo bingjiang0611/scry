@@ -14,7 +14,7 @@ import {
   shellEnv,
   warmShellEnv
 } from './claude-locate'
-import { AgentRuntimeError } from './cli-runtime'
+import { AgentRuntimeError } from './run-outcome'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin } from './db'
@@ -23,7 +23,6 @@ import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker }
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
-  inferLegacyTraceArchiveProvider,
   mirrorTranscript,
   readTraceArchive,
   resolveTranscriptPath,
@@ -35,7 +34,6 @@ import { mergeSessionTurns } from './session-history'
 import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore, createRecentFoldersStore, isSessionProviderId, type AppSessionRef } from './app-store'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
-import { migrateLegacyUserData } from './user-data-migration'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot } from '../shared/trace'
 import {
   normalizeAgentStartRequest,
@@ -329,26 +327,11 @@ const resolvePiProfile = async (id: string): Promise<PiAgentProfile | undefined>
   if (id === 'pi:default') return defaultPiProfile()
   return storedPiProfiles().find((profile) => profile.id === id)
 }
-const appSessionStore = () =>
-  createAppSessionStore(app.getPath('userData'), ({ cwd, externalSessionId }) => {
-    const archive = readTraceArchive({ cwd, sessionId: externalSessionId, userDataDir: app.getPath('userData') })
-    return archive ? inferLegacyTraceArchiveProvider(archive) : undefined
-  })
-const codexSessionIds = () => {
-  try {
-    return appSessionStore().load()
-      .filter((session) => session.providerId === 'codex' && session.externalSessionId)
-      .map((session) => session.externalSessionId as string)
-  } catch {
-    return []
-  }
-}
+const appSessionStore = () => createAppSessionStore(app.getPath('userData'))
 const providerRegistry = new ProviderRegistry(
   createBuiltInProviderAdapters(
     homeDir,
-    process.env.SCRY_PROVIDER_TRANSPORTS,
     join(app.getPath('userData'), 'codex-home-v1'),
-    codexSessionIds,
     join(app.getPath('userData'), 'provider-auth', 'opencode'),
     join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
     { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile }
@@ -2881,11 +2864,6 @@ app.whenReady().then(() => {
   cleanupManagedTurnTemps(app.getPath('userData'))
   cleanupTraceTurnProgressTemps(app.getPath('userData'))
   cleanupTraceArchiveTemps(app.getPath('userData'))
-  try {
-    migrateLegacyUserData(app.getPath('appData'), app.getPath('userData'))
-  } catch (e) {
-    console.warn('[scry] legacy userData migration skipped:', (e as Error)?.message)
-  }
   startupManagedRecovery = (async () => {
     try {
       const traceProgress = await recoverTraceTurnProgress(app.getPath('userData'))

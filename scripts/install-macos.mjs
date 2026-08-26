@@ -25,13 +25,15 @@ function run(command, args, capture = false) {
   return capture ? String(result.stdout).trim() : ''
 }
 
-function validateBundle(path) {
+function validateBundle(path, { staged = false } = {}) {
   accessSync(join(path, 'Contents', 'MacOS', 'Scry'), constants.X_OK)
   if (!existsSync(join(path, 'Contents', 'Resources', 'app.asar'))) throw new Error('安装包缺少 Resources/app.asar')
   const cli = join(path, 'Contents', 'Resources', 'bin', 'scry')
   accessSync(cli, constants.X_OK)
-  const cliVersion = run(cli, ['--version'], true)
-  if (cliVersion !== expectedCliVersion) throw new Error(`内置 CLI 版本不匹配：expected ${expectedCliVersion}, got ${cliVersion || 'unknown'}`)
+  if (!staged) {
+    const cliVersion = run(cli, ['--version'], true)
+    if (cliVersion !== expectedCliVersion) throw new Error(`内置 CLI 版本不匹配：expected ${expectedCliVersion}, got ${cliVersion || 'unknown'}`)
+  }
   const plist = join(path, 'Contents', 'Info.plist')
   const bundleId = run('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], true)
   const version = run('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', plist], true)
