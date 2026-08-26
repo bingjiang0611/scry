@@ -1140,3 +1140,135 @@ describe('managed canonical recorder', () => {
       .resolves.toContain('run-a')
   })
 })
+
+describe('managed provider turn index', () => {
+  const indexPath = (root: string): string =>
+    join(root, '.scry', 'runtime', 'codex', safeKey('session-1'), 'provider-turn-index.json')
+
+  async function startTurn(root: string, turnId: string, startedAt: string): Promise<void> {
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'session-1',
+        turn_id: turnId,
+        prompt: '/rate-workflow 1',
+        timestamp: startedAt
+      }
+    })
+  }
+
+  async function commitTurn(root: string, turnId: string, runId: string): Promise<string> {
+    const evidence = canonicalEvidence()
+    const archiveFingerprint = stableHash({ runId, evidence, timing })
+    const prepared = await prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'codex',
+      sessionId: 'session-1',
+      runId,
+      providerTurnId: turnId,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint
+    })
+    if (prepared.status !== 'prepared') throw new Error(`unexpected prepare status: ${prepared.status}`)
+    const committed = await commitManagedRecorderTurn({
+      workspace: root,
+      provider: 'codex',
+      sessionId: 'session-1',
+      runId,
+      recordId: prepared.recordId,
+      archiveFingerprint,
+      providerTurnId: turnId,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed'
+    })
+    if (committed.status !== 'committed') throw new Error(`unexpected commit status: ${committed.status}`)
+    return prepared.recordId
+  }
+
+  function replay(root: string, turnId: string, runId: string, override: Partial<typeof timing> = {}) {
+    const evidence = canonicalEvidence()
+    const replayTiming = { ...timing, ...override }
+    return prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'codex',
+      sessionId: 'session-1',
+      runId,
+      providerTurnId: turnId,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing: replayTiming,
+      status: 'completed',
+      archiveFingerprint: stableHash({ runId, evidence, timing: replayTiming })
+    })
+  }
+
+  it('canonical commit 增量推进派生索引，使下一轮的否定判断不必全量解析 records', async () => {
+    const root = await workspace()
+    await startTurn(root, 'turn-1', timing.startedAt)
+    const recordId = await commitTurn(root, 'turn-1', 'run-1')
+
+    expect(JSON.parse(await readFile(indexPath(root), 'utf8'))).toEqual({
+      schemaVersion: 1,
+      stamp: { count: 1, maxSequence: 1 },
+      providerTurnRecordIds: { 'turn-1': recordId }
+    })
+
+    // 索引同鲜且不含 turn-2 → 可信否定，仍然正常开出新一轮 handoff。
+    await startTurn(root, 'turn-2', '2026-07-29T13:00:00.000Z')
+    await expect(replay(root, 'turn-2', 'run-2')).resolves.toMatchObject({ status: 'prepared' })
+  })
+
+  it('索引命中时仍按权威记录判定重复与冲突', async () => {
+    const root = await workspace()
+    await startTurn(root, 'turn-1', timing.startedAt)
+    await commitTurn(root, 'turn-1', 'run-1')
+
+    await expect(replay(root, 'turn-1', 'run-1-replay')).resolves.toMatchObject({ status: 'duplicate' })
+    await expect(replay(root, 'turn-1', 'run-1-conflict', {
+      completedAt: '2026-07-29T12:00:09.000Z',
+      durationMs: 9_000
+    })).rejects.toThrow('existing record differs from canonical Scry turn')
+  })
+
+  it('索引 stamp 过期时回退权威全量扫描并重建，不把未见过的记录当成不存在', async () => {
+    const root = await workspace()
+    await startTurn(root, 'turn-1', timing.startedAt)
+    const recordId = await commitTurn(root, 'turn-1', 'run-1')
+    await writeFile(indexPath(root), JSON.stringify({
+      schemaVersion: 1,
+      stamp: { count: 99, maxSequence: 99 },
+      providerTurnRecordIds: {}
+    }))
+
+    await expect(replay(root, 'turn-1', 'run-1-replay')).resolves.toMatchObject({ status: 'duplicate' })
+    expect(JSON.parse(await readFile(indexPath(root), 'utf8'))).toEqual({
+      schemaVersion: 1,
+      stamp: { count: 1, maxSequence: 1 },
+      providerTurnRecordIds: { 'turn-1': recordId }
+    })
+  })
+
+  it('索引同鲜但映射不自洽时落回权威全量扫描', async () => {
+    const root = await workspace()
+    await startTurn(root, 'turn-1', timing.startedAt)
+    const recordId = await commitTurn(root, 'turn-1', 'run-1')
+    await writeFile(indexPath(root), JSON.stringify({
+      schemaVersion: 1,
+      stamp: { count: 1, maxSequence: 1 },
+      providerTurnRecordIds: { 'turn-1': '0'.repeat(32) }
+    }))
+
+    await expect(replay(root, 'turn-1', 'run-1-replay')).resolves.toMatchObject({ status: 'duplicate' })
+    expect(JSON.parse(await readFile(indexPath(root), 'utf8'))).toMatchObject({
+      providerTurnRecordIds: { 'turn-1': recordId }
+    })
+  })
+})
