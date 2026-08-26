@@ -13,6 +13,7 @@ import {
   resolveCommandOnPath,
   resolveRecorderCliPath,
   packagedRecorderCliPath,
+  probeCliVersion,
   runtimeCliEnv,
   sanitizeNestedAgentEnv,
   sanitizeProviderEnv,
@@ -30,6 +31,24 @@ describe('runtime CLI discovery constraints', () => {
     const output = await execFileText('/bin/sh', ['-c', "trap '' TERM; sleep 60"], { timeout: 50 })
     expect(output).toBe('')
     expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('版本探测被 SIGKILL 时把已安装 CLI 标记为不可用', async () => {
+    const probe = await probeCliVersion('/bin/sh', ['-c', 'kill -9 $$'])
+    expect(probe).toMatchObject({
+      health: {
+        state: 'unavailable',
+        transport: 'CLI version probe',
+        lastError: '版本探测被信号 SIGKILL 终止'
+      }
+    })
+  })
+
+  it('版本命令成功才产生 ready health 与版本号', async () => {
+    await expect(probeCliVersion('/bin/sh', ['-c', 'printf "Claude Code 2.1.226\\n"'])).resolves.toMatchObject({
+      version: '2.1.226',
+      health: { state: 'ready', transport: 'CLI version probe' }
+    })
   })
 
   it('只从登录 shell 补齐运行和 Provider 变量，不导入无关 secret', () => {

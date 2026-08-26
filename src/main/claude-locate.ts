@@ -6,6 +6,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, posix, win32 } from 'node:path'
 import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
+import type { ProviderHealth } from '../shared/provider.js'
 
 export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex'
 
@@ -20,34 +21,54 @@ function shellPath(): string {
   return shellPathCache ?? ''
 }
 
-export function execFileText(
+export interface ExecFileOutcome {
+  stdout: string
+  exitCode: number | null
+  signal: NodeJS.Signals | null
+  timedOut: boolean
+  error?: string
+}
+
+export function execFileOutcome(
   file: string,
   args: string[],
   opts: { env?: NodeJS.ProcessEnv; timeout?: number } = {}
-): Promise<string> {
+): Promise<ExecFileOutcome> {
   return new Promise((resolve) => {
     let settled = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const finish = (value: string): void => {
+    let stdout = ''
+    const finish = (outcome: ExecFileOutcome): void => {
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
-      resolve(value)
+      resolve(outcome)
     }
-    const child = spawn(file, args, {
-      env: opts.env,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'ignore']
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(file, args, {
+        env: opts.env,
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'ignore']
+      })
+    } catch (error) {
+      finish({ stdout: '', exitCode: null, signal: null, timedOut: false, error: String((error as Error).message) })
+      return
+    }
+    child.stdout?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => {
+      stdout = `${stdout}${chunk}`.slice(-64 * 1024)
     })
-    let stdout = ''
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk
-    })
-    child.once('error', () => finish(''))
-    child.once('close', (code) => finish(code === 0 ? stdout : ''))
+    child.once('error', (error) => finish({
+      stdout,
+      exitCode: null,
+      signal: null,
+      timedOut: false,
+      error: String(error.message)
+    }))
+    child.once('close', (code, signal) => finish({ stdout, exitCode: code, signal, timedOut: false }))
     timer = setTimeout(() => {
-      finish('')
+      finish({ stdout, exitCode: null, signal: 'SIGKILL', timedOut: true })
       try {
         if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL')
         else child.kill('SIGKILL')
@@ -56,6 +77,15 @@ export function execFileText(
       }
     }, opts.timeout ?? 1500)
   })
+}
+
+export async function execFileText(
+  file: string,
+  args: string[],
+  opts: { env?: NodeJS.ProcessEnv; timeout?: number } = {}
+): Promise<string> {
+  const outcome = await execFileOutcome(file, args, opts)
+  return outcome.exitCode === 0 ? outcome.stdout : ''
 }
 
 async function shellPathAsync(): Promise<string> {
@@ -310,22 +340,41 @@ async function appBundleVersionAsync(path: string): Promise<string | undefined> 
   return version ? `${version} (app)` : undefined
 }
 
-async function tryVersionAsync(path: string, args: string[] = ['--version']): Promise<string | undefined> {
-  const out = (
-    await execFileText(path, args, {
-      env: runtimeCliEnv({ ...(process.env as Record<string, string>), PATH: versionProbePath() }),
-      timeout: 5000
-    })
-  )
-  return normalizeAgentVersion(out)
+interface AgentVersionProbe {
+  version?: string
+  health: ProviderHealth
 }
 
-async function agentVersionAsync(id: string, path: string): Promise<string | undefined> {
+export async function probeCliVersion(path: string, args: string[] = ['--version']): Promise<AgentVersionProbe> {
+  const outcome = await execFileOutcome(path, args, {
+    env: runtimeCliEnv({ ...(process.env as Record<string, string>), PATH: versionProbePath() }),
+    timeout: 5000
+  })
+  const transport = 'CLI version probe'
+  if (outcome.error) {
+    return { health: { state: 'unavailable', transport, lastError: `版本探测无法启动：${outcome.error}`, lastErrorAt: Date.now() } }
+  }
+  if (outcome.timedOut) {
+    return { health: { state: 'unavailable', transport, lastError: '版本探测超时（5s）', lastErrorAt: Date.now() } }
+  }
+  if (outcome.signal) {
+    return { health: { state: 'unavailable', transport, lastError: `版本探测被信号 ${outcome.signal} 终止`, lastErrorAt: Date.now() } }
+  }
+  if (outcome.exitCode !== 0) {
+    return { health: { state: 'unavailable', transport, lastError: `版本探测退出码 ${outcome.exitCode ?? 'unknown'}`, lastErrorAt: Date.now() } }
+  }
+  return {
+    version: normalizeAgentVersion(outcome.stdout),
+    health: { state: 'ready', transport, lastOkAt: Date.now() }
+  }
+}
+
+async function agentVersionAsync(id: string, path: string): Promise<AgentVersionProbe> {
   if (id === 'codex') {
     const bundled = await appBundleVersionAsync(path)
-    if (bundled) return bundled
+    if (bundled) return { version: bundled, health: { state: 'ready', transport: 'App bundle', lastOkAt: Date.now() } }
   }
-  return tryVersionAsync(path, id === 'qoder' ? ['-v'] : ['--version'])
+  return probeCliVersion(path, id === 'qoder' ? ['-v'] : ['--version'])
 }
 
 export interface DetectedAgent {
@@ -334,6 +383,7 @@ export interface DetectedAgent {
   bin: string
   path: string
   version?: string
+  health?: ProviderHealth
 }
 
 // name 是 renderer 使用的 Provider 显示名，bin 才是本地可执行文件名。
@@ -421,7 +471,8 @@ export async function detectAgents(): Promise<DetectedAgent[]> {
               ? await resolveCodexBinAsync()
               : await whichAsync(a.bin))
       if (!path) return null
-      return { ...a, path, version: await agentVersionAsync(a.id, path) }
+      const probe = await agentVersionAsync(a.id, path)
+      return { ...a, path, version: probe.version, health: probe.health }
     })
   )
   return found.filter((a): a is DetectedAgent => a !== null)
