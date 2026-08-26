@@ -206,7 +206,9 @@ export function McpTrustPanel({
         ? 'Codex'
         : runtimeProvider === 'opencode_server'
           ? 'OpenCode'
-          : 'Claude Code'
+          : runtimeProvider === 'pi_rpc'
+            ? 'Pi'
+            : 'Claude Code'
   const configuredButSilent =
     runtimeProvider === 'claude_sdk' ? mcps.filter((mcp) => mcp.enabled && !liveByName.has(mcp.name)) : []
   const labels = useMemo(() => (report ? buildReportLabels(report) : []), [report])

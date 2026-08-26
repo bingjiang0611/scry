@@ -575,11 +575,14 @@ export function SkillsModal({
 const MCP_SCOPE_LABEL: Record<string, string> = {
   '.mcp.json': '项目 MCP（.mcp.json）',
   project: '项目 MCP（~/.claude.json）',
-  user: '用户 MCP（~/.claude.json）'
+  user: '用户 MCP（~/.claude.json）',
+  effective: 'Pi 有效配置（合并后）'
 }
 
 const LIVE_STATE: Record<McpLiveStatus['status'], InventoryState> = {
   connected: 'connected',
+  cached: 'unknown',
+  disconnected: 'unknown',
   failed: 'failed',
   'needs-auth': 'needs-auth',
   'needs-client-registration': 'required',
@@ -589,6 +592,8 @@ const LIVE_STATE: Record<McpLiveStatus['status'], InventoryState> = {
 
 const LIVE_TEXT: Record<McpLiveStatus['status'], string> = {
   connected: 'connected',
+  cached: '仅缓存元数据',
+  disconnected: '尚未连接',
   failed: 'failed',
   'needs-auth': '需认证',
   'needs-client-registration': '需配置 OAuth Client',
@@ -611,8 +616,14 @@ function evidenceForRuntime(value: McpLiveStatus | undefined, capability: Capabi
   if (!state) return { state: 'unknown', label: value.status || 'unknown', detail: 'Provider 返回了未识别的运行态' }
   return {
     state,
-    label: LIVE_TEXT[value.status] + (value.status === 'connected' && value.tools != null ? ' · ' + value.tools + ' tools' : ''),
-    detail: value.serverName || value.serverVersion ? [value.serverName, value.serverVersion].filter(Boolean).join(' · ') : '来自当前 Provider 原生运行时'
+    label: LIVE_TEXT[value.status] + (value.tools != null && (value.status === 'connected' || value.status === 'cached') ? ' · ' + value.tools + ' tools' : ''),
+    detail: value.status === 'cached'
+      ? 'Provider 仅返回缓存中的工具元数据；这不是实时连接证据'
+      : value.status === 'disconnected'
+        ? 'Provider 已加载配置，但 lazy server 尚未建立连接'
+        : value.serverName || value.serverVersion
+          ? [value.serverName, value.serverVersion].filter(Boolean).join(' · ')
+          : '来自当前 Provider 原生运行时'
   }
 }
 
@@ -653,6 +664,8 @@ export function McpModal({
 }) {
   const canManage = capability?.mode === 'manage'
   const readsRuntime = capability?.mode === 'read'
+  const readsPiSnapshot = readsRuntime && capability?.providerId === 'pi'
+  const refreshLabel = readsPiSnapshot ? '刷新快照' : '检测全部'
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
   const loadingConfig = configRefreshing && !capability
@@ -675,16 +688,20 @@ export function McpModal({
           <p>配置、Provider 运行态、本次测试与认证是四份独立证据，不折叠成一个模糊的“健康”结论。</p>
         </div>
         <div className="inventory-modal__head-actions">
-          {loading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? '读取配置中…' : '正在检测全部 MCP…', role: 'status' }} quiet />}
+          {loading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? '读取配置中…' : readsPiSnapshot ? '正在刷新 Pi MCP 快照…' : '正在检测全部 MCP…', role: 'status' }} quiet />}
           <button
             className={'modal-refresh' + (readsRuntime ? ' mcp-refresh-all' : '')}
             onClick={onRefresh}
             disabled={loading || authenticationInProgress}
-            title={readsRuntime ? '启动已授权 MCP，并刷新当前 Provider 的全部原生运行状态' : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
-            aria-label={readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
+            title={readsPiSnapshot
+              ? '重新读取 Pi 脱敏后的有效配置与原生 lazy/runtime 状态；不会主动连接 lazy server'
+              : readsRuntime
+                ? '启动已授权 MCP，并刷新当前 Provider 的全部原生运行状态'
+                : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
+            aria-label={readsPiSnapshot ? '刷新 Pi MCP 快照' : readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
           >
             {refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
-            {readsRuntime && <span>{refreshing ? '检测中…' : '检测全部'}</span>}
+            {readsRuntime && <span>{refreshing ? (readsPiSnapshot ? '刷新中…' : '检测中…') : refreshLabel}</span>}
           </button>
           <button ref={closeRef} className="modal-x" onClick={onClose} aria-label="关闭 MCP"><Icon name="x" /></button>
         </div>

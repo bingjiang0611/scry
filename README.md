@@ -30,6 +30,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 | Codex | 本机 Codex app-server | 实验性 |
 | Qoder | Qoder Agent SDK | 实验性 |
 | OpenCode | OpenCode SDK / server | 实验性 |
+| Pi | 本机 Pi JSONL RPC / 可配置 pi-agent Profile | 实验性；支持模型、Skill、命令与脱敏 MCP snapshot |
 
 ## 开发环境
 

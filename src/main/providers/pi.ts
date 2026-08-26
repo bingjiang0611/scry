@@ -6,6 +6,7 @@ import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
   capabilityUnavailable,
+  type McpSnapshot,
   type ProviderCommand,
   type ProviderContext,
   type ProviderDescriptor,
@@ -22,6 +23,7 @@ import {
   fileOpOf,
   mcpPayloadFailed,
   parseMcp,
+  type McpLiveStatus,
   type ModelUsageRow,
   type TraceEvent
 } from '../../shared/trace'
@@ -292,6 +294,84 @@ interface PiProbe {
   commands: JsonRecord[]
 }
 
+const PI_MCP_SNAPSHOT_HANDLER = 'scry.mcp.snapshot.v1'
+const PI_MCP_RUNTIME_STATUSES = new Set(['connected', 'cached', 'failed', 'needs-auth', 'not-connected', 'disabled'])
+
+interface PiMcpSnapshotResult {
+  snapshot: McpSnapshot
+  reasons: string[]
+  observedAt: number
+}
+
+function requiredString(value: unknown, field: string, max = 4_096): string {
+  if (typeof value !== 'string' || !value || value.length > max) throw new Error(`Pi MCP snapshot ${field} 无效`)
+  return value
+}
+
+function nonnegativeInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Pi MCP snapshot ${field} 无效`)
+  }
+  return value
+}
+
+function parsePiMcpSnapshot(value: unknown): PiMcpSnapshotResult {
+  const root = record(value)
+  if (root.schemaVersion !== 1 || root.lifecycle !== 'ready') {
+    throw new Error(`Pi MCP snapshot schema/lifecycle 不受支持：${String(root.schemaVersion)}/${String(root.lifecycle)}`)
+  }
+  const observedAt = nonnegativeInteger(root.observedAt, 'observedAt')
+  if (!Array.isArray(root.configured)) throw new Error('Pi MCP snapshot configured 无效')
+  const configured = root.configured.map((raw, index) => {
+    const item = record(raw)
+    if (typeof item.enabled !== 'boolean') throw new Error(`Pi MCP snapshot configured[${index}].enabled 无效`)
+    const scope = requiredString(item.scope, `configured[${index}].scope`, 120)
+    const transport = requiredString(item.transport, `configured[${index}].transport`, 40)
+    if (scope !== 'effective' || !['stdio', 'http', 'unix', 'unknown'].includes(transport)) {
+      throw new Error(`Pi MCP snapshot configured[${index}] 坐标无效`)
+    }
+    return {
+      name: requiredString(item.name, `configured[${index}].name`, 240),
+      scope,
+      transport,
+      detail: typeof item.detail === 'string' && item.detail.length <= 4_096 ? item.detail : '',
+      enabled: item.enabled
+    }
+  })
+  const runtimeRoot = record(root.runtime)
+  if (runtimeRoot.version !== 1 || !Array.isArray(runtimeRoot.servers)) {
+    throw new Error('Pi MCP runtime snapshot 无效')
+  }
+  for (const field of ['totalTools', 'totalResources', 'connectedCount', 'disabledCount']) {
+    nonnegativeInteger(runtimeRoot[field], `runtime.${field}`)
+  }
+  const runtime: McpLiveStatus[] = runtimeRoot.servers.map((raw, index) => {
+    const item = record(raw)
+    const status = requiredString(item.status, `runtime.servers[${index}].status`, 40)
+    if (!PI_MCP_RUNTIME_STATUSES.has(status)) throw new Error(`Pi MCP runtime status 不受支持：${status}`)
+    if (typeof item.disabled !== 'boolean') throw new Error(`Pi MCP snapshot runtime.servers[${index}].disabled 无效`)
+    const mappedStatus: McpLiveStatus['status'] = status === 'not-connected'
+      ? 'disconnected'
+      : status as McpLiveStatus['status']
+    return {
+      name: requiredString(item.name, `runtime.servers[${index}].name`, 240),
+      status: mappedStatus,
+      tools: nonnegativeInteger(item.toolCount, `runtime.servers[${index}].toolCount`)
+    }
+  })
+  const configuredNames = new Set(configured.map((item) => item.name))
+  const runtimeNames = new Set(runtime.map((item) => item.name))
+  const reasons: string[] = []
+  if (configuredNames.size !== configured.length || runtimeNames.size !== runtime.length) {
+    throw new Error('Pi MCP snapshot 包含重复 server name')
+  }
+  const missingRuntime = [...configuredNames].filter((name) => !runtimeNames.has(name))
+  const runtimeOnly = [...runtimeNames].filter((name) => !configuredNames.has(name))
+  if (missingRuntime.length > 0) reasons.push(`${missingRuntime.length} 个配置未返回运行态`)
+  if (runtimeOnly.length > 0) reasons.push(`${runtimeOnly.length} 个运行态缺少配置证据`)
+  return { snapshot: { configured, runtime, operations: { authenticate: [] } }, reasons, observedAt }
+}
+
 interface PiEntrySnapshot {
   entries: JsonRecord[]
   leafId: string | null
@@ -437,6 +517,17 @@ export async function probePiAgent(profile: PiAgentProfile, cwd?: string): Promi
         : [],
       commands: Array.isArray(commandRows) ? commandRows.map(record) : []
     }
+  })
+}
+
+async function probePiMcp(profile: PiAgentProfile, cwd: string | undefined, refresh: boolean): Promise<PiMcpSnapshotResult> {
+  return withPiRpc(profile, cwd, ['--mode', 'rpc', '--no-session', '--no-approve', '--offline'], async (rpc) => {
+    const response = await rpc.send({
+      type: 'extension_call',
+      name: PI_MCP_SNAPSHOT_HANDLER,
+      input: { refresh }
+    }, 20_000)
+    return parsePiMcpSnapshot(record(response.data).value)
   })
 }
 
@@ -959,7 +1050,7 @@ export function createPiAdapter(options: {
         available: profiles.length > 0,
         path: profiles[0]?.executable,
         disabledReason: profiles.length > 0 ? undefined : '未检测到 Pi 或已保存的 Pi Agent Profile',
-        capabilities: { skills: 'read', mcp: 'none', commands: 'read', account: 'none' },
+        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' },
         health: { state: profiles.length > 0 ? 'ready' : 'unavailable', transport: 'JSONL RPC subprocess' }
       }
     },
@@ -980,6 +1071,28 @@ export function createPiAdapter(options: {
         },
         getExternalSessionId: () => state.sessionId,
         getProviderTurnId: () => state.providerTurnId
+      }
+    },
+    mcp: {
+      async snapshot(context, refresh = false) {
+        try {
+          const result = await probePiMcp(await profileForContext(context), context.cwd, refresh)
+          return {
+            ...capabilityReady(context, 'read', result.snapshot, result.observedAt),
+            ...(result.reasons.length > 0
+              ? { state: 'degraded' as const, reason: result.reasons.join('；') }
+              : {})
+          }
+        } catch (error) {
+          const message = String((error as Error).message)
+          if (error instanceof PiRpcCommandError && (
+            /Unknown command:\s*extension_call/i.test(message) ||
+            /Extension RPC handler not found/i.test(message)
+          )) {
+            return capabilityUnavailable(context, 'unsupported', '该 Pi Profile 未提供结构化 MCP snapshot bridge；请升级 Pi 与 pi-agent')
+          }
+          return capabilityUnavailable(context, 'unknown', `Pi MCP snapshot 探测失败：${message}`)
+        }
       }
     },
     skills: {
