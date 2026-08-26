@@ -49,7 +49,7 @@ import { capabilityUnavailable, type DeleteSessionResult, type ProviderContext, 
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
-import { probePiAgent } from './providers/pi'
+import { piRpcEnvironment, probePiAgent } from './providers/pi'
 import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
 import { ProviderOperationGate } from './provider-operation-gate'
@@ -1029,7 +1029,10 @@ handleTrusted('agent:detect', async () => {
   const found = new Set(agents.map((agent) => agent.id))
   for (const profile of storedPiProfiles()) {
     if (found.has(profile.id)) continue
-    const versionText = await execFileText(profile.executable, ['--version'], { env: shellEnv(), timeout: 5000 })
+    const versionText = await execFileText(profile.executable, ['--version'], {
+      env: piRpcEnvironment(profile),
+      timeout: 5000
+    })
     const descriptor = descriptorByProvider.get('pi')
     if (!descriptor) continue
     agents.push({
@@ -1053,7 +1056,10 @@ handleTrusted('agent:addPiProfile', async () => {
   if (result.canceled || result.filePaths.length === 0) return null
   try {
     const profile = piProfileForExecutable(result.filePaths[0])
-    const versionText = await execFileText(profile.executable, ['--version'], { env: shellEnv(), timeout: 5000 })
+    const versionText = await execFileText(profile.executable, ['--version'], {
+      env: piRpcEnvironment(profile),
+      timeout: 5000
+    })
     await probePiAgent(profile, currentCwd)
     const stored = piProfileStore().add(profile)
     const descriptor = (await providerRegistry.describe()).find((entry) => entry.id === 'pi')
