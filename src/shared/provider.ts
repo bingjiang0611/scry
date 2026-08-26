@@ -51,6 +51,16 @@ export interface DeleteSessionResult {
   failed: Array<{ store: string; error: string }>
 }
 
+export interface DeleteArchivedSessionsResult {
+  ok: boolean
+  cancelled?: boolean
+  reason?: 'catalog_unavailable' | 'user_cancelled' | 'partial_failure'
+  /** 已完整删除的会话数。 */
+  deleted: number
+  /** 未删除成功的会话；preview 用于在 UI 里指名，reason 沿用单条删除的原因码。 */
+  failures: Array<{ preview: string; reason: NonNullable<DeleteSessionResult['reason']> }>
+}
+
 export interface CapabilityEnvelope<T> {
   providerId: ProviderId
   agentProfileId?: string

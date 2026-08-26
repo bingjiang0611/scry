@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ProjectMeta } from '../env'
-import type { SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
 
 export function useWorkspaceState() {
@@ -42,24 +41,6 @@ export function useWorkspaceState() {
     return dir
   }, [refreshRecent])
 
-  const removeSessionFromProjects = useCallback((projectCwd: string, sessionId: string, providerId: SessionProviderId): void => {
-    ++projectsRequestSeq.current
-    setProjects((prev) =>
-      prev
-        .map((project) =>
-          project.cwd === projectCwd
-            ? {
-                ...project,
-                sessions: project.sessions.filter(
-                  (session) => !(session.sessionId === sessionId && session.providerId === providerId)
-                )
-              }
-            : project
-        )
-        .filter((project) => project.sessions.length > 0)
-    )
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     const projectsSeq = ++projectsRequestSeq.current
@@ -96,7 +77,6 @@ export function useWorkspaceState() {
     loadProjects,
     refreshRecent,
     removeRecentFolder,
-    chooseFolder,
-    removeSessionFromProjects
+    chooseFolder
   }
 }

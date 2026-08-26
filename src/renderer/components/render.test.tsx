@@ -731,7 +731,8 @@ describe('Sidebar 项目分组', () => {
         activeCwd={null}
         onNewChat={() => {}}
         onPick={() => {}}
-        onDelete={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
         onAnalytics={() => {}}
         onDiagnostics={() => {}}
         onSkills={() => {}}
@@ -796,7 +797,8 @@ describe('Sidebar 项目分组', () => {
         activeCwd={null}
         onNewChat={() => {}}
         onPick={() => {}}
-        onDelete={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
         onAnalytics={() => {}}
         analyticsActive
         onDiagnostics={() => {}}
@@ -826,7 +828,8 @@ describe('Sidebar 项目分组', () => {
         activeProviderId="qoder"
         onNewChat={() => {}}
         onPick={() => {}}
-        onDelete={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
       />
     )
 
@@ -861,7 +864,8 @@ describe('Sidebar 项目分组', () => {
         runningRunIds={new Set(['run-active'])}
         onNewChat={() => {}}
         onPick={() => {}}
-        onDelete={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
       />
     )
 
@@ -871,6 +875,116 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-label="正在运行"')
     expect(html.match(/class="sb-running"/g)).toHaveLength(1)
+  })
+
+  it('置顶会话进入独立分组并带项目名，不在原项目分组里重复出现', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[
+          {
+            cwd: '/Users/example/rate-native',
+            name: 'rate-native',
+            mtime: 3,
+            sessions: [
+              { sessionId: 'pinned-1', externalSessionId: 'pinned-1', providerId: 'codex', mtime: 3, preview: '启动需求交付流程', count: 2, pinnedAt: 20 },
+              { sessionId: 'plain-1', externalSessionId: 'plain-1', providerId: 'codex', mtime: 2, preview: '普通会话', count: 1 }
+            ]
+          },
+          {
+            cwd: '/Users/example/scry',
+            name: 'scry',
+            mtime: 1,
+            sessions: [
+              { sessionId: 'pinned-2', externalSessionId: 'pinned-2', providerId: 'claude', mtime: 1, preview: '侧边栏置顶方案', count: 1, pinnedAt: 30 }
+            ]
+          }
+        ]}
+        activeCwd={null}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+      />
+    )
+
+    expect(html).toContain('置顶 <span class="cnt">2</span>')
+    expect(html).toContain('class="sb-pinned"')
+    // 置顶按 pinnedAt 倒序，最近置顶的排最前。
+    expect(html.indexOf('侧边栏置顶方案')).toBeLessThan(html.indexOf('启动需求交付流程'))
+    expect(html).toContain('<span class="sb-sess-proj">rate-native</span>')
+    expect(html).toContain('<span class="sb-sess-proj">scry</span>')
+    // 只剩 rate-native 一个「最近」分组：scry 的会话被置顶分组带走了。
+    expect(html).toContain('最近 <span class="cnt">1</span>')
+    expect(html.match(/class="sb-sess-proj"/g)).toHaveLength(2)
+  })
+
+  it('会话行提供置顶与存档按钮，且不再有右键删除菜单', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[{
+          cwd: '/Users/example/project',
+          name: 'project',
+          mtime: 1,
+          sessions: [{ sessionId: 's1', externalSessionId: 's1', providerId: 'claude', mtime: 1, preview: '会话一', count: 1 }]
+        }]}
+        activeCwd={null}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+      />
+    )
+
+    expect(html).toContain('class="sb-sess-row"')
+    expect(html).toContain('aria-label="置顶会话：会话一"')
+    expect(html).toContain('aria-pressed="false"')
+    expect(html).toContain('aria-label="存档会话：会话一"')
+    // 操作按钮必须是会话按钮的兄弟节点：button 里不能再嵌 button。
+    expect(html).toContain('</button><span class="sb-sess-acts">')
+    expect(html).not.toContain('ctxmenu')
+    expect(html).not.toContain('删除会话')
+    expect(html).not.toContain('aria-haspopup="menu"')
+  })
+
+  it('已置顶的会话按钮标注取消置顶', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[{
+          cwd: '/Users/example/project',
+          name: 'project',
+          mtime: 1,
+          sessions: [{ sessionId: 's1', externalSessionId: 's1', providerId: 'claude', mtime: 1, preview: '会话一', count: 1, pinnedAt: 5 }]
+        }]}
+        activeCwd={null}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+      />
+    )
+
+    expect(html).toContain('class="sb-act on"')
+    expect(html).toContain('aria-label="取消置顶：会话一"')
+    expect(html).toContain('aria-pressed="true"')
+  })
+
+  it('存档后给出可撤销提示', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[]}
+        activeCwd={null}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+        archiveUndo={{ preview: '会话一' }}
+        onUndoArchive={() => {}}
+      />
+    )
+
+    expect(html).toContain('class="sb-undo"')
+    expect(html).toContain('已存档「会话一」')
+    expect(html).toContain('撤销')
   })
 })
 
@@ -3525,7 +3639,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
 })
 
 import { DiagnosticsView } from './DiagnosticsView'
-import { filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
+import { ArchivedChatsPanel, filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
 
 describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => {
   const readyProps: ComponentProps<typeof DiagnosticsView> = {
@@ -3834,13 +3948,87 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
 describe('McpModal 渲染：pending 不伪装 connected', () => {
   it('设置弹窗把当前主题呈现为可访问的单选项', () => {
     const html = renderToStaticMarkup(
-      <SettingsModal theme="light" onThemeChange={() => {}} onClose={() => {}} />
+      <SettingsModal theme="light" onThemeChange={() => {}} onSessionsChanged={() => {}} onClose={() => {}} />
     )
     expect(html).toContain('class="modal settings-modal"')
     expect(html).toContain('role="radiogroup" aria-label="界面主题"')
     expect(html).toContain('class="theme-option active" role="radio" aria-checked="true"')
     expect(html).toContain('浅色')
     expect(html).toContain('立即应用到全部视图')
+  })
+
+  it('设置弹窗用左侧 tab 分区，默认停在外观', () => {
+    const html = renderToStaticMarkup(
+      <SettingsModal theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onClose={() => {}} />
+    )
+    expect(html).toContain('class="settings-rail" aria-label="设置分区"')
+    expect(html).toContain('class="settings-tab active"')
+    expect(html).toContain('已存档会话')
+    // 首帧还没读到索引，不展示假的 0。
+    expect(html).not.toContain('<span class="cnt">0</span>')
+  })
+
+  it('已存档会话读不到索引时说明不可用，而不是显示没有存档', () => {
+    const html = renderToStaticMarkup(
+      <ArchivedChatsPanel projects={null} onRefresh={async () => {}} onSessionsChanged={() => {}} />
+    )
+    expect(html).toContain('会话索引不可用')
+    expect(html).not.toContain('没有已存档会话')
+  })
+
+  it('确实没有已存档会话时给出引导空态，并禁用全部删除', () => {
+    const html = renderToStaticMarkup(
+      <ArchivedChatsPanel projects={[]} onRefresh={async () => {}} onSessionsChanged={() => {}} />
+    )
+    expect(html).toContain('没有已存档会话')
+    expect(html).toContain('class="arch-danger" disabled=""')
+  })
+
+  it('已存档会话按项目分组，每行给出取消存档与永久删除', () => {
+    const html = renderToStaticMarkup(
+      <ArchivedChatsPanel
+        projects={[{
+          cwd: '/Users/example/rate-native',
+          name: 'rate-native',
+          mtime: 2,
+          sessions: [{
+            sessionId: 's1',
+            externalSessionId: 's1',
+            providerId: 'codex',
+            mtime: 2,
+            preview: '迁移埋点上报 MCP',
+            count: 24,
+            archivedAt: Date.UTC(2026, 7, 25, 9, 12)
+          }]
+        }]}
+        onRefresh={async () => {}}
+        onSessionsChanged={() => {}}
+      />
+    )
+    expect(html).toContain('class="arch-group-head"')
+    expect(html).toContain('rate-native')
+    expect(html).toContain('1 个会话')
+    expect(html).toContain('迁移埋点上报 MCP')
+    expect(html).toContain('24 轮')
+    expect(html).toContain('存档于 2026年8月25日')
+    expect(html).toContain('取消存档')
+    expect(html).toContain('aria-label="永久删除：迁移埋点上报 MCP"')
+  })
+
+  it('存档时间缺失时如实标注未知', () => {
+    const html = renderToStaticMarkup(
+      <ArchivedChatsPanel
+        projects={[{
+          cwd: '',
+          name: 'Chats',
+          mtime: 1,
+          sessions: [{ sessionId: 's1', externalSessionId: 's1', providerId: 'claude', mtime: 1, preview: '临时问题', count: 1 }]
+        }]}
+        onRefresh={async () => {}}
+        onSessionsChanged={() => {}}
+      />
+    )
+    expect(html).toContain('存档时间未知')
   })
 
   it('Skill 与 MCP 首次后台读取时立即展示诚实加载态', () => {

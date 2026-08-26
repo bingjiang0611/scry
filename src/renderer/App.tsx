@@ -29,7 +29,7 @@ import {
   reduceRightSurfaceState,
   type RightSurfaceAction
 } from './right-surface'
-import type { ParsedTurn } from './env'
+import type { ParsedTurn, SessionMeta, SessionRef } from './env'
 import { resolveTurnDiffReview, sessionNetDiffReview } from './turn-diff'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
@@ -505,6 +505,7 @@ export function App() {
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   const [view, setView] = useState<AppView>('chat') // 对话/诊断/分析
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
@@ -1008,22 +1009,31 @@ export function App() {
     })
   }
 
-  const deleteSession = async (
-    projectCwd: string,
-    sessionId: string,
-    providerId: SessionProviderId,
-    externalSessionId?: string,
-    agentProfileId?: string
-  ): Promise<void> => {
-    const result = await window.scry.deleteSession({
-      providerId,
-      agentProfileId,
-      cwd: projectCwd,
-      externalSessionId: externalSessionId ?? sessionId
-    })
-    if (!result.ok) return
-    // 乐观移除：只删这一条、保持其余顺序，不全量重扫重排（避免删除后列表顺序跳动）
-    workspace.removeSessionFromProjects(projectCwd, sessionId, providerId)
+  const sessionRefOf = (cwd: string, session: SessionMeta): SessionRef => ({
+    providerId: session.providerId,
+    agentProfileId: session.agentProfileId,
+    cwd,
+    externalSessionId: session.externalSessionId ?? session.sessionId
+  })
+
+  // 置顶与存档都会让会话换分组，所以重新拉一次列表而不是就地改：顺序变化是预期结果。
+  const togglePinSession = async (cwd: string, session: SessionMeta): Promise<void> => {
+    await window.scry.setSessionPinned(sessionRefOf(cwd, session), !session.pinnedAt)
+    workspace.loadProjects()
+  }
+
+  const archiveSession = async (cwd: string, session: SessionMeta): Promise<void> => {
+    const changed = await window.scry.setSessionArchived(sessionRefOf(cwd, session), true)
+    if (!changed) return
+    setArchiveUndo({ ref: sessionRefOf(cwd, session), preview: session.preview })
+    workspace.loadProjects()
+  }
+
+  const undoArchive = async (): Promise<void> => {
+    if (!archiveUndo) return
+    await window.scry.setSessionArchived(archiveUndo.ref, false)
+    setArchiveUndo(null)
+    workspace.loadProjects()
   }
 
   const openSkills = (): void => {
@@ -1170,7 +1180,10 @@ export function App() {
           runningRunIds={runningRunIds}
           onNewChat={newConversation}
           onPick={pickSession}
-          onDelete={deleteSession}
+          onTogglePin={(cwd, session) => void togglePinSession(cwd, session)}
+          onArchive={(cwd, session) => void archiveSession(cwd, session)}
+          archiveUndo={archiveUndo}
+          onUndoArchive={() => void undoArchive()}
           onDiagnostics={() => changeView('diagnostics')}
           diagnosticsActive={view === 'diagnostics'}
           onAnalytics={() => changeView('analytics')}
@@ -1409,6 +1422,10 @@ export function App() {
             <SettingsModal
               theme={theme}
               onThemeChange={changeTheme}
+              onSessionsChanged={() => {
+                setArchiveUndo(null)
+                workspace.loadProjects()
+              }}
               onClose={() => setShowSettings(false)}
             />
           )}

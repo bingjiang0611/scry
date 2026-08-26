@@ -281,4 +281,94 @@ describe('app-store', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('置顶只标记会话，不影响它留在原项目分组里', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.record({ providerId: 'codex', runtimeProvider: 'codex_cli', externalSessionId: 's1', cwd: '/repo/a', prompt: 'pin me' })
+      const ref = { providerId: 'codex' as const, cwd: '/repo/a', externalSessionId: 's1' }
+
+      expect(store.setPinned(ref, true)).toBe(true)
+      expect(store.listProjects()[0].sessions[0].pinnedAt).toEqual(expect.any(Number))
+      expect(store.listArchivedProjects()).toEqual([])
+
+      expect(store.setPinned(ref, false)).toBe(true)
+      expect(store.listProjects()[0].sessions[0].pinnedAt).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('存档把会话移出 listProjects 并清掉置顶，取消存档能放回原项目', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.record({ providerId: 'claude', runtimeProvider: 'claude_sdk', externalSessionId: 's1', cwd: '/repo/a', prompt: 'archive me' })
+      store.record({ providerId: 'claude', runtimeProvider: 'claude_sdk', externalSessionId: 's2', cwd: '/repo/a', prompt: 'keep me' })
+      const ref = { providerId: 'claude' as const, cwd: '/repo/a', externalSessionId: 's1' }
+      store.setPinned(ref, true)
+
+      expect(store.setArchived(ref, true)).toBe(true)
+      expect(store.listProjects()[0].sessions.map((s) => s.sessionId)).toEqual(['s2'])
+      const archived = store.listArchivedProjects()
+      expect(archived).toHaveLength(1)
+      expect(archived[0].sessions[0]).toMatchObject({ sessionId: 's1', archivedAt: expect.any(Number) })
+      // 已存档会话不出现在侧边栏，置顶标记一并清掉。
+      expect(archived[0].sessions[0].pinnedAt).toBeUndefined()
+
+      expect(store.setArchived(ref, false)).toBe(true)
+      expect(store.listProjects()[0].sessions.map((s) => s.sessionId).sort()).toEqual(['s1', 's2'])
+      expect(store.listArchivedProjects()).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('定位不到会话时置顶与存档如实返回 false，不写入空记录', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.record({ providerId: 'codex', runtimeProvider: 'codex_cli', externalSessionId: 's1', cwd: '/repo/a', prompt: 'only session' })
+      const missing = { providerId: 'codex' as const, cwd: '/repo/a', externalSessionId: 'nope' }
+
+      expect(store.setPinned(missing, true)).toBe(false)
+      expect(store.setArchived(missing, true)).toBe(false)
+      expect(store.load()).toHaveLength(1)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('老索引没有 pinnedAt / archivedAt 仍是健康 catalog，不降级到备份', () => {
+    const dir = tempDir()
+    try {
+      writeFileSync(join(dir, 'app-sessions.json'), JSON.stringify([
+        { sessionId: 's1', externalSessionId: 's1', providerId: 'codex', cwd: '/repo/a', preview: 'legacy', ts: 1 }
+      ]))
+      const store = createAppSessionStore(dir)
+
+      expect(store.listProjects()[0].sessions[0]).toMatchObject({ sessionId: 's1', preview: 'legacy' })
+      expect(store.listProjects()[0].sessions[0].pinnedAt).toBeUndefined()
+      expect(store.listArchivedProjects()).toEqual([])
+      expect(store.health()).toMatchObject({ status: 'ready', source: 'primary' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('pinnedAt 不是有限数字时按损坏索引处理，不静默当成已置顶', () => {
+    const dir = tempDir()
+    try {
+      writeFileSync(join(dir, 'app-sessions.json'), JSON.stringify([
+        { sessionId: 's1', externalSessionId: 's1', providerId: 'codex', cwd: '/repo/a', preview: 'broken', ts: 1, pinnedAt: 'soon' }
+      ]))
+      const store = createAppSessionStore(dir)
+
+      expect(() => store.listProjects()).toThrow('均不可用')
+      expect(store.health()).toMatchObject({ status: 'unavailable' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

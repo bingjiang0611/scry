@@ -32,7 +32,7 @@ import {
   type TraceArchiveTurn
 } from './transcript-archive'
 import { mergeSessionTurns } from './session-history'
-import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore, createRecentFoldersStore } from './app-store'
+import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore, createRecentFoldersStore, isSessionProviderId, type AppSessionRef } from './app-store'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { migrateLegacyUserData } from './user-data-migration'
@@ -45,7 +45,7 @@ import {
   type AgentStartRequest,
   type RuntimeProvider
 } from '../shared/runtime'
-import { capabilityUnavailable, type DeleteSessionResult, type ProviderContext, type ProviderId, type SessionProviderId } from '../shared/provider'
+import { capabilityUnavailable, type DeleteArchivedSessionsResult, type DeleteSessionResult, type ProviderContext, type ProviderId, type SessionProviderId } from '../shared/provider'
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
@@ -1393,10 +1393,14 @@ handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
   }))
 })
 
+type SessionDeletionRequest = Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }
+
 // 删除一个历史会话。工作区 .scry/ 是独立 canonical evidence，明确保留。
-handleTrusted(
-  'agent:deleteSession',
-  async (_e, p: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult> => {
+// confirm / notifyFailure 由调用方决定：单条删除各弹一次系统弹窗，批量删除只在批次首尾各弹一次。
+async function deleteOneSession(
+  p: SessionDeletionRequest,
+  options: { confirm: boolean; notifyFailure: boolean }
+): Promise<DeleteSessionResult> {
     const empty = (): Pick<DeleteSessionResult, 'deleted' | 'retained' | 'failed'> => ({
       deleted: [],
       retained: ['workspace .scry/ canonical turn evidence', 'Provider-native session transcript/history'],
@@ -1424,20 +1428,22 @@ handleTrusted(
     })
     if (!reserved) return { ok: false, reason: 'active_session', ...empty() }
     try {
-      const confirmOptions = {
-        type: 'warning' as const,
-        buttons: ['取消', '删除 Scry 会话副本'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-        message: '删除这个历史会话？',
-        detail: '将删除 Scry 的 catalog、archive、附件、SQLite 和 usage 记录。工作区 .scry/ canonical evidence 与 Provider 原生 transcript/history 会保留。'
-      }
-      const confirmation = win && !win.isDestroyed()
-        ? await dialog.showMessageBox(win, confirmOptions)
-        : await dialog.showMessageBox(confirmOptions)
-      if (confirmation.response !== 1) {
-        return { ok: false, cancelled: true, reason: 'user_cancelled', ...empty() }
+      if (options.confirm) {
+        const confirmOptions = {
+          type: 'warning' as const,
+          buttons: ['取消', '删除 Scry 会话副本'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          message: '删除这个历史会话？',
+          detail: '将删除 Scry 的 catalog、archive、附件、SQLite 和 usage 记录。工作区 .scry/ canonical evidence 与 Provider 原生 transcript/history 会保留。'
+        }
+        const confirmation = win && !win.isDestroyed()
+          ? await dialog.showMessageBox(win, confirmOptions)
+          : await dialog.showMessageBox(confirmOptions)
+        if (confirmation.response !== 1) {
+          return { ok: false, cancelled: true, reason: 'user_cancelled', ...empty() }
+        }
       }
       return contextAdmission.run(admissionKey, async () => {
         // Matching starts are fenced by deletionKey. The context admission is reacquired
@@ -1500,13 +1506,15 @@ handleTrusted(
         deleteCatalog: () => sessionStore.remove({ providerId, agentProfileId, cwd, externalSessionId })
       })
       if (!result.ok) {
-        const failureOptions = {
-          type: 'error' as const,
-          message: '会话未完整删除，catalog 已保留供重试',
-          detail: result.failed.map((failure) => `${failure.store}: ${failure.error}`).join('\n')
+        if (options.notifyFailure) {
+          const failureOptions = {
+            type: 'error' as const,
+            message: '会话未完整删除，catalog 已保留供重试',
+            detail: result.failed.map((failure) => `${failure.store}: ${failure.error}`).join('\n')
+          }
+          if (win && !win.isDestroyed()) await dialog.showMessageBox(win, failureOptions)
+          else await dialog.showMessageBox(failureOptions)
         }
-        if (win && !win.isDestroyed()) await dialog.showMessageBox(win, failureOptions)
-        else await dialog.showMessageBox(failureOptions)
         return result
       }
       const key = providerContextKey(providerId, cwd, agentProfileId)
@@ -1521,8 +1529,92 @@ handleTrusted(
     } finally {
       deletingSessions.delete(deletionKey)
     }
+}
+
+handleTrusted('agent:deleteSession', (_e, p: SessionDeletionRequest) =>
+  deleteOneSession(p, { confirm: true, notifyFailure: true }))
+
+function sessionRefFromRequest(p: unknown): AppSessionRef | null {
+  if (!p || typeof p !== 'object') return null
+  const request = p as Partial<AppSessionRef>
+  if (typeof request.externalSessionId !== 'string' || !request.externalSessionId) return null
+  if (!isSessionProviderId(request.providerId)) return null
+  if (request.agentProfileId != null && typeof request.agentProfileId !== 'string') return null
+  return {
+    providerId: request.providerId,
+    agentProfileId: request.agentProfileId,
+    cwd: typeof request.cwd === 'string' ? request.cwd : '',
+    externalSessionId: request.externalSessionId
   }
-)
+}
+
+// 置顶与存档只改 catalog 标记，不动 turn/usage/trace 数据。
+handleTrusted('agent:setSessionPinned', (_e, p: unknown, pinned: unknown) => {
+  const ref = sessionRefFromRequest(p)
+  if (!ref || typeof pinned !== 'boolean') throw new Error('无效的置顶请求')
+  return appSessionStore().setPinned(ref, pinned)
+})
+
+handleTrusted('agent:setSessionArchived', (_e, p: unknown, archived: unknown) => {
+  const ref = sessionRefFromRequest(p)
+  if (!ref || typeof archived !== 'boolean') throw new Error('无效的存档请求')
+  return appSessionStore().setArchived(ref, archived)
+})
+
+handleTrusted('agent:listArchivedSessions', () => appSessionStore().listArchivedProjects())
+
+handleTrusted('agent:deleteArchivedSessions', async (): Promise<DeleteArchivedSessionsResult> => {
+  let targets: Array<{ request: SessionDeletionRequest; preview: string }>
+  try {
+    targets = appSessionStore()
+      .load()
+      .filter((session) => session.archivedAt)
+      .map((session) => ({
+        request: {
+          providerId: session.providerId ?? 'legacy_unknown',
+          agentProfileId: session.agentProfileId,
+          cwd: session.cwd,
+          externalSessionId: session.externalSessionId ?? session.sessionId
+        },
+        preview: session.preview
+      }))
+  } catch {
+    return { ok: false, reason: 'catalog_unavailable', deleted: 0, failures: [] }
+  }
+  if (targets.length === 0) return { ok: true, deleted: 0, failures: [] }
+  const confirmOptions = {
+    type: 'warning' as const,
+    buttons: ['取消', `删除全部 ${targets.length} 个`],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    message: `永久删除全部 ${targets.length} 个已存档会话？`,
+    detail: '将删除 Scry 的 catalog、archive、附件、SQLite 和 usage 记录。工作区 .scry/ canonical evidence 与 Provider 原生 transcript/history 会保留。'
+  }
+  const confirmation = win && !win.isDestroyed()
+    ? await dialog.showMessageBox(win, confirmOptions)
+    : await dialog.showMessageBox(confirmOptions)
+  if (confirmation.response !== 1) {
+    return { ok: false, cancelled: true, reason: 'user_cancelled', deleted: 0, failures: [] }
+  }
+  let deleted = 0
+  const failures: DeleteArchivedSessionsResult['failures'] = []
+  for (const target of targets) {
+    const result = await deleteOneSession(target.request, { confirm: false, notifyFailure: false })
+    if (result.ok) deleted += 1
+    else failures.push({ preview: target.preview, reason: result.reason ?? 'partial_failure' })
+  }
+  if (failures.length > 0) {
+    const failureOptions = {
+      type: 'error' as const,
+      message: `${failures.length} 个已存档会话未删除，catalog 已保留供重试`,
+      detail: failures.map((failure) => `${failure.preview || '(无预览)'}: ${failure.reason}`).join('\n')
+    }
+    if (win && !win.isDestroyed()) await dialog.showMessageBox(win, failureOptions)
+    else await dialog.showMessageBox(failureOptions)
+  }
+  return { ok: failures.length === 0, reason: failures.length > 0 ? 'partial_failure' : undefined, deleted, failures }
+})
 
 interface RunControl {
   runId: string
