@@ -3904,21 +3904,39 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(row).toContain('认证成功，运行状态已刷新')
   })
 
-  it('Provider 返回未知运行态时诚实降级展示，不让整个 renderer 崩溃', () => {
+  it('Pi lazy 与缓存态保持非连接语义，不伪装 connected 或 failed', () => {
     const html = renderToStaticMarkup(
       <McpModal
-        mcps={[{ name: 'legacy', scope: 'user', transport: 'stdio', detail: 'legacy mcp', enabled: true }]}
+        mcps={[
+          { name: 'cached', scope: 'effective', transport: 'http', detail: 'https://mcp.example.test', enabled: true },
+          { name: 'lazy', scope: 'effective', transport: 'stdio', detail: 'lazy-mcp', enabled: true }
+        ]}
         status={{}}
-        live={[{ name: 'legacy', status: 'disconnected' } as unknown as ComponentProps<typeof McpModal>['live'][number]]}
+        live={[
+          { name: 'cached', status: 'cached', tools: 7 },
+          { name: 'lazy', status: 'disconnected', tools: 0 }
+        ]}
         refreshing={false}
+        capability={{
+          providerId: 'pi', agentProfileId: 'pi:test', cwd: '/repo', mode: 'read', state: 'ready',
+          data: { configured: [], runtime: [] }
+        }}
         onTest={() => {}}
         onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
     )
-    expect(html).toContain('data-semantic-state="unknown"')
-    expect(html).toContain('disconnected')
+    expect(html).toContain('Pi 有效配置（合并后）')
+    expect(html).toContain('aria-label="刷新 Pi MCP 快照"')
+    expect(html).toContain('刷新快照')
+    expect(html).toContain('不会主动连接 lazy server')
+    expect(html).toContain('仅缓存元数据 · 7 tools')
+    expect(html).toContain('这不是实时连接证据')
+    expect(html).toContain('尚未连接')
+    expect(html).toContain('lazy server 尚未建立连接')
+    expect(html).not.toContain('inventory-state--connected')
+    expect(html).not.toContain('inventory-state--failed')
   })
 
   it('只读 Provider 不再展示无效的单项测试按钮，改为明确检测全部运行态', () => {

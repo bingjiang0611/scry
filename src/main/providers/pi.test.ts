@@ -54,6 +54,25 @@ process.stdin.on('data', (chunk) => {
         sourceInfo: { scope: 'project', path: '/repo/.claude/skills/rate-workflow/SKILL.md' }
       }
     ] })
+    else if (command.type === 'extension_call' && command.name === 'scry.mcp.snapshot.v1') response({ value: {
+      schemaVersion: 1,
+      lifecycle: 'ready',
+      observedAt: 1700000000000,
+      configured: [
+        { name: 'docs', scope: 'effective', transport: 'http', detail: 'https://mcp.example.test/mcp', enabled: true },
+        { name: 'lazy', scope: 'effective', transport: 'stdio', detail: 'lazy-mcp', enabled: true },
+        { name: 'off', scope: 'effective', transport: 'stdio', detail: 'off-mcp', enabled: false }
+      ],
+      runtime: {
+        version: 1,
+        servers: [
+          { name: 'docs', status: 'cached', toolCount: 7, resourceCount: 2, disabled: false },
+          { name: 'lazy', status: 'not-connected', toolCount: 0, disabled: false },
+          { name: 'off', status: 'disabled', toolCount: 0, disabled: true }
+        ],
+        totalTools: 7, totalResources: 2, connectedCount: 0, disabledCount: 1
+      }
+    } })
     else if (command.type === 'get_entries') {
       const start = command.since == null ? 0 : entries.findIndex((entry) => entry.id === command.since) + 1
       if (command.since != null && start === 0) {
@@ -176,6 +195,25 @@ describe('Pi RPC Provider', () => {
           { name: 'review', dir: '/repo/.pi/agent/skills/review', scope: 'project', description: 'Review code', enabled: true }
         ])
       })
+      await expect(adapter.mcp!.snapshot({ providerId: 'pi', agentProfileId: profile.id, cwd }, true)).resolves.toMatchObject({
+        state: 'ready',
+        mode: 'read',
+        observedAt: 1700000000000,
+        data: {
+          configured: [
+            expect.objectContaining({ name: 'docs', scope: 'effective', transport: 'http', enabled: true }),
+            expect.objectContaining({ name: 'lazy', enabled: true }),
+            expect.objectContaining({ name: 'off', enabled: false })
+          ],
+          runtime: [
+            { name: 'docs', status: 'cached', tools: 7 },
+            { name: 'lazy', status: 'disconnected', tools: 0 },
+            { name: 'off', status: 'disabled', tools: 0 }
+          ],
+          operations: { authenticate: [] }
+        }
+      })
+      await expect(adapter.describe()).resolves.toMatchObject({ capabilities: { mcp: 'read' } })
     })
   }, 20_000)
 

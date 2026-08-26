@@ -1213,7 +1213,13 @@ handleTrusted('agent:toggleSkill', (_e, p: { context: ProviderContext; name: str
   withProviderOperation(p.context.providerId, () => providerRegistry.setSkillEnabled(p.context, p.name, p.enabled), p.context.agentProfileId)
 )
 handleTrusted('agent:mcpSnapshot', async (_e, p: { context: ProviderContext; refresh?: boolean }) => {
-  if (p.context.providerId === 'pi') return providerRegistry.mcpSnapshot(p.context, false)
+  if (p.context.providerId === 'pi') {
+    return withProviderOperation(
+      p.context.providerId,
+      () => providerRegistry.mcpSnapshot(p.context, p.refresh === true),
+      p.context.agentProfileId
+    )
+  }
   if (!p.refresh) return providerRegistry.mcpSnapshot(p.context, false)
   return withProviderOperation(p.context.providerId, async () => {
     const snapshot = p.refresh ? await ensureMcpExecutionAuthorized(p.context, 'live') : null
@@ -1292,7 +1298,7 @@ handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
     return capabilityUnavailable(context, 'unsupported', '该 Provider 已通过 SCRY_DISABLED_PROVIDERS 禁用')
   }
   if (context.providerId === 'pi') {
-    return capabilityUnavailable(context, 'unsupported', 'Pi RPC 没有结构化 MCP 配置与连接状态接口')
+    return capabilityUnavailable(context, 'unsupported', 'Pi snapshot 仅返回脱敏后的有效配置与运行态，不包含 MCP Guard 所需的可执行配置和凭据指纹')
   }
   const snapshot = buildMcpExecutionSnapshot({
     providerId: context.providerId,
