@@ -174,7 +174,8 @@ export function ChatView({
   onPermissionMode,
   onRescan
 }: ChatViewProps) {
-  const selectedAgentName = agents.find((agent) => agent.id === selectedAgentId)?.name ?? '当前 Agent'
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
+  const selectedAgentName = selectedAgent?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
   const agentGroups = groupAgentsByProvider(agents)
   const unavailableProviderCount = agentGroups.filter((group) =>
@@ -243,7 +244,11 @@ export function ChatView({
       description: option.description
     }))
   ]
-  const composerStatus = composerError ?? sendBlockedReason
+  // 冷启动会先用缓存目录渲染，再在后台复核 Provider 权限。复核期间仍 fail closed，
+  // 但不把这个正常的短暂阶段每次都渲染成红色错误或“Provider 不可发送”。
+  const hideTransientRunControlStatus = runControlsLoading && selectedAgent != null && selectedAgent.health?.state !== 'unavailable'
+  const visibleSendBlockedReason = hideTransientRunControlStatus ? null : sendBlockedReason
+  const composerStatus = composerError ?? visibleSendBlockedReason
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
@@ -563,7 +568,7 @@ export function ChatView({
           className="input"
           aria-label="描述任务"
           aria-describedby={composerStatus ? 'composer-status' : undefined}
-          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
+          placeholder={visibleSendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
           value={input}
           onChange={(event) => onInput(event.target.value)}
           onPaste={(event) => {
@@ -681,7 +686,7 @@ export function ChatView({
             aria-busy={submitting}
             aria-label={sendActionLabel}
             aria-describedby={composerStatus ? 'composer-status' : undefined}
-            title={sendBlockedReason ?? sendActionLabel}
+            title={runControlsLoading && sendBlockedReason ? '正在后台复核运行权限' : sendBlockedReason ?? sendActionLabel}
           >
             <Icon name="arrowUp" />
             <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>

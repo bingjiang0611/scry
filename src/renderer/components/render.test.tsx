@@ -1889,7 +1889,12 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
 
   it('可选模型后台读取时保持自动模型语义，不把 composer 伪装成阻塞态', () => {
     const chatHtml = renderWelcome({
+      agents: [{
+        id: 'claude', name: 'Claude Code', bin: 'claude', path: '/usr/local/bin/claude',
+        health: { state: 'ready', transport: 'Agent SDK' }
+      }],
       runControlsLoading: true,
+      sendBlockedReason: '最后已知模型目录；正在向 Provider 复核运行权限',
       runControlCatalog: {
         models: [],
         permissions: RUN_CONTROL_PROPS.runControlCatalog.permissions
@@ -1901,6 +1906,23 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('正在后台读取可选模型；当前使用 Provider 默认模型')
     expect(chatHtml).not.toContain('读取模型…')
     expect(chatHtml).not.toContain('id="composer-status"')
+    expect(chatHtml).not.toContain('当前 Provider 不可发送；草稿会保留')
+    expect(chatHtml).not.toContain('最后已知模型目录；正在向 Provider 复核运行权限')
+    expect(chatHtml).toContain('title="正在后台复核运行权限"')
+  })
+
+  it('Provider 确认不可用时即使运行控制仍在加载，也保留真实阻塞错误', () => {
+    const chatHtml = renderWelcome({
+      agents: [{
+        id: 'claude', name: 'Claude Code', bin: 'claude', path: '/usr/local/bin/claude',
+        health: { state: 'unavailable', transport: 'Agent SDK', lastError: '版本探测被信号 SIGKILL 终止' }
+      }],
+      runControlsLoading: true,
+      sendBlockedReason: '版本探测被信号 SIGKILL 终止'
+    })
+    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).toContain('版本探测被信号 SIGKILL 终止')
+    expect(chatHtml).toContain('当前 Provider 不可发送；草稿会保留')
   })
 
   it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () => {

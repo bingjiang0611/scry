@@ -1022,7 +1022,13 @@ handleTrusted('agent:detect', async () => {
       runtimeProvider: descriptor.runtimeProvider,
       transport: descriptor.transport,
       capabilities: descriptor.capabilities,
-      health: descriptor.health,
+      health: agent.health?.state === 'unavailable'
+        ? {
+            ...descriptor.health,
+            ...agent.health,
+            transport: descriptor.transport
+          }
+        : descriptor.health ?? agent.health,
       ...(providerId === 'pi' ? { agentProfileId: agent.id } : {})
     }]
   })
