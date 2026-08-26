@@ -20,7 +20,7 @@ const LOCK_NAME = '.scry-install.lock'
 const LOCK_TOMBSTONE_PREFIX = '.scry-install.lock.stale-'
 const APP_NAME = 'Scry.app'
 const BACKUP_NAME = '.Scry.app.backup'
-const STAGING_PREFIX = '.Scry.app.staging-'
+const STAGING_PREFIX = '.Scry.staging-'
 
 function readInstallLock(installRoot) {
   const file = join(installRoot, LOCK_NAME)
@@ -231,7 +231,7 @@ export function installBundle({
     writeJournal(installRoot, journal)
     try {
       copyBundle(source, staging)
-      validateBundle(staging)
+      validateBundle(staging, { staged: true })
     } catch (error) {
       if (existsSync(staging)) rmSync(staging, { recursive: true, force: true })
       clearJournal(installRoot)
@@ -246,7 +246,7 @@ export function installBundle({
       renameSync(staging, target)
       journal.phase = 'installed'
       writeJournal(installRoot, journal)
-      validateBundle(target)
+      validateBundle(target, { staged: false })
       registerBundle(target)
       clearJournal(installRoot)
     } catch (error) {

@@ -42,12 +42,6 @@ export const RIGHT_SURFACE_DEFINITIONS: readonly RightSurfaceDefinition[] = [
   }
 ]
 
-export const RIGHT_SURFACE_BY_KIND: Readonly<Record<RightSurfaceKind, RightSurfaceDefinition>> =
-  Object.fromEntries(RIGHT_SURFACE_DEFINITIONS.map((definition) => [definition.kind, definition])) as Record<
-    RightSurfaceKind,
-    RightSurfaceDefinition
-  >
-
 export interface RightSurfaceState {
   openIds: RightSurfaceKind[]
   activeId: RightSurfaceKind | null

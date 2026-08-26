@@ -31,7 +31,20 @@ describe('macOS installer transaction', () => {
     const installRoot = join(dir, 'Applications')
     bundle(source, 'new')
     bundle(join(installRoot, 'Scry.app'), 'old')
-    const result = installBundle({ source, installRoot, copyBundle, validateBundle, registerBundle: () => {} })
+    const validated = []
+    const result = installBundle({
+      source,
+      installRoot,
+      copyBundle,
+      validateBundle: (path, options) => {
+        validated.push({ path, options })
+        validateBundle(path)
+      },
+      registerBundle: () => {}
+    })
+    expect(validated[0].path).toContain('/.Scry.staging-')
+    expect(validated[0].options).toEqual({ staged: true })
+    expect(validated[1]).toEqual({ path: result.target, options: { staged: false } })
     expect(marker(result.target)).toBe('new')
     expect(marker(result.backup)).toBe('old')
     expect(existsSync(join(installRoot, installJournalName))).toBe(false)
@@ -72,7 +85,7 @@ describe('macOS installer transaction', () => {
     const installRoot = join(dir, 'Applications')
     const target = join(installRoot, 'Scry.app')
     const backup = join(installRoot, '.Scry.app.backup')
-    const stagingName = '.Scry.app.staging-crash'
+    const stagingName = '.Scry.staging-crash'
     bundle(target, 'old')
     bundle(join(installRoot, stagingName), 'new')
     renameSync(target, backup)
@@ -88,7 +101,7 @@ describe('macOS installer transaction', () => {
     const dir = root()
     const installRoot = join(dir, 'Applications')
     const target = join(installRoot, 'Scry.app')
-    const stagingName = '.Scry.app.staging-copy-crash'
+    const stagingName = '.Scry.staging-copy-crash'
     bundle(target, 'old')
     bundle(join(installRoot, stagingName), 'partial')
     writeFileSync(join(installRoot, installJournalName), JSON.stringify({

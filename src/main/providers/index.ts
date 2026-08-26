@@ -4,14 +4,11 @@ import { createCodexAdapter } from './codex'
 import { createQoderAdapter } from './qoder'
 import { createOpenCodeAdapter } from './opencode'
 import { createPiAdapter } from './pi'
-import { selectProviderTransports } from './legacy-cli'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 
 export function createBuiltInProviderAdapters(
   homeDir: string,
-  transportSpec?: string,
   codexHomeDir?: string,
-  codexSessionIds: () => readonly string[] = () => [],
   openCodeMcpAuthDirectory?: string,
   openCodeSessionStateDirectory?: string,
   piProfiles?: {
@@ -19,14 +16,11 @@ export function createBuiltInProviderAdapters(
     resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
   }
 ): ProviderAdapter[] {
-  return selectProviderTransports(
-    [
-      createClaudeAdapter(homeDir),
-      createCodexAdapter(codexHomeDir, codexSessionIds, homeDir),
-      createQoderAdapter(homeDir),
-      createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
-      ...(piProfiles ? [createPiAdapter(piProfiles)] : [])
-    ],
-    transportSpec
-  )
+  return [
+    createClaudeAdapter(homeDir),
+    createCodexAdapter(codexHomeDir, homeDir),
+    createQoderAdapter(homeDir),
+    createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
+    ...(piProfiles ? [createPiAdapter(piProfiles)] : [])
+  ]
 }

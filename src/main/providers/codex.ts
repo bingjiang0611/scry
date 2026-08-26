@@ -607,7 +607,6 @@ function traceFromItem(
 
 export function createCodexAdapter(
   isolatedHomePath?: string,
-  legacySessionIds: () => readonly string[] = () => [],
   homeDir = homedir()
 ): ProviderAdapter {
   const clients = new Map<string, CodexAppServerClient>()
@@ -640,11 +639,7 @@ export function createCodexAdapter(
     const env = runtimeCliEnv(undefined, { managedRecorder: true })
     const sourceHome = process.env.SCRY_CODEX_SOURCE_HOME?.trim() || env.CODEX_HOME?.trim() || undefined
     delete env.SCRY_CODEX_SOURCE_HOME
-    isolatedHome ??= createCodexIsolatedHome(
-      sourceHome,
-      isolatedHomePath,
-      legacySessionIds()
-    )
+    isolatedHome ??= createCodexIsolatedHome(sourceHome, isolatedHomePath)
     const appServerArgs = [
       'app-server',
       '--strict-config',

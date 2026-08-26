@@ -209,10 +209,7 @@ export function createRecentFoldersStore(userDataDir: string) {
   return { load, push, remove }
 }
 
-export function createAppSessionStore(
-  userDataDir: string,
-  inferProvider?: (session: { cwd: string; externalSessionId: string }) => ProviderId | undefined
-) {
+export function createAppSessionStore(userDataDir: string) {
   const file = join(userDataDir, 'app-sessions.json')
   let lastHealth: CatalogHealth = { status: 'ready', source: 'empty' }
   const load = (): AppSession[] => {
@@ -232,10 +229,7 @@ export function createAppSessionStore(
         ...session,
         sessionId: session.sessionId || externalSessionId || session.runId || '',
         externalSessionId,
-        providerId:
-          session.providerId ??
-          (externalSessionId ? inferProvider?.({ cwd: session.cwd, externalSessionId }) : undefined) ??
-          'legacy_unknown'
+        providerId: session.providerId ?? 'legacy_unknown'
       }
     })
   }

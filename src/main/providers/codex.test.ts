@@ -84,7 +84,7 @@ describe('Codex provider adapter', () => {
       '[mcp_servers.tracker]\ncommand = "/bin/echo"\nargs = ["configured"]\n' +
       '[mcp_servers.remote]\nurl = "https://mcp.example.test"\n'
     )
-    const adapter = createCodexAdapter(undefined, () => [], home)
+    const adapter = createCodexAdapter(undefined, home)
     try {
       await expect(adapter.mcp!.snapshot({ providerId: 'codex', cwd: '/repo' })).resolves.toMatchObject({
         state: 'degraded', data: {
@@ -134,7 +134,7 @@ describe('Codex provider adapter', () => {
       'url = "https://bearer.example.test/mcp"',
       'bearer_token_env_var = "MCP_TOKEN"'
     ].join('\n'))
-    const adapter = createCodexAdapter(undefined, () => [], home)
+    const adapter = createCodexAdapter(undefined, home)
     try {
       const snapshot = await adapter.mcp!.snapshot({ providerId: 'codex', cwd: '/repo' })
       const byName = new Map(snapshot.data?.configured.map((item) => [item.name, item.targetId]))
@@ -149,7 +149,7 @@ describe('Codex provider adapter', () => {
     const home = mkdtempSync(join(tmpdir(), 'scry-codex-mcp-error-test-'))
     mkdirSync(join(home, '.codex'))
     writeFileSync(join(home, '.codex', 'config.toml'), '[mcp_servers.remote]\nurl = "https://mcp.example.test"\n')
-    const adapter = createCodexAdapter(undefined, () => [], home)
+    const adapter = createCodexAdapter(undefined, home)
     appServer.request.mockRejectedValue(new Error('callback?code=secret-code&state=secret-state'))
     try {
       const result = await adapter.mcp!.snapshot(

@@ -29,7 +29,7 @@ import {
 } from '../../shared/trace'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 import { resolveRuntimeCliBin, shellEnv } from '../claude-locate'
-import { AgentRuntimeError } from '../cli-runtime'
+import { AgentRuntimeError } from '../run-outcome'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import {
   OpenCodeServerManager,

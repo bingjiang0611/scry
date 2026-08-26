@@ -27,7 +27,7 @@ import {
   type ModelUsageRow,
   type TraceEvent
 } from '../../shared/trace'
-import { AgentRuntimeError } from '../cli-runtime'
+import { AgentRuntimeError } from '../run-outcome'
 import { resolveCommandOnPath, shellEnv } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'

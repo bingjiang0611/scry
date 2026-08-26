@@ -1,9 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import {
-  RIGHT_SURFACE_BY_KIND,
-  RIGHT_SURFACE_DEFINITIONS,
-  type RightSurfaceKind
-} from '../right-surface'
+import { RIGHT_SURFACE_DEFINITIONS, type RightSurfaceKind } from '../right-surface'
 import { Icon } from './primitives/Icon'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
@@ -163,7 +159,7 @@ export function RightSurfacePanel({
       <div className="surface-topbar">
         <div className="surface-tabs" role="tablist" aria-label="已打开的 Surface">
           {openIds.map((kind) => {
-            const definition = RIGHT_SURFACE_BY_KIND[kind]
+            const definition = RIGHT_SURFACE_DEFINITIONS.find((item) => item.kind === kind)!
             const selected = activeKind === kind
             const tabId = `${rootId}-${kind}-tab`
             const panelId = `${rootId}-${kind}-panel`
