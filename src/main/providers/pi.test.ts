@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +12,7 @@ import {
   recoverManagedRecorderTurns
 } from '../../core/turn-recorder/managed'
 import { listRecords, stableHash } from '../../core/turn-recorder/store'
-import { createPiAdapter, piUserEntryIdAfterBaseline, probePiAgent } from './pi'
+import { createPiAdapter, piRpcEnvironment, piUserEntryIdAfterBaseline, probePiAgent } from './pi'
 
 const fixtureSource = `#!/usr/bin/env node
 let buffer = ''
@@ -109,6 +109,53 @@ function withFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>
 }
 
 describe('Pi RPC Provider', () => {
+  it('pins the packaged Pi runtime when a selected pi-agent launcher would otherwise rediscover its PATH wrapper', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-bootstrap-'))
+    try {
+      const packageRoot = join(dir, 'node_modules', '@example', 'pi-coding-agent')
+      const runtime = join(packageRoot, 'dist', 'cli.js')
+      const launcher = join(dir, 'pi-agent')
+      const bootstrap = join(dir, 'pi')
+      mkdirSync(join(packageRoot, 'dist'), { recursive: true })
+      writeFileSync(join(dir, 'package.json'), '{}')
+      writeFileSync(launcher, '#!/bin/sh\nexit 0\n')
+      chmodSync(launcher, 0o755)
+      writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({
+        name: '@example/pi-coding-agent',
+        bin: { pi: 'dist/cli.js' }
+      }), { flag: 'wx' })
+      writeFileSync(runtime, '#!/usr/bin/env node\n', { flag: 'wx' })
+      chmodSync(runtime, 0o755)
+      writeFileSync(bootstrap, `#!/bin/sh\n: "\${PI_AGENT_PI:=${runtime}}"\nexport PI_AGENT_PI\nexec ${launcher} "$@"\n`)
+      chmodSync(bootstrap, 0o755)
+
+      const env = piRpcEnvironment(piProfileForExecutable(launcher), { PATH: dir, HOME: dir })
+      expect(env.PI_AGENT_PI).toBe(realpathSync(runtime))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not infer PI_AGENT_PI from an unverified shell assignment', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-bootstrap-'))
+    try {
+      const launcher = join(dir, 'pi-agent')
+      const bootstrap = join(dir, 'pi')
+      const unrelated = join(dir, 'not-a-package-cli')
+      writeFileSync(launcher, '#!/bin/sh\nexit 0\n')
+      writeFileSync(unrelated, '#!/bin/sh\nexit 0\n')
+      writeFileSync(bootstrap, `#!/bin/sh\nPI_AGENT_PI=${unrelated}\nexec ${launcher} "$@"\n`)
+      chmodSync(launcher, 0o755)
+      chmodSync(unrelated, 0o755)
+      chmodSync(bootstrap, 0o755)
+
+      const env = piRpcEnvironment(piProfileForExecutable(launcher), { PATH: dir, HOME: dir })
+      expect(env.PI_AGENT_PI).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('probes native models, permissions, commands and skills for the selected profile', async () => {
     await withFixture(async (profile, cwd) => {
       const probe = await probePiAgent(profile, cwd)

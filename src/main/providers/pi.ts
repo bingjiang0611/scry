@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { accessSync, constants, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
@@ -25,7 +26,7 @@ import {
   type TraceEvent
 } from '../../shared/trace'
 import { AgentRuntimeError } from '../cli-runtime'
-import { shellEnv } from '../claude-locate'
+import { resolveCommandOnPath, shellEnv } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
@@ -42,6 +43,67 @@ const number = (value: unknown): number | undefined =>
 const bounded = (value: unknown, max = 200_000): string => {
   const text = typeof value === 'string' ? value : JSON.stringify(value ?? null)
   return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated by Scry]`
+}
+
+const PI_BOOTSTRAP_MAX_BYTES = 64 * 1024
+
+function packagePiExecutable(executable: string): string | undefined {
+  let canonical: string
+  try {
+    canonical = realpathSync(executable)
+    const stat = statSync(canonical)
+    if (!stat.isFile()) return undefined
+    accessSync(canonical, constants.X_OK)
+  } catch {
+    return undefined
+  }
+  let directory = dirname(canonical)
+  for (;;) {
+    try {
+      const packageJson = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')) as {
+        bin?: { pi?: unknown }
+      }
+      if (typeof packageJson.bin?.pi === 'string') {
+        const declared = realpathSync(join(directory, packageJson.bin.pi))
+        if (declared === canonical) return canonical
+      }
+    } catch {
+      // Continue toward the filesystem root; wrappers and source checkouts may have unrelated package.json files.
+    }
+    const parent = dirname(directory)
+    if (parent === directory) return undefined
+    directory = parent
+  }
+}
+
+function piRuntimeFromBootstrap(bootstrap: string): string | undefined {
+  const packaged = packagePiExecutable(bootstrap)
+  if (packaged) return packaged
+  try {
+    const stat = statSync(bootstrap)
+    if (!stat.isFile() || stat.size > PI_BOOTSTRAP_MAX_BYTES) return undefined
+    const source = readFileSync(bootstrap, 'utf8')
+    const configured = source.match(/^\s*:\s*["']\$\{PI_AGENT_PI:=(\/[^\r\n}"']+)}["']\s*$/m)?.[1] ??
+      source.match(/^\s*(?:export\s+)?PI_AGENT_PI\s*=\s*["']?(\/[^\r\n"']+)["']?\s*$/m)?.[1]
+    return configured ? packagePiExecutable(configured) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function piRpcEnvironment(
+  profile: PiAgentProfile,
+  baseEnv: Record<string, string> = shellEnv()
+): Record<string, string> {
+  const env = { ...baseEnv }
+  if (basename(profile.executable) !== 'pi-agent' || env.PI_AGENT_PI) return env
+  const verified = env.PI_AGENT_VERIFIED_PI_EXECUTABLE
+    ? packagePiExecutable(env.PI_AGENT_VERIFIED_PI_EXECUTABLE)
+    : undefined
+  const onPath = resolveCommandOnPath('pi', env.PATH ?? '')
+  const runtime = verified ?? (onPath ? piRuntimeFromBootstrap(onPath) : undefined)
+  if (runtime) env.PI_AGENT_PI = runtime
+  return env
 }
 
 let eventCounter = 0
@@ -85,7 +147,7 @@ class PiRpcProcess {
   static start(profile: PiAgentProfile, args: string[], cwd?: string): PiRpcProcess {
     const child = spawn(profile.executable, args, {
       cwd: cwd || homedir(),
-      env: shellEnv(),
+      env: piRpcEnvironment(profile),
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe']
     })
