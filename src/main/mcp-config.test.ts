@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -9,8 +9,7 @@ import {
   minimalMcpEnv,
   resolveProviderMcpConfigs,
   testHttpMcp,
-  testMcpConfig,
-  toggleMcp
+  testMcpConfig
 } from './mcp-config'
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'scry-mcp-'))
@@ -159,18 +158,18 @@ describe('mcp-config', () => {
     }
   })
 
-  it('开关项目 MCP 后配置读取与 disabled/connected 状态一致，并可恢复', () => {
+  it('~/.claude.json 的显式关闭优先于项目已有的 MCP 信任标记', () => {
     const home = tempDir()
     const cwd = tempDir()
     try {
       mkdirSync(join(cwd, '.claude'), { recursive: true })
-      writeFileSync(join(home, '.claude.json'), JSON.stringify({ keep: 'value', projects: {} }))
       writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({ mcpServers: { 'scry-e2e': { command: '/bin/mcp' } } }))
+      writeFileSync(
+        join(cwd, '.claude', 'settings.local.json'),
+        JSON.stringify({ enabledMcpjsonServers: ['scry-e2e'] })
+      )
 
-      expect(toggleMcp('scry-e2e', false, cwd, home)).toBe(true)
-      expect(listMcp(cwd, home)).toContainEqual(expect.objectContaining({ name: 'scry-e2e', enabled: false }))
-      expect(JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'))).toMatchObject({
-        keep: 'value',
+      writeFileSync(join(home, '.claude.json'), JSON.stringify({
         projects: {
           [cwd]: {
             disabledMcpjsonServers: ['scry-e2e'],
@@ -178,12 +177,10 @@ describe('mcp-config', () => {
             disabledMcpServers: ['scry-e2e']
           }
         }
-      })
+      }))
+      expect(listMcp(cwd, home)).toContainEqual(expect.objectContaining({ name: 'scry-e2e', enabled: false }))
 
-      expect(toggleMcp('scry-e2e', true, cwd, home)).toBe(true)
-      expect(listMcp(cwd, home)).toContainEqual(expect.objectContaining({ name: 'scry-e2e', enabled: true }))
-      expect(JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'))).toMatchObject({
-        keep: 'value',
+      writeFileSync(join(home, '.claude.json'), JSON.stringify({
         projects: {
           [cwd]: {
             disabledMcpjsonServers: [],
@@ -191,29 +188,7 @@ describe('mcp-config', () => {
             disabledMcpServers: []
           }
         }
-      })
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it('显式关闭不会被项目已有的 MCP 信任标记重新启用', () => {
-    const home = tempDir()
-    const cwd = tempDir()
-    try {
-      mkdirSync(join(cwd, '.claude'), { recursive: true })
-      writeFileSync(join(home, '.claude.json'), JSON.stringify({ projects: {} }))
-      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({ mcpServers: { 'scry-e2e': { command: '/bin/mcp' } } }))
-      writeFileSync(
-        join(cwd, '.claude', 'settings.local.json'),
-        JSON.stringify({ enabledMcpjsonServers: ['scry-e2e'] })
-      )
-
-      expect(toggleMcp('scry-e2e', false, cwd, home)).toBe(true)
-      expect(listMcp(cwd, home)).toContainEqual(expect.objectContaining({ name: 'scry-e2e', enabled: false }))
-
-      expect(toggleMcp('scry-e2e', true, cwd, home)).toBe(true)
+      }))
       expect(listMcp(cwd, home)).toContainEqual(expect.objectContaining({ name: 'scry-e2e', enabled: true }))
     } finally {
       rmSync(home, { recursive: true, force: true })

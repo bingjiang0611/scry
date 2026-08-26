@@ -1028,11 +1028,8 @@ export function App() {
 
   const openSkills = (): void => {
     setShowSkills(true)
-    if (
-      (!integrations.skillCapability && !integrations.skillsRefreshing) ||
-      (!integrations.accountCapability && !integrations.accountRefreshing)
-    ) {
-      void integrations.refreshProviderInventory()
+    if (!integrations.skillCapability && !integrations.skillsRefreshing) {
+      void integrations.refreshSkills()
     }
   }
   const openMcp = (): void => {
@@ -1389,11 +1386,8 @@ export function App() {
               key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
               skills={integrations.skills}
               capability={integrations.skillCapability}
-              account={integrations.accountCapability}
-              accountRefreshing={integrations.accountRefreshing}
-              refreshing={integrations.skillsRefreshing || integrations.accountRefreshing}
-              onToggle={integrations.toggleSkill}
-              onRefresh={() => { void integrations.refreshProviderInventory() }}
+              refreshing={integrations.skillsRefreshing}
+              onRefresh={() => { void integrations.refreshSkills() }}
               onClose={() => setShowSkills(false)}
             />
           )}
@@ -1407,7 +1401,6 @@ export function App() {
               capability={integrations.mcpCapability}
               onTest={integrations.testMcp}
               onReauthenticate={integrations.reauthenticateMcp}
-              onToggle={integrations.toggleMcp}
               onRefresh={integrations.pullMcpLive}
               onClose={() => setShowMcp(false)}
             />

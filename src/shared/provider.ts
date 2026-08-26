@@ -133,12 +133,6 @@ export interface McpAuthResult {
   error?: string
 }
 
-export interface AccountSnapshot {
-  accountLabel?: string
-  plan?: string
-  usage?: unknown
-}
-
 export function capabilityReady<T>(
   context: ProviderContext,
   mode: Exclude<CapabilityMode, 'none'>,

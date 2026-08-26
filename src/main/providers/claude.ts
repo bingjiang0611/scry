@@ -16,10 +16,9 @@ import {
   authorizedMcpServers,
   isRemoteMcpConfig,
   listMcp,
-  testMcpConfig,
-  toggleMcp
+  testMcpConfig
 } from '../mcp-config'
-import { computeEnabledSkills, listSkills, setSkillEnabled } from '../skill-config'
+import { computeEnabledSkills, listSkills } from '../skill-config'
 import {
   capabilityReady,
   capabilityUnknown,
@@ -303,7 +302,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         available: !!path,
         path,
         version: getClaudeVersion(),
-        capabilities: { skills: 'manage', mcp: 'manage', commands: 'read', account: 'none' }
+        capabilities: { skills: 'read', mcp: 'manage', commands: 'read', account: 'none' }
       }
     },
     run: (request) => {
@@ -362,15 +361,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       }
     },
     skills: {
-      list: async (context) => capabilityReady(context, 'manage', listSkills(context.cwd, homeDir)),
-      setEnabled: async (context, name, enabled) => {
-        try {
-          setSkillEnabled(name, enabled, context.cwd, homeDir)
-          return capabilityReady(context, 'manage', true)
-        } catch (error) {
-          return capabilityUnknown<boolean>(context, 'manage', String((error as Error).message))
-        }
-      }
+      list: async (context) => capabilityReady(context, 'read', listSkills(context.cwd, homeDir))
     },
     mcp: {
       snapshot: async (context, refresh = false, execution) => {
@@ -394,10 +385,6 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         } catch (error) {
           return capabilityUnavailable(context, 'unknown', sanitizeMcpAuthError(error))
         }
-      },
-      setEnabled: async (context, name, enabled) => {
-        const ok = toggleMcp(name, enabled, context.cwd, homeDir)
-        return capabilityReady(context, 'manage', ok)
       },
       test: async (context, targetId, execution) => {
         if (!execution) return capabilityReady(context, 'manage', { ok: false, error: '缺少绑定当前配置快照的 MCP 执行授权' })

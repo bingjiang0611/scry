@@ -1,5 +1,4 @@
 import type {
-  AccountSnapshot,
   CapabilityEnvelope,
   McpAuthResult,
   McpSnapshot,
@@ -86,11 +85,6 @@ export interface ProviderRunRequest {
 
 export interface SkillsFacet {
   list(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>>
-  setEnabled?(
-    context: ProviderContext,
-    name: string,
-    enabled: boolean
-  ): Promise<CapabilityEnvelope<boolean>>
 }
 
 export interface McpFacet {
@@ -99,11 +93,6 @@ export interface McpFacet {
     refresh?: boolean,
     execution?: AuthorizedMcpExecution
   ): Promise<CapabilityEnvelope<McpSnapshot>>
-  setEnabled?(
-    context: ProviderContext,
-    name: string,
-    enabled: boolean
-  ): Promise<CapabilityEnvelope<boolean>>
   test?(
     context: ProviderContext,
     name: string,
@@ -119,10 +108,6 @@ export interface McpFacet {
 
 export interface CommandsFacet {
   list(context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>>
-}
-
-export interface AccountFacet {
-  read(context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>>
 }
 
 export interface HookTrustFacet {
@@ -141,7 +126,6 @@ export interface ProviderAdapter {
   readonly skills?: SkillsFacet
   readonly mcp?: McpFacet
   readonly commands?: CommandsFacet
-  readonly account?: AccountFacet
   readonly hookTrust?: HookTrustFacet
   readonly runControls?: RunControlsFacet
   dispose?(): Promise<void> | void

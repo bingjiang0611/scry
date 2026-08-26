@@ -18,8 +18,7 @@ import {
   resultTokenTotal,
   resultOf,
   toolArg,
-  toolDisplayName,
-  updateMcpLiveAfterToggle
+  toolDisplayName
 } from './format'
 import type { Turn } from './format'
 import type { TraceEvent } from '@shared/trace'
@@ -745,18 +744,6 @@ describe('bashReadFiles（Codex 只读 Bash 推断）', () => {
     ).toEqual([])
     expect(bashReadFiles(`rg -n needle src/renderer`)).toEqual([])
     expect(bashReadFiles(`rg -n needle /Users/me/.zsh_history`)).toEqual(['/Users/me/.zsh_history'])
-  })
-})
-
-describe('updateMcpLiveAfterToggle（MCP 配置态不伪装真实连通）', () => {
-  it('启用后标 pending，而不是 connected', () => {
-    expect(updateMcpLiveAfterToggle([{ name: 'github', status: 'disabled' }], 'github', true)).toEqual([
-      { name: 'github', status: 'pending' }
-    ])
-  })
-
-  it('禁用后标 disabled；无 live 缓存时补一条状态', () => {
-    expect(updateMcpLiveAfterToggle([], 'github', false)).toEqual([{ name: 'github', status: 'disabled' }])
   })
 })
 

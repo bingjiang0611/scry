@@ -10,7 +10,6 @@ import type {
   RuntimeProvider
 } from '../shared/runtime'
 import type {
-  AccountSnapshot,
   CatalogHealth,
   CapabilityEnvelope,
   DeleteSessionResult,
@@ -104,8 +103,6 @@ const api = {
   listProjects: (): Promise<ProjectMeta[]> => ipcRenderer.invoke('agent:listProjects'),
   catalogHealth: (): Promise<CatalogHealth> => ipcRenderer.invoke('agent:catalogHealth'),
   listSkills: (context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> => ipcRenderer.invoke('agent:listSkills', context),
-  toggleSkill: (context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>> =>
-    ipcRenderer.invoke('agent:toggleSkill', { context, name, enabled }),
   mcpSnapshot: (context: ProviderContext, refresh = false): Promise<CapabilityEnvelope<McpSnapshot>> =>
     ipcRenderer.invoke('agent:mcpSnapshot', { context, refresh }),
   mcpGuardScan: async (context: ProviderContext): Promise<CapabilityEnvelope<ScanReport>> => {
@@ -117,14 +114,10 @@ const api = {
     ipcRenderer.invoke('agent:testMcp', { context, targetId }),
   reauthenticateMcp: (context: ProviderContext, targetId: string): Promise<CapabilityEnvelope<McpAuthResult>> =>
     ipcRenderer.invoke('agent:reauthenticateMcp', { context, targetId }),
-  toggleMcp: (context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>> =>
-    ipcRenderer.invoke('agent:toggleMcp', { context, name, enabled }),
   listCommands: (context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>> =>
     ipcRenderer.invoke('agent:listCommands', context),
   runControls: (context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>> =>
     ipcRenderer.invoke('agent:runControls', context),
-  providerAccount: (context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>> =>
-    ipcRenderer.invoke('agent:providerAccount', context),
   usageStats: (context: ProviderContext): Promise<UsageStats> =>
     ipcRenderer.invoke('agent:usageStats', context),
   stats: (): Promise<DbStats> => ipcRenderer.invoke('agent:stats'),

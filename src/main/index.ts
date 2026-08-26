@@ -1215,9 +1215,6 @@ handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
 handleTrusted('agent:listSkills', (_e, context: ProviderContext) =>
   withProviderOperation(context.providerId, () => providerRegistry.listSkills(context), context.agentProfileId)
 )
-handleTrusted('agent:toggleSkill', (_e, p: { context: ProviderContext; name: string; enabled: boolean }) =>
-  withProviderOperation(p.context.providerId, () => providerRegistry.setSkillEnabled(p.context, p.name, p.enabled), p.context.agentProfileId)
-)
 handleTrusted('agent:mcpSnapshot', async (_e, p: { context: ProviderContext; refresh?: boolean }) => {
   if (p.context.providerId === 'pi') {
     return withProviderOperation(
@@ -1296,9 +1293,6 @@ handleTrusted('agent:reauthenticateMcp', async (_e, p: { context: ProviderContex
     authLease.release()
   }
 })
-handleTrusted('agent:toggleMcp', (_e, p: { context: ProviderContext; name: string; enabled: boolean }) =>
-  withProviderOperation(p.context.providerId, () => providerRegistry.setMcpEnabled(p.context, p.name, p.enabled), p.context.agentProfileId)
-)
 handleTrusted('agent:mcpGuardScan', (_e, context: ProviderContext) => {
   if (providerRegistry.isDisabled(context.providerId)) {
     return capabilityUnavailable(context, 'unsupported', '该 Provider 已通过 SCRY_DISABLED_PROVIDERS 禁用')
@@ -1330,9 +1324,6 @@ handleTrusted('agent:listCommands', (_e, context: ProviderContext) =>
 )
 handleTrusted('agent:runControls', (_e, context: ProviderContext) =>
   withProviderOperation(context.providerId, () => providerRegistry.runControls(context), context.agentProfileId)
-)
-handleTrusted('agent:providerAccount', (_e, context: ProviderContext) =>
-  withProviderOperation(context.providerId, () => providerRegistry.account(context), context.agentProfileId)
 )
 
 // 单目录会话列表（当前工作目录）：只列 app 自己起过的会话

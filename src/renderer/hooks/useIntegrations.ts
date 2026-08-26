@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BillingGuardianState } from '@shared/billing'
-import type { AccountSnapshot, CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
+import type { CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
 import type { DbStats, Diagnostics, DiffFile, McpLiveStatus, UsageStats } from '@shared/trace'
 import {
   providerIdForAgentId,
@@ -11,7 +11,6 @@ import {
   type AgentRunControls
 } from '@shared/runtime'
 import type { DetectedAgent, McpMeta, SkillMeta } from '../env'
-import { updateMcpLiveAfterToggle } from '../format'
 import type { McpStatus } from '../format'
 import type { McpGuardReport } from '../components/McpTrustPanel'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
@@ -419,8 +418,6 @@ export function useIntegrations(cwd: string | null) {
   const [skills, setSkills] = useState<SkillMeta[]>([])
   const [skillCapability, setSkillCapability] = useState<CapabilityEnvelope<SkillMeta[]> | null>(null)
   const [skillsRefreshing, setSkillsRefreshing] = useState(false)
-  const [accountCapability, setAccountCapability] = useState<CapabilityEnvelope<AccountSnapshot> | null>(null)
-  const [accountRefreshing, setAccountRefreshing] = useState(false)
   const [mcps, setMcps] = useState<McpMeta[]>([])
   const [mcpStatus, setMcpStatus] = useState<Record<string, McpStatus>>({})
   const [mcpLive, setMcpLive] = useState<McpLiveStatus[]>([])
@@ -441,15 +438,12 @@ export function useIntegrations(cwd: string | null) {
   const integrationRequestSeq = useRef(0)
   const usageRequestSeq = useRef(0)
   const skillRefreshRequestSeq = useRef(0)
-  const accountRequestSeq = useRef(0)
   const mcpConfigRequestSeq = useRef(0)
   const mcpLiveRequestSeq = useRef(0)
   const mcpTestCounter = useRef(0)
   const mcpTestRequests = useRef(new Map<string, number>())
   const mcpAuthCounter = useRef(0)
   const mcpAuthRequests = useRef(new Map<string, number>())
-  const mcpToggleCounter = useRef(0)
-  const mcpToggleRequests = useRef(new Map<string, number>())
   const mcpConfigPromiseRef = useRef<Promise<McpLiveStatus[]> | null>(null)
   const runControlRequestSeq = useRef(0)
   const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>(
@@ -607,33 +601,6 @@ export function useIntegrations(cwd: string | null) {
     }
   }, [])
 
-  const refreshAccount = useCallback(async (): Promise<void> => {
-    const context = providerContextRef.current
-    const seq = ++accountRequestSeq.current
-    setAccountRefreshing(true)
-    try {
-      const result = await window.scry.providerAccount(context)
-      if (seq !== accountRequestSeq.current || contextKey(context) !== contextKey(providerContextRef.current)) return
-      setAccountCapability(result)
-    } catch (error) {
-      if (seq !== accountRequestSeq.current || contextKey(context) !== contextKey(providerContextRef.current)) return
-      setAccountCapability({
-        providerId: context.providerId,
-        cwd: context.cwd,
-        mode: 'none',
-        state: 'unknown',
-        data: null,
-        reason: error instanceof Error ? error.message : String(error)
-      })
-    } finally {
-      if (seq === accountRequestSeq.current) setAccountRefreshing(false)
-    }
-  }, [])
-
-  const refreshProviderInventory = useCallback(async (): Promise<void> => {
-    await Promise.all([refreshSkills(), refreshAccount()])
-  }, [refreshAccount, refreshSkills])
-
   const applyMcpSnapshot = useCallback((
     result: CapabilityEnvelope<McpSnapshot>,
     clearUnknownRuntime = false
@@ -696,39 +663,6 @@ export function useIntegrations(cwd: string | null) {
       if (seq === mcpLiveRequestSeq.current) setMcpRefreshing(false)
     }
   }, [applyMcpSnapshot])
-
-  const toggleSkill = useCallback(async (name: string, enabled: boolean): Promise<void> => {
-    const context = providerContextRef.current
-    const result = await window.scry.toggleSkill(context, name, enabled)
-    if (contextKey(context) !== contextKey(providerContextRef.current)) return
-    setSkillCapability((current) => (current ? { ...current, state: result.state, reason: result.reason } : current))
-    const refreshed = await authoritativeRefreshAfterToggle(result, () => window.scry.listSkills(context))
-    if (!refreshed) return
-    if (contextKey(context) !== contextKey(providerContextRef.current)) return
-    setSkillCapability(refreshed)
-    if (refreshed.data) setSkills(refreshed.data)
-  }, [])
-
-  const toggleMcp = useCallback(
-    async (name: string, enabled: boolean): Promise<void> => {
-      const context = providerContextRef.current
-      const key = `${contextKey(context)}\0${name}`
-      const seq = ++mcpToggleCounter.current
-      mcpToggleRequests.current.set(key, seq)
-      const result = await window.scry.toggleMcp(context, name, enabled)
-      if (mcpToggleRequests.current.get(key) !== seq || contextKey(context) !== contextKey(providerContextRef.current)) return
-      if (result.data !== true) return
-      setMcps((prev) => prev.map((mcp) => (mcp.name === name ? { ...mcp, enabled } : mcp)))
-      setMcpLive((prev) => updateMcpLiveAfterToggle(prev, name, enabled))
-      const refreshed = await authoritativeRefreshAfterToggle(result, () => window.scry.mcpSnapshot(context, false))
-      if (
-        refreshed &&
-        mcpToggleRequests.current.get(key) === seq &&
-        contextKey(context) === contextKey(providerContextRef.current)
-      ) applyMcpSnapshot(refreshed)
-    },
-    [applyMcpSnapshot]
-  )
 
   const testMcp = useCallback(async (targetId: string): Promise<void> => {
     const context = providerContextRef.current
@@ -934,12 +868,10 @@ export function useIntegrations(cwd: string | null) {
     ++usageRequestSeq.current
     setUsage(null)
     const skillSeq = ++skillRefreshRequestSeq.current
-    ++accountRequestSeq.current
     ++mcpConfigRequestSeq.current
     ++mcpLiveRequestSeq.current
     mcpTestRequests.current.clear()
     mcpAuthRequests.current.clear()
-    mcpToggleRequests.current.clear()
     mcpConfigPromiseRef.current = null
     setSkills([])
     setMcps([])
@@ -947,8 +879,6 @@ export function useIntegrations(cwd: string | null) {
     setMcpLive([])
     setSkillCapability(null)
     setSkillsRefreshing(true)
-    setAccountCapability(null)
-    setAccountRefreshing(true)
     setMcpCapability(null)
     setMcpConfigRefreshing(false)
     setMcpRefreshing(false)
@@ -965,10 +895,9 @@ export function useIntegrations(cwd: string | null) {
           setSkillsRefreshing(false)
         }
       })
-    void refreshAccount()
     void refreshMcp().catch(() => {})
     if (cwd) loadUsage()
-  }, [cwd, loadGitDiff, loadUsage, providerContext, refreshAccount, refreshMcp])
+  }, [cwd, loadGitDiff, loadUsage, providerContext, refreshMcp])
 
   useEffect(() => {
     const seq = ++runControlRequestSeq.current
@@ -1083,9 +1012,6 @@ export function useIntegrations(cwd: string | null) {
   const currentSkillCapability = capabilityMatchesContext(skillCapability, providerContext)
     ? skillCapability
     : null
-  const currentAccountCapability = capabilityMatchesContext(accountCapability, providerContext)
-    ? accountCapability
-    : null
 
   return {
     agents,
@@ -1107,8 +1033,6 @@ export function useIntegrations(cwd: string | null) {
     skills: currentSkillCapability ? skills : [],
     skillCapability: currentSkillCapability,
     skillsRefreshing,
-    accountCapability: currentAccountCapability,
-    accountRefreshing,
     mcps,
     mcpStatus,
     mcpLive,
@@ -1128,13 +1052,9 @@ export function useIntegrations(cwd: string | null) {
     addPiProfile,
     removePiProfile,
     refreshSkills,
-    refreshAccount,
-    refreshProviderInventory,
     loadMcpLive,
     refreshMcp,
     pullMcpLive,
-    toggleSkill,
-    toggleMcp,
     testMcp,
     reauthenticateMcp,
     setCurrentMcpGuardReport,

@@ -1,7 +1,6 @@
 import {
   capabilityReady,
   capabilityUnknown,
-  type AccountSnapshot,
   type CapabilityEnvelope,
   type McpAuthResult,
   type McpSnapshot,
@@ -745,7 +744,6 @@ export function createCodexAdapter(
     }
   }
 
-  const skillReloads = new Set<string>()
   const isTopLevelSkill = (path: string): boolean => {
     const normalized = path.replaceAll('\\', '/')
     const root = normalized.lastIndexOf('/skills/')
@@ -754,10 +752,9 @@ export function createCodexAdapter(
   const skills = {
     list: async (context: ProviderContext, forceReload = false) => {
       try {
-        const reloadKey = context.cwd ?? ''
         const response = await request<{ data?: Array<{ cwd?: string; skills?: unknown[]; errors?: unknown[] }> }>('skills/list', {
           cwds: context.cwd ? [context.cwd] : [],
-          forceReload: forceReload || skillReloads.delete(reloadKey)
+          forceReload
         }, context.cwd)
         const group = response.data?.find((item) => !context.cwd || item.cwd === context.cwd) ?? response.data?.[0]
         const data: SkillMeta[] = (group?.skills ?? []).map((raw) => {
@@ -772,26 +769,10 @@ export function createCodexAdapter(
         }).filter((skill) => isTopLevelSkill(skill.dir))
         const errors = group?.errors?.length ?? 0
         return errors
-          ? { ...capabilityReady(context, 'manage' as const, data), state: 'degraded' as const, reason: `${errors} 个 Skill 读取错误` }
-          : capabilityReady(context, 'manage' as const, data)
+          ? { ...capabilityReady(context, 'read' as const, data), state: 'degraded' as const, reason: `${errors} 个 Skill 读取错误` }
+          : capabilityReady(context, 'read' as const, data)
       } catch (error) {
-        return capabilityUnknown<SkillMeta[]>(context, 'manage', String((error as Error).message))
-      }
-    },
-    setEnabled: async (context: ProviderContext, name: string, enabled: boolean) => {
-      try {
-        const response = await request<{ effectiveEnabled?: boolean }>('skills/config/write', { name, enabled }, context.cwd)
-        skillReloads.add(context.cwd ?? '')
-        const effectiveEnabled = response.effectiveEnabled ?? enabled
-        return effectiveEnabled === enabled
-          ? capabilityReady(context, 'manage', true)
-          : {
-              ...capabilityReady(context, 'manage', false),
-              state: 'degraded' as const,
-              reason: `Codex 未能${enabled ? '启用' : '关闭'} Skill ${name}`
-            }
-      } catch (error) {
-        return capabilityUnknown<boolean>(context, 'manage', String((error as Error).message))
+        return capabilityUnknown<SkillMeta[]>(context, 'read', String((error as Error).message))
       }
     }
   }
@@ -808,7 +789,7 @@ export function createCodexAdapter(
         transport: 'app-server',
         available: !!path,
         path,
-        capabilities: { skills: 'manage', mcp: 'read', commands: 'read', account: 'read' },
+        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' },
         health: {
           state: !path ? 'unavailable' : lastError ? 'degraded' : lastOkAt ? 'ready' : 'unknown',
           transport: 'app-server',
@@ -1623,28 +1604,6 @@ export function createCodexAdapter(
           unsubscribe()
           finish?.({ name: target.name, threadId, success: false, error: '认证已取消' })
           if (client) await shutdownClient(client)
-        }
-      }
-    },
-    account: {
-      read: async (context) => {
-        try {
-          const [accountResponse, rateLimits, usage] = await Promise.all([
-            request<Record<string, unknown>>('account/read', { refreshToken: false }, context.cwd),
-            request<Record<string, unknown>>('account/rateLimits/read', undefined, context.cwd),
-            request<Record<string, unknown>>('account/usage/read', undefined, context.cwd)
-          ])
-          const account = record(accountResponse.account)
-          const limits = record(rateLimits.rateLimits)
-          const plan = typeof account.planType === 'string' ? account.planType : typeof limits.planType === 'string' ? limits.planType : undefined
-          const data: AccountSnapshot = {
-            accountLabel: account.type === 'apiKey' ? 'OpenAI API key' : typeof account.email === 'string' ? account.email : 'Codex',
-            plan,
-            usage: { authMode: account.type, rateLimits, usage }
-          }
-          return capabilityReady(context, 'read', data)
-        } catch (error) {
-          return capabilityUnknown<AccountSnapshot>(context, 'read', String((error as Error).message))
         }
       }
     },

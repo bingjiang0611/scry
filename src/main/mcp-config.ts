@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { mcpConfigTargetId, parseTomlDocument } from '../cli/mcpguard-core'
 import type { ProviderId } from '../shared/provider'
@@ -496,38 +496,4 @@ export function testMcpConfig(
 ): Promise<McpTestResult> {
   if (cfg.url || cfg.type === 'http' || cfg.type === 'sse') return testHttpMcp(cfg)
   return testStdioMcp(cfg, inheritedEnv, cwd)
-}
-
-export function toggleMcp(name: string, enabled: boolean, cwd: string | undefined, homeDir: string): boolean {
-  if (!cwd) return false
-  const file = join(homeDir, '.claude.json')
-  const cj = readJson(file)
-  if (!cj) return false
-  const projects = (cj.projects && typeof cj.projects === 'object' ? cj.projects : {}) as Record<string, Record<string, unknown>>
-  const proj = (projects[cwd] && typeof projects[cwd] === 'object' ? projects[cwd] : {}) as Record<string, unknown>
-  const disabled = new Set(Array.isArray(proj.disabledMcpjsonServers) ? (proj.disabledMcpjsonServers as string[]) : [])
-  const enabledJson = new Set(Array.isArray(proj.enabledMcpjsonServers) ? (proj.enabledMcpjsonServers as string[]) : [])
-  const disabledUser = new Set(Array.isArray(proj.disabledMcpServers) ? (proj.disabledMcpServers as string[]) : [])
-  if (enabled) {
-    disabled.delete(name)
-    enabledJson.add(name)
-    disabledUser.delete(name)
-  } else {
-    enabledJson.delete(name)
-    disabled.add(name)
-    disabledUser.add(name)
-  }
-  proj.disabledMcpjsonServers = [...disabled]
-  proj.enabledMcpjsonServers = [...enabledJson]
-  proj.disabledMcpServers = [...disabledUser]
-  projects[cwd] = proj
-  cj.projects = projects
-  try {
-    const tmp = file + '.scry.tmp'
-    writeFileSync(tmp, JSON.stringify(cj, null, 2))
-    renameSync(tmp, file)
-    return true
-  } catch {
-    return false
-  }
 }

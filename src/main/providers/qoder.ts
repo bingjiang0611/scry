@@ -1,9 +1,9 @@
-import { qodercliAuth, query, type AccountInfo, type McpServerStatus, type PermissionUpdate, type Query, type SlashCommand, type UsageInfo } from '@qoder-ai/qoder-agent-sdk'
+import { qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
 import { spawn } from 'node:child_process'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { capabilityReady, capabilityUnknown, type AccountSnapshot, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
+import { capabilityReady, capabilityUnknown, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
@@ -50,21 +50,6 @@ function missingFile(error: unknown): boolean {
 function qoderSkillScope(source: string): 'project' | 'user' | 'unknown' {
   const normalized = source.trim().toLowerCase()
   return normalized === 'project' || normalized === 'user' ? normalized : 'unknown'
-}
-
-function qoderAccountUsage(usage: UsageInfo | null): Omit<UsageInfo, 'session'> | undefined {
-  if (!usage) return undefined
-  const { session: _controlSession, ...accountUsage } = usage
-  return Object.keys(accountUsage).length > 0 ? accountUsage : undefined
-}
-
-function firstNonBlank(...values: unknown[]): string | undefined {
-  for (const value of values) {
-    if (typeof value !== 'string') continue
-    const normalized = value.trim()
-    if (normalized) return normalized
-  }
-  return undefined
 }
 
 function projectCommandMatch(prompt: string): RegExpMatchArray | null {
@@ -484,7 +469,6 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
   const skillCache = new Map<string, Cached<{ data: SkillMeta[]; total: number; included: number }>>()
   const commandCache = new Map<string, Cached<{ commands: SlashCommand[]; skillNames?: Set<string>; reason?: string }>>()
   const modelCache = new Map<string, Cached<AgentRunControlCatalog>>()
-  const accountCache = new Map<string, Cached<{ usage: UsageInfo | null; account: AccountInfo }>>()
   let lastHookFallbackError: string | undefined
   let hookFallbackObserved = false
 
@@ -555,7 +539,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         transport: 'Qoder Agent SDK',
         available: !!path,
         path,
-        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' },
+        capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' },
         health: lastHookFallbackError
           ? { state: 'degraded', transport: 'Qoder Agent SDK', lastError: lastHookFallbackError }
           : { state: !path ? 'unavailable' : hookFallbackObserved ? 'ready' : 'unknown', transport: 'Qoder Agent SDK' }
@@ -1063,33 +1047,6 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           return value.data.reason ? { ...ready, state: 'degraded' as const, reason: value.data.reason } : ready
         } catch (error) {
           return capabilityUnknown(context, 'read', String((error as Error).message))
-        }
-      }
-    },
-    account: {
-      read: async (context) => {
-        try {
-          const key = context.cwd ?? ''
-          let value = accountCache.get(key)
-          if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            const [usage, account] = await withControl(context, (q) => Promise.all([q.getUsageInfo(), q.accountInfo()]))
-            value = { data: { usage, account }, observedAt: Date.now() }
-            accountCache.set(key, value)
-          }
-          const accountLabel = firstNonBlank(value.data.account.email, value.data.account.name, value.data.account.userId)
-          const plan = firstNonBlank(value.data.account.subscriptionType, value.data.usage?.userType)
-          const usage = qoderAccountUsage(value.data.usage)
-          if (!accountLabel && !plan && !usage) {
-            return capabilityUnknown<AccountSnapshot>(context, 'read', 'Qoder 未返回账号或用量证据')
-          }
-          const data: AccountSnapshot = {
-            ...(accountLabel ? { accountLabel } : {}),
-            ...(plan ? { plan } : {}),
-            ...(usage ? { usage } : {})
-          }
-          return capabilityReady(context, 'read', data, value.observedAt)
-        } catch (error) {
-          return capabilityUnknown<AccountSnapshot>(context, 'read', String((error as Error).message))
         }
       }
     },

@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { readHead } from './app-store'
 import { readSkillMeta } from './skill-meta'
 
@@ -65,26 +65,6 @@ export function activeOverridesFile(cwd: string | undefined, homeDir: string): s
 
 export function isSkillOff(name: string, cwd: string | undefined, homeDir: string): boolean {
   return readSkillOverrides(activeOverridesFile(cwd, homeDir))[name] === 'off'
-}
-
-function writeOverride(file: string, name: string, off: boolean): void {
-  const parsed = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {}
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`无效的 Skill 配置：${file}`)
-  const obj = parsed as Record<string, unknown>
-  const ov = (obj.skillOverrides && typeof obj.skillOverrides === 'object' ? obj.skillOverrides : {}) as Record<
-    string,
-    string
-  >
-  if (off) ov[name] = 'off'
-  else if (name in ov) delete ov[name]
-  else return
-  obj.skillOverrides = ov
-  mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, JSON.stringify(obj, null, 2) + '\n')
-}
-
-export function setSkillEnabled(name: string, enabled: boolean, cwd: string | undefined, homeDir: string): void {
-  writeOverride(activeOverridesFile(cwd, homeDir), name, !enabled)
 }
 
 export function listSkills(cwd: string | undefined, homeDir: string): SkillConfigItem[] {
