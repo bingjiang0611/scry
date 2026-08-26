@@ -88,6 +88,26 @@ async function recordFiles(dataRoot: string): Promise<Array<{ name: string; sequ
   return out.sort((a, b) => a.sequence - b.sequence || a.name.localeCompare(b.name))
 }
 
+/**
+ * 按 recordId 精确定位一条正式记录。recordId 就写在文件名里，`readRecordFile`
+ * 又强校验文件名↔内容一致，所以这里只读那一个文件，不解析整个 store。
+ * 语义与「全量扫描后按 recordId 过滤」等价。
+ */
+export async function findRecordById(dataRoot: string, recordId: string): Promise<AgentTurnRecord | undefined> {
+  const match = (await recordFiles(dataRoot)).find((file) => file.recordId === recordId)
+  return match ? await readRecordFile(join(dataRoot, 'records', match.name)) : undefined
+}
+
+/**
+ * 只由文件名派生的存储指纹（不读正文）。records 是 append-only 且序号严格递增，
+ * 因此任何新提交都会改变 count 或 maxSequence —— 派生缓存用它判断自己是否仍然新鲜。
+ * 它不是事实源，也不能替代记录本身的校验。
+ */
+export async function recordStoreStamp(dataRoot: string): Promise<{ count: number; maxSequence: number }> {
+  const files = await recordFiles(dataRoot)
+  return { count: files.length, maxSequence: files.at(-1)?.sequence ?? 0 }
+}
+
 export async function readRecordFile(path: string): Promise<AgentTurnRecord> {
   const raw = JSON.parse(await readFile(path, 'utf8')) as unknown
   if (!isAgentTurnRecord(raw)) throw new Error(`invalid turn record: ${path}`)
