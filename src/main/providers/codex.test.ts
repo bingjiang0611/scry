@@ -57,7 +57,7 @@ describe('Codex provider adapter', () => {
       id: 'codex',
       runtimeProvider: 'codex_cli',
       transport: 'app-server',
-      capabilities: { skills: 'manage', mcp: 'read', commands: 'read', account: 'read' }
+      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' }
     })
   })
 
@@ -773,41 +773,18 @@ describe('Codex provider adapter', () => {
     ).resolves.toMatchObject({ data: [{ name: 'markdown-to-html' }] })
   })
 
-  it('reads the Codex account without forcing a token refresh', async () => {
-    appServer.request.mockImplementation(async (method, params) => {
-      if (method === 'account/read') {
-        expect(params).toEqual({ refreshToken: false })
-        return { account: { type: 'chatgpt', email: 'user@example.com', planType: 'pro' } }
-      }
-      if (method === 'account/rateLimits/read') return { rateLimits: { planType: 'pro' } }
-      if (method === 'account/usage/read') return { usage: {} }
-      throw new Error(`unexpected request: ${method}`)
-    })
-
-    await expect(createCodexAdapter().account!.read({ providerId: 'codex', cwd: '/isolated-copy' })).resolves.toMatchObject({
-      state: 'ready', data: { accountLabel: 'user@example.com', plan: 'pro', usage: { authMode: 'chatgpt' } }
-    })
-  })
-
-  it('writes Codex Skill state and force-refreshes the native catalog', async () => {
-    let enabled = true
-    appServer.request.mockImplementation(async (method, params) => {
+  it('reads the Codex Skill catalog without claiming write access', async () => {
+    appServer.request.mockImplementation(async (method) => {
       if (method === 'skills/list') {
-        return { data: [{ cwd: '/isolated-copy', skills: [{ name: 'scry-e2e-audit', path: '/skill', enabled }] }] }
+        return { data: [{ cwd: '/isolated-copy', skills: [{ name: 'scry-e2e-audit', path: '/skill', enabled: true }] }] }
       }
-      if (method === 'skills/config/write') {
-        enabled = (params as { enabled: boolean }).enabled
-        return { effectiveEnabled: enabled }
-      }
-      throw new Error(`unexpected request: ${method} ${JSON.stringify(params)}`)
+      throw new Error(`unexpected request: ${method}`)
     })
     const adapter = createCodexAdapter()
     const context = { providerId: 'codex' as const, cwd: '/isolated-copy' }
 
-    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ mode: 'manage', data: [{ name: 'scry-e2e-audit', enabled: true }] })
-    await expect(adapter.skills!.setEnabled!(context, 'scry-e2e-audit', false)).resolves.toMatchObject({ state: 'ready', data: true })
-    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ data: [{ name: 'scry-e2e-audit', enabled: false }] })
-    expect(appServer.request).toHaveBeenLastCalledWith('skills/list', { cwds: ['/isolated-copy'], forceReload: true })
+    await expect(adapter.skills!.list(context)).resolves.toMatchObject({ mode: 'read', data: [{ name: 'scry-e2e-audit', enabled: true }] })
+    expect(appServer.request).toHaveBeenLastCalledWith('skills/list', { cwds: ['/isolated-copy'], forceReload: false })
   })
 
   it('keeps unapproved Codex hooks out of the app-server process', async () => {

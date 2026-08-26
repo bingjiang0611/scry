@@ -3525,7 +3525,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
 })
 
 import { DiagnosticsView } from './DiagnosticsView'
-import { accountUsageEvidence, filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
+import { filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
 
 describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => {
   const readyProps: ComponentProps<typeof DiagnosticsView> = {
@@ -3849,7 +3849,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         skills={[]}
         capability={null}
         refreshing
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -3867,7 +3866,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         refreshing={false}
         capability={null}
         onTest={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -3885,7 +3883,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         live={[{ name: 'github', status: 'pending' }]}
         refreshing={false}
         onTest={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -3894,7 +3891,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).not.toContain('connected')
   })
 
-  it('Fleet 把配置、运行态、本次测试和认证作为四份独立证据，并以 targetId 关联操作结果', () => {
+  it('Fleet 把运行态与认证作为独立证据，配置只在已关闭时标注，并以 targetId 关联操作结果', () => {
     const html = renderToStaticMarkup(
       <McpModal
         mcps={[{ targetId: 'fleet-target', name: 'fleet', scope: 'project', transport: 'http', detail: 'https://mcp.example.test', enabled: false }]}
@@ -3910,19 +3907,19 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         }}
         onTest={() => {}}
         onReauthenticate={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
     )
     const row = html.slice(html.indexOf('mcp-fleet__row'), html.indexOf('</tbody>'))
-    expect(html).toContain('<th scope="col">配置</th>')
+    expect(html).not.toContain('<th scope="col">配置</th>')
+    expect(html).not.toContain('<th scope="col">本次测试</th>')
     expect(html).toContain('<th scope="col">Provider 运行态</th>')
-    expect(html).toContain('<th scope="col">本次测试</th>')
     expect(html).toContain('<th scope="col">认证</th>')
-    expect(row).toContain('inventory-state--disabled')
+    expect(row).toContain('inventory-scope--off')
+    expect(row).toContain('已关闭')
     expect(row).toContain('connected · 2 tools')
-    expect(row).toContain('本次测试失败 · timeout')
+    expect(row).toContain('测试失败 · timeout')
     expect(row).toContain('认证成功，运行状态已刷新')
   })
 
@@ -3944,7 +3941,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
           data: { configured: [], runtime: [] }
         }}
         onTest={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -3977,7 +3973,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
           data: { configured: [], runtime: null }
         }}
         onTest={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4005,7 +4000,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
           data: { configured: [], runtime: [] }
         }}
         onTest={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4029,14 +4023,14 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
           data: { configured: [], runtime: [] }
         }}
         onTest={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
     )
     expect(failedHtml).toContain('connected')
     expect(failedHtml).toContain('role="alert"')
-    expect(failedHtml).toContain('本次测试失败 · initialize timeout')
+    expect(failedHtml).toContain('测试失败 · initialize timeout')
+    expect(failedHtml).toContain('title="本次测试失败 · initialize timeout"')
   })
 
   it('仅对 Provider 声明支持的 needs-auth 目标提供重新认证与可访问反馈', () => {
@@ -4060,7 +4054,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         capability={capability}
         onTest={() => {}}
         onReauthenticate={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4079,7 +4072,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         capability={capability}
         onTest={() => {}}
         onReauthenticate={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4096,7 +4088,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         capability={capability}
         onTest={() => {}}
         onReauthenticate={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4113,7 +4104,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         capability={capability}
         onTest={() => {}}
         onReauthenticate={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4138,7 +4128,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         }}
         onTest={() => {}}
         onReauthenticate={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4162,7 +4151,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         }}
         onTest={() => {}}
         onReauthenticate={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4173,7 +4161,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
 })
 
 describe('Skill/MCP 操作能力渲染', () => {
-  it('只读 Provider 只展示原生状态，不展示无法生效的 Skill 开关', () => {
+  it('Skill 清单只呈现发现结果，不渲染配置状态、开关与账号证据', () => {
     const html = renderToStaticMarkup(
       <SkillsModal
         skills={[
@@ -4181,22 +4169,23 @@ describe('Skill/MCP 操作能力渲染', () => {
           { name: 'user-home', dir: '/home-skill', scope: 'user', description: 'shared', enabled: true }
         ]}
         capability={{ providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [] }}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
     )
     expect(html).not.toContain('type="checkbox"')
-    expect(html).toContain('inventory-modal--skills')
-    expect(html).toContain('class="skill-ledger__status-line"')
     expect(html).not.toContain('class="inventory-switch"')
+    expect(html).not.toContain('skill-ledger__status')
+    expect(html).not.toContain('配置状态')
+    expect(html).not.toContain('inventory-account')
+    expect(html).toContain('inventory-modal--skills')
     expect(html).toContain('aria-label="Skills 查询上下文"')
     expect(html).toContain('<strong>qoder</strong>')
     expect(html).toContain('<code title="/repo">/repo</code>')
     expect(html).toContain('尚未观测')
-    expect(html).toContain('已启用')
-    expect(html).toContain('只读状态')
-    expect(html).toContain('Scry 不展示无法生效的开关')
+    expect(html).toContain('1 个结果')
+    expect(html).toContain('发现证据')
+    expect(html).toContain('Scry 只读取、不改写 Skill 配置')
     expect(html).toContain('role="tablist" aria-label="Skill 来源"')
     expect(html).toContain('项目 Skill <span>1</span>')
     expect(html).toContain('用户 Skill <span>1</span>')
@@ -4207,7 +4196,7 @@ describe('Skill/MCP 操作能力渲染', () => {
     ], 'user')).toEqual([{ name: 'user-home', dir: '/home', scope: 'user', description: 'shared', enabled: true }])
   })
 
-  it('不丢弃 Provider 原生 Skill scope，并只展示账号级配额', () => {
+  it('不丢弃 Provider 原生 Skill scope', () => {
     const providerSkill = {
       name: 'scry-e2e-audit',
       dir: '/repo/.opencode/skills/scry-e2e-audit',
@@ -4219,21 +4208,6 @@ describe('Skill/MCP 操作能力渲染', () => {
       <SkillsModal
         skills={[providerSkill]}
         capability={{ providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [providerSkill] }}
-        account={{
-          providerId: 'qoder',
-          cwd: '/repo',
-          mode: 'read',
-          state: 'ready',
-          data: {
-            accountLabel: 'dev@example.test',
-            plan: 'pro',
-            usage: {
-              userQuota: { total: 1_000, remaining: 625, unit: 'credits' },
-              session: { total_credits: 12.5, model_usage: { performance: { credits: 12.5 } } }
-            }
-          }
-        }}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
@@ -4242,54 +4216,21 @@ describe('Skill/MCP 操作能力渲染', () => {
     expect(filterSkillsForScope([providerSkill], 'provider')).toEqual([providerSkill])
     expect(html).toContain('Provider Skill <span>1</span>')
     expect(html).toContain('scry-e2e-audit')
-    expect(html).toContain('dev@example.test')
-    expect(html).toContain('pro')
-    expect(html).toContain('625 / 1,000 credits')
-    expect(html).not.toContain('12.5 credits')
-    expect(html).not.toContain('会话 credits')
+    expect(html).toContain('inventory-scope--unknown')
   })
 
-  it('账号能力未知时不把缺失额度补成 0', () => {
-    const html = renderToStaticMarkup(
-      <SkillsModal
-        skills={[]}
-        capability={{ providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [] }}
-        account={{
-          providerId: 'qoder',
-          cwd: '/repo',
-          mode: 'read',
-          state: 'unknown',
-          data: null,
-          reason: 'authentication required'
-        }}
-        onToggle={() => {}}
-        onRefresh={() => {}}
-        onClose={() => {}}
-      />
-    )
-
-    expect(html).toContain('账号证据未知')
-    expect(html).toContain('authentication required')
-    expect(html).not.toContain('0 credits')
-    expect(accountUsageEvidence({ userQuota: { percentage: 75 } })).toEqual({})
-    expect(accountUsageEvidence({ userQuota: { total: 100, used: 25, unit: 'credits' } })).toEqual({
-      quota: '25 / 100 credits 已使用'
-    })
-  })
-
-  it('可管理 Provider 允许 Skill 开关，MCP 只读 Provider 保持 disabled/connected 真值', () => {
+  it('可管理 Provider 也不再渲染 Skill 开关，MCP 面板保持 connected 真值', () => {
     const skillHtml = renderToStaticMarkup(
       <SkillsModal
         skills={[{ name: 'scry-e2e-audit', dir: '/skill', scope: 'project', description: 'audit', enabled: false }]}
         capability={{ providerId: 'claude', cwd: '/repo', mode: 'manage', state: 'ready', data: [] }}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
     )
-    expect(skillHtml).toContain('当前 Provider 支持由 Scry 管理 Skill 开关')
-    expect(skillHtml).toContain('已关闭')
-    expect(skillHtml).not.toContain('type="checkbox" disabled=""')
+    expect(skillHtml).not.toContain('type="checkbox"')
+    expect(skillHtml).not.toContain('已关闭')
+    expect(skillHtml).not.toContain('可管理')
 
     const mcpHtml = renderToStaticMarkup(
       <McpModal
@@ -4305,12 +4246,12 @@ describe('Skill/MCP 操作能力渲染', () => {
           data: { configured: [], runtime: [] }
         }}
         onTest={() => {}}
-        onToggle={() => {}}
         onRefresh={() => {}}
         onClose={() => {}}
       />
     )
-    expect(mcpHtml).toMatch(/type="checkbox"[^>]*disabled=""[^>]*checked=""/)
+    expect(mcpHtml).not.toContain('type="checkbox"')
+    expect(mcpHtml).not.toContain('运行态只读')
     expect(mcpHtml).toContain('aria-label="MCP 查询上下文"')
     expect(mcpHtml).toContain('<strong>opencode</strong>')
     expect(mcpHtml).toContain('<code title="/repo">/repo</code>')

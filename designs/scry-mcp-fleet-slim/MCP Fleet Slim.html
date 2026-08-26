@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scry · MCP Fleet 精简版</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="mcp-fleet.css" />
+    <style>
+      .page {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+      }
+
+      .page__bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 12px 22px;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+      }
+
+      .page__id {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      .page__id strong {
+        color: var(--fg);
+        font: 700 12px/1 var(--font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .page__id span {
+        color: var(--dim2);
+        font: 600 11px/1 var(--font-mono);
+      }
+
+      .tweaks-btn {
+        min-height: 28px;
+        padding: 0 11px;
+        border: 1px solid var(--border2);
+        border-radius: var(--r-md);
+        background: var(--panel2);
+        color: var(--dim);
+        font: 600 11.5px/1 var(--font-ui);
+        cursor: pointer;
+      }
+
+      .tweaks-btn:hover {
+        border-color: var(--accent-line);
+        color: var(--fg);
+      }
+
+      .knobs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 22px;
+        padding: 12px 22px;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel2);
+      }
+
+      .knob {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .knob > span {
+        color: var(--dim2);
+        font: 700 10px/1 var(--font-mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .knob__seg {
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        background: var(--panel);
+      }
+
+      .knob__seg button {
+        min-height: 24px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--dim2);
+        font: 600 11.5px/1 var(--font-ui);
+        cursor: pointer;
+        transition: background-color 140ms ease-out, color 140ms ease-out;
+      }
+
+      .knob__seg button:hover {
+        color: var(--fg);
+      }
+
+      .knob__seg button.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .stage {
+        flex: 1;
+        display: grid;
+        padding: 26px 22px 34px;
+      }
+
+      .stage .modal-overlay {
+        border-radius: var(--r-lg);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+    <script type="text/babel" src="data.jsx"></script>
+    <script type="text/babel" src="app.jsx"></script>
+  </body>
+</html>

@@ -46,16 +46,6 @@ describe('ProviderRegistry', () => {
       mode: 'none',
       data: null
     })
-    await expect(registry.setSkillEnabled({ providerId: 'codex', cwd: '/repo' }, 'audit', false)).resolves.toMatchObject({
-      state: 'unsupported',
-      mode: 'none',
-      data: null
-    })
-    await expect(registry.setMcpEnabled({ providerId: 'codex', cwd: '/repo' }, 'scry-e2e', false)).resolves.toMatchObject({
-      state: 'unsupported',
-      mode: 'none',
-      data: null
-    })
     await expect(registry.reauthenticateMcp(
       { providerId: 'codex', cwd: '/repo' },
       'scry-e2e',

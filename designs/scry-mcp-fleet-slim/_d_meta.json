@@ -1,0 +1,19 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "MCP Fleet 精简版": {
+      "versions": [
+        {
+          "path": "MCP Fleet Slim.html",
+          "createdAt": "2026-08-26T07:24:44.290Z",
+          "status": "needs-review",
+          "subtitle": "去掉配置/本次测试两列与四证据副标题"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-26T07:24:44.291Z",
+  "updatedAt": "2026-08-26T07:24:44.291Z"
+}

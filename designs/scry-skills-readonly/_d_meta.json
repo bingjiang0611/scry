@@ -1,0 +1,28 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Skills 只读清单": {
+      "versions": [
+        {
+          "path": "Skills Panel.html",
+          "createdAt": "2026-08-26T07:29:09.480Z",
+          "status": "needs-review",
+          "subtitle": "去掉配置状态与 Provider account 后的三种方案"
+        }
+      ]
+    },
+    "Skills Panel": {
+      "versions": [
+        {
+          "path": "Skills Panel.html",
+          "createdAt": "2026-08-26T08:02:15.394Z",
+          "status": "approved"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-26T07:29:09.481Z",
+  "updatedAt": "2026-08-26T08:02:15.395Z"
+}

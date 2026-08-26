@@ -5,7 +5,6 @@ import {
   type TraceEvent,
   type DiffFile,
   type HookConfiguredCommand,
-  type McpLiveStatus,
   type ModelUsageRow
 } from '@shared/trace'
 import type { AgentInputAttachment } from '@shared/runtime'
@@ -112,17 +111,6 @@ export interface McpStatus {
   authenticating?: boolean
   authOk?: boolean
   authError?: string
-}
-
-export function updateMcpLiveAfterToggle(live: McpLiveStatus[], name: string, enabled: boolean): McpLiveStatus[] {
-  const status: McpLiveStatus['status'] = enabled ? 'pending' : 'disabled'
-  let seen = false
-  const next = live.map((l) => {
-    if (l.name !== name) return l
-    seen = true
-    return { ...l, status }
-  })
-  return seen ? next : [...next, { name, status }]
 }
 
 export function basename(p: string): string {

@@ -23,14 +23,12 @@ vi.mock('../mcp-config', async () => {
     ...actual,
     findMcpConfigByTargetId: () => ({ config: { command: '/bin/mcp' } }),
     listMcp: mcp.listMcp,
-    testMcpConfig: mcp.testMcpConfig,
-    toggleMcp: vi.fn()
+    testMcpConfig: mcp.testMcpConfig
   }
 })
 vi.mock('../skill-config', () => ({
   computeEnabledSkills: () => ['scry-e2e-audit'],
-  listSkills: () => [{ name: 'scry-e2e-audit', dir: 'scry-e2e-audit', scope: 'project', description: 'Safe audit', enabled: true }],
-  setSkillEnabled: vi.fn()
+  listSkills: () => [{ name: 'scry-e2e-audit', dir: 'scry-e2e-audit', scope: 'project', description: 'Safe audit', enabled: true }]
 }))
 
 import { claudeMcpLoginArgs, createClaudeAdapter, runClaudeMcpLogin } from './claude'
@@ -152,7 +150,7 @@ describe('Claude provider adapter', () => {
     await expect(createClaudeAdapter('/tmp/scry-home').describe()).resolves.toMatchObject({
       id: 'claude',
       runtimeProvider: 'claude_sdk',
-      capabilities: { skills: 'manage', mcp: 'manage', commands: 'read', account: 'none' }
+      capabilities: { skills: 'read', mcp: 'manage', commands: 'read', account: 'none' }
     })
   })
 

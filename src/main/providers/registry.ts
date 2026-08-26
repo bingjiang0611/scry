@@ -1,7 +1,6 @@
 import {
   capabilityReady,
   capabilityUnavailable,
-  type AccountSnapshot,
   type CapabilityEnvelope,
   type McpAuthResult,
   type McpSnapshot,
@@ -107,11 +106,6 @@ export class ProviderRegistry {
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的 Skill 读取接口'))
   }
 
-  setSkillEnabled(context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>> {
-    return this.disabled<boolean>(context) ?? this.get(context.providerId).skills?.setEnabled?.(context, name, enabled) ??
-      Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 不支持由 Scry 管理 Skill 开关'))
-  }
-
   mcpSnapshot(
     context: ProviderContext,
     refresh = false,
@@ -119,11 +113,6 @@ export class ProviderRegistry {
   ): Promise<CapabilityEnvelope<McpSnapshot>> {
     return this.disabled<McpSnapshot>(context) ?? this.get(context.providerId).mcp?.snapshot(context, refresh, execution) ??
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的 MCP 状态接口'))
-  }
-
-  setMcpEnabled(context: ProviderContext, name: string, enabled: boolean): Promise<CapabilityEnvelope<boolean>> {
-    return this.disabled<boolean>(context) ?? this.get(context.providerId).mcp?.setEnabled?.(context, name, enabled) ??
-      Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 不支持由 Scry 管理 MCP 开关'))
   }
 
   testMcp(
@@ -149,11 +138,6 @@ export class ProviderRegistry {
   listCommands(context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>> {
     return this.disabled<ProviderCommand[]>(context) ?? this.get(context.providerId).commands?.list(context) ??
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可嵌入的命令目录'))
-  }
-
-  account(context: ProviderContext): Promise<CapabilityEnvelope<AccountSnapshot>> {
-    return this.disabled<AccountSnapshot>(context) ?? this.get(context.providerId).account?.read(context) ??
-      Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的账户用量接口'))
   }
 
   inspectHookTrust(context: ProviderContext): Promise<CodexHookInspection> {

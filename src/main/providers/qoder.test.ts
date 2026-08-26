@@ -42,7 +42,7 @@ describe('Qoder provider adapter', () => {
       id: 'qoder',
       label: 'Qoder',
       transport: 'Qoder Agent SDK',
-      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'read' }
+      capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' }
     })
   })
 
@@ -410,72 +410,6 @@ describe('Qoder provider adapter', () => {
       state: 'degraded',
       reason: expect.stringContaining('catalog unavailable'),
       data: [{ name: 'help', source: undefined }]
-    })
-    await adapter.dispose?.()
-  })
-
-  it('preserves native account quota without exposing control-session credits as chat usage', async () => {
-    sdk.query.mockReturnValue({
-      initializationResult: vi.fn().mockResolvedValue({}),
-      getUsageInfo: vi.fn().mockResolvedValue({
-        userType: 'Pro',
-        userQuota: { total: 100, used: 25, remaining: 75, unit: 'credits' },
-        session: { total_credits: 1.25, model_usage: { performance: { credits: 1.25 } } }
-      }),
-      accountInfo: vi.fn().mockResolvedValue({ email: 'user@example.test', subscriptionType: 'Pro' }),
-      close: sdk.close
-    })
-    const adapter = createQoderAdapter()
-
-    const result = await adapter.account!.read({ providerId: 'qoder', cwd: '/repo' })
-    expect(result).toMatchObject({
-      mode: 'read',
-      state: 'ready',
-      data: {
-        accountLabel: 'user@example.test',
-        plan: 'Pro',
-        usage: {
-          userQuota: { total: 100, used: 25, remaining: 75, unit: 'credits' }
-        }
-      }
-    })
-    expect(result.data?.usage).not.toHaveProperty('session')
-    await adapter.dispose?.()
-  })
-
-  it('keeps an empty native account response unknown instead of reporting ready', async () => {
-    sdk.query.mockReturnValue({
-      initializationResult: vi.fn().mockResolvedValue({}),
-      getUsageInfo: vi.fn().mockResolvedValue(null),
-      accountInfo: vi.fn().mockResolvedValue({}),
-      close: sdk.close
-    })
-    const adapter = createQoderAdapter()
-
-    await expect(adapter.account!.read({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
-      mode: 'read',
-      state: 'unknown',
-      data: null,
-      reason: expect.stringContaining('未返回账号或用量证据')
-    })
-    await adapter.dispose?.()
-  })
-
-  it('ignores blank account fields and falls back to trimmed native evidence', async () => {
-    sdk.query.mockReturnValue({
-      initializationResult: vi.fn().mockResolvedValue({}),
-      getUsageInfo: vi.fn().mockResolvedValue({ userType: '  Team  ' }),
-      accountInfo: vi.fn().mockResolvedValue({ email: '  ', name: '  Ada  ', userId: 'ignored' }),
-      close: sdk.close
-    })
-    const adapter = createQoderAdapter()
-
-    await expect(adapter.account!.read({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
-      state: 'ready',
-      data: {
-        accountLabel: 'Ada',
-        plan: 'Team'
-      }
     })
     await adapter.dispose?.()
   })

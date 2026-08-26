@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { computeEnabledSkills, listSkills, setSkillEnabled } from './skill-config'
+import { computeEnabledSkills, listSkills } from './skill-config'
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'scry-skill-'))
 
@@ -31,47 +31,6 @@ describe('skill-config', () => {
         ])
       )
       expect(computeEnabledSkills(cwd, home)).toEqual(['user-off'])
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it('配置损坏时拒绝覆盖，不伪报 Skill 开关成功', () => {
-    const home = tempDir()
-    try {
-      mkdirSync(join(home, '.claude'), { recursive: true })
-      const settings = join(home, '.claude', 'settings.local.json')
-      writeFileSync(settings, '{ damaged')
-
-      expect(() => setSkillEnabled('scry-e2e-audit', false, undefined, home)).toThrow()
-      expect(readFileSync(settings, 'utf8')).toBe('{ damaged')
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-    }
-  })
-
-  it('开关 Skill 后重新读取返回持久化状态，并可恢复', () => {
-    const home = tempDir()
-    const cwd = tempDir()
-    try {
-      writeSkill(join(cwd, '.claude', 'skills'), 'scry-e2e-audit')
-      mkdirSync(join(home, '.claude'), { recursive: true })
-      writeFileSync(join(home, '.claude', 'settings.local.json'), JSON.stringify({ keep: 'value' }))
-
-      setSkillEnabled('scry-e2e-audit', false, cwd, home)
-      expect(listSkills(cwd, home)).toContainEqual(expect.objectContaining({ name: 'scry-e2e-audit', enabled: false }))
-      expect(JSON.parse(readFileSync(join(home, '.claude', 'settings.local.json'), 'utf8'))).toMatchObject({
-        keep: 'value',
-        skillOverrides: { 'scry-e2e-audit': 'off' }
-      })
-
-      setSkillEnabled('scry-e2e-audit', true, cwd, home)
-      expect(listSkills(cwd, home)).toContainEqual(expect.objectContaining({ name: 'scry-e2e-audit', enabled: true }))
-      expect(JSON.parse(readFileSync(join(home, '.claude', 'settings.local.json'), 'utf8'))).toMatchObject({
-        keep: 'value',
-        skillOverrides: {}
-      })
     } finally {
       rmSync(home, { recursive: true, force: true })
       rmSync(cwd, { recursive: true, force: true })
