@@ -309,7 +309,7 @@ export function RightSurfacePanel({
                 hidden={activeKind !== kind}
                 key={kind}
               >
-                {contents[kind]}
+                {activeKind === kind || kind === 'terminal' || kind === 'files' ? contents[kind] : null}
               </section>
             )
           })

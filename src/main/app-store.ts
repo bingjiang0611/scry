@@ -160,8 +160,8 @@ export function cleanupAppStoreAtomicTemps(userDataDir: string): void {
   }
 }
 
-function writeJsonRecoverable<T>(file: string, value: T, isValid: JsonValidator<T>): void {
-  const primary = parsedJson<T>(file, isValid)
+function writeJsonRecoverable<T>(file: string, value: T, isValid: JsonValidator<T>, previous?: T): void {
+  const primary = previous === undefined ? parsedJson<T>(file, isValid) : { status: 'valid' as const, value: previous }
   if (primary.status === 'valid') writeAtomic(`${file}.bak`, primary.value)
   writeAtomic(file, value)
 }
@@ -211,8 +211,30 @@ export function createRecentFoldersStore(userDataDir: string) {
 
 export function createAppSessionStore(userDataDir: string) {
   const file = join(userDataDir, 'app-sessions.json')
+  let cached: { sessions: AppSession[]; primaryKey: string } | undefined
   let lastHealth: CatalogHealth = { status: 'ready', source: 'empty' }
+  const clone = (list: AppSession[]): AppSession[] => list.map((session) => ({ ...session }))
+  const primaryKey = (): string => {
+    try {
+      const stat = lstatSync(file)
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing'
+      throw error
+    }
+  }
+  const normalize = (list: AppSession[]): AppSession[] => list.map((session) => {
+    const externalSessionId = session.externalSessionId ?? (session.runId ? undefined : session.sessionId)
+    return {
+      ...session,
+      sessionId: session.sessionId || externalSessionId || session.runId || '',
+      externalSessionId,
+      providerId: session.providerId ?? 'legacy_unknown'
+    }
+  })
   const load = (): AppSession[] => {
+    const key = primaryKey()
+    if (cached?.primaryKey === key) return clone(cached.sessions)
     let read: { value: AppSession[]; health: CatalogHealth }
     try {
       read = readJsonRecoverable<AppSession[]>(file, [], isAppSessionArray)
@@ -223,18 +245,13 @@ export function createAppSessionStore(userDataDir: string) {
       }
       throw error
     }
-    return read.value.map((session) => {
-      const externalSessionId = session.externalSessionId ?? (session.runId ? undefined : session.sessionId)
-      return {
-        ...session,
-        sessionId: session.sessionId || externalSessionId || session.runId || '',
-        externalSessionId,
-        providerId: session.providerId ?? 'legacy_unknown'
-      }
-    })
+    const sessions = normalize(read.value)
+    cached = { sessions, primaryKey: key }
+    return clone(sessions)
   }
   const save = (list: AppSession[]): void => {
-    writeJsonRecoverable(file, list, isAppSessionArray)
+    writeJsonRecoverable(file, list, isAppSessionArray, cached?.sessions)
+    cached = { sessions: normalize(list), primaryKey: primaryKey() }
     lastHealth = { status: 'ready', source: 'primary' }
   }
   const health = (): CatalogHealth => {
@@ -399,6 +416,7 @@ export function createAppSessionStore(userDataDir: string) {
     // Write the deletion tombstone to fallback first. If primary then fails, its old entry remains retryable.
     writeAtomic(`${file}.bak`, next)
     writeAtomic(file, next)
+    cached = { sessions: normalize(next), primaryKey: primaryKey() }
     lastHealth = { status: 'ready', source: 'primary' }
   }
 

@@ -1,18 +1,19 @@
 import {
   closeSync,
   constants,
-  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
+import { copyFile, lstat, open as openFile, readFile, readdir, rename, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -119,30 +120,26 @@ function trustedSegmentTempPaths(args: {
   }
 }
 
-export function cleanupTraceArchiveTemps(userDataDir: string): void {
+export async function cleanupTraceArchiveTemps(userDataDir: string): Promise<void> {
   const root = join(userDataDir, 'trace-archive-turns-v1')
-  const walk = (dir: string, depth: number): void => {
-    let names: string[]
+  const walk = async (dir: string, depth: number): Promise<void> => {
     try {
-      const stat = lstatSync(dir)
+      const stat = await lstat(dir)
       if (!stat.isDirectory() || stat.isSymbolicLink()) return
-      names = readdirSync(dir)
-    } catch {
-      return
-    }
-    for (const name of names) {
-      const path = join(dir, name)
-      try {
-        const stat = lstatSync(path)
-        if (stat.isSymbolicLink()) continue
-        if (depth < 3 && stat.isDirectory()) walk(path, depth + 1)
-        else if (depth === 3 && stat.isFile() && /^turn-[a-f0-9]{64}\.json\.tmp$/.test(name)) unlinkSync(path)
-      } catch {
-        // Startup cleanup is best-effort and only touches strict Scry temp names.
+      const entries = await readdir(dir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) continue
+        const path = join(dir, entry.name)
+        if (depth < 3 && entry.isDirectory()) await walk(path, depth + 1)
+        else if (depth === 3 && entry.isFile() && /^turn-[a-f0-9]{64}\.json\.tmp$/.test(entry.name)) {
+          try { await unlink(path) } catch { /* startup cleanup is best-effort */ }
+        }
       }
+    } catch {
+      // Startup cleanup is best-effort and only touches strict Scry temp names.
     }
   }
-  walk(root, 0)
+  await walk(root, 0)
 }
 
 function traceArchiveTurnKey(turn: Pick<TraceArchiveTurn, 'runId' | 'providerTurnId'>): string {
@@ -222,23 +219,93 @@ function writeOwnedFileAtomically(userDataDir: string, filePath: string, content
   }
 }
 
-function copyToOwnedFileAtomically(userDataDir: string, source: string, filePath: string): void {
+async function mirrorPrefixMatches(source: string, target: string, size: number): Promise<boolean> {
+  if (size === 0) return true
+  const sourceFile = await openFile(source, constants.O_RDONLY | constants.O_NOFOLLOW)
+  const targetFile = await openFile(target, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const starts = [...new Set([0, Math.max(0, size - 4096)])]
+    for (const start of starts) {
+      const length = Math.min(4096, size - start)
+      const sourceBytes = Buffer.allocUnsafe(length)
+      const targetBytes = Buffer.allocUnsafe(length)
+      const [sourceRead, targetRead] = await Promise.all([
+        sourceFile.read(sourceBytes, 0, length, start),
+        targetFile.read(targetBytes, 0, length, start)
+      ])
+      if (sourceRead.bytesRead !== length || targetRead.bytesRead !== length || !sourceBytes.equals(targetBytes)) return false
+    }
+    return true
+  } finally {
+    await Promise.allSettled([sourceFile.close(), targetFile.close()])
+  }
+}
+
+const transcriptMirrorProvenance = new Map<string, { sourceDev: number; sourceIno: number; sourceSize: number; sourceMtimeMs: number }>()
+
+async function copyToOwnedFileAtomically(userDataDir: string, source: string, filePath: string): Promise<void> {
   trustedOwnedParent(userDataDir, filePath, true)
+  const sourceStat = await lstat(source)
+  if (trustedOwnedFile(userDataDir, filePath)) {
+    try {
+      const targetStat = await lstat(filePath)
+      const provenance = transcriptMirrorProvenance.get(filePath)
+      const canAppend = provenance?.sourceDev === sourceStat.dev && provenance.sourceIno === sourceStat.ino &&
+        provenance.sourceSize === targetStat.size && targetStat.size <= sourceStat.size
+      if (canAppend && await mirrorPrefixMatches(source, filePath, targetStat.size)) {
+        if (targetStat.size === sourceStat.size && provenance.sourceMtimeMs === sourceStat.mtimeMs) return
+        const input = await openFile(source, constants.O_RDONLY | constants.O_NOFOLLOW)
+        let output: Awaited<ReturnType<typeof openFile>> | undefined
+        try {
+          output = await openFile(filePath, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW, 0o600)
+          const openedTarget = await output.stat()
+          if (openedTarget.dev !== targetStat.dev || openedTarget.ino !== targetStat.ino) throw new Error('transcript mirror target changed during append')
+          const buffer = Buffer.allocUnsafe(64 * 1024)
+          let position = targetStat.size
+          while (position < sourceStat.size) {
+            const { bytesRead } = await input.read(buffer, 0, Math.min(buffer.length, sourceStat.size - position), position)
+            if (bytesRead === 0) break
+            let written = 0
+            while (written < bytesRead) {
+              const result = await output.write(buffer, written, bytesRead - written)
+              written += result.bytesWritten
+            }
+            position += bytesRead
+          }
+          await output.sync()
+          transcriptMirrorProvenance.set(filePath, {
+            sourceDev: sourceStat.dev,
+            sourceIno: sourceStat.ino,
+            sourceSize: sourceStat.size,
+            sourceMtimeMs: sourceStat.mtimeMs
+          })
+          return
+        } finally {
+          await Promise.allSettled([input.close(), ...(output ? [output.close()] : [])])
+        }
+      }
+    } catch {
+      // A failed incremental append falls back to a complete atomic mirror below.
+    }
+  }
+
   const tmp = `${filePath}.tmp`
   try {
     try {
-      unlinkSync(tmp)
+      await unlink(tmp)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    copyFileSync(source, tmp, constants.COPYFILE_EXCL)
-    renameSync(tmp, filePath)
+    await copyFile(source, tmp, constants.COPYFILE_EXCL)
+    await rename(tmp, filePath)
+    transcriptMirrorProvenance.set(filePath, {
+      sourceDev: sourceStat.dev,
+      sourceIno: sourceStat.ino,
+      sourceSize: sourceStat.size,
+      sourceMtimeMs: sourceStat.mtimeMs
+    })
   } catch (error) {
-    try {
-      unlinkSync(tmp)
-    } catch {
-      /* ignore */
-    }
+    try { await unlink(tmp) } catch { /* ignore */ }
     throw error
   }
 }
@@ -325,6 +392,23 @@ function normalizeArchive(archive: TraceArchive): TraceArchive {
   return archive
 }
 
+function validateArchive(
+  value: unknown,
+  cwd: string,
+  sessionId: string,
+  expectedProvider?: ProviderId
+): ArchiveInspection {
+  if (!isArchiveShape(value)) return { status: 'invalid', reason: 'corrupt', error: 'archive schema is invalid' }
+  if (value.cwd !== cwd || value.sessionId !== sessionId) {
+    return { status: 'invalid', reason: 'identity_mismatch', error: 'archive belongs to another session/cwd' }
+  }
+  const identities = archiveProviderIdentities(value)
+  if (identities.invalid || identities.ids.size > 1 || (expectedProvider && (identities.ids.size !== 1 || !identities.ids.has(expectedProvider)))) {
+    return { status: 'invalid', reason: 'provider_mismatch', error: 'archive contains conflicting Provider identity' }
+  }
+  return { status: 'valid', archive: normalizeArchive(value) }
+}
+
 function inspectArchiveFile(
   userDataDir: string,
   fp: string,
@@ -342,24 +426,35 @@ function inspectArchiveFile(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' }
     return { status: 'invalid', reason: 'untrusted', error: error instanceof Error ? error.message : String(error) }
   }
-  let parsed: TraceArchive
   try {
-    const value: unknown = JSON.parse(readFileSync(fp, 'utf8'))
-    if (!isArchiveShape(value)) {
-      return { status: 'invalid', reason: 'corrupt', error: 'archive schema is invalid' }
-    }
-    parsed = value
+    return validateArchive(JSON.parse(readFileSync(fp, 'utf8')), cwd, sessionId, expectedProvider)
   } catch (error) {
     return { status: 'invalid', reason: 'corrupt', error: `archive is corrupt: ${error instanceof Error ? error.message : String(error)}` }
   }
-  if (parsed.cwd !== cwd || parsed.sessionId !== sessionId) {
-    return { status: 'invalid', reason: 'identity_mismatch', error: 'archive belongs to another session/cwd' }
+}
+
+async function inspectArchiveFileAsync(
+  userDataDir: string,
+  fp: string,
+  cwd: string,
+  sessionId: string,
+  expectedProvider?: ProviderId
+): Promise<ArchiveInspection> {
+  try {
+    trustedOwnedParent(userDataDir, fp, false)
+    const stat = await lstat(fp)
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      return { status: 'invalid', reason: 'untrusted', error: 'archive is not a trusted regular file' }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' }
+    return { status: 'invalid', reason: 'untrusted', error: error instanceof Error ? error.message : String(error) }
   }
-  const identities = archiveProviderIdentities(parsed)
-  if (identities.invalid || identities.ids.size > 1 || (expectedProvider && (identities.ids.size !== 1 || !identities.ids.has(expectedProvider)))) {
-    return { status: 'invalid', reason: 'provider_mismatch', error: 'archive contains conflicting Provider identity' }
+  try {
+    return validateArchive(JSON.parse(await readFile(fp, 'utf8')), cwd, sessionId, expectedProvider)
+  } catch (error) {
+    return { status: 'invalid', reason: 'corrupt', error: `archive is corrupt: ${error instanceof Error ? error.message : String(error)}` }
   }
-  return { status: 'valid', archive: normalizeArchive(parsed) }
 }
 
 function readArchiveFile(
@@ -429,6 +524,42 @@ function inspectSegmentedArchives(args: {
   return { valid, invalid }
 }
 
+async function inspectSegmentedArchivesAsync(args: {
+  cwd: string
+  sessionId: string
+  userDataDir: string
+  providerId: ProviderId
+}): Promise<SegmentedArchiveInspection> {
+  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  let names: string[]
+  try {
+    trustedOwnedParent(args.userDataDir, join(dir, '.identity'), false)
+    names = (await readdir(dir)).filter((name) => /^turn-[a-f0-9]{64}\.json$/.test(name)).sort()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { valid: [], invalid: [] }
+    return { valid: [], invalid: [{ path: dir, error: error instanceof Error ? error.message : String(error) }] }
+  }
+  const valid: TraceArchive[] = []
+  const invalid: Array<{ path: string; error: string }> = []
+  for (const name of names) {
+    const path = join(dir, name)
+    const inspected = await inspectArchiveFileAsync(args.userDataDir, path, args.cwd, args.sessionId, args.providerId)
+    if (inspected.status !== 'valid') {
+      invalid.push({ path, error: inspected.status === 'invalid' ? inspected.error : 'segmented archive disappeared' })
+      continue
+    }
+    if (
+      inspected.archive.turns.length !== 1 ||
+      traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, inspected.archive.turns[0]) !== path
+    ) {
+      invalid.push({ path, error: 'segmented archive identity is invalid' })
+      continue
+    }
+    valid.push(inspected.archive)
+  }
+  return { valid, invalid }
+}
+
 function mergeArchives(archives: TraceArchive[]): TraceArchive | null {
   if (archives.length === 0) return null
   const turns = new Map<string, TraceArchiveTurn>()
@@ -465,6 +596,23 @@ export function readTraceArchive(args: {
   providerId: ProviderId
 }): TraceArchive | null {
   return mergeArchives(archiveCandidates(args))
+}
+
+export async function readTraceArchiveAsync(args: {
+  cwd: string
+  sessionId: string
+  userDataDir: string
+  providerId: ProviderId
+}): Promise<TraceArchive | null> {
+  const current = await inspectArchiveFileAsync(
+    args.userDataDir,
+    traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
+    args.cwd,
+    args.sessionId,
+    args.providerId
+  )
+  const segmented = await inspectSegmentedArchivesAsync(args)
+  return mergeArchives((current.status === 'valid' ? [current.archive] : []).concat(segmented.valid))
 }
 
 export function traceArchiveRunIds(args: {
@@ -571,24 +719,83 @@ export function resolveTranscriptPath(args: {
   return null
 }
 
+const transcriptMirrorTasks = new Map<string, Promise<boolean>>()
+
 export function mirrorTranscript(args: {
   cwd: string
   sessionId: string
   userDataDir: string
   home?: string
-}): boolean {
+}): Promise<boolean> {
   const source = transcriptPath(args.cwd, args.sessionId, args.home)
-  if (inspectTranscriptIdentity(source, args.cwd, args.sessionId).status !== 'match') return false
   const dest = archivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
-  try {
-    copyToOwnedFileAtomically(args.userDataDir, source, dest)
-    return true
-  } catch {
-    return false
-  }
+  const previous = transcriptMirrorTasks.get(dest) ?? Promise.resolve(true)
+  const task = previous.then(async () => {
+    if (inspectTranscriptIdentity(source, args.cwd, args.sessionId).status !== 'match') return false
+    try {
+      await copyToOwnedFileAtomically(args.userDataDir, source, dest)
+      return true
+    } catch {
+      return false
+    }
+  })
+  transcriptMirrorTasks.set(dest, task)
+  void task.finally(() => {
+    if (transcriptMirrorTasks.get(dest) === task) transcriptMirrorTasks.delete(dest)
+  })
+  return task
 }
 
 type TranscriptIdentityInspection = { status: 'match' | 'foreign' } | { status: 'invalid'; error: string }
+interface TranscriptIdentityCache {
+  dev: number
+  ino: number
+  size: number
+  mtimeMs: number
+  cwd: string
+  sessionId: string
+  endedWithNewline: boolean
+  prefixHash: string
+  cwds: Set<string>
+  sessions: Set<string>
+}
+const transcriptIdentityCache = new Map<string, TranscriptIdentityCache>()
+
+function transcriptIdentityResult(
+  state: Pick<TranscriptIdentityCache, 'cwds' | 'sessions' | 'cwd' | 'sessionId'>
+): TranscriptIdentityInspection {
+  if (state.cwds.size !== 1 || state.sessions.size !== 1) {
+    return { status: 'invalid', error: 'transcript has missing or conflicting identity' }
+  }
+  return state.cwds.has(state.cwd) && state.sessions.has(state.sessionId) ? { status: 'match' } : { status: 'foreign' }
+}
+
+function readUtf8Range(filePath: string, start: number, end: number): string {
+  const buffer = Buffer.alloc(Math.max(0, end - start))
+  const fd = openSync(filePath, 'r')
+  let offset = 0
+  try {
+    while (offset < buffer.length) {
+      const read = readSync(fd, buffer, offset, buffer.length - offset, start + offset)
+      if (read === 0) break
+      offset += read
+    }
+  } finally {
+    closeSync(fd)
+  }
+  return buffer.toString('utf8', 0, offset)
+}
+
+function transcriptPrefixHash(filePath: string, size: number): string {
+  const fd = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const buffer = Buffer.allocUnsafe(Math.min(4096, size))
+    const bytesRead = buffer.length ? readSync(fd, buffer, 0, buffer.length, 0) : 0
+    return createHash('sha256').update(buffer.subarray(0, bytesRead)).digest('hex')
+  } finally {
+    closeSync(fd)
+  }
+}
 
 function inspectTranscriptIdentity(
   filePath: string,
@@ -598,19 +805,44 @@ function inspectTranscriptIdentity(
   try {
     const stat = lstatSync(filePath)
     if (!stat.isFile() || stat.isSymbolicLink()) return { status: 'invalid', error: 'transcript is not a trusted regular file' }
-    const cwds = new Set<string>()
-    const sessions = new Set<string>()
-    for (const line of readFileSync(filePath, 'utf8').split('\n')) {
+    const prefixHash = transcriptPrefixHash(filePath, stat.size)
+    const cached = transcriptIdentityCache.get(filePath)
+    if (
+      cached && cached.dev === stat.dev && cached.ino === stat.ino && cached.cwd === cwd && cached.sessionId === sessionId &&
+      cached.size === stat.size && cached.mtimeMs === stat.mtimeMs && cached.prefixHash === prefixHash
+    ) return transcriptIdentityResult(cached)
+
+    const append = cached && cached.dev === stat.dev && cached.ino === stat.ino && cached.cwd === cwd &&
+      cached.sessionId === sessionId && cached.endedWithNewline && cached.prefixHash === prefixHash &&
+      stat.mtimeMs >= cached.mtimeMs && stat.size > cached.size
+    const start = append ? cached.size : 0
+    const cwds = append ? new Set(cached.cwds) : new Set<string>()
+    const sessions = append ? new Set(cached.sessions) : new Set<string>()
+    const content = readUtf8Range(filePath, start, stat.size)
+    for (const line of content.split('\n')) {
       if (!line.trim()) continue
       const row = JSON.parse(line) as Record<string, unknown>
       if (typeof row.cwd === 'string') cwds.add(row.cwd)
       if (typeof row.sessionId === 'string') sessions.add(row.sessionId)
     }
-    if (cwds.size !== 1 || sessions.size !== 1) {
-      return { status: 'invalid', error: 'transcript has missing or conflicting identity' }
+    const state: TranscriptIdentityCache = {
+      dev: stat.dev,
+      ino: stat.ino,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      cwd,
+      sessionId,
+      endedWithNewline: content.endsWith('\n'),
+      prefixHash,
+      cwds,
+      sessions
     }
-    return cwds.has(cwd) && sessions.has(sessionId) ? { status: 'match' } : { status: 'foreign' }
+    transcriptIdentityCache.delete(filePath)
+    transcriptIdentityCache.set(filePath, state)
+    if (transcriptIdentityCache.size > 128) transcriptIdentityCache.delete(transcriptIdentityCache.keys().next().value!)
+    return transcriptIdentityResult(state)
   } catch (error) {
+    transcriptIdentityCache.delete(filePath)
     return { status: 'invalid', error: error instanceof Error ? error.message : String(error) }
   }
 }

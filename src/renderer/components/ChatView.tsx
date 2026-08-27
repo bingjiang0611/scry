@@ -432,7 +432,7 @@ export function ChatView({
               data-selected={selectedTurn || undefined}
               ref={onTurnRef ? (el) => onTurnRef(turn.runId, el) : undefined}
             >
-              <UserMessage text={turn.userText} attachments={turn.attachments ?? []} />
+              <UserMessage text={turn.userText} attachments={turn.attachments} />
               <AssistantTurn
                 turn={turn}
                 selectedId={selectedId}

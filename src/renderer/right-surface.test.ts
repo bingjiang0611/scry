@@ -135,14 +135,16 @@ describe('right surface catalog', () => {
     expect(new Set(RIGHT_SURFACE_DEFINITIONS.map((surface) => surface.kind)).size).toBe(5)
   })
 
-  it('非激活 Surface 保持挂载，只通过 hidden 隐藏', () => {
+  it('只渲染激活 Surface，同时保留后台终端和未保存文件', () => {
     const html = renderToStaticMarkup(createElement(RightSurfacePanel, {
-      openIds: ['overview', 'terminal'],
+      openIds: ['overview', 'files', 'terminal', 'agents'],
       activeId: 'overview',
       maximized: false,
       contents: {
         overview: createElement('span', null, 'overview-state'),
-        terminal: createElement('span', null, 'terminal-state')
+        files: createElement('span', null, 'files-state'),
+        terminal: createElement('span', null, 'terminal-state'),
+        agents: createElement('span', null, 'agents-state')
       },
       onOpen: () => {},
       onActivate: () => {},
@@ -152,7 +154,9 @@ describe('right surface catalog', () => {
     }))
 
     expect(html).toContain('overview-state')
+    expect(html).toContain('files-state')
     expect(html).toContain('terminal-state')
+    expect(html).not.toContain('agents-state')
     expect(html).toMatch(/surface-content-terminal[^>]* hidden=""/)
   })
 })

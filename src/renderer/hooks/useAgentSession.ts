@@ -164,6 +164,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const pendingStartLifecycleRef = useRef<RunLifecycleDelta[] | null>(null)
   const traceBuf = useRef<TraceEvent[]>([])
   const rafId = useRef<number | null>(null)
+  const flushTimeoutId = useRef<number | null>(null)
   const callbacksRef = useRef(callbacks)
 
   callbacksRef.current = callbacks
@@ -172,7 +173,10 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const busy = useMemo(() => restoring || running || turns.some((turn) => !turn.done && !turn.error), [restoring, running, turns])
 
   const flushTrace = useCallback((): void => {
+    if (rafId.current != null) cancelAnimationFrame(rafId.current)
+    if (flushTimeoutId.current != null) window.clearTimeout(flushTimeoutId.current)
     rafId.current = null
+    flushTimeoutId.current = null
     const buf = traceBuf.current
     if (buf.length === 0) return
     traceBuf.current = []
@@ -330,6 +334,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       if (focusedRunIdRef.current !== event.runId) return
       traceBuf.current.push(event)
       if (rafId.current == null) rafId.current = requestAnimationFrame(flushTrace)
+      if (flushTimeoutId.current == null) flushTimeoutId.current = window.setTimeout(flushTrace, 250)
     })
 
     const offQuestion =
@@ -402,6 +407,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       offDone()
       offError()
       if (rafId.current != null) cancelAnimationFrame(rafId.current)
+      if (flushTimeoutId.current != null) window.clearTimeout(flushTimeoutId.current)
     }
   }, [flushTrace])
 

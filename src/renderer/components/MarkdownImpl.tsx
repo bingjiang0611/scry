@@ -1,3 +1,4 @@
+import { memo, useDeferredValue } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -31,14 +32,17 @@ const components: Components = {
   }
 }
 
-export default function MarkdownImpl({ children }: { children: string }) {
+const MarkdownImpl = memo(function MarkdownImpl({ children }: { children: string }) {
+  const deferredChildren = useDeferredValue(children)
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={components}
       urlTransform={(url, key) => key === 'src' ? (safeImageSrc(url) ?? '') : (safeExternalHref(url) ?? '')}
     >
-      {children}
+      {deferredChildren}
     </ReactMarkdown>
   )
-}
+})
+
+export default MarkdownImpl

@@ -53,11 +53,20 @@ import { deleteSessionDataRows, resolveSessionDataRunIds, type SessionDeleteData
 
 let db: Database.Database | null = null
 let dbFilePath: string | null = null
+let dataRevision = 0
+let billingStateCache: { revision: number; value: BillingGuardianState } | undefined
+let statsCache: { revision: number; observedAt: number; value: DbStats } | undefined
+const invalidateQueryCaches = (): void => {
+  dataRevision++
+  billingStateCache = undefined
+  statsCache = undefined
+}
 const require = createRequire(import.meta.url)
 let billingEnvProvider: () => NodeJS.ProcessEnv = () => process.env
 
 export function setBillingEnvProvider(provider: () => NodeJS.ProcessEnv): void {
   billingEnvProvider = provider
+  invalidateQueryCaches()
 }
 
 function gatewayAccountLabel(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -88,6 +97,7 @@ export function initDb(): void {
     db = new Database(dbFilePath)
     db.pragma('journal_mode = WAL')
     migrateDatabase(db)
+    invalidateQueryCaches()
   } catch (e) {
     try { db?.close() } catch { /* retain the original initialization error */ }
     db = null // 降级：sqlite 不可用就不写不查，app 照常跑
@@ -109,6 +119,7 @@ export function deleteSessionData(args: {
   }
   try {
     const result = deleteSessionDataRows(db as unknown as SessionDeleteDatabase, args)
+    if (result.deletedRows > 0) invalidateQueryCaches()
     return { status: 'deleted', ...result }
   } catch (error) {
     return {
@@ -209,6 +220,7 @@ export function recordTurn(args: {
       for (const r of billing.usageLedger) insLedger.run(...(r as never[]))
     })
     tx()
+    invalidateQueryCaches()
     return true
   } catch (e) {
     console.warn('[scry] recordTurn 失败:', (e as Error)?.message)
@@ -340,7 +352,7 @@ function baseBillingState(): BillingGuardianState {
   }
 }
 
-export function billingStateQuery(): BillingGuardianState {
+function computeBillingState(): BillingGuardianState {
   if (!db) {
     return baseBillingState()
   }
@@ -501,6 +513,13 @@ export function billingStateQuery(): BillingGuardianState {
   }
 }
 
+export function billingStateQuery(): BillingGuardianState {
+  if (billingStateCache?.revision === dataRevision) return billingStateCache.value
+  const value = computeBillingState()
+  billingStateCache = { revision: dataRevision, value }
+  return value
+}
+
 export async function syncBillingAdmin(): Promise<BillingSyncResult> {
   if (!db) return { ok: false, rowsImported: 0, ledgerRowsImported: 0, error: 'sqlite unavailable', state: billingStateQuery() }
   const now = Date.now()
@@ -550,6 +569,7 @@ export async function syncBillingAdmin(): Promise<BillingSyncResult> {
       }
     })
     tx()
+    invalidateQueryCaches()
     return {
       ok: true,
       provider: results.length === 1 ? results[0].provider : 'multiple',
@@ -682,6 +702,7 @@ export function importBillingFixture(): BillingFixtureImportResult {
       insAudit.run(`audit:${fetchedAt}:retention`, 'local-user', 'apply_retention_policy', rp?.id ?? 'default', safeJson({ mode: rp?.rawPayloadMode ?? 'aggregate-only' }), fetchedAt)
     })
     metaTx()
+    invalidateQueryCaches()
     return {
       ok: true,
       fixture,
@@ -716,7 +737,7 @@ const EMPTY: DbStats = {
   interventions: { requested: 0, total: 0, answered: 0, cancelled: 0, questions: 0, clarification: 0, permission: 0, waitMs: 0 }
 }
 
-export function statsQuery(): DbStats {
+function computeStats(): DbStats {
   if (!db) return EMPTY
   try {
     const now = Date.now()
@@ -741,4 +762,12 @@ export function statsQuery(): DbStats {
     console.warn('[scry] statsQuery 失败:', (e as Error)?.message)
     return { ...EMPTY, status: 'query_error' }
   }
+}
+
+export function statsQuery(): DbStats {
+  const now = Date.now()
+  if (statsCache?.revision === dataRevision && now - statsCache.observedAt < 1000) return statsCache.value
+  const value = computeStats()
+  statsCache = { revision: dataRevision, observedAt: now, value }
+  return value
 }

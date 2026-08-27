@@ -799,11 +799,9 @@ export function useIntegrations(cwd: string | null) {
 
   const refreshAfterTurn = useCallback((): void => {
     loadUsage()
-    loadStats()
-    loadBillingState()
     loadGitDiff()
     loadDiag()
-  }, [loadBillingState, loadDiag, loadGitDiff, loadStats, loadUsage])
+  }, [loadDiag, loadGitDiff, loadUsage])
 
   useEffect(() => {
     if (typeof window.scry.onDataUpdated !== 'function') return

@@ -1248,47 +1248,46 @@ function AssistantTurnImpl({
     }
     return m
   }, [items])
-  const knownToolUseIds = new Set(
-    items
-      .filter(
-        (event) =>
-          (event.kind === 'tool' || event.kind === 'skill' || event.kind === 'agent') &&
-          !!event.toolUseId
-      )
-      .map((event) => event.toolUseId as string)
-  )
-  const interventions = items.flatMap((event) => event.intervention ? [event.intervention] : [])
-  const interventionsByQuestionId = new Map(
-    interventions.map((intervention) => [intervention.request.questionId, intervention])
-  )
-  const topLevelToolUseIds = new Set(
-    items
-      .filter(
-        (event) =>
-          !event.parentToolUseId &&
-          (event.kind === 'tool' || event.kind === 'skill' || event.kind === 'agent') &&
-          !!event.toolUseId
-      )
-      .map((event) => event.toolUseId as string)
+  const { knownToolUseIds, topLevelToolUseIds, interventions, interventionsByQuestionId, itemRunIds } = useMemo(() => {
+    const known = new Set<string>()
+    const topLevel = new Set<string>()
+    const interventionList: NonNullable<TraceEvent['intervention']>[] = []
+    const interventionMap = new Map<string, NonNullable<TraceEvent['intervention']>>()
+    const runIds = new Set<string>()
+    for (const event of items) {
+      runIds.add(event.runId)
+      if (event.intervention) {
+        interventionList.push(event.intervention)
+        interventionMap.set(event.intervention.request.questionId, event.intervention)
+      }
+      if (!event.toolUseId || (event.kind !== 'tool' && event.kind !== 'skill' && event.kind !== 'agent')) continue
+      known.add(event.toolUseId)
+      if (!event.parentToolUseId) topLevel.add(event.toolUseId)
+    }
+    return {
+      knownToolUseIds: known,
+      topLevelToolUseIds: topLevel,
+      interventions: interventionList,
+      interventionsByQuestionId: interventionMap,
+      itemRunIds: runIds
+    }
+  }, [items])
+  const pendingQuestionKeys = useMemo(
+    () => new Set(pendingQuestions.map((request) => `${request.runId}\0${request.questionId}`)),
+    [pendingQuestions]
   )
   const renderedPendingQuestionKeys = new Set(
     items
       .filter(
         (event) =>
-          !event.parentToolUseId ||
-          !knownToolUseIds.has(event.parentToolUseId) ||
-          topLevelToolUseIds.has(event.parentToolUseId)
-      )
-      .filter((event) =>
-        pendingQuestions.some(
-          (request) => request.runId === event.runId && request.questionId === event.toolUseId
-        )
+          (!event.parentToolUseId || !knownToolUseIds.has(event.parentToolUseId) || topLevelToolUseIds.has(event.parentToolUseId)) &&
+          pendingQuestionKeys.has(`${event.runId}\0${event.toolUseId}`)
       )
       .map((event) => `${event.runId}\0${event.toolUseId}`)
   )
   const unmatchedPendingQuestions = pendingQuestions.filter(
     (request) =>
-      (request.runId === turn.runId || items.some((event) => event.runId === request.runId)) &&
+      (request.runId === turn.runId || itemRunIds.has(request.runId)) &&
       !renderedPendingQuestionKeys.has(`${request.runId}\0${request.questionId}`)
   )
   return (

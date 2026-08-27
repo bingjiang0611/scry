@@ -11,7 +11,7 @@ export async function settleRunsForShutdown<T extends ShutdownRunControl>(
   runs: readonly T[],
   options: {
     cancelQuestion: (runId: string) => void
-    mirror: (run: T, externalSessionId: string | undefined) => void
+    mirror: (run: T, externalSessionId: string | undefined) => void | Promise<void>
     disposeProviders: () => void | Promise<void>
   }
 ): Promise<void> {
@@ -19,7 +19,7 @@ export async function settleRunsForShutdown<T extends ShutdownRunControl>(
     options.cancelQuestion(run.runId)
     let externalSessionId = run.resume
     try { externalSessionId = run.getExternalSessionId() ?? externalSessionId } catch { /* continue cleanup */ }
-    try { options.mirror(run, externalSessionId) } catch { /* continue cleanup */ }
+    try { await options.mirror(run, externalSessionId) } catch { /* continue cleanup */ }
     try { run.interrupt() } catch { /* continue cleanup */ }
     try { await run.cancelTurnDiff() } catch { /* continue cleanup */ }
     await run.settled
