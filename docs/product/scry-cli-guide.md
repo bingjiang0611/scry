@@ -92,16 +92,45 @@ ai_native_trace_report.reportAgentTurns
 
 ### 通用目录初始化
 
-仓库提供了一个通用脚本。进入想采集的目录后执行：
+仓库提供了 [`scripts/setup-scry-workspace.sh`](../../scripts/setup-scry-workspace.sh)。它支持 Claude、Codex、Qoder，进入想采集的目录后执行：
 
 ```bash
 cd /path/to/workspace
 bash /path/to/scry/scripts/setup-scry-workspace.sh
 ```
 
-脚本会安装或定位 Scry CLI、生成最小 `scry.config.json`、把本地运行数据加入当前 Git 仓库的 exclude，最后执行 `scry doctor`。重复执行不会覆盖已有配置。
+脚本会自动检测本机已安装的 Provider。也可以明确指定：
 
-完成后，从 Scry App 打开这个目录即可采集。后台 recorder 不需要提前常驻，第一条 Provider 事件到来时会自动启动。直接在终端运行 Claude、Codex、Qoder 或 OpenCode 时，还需要接入对应 Provider Hook；只安装 CLI 无法拿到它们的运行过程。
+```bash
+SCRY_PROVIDERS="claude codex qoder" \
+  bash /path/to/scry/scripts/setup-scry-workspace.sh
+```
+
+脚本按三步执行：
+
+1. 安装或定位 `scry-turn-recorder@latest`。默认安装到 `~/.local`，不会要求系统目录写权限。
+2. 在当前目录创建最小 `scry.config.json`。已有配置原样保留；`.scry/` 和 `.scry-disabled` 只写入本地 Git exclude。
+3. 创建 `.scry/provider-hook.sh`，再把五类项目 Hook 追加到 Provider 配置：`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`Stop`。已有 Hook 不会被删除，重复执行不会重复追加。
+
+这套 Hook 直接调用 CLI，不需要手动执行 `scry recorder start`。重启 Provider 是为了让它重新加载项目配置，不是启动 Scry 后台进程。通过 Scry App 启动时，Hook 会自动沿用 App 的 managed recorder。
+
+Hook 配置位置如下：
+
+| Provider | 项目配置 |
+| --- | --- |
+| Claude | `.claude/settings.local.json` |
+| Codex | `.codex/hooks.json` |
+| Qoder | `.qoder/settings.json` |
+
+脚本最后执行 `scry doctor`。完成后要重启 Provider，让它重新加载项目 Hook，然后执行一轮真实任务：
+
+```bash
+scry turns list --workspace "$PWD"
+```
+
+能看到新轮次才算接入完成。`doctor` 通过只说明 CLI、配置和本地存储可用，不能证明 Provider 已经触发 Hook。
+
+这个通用脚本暂不处理 OpenCode。OpenCode 使用项目插件，不是上述 JSON Hook 合同；需要接入时单独安装插件。rate-native 已有自己的四端 Hook 和上传器，不要再运行通用脚本，继续使用 `bash init.sh`。
 
 ### rate-native 的安装和启动
 
