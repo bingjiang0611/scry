@@ -82,24 +82,646 @@ Scry CLI 的命令统一输出 JSON，方便人查看，也方便脚本继续处
 
 `summary` 和时间指标要结合证据完整度看。比如 Codex 没有提供服务端精确延迟时，Scry 输出的是本地观测区间，里面可能还包含调度、传输和重试时间。
 
+### 一条完整记录长什么样
+
+下面是一条结构完整的示例记录。里面的路径、时间、Token 和内容都是演示值，实际以 `scry turns show <序号或 recordId> --workspace "$PWD"` 的输出为准。
+
+```json
+{
+  "schemaVersion": 1,
+  "recordKind": "agent_turn",
+  "sequence": 12,
+  "recordId": "8b46136ac7a949418ddf362f9fdcbec1",
+  "recorderVersion": "0.2.26",
+  "workspace": {
+    "id": "demo-project",
+    "root": "/Users/zhangsan/projects/demo-project"
+  },
+  "provider": {
+    "id": "codex",
+    "model": "gpt-5.4"
+  },
+  "sessionId": "019d2d73-852c-7ae0-bb25-a88122a9dc90",
+  "providerTurnId": "turn-38",
+  "generation": 3,
+  "turnIndex": 3,
+  "startedAt": "2026-08-27T08:31:12.105Z",
+  "completedAt": "2026-08-27T08:31:25.482Z",
+  "durationMs": 13377,
+  "status": "completed",
+  "user": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": {
+      "text": "修复文章标题为空时页面报错的问题",
+      "textHash": "sha256:fb739b2062f4b3cd1a7255f953540db7f6ba9aa1fb14d715ca78cd04c556af74"
+    }
+  },
+  "assistant": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": {
+      "text": "已修复标题为空时的报错，并补充了对应测试。",
+      "textHash": "sha256:5c0d3350aa2457af0ea76cd7654ab568438a0464e5f84649504da22911158ad8"
+    }
+  },
+  "tools": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript",
+      "lifecycle_hooks"
+    ],
+    "value": [
+      {
+        "id": "call-01",
+        "category": "tool",
+        "order": 2,
+        "completedOrder": 3,
+        "name": "Read",
+        "startedAt": "2026-08-27T08:31:14.011Z",
+        "completedAt": "2026-08-27T08:31:14.052Z",
+        "durationMs": 41,
+        "status": "success",
+        "input": {
+          "file_path": "src/article/title.ts"
+        },
+        "file": {
+          "operation": "read",
+          "path": "src/article/title.ts"
+        }
+      },
+      {
+        "id": "call-02",
+        "category": "tool",
+        "order": 4,
+        "completedOrder": 5,
+        "name": "Edit",
+        "startedAt": "2026-08-27T08:31:16.302Z",
+        "completedAt": "2026-08-27T08:31:16.355Z",
+        "durationMs": 53,
+        "status": "success",
+        "input": {
+          "file_path": "src/article/title.ts"
+        },
+        "file": {
+          "operation": "edit",
+          "path": "src/article/title.ts"
+        }
+      },
+      {
+        "id": "call-03",
+        "category": "tool",
+        "order": 6,
+        "completedOrder": 7,
+        "name": "Bash",
+        "startedAt": "2026-08-27T08:31:18.104Z",
+        "completedAt": "2026-08-27T08:31:22.682Z",
+        "durationMs": 4578,
+        "status": "success",
+        "input": {
+          "command": "npm test -- title.test.ts"
+        },
+        "outputSummary": "3 tests passed"
+      }
+    ]
+  },
+  "skills": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": [
+      {
+        "id": "skill-01",
+        "category": "skill",
+        "order": 1,
+        "name": "ponytail",
+        "startedAt": "2026-08-27T08:31:12.802Z",
+        "status": "success",
+        "input": {
+          "source": "skill_injection"
+        }
+      }
+    ]
+  },
+  "mcps": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": []
+  },
+  "hooks": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript",
+      "lifecycle_hooks"
+    ],
+    "value": [
+      {
+        "order": 0,
+        "lifecycleEvents": 2,
+        "runs": 1,
+        "event": "UserPromptSubmit",
+        "name": "requirement-check.sh",
+        "command": ".claude/hooks/requirement-check.sh",
+        "startedAt": "2026-08-27T08:31:12.110Z",
+        "completedAt": "2026-08-27T08:31:12.143Z",
+        "durationMs": 33,
+        "status": "success"
+      },
+      {
+        "order": 2,
+        "lifecycleEvents": 6,
+        "runs": 3,
+        "event": "PreToolUse",
+        "name": "security-check.sh",
+        "command": ".claude/hooks/security-check.sh",
+        "startedAt": "2026-08-27T08:31:14.002Z",
+        "completedAt": "2026-08-27T08:31:18.095Z",
+        "durationMs": 47,
+        "status": "success"
+      },
+      {
+        "order": 3,
+        "lifecycleEvents": 6,
+        "runs": 3,
+        "event": "PostToolUse",
+        "name": "audit-log.py",
+        "command": "python3 .claude/hooks/audit-log.py",
+        "startedAt": "2026-08-27T08:31:14.053Z",
+        "completedAt": "2026-08-27T08:31:22.690Z",
+        "durationMs": 61,
+        "status": "success"
+      },
+      {
+        "order": 8,
+        "lifecycleEvents": 2,
+        "runs": 1,
+        "event": "Stop",
+        "name": "trace-flush.py",
+        "command": "python3 .claude/hooks/trace-flush.py",
+        "startedAt": "2026-08-27T08:31:25.401Z",
+        "completedAt": "2026-08-27T08:31:25.462Z",
+        "durationMs": 61,
+        "status": "success"
+      }
+    ]
+  },
+  "usage": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": {
+      "inputTokens": 8432,
+      "outputTokens": 926,
+      "cacheReadTokens": 5140,
+      "cacheCreationTokens": 0,
+      "reasoningTokens": 418,
+      "costUsd": 0.0438125,
+      "apiDurationMs": 6200,
+      "contextTokens": 13572,
+      "contextWindow": 200000,
+      "model": "gpt-5.4"
+    }
+  },
+  "compactions": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": []
+  },
+  "modelSegments": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": [
+      {
+        "order": 1,
+        "at": "2026-08-27T08:31:13.001Z",
+        "kind": "text",
+        "text": "我先检查标题处理逻辑。",
+        "messageId": "msg-01"
+      },
+      {
+        "order": 8,
+        "at": "2026-08-27T08:31:24.910Z",
+        "kind": "text",
+        "text": "已修复标题为空时的报错，并补充了对应测试。",
+        "messageId": "msg-02"
+      }
+    ]
+  },
+  "modelTiming": {
+    "status": "available",
+    "quality": "estimated",
+    "source": [
+      "response_intervals"
+    ],
+    "value": {
+      "method": "response_intervals",
+      "cumulativeMs": 6200,
+      "occupiedMs": 6200,
+      "overlapMs": 0,
+      "totalCalls": 2,
+      "timedCalls": 2,
+      "root": {
+        "totalCalls": 2,
+        "timedCalls": 2,
+        "cumulativeMs": 6200
+      },
+      "subagents": {
+        "totalCalls": 0,
+        "timedCalls": 0,
+        "cumulativeMs": 0
+      },
+      "calls": [
+        {
+          "responseId": "msg-01",
+          "scope": "root",
+          "completedAt": "2026-08-27T08:31:14.000Z",
+          "durationMs": 1800,
+          "source": "observed",
+          "boundary": "turn_or_activity_end"
+        },
+        {
+          "responseId": "msg-02",
+          "scope": "root",
+          "completedAt": "2026-08-27T08:31:25.000Z",
+          "durationMs": 4400,
+          "source": "observed",
+          "boundary": "turn_or_activity_end"
+        }
+      ],
+      "activityCoverage": {
+        "timedCalls": 2,
+        "totalCalls": 2
+      }
+    }
+  },
+  "files": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript",
+      "git_diff"
+    ],
+    "value": [
+      {
+        "path": "src/article/title.ts",
+        "operation": "read"
+      },
+      {
+        "path": "src/article/title.ts",
+        "operation": "edit"
+      }
+    ]
+  },
+  "diff": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "git_before_after"
+    ],
+    "value": [
+      {
+        "status": "captured",
+        "files": [
+          {
+            "path": "src/article/title.ts",
+            "added": 4,
+            "deleted": 1,
+            "patch": "@@ -12,1 +12,4 @@\\n- return article.title.trim()\\n+ const title = article.title?.trim()\\n+ if (!title) return \"未命名文章\"\\n+ return title",
+            "patchStatus": "captured"
+          }
+        ],
+        "repoRoot": "/Users/zhangsan/projects/demo-project",
+        "scope": "workspace",
+        "beforeAt": "2026-08-27T08:31:12.180Z",
+        "afterAt": "2026-08-27T08:31:25.201Z",
+        "captureMs": 92,
+        "cleanup": "ok",
+        "collection": {
+          "strategy": "targeted",
+          "evidence": "git_status+structured",
+          "candidatePathCount": 1,
+          "discoveryMs": 12,
+          "targetedMs": 71
+        }
+      }
+    ]
+  },
+  "dangerousOperations": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "scry_classifier"
+    ],
+    "value": []
+  },
+  "errors": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": []
+  },
+  "interventions": {
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "provider_transcript"
+    ],
+    "value": []
+  }
+}
+```
+
+每个数据区都有一层证据说明：
+
+| 字段 | 含义 |
+| --- | --- |
+| `status` | `available` 表示拿到了；`partial` 表示只拿到一部分；`unavailable` 表示 Provider 没提供；`disabled` 表示配置主动关闭 |
+| `quality` | `exact` 是原始证据；`estimated` 是观测区间；`inferred` 是根据有限信息推断；`unavailable` 是无法判断 |
+| `source` | 这项数据来自 Provider Transcript、生命周期 Hook、Git diff，还是 Scry 自己的分类器 |
+| `value` | 真正的数据 |
+| `omissionReason` | 数据不完整、不可用或被关闭时，说明原因 |
+
+各部分可以这样理解：
+
+| 部分 | 用户能看到什么 |
+| --- | --- |
+| 轮次身份 | 工作区、Agent、模型、会话、轮次、开始结束时间、耗时和最终状态 |
+| `user` / `assistant` | 用户说了什么，Agent 最后回答了什么 |
+| `tools` | 读文件、改代码、执行命令和子 Agent 等调用 |
+| `skills` | 这一轮真正使用过的 Skill；没有使用时是 `available + []` |
+| `mcps` | 调用了哪个 MCP server 和工具；没有调用时是 `available + []` |
+| `hooks` | 执行了哪些 Hook、执行次数、命令、耗时和结果。Recorder 自己的 Hook 会被过滤，避免把自己算进去 |
+| `usage` | Token、缓存、费用、上下文大小和 Provider 上报的 API 耗时 |
+| `compactions` | 这一轮是否发生过上下文压缩 |
+| `modelSegments` | Provider 明文提供的中间文字、thinking 和最终回复片段 |
+| `modelTiming` | 模型调用耗时。`estimated` 表示本地观测，不等于服务端精确延迟 |
+| `files` | 读、写、编辑过哪些文件 |
+| `diff` | 这一轮真正产生的代码变化、增删行数和 patch |
+| `dangerousOperations` | Scry 识别到的危险操作 |
+| `errors` | 工具或运行过程中的错误 |
+| `interventions` | Agent 是否向用户提问、用户是否回答或取消 |
+
+完整记录可能包含提示词、命令参数和代码 patch，分享前要先脱敏。
+
 ## 怎么用
 
 最快的用法只有三步：初始化目录、重启 Agent、执行一轮任务后查看记录。
 
 ### 第一步：初始化工作目录
 
-进入想采集数据的目录，执行 Scry 仓库提供的 [`scripts/setup-scry-workspace.sh`](../../scripts/setup-scry-workspace.sh)：
+进入想采集数据的目录，把下面的完整代码保存为 `setup-scry-workspace.sh`，然后执行：
 
 ```bash
 cd /path/to/workspace
-bash /path/to/scry/scripts/setup-scry-workspace.sh
+chmod +x setup-scry-workspace.sh
+./setup-scry-workspace.sh
+```
+
+脚本也接受目标目录参数，因此放在其他目录时可以执行：
+
+```bash
+bash setup-scry-workspace.sh /path/to/workspace
+```
+
+#### 完整脚本
+
+```sh
+#!/bin/sh
+set -eu
+
+fail() {
+  printf 'Scry 初始化失败：%s\n' "$1" >&2
+  exit 1
+}
+
+absolute_executable() {
+  candidate="$1"
+  [ -f "$candidate" ] && [ -x "$candidate" ] || return 1
+  directory="$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s\n' "$directory" "$(basename "$candidate")"
+}
+
+workspace="${1:-$PWD}"
+[ -d "$workspace" ] || fail "目录不存在：$workspace"
+workspace="$(cd "$workspace" && pwd -P)"
+
+command -v node >/dev/null 2>&1 || fail "缺少 Node.js 20 或更高版本"
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+case "$node_major" in
+  ''|*[!0-9]*) fail "无法读取 Node.js 版本" ;;
+esac
+[ "$node_major" -ge 20 ] || fail "Node.js 版本过低，需要 20 或更高版本"
+node_bin="$(absolute_executable "$(command -v node)")" || fail "Node.js 不可执行"
+
+providers="${SCRY_PROVIDERS:-}"
+if [ -z "$providers" ]; then
+  command -v claude >/dev/null 2>&1 && providers="$providers claude"
+  command -v codex >/dev/null 2>&1 && providers="$providers codex"
+  if command -v qodercli >/dev/null 2>&1 || command -v qoder >/dev/null 2>&1; then
+    providers="$providers qoder"
+  fi
+fi
+[ -n "$providers" ] || fail "没有检测到 Claude、Codex 或 Qoder；可用 SCRY_PROVIDERS='claude codex' 指定"
+
+installed=""
+for provider in $providers; do
+  case "$provider" in
+    claude|codex|qoder) ;;
+    *) fail "暂不支持 Provider：$provider（当前支持 claude、codex、qoder）" ;;
+  esac
+  case " $installed " in
+    *" $provider "*) ;;
+    *) installed="$installed $provider" ;;
+  esac
+done
+
+if [ -n "${SCRY_CLI_PATH:-}" ]; then
+  scry_bin="$SCRY_CLI_PATH"
+elif command -v scry >/dev/null 2>&1; then
+  scry_bin="$(command -v scry)"
+elif [ -x "$HOME/.local/bin/scry" ]; then
+  scry_bin="$HOME/.local/bin/scry"
+else
+  command -v npm >/dev/null 2>&1 || fail "缺少 npm，无法安装 Scry CLI"
+  registry="${SCRY_NPM_REGISTRY:-https://registry.npmjs.org}"
+  printf '1/3 安装 Scry CLI 到 %s/.local ...\n' "$HOME"
+  npm install -g --prefix "$HOME/.local" scry-turn-recorder@latest \
+    --registry="$registry" >/dev/null
+  scry_bin="$HOME/.local/bin/scry"
+fi
+scry_bin="$(absolute_executable "$scry_bin")" || fail "Scry CLI 不可执行：$scry_bin"
+printf '1/3 Scry CLI：%s\n' "$scry_bin"
+
+config="$workspace/scry.config.json"
+if [ ! -e "$config" ]; then
+  workspace_id="$(basename "$workspace" | tr -cs 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')"
+  [ -n "$workspace_id" ] || workspace_id="workspace"
+  temporary="$config.tmp.$$"
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  umask 077
+  {
+    printf '{\n'
+    printf '  "schemaVersion": 1,\n'
+    printf '  "enabled": true,\n'
+    printf '  "workspaceId": "%s",\n' "$workspace_id"
+    printf '  "dataDir": ".scry",\n'
+    printf '  "repositories": { "mode": "discover-nested-git", "maxDepth": 2 },\n'
+    printf '  "capture": {\n'
+    printf '    "prompt": true,\n'
+    printf '    "assistant": true,\n'
+    printf '    "toolOutput": "summary",\n'
+    printf '    "diff": true,\n'
+    printf '    "hooks": true\n'
+    printf '  }\n'
+    printf '}\n'
+  } > "$temporary"
+  mv "$temporary" "$config"
+  trap - EXIT HUP INT TERM
+  printf '2/3 已创建 %s\n' "$config"
+else
+  printf '2/3 保留已有 %s\n' "$config"
+fi
+
+mkdir -p "$workspace/.scry"
+printf '%s\n' "$scry_bin" > "$workspace/.scry/cli-path"
+printf '%s\n' "$(dirname "$node_bin")" > "$workspace/.scry/node-bin-dir"
+hook="$workspace/.scry/provider-hook.sh"
+hook_temporary="$hook.tmp.$$"
+trap 'rm -f "$hook_temporary"' EXIT HUP INT TERM
+{
+  printf '#!/bin/sh\n'
+  printf 'set -eu\n'
+  printf 'workspace="$(cd "$(dirname "$0")/.." && pwd -P)"\n'
+  printf 'IFS= read -r scry_bin < "$workspace/.scry/cli-path"\n'
+  printf 'IFS= read -r node_bin_dir < "$workspace/.scry/node-bin-dir"\n'
+  printf 'PATH="$node_bin_dir:$PATH"\n'
+  printf 'export PATH SCRY_HANDLER_ID=turn-recorder-v1\n'
+  printf 'if [ "${SCRY_RECORDER_MANAGED:-0}" = "1" ]; then\n'
+  printf '  [ -x "${SCRY_CLI_PATH:-}" ] || exit 0\n'
+  printf '  scry_bin="$SCRY_CLI_PATH"\n'
+  printf '  exec "$scry_bin" recorder hook --provider "$1" --event "$2" --workspace "$workspace" --stdin --quiet --managed\n'
+  printf 'fi\n'
+  printf 'exec "$scry_bin" recorder hook --provider "$1" --event "$2" --workspace "$workspace" --stdin --quiet\n'
+} > "$hook_temporary"
+chmod 700 "$hook_temporary"
+mv "$hook_temporary" "$hook"
+trap - EXIT HUP INT TERM
+
+node -e '
+const fs = require("node:fs")
+const path = require("node:path")
+
+const [workspace, providerSource] = process.argv.slice(1)
+const locations = {
+  claude: ".claude/settings.local.json",
+  codex: ".codex/hooks.json",
+  qoder: ".qoder/settings.json"
+}
+const projectEnvs = {
+  claude: "CLAUDE_PROJECT_DIR",
+  codex: "CODEX_PROJECT_DIR",
+  qoder: "QODER_PROJECT_DIR"
+}
+const quote = String.fromCharCode(39)
+const events = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]
+const outputs = []
+
+for (const provider of providerSource.split(/\s+/).filter(Boolean)) {
+  const settingsPath = path.join(workspace, locations[provider])
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+  let settings = {}
+  if (fs.existsSync(settingsPath)) {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"))
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      throw new Error(`${settingsPath} must contain a JSON object`)
+    }
+  }
+  if (settings.hooks === undefined) settings.hooks = {}
+  if (!settings.hooks || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
+    throw new Error(`${settingsPath}.hooks must be a JSON object`)
+  }
+
+  for (const event of events) {
+    const groups = settings.hooks[event] ?? []
+    if (!Array.isArray(groups)) throw new Error(`${settingsPath}.hooks.${event} must be an array`)
+    const marker = `${provider} ${event}${quote}`
+    const exists = groups.some((group) => Array.isArray(group?.hooks) && group.hooks.some((hook) =>
+      typeof hook?.command === "string" && hook.command.endsWith(marker)
+    ))
+    if (!exists) {
+      const body = `root="\${${projectEnvs[provider]}:-$PWD}"; exec "$root/.scry/provider-hook.sh" ${provider} ${event}`
+      const command = `SCRY_HANDLER_ID=turn-recorder-v1 sh -c ${quote}${body}${quote}`
+      groups.push({
+        hooks: [{ type: "command", command, timeout: event === "UserPromptSubmit" || event === "Stop" ? 15 : 10 }]
+      })
+    }
+    settings.hooks[event] = groups
+  }
+
+  outputs.push({ settingsPath, source: `${JSON.stringify(settings, null, 2)}\n` })
+}
+
+for (const { settingsPath, source } of outputs) {
+  const temporary = `${settingsPath}.tmp-${process.pid}`
+  fs.writeFileSync(temporary, source, { mode: 0o600 })
+  fs.renameSync(temporary, settingsPath)
+}
+' "$workspace" "${installed# }"
+printf '3/3 已配置项目 Hook：%s\n' "${installed# }"
+
+if git -C "$workspace" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  exclude="$(git -C "$workspace" rev-parse --git-path info/exclude)"
+  case "$exclude" in
+    /*) ;;
+    *) exclude="$workspace/$exclude" ;;
+  esac
+  mkdir -p "$(dirname "$exclude")"
+  touch "$exclude"
+  for entry in '.scry/' '.scry-disabled'; do
+    grep -Fqx "$entry" "$exclude" || printf '%s\n' "$entry" >> "$exclude"
+  done
+fi
+
+doctor_status=0
+"$scry_bin" doctor --workspace "$workspace" || doctor_status=$?
+case "$doctor_status" in
+  0) ;;
+  5) printf 'Scry 已可用，但现有记录有 pending、orphan 或 dropped，请按 doctor 输出排查。\n' >&2 ;;
+  *) exit "$doctor_status" ;;
+esac
+
+printf '\nScry 已配置完成。重新启动上述 Provider，执行一轮后运行：\n'
+printf '  "%s" turns list --workspace "%s"\n' "$scry_bin" "$workspace"
 ```
 
 脚本支持 Claude Code、Codex 和 Qoder，并会自动检测本机已经安装的工具。也可以明确指定：
 
 ```bash
 SCRY_PROVIDERS="claude codex qoder" \
-  bash /path/to/scry/scripts/setup-scry-workspace.sh
+  ./setup-scry-workspace.sh
 ```
 
 这一个脚本会完成三件事：
@@ -176,6 +798,104 @@ rm .scry-disabled
 
 暂停记录不会删除已有数据，之前的记录仍然可以用 `turns list`、`show`、`summary` 和 `verify` 查看。
 
+## rate-native 中怎么用
+
+rate-native 已经带了自己的四端 Hook 和上传器，覆盖 Claude Code、Codex、Qoder 和 OpenCode。不要再执行前面的通用初始化脚本，否则可能重复添加 Hook。新同事只需要在 rate-native 根目录运行：
+
+```bash
+bash init.sh
+```
+
+### 初始化做了什么
+
+`init.sh` 中和 Scry 有关的动作只有三类：
+
+1. 通过项目内安装器安装或升级 `scry-turn-recorder@latest`。找不到系统级安装目录权限时，安装器会使用用户目录。
+2. 把实际找到的 CLI 绝对路径写入 Claude、Codex、Qoder 和 OpenCode 的 `settings.local.json`，统一使用 `SCRY_CLI_PATH`。这样 Agent 改写 `PATH` 后也不会调用到另一份 CLI。
+3. 执行 `scry doctor --workspace <rate-native根目录>`。返回 0 表示正常；返回 5 表示 CLI 可用，但已有 pending、orphan 或 dropped 数据需要排查。
+
+rate-native 的 `scry.config.json` 会采集提示词、回复、工具输出摘要、Hook 和 Git diff，并发现根目录下两层以内的嵌套 Git 仓库。`.treehouse`、`node_modules`、`target`、`dist` 和 `build` 不参与仓库发现，`.factorypath` 不保存 patch 正文。
+
+### 本地记录链路
+
+```text
+Claude / Codex / Qoder / OpenCode
+        ↓ 项目 Hook
+.claude/hooks/scry-recorder.sh
+        ↓
+workspace recorder daemon
+        ↓ daemon 不可用时直接调用 CLI，并拉起 daemon
+.scry/records/*.json
+```
+
+四端的事件名和载荷不同，`agent-adapters` 负责转换，最后都进入同一个 `scry-recorder.sh`。这个脚本优先把事件发给当前工作区的 Unix socket；socket 不可用时，当前事件由 CLI 直接处理，并用 `--start-daemon` 拉起后台 recorder。
+
+通过 Scry App 启动 Agent 时，环境里会有 `SCRY_RECORDER_MANAGED=1`。这时 Hook 只建立轮次身份，最终记录使用 App 已经整理好的标准证据，不再从会话文件近似还原。受管模式会检查 CLI 绝对路径和版本，检查失败就拒绝建立受管记录。
+
+### 远端上传链路
+
+Scry CLI 只负责生成本地记录。rate-native 在它后面增加了上传链路：
+
+```text
+.scry/records/*.json
+        ↓ record-committed
+.claude/hooks/scry-record-committed.py
+        ↓ 只传 provider、sessionId、recordId、sequence
+持久异步任务
+        ↓
+.claude/hooks/scry_turn_uploader.py
+        ↓ export、脱敏、写 outbox、gzip-base64
+ai_native_trace_report.reportAgentTurns
+```
+
+具体处理顺序如下：
+
+1. 正式 record 原子落盘后，commit hook 只接收工作区、Provider、会话 ID、record ID 和 sequence，不把整条大 JSON 塞进任务参数。
+2. 异步 uploader 调用 `scry turns export`，固定 `snapshotMaxSequence` 分页读取，避免上传过程中混入新记录。
+3. 上传前把工作区路径和用户目录替换成占位符，并遮掉常见 Token、密码、Cookie、Authorization 和 JWT。脱敏只作用于上传副本，本地原始记录不会被改写。
+4. 脱敏后的记录先原子写入 `.scry/upload/outbox/`，落盘成功后才推进本地游标。
+5. 记录压缩后更小时，使用 `gzip-base64` 信封；小记录或压缩无收益时保留明文 JSON。
+6. uploader 通过 Workitem MCP 调用 `reportAgentTurns`。服务端返回 `inserted` 或 `duplicated` 后才删除 outbox；`rejected` 或 `conflicted` 会移入 `.scry/upload/dead-letter/`；网络超时会保留并重试。
+
+这条链路与 rate-native 原有的阶段埋点分开。Scry uploader 不读写 `.claude/traces*.jsonl`，也不复用 `reportTraces` 的上传游标。
+
+### 怎么确认正常
+
+初始化后重启 Agent，执行一轮真实任务，再检查：
+
+```bash
+# CLI、配置和本地 Store
+scry doctor --workspace "$PWD"
+
+# 是否生成了新轮次
+scry turns list --workspace "$PWD"
+
+# 查看某一轮完整记录
+scry turns show <序号或 recordId> --workspace "$PWD"
+
+# 查看上传状态
+python3 -m json.tool .scry/upload/health.json
+
+# outbox 有文件，说明还在等待上传或重试
+ls .scry/upload/outbox
+
+# dead-letter 有文件，说明远端明确拒绝、冲突或多次超时
+ls .scry/upload/dead-letter
+```
+
+“本地有记录”和“远端已收到”是两件事。`turns list` 只能证明本地记录成功；远端是否完成，要结合 `health.json`、outbox、dead-letter 和服务端 ACK 判断。
+
+### 开关
+
+| 开关 | 作用 |
+| --- | --- |
+| `SCRY_TURN_UPLOAD_ENABLED=0` | 停止远端上传，本地继续记录 |
+| `SCRY_RECORDER_ENABLED=0` | 停止新增本地记录，rate-native uploader 也直接退出 |
+| 根目录创建 `.scry-disabled` | 停止新增本地记录，上传器也直接退出 |
+| `SCRY_RECORDER_TRANSPORT=direct` | 不走 daemon，每次 Hook 直接调用 CLI，主要用于排查 socket 问题 |
+
+这些开关不会删除历史记录。
+
 ## 一句话记住
 
-在目标目录执行一次初始化脚本，重启 Agent，然后照常使用。执行完一轮任务后，运行 `scry turns list --workspace "$PWD"`，能看到新记录就说明 Scry 已经正常工作。
+普通项目把文档中的脚本保存到目标目录并执行一次；rate-native 只运行 `bash init.sh`。重启 Agent 并完成一轮真实任务后，`scry turns list --workspace "$PWD"` 出现新记录，才能证明本地采集已经接通。
