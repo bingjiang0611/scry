@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import {
@@ -21,7 +21,6 @@ import { SkillsModal, McpModal, SettingsModal } from './components/Modals'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
-import { TerminalSurface } from './components/TerminalSurface'
 import { AgentsSurface } from './components/AgentsSurface'
 import {
   createRightSurfaceState,
@@ -37,6 +36,8 @@ import { useAgentSession } from './hooks/useAgentSession'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
+
+const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
 type AppView = 'chat' | 'diagnostics' | 'analytics'
 
@@ -1375,7 +1376,9 @@ export function App() {
                 </div>
               ),
               terminal: (
-                <TerminalSurface cwd={cwd} active={panelVisible && rightSurface.activeId === 'terminal'} />
+                <Suspense fallback={<div className="surface-unavailable"><span>正在加载终端…</span></div>}>
+                  <TerminalSurface cwd={cwd} active={panelVisible && rightSurface.activeId === 'terminal'} />
+                </Suspense>
               ),
               agents: <AgentsSurface turns={session.turns} busy={session.busy} />
             }}

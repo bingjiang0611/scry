@@ -1527,45 +1527,63 @@ export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts
 // 连续 text_delta 合并进上一条——语义与逐事件版完全一致，只是批量。clone-on-write 只复制变动的 turn。
 export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set<string>): Turn[] {
   let next = prev
-  let mutated = false
+  const turnIndices = new Map(prev.map((turn, index) => [turn.runId, index]))
+  const states = new Map<number, { items: TraceEvent[]; indices: Map<string, number>; mutable: boolean }>()
+  const stateFor = (index: number) => {
+    let state = states.get(index)
+    if (!state) {
+      const items = next[index].items
+      state = { items, indices: new Map(items.map((event, itemIndex) => [event.id, itemIndex])), mutable: false }
+      states.set(index, state)
+    }
+    return state
+  }
+  const mutableStateFor = (index: number) => {
+    const state = stateFor(index)
+    if (state.mutable) return state
+    if (next === prev) next = [...prev]
+    state.items = [...state.items]
+    state.mutable = true
+    next[index] = { ...next[index], items: state.items }
+    return state
+  }
+  const rebuildIndices = (state: { items: TraceEvent[]; indices: Map<string, number> }) => {
+    state.indices = new Map(state.items.map((event, itemIndex) => [event.id, itemIndex]))
+  }
+
   for (const ev of events) {
-    if (cleared.has(ev.runId)) continue // New chat 清掉的旧 run，丢弃残余在途事件
-    const i = next.findIndex((t) => t.runId === ev.runId)
-    if (i === -1) {
-      if (!mutated) {
-        next = [...next]
-        mutated = true
-      }
-      next.push({ runId: ev.runId, userText: '', items: [ev], done: false })
+    if (cleared.has(ev.runId)) continue
+    let index = turnIndices.get(ev.runId)
+    if (index == null) {
+      if (next === prev) next = [...prev]
+      index = next.length
+      const items = [ev]
+      next.push({ runId: ev.runId, userText: '', items, done: false })
+      turnIndices.set(ev.runId, index)
+      states.set(index, { items, indices: new Map([[ev.id, 0]]), mutable: true })
       continue
     }
-    const items = next[i].items
-    const existingIndex = items.findIndex((event) => event.id === ev.id)
+
+    let state = stateFor(index)
+    const existingIndex = state.indices.get(ev.id)
     if (ev.kind === 'harness' && ev.stage === 'result_superseded') {
-      if (existingIndex === -1) continue
-      if (!mutated) {
-        next = [...next]
-        mutated = true
-      }
-      next[i] = { ...next[i], items: items.filter((_, index) => index !== existingIndex) }
+      if (existingIndex == null) continue
+      state = mutableStateFor(index)
+      state.items.splice(existingIndex, 1)
+      rebuildIndices(state)
       continue
     }
-    if (existingIndex !== -1) {
-      if (items[existingIndex] === ev) continue
-      if (!mutated) {
-        next = [...next]
-        mutated = true
-      }
-      const updated = [...items]
-      updated[existingIndex] = ev
-      next[i] = { ...next[i], items: updated }
+    if (existingIndex != null) {
+      if (state.items[existingIndex] === ev) continue
+      state = mutableStateFor(index)
+      state.items[existingIndex] = ev
       continue
     }
     if (
       ev.kind === 'model' && ev.stage === 'text' &&
       ev.runtimeMetadata?.replacesStreamedText === true && ev.messageId
     ) {
-      const first = items.findIndex((candidate) =>
+      const first = state.items.findIndex((candidate) =>
         candidate.kind === 'model' &&
         (candidate.stage === 'text' || candidate.stage === 'text_delta') &&
         candidate.messageId === ev.messageId &&
@@ -1573,32 +1591,33 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
         candidate.parentToolUseId === ev.parentToolUseId
       )
       if (first >= 0) {
-        if (!mutated) {
-          next = [...next]
-          mutated = true
-        }
-        const updated = items.filter((candidate) => !(
+        state = mutableStateFor(index)
+        state.items = state.items.filter((candidate) => !(
           candidate.kind === 'model' &&
           (candidate.stage === 'text' || candidate.stage === 'text_delta') &&
           candidate.messageId === ev.messageId &&
           candidate.agentId === ev.agentId &&
           candidate.parentToolUseId === ev.parentToolUseId
         ))
-        updated.splice(first, 0, ev)
-        next[i] = { ...next[i], items: updated }
+        state.items.splice(first, 0, ev)
+        next[index] = { ...next[index], items: state.items }
+        rebuildIndices(state)
         continue
       }
     }
-    const last = items[items.length - 1]
-    const merged =
-      ev.stage === 'text_delta' && last?.stage === 'text_delta'
-        ? [...items.slice(0, -1), { ...last, text: (last.text ?? '') + (ev.text ?? '') }]
-        : [...items, ev]
-    if (!mutated) {
-      next = [...next]
-      mutated = true
+
+    state = mutableStateFor(index)
+    const lastIndex = state.items.length - 1
+    const last = state.items[lastIndex]
+    if (
+      ev.stage === 'text_delta' && last?.stage === 'text_delta' &&
+      ev.messageId === last.messageId && ev.agentId === last.agentId && ev.parentToolUseId === last.parentToolUseId
+    ) {
+      state.items[lastIndex] = { ...last, text: (last.text ?? '') + (ev.text ?? '') }
+    } else {
+      state.indices.set(ev.id, state.items.length)
+      state.items.push(ev)
     }
-    next[i] = { ...next[i], items: merged }
   }
   return next
 }

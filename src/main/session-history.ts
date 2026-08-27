@@ -105,10 +105,6 @@ export function restoreTraceArchiveTurn(
   }
 }
 
-function sameUserText(a: string, b: string): boolean {
-  return canonicalUserText(a) === canonicalUserText(b)
-}
-
 function canonicalUserText(text: string): string {
   const name = text.match(/<command-name>([\s\S]*?)<\/command-name>/)?.[1]?.trim()
   if (!name) return text.trim()
@@ -358,18 +354,20 @@ export function mergeSessionTurns(
   if (restoredArchive.length === 0) return merged
   if (merged.length === 0) return restoredArchive
 
+  const transcriptIndices = new Map<string, number[]>()
+  for (let index = 0; index < merged.length; index++) {
+    const key = canonicalUserText(merged[index].userText)
+    const indices = transcriptIndices.get(key)
+    if (indices) indices.push(index)
+    else transcriptIndices.set(key, [index])
+  }
   const usedArchive = new Set<number>()
-  const usedTranscript = new Set<number>()
   for (let archiveIndex = restoredArchive.length - 1; archiveIndex >= 0; archiveIndex--) {
     const archivedTurn = restoredArchive[archiveIndex]
-    for (let turnIndex = merged.length - 1; turnIndex >= 0; turnIndex--) {
-      if (usedTranscript.has(turnIndex)) continue
-      if (!sameUserText(merged[turnIndex].userText, archivedTurn.userText)) continue
-      merged[turnIndex] = mergeTurnWithArchive(merged[turnIndex], archivedTurn)
-      usedArchive.add(archiveIndex)
-      usedTranscript.add(turnIndex)
-      break
-    }
+    const turnIndex = transcriptIndices.get(canonicalUserText(archivedTurn.userText))?.pop()
+    if (turnIndex == null) continue
+    merged[turnIndex] = mergeTurnWithArchive(merged[turnIndex], archivedTurn)
+    usedArchive.add(archiveIndex)
   }
 
   for (let index = 0; index < restoredArchive.length; index++) {

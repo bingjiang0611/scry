@@ -1216,6 +1216,18 @@ describe('applyTraceBatch（性能：批量合并，语义不变）', () => {
     expect(out[0].items[0].text).toBe('你好')
   })
 
+  it('相邻但来自不同 message 的 text_delta 不会串流合并', () => {
+    const out = applyTraceBatch(
+      [],
+      [
+        e({ id: 'a', kind: 'model', stage: 'text_delta', text: 'A', messageId: 'm1' }),
+        e({ id: 'b', kind: 'model', stage: 'text_delta', text: 'B', messageId: 'm2' })
+      ],
+      new Set()
+    )
+    expect(out[0].items.map((item) => item.text)).toEqual(['A', 'B'])
+  })
+
   it('Provider 权威正文替换同 message 的流式前缀', () => {
     const out = applyTraceBatch(
       [],

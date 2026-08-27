@@ -1,5 +1,5 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
-import { useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import {
   mcpCallsForEvent,
   type TraceEvent,
@@ -466,7 +466,7 @@ function renderTurnCallDetail(kind: 'mcp' | 'skill', items: TurnCallItem[]): Rea
 }
 
 export function OverviewPanel({
-  turns,
+  turns: liveTurns,
   sessionId = null,
   selected,
   usage,
@@ -492,6 +492,20 @@ export function OverviewPanel({
   onOpenSessionDiff?: (path?: string) => void
 }) {
   const [filesFolded, setFilesFolded] = useState(false)
+  const [turns, setTurns] = useState(liveTurns)
+  const turnsUpdatedAt = useRef(0)
+  useEffect(() => {
+    if (!busy) {
+      setTurns(liveTurns)
+      return
+    }
+    const delay = Math.max(0, 200 - (Date.now() - turnsUpdatedAt.current))
+    const timer = window.setTimeout(() => {
+      turnsUpdatedAt.current = Date.now()
+      setTurns(liveTurns)
+    }, delay)
+    return () => window.clearTimeout(timer)
+  }, [busy, liveTurns])
   const [overviewDataTab, setOverviewDataTab] = useState<'turns' | 'session'>('turns')
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
   const dangerAuditRef = useRef<HTMLDivElement>(null)

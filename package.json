@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.100",
+  "version": "0.2.101",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "private": true,
   "license": "MIT",
@@ -39,12 +39,8 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.186",
     "@opencode-ai/sdk": "^1.17.18",
     "@qoder-ai/qoder-agent-sdk": "^1.0.17",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^12.11.1",
     "node-pty": "^1.1.0",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
     "undici": "^7.28.0"
   },
   "devDependencies": {
@@ -53,11 +49,15 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^42.4.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^5.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
     "vitest": "^3.0.0"

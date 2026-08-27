@@ -9,6 +9,7 @@ import {
   deleteTranscriptCopies,
   mirrorTranscript,
   readTraceArchive,
+  readTraceArchiveAsync,
   resolveTranscriptPath,
   traceArchiveRunIds,
   traceArchivePath,
@@ -41,7 +42,7 @@ afterEach(() => {
 })
 
 describe('transcript archive mirror', () => {
-  it('不绑定项目使用独立受管目录写入和读取 trace archive', () => {
+  it('不绑定项目使用独立受管目录写入和读取 trace archive', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
     const sessionId = 'unbound-session'
@@ -57,6 +58,8 @@ describe('transcript archive mirror', () => {
     expect(traceArchivePath(userDataDir, '', sessionId, 'qoder')).toContain('/unbound/')
     expect(readTraceArchive({ cwd: '', sessionId, userDataDir, providerId: 'qoder' }))
       .toMatchObject({ cwd: '', sessionId, providerId: 'qoder' })
+    await expect(readTraceArchiveAsync({ cwd: '', sessionId, userDataDir, providerId: 'qoder' }))
+      .resolves.toMatchObject({ cwd: '', sessionId, providerId: 'qoder' })
   })
 
   it('keeps opaque or traversal-like session ids inside every owned directory for read/write/delete', () => {
@@ -86,7 +89,7 @@ describe('transcript archive mirror', () => {
     expect(readFileSync(sentinel, 'utf8')).toBe('keep')
   })
 
-  it('每轮结束可把 Claude 原始 transcript mirror 到 app userData', () => {
+  it('每轮结束可把 Claude 原始 transcript mirror 到 app userData', async () => {
     const root = tempRoot()
     const home = join(root, 'home')
     const userDataDir = join(root, 'userData')
@@ -95,12 +98,48 @@ describe('transcript archive mirror', () => {
     const content = transcriptContent(cwd, sessionId)
     writeTranscript(home, cwd, sessionId, content)
 
-    expect(mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
     const archived = archivedTranscriptPath(userDataDir, cwd, sessionId)
     expect(readFileSync(archived, 'utf8')).toBe(content)
   })
 
-  it('加载历史时优先原始 transcript，原始丢失后 fallback 到 mirror', () => {
+  it('增量校验追加 transcript，并拒绝后续身份冲突', async () => {
+    const root = tempRoot()
+    const home = join(root, 'home')
+    const userDataDir = join(root, 'userData')
+    const cwd = '/repo/incremental'
+    const sessionId = 'sess-incremental'
+    const primary = writeTranscript(home, cwd, sessionId, transcriptContent(cwd, sessionId))
+    const archived = archivedTranscriptPath(userDataDir, cwd, sessionId)
+
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
+    writeFileSync(primary, `${JSON.stringify({ type: 'assistant', cwd, sessionId })}\n`, { flag: 'a' })
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
+    const validMirror = readFileSync(archived, 'utf8')
+    expect(validMirror).toContain('assistant')
+
+    writeFileSync(primary, `${JSON.stringify({ type: 'user', cwd: '/other', sessionId })}\n`, { flag: 'a' })
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(false)
+    expect(readFileSync(archived, 'utf8')).toBe(validMirror)
+  })
+
+  it('源 transcript 原地重写时回退完整原子镜像', async () => {
+    const root = tempRoot()
+    const home = join(root, 'home')
+    const userDataDir = join(root, 'userData')
+    const cwd = '/repo/rewrite'
+    const sessionId = 'sess-rewrite'
+    const primary = writeTranscript(home, cwd, sessionId, `${JSON.stringify({ cwd, sessionId, text: 'old-prefix' })}\n`)
+    const archived = archivedTranscriptPath(userDataDir, cwd, sessionId)
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
+
+    const rewritten = `${JSON.stringify({ cwd, sessionId, text: 'new-prefix-that-is-longer' })}\n`
+    writeFileSync(primary, rewritten)
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
+    expect(readFileSync(archived, 'utf8')).toBe(rewritten)
+  })
+
+  it('加载历史时优先原始 transcript，原始丢失后 fallback 到 mirror', async () => {
     const root = tempRoot()
     const home = join(root, 'home')
     const userDataDir = join(root, 'userData')
@@ -108,7 +147,7 @@ describe('transcript archive mirror', () => {
     const sessionId = 'sess-2'
     const content = transcriptContent(cwd, sessionId)
     const primary = writeTranscript(home, cwd, sessionId, content)
-    expect(mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
 
     expect(resolveTranscriptPath({ cwd, sessionId, userDataDir, home })).toBe(primary)
     unlinkSync(primary)
@@ -118,14 +157,14 @@ describe('transcript archive mirror', () => {
     expect(readFileSync(resolved!, 'utf8')).toBe(content)
   })
 
-  it('显式删除 Scry 会话副本时保留 Claude 原始 transcript，只删除 app mirror', () => {
+  it('显式删除 Scry 会话副本时保留 Claude 原始 transcript，只删除 app mirror', async () => {
     const root = tempRoot()
     const home = join(root, 'home')
     const userDataDir = join(root, 'userData')
     const cwd = '/Users/me/project'
     const sessionId = 'sess-3'
     const primary = writeTranscript(home, cwd, sessionId, transcriptContent(cwd, sessionId))
-    expect(mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(true)
     const archived = archivedTranscriptPath(userDataDir, cwd, sessionId)
 
     deleteTranscriptCopies({ cwd, sessionId, userDataDir, home })
@@ -133,7 +172,7 @@ describe('transcript archive mirror', () => {
     expect(existsSync(archived)).toBe(false)
   })
 
-  it('does not resolve or mirror a native Claude transcript whose encoded cwd belongs to another workspace', () => {
+  it('does not resolve or mirror a native Claude transcript whose encoded cwd belongs to another workspace', async () => {
     const root = tempRoot()
     const home = join(root, 'home')
     const userDataDir = join(root, 'userData')
@@ -144,7 +183,7 @@ describe('transcript archive mirror', () => {
 
     expect(transcriptPath(firstCwd, sessionId, home)).toBe(primary)
     expect(resolveTranscriptPath({ cwd: firstCwd, sessionId, userDataDir, home })).toBeNull()
-    expect(mirrorTranscript({ cwd: firstCwd, sessionId, userDataDir, home })).toBe(false)
+    expect(await mirrorTranscript({ cwd: firstCwd, sessionId, userDataDir, home })).toBe(false)
     expect(resolveTranscriptPath({ cwd: collidingCwd, sessionId, userDataDir, home })).toBe(primary)
   })
 
@@ -257,7 +296,7 @@ describe('transcript archive mirror', () => {
     }
   })
 
-  it('逐段隔离 corrupt/schema-invalid sibling，保留合法历史并允许继续写入与删除', () => {
+  it('逐段隔离 corrupt/schema-invalid sibling，保留合法历史并允许继续写入与删除', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
     const cwd = '/repo/segmented-corruption'
@@ -275,6 +314,8 @@ describe('transcript archive mirror', () => {
 
     expect(() => readTraceArchive({ cwd, sessionId, userDataDir, providerId: 'codex' })).not.toThrow()
     expect(traceArchiveRunIds({ cwd, sessionId, userDataDir, providerId: 'codex' })).toEqual(['good'])
+    await expect(readTraceArchiveAsync({ cwd, sessionId, userDataDir, providerId: 'codex' }))
+      .resolves.toMatchObject({ turns: [expect.objectContaining({ runId: 'good' })] })
     expect(upsertTraceArchiveTurn({
       cwd,
       sessionId,
@@ -290,7 +331,7 @@ describe('transcript archive mirror', () => {
     expect(existsSync(corrupt)).toBe(false)
   })
 
-  it('deletion and single-instance startup cleanup remove orphan per-turn crash temps without a final segment', () => {
+  it('deletion and single-instance startup cleanup remove orphan per-turn crash temps without a final segment', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
     const cwd = '/repo/temp-only'
@@ -303,7 +344,7 @@ describe('transcript archive mirror', () => {
     expect(existsSync(temp)).toBe(false)
 
     writeFileSync(temp, 'another partial turn')
-    cleanupTraceArchiveTemps(userDataDir)
+    await cleanupTraceArchiveTemps(userDataDir)
     expect(existsSync(temp)).toBe(false)
   })
 
@@ -355,7 +396,7 @@ describe('transcript archive mirror', () => {
     expect(archive?.turns.find((turn) => turn.runId === 'run-499')?.userText).toBe('updated')
   })
 
-  it('rejects symlinked Scry-owned archive and transcript parents for writes and deletion', () => {
+  it('rejects symlinked Scry-owned archive and transcript parents for writes and deletion', async () => {
     const root = tempRoot()
     const external = tempRoot()
     const userDataDir = join(root, 'userData')
@@ -378,7 +419,7 @@ describe('transcript archive mirror', () => {
       userDataDir,
       turn: { runId: 'run-link', userText: 'x', items: [], done: true }
     })).toBe(false)
-    expect(mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(false)
+    expect(await mirrorTranscript({ cwd, sessionId, userDataDir, home })).toBe(false)
     const deletion = deleteTranscriptCopies({ cwd, sessionId, userDataDir, home, providerId: 'codex' })
     expect(deletion.failed.some((failure) => failure.error.includes('not trusted'))).toBe(true)
     expect(readFileSync(join(external, 'trace-target', 'marker.txt'), 'utf8')).toBe('keep')

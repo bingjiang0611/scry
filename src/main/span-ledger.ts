@@ -132,6 +132,13 @@ export const DDL_V8 = [
   `CREATE INDEX IF NOT EXISTS idx_human_interventions_session_time ON human_interventions(session_id, closed_at)`
 ]
 
+// v9（Performance）：覆盖每轮统计与 canonical billing 去重的高频过滤列。
+export const DDL_V9 = [
+  `CREATE INDEX IF NOT EXISTS idx_spans_tool ON spans(tool) WHERE tool IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_spans_danger_level ON spans(danger_level) WHERE danger_level IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_usage_ledger_canonical ON usage_ledger(provider, cost_unit, cost_source, bucket_start, bucket_end, account_label) WHERE cost IS NOT NULL`
+]
+
 export const UPSERT_SESSION_REF_SQL = `INSERT INTO session_refs (
   scry_session_id, provider_id, runtime_provider, cwd, external_session_id, preview, created_ts, updated_ts
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -281,11 +288,23 @@ export function buildAnalyticsStats(args: {
   const dangerStart = new Date(new Date(today).setDate(new Date(today).getDate() - 89)).getTime()
   const currentResults = args.results.filter((row) => row.tsStart >= currentStart && row.tsStart < tomorrow)
   const previousResults = args.results.filter((row) => row.tsStart >= previousStart && row.tsStart < currentStart)
+  const currentResultsByDay = new Map<string, AnalyticsResultRow[]>()
+  const currentResultsByProvider = new Map<string, AnalyticsResultRow[]>()
+  for (const row of currentResults) {
+    const day = localDay(row.tsStart)
+    const dayRows = currentResultsByDay.get(day)
+    if (dayRows) dayRows.push(row)
+    else currentResultsByDay.set(day, [row])
+    if (row.providerId) {
+      const providerRows = currentResultsByProvider.get(row.providerId)
+      if (providerRows) providerRows.push(row)
+      else currentResultsByProvider.set(row.providerId, [row])
+    }
+  }
 
   const tokenDaily = Array.from({ length: 30 }, (_, i) => {
     const start = new Date(new Date(currentStart).setDate(new Date(currentStart).getDate() + i)).getTime()
-    const end = new Date(new Date(start).setDate(new Date(start).getDate() + 1)).getTime()
-    const rows = currentResults.filter((row) => row.tsStart >= start && row.tsStart < end)
+    const rows = currentResultsByDay.get(localDay(start)) ?? []
     return {
       day: localDay(start),
       input: sumKnown(rows, 'inputTokens'),
@@ -299,11 +318,17 @@ export function buildAnalyticsStats(args: {
       cacheWriteKnownTurns: rows.filter((row) => row.cacheWriteTokens != null).length
     }
   })
+  const dangersByDay = new Map<string, { danger: number; warn: number }>()
+  for (const row of args.dangers) {
+    if (row.tsStart < dangerStart || row.tsStart >= tomorrow) continue
+    const counts = dangersByDay.get(localDay(row.tsStart)) ?? { danger: 0, warn: 0 }
+    if (row.level === 'danger') counts.danger++
+    if (row.level === 'warn') counts.warn++
+    dangersByDay.set(localDay(row.tsStart), counts)
+  }
   const dangerDaily = Array.from({ length: 90 }, (_, i) => {
     const start = new Date(new Date(dangerStart).setDate(new Date(dangerStart).getDate() + i)).getTime()
-    const end = new Date(new Date(start).setDate(new Date(start).getDate() + 1)).getTime()
-    const rows = args.dangers.filter((row) => row.tsStart >= start && row.tsStart < end)
-    return { day: localDay(start), danger: rows.filter((row) => row.level === 'danger').length, warn: rows.filter((row) => row.level === 'warn').length }
+    return { day: localDay(start), ...(dangersByDay.get(localDay(start)) ?? { danger: 0, warn: 0 }) }
   })
 
   const windowSummary = (results: AnalyticsResultRow[], from: number, to: number) => {
@@ -321,7 +346,7 @@ export function buildAnalyticsStats(args: {
   const previous = windowSummary(previousResults, previousStart, currentStart)
 
   const providerCoverage = PROVIDERS.map((providerId) => {
-    const rows = currentResults.filter((row) => row.providerId === providerId)
+    const rows = currentResultsByProvider.get(providerId) ?? []
     return {
       providerId,
       turns: rows.length,
@@ -333,7 +358,7 @@ export function buildAnalyticsStats(args: {
     }
   })
   const cacheReuse = PROVIDERS.map((providerId) => {
-    const rows = currentResults.filter((row) => row.providerId === providerId)
+    const rows = currentResultsByProvider.get(providerId) ?? []
     const denominator: NonNullable<DbStats['cacheReuse']>[number]['denominator'] = providerId === 'claude'
       ? 'separate_input'
       : providerId === 'codex'
@@ -368,7 +393,11 @@ export function buildAnalyticsStats(args: {
   })
 
   const mcpGroups = new Map<string, AnalyticsMcpRow[]>()
-  for (const row of args.mcp) mcpGroups.set(row.server, [...(mcpGroups.get(row.server) ?? []), row])
+  for (const row of args.mcp) {
+    const rows = mcpGroups.get(row.server)
+    if (rows) rows.push(row)
+    else mcpGroups.set(row.server, [row])
+  }
   const mcpLatency = [...mcpGroups.entries()].map(([server, rows]) => ({
     server,
     calls: rows.length,

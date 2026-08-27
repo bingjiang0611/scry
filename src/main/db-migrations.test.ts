@@ -48,6 +48,10 @@ function columns(db: MigrationTestDatabase, table: string): string[] {
   return (db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>).map((row) => row.name)
 }
 
+function indexes(db: MigrationTestDatabase, table: string): string[] {
+  return (db.prepare(`PRAGMA index_list("${table}")`).all() as Array<{ name: string }>).map((row) => row.name)
+}
+
 describe('SQLite migrations', () => {
   it('migrates a fresh database atomically to the current version', () => {
     const db = new MigrationTestDatabase()
@@ -59,6 +63,8 @@ describe('SQLite migrations', () => {
       expect(columns(db, 'human_interventions')).toEqual(expect.arrayContaining([
         'run_id', 'question_id', 'kind', 'resolution', 'request_json', 'response_json', 'duration_ms'
       ]))
+      expect(indexes(db, 'spans')).toEqual(expect.arrayContaining(['idx_spans_tool', 'idx_spans_danger_level']))
+      expect(indexes(db, 'usage_ledger')).toContain('idx_usage_ledger_canonical')
     } finally {
       db.close()
     }

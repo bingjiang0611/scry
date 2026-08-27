@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shel
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { getClaudeVersion } from './agent-runner'
@@ -24,7 +25,7 @@ import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
   mirrorTranscript,
-  readTraceArchive,
+  readTraceArchiveAsync,
   resolveTranscriptPath,
   traceArchiveRunIds,
   upsertTraceArchiveTurn,
@@ -327,7 +328,8 @@ const resolvePiProfile = async (id: string): Promise<PiAgentProfile | undefined>
   if (id === 'pi:default') return defaultPiProfile()
   return storedPiProfiles().find((profile) => profile.id === id)
 }
-const appSessionStore = () => createAppSessionStore(app.getPath('userData'))
+let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
+const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(app.getPath('userData'))
 const providerRegistry = new ProviderRegistry(
   createBuiltInProviderAdapters(
     homeDir,
@@ -673,10 +675,14 @@ function setCurrentCwd(dir: string | undefined): void {
   currentCwd = dir
 }
 
-function mirrorSessionTranscript(providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined): void {
+async function mirrorSessionTranscript(providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined): Promise<void> {
   if (providerId !== 'claude' || !cwd || !sessionId) return
-  const ok = mirrorTranscript({ cwd, sessionId, userDataDir: app.getPath('userData') })
-  if (!ok) console.warn('[scry] transcript mirror skipped:', cwd, sessionId)
+  try {
+    const ok = await mirrorTranscript({ cwd, sessionId, userDataDir: app.getPath('userData') })
+    if (!ok) console.warn('[scry] transcript mirror skipped:', cwd, sessionId)
+  } catch (error) {
+    console.warn('[scry] transcript mirror failed:', cwd, sessionId, error)
+  }
 }
 
 interface ArchiveTraceTurnArgs {
@@ -1319,10 +1325,10 @@ handleTrusted('agent:listProjects', () => appSessionStore().listProjects())
 handleTrusted('agent:catalogHealth', () => appSessionStore().health())
 
 // 加载一个历史会话：解析 transcript 成对话轮次，并把它设为当前会话（后续对话会 resume）
-handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
+handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
   if (!payload.externalSessionId) return null
   const cwd = payload.cwd ?? ''
-  const archived = readTraceArchive({
+  const archived = await readTraceArchiveAsync({
     cwd,
     sessionId: payload.externalSessionId,
     providerId: payload.providerId,
@@ -1335,7 +1341,7 @@ handleTrusted('agent:loadSession', (_e, payload: ProviderContext) => {
   let turns: ParsedTurn[] = []
   if (fp) {
     try {
-      const content = readFileSync(fp, 'utf8')
+      const content = await readFile(fp, 'utf8')
       turns = parseTranscriptToTurns(content, {
         runId: payload.externalSessionId,
         newId: () => `h-${evSeq++}`,
@@ -2450,7 +2456,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           hint: '保留 userData/app-sessions.json 与 .bak 后重试；本轮 trace 仍会继续归档'
         })
       }
-      mirrorSessionTranscript(providerId, cwd, nativeSessionId)
+      void mirrorSessionTranscript(providerId, cwd, nativeSessionId)
       const alreadyDone = runState.done
       runState.done = true
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
@@ -2648,7 +2654,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           hint: '保留 userData/app-sessions.json、archive 与 attachments 后重试恢复'
         })
       }
-      mirrorSessionTranscript(providerId, cwd, nativeSessionId)
+      void mirrorSessionTranscript(providerId, cwd, nativeSessionId)
       const recordingPolicy = providerRecordingPolicy(stopped ? 'interrupted' : 'failed', providerRecordingFailure)
       if (!recordingPolicy.allowCanonicalCommit) {
         const { message: recordingMessage, category } = recordingPolicy.rendererError
@@ -2801,7 +2807,10 @@ handleTrusted('agent:syncBillingAdmin', async () => {
   await warmShellEnv()
   return syncBillingAdmin()
 })
-handleTrusted('agent:importBillingFixture', () => importBillingFixture())
+handleTrusted('agent:importBillingFixture', async () => {
+  await warmShellEnv()
+  return importBillingFixture()
+})
 
 // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
 handleTrusted('agent:gitDiff', (_e, cwd: string) => gitNumstat(cwd))
@@ -2859,12 +2868,15 @@ handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
 app.whenReady().then(() => {
   if (!primaryInstance) return
   void warmShellEnv()
-  cleanupAppStoreAtomicTemps(app.getPath('userData'))
-  cleanupUsageAtomicTemps(app.getPath('userData'))
-  cleanupManagedTurnTemps(app.getPath('userData'))
-  cleanupTraceTurnProgressTemps(app.getPath('userData'))
-  cleanupTraceArchiveTemps(app.getPath('userData'))
+  createWindow()
   startupManagedRecovery = (async () => {
+    // Let the first window render before touching historical recovery trees.
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    cleanupAppStoreAtomicTemps(app.getPath('userData'))
+    cleanupUsageAtomicTemps(app.getPath('userData'))
+    cleanupManagedTurnTemps(app.getPath('userData'))
+    cleanupTraceTurnProgressTemps(app.getPath('userData'))
+    await cleanupTraceArchiveTemps(app.getPath('userData'))
     try {
       const traceProgress = await recoverTraceTurnProgress(app.getPath('userData'))
       if (traceProgress.pending > 0) console.warn('[scry] trace turn progress recovery pending:', traceProgress)
@@ -2894,7 +2906,6 @@ app.whenReady().then(() => {
       console.warn('[scry] recorder commit hook startup redelivery failed:', error)
     }
   })()
-  createWindow()
   setTimeout(() => initDb(), 800)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
