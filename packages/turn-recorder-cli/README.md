@@ -5,7 +5,7 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.21 \
+npm install -g @ali/scry-turn-recorder@0.2.26 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
@@ -15,6 +15,15 @@ npm install -g @ali/scry-turn-recorder@0.2.21 \
 scry upgrade --check  # 只检查
 scry upgrade          # 立即升级到 registry 的 latest
 ```
+
+直接运行 Pi CLI 需要安装随 recorder 发布的 lifecycle 扩展；安装器会幂等写入受管 loader，且拒绝覆盖用户同名扩展：
+
+```bash
+scry integrations install-pi
+scry integrations status-pi
+```
+
+扩展把 Pi 的顶层 prompt、工具、assistant、usage 和模型响应区间按顺序投递到同一 workspace recorder；失败始终 fail-open，不阻断 Pi。
 
 设置 `SCRY_NO_UPDATE_CHECK=1` 或传入 `--no-update-check` 可关闭后台检查；私有 registry 可通过 `SCRY_CLI_REGISTRY` 覆盖。
 

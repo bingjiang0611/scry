@@ -74,7 +74,46 @@ describe('turn recorder state machine', () => {
       expect.objectContaining({ id: 's1-tool', name: 'Bash', status: 'success', outputSummary: 'ok' })
     ])
     expect(records[0].usage).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
+    expect(records[0].modelTiming).toMatchObject({
+      status: 'partial',
+      quality: 'estimated',
+      value: { method: 'non_call_residual' }
+    })
     expect(records[0].diff).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
+  })
+
+  it('Pi direct lifecycle 记录工具、assistant、usage 与响应耗时', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'pi', event: 'UserPromptSubmit', workspace: root,
+      payload: payload('pi-session', { prompt: 'inspect', promptId: 'pi-turn-1' })
+    })
+    await handleRecorderHook({
+      provider: 'pi', event: 'PreToolUse:read', workspace: root,
+      payload: payload('pi-session', { promptId: 'pi-turn-1', tool_name: 'read', tool_use_id: 'pi-tool', tool_input: { path: 'README.md' } })
+    })
+    await handleRecorderHook({
+      provider: 'pi', event: 'PostToolUse:read', workspace: root,
+      payload: payload('pi-session', { promptId: 'pi-turn-1', tool_name: 'read', tool_use_id: 'pi-tool', tool_response: 'ok' })
+    })
+    await handleRecorderHook({
+      provider: 'pi', event: 'Stop', workspace: root,
+      payload: payload('pi-session', {
+        promptId: 'pi-turn-1',
+        assistant_response: 'done',
+        usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 5 },
+        model_segments: [{ response_id: 'response-1', completed_at: '2026-07-19T12:00:00.900Z', duration_ms: 400 }],
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+
+    expect(await listRecords(join(root, '.scry'))).toMatchObject([{
+      provider: { id: 'pi' },
+      providerTurnId: 'pi-turn-1',
+      assistant: { status: 'available', value: { text: 'done' } },
+      usage: { status: 'available', value: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 5 } },
+      modelTiming: { status: 'available', value: { method: 'response_intervals', totalCalls: 1, timedCalls: 1 } }
+    }])
   })
 
   it('相同 prompt 的下一轮不会误去重，open 状态内的重复 prompt 会去重', async () => {
@@ -138,6 +177,115 @@ describe('turn recorder state machine', () => {
 
     expect(await listRecords(join(root, '.scry'))).toMatchObject([
       { turnIndex: 1, status: 'completed' }
+    ])
+  })
+
+  it.each([
+    ['qoder', 'UserPromptSubmit', 'Stop'],
+    ['opencode', 'chat.message', 'session.idle']
+  ] as const)('%s 无 turn id 时延迟 terminal 不关闭替换后的新轮', async (provider, startEvent, endEvent) => {
+    const root = await workspace()
+    const withoutTimestamp = (prompt?: string) => payload('late-terminal', { timestamp: undefined, ...(prompt ? { prompt } : {}) })
+    await handleRecorderHook({ provider, event: startEvent, workspace: root, payload: withoutTimestamp('old') })
+    await handleRecorderHook({ provider, event: startEvent, workspace: root, payload: withoutTimestamp('new') })
+
+    await expect(handleRecorderHook({ provider, event: endEvent, workspace: root, payload: withoutTimestamp() }))
+      .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('deferred') })
+    await handleRecorderHook({
+      provider,
+      event: 'PreToolUse:Read',
+      workspace: root,
+      payload: payload('late-terminal', { timestamp: undefined, tool_name: 'Read', tool_use_id: 'new-tool', tool_input: { path: 'README.md' } })
+    })
+    await handleRecorderHook({
+      provider,
+      event: 'PostToolUse:Read',
+      workspace: root,
+      payload: payload('late-terminal', { timestamp: undefined, tool_name: 'Read', tool_use_id: 'new-tool', tool_response: 'ok' })
+    })
+    await handleRecorderHook({ provider, event: endEvent, workspace: root, payload: withoutTimestamp() })
+
+    const records = await listRecords(join(root, '.scry'))
+    expect(records.map((record) => [record.turnIndex, record.status, record.tools.value?.length ?? 0])).toEqual([
+      [1, 'interrupted', 0],
+      [2, 'completed', 1]
+    ])
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ orphanEvents: 0 })
+  })
+
+  it('Qoder 已完成上一轮的重复 terminal 不关闭下一轮', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
+      payload: payload('q-duplicate-stop', { prompt: 'first', timestamp: '2026-07-19T12:00:00.000Z' })
+    })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root,
+      payload: payload('q-duplicate-stop', { timestamp: '2026-07-19T12:00:31.000Z' })
+    })
+    const noTime = (extra: Record<string, unknown> = {}) => payload('q-duplicate-stop', { timestamp: undefined, ...extra })
+    await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: noTime({ prompt: 'second' }) })
+    await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() }))
+      .resolves.toMatchObject({ status: 'pending' })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'PreToolUse:Read', workspace: root,
+      payload: noTime({ tool_name: 'Read', tool_use_id: 'second-tool', tool_input: { path: 'README.md' } })
+    })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'PostToolUse:Read', workspace: root,
+      payload: noTime({ tool_name: 'Read', tool_use_id: 'second-tool', tool_response: 'ok' })
+    })
+    await handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() })
+
+    expect((await listRecords(join(root, '.scry'))).map((record) => [record.turnIndex, record.status, record.tools.value?.length ?? 0])).toEqual([
+      [1, 'completed', 0],
+      [2, 'completed', 1]
+    ])
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ orphanEvents: 0 })
+  })
+
+  it('Qoder bridge 内显式旧时间的 terminal 直接拒绝且不吞当前 terminal', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
+      payload: payload('q-stale', { prompt: 'old', timestamp: '2026-07-19T12:00:00.000Z' })
+    })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
+      payload: payload('q-stale', { prompt: 'new', timestamp: '2026-07-19T12:00:02.000Z' })
+    })
+    await expect(handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root,
+      payload: payload('q-stale', {
+        timestamp: undefined,
+        raw_qoder_payload: payload('q-stale', { timestamp: '2026-07-19T12:00:01.000Z' })
+      })
+    })).resolves.toMatchObject({ status: 'duplicate', reason: expect.stringContaining('predates') })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root,
+      payload: payload('q-stale', { timestamp: '2026-07-19T12:00:33.000Z' })
+    })
+
+    expect((await listRecords(join(root, '.scry'))).map((record) => [record.turnIndex, record.status])).toEqual([
+      [1, 'interrupted'],
+      [2, 'completed']
+    ])
+  })
+
+  it('无后续活动的早期 terminal 在 grace 到期后由 recovery 收敛', async () => {
+    const root = await workspace()
+    const noTime = (prompt?: string) => payload('q-grace', { timestamp: undefined, ...(prompt ? { prompt } : {}) })
+    await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: noTime('old') })
+    await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: noTime('new') })
+    await handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() })
+    const openPath = join(root, '.scry', 'runtime', 'qoder', safeKey('q-grace'), 'open.json')
+    const open = JSON.parse(await readFile(openPath, 'utf8'))
+    await writeFile(openPath, JSON.stringify({ ...open, deferredTerminalAt: '2000-01-01T00:00:00.000Z' }))
+
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 1 })
+    expect((await listRecords(join(root, '.scry'))).map((record) => [record.turnIndex, record.status])).toEqual([
+      [1, 'interrupted'],
+      [2, 'completed']
     ])
   })
 
@@ -1670,6 +1818,49 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
       expect.objectContaining({ id: 'large-call', name: 'Bash', status: 'success' })
     ])
   }, 15_000)
+
+  it('保留单个 code-mode exec_command 调用及数组输出', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'rollout-code-exec.jsonl')
+    const row = (timestamp: string, type: string, payload: Record<string, unknown>) => ({ timestamp, type, payload })
+    await writeFile(rollout, `${[
+      row('2026-07-19T12:00:00.000Z', 'event_msg', { type: 'task_started', turn_id: 'code-turn' }),
+      row('2026-07-19T12:00:00.010Z', 'event_msg', { type: 'user_message', message: 'inspect' }),
+      row('2026-07-19T12:00:00.100Z', 'response_item', {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'code-exec-1',
+        input: 'const r = await tools.exec_command({"cmd":"rg -n \\"UserPromptSubmit|prompt\\" recorder.js","workdir":"/repo","yield_time_ms":10000,"max_output_tokens":26000});\\ntext(r.output);'
+      }),
+      row('2026-07-19T12:00:00.200Z', 'response_item', {
+        type: 'custom_tool_call_output',
+        call_id: 'code-exec-1',
+        output: [
+          { type: 'input_text', text: 'Script completed\nWall time 1.0 seconds\nOutput:\n' },
+          { type: 'input_text', text: 'function rejectedBeforeExecution(output) { return /CreateProcess[\\s\\S]*Rejected|rejected:[\\s\\S]*denied/i.test(output) }' }
+        ]
+      }),
+      row('2026-07-19T12:00:00.300Z', 'response_item', {
+        type: 'custom_tool_call', name: 'exec_command', call_id: 'rejected-exec', arguments: JSON.stringify({ cmd: 'blocked' })
+      }),
+      row('2026-07-19T12:00:00.400Z', 'response_item', {
+        type: 'custom_tool_call_output', call_id: 'rejected-exec', output: 'CreateProcess policy Rejected'
+      }),
+      row('2026-07-19T12:00:01.000Z', 'event_msg', { type: 'task_complete', turn_id: 'code-turn', last_agent_message: 'done' })
+    ].map((item) => JSON.stringify(item)).join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn.started', workspace: root,
+      payload: payload('code-session', { prompt: 'inspect', turn_id: 'code-turn', rollout_path: rollout })
+    })
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn/completed', workspace: root,
+      payload: payload('code-session', { turn_id: 'code-turn', rollout_path: rollout, timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    expect((await listRecords(join(root, '.scry')))[0]?.tools.value).toEqual([
+      expect.objectContaining({ id: 'code-exec-1', name: 'Bash', status: 'success' })
+    ])
+  })
 
   it('还原 slash prompt、展开 Codex exec，并把子 agent 调用并入父轮但不重复 usage', async () => {
     const root = await workspace()

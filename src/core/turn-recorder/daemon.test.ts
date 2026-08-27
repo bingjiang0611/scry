@@ -53,6 +53,22 @@ describe('turn recorder daemon', () => {
     await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
   })
 
+  it('socket 接受 direct Pi lifecycle', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
+    try {
+      const base = { workspace: root, provider: 'pi' as const, env }
+      await sendRecorderDaemonHook({ ...base, event: 'UserPromptSubmit', payload: { session_id: 'pi-session', promptId: 'pi-turn', prompt: 'hello' } })
+      await sendRecorderDaemonHook({ ...base, event: 'Stop', payload: { session_id: 'pi-session', promptId: 'pi-turn', assistant_response: 'done' } })
+      await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
+        { sessionId: 'pi-session', provider: { id: 'pi' }, providerTurnId: 'pi-turn', status: 'completed' }
+      ])
+    } finally {
+      await daemon.close()
+    }
+  })
+
   it('闲置后自动退出，下次事件可由 launcher 再拉起', async () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
