@@ -2,7 +2,14 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore, createRecentFoldersStore } from './app-store'
+import {
+  appSessionCanResume,
+  cleanupAppStoreAtomicTemps,
+  createAppSessionStore,
+  createProjectStore,
+  createRecentFoldersStore,
+  mergeProjectMetas
+} from './app-store'
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'scry-store-'))
 
@@ -49,6 +56,48 @@ describe('app-store', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('项目目录独立于会话保留，并支持置顶、重命名、移除和重新打开', () => {
+    const dir = tempDir()
+    try {
+      const store = createProjectStore(dir)
+      store.seed([
+        { cwd: '/repo/empty', lastOpenedAt: 1 },
+        { cwd: '/repo/empty', lastOpenedAt: 2 },
+        { cwd: '/repo/full', lastOpenedAt: 3 }
+      ])
+      expect(store.load()).toHaveLength(2)
+      expect(store.rename('/repo/empty', '空项目')).toBe(true)
+      expect(store.setPinned('/repo/empty', true)).toBe(true)
+
+      const withEmpty = mergeProjectMetas(store.load(), [{
+        cwd: '/repo/full', name: 'full', mtime: 4, sessions: []
+      }])
+      expect(withEmpty.map((project) => project.cwd)).toEqual(['/repo/empty', '/repo/full'])
+      expect(withEmpty[0]).toMatchObject({ name: '空项目', sessions: [], pinnedAt: expect.any(Number) })
+
+      store.remove('/repo/empty')
+      expect(mergeProjectMetas(store.load(), []).map((project) => project.cwd)).toEqual(['/repo/full'])
+      store.remember('/repo/empty')
+      expect(mergeProjectMetas(store.load(), [])[0]).toMatchObject({ cwd: '/repo/empty', name: '空项目' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('项目合并时保留 Chats 在末尾，并让项目级置顶优先', () => {
+    const projects = mergeProjectMetas(
+      [
+        { cwd: '/repo/pinned', lastOpenedAt: 1, pinnedAt: 10 },
+        { cwd: '/repo/empty', lastOpenedAt: 8 }
+      ],
+      [
+        { cwd: '/repo/session', name: 'session', mtime: 20, sessions: [] },
+        { cwd: '', name: 'Chats', mtime: 30, sessions: [] }
+      ]
+    )
+    expect(projects.map((project) => project.cwd)).toEqual(['/repo/pinned', '/repo/session', '/repo/empty', ''])
   })
 
   it('app sessions 只按 app 自己记录的 cwd 分组', () => {
