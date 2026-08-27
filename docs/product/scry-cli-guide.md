@@ -6,7 +6,7 @@ Scry CLI 是给 Claude Code、Codex、Qoder、OpenCode、Pi 这类命令行 Agen
 
 用户发出一条指令后，Agent 可能会思考、调用工具、修改文件、启动子 Agent，最后给出回复。Scry CLI 把这一整段过程记成一条 `AgentTurnRecord`。可以把它理解成 Agent 的行车记录仪。
 
-它只负责采集、整理和保存本地记录，本身不上传数据。要不要上传、上传到哪里，由接入它的项目决定。
+它负责采集、整理和保存本地记录。数据默认放在当前工作目录的 `.scry/` 下。
 
 ## Scry CLI 是必须的吗
 
@@ -17,7 +17,7 @@ Scry CLI 是给 Claude Code、Codex、Qoder、OpenCode、Pi 这类命令行 Agen
 
 Recorder 可以自己用 Python、Node.js 或 Shell 实现，不一定非要叫 Scry CLI。Scry CLI 的作用，是把接收事件、关联轮次、读取 Provider 会话文件、计算 Git diff、去重、异常恢复和查询记录这些通用能力封装好。项目已经有自己的 Recorder，并且输出满足使用方要求时，可以不安装 Scry CLI。
 
-rate-native 当前没有重复实现这套 Recorder。它的 Provider Hook 会调用 `scry recorder hook`，所以现有方案仍然需要一份能被找到的 Scry CLI。以后如果换成自研 Recorder，Hook 和上传器也要跟着适配。
+如果项目的 Hook 调用的是 `scry recorder hook`，就需要先安装 Scry CLI。只安装 CLI、没有配置 Hook，Scry 不知道 Agent 什么时候开始和结束，也就不会产生记录。
 
 ## 工作原理
 
@@ -30,7 +30,7 @@ Scry recorder / workspace daemon
         ↓
 .scry/records/*.json
         ↓
-scry turns list / show / timeline / summary / export
+scry turns list / show / timeline / summary
 ```
 
 一次记录大致分四步：
@@ -78,109 +78,104 @@ Scry CLI 的命令统一输出 JSON，方便人查看，也方便脚本继续处
 | `scry turns timeline <序号或 recordId> --workspace "$PWD"` | 按发生顺序排列的模型文本、thinking、工具、Skill、MCP 和子 Agent 事件 |
 | `scry turns summary --workspace "$PWD"` | 最新会话的轮次、调用、文件、Token、错误、diff 和耗时汇总 |
 | `scry turns summary --all --workspace "$PWD"` | 整个工作区的汇总 |
-| `scry turns export --workspace "$PWD" --after 0 --limit 100` | 可分页上传的记录，以及 `nextCursor`、`hasMore`、`snapshotMaxSequence` |
 | `scry turns verify --workspace "$PWD"` | 本地记录是否能解析、序号和文件内容是否一致 |
 
 `summary` 和时间指标要结合证据完整度看。比如 Codex 没有提供服务端精确延迟时，Scry 输出的是本地观测区间，里面可能还包含调度、传输和重试时间。
 
-## rate-native 中怎么用
+## 怎么用
 
-rate-native 把“本地记录”和“远端上传”拆成了两段：
+最快的用法只有三步：初始化目录、重启 Agent、执行一轮任务后查看记录。
 
-```text
-Claude / Codex / Qoder / OpenCode
-        ↓ 项目 Hook
-Scry CLI
-        ↓
-.scry/records
-        ↓ record-committed
-rate-native 异步 uploader
-        ↓ 脱敏、gzip-base64 压缩
-.scry/upload/outbox
-        ↓
-ai_native_trace_report.reportAgentTurns
-```
+### 第一步：初始化工作目录
 
-### 通用目录初始化
-
-仓库提供了 [`scripts/setup-scry-workspace.sh`](../../scripts/setup-scry-workspace.sh)。它支持 Claude、Codex、Qoder，进入想采集的目录后执行：
+进入想采集数据的目录，执行 Scry 仓库提供的 [`scripts/setup-scry-workspace.sh`](../../scripts/setup-scry-workspace.sh)：
 
 ```bash
 cd /path/to/workspace
 bash /path/to/scry/scripts/setup-scry-workspace.sh
 ```
 
-脚本会自动检测本机已安装的 Provider。也可以明确指定：
+脚本支持 Claude Code、Codex 和 Qoder，并会自动检测本机已经安装的工具。也可以明确指定：
 
 ```bash
 SCRY_PROVIDERS="claude codex qoder" \
   bash /path/to/scry/scripts/setup-scry-workspace.sh
 ```
 
-脚本按三步执行：
+这一个脚本会完成三件事：
 
-1. 安装或定位 `@ali/scry-turn-recorder@latest`。默认安装到 `~/.local`，不会要求系统目录写权限。
-2. 在当前目录创建最小 `scry.config.json`。已有配置原样保留；`.scry/` 和 `.scry-disabled` 只写入本地 Git exclude。
-3. 创建 `.scry/provider-hook.sh`，再把五类项目 Hook 追加到 Provider 配置：`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`Stop`。已有 Hook 不会被删除，重复执行不会重复追加。
+1. 安装或找到 Scry CLI。默认安装到 `~/.local`，不需要系统目录权限。
+2. 在当前目录创建 `scry.config.json`，并让 Git 忽略本地记录目录 `.scry/`。
+3. 为检测到的 Agent 安装项目 Hook。已有 Hook 不会被删除，重复执行也不会重复添加。
 
-这套 Hook 直接调用 CLI，不需要手动执行 `scry recorder start`。重启 Provider 是为了让它重新加载项目配置，不是启动 Scry 后台进程。通过 Scry App 启动时，Hook 会自动沿用 App 的 managed recorder。
+脚本执行完后，不需要再手动运行 `scry recorder start`。Hook 收到事件时会自动调用 Scry。
 
 Hook 配置位置如下：
 
-| Provider | 项目配置 |
+| Agent | Hook 配置文件 |
 | --- | --- |
-| Claude | `.claude/settings.local.json` |
+| Claude Code | `.claude/settings.local.json` |
 | Codex | `.codex/hooks.json` |
 | Qoder | `.qoder/settings.json` |
 
-脚本最后执行 `scry doctor`。完成后要重启 Provider，让它重新加载项目 Hook，然后执行一轮真实任务：
+OpenCode 暂不支持这个初始化脚本，需要单独安装项目插件。
+
+### 第二步：重启 Agent，执行一轮任务
+
+初始化完成后，重启 Claude Code、Codex 或 Qoder，让它重新加载项目 Hook。然后像平时一样给 Agent 一条指令，不需要额外执行 Scry 命令。
+
+如果想先检查安装是否正常，可以运行：
+
+```bash
+scry doctor --workspace "$PWD"
+```
+
+`doctor` 通过只说明 CLI、配置和本地目录可用。真正执行一轮 Agent 任务后，再运行下面的命令，能看到新记录才算接入成功：
 
 ```bash
 scry turns list --workspace "$PWD"
 ```
 
-能看到新轮次才算接入完成。`doctor` 通过只说明 CLI、配置和本地存储可用，不能证明 Provider 已经触发 Hook。
+### 第三步：查看记录
 
-这个通用脚本暂不处理 OpenCode。OpenCode 使用项目插件，不是上述 JSON Hook 合同；需要接入时单独安装插件。rate-native 已有自己的四端 Hook 和上传器，不要再运行通用脚本，继续使用 `bash init.sh`。
+常用命令：
 
-### rate-native 的安装和启动
+```bash
+# 看有哪些记录
+scry turns list --workspace "$PWD"
 
-新同事在 rate-native 根目录运行 `bash init.sh`。脚本会：
+# 看最近一次会话的汇总
+scry turns summary --workspace "$PWD"
 
-1. 从内网 npm registry 安装或升级 `@ali/scry-turn-recorder@latest`。
-2. 把解析到的 CLI 绝对路径写入四端本地配置的 `SCRY_CLI_PATH`，避免 Provider 改写 `PATH` 后调用到另一份 CLI。
-3. 执行 `scry doctor` 检查配置和本地记录状态。
+# 看某一轮的完整内容
+scry turns show <序号或 recordId> --workspace "$PWD"
 
-正常使用不需要手动运行 `scry recorder start`，也不需要让 Agent 或 Skill 主动执行 Scry 命令。Provider Hook 会自动完成记录。
+# 按时间顺序查看某一轮发生了什么
+scry turns timeline <序号或 recordId> --workspace "$PWD"
+```
 
-### 本地记录
+记录保存在当前工作目录的 `.scry/records/` 下，不会提交到 Git。记录里可能包含提示词、回复、工具输入输出和代码 diff，不要随意分享整个 `.scry/` 目录。
 
-rate-native 的 `scry.config.json` 当前会记录提示词、回复、工具输出摘要、diff 和 Hook，并发现根仓库下两层以内的子 Git 仓库。记录写在 `.scry/records/`，不进入 Git。
+### 暂停和恢复
 
-这条链路独立于 rate-native 原有的阶段埋点：它不读写 `.claude/traces*.jsonl`，也不调用或复用 `reportTraces` 的游标。
+临时停止记录，任选一种方式：
 
-### 远端上传
+```bash
+# 只对当前这次命令生效
+SCRY_RECORDER_ENABLED=0 <你的 Agent 命令>
 
-正式记录落盘后，Scry 只给 rate-native 的 commit hook 发送工作区、Provider、会话 ID、record ID 和序号。commit hook 再唤醒持久异步任务，不把整条记录塞进任务参数。
+# 停止当前工作目录继续产生记录
+touch .scry-disabled
+```
 
-上传器会：
+删除 `.scry-disabled` 后就会恢复记录：
 
-1. 用固定 snapshot 调用 `scry turns export`，避免分页过程中混入新记录。
-2. 把工作区路径和用户目录替换成 `$WORKSPACE`、`$HOME`，并遮掉常见 token、密码、Cookie、Authorization 和 JWT。
-3. 先把脱敏后的记录原子写进 `.scry/upload/outbox/`，再推进本地游标。
-4. 用 `gzip-base64` 压缩记录，通过 Aone MCP 的 `reportAgentTurns` 上传。
-5. 服务端返回 `inserted` 或 `duplicated` 才删除 outbox；网络失败继续保留，明确拒绝或冲突的记录移到 `.scry/upload/dead-letter/`。
+```bash
+rm .scry-disabled
+```
 
-上传状态在 `.scry/upload/health.json`。因此“本地已经记录”不等于“远端已经收到”，排查时要分别看 records、outbox、health 和远端 ACK。
-
-### 开关
-
-- `SCRY_TURN_UPLOAD_ENABLED=0`：只停远端上传，本地继续记录。
-- `SCRY_RECORDER_ENABLED=0`：停止新增本地记录。
-- 仓库根目录创建 `.scry-disabled`：停止新增本地记录。
-
-已有记录仍可用 `turns list/show/summary/export/verify` 查看。停掉 recorder 不会删除历史数据。
+暂停记录不会删除已有数据，之前的记录仍然可以用 `turns list`、`show`、`summary` 和 `verify` 查看。
 
 ## 一句话记住
 
-Scry CLI 负责把 Agent 的一次完整工作过程记清楚；rate-native 负责把已经落盘的记录可靠地送到远端。日常采集和上传失败不会中断正在执行的 Agent，上传失败的记录也不会直接丢掉。受管会话启动前仍会严格检查 CLI 路径和版本；检查不过就拒绝启动，避免出现一段看似受管、实际没有记录的会话。
+在目标目录执行一次初始化脚本，重启 Agent，然后照常使用。执行完一轮任务后，运行 `scry turns list --workspace "$PWD"`，能看到新记录就说明 Scry 已经正常工作。
