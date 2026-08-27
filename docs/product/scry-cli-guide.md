@@ -90,7 +90,20 @@ rate-native 异步 uploader
 ai_native_trace_report.reportAgentTurns
 ```
 
-### 安装和启动
+### 通用目录初始化
+
+仓库提供了一个通用脚本。进入想采集的目录后执行：
+
+```bash
+cd /path/to/workspace
+bash /path/to/scry/scripts/setup-scry-workspace.sh
+```
+
+脚本会安装或定位 Scry CLI、生成最小 `scry.config.json`、把本地运行数据加入当前 Git 仓库的 exclude，最后执行 `scry doctor`。重复执行不会覆盖已有配置。
+
+完成后，从 Scry App 打开这个目录即可采集。后台 recorder 不需要提前常驻，第一条 Provider 事件到来时会自动启动。直接在终端运行 Claude、Codex、Qoder 或 OpenCode 时，还需要接入对应 Provider Hook；只安装 CLI 无法拿到它们的运行过程。
+
+### rate-native 的安装和启动
 
 新同事在 rate-native 根目录运行 `bash init.sh`。脚本会：
 
