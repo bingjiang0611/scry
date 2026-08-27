@@ -51,6 +51,15 @@ export interface ProjectMeta {
   name: string
   mtime: number
   sessions: SessionMeta[]
+  pinnedAt?: number
+}
+
+export interface ProjectRecord {
+  cwd: string
+  name?: string
+  lastOpenedAt: number
+  pinnedAt?: number
+  removedAt?: number
 }
 
 /** 定位单条 catalog 会话：Provider + profile + 工作目录 + Provider 侧会话 id。 */
@@ -155,7 +164,11 @@ function writeAtomic(file: string, value: unknown): void {
 }
 
 export function cleanupAppStoreAtomicTemps(userDataDir: string): void {
-  for (const name of ['recent-folders.json', 'recent-folders.json.bak', 'app-sessions.json', 'app-sessions.json.bak']) {
+  for (const name of [
+    'recent-folders.json', 'recent-folders.json.bak',
+    'projects.json', 'projects.json.bak',
+    'app-sessions.json', 'app-sessions.json.bak'
+  ]) {
     cleanupAtomicTemps(join(userDataDir, name))
   }
 }
@@ -207,6 +220,97 @@ export function createRecentFoldersStore(userDataDir: string) {
     return next
   }
   return { load, push, remove }
+}
+
+function isProjectRecordArray(value: unknown): value is ProjectRecord[] {
+  return Array.isArray(value) && value.every((item) => {
+    if (!item || typeof item !== 'object') return false
+    const project = item as Partial<ProjectRecord>
+    return typeof project.cwd === 'string' && project.cwd.length > 0 && project.cwd.length <= 4_096 &&
+      (project.name == null || (typeof project.name === 'string' && project.name.length > 0 && project.name.length <= 120)) &&
+      typeof project.lastOpenedAt === 'number' && Number.isFinite(project.lastOpenedAt) &&
+      (project.pinnedAt == null || (typeof project.pinnedAt === 'number' && Number.isFinite(project.pinnedAt))) &&
+      (project.removedAt == null || (typeof project.removedAt === 'number' && Number.isFinite(project.removedAt)))
+  })
+}
+
+export function createProjectStore(userDataDir: string) {
+  const file = join(userDataDir, 'projects.json')
+  const load = (): ProjectRecord[] => readJsonRecoverable<ProjectRecord[]>(file, [], isProjectRecordArray).value
+  const save = (projects: ProjectRecord[]): void => writeJsonRecoverable(file, projects, isProjectRecordArray)
+  const seed = (observed: Array<{ cwd: string; lastOpenedAt: number }>): void => {
+    const projects = load()
+    const known = new Set(projects.map((project) => project.cwd))
+    const additions = observed.filter((project) => {
+      if (!project.cwd || known.has(project.cwd)) return false
+      known.add(project.cwd)
+      return true
+    })
+    if (additions.length === 0) return
+    save([...projects, ...additions])
+  }
+  const remember = (cwd: string): void => {
+    const projects = load()
+    const current = projects.find((project) => project.cwd === cwd)
+    const now = Date.now()
+    if (current) {
+      current.lastOpenedAt = now
+      delete current.removedAt
+    } else projects.push({ cwd, lastOpenedAt: now })
+    save(projects)
+  }
+  const setPinned = (cwd: string, pinned: boolean): boolean => {
+    const projects = load()
+    const current = projects.find((project) => project.cwd === cwd && !project.removedAt)
+    if (!current) return false
+    if (pinned) current.pinnedAt = Date.now()
+    else delete current.pinnedAt
+    save(projects)
+    return true
+  }
+  const rename = (cwd: string, name: string): boolean => {
+    const projects = load()
+    const current = projects.find((project) => project.cwd === cwd && !project.removedAt)
+    if (!current) return false
+    current.name = name
+    save(projects)
+    return true
+  }
+  const remove = (cwd: string): void => {
+    const projects = load()
+    const current = projects.find((project) => project.cwd === cwd)
+    const now = Date.now()
+    if (current) {
+      current.removedAt = now
+      delete current.pinnedAt
+    } else projects.push({ cwd, lastOpenedAt: now, removedAt: now })
+    save(projects)
+  }
+  return { load, seed, remember, setPinned, rename, remove }
+}
+
+export function mergeProjectMetas(records: ProjectRecord[], sessionProjects: ProjectMeta[]): ProjectMeta[] {
+  const recordsByCwd = new Map(records.map((project) => [project.cwd, project]))
+  const sessionsByCwd = new Map(sessionProjects.map((project) => [project.cwd, project]))
+  const cwds = new Set([...records.map((project) => project.cwd), ...sessionProjects.map((project) => project.cwd)])
+  return [...cwds].flatMap((cwd): ProjectMeta[] => {
+    const sessions = sessionsByCwd.get(cwd)
+    if (!cwd) return sessions ? [sessions] : []
+    const project = recordsByCwd.get(cwd)
+    if (project?.removedAt) return []
+    return [{
+      cwd,
+      name: project?.name ?? sessions?.name ?? basename(cwd),
+      mtime: Math.max(project?.lastOpenedAt ?? 0, sessions?.mtime ?? 0),
+      sessions: sessions?.sessions ?? [],
+      ...(project?.pinnedAt ? { pinnedAt: project.pinnedAt } : {})
+    }]
+  }).sort((a, b) =>
+    Number(!a.cwd) - Number(!b.cwd) ||
+    Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt)) ||
+    (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) ||
+    b.mtime - a.mtime
+  )
 }
 
 export function createAppSessionStore(userDataDir: string) {

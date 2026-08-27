@@ -1,0 +1,25 @@
+{
+  "type": "design",
+  "title": "Scry Project Manager",
+  "prompt": "空项目保留在侧栏，并参考 Codex 支持项目管理与项目内新建会话。",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Project Manager": {
+      "versions": [
+        {
+          "path": "Project Manager.html",
+          "createdAt": "2026-08-27T07:32:20.750Z",
+          "status": "approved",
+          "subtitle": "空项目保留 · 项目菜单 · 项目内新建会话",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-27T07:32:20.762Z",
+  "updatedAt": "2026-08-27T07:46:06.913Z"
+}

@@ -1,8 +1,9 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
-import { useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import { Icon } from './primitives/Icon'
+import { ModalFrame } from './Modals'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { McpMeta, SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
@@ -34,6 +35,12 @@ export function Sidebar({
   onPick,
   onTogglePin,
   onArchive,
+  onAddProject,
+  onNewProjectChat,
+  onToggleProjectPin,
+  onRenameProject,
+  onRemoveProject,
+  onRevealProject,
   archiveUndo = null,
   onUndoArchive,
   onDiagnostics,
@@ -61,6 +68,12 @@ export function Sidebar({
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
+  onAddProject?: () => void
+  onNewProjectChat?: (cwd: string) => void
+  onToggleProjectPin?: (project: ProjectMeta) => void
+  onRenameProject?: (project: ProjectMeta, name: string) => void | Promise<void>
+  onRemoveProject?: (project: ProjectMeta) => void | Promise<void>
+  onRevealProject?: (project: ProjectMeta) => void
   archiveUndo?: { preview: string } | null
   onUndoArchive?: () => void
   onDiagnostics?: () => void
@@ -78,12 +91,30 @@ export function Sidebar({
 }) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
+  const [projectDialog, setProjectDialog] = useState<{ mode: 'rename' | 'remove'; project: ProjectMeta } | null>(null)
+  const projectMenuRef = useRef<HTMLDivElement>(null)
   const toggle = (cwd: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
       next.has(cwd) ? next.delete(cwd) : next.add(cwd)
       return next
     })
+  useEffect(() => {
+    if (!projectMenu) return
+    const dismissPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !projectMenuRef.current?.contains(event.target)) setProjectMenu(null)
+    }
+    const dismissEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setProjectMenu(null)
+    }
+    document.addEventListener('pointerdown', dismissPointer, true)
+    document.addEventListener('keydown', dismissEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismissPointer, true)
+      document.removeEventListener('keydown', dismissEscape)
+    }
+  }, [projectMenu])
   const ql = q.trim().toLowerCase()
   const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
   // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名，避免丢掉工作目录上下文。
@@ -93,12 +124,25 @@ export function Sidebar({
       .map((session) => ({ session, cwd: project.cwd, name: project.name })))
     .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0))
   const filtered = projects
-    .map((project) => ({ ...project, sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session)) }))
-    .filter((project) => project.sessions.length > 0)
+    .map((project) => ({
+      ...project,
+      totalSessions: project.sessions.length,
+      projectMatch: !ql || project.name.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql),
+      sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
+    }))
+    .filter((project) => project.projectMatch || project.sessions.length > 0)
   const mcpSummary = summarizeMcpNav(mcps, mcpLive)
   const isActive = (session: SessionMeta): boolean =>
     session.sessionId === activeSessionId && session.providerId === activeProviderId &&
     session.agentProfileId === activeAgentProfileId
+  const openProjectMenu = (event: ReactMouseEvent<HTMLButtonElement>, project: ProjectMeta): void => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    setProjectMenu({
+      project,
+      left: Math.min(rect.right + 6, window.innerWidth - 254),
+      top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - 292))
+    })
+  }
   return (
     <aside className="sidebar" id={id} aria-label="会话导航">
       <div className="sb-brand">
@@ -192,34 +236,67 @@ export function Sidebar({
             <div className="sb-divider" />
           </>
         )}
-        <div className="sb-section">
-          最近 <span className="cnt">{filtered.length}</span>
+        <div className="sb-section sb-project-section">
+          项目 <span className="cnt">{filtered.length}</span>
+          {onAddProject && (
+            <button type="button" className="sb-project-add" title="添加项目" aria-label="添加项目" onClick={onAddProject}>
+              <Icon name="plus" />
+            </button>
+          )}
         </div>
-        {filtered.length === 0 && pinned.length === 0 && <div className="sb-empty">无历史会话</div>}
+        {filtered.length === 0 && pinned.length === 0 && (
+          <div className="sb-empty">{projects.length === 0 ? '暂无项目' : '无匹配项目或会话'}</div>
+        )}
         {filtered.map((p) => {
           const open = !collapsed.has(p.cwd)
           const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
           const contextLabel = p.cwd || '未关联工作目录'
+          const emptyLabel = p.totalSessions === 0 ? '暂无会话' : ql ? '无匹配会话' : '会话已置顶'
           return (
             <div key={p.cwd} className={`sb-proj ${open ? 'open' : ''}`}>
-              <button
-                type="button"
-                className={`sb-proj-head ${active ? 'on' : ''}`}
-                title={`${p.name}\n${contextLabel}`}
-                aria-label={`${p.name} · ${contextLabel}`}
-                aria-expanded={open}
-                data-project-path={p.cwd}
-                onClick={() => toggle(p.cwd)}
-              >
-                <Icon name="chevronRight" className="chev" />
-                <span className="pname">{p.name}</span>
-                {p.cwd && (
-                  <span className="ppath" aria-hidden="true">
-                    {p.cwd}
+              <div className={`sb-proj-row ${active ? 'active' : ''}`}>
+                <button
+                  type="button"
+                  className={`sb-proj-head ${active ? 'on' : ''}`}
+                  title={`${p.name}\n${contextLabel}`}
+                  aria-label={`${p.name} · ${contextLabel}`}
+                  aria-expanded={open}
+                  data-project-path={p.cwd}
+                  onClick={() => toggle(p.cwd)}
+                >
+                  <Icon name="chevronRight" className="chev" />
+                  <span className="pname">{p.name}</span>
+                  {p.pinnedAt && <Icon name="pin" className="sb-project-pin" />}
+                  {p.cwd && (
+                    <span className="ppath" aria-hidden="true">
+                      {p.cwd}
+                    </span>
+                  )}
+                  <span className="pcnt">{p.totalSessions || ''}</span>
+                </button>
+                {p.cwd && onNewProjectChat && (
+                  <span className="sb-proj-acts">
+                    <button
+                      type="button"
+                      className="sb-proj-act"
+                      title={`在 ${p.name} 新建会话`}
+                      aria-label={`在 ${p.name} 新建会话`}
+                      onClick={() => onNewProjectChat(p.cwd)}
+                    >
+                      <Icon name="plus" />
+                    </button>
+                    <button
+                      type="button"
+                      className="sb-proj-act sb-proj-more"
+                      title={`管理项目 ${p.name}`}
+                      aria-label={`管理项目 ${p.name}`}
+                      onClick={(event) => openProjectMenu(event, p)}
+                    >
+                      ···
+                    </button>
                   </span>
                 )}
-                <span className="pcnt">{p.sessions.length}</span>
-              </button>
+              </div>
               {open && (
                 <div className="sb-sess-list">
                   {p.sessions.map((s) => (
@@ -234,12 +311,79 @@ export function Sidebar({
                       onArchive={onArchive}
                     />
                   ))}
+                  {p.sessions.length === 0 && (
+                    <div className="sb-project-empty">
+                      <span>{emptyLabel}</span>
+                      {p.totalSessions === 0 && onNewProjectChat && (
+                        <button type="button" onClick={() => onNewProjectChat(p.cwd)}>新建</button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )
         })}
       </div>
+
+      {projectMenu && (
+        <div
+          ref={projectMenuRef}
+          className="menu sb-project-menu"
+          role="menu"
+          aria-label={`管理项目 ${projectMenu.project.name}`}
+          style={{ left: projectMenu.left, top: projectMenu.top }}
+        >
+          <div className="sb-project-menu-head">
+            <b>{projectMenu.project.name}</b>
+            <code>{projectMenu.project.cwd}</code>
+          </div>
+          {onNewProjectChat && (
+            <button type="button" className="mitem on" onClick={() => { setProjectMenu(null); onNewProjectChat(projectMenu.project.cwd) }}>
+              <Icon name="plus" /> 在此项目新建会话
+            </button>
+          )}
+          <div className="mdiv" />
+          {onToggleProjectPin && (
+            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onToggleProjectPin(projectMenu.project) }}>
+              <Icon name="pin" /> {projectMenu.project.pinnedAt ? '取消置顶项目' : '置顶项目'}
+            </button>
+          )}
+          {onRevealProject && (
+            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onRevealProject(projectMenu.project) }}>
+              <Icon name="folder" /> 在 Finder 中显示
+            </button>
+          )}
+          {onRenameProject && (
+            <button type="button" className="mitem" onClick={() => { setProjectDialog({ mode: 'rename', project: projectMenu.project }); setProjectMenu(null) }}>
+              <Icon name="settings" /> 编辑项目名称
+            </button>
+          )}
+          <div className="mdiv" />
+          {onRemoveProject && (
+            <button type="button" className="mitem sb-project-remove" onClick={() => { setProjectDialog({ mode: 'remove', project: projectMenu.project }); setProjectMenu(null) }}>
+              <Icon name="x" /> 从 Scry 移除项目
+            </button>
+          )}
+        </div>
+      )}
+
+      {projectDialog && (
+        <ProjectDialog
+          key={`${projectDialog.mode}:${projectDialog.project.cwd}`}
+          mode={projectDialog.mode}
+          project={projectDialog.project}
+          onClose={() => setProjectDialog(null)}
+          onRename={async (name) => {
+            await onRenameProject?.(projectDialog.project, name)
+            setProjectDialog(null)
+          }}
+          onRemove={async () => {
+            await onRemoveProject?.(projectDialog.project)
+            setProjectDialog(null)
+          }}
+        />
+      )}
 
       {archiveUndo && onUndoArchive && (
         <div className="sb-undo" role="status">
@@ -259,6 +403,64 @@ export function Sidebar({
         </div>
       )}
     </aside>
+  )
+}
+
+function ProjectDialog({
+  mode,
+  project,
+  onClose,
+  onRename,
+  onRemove
+}: {
+  mode: 'rename' | 'remove'
+  project: ProjectMeta
+  onClose: () => void
+  onRename: (name: string) => void | Promise<void>
+  onRemove: () => void | Promise<void>
+}) {
+  const [name, setName] = useState(project.name)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const titleId = `project-dialog-${mode}`
+  return (
+    <ModalFrame labelledBy={titleId} initialFocusRef={mode === 'rename' ? inputRef : undefined} className="project-dialog" onClose={onClose}>
+      <div className="modal-head">
+        <b id={titleId}>{mode === 'rename' ? '编辑项目名称' : `移除“${project.name}”？`}</b>
+        <button type="button" className="modal-x" aria-label="关闭" onClick={onClose}>×</button>
+      </div>
+      {mode === 'rename' ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            const next = name.trim()
+            if (next) void onRename(next)
+          }}
+        >
+          <div className="project-dialog-body">
+            <label>
+              <span>显示名称</span>
+              <input ref={inputRef} value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
+            </label>
+            <code>{project.cwd}</code>
+          </div>
+          <div className="project-dialog-actions">
+            <button type="button" className="btn" onClick={onClose}>取消</button>
+            <button type="submit" className="btn primary" disabled={!name.trim()}>保存</button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <div className="project-dialog-body">
+            <p>只会移除 Scry 中的项目入口，不会删除目录、Git 仓库、会话历史或分析数据。</p>
+            <code>{project.cwd}</code>
+          </div>
+          <div className="project-dialog-actions">
+            <button type="button" className="btn" onClick={onClose}>取消</button>
+            <button type="button" className="btn project-remove-confirm" onClick={() => void onRemove()}>移除项目</button>
+          </div>
+        </>
+      )}
+    </ModalFrame>
   )
 }
 

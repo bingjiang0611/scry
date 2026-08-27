@@ -27,7 +27,7 @@ import {
   reduceRightSurfaceState,
   type RightSurfaceAction
 } from './right-surface'
-import type { ParsedTurn, SessionMeta, SessionRef } from './env'
+import type { ParsedTurn, ProjectMeta, SessionMeta, SessionRef } from './env'
 import { resolveTurnDiffReview, sessionNetDiffReview } from './turn-diff'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
@@ -392,6 +392,7 @@ export function App() {
     activeSessionId,
     setActiveSessionId,
     loadProjects,
+    refreshRecent,
     chooseFolder: chooseFolderRaw,
     removeRecentFolder,
     catalogHealth
@@ -915,8 +916,8 @@ export function App() {
     setView('chat')
   }
 
-  const unbindProject = async (): Promise<void> => {
-    if (!cwd || !confirmWorkspaceTransition()) return
+  const unbindProject = async (skipConfirmation = false): Promise<void> => {
+    if (!cwd || (!skipConfirmation && !confirmWorkspaceTransition())) return
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     await window.scry.focusRun(null)
@@ -950,6 +951,36 @@ export function App() {
       focusComposer: () => window.setTimeout(() => taRef.current?.focus(), 0),
       isCurrent
     })
+  }
+
+  const addProject = async (): Promise<void> => {
+    if (!confirmWorkspaceTransition()) return
+    const dir = await window.scry.chooseFolder()
+    if (!dir) return
+    refreshRecent()
+    loadProjects()
+    await pickRecent(dir)
+  }
+
+  const newConversationInProject = async (projectCwd: string): Promise<void> => {
+    if (projectCwd === cwd) await newConversation()
+    else await pickRecent(projectCwd)
+  }
+
+  const toggleProjectPin = async (project: ProjectMeta): Promise<void> => {
+    if (await window.scry.setProjectPinned(project.cwd, !project.pinnedAt)) loadProjects()
+  }
+
+  const renameProject = async (project: ProjectMeta, name: string): Promise<void> => {
+    if (await window.scry.renameProject(project.cwd, name)) loadProjects()
+  }
+
+  const removeProject = async (project: ProjectMeta): Promise<void> => {
+    if (project.cwd === cwd && !confirmWorkspaceTransition()) return
+    await window.scry.removeProject(project.cwd)
+    if (project.cwd === cwd) await unbindProject(true)
+    refreshRecent()
+    loadProjects()
   }
 
   const pickSession = async (
@@ -1181,6 +1212,12 @@ export function App() {
           onPick={pickSession}
           onTogglePin={(cwd, session) => void togglePinSession(cwd, session)}
           onArchive={(cwd, session) => void archiveSession(cwd, session)}
+          onAddProject={() => void addProject()}
+          onNewProjectChat={(projectCwd) => void newConversationInProject(projectCwd)}
+          onToggleProjectPin={(project) => void toggleProjectPin(project)}
+          onRenameProject={renameProject}
+          onRemoveProject={removeProject}
+          onRevealProject={(project) => void window.scry.revealProject(project.cwd)}
           archiveUndo={archiveUndo}
           onUndoArchive={() => void undoArchive()}
           onDiagnostics={() => changeView('diagnostics')}

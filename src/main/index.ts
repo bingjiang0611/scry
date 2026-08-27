@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -32,7 +32,17 @@ import {
   type TraceArchiveTurn
 } from './transcript-archive'
 import { mergeSessionTurns } from './session-history'
-import { appSessionCanResume, cleanupAppStoreAtomicTemps, createAppSessionStore, createRecentFoldersStore, isSessionProviderId, type AppSessionRef } from './app-store'
+import {
+  appSessionCanResume,
+  cleanupAppStoreAtomicTemps,
+  createAppSessionStore,
+  createProjectStore,
+  createRecentFoldersStore,
+  isSessionProviderId,
+  mergeProjectMetas,
+  type AppSessionRef,
+  type ProjectMeta
+} from './app-store'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot } from '../shared/trace'
@@ -301,6 +311,23 @@ function closeAllTerminals(): void {
 
 const homeDir = homedir()
 const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
+const projectStore = () => createProjectStore(app.getPath('userData'))
+const rememberProject = (cwd: string): void => {
+  recentStore().push(cwd)
+  projectStore().remember(cwd)
+}
+const listProjectCatalog = (): ProjectMeta[] => {
+  const sessionProjects = appSessionStore().listProjects()
+  const now = Date.now()
+  const observed = new Map<string, number>()
+  recentStore().load().forEach((cwd, index) => observed.set(cwd, now - index))
+  for (const project of sessionProjects) {
+    if (project.cwd) observed.set(project.cwd, Math.max(observed.get(project.cwd) ?? 0, project.mtime))
+  }
+  const store = projectStore()
+  store.seed([...observed].map(([cwd, lastOpenedAt]) => ({ cwd, lastOpenedAt })))
+  return mergeProjectMetas(store.load(), sessionProjects)
+}
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
 const defaultPiProfile = async (): Promise<PiAgentProfile | undefined> => {
   const detected = (await detectAgents()).find((agent) => agent.id === 'pi:default')
@@ -1101,7 +1128,7 @@ handleTrusted('agent:chooseFolder', async () => {
   const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
   if (r.canceled || r.filePaths.length === 0) return null
   const dir = r.filePaths[0]
-  recentStore().push(dir)
+  rememberProject(dir)
   setCurrentCwd(dir)
   return dir
 })
@@ -1185,8 +1212,8 @@ handleTrusted('terminal:close', async (event, request: TerminalCloseRequest) => 
 
 handleTrusted('agent:setCwd', (_e, dir: string | null) => {
   const cwd = typeof dir === 'string' && dir.trim() ? dir : undefined
+  if (cwd) rememberProject(cwd)
   setCurrentCwd(cwd)
-  if (cwd) recentStore().push(cwd)
   return cwd ?? null
 })
 
@@ -1322,9 +1349,37 @@ handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
   return appSessionStore().listSessions(context.cwd ?? '', context.providerId, context.agentProfileId)
 })
 
-// 左侧栏 Projects 分组：只从 app 会话记录按 cwd 分组（不扫 ~/.claude/projects，不采集 terminal 会话）
-handleTrusted('agent:listProjects', () => appSessionStore().listProjects())
+// 左侧栏项目目录独立于会话保留；老数据从 recent folders 与 app 会话 catalog 一次性补齐。
+handleTrusted('agent:listProjects', () => listProjectCatalog())
 handleTrusted('agent:catalogHealth', () => appSessionStore().health())
+
+const projectCwdFromRequest = (value: unknown): string => {
+  if (typeof value !== 'string' || !isAbsolute(value) || value.length > 4_096) throw new Error('无效的项目目录')
+  return value
+}
+
+handleTrusted('agent:setProjectPinned', (_event, cwd: unknown, pinned: unknown) => {
+  if (typeof pinned !== 'boolean') throw new Error('无效的项目置顶请求')
+  return projectStore().setPinned(projectCwdFromRequest(cwd), pinned)
+})
+
+handleTrusted('agent:renameProject', (_event, cwd: unknown, name: unknown) => {
+  const label = typeof name === 'string' ? name.trim() : ''
+  if (!label || label.length > 120) throw new Error('项目名称必须为 1–120 个字符')
+  return projectStore().rename(projectCwdFromRequest(cwd), label)
+})
+
+handleTrusted('agent:removeProject', (_event, cwd: unknown) => {
+  const dir = projectCwdFromRequest(cwd)
+  projectStore().remove(dir)
+  recentStore().remove(dir)
+  return true as const
+})
+
+handleTrusted('agent:revealProject', (_event, cwd: unknown) => {
+  shell.showItemInFolder(projectCwdFromRequest(cwd))
+  return true as const
+})
 
 // 加载一个历史会话：解析 transcript 成对话轮次，并把它设为当前会话（后续对话会 resume）
 handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
@@ -1369,7 +1424,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
   )
   if (!catalogSession || appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
   else sessionByContext.delete(key)
-  if (cwd) recentStore().push(cwd)
+  if (cwd) rememberProject(cwd)
   const merged = mergeSessionTurns(turns, archived, { userDataDir: app.getPath('userData') })
   const hookConfig =
     cwd && payload.providerId === 'claude'

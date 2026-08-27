@@ -761,6 +761,38 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace')
   })
 
+  it('没有会话的项目仍保留，并提供项目内新建与管理入口', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[{
+          cwd: '/Users/example/empty-project',
+          name: 'empty-project',
+          mtime: 2,
+          sessions: [],
+          pinnedAt: 10
+        }]}
+        activeCwd="/Users/example/empty-project"
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+        onAddProject={() => {}}
+        onNewProjectChat={() => {}}
+        onToggleProjectPin={() => {}}
+        onRenameProject={() => {}}
+        onRemoveProject={() => {}}
+        onRevealProject={() => {}}
+      />
+    )
+
+    expect(html).toContain('项目 <span class="cnt">1</span>')
+    expect(html).toContain('aria-label="添加项目"')
+    expect(html).toContain('暂无会话')
+    expect(html).toContain('aria-label="在 empty-project 新建会话"')
+    expect(html).toContain('aria-label="管理项目 empty-project"')
+    expect(html).toContain('class="ico sb-project-pin"')
+  })
+
   it('不绑定项目会话以独立活动分组出现在左侧', () => {
     const html = renderToStaticMarkup(
       <Sidebar
@@ -860,8 +892,9 @@ describe('Sidebar 项目分组', () => {
     expect(html.indexOf('侧边栏置顶方案')).toBeLessThan(html.indexOf('启动需求交付流程'))
     expect(html).toContain('<span class="sb-sess-proj">rate-native</span>')
     expect(html).toContain('<span class="sb-sess-proj">scry</span>')
-    // 只剩 rate-native 一个「最近」分组：scry 的会话被置顶分组带走了。
-    expect(html).toContain('最近 <span class="cnt">1</span>')
+    // 项目目录独立于会话保留：scry 的会话被置顶后，项目仍显示为“会话已置顶”。
+    expect(html).toContain('项目 <span class="cnt">2</span>')
+    expect(html).toContain('会话已置顶')
     expect(html.match(/class="sb-sess-proj"/g)).toHaveLength(2)
   })
 

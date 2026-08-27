@@ -37,9 +37,10 @@ export function useWorkspaceState() {
     if (dir) {
       setCwd(dir)
       refreshRecent()
+      loadProjects()
     }
     return dir
-  }, [refreshRecent])
+  }, [loadProjects, refreshRecent])
 
   useEffect(() => {
     let cancelled = false
