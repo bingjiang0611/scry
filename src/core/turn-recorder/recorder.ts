@@ -133,6 +133,13 @@ function timestampOf(payload: Record<string, unknown>): string {
   return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString()
 }
 
+function startFingerprintOf(provider: ProviderId, event: string, payload: Record<string, unknown>): string {
+  const canonicalPayload = provider === 'qoder'
+    ? nestedRecord(payload, 'raw_qoder_payload') ?? payload
+    : payload
+  return stableHash({ event, payload: canonicalPayload })
+}
+
 function epochSecondsAt(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
   for (const key of keys) {
     const value = payload[key]
@@ -1562,14 +1569,6 @@ async function beginOpenTurn(
   const providerTurnId = providerTurnIdOf(payload, provider)
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
-  const captureDir = join(turnRoot(root, generation), 'captures')
-  const repositories = !managedByScry && enablement.config.capture.diff
-    ? await discoverRepositories(enablement.workspaceRoot, enablement.config)
-    : []
-  const captures = await Promise.all(repositories.map(async (repository) => ({
-    repository,
-    capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
-  })))
   const open: OpenTurnState = {
     schemaVersion: 1,
     provider,
@@ -1578,7 +1577,7 @@ async function beginOpenTurn(
     turnIndex,
     status: 'open',
     startedAt: timestampOf(payload),
-    startFingerprint: stableHash({ event, payload }),
+    startFingerprint: startFingerprintOf(provider, event, payload),
     ...(enablement.config.capture.prompt && prompt ? { prompt } : {}),
     ...(promptHash ? { promptHash } : {}),
     ...(managedRunId ? { managedRunId } : {}),
@@ -1587,10 +1586,19 @@ async function beginOpenTurn(
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
-    captures
+    captures: []
   }
   await writeJsonAtomic(openPath(root), open, { sync: false })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex }, { sync: false })
+  if (!managedByScry && enablement.config.capture.diff) {
+    const captureDir = join(turnRoot(root, generation), 'captures')
+    const repositories = await discoverRepositories(enablement.workspaceRoot, enablement.config)
+    open.captures = await Promise.all(repositories.map(async (repository) => ({
+      repository,
+      capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
+    })))
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+  }
   return open
 }
 
@@ -1897,7 +1905,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       }
       if (START_EVENTS.has(input.event)) {
         const providerTurnId = incomingProviderTurnId
-        const startFingerprint = stableHash({ event: input.event, payload: input.payload })
+        const startFingerprint = startFingerprintOf(input.provider, input.event, input.payload)
         const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
         const incomingManagedPromptHash = stringAt(input.payload, 'scry_managed_prompt_hash')
         const hasManagedIdentity = !!(

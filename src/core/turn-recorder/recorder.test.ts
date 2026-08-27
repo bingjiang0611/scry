@@ -115,6 +115,32 @@ describe('turn recorder state machine', () => {
     ])
   })
 
+  it('Qoder 无 promptId 时按原始 payload 去重直连与 bridge 包装', async () => {
+    const root = await workspace()
+    const direct = payload('q1', { prompt: '/rate-workflow 1' })
+    const bridged = {
+      ...direct,
+      hook_event_name: 'UserPromptSubmit',
+      cwd: root,
+      raw_qoder_payload: direct
+    }
+
+    expect(await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: direct }))
+      .toMatchObject({ status: 'started' })
+    expect(await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: bridged }))
+      .toMatchObject({ status: 'duplicate' })
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('q1', { timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    expect(await listRecords(join(root, '.scry'))).toMatchObject([
+      { turnIndex: 1, status: 'completed' }
+    ])
+  })
+
   it('Qoder 相同 prompt 但不同 promptId 仍保留两个真实轮次', async () => {
     const root = await workspace()
     await handleRecorderHook({
@@ -2081,6 +2107,40 @@ describe('OpenCode compact lifecycle evidence', () => {
 })
 
 describe('nested Git turn diff', () => {
+  it('昂贵 Git 快照期间先持久化 open turn', async () => {
+    const root = await workspace()
+    await pexecFile('git', ['init'], { cwd: root })
+    await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
+    await pexecFile('git', ['config', 'user.email', 'scry@example.invalid'], { cwd: root })
+    const filter = join(root, 'slow-clean.sh')
+    await writeFile(filter, '#!/bin/sh\nsleep 1\ncat\n')
+    await chmod(filter, 0o700)
+    await pexecFile('git', ['config', 'filter.slow.clean', filter], { cwd: root })
+    await pexecFile('git', ['config', 'filter.slow.smudge', 'cat'], { cwd: root })
+    await writeFile(join(root, '.gitattributes'), '*.slow filter=slow\n')
+    await writeFile(join(root, 'a.slow'), 'before\n')
+    await pexecFile('git', ['add', '.gitattributes', 'a.slow'], { cwd: root })
+    await pexecFile('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'baseline'], { cwd: root })
+    await writeFile(join(root, 'a.slow'), 'after\n')
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
+    config.capture.diff = true
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+
+    let settled = false
+    const starting = handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('q1', { prompt: 'slow snapshot' })
+    }).finally(() => { settled = true })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    const open = JSON.parse(await readFile(join(root, '.scry', 'runtime', 'qoder', safeKey('q1'), 'open.json'), 'utf8'))
+    expect(open).toMatchObject({ status: 'open', captures: [] })
+    expect(settled).toBe(false)
+    await expect(starting).resolves.toMatchObject({ status: 'started' })
+  }, 15_000)
+
   it('按真实子仓归属记录本轮净变化', async () => {
     const root = await workspace()
     const repository = join(root, 'plugin-commerce-app')
