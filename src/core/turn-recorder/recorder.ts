@@ -85,6 +85,9 @@ interface TranscriptRead {
 
 const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
+const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'])
+const STALE_TERMINAL_WINDOW_MS = 30_000
+const DEFERRED_TERMINAL_GRACE_MS = 180_000
 const TRANSCRIPT_REWIND_BYTES = 4 * 1024 * 1024
 const MAX_TRANSCRIPT_READ_BYTES = 32 * 1024 * 1024
 
@@ -128,9 +131,14 @@ function promptOf(payload: Record<string, unknown>): string | undefined {
   return messageRecord ? stringAt(messageRecord, 'text', 'content', 'prompt') : undefined
 }
 
+function explicitTimestampOf(payload: Record<string, unknown>): string | undefined {
+  const value = stringAt(payload, 'timestamp', 'ts', 'created_at', 'createdAt') ??
+    stringAt(nestedRecord(payload, 'raw_qoder_payload') ?? {}, 'timestamp', 'ts', 'created_at', 'createdAt')
+  return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined
+}
+
 function timestampOf(payload: Record<string, unknown>): string {
-  const value = stringAt(payload, 'timestamp', 'ts', 'created_at', 'createdAt')
-  return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString()
+  return explicitTimestampOf(payload) ?? new Date().toISOString()
 }
 
 function startFingerprintOf(provider: ProviderId, event: string, payload: Record<string, unknown>): string {
@@ -351,6 +359,26 @@ function lifecycleTraceEvents(args: {
   if (usage) out.push(usage)
   const assistant = stringAt(args.payload, 'assistant_response', 'assistantResponse', 'result_text')
   if (assistant) out.push({ id: `assistant-${stableHash(assistant).slice(0, 16)}`, ts: at, runId: args.runId, kind: 'model', stage: 'text', text: assistant })
+  const rawSegments = args.payload.model_segments ?? args.payload.modelSegments
+  if (Array.isArray(rawSegments)) {
+    for (const raw of rawSegments.slice(0, 200)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const segment = raw as Record<string, unknown>
+      const completedAt = stringAt(segment, 'completed_at', 'completedAt', 'timestamp')
+      const duration = segment.duration_ms ?? segment.durationMs
+      if (!completedAt || !Number.isFinite(Date.parse(completedAt)) || typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0) continue
+      const responseId = stringAt(segment, 'response_id', 'responseId', 'id')
+      out.push({
+        id: `model-response-${responseId ?? stableHash(segment).slice(0, 16)}`,
+        ts: new Date(completedAt).toISOString(),
+        runId: args.runId,
+        kind: 'model',
+        stage: 'response_completed',
+        ...(responseId ? { messageId: responseId } : {}),
+        durationMs: Math.round(duration)
+      })
+    }
+  }
   return out
 }
 
@@ -625,7 +653,9 @@ function outputFailed(payload: Record<string, unknown>, output: string | undefin
 }
 
 function rejectedBeforeExecution(output: string | undefined): boolean {
-  return /CreateProcess[\s\S]*Rejected|rejected:[\s\S]*(?:not permitted|permission|denied)/i.test(output ?? '')
+  const header = (output ?? '').trimStart().slice(0, 1_024)
+  if (/^Script completed\b/i.test(header)) return false
+  return /^(?:Script (?:failed|rejected)[\s\S]{0,512}|(?:Error:\s*)?CreateProcess[\s\S]{0,512}Rejected|rejected:[\s\S]{0,512}(?:not permitted|permission|denied))/i.test(header)
 }
 
 function runningCellId(output: string | undefined): string | undefined {
@@ -1550,7 +1580,8 @@ async function beginOpenTurn(
   sessionId: string,
   event: string,
   payload: Record<string, unknown>,
-  managedByScry = false
+  managedByScry = false,
+  staleTerminalProtection = false
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
@@ -1586,6 +1617,7 @@ async function beginOpenTurn(
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
+    ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
     captures: []
   }
   await writeJsonAtomic(openPath(root), open, { sync: false })
@@ -1622,7 +1654,7 @@ async function storeLifecycleEvent(
   open: OpenTurnState,
   event: string,
   payload: Record<string, unknown>
-): Promise<void> {
+): Promise<string> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const id = stableHash({ event, sessionId: open.sessionId, generation: open.generation, payload })
   const stored: StoredLifecycleEvent = {
@@ -1650,6 +1682,7 @@ async function storeLifecycleEvent(
     open.transcriptStartOffset = await transcriptStartOffset(transcriptPath)
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
+  return id
 }
 
 function terminalStatus(payload: Record<string, unknown>, fallback: AgentTurnRecord['status']): AgentTurnRecord['status'] {
@@ -1713,7 +1746,23 @@ async function finalizeOpenTurn(
     stage: 'turn_diff',
     turnDiff
   }))
-  const events = dedupeTraceEvents([...mergedEvents, ...diffEvents])
+  const completedAt = transcript.completedAt ?? open.closingAt ?? timestampOf(payload)
+  const startedAt = transcript.startedAt ?? open.startedAt
+  const startedMs = Date.parse(startedAt)
+  const completedMs = Date.parse(completedAt)
+  const wallDurationMs = Number.isFinite(startedMs) && Number.isFinite(completedMs) && completedMs >= startedMs
+    ? completedMs - startedMs
+    : undefined
+  const wallEvents: TraceEvent[] = wallDurationMs == null ? [] : [{
+    id: `turn-wall-${open.generation}`,
+    ts: completedAt,
+    runId,
+    kind: 'harness',
+    stage: 'turn_wall',
+    durationMs: wallDurationMs,
+    runtimeMetadata: { source: 'recorder_observed_wall' }
+  }]
+  const events = dedupeTraceEvents([...mergedEvents, ...wallEvents, ...diffEvents])
   const hasUsage = events.some((event) => event.kind === 'harness' && event.stage === 'result')
   const hasToolEvidence = events.some((event) =>
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
@@ -1762,10 +1811,6 @@ async function finalizeOpenTurn(
     evidence.modelSegments = disabled('assistant capture disabled by config')
   }
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
-  const completedAt = transcript.completedAt ?? open.closingAt ?? timestampOf(payload)
-  const startedAt = transcript.startedAt ?? open.startedAt
-  const startedMs = Date.parse(startedAt)
-  const completedMs = Date.parse(completedAt)
   const recordId = stableHash({
     workspace: enablement.config.workspaceId,
     provider: open.provider,
@@ -1906,6 +1951,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       if (START_EVENTS.has(input.event)) {
         const providerTurnId = incomingProviderTurnId
         const startFingerprint = startFingerprintOf(input.provider, input.event, input.payload)
+        let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) && !providerTurnId
         const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
         const incomingManagedPromptHash = stringAt(input.payload, 'scry_managed_prompt_hash')
         const hasManagedIdentity = !!(
@@ -1947,6 +1993,10 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
             )
           } else {
             const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
+            protectNextStart ||= fallback === 'interrupted' &&
+              STALE_TERMINAL_PROVIDERS.has(input.provider) &&
+              !open.providerTurnId &&
+              !providerTurnId
             open.status = 'closing'
             open.closingAt ??= timestampOf(input.payload)
             await writeJsonAtomic(openPath(root), open, { sync: false })
@@ -1954,7 +2004,15 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
             if (finalized.status === 'pending') return finalized
           }
         }
-        open = await beginOpenTurn(enablement, input.provider, sessionId, input.event, input.payload, input.managed === true)
+        open = await beginOpenTurn(
+          enablement,
+          input.provider,
+          sessionId,
+          input.event,
+          input.payload,
+          input.managed === true,
+          protectNextStart
+        )
         if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
         return { status: 'started' as const }
       }
@@ -1993,8 +2051,36 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         await updateHealth(enablement.dataRoot, { increment: { orphanEvents: 1 } })
         return { status: 'orphan' as const }
       }
+      const endEvent = END_EVENTS.has(input.event)
+      if (open.deferredTerminalEventId) {
+        if (endEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+        await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
+        open.status = 'open'
+        delete open.closingAt
+        delete open.deferredTerminalAt
+        delete open.deferredTerminalEventId
+        delete open.staleTerminalProtection
+        await writeJsonAtomic(openPath(root), open, { sync: false })
+      }
+      const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
+      if (explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
+        return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
+      }
+      if (endEvent && !incomingProviderTurnId && !explicitTerminalAt && open.staleTerminalProtection) {
+        const terminalAt = explicitTerminalAt ?? timestampOf(input.payload)
+        const elapsed = Date.parse(terminalAt) - Date.parse(open.startedAt)
+        if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS) {
+          const eventId = await storeLifecycleEvent(enablement, open, input.event, input.payload)
+          open.status = 'closing'
+          open.closingAt = terminalAt
+          open.deferredTerminalAt = new Date().toISOString()
+          open.deferredTerminalEventId = eventId
+          await writeJsonAtomic(openPath(root), open, { sync: false })
+          return { status: 'pending' as const, reason: 'unidentified early terminal deferred for stale-event protection' }
+        }
+      }
       await storeLifecycleEvent(enablement, open, input.event, input.payload)
-      if (!END_EVENTS.has(input.event)) return { status: 'recorded' as const }
+      if (!endEvent) return { status: 'recorded' as const }
       open.status = 'closing'
       open.closingAt = timestampOf(input.payload)
       await writeJsonAtomic(openPath(root), open, { sync: false })
@@ -2027,7 +2113,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
 
 async function runtimeSessions(dataRoot: string): Promise<Array<{ provider: ProviderId; sessionDir: string }>> {
   const out: Array<{ provider: ProviderId; sessionDir: string }> = []
-  for (const provider of ['claude', 'codex', 'qoder', 'opencode'] as ProviderId[]) {
+  for (const provider of ['claude', 'codex', 'qoder', 'opencode', 'pi'] as ProviderId[]) {
     const providerRoot = join(dataRoot, 'runtime', provider)
     let entries
     try {
@@ -2089,6 +2175,12 @@ export async function recoverRecorder(
           await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
         }
         if (open.status !== 'closing') return { status: 'idle' as const }
+        if (open.deferredTerminalAt) {
+          const deferredAt = Date.parse(open.deferredTerminalAt)
+          if (Number.isFinite(deferredAt) && Date.now() - deferredAt < DEFERRED_TERMINAL_GRACE_MS) {
+            return { status: 'pending' as const, reason: 'unidentified terminal grace period is still active' }
+          }
+        }
         return finalizeOpenTurn(
           enablement,
           open,

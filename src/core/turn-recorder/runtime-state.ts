@@ -32,6 +32,9 @@ export interface RecorderOpenTurnState {
   providerTurnId?: string
   continuationProviderTurnIds?: string[]
   managedByScry?: boolean
+  staleTerminalProtection?: boolean
+  deferredTerminalAt?: string
+  deferredTerminalEventId?: string
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }
 

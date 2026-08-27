@@ -145,7 +145,7 @@ function residualTiming(events: TraceEvent[]): DerivedModelTiming | undefined {
   const result = [...events].reverse().find(
     (event) =>
       event.kind === 'harness' &&
-      event.stage === 'result' &&
+      (event.stage === 'result' || event.stage === 'turn_wall') &&
       event.text !== 'transcript assistant usage' &&
       finiteDuration(event.durationMs) != null
   )

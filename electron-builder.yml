@@ -40,6 +40,7 @@ extraResources:
     filter:
       - package.json
       - dist/**
+      - integrations/**
   - from: build/scry-cli
     to: bin/scry
 

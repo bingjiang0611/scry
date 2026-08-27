@@ -16,11 +16,11 @@ const RECOVERY_POLL_MS = 1_000
 const MAX_RECOVERY_POLL_MS = 15_000
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_SOCKET_BYTES = 100
-const STARTING_TTL_MS = 10_000
+const STARTING_TTL_MS = 30_000
 const STOP_WAIT_MS = 1_000
-const OWNER_WAIT_MS = 3_000
-const READY_WAIT_MS = 5_000
-const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode'])
+const OWNER_WAIT_MS = 15_000
+const READY_WAIT_MS = 15_000
+const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
 const OWNER_TOKEN_ENV = 'SCRY_RECORDER_OWNER_TOKEN'
 
 export interface RecorderDaemonStatus {

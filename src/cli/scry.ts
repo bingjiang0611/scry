@@ -6,6 +6,7 @@ import { recorderDaemonStatus, serveRecorderDaemon, startRecorderDaemon, stopRec
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
 import { RECORDER_VERSION, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
+import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
@@ -59,7 +60,7 @@ function workspaceOf(args: ParsedArgs): string {
 
 function providerOf(args: ParsedArgs): ProviderId {
   const value = flag(args, 'provider')
-  if (!value || !['claude', 'codex', 'qoder', 'opencode'].includes(value)) throw new Error('--provider must be claude|codex|qoder|opencode')
+  if (!value || !['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(value)) throw new Error('--provider must be claude|codex|qoder|opencode|pi')
   return value as ProviderId
 }
 
@@ -228,6 +229,20 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
   return degraded ? 5 : 0
 }
 
+async function integrationsCommand(args: ParsedArgs): Promise<number> {
+  const action = args.positionals[1]
+  if (action === 'install-pi') {
+    print(await installPiIntegration())
+    return 0
+  }
+  if (action === 'status-pi') {
+    const status = await piIntegrationStatus()
+    print(status)
+    return status.installed ? 0 : 4
+  }
+  throw new Error('usage: scry integrations install-pi|status-pi')
+}
+
 async function upgradeCommand(args: ParsedArgs): Promise<number> {
   if (process.env.SCRY_CLI_BUNDLED === '1') {
     print({
@@ -268,9 +283,10 @@ export async function runScryCli(argv: string[]): Promise<number> {
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
     case 'doctor': return doctorCommand(args)
+    case 'integrations': return integrationsCommand(args)
     case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry recorder|turns|doctor|upgrade ...')
+      throw new Error('usage: scry recorder|turns|doctor|integrations|upgrade ...')
   }
 }
 
