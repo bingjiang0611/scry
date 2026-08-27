@@ -8,6 +8,17 @@ Scry CLI 是给 Claude Code、Codex、Qoder、OpenCode、Pi 这类命令行 Agen
 
 它只负责采集、整理和保存本地记录，本身不上传数据。要不要上传、上传到哪里，由接入它的项目决定。
 
+## Scry CLI 是必须的吗
+
+从原理上说，不是。记录 Agent 数据只需要两部分：
+
+- Hook 在提问开始、工具调用和回答结束等节点发出事件。
+- Recorder 接收这些事件，把同一轮的数据拼起来并写入文件。
+
+Recorder 可以自己用 Python、Node.js 或 Shell 实现，不一定非要叫 Scry CLI。Scry CLI 的作用，是把接收事件、关联轮次、读取 Provider 会话文件、计算 Git diff、去重、异常恢复和查询记录这些通用能力封装好。项目已经有自己的 Recorder，并且输出满足使用方要求时，可以不安装 Scry CLI。
+
+rate-native 当前没有重复实现这套 Recorder。它的 Provider Hook 会调用 `scry recorder hook`，所以现有方案仍然需要一份能被找到的 Scry CLI。以后如果换成自研 Recorder，Hook 和上传器也要跟着适配。
+
 ## 工作原理
 
 ```text
