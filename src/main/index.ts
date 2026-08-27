@@ -9,9 +9,9 @@ import { getClaudeVersion } from './agent-runner'
 import {
   detectAgents,
   detectAgentsFast,
-  execFileText,
-  normalizeAgentVersion,
   packagedRecorderCliPath,
+  PI_VERSION_PROBE_TIMEOUT_MS,
+  probeCliVersion,
   shellEnv,
   warmShellEnv
 } from './claude-locate'
@@ -1024,9 +1024,9 @@ handleTrusted('agent:detect', async () => {
   const found = new Set(agents.map((agent) => agent.id))
   for (const profile of storedPiProfiles()) {
     if (found.has(profile.id)) continue
-    const versionText = await execFileText(profile.executable, ['--version'], {
+    const versionProbe = await probeCliVersion(profile.executable, ['--version'], {
       env: piRpcEnvironment(profile),
-      timeout: 5000
+      timeout: PI_VERSION_PROBE_TIMEOUT_MS
     })
     const descriptor = descriptorByProvider.get('pi')
     if (!descriptor) continue
@@ -1035,11 +1035,13 @@ handleTrusted('agent:detect', async () => {
       name: profile.label,
       bin: basename(profile.executable),
       path: profile.executable,
-      version: versionText ? normalizeAgentVersion(versionText) : descriptor.version,
+      version: versionProbe.version ?? descriptor.version,
       runtimeProvider: descriptor.runtimeProvider,
       transport: descriptor.transport,
       capabilities: descriptor.capabilities,
-      health: descriptor.health,
+      health: versionProbe.health.state === 'unavailable'
+        ? { ...descriptor.health, ...versionProbe.health, transport: descriptor.transport }
+        : descriptor.health ?? versionProbe.health,
       agentProfileId: profile.id
     })
   }
@@ -1051,9 +1053,9 @@ handleTrusted('agent:addPiProfile', async () => {
   if (result.canceled || result.filePaths.length === 0) return null
   try {
     const profile = piProfileForExecutable(result.filePaths[0])
-    const versionText = await execFileText(profile.executable, ['--version'], {
+    const versionProbe = await probeCliVersion(profile.executable, ['--version'], {
       env: piRpcEnvironment(profile),
-      timeout: 5000
+      timeout: PI_VERSION_PROBE_TIMEOUT_MS
     })
     await probePiAgent(profile, currentCwd)
     const stored = piProfileStore().add(profile)
@@ -1064,7 +1066,7 @@ handleTrusted('agent:addPiProfile', async () => {
       name: stored.label,
       bin: basename(stored.executable),
       path: stored.executable,
-      version: versionText ? normalizeAgentVersion(versionText) : descriptor.version,
+      version: versionProbe.version ?? descriptor.version,
       runtimeProvider: descriptor.runtimeProvider,
       transport: descriptor.transport,
       capabilities: descriptor.capabilities,

@@ -6382,6 +6382,7 @@ textarea:focus-visible,
 
 /* 存档会让会话从列表消失，给一次撤销机会，避免误点只能进设置里找回。 */
 .sb-undo {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;

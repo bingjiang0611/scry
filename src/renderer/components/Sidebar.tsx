@@ -239,15 +239,16 @@ export function Sidebar({
             </div>
           )
         })}
-        {archiveUndo && onUndoArchive && (
-          <div className="sb-undo" role="status">
-            <span>已存档「{archiveUndo.preview || '(无预览)'}」</span>
-            <button type="button" onClick={onUndoArchive}>
-              <Icon name="undo" /> 撤销
-            </button>
-          </div>
-        )}
       </div>
+
+      {archiveUndo && onUndoArchive && (
+        <div className="sb-undo" role="status">
+          <span>已存档「{archiveUndo.preview || '(无预览)'}」</span>
+          <button type="button" onClick={onUndoArchive}>
+            <Icon name="undo" /> 撤销
+          </button>
+        </div>
+      )}
 
       {onSettings && (
         <div className="sb-footer">

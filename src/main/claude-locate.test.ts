@@ -51,6 +51,17 @@ describe('runtime CLI discovery constraints', () => {
     })
   })
 
+  it('允许慢启动的 wrapper 使用更长超时与专用环境', async () => {
+    await expect(probeCliVersion(
+      '/bin/sh',
+      ['-c', 'sleep 0.05; printf "$PI_TEST_VERSION\\n"'],
+      { env: { PATH: '/usr/bin:/bin', PI_TEST_VERSION: '0.84.2' }, timeout: 500 }
+    )).resolves.toMatchObject({
+      version: '0.84.2',
+      health: { state: 'ready' }
+    })
+  })
+
   it('只从登录 shell 补齐运行和 Provider 变量，不导入无关 secret', () => {
     expect(mergeLoginShellEnv(
       { HOME: '/Users/example', DATABASE_URL: 'inherited-value' },
