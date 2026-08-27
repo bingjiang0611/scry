@@ -345,17 +345,24 @@ interface AgentVersionProbe {
   health: ProviderHealth
 }
 
-export async function probeCliVersion(path: string, args: string[] = ['--version']): Promise<AgentVersionProbe> {
+export const PI_VERSION_PROBE_TIMEOUT_MS = 15_000
+
+export async function probeCliVersion(
+  path: string,
+  args: string[] = ['--version'],
+  options: { env?: NodeJS.ProcessEnv; timeout?: number } = {}
+): Promise<AgentVersionProbe> {
+  const timeout = options.timeout ?? 5_000
   const outcome = await execFileOutcome(path, args, {
-    env: runtimeCliEnv({ ...(process.env as Record<string, string>), PATH: versionProbePath() }),
-    timeout: 5000
+    env: options.env ?? runtimeCliEnv({ ...(process.env as Record<string, string>), PATH: versionProbePath() }),
+    timeout
   })
   const transport = 'CLI version probe'
   if (outcome.error) {
     return { health: { state: 'unavailable', transport, lastError: `版本探测无法启动：${outcome.error}`, lastErrorAt: Date.now() } }
   }
   if (outcome.timedOut) {
-    return { health: { state: 'unavailable', transport, lastError: '版本探测超时（5s）', lastErrorAt: Date.now() } }
+    return { health: { state: 'unavailable', transport, lastError: `版本探测超时（${timeout / 1_000}s）`, lastErrorAt: Date.now() } }
   }
   if (outcome.signal) {
     return { health: { state: 'unavailable', transport, lastError: `版本探测被信号 ${outcome.signal} 终止`, lastErrorAt: Date.now() } }
@@ -374,7 +381,11 @@ async function agentVersionAsync(id: string, path: string): Promise<AgentVersion
     const bundled = await appBundleVersionAsync(path)
     if (bundled) return { version: bundled, health: { state: 'ready', transport: 'App bundle', lastOkAt: Date.now() } }
   }
-  return probeCliVersion(path, id === 'qoder' ? ['-v'] : ['--version'])
+  return probeCliVersion(
+    path,
+    id === 'qoder' ? ['-v'] : ['--version'],
+    id === 'pi:default' ? { timeout: PI_VERSION_PROBE_TIMEOUT_MS } : {}
+  )
 }
 
 export interface DetectedAgent {
