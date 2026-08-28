@@ -109,7 +109,7 @@ function withFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>
 }
 
 describe('Pi RPC Provider', () => {
-  it('pins the packaged Pi runtime when a selected pi-agent launcher would otherwise rediscover its PATH wrapper', () => {
+  it('pins the packaged Pi runtime from supported PATH bootstrap forms', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-pi-bootstrap-'))
     try {
       const packageRoot = join(dir, 'node_modules', '@example', 'pi-coding-agent')
@@ -129,8 +129,11 @@ describe('Pi RPC Provider', () => {
       writeFileSync(bootstrap, `#!/bin/sh\n: "\${PI_AGENT_PI:=${runtime}}"\nexport PI_AGENT_PI\nexec ${launcher} "$@"\n`)
       chmodSync(bootstrap, 0o755)
 
-      const env = piRpcEnvironment(piProfileForExecutable(launcher), { PATH: dir, HOME: dir })
-      expect(env.PI_AGENT_PI).toBe(realpathSync(runtime))
+      const profile = piProfileForExecutable(launcher)
+      expect(piRpcEnvironment(profile, { PATH: dir, HOME: dir }).PI_AGENT_PI).toBe(realpathSync(runtime))
+
+      writeFileSync(bootstrap, `#!/bin/sh\nPI_AGENT_PI=${runtime} \\\n\texec ${launcher} "$@"\n`)
+      expect(piRpcEnvironment(profile, { PATH: dir, HOME: dir }).PI_AGENT_PI).toBe(realpathSync(runtime))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -84,7 +84,7 @@ function piRuntimeFromBootstrap(bootstrap: string): string | undefined {
     if (!stat.isFile() || stat.size > PI_BOOTSTRAP_MAX_BYTES) return undefined
     const source = readFileSync(bootstrap, 'utf8')
     const configured = source.match(/^\s*:\s*["']\$\{PI_AGENT_PI:=(\/[^\r\n}"']+)}["']\s*$/m)?.[1] ??
-      source.match(/^\s*(?:export\s+)?PI_AGENT_PI\s*=\s*["']?(\/[^\r\n"']+)["']?\s*$/m)?.[1]
+      source.match(/^\s*(?:export\s+)?PI_AGENT_PI\s*=\s*["']?(\/[^\r\n"']+?)["']?\s*(?:\\)?\s*$/m)?.[1]
     return configured ? packagePiExecutable(configured) : undefined
   } catch {
     return undefined
