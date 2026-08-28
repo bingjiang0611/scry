@@ -212,13 +212,13 @@ scry turns export --workspace <root> --after <sequence> --limit <n>
 ## 7. CLI
 
 ```text
-scry recorder hook --provider <id> --event <event> --workspace <root> --stdin --quiet
+scry recorder hook --provider <id> --event <event> --workspace <root> --stdin [--quiet|--verbose]
 scry recorder recover --workspace <root>
 scry turns list|show|timeline|summary|export|verify --workspace <root>
 scry doctor --workspace <root> [--json]
 ```
 
-Hook 模式默认静默；可恢复错误写 health/log 并以 0 返回，不改变 Agent 权限、提示词或工具结果。配置/Store 检查命令使用稳定退出码：`0=healthy`、`2=disabled`、`3=config`、`4=store-corrupt`、`5=degraded`。
+Hook 模式默认静默，只有显式 `--verbose` 才向 stdout 输出结果；可恢复错误写 health/log 并以 0 返回，不改变 Agent 权限、提示词或工具结果。配置/Store 检查命令使用稳定退出码：`0=healthy`、`1=usage/not-found`、`2=disabled`、`3=config`、`4=store-corrupt`、`5=degraded`。
 
 Recorder handler 由 sample-workspace 生成器在 Provider 可见的 command 上注入结构化 `SCRY_HANDLER_ID=turn-recorder-v1`；Core 同时识别 marker 与 `scry-recorder.sh` 命令，确保 Recorder 自身不进入 Hook 统计。
 

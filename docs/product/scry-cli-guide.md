@@ -92,7 +92,7 @@ Scry CLI 的命令统一输出 JSON，方便人查看，也方便脚本继续处
   "recordKind": "agent_turn",
   "sequence": 12,
   "recordId": "8b46136ac7a949418ddf362f9fdcbec1",
-  "recorderVersion": "0.2.26",
+  "recorderVersion": "0.2.27",
   "workspace": {
     "id": "demo-project",
     "root": "/Users/zhangsan/projects/demo-project"

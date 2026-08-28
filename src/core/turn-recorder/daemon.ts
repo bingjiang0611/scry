@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { chmod, mkdir, rm, stat } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement } from './recorder.js'
@@ -122,11 +123,15 @@ async function stopOwner(owner: DaemonOwner): Promise<void> {
 
 export function recorderSocketPath(workspace: string, env: NodeJS.ProcessEnv = process.env): string {
   const configured = env.SCRY_RECORDER_SOCKET?.trim()
-  const socketPath = configured
-    ? (isAbsolute(configured) ? configured : resolve(workspace, configured))
-    : join(resolve(workspace), '.scry', 'recorder-v1.sock')
-  if (Buffer.byteLength(socketPath) > MAX_SOCKET_BYTES) throw new Error(`recorder socket path is too long: ${socketPath}`)
-  return socketPath
+  if (configured) {
+    const socketPath = isAbsolute(configured) ? configured : resolve(workspace, configured)
+    if (Buffer.byteLength(socketPath) > MAX_SOCKET_BYTES) throw new Error(`recorder socket path is too long: ${socketPath}`)
+    return socketPath
+  }
+  const socketPath = join(resolve(workspace), '.scry', 'recorder-v1.sock')
+  if (Buffer.byteLength(socketPath) <= MAX_SOCKET_BYTES) return socketPath
+  const digest = createHash('sha256').update(resolve(workspace)).digest('hex').slice(0, 16)
+  return join(tmpdir(), `scry-${process.getuid?.() ?? 'user'}-${digest}.sock`)
 }
 
 function writeJson(response: ServerResponse, statusCode: number, value: unknown): void {
@@ -265,7 +270,7 @@ export async function startRecorderDaemon(args: {
   const enablement = await recorderEnablement(args.workspace, env)
   if (!enablement.enabled) throw new Error(`recorder is disabled: ${enablement.reason}`)
   const socketPath = recorderSocketPath(enablement.workspaceRoot, env)
-  const lockPath = join(dirname(socketPath), 'locks', 'daemon-start.lock')
+  const lockPath = join(enablement.dataRoot, 'locks', 'daemon-start.lock')
   return withDirectoryLock(lockPath, async () => {
     const existing = await recorderDaemonStatus(enablement.workspaceRoot, env)
     if (existing.running && existing.recorderVersion === RECORDER_VERSION) return { started: false, status: existing }
@@ -304,15 +309,15 @@ export async function startRecorderDaemon(args: {
     })
     const childPid = child.pid
     child.unref()
+    if (args.waitForReady === false) {
+      return { started: true, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
+    }
     const launchedOwner = await waitForOwner(markerPath, instanceId, OWNER_WAIT_MS)
     if (!launchedOwner) {
       if (childPid && processAlive(childPid)) {
         try { process.kill(childPid, 'SIGTERM') } catch {}
       }
       throw new Error(`recorder daemon did not publish its owner marker within ${OWNER_WAIT_MS}ms`)
-    }
-    if (args.waitForReady === false) {
-      return { started: true, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
     }
     const status = await waitForDaemon(enablement.workspaceRoot, env, READY_WAIT_MS)
     if (!status) {

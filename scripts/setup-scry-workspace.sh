@@ -95,6 +95,7 @@ else
 fi
 
 mkdir -p "$workspace/.scry"
+chmod 700 "$workspace/.scry"
 printf '%s\n' "$scry_bin" > "$workspace/.scry/cli-path"
 printf '%s\n' "$(dirname "$node_bin")" > "$workspace/.scry/node-bin-dir"
 hook="$workspace/.scry/provider-hook.sh"

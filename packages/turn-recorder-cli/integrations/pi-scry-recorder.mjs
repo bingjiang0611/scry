@@ -133,7 +133,8 @@ function sendDirect(workspace, event, payload) {
     }
     const child = spawn(scry, [
       'recorder', 'hook', '--provider', 'pi', '--event', event,
-      '--workspace', workspace, '--stdin', '--quiet', '--start-daemon',
+      '--workspace', workspace, '--stdin', '--quiet',
+      ...(process.env.SCRY_RECORDER_TRANSPORT === 'direct' ? [] : ['--start-daemon']),
     ], { cwd: workspace, stdio: ['pipe', 'ignore', 'pipe'] })
     let stderr = ''
     child.stderr.on('data', (chunk) => { if (stderr.length < 4_000) stderr += chunk.toString() })
@@ -152,7 +153,7 @@ function sendDirect(workspace, event, payload) {
 }
 
 async function deliver(workspace, event, payload) {
-  if (await sendSocket(workspace, event, payload)) return
+  if (process.env.SCRY_RECORDER_TRANSPORT !== 'direct' && await sendSocket(workspace, event, payload)) return
   await sendDirect(workspace, event, payload)
 }
 

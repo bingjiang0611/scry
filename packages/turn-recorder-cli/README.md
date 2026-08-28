@@ -5,7 +5,7 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.26 \
+npm install -g @ali/scry-turn-recorder@0.2.27 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
@@ -36,7 +36,10 @@ scry turns summary --workspace "$PWD"
 scry turns summary <sessionId> --workspace "$PWD"
 scry turns summary --all --workspace "$PWD"
 scry turns export --workspace "$PWD" --after 0 --limit 100
+scry --help
 ```
+
+参数同时支持 `--workspace <root>` 与 `--workspace=<root>`；未知参数或缺少参数值会直接报错。`turns show/timeline` 未找到记录时输出 `{ "found": false }` 并退出 1，退出码 4 只表示 store 损坏。
 
 Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，首事件由 `scry recorder hook --start-daemon` 直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。Agent、skill 和用户提示词不应主动调用这些记录命令。
 
@@ -57,7 +60,7 @@ scry recorder stop --workspace "$PWD"
 scry recorder restart --workspace "$PWD"
 ```
 
-正常使用无需手动启动。若 daemon transport 出现兼容问题，可设置 `SCRY_RECORDER_TRANSPORT=direct` 临时切回逐 Hook 同步 CLI；`.scry-disabled` 和 `SCRY_RECORDER_ENABLED=0` 仍用于完全停止记录。
+正常使用无需手动启动。深路径 workspace 会自动把 socket 放到系统临时目录。若 daemon transport 出现兼容问题，可设置 `SCRY_RECORDER_TRANSPORT=direct` 临时切回逐 Hook 同步 CLI；`.scry-disabled` 和 `SCRY_RECORDER_ENABLED=0` 仍用于完全停止记录。
 
 工作区根目录需要显式配置，缺少配置时 fail closed，不创建数据目录：
 
