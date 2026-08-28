@@ -5,7 +5,7 @@ import { basename, isAbsolute, join } from 'node:path'
 import { isAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.26'
+export const RECORDER_VERSION = '0.2.27'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -337,9 +337,10 @@ export async function listRecords(dataRoot: string): Promise<AgentTurnRecord[]> 
 }
 
 export async function showRecord(dataRoot: string, selector: string): Promise<AgentTurnRecord | null> {
-  const records = await listRecords(dataRoot)
-  const sequence = Number(selector)
-  return records.find((record) => record.recordId === selector || (Number.isSafeInteger(sequence) && record.sequence === sequence)) ?? null
+  const files = await recordFiles(dataRoot)
+  const sequence = /^\d+$/.test(selector) ? Number(selector) : undefined
+  const match = files.find((file) => file.recordId === selector || file.sequence === sequence)
+  return match ? await readRecordFile(join(dataRoot, 'records', match.name)) : null
 }
 
 export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; records: number; errors: string[] }> {

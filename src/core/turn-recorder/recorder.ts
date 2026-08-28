@@ -10,7 +10,7 @@ import { aggregateTurnEvidence } from './aggregate.js'
 import { turnChangeHints } from './change-journal.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
-import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
 import {
   SESSION_LOCK_WAIT_MS,
@@ -2021,7 +2021,10 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         if (input.managed) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
         const orphanId = stableHash({ event: input.event, payload: input.payload })
         await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
-        await updateHealth(enablement.dataRoot, { increment: { orphanEvents: 1 } })
+        await updateHealth(enablement.dataRoot, {
+          lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
+          increment: { orphanEvents: 1 }
+        })
         return { status: 'orphan' as const }
       }
       if (open.managedByScry) {
@@ -2048,7 +2051,10 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         }
         const orphanId = stableHash({ event: input.event, payload: input.payload })
         await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
-        await updateHealth(enablement.dataRoot, { increment: { orphanEvents: 1 } })
+        await updateHealth(enablement.dataRoot, {
+          lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
+          increment: { orphanEvents: 1 }
+        })
         return { status: 'orphan' as const }
       }
       const endEvent = END_EVENTS.has(input.event)
@@ -2093,17 +2099,22 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       }
       return finalizeOpenTurn(enablement, open, input.payload, 'completed', { allowUnstableTranscript: true })
     }, { waitMs: SESSION_LOCK_WAIT_MS })
-    const pending = START_EVENTS.has(input.event) || END_EVENTS.has(input.event)
-      ? await pendingHealth(enablement.dataRoot)
-      : undefined
-    if (pending) {
-      await updateHealth(enablement.dataRoot, {
-        lastSuccessAt: new Date().toISOString(),
-        lastError: undefined,
-        ...pending
-      })
+    try {
+      const pending = START_EVENTS.has(input.event) || END_EVENTS.has(input.event)
+        ? await pendingHealth(enablement.dataRoot)
+        : undefined
+      if (pending) {
+        await updateHealth(enablement.dataRoot, {
+          lastSuccessAt: new Date().toISOString(),
+          ...(result.status === 'orphan' ? {} : { lastError: undefined }),
+          ...pending
+        })
+      }
+      await drainCommitNotifications(enablement.dataRoot, input.env ?? process.env)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      await appendRotatingLog(join(enablement.dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR recorder post-processing: ${message}`).catch(() => undefined)
     }
-    await drainCommitNotifications(enablement.dataRoot, input.env ?? process.env)
     return result
   } catch (error) {
     await recordError(enablement.dataRoot, error)

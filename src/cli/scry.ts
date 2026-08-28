@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { ProviderId } from '../shared/provider.js'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
@@ -15,28 +17,40 @@ import {
   upgradeCli
 } from './update.js'
 
-interface ParsedArgs {
+export interface ParsedArgs {
   positionals: string[]
   flags: Map<string, string | true>
 }
 
-function parseArgs(argv: string[]): ParsedArgs {
+const VALUE_FLAGS = new Set(['workspace', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot'])
+const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version'])
+
+export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
   const flags = new Map<string, string | true>()
   for (let index = 0; index < argv.length; index++) {
     const value = argv[index]
+    if (value === '-h') {
+      flags.set('help', true)
+      continue
+    }
+    if (value.startsWith('-') && !value.startsWith('--')) throw new Error(`unknown option: ${value}`)
     if (!value.startsWith('--')) {
       positionals.push(value)
       continue
     }
-    const key = value.slice(2)
-    const next = argv[index + 1]
-    if (next && !next.startsWith('--')) {
-      flags.set(key, next)
-      index++
-    } else {
+    const equals = value.indexOf('=')
+    const key = value.slice(2, equals > 2 ? equals : undefined)
+    if (BOOLEAN_FLAGS.has(key)) {
+      if (equals > 2) throw new Error(`--${key} does not accept a value`)
       flags.set(key, true)
+      continue
     }
+    if (!VALUE_FLAGS.has(key)) throw new Error(`unknown option: --${key}`)
+    const next = equals > 2 ? value.slice(equals + 1) : argv[index + 1]
+    if (!next || (equals < 0 && next.startsWith('--'))) throw new Error(`missing value for --${key}`)
+    flags.set(key, next)
+    if (equals < 0) index++
   }
   return { positionals, flags }
 }
@@ -68,6 +82,10 @@ function print(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
+function helpText(): string {
+  return `Scry CLI\n\nUsage:\n  scry recorder hook|recover|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --help, -h           Show help\n  --version            Show version\n`
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = []
   for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
@@ -82,14 +100,18 @@ async function dataRootOf(workspace: string): Promise<string> {
 
 async function hookCommand(args: ParsedArgs): Promise<number> {
   const quiet = args.flags.has('quiet')
+  const verbose = args.flags.has('verbose') && !quiet
   const workspace = workspaceOf(args)
+  let delegatedToCore = false
   try {
     const source = await readStdin()
     const payload = source.trim() ? JSON.parse(source) as Record<string, unknown> : {}
     const event = flag(args, 'event')
     if (!event) throw new Error('--event is required')
+    const provider = providerOf(args)
+    delegatedToCore = true
     const result = await handleRecorderHook({
-      provider: providerOf(args),
+      provider,
       event,
       workspace,
       payload,
@@ -99,10 +121,10 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
       const scriptPath = process.argv[1]
       if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
     }
-    if (!quiet) print(result)
+    if (verbose) print(result)
   } catch (error) {
     const enablement = await recorderEnablement(workspace).catch(() => null)
-    if (enablement?.enabled) await recordError(enablement.dataRoot, error)
+    if (!delegatedToCore && enablement?.enabled) await recordError(enablement.dataRoot, error)
     if (!quiet) process.stderr.write(`scry recorder hook: ${error instanceof Error ? error.message : String(error)}\n`)
   }
   // Hook mode is observational and must never block the Provider.
@@ -164,7 +186,10 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     const selector = args.positionals[2]
     if (!selector) throw new Error('usage: scry turns show <sequence|recordId> --workspace <root>')
     const record = await showRecord(dataRoot, selector)
-    if (!record) return 4
+    if (!record) {
+      print({ found: false, selector })
+      return 1
+    }
     print(record)
     return 0
   }
@@ -172,7 +197,10 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     const selector = args.positionals[2]
     if (!selector) throw new Error('usage: scry turns timeline <sequence|recordId> --workspace <root>')
     const record = await showRecord(dataRoot, selector)
-    if (!record) return 4
+    if (!record) {
+      print({ found: false, selector })
+      return 1
+    }
     print(turnTimeline(record))
     return 0
   }
@@ -215,7 +243,7 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
   const [health, store] = await Promise.all([readHealth(enablement.dataRoot), verifyStore(enablement.dataRoot)])
-  const degraded = !!health.lastError || health.orphanEvents > 0 || health.droppedEvents > 0 || health.pendingCount > 0
+  const degraded = !!health.lastError || health.pendingCount > 0
   print({
     healthy: store.ok && !degraded,
     enabled: true,
@@ -238,7 +266,7 @@ async function integrationsCommand(args: ParsedArgs): Promise<number> {
   if (action === 'status-pi') {
     const status = await piIntegrationStatus()
     print(status)
-    return status.installed ? 0 : 4
+    return status.installed ? 0 : 1
   }
   throw new Error('usage: scry integrations install-pi|status-pi')
 }
@@ -264,6 +292,10 @@ async function upgradeCommand(args: ParsedArgs): Promise<number> {
 
 export async function runScryCli(argv: string[]): Promise<number> {
   const args = parseArgs(argv)
+  if (args.flags.has('help') || args.positionals[0] === 'help' || args.positionals.length === 0) {
+    process.stdout.write(helpText())
+    return 0
+  }
   if (args.flags.has('version') || args.positionals[0] === 'version') {
     process.stdout.write(`${RECORDER_VERSION}\n`)
     return 0
@@ -290,23 +322,37 @@ export async function runScryCli(argv: string[]): Promise<number> {
   }
 }
 
-const cliArgv = process.argv.slice(2)
-const parsedCliArgs = parseArgs(cliArgv)
-const autoUpdateEligible = shouldScheduleAutoUpdate({
-  command: parsedCliArgs.positionals[0],
-  action: parsedCliArgs.positionals[1],
-  noUpdateCheck: parsedCliArgs.flags.has('no-update-check'),
-  stderrIsTTY: process.stderr.isTTY === true
-})
-try {
-  if (autoUpdateEligible) {
-    const notice = await consumeUpdateNotice()
-    if (notice) process.stderr.write(`${notice}\n`)
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  let parsedCliArgs: ParsedArgs
+  try {
+    parsedCliArgs = parseArgs(argv)
+  } catch (error) {
+    process.stderr.write(`scry: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
+    return
   }
-  process.exitCode = await runScryCli(cliArgv)
-} catch (error) {
-  process.stderr.write(`scry: ${error instanceof Error ? error.message : String(error)}\n`)
-  process.exitCode = 1
-} finally {
-  if (autoUpdateEligible) await scheduleBackgroundUpdate(RECORDER_VERSION, process.argv[1])
+  const autoUpdateEligible = shouldScheduleAutoUpdate({
+    command: parsedCliArgs.positionals[0],
+    action: parsedCliArgs.positionals[1],
+    noUpdateCheck: parsedCliArgs.flags.has('no-update-check'),
+    stderrIsTTY: process.stderr.isTTY === true
+  })
+  try {
+    if (autoUpdateEligible) {
+      const notice = await consumeUpdateNotice()
+      if (notice) process.stderr.write(`${notice}\n`)
+    }
+    process.exitCode = await runScryCli(argv)
+  } catch (error) {
+    process.stderr.write(`scry: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
+  } finally {
+    if (autoUpdateEligible) await scheduleBackgroundUpdate(RECORDER_VERSION, process.argv[1])
+  }
 }
+
+let isMain = false
+try {
+  isMain = !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+} catch {}
+if (isMain) await main()

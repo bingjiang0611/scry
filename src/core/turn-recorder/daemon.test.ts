@@ -4,7 +4,7 @@ import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { listenRecorderDaemon, recorderDaemonStatus, sendRecorderDaemonHook } from './daemon'
+import { listenRecorderDaemon, recorderDaemonStatus, recorderSocketPath, sendRecorderDaemonHook } from './daemon'
 import { listRecords } from './store'
 
 const roots: string[] = []
@@ -32,6 +32,13 @@ function socketPath(root: string): string {
 }
 
 describe('turn recorder daemon', () => {
+  it('深路径 workspace 自动使用短 socket 路径', () => {
+    const workspace = join(tmpdir(), 'nested', 'x'.repeat(120))
+    const path = recorderSocketPath(workspace, { ...process.env, SCRY_RECORDER_SOCKET: '' })
+    expect(Buffer.byteLength(path)).toBeLessThanOrEqual(100)
+    expect(path.startsWith(tmpdir())).toBe(true)
+  })
+
   it('通过 workspace socket 复用 recorder core 并提交完整轮次', async () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }

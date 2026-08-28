@@ -10,6 +10,7 @@ afterEach(async () => {
   delete process.env.SCRY_CLI_PATH
   delete process.env.SCRY_RECORDER_SOCKET
   delete process.env.SCRY_PI_SOCKET_TIMEOUT_MS
+  delete process.env.SCRY_RECORDER_TRANSPORT
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -77,6 +78,30 @@ describe('Pi recorder extension lifecycle', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
+  })
+
+  it('direct transport 跳过 socket 且不拉起 daemon', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-direct-'))
+    roots.push(root)
+    const capture = join(root, 'capture.txt')
+    const cli = join(root, 'scry')
+    await writeFile(cli, `#!/bin/sh\nprintf '%s' "$*" > ${JSON.stringify(capture)}\ncat >/dev/null\n`)
+    await chmod(cli, 0o700)
+    process.env.SCRY_CLI_PATH = cli
+    process.env.SCRY_RECORDER_SOCKET = join(root, 'unused.sock')
+    process.env.SCRY_RECORDER_TRANSPORT = 'direct'
+
+    const handlers = new Map<string, Array<(event: any, ctx: any) => any>>()
+    const pi = { on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } }
+    // @ts-expect-error the distributed Pi extension is runtime JavaScript by design
+    const extension = await import('../../packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')
+    extension.default(pi)
+    const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-direct', getLeafId: () => 'pi-direct-turn' } }
+    for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'hello' }, ctx)
+
+    const args = await readFile(capture, 'utf8')
+    expect(args).toContain('--event UserPromptSubmit')
+    expect(args).not.toContain('--start-daemon')
   })
 
   it('按一个顶层轮次串行发送 start、tool 与 settled terminal', async () => {
