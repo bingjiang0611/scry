@@ -612,6 +612,11 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   scroll-margin-block: 42px;
 }
 
+.chat-body .session-summary {
+  width: min(820px, 100%);
+  margin-inline: auto;
+}
+
 .chat-body .transcript-turn + .transcript-turn {
   margin-top: 0;
   padding-top: 24px;
