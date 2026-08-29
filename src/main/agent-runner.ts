@@ -3,6 +3,7 @@
 
 import { query, type HookInput, type PermissionUpdate, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { open } from 'node:fs/promises'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { type TraceEvent, type McpLiveStatus } from '../shared/trace'
 import {
   agentPermissionDecision,
@@ -59,6 +60,7 @@ export interface RunHandle {
     mcpStatus?: McpLiveStatus[]
   }>
   interrupt: () => void
+  forceKill: () => void
   getSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
 }
@@ -223,6 +225,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   let transcriptPath: string | undefined
   let frozenTranscriptBaseline: TranscriptBaseline | undefined
   let stderrDiagnostic = ''
+  let spawnedChild: ChildProcessWithoutNullStreams | undefined
   const captureSessionId = (next: string | undefined): void => {
     if (!next || sessionId === next) return
     sessionId = next
@@ -280,6 +283,23 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   // 显式传完整登录环境，修 launchd 启动的打包 app spawn claude 时 "Not logged in"。
   if (opts.env) options.env = opts.env
   if (opts.settingSources?.length) options.settingSources = opts.settingSources
+  options.spawnClaudeCodeProcess = (spawnOptions: {
+    command: string
+    args: string[]
+    cwd?: string
+    env: NodeJS.ProcessEnv
+    signal: AbortSignal
+  }) => {
+    const child = spawn(spawnOptions.command, spawnOptions.args, {
+      cwd: spawnOptions.cwd,
+      env: spawnOptions.env,
+      detached: process.platform !== 'win32',
+      signal: spawnOptions.signal,
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    spawnedChild = child
+    return child
+  }
   options.strictMcpConfig = true
   options.mcpServers = opts.mcpServers ?? {}
   if (opts.requestUserInput) {
@@ -357,6 +377,18 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       if (typeof fn === 'function') Promise.resolve(fn.call(q)).catch(() => {})
     } catch {
       /* ignore */
+    }
+  }
+
+  const forceKill = (): void => {
+    stopped = true
+    const child = spawnedChild
+    if (!child || child.exitCode !== null || child.signalCode !== null) return
+    try {
+      if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL')
+      else child.kill('SIGKILL')
+    } catch {
+      try { child.kill('SIGKILL') } catch { /* already gone */ }
     }
   }
 
@@ -443,6 +475,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   return {
     promise,
     interrupt,
+    forceKill,
     getSessionId: () => sessionId,
     getProviderTurnId: () => providerTurnId
   }

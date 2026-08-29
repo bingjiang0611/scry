@@ -63,8 +63,49 @@ describe('SQLite migrations', () => {
       expect(columns(db, 'human_interventions')).toEqual(expect.arrayContaining([
         'run_id', 'question_id', 'kind', 'resolution', 'request_json', 'response_json', 'duration_ms'
       ]))
-      expect(indexes(db, 'spans')).toEqual(expect.arrayContaining(['idx_spans_tool', 'idx_spans_danger_level']))
-      expect(indexes(db, 'usage_ledger')).toContain('idx_usage_ledger_canonical')
+      expect(indexes(db, 'spans')).toEqual(expect.arrayContaining(['idx_spans_tool', 'idx_spans_danger_level', 'idx_spans_run']))
+      expect(indexes(db, 'file_ops')).toEqual(expect.arrayContaining([
+        'idx_file_ops_session', 'idx_file_ops_span', 'idx_file_ops_identity'
+      ]))
+      expect(indexes(db, 'usage_ledger')).toEqual(expect.arrayContaining([
+        'idx_usage_ledger_canonical', 'idx_usage_ledger_run', 'idx_usage_ledger_span'
+      ]))
+      expect(columns(db, 'billing_sync_state')).toEqual(expect.arrayContaining(['provider', 'last_sync_ts', 'last_error']))
+    } finally {
+      db.close()
+    }
+  })
+
+  it('deduplicates every future file_ops identity before adding the v11 unique index', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase(), DB_MIGRATIONS.slice(0, 10))
+      const insert = db.prepare(
+        `INSERT INTO file_ops (span_id, session_id, op, path, source, confidence, lines_added, lines_deleted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      insert.run('span-1', 'session-a', 'write', '/repo/a.ts', 'tool-input', 'exact', null, null)
+      insert.run('span-1', 'session-b', 'write', '/repo/a.ts', 'tool-input', 'inferred', 1, 2)
+      migrateDatabase(db.asProductionDatabase())
+      expect(db.prepare('SELECT COUNT(*) n FROM file_ops').get()).toEqual({ n: 1 })
+      expect(indexes(db, 'file_ops')).toContain('idx_file_ops_identity')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps replayed file evidence idempotent', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase())
+      const insert = db.prepare(
+        `INSERT OR IGNORE INTO file_ops (span_id, session_id, op, path, source, confidence, lines_added, lines_deleted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      const row = ['span-1', 'session-1', 'write', '/repo/a.ts', 'tool-input', 'exact', null, null]
+      insert.run(...row)
+      insert.run(...row)
+      expect(db.prepare('SELECT COUNT(*) n FROM file_ops').get()).toEqual({ n: 1 })
     } finally {
       db.close()
     }

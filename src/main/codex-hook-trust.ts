@@ -1,6 +1,18 @@
-import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 export type CodexHookTrustStatus = 'managed' | 'untrusted' | 'trusted' | 'modified'
 
@@ -49,6 +61,11 @@ function canonicalCwd(cwd: string): string {
 function readGrantFile(file: string): CodexHookGrantFile {
   try {
     if (!existsSync(file)) return { version: 1, grants: [] }
+    const stat = lstatSync(file)
+    const uid = typeof process.getuid === 'function' ? process.getuid() : undefined
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o777) !== 0o600 || (uid !== undefined && stat.uid !== uid)) {
+      return { version: 1, grants: [] }
+    }
     const value = JSON.parse(readFileSync(file, 'utf8')) as Partial<CodexHookGrantFile>
     return {
       version: 1,
@@ -101,7 +118,21 @@ export function createCodexHookGrantStore(userDataDir: string) {
         { cwd: canonical, fingerprint, hookCount, updatedAt: Date.now() }
       ]
     }
-    writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`
+    let fd: number | undefined
+    try {
+      fd = openSync(temporary, 'wx', 0o600)
+      writeFileSync(fd, `${JSON.stringify(next, null, 2)}\n`)
+      fsyncSync(fd)
+      closeSync(fd)
+      fd = undefined
+      renameSync(temporary, file)
+    } catch (error) {
+      if (fd !== undefined) closeSync(fd)
+      try { unlinkSync(temporary) } catch { /* temporary may already be renamed */ }
+      throw error
+    }
   }
 
   return { isGranted, grant }

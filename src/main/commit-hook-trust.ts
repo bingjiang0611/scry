@@ -180,6 +180,11 @@ export function createCommitHookTrustStore(userDataDir: string) {
 
   const readGrants = async (): Promise<GrantFile> => {
     try {
+      const stat = await lstat(grantPath)
+      const uid = typeof process.getuid === 'function' ? process.getuid() : undefined
+      if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o777) !== 0o600 || (uid !== undefined && stat.uid !== uid)) {
+        return { version: 1, grants: [] }
+      }
       return parseGrants(JSON.parse(await readFile(grantPath, 'utf8')))
     } catch {
       return { version: 1, grants: [] }
@@ -211,7 +216,7 @@ export function createCommitHookTrustStore(userDataDir: string) {
         { workspace, fingerprint, grantedAt: Date.now() }
       ]
     }
-    await mkdir(userDataDir, { recursive: true })
+    await mkdir(userDataDir, { recursive: true, mode: 0o700 })
     const temporary = `${grantPath}.${process.pid}.${Date.now()}.tmp`
     await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
     await chmod(temporary, 0o600)
@@ -227,7 +232,7 @@ export function createCommitHookTrustStore(userDataDir: string) {
         item.workspace !== workspace || (fingerprint !== undefined && item.fingerprint !== fingerprint)
       )
     }
-    await mkdir(userDataDir, { recursive: true })
+    await mkdir(userDataDir, { recursive: true, mode: 0o700 })
     const temporary = `${grantPath}.${process.pid}.${Date.now()}.tmp`
     await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
     await chmod(temporary, 0o600)

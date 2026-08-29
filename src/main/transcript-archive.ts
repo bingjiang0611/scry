@@ -241,7 +241,16 @@ async function mirrorPrefixMatches(source: string, target: string, size: number)
   }
 }
 
-const transcriptMirrorProvenance = new Map<string, { sourceDev: number; sourceIno: number; sourceSize: number; sourceMtimeMs: number }>()
+type TranscriptMirrorProvenance = { sourceDev: number; sourceIno: number; sourceSize: number; sourceMtimeMs: number }
+const transcriptMirrorProvenance = new Map<string, TranscriptMirrorProvenance>()
+const rememberTranscriptMirrorProvenance = (filePath: string, value: TranscriptMirrorProvenance): void => {
+  transcriptMirrorProvenance.delete(filePath)
+  transcriptMirrorProvenance.set(filePath, value)
+  if (transcriptMirrorProvenance.size > 128) {
+    const oldest = transcriptMirrorProvenance.keys().next().value
+    if (oldest !== undefined) transcriptMirrorProvenance.delete(oldest)
+  }
+}
 
 async function copyToOwnedFileAtomically(userDataDir: string, source: string, filePath: string): Promise<void> {
   trustedOwnedParent(userDataDir, filePath, true)
@@ -273,7 +282,7 @@ async function copyToOwnedFileAtomically(userDataDir: string, source: string, fi
             position += bytesRead
           }
           await output.sync()
-          transcriptMirrorProvenance.set(filePath, {
+          rememberTranscriptMirrorProvenance(filePath, {
             sourceDev: sourceStat.dev,
             sourceIno: sourceStat.ino,
             sourceSize: sourceStat.size,
@@ -298,7 +307,7 @@ async function copyToOwnedFileAtomically(userDataDir: string, source: string, fi
     }
     await copyFile(source, tmp, constants.COPYFILE_EXCL)
     await rename(tmp, filePath)
-    transcriptMirrorProvenance.set(filePath, {
+    rememberTranscriptMirrorProvenance(filePath, {
       sourceDev: sourceStat.dev,
       sourceIno: sourceStat.ino,
       sourceSize: sourceStat.size,
@@ -541,21 +550,27 @@ async function inspectSegmentedArchivesAsync(args: {
   }
   const valid: TraceArchive[] = []
   const invalid: Array<{ path: string; error: string }> = []
-  for (const name of names) {
-    const path = join(dir, name)
-    const inspected = await inspectArchiveFileAsync(args.userDataDir, path, args.cwd, args.sessionId, args.providerId)
-    if (inspected.status !== 'valid') {
-      invalid.push({ path, error: inspected.status === 'invalid' ? inspected.error : 'segmented archive disappeared' })
-      continue
+  const concurrency = 8
+  for (let offset = 0; offset < names.length; offset += concurrency) {
+    const batch = await Promise.all(names.slice(offset, offset + concurrency).map(async (name) => {
+      const path = join(dir, name)
+      const inspected = await inspectArchiveFileAsync(args.userDataDir, path, args.cwd, args.sessionId, args.providerId)
+      return { path, inspected }
+    }))
+    for (const { path, inspected } of batch) {
+      if (inspected.status !== 'valid') {
+        invalid.push({ path, error: inspected.status === 'invalid' ? inspected.error : 'segmented archive disappeared' })
+        continue
+      }
+      if (
+        inspected.archive.turns.length !== 1 ||
+        traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, inspected.archive.turns[0]) !== path
+      ) {
+        invalid.push({ path, error: 'segmented archive identity is invalid' })
+        continue
+      }
+      valid.push(inspected.archive)
     }
-    if (
-      inspected.archive.turns.length !== 1 ||
-      traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, inspected.archive.turns[0]) !== path
-    ) {
-      invalid.push({ path, error: 'segmented archive identity is invalid' })
-      continue
-    }
-    valid.push(inspected.archive)
   }
   return { valid, invalid }
 }
@@ -896,6 +911,8 @@ export function deleteTranscriptCopies(args: {
     try {
       trustedOwnedParent(args.userDataDir, fp, false)
       unlinkSync(fp)
+      transcriptMirrorProvenance.delete(fp)
+      transcriptIdentityCache.delete(fp)
       deleted.push(fp)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {

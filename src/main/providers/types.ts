@@ -34,6 +34,7 @@ export interface ProviderRunResult {
 export interface ProviderRunHandle {
   promise: Promise<ProviderRunResult>
   interrupt: () => void
+  forceKill: () => void
   getExternalSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
   getRecordingFailure?: () => { message: string } | undefined

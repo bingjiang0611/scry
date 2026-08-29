@@ -165,6 +165,16 @@ function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
   }
 }
 
+function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (!pid) return
+  try {
+    if (process.platform !== 'win32') process.kill(-pid, signal)
+    else process.kill(pid, signal)
+  } catch {
+    try { process.kill(pid, signal) } catch { /* already gone */ }
+  }
+}
+
 function qoderOptions(
   cwd: string | undefined,
   resume?: string,
@@ -177,7 +187,10 @@ function qoderOptions(
 ): Record<string, unknown> {
   const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!executable) throw new Error('Qoder CLI 未找到')
-  const runtimeEnv = runtimeCliEnv(undefined, managedRecorder ? { managedRecorder: true } : {})
+  const runtimeEnv = runtimeCliEnv(
+    undefined,
+    managedRecorder ? { managedRecorder: true, providerId: 'qoder' } : { providerId: 'qoder' }
+  )
   delete runtimeEnv.SCRY_MANAGED_RUN_ID
   delete runtimeEnv.SCRY_MANAGED_PROMPT_HASH
   const permissions = permissionMode === 'full_access'
@@ -210,10 +223,15 @@ function qoderOptions(
     ...(onPid
       ? {
           spawnQoderCLIProcess: (options: { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal: AbortSignal }) => {
-            const child = spawn(options.command, options.args, { cwd: options.cwd, env: options.env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'] })
+            const child = spawn(options.command, options.args, {
+              cwd: options.cwd,
+              env: options.env as NodeJS.ProcessEnv,
+              detached: process.platform !== 'win32',
+              stdio: ['pipe', 'pipe', 'pipe']
+            })
             if (child.pid) onPid(child.pid)
             child.once('exit', (code, signal) => onExit?.(code, signal))
-            options.signal.addEventListener('abort', () => child.kill('SIGTERM'), { once: true })
+            options.signal.addEventListener('abort', () => signalProcessTree(child.pid, 'SIGTERM'), { once: true })
             return child
           }
         }
@@ -552,6 +570,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         let stopped = false
         let externalSessionId = request.resume
         let q: Query | undefined
+        let qoderPid: number | undefined
         const ctx: NormalizeCtx = { runId: request.runId, cwd: request.cwd, newId, now: () => new Date().toISOString() }
         const promise: Promise<ProviderRunResult> = (async () => {
           q = query({
@@ -560,7 +579,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               ...qoderOptions(
                 request.cwd,
                 request.resume,
-                undefined,
+                (pid) => { qoderPid = pid },
                 undefined,
                 request.permissionMode,
                 request.managedRecorder === true,
@@ -620,6 +639,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             controller.abort()
             void q?.interrupt().catch(() => {})
           },
+          forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
           getExternalSessionId: () => externalSessionId,
           getProviderTurnId: () => undefined
         }
@@ -852,6 +872,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       return {
         promise,
         interrupt,
+        forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: currentProviderTurnId
       }
@@ -995,7 +1016,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               }
             })
             value = { data: catalog, observedAt: Date.now() }
+            skillCache.delete(key)
             skillCache.set(key, value)
+            while (skillCache.size > 16) {
+              const oldest = skillCache.keys().next().value
+              if (oldest === undefined) break
+              skillCache.delete(oldest)
+            }
           }
           const ready = capabilityReady(context, 'read', value.data.data, value.observedAt)
           return value.data.included < value.data.total
@@ -1031,7 +1058,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               }),
               observedAt: Date.now()
             }
+            commandCache.delete(key)
             commandCache.set(key, value)
+            while (commandCache.size > 16) {
+              const oldest = commandCache.keys().next().value
+              if (oldest === undefined) break
+              commandCache.delete(oldest)
+            }
           }
           const ready = capabilityReady(
             context,
@@ -1079,7 +1112,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 permissions: permissionOptions()
               }
             }
+            modelCache.delete(key)
             modelCache.set(key, value)
+            while (modelCache.size > 16) {
+              const oldest = modelCache.keys().next().value
+              if (oldest === undefined) break
+              modelCache.delete(oldest)
+            }
           }
           return capabilityReady(context, 'read', value.data, value.observedAt)
         } catch (error) {
@@ -1093,6 +1132,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
     },
     dispose: () => {
       for (const [key, session] of controls) closeControl(key, session)
+      skillCache.clear()
+      commandCache.clear()
+      modelCache.clear()
     }
   }
 }

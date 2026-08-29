@@ -28,7 +28,7 @@ import {
   type TraceEvent
 } from '../../shared/trace'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
-import { resolveRuntimeCliBin, shellEnv } from '../claude-locate'
+import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../run-outcome'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import {
@@ -966,12 +966,52 @@ export function createOpenCodeAdapter(
 ): ProviderAdapter {
   const executable = (): string | undefined => process.env.SCRY_OPENCODE_PATH?.trim() || resolveRuntimeCliBin('opencode')
   const managers = new Map<string, OpenCodeServerManager>()
+  const managerActivity = new Map<OpenCodeServerManager, number>()
+  const managerLastUsed = new Map<OpenCodeServerManager, number>()
+  const managerIdleTimers = new Map<OpenCodeServerManager, ReturnType<typeof setTimeout>>()
+  const SERVER_IDLE_MS = 60_000
+  const evictIdleManagers = (protectedManager?: OpenCodeServerManager): void => {
+    if (managers.size <= 3) return
+    const idle = [...managers.entries()]
+      .filter(([, manager]) => manager !== protectedManager && (managerActivity.get(manager) ?? 0) === 0)
+      .sort(([, left], [, right]) => (managerLastUsed.get(left) ?? 0) - (managerLastUsed.get(right) ?? 0))
+    for (const [cwd, manager] of idle.slice(0, Math.max(0, managers.size - 3))) {
+      managers.delete(cwd)
+      managerLastUsed.delete(manager)
+      const timer = managerIdleTimers.get(manager)
+      if (timer) clearTimeout(timer)
+      managerIdleTimers.delete(manager)
+      manager.close()
+    }
+  }
+  const scheduleManagerClose = (cwd: string, manager: OpenCodeServerManager): void => {
+    const previous = managerIdleTimers.get(manager)
+    if (previous) clearTimeout(previous)
+    const timer = setTimeout(() => {
+      managerIdleTimers.delete(manager)
+      if ((managerActivity.get(manager) ?? 0) > 0 || managers.get(cwd) !== manager) {
+        if (managers.get(cwd) === manager) scheduleManagerClose(cwd, manager)
+        return
+      }
+      managers.delete(cwd)
+      managerActivity.delete(manager)
+      managerLastUsed.delete(manager)
+      manager.close()
+    }, SERVER_IDLE_MS)
+    timer.unref()
+    managerIdleTimers.set(manager, timer)
+  }
   const managerFor = (cwd: string): OpenCodeServerManager => {
     let manager = managers.get(cwd)
     if (!manager) {
       manager = new OpenCodeServerManager(executable, privateMcpAuthDirectory, {}, sessionStateRoot)
       managers.set(cwd, manager)
     }
+    const timer = managerIdleTimers.get(manager)
+    if (timer) clearTimeout(timer)
+    managerIdleTimers.delete(manager)
+    managerLastUsed.set(manager, Date.now())
+    evictIdleManagers(manager)
     return manager
   }
   let lastOkAt: number | undefined
@@ -991,8 +1031,9 @@ export function createOpenCodeAdapter(
     pluginTrust?: OpenCodeProjectPluginAuthorization
   ): Promise<OpenCodeServerState> => {
     if (!context.cwd) throw new Error('OpenCode 需要工作目录')
+    const manager = managerFor(context.cwd)
     try {
-      const state = await managerFor(context.cwd).ensure(context.cwd, mcpExecution, pluginTrust)
+      const state = await manager.ensure(context.cwd, mcpExecution, pluginTrust)
       lastOkAt = Date.now()
       lastError = undefined
       return state
@@ -1007,10 +1048,29 @@ export function createOpenCodeAdapter(
         })
       }
       throw error
+    } finally {
+      scheduleManagerClose(context.cwd, manager)
     }
   }
-  const clientFor = async (context: ProviderContext, mcpExecution?: AuthorizedMcpExecution): Promise<OpencodeClient> =>
-    (await serverFor(context, mcpExecution)).client
+  const withClient = async <T>(
+    context: ProviderContext,
+    mcpExecution: AuthorizedMcpExecution | undefined,
+    action: (client: OpencodeClient) => Promise<T>
+  ): Promise<T> => {
+    if (!context.cwd) throw new Error('OpenCode 需要工作目录')
+    const manager = managerFor(context.cwd)
+    managerActivity.set(manager, (managerActivity.get(manager) ?? 0) + 1)
+    try {
+      return await action((await serverFor(context, mcpExecution)).client)
+    } finally {
+      const active = Math.max(0, (managerActivity.get(manager) ?? 1) - 1)
+      if (active > 0) managerActivity.set(manager, active)
+      else managerActivity.delete(manager)
+      managerLastUsed.set(manager, Date.now())
+      scheduleManagerClose(context.cwd, manager)
+      evictIdleManagers()
+    }
+  }
 
   return {
     id: 'opencode',
@@ -1057,6 +1117,7 @@ export function createOpenCodeAdapter(
       const eventController = new AbortController()
       const context: ProviderContext = { providerId: 'opencode', cwd: request.cwd, externalSessionId }
       const manager = request.cwd ? managerFor(request.cwd) : undefined
+      if (manager) managerActivity.set(manager, (managerActivity.get(manager) ?? 0) + 1)
       const promise = (async () => {
         try {
           if (!request.cwd) throw new Error('OpenCode 需要工作目录')
@@ -1099,7 +1160,7 @@ export function createOpenCodeAdapter(
               workspace: request.cwd,
               managed: true,
               env: {
-                ...process.env,
+                ...runtimeCliEnv(undefined, { providerId: 'opencode' }),
                 SCRY_MANAGED_RUN_ID: request.managedRecorderIdentity.runId,
                 SCRY_MANAGED_PROMPT_HASH: request.managedRecorderIdentity.promptHash
               },
@@ -1309,6 +1370,13 @@ export function createOpenCodeAdapter(
           const normalized = normalizeOpenCodeRunError(error, request.cwd, manager)
           rememberFailure(normalized)
           throw normalized
+        } finally {
+          if (manager && request.cwd) {
+            const active = Math.max(0, (managerActivity.get(manager) ?? 1) - 1)
+            if (active > 0) managerActivity.set(manager, active)
+            else managerActivity.delete(manager)
+            scheduleManagerClose(request.cwd, manager)
+          }
         }
       })()
       const interrupt = (): void => {
@@ -1321,6 +1389,7 @@ export function createOpenCodeAdapter(
       return {
         promise,
         interrupt,
+        forceKill: () => manager?.forceClose(),
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: () => providerTurnId,
         getRecordingFailure: () => recordingFailure
@@ -1342,11 +1411,10 @@ export function createOpenCodeAdapter(
         }
         if (!execution) return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 OpenCode MCP 执行快照')
         try {
-          return capabilityReady(context, 'read', await openCodeMcpSnapshot(
-            await clientFor(context, execution),
+          return capabilityReady(context, 'read', await withClient(
             context,
-            configured,
-            operations.authenticate
+            execution,
+            (client) => openCodeMcpSnapshot(client, context, configured, operations.authenticate)
           ))
         } catch (error) {
           rememberFailure(error)
@@ -1442,13 +1510,18 @@ export function createOpenCodeAdapter(
         const cached = modelCache.get(cacheKey)
         if (cached && cached.expiresAt > Date.now()) return capabilityReady(context, 'read', cached.catalog)
         try {
-          const client = await clientFor(context)
-          const response = await unwrap<{ data?: unknown[] }>(
+          const response = await withClient(context, undefined, (client) => unwrap<{ data?: unknown[] }>(
             client.v2.model.list({ location: { directory: context.cwd } }),
             'model.list'
-          )
+          ))
           const catalog = openCodeRunControlCatalog(response.data ?? [])
+          modelCache.delete(cacheKey)
           modelCache.set(cacheKey, { expiresAt: Date.now() + 30_000, catalog })
+          while (modelCache.size > 16) {
+            const oldest = modelCache.keys().next().value
+            if (oldest === undefined) break
+            modelCache.delete(oldest)
+          }
           return capabilityReady(context, 'read', catalog)
         } catch (error) {
           rememberFailure(error)
@@ -1463,11 +1536,10 @@ export function createOpenCodeAdapter(
     skills: {
       list: async (context) => {
         try {
-          const client = await clientFor(context)
-          const response = await unwrap<{ data?: unknown[] }>(
+          const response = await withClient(context, undefined, (client) => unwrap<{ data?: unknown[] }>(
             client.v2.skill.list({ location: { directory: context.cwd } }),
             'skill.list'
-          )
+          ))
           const data: SkillMeta[] = await Promise.all((response.data ?? []).map(async (raw) => {
             const skill = record(raw)
             const location = String(skill.location ?? '')
@@ -1489,11 +1561,10 @@ export function createOpenCodeAdapter(
     commands: {
       list: async (context) => {
         try {
-          const client = await clientFor(context)
-          const response = await unwrap<{ data?: unknown[] }>(
+          const response = await withClient(context, undefined, (client) => unwrap<{ data?: unknown[] }>(
             client.v2.command.list({ location: { directory: context.cwd } }),
             'command.list'
-          )
+          ))
           return capabilityReady(context, 'read', (response.data ?? []).map((raw) => {
             const command = record(raw)
             return { name: String(command.name ?? ''), description: String(command.description ?? ''), source: 'custom' as const }
@@ -1505,8 +1576,13 @@ export function createOpenCodeAdapter(
       }
     },
     dispose: () => {
+      for (const timer of managerIdleTimers.values()) clearTimeout(timer)
+      managerIdleTimers.clear()
+      managerActivity.clear()
+      managerLastUsed.clear()
       for (const manager of managers.values()) manager.close()
       managers.clear()
+      modelCache.clear()
     }
   }
 }

@@ -9,7 +9,8 @@ import {
   isUpdateDue,
   npmPrefixFromEntry,
   runBackgroundUpdate,
-  shouldScheduleAutoUpdate
+  shouldScheduleAutoUpdate,
+  upgradeCli
 } from './update'
 
 describe('CLI auto update', () => {
@@ -30,13 +31,15 @@ describe('CLI auto update', () => {
 
   it('does not schedule updates for bundled, managed, recorder, CI or non-interactive runs', () => {
     const base = { command: 'doctor', noUpdateCheck: false, stderrIsTTY: true }
-    expect(shouldScheduleAutoUpdate({ ...base, env: {} })).toBe(true)
+    expect(shouldScheduleAutoUpdate({ ...base, env: {} })).toBe(false)
+    const optedIn = { SCRY_AUTO_UPDATE: '1' }
+    expect(shouldScheduleAutoUpdate({ ...base, env: optedIn })).toBe(true)
     expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_CLI_BUNDLED: '1' } })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_RECORDER_MANAGED: '1' } })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, env: { CI: 'true' } })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'hook', env: {} })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'serve', env: {} })).toBe(false)
-    expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'status', env: {} })).toBe(true)
+    expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'status', env: optedIn })).toBe(true)
     expect(shouldScheduleAutoUpdate({ ...base, stderrIsTTY: false, env: {} })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, noUpdateCheck: true, env: {} })).toBe(false)
   })
@@ -61,7 +64,7 @@ describe('CLI auto update', () => {
     expect(npmPrefixFromEntry(import.meta.filename)).toBeNull()
   })
 
-  it('installs an exact version and marks a background update as already notified', async () => {
+  it('foreground upgrade installs an exact version with lifecycle scripts disabled', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-update-'))
     tempDirs.push(root)
     const entry = join(root, 'lib/node_modules/scry-turn-recorder/dist/cli/scry.js')
@@ -82,10 +85,37 @@ else writeFileSync(process.env.MOCK_SCRY_ENTRY, '#!/usr/bin/env node\\nprocess.s
     vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', state)
     vi.stubEnv('MOCK_SCRY_ENTRY', entry)
     vi.stubEnv('MOCK_NPM_LOG', npmLog)
-    await expect(runBackgroundUpdate('0.2.12', entry)).resolves.toMatchObject({ status: 'updated', latestVersion: '0.2.13' })
-    expect(await readFile(npmLog, 'utf8')).toContain('scry-turn-recorder@~0.2.12')
+    await expect(upgradeCli({ currentVersion: '0.2.12', entryPath: entry, allowBreaking: true })).resolves.toMatchObject({
+      status: 'updated', latestVersion: '0.2.13'
+    })
+    const npmCalls = await readFile(npmLog, 'utf8')
+    expect(npmCalls).toContain('scry-turn-recorder@0.2.13')
+    expect(npmCalls).toContain('--ignore-scripts')
     const saved = JSON.parse(await readFile(state, 'utf8')) as { updatedAt?: string; notifiedAt?: string }
     expect(saved.notifiedAt).toBe(saved.updatedAt)
+  })
+
+  it('background checks never install or execute a registry package', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-update-'))
+    tempDirs.push(root)
+    const entry = join(root, 'lib/node_modules/scry-turn-recorder/dist/cli/scry.js')
+    const npm = join(root, 'mock-npm.mjs')
+    const npmLog = join(root, 'npm.log')
+    await mkdir(join(entry, '..'), { recursive: true })
+    await writeFile(entry, '#!/usr/bin/env node\nprocess.stdout.write("0.2.12\\n")\n')
+    await writeFile(npm, `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs'
+appendFileSync(process.env.MOCK_NPM_LOG, JSON.stringify(process.argv.slice(2)) + '\\n')
+process.stdout.write(JSON.stringify('0.2.13'))
+`)
+    await chmod(npm, 0o755)
+    vi.stubEnv('SCRY_NPM_PATH', npm)
+    vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', join(root, 'state.json'))
+    vi.stubEnv('MOCK_NPM_LOG', npmLog)
+    await expect(runBackgroundUpdate('0.2.12', entry)).resolves.toMatchObject({ status: 'update_available' })
+    const calls = (await readFile(npmLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as string[])
+    expect(calls).toHaveLength(1)
+    expect(calls[0][0]).toBe('view')
   })
 
   it('shows an update notice once and never injects it into the bundled CLI', async () => {

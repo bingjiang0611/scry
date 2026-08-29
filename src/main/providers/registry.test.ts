@@ -17,6 +17,7 @@ function adapter(id: 'claude' | 'codex'): ProviderAdapter {
     run: () => ({
       promise: Promise.resolve({ externalSessionId: 'session-1' }),
       interrupt: vi.fn(),
+      forceKill: vi.fn(),
       getExternalSessionId: () => 'session-1'
     })
   }
@@ -31,7 +32,12 @@ describe('ProviderRegistry', () => {
     const base = adapter('codex')
     base.run = (request) => {
       request.emit({ id: 'event-1', runId: request.runId, ts: '2026-07-10T00:00:00.000Z', kind: 'model', stage: 'text' })
-      return { promise: Promise.resolve({}), interrupt: () => {}, getExternalSessionId: () => undefined }
+      return {
+        promise: Promise.resolve({}),
+        interrupt: () => {},
+        forceKill: () => {},
+        getExternalSessionId: () => undefined
+      }
     }
     const emit = vi.fn()
     new ProviderRegistry([base]).run('codex', { runId: 'run-1', prompt: 'hi', attachments: [], emit })
@@ -95,7 +101,7 @@ describe('ProviderRegistry', () => {
     )
   })
 
-  it('uses the legacy full-access path when run controls are disabled', async () => {
+  it('keeps provider-default permissions when run controls are disabled', async () => {
     const base = adapter('codex')
     const run = vi.fn(base.run)
     base.run = run
@@ -112,11 +118,11 @@ describe('ProviderRegistry', () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       model: undefined,
       effort: undefined,
-      permissionMode: 'full_access'
+      permissionMode: 'default'
     }))
     await expect(registry.runControls({ providerId: 'codex' })).resolves.toMatchObject({
       state: 'degraded',
-      data: { models: [], permissions: [expect.objectContaining({ id: 'full_access' })] }
+      data: { models: [], permissions: [expect.objectContaining({ id: 'default' })] }
     })
   })
 

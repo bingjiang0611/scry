@@ -246,6 +246,34 @@ describe('Billing Guardian P1 ledger normalizer', () => {
     })
   })
 
+  sqliteIt('Anthropic/OpenAI 聚合换序后仍使用稳定主键，重同步不重复计费', () => {
+    const a = { starting_at: '2026-08-01T00:00:00Z', ending_at: '2026-08-02T00:00:00Z', grouping: { model: 'a' }, results: { cost_usd: 1 } }
+    const b = { starting_at: '2026-08-01T00:00:00Z', ending_at: '2026-08-02T00:00:00Z', grouping: { model: 'b' }, results: { cost_usd: 2 } }
+    const first = billingRowsFromAdminPayload({
+      provider: 'anthropic', source: 'anthropic_admin_cost', payloads: [a, b], fetchedAt: 10
+    })
+    const second = billingRowsFromAdminPayload({
+      provider: 'anthropic', source: 'anthropic_admin_cost', payloads: [b, a], fetchedAt: 20
+    })
+    expect(asRaw(first.providerRawUsage[0]).id).toBe(asRaw(second.providerRawUsage[1]).id)
+    expect(asRaw(first.providerRawUsage[1]).id).toBe(asRaw(second.providerRawUsage[0]).id)
+
+    const db = new nodeSqlite!.DatabaseSync(':memory:')
+    try {
+      for (const stmt of DDL_V4) db.prepare(stmt).run()
+      const insertRaw = db.prepare(sqlInsert('provider_raw_usage', PROVIDER_RAW_USAGE_COLS))
+      const insertLedger = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
+      for (const rows of [first, second]) {
+        for (const row of rows.providerRawUsage) insertRaw.run(...row)
+        for (const row of rows.usageLedger) insertLedger.run(...row)
+      }
+      expect(db.prepare('SELECT COUNT(*) n FROM provider_raw_usage').get()).toEqual({ n: 2 })
+      expect(db.prepare('SELECT COUNT(*) n, SUM(cost) cost FROM usage_ledger').get()).toEqual({ n: 2, cost: 3 })
+    } finally {
+      db.close()
+    }
+  })
+
   sqliteIt('Qoder 同一账单事件换序后仍使用稳定主键，重同步不重复计费', () => {
     const prefix = { timestamp: 1, userId: 'u1', source: 'CLI', operation: 'Agent', modelTier: 'Ultimate', credits: 0.1, cost: 0.1 }
     const target = { timestamp: 2, userId: 'u1', source: 'CLI', operation: 'Agent', modelTier: 'Ultimate', credits: 0.2, cost: 0.2 }

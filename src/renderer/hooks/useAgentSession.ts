@@ -58,8 +58,13 @@ export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta
 export const currentVisibleRunId = (turns: Turn[]): string | null =>
   [...turns].reverse().find((turn) => !turn.done && !turn.error)?.runId ?? null
 
-export function clearSessionTurns(prev: Turn[], clearedRuns: Set<string>): Turn[] {
+export function clearSessionTurns(prev: Turn[], clearedRuns: Set<string>, maxTombstones = 512): Turn[] {
   prev.forEach((turn) => clearedRuns.add(turn.runId))
+  while (clearedRuns.size > maxTombstones) {
+    const oldest = clearedRuns.values().next().value
+    if (oldest === undefined) break
+    clearedRuns.delete(oldest)
+  }
   return []
 }
 

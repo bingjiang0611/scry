@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { ProviderId, SessionProviderId } from '../shared/provider'
@@ -18,18 +18,31 @@ export const usageJsonlPath = (userDataDir: string): string => join(userDataDir,
 
 interface ParsedUsageRow {
   providerId: SessionProviderId
-  agentProfileId?: string
+  agentProfileId?: string | null
   cwd?: string
   cost?: number | null
   tin?: number | null
   tout?: number | null
 }
 
+interface UsageAggregate {
+  providerId: SessionProviderId
+  agentProfileId?: string | null
+  cwd: string
+  cost: number
+  tin: number
+  tout: number
+  costRows: number
+  tinRows: number
+  toutRows: number
+  turns: number
+}
+
 let usageScanCache: {
   file: string
   size: number
   mtimeMs: number
-  rows: ParsedUsageRow[]
+  aggregates: Map<string, UsageAggregate>
   invalidLines: number
 } | null = null
 
@@ -37,24 +50,48 @@ function invalidateUsageScan(file: string): void {
   if (usageScanCache?.file === file) usageScanCache = null
 }
 
-function scanUsage(file: string): { rows: ParsedUsageRow[]; invalidLines: number; sourceBytes: number } {
+const aggregateKey = (row: Pick<ParsedUsageRow, 'providerId' | 'agentProfileId' | 'cwd'>): string =>
+  `${row.providerId}\0${row.agentProfileId ?? ''}\0${row.cwd ?? ''}`
+
+function addAggregate(aggregates: Map<string, UsageAggregate>, row: ParsedUsageRow): void {
+  const key = aggregateKey(row)
+  const aggregate = aggregates.get(key) ?? {
+    providerId: row.providerId,
+    agentProfileId: row.agentProfileId,
+    cwd: row.cwd ?? '',
+    cost: 0,
+    tin: 0,
+    tout: 0,
+    costRows: 0,
+    tinRows: 0,
+    toutRows: 0,
+    turns: 0
+  }
+  if (typeof row.cost === 'number') { aggregate.cost += row.cost; aggregate.costRows++ }
+  if (typeof row.tin === 'number') { aggregate.tin += row.tin; aggregate.tinRows++ }
+  if (typeof row.tout === 'number') { aggregate.tout += row.tout; aggregate.toutRows++ }
+  aggregate.turns++
+  aggregates.set(key, aggregate)
+}
+
+function scanUsage(file: string): { aggregates: Map<string, UsageAggregate>; invalidLines: number; sourceBytes: number } {
   const stat = statSync(file)
   if (usageScanCache?.file === file && usageScanCache.size === stat.size && usageScanCache.mtimeMs === stat.mtimeMs) {
-    return { rows: usageScanCache.rows, invalidLines: usageScanCache.invalidLines, sourceBytes: stat.size }
+    return { aggregates: usageScanCache.aggregates, invalidLines: usageScanCache.invalidLines, sourceBytes: stat.size }
   }
-  const rows: ParsedUsageRow[] = []
+  const aggregates = new Map<string, UsageAggregate>()
   let invalidLines = 0
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line.trim()) continue
     try {
       const parsed = JSON.parse(line) as Omit<ParsedUsageRow, 'providerId'> & { providerId?: SessionProviderId }
-      rows.push({ ...parsed, providerId: parsed.providerId ?? 'legacy_unknown' })
+      addAggregate(aggregates, { ...parsed, providerId: parsed.providerId ?? 'legacy_unknown' })
     } catch {
       invalidLines++
     }
   }
-  usageScanCache = { file, size: stat.size, mtimeMs: stat.mtimeMs, rows, invalidLines }
-  return { rows, invalidLines, sourceBytes: stat.size }
+  usageScanCache = { file, size: stat.size, mtimeMs: stat.mtimeMs, aggregates, invalidLines }
+  return { aggregates, invalidLines, sourceBytes: stat.size }
 }
 
 function cleanupAtomicTemps(file: string): void {
@@ -126,8 +163,16 @@ export function appendUsage(
       ts: ev.ts
     }
     const file = usageJsonlPath(userDataDir)
-    appendFileSync(file, JSON.stringify(row) + '\n')
-    invalidateUsageScan(file)
+    const line = `${JSON.stringify(row)}\n`
+    const previousSize = usageScanCache?.file === file ? usageScanCache.size : undefined
+    appendFileSync(file, line, { mode: 0o600 })
+    chmodSync(file, 0o600)
+    const stat = statSync(file)
+    if (usageScanCache?.file === file && previousSize != null && previousSize + Buffer.byteLength(line) === stat.size) {
+      addAggregate(usageScanCache.aggregates, row)
+      usageScanCache.size = stat.size
+      usageScanCache.mtimeMs = stat.mtimeMs
+    } else invalidateUsageScan(file)
   } catch {
     /* usage.jsonl is best-effort; sqlite remains the structured source */
   }
@@ -160,26 +205,20 @@ export function readUsageStats(
       error: error instanceof Error ? error.message : String(error)
     }
   }
-  for (const row of scan.rows) {
+  for (const row of scan.aggregates.values()) {
     if (filter.providerId && row.providerId !== filter.providerId) continue
     if (filter.agentProfileId !== undefined && row.agentProfileId !== filter.agentProfileId) continue
     if (filter.cwd != null && row.cwd !== filter.cwd) continue
-    if (typeof row.cost === 'number') {
-      cost += row.cost
-      costRows++
-    }
-    if (typeof row.tin === 'number') {
-      tin += row.tin
-      tinRows++
-    }
-    if (typeof row.tout === 'number') {
-      tout += row.tout
-      toutRows++
-    }
-    turns++
+    cost += row.cost
+    tin += row.tin
+    tout += row.tout
+    costRows += row.costRows
+    tinRows += row.tinRows
+    toutRows += row.toutRows
+    turns += row.turns
   }
   return {
-    status: scan.invalidLines === 0 ? 'ready' : scan.rows.length === 0 ? 'query_error' : 'partial',
+    status: scan.invalidLines === 0 ? 'ready' : scan.aggregates.size === 0 ? 'query_error' : 'partial',
     cost: costRows ? cost : null,
     tin: tinRows ? tin : null,
     tout: toutRows ? tout : null,

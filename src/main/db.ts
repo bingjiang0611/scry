@@ -5,7 +5,20 @@ import type Database from 'better-sqlite3'
 import { app } from 'electron'
 import { createRequire } from 'node:module'
 import { basename, join } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { maskSecrets, type TraceEvent, type DbStats } from '../shared/trace'
 import {
   SPAN_COLS,
@@ -90,13 +103,71 @@ function safeJson(v: unknown): string {
   return JSON.stringify(scrub(v ?? {}))
 }
 
+export interface RecordTurnArgs {
+  runId: string
+  sessionId?: string
+  cwd?: string
+  userText: string
+  items: TraceEvent[]
+  runtimeProvider?: RuntimeProvider
+  providerId?: ProviderId
+  billingProvider?: BillingProvider
+}
+
+const turnOutboxDir = (): string => join(app.getPath('userData'), 'db-turn-outbox')
+const turnOutboxPath = (runId: string): string => join(
+  turnOutboxDir(),
+  `${createHash('sha256').update(runId).digest('hex')}.json`
+)
+
+function queueTurnForDatabase(args: RecordTurnArgs): void {
+  const dir = turnOutboxDir()
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const target = turnOutboxPath(args.runId)
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
+  let fd: number | undefined
+  try {
+    fd = openSync(temporary, 'wx', 0o600)
+    writeFileSync(fd, `${JSON.stringify(args)}\n`)
+    fsyncSync(fd)
+    closeSync(fd)
+    fd = undefined
+    renameSync(temporary, target)
+  } catch (error) {
+    if (fd !== undefined) closeSync(fd)
+    try { unlinkSync(temporary) } catch { /* temporary may already be renamed */ }
+    throw error
+  }
+}
+
+function replayDatabaseTurnOutbox(): void {
+  let names: string[]
+  try { names = readdirSync(turnOutboxDir()).filter((name) => /^[a-f0-9]{64}\.json$/.test(name)).sort() } catch { return }
+  for (const name of names) {
+    const path = join(turnOutboxDir(), name)
+    try {
+      const args = JSON.parse(readFileSync(path, 'utf8')) as RecordTurnArgs
+      if (!args.runId || !Array.isArray(args.items) || !recordTurn(args, { queueOnFailure: false })) continue
+      unlinkSync(path)
+    } catch (error) {
+      console.warn('[scry] database turn outbox replay failed:', name, (error as Error)?.message)
+    }
+  }
+}
+
 export function initDb(): void {
   try {
     const Database = require('better-sqlite3') as typeof import('better-sqlite3')
     dbFilePath = join(app.getPath('userData'), 'scry.db')
     db = new Database(dbFilePath)
+    chmodSync(dbFilePath, 0o600)
     db.pragma('journal_mode = WAL')
+    db.pragma('secure_delete = ON')
     migrateDatabase(db)
+    replayDatabaseTurnOutbox()
+    for (const file of [dbFilePath, `${dbFilePath}-wal`, `${dbFilePath}-shm`]) {
+      if (existsSync(file)) chmodSync(file, 0o600)
+    }
     invalidateQueryCaches()
   } catch (e) {
     try { db?.close() } catch { /* retain the original initialization error */ }
@@ -151,40 +222,17 @@ export function resolveSessionRunIds(args: {
   }
 }
 
-export function recordTurn(args: {
-  runId: string
-  sessionId?: string
-  cwd?: string
-  userText: string
-  items: TraceEvent[]
-  runtimeProvider?: RuntimeProvider
-  providerId?: ProviderId
-  billingProvider?: BillingProvider
-}): boolean {
-  if (!db) return false
+export function recordTurn(args: RecordTurnArgs, options: { queueOnFailure?: boolean } = {}): boolean {
+  if (!db) {
+    if (options.queueOnFailure !== false) queueTurnForDatabase(args)
+    return false
+  }
   try {
     const ts = Date.now()
     const cwd = args.cwd ?? ''
-    db.prepare(
-      `INSERT INTO projects (cwd, name, last_seen_at) VALUES (?, ?, ?)
-       ON CONFLICT(cwd) DO UPDATE SET last_seen_at = excluded.last_seen_at`
-    ).run(cwd, cwd ? basename(cwd) : 'Chats', ts)
     const internalSessionId = args.sessionId && args.providerId
       ? scrySessionId(args.providerId, cwd, args.sessionId)
       : undefined
-    if (internalSessionId && args.sessionId && args.providerId && args.runtimeProvider) {
-      db.prepare(UPSERT_SESSION_REF_SQL).run(
-        internalSessionId,
-        args.providerId,
-        args.runtimeProvider,
-        cwd,
-        args.sessionId,
-        args.userText.slice(0, 200),
-        ts,
-        ts
-      )
-    }
-
     const rows = spanRowsFromItems({ runId: args.runId, sessionId: internalSessionId, cwd, items: args.items, nowMs: ts })
     const gatewayLabel = gatewayAccountLabel(billingEnvProvider())
     const priceVersions = db.prepare(
@@ -208,11 +256,27 @@ export function recordTurn(args: {
     const insSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
     const insMu = db.prepare(sqlInsert('model_usage', MODEL_USAGE_COLS))
     const insFo = db.prepare(
-      `INSERT INTO file_ops (${FILE_OP_COLS.join(', ')}) VALUES (${FILE_OP_COLS.map(() => '?').join(', ')})`
+      `INSERT OR IGNORE INTO file_ops (${FILE_OP_COLS.join(', ')}) VALUES (${FILE_OP_COLS.map(() => '?').join(', ')})`
     )
     const insIntervention = db.prepare(sqlInsert('human_interventions', HUMAN_INTERVENTION_COLS))
     const insLedger = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
     const tx = db.transaction(() => {
+      db!.prepare(
+        `INSERT INTO projects (cwd, name, last_seen_at) VALUES (?, ?, ?)
+         ON CONFLICT(cwd) DO UPDATE SET last_seen_at = excluded.last_seen_at`
+      ).run(cwd, cwd ? basename(cwd) : 'Chats', ts)
+      if (internalSessionId && args.sessionId && args.providerId && args.runtimeProvider) {
+        db!.prepare(UPSERT_SESSION_REF_SQL).run(
+          internalSessionId,
+          args.providerId,
+          args.runtimeProvider,
+          cwd,
+          args.sessionId,
+          args.userText.slice(0, 200),
+          ts,
+          ts
+        )
+      }
       for (const r of rows.spans) insSpan.run(...(r as never[]))
       for (const r of rows.modelUsage) insMu.run(...(r as never[]))
       for (const r of rows.fileOps) insFo.run(...(r as never[]))
@@ -224,6 +288,11 @@ export function recordTurn(args: {
     return true
   } catch (e) {
     console.warn('[scry] recordTurn 失败:', (e as Error)?.message)
+    if (options.queueOnFailure !== false) {
+      try { queueTurnForDatabase(args) } catch (queueError) {
+        console.error('[scry] database turn outbox write failed:', (queueError as Error)?.message)
+      }
+    }
     return false
   }
 }
@@ -317,8 +386,13 @@ function usageLedgerObjectFromDb(row: Record<string, unknown>): UsageLedgerObjec
   }
 }
 
-function baseBillingState(): BillingGuardianState {
+function baseBillingState(
+  status: 'unavailable' | 'query_error' = 'unavailable',
+  error = 'SQLite 当前不可用，账单事实未知'
+): BillingGuardianState {
   return {
+    status,
+    error,
     adminConnections: envConnections(),
     gatewayConnections: gatewayConnections(),
     rawUsageRows: 0,
@@ -357,6 +431,10 @@ function computeBillingState(): BillingGuardianState {
     return baseBillingState()
   }
   try {
+    const syncRows = db.prepare(
+      `SELECT provider, last_sync_ts lastSyncTs, last_error lastError FROM billing_sync_state`
+    ).all() as Array<{ provider: BillingProvider; lastSyncTs: number | null; lastError: string | null }>
+    const syncByProvider = new Map(syncRows.map((row) => [row.provider, row]))
     const rawUsageRows = (db.prepare(`SELECT COUNT(*) n FROM provider_raw_usage`).get() as { n: number }).n
     const ledgerRows = (db.prepare(`SELECT COUNT(*) n FROM usage_ledger`).get() as { n: number }).n
     const sourceSummaries = db
@@ -480,7 +558,15 @@ function computeBillingState(): BillingGuardianState {
       )
       .get() as { n: number; cost: number }
     return {
-      adminConnections: envConnections(),
+      status: 'ready',
+      adminConnections: envConnections({
+        lastOpenAiSync: syncByProvider.get('openai')?.lastSyncTs ?? undefined,
+        lastAnthropicSync: syncByProvider.get('anthropic')?.lastSyncTs ?? undefined,
+        lastQoderSync: syncByProvider.get('qoder')?.lastSyncTs ?? undefined,
+        lastOpenAiError: syncByProvider.get('openai')?.lastError ?? undefined,
+        lastAnthropicError: syncByProvider.get('anthropic')?.lastError ?? undefined,
+        lastQoderError: syncByProvider.get('qoder')?.lastError ?? undefined
+      }),
       gatewayConnections: gatewayConnections(),
       rawUsageRows,
       ledgerRows,
@@ -508,8 +594,9 @@ function computeBillingState(): BillingGuardianState {
       }
     }
   } catch (e) {
-    console.warn('[scry] billingStateQuery 失败:', (e as Error)?.message)
-    return baseBillingState()
+    const error = (e as Error)?.message ?? String(e)
+    console.warn('[scry] billingStateQuery 失败:', error)
+    return baseBillingState('query_error', error)
   }
 }
 
@@ -520,65 +607,84 @@ export function billingStateQuery(): BillingGuardianState {
   return value
 }
 
+export const UPSERT_BILLING_SYNC_STATE_SQL = `INSERT INTO billing_sync_state (
+  provider, last_sync_ts, last_error, updated_ts
+) VALUES (?, ?, ?, ?)
+ON CONFLICT(provider) DO UPDATE SET
+  last_sync_ts=COALESCE(excluded.last_sync_ts, billing_sync_state.last_sync_ts),
+  last_error=excluded.last_error,
+  updated_ts=excluded.updated_ts`
+
 export async function syncBillingAdmin(): Promise<BillingSyncResult> {
   if (!db) return { ok: false, rowsImported: 0, ledgerRowsImported: 0, error: 'sqlite unavailable', state: billingStateQuery() }
   const now = Date.now()
   const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000
   const env = billingEnvProvider()
-  const openAiKey = env.OPENAI_ADMIN_API_KEY
-  const anthropicKey = env.ANTHROPIC_ADMIN_API_KEY
-  const qoderKey = env.QODER_ADMIN_API_KEY
-  const qoderOrganizationId = env.QODER_ORGANIZATION_ID
-  try {
-    const results: AdminFetchResult[] = []
-    if (openAiKey) {
-      results.push(await fetchOpenAiAdminUsageAndCosts({
-          apiKey: openAiKey,
-          startTime: Math.floor(oneWeekAgo / 1000),
-          endTime: Math.floor(now / 1000),
-          nowMs: now
-        }))
-    }
-    if (anthropicKey) {
-      results.push(await fetchAnthropicAdminUsageAndCosts({
-          apiKey: anthropicKey,
-          startingAt: new Date(oneWeekAgo).toISOString(),
-          endingAt: new Date(now).toISOString(),
-          nowMs: now
-        }))
-    }
-    if (qoderKey && qoderOrganizationId) {
-      results.push(await fetchQoderUsageAndCosts({
-        apiKey: qoderKey,
-        organizationId: qoderOrganizationId,
-        memberId: env.QODER_MEMBER_ID,
-        startDate: new Date(oneWeekAgo).toISOString(),
-        endDate: new Date(now).toISOString(),
-        nowMs: now
-      }))
-    }
-    if (results.length === 0) {
-      return { ok: false, rowsImported: 0, ledgerRowsImported: 0, error: 'missing Anthropic/OpenAI/Qoder Admin configuration', state: billingStateQuery() }
-    }
-    const insRaw = db.prepare(sqlInsert('provider_raw_usage', PROVIDER_RAW_USAGE_COLS))
-    const insLedger = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
-    const tx = db.transaction(() => {
-      for (const result of results) {
-        for (const r of result.rows.providerRawUsage) insRaw.run(...(r as never[]))
-        for (const r of result.rows.usageLedger) insLedger.run(...(r as never[]))
+  const tasks: Array<{ provider: BillingProvider; promise: Promise<AdminFetchResult> }> = []
+  if (env.OPENAI_ADMIN_API_KEY) {
+    tasks.push({ provider: 'openai', promise: fetchOpenAiAdminUsageAndCosts({
+      apiKey: env.OPENAI_ADMIN_API_KEY,
+      startTime: Math.floor(oneWeekAgo / 1000),
+      endTime: Math.floor(now / 1000),
+      nowMs: now
+    }) })
+  }
+  if (env.ANTHROPIC_ADMIN_API_KEY) {
+    tasks.push({ provider: 'anthropic', promise: fetchAnthropicAdminUsageAndCosts({
+      apiKey: env.ANTHROPIC_ADMIN_API_KEY,
+      startingAt: new Date(oneWeekAgo).toISOString(),
+      endingAt: new Date(now).toISOString(),
+      nowMs: now
+    }) })
+  }
+  if (env.QODER_ADMIN_API_KEY && env.QODER_ORGANIZATION_ID) {
+    tasks.push({ provider: 'qoder', promise: fetchQoderUsageAndCosts({
+      apiKey: env.QODER_ADMIN_API_KEY,
+      organizationId: env.QODER_ORGANIZATION_ID,
+      memberId: env.QODER_MEMBER_ID,
+      startDate: new Date(oneWeekAgo).toISOString(),
+      endDate: new Date(now).toISOString(),
+      nowMs: now
+    }) })
+  }
+  if (tasks.length === 0) {
+    return { ok: false, rowsImported: 0, ledgerRowsImported: 0, error: 'missing Anthropic/OpenAI/Qoder Admin configuration', state: billingStateQuery() }
+  }
+
+  const settled = await Promise.allSettled(tasks.map((task) => task.promise))
+  const results: AdminFetchResult[] = []
+  const failures: string[] = []
+  const syncState = db.prepare(UPSERT_BILLING_SYNC_STATE_SQL)
+  const insRaw = db.prepare(sqlInsert('provider_raw_usage', PROVIDER_RAW_USAGE_COLS))
+  const insLedger = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
+  const tx = db.transaction(() => {
+    settled.forEach((outcome, index) => {
+      const provider = tasks[index].provider
+      if (outcome.status === 'fulfilled') {
+        results.push(outcome.value)
+        for (const row of outcome.value.rows.providerRawUsage) insRaw.run(...(row as never[]))
+        for (const row of outcome.value.rows.usageLedger) insLedger.run(...(row as never[]))
+        syncState.run(provider, outcome.value.fetchedAt, null, now)
+      } else {
+        const error = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)
+        failures.push(`${provider}: ${error}`)
+        syncState.run(provider, null, error.slice(0, 2_000), now)
       }
     })
+  })
+  try {
     tx()
     invalidateQueryCaches()
-    return {
-      ok: true,
-      provider: results.length === 1 ? results[0].provider : 'multiple',
-      rowsImported: results.reduce((sum, result) => sum + result.rows.providerRawUsage.length, 0),
-      ledgerRowsImported: results.reduce((sum, result) => sum + result.rows.usageLedger.length, 0),
-      state: billingStateQuery()
-    }
-  } catch (e) {
-    return { ok: false, rowsImported: 0, ledgerRowsImported: 0, error: String((e as Error).message), state: billingStateQuery() }
+  } catch (error) {
+    return { ok: false, rowsImported: 0, ledgerRowsImported: 0, error: String((error as Error).message), state: billingStateQuery() }
+  }
+  return {
+    ok: failures.length === 0,
+    ...(results.length > 0 ? { provider: results.length === 1 ? results[0].provider : 'multiple' as const } : {}),
+    rowsImported: results.reduce((sum, result) => sum + result.rows.providerRawUsage.length, 0),
+    ledgerRowsImported: results.reduce((sum, result) => sum + result.rows.usageLedger.length, 0),
+    ...(failures.length > 0 ? { error: failures.join('；') } : {}),
+    state: billingStateQuery()
   }
 }
 

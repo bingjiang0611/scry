@@ -37,6 +37,26 @@ describe('withDirectoryLock', () => {
     }
   })
 
+  it('recovers an ancient unheartbeated lock when its PID has been reused', async () => {
+    const root = tempDir()
+    const lock = join(root, 'commit.lock')
+    try {
+      await mkdir(lock)
+      const ownerPath = join(lock, 'owner.json')
+      await writeFile(ownerPath, JSON.stringify({
+        pid: process.pid,
+        createdAt: Date.now() - 6 * 60_000,
+        token: 'old-process-incarnation'
+      }))
+      const old = new Date(Date.now() - 6 * 60_000)
+      await utimes(ownerPath, old, old)
+      await withDirectoryLock(lock, async () => undefined, { waitMs: 1_000, ttlMs: 10 })
+      expect(await readdir(join(root, 'recovered'))).toHaveLength(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('does not release a lock whose owner token changed', async () => {
     const root = tempDir()
     const lock = join(root, 'commit.lock')

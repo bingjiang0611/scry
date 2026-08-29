@@ -139,6 +139,24 @@ describe('Pi RPC Provider', () => {
     }
   })
 
+  it('removes billing-admin credentials from the Pi subprocess environment', () => {
+    const profile = { id: 'pi:test', label: 'Pi', executable: '/usr/bin/pi' }
+    const env = piRpcEnvironment(profile, {
+      PATH: '/usr/bin',
+      HOME: '/tmp',
+      ANTHROPIC_ADMIN_API_KEY: 'anthropic-admin',
+      OPENAI_ADMIN_API_KEY: 'openai-admin',
+      QODER_ADMIN_API_KEY: 'qoder-admin',
+      QODER_ORGANIZATION_ID: 'org',
+      QODER_MEMBER_ID: 'member'
+    })
+    expect(env).not.toHaveProperty('ANTHROPIC_ADMIN_API_KEY')
+    expect(env).not.toHaveProperty('OPENAI_ADMIN_API_KEY')
+    expect(env).not.toHaveProperty('QODER_ADMIN_API_KEY')
+    expect(env).not.toHaveProperty('QODER_ORGANIZATION_ID')
+    expect(env).not.toHaveProperty('QODER_MEMBER_ID')
+  })
+
   it('does not infer PI_AGENT_PI from an unverified shell assignment', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-pi-bootstrap-'))
     try {

@@ -11850,3 +11850,9 @@ button.turn-id.turn-call-open:focus-visible {
     display: none;
   }
 }
+
+/* Keep long histories in the accessibility/layout tree without eagerly painting every turn. */
+.transcript-turn {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}

@@ -120,7 +120,9 @@ function claudeRuntimeEnv(
   managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
 ): Record<string, string> {
   return {
-    ...(managedRecorder ? runtimeCliEnv(undefined, { managedRecorder: true }) : runtimeCliEnv()),
+    ...(managedRecorder
+      ? runtimeCliEnv(undefined, { managedRecorder: true, providerId: 'claude' })
+      : runtimeCliEnv(undefined, { providerId: 'claude' })),
     ...(managedRecorder && managedIdentity ? {
       SCRY_MANAGED_RUN_ID: managedIdentity.runId,
       SCRY_MANAGED_PROMPT_HASH: managedIdentity.promptHash
@@ -356,6 +358,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           mcp: result.mcpStatus ? { configured: listMcp(request.cwd, homeDir), runtime: result.mcpStatus } : undefined
         })),
         interrupt: handle.interrupt,
+        forceKill: handle.forceKill,
         getExternalSessionId: handle.getSessionId,
         getProviderTurnId: handle.getProviderTurnId
       }

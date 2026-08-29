@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
+import { releaseBuildEnvironment } from './release-policy.mjs'
 
 function localSigningIdentity() {
   if (process.platform !== 'darwin') return null
@@ -11,18 +12,26 @@ function localSigningIdentity() {
     null
 }
 
-const env = { ...process.env }
+let env = { ...process.env }
+const releaseBuild = env.SCRY_RELEASE_BUILD === '1'
 if (!env.CSC_NAME && !env.CSC_LINK && env.CSC_IDENTITY_AUTO_DISCOVERY !== 'false') {
   const identity = localSigningIdentity()
   if (identity) {
     env.CSC_NAME = identity
     console.log(`[scry] signing macOS app with ${identity}`)
-  } else if (process.platform === 'darwin') {
-    console.warn('[scry] no code-signing identity found; macOS Dock badge requires a signed build')
+  } else if (process.platform === 'darwin' && !releaseBuild) {
+    console.warn('[scry] no code-signing identity found; this output is development-only')
   }
 }
+env = releaseBuildEnvironment({
+  releaseBuild,
+  platform: process.platform,
+  env,
+  discoveredIdentity: env.CSC_NAME || localSigningIdentity()
+})
 
 const builder = join(process.cwd(), 'node_modules', '.bin', 'electron-builder')
-const result = spawnSync(builder, ['--dir'], { env, stdio: 'inherit' })
+const args = ['--dir', ...(releaseBuild && process.platform === 'darwin' ? ['--config.mac.notarize=true'] : [])]
+const result = spawnSync(builder, args, { env, stdio: 'inherit' })
 if (result.error) throw result.error
 if (result.status !== 0) throw new Error(`electron-builder failed with exit ${result.status ?? 'unknown'}`)

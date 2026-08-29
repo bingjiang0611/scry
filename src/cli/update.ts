@@ -57,7 +57,10 @@ function statePath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 function registryOf(env: NodeJS.ProcessEnv): string {
-  return (env.SCRY_CLI_REGISTRY ?? DEFAULT_REGISTRY).replace(/\/+$/, '')
+  const value = (env.SCRY_CLI_REGISTRY ?? DEFAULT_REGISTRY).replace(/\/+$/, '')
+  const url = new URL(value)
+  if (url.protocol !== 'https:') throw new Error('Scry CLI registry must use HTTPS')
+  return url.href.replace(/\/+$/, '')
 }
 
 function npmExecutable(env: NodeJS.ProcessEnv): string {
@@ -107,6 +110,7 @@ export function shouldScheduleAutoUpdate(options: AutoUpdateOptions): boolean {
   if (!options.stderrIsTTY || options.noUpdateCheck) return false
   if (!options.command || ['upgrade', 'version', '__auto_update'].includes(options.command)) return false
   if (options.command === 'recorder' && ['hook', 'serve'].includes(options.action ?? '')) return false
+  if (!enabled(env.SCRY_AUTO_UPDATE)) return false
   return ![
     env.SCRY_CLI_BUNDLED,
     env.SCRY_RECORDER_MANAGED,
@@ -207,7 +211,7 @@ export async function upgradeCli(options: UpgradeOptions): Promise<UpgradeResult
       if (!entryPath || !prefix) throw new Error('当前 scry 不是 npm 全局安装；请使用对应安装方式升级')
       await runNpm([
         'install', '--global', '--prefix', prefix,
-        '--registry', registryOf(env), '--no-audit', '--no-fund',
+        '--registry', registryOf(env), '--no-audit', '--no-fund', '--ignore-scripts',
         `${PACKAGE_NAME}@${latest}`
       ], env, 120_000)
       const { stdout } = await execFileAsync(process.execPath, [entryPath, '--version'], {
@@ -242,7 +246,12 @@ export async function runBackgroundUpdate(currentVersion: string, entryPath?: st
   return await withDirectoryLock(`${path}.lock`, async () => {
     const latestState = await readJson<CliUpdateState>(path)
     if (!isUpdateDue(latestState)) return null
-    return await upgradeCli({ currentVersion, entryPath })
+    return await upgradeCli({
+      currentVersion,
+      entryPath,
+      checkOnly: true,
+      env: { ...process.env, SCRY_CLI_REGISTRY: DEFAULT_REGISTRY }
+    })
   }, { waitMs: 100, ttlMs: 3 * 60 * 1_000 }).catch(() => null)
 }
 

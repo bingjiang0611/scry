@@ -610,6 +610,10 @@ export function createCodexAdapter(
   homeDir = homedir()
 ): ProviderAdapter {
   const clients = new Map<string, CodexAppServerClient>()
+  const clientActivity = new Map<CodexAppServerClient, number>()
+  const clientLastUsed = new Map<CodexAppServerClient, number>()
+  const clientIdleTimers = new Map<CodexAppServerClient, ReturnType<typeof setTimeout>>()
+  const CLIENT_IDLE_MS = 60_000
   const modelCache = new Map<string, { data: AgentRunControlCatalog; observedAt: number }>()
   let lastClient: CodexAppServerClient | null = null
   let lastOkAt: number | undefined
@@ -620,6 +624,28 @@ export function createCodexAdapter(
   let isolatedHome: ReturnType<typeof createCodexIsolatedHome> | undefined
 
   const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
+  const evictIdleClients = (protectedClient?: CodexAppServerClient): void => {
+    const unique = [...new Set(clients.values())]
+    if (unique.length <= 3) return
+    const idle = unique
+      .filter((client) => client !== protectedClient && (clientActivity.get(client) ?? 0) === 0)
+      .sort((left, right) => (clientLastUsed.get(left) ?? 0) - (clientLastUsed.get(right) ?? 0))
+    for (const client of idle.slice(0, Math.max(0, unique.length - 3))) void shutdownClient(client)
+  }
+  const scheduleClientShutdown = (client: CodexAppServerClient): void => {
+    const previous = clientIdleTimers.get(client)
+    if (previous) clearTimeout(previous)
+    const timer = setTimeout(() => {
+      clientIdleTimers.delete(client)
+      if ((clientActivity.get(client) ?? 0) > 0) {
+        scheduleClientShutdown(client)
+        return
+      }
+      void shutdownClient(client)
+    }, CLIENT_IDLE_MS)
+    timer.unref()
+    clientIdleTimers.set(client, timer)
+  }
   const getClient = (
     cwd?: string,
     hookTrust: CodexHookTrustGrant[] = [],
@@ -630,13 +656,17 @@ export function createCodexAdapter(
     const key = `${cwd ?? ''}\0${trustKey}\0${mcpExecution?.fingerprint ?? 'none'}`
     const existing = clients.get(key)
     if (existing) {
+      const timer = clientIdleTimers.get(existing)
+      if (timer) clearTimeout(timer)
+      clientIdleTimers.delete(existing)
+      clientLastUsed.set(existing, Date.now())
       lastClient = existing
       return existing
     }
     const path = executable()
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
-    const env = runtimeCliEnv(undefined, { managedRecorder: true })
+    const env = runtimeCliEnv(undefined, { managedRecorder: true, providerId: 'codex' })
     const sourceHome = process.env.SCRY_CODEX_SOURCE_HOME?.trim() || env.CODEX_HOME?.trim() || undefined
     delete env.SCRY_CODEX_SOURCE_HOME
     isolatedHome ??= createCodexIsolatedHome(sourceHome, isolatedHomePath)
@@ -674,16 +704,26 @@ export function createCodexAdapter(
       env: { ...env, CODEX_HOME: isolatedHome.path }
     })
     clients.set(key, client)
+    clientLastUsed.set(client, Date.now())
     lastClient = client
+    evictIdleClients(client)
     return client
   }
 
   const shutdownClient = async (client: CodexAppServerClient): Promise<void> => {
+    const timer = clientIdleTimers.get(client)
+    if (timer) clearTimeout(timer)
+    clientIdleTimers.delete(client)
+    clientActivity.delete(client)
+    clientLastUsed.delete(client)
+    let registered = false
     for (const [key, cached] of clients) {
-      if (cached === client) clients.delete(key)
+      if (cached !== client) continue
+      registered = true
+      clients.delete(key)
     }
     if (lastClient === client) lastClient = null
-    await client.shutdown()
+    if (registered) await client.shutdown()
   }
 
   const request = async <T>(
@@ -693,8 +733,10 @@ export function createCodexAdapter(
     hookTrust: CodexHookTrustGrant[] = [],
     mcpExecution?: AuthorizedMcpExecution
   ): Promise<T> => {
+    const client = getClient(cwd, hookTrust, mcpExecution)
+    clientActivity.set(client, (clientActivity.get(client) ?? 0) + 1)
     try {
-      const result = await getClient(cwd, hookTrust, mcpExecution).request<T>(method, params)
+      const result = await client.request<T>(method, params)
       lastOkAt = Date.now()
       lastError = undefined
       return result
@@ -702,6 +744,13 @@ export function createCodexAdapter(
       lastErrorAt = Date.now()
       lastError = sanitizeMcpAuthError(error)
       throw error
+    } finally {
+      const active = Math.max(0, (clientActivity.get(client) ?? 1) - 1)
+      if (active > 0) clientActivity.set(client, active)
+      else clientActivity.delete(client)
+      clientLastUsed.set(client, Date.now())
+      scheduleClientShutdown(client)
+      evictIdleClients()
     }
   }
 
@@ -814,6 +863,7 @@ export function createCodexAdapter(
       let accountPlan: string | undefined
       let accountReadError: string | undefined
       let lastTurnError: Record<string, unknown> | undefined
+      let activeClient: CodexAppServerClient | undefined
       let planUpdateSeq = 0
       const childAgents = new Map<string, { parentToolUseId?: string; name?: string }>()
       const seenSubAgentActivities = new Set<string>()
@@ -991,6 +1041,8 @@ export function createCodexAdapter(
       const promise = (async (): Promise<ProviderRunResult> => {
         try {
           const appServer = getClient(runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
+          activeClient = appServer
+          clientActivity.set(appServer, (clientActivity.get(appServer) ?? 0) + 1)
           await appServer.start()
           const generationFailure = appServer.failureForCurrentGeneration()
           unsubscribeRequest = appServer.onRequest(handleServerRequest)
@@ -1413,6 +1465,12 @@ export function createCodexAdapter(
           unsubscribeRequest()
           for (const controller of approvalControllers) controller.abort()
           approvalControllers.clear()
+          if (activeClient) {
+            const active = Math.max(0, (clientActivity.get(activeClient) ?? 1) - 1)
+            if (active > 0) clientActivity.set(activeClient, active)
+            else clientActivity.delete(activeClient)
+            scheduleClientShutdown(activeClient)
+          }
         }
       })()
 
@@ -1433,6 +1491,7 @@ export function createCodexAdapter(
       return {
         promise,
         interrupt,
+        forceKill: () => activeClient?.close(),
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: () => turnId
       }
@@ -1638,7 +1697,13 @@ export function createCodexAdapter(
               data: { models, permissions: permissionOptions() },
               observedAt: Date.now()
             }
+            modelCache.delete(key)
             modelCache.set(key, value)
+            while (modelCache.size > 16) {
+              const oldest = modelCache.keys().next().value
+              if (oldest === undefined) break
+              modelCache.delete(oldest)
+            }
           }
           return capabilityReady(context, 'read', value.data, value.observedAt)
         } catch (error) {
@@ -1651,8 +1716,13 @@ export function createCodexAdapter(
       }
     },
     dispose: async () => {
+      for (const timer of clientIdleTimers.values()) clearTimeout(timer)
+      clientIdleTimers.clear()
+      clientActivity.clear()
+      clientLastUsed.clear()
       await Promise.all([...clients.values()].map((client) => client.shutdown()))
       clients.clear()
+      modelCache.clear()
       lastClient = null
       isolatedHome?.cleanup()
       isolatedHome = undefined

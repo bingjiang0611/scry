@@ -898,7 +898,8 @@ const record = async (stage, input = {}) => {
   const tool = text(input.tool) ?? text(input.toolName) ?? text(input.name)
   if (!sessionId || !callId || !tool) return
   const line = JSON.stringify({ version: 1, stage, sessionId, callId, tool, timestamp: new Date().toISOString() }) + "\\n"
-  try { await appendFile(tracePath, line, { encoding: "utf8", mode: 0o600 }) } catch {}
+  try { await appendFile(tracePath, line, { encoding: "utf8", mode: 0o600 }) }
+  catch (error) { console.error("[scry-hook-observer] trace append failed:", error instanceof Error ? error.message : String(error)) }
 }
 
 export const ScryHookObserver = async () => ({
@@ -1086,7 +1087,7 @@ export class OpenCodeServerManager {
       if (configured) throw new Error(`OpenCode managed config 无法安全隔离：${configured}`)
     }
     const port = await freePort()
-    const sourceEnv = runtimeCliEnv()
+    const sourceEnv = runtimeCliEnv(undefined, { providerId: 'opencode' })
     const providerMcpAuthFile = openCodeMcpAuthFile(sourceEnv)
     const mcpAuthFile = providerMcpAuthFile
     const mcpAuthSeed = await openCodeMcpAuthSeed(
@@ -1245,6 +1246,24 @@ export class OpenCodeServerManager {
       if (dir) await rm(dir, { recursive: true, force: true })
       throw error
     }
+  }
+
+  forceClose(): void {
+    this.startGeneration += 1
+    const children = [this.active?.process, this.pendingChild].filter(
+      (child): child is ChildProcessWithoutNullStreams => child != null
+    )
+    this.active = null
+    this.pendingChild = null
+    for (const child of children) {
+      this.expectedStops.add(child)
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    }
+    this.pendingDispatcher?.destroy()
+    this.pendingDispatcher = null
+    const dir = this.hookConfigDir
+    this.hookConfigDir = null
+    if (dir) void rm(dir, { recursive: true, force: true })
   }
 
   close(): void {

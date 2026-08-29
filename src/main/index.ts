@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { getClaudeVersion } from './agent-runner'
 import {
   detectAgents,
@@ -58,6 +58,7 @@ import { capabilityUnavailable, type DeleteArchivedSessionsResult, type DeleteSe
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
+import { createSmokeProviderAdapter } from './providers/smoke'
 import { piRpcEnvironment, probePiAgent } from './providers/pi'
 import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
@@ -108,11 +109,15 @@ import type {
   WorkspaceWriteRequest
 } from '../shared/workspace'
 import { createTerminalManager, type TerminalManager } from './terminal-manager'
+import { TerminalOutputBridge } from './terminal-output'
+import {
+  authorizedWorkspaceRequest,
+  canonicalExistingDirectory,
+  knownProjectDirectory
+} from './workspace-authorization'
 import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import type {
   TerminalCloseRequest,
-  TerminalDataEvent,
-  TerminalExitEvent,
   TerminalResizeRequest,
   TerminalStartRequest,
   TerminalWriteRequest
@@ -140,14 +145,17 @@ import {
   configureRendererPermissions,
   isAllowedRendererRequest,
   isSafeExternalUrl,
+  isSensitiveExternalDestination,
   isTrustedRendererUrl,
   resolveRendererEntryUrl,
   rendererContentSecurityPolicy
 } from './renderer-security'
 import {
   buildMcpExecutionSnapshot,
+  confirmMcpExecutionAuthorization,
   guardSummaryLine,
   McpExecutionTrust,
+  mcpExecutionAuthorizationPrompt,
   mcpExecutionGuardSummary,
   type McpExecutionOperation,
   type McpExecutionSnapshot
@@ -162,7 +170,7 @@ import {
 } from './attachment-store'
 import { deleteOwnedSessionData } from './session-deletion'
 import { ensureFailedTerminalResult } from './run-outcome'
-import { settleRunsForShutdown } from './shutdown'
+import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
 import { ContextAdmission, expectedSessionMatches, waitForCompletedRuns } from './context-admission'
 import {
   cleanupTraceTurnProgressTemps,
@@ -194,8 +202,8 @@ const rendererEntryUrl = resolveRendererEntryUrl(
 const useDevelopmentRenderer = rendererEntryUrl !== packagedRendererEntryUrl
 let win: BrowserWindow | null = null
 let runSeq = 0
-let evSeq = 0
 let isShuttingDown = false
+const mainEventId = (prefix: string, runId: string): string => `${prefix}-${runId}-${randomUUID()}`
 let startupManagedRecovery: Promise<void> = Promise.resolve()
 const primaryInstance = app.requestSingleInstanceLock()
 if (!primaryInstance) {
@@ -224,6 +232,7 @@ function attachmentPrompt(prompt: string, attachments: PreparedAttachment[]): st
 const sessionByContext = new Map<string, string>()
 const sessionRevisionByContext = new Map<string, number>()
 const sessionAliasesByContext = new Map<string, Map<string, string>>()
+let loadSessionRevision = 0
 // 会话级净 diff 的持久 baseline registry：每个 (provider,cwd) 上下文一份贯穿会话的 Git 快照。
 // revision + 原生 session id 双重锚定，绝不串会话；找不到可复用基线时当场重锚并标 origin=resumed，
 // 不再像旧实现那样在 resume/loadSession 之后彻底不落 session_diff。
@@ -237,44 +246,20 @@ const deletingSessions = new Set<string>()
 let currentCwd: string | undefined
 let terminalManager: TerminalManager | undefined
 let terminalManagerPromise: Promise<TerminalManager> | undefined
-let terminalDataBuffer: TerminalDataEvent[] = []
-let terminalDataBytes = 0
-let terminalDataTimer: ReturnType<typeof setTimeout> | null = null
-const TERMINAL_OUTPUT_FLUSH_BYTES = 1024 * 1024
 
 function rendererCanReceive(): boolean {
   return Boolean(win && !win.isDestroyed() && !win.webContents.isDestroyed())
 }
 
-function flushTerminalData(): void {
-  if (terminalDataTimer) {
-    clearTimeout(terminalDataTimer)
-    terminalDataTimer = null
-  }
-  if (terminalDataBuffer.length === 0) return
-  const batch = terminalDataBuffer
-  terminalDataBuffer = []
-  terminalDataBytes = 0
-  if (rendererCanReceive()) win?.webContents.send('terminal:data', batch)
-}
-
-function queueTerminalData(event: TerminalDataEvent): void {
-  if (!rendererCanReceive()) return
-  const last = terminalDataBuffer.at(-1)
-  if (last?.id === event.id) last.data += event.data
-  else terminalDataBuffer.push({ ...event })
-  terminalDataBytes += Buffer.byteLength(event.data, 'utf8')
-  if (terminalDataBytes >= TERMINAL_OUTPUT_FLUSH_BYTES) {
-    flushTerminalData()
-  } else if (!terminalDataTimer) {
-    terminalDataTimer = setTimeout(flushTerminalData, 16)
-  }
-}
-
-function sendTerminalExit(event: TerminalExitEvent): void {
-  flushTerminalData()
-  if (rendererCanReceive()) win?.webContents.send('terminal:exit', event)
-}
+const terminalOutput = new TerminalOutputBridge({
+  canSend: rendererCanReceive,
+  sendData: (events) => win?.webContents.send('terminal:data', events),
+  sendExit: (event) => win?.webContents.send('terminal:exit', event),
+  closeTerminal: (id) => {
+    try { terminalManager?.close({ id }) } catch { /* terminal may already be closing */ }
+  },
+  warn: (message, id) => console.warn(`[scry] ${message}:`, id)
+})
 
 async function getTerminalManager(): Promise<TerminalManager> {
   if (terminalManager) return terminalManager
@@ -284,8 +269,8 @@ async function getTerminalManager(): Promise<TerminalManager> {
         const manager = createTerminalManager({
           getCurrentCwd: () => currentCwd,
           defaultCwd: homeDir,
-          onData: queueTerminalData,
-          onExit: sendTerminalExit,
+          onData: (event) => terminalOutput.data(event),
+          onExit: (event) => terminalOutput.exit(event),
           shell: env.SHELL || process.env.SHELL || '/bin/zsh',
           env
         })
@@ -300,22 +285,28 @@ async function getTerminalManager(): Promise<TerminalManager> {
   return terminalManagerPromise
 }
 
-function closeAllTerminals(): void {
+function closeAllTerminals(discardOutput = false): void {
   try {
     terminalManager?.closeAll()
   } catch (error) {
     console.warn('[scry] terminal cleanup failed:', (error as Error)?.message)
   }
-  flushTerminalData()
+  if (discardOutput) terminalOutput.close()
 }
 
 const homeDir = homedir()
 const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
 const projectStore = () => createProjectStore(app.getPath('userData'))
 const rememberProject = (cwd: string): void => {
-  recentStore().push(cwd)
-  projectStore().remember(cwd)
+  const canonical = canonicalExistingDirectory(cwd)
+  recentStore().push(canonical)
+  projectStore().remember(canonical)
 }
+const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirectory(cwd, new Set([
+  ...recentStore().load(),
+  ...projectStore().load().filter((project) => !project.removedAt).map((project) => project.cwd),
+  ...appSessionStore().load().map((session) => session.cwd).filter(Boolean)
+]))
 const listProjectCatalog = (): ProjectMeta[] => {
   const sessionProjects = appSessionStore().listProjects()
   const now = Date.now()
@@ -357,14 +348,23 @@ const resolvePiProfile = async (id: string): Promise<PiAgentProfile | undefined>
 }
 let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
 const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(app.getPath('userData'))
+const builtInProviderAdapters = createBuiltInProviderAdapters(
+  homeDir,
+  join(app.getPath('userData'), 'codex-home-v1'),
+  join(app.getPath('userData'), 'provider-auth', 'opencode'),
+  join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
+  { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile }
+)
+if (
+  process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
+  process.env.ELECTRON_ENABLE_LOGGING === '1' &&
+  process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
+) {
+  const codexIndex = builtInProviderAdapters.findIndex((adapter) => adapter.id === 'codex')
+  if (codexIndex >= 0) builtInProviderAdapters[codexIndex] = createSmokeProviderAdapter()
+}
 const providerRegistry = new ProviderRegistry(
-  createBuiltInProviderAdapters(
-    homeDir,
-    join(app.getPath('userData'), 'codex-home-v1'),
-    join(app.getPath('userData'), 'provider-auth', 'opencode'),
-    join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
-    { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile }
-  ),
+  builtInProviderAdapters,
   {
     disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS),
     runControlsEnabled: process.env.SCRY_RUN_CONTROLS?.trim() !== '0'
@@ -455,14 +455,36 @@ async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]
   if (pending.length === 0) return []
 
   const trust = pending.map(({ key, currentHash }) => ({ key, currentHash }))
-  if (process.env.SCRY_CODEX_BYPASS_HOOK_TRUST?.trim() === '1') return trust
-
   const fingerprint = codexHookFingerprint(inspection.hooks)
   const store = codexHookGrantStore()
   if (!store.isGranted(cwd, fingerprint)) {
-    // 默认允许：不再弹窗确认。注入的仍是这组 Hook 的精确 key/hash，
-    // 指纹绑定语义不变——Hook 增删或内容 hash 变化会生成新指纹并再次走这里。
     const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
+    const detail = [
+      `仓库：${cwd}`,
+      `来源：${codexHookSourceSummary(inspection) || '未知'}`,
+      `指纹：${fingerprint}`,
+      '',
+      ...pending.map((hook, index) => `${index + 1}. ${hook.eventName} · ${hook.sourcePath}\n   ${hook.currentHash}`),
+      ...(inspection.warnings.length > 0 ? ['', `警告：${inspection.warnings.join('；')}`] : []),
+      '',
+      '只有上面列出的精确 Hook key/hash 会被放行；内容变化后将重新询问。'
+    ].join('\n')
+    const options = {
+      type: 'warning' as const,
+      title: '授权当前仓库的 Codex Hook',
+      message: `Codex 已发现 ${pending.length} 个尚未信任的项目 Hook`,
+      detail,
+      buttons: ['取消', '允许这些 Hook 并启动'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    }
+    const result = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 1) {
+      throw codexHookInspectionError(cwd, '用户未授权当前 Codex Hook', '检查 Hook 来源后重新发送，或禁用项目 Hook')
+    }
     try {
       store.grant(cwd, fingerprint, enabledCount)
     } catch (error) {
@@ -471,12 +493,6 @@ async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]
         `Codex Hook 授权保存失败：${String((error as Error).message)}`,
         '检查 Scry userData 目录写权限后重试'
       )
-    }
-    console.info(
-      `[scry] auto-granted codex hook trust: ${cwd} fingerprint=${fingerprint} hooks=${pending.length}/${enabledCount}（${codexHookSourceSummary(inspection)}）`
-    )
-    if (inspection.warnings.length > 0) {
-      console.warn(`[scry] codex hook warnings: ${cwd}: ${inspection.warnings.join('；')}`)
     }
   }
   return trust
@@ -557,10 +573,9 @@ function withoutCommitHookCapability(env: NodeJS.ProcessEnv = process.env): Node
 }
 
 async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessEnv> {
-  const enablement = await resolveRecorderEnablement(cwd)
-  if (!enablement.enabled || !enablement.config.commitHook) return process.env
-
   const baseEnv = withoutCommitHookCapability()
+  const enablement = await resolveRecorderEnablement(cwd)
+  if (!enablement.enabled || !enablement.config.commitHook) return baseEnv
   let inspection
   try {
     inspection = await inspectCommitHookBundle(cwd, enablement.config.commitHook)
@@ -588,17 +603,34 @@ async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessE
     }
   }
   if (!granted) {
-    // 默认允许：不再弹窗确认。授权后仍只执行冻结到应用数据目录的精确回调包副本，
-    // 入口或任一依赖内容变化会生成新指纹并重新走这里；授权失败不影响本地 record 落盘。
+    const options = {
+      type: 'warning' as const,
+      title: '授权 Recorder 提交回调',
+      message: '当前仓库请求在每轮记录提交后执行本地脚本',
+      detail: [
+        `仓库：${inspection.workspace}`,
+        `入口：${inspection.entry}`,
+        `文件：${inspection.files.length}`,
+        `指纹：${inspection.fingerprint}`,
+        '',
+        '未授权时仍会保存本地 recorder 数据，但不会执行回调。',
+        '允许后只执行冻结到 Scry 私有目录的精确文件字节；内容变化后将重新询问。'
+      ].join('\n'),
+      buttons: ['不执行回调', '允许当前回调'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    }
+    const result = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 1) return baseEnv
     try {
       await store.grant(inspection.workspace, inspection.fingerprint)
     } catch (error) {
       console.warn('[scry] recorder commit hook grant failed:', cwd, error)
       return baseEnv
     }
-    console.info(
-      `[scry] auto-granted recorder commit hook: ${inspection.workspace} entry=${inspection.entry} files=${inspection.files.length} fingerprint=${inspection.fingerprint}`
-    )
   }
 
   try {
@@ -664,12 +696,26 @@ async function ensureMcpExecutionAuthorized(
   if (selected.length === 0) return operation === 'run' ? null : snapshot
 
   if (!mcpExecutionTrust.isGranted(operation, snapshot)) {
-    // 默认允许：不再弹分页授权框。授权仍按 进程+操作+目录+配置 指纹绑定，
-    // 配置变化或重启后重新走这里；下方二次构建的 TOCTOU 校验保持不变。
-    const guard = guardSummaryLine(mcpExecutionGuardSummary(snapshot, selected))
-    console.info(
-      `[scry] auto-granted mcp execution: ${context.providerId} ${operation} cwd=${snapshot.cwd} targets=${selected.length} fingerprint=${snapshot.fingerprint} ${guard}`
-    )
+    const guardSummary = mcpExecutionGuardSummary(snapshot, selected)
+    const guard = guardSummaryLine(guardSummary)
+    if (guardSummary.status === 'block') {
+      throw new Error(`MCP Guard 已阻断执行：${guard}`)
+    }
+    const groups = new Map<string, typeof selected>()
+    for (const target of selected) {
+      const scope = target.scope === 'user' ? 'user' : 'project'
+      groups.set(scope, [...(groups.get(scope) ?? []), target])
+    }
+    for (const targets of groups.values()) {
+      const prompt = mcpExecutionAuthorizationPrompt(snapshot, operation, targets)
+      const approved = await confirmMcpExecutionAuthorization(prompt, async (options) => {
+        const result = win && !win.isDestroyed()
+          ? await dialog.showMessageBox(win, options)
+          : await dialog.showMessageBox(options)
+        return { response: result.response }
+      })
+      if (!approved) throw new Error('用户未授权执行当前 MCP 配置')
+    }
   }
 
   const verified = build()
@@ -682,11 +728,22 @@ async function ensureMcpExecutionAuthorized(
 
 function authorizedMcpExecution(snapshot: McpExecutionSnapshot | null): AuthorizedMcpExecution | undefined {
   if (!snapshot) return undefined
-  return {
+  const verified = buildMcpExecutionSnapshot({
+    providerId: snapshot.providerId,
     cwd: snapshot.cwd,
-    fingerprint: snapshot.fingerprint,
-    targets: snapshot.targets.map(({ targetId, name, enabled, config }) => ({ targetId, name, enabled, config })),
-    env: { ...snapshot.executionEnv }
+    homeDir,
+    settingSources: snapshot.settingSources,
+    env: shellEnv(),
+    selectedTargetId: snapshot.selectedTargetId
+  })
+  if (verified.errors.length > 0 || verified.fingerprint !== snapshot.fingerprint) {
+    throw new Error('MCP 可执行文件或配置在启动边界发生变化，已拒绝执行')
+  }
+  return {
+    cwd: verified.cwd,
+    fingerprint: verified.fingerprint,
+    targets: verified.targets.map(({ targetId, name, enabled, config }) => ({ targetId, name, enabled, config })),
+    env: { ...verified.executionEnv }
   }
 }
 
@@ -883,6 +940,27 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
 // 注：原来扫 ~/.claude/projects 列举 transcript 的逻辑（readHeadPreview/readCwd/collectSessions）
 // 已移除——app 只列自己起过的会话（见 app-sessions），不采集 terminal 裸跑的 claude。
 
+async function openExternalUrl(url: string): Promise<void> {
+  if (!isSafeExternalUrl(url)) return
+  if (await isSensitiveExternalDestination(url)) {
+    const options = {
+      type: 'warning' as const,
+      title: '打开本机或私网链接',
+      message: '该链接可能访问已登录的本机或内网服务',
+      detail: url,
+      buttons: ['取消', '仍然在浏览器中打开'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    }
+    const result = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 1) return
+  }
+  await shell.openExternal(url)
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -902,13 +980,13 @@ function createWindow(): void {
   const createdWindow = win
   createdWindow.on('focus', () => dockBadge.focusWindow())
   createdWindow.on('closed', () => {
-    closeAllTerminals()
+    closeAllTerminals(true)
     if (win === createdWindow) win = null
   })
   createdWindow.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) closeAllTerminals()
+    if (details.isMainFrame && !details.isSameDocument) closeAllTerminals(true)
   })
-  createdWindow.webContents.on('render-process-gone', () => closeAllTerminals())
+  createdWindow.webContents.on('render-process-gone', () => closeAllTerminals(true))
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error(`[scry] preload failed: ${preloadPath}`, error)
   })
@@ -928,16 +1006,16 @@ function createWindow(): void {
   win.webContents.on('will-navigate', (event, url) => {
     if (isTrustedRendererUrl(url, rendererEntryUrl)) return
     event.preventDefault()
-    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+    if (isSafeExternalUrl(url)) void openExternalUrl(url)
   })
   win.webContents.on('will-redirect', (event, url) => {
     if (isTrustedRendererUrl(url, rendererEntryUrl)) return
     event.preventDefault()
-    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+    if (isSafeExternalUrl(url)) void openExternalUrl(url)
   })
   win.webContents.on('will-attach-webview', (event) => event.preventDefault())
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+    if (isSafeExternalUrl(url)) void openExternalUrl(url)
     return { action: 'deny' }
   })
   let windowShown = false
@@ -1127,7 +1205,8 @@ handleTrusted('agent:removeRecentFolder', (_event, dir: string) => recentStore()
 handleTrusted('agent:chooseFolder', async () => {
   const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
   if (r.canceled || r.filePaths.length === 0) return null
-  const dir = r.filePaths[0]
+  const dir = canonicalExistingDirectory(r.filePaths[0])
+  loadSessionRevision++
   rememberProject(dir)
   setCurrentCwd(dir)
   return dir
@@ -1149,44 +1228,28 @@ handleTrusted('agent:clipboardImage', () => {
   } satisfies AgentInputAttachment
 })
 
-function assertWorkspaceSender(senderId: number): void {
-  if (!win || win.isDestroyed() || senderId !== win.webContents.id) throw new Error('无权访问工作区文件')
-}
-
-handleTrusted('workspace:list', (event, request: WorkspaceListRequest) => {
-  assertWorkspaceSender(event.sender.id)
-  return listWorkspace(request)
-})
-handleTrusted('workspace:read', (event, request: WorkspacePathRequest) => {
-  assertWorkspaceSender(event.sender.id)
-  return readWorkspaceFile(request)
-})
-handleTrusted('workspace:write', (event, request: WorkspaceWriteRequest) => {
-  assertWorkspaceSender(event.sender.id)
-  return writeWorkspaceFile(request)
-})
-handleTrusted('workspace:create', (event, request: WorkspaceCreateRequest) => {
-  assertWorkspaceSender(event.sender.id)
-  return createWorkspaceEntry(request)
-})
-handleTrusted('workspace:rename', (event, request: WorkspaceRenameRequest) => {
-  assertWorkspaceSender(event.sender.id)
-  return renameWorkspaceEntry(request)
-})
-handleTrusted('workspace:move', (event, request: WorkspaceMoveRequest) => {
-  assertWorkspaceSender(event.sender.id)
-  return moveWorkspaceEntry(request)
-})
-handleTrusted('workspace:trash', (event, request: WorkspacePathRequest) => {
-  assertWorkspaceSender(event.sender.id)
-  return trashWorkspaceEntry(request, (path) => shell.trashItem(path))
-})
+handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
+  listWorkspace(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
+  readWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:write', (_event, request: WorkspaceWriteRequest) =>
+  writeWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:create', (_event, request: WorkspaceCreateRequest) =>
+  createWorkspaceEntry(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:rename', (_event, request: WorkspaceRenameRequest) =>
+  renameWorkspaceEntry(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:move', (_event, request: WorkspaceMoveRequest) =>
+  moveWorkspaceEntry(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:trash', (_event, request: WorkspacePathRequest) =>
+  trashWorkspaceEntry(authorizedWorkspaceRequest(currentCwd, request), (path) => shell.trashItem(path)))
 
 handleTrusted('terminal:start', async (event, request: TerminalStartRequest) => {
   const manager = await getTerminalManager()
   if (isShuttingDown || !rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
-  return manager.start(request)
+  const session = manager.start(request)
+  terminalOutput.started(session.id)
+  return session
 })
 handleTrusted('terminal:write', async (event, request: TerminalWriteRequest) => {
   const manager = await getTerminalManager()
@@ -1202,17 +1265,28 @@ handleTrusted('terminal:resize', async (event, request: TerminalResizeRequest) =
   manager.resize(request)
   return true as const
 })
+handleTrusted('terminal:ready', (_event, request: { id: string }) => {
+  if (!request || typeof request.id !== 'string' || !request.id.startsWith('terminal-')) throw new Error('终端 ready 无效')
+  terminalOutput.ready(request.id)
+  return true as const
+})
+handleTrusted('terminal:ack', (_event, request: { id: string; bytes: number }) => {
+  if (!request || typeof request.id !== 'string') throw new Error('终端输出确认无效')
+  terminalOutput.ack(request.id, request.bytes)
+  return true as const
+})
 handleTrusted('terminal:close', async (event, request: TerminalCloseRequest) => {
   const manager = await getTerminalManager()
   if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
+  terminalOutput.terminalClosed(request.id)
   manager.close(request)
   return true as const
 })
 
 handleTrusted('agent:setCwd', (_e, dir: string | null) => {
-  const cwd = typeof dir === 'string' && dir.trim() ? dir : undefined
-  if (cwd) rememberProject(cwd)
+  loadSessionRevision++
+  const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
   setCurrentCwd(cwd)
   return cwd ?? null
 })
@@ -1384,7 +1458,20 @@ handleTrusted('agent:revealProject', (_event, cwd: unknown) => {
 // 加载一个历史会话：解析 transcript 成对话轮次，并把它设为当前会话（后续对话会 resume）
 handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
   if (!payload.externalSessionId) return null
-  const cwd = payload.cwd ?? ''
+  const requestRevision = ++loadSessionRevision
+  const catalogMatches = appSessionStore().load().filter((session) =>
+    session.providerId === payload.providerId && session.agentProfileId === payload.agentProfileId &&
+    (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
+  )
+  const requestedCwd = payload.cwd?.trim()
+    ? resolveKnownProjectDirectory(payload.cwd)
+    : payload.cwd === '' ? '' : undefined
+  const catalogSession = catalogMatches.length === 1
+    ? catalogMatches[0]
+    : catalogMatches.find((session) => session.cwd === requestedCwd)
+  if (!catalogSession) throw new Error('会话不属于当前 Scry catalog 或身份不唯一')
+  const cwd = catalogSession.cwd ? resolveKnownProjectDirectory(catalogSession.cwd) : ''
+  if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
   const archived = await readTraceArchiveAsync({
     cwd,
     sessionId: payload.externalSessionId,
@@ -1401,7 +1488,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
       const content = await readFile(fp, 'utf8')
       turns = parseTranscriptToTurns(content, {
         runId: payload.externalSessionId,
-        newId: () => `h-${evSeq++}`,
+        newId: () => mainEventId('history', payload.externalSessionId!),
         now: () => new Date().toISOString()
       })
     } catch {
@@ -1409,6 +1496,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
     }
   }
   if (!fp && !archived) return null
+  if (requestRevision !== loadSessionRevision) return null
   dockBadge.view(
     providerSessionKey(payload.providerId, cwd, payload.externalSessionId, payload.agentProfileId),
     Boolean(win?.isFocused())
@@ -1418,11 +1506,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
   bumpSessionRevision(key)
   discardSessionBaseline(key)
   sessionAliasesByContext.delete(key)
-  const catalogSession = appSessionStore().load().find((session) =>
-    session.providerId === payload.providerId && session.agentProfileId === payload.agentProfileId && session.cwd === cwd &&
-    (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
-  )
-  if (!catalogSession || appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
+  if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
   else sessionByContext.delete(key)
   if (cwd) rememberProject(cwd)
   const merged = mergeSessionTurns(turns, archived, { userDataDir: app.getPath('userData') })
@@ -1666,6 +1750,7 @@ interface RunControl {
   runId: string
   providerId: ProviderId
   interrupt: () => void
+  forceKill: () => void
   cwd?: string
   resume?: string
   getExternalSessionId: () => string | undefined
@@ -1697,7 +1782,7 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
   if (run) {
     run.pendingQuestions = (run.pendingQuestions ?? []).filter((item) => item.questionId !== change.questionId)
     const event: TraceEvent = {
-      id: `i-${evSeq++}`,
+      id: mainEventId('intervention', change.runId),
       ts: change.intervention.closedAt,
       runId: change.runId,
       kind: 'human',
@@ -1717,6 +1802,7 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
 // 保序（FIFO buffer）、不丢（done/error 前 flushTraceSend 强制清空）。
 let traceSendBuf: TraceEvent[] = []
 let traceSendTimer: ReturnType<typeof setTimeout> | null = null
+const TRACE_FLUSH_MS = 50
 function flushTraceSend(): void {
   if (traceSendTimer) {
     clearTimeout(traceSendTimer)
@@ -1725,11 +1811,11 @@ function flushTraceSend(): void {
   if (traceSendBuf.length === 0) return
   const batch = traceSendBuf
   traceSendBuf = []
-  win?.webContents.send('agent:trace', batch)
+  if (rendererCanReceive()) win?.webContents.send('agent:trace', batch)
 }
 function queueTrace(ev: TraceEvent): void {
   traceSendBuf.push(ev)
-  if (!traceSendTimer) traceSendTimer = setTimeout(flushTraceSend, 16)
+  if (!traceSendTimer) traceSendTimer = setTimeout(flushTraceSend, TRACE_FLUSH_MS)
 }
 
 handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
@@ -1747,7 +1833,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   // 登录 shell 可能被用户启动脚本卡住；发送不能等它。shellEnv() 会在未预热时使用安全 fallback。
   void warmShellEnv()
-  const cwd = request.cwd ?? currentCwd
+  const cwd = request.cwd ? resolveKnownProjectDirectory(request.cwd) : currentCwd
+  if (request.cwd && currentCwd && cwd !== canonicalExistingDirectory(currentCwd)) {
+    throw new AgentRuntimeError('发送请求的工作目录与当前授权目录不一致', {
+      provider: runtimeProvider,
+      stage: 'frontdoor',
+      cwd,
+      nextAction: '重新选择目标项目后再发送'
+    })
+  }
   const catalogCwd = cwd ?? ''
   if (request.backend !== 'local') {
     throw new AgentRuntimeError(`backend=${request.backend} 尚未实现`, {
@@ -1942,9 +2036,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const openCodePluginTrust = providerId === 'opencode' && cwd
     ? await resolveOpenCodePluginTrust(cwd)
     : undefined
-  const mcpExecution = providerId === 'pi'
-    ? undefined
-    : authorizedMcpExecution(await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run'))
+  const mcpExecutionSnapshot = providerId === 'pi'
+    ? null
+    : await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
   if (isShuttingDown) {
     throw new AgentRuntimeError('Scry 正在退出，已拒绝启动新一轮', {
       provider: runtimeProvider,
@@ -2049,7 +2143,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if (writeCompletions.observe(ev)) notifyDiffChange()
   }
   emit({
-    id: `c-${evSeq++}`,
+    id: mainEventId('controls', runId),
     ts: new Date().toISOString(),
     runId,
     kind: 'harness',
@@ -2172,7 +2266,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       }))
       .then((turnDiff) => {
         const event: TraceEvent = {
-          id: `d-${evSeq++}`,
+          id: mainEventId('turn-diff', runId),
           ts: new Date().toISOString(),
           runId,
           kind: 'harness',
@@ -2243,7 +2337,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       await diffPreviewer.idle()
       const publishSessionDiff = (snapshot: TurnDiffSnapshot, origin?: TurnDiffBaselineOrigin): void => {
         const event: TraceEvent = {
-          id: `s-${evSeq++}`,
+          id: mainEventId('session-diff', runId),
           ts: new Date().toISOString(),
           runId,
           kind: 'harness',
@@ -2353,6 +2447,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       recordingFailure?: { message: string }
     }>
     interrupt: () => void
+    forceKill: () => void
     getExternalSessionId: () => string | undefined
     getProviderTurnId?: () => string | undefined
     getRecordingFailure?: () => { message: string } | undefined
@@ -2368,6 +2463,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }> => {
     if (interrupted) return { stopped: true }
     observedProviderStartedAt = new Date().toISOString()
+    // Re-hash executable bytes at the actual Provider launch boundary, after all
+    // attachment/recorder/diff preparation that may have yielded to the event loop.
+    const mcpExecution = authorizedMcpExecution(mcpExecutionSnapshot)
     h = providerRegistry.run(providerId, {
       runId,
       prompt: runtimePrompt,
@@ -2415,6 +2513,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     interrupt: () => {
       interrupted = true
       h?.interrupt()
+    },
+    forceKill: () => {
+      interrupted = true
+      h?.forceKill()
     },
     cwd,
     resume,
@@ -2665,7 +2767,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
             cwd,
             hint,
             brief: runtimeErr?.brief,
-            id: `h-${evSeq++}`,
+            id: mainEventId('result', runId),
             ts: new Date().toISOString()
           })
           if (runs.isFocused(runId)) {
@@ -2925,6 +3027,9 @@ handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
 app.whenReady().then(() => {
   if (!primaryInstance) return
   void warmShellEnv()
+  // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，
+  // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
+  initDb()
   createWindow()
   startupManagedRecovery = (async () => {
     // Let the first window render before touching historical recovery trees.
@@ -2963,7 +3068,6 @@ app.whenReady().then(() => {
       console.warn('[scry] recorder commit hook startup redelivery failed:', error)
     }
   })()
-  setTimeout(() => initDb(), 800)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -2977,15 +3081,15 @@ app.on('before-quit', (event) => {
   if (quitCleanupStarted) return
   isShuttingDown = true
   quitCleanupStarted = true
-  closeAllTerminals()
+  closeAllTerminals(true)
   sessionDiffBaselines.disposeAll()
-  const cleanup = settleRunsForShutdown(runs.unsettledControls(), {
+  const controls = runs.unsettledControls()
+  const cleanup = settleRunsForShutdown(controls, {
     cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
     disposeProviders: () => providerRegistry.dispose()
   })
-  const timeout = new Promise<void>((resolve) => setTimeout(resolve, 6_000))
-  void Promise.race([cleanup, timeout]).finally(() => {
+  void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
     quitCleanupFinished = true
     app.quit()
   })
