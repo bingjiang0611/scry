@@ -1,5 +1,15 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs'
+import {
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  statSync
+} from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import type { MessageBoxOptions } from 'electron'
 import { scanMcp, type ScanReport, type Severity } from '../cli/mcpguard-core'
@@ -25,6 +35,7 @@ export interface McpExecutionSnapshot {
   report: ScanReport
   errors: string[]
   warnings: string[]
+  selectedTargetId?: string
 }
 
 function stableJson(value: unknown): string {
@@ -138,16 +149,44 @@ function normalizedExecutionTarget(
     }
     try {
       const canonical = realpathSync(absolute)
-      const stat = statSync(canonical)
-      if (!stat.isFile()) throw new Error('not a regular file')
       if (process.platform !== 'win32') accessSync(canonical, constants.X_OK)
-      config.command = canonical
-      return {
-        ...target,
-        config,
-        executableIdentity: `${canonical}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
+      const fd = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        const before = fstatSync(fd)
+        if (!before.isFile()) throw new Error('not a regular file')
+        const digest = createHash('sha256')
+        const buffer = Buffer.allocUnsafe(64 * 1024)
+        let position = 0
+        while (position < before.size) {
+          const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, before.size - position), position)
+          if (bytesRead === 0) break
+          digest.update(buffer.subarray(0, bytesRead))
+          position += bytesRead
+        }
+        const after = fstatSync(fd)
+        const pathAfter = statSync(canonical)
+        if (position !== before.size || before.dev !== after.dev || before.ino !== after.ino ||
+          before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs ||
+          pathAfter.dev !== before.dev || pathAfter.ino !== before.ino) {
+          throw new Error('executable changed while hashing')
+        }
+        config.command = canonical
+        const executableDigest = digest.digest('hex')
+        return {
+          ...target,
+          config,
+          executableDigest,
+          executableIdentity: `${canonical}:${before.dev}:${before.ino}:${before.size}:sha256:${executableDigest}`
+        }
+      } finally {
+        closeSync(fd)
       }
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/changed while hashing|changed during|EIO|EBUSY/i.test(message)) {
+        errors.push(`MCP server ${target.name} 的 executable 无法稳定校验：${absolute}`)
+        return { ...target, config, executableIdentity: `blocked:${absolute}` }
+      }
       return {
         ...target,
         config,
@@ -233,7 +272,8 @@ export function buildMcpExecutionSnapshot(args: {
       jsonPointer: target.jsonPointer,
       enabled: target.enabled,
       config: target.config,
-      executableIdentity: target.executableIdentity
+      executableIdentity: target.executableIdentity,
+      executableDigest: target.executableDigest
     }))
   }
   return {
@@ -245,6 +285,7 @@ export function buildMcpExecutionSnapshot(args: {
     report,
     errors,
     warnings,
+    ...(args.selectedTargetId ? { selectedTargetId: args.selectedTargetId } : {}),
     fingerprint: `sha256:${createHash('sha256').update(stableJson(canonical)).digest('hex')}`
   }
 }

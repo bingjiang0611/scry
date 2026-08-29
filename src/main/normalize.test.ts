@@ -1325,6 +1325,12 @@ describe('maskSecrets（落库前脱敏，RFC §11）', () => {
     expect(maskSecrets('Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123')).toBe('Authorization: «REDACTED»')
     expect(maskSecrets(`token ${fakeGithubPat}`)).toBe('token «REDACTED»')
   })
+  it('按字段名、私钥和 DSN 脱敏常见秘密', () => {
+    expect(maskSecrets('AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyz0123456789ABCD')).toBe('AWS_SECRET_ACCESS_KEY=«REDACTED»')
+    expect(maskSecrets('{"password":"database-password"}')).toBe('{"password":«REDACTED»}')
+    expect(maskSecrets('postgres://user:password@localhost/db')).toBe('postgres://user:«REDACTED»@localhost/db')
+    expect(maskSecrets('-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----')).toBe('«REDACTED PRIVATE KEY»')
+  })
   it('正常文本不误伤（裸 sk-/risk- 等不匹配）', () => {
     expect(maskSecrets('修复 risk-control 模块的 sk- 前缀解析')).toBe('修复 risk-control 模块的 sk- 前缀解析')
     expect(maskSecrets('file_path=/a/b/c.ts')).toBe('file_path=/a/b/c.ts')

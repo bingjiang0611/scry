@@ -202,6 +202,8 @@ export interface BillingGatewayConnection {
 }
 
 export interface BillingGuardianState {
+  status?: 'ready' | 'unavailable' | 'query_error'
+  error?: string
   adminConnections: BillingAdminConnection[]
   gatewayConnections: BillingGatewayConnection[]
   rawUsageRows: number

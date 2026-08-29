@@ -139,6 +139,29 @@ export const DDL_V9 = [
   `CREATE INDEX IF NOT EXISTS idx_usage_ledger_canonical ON usage_ledger(provider, cost_unit, cost_source, bucket_start, bucket_end, account_label) WHERE cost IS NOT NULL`
 ]
 
+// v10（lifecycle/performance）：持久化账单同步健康；覆盖会话删除的实际过滤列。
+export const DDL_V10 = [
+  `CREATE TABLE IF NOT EXISTS billing_sync_state (
+     provider TEXT PRIMARY KEY, last_sync_ts INTEGER, last_error TEXT, updated_ts INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_file_ops_session ON file_ops(session_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_file_ops_span ON file_ops(span_id) WHERE span_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_spans_run ON spans(run_id) WHERE run_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_turns_session_cwd ON turns(session_id, cwd)`,
+  `CREATE INDEX IF NOT EXISTS idx_turns_run ON turns(run_id) WHERE run_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_usage_ledger_run ON usage_ledger(run_id) WHERE run_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_usage_ledger_span ON usage_ledger(span_id) WHERE span_id IS NOT NULL`
+]
+
+// v11（outbox idempotency）：同一 span 的文件证据重放不得生成重复行。
+export const DDL_V11 = [
+  `DELETE FROM file_ops WHERE id NOT IN (
+     SELECT MIN(id) FROM file_ops
+     GROUP BY span_id, op, path, source
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_file_ops_identity
+     ON file_ops(span_id, op, path, source) WHERE span_id IS NOT NULL`
+]
+
 export const UPSERT_SESSION_REF_SQL = `INSERT INTO session_refs (
   scry_session_id, provider_id, runtime_provider, cwd, external_session_id, preview, created_ts, updated_ts
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)

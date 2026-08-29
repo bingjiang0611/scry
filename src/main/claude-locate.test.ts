@@ -414,6 +414,38 @@ printf '%s\n' '${RECORDER_VERSION}'
     })
   })
 
+  it('isolates provider and cloud credentials unless explicitly allowed', () => {
+    const input = {
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'anthropic',
+      OPENAI_API_KEY: 'openai',
+      AWS_SECRET_ACCESS_KEY: 'aws',
+      SCRY_PROVIDER_ENV_ALLOW: [
+        'claude:AWS_SECRET_ACCESS_KEY',
+        'codex:AWS_SECRET_ACCESS_KEY',
+        'pi:AWS_SECRET_ACCESS_KEY',
+        'opencode:AWS_SECRET_ACCESS_KEY'
+      ].join(',')
+    }
+    expect(sanitizeProviderEnv(input, 'claude')).toEqual({
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'anthropic',
+      AWS_SECRET_ACCESS_KEY: 'aws'
+    })
+    expect(sanitizeProviderEnv(input, 'codex')).toEqual({
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'openai',
+      AWS_SECRET_ACCESS_KEY: 'aws'
+    })
+    expect(sanitizeProviderEnv(input, 'pi')).toEqual({ PATH: '/usr/bin', AWS_SECRET_ACCESS_KEY: 'aws' })
+    expect(sanitizeProviderEnv(input, 'opencode')).toEqual({ PATH: '/usr/bin', AWS_SECRET_ACCESS_KEY: 'aws' })
+    expect(sanitizeProviderEnv({
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'secret',
+      SCRY_PROVIDER_ENV_ALLOW: 'pi:OPENAI_API_KEY'
+    }, 'claude')).toEqual({ PATH: '/usr/bin' })
+  })
+
   it('keeps billing-only admin credentials out of provider children', () => {
     expect(sanitizeProviderEnv({
       PATH: '/usr/bin:/bin',
@@ -422,6 +454,8 @@ printf '%s\n' '${RECORDER_VERSION}'
       QODER_ADMIN_API_KEY: 'qoder-admin',
       QODER_ORGANIZATION_ID: 'org-1',
       QODER_MEMBER_ID: 'member-1',
+      SCRY_RECORDER_COMMIT_HOOK: '/tmp/untrusted-hook',
+      SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'untrusted',
       OPENAI_API_KEY: 'provider-key',
       ANTHROPIC_API_KEY: 'provider-key-2'
     })).toEqual({

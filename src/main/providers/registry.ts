@@ -61,7 +61,7 @@ export class ProviderRegistry {
       ...request,
       ...(this.runControlsEnabled
         ? { permissionMode: request.permissionMode ?? 'default' }
-        : { model: undefined, effort: undefined, permissionMode: 'full_access' }),
+        : { model: undefined, effort: undefined, permissionMode: 'default' }),
       emit: (event) => request.emit({ ...event, providerId, runtimeProvider: adapter.runtimeProvider })
     })
   }
@@ -74,9 +74,9 @@ export class ProviderRegistry {
         ...capabilityReady(context, 'read', {
           models: [],
           permissions: [{
-            id: 'full_access' as const,
-            label: '完全访问',
-            description: 'SCRY_RUN_CONTROLS=0，沿用升级前的完全访问行为'
+            id: 'default' as const,
+            label: '默认审批',
+            description: '运行控制已关闭；权限保持 Provider 默认安全模式'
           }]
         }),
         state: 'degraded' as const,

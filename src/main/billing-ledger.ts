@@ -330,7 +330,6 @@ function rawObject(args: {
   source: string
   sourceKind: BillingSourceKind
   payload: Record<string, unknown>
-  index: number
   fetchedAt: number
   startingAt?: string | null
   endingAt?: string | null
@@ -352,13 +351,9 @@ function rawObject(args: {
     stablePart(args.payload.id) ??
     stablePart(args.payload.provider_request_id) ??
     stablePart(args.payload.request_id) ??
-    stablePart(args.payload.timestamp) ??
-    stablePart(args.payload.start_time) ??
-    stablePart(args.payload.starting_at) ??
-    stablePart(args.payload.created_at) ??
-    String(args.index)
+    `sha256:${createHash('sha256').update(JSON.stringify(normalizedJsonValue(args.payload))).digest('hex').slice(0, 32)}`
   return {
-    id: args.idOverride ?? `${args.source}:${idPart}:${args.index}`,
+    id: args.idOverride ?? `${args.source}:${idPart}`,
     provider: args.provider,
     source: args.source,
     sourceKind: args.sourceKind,
@@ -557,7 +552,7 @@ export function billingRowsFromAdminPayload(args: {
   const sourceKind: BillingSourceKind =
     args.source === 'qoder_teams_usage' || args.source.endsWith('_cost') || args.source === 'anthropic_admin_cost' ? 'provider_bill' : 'official_telemetry'
   const qoderOccurrences = new Map<string, number>()
-  const raw = args.payloads.map((payload, index) => {
+  const raw = args.payloads.map((payload) => {
     let idOverride: string | undefined
     if (args.source === 'qoder_teams_usage') {
       const key = qoderEventKey(payload)
@@ -570,7 +565,6 @@ export function billingRowsFromAdminPayload(args: {
       source: args.source,
       sourceKind,
       payload,
-      index,
       fetchedAt: args.fetchedAt,
       startingAt: args.startingAt,
       endingAt: args.endingAt,
@@ -595,13 +589,12 @@ export function billingRowsFromAnthropicGatewayPayload(args: {
   fetchedAt: number
   accountLabel?: string | null
 }): BillingLedgerRows {
-  const raw = args.payloads.map((payload, index) =>
+  const raw = args.payloads.map((payload) =>
     rawObject({
       provider: 'anthropic',
       source: 'anthropic_gateway_response',
       sourceKind: 'gateway_reported',
       payload,
-      index,
       fetchedAt: args.fetchedAt,
       startingAt: stringFromPath(payload, ['created_at']) ?? null,
       endingAt: stringFromPath(payload, ['created_at']) ?? null

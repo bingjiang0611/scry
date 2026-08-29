@@ -5,6 +5,11 @@ directories:
   buildResources: build
 
 asar: true
+# Scry 只提供英文和中文 UI；裁掉 Chromium 其余 locale，避免安装包长期携带约 60 MiB 无用资源。
+electronLanguages:
+  - en
+  - zh_CN
+  - zh_TW
 # SDK 是 ESM(.mjs) 且运行时要 spawn，从 asar 内 import/spawn 有坑 → 解包成真实文件。
 # 体积小(排除平台二进制后只剩 ~7MB 的 .mjs/.d.ts)。
 asarUnpack:
@@ -46,6 +51,7 @@ extraResources:
 
 mac:
   category: public.app-category.developer-tools
+  hardenedRuntime: true
   # dir 目标只出 .app。签名身份由本机 Keychain 或 CSC_* 自动发现；没有可用身份时 builder 会跳过签名。
   # Dock badge 依赖 macOS 通知权限，正式分发必须使用稳定的 Developer ID 身份并公证。
   target:

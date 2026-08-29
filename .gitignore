@@ -7,5 +7,6 @@ packages/turn-recorder-cli/dist/
 .DS_Store
 .claude/
 .local/
+.pi/
 .vite/
 docs/ui-audit/screenshots/

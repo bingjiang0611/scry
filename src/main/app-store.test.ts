@@ -115,7 +115,7 @@ describe('app-store', () => {
           providerId: 'claude',
           runtimeProvider: 'claude_sdk',
           mtime: expect.any(Number),
-          preview: 'first prompt',
+          preview: 'resume prompt',
           count: 1
         }
       ])

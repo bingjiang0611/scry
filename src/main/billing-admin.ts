@@ -41,10 +41,13 @@ function dataArray(payload: Record<string, unknown>): Record<string, unknown>[] 
   if (!Array.isArray(data)) return []
   const out: Record<string, unknown>[] = []
   for (const bucket of data) {
-    const results = (bucket as Record<string, unknown>).results
+    const bucketRecord = bucket as Record<string, unknown>
+    const results = bucketRecord.results
     if (Array.isArray(results)) {
-      for (const r of results) out.push({ ...(bucket as Record<string, unknown>), ...(r as Record<string, unknown>) })
-    } else out.push(bucket as Record<string, unknown>)
+      const stableBucket = { ...bucketRecord }
+      delete stableBucket.results
+      for (const r of results) out.push({ ...stableBucket, ...(r as Record<string, unknown>) })
+    } else out.push(bucketRecord)
   }
   return out
 }

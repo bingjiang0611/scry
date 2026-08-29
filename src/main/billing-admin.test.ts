@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { adminKeyStatus, fetchAnthropicAdminUsageAndCosts, fetchOpenAiAdminUsageAndCosts, fetchQoderUsageAndCosts } from './billing-admin'
-import { USAGE_LEDGER_COLS } from './span-ledger'
+import { PROVIDER_RAW_USAGE_COLS, USAGE_LEDGER_COLS } from './span-ledger'
 
 const asLedger = (row: unknown[]): Record<string, unknown> =>
   Object.fromEntries(USAGE_LEDGER_COLS.map((c, i) => [c, row[i]]))
+const asRaw = (row: unknown[]): Record<string, unknown> =>
+  Object.fromEntries(PROVIDER_RAW_USAGE_COLS.map((c, i) => [c, row[i]]))
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
@@ -100,6 +102,25 @@ describe('Billing Guardian P1 Admin connector', () => {
       'official_telemetry',
       'provider_bill'
     ])
+  })
+
+  it('bucket 新增结果时既有 Admin 子项主键保持稳定', async () => {
+    const childA = { grouping: { model: 'claude-a' }, uncached_input_tokens: 10, output_tokens: 2, cost_usd: 0.02 }
+    const childB = { grouping: { model: 'claude-b' }, uncached_input_tokens: 20, output_tokens: 4, cost_usd: 0.04 }
+    const fetchFor = (results: Record<string, unknown>[]) => async (): Promise<Response> => jsonResponse({
+      data: [{ starting_at: '2026-07-01T00:00:00Z', ending_at: '2026-07-02T00:00:00Z', results }],
+      has_more: false
+    })
+    const first = await fetchAnthropicAdminUsageAndCosts({
+      apiKey: 'key', startingAt: '2026-07-01T00:00:00Z', endingAt: '2026-07-02T00:00:00Z',
+      fetchImpl: fetchFor([childA]), nowMs: 1
+    })
+    const expanded = await fetchAnthropicAdminUsageAndCosts({
+      apiKey: 'key', startingAt: '2026-07-01T00:00:00Z', endingAt: '2026-07-02T00:00:00Z',
+      fetchImpl: fetchFor([childA, childB]), nowMs: 2
+    })
+    expect(asRaw(first.rows.providerRawUsage[0]).id).toBe(asRaw(expanded.rows.providerRawUsage[0]).id)
+    expect(asRaw(first.rows.providerRawUsage[1]).id).toBe(asRaw(expanded.rows.providerRawUsage[2]).id)
   })
 
   it('Qoder Teams usage 只导入 Credits 账单且支持 member cursor', async () => {

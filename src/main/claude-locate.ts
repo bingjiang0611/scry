@@ -6,7 +6,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, posix, win32 } from 'node:path'
 import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
-import type { ProviderHealth } from '../shared/provider.js'
+import type { ProviderHealth, ProviderId } from '../shared/provider.js'
 
 export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex'
 
@@ -188,12 +188,36 @@ const PROVIDER_FORBIDDEN_ENV = new Set([
   'ANTHROPIC_ADMIN_API_KEY',
   'QODER_ADMIN_API_KEY',
   'QODER_ORGANIZATION_ID',
-  'QODER_MEMBER_ID'
+  'QODER_MEMBER_ID',
+  'SCRY_RECORDER_COMMIT_HOOK',
+  'SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT'
 ])
 
-export function sanitizeProviderEnv(input: Record<string, string>): Record<string, string> {
+export function sanitizeProviderEnv(input: Record<string, string>, providerId?: ProviderId): Record<string, string> {
   const out = sanitizeNestedAgentEnv(input)
-  for (const key of PROVIDER_FORBIDDEN_ENV) delete out[key]
+  const explicitlyAllowed = new Set(
+    input.SCRY_PROVIDER_ENV_ALLOW?.split(',')
+      .map((value) => value.trim())
+      .filter((value) => providerId != null && value.startsWith(`${providerId}:`))
+      .map((value) => value.slice(value.indexOf(':') + 1))
+      .filter(Boolean) ?? []
+  )
+  delete out.SCRY_PROVIDER_ENV_ALLOW
+  const forbiddenPrefixes = ['AWS_', 'AZURE_', 'GOOGLE_', 'GCP_']
+  const providerPrefixes: Partial<Record<ProviderId, string[]>> = {
+    claude: ['OPENAI_', 'CODEX_', 'QODER_', 'OPENCODE_'],
+    codex: ['ANTHROPIC_', 'CLAUDE_', 'QODER_', 'OPENCODE_'],
+    qoder: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'OPENCODE_'],
+    opencode: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'QODER_'],
+    pi: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'QODER_', 'OPENCODE_']
+  }
+  for (const key of Object.keys(out)) {
+    if (PROVIDER_FORBIDDEN_ENV.has(key) ||
+      (!explicitlyAllowed.has(key) && forbiddenPrefixes.some((prefix) => key.startsWith(prefix))) ||
+      (!explicitlyAllowed.has(key) && (providerId ? providerPrefixes[providerId] ?? [] : []).some((prefix) => key.startsWith(prefix)))) {
+      delete out[key]
+    }
+  }
   return out
 }
 
@@ -593,7 +617,7 @@ function recorderCliVersionKey(path: string): string {
 
 export function runtimeCliEnv(
   base?: Record<string, string>,
-  options: { managedRecorder?: boolean } = {}
+  options: { managedRecorder?: boolean; providerId?: ProviderId } = {}
 ): Record<string, string> {
   const runtimeBase = base ?? shellEnv()
   const originalPath = base
@@ -621,7 +645,7 @@ export function runtimeCliEnv(
           actualVersion = execFileSync(scryCliPath, ['--version'], {
             encoding: 'utf8',
             timeout: 5_000,
-            env: sanitizeProviderEnv(runtimeBase)
+            env: sanitizeProviderEnv(runtimeBase, options.providerId)
           }).trim()
         }
       } catch {
@@ -644,5 +668,5 @@ export function runtimeCliEnv(
       SCRY_RECORDER_VERIFIED_VERSION: RECORDER_VERSION
     } : {}),
     PATH: runtimeBase.PATH ?? process.env.PATH ?? ''
-  })
+  }, options.providerId)
 }

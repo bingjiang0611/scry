@@ -9,7 +9,7 @@ npm install -g @ali/scry-turn-recorder@0.2.27 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
 
-独立 npm 安装的 `scry` 会在交互式命令结束后后台检查更新；检查至多每天一次，失败后 6 小时再试，当前命令不会等待网络，升级成功后会直接在原终端提示。`0.x` 版本只自动安装同一 minor 下的 patch，`1.x` 起只自动安装同一 major 下的兼容版本。桌面 App 内置 CLI、recorder、daemon 和 CI 不触发自动更新。
+独立 npm 安装默认不后台联网。设置 `SCRY_AUTO_UPDATE=1` 后，`scry` 才会在交互式命令结束后检查兼容更新；后台任务只检查、不安装，升级仍需前台运行 `scry upgrade`。检查至多每天一次，失败后 6 小时再试。桌面 App 内置 CLI、recorder、daemon 和 CI 不触发后台检查。
 
 ```bash
 scry upgrade --check  # 只检查
@@ -25,7 +25,7 @@ scry integrations status-pi
 
 扩展把 Pi 的顶层 prompt、工具、assistant、usage 和模型响应区间按顺序投递到同一 workspace recorder；失败始终 fail-open，不阻断 Pi。
 
-设置 `SCRY_NO_UPDATE_CHECK=1` 或传入 `--no-update-check` 可关闭后台检查；私有 registry 可通过 `SCRY_CLI_REGISTRY` 覆盖。
+设置 `SCRY_NO_UPDATE_CHECK=1` 或传入 `--no-update-check` 可关闭已启用的后台检查；私有 registry 可通过 `SCRY_CLI_REGISTRY` 覆盖，但必须使用 HTTPS。自动安装禁用 package lifecycle scripts。
 
 ```bash
 scry doctor --workspace "$PWD"

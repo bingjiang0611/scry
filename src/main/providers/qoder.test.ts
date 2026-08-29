@@ -524,7 +524,7 @@ describe('Qoder provider adapter', () => {
       costUsd: undefined,
       runtimeMetadata: expect.objectContaining({ reportedZeroUsage: true })
     })
-    expect(sdk.runtimeCliEnv).toHaveBeenCalledWith(undefined, {})
+    expect(sdk.runtimeCliEnv).toHaveBeenCalledWith(undefined, { providerId: 'qoder' })
     expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({
       QODERCLI_PRINT_BG_WAIT_CEILING_MS: '0'
     })

@@ -10,7 +10,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 - 按工作目录管理新会话、历史会话和最近项目。
 - 汇总 token、cost、duration、tool/MCP 调用与文件读写足迹。
 - 提供对话、会话纵览、账单卫士、MCP 信任、跨会话分析和诊断视图。
-- 通过 Provider adapter 接入 Claude、Codex、Qoder 和 OpenCode；各 Provider 的可用能力取决于本机 CLI/SDK 与登录状态。
+- 通过 Provider adapter 接入 Claude、Codex、Qoder、OpenCode 和 Pi；各 Provider 的可用能力取决于本机 CLI/SDK 与登录状态。
 - 提供独立的 `@ali/scry-turn-recorder` CLI，在本地记录顶层 agent turn。
 
 ## 安全与数据边界
@@ -20,6 +20,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 - Scry 的会话索引、观测数据和 turn-recorder 记录保存在本机；turn-recorder 默认只写工作区的 `.scry/`，不实现上传。
 - Scry 本身没有项目数据上传后端，但 Provider CLI/SDK 会连接各自服务；其数据处理遵循对应 Provider 的配置、许可证和服务条款。
 - Bash、MCP 和第三方工具可能访问 Scry 无法完整统计的文件或网络资源，文件足迹不是安全沙箱或完整审计日志。
+- 项目级 MCP/Hook 首次执行和指纹变化会要求确认，并在 Provider 启动边界重新校验配置与 executable SHA-256；这用于防止仓库内容漂移，不承诺抵御已经能以同一 macOS 用户身份修改进程或文件的并发攻击者。
 - 逐工具审批的覆盖范围取决于 Provider 与 transport；即使界面出现审批，也不能把 Scry 当作统一的权限隔离层。
 
 ## Provider 状态
@@ -37,7 +38,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 前置要求：
 
 - macOS（当前主要开发与验证平台）
-- Node.js 22 或更高版本
+- Node.js 22.12 或更高版本（桌面 App 工具链；独立 recorder CLI 另支持 Node 20/22/24）
 - 至少一个已安装并完成登录的受支持 agent CLI
 
 ```bash
@@ -68,7 +69,7 @@ npm run build
 桌面 App 已自带同源 CLI，并固定通过 App Resources 内的绝对路径驱动 Provider/Hook；安装或更新 App 时会同步更新其私有 CLI，不依赖用户 `PATH` 中的全局版本。下面的 npm 安装仅用于没有桌面 App 的 headless/独立终端环境。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.20 \
+npm install -g @ali/scry-turn-recorder@0.2.27 \
   --registry=https://registry.anpm.alibaba-inc.com
 scry doctor --workspace /path/to/workspace
 ```
@@ -76,14 +77,14 @@ scry doctor --workspace /path/to/workspace
 CLI 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围；
 默认 daemon 使用 Unix socket，rate-native 的 Hook/uploader 也依赖 Unix shell。
 
-独立 npm 安装会在交互式命令结束后后台检查并安装兼容更新，不阻塞当前命令；可用
-`scry upgrade --check` 检查、`scry upgrade` 立即升级，或以
-`SCRY_NO_UPDATE_CHECK=1` / `--no-update-check` 禁用后台检查。App 私有 CLI、Hook、daemon 与 CI 不参与自动更新。
+独立 npm 安装默认不执行后台更新；可用 `scry upgrade --check` 检查、`scry upgrade` 明确升级。
+需要后台检查兼容更新时显式设置 `SCRY_AUTO_UPDATE=1`；后台任务只检查、不安装，升级仍需前台运行
+`scry upgrade`。可再用 `SCRY_NO_UPDATE_CHECK=1` 或 `--no-update-check` 临时禁用检查。App 私有 CLI、Hook、daemon 与 CI 不参与自动更新。
 
 若 npm 的系统全局目录不可写，可安装到用户目录，并确保 `~/.local/bin` 在 `PATH`：
 
 ```bash
-npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.20 \
+npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.27 \
   --registry=https://registry.anpm.alibaba-inc.com
 export PATH="$HOME/.local/bin:$PATH"
 ```

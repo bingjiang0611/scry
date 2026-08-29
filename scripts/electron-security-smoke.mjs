@@ -98,7 +98,8 @@ async function main() {
       ...process.env,
       HOME: home,
       ELECTRON_ENABLE_LOGGING: '1',
-      ELECTRON_DISABLE_SECURITY_WARNINGS: '0'
+      ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
+      SCRY_ELECTRON_SMOKE_PROVIDER: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -133,7 +134,7 @@ async function main() {
   )
   for (const key of [
     'start', 'stop', 'activeRuns', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills', 'onFocusedRun', 'onDataUpdated',
-    'terminalStart', 'terminalWrite', 'terminalResize', 'terminalClose', 'onTerminalData', 'onTerminalExit'
+    'terminalStart', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'onTerminalData', 'onTerminalExit'
   ]) {
     assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
   }
@@ -247,6 +248,47 @@ async function main() {
     hidden: true,
     reopened: true
   })
+
+  const lifecycleSmoke = await evaluate(`(async () => {
+    const cwd = ${JSON.stringify(canonicalWorkspace)}
+    await window.scry.setCwd(cwd)
+    let cleanupDone = () => {}
+    let cleanupError = () => {}
+    const terminal = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('fake Provider lifecycle timed out')), 15_000)
+      cleanupDone = window.scry.onTurnDone((event) => {
+        clearTimeout(timer)
+        cleanupDone()
+        cleanupError()
+        resolve({ kind: 'done', event })
+      })
+      cleanupError = window.scry.onError((event) => {
+        clearTimeout(timer)
+        cleanupDone()
+        cleanupError()
+        reject(new Error(event.message))
+      })
+    })
+    const started = await window.scry.start({ providerId: 'codex', cwd, prompt: 'packaged fake-provider smoke' })
+    const outcome = await terminal
+    const externalSessionId = outcome.event.externalSessionId || outcome.event.sessionId
+    const loaded = await window.scry.loadSession({ providerId: 'codex', cwd, externalSessionId })
+    const stats = await window.scry.stats()
+    return {
+      sameRun: outcome.event.runId === started.runId,
+      externalSessionId,
+      loadedTurns: loaded?.length || 0,
+      hasTool: loaded?.some((turn) => turn.items.some((item) => item.stage === 'tool_use')) || false,
+      statsStatus: stats.status,
+      statsTurns: stats.totals.turns
+    }
+  })()`)
+  assert.equal(lifecycleSmoke.sameRun, true)
+  assert.ok(lifecycleSmoke.externalSessionId)
+  assert.ok(lifecycleSmoke.loadedTurns >= 1)
+  assert.equal(lifecycleSmoke.hasTool, true)
+  assert.equal(lifecycleSmoke.statsStatus, 'ready')
+  assert.ok(lifecycleSmoke.statsTurns >= 1)
 
   const windowChrome = await evaluate(`(() => {
     const inspect = (selector) => {
@@ -493,8 +535,10 @@ async function main() {
         if (settled) return
         settled = true
         clearTimeout(timeout)
-        offData()
-        offExit()
+        if (!result.ok || close) {
+          offData()
+          offExit()
+        }
         if (close && session) await window.scry.terminalClose(session.id).catch(() => {})
         resolve(result)
       }
@@ -503,6 +547,7 @@ async function main() {
         try {
           offData = window.scry.onTerminalData((event) => {
             if (event.id !== session?.id) return
+            void window.scry.terminalAck(event.id, new TextEncoder().encode(event.data).byteLength)
             output += event.data
             const markerIndex = output.indexOf(marker + ':')
             if (markerIndex >= 0 && output.indexOf(String.fromCharCode(10), markerIndex) >= 0) {
@@ -515,6 +560,7 @@ async function main() {
             }
           })
           session = await window.scry.terminalStart({ cwd, cols: 80, rows: 24 })
+          await window.scry.terminalReady(session.id)
           await window.scry.terminalResize(session.id, 100, 30)
           const slash = String.fromCharCode(92)
           const encodedMarker = slash + '137' + slash + '137' + marker.slice(2)
@@ -562,7 +608,7 @@ async function main() {
   assert.equal(terminalSmoke.unbound.ok, true, `packaged unbound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
   assert.equal(terminalSmoke.unbound.cwd, canonicalHome)
   assert.ok(terminalSmoke.unbound.output.includes(`__SCRY_TERMINAL_HOME_OK__:${canonicalHome}`))
-  assert.equal(terminalSmoke.unboundExited, true)
+  assert.equal(terminalSmoke.unboundExited, true, JSON.stringify(terminalSmoke))
   assert.equal(terminalSmoke.oldWriteRejected, true)
   assert.equal(terminalSmoke.bound.ok, true, `packaged bound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
   assert.equal(terminalSmoke.bound.cwd, canonicalWorkspace)
@@ -602,6 +648,13 @@ try {
       new Promise((resolveExit) => child.once('exit', resolveExit)),
       new Promise((resolveWait) => setTimeout(resolveWait, 2_000))
     ])
+    if (child.exitCode == null) {
+      child.kill('SIGKILL')
+      await Promise.race([
+        new Promise((resolveExit) => child.once('exit', resolveExit)),
+        new Promise((resolveWait) => setTimeout(resolveWait, 2_000))
+      ])
+    }
   }
   try {
     rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })

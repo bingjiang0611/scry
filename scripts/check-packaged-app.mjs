@@ -10,10 +10,11 @@ const unpacked = join(resources, 'app.asar.unpacked')
 const qoderRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 'dist', '_bundled', 'qodercli')
 const qoderIndexRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 'dist', 'index.js')
 const ptyRootRelative = join('node_modules', 'node-pty')
-const maxBytes = Number(process.env.SCRY_APP_MAX_BYTES || 380 * 1024 * 1024)
+const maxBytes = Number(process.env.SCRY_APP_MAX_BYTES || 330 * 1024 * 1024)
 const scryCli = join(resources, 'bin', 'scry')
 const scryCliPackage = join(resources, 'scry-cli', 'package.json')
 const scryPiIntegration = join(resources, 'scry-cli', 'integrations', 'pi-scry-recorder.mjs')
+const electronResources = join(appPath, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Versions', 'A', 'Resources')
 
 function directoryBytes(path) {
   const stat = lstatSync(path)
@@ -72,6 +73,12 @@ accessSync(ptySpawnHelper, constants.X_OK)
 accessSync(scryCli, constants.X_OK)
 if (!existsSync(scryCliPackage)) throw new Error('packaged app 缺少 App 私有 Scry CLI package.json')
 if (!existsSync(scryPiIntegration)) throw new Error('packaged app 缺少 Pi recorder integration')
+for (const locale of ['en.lproj', 'zh_CN.lproj', 'zh_TW.lproj']) {
+  if (!existsSync(join(electronResources, locale, 'locale.pak'))) throw new Error(`packaged app 缺少必需 locale：${locale}`)
+}
+for (const locale of ['fr.lproj', 'de.lproj', 'ja.lproj']) {
+  if (existsSync(join(electronResources, locale))) throw new Error(`packaged app 未裁剪非目标 locale：${locale}`)
+}
 const expectedCliVersion = JSON.parse(readFileSync(scryCliPackage, 'utf8')).version
 const actualCliVersion = execFileSync(scryCli, ['--version'], { encoding: 'utf8', timeout: 5_000 }).trim()
 if (actualCliVersion !== expectedCliVersion) {
@@ -82,4 +89,21 @@ const bytes = directoryBytes(appPath)
 if (bytes > maxBytes) {
   throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes`)
 }
-console.log(JSON.stringify({ appPath, bytes, maxBytes, preload: 'cjs', qoderBundledCli: false, qoderSdk: true, nodePty: true, scryCliBundled: true, scryCliVersion: actualCliVersion }))
+const sizeBreakdown = {
+  frameworks: directoryBytes(join(appPath, 'Contents', 'Frameworks')),
+  asar: directoryBytes(asarPath),
+  unpacked: directoryBytes(unpacked),
+  privateCli: directoryBytes(join(resources, 'scry-cli'))
+}
+console.log(JSON.stringify({
+  appPath,
+  bytes,
+  maxBytes,
+  sizeBreakdown,
+  preload: 'cjs',
+  qoderBundledCli: false,
+  qoderSdk: true,
+  nodePty: true,
+  scryCliBundled: true,
+  scryCliVersion: actualCliVersion
+}))

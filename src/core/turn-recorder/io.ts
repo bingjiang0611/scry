@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 export async function readJson<T>(path: string): Promise<T | null> {
@@ -94,7 +94,19 @@ async function staleOwner(lockDir: string, ttlMs: number): Promise<LockOwner | '
       return (statError as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : null
     }
   }
-  if (Number.isInteger(owner.pid) && (owner.pid ?? 0) > 0) return pidAlive(owner.pid as number) ? null : owner
+  if (Number.isInteger(owner.pid) && (owner.pid ?? 0) > 0) {
+    if (!pidAlive(owner.pid as number)) return owner
+    // PID reuse cannot be distinguished portably from the original owner. No recorder
+    // critical section is expected to live for minutes, so cap a live-PID lock instead
+    // of allowing an unrelated reused PID to block the workspace forever.
+    const maxLiveOwnerAgeMs = Math.max(ttlMs * 10, 5 * 60_000)
+    try {
+      const heartbeat = await stat(ownerPath)
+      return Date.now() - heartbeat.mtimeMs >= maxLiveOwnerAgeMs ? owner : null
+    } catch {
+      return null
+    }
+  }
   if (owner.token && typeof owner.createdAt === 'number' && Date.now() - owner.createdAt >= ttlMs) return owner
   return null
 }
@@ -192,10 +204,21 @@ export async function withDirectoryLock<T>(
       await delay(20)
     }
   }
+  const ownerPath = join(lockDir, 'owner.json')
+  const heartbeatMs = Math.max(1_000, Math.min(Math.floor(ttlMs / 3), 60_000))
+  const heartbeat = setInterval(() => {
+    void readJson<LockOwner>(ownerPath).then((current) => {
+      if (current?.token !== owner.token) return
+      const now = new Date()
+      return utimes(ownerPath, now, now)
+    }).catch(() => undefined)
+  }, heartbeatMs)
+  heartbeat.unref()
   try {
     return await action()
   } finally {
-    const current = await readJson<LockOwner>(join(lockDir, 'owner.json'))
+    clearInterval(heartbeat)
+    const current = await readJson<LockOwner>(ownerPath)
     if (current?.token === owner.token) await rm(lockDir, { recursive: true, force: true })
   }
 }

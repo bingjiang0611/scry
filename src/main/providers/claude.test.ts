@@ -398,7 +398,7 @@ describe('Claude provider adapter', () => {
       providerTurnId: 'root-prompt-id'
     })
     expect(handle.getProviderTurnId?.()).toBe('root-prompt-id')
-    expect(locate.runtimeCliEnv).toHaveBeenCalledWith(undefined, { managedRecorder: true })
+    expect(locate.runtimeCliEnv).toHaveBeenCalledWith(undefined, { managedRecorder: true, providerId: 'claude' })
     expect(runner.runAgent).toHaveBeenCalledWith(
       'probe',
       'run-managed',

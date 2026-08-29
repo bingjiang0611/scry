@@ -126,6 +126,7 @@ function TerminalPane({
       }
       terminal.reset()
       terminalIdRef.current = session.id
+      await window.scry.terminalReady(session.id)
       onStatus(tabKey, 'running')
       requestAnimationFrame(() => {
         resize()
@@ -166,7 +167,11 @@ function TerminalPane({
       if (id) void window.scry.terminalWrite(id, data).catch(() => {})
     })
     const offData = window.scry.onTerminalData((event) => {
-      if (event.id === terminalIdRef.current) terminal.write(event.data)
+      if (event.id !== terminalIdRef.current) return
+      const bytes = new TextEncoder().encode(event.data).byteLength
+      terminal.write(event.data, () => {
+        void window.scry.terminalAck(event.id, bytes).catch(() => {})
+      })
     })
     const offExit = window.scry.onTerminalExit((event) => {
       if (event.id !== terminalIdRef.current) return

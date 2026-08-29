@@ -436,6 +436,11 @@ export function App() {
   }, [])
   const markRunFinished = useCallback((runId: string): void => {
     terminalRunIdsRef.current.add(runId)
+    while (terminalRunIdsRef.current.size > 512) {
+      const oldest = terminalRunIdsRef.current.values().next().value
+      if (oldest === undefined) break
+      terminalRunIdsRef.current.delete(oldest)
+    }
     setRunningRunIds((prev) => {
       if (!prev.has(runId)) return prev
       const next = new Set(prev)
@@ -602,7 +607,9 @@ export function App() {
           return next
         })
       })
-      .catch(() => {})
+      .catch((error) => {
+        if (!cancelled) setComposerError(`无法恢复运行列表：${error instanceof Error ? error.message : String(error)}`)
+      })
     window.scry
       .activeRun()
       .then((run) => {
@@ -615,7 +622,9 @@ export function App() {
           void window.scry.setCwd(run.cwd)
         }
       })
-      .catch(() => {})
+      .catch((error) => {
+        if (!cancelled) setComposerError(`无法恢复当前运行：${error instanceof Error ? error.message : String(error)}`)
+      })
       .finally(() => {
         if (!cancelled) setActiveRunHydrated(true)
       })
@@ -1102,6 +1111,11 @@ export function App() {
   }
   const changeView = (next: AppView): void => {
     setView(next)
+    if (next === 'analytics' || next === 'diagnostics') integrations.loadStats()
+    if (next === 'diagnostics') {
+      integrations.loadDiag()
+      integrations.loadGitDiff()
+    }
   }
   const openTurnDiffReview = useCallback(
     (turn: { runId: string; userText: string }, _turnDiff: TurnDiffSnapshot, initialPath?: string): void => {

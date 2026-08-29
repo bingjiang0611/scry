@@ -467,7 +467,13 @@ export function useIntegrations(cwd: string | null) {
       const request = fn(context)
         .then((result) => {
           if (isAuthoritativeRunControlCatalog(result)) {
+            runControlCatalogByContext.current.delete(key)
             runControlCatalogByContext.current.set(key, result)
+            while (runControlCatalogByContext.current.size > 16) {
+              const oldest = runControlCatalogByContext.current.keys().next().value
+              if (oldest === undefined) break
+              runControlCatalogByContext.current.delete(oldest)
+            }
             writeRunControlCatalogCache(runControlCatalogByContext.current)
           }
           return result
@@ -802,11 +808,6 @@ export function useIntegrations(cwd: string | null) {
     loadGitDiff()
     loadDiag()
   }, [loadDiag, loadGitDiff, loadUsage])
-
-  useEffect(() => {
-    if (typeof window.scry.onDataUpdated !== 'function') return
-    return window.scry.onDataUpdated(() => applyDataUpdatedEffects({ loadStats, loadBillingState }))
-  }, [loadBillingState, loadStats])
 
   const setRunModel = useCallback((model: AgentModelRef | undefined): void => {
     setRunControls((current) => {

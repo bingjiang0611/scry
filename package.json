@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.109",
+  "version": "0.2.110",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "private": true,
   "license": "MIT",
@@ -30,20 +30,24 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
-    "pack": "npm run typecheck && npm test && npm run build && npm run build:cli && node scripts/run-electron-builder.mjs && npm run check:packaged-app && npm run smoke:electron",
+    "pack": "npm run typecheck && npm test && npm run pack:artifact",
+    "pack:artifact": "npm run build && npm run build:cli && node scripts/run-electron-builder.mjs && npm run check:packaged-app && npm run smoke:electron",
+    "pack:release": "SCRY_RELEASE_BUILD=1 npm run pack",
     "check:packaged-app": "node scripts/check-packaged-app.mjs",
     "smoke:electron": "node scripts/electron-security-smoke.mjs",
-    "install:mac": "npm run pack && node scripts/install-macos.mjs"
+    "install:mac": "npm run pack:release && node scripts/install-macos.mjs --require-release",
+    "install:mac:dev": "npm run pack && node scripts/install-macos.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.186",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.251",
     "@opencode-ai/sdk": "^1.17.18",
-    "@qoder-ai/qoder-agent-sdk": "^1.0.17",
+    "@qoder-ai/qoder-agent-sdk": "1.0.17",
     "better-sqlite3": "^12.11.1",
     "node-pty": "^1.1.0",
-    "undici": "^7.28.0"
+    "undici": "^7.29.0"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
@@ -51,8 +55,8 @@
     "@vitejs/plugin-react": "^5.0.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "electron": "^42.4.1",
-    "electron-builder": "^25.1.8",
+    "electron": "^42.10.1",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

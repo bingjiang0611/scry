@@ -26,7 +26,7 @@ import {
   type TraceEvent
 } from '../../shared/trace'
 import { AgentRuntimeError } from '../run-outcome'
-import { resolveCommandOnPath, shellEnv } from '../claude-locate'
+import { resolveCommandOnPath, sanitizeProviderEnv, shellEnv } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
@@ -95,7 +95,7 @@ export function piRpcEnvironment(
   profile: PiAgentProfile,
   baseEnv: Record<string, string> = shellEnv()
 ): Record<string, string> {
-  const env = { ...baseEnv }
+  const env = sanitizeProviderEnv(baseEnv, 'pi')
   if (basename(profile.executable) !== 'pi-agent' || env.PI_AGENT_PI) return env
   const verified = env.PI_AGENT_VERIFIED_PI_EXECUTABLE
     ? packagePiExecutable(env.PI_AGENT_VERIFIED_PI_EXECUTABLE)
@@ -271,6 +271,16 @@ class PiRpcProcess {
   abort(): void {
     this.fail(new Error('Pi RPC 已被用户中止'))
     this.terminate()
+  }
+
+  forceTerminate(): void {
+    this.closing = true
+    try {
+      if (process.platform !== 'win32' && this.child.pid) process.kill(-this.child.pid, 'SIGKILL')
+      else this.child.kill('SIGKILL')
+    } catch {
+      try { this.child.kill('SIGKILL') } catch { /* already gone */ }
+    }
   }
 
   stderrTail(): string {
@@ -808,7 +818,7 @@ async function runPiAgent(
         workspace: request.cwd,
         managed: true,
         env: {
-          ...process.env,
+          ...sanitizeProviderEnv(process.env as Record<string, string>, 'pi'),
           SCRY_MANAGED_RUN_ID: request.managedRecorderIdentity.runId,
           SCRY_MANAGED_PROMPT_HASH: request.managedRecorderIdentity.promptHash
         },
@@ -978,6 +988,7 @@ export function createPiAdapter(options: {
           state.rpc?.notify({ type: 'abort' })
           setTimeout(() => state.rpc?.abort(), 2_000)
         },
+        forceKill: () => state.rpc?.forceTerminate(),
         getExternalSessionId: () => state.sessionId,
         getProviderTurnId: () => state.providerTurnId
       }
