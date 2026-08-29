@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration'
 
@@ -102,6 +104,35 @@ describe('Pi recorder extension lifecycle', () => {
     const args = await readFile(capture, 'utf8')
     expect(args).toContain('--event UserPromptSubmit')
     expect(args).not.toContain('--start-daemon')
+  })
+
+  it('direct transport 子进程提前关闭 stdin 时不让 EPIPE 杀死 Pi', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-epipe-'))
+    roots.push(root)
+    const cli = join(root, 'scry')
+    const harness = join(root, 'harness.mjs')
+    const extensionUrl = pathToFileURL(resolve('packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')).href
+    await writeFile(cli, '#!/usr/bin/env node\nimport { closeSync } from "node:fs"\ncloseSync(0)\nsetTimeout(() => {}, 200)\n')
+    await chmod(cli, 0o700)
+    await writeFile(harness, `
+import extension from ${JSON.stringify(extensionUrl)}
+const handlers = new Map()
+extension({ on(name, handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } })
+const ctx = { cwd: process.cwd(), sessionManager: { getSessionId: () => 'pi-epipe', getLeafId: () => 'pi-epipe-turn' } }
+for (const handler of handlers.get('before_agent_start') ?? []) {
+  await handler({ prompt: 'x'.repeat(8 * 1024 * 1024) }, ctx)
+}
+`)
+
+    const result = await new Promise<{ error: Error | null, stderr: string }>((done) => {
+      execFile(process.execPath, [harness], {
+        cwd: root,
+        env: { ...process.env, SCRY_CLI_PATH: cli, SCRY_RECORDER_TRANSPORT: 'direct' }
+      }, (error, _stdout, stderr) => done({ error, stderr }))
+    })
+
+    expect(result.error).toBeNull()
+    expect(result.stderr).not.toContain('EPIPE')
   })
 
   it('按一个顶层轮次串行发送 start、tool 与 settled terminal', async () => {
