@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import { parseArgs, runScryCli } from './scry'
 
 const roots: string[] = []
@@ -51,6 +52,12 @@ describe('Scry CLI arguments', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['--help'])).resolves.toBe(0)
     expect(stdout.text()).toContain('Usage:')
+  })
+
+  it('--version 不会被空 positional 误判成 help', async () => {
+    const stdout = captureStdout()
+    await expect(runScryCli(['--version'])).resolves.toBe(0)
+    expect(stdout.text()).toBe(`${RECORDER_VERSION}\n`)
   })
 })
 

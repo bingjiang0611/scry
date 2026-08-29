@@ -7,6 +7,7 @@ import './analytics-evidence.css'
 import './diagnostics-evidence.css'
 import './inventory-evidence.css'
 import './session-evidence.css'
+import './codex-alignment.css'
 
 document.documentElement.dataset.platform =
   navigator.userAgent.includes('Electron') && navigator.platform.startsWith('Mac') ? 'macos' : 'other'

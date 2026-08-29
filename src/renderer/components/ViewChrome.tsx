@@ -6,9 +6,7 @@ interface ViewChromeProps {
   agent: DetectedAgent | undefined
   agentScanning?: boolean
   showPanel: boolean
-  showWorkspace?: boolean
   onTogglePanel: () => void
-  onToggleWorkspace?: () => void
 }
 
 export function ViewChrome({
@@ -16,13 +14,16 @@ export function ViewChrome({
   agent,
   agentScanning = false,
   showPanel,
-  showWorkspace = false,
-  onTogglePanel,
-  onToggleWorkspace
+  onTogglePanel
 }: ViewChromeProps) {
   const agentVersion = agent?.version?.replace(/\s+\(Claude Code\)\s*$/, '')
+  const workspaceLabel = cwd?.split('/').filter(Boolean).at(-1) ?? '不绑定项目'
   return (
     <header className="topbar compact">
+      <div className="tb-thread" title={cwd ?? '当前会话未绑定工作目录'}>
+        <Icon name="folder" />
+        <b>{workspaceLabel}</b>
+      </div>
       <div className="tb-spacer" />
       <div className="tb-statusbar" aria-label="会话工具">
         {agent ? (
@@ -36,30 +37,16 @@ export function ViewChrome({
             <span className="agent-name">{agentScanning ? '正在检测 agent…' : '未检测到 agent'}</span>
           </div>
         )}
-        {!cwd && (
-          <span className="tb-context cwd-pill" title="当前运行未指定工作目录">
-            <Icon name="folder" /> <b>不绑定项目</b>
-          </span>
-        )}
-        {cwd && onToggleWorkspace && (
-          <button
-            type="button"
-            className={`tb-action panel-pill ${showWorkspace ? 'on' : ''}`}
-            onClick={onToggleWorkspace}
-            title="工作区文件"
-            aria-pressed={showWorkspace}
-          >
-            <Icon name="folder" /> 文件
-          </button>
-        )}
         <button
           type="button"
           className={`tb-action panel-pill ${showPanel ? 'on' : ''}`}
           onClick={onTogglePanel}
           title="右侧工作区"
+          aria-label="右侧工作区"
           aria-pressed={showPanel}
         >
-          <Icon name="panel" /> 面板
+          <Icon name="panel" />
+          <span className="tb-action-label">面板</span>
         </button>
       </div>
     </header>
