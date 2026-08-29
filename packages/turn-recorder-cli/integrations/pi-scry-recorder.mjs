@@ -138,6 +138,7 @@ function sendDirect(workspace, event, payload) {
     ], { cwd: workspace, stdio: ['pipe', 'ignore', 'pipe'] })
     let stderr = ''
     child.stderr.on('data', (chunk) => { if (stderr.length < 4_000) stderr += chunk.toString() })
+    child.stdin.on('error', () => finish(false))
     child.on('error', () => finish(false))
     child.on('close', (code) => {
       if (code !== 0) debug(`hook ${event} exited ${String(code)} ${stderr.trim()}`)
