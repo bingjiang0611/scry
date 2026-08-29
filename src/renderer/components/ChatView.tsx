@@ -544,6 +544,25 @@ export function ChatView({
             ))}
           </div>
         )}
+        <div className="composer-context" role="group" aria-label="会话上下文">
+          <WorkdirPicker
+            cwd={cwd}
+            recent={recent}
+            onChoose={onChooseFolder}
+            onUnbind={onUnbindProject}
+            onPick={onPickRecent}
+            onRemove={onRemoveRecent}
+          />
+          <CliPicker
+            agents={agents}
+            selectedId={selectedAgentId}
+            onSelect={onSelectAgent}
+            onAddPi={onAddPiAgent}
+            onRemovePi={onRemovePiAgent}
+            onRescan={onRescan}
+            disabled={agentLocked}
+          />
+        </div>
         {busy && (
           <div className="run-status" role="status" aria-live="polite">
             <span className="run-status-left">
@@ -621,25 +640,7 @@ export function ChatView({
         />
         {composerStatus && <div id="composer-status" className="composer-error" role="alert">{composerStatus}</div>}
         <div className="composer-bottom">
-          <div className="composer-controls" role="group" aria-label="会话与运行配置">
-            <WorkdirPicker
-              cwd={cwd}
-              recent={recent}
-              onChoose={onChooseFolder}
-              onUnbind={onUnbindProject}
-              onPick={onPickRecent}
-              onRemove={onRemoveRecent}
-            />
-            <CliPicker
-              agents={agents}
-              selectedId={selectedAgentId}
-              onSelect={onSelectAgent}
-              onAddPi={onAddPiAgent}
-              onRemovePi={onRemovePiAgent}
-              onRescan={onRescan}
-              disabled={agentLocked}
-            />
-            <span className="run-group-sep" aria-hidden="true" />
+          <div className="composer-controls" role="group" aria-label="运行配置">
             <div className="run-control-scroll">
               <RunControlSelect
                 ariaLabel="模型"

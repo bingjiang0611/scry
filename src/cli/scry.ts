@@ -292,12 +292,12 @@ async function upgradeCommand(args: ParsedArgs): Promise<number> {
 
 export async function runScryCli(argv: string[]): Promise<number> {
   const args = parseArgs(argv)
-  if (args.flags.has('help') || args.positionals[0] === 'help' || args.positionals.length === 0) {
-    process.stdout.write(helpText())
-    return 0
-  }
   if (args.flags.has('version') || args.positionals[0] === 'version') {
     process.stdout.write(`${RECORDER_VERSION}\n`)
+    return 0
+  }
+  if (args.flags.has('help') || args.positionals[0] === 'help' || args.positionals.length === 0) {
+    process.stdout.write(helpText())
     return 0
   }
   switch (args.positionals[0]) {

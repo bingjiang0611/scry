@@ -256,10 +256,14 @@ async function main() {
       const rect = node.getBoundingClientRect()
       return {
         top: Math.round(rect.top),
+        right: Math.round(rect.right),
+        width: Math.round(rect.width),
         height: Math.round(rect.height),
         background: style.backgroundColor,
         drag: style.getPropertyValue('-webkit-app-region'),
-        paddingLeft: style.paddingLeft
+        paddingLeft: style.paddingLeft,
+        position: style.position,
+        borderRadius: style.borderRadius
       }
     }
     const topbarAction = document.querySelector('.topbar button')
@@ -279,10 +283,12 @@ async function main() {
     else delete root.dataset.theme
     return {
       platform: document.documentElement.dataset.platform,
+      viewportWidth: document.documentElement.clientWidth,
       sidebar: inspect('.sidebar'),
       brand: inspect('.sb-brand'),
       main: inspect('.main-area'),
       topbar: inspect('.topbar'),
+      surfaceSlot: inspect('.right-panel-slot'),
       surface: inspect('.right-surface-panel'),
       surfaceTopbar: inspect('.surface-topbar'),
       topbarActionDrag: topbarAction
@@ -296,9 +302,25 @@ async function main() {
   })()`)
   assert.equal(windowChrome.platform, 'macos')
   assert.deepEqual(
-    [windowChrome.brand?.top, windowChrome.topbar?.top, windowChrome.surfaceTopbar?.top],
-    [0, 0, 0],
-    'macOS app columns must extend to the top window edge'
+    [windowChrome.brand?.top, windowChrome.topbar?.top],
+    [0, 0],
+    'macOS primary app columns must extend to the top window edge'
+  )
+  assert.deepEqual(
+    [windowChrome.surfaceSlot?.top, windowChrome.surfaceTopbar?.top],
+    [62, 63],
+    'on-demand Surface must float below the integrated titlebar'
+  )
+  assert.deepEqual(
+    [windowChrome.surfaceSlot?.position, windowChrome.surfaceSlot?.borderRadius],
+    ['fixed', '16px'],
+    'on-demand Surface must remain a floating rounded workbench'
+  )
+  assert.ok(windowChrome.surfaceSlot?.width <= 440, 'floating Surface exceeded its desktop width cap')
+  assert.equal(
+    windowChrome.viewportWidth - windowChrome.surfaceSlot?.right,
+    14,
+    'floating Surface lost its 14px window gutter'
   )
   assert.deepEqual(
     [windowChrome.brand?.height, windowChrome.topbar?.height, windowChrome.surfaceTopbar?.height],
@@ -318,10 +340,10 @@ async function main() {
   )
   assert.equal(windowChrome.brand?.background, 'rgba(0, 0, 0, 0)')
   assert.equal(windowChrome.topbar?.background, windowChrome.main?.background)
-  assert.equal(windowChrome.surfaceTopbar?.background, windowChrome.surface?.background)
+  assert.equal(windowChrome.surfaceTopbar?.background, 'rgba(0, 0, 0, 0)')
   assert.equal(windowChrome.lightBackgrounds.brand, 'rgba(0, 0, 0, 0)')
   assert.equal(windowChrome.lightBackgrounds.topbar, windowChrome.lightBackgrounds.main)
-  assert.equal(windowChrome.lightBackgrounds.surfaceTopbar, windowChrome.lightBackgrounds.surface)
+  assert.equal(windowChrome.lightBackgrounds.surfaceTopbar, 'rgba(0, 0, 0, 0)')
   assert.equal(windowChrome.lightBackgrounds.main, 'rgb(255, 255, 255)')
   assert.notEqual(windowChrome.lightBackgrounds.main, windowChrome.main?.background)
 

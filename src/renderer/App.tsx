@@ -47,7 +47,7 @@ type AppStyle = CSSProperties & {
 }
 
 const SIDEBAR_MIN = 190
-const SIDEBAR_MAX = 320
+const SIDEBAR_MAX = 260
 const PANEL_MIN = 360
 const PANEL_MAX = 960
 const CHAT_BOTTOM_STICKY_PX = 32
@@ -402,10 +402,6 @@ export function App() {
     createRightSurfaceState({ visible: false })
   )
   const hasSurfaceContext = Boolean(cwd || activeSessionId)
-  useEffect(() => {
-    if (hasSurfaceContext) dispatchRightSurface({ type: 'show' })
-  }, [hasSurfaceContext])
-  const workspaceOpen = rightSurface.openIds.includes('files')
   const terminalOpen = rightSurface.openIds.includes('terminal')
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
@@ -1104,17 +1100,6 @@ export function App() {
     }
     dispatchRightSurface({ type: 'hide' })
   }
-  const toggleWorkspacePanel = (): void => {
-    if (view !== 'chat' || !cwd) return
-    if (!workspaceOpen || rightSurface.activeId !== 'files' || !panelVisible) {
-      surfacePane.restore()
-      dispatchRightSurface({ type: 'open', kind: 'files' })
-      return
-    }
-    if (!confirmWorkspaceTransition()) return
-    dispatchRightSurface({ type: 'close', kind: 'files' })
-    setWorkspaceDirty(false)
-  }
   const changeView = (next: AppView): void => {
     setView(next)
   }
@@ -1274,9 +1259,7 @@ export function App() {
               agent={integrations.selectedAgent}
               agentScanning={integrations.agentsScanning}
               showPanel={panelVisible}
-              showWorkspace={workspaceOpen && rightSurface.activeId === 'files' && panelVisible}
               onTogglePanel={toggleOverviewPanel}
-              onToggleWorkspace={toggleWorkspacePanel}
             />
 
             <ChatView

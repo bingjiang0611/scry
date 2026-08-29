@@ -299,9 +299,11 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('加入队列')
   })
 
-  it('配置行收敛：Provider 后有分组竖线，模型/权限带前缀 label', () => {
+  it('Composer 把会话上下文与运行配置分层，模型/权限保留前缀 label', () => {
     const html = renderWelcome({ turns: [runningTurn], busy: true })
-    expect(html).toContain('run-group-sep')
+    expect(html).toContain('class="composer-context" role="group" aria-label="会话上下文"')
+    expect(html).toContain('class="composer-controls" role="group" aria-label="运行配置"')
+    expect(html).not.toContain('run-group-sep')
     expect(html).toContain('rc-prefix" aria-hidden="true">模型')
     expect(html).toContain('rc-prefix" aria-hidden="true">权限')
   })
@@ -344,7 +346,8 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).toContain('aria-pressed="false"')
     expect(html).toContain('不绑定项目')
     expect(html).toContain('可直接发起任务')
-    expect(html).toContain('aria-label="会话与运行配置"')
+    expect(html).toContain('aria-label="会话上下文"')
+    expect(html).toContain('aria-label="运行配置"')
     expect(html).toContain('aria-label="模型"')
     expect(html).toContain('aria-label="权限"')
     expect(html).not.toContain('纵览面板')
@@ -373,22 +376,25 @@ describe('ViewChrome 顶栏', () => {
     )
     expect(html).toContain('正在检测 agent…')
     expect(html).not.toContain('未检测到 agent')
+    expect(html).toContain('class="tb-thread"')
+    expect(html).toContain('不绑定项目')
     expect(html).toContain('title="右侧工作区"')
     expect(html).not.toContain('title="工作区文件"')
   })
 
-  it('绑定项目时显示文件入口，不混入集成入口', () => {
+  it('绑定项目时只显示面板入口，不混入文件快捷入口或集成入口', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
         cwd="/tmp/sample-workspace"
         agent={undefined}
         showPanel
         onTogglePanel={() => {}}
-        onToggleWorkspace={() => {}}
       />
     )
-    expect(html).toContain('title="工作区文件"')
+    expect(html).not.toContain('title="工作区文件"')
+    expect(html).toContain('sample-workspace')
     expect(html).toContain('title="右侧工作区"')
+    expect(html).toContain('aria-label="右侧工作区"')
     expect(html).not.toContain('title="Skills"')
     expect(html).not.toContain('title="MCP"')
   })
@@ -1958,15 +1964,19 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('Test Model · test-model-alias')
     expect(chatHtml).toContain('aria-label="Effort"')
     expect(chatHtml).toContain('aria-label="权限"')
+    const context = chatHtml.match(/<div class="composer-context"[\s\S]*?<textarea/u)?.[0] ?? ''
     const controls = chatHtml.match(/<div class="composer-controls"[\s\S]*?<div class="spacer"/u)?.[0] ?? ''
     expect(chatHtml).not.toContain('class="composer-top"')
+    expect(context).toContain('role="group"')
+    expect(context).toContain('aria-label="会话上下文"')
+    expect(context).toContain('class="wdpick"')
+    expect(context).toContain('class="clipick"')
+    expect(context.indexOf('工作目录：')).toBeLessThan(context.indexOf('Agent'))
     expect(controls).toContain('role="group"')
-    expect(controls).toContain('aria-label="会话与运行配置"')
-    expect(controls).toContain('class="wdpick"')
+    expect(controls).toContain('aria-label="运行配置"')
     expect(controls).toContain('class="run-control-scroll"')
-    expect(controls.indexOf('工作目录：')).toBeLessThan(controls.indexOf('Agent'))
-    expect(controls.indexOf('Agent')).toBeLessThan(controls.indexOf('aria-label="模型"'))
-    expect(controls.indexOf('class="clipick"')).toBeLessThan(controls.indexOf('class="run-control-scroll"'))
+    expect(controls).not.toContain('class="wdpick"')
+    expect(controls).not.toContain('class="clipick"')
     expect(controls.indexOf('aria-label="模型"')).toBeLessThan(controls.indexOf('aria-label="Effort"'))
     expect(controls.indexOf('aria-label="Effort"')).toBeLessThan(controls.indexOf('aria-label="权限"'))
     expect(chatHtml).toContain('aria-label="发送"')
@@ -2070,7 +2080,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="重新扫描 PATH"')
     expect(chatHtml).toContain('重新扫描')
     expect(chatHtml).not.toContain('data-busy')
-    // 项目选择只保留在 composer 底部控制栏，不在 welcome 正文重复出现。
+    // 项目选择只保留在 composer 上下文栏，不在 welcome 正文重复出现。
     expect(chatHtml).not.toContain('class="welcome-context"')
     expect(chatHtml).toContain('/tmp/project')
     expect(chatHtml).not.toContain('运行上下文')
