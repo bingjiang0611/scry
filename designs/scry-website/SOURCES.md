@@ -5,8 +5,8 @@
 - `scry/README.md` — product positioning, capabilities, provider status, local-data and sandbox boundaries
 - `scry/src/renderer/styles.css` — dark/light tokens, type stacks, status colors, radii
 - `scry/designs/scry-app-icon/final/icon.png` — approved app icon
-- `scry/docs/ui-audit/screenshots/scry-full-surface-2026-07-15/01-session-chat-overview.png`
-- `scry/docs/ui-audit/screenshots/scry-full-surface-2026-07-15/08-analysis-overview.png`
+- `scry/.local/ui-probe/shots/chat-G-large-2560-full.png` — 2560px lossless product capture
+- `scry/.local/ui-probe/shots/analytics-G-large-2560-full.png` — 2560px lossless analytics capture
 - `scry/designs/scry-ui-refresh/reference-current-light.png`
 
 ## Live visual references

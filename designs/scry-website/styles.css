@@ -482,8 +482,7 @@ html[data-hero="grid"] .hero-aperture {
 }
 
 .product-window-hero {
-  transform: rotateX(4deg) scale(0.98);
-  transform-origin: 50% 100%;
+  transform: none;
 }
 
 .window-bar {
@@ -537,7 +536,9 @@ html[data-hero="grid"] .hero-aperture {
 
 .product-window img {
   width: 100%;
-  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: 54% 50%;
 }
 
 .evidence-float {
@@ -684,12 +685,13 @@ html[data-hero="grid"] .hero-aperture {
   border-radius: 14px;
   background: #080b0f;
   box-shadow: 0 50px 100px rgba(0, 0, 0, 0.55);
-  transform: perspective(1400px) rotateY(-4deg) rotateX(1deg);
-  transform-origin: 0 50%;
 }
 
 .grid-product-frame img {
   width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: 50% 50%;
 }
 
 .trace-card {
@@ -882,7 +884,17 @@ html[data-hero="grid"] .hero-aperture {
 
 .showcase-panel img {
   width: 100%;
-  opacity: 0.96;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  opacity: 1;
+}
+
+#panel-live img {
+  object-position: 54% 50%;
+}
+
+#panel-analysis img {
+  object-position: 50% 50%;
 }
 
 .showcase-note {
@@ -1719,10 +1731,6 @@ html[data-hero="grid"] .hero-aperture {
     padding-top: 36px;
   }
 
-  .grid-product-frame {
-    transform: none;
-  }
-
   .trace-card {
     display: none;
   }
@@ -1912,10 +1920,6 @@ html[data-hero="grid"] .hero-aperture {
   .eyebrow {
     margin-bottom: 22px;
     font-size: 8px;
-  }
-
-  .product-window-hero {
-    transform: none;
   }
 
   .hero-facts dd {
