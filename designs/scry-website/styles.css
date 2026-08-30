@@ -534,13 +534,26 @@ html[data-hero="grid"] .hero-aperture {
   background: var(--mint);
 }
 
-.live-surface {
-  display: block;
+.live-stage {
+  position: relative;
   width: 100%;
-  height: auto;
   aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #07090d;
+  contain: layout paint;
+}
+
+.live-surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 1280px;
+  height: 720px;
+  max-width: none;
   border: 0;
   background: #07090d;
+  transform-origin: 0 0;
   pointer-events: none;
 }
 

@@ -25,6 +25,23 @@ try {
 setHero(storedHero || document.documentElement.dataset.hero)
 heroButtons.forEach((button) => button.addEventListener('click', () => setHero(button.dataset.heroChoice)))
 
+const liveStages = [...document.querySelectorAll('.live-stage')]
+function fitLiveStages() {
+  liveStages.forEach((stage) => {
+    const surface = stage.querySelector('.live-surface')
+    const width = stage.clientWidth
+    if (surface && width > 0) surface.style.transform = `scale(${width / 1280})`
+  })
+}
+fitLiveStages()
+requestAnimationFrame(fitLiveStages)
+const liveStageObserver = 'ResizeObserver' in window ? new ResizeObserver(fitLiveStages) : null
+if (liveStageObserver) {
+  liveStages.forEach((stage) => liveStageObserver.observe(stage))
+} else {
+  window.addEventListener('resize', fitLiveStages)
+}
+
 const showcaseButtons = [...document.querySelectorAll('[data-showcase]')]
 const showcasePanels = [...document.querySelectorAll('.showcase-panel')]
 const showcaseFullLink = document.querySelector('[data-showcase-full]')
@@ -42,6 +59,7 @@ function setShowcase(name, focus = false) {
     panel.classList.toggle('is-active', active)
   })
   showcaseFullLink.href = name === 'analysis' ? 'assets/analytics-live.html' : 'assets/chat-live.html'
+  requestAnimationFrame(fitLiveStages)
 }
 
 showcaseButtons.forEach((button, index) => {
