@@ -27,6 +27,7 @@ heroButtons.forEach((button) => button.addEventListener('click', () => setHero(b
 
 const showcaseButtons = [...document.querySelectorAll('[data-showcase]')]
 const showcasePanels = [...document.querySelectorAll('.showcase-panel')]
+const showcaseFullLink = document.querySelector('[data-showcase-full]')
 
 function setShowcase(name, focus = false) {
   showcaseButtons.forEach((button) => {
@@ -40,6 +41,7 @@ function setShowcase(name, focus = false) {
     panel.hidden = !active
     panel.classList.toggle('is-active', active)
   })
+  showcaseFullLink.href = name === 'analysis' ? 'assets/analytics-live.html' : 'assets/chat-live.html'
 }
 
 showcaseButtons.forEach((button, index) => {

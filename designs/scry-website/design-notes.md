@@ -19,7 +19,7 @@ Scry is a local-first, MIT-licensed desktop app for observing and governing AI c
 - **Signal colors:** orange from the app icon; mint, blue, and coral from Scry’s existing trace/status tokens
 - **Typography:** native Apple/SF stack with compact monospace evidence labels
 - **Composition:** Apple-like scale and whitespace; Linear-like hairlines, figure labels, and product evidence
-- **Imagery:** real Scry screenshots only—no invented dashboards, metrics, testimonials, or community counts
+- **Product surfaces:** real Scry component probes rendered as live HTML/CSS—no raster screenshots, invented dashboards, metrics, testimonials, or community counts
 
 ## Hero variants
 

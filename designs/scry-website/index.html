@@ -62,7 +62,7 @@
             <span>Scry · rate-native</span>
             <span class="window-live"><i></i> observing</span>
           </div>
-          <img src="assets/chat-overview.png" alt="Scry 深色界面：Agent 执行轨迹、工具证据与会话状态">
+          <iframe class="live-surface" src="assets/chat-live.html" title="Scry 深色界面：Agent 执行轨迹、工具证据与会话状态" loading="eager" tabindex="-1"></iframe>
         </div>
         <div class="evidence-float evidence-float-left" aria-hidden="true">
           <span>TURN 16</span>
@@ -99,7 +99,7 @@
         <div class="grid-product reveal" aria-label="Scry 分析视图预览">
           <p class="figure-label">FIG 0.2 · CROSS-SESSION ANALYSIS</p>
           <div class="grid-product-frame">
-            <img src="assets/analytics-overview.png" alt="Scry 跨会话分析界面，包含 Token、工具调用和风险统计">
+            <iframe class="live-surface" src="assets/analytics-live.html" title="Scry 跨会话分析界面，包含 Token、工具调用和风险统计" loading="eager" tabindex="-1"></iframe>
           </div>
           <div class="trace-card trace-card-top" aria-hidden="true"><span>provider</span><strong>Claude</strong><i></i></div>
           <div class="trace-card trace-card-bottom" aria-hidden="true"><span>evidence</span><strong>captured locally</strong><i></i></div>
@@ -135,15 +135,18 @@
               <button id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="panel-live" data-showcase="live">对话现场</button>
               <button id="tab-analysis" type="button" role="tab" aria-selected="false" aria-controls="panel-analysis" data-showcase="analysis">跨会话分析</button>
             </div>
-            <p><span class="live-dot"></span> Real product captures</p>
+            <div class="showcase-meta">
+              <p><span class="live-dot"></span> Real product surface · live DOM</p>
+              <a data-showcase-full href="assets/chat-live.html" target="_blank" rel="noreferrer">1:1 查看 <span aria-hidden="true">↗</span></a>
+            </div>
           </div>
 
           <div id="panel-live" class="showcase-panel is-active" role="tabpanel" aria-labelledby="tab-live">
-            <img src="assets/chat-overview.png" alt="Scry 对话现场：工具调用、文件足迹与会话用量同时可见">
+            <iframe class="live-surface" src="assets/chat-live.html" title="Scry 对话现场：工具调用、文件足迹与会话用量同时可见" loading="lazy" tabindex="-1"></iframe>
             <div class="showcase-note note-live"><span>LIVE TRACE</span><strong>过程与结果在同一时间线上</strong></div>
           </div>
           <div id="panel-analysis" class="showcase-panel" role="tabpanel" aria-labelledby="tab-analysis" hidden>
-            <img src="assets/analytics-overview.png" alt="Scry 跨会话分析：对 Token、工具调用与风险进行汇总">
+            <iframe class="live-surface" src="assets/analytics-live.html" title="Scry 跨会话分析：对 Token、工具调用与风险进行汇总" loading="lazy" tabindex="-1"></iframe>
             <div class="showcase-note note-analysis"><span>CROSS-SESSION</span><strong>把零散执行变成可比较的系统信号</strong></div>
           </div>
         </div>

@@ -3,10 +3,10 @@
 ## Scry ground truth
 
 - `scry/README.md` — product positioning, capabilities, provider status, local-data and sandbox boundaries
-- `scry/src/renderer/styles.css` — dark/light tokens, type stacks, status colors, radii
+- `scry/src/renderer/styles.css` — copied into the prototype so product surfaces render as native DOM at device resolution
 - `scry/designs/scry-app-icon/final/icon.png` — approved app icon
-- `scry/.local/ui-probe/shots/chat-G-large-2560-full.png` — 2560px lossless product capture
-- `scry/.local/ui-probe/shots/analytics-G-large-2560-full.png` — 2560px lossless analytics capture
+- `scry/.local/ui-probe/chat.html` — real Scry components rendered to static HTML
+- `scry/.local/ui-probe/analytics.html` — real analytics components rendered to static HTML
 - `scry/designs/scry-ui-refresh/reference-current-light.png`
 
 ## Live visual references
