@@ -1,0 +1,24 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry App Icon Redesign": {
+      "versions": [
+        {
+          "path": "Scry App Icon Redesign.html",
+          "createdAt": "2026-08-30T11:56:36.777Z",
+          "status": "needs-review",
+          "subtitle": "三案比较 · A Aperture Trace 定稿 · PNG/ICNS",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "section": "Scry Brand"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-30T11:56:36.778Z",
+  "updatedAt": "2026-08-30T11:56:36.778Z"
+}

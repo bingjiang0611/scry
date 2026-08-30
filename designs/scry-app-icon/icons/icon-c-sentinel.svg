@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <path id="tile" d="M512 48C691 48 794 48 870 113C946 178 960 286 960 512C960 738 946 846 870 911C794 976 691 976 512 976C333 976 230 976 154 911C78 846 64 738 64 512C64 286 78 178 154 113C230 48 333 48 512 48Z" />
+    <linearGradient id="tileFill" x1="176" y1="86" x2="842" y2="932" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#414955" />
+      <stop offset="0.36" stop-color="#202630" />
+      <stop offset="1" stop-color="#090C11" />
+    </linearGradient>
+    <linearGradient id="rim" x1="324" y1="232" x2="724" y2="804" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F3F7FA" stop-opacity="0.82" />
+      <stop offset="0.18" stop-color="#72808E" stop-opacity="0.56" />
+      <stop offset="0.52" stop-color="#252C34" />
+      <stop offset="0.82" stop-color="#0A0E13" />
+      <stop offset="1" stop-color="#BAC4CC" stop-opacity="0.54" />
+    </linearGradient>
+    <radialGradient id="dial" cx="0" cy="0" r="1" gradientTransform="translate(420 374) rotate(49) scale(420)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#25313A" />
+      <stop offset="0.5" stop-color="#111820" />
+      <stop offset="1" stop-color="#05080C" />
+    </radialGradient>
+    <radialGradient id="core" cx="0" cy="0" r="1" gradientTransform="translate(478 470) rotate(48) scale(160)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0FFF9" />
+      <stop offset="0.25" stop-color="#7AFFC5" />
+      <stop offset="0.68" stop-color="#20CF95" />
+      <stop offset="1" stop-color="#0B8F6B" />
+    </radialGradient>
+    <filter id="shadow" x="-35%" y="-35%" width="170%" height="185%"><feGaussianBlur stdDeviation="24" /></filter>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="17" /></filter>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="25" /></filter>
+    <clipPath id="tileClip"><use xlink:href="#tile" /></clipPath>
+    <clipPath id="dialClip"><circle cx="512" cy="520" r="304" /></clipPath>
+    <pattern id="grid" width="94" height="94" patternUnits="userSpaceOnUse">
+      <path d="M94 0H0V94" fill="none" stroke="#B7C4CE" stroke-opacity="0.14" stroke-width="4" />
+    </pattern>
+  </defs>
+
+  <use xlink:href="#tile" transform="translate(0 18)" fill="#000000" opacity="0.46" filter="url(#shadow)" />
+  <use xlink:href="#tile" fill="url(#tileFill)" />
+  <g clip-path="url(#tileClip)">
+    <rect x="60" y="44" width="908" height="936" fill="url(#grid)" opacity="0.42" />
+    <ellipse cx="326" cy="72" rx="500" ry="222" fill="#FFFFFF" opacity="0.09" filter="url(#soft)" />
+    <circle cx="782" cy="778" r="312" fill="#0AA479" opacity="0.09" filter="url(#soft)" />
+  </g>
+  <use xlink:href="#tile" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="10" />
+
+  <ellipse cx="512" cy="826" rx="286" ry="64" fill="#000000" opacity="0.42" filter="url(#soft)" />
+  <circle cx="512" cy="520" r="330" fill="#000000" opacity="0.46" filter="url(#shadow)" />
+  <circle cx="512" cy="520" r="326" fill="url(#rim)" />
+  <circle cx="512" cy="520" r="304" fill="url(#dial)" />
+
+  <g clip-path="url(#dialClip)">
+    <rect x="208" y="216" width="608" height="608" fill="url(#grid)" opacity="0.34" />
+    <ellipse cx="396" cy="334" rx="170" ry="78" transform="rotate(-20 396 334)" fill="#FFFFFF" opacity="0.09" />
+    <circle cx="512" cy="520" r="222" fill="none" stroke="#A9B7C1" stroke-opacity="0.18" stroke-width="13" />
+    <circle cx="512" cy="520" r="222" fill="none" stroke="#5EF0B5" stroke-width="24" stroke-linecap="round" stroke-dasharray="265 128 250 138 252 360" transform="rotate(-84 512 520)" />
+    <circle cx="512" cy="520" r="222" fill="none" stroke="#45E6AA" stroke-opacity="0.34" stroke-width="60" stroke-linecap="round" stroke-dasharray="265 128 250 138 252 360" transform="rotate(-84 512 520)" filter="url(#glow)" />
+  </g>
+
+  <g fill="none" stroke="#6EF4BE" stroke-width="42" stroke-linecap="round">
+    <path d="M512 520L512 314" />
+    <path d="M512 520L688 626" />
+    <path d="M512 520L336 626" />
+  </g>
+  <g fill="none" stroke="#E5FFF4" stroke-width="10" stroke-linecap="round" opacity="0.56">
+    <path d="M506 514L506 326" />
+    <path d="M521 515L678 610" />
+    <path d="M503 523L347 617" />
+  </g>
+
+  <circle cx="512" cy="520" r="118" fill="#20D99A" opacity="0.38" filter="url(#glow)" />
+  <circle cx="512" cy="520" r="98" fill="url(#core)" />
+  <circle cx="481" cy="487" r="25" fill="#FFFFFF" opacity="0.58" />
+  <circle cx="512" cy="314" r="52" fill="#CFFFF0" />
+  <circle cx="688" cy="626" r="52" fill="#CFFFF0" />
+  <circle cx="336" cy="626" r="52" fill="#CFFFF0" />
+  <g fill="#FFFFFF" opacity="0.62">
+    <circle cx="494" cy="296" r="14" />
+    <circle cx="670" cy="608" r="14" />
+    <circle cx="318" cy="608" r="14" />
+  </g>
+  <path d="M289 299C355 230 446 207 524 215" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round" opacity="0.32" />
+</svg>
