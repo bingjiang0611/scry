@@ -21,10 +21,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - run: npm run build:cli
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and contract tests
+        run: npm run test:unit
+      - name: Workspace hook shell test
+        run: npm run test:shell
+      - name: Build desktop app
+        run: npm run build
+      - name: Build recorder CLI
+        run: npm run build:cli
 
   cli-compat:
     runs-on: ubuntu-latest
@@ -42,10 +48,11 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm run check:cli-release
+      - name: CLI tests and clean tarball smoke
+        run: npm run check:cli-release
 
   packaged-electron:
-    needs: node
+    needs: [node, cli-compat]
     runs-on: macos-14
     timeout-minutes: 30
     env:

@@ -1,0 +1,178 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ScryApi } from './index'
+
+type IpcListener = (event: unknown, ...args: unknown[]) => void
+
+const electron = vi.hoisted(() => ({
+  exposeInMainWorld: vi.fn((_name: string, _api: unknown): void => undefined),
+  invoke: vi.fn(async (_channel: string, ..._args: unknown[]): Promise<unknown> => undefined),
+  on: vi.fn((_channel: string, _listener: IpcListener): void => undefined),
+  removeListener: vi.fn((_channel: string, _listener: IpcListener): void => undefined),
+  send: vi.fn((_channel: string, ..._args: unknown[]): void => undefined)
+}))
+
+vi.mock('electron', () => ({
+  contextBridge: { exposeInMainWorld: electron.exposeInMainWorld },
+  ipcRenderer: {
+    invoke: electron.invoke,
+    on: electron.on,
+    removeListener: electron.removeListener,
+    send: electron.send
+  }
+}))
+
+await import('./index')
+
+const exposed = electron.exposeInMainWorld.mock.calls[0]
+if (!exposed) throw new Error('preload did not expose an API')
+const api = exposed[1] as ScryApi
+const callableApi = api as unknown as Record<string, (...args: unknown[]) => unknown>
+
+const invokeChannels = {
+  setTheme: 'app:setTheme',
+  detectFast: 'agent:detectFast',
+  detect: 'agent:detect',
+  addPiProfile: 'agent:addPiProfile',
+  removePiProfile: 'agent:removePiProfile',
+  providerDescriptors: 'agent:providerDescriptors',
+  recentFolders: 'agent:recentFolders',
+  removeRecentFolder: 'agent:removeRecentFolder',
+  chooseFolder: 'agent:chooseFolder',
+  clipboardImage: 'agent:clipboardImage',
+  workspaceList: 'workspace:list',
+  workspaceRead: 'workspace:read',
+  workspaceWrite: 'workspace:write',
+  workspaceCreate: 'workspace:create',
+  workspaceRename: 'workspace:rename',
+  workspaceMove: 'workspace:move',
+  workspaceTrash: 'workspace:trash',
+  terminalStart: 'terminal:start',
+  terminalWrite: 'terminal:write',
+  terminalResize: 'terminal:resize',
+  terminalReady: 'terminal:ready',
+  terminalAck: 'terminal:ack',
+  terminalClose: 'terminal:close',
+  setCwd: 'agent:setCwd',
+  newSession: 'agent:newSession',
+  listSessions: 'agent:listSessions',
+  listProjects: 'agent:listProjects',
+  setProjectPinned: 'agent:setProjectPinned',
+  renameProject: 'agent:renameProject',
+  removeProject: 'agent:removeProject',
+  revealProject: 'agent:revealProject',
+  listArchivedSessions: 'agent:listArchivedSessions',
+  catalogHealth: 'agent:catalogHealth',
+  listSkills: 'agent:listSkills',
+  mcpSnapshot: 'agent:mcpSnapshot',
+  mcpGuardScan: 'agent:mcpGuardScan',
+  testMcp: 'agent:testMcp',
+  reauthenticateMcp: 'agent:reauthenticateMcp',
+  listCommands: 'agent:listCommands',
+  runControls: 'agent:runControls',
+  usageStats: 'agent:usageStats',
+  stats: 'agent:stats',
+  billingState: 'agent:billingState',
+  syncBillingAdmin: 'agent:syncBillingAdmin',
+  importBillingFixture: 'agent:importBillingFixture',
+  gitDiff: 'agent:gitDiff',
+  diagnostics: 'agent:diagnostics',
+  loadSession: 'agent:loadSession',
+  deleteSession: 'agent:deleteSession',
+  setSessionPinned: 'agent:setSessionPinned',
+  setSessionArchived: 'agent:setSessionArchived',
+  deleteArchivedSessions: 'agent:deleteArchivedSessions',
+  start: 'agent:start',
+  activeRun: 'agent:activeRun',
+  activeRuns: 'agent:activeRuns',
+  focusRun: 'agent:focusRun',
+  adoptActiveRun: 'agent:adoptActiveRun',
+  answerQuestion: 'agent:answerQuestion',
+  stop: 'agent:stop'
+} as const satisfies Partial<Record<keyof ScryApi, string>>
+
+const listenerChannels = {
+  onTrace: 'agent:trace',
+  onTerminalData: 'terminal:data',
+  onTerminalExit: 'terminal:exit',
+  onTurnDone: 'agent:turnDone',
+  onDataUpdated: 'agent:dataUpdated',
+  onSession: 'agent:session',
+  onFocusedRun: 'agent:focusedRun',
+  onQuestion: 'agent:userQuestion',
+  onQuestionClosed: 'agent:userQuestionClosed',
+  onError: 'agent:error'
+} as const satisfies Partial<Record<keyof ScryApi, string>>
+
+beforeEach(() => {
+  electron.invoke.mockReset()
+  electron.invoke.mockResolvedValue({ data: null })
+  electron.on.mockClear()
+  electron.removeListener.mockClear()
+  electron.send.mockClear()
+})
+
+describe('preload IPC boundary', () => {
+  it('exposes only the reviewed narrow API and fixed IPC channels', async () => {
+    expect(exposed[0]).toBe('scry')
+    expect(Object.keys(api).sort()).toEqual([
+      'rendererReady',
+      ...Object.keys(invokeChannels),
+      ...Object.keys(listenerChannels)
+    ].sort())
+
+    api.rendererReady()
+    expect(electron.send).toHaveBeenCalledWith('app:rendererReady')
+
+    for (const [method, channel] of Object.entries(invokeChannels)) {
+      electron.invoke.mockClear()
+      await callableApi[method]()
+      expect(electron.invoke, method).toHaveBeenCalledTimes(1)
+      expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
+    }
+  })
+
+  it('keeps structured arguments on the main-process side of the bridge', async () => {
+    await api.terminalWrite('terminal-1', 'pwd\n')
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:write', { id: 'terminal-1', data: 'pwd\n' })
+
+    await api.terminalResize('terminal-1', 120, 40)
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:resize', { id: 'terminal-1', cols: 120, rows: 40 })
+
+    const context = { providerId: 'codex' as const, cwd: '/repo' }
+    await api.mcpSnapshot(context, true)
+    expect(electron.invoke).toHaveBeenLastCalledWith('agent:mcpSnapshot', { context, refresh: true })
+
+    await api.testMcp(context, 'server-1')
+    expect(electron.invoke).toHaveBeenLastCalledWith('agent:testMcp', { context, targetId: 'server-1' })
+  })
+
+  it('registers removable listeners and preserves batched event delivery', () => {
+    for (const [method, channel] of Object.entries(listenerChannels)) {
+      electron.on.mockClear()
+      electron.removeListener.mockClear()
+      const cleanup = callableApi[method](vi.fn()) as () => void
+      expect(electron.on, method).toHaveBeenCalledTimes(1)
+      const listener = electron.on.mock.calls[0]?.[1]
+      expect(electron.on.mock.calls[0]?.[0], method).toBe(channel)
+      cleanup()
+      expect(electron.removeListener).toHaveBeenCalledWith(channel, listener)
+    }
+
+    const traceCallback = vi.fn()
+    api.onTrace(traceCallback)
+    const traceListener = electron.on.mock.calls.at(-1)?.[1]
+    traceListener?.(null, [{ id: 'one' }, { id: 'two' }])
+    expect(traceCallback.mock.calls.map(([event]) => event.id)).toEqual(['one', 'two'])
+
+    const terminalCallback = vi.fn()
+    api.onTerminalData(terminalCallback)
+    const terminalListener = electron.on.mock.calls.at(-1)?.[1]
+    terminalListener?.(null, [{ id: 'terminal-1', data: 'a' }, { id: 'terminal-1', data: 'b' }])
+    expect(terminalCallback.mock.calls.map(([event]) => event.data)).toEqual(['a', 'b'])
+  })
+
+  it('rejects malformed mcpguard reports before they reach the renderer', async () => {
+    electron.invoke.mockResolvedValueOnce({ data: { summary: 'not-a-report' } })
+    await expect(api.mcpGuardScan({ providerId: 'codex', cwd: '/repo' })).rejects.toThrow('无效的 mcpguard 报告')
+  })
+})

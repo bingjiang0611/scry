@@ -58,9 +58,13 @@ npm run dev
 
 ```bash
 npm run typecheck
-npm test
+npm test                 # Vitest 单测/合同测试 + workspace Hook shell 测试
 npm run build
+npm run check:cli-release # CLI 单测、构建、npm tarball 干净安装与 bin/doctor smoke
 ```
+
+GitHub Actions 会在 Node 22 运行 App 的 typecheck、全量测试与构建，在 Node 20/22/24
+运行 CLI 发布检查，并在 macOS Node 22 打包后执行 packaged App 与 Electron security smoke。
 
 ## 独立轮次记录 CLI
 
