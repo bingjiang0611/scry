@@ -1,0 +1,18 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Website": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-08-30T12:24:45.869Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-30T12:24:45.870Z",
+  "updatedAt": "2026-08-30T12:28:00.596Z"
+}

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN" data-hero="aperture">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07090d">
+  <meta name="description" content="Scry 是本地优先、MIT 开源的 AI coding agent 观测与治理桌面应用。">
+  <title>Scry — 让每一次 Agent 执行都有迹可循</title>
+  <link rel="icon" href="assets/scry-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="site-header" aria-label="主导航">
+    <div class="nav-shell">
+      <a class="brand" href="#main" aria-label="Scry 首页">
+        <img src="assets/scry-icon.png" alt="" width="32" height="32">
+        <span>Scry</span>
+        <span class="brand-status">Open Source</span>
+      </a>
+
+      <nav class="nav-links" aria-label="页面导航">
+        <a href="#product">产品</a>
+        <a href="#evidence">证据</a>
+        <a href="#architecture">架构</a>
+        <a href="#local-first">本地优先</a>
+      </nav>
+
+      <div class="nav-actions">
+        <div class="hero-switch" role="group" aria-label="首屏设计方向">
+          <span>Hero</span>
+          <button type="button" data-hero-choice="aperture" aria-pressed="true">A</button>
+          <button type="button" data-hero-choice="grid" aria-pressed="false">B</button>
+        </div>
+        <a class="nav-github" href="https://github.com/bingjiang0611/scry" target="_blank" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero hero-aperture" data-screen-label="Hero A — Aperture">
+      <div class="hero-glow hero-glow-orange" aria-hidden="true"></div>
+      <div class="hero-glow hero-glow-mint" aria-hidden="true"></div>
+      <div class="hero-copy reveal">
+        <p class="eyebrow"><span class="live-dot"></span> Local-first · MIT licensed · macOS</p>
+        <h1>Agent 的每一步，<br><span>都有迹可循。</span></h1>
+        <p class="hero-lede">Scry 把终端里的执行过程，变成可检查的对话、工具调用、文件足迹、用量与诊断证据。</p>
+        <div class="cta-row">
+          <a class="button button-primary" href="https://github.com/bingjiang0611/scry" target="_blank" rel="noreferrer">在 GitHub 查看源码 <span aria-hidden="true">↗</span></a>
+          <a class="text-link" href="#architecture">了解它如何工作 <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+
+      <div class="aperture-stage reveal" aria-label="Scry 产品界面预览">
+        <div class="stage-orbit" aria-hidden="true"></div>
+        <img class="floating-icon" src="assets/scry-icon.png" alt="Scry 应用图标" width="116" height="116">
+        <div class="product-window product-window-hero">
+          <div class="window-bar">
+            <div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+            <span>Scry · rate-native</span>
+            <span class="window-live"><i></i> observing</span>
+          </div>
+          <img src="assets/chat-overview.jpg" alt="Scry 深色界面：左侧会话，中间 Agent 执行轨迹，右侧会话纵览">
+        </div>
+        <div class="evidence-float evidence-float-left" aria-hidden="true">
+          <span>TURN 16</span>
+          <strong>33 tools</strong>
+          <small>trace captured</small>
+        </div>
+        <div class="evidence-float evidence-float-right" aria-hidden="true">
+          <span>FILES</span>
+          <strong>8 touched</strong>
+          <small>local evidence</small>
+        </div>
+      </div>
+      <p class="hero-caption reveal"><span>FIG 0.1</span> Real Scry UI · no fabricated dashboard</p>
+    </section>
+
+    <section class="hero hero-grid" data-screen-label="Hero B — Evidence Grid">
+      <div class="grid-ambient" aria-hidden="true"></div>
+      <div class="hero-grid-shell">
+        <div class="grid-copy reveal">
+          <p class="eyebrow"><span class="live-dot"></span> The open-source evidence layer</p>
+          <h1>不是更多 AI。<br><span>是更多证据。</span></h1>
+          <p class="hero-lede">在一个本地桌面界面里驱动 Claude、Codex、Qoder、OpenCode 与 Pi，并看清每一次调用、修改与成本。</p>
+          <div class="cta-row">
+            <a class="button button-primary" href="https://github.com/bingjiang0611/scry" target="_blank" rel="noreferrer">阅读源码 <span aria-hidden="true">↗</span></a>
+            <a class="text-link" href="#product">查看产品 <span aria-hidden="true">↓</span></a>
+          </div>
+          <dl class="hero-facts">
+            <div><dt>LICENSE</dt><dd>MIT</dd></div>
+            <div><dt>DATA</dt><dd>Local-first</dd></div>
+            <div><dt>STATUS</dt><dd>MVP / WIP</dd></div>
+          </dl>
+        </div>
+
+        <div class="grid-product reveal" aria-label="Scry 分析视图预览">
+          <p class="figure-label">FIG 0.2 · CROSS-SESSION ANALYSIS</p>
+          <div class="grid-product-frame">
+            <img src="assets/analytics-overview.jpg" alt="Scry 跨会话分析界面，包含 Token、工具调用和风险统计">
+          </div>
+          <div class="trace-card trace-card-top" aria-hidden="true"><span>provider</span><strong>Claude</strong><i></i></div>
+          <div class="trace-card trace-card-bottom" aria-hidden="true"><span>evidence</span><strong>captured locally</strong><i></i></div>
+          <div class="grid-index" aria-hidden="true">01<br>02<br>03<br>04</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="provider-rail" aria-label="支持的 Provider" data-screen-label="Provider Rail">
+      <div class="section-shell rail-shell reveal">
+        <p>ONE LOCAL CONTROL PLANE</p>
+        <div class="provider-list" role="list">
+          <span role="listitem"><i class="provider-dot dot-claude"></i>Claude</span>
+          <span role="listitem"><i class="provider-dot dot-codex"></i>Codex</span>
+          <span role="listitem"><i class="provider-dot dot-qoder"></i>Qoder</span>
+          <span role="listitem"><i class="provider-dot dot-opencode"></i>OpenCode</span>
+          <span role="listitem"><i class="provider-dot dot-pi"></i>Pi</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="product" class="product-story section-space" data-screen-label="Product — Live Evidence">
+      <div class="section-shell">
+        <header class="section-heading reveal">
+          <p class="section-kicker">OBSERVE THE WORK</p>
+          <h2>从「它说完成了」，<br>到「你看见它完成了」。</h2>
+          <p>Scry 不只保留最终答案。它把 Agent 的过程组织成可以复查、比较和定位问题的证据。</p>
+        </header>
+
+        <div class="showcase reveal">
+          <div class="showcase-toolbar">
+            <div class="showcase-tabs" role="tablist" aria-label="Scry 产品视图">
+              <button id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="panel-live" data-showcase="live">对话现场</button>
+              <button id="tab-analysis" type="button" role="tab" aria-selected="false" aria-controls="panel-analysis" data-showcase="analysis">跨会话分析</button>
+            </div>
+            <p><span class="live-dot"></span> Real product captures</p>
+          </div>
+
+          <div id="panel-live" class="showcase-panel is-active" role="tabpanel" aria-labelledby="tab-live">
+            <img src="assets/chat-overview.jpg" alt="Scry 对话现场：工具调用、文件足迹与会话用量同时可见">
+            <div class="showcase-note note-live"><span>LIVE TRACE</span><strong>过程与结果在同一时间线上</strong></div>
+          </div>
+          <div id="panel-analysis" class="showcase-panel" role="tabpanel" aria-labelledby="tab-analysis" hidden>
+            <img src="assets/analytics-overview.jpg" alt="Scry 跨会话分析：对 Token、工具调用与风险进行汇总">
+            <div class="showcase-note note-analysis"><span>CROSS-SESSION</span><strong>把零散执行变成可比较的系统信号</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence" class="evidence-section section-space" data-screen-label="Evidence System">
+      <div class="section-shell">
+        <header class="split-heading reveal">
+          <div>
+            <p class="section-kicker">THE EVIDENCE SYSTEM</p>
+            <h2>不靠感觉管理 Agent。</h2>
+          </div>
+          <p>每一种信息都对应一个实际问题：发生了什么、改了什么、花了多少、哪里值得警惕。</p>
+        </header>
+
+        <div class="evidence-grid">
+          <article class="evidence-card evidence-card-large reveal">
+            <div class="card-index">01 / LIVE TRACE</div>
+            <div class="mini-trace" aria-hidden="true">
+              <div><span class="trace-node node-blue"></span><p><b>Read</b><small>00_intake.md</small></p><em>success</em></div>
+              <div><span class="trace-node node-mint"></span><p><b>Skill</b><small>rate-workflow</small></p><em>loaded</em></div>
+              <div><span class="trace-node node-orange"></span><p><b>Bash</b><small>pwd &amp;&amp; ls</small></p><em>success</em></div>
+            </div>
+            <div class="card-copy">
+              <h3>执行过程，不再折叠成一句“Done”。</h3>
+              <p>流式查看模型输出、工具调用与状态变化，按 turn 回到问题发生的那一刻。</p>
+            </div>
+          </article>
+
+          <article class="evidence-card reveal">
+            <div class="card-index">02 / FOOTPRINT</div>
+            <div class="footprint-stack" aria-hidden="true">
+              <span><i>R</i> 00_intake.md <b>read</b></span>
+              <span><i>R</i> SKILL.md <b>read</b></span>
+              <span><i>W</i> doc.txt <b>changed</b></span>
+            </div>
+            <div class="card-copy">
+              <h3>文件足迹有上下文。</h3>
+              <p>把读取、写入与修改和具体 turn 对齐，快速回答“它碰过哪些文件”。</p>
+            </div>
+          </article>
+
+          <article class="evidence-card reveal">
+            <div class="card-index">03 / GOVERNANCE</div>
+            <div class="governance-meter" aria-hidden="true">
+              <div class="meter-ring"><strong>42%</strong></div>
+              <div><span>Context</span><b>422.5k / 1000k</b><small>budget visible before it hurts</small></div>
+            </div>
+            <div class="card-copy">
+              <h3>成本、信任与风险同屏。</h3>
+              <p>聚合 token、cost、duration、MCP 与危险操作信号，辅助判断，不伪装成安全边界。</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="local-first" class="local-section" data-screen-label="Local First — Honest Boundaries">
+      <div class="local-shell">
+        <div class="local-visual reveal">
+          <div class="icon-halo" aria-hidden="true"></div>
+          <img src="assets/scry-icon.png" alt="Scry 应用图标" width="320" height="320">
+          <span class="local-stamp">LOCAL / 001</span>
+        </div>
+        <div class="local-copy reveal">
+          <p class="section-kicker">LOCAL FIRST. HONEST BY DESIGN.</p>
+          <h2>数据留在本机。<br>边界写在明处。</h2>
+          <p>会话索引、观测数据与 turn recorder 记录保存在本机；Scry 本身没有项目数据上传后端。Provider CLI 仍会连接各自服务。</p>
+          <div class="boundary-note">
+            <span>IMPORTANT</span>
+            <p><strong>Scry 不是安全沙箱。</strong> 文件足迹也不是完整审计日志。它提供可见性和治理入口，而不是虚假的绝对保证。</p>
+          </div>
+          <a class="text-link text-link-dark" href="https://github.com/bingjiang0611/scry#%E5%AE%89%E5%85%A8%E4%B8%8E%E6%95%B0%E6%8D%AE%E8%BE%B9%E7%95%8C" target="_blank" rel="noreferrer">阅读完整数据边界 <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" class="architecture-section section-space" data-screen-label="Architecture — Local Control Plane">
+      <div class="section-shell">
+        <header class="section-heading section-heading-compact reveal">
+          <p class="section-kicker">OPEN ARCHITECTURE</p>
+          <h2>一个桌面界面，<br>连接你已经在用的 Agent。</h2>
+          <p>Scry 通过原生 Provider adapters 驱动本机 CLI / SDK；渲染、记录与治理路径都可以在源码里检查。</p>
+        </header>
+
+        <div class="architecture-flow reveal" aria-label="Scry 架构：Renderer 通过 IPC 连接 Main，再连接本地 Agent Runtime">
+          <article><span>01</span><p>Renderer</p><small>对话 · 分析 · 诊断</small></article>
+          <i aria-hidden="true">→</i>
+          <article><span>02</span><p>Preload / IPC</p><small>最小化 API 边界</small></article>
+          <i aria-hidden="true">→</i>
+          <article><span>03</span><p>Electron Main</p><small>会话 · 信任 · SQLite</small></article>
+          <i aria-hidden="true">→</i>
+          <article><span>04</span><p>Local Runtime</p><small>Claude · Codex · Qoder · OpenCode · Pi</small></article>
+        </div>
+
+        <div class="source-panel reveal">
+          <div class="source-copy">
+            <p class="section-kicker">READ IT. RUN IT. QUESTION IT.</p>
+            <h3>开源不是装饰，是验证路径。</h3>
+            <p>从 Provider adapter 到 turn recorder，Scry 自有代码以 MIT 许可证开放。当前项目处于 MVP / WIP 阶段，主要在 macOS 开发和验证。</p>
+          </div>
+          <div class="clone-box">
+            <div class="clone-top"><span>TERMINAL</span><span>zsh</span></div>
+            <code>git clone https://github.com/bingjiang0611/scry.git</code>
+            <button type="button" data-copy="git clone https://github.com/bingjiang0611/scry.git" aria-label="复制 clone 命令">复制</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" data-screen-label="Final CTA — GitHub">
+      <div class="final-glow" aria-hidden="true"></div>
+      <div class="section-shell reveal">
+        <img src="assets/scry-icon.png" alt="" width="76" height="76">
+        <p class="section-kicker">SCRY / OPEN SOURCE</p>
+        <h2>别只相信 Agent。<br>看见它如何工作。</h2>
+        <p>本地优先的 AI coding agent 观测与治理桌面应用。</p>
+        <a class="button button-primary button-large" href="https://github.com/bingjiang0611/scry" target="_blank" rel="noreferrer">在 GitHub 查看 Scry <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="section-shell footer-shell">
+      <div class="footer-brand">
+        <img src="assets/scry-icon.png" alt="" width="28" height="28">
+        <span>Scry</span>
+      </div>
+      <p>Local-first observability &amp; governance for coding agents.</p>
+      <nav aria-label="页脚导航">
+        <a href="https://github.com/bingjiang0611/scry" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="https://github.com/bingjiang0611/scry#readme" target="_blank" rel="noreferrer">README</a>
+        <a href="https://github.com/bingjiang0611/scry/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License</a>
+      </nav>
+    </div>
+  </footer>
+
+  <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>
