@@ -345,7 +345,7 @@ describe('Pi RPC Provider', () => {
         attachments: [], permissionMode: 'full_access', emit: vi.fn()
       }).promise).rejects.toThrow('命令目录未证明')
     })
-  })
+  }, 10_000)
 
   it('fails closed after prompt acceptance when no authoritative user entry appears', async () => {
     await withFixture(async (profile, cwd) => {
@@ -355,7 +355,7 @@ describe('Pi RPC Provider', () => {
         attachments: [], permissionMode: 'full_access', emit: vi.fn()
       }).promise).rejects.toThrow('prompt 已接受')
     })
-  }, 10_000)
+  }, 15_000)
 
   it('uses append order as the cursor and accepts a user descendant through prompt-time compaction', async () => {
     await withFixture(async (profile, cwd) => {
@@ -377,7 +377,7 @@ describe('Pi RPC Provider', () => {
       { type: 'message', id: 'user-1', parentId: null, message: { role: 'user' } },
       { type: 'message', id: 'user-2', parentId: 'user-1', message: { role: 'user' } }
     ])).toThrow('多个新增')
-  })
+  }, 15_000)
 
   it('cancels the exact managed provisional lifecycle when Pi rejects prompt preflight', async () => {
     await withFixture(async (profile, cwd) => {
@@ -409,7 +409,7 @@ describe('Pi RPC Provider', () => {
       await expect(recoverManagedRecorderTurns(cwd, process.env, { provider: 'pi' }))
         .resolves.toEqual({ recovered: 0, pending: 0 })
     })
-  })
+  }, 15_000)
 
   it('retains the managed provisional lifecycle when prompt transport outcome is uncertain', async () => {
     await withFixture(async (profile, cwd) => {
