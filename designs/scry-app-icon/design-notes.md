@@ -60,3 +60,7 @@ Ship **A · Aperture Trace**. It has the strongest semantic compression, cleares
 - 1024×1024 PNG previews for all three directions;
 - final `icon.png` and `icon.icns` generated from A;
 - final asset synchronized to `scry/build/` after verification.
+
+## macOS delivery constraint
+
+The final A master uses the same 824 px legacy-ICNS silhouette envelope as the previous shipped icon (`x/y = 100…924`), with a broad `rx=180` rounded-rectangle profile and no baked outer shadow. This prevents current macOS IconServices from treating the artwork as an irregular legacy glyph and adding a white compatibility backplate in the Dock.

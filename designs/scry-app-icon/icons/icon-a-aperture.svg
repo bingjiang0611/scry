@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <clipPath id="tileClip"><path d="M512 48C691 48 794 48 870 113C946 178 960 286 960 512C960 738 946 846 870 911C794 976 691 976 512 976C333 976 230 976 154 911C78 846 64 738 64 512C64 286 78 178 154 113C230 48 333 48 512 48Z" /></clipPath>
+    <clipPath id="tileClip"><rect x="100" y="100" width="824" height="824" rx="180" /></clipPath>
     <linearGradient id="tileFill" x1="152" y1="96" x2="866" y2="934" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#FFD765" />
       <stop offset="0.42" stop-color="#FF9B3F" />
       <stop offset="1" stop-color="#E8442D" />
     </linearGradient>
-    <linearGradient id="tileEdge" x1="512" y1="48" x2="512" y2="976" gradientUnits="userSpaceOnUse">
+    <linearGradient id="tileEdge" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
       <stop stop-color="#FFF6CE" stop-opacity="0.8" />
       <stop offset="0.18" stop-color="#FFFFFF" stop-opacity="0.12" />
       <stop offset="0.82" stop-color="#7D1C24" stop-opacity="0.2" />
@@ -42,14 +42,13 @@
     <clipPath id="lensClip"><circle cx="512" cy="516" r="286" /></clipPath>
   </defs>
 
-  <path d="M512 48C691 48 794 48 870 113C946 178 960 286 960 512C960 738 946 846 870 911C794 976 691 976 512 976C333 976 230 976 154 911C78 846 64 738 64 512C64 286 78 178 154 113C230 48 333 48 512 48Z" transform="translate(0 18)" fill="#09040A" opacity="0.34" filter="url(#shadow)" />
-  <path d="M512 48C691 48 794 48 870 113C946 178 960 286 960 512C960 738 946 846 870 911C794 976 691 976 512 976C333 976 230 976 154 911C78 846 64 738 64 512C64 286 78 178 154 113C230 48 333 48 512 48Z" fill="url(#tileFill)" />
+  <rect x="100" y="100" width="824" height="824" rx="180" fill="url(#tileFill)" />
   <g clip-path="url(#tileClip)">
     <ellipse cx="320" cy="72" rx="470" ry="255" fill="#FFFFFF" opacity="0.2" filter="url(#soft)" />
     <ellipse cx="852" cy="874" rx="360" ry="258" fill="#AE1637" opacity="0.25" filter="url(#soft)" />
     <path d="M97 210C280 59 723 49 923 213" fill="none" stroke="#FFFFFF" stroke-width="14" opacity="0.25" filter="url(#soft)" />
   </g>
-  <path d="M512 48C691 48 794 48 870 113C946 178 960 286 960 512C960 738 946 846 870 911C794 976 691 976 512 976C333 976 230 976 154 911C78 846 64 738 64 512C64 286 78 178 154 113C230 48 333 48 512 48Z" fill="none" stroke="url(#tileEdge)" stroke-width="10" />
+  <rect x="100" y="100" width="824" height="824" rx="180" clip-path="url(#tileClip)" fill="none" stroke="url(#tileEdge)" stroke-width="10" />
 
   <ellipse cx="512" cy="801" rx="280" ry="70" fill="#5C1523" opacity="0.34" filter="url(#soft)" />
   <circle cx="512" cy="516" r="316" fill="#3D1524" opacity="0.48" filter="url(#shadow)" />
