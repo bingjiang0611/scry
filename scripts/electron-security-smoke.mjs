@@ -350,19 +350,19 @@ async function main() {
   )
   assert.deepEqual(
     [windowChrome.surfaceSlot?.top, windowChrome.surfaceTopbar?.top],
-    [62, 63],
-    'on-demand Surface must float below the integrated titlebar'
+    [0, 0],
+    'on-demand Surface must join the integrated titlebar at the window edge'
   )
   assert.deepEqual(
     [windowChrome.surfaceSlot?.position, windowChrome.surfaceSlot?.borderRadius],
-    ['fixed', '16px'],
-    'on-demand Surface must remain a floating rounded workbench'
+    ['static', '0px'],
+    'on-demand Surface must remain a docked split workspace'
   )
-  assert.ok(windowChrome.surfaceSlot?.width <= 440, 'floating Surface exceeded its desktop width cap')
+  assert.ok(windowChrome.surfaceSlot?.width >= 360, 'docked Surface fell below its usable width')
   assert.equal(
     windowChrome.viewportWidth - windowChrome.surfaceSlot?.right,
-    14,
-    'floating Surface lost its 14px window gutter'
+    0,
+    'docked Surface lost its right-edge alignment'
   )
   assert.deepEqual(
     [windowChrome.brand?.height, windowChrome.topbar?.height, windowChrome.surfaceTopbar?.height],
