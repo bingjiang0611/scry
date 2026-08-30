@@ -203,9 +203,11 @@ const useDevelopmentRenderer = rendererEntryUrl !== packagedRendererEntryUrl
 let win: BrowserWindow | null = null
 let runSeq = 0
 let isShuttingDown = false
+const isOwnedTestApp = process.env.SCRY_TEST_APP === '1'
+const autoApproveTestTrust = isOwnedTestApp
 const mainEventId = (prefix: string, runId: string): string => `${prefix}-${runId}-${randomUUID()}`
 let startupManagedRecovery: Promise<void> = Promise.resolve()
-const primaryInstance = app.requestSingleInstanceLock()
+const primaryInstance = isOwnedTestApp || app.requestSingleInstanceLock()
 if (!primaryInstance) {
   app.quit()
 } else {
@@ -459,31 +461,33 @@ async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]
   const store = codexHookGrantStore()
   if (!store.isGranted(cwd, fingerprint)) {
     const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
-    const detail = [
-      `仓库：${cwd}`,
-      `来源：${codexHookSourceSummary(inspection) || '未知'}`,
-      `指纹：${fingerprint}`,
-      '',
-      ...pending.map((hook, index) => `${index + 1}. ${hook.eventName} · ${hook.sourcePath}\n   ${hook.currentHash}`),
-      ...(inspection.warnings.length > 0 ? ['', `警告：${inspection.warnings.join('；')}`] : []),
-      '',
-      '只有上面列出的精确 Hook key/hash 会被放行；内容变化后将重新询问。'
-    ].join('\n')
-    const options = {
-      type: 'warning' as const,
-      title: '授权当前仓库的 Codex Hook',
-      message: `Codex 已发现 ${pending.length} 个尚未信任的项目 Hook`,
-      detail,
-      buttons: ['取消', '允许这些 Hook 并启动'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true
-    }
-    const result = win && !win.isDestroyed()
-      ? await dialog.showMessageBox(win, options)
-      : await dialog.showMessageBox(options)
-    if (result.response !== 1) {
-      throw codexHookInspectionError(cwd, '用户未授权当前 Codex Hook', '检查 Hook 来源后重新发送，或禁用项目 Hook')
+    if (!autoApproveTestTrust) {
+      const detail = [
+        `仓库：${cwd}`,
+        `来源：${codexHookSourceSummary(inspection) || '未知'}`,
+        `指纹：${fingerprint}`,
+        '',
+        ...pending.map((hook, index) => `${index + 1}. ${hook.eventName} · ${hook.sourcePath}\n   ${hook.currentHash}`),
+        ...(inspection.warnings.length > 0 ? ['', `警告：${inspection.warnings.join('；')}`] : []),
+        '',
+        '只有上面列出的精确 Hook key/hash 会被放行；内容变化后将重新询问。'
+      ].join('\n')
+      const options = {
+        type: 'warning' as const,
+        title: '授权当前仓库的 Codex Hook',
+        message: `Codex 已发现 ${pending.length} 个尚未信任的项目 Hook`,
+        detail,
+        buttons: ['取消', '允许这些 Hook 并启动'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      }
+      const result = win && !win.isDestroyed()
+        ? await dialog.showMessageBox(win, options)
+        : await dialog.showMessageBox(options)
+      if (result.response !== 1) {
+        throw codexHookInspectionError(cwd, '用户未授权当前 Codex Hook', '检查 Hook 来源后重新发送，或禁用项目 Hook')
+      }
     }
     try {
       store.grant(cwd, fingerprint, enabledCount)
@@ -514,38 +518,40 @@ async function resolveOpenCodePluginTrust(cwd: string): Promise<OpenCodeProjectP
 
   const store = openCodePluginGrantStore()
   if (!store.isGranted(projection.cwd, projection.pluginFingerprint)) {
-    const list = projection.plugins.map((plugin, index) => [
-      `${index + 1}. ${plugin.path}`,
-      `   SHA-256 ${plugin.digest}（${plugin.size} bytes）`
-    ].join('\n'))
-    const options = {
-      type: 'warning' as const,
-      title: '授权当前仓库的 OpenCode plugin',
-      message: `OpenCode 已发现 ${projection.plugins.length} 个项目 plugin`,
-      detail: [
-        `仓库：${projection.cwd}`,
-        '',
-        ...list,
-        '',
-        '允许后，Scry 只执行上面列出的精确文件字节，并将其复制到 Scry 私有 0600 快照。',
-        '以后同一组路径和 SHA-256 自动放行；任一增删或内容变化都会重新询问。',
-        '这是 Scry 的本地授权，不会伪造或修改 OpenCode 自身的信任状态。'
-      ].join('\n'),
-      buttons: ['允许当前 plugin 并启动', '取消'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true
-    }
-    const result = win && !win.isDestroyed()
-      ? await dialog.showMessageBox(win, options)
-      : await dialog.showMessageBox(options)
-    if (result.response !== 0) {
-      throw new AgentRuntimeError('已取消 OpenCode 项目 plugin 授权', {
-        provider: 'opencode_server',
-        stage: 'capability',
-        cwd,
-        nextAction: '如需执行当前项目 plugin，请再次发送任务并在授权对话框中选择允许'
-      })
+    if (!autoApproveTestTrust) {
+      const list = projection.plugins.map((plugin, index) => [
+        `${index + 1}. ${plugin.path}`,
+        `   SHA-256 ${plugin.digest}（${plugin.size} bytes）`
+      ].join('\n'))
+      const options = {
+        type: 'warning' as const,
+        title: '授权当前仓库的 OpenCode plugin',
+        message: `OpenCode 已发现 ${projection.plugins.length} 个项目 plugin`,
+        detail: [
+          `仓库：${projection.cwd}`,
+          '',
+          ...list,
+          '',
+          '允许后，Scry 只执行上面列出的精确文件字节，并将其复制到 Scry 私有 0600 快照。',
+          '以后同一组路径和 SHA-256 自动放行；任一增删或内容变化都会重新询问。',
+          '这是 Scry 的本地授权，不会伪造或修改 OpenCode 自身的信任状态。'
+        ].join('\n'),
+        buttons: ['允许当前 plugin 并启动', '取消'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      }
+      const result = win && !win.isDestroyed()
+        ? await dialog.showMessageBox(win, options)
+        : await dialog.showMessageBox(options)
+      if (result.response !== 0) {
+        throw new AgentRuntimeError('已取消 OpenCode 项目 plugin 授权', {
+          provider: 'opencode_server',
+          stage: 'capability',
+          cwd,
+          nextAction: '如需执行当前项目 plugin，请再次发送任务并在授权对话框中选择允许'
+        })
+      }
     }
     try {
       store.grant(projection.cwd, projection.pluginFingerprint, projection.plugins.length)
@@ -603,28 +609,30 @@ async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessE
     }
   }
   if (!granted) {
-    const options = {
-      type: 'warning' as const,
-      title: '授权 Recorder 提交回调',
-      message: '当前仓库请求在每轮记录提交后执行本地脚本',
-      detail: [
-        `仓库：${inspection.workspace}`,
-        `入口：${inspection.entry}`,
-        `文件：${inspection.files.length}`,
-        `指纹：${inspection.fingerprint}`,
-        '',
-        '未授权时仍会保存本地 recorder 数据，但不会执行回调。',
-        '允许后只执行冻结到 Scry 私有目录的精确文件字节；内容变化后将重新询问。'
-      ].join('\n'),
-      buttons: ['不执行回调', '允许当前回调'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true
+    if (!autoApproveTestTrust) {
+      const options = {
+        type: 'warning' as const,
+        title: '授权 Recorder 提交回调',
+        message: '当前仓库请求在每轮记录提交后执行本地脚本',
+        detail: [
+          `仓库：${inspection.workspace}`,
+          `入口：${inspection.entry}`,
+          `文件：${inspection.files.length}`,
+          `指纹：${inspection.fingerprint}`,
+          '',
+          '未授权时仍会保存本地 recorder 数据，但不会执行回调。',
+          '允许后只执行冻结到 Scry 私有目录的精确文件字节；内容变化后将重新询问。'
+        ].join('\n'),
+        buttons: ['不执行回调', '允许当前回调'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      }
+      const result = win && !win.isDestroyed()
+        ? await dialog.showMessageBox(win, options)
+        : await dialog.showMessageBox(options)
+      if (result.response !== 1) return baseEnv
     }
-    const result = win && !win.isDestroyed()
-      ? await dialog.showMessageBox(win, options)
-      : await dialog.showMessageBox(options)
-    if (result.response !== 1) return baseEnv
     try {
       await store.grant(inspection.workspace, inspection.fingerprint)
     } catch (error) {
@@ -708,7 +716,7 @@ async function ensureMcpExecutionAuthorized(
     }
     for (const targets of groups.values()) {
       const prompt = mcpExecutionAuthorizationPrompt(snapshot, operation, targets)
-      const approved = await confirmMcpExecutionAuthorization(prompt, async (options) => {
+      const approved = autoApproveTestTrust || await confirmMcpExecutionAuthorization(prompt, async (options) => {
         const result = win && !win.isDestroyed()
           ? await dialog.showMessageBox(win, options)
           : await dialog.showMessageBox(options)
