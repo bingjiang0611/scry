@@ -825,40 +825,29 @@ select:focus-visible,
   box-shadow: var(--shadow-pop);
 }
 
-/* On-demand Surface: float above the transcript instead of shrinking it. */
-
-@media (min-width: 1001px) {
-  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) .runtime-composer {
-    width: min(
-      var(--evidence-column),
-      calc(100% - min(var(--overview-panel-w), 440px) - 22px)
-    );
-    margin-right: calc(min(var(--overview-panel-w), 440px) + 14px);
-    margin-left: auto;
-  }
-}
+/* Dock the Surface into the window chrome, matching Codex's split workspace. */
 
 .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) {
-  grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
+  grid-template-columns:
+    var(--sidebar-w)
+    var(--pane-resizer-w)
+    minmax(0, 1fr)
+    var(--pane-resizer-w)
+    minmax(0, var(--overview-panel-w));
 }
 
 .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) > .panel-resizer {
-  display: none;
+  display: block;
 }
 
 .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) > .right-panel-slot {
-  position: fixed;
-  z-index: 50;
-  top: calc(var(--window-titlebar-h, var(--topbar-h)) + 10px);
-  right: 14px;
-  bottom: 14px;
-  left: auto;
-  width: min(var(--overview-panel-w), 440px, calc(100vw - var(--sidebar-w) - 40px));
+  position: static;
+  width: auto;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--overview-surface) 97%, transparent);
-  box-shadow: var(--shadow-pop);
+  border: 0;
+  border-radius: 0;
+  background: var(--overview-surface);
+  box-shadow: none;
 }
 
 .app.right-panel-surface.right-panel-maximized > .right-panel-slot {
@@ -872,12 +861,12 @@ select:focus-visible,
 }
 
 .right-surface-panel {
-  background: color-mix(in srgb, var(--overview-surface) 97%, transparent);
+  background: var(--overview-surface);
 }
 
 .surface-topbar {
-  height: 46px;
-  min-height: 46px;
+  height: var(--window-titlebar-h, var(--topbar-h));
+  min-height: var(--window-titlebar-h, var(--topbar-h));
   padding-inline: 9px;
   border-bottom-color: var(--border3);
   background: transparent;
@@ -1354,13 +1343,6 @@ select:focus-visible,
 }
 
 @media (max-width: 900px) {
-  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) > .right-panel-slot {
-    top: calc(var(--window-titlebar-h, var(--topbar-h)) + 8px);
-    right: 8px;
-    bottom: 8px;
-    width: min(430px, calc(100vw - var(--sidebar-w) - 24px));
-  }
-
   .settings-modal {
     width: calc(100vw - 32px);
     height: calc(100vh - 32px);
