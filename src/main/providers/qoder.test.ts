@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,7 +35,8 @@ import {
   parseQoderBackgroundTaskFailures,
   parseQoderHookLog,
   qoderHookFallbackOnly,
-  qoderProviderTurnIdFromLog
+  qoderProviderTurnIdFromLog,
+  resolveQoderSdkExecutable
 } from './qoder'
 
 describe('Qoder provider adapter', () => {
@@ -43,6 +44,20 @@ describe('Qoder provider adapter', () => {
     vi.clearAllMocks()
     sdk.getSessionMessages.mockReset().mockResolvedValue([])
     sdk.forkSession.mockReset()
+  })
+
+  it('resolves the qodercli symlink to its JavaScript bundle for the SDK launch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-qoder-cli-'))
+    try {
+      const script = join(root, 'qodercli.js')
+      const bin = join(root, 'qodercli')
+      await writeFile(script, '#!/usr/bin/env node\n')
+      await symlink(script, bin)
+      expect(resolveQoderSdkExecutable(bin)).toBe(await realpath(script))
+      expect(resolveQoderSdkExecutable(join(root, 'missing'))).toBe(join(root, 'missing'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('forks Qoder immediately before the edited native prompt', async () => {

@@ -24,6 +24,7 @@ import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker }
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
+  discoverTraceArchiveSessions,
   mirrorTranscript,
   readTraceArchiveAsync,
   resolveTranscriptPath,
@@ -308,7 +309,33 @@ const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirect
   ...projectStore().load().filter((project) => !project.removedAt).map((project) => project.cwd),
   ...appSessionStore().load().map((session) => session.cwd).filter(Boolean)
 ]))
+let traceCatalogRecoveryDone = false
+const recoverTraceCatalogOnce = (): void => {
+  if (traceCatalogRecoveryDone) return
+  traceCatalogRecoveryDone = true
+  const store = appSessionStore()
+  const known = new Set(store.load().flatMap((session) =>
+    session.externalSessionId
+      ? [`${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd}\0${session.externalSessionId}`]
+      : []
+  ))
+  for (const summary of discoverTraceArchiveSessions(app.getPath('userData'))) {
+    if (summary.providerId === 'pi') continue // Pi profile identity is not encoded in legacy trace archives.
+    const key = `${summary.providerId}\0\0${summary.cwd}\0${summary.sessionId}`
+    if (known.has(key)) continue
+    store.record({
+      providerId: summary.providerId,
+      runtimeProvider: summary.runtimeProvider,
+      runId: summary.runId,
+      externalSessionId: summary.sessionId,
+      cwd: summary.cwd,
+      prompt: summary.prompt
+    })
+    known.add(key)
+  }
+}
 const listProjectCatalog = (): ProjectMeta[] => {
+  recoverTraceCatalogOnce()
   const sessionProjects = appSessionStore().listProjects()
   const now = Date.now()
   const observed = new Map<string, number>()
