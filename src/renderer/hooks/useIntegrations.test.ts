@@ -14,6 +14,7 @@ import {
   reconcileSelectedAgentId,
   retainCachedRunControlCatalog,
   requestRunControlsForSelectedProvider,
+  resolveRunControlSelection,
   runControlSendBlockedReason,
   serializeRunControlCatalogCache,
   shouldKeepCachedRunControlCatalog
@@ -163,6 +164,23 @@ describe('Agent 切换时的运行控制门禁', () => {
       data: null,
       reason: 'Qoder 控制接口不可用'
     }, false, { permissionMode: 'default' })).toBe('Qoder 控制接口不可用')
+  })
+
+  it('Pi 只提供完全访问时不自动升级默认权限', () => {
+    const catalog: AgentRunControlCatalog = {
+      models: [{ model: { id: 'pi-model' }, label: 'Pi', efforts: [] }],
+      permissions: [{ id: 'full_access', label: '本机完全访问', description: '继承本机用户权限' }]
+    }
+    const controls = resolveRunControlSelection(catalog, { permissionMode: 'default' })
+    const capability: CapabilityEnvelope<AgentRunControlCatalog> = {
+      providerId: 'pi', mode: 'read', state: 'ready', data: catalog
+    }
+
+    expect(controls.permissionMode).toBe('default')
+    expect(runControlSendBlockedReason(capability, false, controls)).toBe(
+      '当前 Provider 不支持所选模型、推理强度或权限，请重新选择'
+    )
+    expect(runControlSendBlockedReason(capability, false, { permissionMode: 'full_access' })).toBeNull()
   })
 })
 
@@ -317,7 +335,7 @@ describe('模型目录跨进程缓存', () => {
     expect(runControlSendBlockedReason(restored, false, {
       model: { id: 'not-in-cache' },
       permissionMode: 'default'
-    })).toBe(restored.reason)
+    })).toBe('最后已知模型目录不包含当前模型、推理强度或权限，请重新选择')
     expect(runControlSendBlockedReason(
       envelope('qoder', '/repo', catalog('ultimate'), now),
       false,
@@ -386,6 +404,6 @@ describe('模型目录跨进程缓存', () => {
     expect(runControlSendBlockedReason(retained, false, {
       model: { id: 'ultimate' },
       permissionMode: 'auto_review'
-    })).toBe(retained.reason)
+    })).toBe('最后已知模型目录不包含当前模型、推理强度或权限，请重新选择')
   })
 })

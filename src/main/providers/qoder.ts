@@ -266,7 +266,7 @@ function fields(text: string): Record<string, string> {
 
 export function parseQoderHookLog(runId: string, text: string, sessionId?: string): TraceEvent[] {
   const events: TraceEvent[] = []
-  const pending = new Map<string, Array<Record<string, string>>>()
+  const pending = new Map<string, Array<{ detail: Record<string, string>; startedAt: number }>>()
   for (const line of text.split('\n')) {
     const match = line.match(/^(\S+)\s+\S+\s+(?:\[([^\]]+)\]\s+)?hook\.(started|finished)\s+(.+)$/)
     if (!match) continue
@@ -278,7 +278,7 @@ export function parseQoderHookLog(runId: string, text: string, sessionId?: strin
     const key = [context.session ?? '', context.tool ?? '', hookName, hookEvent].join('|')
     if (match[3] === 'started') {
       const queue = pending.get(key) ?? []
-      queue.push(detail)
+      queue.push({ detail, startedAt: new Date(match[1]).getTime() })
       pending.set(key, queue)
       const hookId = `qoder-log:${key}:${detail.source ?? 'unknown'}:${detail.hook_index ?? queue.length}`
       events.push({
@@ -290,7 +290,17 @@ export function parseQoderHookLog(runId: string, text: string, sessionId?: strin
       })
       continue
     }
-    const started = pending.get(key)?.shift() ?? {}
+    const queue = pending.get(key) ?? []
+    const finishedAt = new Date(match[1]).getTime()
+    const durationMs = detail.duration_ms == null ? Number.NaN : Number(detail.duration_ms)
+    // finished 日志不带 source/index；用它上报的 duration 反推 started，避免并发 Hook 按完成顺序串位。
+    const expectedStart = finishedAt - durationMs
+    const matchedIndex = Number.isFinite(expectedStart) && queue.length > 1
+      ? queue.reduce((best, candidate, index) =>
+          Math.abs(candidate.startedAt - expectedStart) < Math.abs(queue[best].startedAt - expectedStart) ? index : best, 0)
+      : 0
+    const started = queue.splice(matchedIndex, 1)[0]?.detail ?? {}
+    if (queue.length === 0) pending.delete(key)
     const hookId = `qoder-log:${key}:${started.source ?? 'unknown'}:${started.hook_index ?? 'unknown'}`
     const success = detail.success === 'true'
     const exitCode = detail.exit_code == null ? undefined : Number(detail.exit_code)
@@ -298,7 +308,7 @@ export function parseQoderHookLog(runId: string, text: string, sessionId?: strin
       id: `${hookId}:response`, runId, ts: new Date(match[1]).toISOString(), kind: 'hook', stage: 'hook_response',
       tool: hookName, name: hookEvent, hookId, hookName, hookEvent, hookCommand: started.display_text,
       hookOutcome: success ? 'success' : 'error', hookExitCode: Number.isFinite(exitCode) ? exitCode : undefined,
-      toolUseId: context.tool, durationMs: detail.duration_ms == null ? undefined : Number(detail.duration_ms), isError: !success,
+      toolUseId: context.tool, durationMs: Number.isFinite(durationMs) ? durationMs : undefined, isError: !success,
       input: { sessionId: context.session, turnId: context.turn, source: started.source, hookIndex: started.hook_index },
       runtimeMetadata: { source: 'qoder_cli_log', hookSource: started.source, hookIndex: started.hook_index }
     })

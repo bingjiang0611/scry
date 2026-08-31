@@ -291,6 +291,7 @@ export interface RunControlSelectOption {
   value: string
   label: string
   description?: string
+  disabled?: boolean
 }
 
 export function RunControlSelect({
@@ -327,7 +328,7 @@ export function RunControlSelect({
         onChange={(event) => onChange(event.target.value)}
       >
         {options.map((option) => (
-          <option value={option.value} key={option.value} title={option.description}>
+          <option value={option.value} key={option.value} title={option.description} disabled={option.disabled}>
             {option.label}
           </option>
         ))}

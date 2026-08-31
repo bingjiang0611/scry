@@ -1,3 +1,7 @@
+export function providerOperationKey(providerId: string, agentProfileId?: string): string {
+  return `${providerId}\0${agentProfileId ?? ''}`
+}
+
 export type ProviderOperationLease =
   | { ok: true; release(): void }
   | { ok: false; blockedBy: 'authentication' | 'operation' }
