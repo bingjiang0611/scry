@@ -133,13 +133,21 @@ function UserMessageImpl({
               }
             }}
           />
-          <div className="user-edit-note">将创建新的对话分支；工作区文件不会自动回滚。</div>
           {editError && <div className="user-edit-error" role="alert">{editError}</div>}
-          <div className="user-edit-actions">
-            <button type="button" disabled={saving} onClick={() => { setDraft(text); setEditError(null); setEditing(false) }}>取消</button>
-            <button type="button" className="primary" disabled={saving || !draft.trim()} onClick={() => void submit()}>
-              {saving ? '重新发送中…' : '重新发送'}
-            </button>
+          <div className="user-edit-footer">
+            <span className="user-edit-note">将创建新对话分支，不会回滚工作区文件</span>
+            <div className="user-edit-actions">
+              <button type="button" disabled={saving} onClick={() => { setDraft(text); setEditError(null); setEditing(false) }}>取消</button>
+              <button
+                type="button"
+                className="primary"
+                title="发送修改后的消息并建立新分支"
+                disabled={saving || !draft.trim()}
+                onClick={() => void submit()}
+              >
+                {saving ? '发送中…' : '发送'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

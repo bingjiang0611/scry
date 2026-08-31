@@ -101,6 +101,10 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
+.user-edit-input:focus-visible {
+  outline: none;
+}
+
 /* Shell and sidebar ---------------------------------------------------------- */
 
 .sidebar {
@@ -545,6 +549,17 @@ select:focus-visible,
   box-shadow: var(--shadow-card);
   font-size: 14.5px;
   line-height: 1.6;
+}
+
+.chat-body .turn-user.editing {
+  padding-left: 6%;
+}
+
+.chat-body .user-edit-bubble {
+  width: 100%;
+  min-height: 156px;
+  padding: 20px 22px;
+  border-radius: 24px;
 }
 
 .chat-body .turn-assistant {
