@@ -2034,8 +2034,10 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('title="正在后台复核运行权限"')
   })
 
-  it('缓存目录复核状态在 loading 标记结束后也不显示成错误或 tooltip', () => {
-    const reason = '最后已知模型目录（8/28/2026, 3:11:55 PM 读取）；正在向 Provider 复核运行权限'
+  it.each([
+    '最后已知模型目录（8/28/2026, 3:11:55 PM 读取）；正在向 Provider 复核运行权限',
+    '当前显示最后已知模型目录；Transport closed'
+  ])('缓存目录状态在 loading 结束后也不显示成错误或 tooltip：%s', (reason) => {
     const chatHtml = renderWelcome({ sendBlockedReason: reason })
 
     expect(chatHtml).not.toContain('id="composer-status"')
