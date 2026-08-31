@@ -3,6 +3,8 @@ import { execFile } from 'node:child_process'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  forkSession,
+  getSessionMessages,
   query,
   type McpServerConfig,
   type McpServerStatus,
@@ -10,6 +12,7 @@ import {
   type SlashCommand
 } from '@anthropic-ai/claude-agent-sdk'
 import { getClaudeVersion, runAgent } from '../agent-runner'
+import { extractUserText } from '../normalize'
 import { resolveClaudeBin, runtimeCliEnv } from '../claude-locate'
 import {
   authorizedMcpRuntimeEnv,
@@ -307,6 +310,32 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         capabilities: { skills: 'read', mcp: 'manage', commands: 'read', account: 'none' }
       }
     },
+    forkLastTurn: {
+      async fork(request) {
+        const messages = await getSessionMessages(request.sourceSessionId, {
+          dir: request.cwd,
+          includeSystemMessages: true
+        })
+        const nativeIndex = messages.findIndex((message) =>
+          typeof (message as { uuid?: unknown }).uuid === 'string' &&
+          (message as { uuid: string }).uuid === request.replaceForkTurnId
+        )
+        const promptIndex = messages.findLastIndex((message) => {
+          const raw = message as unknown as { type?: unknown; parent_tool_use_id?: unknown; message?: { content?: unknown } }
+          return raw.type === 'user' && raw.parent_tool_use_id == null &&
+            extractUserText(raw.message?.content).trim() === request.originalPrompt.trim()
+        })
+        const index = nativeIndex >= 0 ? nativeIndex : promptIndex
+        const boundary = index > 0 ? (messages[index - 1] as { uuid?: unknown }).uuid : undefined
+        if (typeof boundary !== 'string' || !boundary) throw new Error('Claude 会话无法定位待替换消息的前一边界')
+        const forked = await forkSession(request.sourceSessionId, {
+          dir: request.cwd,
+          upToMessageId: boundary,
+          title: 'Edited branch'
+        })
+        return { externalSessionId: forked.sessionId }
+      }
+    },
     run: (request) => {
       const handle = runAgent(
         request.prompt,
@@ -340,7 +369,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           ),
           settingSources: settingSourcesFromEnv(),
           onSessionId: request.onExternalSessionId,
-          captureProviderTurnId: request.managedRecorder === true,
+          captureProviderTurnId: true,
           attachments: request.attachments,
           requestUserInput: request.requestUserInput,
           model: request.model?.id,

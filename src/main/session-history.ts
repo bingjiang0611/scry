@@ -11,6 +11,8 @@ import {
 
 export interface LoadedSessionTurn {
   runId?: string
+  providerTurnId?: string
+  forkTurnId?: string
   userText: string
   attachments?: AgentInputAttachment[]
   items: TraceEvent[]
@@ -96,6 +98,8 @@ export function restoreTraceArchiveTurn(
     : recovered.warnings
   return {
     runId: turn.runId,
+    providerTurnId: turn.providerTurnId,
+    forkTurnId: turn.forkTurnId ?? turn.providerTurnId,
     userText: cleanAttachmentPrompt(turn.userText),
     attachments: attachments.length > 0 ? attachments : undefined,
     items: turn.items,
@@ -321,6 +325,8 @@ function mergeTurnWithArchive(transcriptTurn: LoadedSessionTurn, archiveTurn: Lo
     : transcriptTurn.items
   return {
     runId: archiveTurn.runId,
+    providerTurnId: archiveTurn.providerTurnId ?? transcriptTurn.providerTurnId,
+    forkTurnId: archiveTurn.forkTurnId ?? transcriptTurn.forkTurnId ?? archiveTurn.providerTurnId ?? transcriptTurn.providerTurnId,
     userText: transcriptTurn.userText,
     attachments: archiveTurn.attachments?.length ? archiveTurn.attachments : transcriptTurn.attachments,
     items: mergeTraceItems(transcriptItems, archiveTurn.items),
@@ -344,6 +350,8 @@ export function mergeSessionTurns(
     items: normalizeHistoricalEvents(keepLastTurnDiff(turn.items))
   }))
   const merged: LoadedSessionTurn[] = transcriptTurns.map((turn) => ({
+    providerTurnId: turn.providerTurnId,
+    forkTurnId: turn.providerTurnId,
     userText: cleanAttachmentPrompt(turn.userText),
     attachments: recoverAttachmentsFromPrompt(turn.userText, '', context, budget).attachments,
     items: normalizeHistoricalEvents(turn.items)

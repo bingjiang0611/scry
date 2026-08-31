@@ -9,6 +9,8 @@ const sdk = vi.hoisted(() => ({
   query: vi.fn(),
   close: vi.fn(),
   spawn: vi.fn(),
+  getSessionMessages: vi.fn(),
+  forkSession: vi.fn(),
   runtimeCliEnv: vi.fn((_base?: Record<string, string>, _options: { managedRecorder?: boolean } = {}) => ({}))
 }))
 
@@ -16,7 +18,9 @@ vi.mock('node:child_process', () => ({ spawn: sdk.spawn }))
 
 vi.mock('@qoder-ai/qoder-agent-sdk', () => ({
   qodercliAuth: () => ({ type: 'qodercli' }),
-  query: sdk.query
+  query: sdk.query,
+  getSessionMessages: sdk.getSessionMessages,
+  forkSession: sdk.forkSession
 }))
 
 vi.mock('../claude-locate', () => ({
@@ -35,7 +39,36 @@ import {
 } from './qoder'
 
 describe('Qoder provider adapter', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sdk.getSessionMessages.mockReset().mockResolvedValue([])
+    sdk.forkSession.mockReset()
+  })
+
+  it('forks Qoder immediately before the edited native prompt', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      { type: 'assistant', uuid: 'assistant-previous' },
+      { type: 'user', uuid: 'prompt-last' },
+      { type: 'assistant', uuid: 'assistant-last' }
+    ])
+    sdk.forkSession.mockResolvedValue({ sessionId: 'session-forked' })
+
+    await expect(createQoderAdapter().forkLastTurn!.fork({
+      sourceSessionId: 'session-source',
+      originalPrompt: 'old prompt',
+      replaceRunId: 'run-last',
+      replaceProviderTurnId: 'qoder-turn-last',
+      replaceForkTurnId: 'prompt-last',
+      previousProviderTurnId: 'qoder-turn-previous',
+      previousForkTurnId: 'prompt-previous',
+      cwd: '/repo'
+    })).resolves.toEqual({ externalSessionId: 'session-forked' })
+    expect(sdk.forkSession).toHaveBeenCalledWith('session-source', {
+      dir: '/repo',
+      upToMessageId: 'assistant-previous',
+      title: 'Edited branch'
+    })
+  })
 
   it('reports the SDK Skill catalog as read-only rather than unsupported', async () => {
     await expect(createQoderAdapter().describe()).resolves.toMatchObject({
@@ -530,7 +563,7 @@ describe('Qoder provider adapter', () => {
     })
   })
 
-  it('managed Qoder 返回 native promptId 与失败状态，并只在显式启用时注入 managed 环境', async () => {
+  it('managed Qoder 返回 native promptId、fork message id 与失败状态，并只在显式启用时注入 managed 环境', async () => {
     sdk.runtimeCliEnv.mockImplementation((_base?: Record<string, string>, options: { managedRecorder?: boolean } = {}) =>
       options?.managedRecorder ? {
         SCRY_RECORDER_MANAGED: '1',
@@ -538,6 +571,14 @@ describe('Qoder provider adapter', () => {
         SCRY_MANAGED_PROMPT_HASH: 'b'.repeat(64)
       } : {}
     )
+    sdk.getSessionMessages.mockResolvedValue([{
+      type: 'user',
+      uuid: 'qoder-user-message',
+      session_id: 'qoder-session',
+      message: { role: 'user', content: 'work' },
+      parent_tool_use_id: null,
+      parent_agent_id: null
+    }])
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {
         yield {
@@ -576,9 +617,11 @@ describe('Qoder provider adapter', () => {
     await expect(handle.promise).resolves.toMatchObject({
       externalSessionId: 'qoder-session',
       providerTurnId: 'qoder-turn',
+      forkTurnId: 'qoder-user-message',
       status: 'failed'
     })
     expect(handle.getProviderTurnId?.()).toBe('qoder-turn')
+    expect(handle.getForkTurnId?.()).toBe('qoder-user-message')
     expect(sdk.query.mock.calls[0][0].options.env).toMatchObject({
       SCRY_RECORDER_MANAGED: '1',
       SCRY_MANAGED_RUN_ID: 'run-managed',

@@ -813,6 +813,37 @@ describe('OpenCode provider adapter', () => {
     })
   })
 
+  it('forks OpenCode from the parent of the edited user message', async () => {
+    const message = vi.fn(async () => ({ data: { info: { id: 'user-last', parentID: 'assistant-previous' } } }))
+    const fork = vi.fn(async () => ({ data: { id: 'session-forked' } }))
+    const client = { session: { message, fork } } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 42, client
+    })
+    const adapter = createOpenCodeAdapter()
+    try {
+      await expect(adapter.forkLastTurn!.fork({
+        sourceSessionId: 'session-source',
+        originalPrompt: 'old prompt',
+        replaceRunId: 'run-last',
+        replaceProviderTurnId: 'user-last',
+        replaceForkTurnId: 'user-last',
+        previousProviderTurnId: 'user-previous',
+        previousForkTurnId: 'user-previous',
+        cwd: '/repo'
+      })).resolves.toEqual({ externalSessionId: 'session-forked' })
+      expect(message).toHaveBeenCalledWith({
+        sessionID: 'session-source', messageID: 'user-last', directory: '/repo'
+      })
+      expect(fork).toHaveBeenCalledWith({
+        sessionID: 'session-source', messageID: 'assistant-previous', directory: '/repo'
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
   it('does not degrade Provider health when an unbound session requests workspace metadata', async () => {
     const adapter = createOpenCodeAdapter()
     try {

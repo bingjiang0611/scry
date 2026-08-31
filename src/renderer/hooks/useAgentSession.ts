@@ -8,6 +8,8 @@ import type { Turn } from '../format'
 interface TurnDoneEvent {
   runId: string
   sessionId?: string
+  providerTurnId?: string
+  forkTurnId?: string
 }
 
 interface TurnErrorEvent {
@@ -40,8 +42,13 @@ export function mergeActiveRun(prev: Turn[], run: Turn): Turn[] {
   return next
 }
 
-export const markTurnDone = (prev: Turn[], runId: string): Turn[] =>
-  prev.map((turn) => (turn.runId === runId ? { ...turn, done: true } : turn))
+export const markTurnDone = (prev: Turn[], runId: string, providerTurnId?: string, forkTurnId?: string): Turn[] =>
+  prev.map((turn) => (turn.runId === runId ? {
+    ...turn,
+    done: true,
+    ...(providerTurnId ? { providerTurnId } : {}),
+    ...((forkTurnId ?? providerTurnId) ? { forkTurnId: forkTurnId ?? providerTurnId } : {})
+  } : turn))
 
 export const markTurnError = (prev: Turn[], event: TurnErrorEvent): Turn[] =>
   prev.map((turn) =>
@@ -51,7 +58,9 @@ export const markTurnError = (prev: Turn[], event: TurnErrorEvent): Turn[] =>
 export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta[]): Turn[] =>
   deltas.reduce(
     (turns, delta) =>
-      delta.kind === 'done' ? markTurnDone(turns, delta.event.runId) : markTurnError(turns, delta.event),
+      delta.kind === 'done'
+        ? markTurnDone(turns, delta.event.runId, delta.event.providerTurnId, delta.event.forkTurnId)
+        : markTurnError(turns, delta.event),
     prev
   )
 
@@ -116,6 +125,8 @@ export const parsedSessionTurns = (sessionId: string, parsed: ParsedTurn[]): Tur
   parsed.map((turn, index) => {
     const restored: Turn = {
       runId: turn.runId ?? `${sessionId}-${index}`,
+      providerTurnId: turn.providerTurnId,
+      forkTurnId: turn.forkTurnId,
       userText: turn.userText,
       items: turn.items,
       done: turn.done ?? true
@@ -270,14 +281,18 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     const lifecycleDeltas = (pendingStartLifecycleRef.current ?? []).filter((delta) => delta.event.runId === runId)
     pendingStartLifecycleRef.current = null
     setTurns((prev) => {
-      const index = prev.findIndex((turn) => turn.runId === runId)
+      const replaceIndex = request.forkLastTurn
+        ? prev.findIndex((turn) => turn.runId === request.forkLastTurn!.replaceRunId)
+        : -1
+      const visible = replaceIndex >= 0 ? prev.slice(0, replaceIndex) : prev
+      const index = visible.findIndex((turn) => turn.runId === runId)
       if (index === -1) {
         return replayRunLifecycleDeltas(
-          [...prev, { runId, userText: request.prompt, attachments: request.attachments, items: [], done: false }],
+          [...visible, { runId, userText: request.prompt, attachments: request.attachments, items: [], done: false }],
           lifecycleDeltas
         )
       }
-      const next = [...prev]
+      const next = [...visible]
       next[index] = { ...next[index], userText: request.prompt, attachments: request.attachments }
       return replayRunLifecycleDeltas(next, lifecycleDeltas)
     })

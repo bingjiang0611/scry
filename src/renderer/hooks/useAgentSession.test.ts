@@ -90,7 +90,12 @@ describe('useAgentSession state reducers', () => {
 
   it('flushes trace batches before turnDone and marks the turn complete', () => {
     const turns = applyTraceBatch([], [ev('a')], new Set<string>())
-    expect(markTurnDone(turns, 'r1')[0]).toMatchObject({ done: true, items: [{ id: 'a' }] })
+    expect(markTurnDone(turns, 'r1', 'provider-turn-1')[0]).toMatchObject({
+      done: true,
+      providerTurnId: 'provider-turn-1',
+      forkTurnId: 'provider-turn-1',
+      items: [{ id: 'a' }]
+    })
   })
 
   it('records turn errors with the hint used by the UI', () => {
@@ -118,13 +123,29 @@ describe('useAgentSession state reducers', () => {
     expect(applyTraceBatch(next, [ev('late', 'r1'), ev('fresh', 'r2')], cleared).map((turn) => turn.runId)).toEqual(['r2'])
   })
 
-  it('replaces the timeline with parsed history turns', () => {
+  it('replaces the timeline with parsed history turns and preserves native boundaries', () => {
     const turns = parsedSessionTurns('s1', [
-      { runId: 'archived-run', userText: 'hello', attachments: [image], items: [ev('a', 'archived')], done: true }
+      {
+        runId: 'archived-run',
+        providerTurnId: 'provider-turn-archived',
+        forkTurnId: 'fork-turn-archived',
+        userText: 'hello',
+        attachments: [image],
+        items: [ev('a', 'archived')],
+        done: true
+      }
     ])
 
     expect(turns).toEqual([
-      { runId: 'archived-run', userText: 'hello', attachments: [image], items: [ev('a', 'archived')], done: true }
+      {
+        runId: 'archived-run',
+        providerTurnId: 'provider-turn-archived',
+        forkTurnId: 'fork-turn-archived',
+        userText: 'hello',
+        attachments: [image],
+        items: [ev('a', 'archived')],
+        done: true
+      }
     ])
   })
 

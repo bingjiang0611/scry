@@ -1106,6 +1106,29 @@ export function createOpenCodeAdapter(
         }
       }
     },
+    forkLastTurn: {
+      async fork(request) {
+        if (!request.cwd) throw new Error('OpenCode 分支需要工作目录')
+        const server = await serverFor(
+          { providerId: 'opencode', cwd: request.cwd, externalSessionId: request.sourceSessionId },
+          request.mcpExecution,
+          request.openCodePluginTrust
+        )
+        const message = await unwrap<{ info?: unknown }>(server.client.session.message({
+          sessionID: request.sourceSessionId,
+          messageID: request.replaceForkTurnId,
+          directory: request.cwd
+        }), 'session.message')
+        const parentID = record(message.info).parentID
+        if (typeof parentID !== 'string' || !parentID) throw new Error('OpenCode 会话无法定位待替换消息的前一边界')
+        const forked = await unwrap<{ id: string }>(server.client.session.fork({
+          sessionID: request.sourceSessionId,
+          messageID: parentID,
+          directory: request.cwd
+        }), 'session.fork')
+        return { externalSessionId: forked.id }
+      }
+    },
     run: (request) => {
       let externalSessionId = request.resume
       let providerTurnId: string | undefined

@@ -993,6 +993,33 @@ export function createPiAdapter(options: {
         health: { state: profiles.length > 0 ? 'ready' : 'unavailable', transport: 'JSONL RPC subprocess' }
       }
     },
+    forkLastTurn: {
+      async fork(request) {
+        if (!request.agentProfileId) throw new Error('Pi 分支缺少 agentProfileId')
+        const profile = await options.resolveProfile(request.agentProfileId)
+        if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
+        return withPiRpc(
+          profile,
+          request.cwd,
+          ['--mode', 'rpc', '--approve', '--session', request.sourceSessionId],
+          async (rpc) => {
+            const snapshot = await rpc.send({ type: 'get_entries' })
+            const entries = record(snapshot.data).entries
+            const target = Array.isArray(entries)
+              ? entries.map(record).find((entry) => entry.id === request.replaceForkTurnId)
+              : undefined
+            if (!target || record(target.message).role !== 'user') {
+              throw new Error('Pi 会话无法定位待替换的用户消息 entry')
+            }
+            const forked = await rpc.send({ type: 'fork', entryId: request.replaceForkTurnId })
+            if (record(forked.data).cancelled === true) throw new Error('Pi extension 取消了会话分支')
+            const state = record((await rpc.send({ type: 'get_state' })).data)
+            if (typeof state.sessionId !== 'string' || !state.sessionId) throw new Error('Pi fork 未返回新 sessionId')
+            return { externalSessionId: state.sessionId }
+          }
+        )
+      }
+    },
     run(request: ProviderRunRequest): ProviderRunHandle {
       const state: PiRunState = { stopped: false }
       const promise = (async () => {

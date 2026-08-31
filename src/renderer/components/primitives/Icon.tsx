@@ -7,7 +7,7 @@ export type IconName =
   | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
   | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'diff' | 'terminal' | 'agents' | 'panel'
-  | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo'
+  | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit'
 
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -142,7 +142,13 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M20 9v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9M10 13h4" />
     </>
   ),
-  undo: <path d="M4 10h11a4 4 0 0 1 0 8H9M4 10l4-4M4 10l4 4" />
+  undo: <path d="M4 10h11a4 4 0 0 1 0 8H9M4 10l4-4M4 10l4 4" />,
+  edit: (
+    <>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </>
+  )
 }
 
 export function Icon({ name, lg, className }: { name: IconName; lg?: boolean; className?: string }) {

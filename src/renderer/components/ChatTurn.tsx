@@ -76,12 +76,75 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
   )
 }
 
-function UserMessageImpl({ text, attachments = [] }: { text: string; attachments?: AgentInputAttachment[] }) {
+function UserMessageImpl({
+  text,
+  attachments = [],
+  editable = false,
+  onEdit
+}: {
+  text: string
+  attachments?: AgentInputAttachment[]
+  editable?: boolean
+  onEdit?: (text: string) => Promise<void>
+}) {
   const [expanded, setExpanded] = useState(false)
   const [preview, setPreview] = useState<AgentInputAttachment | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(text)
+  const [saving, setSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
   const skillDetailId = useId()
   if (!text && attachments.length === 0) return null
   const { command, body, injectedSkill } = parseUserMessage(text)
+
+  if (editing) {
+    const submit = async (): Promise<void> => {
+      const prompt = draft.trim()
+      if (!prompt || saving || !onEdit) return
+      setSaving(true)
+      setEditError(null)
+      try {
+        await onEdit(prompt)
+        setEditing(false)
+      } catch (error) {
+        setEditError(error instanceof Error ? error.message : String(error))
+      } finally {
+        setSaving(false)
+      }
+    }
+    return (
+      <div className="turn-user editing">
+        <div className="bubble-user user-edit-bubble">
+          <textarea
+            className="user-edit-input"
+            value={draft}
+            autoFocus
+            aria-label="编辑最后一条消息"
+            disabled={saving}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setDraft(text)
+                setEditError(null)
+                setEditing(false)
+              } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                void submit()
+              }
+            }}
+          />
+          <div className="user-edit-note">将创建新的对话分支；工作区文件不会自动回滚。</div>
+          {editError && <div className="user-edit-error" role="alert">{editError}</div>}
+          <div className="user-edit-actions">
+            <button type="button" disabled={saving} onClick={() => { setDraft(text); setEditError(null); setEditing(false) }}>取消</button>
+            <button type="button" className="primary" disabled={saving || !draft.trim()} onClick={() => void submit()}>
+              {saving ? '重新发送中…' : '重新发送'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // skill 注入：不是用户发的，渲染成中性折叠注记（默认收起，点开看 SKILL.md）
   if (injectedSkill) {
@@ -147,6 +210,19 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
           </button>
         )}
       </div>
+      {editable && onEdit && (
+        <div className="user-message-actions">
+          <button
+            type="button"
+            className="user-message-edit"
+            aria-label="编辑最后一条消息"
+            title="编辑最后一条消息并从这里建立新分支"
+            onClick={() => { setDraft(text); setEditError(null); setEditing(true) }}
+          >
+            <Icon name="edit" />
+          </button>
+        </div>
+      )}
       {preview && <ImageLightbox attachment={preview} onClose={() => setPreview(null)} />}
     </div>
   )

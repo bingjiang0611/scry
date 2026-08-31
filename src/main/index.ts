@@ -29,9 +29,10 @@ import {
   resolveTranscriptPath,
   traceArchiveRunIds,
   upsertTraceArchiveTurn,
+  type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
-import { mergeSessionTurns } from './session-history'
+import { mergeSessionTurns, restoreTraceArchiveTurn } from './session-history'
 import {
   appSessionCanResume,
   cleanupAppStoreAtomicTemps,
@@ -767,6 +768,7 @@ interface ArchiveTraceTurnArgs {
   cwd: string | undefined
   sessionId: string | undefined
   providerTurnId?: string
+  forkTurnId?: string
   runId: string
   userText: string
   attachments?: AgentInputAttachment[]
@@ -778,6 +780,55 @@ interface ArchiveTraceTurnArgs {
   observedTiming?: ManagedTurnTiming
   commitHookEnv?: NodeJS.ProcessEnv
   managedRecorderEnabled: boolean
+}
+
+function cloneForkArchivePrefix(args: {
+  archive: TraceArchive
+  targetSessionId: string
+  providerId: ProviderId
+  runtimeProvider: RuntimeProvider
+  cwd: string
+}): void {
+  const userDataDir = app.getPath('userData')
+  const clonedRunIds: string[] = []
+  try {
+    for (const source of args.archive.turns.slice(0, -1)) {
+      const runId = `fork-${createHash('sha256')
+        .update(`${args.targetSessionId}\0${source.runId}`)
+        .digest('hex')
+        .slice(0, 24)}`
+      clonedRunIds.push(runId)
+      const restored = restoreTraceArchiveTurn(source, { userDataDir })
+      const attachments = prepareRunAttachments(userDataDir, runId, restored.attachments ?? [], {
+        providerId: args.providerId,
+        cwd: args.cwd,
+        sessionId: args.targetSessionId
+      })
+      const ok = upsertTraceArchiveTurn({
+        cwd: args.cwd,
+        sessionId: args.targetSessionId,
+        providerId: args.providerId,
+        runtimeProvider: args.runtimeProvider,
+        userDataDir,
+        turn: {
+          ...source,
+          runId,
+          attachments,
+          items: source.items.map((event) => ({ ...event, runId }))
+        }
+      })
+      if (!ok) throw new Error('Scry 无法复制分支前缀归档')
+    }
+  } catch (error) {
+    deleteTranscriptCopies({
+      cwd: args.cwd,
+      sessionId: args.targetSessionId,
+      userDataDir,
+      providerId: args.providerId
+    })
+    for (const runId of clonedRunIds) deleteRunAttachments(userDataDir, runId)
+    throw error
+  }
 }
 
 function observedTurnTiming(startedAt: string | undefined, completedAt: string): ManagedTurnTiming | undefined {
@@ -811,6 +862,7 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
     turn: {
       runId: args.runId,
       ...(args.providerTurnId ? { providerTurnId: args.providerTurnId } : {}),
+      ...(args.forkTurnId ? { forkTurnId: args.forkTurnId } : {}),
       userText: args.userText,
       attachments: args.attachments?.map((attachment) =>
         storeAttachmentReference(app.getPath('userData'), args.runId, attachment)
@@ -1871,6 +1923,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
     let resume = sessionByContext.get(contextKey)
     const expectedSessionId = request.expectedExternalSessionId
+    const forkSourceSessionId = request.forkLastTurn ? resume : undefined
     const contextRuns = runs.unsettledStates().filter((run) =>
       run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
@@ -2039,14 +2092,82 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '重新打开 Scry 后再启动'
     })
   }
+  if (request.forkLastTurn) {
+    if (!forkSourceSessionId || forkSourceSessionId !== expectedSessionId) throw contextChangedError()
+    const archive = await readTraceArchiveAsync({
+      cwd: catalogCwd,
+      sessionId: forkSourceSessionId,
+      providerId,
+      userDataDir: app.getPath('userData')
+    })
+    const head = archive?.turns.at(-1)
+    if (!archive || head?.runId !== request.forkLastTurn.replaceRunId ||
+      head.providerTurnId !== request.forkLastTurn.replaceProviderTurnId ||
+      (head.forkTurnId ?? head.providerTurnId) !== request.forkLastTurn.replaceForkTurnId) {
+      throw new AgentRuntimeError('最后一条消息已变化，已拒绝从过期边界建立分支', {
+        provider: runtimeProvider,
+        stage: 'frontdoor',
+        cwd,
+        nextAction: '重新打开当前会话后再编辑最后一条消息'
+      })
+    }
+    if (request.forkLastTurn.previousProviderTurnId && request.forkLastTurn.previousForkTurnId) {
+      const previous = archive?.turns.at(-2)
+      if (previous?.providerTurnId !== request.forkLastTurn.previousProviderTurnId ||
+        (previous.forkTurnId ?? previous.providerTurnId) !== request.forkLastTurn.previousForkTurnId) {
+        throw new AgentRuntimeError('上一轮边界与当前会话不一致', {
+          provider: runtimeProvider,
+          stage: 'frontdoor',
+          cwd,
+          nextAction: '重新打开当前会话后再编辑最后一条消息'
+        })
+      }
+      if (!adapter.forkLastTurn) {
+        throw new AgentRuntimeError('当前 Provider 不支持从历史边界建立分支', {
+          provider: runtimeProvider,
+          stage: 'capability',
+          cwd,
+          nextAction: '升级 Provider CLI/SDK 后重试'
+        })
+      }
+      const forked = await adapter.forkLastTurn.fork({
+        ...request.forkLastTurn,
+        sourceSessionId: forkSourceSessionId,
+        originalPrompt: head.userText,
+        cwd,
+        agentProfileId,
+        model: request.model,
+        permissionMode: request.permissionMode,
+        codexHookTrust,
+        openCodePluginTrust,
+        mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
+      })
+      if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')
+      cloneForkArchivePrefix({
+        archive,
+        targetSessionId: forked.externalSessionId,
+        providerId,
+        runtimeProvider,
+        cwd: catalogCwd
+      })
+      resume = forked.externalSessionId
+      sessionByContext.set(contextKey, resume)
+    } else {
+      // 编辑首轮不需要复制空历史；直接创建一个新的 Provider 会话。
+      resume = undefined
+      sessionByContext.delete(contextKey)
+    }
+    sessionAliasesByContext.delete(contextKey)
+  }
   const committedResume = sessionByContext.get(contextKey)
   const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
   const committedRuns = runs.unsettledStates().filter((run) =>
     run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
   )
+  const committedExpectedSessionId = request.forkLastTurn ? resume ?? null : expectedSessionId
   if (
     committedResume !== resume || committedRevision !== contextRevision ||
-    !expectedSessionMatches(expectedSessionId, committedResume, [...committedRuns, ...catalogAliases()])
+    !expectedSessionMatches(committedExpectedSessionId, committedResume, [...committedRuns, ...catalogAliases()])
   ) throw contextChangedError()
   if (cwd && committedResume && deletingSessions.has(scopedSessionKey(committedResume))) {
     throw new AgentRuntimeError('这个会话正在删除，已拒绝启动新一轮', {
@@ -2182,12 +2303,20 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       win?.webContents.send('agent:session', {
         runId,
         sessionId: resume,
+        ...(forkSourceSessionId ? { previousSessionId: forkSourceSessionId } : {}),
         externalSessionId: resume,
         providerId,
         agentProfileId
       })
     } else {
-      win?.webContents.send('agent:session', { runId, sessionId: runId, providerId, agentProfileId, pending: true })
+      win?.webContents.send('agent:session', {
+        runId,
+        sessionId: runId,
+        ...(forkSourceSessionId ? { previousSessionId: forkSourceSessionId } : {}),
+        providerId,
+        agentProfileId,
+        pending: true
+      })
     }
   } catch (error) {
     try { cleanupProvisional() } catch { /* preserve the frontdoor error */ }
@@ -2421,7 +2550,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       win?.webContents.send('agent:session', {
         runId,
         sessionId,
-        previousSessionId: runId,
+        previousSessionId: forkSourceSessionId ?? runId,
         externalSessionId: sessionId,
         providerId,
         agentProfileId
@@ -2434,6 +2563,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     promise: Promise<{
       externalSessionId?: string
       providerTurnId?: string
+      forkTurnId?: string
       stopped?: boolean
       status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
       recordingFailure?: { message: string }
@@ -2442,6 +2572,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     forceKill: () => void
     getExternalSessionId: () => string | undefined
     getProviderTurnId?: () => string | undefined
+    getForkTurnId?: () => string | undefined
     getRecordingFailure?: () => { message: string } | undefined
   } | null = null
   let interrupted = false
@@ -2449,6 +2580,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const runProvider = async (): Promise<{
     externalSessionId?: string
     providerTurnId?: string
+    forkTurnId?: string
     stopped?: boolean
     status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
     recordingFailure?: { message: string }
@@ -2571,6 +2703,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         cwd,
         sessionId: archiveSessionId(managedRecorderEnabled, nativeSessionId, storageSessionId),
         providerTurnId: r.providerTurnId,
+        forkTurnId: r.forkTurnId ?? r.providerTurnId,
         runId,
         userText: displayPrompt,
         attachments,
@@ -2655,6 +2788,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           externalSessionId: storageSessionId,
           providerId,
           agentProfileId,
+          providerTurnId: r.providerTurnId,
+          forkTurnId: r.forkTurnId ?? r.providerTurnId,
           stopped: r.stopped
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
@@ -2688,6 +2823,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           externalSessionId: storageSessionId,
           providerId,
           agentProfileId,
+          providerTurnId: r.providerTurnId,
+          forkTurnId: r.forkTurnId ?? r.providerTurnId,
           stopped: r.stopped
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
@@ -2721,6 +2858,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       } catch (error) {
         console.warn('[scry] Provider turn getter failed at terminal boundary:', runId, error)
       }
+      let forkTurnId = providerTurnId
+      try {
+        forkTurnId = h?.getForkTurnId?.() ?? forkTurnId
+      } catch (error) {
+        console.warn('[scry] Provider fork turn getter failed at terminal boundary:', runId, error)
+      }
       let providerRecordingFailure: { message: string } | undefined
       try {
         providerRecordingFailure = h?.getRecordingFailure?.()
@@ -2733,6 +2876,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         cwd,
         sessionId: archiveSessionId(managedRecorderEnabled, nativeSessionId, storageSessionId),
         providerTurnId,
+        forkTurnId,
         runId,
         userText: displayPrompt,
         attachments,

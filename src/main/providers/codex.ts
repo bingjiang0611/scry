@@ -845,6 +845,21 @@ export function createCodexAdapter(
         }
       }
     },
+    forkLastTurn: {
+      async fork(forkRequest) {
+        if (!forkRequest.previousForkTurnId) throw new Error('Codex 分支缺少上一轮 turn ID')
+        const access = codexAccess(forkRequest.permissionMode)
+        const thread = await request<CodexThreadResponse>('thread/fork', {
+          threadId: forkRequest.sourceSessionId,
+          lastTurnId: forkRequest.previousForkTurnId,
+          cwd: forkRequest.cwd,
+          excludeTurns: true,
+          ...access,
+          ...(forkRequest.model ? { model: forkRequest.model.id } : {})
+        }, forkRequest.cwd, forkRequest.codexHookTrust, forkRequest.mcpExecution)
+        return { externalSessionId: thread.thread.id }
+      }
+    },
     run: (runRequest: ProviderRunRequest) => {
       let externalSessionId = runRequest.resume
       let turnId: string | undefined

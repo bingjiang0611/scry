@@ -20,6 +20,7 @@ describe('session history merge', () => {
       providerId: 'pi',
       turns: [{
         runId: 'pi-run',
+        providerTurnId: 'pi-user-entry',
         userText: 'inspect',
         items: [{
           id: 'pi-read',
@@ -35,7 +36,9 @@ describe('session history merge', () => {
       }]
     }
 
-    expect(mergeSessionTurns([], archive)[0].items[0]).toMatchObject({
+    const [turn] = mergeSessionTurns([], archive)
+    expect(turn).toMatchObject({ providerTurnId: 'pi-user-entry', forkTurnId: 'pi-user-entry' })
+    expect(turn.items[0]).toMatchObject({
       fileOp: 'read',
       filePath: '.claude/skills/rate-workflow/SKILL.md'
     })
