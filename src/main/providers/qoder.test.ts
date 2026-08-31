@@ -85,6 +85,32 @@ describe('Qoder provider adapter', () => {
     })
   })
 
+  it('用 transcript user content 回退定位旧 archive 中没有 forkTurnId 的 Qoder prompt', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      { type: 'user', uuid: 'prompt-previous', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: 'first' }] } },
+      { type: 'assistant', uuid: 'assistant-previous', message: { role: 'assistant', content: [] } },
+      { type: 'user', uuid: 'native-prompt-last', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: 'old prompt' }] } },
+      { type: 'assistant', uuid: 'assistant-last', message: { role: 'assistant', content: [] } }
+    ])
+    sdk.forkSession.mockResolvedValue({ sessionId: 'session-forked' })
+
+    await expect(createQoderAdapter().forkLastTurn!.fork({
+      sourceSessionId: 'session-source',
+      originalPrompt: 'old prompt',
+      replaceRunId: 'run-last',
+      replaceProviderTurnId: 'legacy-prompt-id',
+      replaceForkTurnId: 'legacy-prompt-id',
+      previousProviderTurnId: 'previous-prompt-id',
+      previousForkTurnId: 'previous-prompt-id',
+      cwd: '/repo'
+    })).resolves.toEqual({ externalSessionId: 'session-forked' })
+    expect(sdk.forkSession).toHaveBeenCalledWith('session-source', {
+      dir: '/repo',
+      upToMessageId: 'assistant-previous',
+      title: 'Edited branch'
+    })
+  })
+
   it('reports the SDK Skill catalog as read-only rather than unsupported', async () => {
     await expect(createQoderAdapter().describe()).resolves.toMatchObject({
       id: 'qoder',
