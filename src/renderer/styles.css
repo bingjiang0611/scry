@@ -4208,10 +4208,17 @@ button.turn-call-group:focus-visible {
   width: 100%;
 }
 
+.user-edit-bubble {
+  min-height: 156px;
+  display: flex;
+  flex-direction: column;
+}
+
 .user-edit-input {
   width: 100%;
-  min-height: 112px;
-  resize: vertical;
+  min-height: 76px;
+  flex: 1;
+  resize: none;
   padding: 0;
   border: 0;
   outline: 0;
@@ -4221,34 +4228,52 @@ button.turn-call-group:focus-visible {
   line-height: 1.65;
 }
 
+.user-edit-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+}
+
 .user-edit-note {
-  margin-top: 6px;
+  max-width: 360px;
   color: var(--dim3);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 10.5px;
+  line-height: 1.45;
 }
 
 .user-edit-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-left: auto;
 }
 
 .user-edit-actions button {
-  min-height: 30px;
-  padding: 5px 10px;
+  min-height: 38px;
+  padding: 7px 16px;
   border: 1px solid var(--border2);
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--dim);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+  color: var(--fg);
+  font: 500 13px/1 var(--font-ui);
   cursor: pointer;
 }
 
+.user-edit-actions button:hover {
+  background: var(--panel-hi);
+}
+
 .user-edit-actions button.primary {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--fg);
+  border-color: var(--fg);
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.user-edit-actions button.primary:hover {
+  opacity: 0.88;
 }
 
 .user-edit-actions button:disabled {
