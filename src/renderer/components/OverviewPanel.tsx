@@ -531,7 +531,7 @@ export function OverviewPanel({
     }
   }
   const formatObserved = (evidence: { value: number | null; known: number }, format: (value: number) => string = fmtTok): string =>
-    evidence.value == null ? '—' : `${evidence.known < turns.length ? '≥ ' : ''}${format(evidence.value)}`
+    evidence.value == null ? '—' : format(evidence.value)
   const tin = sumObserved((e) => e.tokensIn)
   const tout = sumObserved((e) => e.tokensOut)
   // verdict foot 用全会话累计（和 cost/tokens pillar 一致，不混最后一轮）。

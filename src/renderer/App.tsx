@@ -985,15 +985,6 @@ export function App() {
     })
   }
 
-  const addProject = async (): Promise<void> => {
-    if (!confirmWorkspaceTransition()) return
-    const dir = await window.scry.chooseFolder()
-    if (!dir) return
-    refreshRecent()
-    loadProjects()
-    await pickRecent(dir)
-  }
-
   const newConversationInProject = async (projectCwd: string): Promise<void> => {
     if (projectCwd === cwd) await newConversation()
     else await pickRecent(projectCwd)
@@ -1238,7 +1229,6 @@ export function App() {
           onPick={pickSession}
           onTogglePin={(cwd, session) => void togglePinSession(cwd, session)}
           onArchive={(cwd, session) => void archiveSession(cwd, session)}
-          onAddProject={() => void addProject()}
           onNewProjectChat={(projectCwd) => void newConversationInProject(projectCwd)}
           onToggleProjectPin={(project) => void toggleProjectPin(project)}
           onRenameProject={renameProject}

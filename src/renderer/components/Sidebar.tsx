@@ -35,7 +35,6 @@ export function Sidebar({
   onPick,
   onTogglePin,
   onArchive,
-  onAddProject,
   onNewProjectChat,
   onToggleProjectPin,
   onRenameProject,
@@ -68,7 +67,6 @@ export function Sidebar({
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
-  onAddProject?: () => void
   onNewProjectChat?: (cwd: string) => void
   onToggleProjectPin?: (project: ProjectMeta) => void
   onRenameProject?: (project: ProjectMeta, name: string) => void | Promise<void>
@@ -215,9 +213,7 @@ export function Sidebar({
         )}
         {pinned.length > 0 && (
           <>
-            <div className="sb-section">
-              置顶 <span className="cnt">{pinned.length}</span>
-            </div>
+            <div className="sb-section">置顶</div>
             <div className="sb-pinned">
               {pinned.map(({ session, cwd, name }) => (
                 <SessionRow
@@ -236,14 +232,7 @@ export function Sidebar({
             <div className="sb-divider" />
           </>
         )}
-        <div className="sb-section sb-project-section">
-          项目 <span className="cnt">{filtered.length}</span>
-          {onAddProject && (
-            <button type="button" className="sb-project-add" title="添加项目" aria-label="添加项目" onClick={onAddProject}>
-              <Icon name="plus" />
-            </button>
-          )}
-        </div>
+        <div className="sb-section sb-project-section">项目</div>
         {filtered.length === 0 && pinned.length === 0 && (
           <div className="sb-empty">{projects.length === 0 ? '暂无项目' : '无匹配项目或会话'}</div>
         )}
@@ -273,19 +262,9 @@ export function Sidebar({
                       {p.cwd}
                     </span>
                   )}
-                  <span className="pcnt">{p.totalSessions || ''}</span>
                 </button>
                 {p.cwd && onNewProjectChat && (
                   <span className="sb-proj-acts">
-                    <button
-                      type="button"
-                      className="sb-proj-act"
-                      title={`在 ${p.name} 新建会话`}
-                      aria-label={`在 ${p.name} 新建会话`}
-                      onClick={() => onNewProjectChat(p.cwd)}
-                    >
-                      <Icon name="plus" />
-                    </button>
                     <button
                       type="button"
                       className="sb-proj-act sb-proj-more"
@@ -501,7 +480,6 @@ function SessionRow({
           <span className="sb-sesstext">{session.preview || '(无预览)'}</span>
         </span>
         <span className="sb-session-meta">
-          {session.count > 1 && <span className="sb-count">{session.count} 轮</span>}
           <span className="sb-sesstime" title={activeTimeTitle(session.mtime)}>
             {relTime(session.mtime)}
           </span>
