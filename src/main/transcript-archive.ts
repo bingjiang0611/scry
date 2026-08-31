@@ -90,6 +90,84 @@ export interface TraceArchive {
   turns: TraceArchiveTurn[]
 }
 
+export interface TraceArchiveSessionSummary {
+  cwd: string
+  sessionId: string
+  providerId: ProviderId
+  runtimeProvider: RuntimeProvider
+  runId: string
+  prompt: string
+  ts: number
+}
+
+const DISCOVERABLE_PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+const TRACE_DISCOVERY_MAX_FILES = 10_000
+const TRACE_DISCOVERY_MAX_FILE_BYTES = 32 * 1024 * 1024
+
+/** Recover Scry-owned session catalog metadata from canonical per-turn archives. */
+export function discoverTraceArchiveSessions(userDataDir: string): TraceArchiveSessionSummary[] {
+  const root = join(userDataDir, 'trace-archive-turns-v1')
+  const summaries = new Map<string, TraceArchiveSessionSummary>()
+  let inspectedFiles = 0
+  try {
+    for (const providerEntry of readdirSync(root, { withFileTypes: true })) {
+      if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink() ||
+          !DISCOVERABLE_PROVIDER_IDS.has(providerEntry.name as ProviderId)) continue
+      const providerId = providerEntry.name as ProviderId
+      const providerDir = join(root, providerEntry.name)
+      for (const cwdEntry of readdirSync(providerDir, { withFileTypes: true })) {
+        if (!cwdEntry.isDirectory() || cwdEntry.isSymbolicLink()) continue
+        const cwdDir = join(providerDir, cwdEntry.name)
+        for (const sessionEntry of readdirSync(cwdDir, { withFileTypes: true })) {
+          if (!sessionEntry.isDirectory() || sessionEntry.isSymbolicLink()) continue
+          const sessionDir = join(cwdDir, sessionEntry.name)
+          for (const fileEntry of readdirSync(sessionDir, { withFileTypes: true })) {
+            if (++inspectedFiles > TRACE_DISCOVERY_MAX_FILES) return [...summaries.values()]
+            if (!fileEntry.isFile() || fileEntry.isSymbolicLink() || !/^turn-[a-f0-9]{64}\.json$/.test(fileEntry.name)) continue
+            const path = join(sessionDir, fileEntry.name)
+            const stat = lstatSync(path)
+            if (stat.size <= 0 || stat.size > TRACE_DISCOVERY_MAX_FILE_BYTES) continue
+            let archive: TraceArchive
+            try {
+              archive = JSON.parse(readFileSync(path, 'utf8')) as TraceArchive
+            } catch {
+              continue
+            }
+            if (!archive || !Array.isArray(archive.turns) || archive.providerId !== providerId ||
+                typeof archive.cwd !== 'string' || typeof archive.sessionId !== 'string' || !archive.sessionId ||
+                typeof archive.runtimeProvider !== 'string') continue
+            const turns = archive.turns.filter((turn) =>
+              turn && typeof turn.runId === 'string' && typeof turn.userText === 'string' &&
+              typeof turn.ts === 'number' && Number.isFinite(turn.ts)
+            )
+            if (turns.length === 0) continue
+            const first = turns.reduce((left, right) => left.ts <= right.ts ? left : right)
+            const latest = turns.reduce((left, right) => left.ts >= right.ts ? left : right)
+            const key = `${providerId}\0${archive.cwd}\0${archive.sessionId}`
+            const current = summaries.get(key)
+            if (!current || latest.ts > current.ts) {
+              summaries.set(key, {
+                cwd: archive.cwd,
+                sessionId: archive.sessionId,
+                providerId,
+                runtimeProvider: archive.runtimeProvider,
+                runId: latest.runId,
+                prompt: first.userText,
+                ts: latest.ts
+              })
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn('[scry] trace archive catalog recovery failed:', (error as Error).message)
+    }
+  }
+  return [...summaries.values()]
+}
+
 export function traceArchivePath(userDataDir: string, cwd: string, sessionId: string, providerId: ProviderId = 'claude'): string {
   return join(userDataDir, 'trace-archives-v2', providerId, ownedCwdKey(cwd), ownedSessionFileStem(sessionId) + '.json')
 }

@@ -1,6 +1,7 @@
 import { forkSession, getSessionMessages, qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
 import { spawn } from 'node:child_process'
 import { lstat, readFile, readdir } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { capabilityReady, capabilityUnknown, type McpSnapshot, type ProviderContext, type SkillMeta } from '../../shared/provider'
@@ -175,6 +176,14 @@ function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): voi
   }
 }
 
+export function resolveQoderSdkExecutable(executable: string): string {
+  try {
+    return realpathSync(executable)
+  } catch {
+    return executable
+  }
+}
+
 function qoderOptions(
   cwd: string | undefined,
   resume?: string,
@@ -185,8 +194,12 @@ function qoderOptions(
   mcpExecution?: AuthorizedMcpExecution,
   managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
 ): Record<string, unknown> {
-  const executable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
-  if (!executable) throw new Error('Qoder CLI 未找到')
+  const detectedExecutable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
+  if (!detectedExecutable) throw new Error('Qoder CLI 未找到')
+  // Alibaba EDR blocks the qodercli symlink entry from reading ~/.qoder/.auth/user.
+  // Resolving the same signed CLI to its JavaScript bundle lets the SDK launch it
+  // through Node, preserving the original config/auth/session paths.
+  const executable = resolveQoderSdkExecutable(detectedExecutable)
   const runtimeEnv = runtimeCliEnv(
     undefined,
     managedRecorder ? { managedRecorder: true, providerId: 'qoder' } : { providerId: 'qoder' }

@@ -7,6 +7,7 @@ import {
   archivedTranscriptPath,
   cleanupTraceArchiveTemps,
   deleteTranscriptCopies,
+  discoverTraceArchiveSessions,
   mirrorTranscript,
   readTraceArchive,
   readTraceArchiveAsync,
@@ -60,6 +61,31 @@ describe('transcript archive mirror', () => {
       .toMatchObject({ cwd: '', sessionId, providerId: 'qoder' })
     await expect(readTraceArchiveAsync({ cwd: '', sessionId, userDataDir, providerId: 'qoder' }))
       .resolves.toMatchObject({ cwd: '', sessionId, providerId: 'qoder' })
+  })
+
+  it('可从孤立的逐轮 archive 恢复会话 catalog 元数据', () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const cwd = '/repo'
+    const sessionId = 'qoder-native-session'
+
+    expect(upsertTraceArchiveTurn({
+      cwd,
+      sessionId,
+      providerId: 'qoder',
+      runtimeProvider: 'qoder_cli',
+      userDataDir,
+      turn: { runId: 'run-first', userText: '保留的历史问题', items: [], done: true }
+    })).toBe(true)
+
+    expect(discoverTraceArchiveSessions(userDataDir)).toEqual([expect.objectContaining({
+      cwd,
+      sessionId,
+      providerId: 'qoder',
+      runtimeProvider: 'qoder_cli',
+      runId: 'run-first',
+      prompt: '保留的历史问题'
+    })])
   })
 
   it('keeps opaque or traversal-like session ids inside every owned directory for read/write/delete', () => {
