@@ -307,9 +307,7 @@ export function resolveRunControlSelection(
     : undefined
   const permissionMode = catalog.permissions.some((option) => option.id === current.permissionMode)
     ? current.permissionMode
-    : catalog.permissions.find((option) => option.id === 'default')?.id ??
-      catalog.permissions[0]?.id ??
-      'default'
+    : catalog.permissions.find((option) => option.id === 'default')?.id ?? 'default'
   return { model, effort, permissionMode }
 }
 
@@ -371,16 +369,23 @@ export function runControlSendBlockedReason(
     controls.permissionMode === 'default' &&
     controls.model == null &&
     controls.effort == null
+  if (usesProviderDefaults && capability === null && loading) return null
+
   const selectedModel = controls.model && capability?.data
     ? capability.data.models.find((option) => modelKey(option.model) === modelKey(controls.model!))
     : undefined
-  const cachedSelectionIsKnown = capability?.state === 'unknown' &&
-    capability.reason?.includes('最后已知模型目录') === true &&
-    capability.data != null &&
+  const selectionIsKnown = capability?.data != null &&
     (controls.model == null || selectedModel != null) &&
     (controls.effort == null || selectedModel?.efforts.some((option) => option.id === controls.effort) === true) &&
     capability.data.permissions.some((option) => option.id === controls.permissionMode)
-  if ((usesProviderDefaults && capability === null && loading) || cachedSelectionIsKnown) return null
+  const cachedCatalog = capability?.state === 'unknown' &&
+    capability.reason?.includes('最后已知模型目录') === true
+  if (cachedCatalog && selectionIsKnown) return null
+  if (capability?.data != null && !selectionIsKnown) {
+    return cachedCatalog
+      ? '最后已知模型目录不包含当前模型、推理强度或权限，请重新选择'
+      : '当前 Provider 不支持所选模型、推理强度或权限，请重新选择'
+  }
   return !capability || capability.data == null ||
     (capability.state !== 'ready' && capability.state !== 'degraded')
     ? capability?.reason ?? '运行权限能力尚未确认，暂不能发送'

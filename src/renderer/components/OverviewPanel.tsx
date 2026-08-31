@@ -297,8 +297,7 @@ function fileOperationText(file: FileRow): string {
 }
 
 function turnFileCount(row: Pick<TurnCallRow, 'files' | 'turnDiff'>): number {
-  const diffFiles = row.turnDiff?.status === 'captured' ? row.turnDiff.files : []
-  return diffFiles.length > 0 ? diffFiles.length : row.files.length
+  return row.turnDiff?.status === 'captured' ? row.turnDiff.files.length : row.files.length
 }
 
 export function TurnFileFootprint({
@@ -310,8 +309,8 @@ export function TurnFileFootprint({
   turnDiff?: TurnDiffSnapshot
   preview?: boolean
 }) {
-  const diffFiles = turnDiff?.status === 'captured' ? turnDiff.files : []
-  const hasDiff = diffFiles.length > 0
+  const hasDiff = turnDiff?.status === 'captured'
+  const diffFiles = hasDiff ? turnDiff.files : []
   const count = hasDiff ? diffFiles.length : files.length
   return (
     <section

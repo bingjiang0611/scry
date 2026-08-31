@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { ProviderOperationGate } from './provider-operation-gate'
+import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
 
 describe('ProviderOperationGate', () => {
+  it('uses one identity for authentication and run operations', () => {
+    expect(providerOperationKey('qoder')).toBe('qoder\0')
+    expect(providerOperationKey('pi', 'pi:custom')).toBe('pi\0pi:custom')
+
+    const gate = new ProviderOperationGate()
+    const auth = gate.acquireAuthentication(providerOperationKey('qoder'))
+    expect(auth.ok).toBe(true)
+    expect(gate.acquireOperation(providerOperationKey('qoder'))).toEqual({
+      ok: false,
+      blockedBy: 'authentication'
+    })
+    if (auth.ok) auth.release()
+  })
+
   it('serializes MCP authentication globally for one Provider', () => {
     const gate = new ProviderOperationGate()
     const first = gate.acquireAuthentication('opencode')

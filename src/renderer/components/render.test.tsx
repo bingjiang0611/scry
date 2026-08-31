@@ -1992,6 +1992,23 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('M12 19V5m-7 7 7-7 7 7')
   })
 
+  it('Pi 完全访问必须由用户明确选择，不把唯一权限静默当成当前值', () => {
+    const chatHtml = renderWelcome({
+      selectedAgentId: 'pi:default',
+      runControls: { permissionMode: 'default' },
+      runControlCatalog: {
+        models: [{ model: { id: 'pi-model' }, label: 'Pi', efforts: [] }],
+        permissions: [{ id: 'full_access', label: '本机完全访问', description: '继承本机用户权限' }]
+      },
+      sendBlockedReason: '当前 Provider 不支持所选模型、推理强度或权限，请重新选择'
+    })
+
+    expect(chatHtml).toMatch(/<option value="default"[^>]*disabled=""[^>]*selected="">请选择权限<\/option>/)
+    expect(chatHtml).toMatch(/<option value="full_access"[^>]*>本机完全访问<\/option>/)
+    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
+  })
+
   it('Composer 用描述关系说明阻塞原因，不把错误文案伪装成发送动作名', () => {
     const chatHtml = renderWelcome({ sendBlockedReason: '当前 Provider 不可发送' })
     expect(chatHtml).toContain('id="composer-status"')
@@ -2007,7 +2024,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         health: { state: 'ready', transport: 'Agent SDK' }
       }],
       runControlsLoading: true,
-      sendBlockedReason: '最后已知模型目录；正在向 Provider 复核运行权限',
       runControlCatalog: {
         models: [],
         permissions: RUN_CONTROL_PROPS.runControlCatalog.permissions
@@ -2020,19 +2036,16 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).not.toContain('读取模型…')
     expect(chatHtml).not.toContain('id="composer-status"')
     expect(chatHtml).not.toContain('当前 Provider 不可发送；草稿会保留')
-    expect(chatHtml).not.toContain('最后已知模型目录；正在向 Provider 复核运行权限')
-    expect(chatHtml).toContain('title="正在后台复核运行权限"')
+    expect(chatHtml).toContain('title="发送"')
   })
 
-  it.each([
-    '最后已知模型目录（8/28/2026, 3:11:55 PM 读取）；正在向 Provider 复核运行权限',
-    '当前显示最后已知模型目录；Transport closed'
-  ])('缓存目录状态在 loading 结束后也不显示成错误或 tooltip：%s', (reason) => {
+  it('缓存选择失效时展示可行动原因，不留下静默禁用按钮', () => {
+    const reason = '最后已知模型目录不包含当前模型、推理强度或权限，请重新选择'
     const chatHtml = renderWelcome({ sendBlockedReason: reason })
 
-    expect(chatHtml).not.toContain('id="composer-status"')
-    expect(chatHtml).not.toContain(reason)
-    expect(chatHtml).toContain('title="发送"')
+    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).toContain(reason)
+    expect(chatHtml).toContain(`title="${reason}"`)
     expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
@@ -2893,6 +2906,20 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
         }}
       />
     )
+    const zeroDiffHtml = renderToStaticMarkup(
+      <TurnFileFootprint
+        files={[{ path: '/tmp/validation.txt', read: 1, inferredRead: 1, write: 0, edit: 0 }]}
+        turnDiff={{
+          version: 1,
+          status: 'captured',
+          files: [],
+          beforeAt: 'before',
+          afterAt: 'after',
+          captureMs: 1,
+          cleanup: 'ok'
+        }}
+      />
+    )
     const emptyHtml = renderToStaticMarkup(<TurnFileFootprint files={[]} />)
 
     expect(toolOnlyHtml).toContain('本轮文件足迹（工具证据）')
@@ -2905,6 +2932,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(diffHtml).toContain('wiki-log.md')
     expect(diffHtml).toContain('+3 −0')
     expect(diffHtml).not.toContain('list_after.md')
+    expect(zeroDiffHtml).toContain('本轮改动（Git 证据）')
+    expect(zeroDiffHtml).toContain('0 files')
+    expect(zeroDiffHtml).not.toContain('validation.txt')
+    expect(zeroDiffHtml).not.toContain('本轮文件足迹（工具证据）')
     expect(emptyHtml).toContain('暂无文件工具证据')
   })
 

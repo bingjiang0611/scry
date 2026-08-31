@@ -64,7 +64,7 @@ import { createSmokeProviderAdapter } from './providers/smoke'
 import { piRpcEnvironment, probePiAgent } from './providers/pi'
 import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
-import { ProviderOperationGate } from './provider-operation-gate'
+import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
 import { appendCoalescedTrace, upsertTraceById } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import {
@@ -413,7 +413,7 @@ const withProviderOperation = async <T>(
   operation: () => T | Promise<T>,
   agentProfileId?: string
 ): Promise<T> => {
-  const lease = providerOperationGate.acquireOperation(`${providerId}\0${agentProfileId ?? ''}`)
+  const lease = providerOperationGate.acquireOperation(providerOperationKey(providerId, agentProfileId))
   if (!lease.ok) throw new Error('当前 Provider 正在认证 MCP，请等待认证完成或超时后重试')
   try {
     return await operation()
@@ -1405,7 +1405,7 @@ handleTrusted('agent:testMcp', async (_e, p: { context: ProviderContext; targetI
 })
 handleTrusted('agent:reauthenticateMcp', async (_e, p: { context: ProviderContext; targetId: string }) => {
   const canonicalCwd = canonicalProviderCwd(p.context.cwd)
-  const authKey = p.context.providerId
+  const authKey = providerOperationKey(p.context.providerId, p.context.agentProfileId)
   const authLease = providerOperationGate.acquireAuthentication(authKey)
   if (!authLease.ok) {
     throw new Error(authLease.blockedBy === 'authentication'
@@ -1944,7 +1944,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '不要手工覆盖 runtimeProvider；由 Provider adapter descriptor 选择原生 transport'
     })
   }
-  const lifecycleKey = `${providerId}\0${agentProfileId ?? ''}`
+  const lifecycleKey = providerOperationKey(providerId, agentProfileId)
   const startLease = providerOperationGate.acquireOperation(lifecycleKey)
   if (!startLease.ok) {
     throw new AgentRuntimeError('当前 Provider 正在认证 MCP，已拒绝启动新一轮', {

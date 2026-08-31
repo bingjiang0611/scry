@@ -243,13 +243,23 @@ export function ChatView({
       description: option.description
     }))
   ]
-  // 冷启动会先用缓存目录渲染，再在后台复核 Provider 权限。缓存来源和复核传输失败
-  // 都是运行控制的内部状态：继续 fail closed，但不在 composer 中渲染成红色错误。
-  const cachedCatalogStatus = sendBlockedReason?.includes('最后已知模型目录') === true
-  const hideTransientRunControlStatus = cachedCatalogStatus ||
-    (runControlsLoading && selectedAgent != null && selectedAgent.health?.state !== 'unavailable')
-  const visibleSendBlockedReason = hideTransientRunControlStatus ? null : sendBlockedReason
-  const composerStatus = composerError ?? visibleSendBlockedReason
+  const permissionOptions = [
+    ...(!runControlCatalog.permissions.some((option) => option.id === runControls.permissionMode)
+      ? [{
+          value: runControls.permissionMode,
+          label: '请选择权限',
+          description: '当前 Provider 需要你明确选择一个受支持的权限模式',
+          disabled: true
+        }]
+      : []),
+    ...runControlCatalog.permissions.map((option) => ({
+      value: option.id,
+      label: option.label,
+      description: option.description
+    }))
+  ]
+  // 合法缓存选择由运行控制层返回 null；非空阻塞原因必须可见，不能留下无解释的禁用按钮。
+  const composerStatus = composerError ?? sendBlockedReason
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
@@ -584,7 +594,7 @@ export function ChatView({
           className="input"
           aria-label="描述任务"
           aria-describedby={composerStatus ? 'composer-status' : undefined}
-          placeholder={visibleSendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
+          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
           value={input}
           onChange={(event) => onInput(event.target.value)}
           onPaste={(event) => {
@@ -665,11 +675,7 @@ export function ChatView({
                 ariaLabel="权限"
                 prefix="权限"
                 value={runControls.permissionMode}
-                options={runControlCatalog.permissions.map((option) => ({
-                  value: option.id,
-                  label: option.label,
-                  description: option.description
-                }))}
+                options={permissionOptions}
                 tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
                 onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
               />
@@ -684,7 +690,7 @@ export function ChatView({
             aria-busy={submitting}
             aria-label={sendActionLabel}
             aria-describedby={composerStatus ? 'composer-status' : undefined}
-            title={runControlsLoading && sendBlockedReason ? '正在后台复核运行权限' : visibleSendBlockedReason ?? sendActionLabel}
+            title={sendBlockedReason ?? sendActionLabel}
           >
             <Icon name="arrowUp" />
             <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>

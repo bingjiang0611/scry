@@ -1241,6 +1241,22 @@ describe('Qoder provider adapter', () => {
     ])
   })
 
+  it('按 duration 对齐并发同名 Hook，不把乱序完成状态归给错误脚本', () => {
+    const log = [
+      '2026-07-11T11:24:25.363+08:00 INFO  [session=s1 turn=t1 tool=tool1] hook.started hook_name="PreToolUse:Skill" hook_event_name="PreToolUse" source="project" hook_index=1 display_text="slow-project-hook"',
+      '2026-07-11T11:24:25.500+08:00 INFO  [session=s1 turn=t1 tool=tool1] hook.started hook_name="PreToolUse:Skill" hook_event_name="PreToolUse" source="user" hook_index=2 display_text="fast-user-hook"',
+      '2026-07-11T11:24:26.000+08:00 INFO  [session=s1 turn=t1 tool=tool1] hook.finished hook_name="PreToolUse:Skill" hook_event_name="PreToolUse" success=true duration_ms=500 exit_code=0',
+      '2026-07-11T11:24:27.000+08:00 INFO  [session=s1 turn=t1 tool=tool1] hook.finished hook_name="PreToolUse:Skill" hook_event_name="PreToolUse" success=false duration_ms=1637 exit_code=1'
+    ].join('\n')
+
+    const responses = parseQoderHookLog('run-1', log, 's1').filter((event) => event.stage === 'hook_response')
+
+    expect(responses).toEqual([
+      expect.objectContaining({ hookCommand: 'fast-user-hook', hookOutcome: 'success' }),
+      expect.objectContaining({ hookCommand: 'slow-project-hook', hookOutcome: 'error', isError: true })
+    ])
+  })
+
   it('marks only failed background shell tasks from the Qoder process log', () => {
     const log = [
       '2026-08-05T18:31:57.544+08:00 INFO  [session=s1] tool.shell.backgrounded pid=35509 command="make build-local"',
