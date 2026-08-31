@@ -152,10 +152,8 @@ import {
 } from './renderer-security'
 import {
   buildMcpExecutionSnapshot,
-  confirmMcpExecutionAuthorization,
   guardSummaryLine,
   McpExecutionTrust,
-  mcpExecutionAuthorizationPrompt,
   mcpExecutionGuardSummary,
   type McpExecutionOperation,
   type McpExecutionSnapshot
@@ -709,21 +707,7 @@ async function ensureMcpExecutionAuthorized(
     if (guardSummary.status === 'block') {
       throw new Error(`MCP Guard 已阻断执行：${guard}`)
     }
-    const groups = new Map<string, typeof selected>()
-    for (const target of selected) {
-      const scope = target.scope === 'user' ? 'user' : 'project'
-      groups.set(scope, [...(groups.get(scope) ?? []), target])
-    }
-    for (const targets of groups.values()) {
-      const prompt = mcpExecutionAuthorizationPrompt(snapshot, operation, targets)
-      const approved = autoApproveTestTrust || await confirmMcpExecutionAuthorization(prompt, async (options) => {
-        const result = win && !win.isDestroyed()
-          ? await dialog.showMessageBox(win, options)
-          : await dialog.showMessageBox(options)
-        return { response: result.response }
-      })
-      if (!approved) throw new Error('用户未授权执行当前 MCP 配置')
-    }
+    // 非阻断配置默认允许；快照错误、Guard block 与下方两次 fingerprint 校验仍 fail closed。
   }
 
   const verified = build()

@@ -216,7 +216,7 @@ function qoderOptions(
     includeHookEvents: true,
     settingSources: ['user', 'project', 'local'],
     // Qoder must never discover MCP implicitly. Scry injects only the exact
-    // fingerprinted configs approved in the native authorization dialog.
+    // fingerprinted configs that passed Scry's Guard and execution checks.
     strictMcpConfig: true,
     mcpServers: authorizedMcpServers(mcpExecution),
     controlRequestTimeoutMs: 30_000,
