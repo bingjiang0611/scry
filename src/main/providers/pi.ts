@@ -1,7 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { accessSync, constants, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, delimiter, dirname, join } from 'node:path'
 import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
@@ -91,12 +91,32 @@ function piRuntimeFromBootstrap(bootstrap: string): string | undefined {
   }
 }
 
+function compatiblePiNode(pathValue: string): string | undefined {
+  for (const directory of pathValue.split(delimiter)) {
+    const candidate = resolveCommandOnPath('node', directory)
+    if (!candidate) continue
+    try {
+      const version = execFileSync(candidate, ['-p', 'process.versions.node'], {
+        encoding: 'utf8',
+        timeout: 1_500
+      }).trim().split('.').map(Number)
+      if (version[0] > 23 || (version[0] === 23 && version[1] >= 6)) return realpathSync(candidate)
+    } catch {
+      // Keep scanning: version-manager PATHs commonly contain an older Node before the active one.
+    }
+  }
+  return undefined
+}
+
 export function piRpcEnvironment(
   profile: PiAgentProfile,
   baseEnv: Record<string, string> = shellEnv()
 ): Record<string, string> {
   const env = sanitizeProviderEnv(baseEnv, 'pi')
-  if (basename(profile.executable) !== 'pi-agent' || env.PI_AGENT_PI) return env
+  if (basename(profile.executable) !== 'pi-agent') return env
+  const compatibleNode = env.PI_AGENT_NODE ? undefined : compatiblePiNode(env.PATH ?? '')
+  if (compatibleNode) env.PI_AGENT_NODE = compatibleNode
+  if (env.PI_AGENT_PI) return env
   const verified = env.PI_AGENT_VERIFIED_PI_EXECUTABLE
     ? packagePiExecutable(env.PI_AGENT_VERIFIED_PI_EXECUTABLE)
     : undefined
