@@ -2883,17 +2883,77 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(turnCalls).toContain('turn-call-count">2</span>')
   })
 
-  it('本轮文件足迹逐文件展示操作证据，并为无证据轮次保留诚实空态', () => {
-    const footprintHtml = renderToStaticMarkup(
+  it('本轮文件足迹优先展示 Git 净改动与行数；无 diff 时诚实降级到工具证据', () => {
+    const toolOnlyHtml = renderToStaticMarkup(
       <TurnFileFootprint files={[{ path: '/repo/src/a.ts', read: 2, inferredRead: 1, write: 1, edit: 0 }]} />
+    )
+    const diffHtml = renderToStaticMarkup(
+      <TurnFileFootprint
+        files={[{ path: '/tmp/list_after.md', read: 2, inferredRead: 2, write: 0, edit: 0 }]}
+        turnDiff={{
+          version: 1,
+          status: 'captured',
+          files: [
+            { path: '/repo/raw/list.md', added: 0, deleted: 2 },
+            { path: '/repo/wiki-log.md', added: 3, deleted: 0 }
+          ],
+          repoRoot: '/repo',
+          beforeAt: 'before',
+          afterAt: 'after',
+          captureMs: 1,
+          cleanup: 'ok'
+        }}
+      />
     )
     const emptyHtml = renderToStaticMarkup(<TurnFileFootprint files={[]} />)
 
-    expect(footprintHtml).toContain('本轮文件足迹（工具证据）')
-    expect(footprintHtml).toContain('1 files')
-    expect(footprintHtml).toContain('a.ts')
-    expect(footprintHtml).toContain('R1 ~R1 W1')
+    expect(toolOnlyHtml).toContain('本轮文件足迹（工具证据）')
+    expect(toolOnlyHtml).toContain('1 files')
+    expect(toolOnlyHtml).toContain('R1 ~R1 W1')
+    expect(diffHtml).toContain('本轮改动（Git 证据）')
+    expect(diffHtml).toContain('2 files')
+    expect(diffHtml).toContain('raw/list.md')
+    expect(diffHtml).toContain('+0 −2')
+    expect(diffHtml).toContain('wiki-log.md')
+    expect(diffHtml).toContain('+3 −0')
+    expect(diffHtml).not.toContain('list_after.md')
     expect(emptyHtml).toContain('暂无文件工具证据')
+  })
+
+  it('每轮文件数量优先采用 turn_diff，不再把 Bash 临时文件数量冒充实际改动数', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[{
+          runId: 'diff-files',
+          userText: '修改文件',
+          done: true,
+          items: [ev({
+            id: 'diff-files-snapshot',
+            runId: 'diff-files',
+            kind: 'harness',
+            stage: 'turn_diff',
+            turnDiff: {
+              version: 1,
+              status: 'captured',
+              files: [
+                { path: '/repo/a.md', added: 1, deleted: 0 },
+                { path: '/repo/b.md', added: 0, deleted: 2 }
+              ],
+              beforeAt: 'before',
+              afterAt: 'after',
+              captureMs: 1,
+              cleanup: 'ok'
+            }
+          })]
+        }]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+      />
+    )
+
+    expect(html).toContain('aria-label="文件 2，展开明细"')
   })
 
   it('每轮 Skill 调用把注入和内部文件证据折叠为一次，同时保留嵌套 Skill', () => {

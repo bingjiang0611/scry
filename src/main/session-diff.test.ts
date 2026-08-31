@@ -13,6 +13,7 @@ import {
   RunDiffPreviewer,
   SessionDiffBaselineRegistry,
   WriteCompletionTracker,
+  sessionLoadMatchesRun,
   type DiffPreviewEvent
 } from './session-diff'
 
@@ -135,6 +136,24 @@ describe('SessionDiffBaselineRegistry', () => {
     registry.rebind('claude\0/repo', 1, 'ses_adopted')
     const same = registry.get('claude\0/repo', 1, 'ses_adopted')
     expect(same?.capture).toBe(entry.capture)
+  })
+
+  it('loadSession 恢复同一条未收口 run 时保留 baseline，真正切会话才不匹配', () => {
+    const run = {
+      providerId: 'qoder',
+      agentProfileId: 'default',
+      cwd: '/repo',
+      externalSessionId: 'ses_active'
+    }
+    expect(sessionLoadMatchesRun(run, {
+      providerId: 'qoder', agentProfileId: 'default', cwd: '/repo', externalSessionId: 'ses_active'
+    })).toBe(true)
+    expect(sessionLoadMatchesRun(run, {
+      providerId: 'qoder', agentProfileId: 'default', cwd: '/repo', externalSessionId: 'ses_other'
+    })).toBe(false)
+    expect(sessionLoadMatchesRun(run, {
+      providerId: 'qoder', agentProfileId: 'other', cwd: '/repo', externalSessionId: 'ses_active'
+    })).toBe(false)
   })
 
   it('disposeAll 回收全部基线', async () => {
