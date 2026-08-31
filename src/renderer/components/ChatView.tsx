@@ -246,11 +246,10 @@ export function ChatView({
       description: option.description
     }))
   ]
-  // 冷启动会先用缓存目录渲染，再在后台复核 Provider 权限。复核期间仍 fail closed，
-  // 但不把这个正常的短暂阶段每次都渲染成红色错误或“Provider 不可发送”。
-  const cachedCatalogRevalidation = sendBlockedReason?.includes('最后已知模型目录') === true &&
-    sendBlockedReason.includes('正在向 Provider 复核运行权限')
-  const hideTransientRunControlStatus = cachedCatalogRevalidation ||
+  // 冷启动会先用缓存目录渲染，再在后台复核 Provider 权限。缓存来源和复核传输失败
+  // 都是运行控制的内部状态：继续 fail closed，但不在 composer 中渲染成红色错误。
+  const cachedCatalogStatus = sendBlockedReason?.includes('最后已知模型目录') === true
+  const hideTransientRunControlStatus = cachedCatalogStatus ||
     (runControlsLoading && selectedAgent != null && selectedAgent.health?.state !== 'unavailable')
   const visibleSendBlockedReason = hideTransientRunControlStatus ? null : sendBlockedReason
   const composerStatus = composerError ?? visibleSendBlockedReason
