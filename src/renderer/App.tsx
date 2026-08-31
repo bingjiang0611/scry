@@ -1325,7 +1325,6 @@ export function App() {
               onTurnRef={setTurnRef}
               onSelect={session.setSelected}
               onOpenDiff={openTurnDiffReview}
-              onOpenSessionDiff={openSessionNetDiff}
               onAnswerQuestion={session.answerQuestion}
               onInput={(value) => {
                 setInput(value)

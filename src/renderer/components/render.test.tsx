@@ -190,7 +190,7 @@ const renderWelcome = (overrides: Partial<ComponentProps<typeof ChatView>> = {})
   return renderToStaticMarkup(<ChatView {...props} {...overrides} />)
 }
 
-describe('ChatView 会话净改动摘要', () => {
+describe('ChatView 改动摘要', () => {
   const sessionTurn: Turn = {
     runId: 'run-1',
     userText: '改两个文件',
@@ -235,25 +235,12 @@ describe('ChatView 会话净改动摘要', () => {
     ]
   }
 
-  it('会话空闲时在对话末尾展示整个会话的净改动，且默认收起', () => {
-    const html = renderWelcome({
-      turns: [sessionTurn],
-      busy: false,
-      cwd: '/repo',
-      onOpenSessionDiff: () => {}
-    })
-    const summary = html.match(/<details class="files-summary diff session-summary"[\s\S]*?<\/details>/)?.[0] ?? ''
-    expect(summary).toContain('本会话改动')
-    expect(summary).toContain('Edited 1 file')
-    expect(summary).toContain('src/a.ts')
-    expect(summary).toContain('>+4<')
-    expect(summary).toContain('>−1<')
-    expect(summary).not.toContain('open=""')
-  })
+  it('对话流不再展示重复的本会话改动卡', () => {
+    const html = renderWelcome({ turns: [sessionTurn], busy: false, cwd: '/repo' })
 
-  it('运行中不展示会话摘要，避免把临时快照冒充终态', () => {
-    const html = renderWelcome({ turns: [sessionTurn], busy: true, cwd: '/repo', onOpenSessionDiff: () => {} })
+    expect(html).not.toContain('本会话改动')
     expect(html).not.toContain('session-summary')
+    expect(html).toContain('本轮改动')
   })
 })
 
@@ -1267,6 +1254,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(diffHtml).toContain('src/a.ts')
     expect(diffHtml).toContain('test/b.ts')
     expect(diffHtml).toContain('binary')
+    expect(diffHtml.indexOf('class="turn-flow"')).toBeLessThan(diffHtml.indexOf('class="files-summary diff"'))
     expect(diffHtml.match(/class="files-summary/g)).toHaveLength(1)
     const filesHtml = diffHtml.match(/<details class="files-summary diff"[\s\S]*?<\/details>/)?.[0] ?? ''
     expect(filesHtml).not.toContain('R ·')
