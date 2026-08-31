@@ -314,13 +314,17 @@ const recoverTraceCatalogOnce = (): void => {
   if (traceCatalogRecoveryDone) return
   traceCatalogRecoveryDone = true
   const store = appSessionStore()
-  const known = new Set(store.load().flatMap((session) =>
+  const catalog = store.load()
+  const knownCwds = new Set(catalog.map((session) => session.cwd))
+  const known = new Set(catalog.flatMap((session) =>
     session.externalSessionId
       ? [`${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd}\0${session.externalSessionId}`]
       : []
   ))
   for (const summary of discoverTraceArchiveSessions(app.getPath('userData'))) {
-    if (summary.providerId === 'pi') continue // Pi profile identity is not encoded in legacy trace archives.
+    // Recovery targets the Qoder catalog gap that loses otherwise healthy native sessions.
+    // Never resurrect archived regression evidence as new projects.
+    if (summary.providerId !== 'qoder' || !knownCwds.has(summary.cwd)) continue
     const key = `${summary.providerId}\0\0${summary.cwd}\0${summary.sessionId}`
     if (known.has(key)) continue
     store.record({

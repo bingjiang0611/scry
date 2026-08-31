@@ -586,10 +586,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           typeof (message as { uuid?: unknown }).uuid === 'string' &&
           (message as { uuid: string }).uuid === request.replaceForkTurnId
         )
-        const promptIndex = messages.findLastIndex((message) =>
-          message.type === 'user' && message.parent_tool_use_id == null &&
-          extractUserText(message.message).trim() === request.originalPrompt.trim()
-        )
+        const promptIndex = messages.findLastIndex((message) => {
+          const payload = message.message && typeof message.message === 'object' && !Array.isArray(message.message)
+            ? (message.message as { content?: unknown }).content
+            : message.message
+          return message.type === 'user' && message.parent_tool_use_id == null &&
+            extractUserText(payload).trim() === request.originalPrompt.trim()
+        })
         const index = nativeIndex >= 0 ? nativeIndex : promptIndex
         const boundary = index > 0 ? (messages[index - 1] as { uuid?: unknown }).uuid : undefined
         if (typeof boundary !== 'string' || !boundary) throw new Error('Qoder 会话无法定位待替换消息的前一边界')
