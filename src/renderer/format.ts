@@ -94,6 +94,8 @@ export function fileWriteCoverage(items: TraceEvent[]): FileCoverage {
 
 export interface Turn {
   runId: string
+  providerTurnId?: string
+  forkTurnId?: string
   userText: string
   attachments?: AgentInputAttachment[]
   items: TraceEvent[]

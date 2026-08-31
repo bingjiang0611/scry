@@ -4,14 +4,18 @@ import { dirname } from 'node:path'
 
 const runner = vi.hoisted(() => ({ captureInit: vi.fn(), runAgent: vi.fn() }))
 const mcp = vi.hoisted(() => ({ listMcp: vi.fn(), testMcpConfig: vi.fn() }))
-const sdk = vi.hoisted(() => ({ query: vi.fn() }))
+const sdk = vi.hoisted(() => ({ query: vi.fn(), getSessionMessages: vi.fn(), forkSession: vi.fn() }))
 const locate = vi.hoisted(() => ({ runtimeCliEnv: vi.fn() }))
 const childProcess = vi.hoisted(() => ({ execFile: vi.fn() }))
 vi.mock('node:child_process', async () => ({
   ...await vi.importActual<typeof import('node:child_process')>('node:child_process'),
   execFile: childProcess.execFile
 }))
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: sdk.query }))
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: sdk.query,
+  getSessionMessages: sdk.getSessionMessages,
+  forkSession: sdk.forkSession
+}))
 vi.mock('../agent-runner', () => ({ captureInit: runner.captureInit, getClaudeVersion: () => 'test', runAgent: runner.runAgent }))
 vi.mock('../claude-locate', () => ({
   resolveClaudeBin: () => '/bin/claude',
@@ -132,6 +136,8 @@ describe('Claude provider adapter', () => {
     ])
     mcp.testMcpConfig.mockReset()
     sdk.query.mockReset()
+    sdk.getSessionMessages.mockReset()
+    sdk.forkSession.mockReset()
     locate.runtimeCliEnv.mockReset().mockImplementation((_base, options) => ({
       PATH: '/runtime/bin',
       ANTHROPIC_API_KEY: 'provider-auth',
@@ -151,6 +157,31 @@ describe('Claude provider adapter', () => {
       id: 'claude',
       runtimeProvider: 'claude_sdk',
       capabilities: { skills: 'read', mcp: 'manage', commands: 'read', account: 'none' }
+    })
+  })
+
+  it('forks Claude immediately before the edited native prompt', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      { type: 'assistant', uuid: 'assistant-previous' },
+      { type: 'user', uuid: 'prompt-last' },
+      { type: 'assistant', uuid: 'assistant-last' }
+    ])
+    sdk.forkSession.mockResolvedValue({ sessionId: 'session-forked' })
+
+    await expect(createClaudeAdapter('/tmp/scry-home').forkLastTurn!.fork({
+      sourceSessionId: 'session-source',
+      originalPrompt: 'old prompt',
+      replaceRunId: 'run-last',
+      replaceProviderTurnId: 'prompt-last',
+      replaceForkTurnId: 'prompt-last',
+      previousProviderTurnId: 'prompt-previous',
+      previousForkTurnId: 'prompt-previous',
+      cwd: '/repo'
+    })).resolves.toEqual({ externalSessionId: 'session-forked' })
+    expect(sdk.forkSession).toHaveBeenCalledWith('session-source', {
+      dir: '/repo',
+      upToMessageId: 'assistant-previous',
+      title: 'Edited branch'
     })
   })
 

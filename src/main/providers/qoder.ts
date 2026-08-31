@@ -1,4 +1,4 @@
-import { qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
+import { forkSession, getSessionMessages, qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
 import { spawn } from 'node:child_process'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -16,7 +16,7 @@ import {
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
-import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
+import { extractUserText, normalizeSdkMessage, type NormalizeCtx } from '../normalize'
 import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
@@ -563,6 +563,31 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           : { state: !path ? 'unavailable' : hookFallbackObserved ? 'ready' : 'unknown', transport: 'Qoder Agent SDK' }
       }
     },
+    forkLastTurn: {
+      async fork(request) {
+        const messages = await getSessionMessages(request.sourceSessionId, {
+          dir: request.cwd,
+          includeSystemMessages: true
+        })
+        const nativeIndex = messages.findIndex((message) =>
+          typeof (message as { uuid?: unknown }).uuid === 'string' &&
+          (message as { uuid: string }).uuid === request.replaceForkTurnId
+        )
+        const promptIndex = messages.findLastIndex((message) =>
+          message.type === 'user' && message.parent_tool_use_id == null &&
+          extractUserText(message.message).trim() === request.originalPrompt.trim()
+        )
+        const index = nativeIndex >= 0 ? nativeIndex : promptIndex
+        const boundary = index > 0 ? (messages[index - 1] as { uuid?: unknown }).uuid : undefined
+        if (typeof boundary !== 'string' || !boundary) throw new Error('Qoder 会话无法定位待替换消息的前一边界')
+        const forked = await forkSession(request.sourceSessionId, {
+          dir: request.cwd,
+          upToMessageId: boundary,
+          title: 'Edited branch'
+        })
+        return { externalSessionId: forked.sessionId }
+      }
+    },
     run: (request: ProviderRunRequest) => {
       if (/^\/plugins\s+reload\s*$/i.test(request.prompt)) {
         const controller = new AbortController()
@@ -648,6 +673,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       let stopped = false
       let externalSessionId = request.resume
       let providerTurnId: string | undefined
+      let forkTurnId: string | undefined
       let providerTurnIdAmbiguous = false
       let providerStatus: 'completed' | 'failed' = 'completed'
       const observeProviderTurnId = (value: string | undefined): void => {
@@ -669,6 +695,16 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       const sdkHooks: TraceEvent[] = []
       const ctx: NormalizeCtx = { runId: request.runId, cwd: request.cwd, newId, now: () => new Date().toISOString() }
       const promise: Promise<ProviderRunResult> = (async () => {
+        const forkBaseline = new Set<string>()
+        if (request.resume) {
+          try {
+            for (const message of await getSessionMessages(request.resume, { dir: request.cwd, includeSystemMessages: true })) {
+              if (message.uuid) forkBaseline.add(message.uuid)
+            }
+          } catch {
+            // Fork identity is optional for this turn; the Provider run itself must remain usable.
+          }
+        }
         const providerPrompt = request.cwd && projectCommandMatch(request.prompt)
           ? await expandQoderProjectCommand(request.prompt, request.cwd)
           : request.prompt
@@ -855,10 +891,22 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         } else if ((request.managedRecorder === true || logHooksEnabled) && !qoderPid) {
           lastHookFallbackError = 'Qoder log fallback could not identify the current CLI process'
         }
+        if (externalSessionId) {
+          try {
+            const messages = await getSessionMessages(externalSessionId, { dir: request.cwd, includeSystemMessages: true })
+            const candidates = messages.filter((message) =>
+              message.type === 'user' && message.parent_tool_use_id == null && !forkBaseline.has(message.uuid)
+            )
+            if (candidates.length === 1) forkTurnId = candidates[0].uuid
+          } catch {
+            // The completed turn remains valid even when its optional fork identity is unavailable.
+          }
+        }
         if (terminalError != null) throw terminalError
         return {
           externalSessionId,
           providerTurnId: currentProviderTurnId(),
+          forkTurnId,
           stopped,
           status: stopped ? 'interrupted' : providerStatus,
           mcp: statuses ? qoderMcpSnapshot(statuses) : undefined
@@ -874,7 +922,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         interrupt,
         forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
         getExternalSessionId: () => externalSessionId,
-        getProviderTurnId: currentProviderTurnId
+        getProviderTurnId: currentProviderTurnId,
+        getForkTurnId: () => forkTurnId
       }
     },
     mcp: {

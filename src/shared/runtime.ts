@@ -117,10 +117,19 @@ export interface AgentRunControls {
   permissionMode: AgentPermissionMode
 }
 
+export interface AgentForkLastTurn {
+  replaceRunId: string
+  replaceProviderTurnId: string
+  replaceForkTurnId: string
+  previousProviderTurnId?: string
+  previousForkTurnId?: string
+}
+
 export interface AgentStartRequest {
   prompt: string
   cwd?: string
   expectedExternalSessionId?: string | null
+  forkLastTurn?: AgentForkLastTurn
   providerId?: ProviderId
   agentId?: string
   agentProfileId?: string
@@ -185,6 +194,7 @@ export interface NormalizedAgentStartRequest {
   prompt: string
   cwd?: string
   expectedExternalSessionId?: string | null
+  forkLastTurn?: AgentForkLastTurn
   providerId: ProviderId
   agentId: string
   agentProfileId?: string
@@ -323,6 +333,14 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
     throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
   }
+  const replaceRunId = boundedControlValue(payload.forkLastTurn?.replaceRunId)
+  const replaceProviderTurnId = boundedControlValue(payload.forkLastTurn?.replaceProviderTurnId)
+  const replaceForkTurnId = boundedControlValue(payload.forkLastTurn?.replaceForkTurnId)
+  const previousProviderTurnId = boundedControlValue(payload.forkLastTurn?.previousProviderTurnId)
+  const previousForkTurnId = boundedControlValue(payload.forkLastTurn?.previousForkTurnId)
+  if (payload.forkLastTurn && (!replaceRunId || !replaceProviderTurnId || !replaceForkTurnId || typeof payload.expectedExternalSessionId !== 'string')) {
+    throw new Error('编辑最后一条消息缺少可信会话或轮次边界')
+  }
   return {
     prompt: payload.prompt,
     ...(typeof payload.cwd === 'string' && payload.cwd.trim() ? { cwd: payload.cwd } : {}),
@@ -331,6 +349,15 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
       : typeof payload.expectedExternalSessionId === 'string' && payload.expectedExternalSessionId
         ? { expectedExternalSessionId: payload.expectedExternalSessionId }
         : {}),
+    ...(replaceRunId && replaceProviderTurnId && replaceForkTurnId ? {
+      forkLastTurn: {
+        replaceRunId,
+        replaceProviderTurnId,
+        replaceForkTurnId,
+        ...(previousProviderTurnId ? { previousProviderTurnId } : {}),
+        ...(previousForkTurnId ? { previousForkTurnId } : {})
+      }
+    } : {}),
     providerId,
     agentId,
     ...(agentProfileId ? { agentProfileId } : {}),

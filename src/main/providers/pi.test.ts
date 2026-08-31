@@ -17,6 +17,7 @@ import { createPiAdapter, piRpcEnvironment, piUserEntryIdAfterBaseline, probePiA
 const fixtureSource = `#!/usr/bin/env node
 let buffer = ''
 let leafId = 'active-leaf'
+let sessionId = 'pi-session-1'
 let entrySeq = 0
 const entries = [
   { type: 'message', id: 'active-leaf', parentId: null, timestamp: new Date().toISOString(), message: { role: 'assistant' } },
@@ -36,7 +37,7 @@ process.stdin.on('data', (chunk) => {
     if (command.type === 'get_state') response({
       model: { provider: 'test-provider', id: 'test-model' },
       thinkingLevel: 'high',
-      sessionId: 'pi-session-1',
+      sessionId,
       sessionFile: '/tmp/pi-session-1.jsonl',
       cwd: process.cwd()
     })
@@ -54,6 +55,15 @@ process.stdin.on('data', (chunk) => {
         sourceInfo: { scope: 'project', path: '/repo/.claude/skills/rate-workflow/SKILL.md' }
       }
     ] })
+    else if (command.type === 'fork') {
+      const target = entries.find((entry) => entry.id === command.entryId && entry.message?.role === 'user')
+      if (!target) send({ type: 'response', id: command.id, command: command.type, success: false, error: 'invalid fork target' })
+      else {
+        sessionId = 'pi-session-forked'
+        leafId = target.parentId
+        response({ text: target.message.content ?? '', cancelled: false })
+      }
+    }
     else if (command.type === 'get_entries') {
       const start = command.since == null ? 0 : entries.findIndex((entry) => entry.id === command.since) + 1
       if (command.since != null && start === 0) {
@@ -232,6 +242,23 @@ describe('Pi RPC Provider', () => {
       expect(adapter.mcp).toBeUndefined()
     })
   }, 20_000)
+
+  it('forks Pi before the edited user entry and returns the new native session', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.forkLastTurn!.fork({
+        sourceSessionId: 'pi-session-1',
+        originalPrompt: 'old prompt',
+        replaceRunId: 'run-last',
+        replaceProviderTurnId: 'abandoned-user',
+        replaceForkTurnId: 'abandoned-user',
+        previousProviderTurnId: 'prompt-previous',
+        previousForkTurnId: 'prompt-previous',
+        agentProfileId: profile.id,
+        cwd
+      })).resolves.toEqual({ externalSessionId: 'pi-session-forked' })
+    })
+  })
 
   it('waits for agent_settled and normalizes stream, subagent tools, session and usage', async () => {
     await withFixture(async (profile, cwd) => {

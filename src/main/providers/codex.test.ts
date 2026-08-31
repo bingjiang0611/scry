@@ -61,6 +61,32 @@ describe('Codex provider adapter', () => {
     })
   })
 
+  it('forks a thread through the previous native turn before rerunning an edited prompt', async () => {
+    appServer.request.mockImplementation(async (method: string) => {
+      if (method === 'thread/fork') return { thread: { id: 'thread-forked' } }
+      throw new Error(`unexpected ${method}`)
+    })
+    const adapter = createCodexAdapter()
+
+    await expect(adapter.forkLastTurn!.fork({
+      sourceSessionId: 'thread-source',
+      originalPrompt: 'old prompt',
+      replaceRunId: 'run-last',
+      replaceProviderTurnId: 'turn-last',
+      replaceForkTurnId: 'turn-last',
+      previousProviderTurnId: 'turn-previous',
+      previousForkTurnId: 'turn-previous',
+      cwd: '/repo',
+      permissionMode: 'full_access'
+    })).resolves.toEqual({ externalSessionId: 'thread-forked' })
+    expect(appServer.request).toHaveBeenCalledWith('thread/fork', expect.objectContaining({
+      threadId: 'thread-source',
+      lastTurnId: 'turn-previous',
+      cwd: '/repo',
+      excludeTurns: true
+    }))
+  })
+
   it('clears implicit MCP and serializes only approved Codex configs', () => {
     expect(codexMcpConfigArgs()).toEqual(['-c', 'mcp_servers={}'])
     expect(codexMcpConfigArgs({

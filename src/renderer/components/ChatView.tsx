@@ -65,6 +65,7 @@ interface ChatViewProps {
   onPasteClipboardImage: () => void
   onRemoveDraftAttachment: (id: string) => void
   onRemoveQueuedPrompt: (index: number) => void
+  onEditLastTurn?: (turn: Turn, text: string) => Promise<void>
   onSelectAgent: (agentId: string) => void
   onAddPiAgent?: () => void
   onRemovePiAgent?: (id: string) => void
@@ -166,6 +167,7 @@ export function ChatView({
   onPasteClipboardImage,
   onRemoveDraftAttachment,
   onRemoveQueuedPrompt,
+  onEditLastTurn,
   onSelectAgent,
   onAddPiAgent = () => {},
   onRemovePiAgent = () => {},
@@ -425,8 +427,11 @@ export function ChatView({
               </section>
             </div>
           )}
-          {turns.map((turn) => {
+          {turns.map((turn, index) => {
             const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
+            const editable = index === turns.length - 1 && turn.done && !busy && queuedPrompts.length === 0 &&
+              pendingQuestions.length === 0 && !!turn.providerTurnId && !!turn.forkTurnId &&
+              (index === 0 || (!!turns[index - 1].providerTurnId && !!turns[index - 1].forkTurnId)) && !!onEditLastTurn
             return (
             <div
               key={turn.runId}
@@ -435,7 +440,12 @@ export function ChatView({
               data-selected={selectedTurn || undefined}
               ref={onTurnRef ? (el) => onTurnRef(turn.runId, el) : undefined}
             >
-              <UserMessage text={turn.userText} attachments={turn.attachments} />
+              <UserMessage
+                text={turn.userText}
+                attachments={turn.attachments}
+                editable={editable}
+                onEdit={editable ? (text) => onEditLastTurn!(turn, text) : undefined}
+              />
               <AssistantTurn
                 turn={turn}
                 selectedId={selectedId}

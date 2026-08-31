@@ -4139,7 +4139,8 @@ button.turn-call-group:focus-visible {
 /* 对话消息（蓝本 chat.html）：bubble-user / who(av+runid) / model-text / files-summary / turn-footer */
 .turn-user {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   margin-bottom: 14px;
 }
 .bubble-user {
@@ -4173,6 +4174,94 @@ button.turn-call-group:focus-visible {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+.user-message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 5px;
+}
+
+.user-message-edit {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+}
+
+.user-message-edit:hover {
+  background: var(--panel2);
+  color: var(--fg);
+}
+
+.user-message-edit .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.turn-user.editing,
+.user-edit-bubble {
+  width: 100%;
+}
+
+.user-edit-input {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.65;
+}
+
+.user-edit-note {
+  margin-top: 6px;
+  color: var(--dim3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.user-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.user-edit-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.user-edit-actions button.primary {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.user-edit-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.user-edit-error {
+  margin-top: 8px;
+  color: var(--bad);
+  font-size: 11.5px;
+}
+
 .user-md + .user-attachments,
 .bubble-user .slash + .user-attachments {
   margin-top: 8px;

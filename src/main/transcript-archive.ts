@@ -65,6 +65,7 @@ export function archivedTranscriptPath(userDataDir: string, cwd: string, session
 export interface TraceArchiveTurn {
   runId: string
   providerTurnId?: string
+  forkTurnId?: string
   userText: string
   attachments?: StoredAttachment[]
   items: TraceEvent[]
@@ -341,6 +342,7 @@ function isArchiveShape(value: unknown): value is TraceArchive {
     const turn = raw as Partial<TraceArchiveTurn>
     return typeof turn.runId === 'string' && turn.runId.length > 0 &&
       (turn.providerTurnId == null || typeof turn.providerTurnId === 'string') &&
+      (turn.forkTurnId == null || typeof turn.forkTurnId === 'string') &&
       typeof turn.userText === 'string' &&
       Array.isArray(turn.items) && turn.items.every((item) => !!item && typeof item === 'object' && !Array.isArray(item)) &&
       (turn.attachments == null || (Array.isArray(turn.attachments) && turn.attachments.every(

@@ -29,6 +29,7 @@ import {
 } from './right-surface'
 import type { ParsedTurn, ProjectMeta, SessionMeta, SessionRef } from './env'
 import { resolveTurnDiffReview, sessionNetDiffReview } from './turn-diff'
+import type { Turn } from './format'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
@@ -767,6 +768,32 @@ export function App() {
     [currentRunRequest, selectSessionId, session.send]
   )
 
+  const editLastTurn = useCallback(async (turn: Turn, text: string): Promise<void> => {
+    const latest = session.turns.at(-1)
+    const sourceSessionId = activeSessionIdRef.current
+    if (!sourceSessionId || latest?.runId !== turn.runId || !turn.done || !turn.providerTurnId || !turn.forkTurnId) {
+      throw new Error('最后一条消息已变化，请重新选择后再编辑')
+    }
+    if (queuedPrompts.length > 0 || session.pendingQuestions.length > 0) {
+      throw new Error('请先清空队列并处理当前提问')
+    }
+    const previousProviderTurnId = session.turns.at(-2)?.providerTurnId
+    const previousForkTurnId = session.turns.at(-2)?.forkTurnId
+    const runId = await session.send(text, {
+      ...currentRunRequest(),
+      expectedExternalSessionId: sourceSessionId,
+      attachments: turn.attachments ?? [],
+      forkLastTurn: {
+        replaceRunId: turn.runId,
+        replaceProviderTurnId: turn.providerTurnId,
+        replaceForkTurnId: turn.forkTurnId,
+        ...(previousProviderTurnId ? { previousProviderTurnId } : {}),
+        ...(previousForkTurnId ? { previousForkTurnId } : {})
+      }
+    })
+    if (!runId) throw new Error('编辑后的消息为空')
+  }, [currentRunRequest, queuedPrompts.length, session.pendingQuestions.length, session.send, session.turns])
+
   useEffect(() => {
     if (session.busy) {
       return
@@ -1329,6 +1356,7 @@ export function App() {
               onPasteClipboardImage={addClipboardImage}
               onRemoveDraftAttachment={removeDraftAttachment}
               onRemoveQueuedPrompt={removeQueuedPrompt}
+              onEditLastTurn={editLastTurn}
               onSelectAgent={integrations.setSelectedId}
               onAddPiAgent={integrations.addPiProfile}
               onRemovePiAgent={integrations.removePiProfile}

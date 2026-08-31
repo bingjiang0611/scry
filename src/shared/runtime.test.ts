@@ -84,6 +84,35 @@ describe('runtime frontdoor mapping', () => {
       .toMatchObject({ expectedExternalSessionId: null })
   })
 
+  it('normalizes a last-turn fork only with a trusted source session and stable boundaries', () => {
+    expect(normalizeAgentStartRequest({
+      prompt: 'edited',
+      providerId: 'codex',
+      expectedExternalSessionId: 'thread-source',
+      forkLastTurn: {
+        replaceRunId: ' run-last ',
+        replaceProviderTurnId: ' turn-last ',
+        replaceForkTurnId: ' message-last ',
+        previousProviderTurnId: ' turn-previous ',
+        previousForkTurnId: ' message-previous '
+      }
+    })).toMatchObject({
+      expectedExternalSessionId: 'thread-source',
+      forkLastTurn: {
+        replaceRunId: 'run-last',
+        replaceProviderTurnId: 'turn-last',
+        replaceForkTurnId: 'message-last',
+        previousProviderTurnId: 'turn-previous',
+        previousForkTurnId: 'message-previous'
+      }
+    })
+    expect(() => normalizeAgentStartRequest({
+      prompt: 'edited',
+      providerId: 'codex',
+      forkLastTurn: { replaceRunId: 'run-last', replaceProviderTurnId: 'turn-last', replaceForkTurnId: 'message-last' }
+    })).toThrow('可信会话或轮次边界')
+  })
+
   it('maps generic permission answers without exposing native request ids', () => {
     const request = agentPermissionQuestion('run-1', 'permission-1', '权限请求', '允许执行命令？', 'git status')
     expect(agentPermissionDecision(request, {

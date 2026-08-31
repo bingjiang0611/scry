@@ -10,6 +10,7 @@ import type {
   SkillMeta
 } from '../../shared/provider'
 import type {
+  AgentForkLastTurn,
   AgentInputAttachment,
   AgentModelRef,
   AgentPermissionMode,
@@ -25,6 +26,7 @@ import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trus
 export interface ProviderRunResult {
   externalSessionId?: string
   providerTurnId?: string
+  forkTurnId?: string
   stopped?: boolean
   status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
   recordingFailure?: { message: string }
@@ -37,6 +39,7 @@ export interface ProviderRunHandle {
   forceKill: () => void
   getExternalSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
+  getForkTurnId?: () => string | undefined
   getRecordingFailure?: () => { message: string } | undefined
 }
 
@@ -84,6 +87,22 @@ export interface ProviderRunRequest {
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
 }
 
+export interface ProviderForkLastTurnRequest extends AgentForkLastTurn {
+  sourceSessionId: string
+  originalPrompt: string
+  cwd?: string
+  agentProfileId?: string
+  model?: AgentModelRef
+  permissionMode?: AgentPermissionMode
+  codexHookTrust?: CodexHookTrustGrant[]
+  openCodePluginTrust?: OpenCodeProjectPluginAuthorization
+  mcpExecution?: AuthorizedMcpExecution
+}
+
+export interface ForkLastTurnFacet {
+  fork(request: ProviderForkLastTurnRequest): Promise<{ externalSessionId?: string }>
+}
+
 export interface SkillsFacet {
   list(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>>
 }
@@ -124,6 +143,7 @@ export interface ProviderAdapter {
   readonly runtimeProvider: RuntimeProvider
   describe(): Promise<ProviderDescriptor>
   run(request: ProviderRunRequest): ProviderRunHandle
+  readonly forkLastTurn?: ForkLastTurnFacet
   readonly skills?: SkillsFacet
   readonly mcp?: McpFacet
   readonly commands?: CommandsFacet

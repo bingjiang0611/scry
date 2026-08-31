@@ -1917,6 +1917,13 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(userHtml).toContain('技术方案')
   })
 
+  it('最后一条已完成消息显示原生分支编辑入口', () => {
+    const userHtml = renderToStaticMarkup(<UserMessage text="原消息" editable onEdit={async () => {}} />)
+
+    expect(userHtml).toContain('aria-label="编辑最后一条消息"')
+    expect(userHtml).toContain('title="编辑最后一条消息并从这里建立新分支"')
+  })
+
   it('长用户消息用紧凑的折叠控件展示行数与展开状态', () => {
     const userHtml = renderToStaticMarkup(<UserMessage text={Array.from({ length: 13 }, (_, index) => `第 ${index + 1} 行`).join('\n')} />)
 
