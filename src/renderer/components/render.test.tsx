@@ -1917,6 +1917,16 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(userHtml).toContain('技术方案')
   })
 
+  it('长用户消息用紧凑的折叠控件展示行数与展开状态', () => {
+    const userHtml = renderToStaticMarkup(<UserMessage text={Array.from({ length: 13 }, (_, index) => `第 ${index + 1} 行`).join('\n')} />)
+
+    expect(userHtml).toContain('class="expandbtn"')
+    expect(userHtml).toContain('aria-expanded="false"')
+    expect(userHtml).toContain('<span>展开全部</span>')
+    expect(userHtml).toContain('<span class="expandmeta">13 行</span>')
+    expect(userHtml).not.toContain('展开全部（')
+  })
+
   it('ChatView 能把待跳转轮次标记成滚动目标', () => {
     const chatHtml = renderToStaticMarkup(
       <ChatView

@@ -135,8 +135,15 @@ function UserMessageImpl({ text, attachments = [] }: { text: string; attachments
           </div>
         )}
         {long && (
-          <button className="expandbtn" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? '收起' : `展开全部（${lines.length} 行）`}
+          <button
+            type="button"
+            className="expandbtn"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            <Icon name={expanded ? 'chevronUp' : 'chevronDown'} />
+            <span>{expanded ? '收起' : '展开全部'}</span>
+            {!expanded && <span className="expandmeta">{lines.length} 行</span>}
           </button>
         )}
       </div>
