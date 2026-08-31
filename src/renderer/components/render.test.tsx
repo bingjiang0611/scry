@@ -796,6 +796,7 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('暂无会话')
     expect(html).toContain('aria-label="在 empty-project 新建会话"')
     expect(html).toContain('aria-label="管理项目 empty-project"')
+    expect(html).toContain('class="sb-proj-head on"')
     expect(html).toContain('class="ico sb-project-pin"')
   })
 
@@ -818,7 +819,8 @@ describe('Sidebar 项目分组', () => {
       />
     )
 
-    expect(html).toContain('class="sb-proj-head on"')
+    expect(html).not.toContain('class="sb-proj-head on"')
+    expect(html).not.toContain('class="sb-proj-row active"')
     expect(html).toContain('aria-label="Chats · 未关联工作目录"')
     expect(html).not.toContain('class="ppath"')
     expect(html).toContain('class="sb-sess active"')
@@ -2013,6 +2015,16 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).not.toContain('当前 Provider 不可发送；草稿会保留')
     expect(chatHtml).not.toContain('最后已知模型目录；正在向 Provider 复核运行权限')
     expect(chatHtml).toContain('title="正在后台复核运行权限"')
+  })
+
+  it('缓存目录复核状态在 loading 标记结束后也不显示成错误或 tooltip', () => {
+    const reason = '最后已知模型目录（8/28/2026, 3:11:55 PM 读取）；正在向 Provider 复核运行权限'
+    const chatHtml = renderWelcome({ sendBlockedReason: reason })
+
+    expect(chatHtml).not.toContain('id="composer-status"')
+    expect(chatHtml).not.toContain(reason)
+    expect(chatHtml).toContain('title="发送"')
+    expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
   it('Provider 确认不可用时即使运行控制仍在加载，也保留真实阻塞错误', () => {
