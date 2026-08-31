@@ -11,8 +11,7 @@ import type {
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
-import { AssistantTurn, SessionSummary, UserMessage } from './ChatTurn'
-import { sessionNetDiffReview } from '../turn-diff'
+import { AssistantTurn, UserMessage } from './ChatTurn'
 import { WorkdirPicker, CliPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
 import { Icon } from './primitives/Icon'
 
@@ -48,7 +47,6 @@ interface ChatViewProps {
   onTurnRef?: (runId: string, el: HTMLDivElement | null) => void
   onSelect: (event: TraceEvent) => void
   onOpenDiff?: (turn: Turn, turnDiff: TurnDiffSnapshot, initialPath?: string) => void
-  onOpenSessionDiff?: (initialPath?: string) => void
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onInput: (value: string) => void
   onChooseFolder: () => void
@@ -150,7 +148,6 @@ export function ChatView({
   onTurnRef,
   onSelect,
   onOpenDiff,
-  onOpenSessionDiff,
   onAnswerQuestion,
   onInput,
   onChooseFolder,
@@ -456,18 +453,6 @@ export function ChatView({
             </div>
             )
           })}
-          {!busy && turns.length > 0 && onOpenSessionDiff && (() => {
-            const sessionReview = sessionNetDiffReview(turns)
-            return sessionReview
-              ? (
-                <SessionSummary
-                  sessionDiff={sessionReview.turnDiff}
-                  preview={sessionReview.preview}
-                  onOpenDiff={onOpenSessionDiff}
-                />
-              )
-              : null
-          })()}
         </div>
       </div>
 

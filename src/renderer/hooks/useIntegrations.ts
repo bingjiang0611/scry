@@ -396,6 +396,10 @@ export function requestRunControlsForSelectedProvider<T>(
   return request({ providerId, ...(agentProfileId ? { agentProfileId } : {}), cwd: cwd ?? undefined })
 }
 
+export function reconcileSelectedAgentId(current: string, detected: DetectedAgent[]): string {
+  return detected.length > 0 && !detected.some((agent) => agent.id === current) ? detected[0].id : current
+}
+
 export function useIntegrations(cwd: string | null) {
   const storedRunControlPreferences = useMemo(readRunControlPreferences, [])
   const initialProviderId = providerIdForAgentId(storedRunControlPreferences.selectedAgentId) ?? 'claude'
@@ -515,9 +519,7 @@ export function useIntegrations(cwd: string | null) {
       .detect()
       .then((detected) => {
         setAgents(detected)
-        setSelectedId((current) =>
-          detected.length && !detected.find((agent) => agent.id === current) ? detected[0].id : current
-        )
+        setSelectedId((current) => reconcileSelectedAgentId(current, detected))
       })
       .catch(() => {})
       .finally(() => setAgentsScanning(false))
@@ -991,7 +993,9 @@ export function useIntegrations(cwd: string | null) {
     const fast = typeof window.scry.detectFast === 'function' ? window.scry.detectFast() : Promise.resolve([])
     void fast
       .then((detected) => {
-        if (!cancelled && detected.length > 0) setAgents(detected)
+        if (cancelled || detected.length === 0) return
+        setAgents(detected)
+        setSelectedId((current) => reconcileSelectedAgentId(current, detected))
       })
       .catch(() => {})
       .finally(() => {

@@ -11,6 +11,7 @@ import {
   parseRunControlCatalogCache,
   parseRunControlPreferences,
   reconcileMcpAuthStatus,
+  reconcileSelectedAgentId,
   retainCachedRunControlCatalog,
   requestRunControlsForSelectedProvider,
   runControlSendBlockedReason,
@@ -122,6 +123,17 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
 })
 
 describe('Agent 切换时的运行控制门禁', () => {
+  it('快速探测发现已保存的 Agent 不存在时立即选中首个可用 Agent', () => {
+    const detected = [
+      { id: 'claude', name: 'Claude Code', path: '/usr/local/bin/claude', bin: 'claude' },
+      { id: 'codex', name: 'Codex', path: '/usr/local/bin/codex', bin: 'codex' }
+    ]
+
+    expect(reconcileSelectedAgentId('qoder', detected)).toBe('claude')
+    expect(reconcileSelectedAgentId('codex', detected)).toBe('codex')
+    expect(reconcileSelectedAgentId('qoder', [])).toBe('qoder')
+  })
+
   it('Claude 选中时只请求 Claude 的运行控制，不预热 Codex', async () => {
     const request = vi.fn().mockResolvedValue(null)
 
