@@ -211,7 +211,7 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
             <span className="ae-code">00 · THE FIELD</span>
             <EvidenceStatus state={evidence.recentState} label={`近 30 天 · ${stateLabel[evidence.recentState]}`} />
             <EvidenceValue
-              value={`${evidence.recentState === 'lower' ? '≥ ' : ''}${fmtTok(evidence.recentState === 'zero' ? 0 : evidence.observedWindow)}`}
+              value={fmtTok(evidence.recentState === 'zero' ? 0 : evidence.observedWindow)}
               state={evidence.recentState}
               suffix="已知 Token"
             />
@@ -253,9 +253,9 @@ export function AnalyticsView({ stats, projects }: { stats: DbStats | null; proj
             {currentDay && (
               <div className="ae-day-ledger">
                 <header><b>{currentDay.day}</b><EvidenceStatus state={currentDay.state} /></header>
-                <EvidenceRow label="OBSERVED TOKEN" value={`${currentDay.state === 'lower' ? '≥ ' : ''}${fmtTok(currentDay.observed ?? (currentDay.turns === 0 ? 0 : null))}`} state={currentDay.state} />
-                <EvidenceRow label="INPUT" value={`${currentInputState === 'lower' ? '≥ ' : ''}${fmtTok(currentDay.turns === 0 ? 0 : currentDay.input)}`} state={currentInputState} note={`${currentDay.inputKnownTurns}/${currentDay.turns} turns`} />
-                <EvidenceRow label="OUTPUT" value={`${currentOutputState === 'lower' ? '≥ ' : ''}${fmtTok(currentDay.turns === 0 ? 0 : currentDay.output)}`} state={currentOutputState} note={`${currentDay.outputKnownTurns}/${currentDay.turns} turns`} />
+                <EvidenceRow label="OBSERVED TOKEN" value={fmtTok(currentDay.observed ?? (currentDay.turns === 0 ? 0 : null))} state={currentDay.state} />
+                <EvidenceRow label="INPUT" value={fmtTok(currentDay.turns === 0 ? 0 : currentDay.input)} state={currentInputState} note={`${currentDay.inputKnownTurns}/${currentDay.turns} turns`} />
+                <EvidenceRow label="OUTPUT" value={fmtTok(currentDay.turns === 0 ? 0 : currentDay.output)} state={currentOutputState} note={`${currentDay.outputKnownTurns}/${currentDay.turns} turns`} />
               </div>
             )}
           </div>

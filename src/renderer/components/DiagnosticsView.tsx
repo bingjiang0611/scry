@@ -394,15 +394,9 @@ export function DiagnosticsView({
           ? 'true-zero'
           : 'exact'
         : 'unknown'
-  const tokenValue =
-    tokenState === 'unknown'
-      ? '—'
-      : tokenState === 'partial'
-        ? `≥ ${fmtTok(knownUsageTokens)}`
-        : fmtTok(knownUsageTokens)
+  const tokenValue = tokenState === 'unknown' ? '—' : fmtTok(knownUsageTokens)
   const ledgerTurns = usageAvailable ? usage.turns : dbReady ? stats.totals.turns : null
-  const ledgerValue =
-    ledgerTurns == null ? '—' : usage?.status === 'partial' ? `≥ ${ledgerTurns}` : String(ledgerTurns)
+  const ledgerValue = ledgerTurns == null ? '—' : String(ledgerTurns)
   const ledgerPartial =
     !dbReady ||
     !usageAvailable ||
@@ -534,9 +528,7 @@ export function DiagnosticsView({
                 : '没有 result 事件，不能把警告数显示为 0。',
     value:
       runtimeWarnings.length > 0
-        ? capabilityCoverageComplete
-          ? String(runtimeWarnings.length)
-          : `≥ ${runtimeWarnings.length}`
+        ? String(runtimeWarnings.length)
         : capabilityCoverageComplete
           ? '0'
           : capabilityCoverageMixed

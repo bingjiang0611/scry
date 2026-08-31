@@ -767,7 +767,7 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace')
   })
 
-  it('没有会话的项目仍保留，并提供项目内新建与管理入口', () => {
+  it('没有会话的项目仍保留，项目树不显示计数或行内新建按钮', () => {
     const html = renderToStaticMarkup(
       <Sidebar
         projects={[{
@@ -782,7 +782,6 @@ describe('Sidebar 项目分组', () => {
         onPick={() => {}}
         onTogglePin={() => {}}
         onArchive={() => {}}
-        onAddProject={() => {}}
         onNewProjectChat={() => {}}
         onToggleProjectPin={() => {}}
         onRenameProject={() => {}}
@@ -791,10 +790,11 @@ describe('Sidebar 项目分组', () => {
       />
     )
 
-    expect(html).toContain('项目 <span class="cnt">1</span>')
-    expect(html).toContain('aria-label="添加项目"')
+    expect(html).not.toContain('aria-label="添加项目"')
     expect(html).toContain('暂无会话')
-    expect(html).toContain('aria-label="在 empty-project 新建会话"')
+    expect(html).not.toContain('class="cnt"')
+    expect(html).not.toContain('class="pcnt"')
+    expect(html).not.toContain('aria-label="在 empty-project 新建会话"')
     expect(html).toContain('aria-label="管理项目 empty-project"')
     expect(html).toContain('class="sb-proj-head on"')
     expect(html).toContain('class="ico sb-project-pin"')
@@ -894,15 +894,17 @@ describe('Sidebar 项目分组', () => {
       />
     )
 
-    expect(html).toContain('置顶 <span class="cnt">2</span>')
+    expect(html).toContain('<div class="sb-section">置顶</div>')
     expect(html).toContain('class="sb-pinned"')
     // 置顶按 pinnedAt 倒序，最近置顶的排最前。
     expect(html.indexOf('侧边栏置顶方案')).toBeLessThan(html.indexOf('启动需求交付流程'))
     expect(html).toContain('<span class="sb-sess-proj">rate-native</span>')
     expect(html).toContain('<span class="sb-sess-proj">scry</span>')
     // 项目目录独立于会话保留：scry 的会话被置顶后，项目仍显示为“会话已置顶”。
-    expect(html).toContain('项目 <span class="cnt">2</span>')
     expect(html).toContain('会话已置顶')
+    expect(html).not.toContain('class="cnt"')
+    expect(html).not.toContain('class="pcnt"')
+    expect(html).not.toContain('class="sb-count"')
     expect(html.match(/class="sb-sess-proj"/g)).toHaveLength(2)
   })
 
@@ -3524,7 +3526,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).toContain('overview-verdict warn')
   })
 
-  it('输入输出、缓存与 API 缺失部分轮次时都显示已知下界', () => {
+  it('输入输出、缓存与 API 缺失部分轮次时显示已捕获值但不加不等号', () => {
     const html = renderToStaticMarkup(
       <OverviewPanel
         turns={[
@@ -3548,11 +3550,12 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
       />
     )
 
-    expect(html).toContain('<strong>13 / ≥ 5</strong>')
-    expect(html).toContain('<b>cache·r</b>≥ 7')
-    expect(html).toContain('<b>cache·w</b>≥ 2')
-    expect(html).toContain('<b>reason</b>≥ 4')
-    expect(html).toContain('<b>api</b>≥ 1.0s')
+    expect(html).toContain('<strong>13 / 5</strong>')
+    expect(html).toContain('<b>cache·r</b>7')
+    expect(html).toContain('<b>cache·w</b>2')
+    expect(html).toContain('<b>reason</b>4')
+    expect(html).toContain('<b>api</b>1.0s')
+    expect(html).not.toContain('≥')
   })
 })
 
@@ -3898,15 +3901,16 @@ describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => 
     expect(warningHtml).not.toContain('运行正常')
   })
 
-  it('partial usage 保留已解析 turns 与 Token 下界，不降级成 unknown', () => {
+  it('partial usage 保留已解析 turns 与 Token，并通过状态标明部分覆盖', () => {
     const partial = renderDiagnostics({
       usage: { status: 'partial', cost: null, tin: 100, tout: 20, turns: 3, invalidLines: 2, sourceBytes: 1536 }
     })
 
     expect(partial).toContain('账本证据仅部分可用')
-    expect(partial).toContain('>≥ 3</span>')
-    expect(partial).toContain('Token ≥ 120')
-    expect(partial).toContain('3 turns · 2 invalid lines · 1.5 KiB · Token ≥ 120')
+    expect(partial).toContain('>3</span>')
+    expect(partial).toContain('Token 120')
+    expect(partial).toContain('3 turns · 2 invalid lines · 1.5 KiB · Token 120')
+    expect(partial).not.toContain('≥')
   })
 
   it('capabilityWarnings 缺字段保持 unknown，只有显式空数组才是真实 0', () => {
@@ -4509,13 +4513,14 @@ describe('AnalyticsView 渲染：四章真实证据叙事', () => {
     />
   )
 
-  it('00–03 四章使用真实字段且近 30 天部分覆盖显示下界', () => {
+  it('00–03 四章使用真实字段且近 30 天部分覆盖不显示不等号', () => {
     expect(html).toContain('从量到证据，再到能力盲区')
     expect(html).toContain('00</span>近 30 天')
     expect(html).toContain('01</span>Provider 覆盖')
     expect(html).toContain('02</span>工具与延迟')
     expect(html).toContain('03</span>风险与盲区')
-    expect(html).toContain('≥ 47.9k')
+    expect(html).toContain('47.9k')
+    expect(html).not.toContain('≥ 47.9k')
     expect(html).toContain('4/5')
     expect(html).not.toContain('$12.47')
     expect(html).toContain('847')

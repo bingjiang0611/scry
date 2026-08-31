@@ -10724,31 +10724,12 @@ button.turn-id.turn-call-open:focus-visible {
   margin-left: auto;
 }
 
-.sb-project-add {
-  width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
-  margin: -7px -6px -7px 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--dim2);
-  cursor: pointer;
-}
-
-.sb-project-add:hover {
-  background: var(--panel2);
-  color: var(--fg);
-}
-
 .sb-proj-row {
   position: relative;
 }
 
 .sb-proj-row .sb-proj-head {
-  padding-right: 57px;
+  padding-right: 31px;
 }
 
 .sb-proj-row.active .sb-proj-head {

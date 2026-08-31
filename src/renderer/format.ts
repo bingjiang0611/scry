@@ -124,9 +124,9 @@ export function fmtTok(n?: number | null): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
-export function fmtTokenCoverage(value: number | null, knownTurns: number, totalTurns: number): string {
+export function fmtTokenCoverage(value: number | null, knownTurns: number, _totalTurns: number): string {
   if (value == null || knownTurns === 0) return '—'
-  return `${knownTurns < totalTurns ? '≥ ' : ''}${fmtTok(value)}`
+  return fmtTok(value)
 }
 
 type TokenCacheAccounting = 'separate' | 'input_includes_cache'
@@ -1328,8 +1328,8 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
       severity: row.tokensTotal >= 250_000 ? 'bad' : 'warn',
       title: `${relativeSpike ? 'Token 突增' : '高 Token 轮次'} ${fmtTok(row.tokensTotal)}`,
       detail: relativeSpike
-        ? `TURN ${String(row.turnNo).padStart(2, '0')} · 较此前已捕获轮次均值 ${fmtTok(previousAverage)} ≥ 2× · 工具 ${row.toolCount} 次`
-        : `TURN ${String(row.turnNo).padStart(2, '0')} · 总 Token ≥ 100.0k 规则阈值 · 工具 ${row.toolCount} 次 · 输入/输出 ${fmtTok(row.tokensIn + row.tokensOut)}`,
+        ? `TURN ${String(row.turnNo).padStart(2, '0')} · 达到此前已捕获轮次均值 ${fmtTok(previousAverage)} 的 2× · 工具 ${row.toolCount} 次`
+        : `TURN ${String(row.turnNo).padStart(2, '0')} · 总 Token 达到 100.0k 规则阈值 · 工具 ${row.toolCount} 次 · 输入/输出 ${fmtTok(row.tokensIn + row.tokensOut)}`,
       action: '展开该 turn 的 model/cache/tool 证据，必要时拆任务',
       evidence: row.result
     })
@@ -1349,7 +1349,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
     signals.push({
       severity: 'warn',
       title: `高频工具调用 ${repeatInTurn.name} ${repeatInTurn.count}×`,
-      detail: `TURN ${String(repeatInTurn.turn.turnNo).padStart(2, '0')} · 单轮调用达到频次阈值（≥8）；频次本身不等同于循环`,
+      detail: `TURN ${String(repeatInTurn.turn.turnNo).padStart(2, '0')} · 单轮调用达到频次阈值（8 次）；频次本身不等同于循环`,
       action: '展开该轮，区分合理批处理与重复重试',
       evidence: repeatInTurn.turn.result
     })
