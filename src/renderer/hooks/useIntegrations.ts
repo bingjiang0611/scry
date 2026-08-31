@@ -209,7 +209,7 @@ export function parseRunControlCatalogCache(
       cache.set(contextKey(context), {
         ...context,
         mode: 'read',
-        // 上一次运行留下的目录只用于立刻渲染选项；运行权限仍要等本次 Provider 探测确认，保持 fail closed。
+        // 缓存按 Provider + profile + cwd 隔离并有时效；只允许继续使用目录中可精确证明的既有选项。
         state: 'unknown',
         data: { models, permissions },
         reason: `最后已知模型目录（${new Date(observedAt).toLocaleString()} 读取）；正在向 Provider 复核运行权限`,
@@ -371,10 +371,16 @@ export function runControlSendBlockedReason(
     controls.permissionMode === 'default' &&
     controls.model == null &&
     controls.effort == null
-  if (usesProviderDefaults && (
-    (capability === null && loading) ||
-    (capability?.state === 'unknown' && (capability.data?.models.length ?? 0) > 0)
-  )) return null
+  const selectedModel = controls.model && capability?.data
+    ? capability.data.models.find((option) => modelKey(option.model) === modelKey(controls.model!))
+    : undefined
+  const cachedSelectionIsKnown = capability?.state === 'unknown' &&
+    capability.reason?.includes('最后已知模型目录') === true &&
+    capability.data != null &&
+    (controls.model == null || selectedModel != null) &&
+    (controls.effort == null || selectedModel?.efforts.some((option) => option.id === controls.effort) === true) &&
+    capability.data.permissions.some((option) => option.id === controls.permissionMode)
+  if ((usesProviderDefaults && capability === null && loading) || cachedSelectionIsKnown) return null
   return !capability || capability.data == null ||
     (capability.state !== 'ready' && capability.state !== 'degraded')
     ? capability?.reason ?? '运行权限能力尚未确认，暂不能发送'

@@ -286,7 +286,7 @@ describe('模型目录跨进程缓存', () => {
     expect(restored.get('qoder\u0000\u0000')).toBeUndefined()
   })
 
-  it('恢复的目录标注来源与读取时间，且在本次探测确认前仍拒绝发送', () => {
+  it('恢复的目录标注来源与读取时间，并允许使用缓存中可精确证明的选项', () => {
     const restored = parseRunControlCatalogCache(
       serializeRunControlCatalogCache(new Map([
         ['qoder\u0000/repo', envelope('qoder', '/repo', catalog('ultimate'), now - 1_000)]
@@ -297,8 +297,15 @@ describe('模型目录跨进程缓存', () => {
     expect(restored.state).toBe('unknown')
     expect(restored.reason).toContain('最后已知模型目录')
     expect(runControlSendBlockedReason(restored, false, { permissionMode: 'default' })).toBeNull()
-    expect(runControlSendBlockedReason(restored, false, { model: { id: 'ultimate' }, permissionMode: 'default' }))
-      .toBe(restored.reason)
+    expect(runControlSendBlockedReason(restored, false, {
+      model: { id: 'ultimate' },
+      effort: 'high',
+      permissionMode: 'default'
+    })).toBeNull()
+    expect(runControlSendBlockedReason(restored, false, {
+      model: { id: 'not-in-cache' },
+      permissionMode: 'default'
+    })).toBe(restored.reason)
     expect(runControlSendBlockedReason(
       envelope('qoder', '/repo', catalog('ultimate'), now),
       false,
@@ -341,6 +348,32 @@ describe('模型目录跨进程缓存', () => {
     expect(runControlSendBlockedReason(retained, false, {
       model: { id: 'ultimate' },
       permissionMode: 'default'
+    })).toBeNull()
+  })
+
+  it('缓存复核传输失败时允许目录内的非默认权限，但拒绝不存在的权限', () => {
+    const known = catalog('ultimate')
+    known.permissions.push({ id: 'full_access', label: '完全访问', description: '允许执行工作区操作' })
+    const retained = retainCachedRunControlCatalog(
+      envelope('qoder', '/repo', known, now - 1_000),
+      {
+        providerId: 'qoder',
+        cwd: '/repo',
+        mode: 'read',
+        state: 'unknown',
+        data: null,
+        reason: 'Transport closed'
+      }
+    )
+
+    expect(runControlSendBlockedReason(retained, false, {
+      model: { id: 'ultimate' },
+      effort: 'high',
+      permissionMode: 'full_access'
+    })).toBeNull()
+    expect(runControlSendBlockedReason(retained, false, {
+      model: { id: 'ultimate' },
+      permissionMode: 'auto_review'
     })).toBe(retained.reason)
   })
 })
