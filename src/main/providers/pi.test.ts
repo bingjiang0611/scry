@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { piProfileForExecutable } from '../pi-agent-profiles'
@@ -134,6 +134,37 @@ describe('Pi RPC Provider', () => {
 
       writeFileSync(bootstrap, `#!/bin/sh\nPI_AGENT_PI=${runtime} \\\n\texec ${launcher} "$@"\n`)
       expect(piRpcEnvironment(profile, { PATH: dir, HOME: dir }).PI_AGENT_PI).toBe(realpathSync(runtime))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('selects a compatible Node later on PATH for pi-agent', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-node-'))
+    try {
+      const oldBin = join(dir, 'old', 'bin')
+      const newBin = join(dir, 'new', 'bin')
+      const launcher = join(dir, 'pi-agent')
+      mkdirSync(oldBin, { recursive: true })
+      mkdirSync(newBin, { recursive: true })
+      writeFileSync(launcher, '#!/bin/sh\nexit 0\n')
+      writeFileSync(join(oldBin, 'node'), '#!/bin/sh\nprintf "22.22.1\\n"\n')
+      writeFileSync(join(newBin, 'node'), '#!/bin/sh\nprintf "24.18.0\\n"\n')
+      chmodSync(launcher, 0o755)
+      chmodSync(join(oldBin, 'node'), 0o755)
+      chmodSync(join(newBin, 'node'), 0o755)
+
+      const profile = piProfileForExecutable(launcher)
+      expect(piRpcEnvironment(profile, {
+        PATH: `${oldBin}${delimiter}${newBin}`,
+        HOME: dir,
+        PI_AGENT_PI: '/already/pinned/pi'
+      }).PI_AGENT_NODE).toBe(realpathSync(join(newBin, 'node')))
+      expect(piRpcEnvironment(profile, {
+        PATH: `${oldBin}${delimiter}${newBin}`,
+        HOME: dir,
+        PI_AGENT_NODE: join(oldBin, 'node')
+      }).PI_AGENT_NODE).toBe(join(oldBin, 'node'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
