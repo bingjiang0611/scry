@@ -246,7 +246,10 @@ export function ChatView({
   ]
   // 冷启动会先用缓存目录渲染，再在后台复核 Provider 权限。复核期间仍 fail closed，
   // 但不把这个正常的短暂阶段每次都渲染成红色错误或“Provider 不可发送”。
-  const hideTransientRunControlStatus = runControlsLoading && selectedAgent != null && selectedAgent.health?.state !== 'unavailable'
+  const cachedCatalogRevalidation = sendBlockedReason?.includes('最后已知模型目录') === true &&
+    sendBlockedReason.includes('正在向 Provider 复核运行权限')
+  const hideTransientRunControlStatus = cachedCatalogRevalidation ||
+    (runControlsLoading && selectedAgent != null && selectedAgent.health?.state !== 'unavailable')
   const visibleSendBlockedReason = hideTransientRunControlStatus ? null : sendBlockedReason
   const composerStatus = composerError ?? visibleSendBlockedReason
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
@@ -687,7 +690,7 @@ export function ChatView({
             aria-busy={submitting}
             aria-label={sendActionLabel}
             aria-describedby={composerStatus ? 'composer-status' : undefined}
-            title={runControlsLoading && sendBlockedReason ? '正在后台复核运行权限' : sendBlockedReason ?? sendActionLabel}
+            title={runControlsLoading && sendBlockedReason ? '正在后台复核运行权限' : visibleSendBlockedReason ?? sendActionLabel}
           >
             <Icon name="arrowUp" />
             <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>

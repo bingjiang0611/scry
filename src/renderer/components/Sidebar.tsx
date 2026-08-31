@@ -250,14 +250,15 @@ export function Sidebar({
         {filtered.map((p) => {
           const open = !collapsed.has(p.cwd)
           const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
+          const projectSelected = active && activeSessionId == null
           const contextLabel = p.cwd || '未关联工作目录'
           const emptyLabel = p.totalSessions === 0 ? '暂无会话' : ql ? '无匹配会话' : '会话已置顶'
           return (
             <div key={p.cwd} className={`sb-proj ${open ? 'open' : ''}`}>
-              <div className={`sb-proj-row ${active ? 'active' : ''}`}>
+              <div className={`sb-proj-row ${projectSelected ? 'active' : ''}`}>
                 <button
                   type="button"
-                  className={`sb-proj-head ${active ? 'on' : ''}`}
+                  className={`sb-proj-head ${projectSelected ? 'on' : ''}`}
                   title={`${p.name}\n${contextLabel}`}
                   aria-label={`${p.name} · ${contextLabel}`}
                   aria-expanded={open}
