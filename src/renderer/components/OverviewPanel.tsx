@@ -6,7 +6,8 @@ import {
   type DbStats,
   type Diagnostics,
   type DiffFile,
-  type HookConfiguredCommand
+  type HookConfiguredCommand,
+  type TurnDiffSnapshot
 } from '@shared/trace'
 import type { AgentIntervention, RuntimeProvider } from '@shared/runtime'
 import { providerDangerCoverage } from '@shared/provider'
@@ -29,7 +30,7 @@ import {
   resultOf
 } from '../format'
 import type { FileRow, HookInstanceRow, HookScriptRow, HookSummary, Turn } from '../format'
-import { displayDiffPath, sessionDiffSummary, sessionNetDiffSummary } from '../turn-diff'
+import { displayDiffPath, sessionDiffSummary, sessionNetDiffSummary, turnDiffViewOf } from '../turn-diff'
 import { HooksSummary } from './ChatTurn'
 import { Icon } from './primitives/Icon'
 import { TurnTimingDetails } from './TurnTimingDetails'
@@ -280,6 +281,8 @@ interface TurnCallRow {
   userText: string
   timing: TurnTimingBreakdown
   files: FileRow[]
+  turnDiff?: TurnDiffSnapshot
+  turnDiffPreview: boolean
   hooks: HookSummary
   interventions: AgentIntervention[]
 }
@@ -293,18 +296,46 @@ function fileOperationText(file: FileRow): string {
   ].filter(Boolean).join(' ')
 }
 
-export function TurnFileFootprint({ files }: { files: FileRow[] }) {
+function turnFileCount(row: Pick<TurnCallRow, 'files' | 'turnDiff'>): number {
+  const diffFiles = row.turnDiff?.status === 'captured' ? row.turnDiff.files : []
+  return diffFiles.length > 0 ? diffFiles.length : row.files.length
+}
+
+export function TurnFileFootprint({
+  files,
+  turnDiff,
+  preview = false
+}: {
+  files: FileRow[]
+  turnDiff?: TurnDiffSnapshot
+  preview?: boolean
+}) {
+  const diffFiles = turnDiff?.status === 'captured' ? turnDiff.files : []
+  const hasDiff = diffFiles.length > 0
+  const count = hasDiff ? diffFiles.length : files.length
   return (
     <section
       className="turn-file-footprint"
       aria-label="本轮文件足迹"
-      title="R/W/E 来自本轮结构化文件工具；~R 来自本轮 cat、sed、rg 等只读 Bash 命令推断，其他间接文件访问仍可能未统计"
+      title={hasDiff
+        ? 'Git 快照提供本轮真实净改动与行数；只有 Git 快照不可用时才降级到工具足迹'
+        : 'R/W/E 来自本轮结构化文件工具；~R 来自本轮 cat、sed、rg 等只读 Bash 命令推断，其他间接文件访问仍可能未统计'}
     >
       <div className="turn-file-heading">
-        <span><Icon name="file" /> 本轮文件足迹（工具证据）</span>
-        <span>{files.length} files</span>
+        <span><Icon name="file" /> {hasDiff ? `本轮改动（Git 证据${preview ? ' · 运行中预览' : ''}）` : '本轮文件足迹（工具证据）'}</span>
+        <span>{count} files</span>
       </div>
-      {files.length === 0 ? (
+      {hasDiff ? (
+        <div className="turn-file-list">
+          {diffFiles.map((file) => (
+            <div className="turn-file-row" key={file.path} title={file.path}>
+              <span className="fbadge e">Δ</span>
+              <span className="fname">{displayDiffPath(file.path, turnDiff?.repoRoot)}</span>
+              <span className="fops">{file.binary ? 'binary' : `+${file.added} −${file.deleted}`}</span>
+            </div>
+          ))}
+        </div>
+      ) : files.length === 0 ? (
         <div className="turn-file-empty">暂无文件工具证据</div>
       ) : (
         <div className="turn-file-list">
@@ -558,6 +589,7 @@ export function OverviewPanel({
       .map((turn, index) => {
         const logicalEvents = logicalCallEventsForTurn(turn.items)
         const result = resultOf(turn) ?? null
+        const turnDiffView = turnDiffViewOf(turn.items)
         const maps: Record<TurnCallKind, Map<string, number>> = {
           tool: new Map(),
           mcp: new Map(),
@@ -596,6 +628,8 @@ export function OverviewPanel({
           userText: turnUserPreview(turn.userText),
           timing: buildTurnTimingBreakdown(turn.items, logicalEvents, result ?? undefined),
           files: aggregateFiles(turn.items).structured,
+          ...(turnDiffView ? { turnDiff: turnDiffView.turnDiff } : {}),
+          turnDiffPreview: turnDiffView?.preview === true,
           hooks: aggregateHooks(turn.items),
           interventions: humanInterventions(turn.items)
         }
@@ -968,7 +1002,7 @@ export function OverviewPanel({
                         onToggle: (event) => toggleTurnCallGroup(hooksKey, event)
                       })}
                       {renderTurnDetailToggle({
-                        kind: 'file', count: row.files.length, expanded: fileExpanded,
+                        kind: 'file', count: turnFileCount(row), expanded: fileExpanded,
                         controls: `turn-files-${row.turnNo}`,
                         onToggle: (event) => toggleTurnCallGroup(fileKey, event)
                       })}
@@ -996,7 +1030,13 @@ export function OverviewPanel({
                         <div id={`turn-hooks-${row.turnNo}`}><HooksSummary summary={row.hooks} title="Hooks 明细" /></div>
                       )}
                       {fileExpanded && (
-                        <div id={`turn-files-${row.turnNo}`}><TurnFileFootprint files={row.files} /></div>
+                        <div id={`turn-files-${row.turnNo}`}>
+                          <TurnFileFootprint
+                            files={row.files}
+                            preview={row.turnDiffPreview}
+                            {...(row.turnDiff ? { turnDiff: row.turnDiff } : {})}
+                          />
+                        </div>
                       )}
                     </div>
                   )}

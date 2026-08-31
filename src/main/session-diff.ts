@@ -34,6 +34,29 @@ export interface EnsureSessionBaselineInput {
   sessionId?: string
 }
 
+export interface SessionLoadIdentity {
+  providerId?: string
+  agentProfileId?: string
+  cwd?: string
+  externalSessionId?: string
+  sessionId?: string
+}
+
+/**
+ * renderer 为恢复正在运行/收口的会话也会调用 loadSession。那只是读取历史，不能按“切换会话”
+ * 清掉该 run 正在使用的 Git baseline；否则 turn_diff 仍有数据，但 session_diff 会落成 no_baseline。
+ */
+export function sessionLoadMatchesRun(run: SessionLoadIdentity, target: SessionLoadIdentity): boolean {
+  const runSessionId = run.externalSessionId ?? run.sessionId
+  return Boolean(
+    runSessionId && target.externalSessionId &&
+    runSessionId === target.externalSessionId &&
+    run.providerId === target.providerId &&
+    run.agentProfileId === target.agentProfileId &&
+    (run.cwd ?? '') === (target.cwd ?? '')
+  )
+}
+
 /**
  * 每个 (provider, cwd) 上下文一份会话净 diff 基线。
  *

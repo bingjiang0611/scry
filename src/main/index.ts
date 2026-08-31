@@ -20,7 +20,7 @@ import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
-import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker } from './session-diff'
+import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
@@ -1578,9 +1578,19 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
   )
   setCurrentCwd(cwd || undefined)
   const key = providerContextKey(payload.providerId, cwd, payload.agentProfileId)
-  bumpSessionRevision(key)
-  discardSessionBaseline(key)
-  sessionAliasesByContext.delete(key)
+  // 恢复当前仍在运行或收口的会话只是读取历史：它不能清掉该 run 正在使用的 session diff baseline。
+  // 真正切换到另一条历史会话时才递增 revision 并废弃旧 baseline。
+  const loadingUnsettledRun = runs.unsettledStates().some((run) => sessionLoadMatchesRun(run, {
+    providerId: payload.providerId,
+    agentProfileId: payload.agentProfileId,
+    cwd,
+    externalSessionId: payload.externalSessionId
+  }))
+  if (!loadingUnsettledRun) {
+    bumpSessionRevision(key)
+    discardSessionBaseline(key)
+    sessionAliasesByContext.delete(key)
+  }
   if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
   else sessionByContext.delete(key)
   if (cwd) rememberProject(cwd)
