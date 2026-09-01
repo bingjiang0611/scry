@@ -240,7 +240,6 @@ export function Sidebar({
           const open = !collapsed.has(p.cwd)
           const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
           const projectSelected = active && activeSessionId == null
-          const contextLabel = p.cwd || '未关联工作目录'
           const emptyLabel = p.totalSessions === 0 ? '暂无会话' : ql ? '无匹配会话' : '会话已置顶'
           return (
             <div key={p.cwd} className={`sb-proj ${open ? 'open' : ''}`}>
@@ -248,20 +247,14 @@ export function Sidebar({
                 <button
                   type="button"
                   className={`sb-proj-head ${projectSelected ? 'on' : ''}`}
-                  title={`${p.name}\n${contextLabel}`}
-                  aria-label={`${p.name} · ${contextLabel}`}
+                  aria-label={p.cwd ? `${p.name} · ${p.cwd}` : `${p.name} · 未关联工作目录`}
                   aria-expanded={open}
                   data-project-path={p.cwd}
                   onClick={() => toggle(p.cwd)}
                 >
-                  <Icon name="chevronRight" className="chev" />
+                  <Icon name="folder" className="sb-project-folder" />
                   <span className="pname">{p.name}</span>
                   {p.pinnedAt && <Icon name="pin" className="sb-project-pin" />}
-                  {p.cwd && (
-                    <span className="ppath" aria-hidden="true">
-                      {p.cwd}
-                    </span>
-                  )}
                 </button>
                 {p.cwd && onNewProjectChat && (
                   <span className="sb-proj-acts">
@@ -269,10 +262,19 @@ export function Sidebar({
                       type="button"
                       className="sb-proj-act sb-proj-more"
                       title={`管理项目 ${p.name}`}
-                      aria-label={`管理项目 ${p.name}`}
+                      aria-label={`管理项目 ${p.name} · ${p.cwd}`}
                       onClick={(event) => openProjectMenu(event, p)}
                     >
                       ···
+                    </button>
+                    <button
+                      type="button"
+                      className="sb-proj-act sb-proj-new"
+                      title={`在 ${p.name} 中新建会话`}
+                      aria-label={`在 ${p.name} 中新建会话 · ${p.cwd}`}
+                      onClick={() => onNewProjectChat(p.cwd)}
+                    >
+                      <Icon name="compose" />
                     </button>
                   </span>
                 )}
@@ -292,12 +294,7 @@ export function Sidebar({
                     />
                   ))}
                   {p.sessions.length === 0 && (
-                    <div className="sb-project-empty">
-                      <span>{emptyLabel}</span>
-                      {p.totalSessions === 0 && onNewProjectChat && (
-                        <button type="button" onClick={() => onNewProjectChat(p.cwd)}>新建</button>
-                      )}
-                    </div>
+                    <div className="sb-project-empty">{emptyLabel}</div>
                   )}
                 </div>
               )}

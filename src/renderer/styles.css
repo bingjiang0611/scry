@@ -379,13 +379,9 @@ body.pane-resizing * {
 .sb-proj-head:hover {
   color: var(--fg);
 }
-.sb-proj-head .chev {
-  color: var(--dim3);
-  transition: transform 0.12s;
+.sb-project-folder {
   flex: none;
-}
-.sb-proj.open .sb-proj-head .chev {
-  transform: rotate(90deg);
+  color: var(--dim2);
 }
 .sb-proj-head .pname {
   font-weight: 550;
@@ -394,33 +390,6 @@ body.pane-resizing * {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.sb-proj-head .ppath {
-  position: absolute;
-  z-index: 30;
-  left: 28px;
-  right: 8px;
-  top: calc(100% + 4px);
-  padding: 6px 8px;
-  border: 1px solid var(--border2);
-  border-radius: var(--r-sm);
-  background: var(--panel2);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26);
-  color: var(--dim);
-  font: 10.5px/1.35 var(--font-mono);
-  letter-spacing: 0;
-  overflow-wrap: anywhere;
-  pointer-events: none;
-  opacity: 0;
-  transform: translateY(-2px);
-  transition:
-    opacity 0.12s ease-out,
-    transform 0.12s ease-out;
-}
-.sb-proj-head:hover .ppath,
-.sb-proj-head:focus-visible .ppath {
-  opacity: 1;
-  transform: translateY(0);
 }
 .sb-proj-head .pcnt {
   font: 10.5px/1 var(--font-mono);
@@ -6333,7 +6302,6 @@ textarea:focus-visible,
   color: var(--fg);
 }
 
-.sb-proj-head .ppath,
 .ctxmenu,
 .menu,
 .slash-menu,
@@ -10729,7 +10697,7 @@ button.turn-id.turn-call-open:focus-visible {
 }
 
 .sb-proj-row .sb-proj-head {
-  padding-right: 31px;
+  padding-right: 59px;
 }
 
 .sb-proj-row.active .sb-proj-head {
@@ -10793,24 +10761,6 @@ button.turn-id.turn-call-open:focus-visible {
   padding: 0 8px 0 27px;
   color: var(--dim3);
   font-size: 11.5px;
-}
-
-.sb-project-empty button {
-  margin-left: auto;
-  padding: 3px 6px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--accent);
-  font: 11px/1 var(--font-ui);
-  cursor: pointer;
-  opacity: 0;
-}
-
-.sb-proj:hover .sb-project-empty button,
-.sb-proj:focus-within .sb-project-empty button,
-.sb-proj-row.active + .sb-sess-list .sb-project-empty button {
-  opacity: 1;
 }
 
 .sb-project-menu {
