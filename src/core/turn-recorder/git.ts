@@ -180,6 +180,16 @@ function capturePathspec(repoRoot: string, scope: string, excludedPaths: string[
   return [literalScope, ...new Set(exclusions)]
 }
 
+async function ignoredByGit(cwd: string, path: string, deadline: number): Promise<boolean> {
+  try {
+    await gitCommand(['check-ignore', '-q', '--', path], { cwd, deadline })
+    return true
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 1) return false
+    throw error
+  }
+}
+
 function terminalSnapshot(
   capture: GitTurnDiffCapture,
   status: TurnDiffSnapshot['status'],
@@ -259,7 +269,17 @@ export async function beginGitTurnDiff(
         return resolve(path)
       }
     }))
-    const pathspec = capturePathspec(repoRoot, scope, canonicalExcludedPaths)
+    // `git add -- . :(exclude)<path>` exits 1 when <path> is already ignored,
+    // even though the positive pathspec alone would naturally skip it. Keep an
+    // explicit exclusion only for visible/tracked paths; ignored dataDir paths
+    // are already absent from the temporary snapshot index.
+    const explicitExcludedPaths: string[] = []
+    for (const path of canonicalExcludedPaths) {
+      const fromRepo = relative(repoRoot, path)
+      if (fromRepo.startsWith('..') || isAbsolute(fromRepo)) continue
+      if (!await ignoredByGit(repoRoot, path, deadline)) explicitExcludedPaths.push(path)
+    }
+    const pathspec = capturePathspec(repoRoot, scope, explicitExcludedPaths)
     const baselineClean = !(await gitCommand(
       snapshotGitArgs([], ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...pathspec]),
       { cwd: repoRoot, deadline }
