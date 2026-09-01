@@ -61,7 +61,7 @@ import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
 import { createSmokeProviderAdapter } from './providers/smoke'
-import { piRpcEnvironment, probePiAgent } from './providers/pi'
+import { piRpcEnvironment, piVersionProbeEnvironment, probePiAgent } from './providers/pi'
 import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
 import { composeProviderDetectionResults } from './provider-detection'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
@@ -355,7 +355,7 @@ const listProjectCatalog = (): ProjectMeta[] => {
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
 const detectInstalledAgents = () => detectAgents({
   versionProbeEnv: (agent, executable) => agent.id === 'pi:default'
-    ? piRpcEnvironment({ id: 'pi:default', label: 'Pi', executable })
+    ? piVersionProbeEnvironment({ id: 'pi:default', label: 'Pi', executable })
     : undefined
 })
 const defaultPiProfile = async (): Promise<PiAgentProfile | undefined> => {
