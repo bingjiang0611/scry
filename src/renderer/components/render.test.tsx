@@ -2144,14 +2144,20 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(scanningHtml).not.toContain('未检测到可用 Provider')
     expect(scanningHtml).not.toContain('已发现')
 
+    const detectedAgents = [{
+      id: 'claude',
+      name: 'Claude Code',
+      bin: 'claude',
+      path: '/usr/local/bin/claude'
+    }, {
+      id: 'pi:25f2d533d0a8b391',
+      name: 'Pi · pi-agent',
+      bin: 'pi-agent',
+      path: '/Users/example/dev-agent/pi-agent/bin/pi-agent'
+    }]
     const fastHtml = renderWelcome({
       agentScanning: true,
-      agents: [{
-        id: 'claude',
-        name: 'Claude Code',
-        bin: 'claude',
-        path: '/usr/local/bin/claude'
-      }]
+      agents: detectedAgents
     })
     // 快速 PATH 探测可能已经返回，但完整版本/descriptor 探测完成前不展示中间结果。
     expect(fastHtml).toContain('aria-busy="true"')
@@ -2160,9 +2166,10 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(fastHtml).toContain('正在探测本机 agent CLI')
     expect(fastHtml).toContain('data-busy="true"')
     expect(fastHtml).toContain('扫描中…')
-    expect(fastHtml).not.toContain('1/1 个 Provider 可用')
+    expect(fastHtml).not.toContain('2/2 个 Provider 可用')
     expect(fastHtml).not.toContain('data-health="available"')
     expect(fastHtml).not.toContain('/usr/local/bin/claude')
+    expect(fastHtml).not.toContain('/Users/example/dev-agent/pi-agent/bin/pi-agent')
 
     const completeHtml = renderWelcome({ agentScanning: false })
     expect(completeHtml).toContain('data-tone="warn"')
@@ -2172,16 +2179,12 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
 
     const detectedHtml = renderWelcome({
       agentScanning: false,
-      agents: [{
-        id: 'claude',
-        name: 'Claude Code',
-        bin: 'claude',
-        path: '/usr/local/bin/claude'
-      }]
+      agents: detectedAgents
     })
-    expect(detectedHtml).toContain('1/1 个 Provider 可用')
+    expect(detectedHtml).toContain('2/2 个 Provider 可用')
     expect(detectedHtml).toContain('data-health="available"')
     expect(detectedHtml).toContain('/usr/local/bin/claude')
+    expect(detectedHtml).toContain('/Users/example/dev-agent/pi-agent/bin/pi-agent')
     expect(detectedHtml).not.toContain('aria-busy="true"')
   })
 
