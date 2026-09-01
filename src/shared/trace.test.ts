@@ -56,11 +56,11 @@ describe('turn diff patch policy', () => {
     expect(normalizeTurnDiffSnapshot({
       version: 1,
       status: 'captured',
-      files: [{ path: '/repo/.factorypath', added: 1, deleted: 1, patchStatus: 'unavailable', patchReason: 'policy' }],
+      files: [{ path: '/repo/.factorypath', added: 1, deleted: 1, change: 'modified', patchStatus: 'unavailable', patchReason: 'policy' }],
       beforeAt: '2026-01-01T00:00:00.000Z',
       afterAt: '2026-01-01T00:00:01.000Z',
       captureMs: 1,
       cleanup: 'ok'
-    })?.files[0]).toMatchObject({ patchStatus: 'unavailable', patchReason: 'policy' })
+    })?.files[0]).toMatchObject({ change: 'modified', patchStatus: 'unavailable', patchReason: 'policy' })
   })
 })

@@ -4,9 +4,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, it, expect } from 'vitest'
-import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNameStatus, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
 
 const pexecFile = promisify(execFile)
+
+describe('parseNameStatus（P2 git diff）', () => {
+  it('解析 A/M/D 的 NUL 分隔状态并忽略未知状态', () => {
+    expect([...parseNameStatus('A\0new.md\0M\0edit.md\0D\0old.md\0T\0type.md\0', '/repo')]).toEqual([
+      ['/repo/new.md', 'added'],
+      ['/repo/edit.md', 'modified'],
+      ['/repo/old.md', 'deleted']
+    ])
+  })
+})
 
 describe('parseNumstat（P2 git diff）', () => {
   it('解析 added/deleted/path，拼绝对路径', () => {
@@ -189,6 +199,7 @@ describe('每轮 Git 工作树快照', () => {
         path: join(canonicalRoot, 'a.txt'),
         added: 1,
         deleted: 1,
+        change: 'modified',
         patchStatus: 'captured'
       })
       expect(result.files[0].patch).toContain('-preexisting')
@@ -197,6 +208,7 @@ describe('每轮 Git 工作树快照', () => {
         path: join(canonicalRoot, 'new.txt'),
         added: 2,
         deleted: 0,
+        change: 'added',
         patchStatus: 'captured'
       })
       expect(result.files[1].patch).toContain('+one')

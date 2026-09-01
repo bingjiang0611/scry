@@ -71,6 +71,30 @@ describe('session history merge', () => {
     ])
   })
 
+  it('同一 run 的不同 result id 均保留，相同 id 才跨来源去重', () => {
+    const shared = { id: 'shared', ts: '2026-08-01T00:00:01.000Z', runId: 'run-1', kind: 'harness' as const, stage: 'result', durationMs: 1_000 }
+    const archive: TraceArchive = {
+      version: 3,
+      cwd: '/repo',
+      sessionId: 'sess',
+      providerId: 'qoder',
+      turns: [{
+        runId: 'run-1',
+        userText: 'inspect',
+        items: [
+          shared,
+          { ...shared, id: 'continuation', ts: '2026-08-01T00:00:03.000Z', durationMs: 500 }
+        ],
+        done: true,
+        ts: 1
+      }]
+    }
+
+    const [turn] = mergeSessionTurns([{ userText: 'inspect', items: [shared] }], archive)
+    expect(turn.items.filter((event) => event.kind === 'harness' && event.stage === 'result').map((event) => event.id))
+      .toEqual(['shared', 'continuation'])
+  })
+
   it('把 Claude command envelope 与 archive 纯文本命令识别为同一轮', () => {
     const archive: TraceArchive = {
       version: 2,

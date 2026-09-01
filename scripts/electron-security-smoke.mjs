@@ -491,17 +491,29 @@ async function main() {
     const trigger = document.querySelector('button[title="MCP"]')
     trigger?.focus()
     trigger?.click()
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    const dialog = document.querySelector('[role="dialog"][aria-modal="true"]')
-    const focusedInside = !!dialog && dialog.contains(document.activeElement)
+    let dialog = null
+    let focusedInside = false
+    for (let attempt = 0; attempt < 40; attempt++) {
+      dialog = document.querySelector('[role="dialog"][aria-modal="true"]')
+      focusedInside = !!dialog && dialog.contains(document.activeElement)
+      if (focusedInside) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    let closed = false
+    let restored = false
+    for (let attempt = 0; attempt < 40; attempt++) {
+      closed = !document.querySelector('[role="dialog"]')
+      restored = document.activeElement === trigger
+      if (closed && restored) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
     return {
       opened: !!dialog,
       labelled: !!dialog?.getAttribute('aria-labelledby'),
       focusedInside,
-      closed: !document.querySelector('[role="dialog"]'),
-      restored: document.activeElement === trigger
+      closed,
+      restored
     }
   })()`)
   assert.deepEqual(modal, { opened: true, labelled: true, focusedInside: true, closed: true, restored: true })

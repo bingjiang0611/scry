@@ -120,6 +120,24 @@ describe('Billing Guardian P1 ledger normalizer', () => {
     })
   })
 
+  it('多 result usage：增量 Provider 逐条入账，Claude 累计快照只取最终一条', () => {
+    const qoderItems = [
+      resultEvent({ id: 'q1', runtimeProvider: 'qoder_cli', billingProvider: 'qoder' }),
+      resultEvent({ id: 'q2', runtimeProvider: 'qoder_cli', billingProvider: 'qoder' })
+    ]
+    const claudeItems = qoderItems.map((event, index) => ({
+      ...event,
+      id: `c${index + 1}`,
+      runtimeProvider: 'claude_sdk' as const,
+      billingProvider: 'anthropic' as const
+    }))
+
+    expect(sdkUsageLedgerRowsFromItems({ runId: 'q', items: qoderItems, nowMs: 1 }).map((row) => row.spanId))
+      .toEqual(['q1', 'q2'])
+    expect(sdkUsageLedgerRowsFromItems({ runId: 'c', items: claudeItems, nowMs: 1 }).map((row) => row.spanId))
+      .toEqual(['c2'])
+  })
+
   it('配置三方 Anthropic gateway 时 SDK result 仍标为 sdk_estimate，不伪装官方账单', () => {
     const rows = sdkUsageLedgerRowsFromItems({
       runId: 'run-1',

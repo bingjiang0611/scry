@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path'
 import type { RuntimeProvider } from '../shared/runtime.js'
 import type { ProviderId } from '../shared/provider.js'
 import type { AgentTurnRecord } from '../shared/turn-record.js'
+import { resultWallTiming } from '../shared/result-timing.js'
 import {
   commitManagedRecorderTurn,
   isManagedRecorderProvider,
@@ -488,21 +489,7 @@ export function canonicalTurnTiming(events: Array<{
   durationMs?: number
   text?: string
 }>): ManagedTurnTiming | null {
-  const result = [...events].reverse().find((event) =>
-    event.kind === 'harness' &&
-    event.stage === 'result' &&
-    event.text !== 'transcript assistant usage' &&
-    Number.isFinite(event.durationMs) &&
-    Number(event.durationMs) >= 0 &&
-    Number.isFinite(Date.parse(event.ts))
-  )
-  if (!result || result.durationMs == null) return null
-  const completed = Date.parse(result.ts)
-  return {
-    startedAt: new Date(completed - result.durationMs).toISOString(),
-    completedAt: new Date(completed).toISOString(),
-    durationMs: result.durationMs
-  }
+  return resultWallTiming(events) ?? null
 }
 
 export function canonicalOrObservedTurnTiming(

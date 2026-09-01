@@ -228,6 +228,19 @@ describe('managed trace turn coordinator', () => {
     })
   })
 
+  it('非 Claude 多 result timing 保留 continuation 间隔', () => {
+    const events = [
+      { kind: 'harness', stage: 'result', ts: '2026-07-29T12:00:10.000Z', durationMs: 10_000 },
+      { kind: 'harness', stage: 'result', ts: '2026-07-29T12:00:30.000Z', durationMs: 5_000 }
+    ]
+
+    expect(canonicalOrObservedTurnTiming(events, 'qoder', 'completed')).toEqual({
+      startedAt: '2026-07-29T12:00:00.000Z',
+      completedAt: '2026-07-29T12:00:30.000Z',
+      durationMs: 30_000
+    })
+  })
+
   it('OpenCode 使用 opencode_server 提交 live canonical turn', async () => {
     const { workspace, userDataDir } = await fixture()
     await startManagedOpenCode(workspace)

@@ -1284,8 +1284,18 @@ body.pane-resizing * {
 .fbadge.w {
   background: var(--write);
 }
-.fbadge.e {
+.fbadge.e,
+.fbadge.m {
   background: var(--edit);
+}
+.fbadge.a {
+  background: var(--write);
+}
+.fbadge.d {
+  background: var(--bad);
+}
+.fbadge.delta {
+  background: var(--dim2);
 }
 .fname {
   font-family: ui-monospace, Menlo, monospace;

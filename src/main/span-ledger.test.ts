@@ -96,6 +96,23 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     })
   })
 
+  it('非 Claude 多 result 逐条落 span，Claude 累计快照只落最终一条', () => {
+    const incremental = [
+      ev({ id: 'q1', kind: 'harness', stage: 'result', runtimeProvider: 'qoder_cli', tokensOut: 2 }),
+      ev({ id: 'q2', kind: 'harness', stage: 'result', runtimeProvider: 'qoder_cli', tokensOut: 3 })
+    ]
+    const cumulative = incremental.map((event, index) => ({
+      ...event,
+      id: `c${index + 1}`,
+      runtimeProvider: 'claude_sdk' as const
+    }))
+
+    expect(spanRowsFromItems({ runId: 'run-1', items: incremental, nowMs: 1 }).spans.map(asSpan))
+      .toEqual([expect.objectContaining({ id: 'q1' }), expect.objectContaining({ id: 'q2' })])
+    expect(spanRowsFromItems({ runId: 'run-1', items: cumulative, nowMs: 1 }).spans.map(asSpan))
+      .toEqual([expect.objectContaining({ id: 'c2' })])
+  })
+
   it('compact 作为 harness span 落 SQLite，可直接按 stage 计数', () => {
     const spans = spanRowsFromItems({
       runId: 'run-1',

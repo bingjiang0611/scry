@@ -91,10 +91,13 @@ export interface Diagnostics {
 }
 
 // P2 Files & Diff（RFC §8.4）：最终 git diff 的每文件增删（绝对路径），与工具足迹对照。
+export type DiffFileChange = 'added' | 'modified' | 'deleted'
+
 export interface DiffFile {
   path: string
   added: number
   deleted: number
+  change?: DiffFileChange
   binary?: boolean
   patch?: string
   patchStatus?: TurnDiffPatchStatus
@@ -186,6 +189,9 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     const deleted = nonNegativeInteger(file.deleted)
     if (typeof file.path !== 'string' || !file.path || added == null || deleted == null) return []
     const binary = file.binary === true
+    const change = ['added', 'modified', 'deleted'].includes(String(file.change))
+      ? (file.change as DiffFileChange)
+      : undefined
     const patch = typeof file.patch === 'string' && file.patch.length > 0 && file.patch.length <= 1_100_000 ? file.patch : undefined
     const patchStatus = ['captured', 'truncated', 'binary', 'unavailable'].includes(String(file.patchStatus))
       ? (file.patchStatus as TurnDiffPatchStatus)
@@ -201,7 +207,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
           : patchStatus === 'unavailable' && patchReason
             ? { patchStatus, patchReason }
             : {}
-    return [{ path: file.path, added, deleted, ...(binary ? { binary: true } : {}), ...patchFields }]
+    return [{ path: file.path, added, deleted, ...(change ? { change } : {}), ...(binary ? { binary: true } : {}), ...patchFields }]
   })
   const reason = ['not_git', 'no_head', 'deadline', 'git_error', 'no_baseline'].includes(String(raw.reason))
     ? (raw.reason as TurnDiffReason)

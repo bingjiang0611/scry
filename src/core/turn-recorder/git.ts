@@ -8,6 +8,7 @@ import { StringDecoder } from 'node:string_decoder'
 import { promisify } from 'node:util'
 import type {
   DiffFile,
+  DiffFileChange,
   TurnDiffCollection,
   TurnDiffFallbackReason,
   TurnDiffReason,
@@ -574,26 +575,47 @@ async function computeGitTurnDiff(
     }
     if (!afterTree) throw new Error('Git after tree was not created')
 
-    const stdout = await gitCommand(
-      snapshotGitArgs(filterOverrides, [
-        'diff',
-        '--no-renames',
-        '--no-ext-diff',
-        '--no-textconv',
-        '--numstat',
-        '-z',
-        capture.beforeTree,
-        afterTree,
-        '--',
-        ...fullPathspec
-      ]),
-      { cwd: capture.repoRoot, env, deadline }
-    )
+    const [numstat, nameStatus] = await Promise.all([
+      gitCommand(
+        snapshotGitArgs(filterOverrides, [
+          'diff',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--numstat',
+          '-z',
+          capture.beforeTree,
+          afterTree,
+          '--',
+          ...fullPathspec
+        ]),
+        { cwd: capture.repoRoot, env, deadline }
+      ),
+      gitCommand(
+        snapshotGitArgs(filterOverrides, [
+          'diff',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--name-status',
+          '-z',
+          capture.beforeTree,
+          afterTree,
+          '--',
+          ...fullPathspec
+        ]),
+        { cwd: capture.repoRoot, env, deadline }
+      )
+    ])
+    const changes = parseNameStatus(nameStatus, capture.repoRoot)
     files = await captureTurnPatches(
       capture,
       env,
       afterTree,
-      parseNumstat(stdout, capture.repoRoot),
+      parseNumstat(numstat, capture.repoRoot).map((file) => {
+        const change = changes.get(file.path)
+        return { ...file, ...(change ? { change } : {}) }
+      }),
       new Set(options.patchExcludeBasenames ?? [])
     )
   } catch (error) {
@@ -777,6 +799,17 @@ export async function cancelGitTurnDiff(capture: GitTurnDiffCapture): Promise<vo
 // `git diff --numstat -z` 的输出：每条 `added\tdeleted\tpath\0`（二进制文件增删为 `-`）。
 // 必须用 -z，否则 Git 会按 core.quotePath 把中文路径转成 `\345\...` 这类 C-style/octal 字符串。
 // 路径相对 repo root → 拼成绝对路径，便于和工具足迹（绝对 file_path）对照。
+export function parseNameStatus(stdout: string, repoRoot: string): Map<string, DiffFileChange> {
+  const fields = stdout.split('\0').filter(Boolean)
+  const out = new Map<string, DiffFileChange>()
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const status = fields[index][0]
+    const change = status === 'A' ? 'added' : status === 'D' ? 'deleted' : status === 'M' ? 'modified' : undefined
+    if (change) out.set(join(repoRoot, fields[index + 1]), change)
+  }
+  return out
+}
+
 export function parseNumstat(stdout: string, repoRoot: string): DiffFile[] {
   const out: DiffFile[] = []
   const records = stdout.includes('\0') ? stdout.split('\0') : stdout.split('\n')

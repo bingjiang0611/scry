@@ -300,6 +300,31 @@ function turnFileCount(row: Pick<TurnCallRow, 'files' | 'turnDiff'>): number {
   return row.turnDiff?.status === 'captured' ? row.turnDiff.files.length : row.files.length
 }
 
+interface ChangeBadge {
+  label: string
+  tone: string
+  title: string
+}
+
+function normalizedEvidencePath(path: string): string {
+  return path.replaceAll('\\', '/')
+}
+
+function diffChangeBadge(file: DiffFile, structured: FileRow[]): ChangeBadge {
+  const path = normalizedEvidencePath(file.path)
+  const tool = structured.find((candidate) => normalizedEvidencePath(candidate.path) === path)
+  if (tool?.write) return { label: 'W', tone: 'w', title: 'W：本轮 Write 工具证据；文件与行数来自 Git 净改动' }
+  if (tool?.edit) return { label: 'E', tone: 'e', title: 'E：本轮 Edit 工具证据；文件与行数来自 Git 净改动' }
+
+  const inferredChange = file.change ?? (file.patch?.includes('\nnew file mode ') ? 'added' : file.patch?.includes('\ndeleted file mode ') ? 'deleted' : file.patch ? 'modified' : undefined)
+  if (inferredChange === 'added') return { label: 'A', tone: 'a', title: 'A：Git 证明本轮新增文件；具体工具类型未观测' }
+  if (inferredChange === 'modified') return { label: 'M', tone: 'm', title: 'M：Git 证明本轮修改文件；具体工具类型未观测' }
+  if (inferredChange === 'deleted') return { label: 'D', tone: 'd', title: 'D：Git 证明本轮删除文件；具体工具类型未观测' }
+
+  const label = file.added > 0 && file.deleted > 0 ? '±' : file.added > 0 ? '+' : file.deleted > 0 ? '−' : 'Δ'
+  return { label, tone: 'delta', title: 'Git 证明文件有净改动；旧记录未采集新增/修改/删除状态' }
+}
+
 export function TurnFileFootprint({
   files,
   turnDiff,
@@ -317,7 +342,7 @@ export function TurnFileFootprint({
       className="turn-file-footprint"
       aria-label="本轮文件足迹"
       title={hasDiff
-        ? 'Git 快照提供本轮真实净改动与行数；只有 Git 快照不可用时才降级到工具足迹'
+        ? '文件集合与行数来自 Git 净改动；匹配到结构化工具证据时显示 W/E，否则显示 Git 的 A/M/D。只有 Git 快照不可用时才降级到工具足迹'
         : 'R/W/E 来自本轮结构化文件工具；~R 来自本轮 cat、sed、rg 等只读 Bash 命令推断，其他间接文件访问仍可能未统计'}
     >
       <div className="turn-file-heading">
@@ -326,13 +351,16 @@ export function TurnFileFootprint({
       </div>
       {hasDiff ? (
         <div className="turn-file-list">
-          {diffFiles.map((file) => (
-            <div className="turn-file-row" key={file.path} title={file.path}>
-              <span className="fbadge e">Δ</span>
-              <span className="fname">{displayDiffPath(file.path, turnDiff?.repoRoot)}</span>
-              <span className="fops">{file.binary ? 'binary' : `+${file.added} −${file.deleted}`}</span>
-            </div>
-          ))}
+          {diffFiles.map((file) => {
+            const badge = diffChangeBadge(file, files)
+            return (
+              <div className="turn-file-row" key={file.path} title={file.path}>
+                <span className={`fbadge ${badge.tone}`} title={badge.title} aria-label={badge.title}>{badge.label}</span>
+                <span className="fname">{displayDiffPath(file.path, turnDiff?.repoRoot)}</span>
+                <span className="fops">{file.binary ? 'binary' : `+${file.added} −${file.deleted}`}</span>
+              </div>
+            )
+          })}
         </div>
       ) : files.length === 0 ? (
         <div className="turn-file-empty">暂无文件工具证据</div>
