@@ -5,7 +5,11 @@ dist-electron/
 packages/turn-recorder-cli/dist/
 *.log
 .DS_Store
-.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/baoyu-design/
+!.claude/skills/validate-scry-rate-workflow/
 .local/
 .pi/
 .vite/

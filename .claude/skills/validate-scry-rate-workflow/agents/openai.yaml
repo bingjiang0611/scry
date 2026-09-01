@@ -1,0 +1,4 @@
+interface:
+  display_name: "验证 Scry rate-workflow"
+  short_description: "在固定 treehouse 上完成五 Provider 的 Scry 草稿或严格三轮验收"
+  default_prompt: "使用 $validate-scry-rate-workflow 验证用户指定的 Provider；未指定时先询问。默认 draft 只把第一条契约消息放入 composer；用户明确要求发送、三轮或写完技术方案后停下时使用 three-turn，逐轮等 terminal，最后严格核对 Scry archive、workspace records 与 CLI overview。统一事务负责冻结 recorder、源码、构建、treehouse、Provider 与 Pi Profile 身份；只恢复 contract allowlist，不删除用户文件，不接管 active/legacy 现场。Agent 绝不得克隆 Aone；用户已给合法需求 ID 时只读核验后继续。若使用 Subagent，以 provider+run_root 为唯一 lane，单 lane 只保留一个 fresh-context worker，后续用 steer/resume 和紧凑 handoff 继续，禁止反复 fork 全量历史。验收现场默认保留，只有用户明确指定 run_root 清理时才收尾。"

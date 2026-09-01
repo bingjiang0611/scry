@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 8,
+  "workflowProfiles": {
+    "default": "draft",
+    "draft": {
+      "turns": 0,
+      "stopBoundary": "turn1_composer_ready"
+    },
+    "three-turn": {
+      "turns": 3,
+      "requiresExplicitRequest": true,
+      "stopBoundary": "technical_design_written",
+      "verifyArchiveRecordParity": true
+    }
+  },
+  "sourceWorkitem": {
+    "id": "85076624",
+    "projectId": "952011",
+    "url": "https://project.aone.alibaba-inc.com/v2/project/952011/req/85076624"
+  },
+  "cloneHandoff": {
+    "mode": "user_only",
+    "agentMayClone": false,
+    "waitingStatus": "WAITING_FOR_USER_CLONE",
+    "acceptedInputs": [
+      "workitem_id",
+      "canonical_url"
+    ],
+    "cloneIdMustDifferFromSource": true,
+    "pauseBeforeProviderClaim": true,
+    "resumeRequiresFreshPreflight": true
+  },
+  "document": {
+    "url": "https://docs.dingtalk.com/i/nodes/G1DKw2zgV2KnvL4kFqvXv3LPJB5r9YAn",
+    "title": "[勿删] [Scry] 【评价卖点&总结】渠道数据异常兜底优化"
+  },
+  "permission": {
+    "selector": "select[aria-label=\"权限\"]",
+    "value": "full_access",
+    "label": "完全访问"
+  },
+  "mcpExecutionPolicy": {
+    "credentialScopeExceptions": [
+      {
+        "server": "ai_native_trace_report",
+        "rule": "credential_env_outside_user_scope",
+        "reason": "agent-adapters/scripts/generate.py 在源仓 rate-native 和每个 treehouse 里生成的项目级配置逐字相同，bearer_token_env_var 是该 server 既定的项目级凭据绑定方式，不是 treehouse 相对源仓的漂移"
+      }
+    ]
+  },
+  "retention": {
+    "mode": "retain_for_review",
+    "runRootParent": "/Users/baobingjiang/.local/state/validate-scry-rate-workflow",
+    "keepTestAppRunning": true,
+    "keepWorkspaceRuntime": true,
+    "keepProviderLock": true,
+    "autoCleanupBeforeFirstPrompt": true,
+    "postSendCleanupRequiresExplicitUserRequest": true,
+    "sendIntentEvidence": "turn1-send-intent.json",
+    "draftEvidence": "turn1-draft.json"
+  },
+  "recoveryPolicy": {
+    "maxAttempts": 2,
+    "freezeAfterRecovery": true,
+    "quarantineInsteadOfDelete": true,
+    "legacyPostSendCleanupContracts": [
+      {
+        "schemaVersion": 7,
+        "sha256": "sha256:094da09efeff88641de70eca6964594c23547d0afbf5544fe6ad04e975c25661",
+        "cleanupCompatibleWithSchemaVersion": 8
+      }
+    ],
+    "runtimeSnapshot": {
+      "relativePath": "scry-runtime",
+      "stateVersion": 3
+    },
+    "scryIgnoredUntrackedPrefixes": [
+      "designs/"
+    ],
+    "treehousePool": {
+      "pruneStaleWorktreeRegistry": true,
+      "maxRegistryRepairsPerLease": 1
+    },
+    "dependencies": {
+      "installIfMissing": true,
+      "lockfile": "package-lock.json",
+      "modulesDir": "node_modules",
+      "installArgs": [
+        "ci",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "requiredExecutables": [
+        "node_modules/.bin/electron-vite",
+        "node_modules/.bin/electron"
+      ],
+      "requiredPaths": [
+        "node_modules/.package-lock.json",
+        "node_modules/electron/dist/Electron.app"
+      ],
+      "binaryInstallers": [
+        {
+          "requiredPath": "node_modules/electron/dist/Electron.app",
+          "script": "node_modules/electron/install.js"
+        }
+      ],
+      "timeoutSeconds": 3600
+    },
+    "recorder": {
+      "package": "@ali/scry-turn-recorder",
+      "registry": "https://registry.anpm.alibaba-inc.com",
+      "installPrefix": "/Users/baobingjiang/.local",
+      "publishIfMissing": true,
+      "nodeBinDir": "/Users/baobingjiang/.nvm/versions/node/v22.22.1/bin"
+    },
+    "config": {
+      "authoritativeRepo": "/Users/baobingjiang/IdeaProjects/rate-native",
+      "sourceCandidates": [
+        ".claude/settings.local.json",
+        ".qoder/settings.local.json",
+        ".codex/settings.local.json",
+        ".opencode/settings.local.json"
+      ],
+      "managedTargets": [
+        ".claude/settings.local.json",
+        ".qoder/settings.local.json",
+        ".codex/settings.local.json",
+        ".opencode/settings.local.json"
+      ],
+      "requiredEnvKeys": [
+        "SCRY_CLI_PATH",
+        "DINGTALK_DOC_MCP_URL"
+      ],
+      "copiedEnvKeys": [
+        "SCRY_CLI_PATH",
+        "DINGTALK_DOC_MCP_URL",
+        "NEXTCR_API_KEY",
+        "CC_DINGTALK_USERID",
+        "CC_ACTOR_NICK"
+      ],
+      "mode": "0600"
+    }
+  },
+  "archiveVersion": 3,
+  "firstPromptSuffix": "理解prd后停下",
+  "secondPrompt": "确认并继续 写技术方案前停下",
+  "thirdPrompt": "确认 写完技术方案后停下",
+  "fixedTreehouse": {
+    "sourceRepo": "/Users/baobingjiang/IdeaProjects/rate-native",
+    "poolRoot": "/Users/baobingjiang/.treehouse/rate-native-3b0c3e",
+    "workspaceName": "rate-native",
+    "leaseHolderPrefix": "validate-scry-rate-workflow:fixed:",
+    "sharedLocks": [
+      "browser",
+      "build",
+      "environment"
+    ],
+    "bootstrapInputs": [
+      "init.sh",
+      ".mcp.json",
+      ".pi/settings.json",
+      "agent-adapters/scripts/install-scry-cli.sh",
+      "agent-adapters/scripts/install-global-hooks.py"
+    ],
+    "warmRepositories": [
+      "rateplatform",
+      "rateplatform2",
+      "rp-client",
+      "review2",
+      "plugin-taobao-app",
+      "template_17931",
+      "template_17933",
+      "rate-list",
+      "rate-detail",
+      "rate-list-media-browser",
+      "media-browser-custom",
+      "rate-doc"
+    ],
+    "cleanupExactPaths": [
+      ".scry",
+      ".scry-disabled",
+      ".claude/sessions",
+      ".claude/current-turn.txt",
+      ".claude/current-turn-task.txt",
+      ".claude/current-task.txt",
+      ".claude/current-task-lease.json",
+      ".claude/current-task-session.txt",
+      ".claude/current-session.json",
+      ".claude/.session-task-map.json",
+      ".claude/.session-task-meta.json",
+      ".claude/.session-turn-map.json",
+      ".claude/.session-prompt-events.json",
+      ".claude/.session-identity.lock",
+      ".claude/active-state.md",
+      ".claude/workflow-state",
+      ".claude/.flush-cursor.json",
+      ".claude/.flush.lock",
+      ".claude/trace-audit-emit.lock",
+      ".claude/.async-hook-queue",
+      ".claude/tmp",
+      ".claude/.actor-cache.json",
+      ".claude/flush-config.json",
+      ".claude/dingtalk-notify.log",
+      ".claude/skills/rate-workflow/history",
+      ".claude/skills/rate-workflow/scripts/dashboard-data.json",
+      ".claude/skills/rate-workflow/scripts/team-dashboard.html"
+    ],
+    "cleanupGlobPaths": [
+      ".claude/traces*.jsonl*",
+      ".claude/tool-starts.json*"
+    ]
+  },
+  "providers": {
+    "claude": {
+      "runtime": "claude_sdk",
+      "cli": "claude",
+      "displayName": "Claude Code",
+      "treehouseSlot": 2,
+      "command": "/rate-workflow",
+      "skill": "rate-workflow",
+      "mcpConfigPaths": [
+        "$HOME/.claude.json",
+        "$WORKSPACE/.mcp.json",
+        "$WORKSPACE/.claude/settings.local.json"
+      ]
+    },
+    "codex": {
+      "runtime": "codex_cli",
+      "cli": "codex",
+      "displayName": "Codex",
+      "treehouseSlot": 1,
+      "command": "/rate-workflow",
+      "skill": "rate-workflow",
+      "mcpConfigPaths": [
+        "$HOME/.codex/config.toml",
+        "$WORKSPACE/.codex/config.toml"
+      ]
+    },
+    "qoder": {
+      "runtime": "qoder_cli",
+      "cli": "qodercli",
+      "displayName": "Qoder",
+      "treehouseSlot": 3,
+      "command": "/rate-native-rate-workflow",
+      "skill": "rate-workflow",
+      "mcpConfigPaths": [
+        "$HOME/.qoder/mcp.json",
+        "$WORKSPACE/.mcp.json",
+        "$WORKSPACE/.qoder/mcp.json"
+      ]
+    },
+    "opencode": {
+      "runtime": "opencode_server",
+      "cli": "opencode",
+      "displayName": "OpenCode",
+      "treehouseSlot": 4,
+      "command": "/rate-workflow",
+      "skill": "rate-workflow",
+      "mcpConfigPaths": [
+        "$HOME/.config/opencode/opencode.json",
+        "$WORKSPACE/opencode.json"
+      ]
+    },
+    "pi": {
+      "runtime": "pi_rpc",
+      "cli": "pi",
+      "displayName": "Pi",
+      "treehouseSlot": 5,
+      "command": "/skill:rate-workflow",
+      "skill": "rate-workflow",
+      "agentProfileId": "pi:default",
+      "permissionLabel": "本机完全访问",
+      "mcpExecution": "none",
+      "mcpConfigPaths": []
+    }
+  }
+}
