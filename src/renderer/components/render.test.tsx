@@ -2896,13 +2896,18 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     )
     const diffHtml = renderToStaticMarkup(
       <TurnFileFootprint
-        files={[{ path: '/tmp/list_after.md', read: 2, inferredRead: 2, write: 0, edit: 0 }]}
+        files={[
+          { path: '/tmp/list_after.md', read: 2, inferredRead: 2, write: 0, edit: 0 },
+          { path: '/repo/raw/list.md', read: 1, inferredRead: 0, write: 0, edit: 1 },
+          { path: '/repo/wiki-log.md', read: 0, inferredRead: 0, write: 1, edit: 0 }
+        ]}
         turnDiff={{
           version: 1,
           status: 'captured',
           files: [
-            { path: '/repo/raw/list.md', added: 0, deleted: 2 },
-            { path: '/repo/wiki-log.md', added: 3, deleted: 0 }
+            { path: '/repo/raw/list.md', added: 0, deleted: 2, change: 'modified' },
+            { path: '/repo/wiki-log.md', added: 3, deleted: 0, change: 'added' },
+            { path: '/repo/obsolete.md', added: 0, deleted: 10, patch: 'diff --git a/obsolete.md b/obsolete.md\ndeleted file mode 100644' }
           ],
           repoRoot: '/repo',
           beforeAt: 'before',
@@ -2932,11 +2937,19 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(toolOnlyHtml).toContain('1 files')
     expect(toolOnlyHtml).toContain('R1 ~R1 W1')
     expect(diffHtml).toContain('本轮改动（Git 证据）')
-    expect(diffHtml).toContain('2 files')
+    expect(diffHtml).toContain('3 files')
     expect(diffHtml).toContain('raw/list.md')
     expect(diffHtml).toContain('+0 −2')
     expect(diffHtml).toContain('wiki-log.md')
     expect(diffHtml).toContain('+3 −0')
+    expect(diffHtml).toContain('obsolete.md')
+    expect(diffHtml).toContain('fbadge e')
+    expect(diffHtml).toContain('>E</span>')
+    expect(diffHtml).toContain('fbadge w')
+    expect(diffHtml).toContain('>W</span>')
+    expect(diffHtml).toContain('fbadge d')
+    expect(diffHtml).toContain('>D</span>')
+    expect(diffHtml).not.toContain('>Δ</span>')
     expect(diffHtml).not.toContain('list_after.md')
     expect(zeroDiffHtml).toContain('本轮改动（Git 证据）')
     expect(zeroDiffHtml).toContain('0 files')

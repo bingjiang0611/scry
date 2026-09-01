@@ -1,4 +1,5 @@
 import { logicalCallEventsForTurn } from './logical-calls.js'
+import { providerUsageResultEvents, resultWallTiming } from './result-timing.js'
 import type { TraceEvent } from './trace.js'
 import type {
   EvidenceQuality,
@@ -121,12 +122,7 @@ function responseIntervalTiming(events: TraceEvent[]): DerivedModelTiming | unde
 }
 
 function providerApiTiming(events: TraceEvent[]): DerivedModelTiming | undefined {
-  const results = events.filter(
-    (event) =>
-      event.kind === 'harness' &&
-      event.stage === 'result' &&
-      event.text !== 'transcript assistant usage'
-  )
+  const results = providerUsageResultEvents(events)
   const durations = results
     .map((event) => finiteDuration(event.durationApiMs))
     .filter((duration): duration is number => duration != null)
@@ -142,15 +138,17 @@ function providerApiTiming(events: TraceEvent[]): DerivedModelTiming | undefined
 }
 
 function residualTiming(events: TraceEvent[]): DerivedModelTiming | undefined {
-  const result = [...events].reverse().find(
+  const turnWall = [...events].reverse().find(
     (event) =>
       event.kind === 'harness' &&
-      (event.stage === 'result' || event.stage === 'turn_wall') &&
-      event.text !== 'transcript assistant usage' &&
-      finiteDuration(event.durationMs) != null
+      event.stage === 'turn_wall' &&
+      finiteDuration(event.durationMs) != null &&
+      timestampMs(event.ts) != null
   )
-  const wallMs = finiteDuration(result?.durationMs)
-  if (!result || wallMs == null) return undefined
+  const resultTiming = resultWallTiming(events)
+  const wallMs = finiteDuration(turnWall?.durationMs) ?? resultTiming?.durationMs
+  const wallCompletedMs = timestampMs(turnWall?.ts) ?? timestampMs(resultTiming?.completedAt)
+  if (wallMs == null || wallCompletedMs == null) return undefined
 
   const resultByToolUseId = new Map<string, TraceEvent>()
   for (const event of events) {
@@ -179,16 +177,15 @@ function residualTiming(events: TraceEvent[]): DerivedModelTiming | undefined {
   ).length
   const occupiedActivityMs = calls.length === 0 ? 0 : intervalUnionMs(intervals)
   if (occupiedActivityMs == null) return undefined
-  const resultMs = timestampMs(result.ts)
-  const turnStartMs = resultMs != null ? resultMs - wallMs : undefined
+  const turnStartMs = wallCompletedMs - wallMs
   const inconsistentWall =
     occupiedActivityMs > wallMs ||
-    (turnStartMs != null && resultMs != null && intervals.some(
+    intervals.some(
       (interval) =>
         interval.startMs != null &&
         interval.endMs != null &&
-        (interval.startMs < turnStartMs || interval.endMs > resultMs)
-    ))
+        (interval.startMs < turnStartMs || interval.endMs > wallCompletedMs)
+    )
   if (inconsistentWall) {
     return {
       status: 'unavailable',

@@ -287,7 +287,8 @@ describe('turn recorder daemon', () => {
         payload: { type: 'turn_aborted', turn_id: 'callback-turn', reason: 'interrupted' }
       })}\n`)
 
-      await expect.poll(async () => JSON.parse((await readFile(capture, 'utf8')).trim()), { timeout: 4_000 })
+      // 全量/CLI release 门禁并行构建时 recovery + callback 可能超过 4 秒；等待可观测提交文件，不用固定 sleep。
+      await expect.poll(async () => JSON.parse((await readFile(capture, 'utf8')).trim()), { timeout: 10_000 })
         .toMatchObject({ event: 'record-committed', provider: 'codex', sessionId: 'callback-session', sequence: 1 })
     } finally {
       await daemon.close()

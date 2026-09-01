@@ -9,6 +9,7 @@ import {
 } from '@shared/trace'
 import type { AgentInputAttachment } from '@shared/runtime'
 import { logicalCallEventsForTurn } from '@shared/logical-calls'
+import { resultWallTiming } from '@shared/result-timing'
 import { inferredReadPaths } from './file-evidence'
 export { logicalCallEventsForTurn }
 export { bashReadFiles } from './file-evidence'
@@ -880,9 +881,14 @@ function aggregateModelUsage(rows: ModelUsageRow[]): ModelUsageRow[] | undefined
 export function resultOf(t: Turn | Pick<Turn, 'items'>): TraceEvent | undefined {
   const observed = resultsOf(t)
   const archived = observed.filter((event) => event.text !== 'transcript assistant usage')
-  const results = archived.some(hasTokenUsage) ? archived : observed
-  if (results.length <= 1) return results[0]
+  const usageCandidates = archived.some(hasTokenUsage) ? archived : observed
+  if (usageCandidates.length <= 1) return usageCandidates[0]
+  // Claude SDK 的 continuation result 是累计快照；其他 Provider 当前上报增量 result。
+  // 墙钟统一按所有 canonical result 的时间区间外包络计算，不能跟 usage 一起求和。
+  const latestCandidate = usageCandidates[usageCandidates.length - 1]
+  const results = latestCandidate.runtimeProvider === 'claude_sdk' ? [latestCandidate] : usageCandidates
   const last = results[results.length - 1]
+  const wall = resultWallTiming(observed)
   const knownCosts = results.filter((e) => e.costUsd != null)
   const costKnown = knownCosts.length === results.length
   const modelUsage = aggregateModelUsage(results.flatMap((e) => e.modelUsage ?? []))
@@ -893,6 +899,7 @@ export function resultOf(t: Turn | Pick<Turn, 'items'>): TraceEvent | undefined 
   }
   return {
     ...last,
+    ...(wall ? { ts: wall.completedAt } : {}),
     costUsd: costKnown ? knownCosts.reduce((s, e) => s + (e.costUsd ?? 0), 0) : undefined,
     costSource: costKnown && results.every((e) => e.costSource === 'price_table') ? 'price_table' : last.costSource,
     costConfidence: costKnown ? last.costConfidence : undefined,
@@ -905,7 +912,7 @@ export function resultOf(t: Turn | Pick<Turn, 'items'>): TraceEvent | undefined 
     cacheCreation5mTokens: sumObserved((event) => event.cacheCreation5mTokens),
     cacheCreation1hTokens: sumObserved((event) => event.cacheCreation1hTokens),
     durationApiMs: results.reduce((s, e) => s + (e.durationApiMs ?? 0), 0) || undefined,
-    durationMs: results.reduce((s, e) => s + (e.durationMs ?? 0), 0) || undefined,
+    durationMs: wall?.durationMs,
     contextTokens: contextSource?.contextTokens,
     modelUsage: contextSource?.modelUsage?.some((m) => m.contextWindow) ? (modelUsage ?? contextSource.modelUsage) : modelUsage
   }

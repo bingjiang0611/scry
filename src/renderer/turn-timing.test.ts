@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '@shared/trace'
+import { resultOf, type Turn } from './format'
 import { buildTurnTimingBreakdown } from './turn-timing'
 
 function event(partial: Partial<TraceEvent> & Pick<TraceEvent, 'id' | 'kind' | 'stage'>): TraceEvent {
@@ -411,6 +412,23 @@ describe('buildTurnTimingBreakdown', () => {
       totalApiPhases: 1
     })
     expect(timing.phases[0]).toMatchObject({ kind: 'unsegmented', observedMs: 7000, toolMs: 3000 })
+  })
+
+  it('多 result continuation 有间隔时使用完整墙钟，不误报活动越界', () => {
+    const tool = event({
+      id: 'tool', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tool',
+      ts: '2026-07-18T00:00:01.000Z'
+    })
+    const items = [
+      tool,
+      event({ id: 'tool-result', kind: 'tool', stage: 'tool_result', toolUseId: 'tool', ts: '2026-07-18T00:00:05.000Z' }),
+      event({ id: 'result-1', kind: 'harness', stage: 'result', ts: '2026-07-18T00:00:10.000Z', durationMs: 10_000, durationApiMs: 4_000 }),
+      event({ id: 'result-2', kind: 'harness', stage: 'result', ts: '2026-07-18T00:00:30.000Z', durationMs: 5_000, durationApiMs: 3_000 })
+    ]
+    const turn: Turn = { runId: 'run-1', userText: 'continue', items, done: true }
+    const timing = buildTurnTimingBreakdown(items, [tool], resultOf(turn))
+
+    expect(timing).toMatchObject({ wallMs: 30_000, wallConsistency: 'valid', apiMs: 7_000, apiSource: 'provider' })
   })
 
   it('活动区间超出整轮窗口时标记数据异常，不把负余量截成零', () => {

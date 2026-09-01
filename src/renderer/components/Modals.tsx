@@ -37,11 +37,18 @@ export function ModalFrame({
     const focusable = (): HTMLElement[] => [...(dialogRef.current?.querySelectorAll<HTMLElement>(
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     ) ?? [])]
-    const frame = window.requestAnimationFrame(() => {
+    const focusInitial = (): void => {
       const requested = initialFocusRef?.current
       const target = requested && !requested.matches(':disabled') ? requested : focusable()[0] ?? dialogRef.current
-      target?.focus()
-    })
+      target?.focus({ preventScroll: true })
+    }
+    // effect 执行时 DOM 已提交，先同步聚焦；rAF 只用于覆盖随后完成的布局/控件挂载。
+    // modal 存续期间也不允许外部 composer 或 inactive-window 恢复逻辑把焦点抢走。
+    focusInitial()
+    const frame = window.requestAnimationFrame(focusInitial)
+    const onFocusIn = (): void => {
+      if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) focusInitial()
+    }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -68,9 +75,11 @@ export function ModalFrame({
         first.focus()
       }
     }
+    document.addEventListener('focusin', onFocusIn)
     document.addEventListener('keydown', onKeyDown)
     return () => {
       window.cancelAnimationFrame(frame)
+      document.removeEventListener('focusin', onFocusIn)
       document.removeEventListener('keydown', onKeyDown)
       if (restore?.isConnected) restore.focus()
     }

@@ -80,7 +80,8 @@ for (const locale of ['fr.lproj', 'de.lproj', 'ja.lproj']) {
   if (existsSync(join(electronResources, locale))) throw new Error(`packaged app 未裁剪非目标 locale：${locale}`)
 }
 const expectedCliVersion = JSON.parse(readFileSync(scryCliPackage, 'utf8')).version
-const actualCliVersion = execFileSync(scryCli, ['--version'], { encoding: 'utf8', timeout: 5_000 }).trim()
+// 首次执行刚签名的 bundle 可能触发 macOS 冷启动校验；仍保持有界，但不要把系统负载误判成 CLI 缺失。
+const actualCliVersion = execFileSync(scryCli, ['--version'], { encoding: 'utf8', timeout: 15_000 }).trim()
 if (actualCliVersion !== expectedCliVersion) {
   throw new Error(`App 私有 Scry CLI 版本不匹配：expected ${expectedCliVersion}, got ${actualCliVersion || 'unknown'}`)
 }

@@ -1036,6 +1036,28 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     ])
   })
 
+  it('多 result 墙钟取时间区间外包络，API 活动量仍累加', () => {
+    const result = resultOf({
+      runId: 'continuations', userText: 'continue', done: true,
+      items: [
+        ev({
+          id: 'r1', ts: '2026-01-01T00:00:10.000Z', kind: 'harness', stage: 'result',
+          durationMs: 10_000, durationApiMs: 4_000
+        }),
+        ev({
+          id: 'r2', ts: '2026-01-01T00:00:30.000Z', kind: 'harness', stage: 'result',
+          durationMs: 5_000, durationApiMs: 3_000
+        })
+      ]
+    })
+
+    expect(result).toMatchObject({
+      ts: '2026-01-01T00:00:30.000Z',
+      durationMs: 30_000,
+      durationApiMs: 7_000
+    })
+  })
+
   it('高 Token 轮次保留最高 10 条，并按 token 从高到低排序', () => {
     const turns: Turn[] = Array.from({ length: 12 }, (_, i) => ({
       runId: `turn-${i + 1}`,

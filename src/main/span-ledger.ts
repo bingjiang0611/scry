@@ -2,6 +2,7 @@
 // db.ts 只负责 electron 路径 + 预编译语句执行；本文件负责 schema、TraceEvent→行映射、查询 SQL。
 import { type DbStats, type TraceEvent, maskSecrets } from '../shared/trace'
 import { providerDangerCoverage, type ProviderId } from '../shared/provider'
+import { providerUsageResultEvents } from '../shared/result-timing'
 
 // v1（旧）：保留建表兼容旧库，P0 起不再写/读。
 export const DDL_V1 = [
@@ -564,8 +565,7 @@ export function spanRowsFromItems(args: {
       }
     }
   }
-  const result = items.find((e) => e.kind === 'harness' && e.stage === 'result')
-  if (result) {
+  for (const result of providerUsageResultEvents(items)) {
     const tStart = tsMs(result.ts, nowMs)
     rows.spans.push([
       result.id, sessionId ?? null, result.runId, null, null, null, null, null,

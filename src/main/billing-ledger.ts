@@ -8,6 +8,7 @@ import type {
   UsageLedgerObject
 } from '../shared/billing'
 import { maskSecrets, type TraceEvent } from '../shared/trace'
+import { providerUsageResultEvents } from '../shared/result-timing'
 import type { RuntimeProvider } from '../shared/runtime'
 import { createHash } from 'node:crypto'
 
@@ -161,7 +162,11 @@ export function sdkUsageLedgerRowsFromItems(args: {
   gateway?: { provider: 'anthropic'; accountLabel: string } | null
   priceVersions?: LocalModelPriceVersion[]
 }): UsageLedgerObject[] {
-  const result = args.items.find((e) => e.kind === 'harness' && e.stage === 'result')
+  const results = providerUsageResultEvents(args.items)
+  if (results.length > 1) {
+    return results.flatMap((result) => sdkUsageLedgerRowsFromItems({ ...args, items: [result] }))
+  }
+  const result = results[0]
   if (!result) return []
   const fallbackProvider = result.billingProvider ?? args.billingProvider
   const sourceFor = (provider: BillingProvider, usageSource?: string): string =>

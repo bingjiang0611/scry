@@ -127,7 +127,8 @@ function traceEventKey(event: TraceEvent): string {
     return `hook:${event.stage}:${event.hookId}${progress}`
   }
   if (event.kind === 'model') return `model:${event.stage}:${event.text ?? event.thinking ?? ''}`
-  if (event.kind === 'harness' && event.stage === 'result') return `result:${event.runId}`
+  // 一个 run 可包含多个正常 continuation result；只按 runId 去重会静默丢掉后续 timing/usage。
+  if (event.kind === 'harness' && event.stage === 'result') return `result:${event.runId}:${event.id}`
   return `event:${event.kind}:${event.stage}:${event.tool ?? ''}:${event.name ?? ''}:${event.text ?? event.output ?? ''}`
 }
 
