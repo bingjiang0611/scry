@@ -353,8 +353,13 @@ const listProjectCatalog = (): ProjectMeta[] => {
   return mergeProjectMetas(store.load(), sessionProjects)
 }
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
+const detectInstalledAgents = () => detectAgents({
+  versionProbeEnv: (agent, executable) => agent.id === 'pi:default'
+    ? piRpcEnvironment({ id: 'pi:default', label: 'Pi', executable })
+    : undefined
+})
 const defaultPiProfile = async (): Promise<PiAgentProfile | undefined> => {
-  const detected = (await detectAgents()).find((agent) => agent.id === 'pi:default')
+  const detected = (await detectInstalledAgents()).find((agent) => agent.id === 'pi:default')
   return detected ? { id: 'pi:default', label: 'Pi', executable: detected.path } : undefined
 }
 const storedPiProfiles = (): PiAgentProfile[] => {
@@ -1176,7 +1181,7 @@ handleTrusted('agent:detectFast', () => {
 
 handleTrusted('agent:detect', async () => {
   // 先异步完成 PATH/版本探测，让 descriptor 的同步 fallback 命中已知路径，避免阻塞主进程。
-  const detected = await detectAgents()
+  const detected = await detectInstalledAgents()
   const descriptors = await providerRegistry.describe()
   return composeProviderDetectionResults({
     detected,

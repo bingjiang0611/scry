@@ -155,12 +155,15 @@ describe('Pi RPC Provider', () => {
       const oldBin = join(dir, 'old', 'bin')
       const newBin = join(dir, 'new', 'bin')
       const launcher = join(dir, 'pi-agent')
+      const nativeWrapper = join(dir, 'pi')
       mkdirSync(oldBin, { recursive: true })
       mkdirSync(newBin, { recursive: true })
       writeFileSync(launcher, '#!/bin/sh\nexit 0\n')
+      writeFileSync(nativeWrapper, '#!/bin/sh\nexit 0\n')
       writeFileSync(join(oldBin, 'node'), '#!/bin/sh\nprintf "22.22.1\\n"\n')
       writeFileSync(join(newBin, 'node'), '#!/bin/sh\nprintf "24.18.0\\n"\n')
       chmodSync(launcher, 0o755)
+      chmodSync(nativeWrapper, 0o755)
       chmodSync(join(oldBin, 'node'), 0o755)
       chmodSync(join(newBin, 'node'), 0o755)
 
@@ -175,6 +178,14 @@ describe('Pi RPC Provider', () => {
         HOME: dir,
         PI_AGENT_NODE: join(oldBin, 'node')
       }).PI_AGENT_NODE).toBe(join(oldBin, 'node'))
+      expect(piRpcEnvironment({
+        id: 'pi:default',
+        label: 'Pi',
+        executable: nativeWrapper
+      }, {
+        PATH: `${oldBin}${delimiter}${newBin}`,
+        HOME: dir
+      }).PI_AGENT_NODE).toBe(realpathSync(join(newBin, 'node')))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

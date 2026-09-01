@@ -402,7 +402,17 @@ export function requestRunControlsForSelectedProvider<T>(
 }
 
 export function reconcileSelectedAgentId(current: string, detected: DetectedAgent[]): string {
-  return detected.length > 0 && !detected.some((agent) => agent.id === current) ? detected[0].id : current
+  if (detected.length === 0) return current
+  const available = (agent: DetectedAgent): boolean => agent.health?.state !== 'unavailable'
+  const currentProviderId = providerIdForAgentId(current)
+  const sameProviderFallback = currentProviderId
+    ? detected.find((agent) => providerIdForAgentId(agent.id) === currentProviderId && available(agent))
+    : undefined
+  const selected = detected.find((agent) => agent.id === current)
+  if (!selected) return sameProviderFallback?.id ?? detected.find(available)?.id ?? detected[0].id
+  if (available(selected)) return current
+  // 不跨 Provider 静默切换；但同一 Provider 的可用 Profile 应替代失效 Profile。
+  return sameProviderFallback?.id ?? current
 }
 
 export function useIntegrations(cwd: string | null) {

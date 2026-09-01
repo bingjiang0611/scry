@@ -124,7 +124,7 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
 })
 
 describe('Agent 切换时的运行控制门禁', () => {
-  it('快速探测发现已保存的 Agent 不存在时立即选中首个可用 Agent', () => {
+  it('探测结果优先保留当前选择，缺失时回退首个可用 Agent', () => {
     const detected = [
       { id: 'claude', name: 'Claude Code', path: '/usr/local/bin/claude', bin: 'claude' },
       { id: 'codex', name: 'Codex', path: '/usr/local/bin/codex', bin: 'codex' }
@@ -133,6 +133,39 @@ describe('Agent 切换时的运行控制门禁', () => {
     expect(reconcileSelectedAgentId('qoder', detected)).toBe('claude')
     expect(reconcileSelectedAgentId('codex', detected)).toBe('codex')
     expect(reconcileSelectedAgentId('qoder', [])).toBe('qoder')
+  })
+
+  it('Pi 当前 Profile 不可用时自动切到同 Provider 的可用 Profile', () => {
+    const detected = [{
+      id: 'pi:default',
+      name: 'Pi',
+      path: '/Users/example/.local/bin/pi',
+      bin: 'pi',
+      health: { state: 'unavailable' as const, transport: 'CLI version probe', lastError: '版本探测退出码 1' }
+    }, {
+      id: 'pi:25f2d533d0a8b391',
+      name: 'Pi · pi-agent',
+      path: '/Users/example/dev-agent/pi-agent/bin/pi-agent',
+      bin: 'pi-agent',
+      health: { state: 'ready' as const, transport: 'JSONL RPC subprocess' }
+    }, {
+      id: 'codex',
+      name: 'Codex',
+      path: '/usr/local/bin/codex',
+      bin: 'codex',
+      health: { state: 'ready' as const, transport: 'app-server' }
+    }]
+
+    expect(reconcileSelectedAgentId('pi:default', detected)).toBe('pi:25f2d533d0a8b391')
+    expect(reconcileSelectedAgentId('pi:missing', detected)).toBe('pi:25f2d533d0a8b391')
+    // 只有一个 Profile 的 Provider 不可用时保持用户选择，不跨 Provider 静默切换。
+    expect(reconcileSelectedAgentId('claude', [{
+      id: 'claude',
+      name: 'Claude Code',
+      path: '/usr/local/bin/claude',
+      bin: 'claude',
+      health: { state: 'unavailable', transport: 'Agent SDK' }
+    }, ...detected])).toBe('claude')
   })
 
   it('Claude 选中时只请求 Claude 的运行控制，不预热 Codex', async () => {
