@@ -20,8 +20,11 @@ function safeImageSrc(src: string | undefined): string | undefined {
 function normalizeStrongSpacing(segment: string): string {
   return segment.replace(
     /(^|[^\\*])\*\*([ \t]*)([^*\n]*?\S)([ \t]*)\*\*/g,
-    (_match, prefix: string, _leading: string, content: string, trailing: string) =>
-      `${prefix}**${content}**${trailing ? ' ' : ''}`
+    (match, prefix: string, _leading: string, content: string, trailing: string, offset: number, source: string) => {
+      const next = source[offset + match.length]
+      const needsSeparator = !!trailing || (!!next && /[\p{L}\p{N}]/u.test(next))
+      return `${prefix}**${content}**${needsSeparator ? ' ' : ''}`
+    }
   )
 }
 
