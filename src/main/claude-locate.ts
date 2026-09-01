@@ -400,7 +400,11 @@ export async function probeCliVersion(
   }
 }
 
-async function agentVersionAsync(id: string, path: string): Promise<AgentVersionProbe> {
+async function agentVersionAsync(
+  id: string,
+  path: string,
+  env?: NodeJS.ProcessEnv
+): Promise<AgentVersionProbe> {
   if (id === 'codex') {
     const bundled = await appBundleVersionAsync(path)
     if (bundled) return { version: bundled, health: { state: 'ready', transport: 'App bundle', lastOkAt: Date.now() } }
@@ -408,7 +412,7 @@ async function agentVersionAsync(id: string, path: string): Promise<AgentVersion
   return probeCliVersion(
     path,
     id === 'qoder' ? ['-v'] : ['--version'],
-    id === 'pi:default' ? { timeout: PI_VERSION_PROBE_TIMEOUT_MS } : {}
+    id === 'pi:default' ? { env, timeout: PI_VERSION_PROBE_TIMEOUT_MS } : env ? { env } : {}
   )
 }
 
@@ -493,7 +497,9 @@ async function resolveCodexBinAsync(): Promise<string | undefined> {
   })
 }
 
-export async function detectAgents(): Promise<DetectedAgent[]> {
+export async function detectAgents(options: {
+  versionProbeEnv?: (agent: { id: string; name: string; bin: string }, path: string) => NodeJS.ProcessEnv | undefined
+} = {}): Promise<DetectedAgent[]> {
   const found = await Promise.all(
     KNOWN_AGENTS.map(async (a): Promise<DetectedAgent | null> => {
       const path =
@@ -506,7 +512,7 @@ export async function detectAgents(): Promise<DetectedAgent[]> {
               ? await resolveCodexBinAsync()
               : await whichAsync(a.bin))
       if (!path) return null
-      const probe = await agentVersionAsync(a.id, path)
+      const probe = await agentVersionAsync(a.id, path, options.versionProbeEnv?.(a, path))
       return { ...a, path, version: probe.version, health: probe.health }
     })
   )

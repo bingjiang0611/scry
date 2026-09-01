@@ -113,9 +113,11 @@ export function piRpcEnvironment(
   baseEnv: Record<string, string> = shellEnv()
 ): Record<string, string> {
   const env = sanitizeProviderEnv(baseEnv, 'pi')
-  if (basename(profile.executable) !== 'pi-agent') return env
+  // 原生 `pi` 也可能是转发到 pi-agent 的 shell wrapper。Finder 的 PATH 常先命中旧 Node，
+  // 因此所有 Pi Profile 都先固定一个兼容 Node，避免内置 Profile 的 --version 误报退出码 1。
   const compatibleNode = env.PI_AGENT_NODE ? undefined : compatiblePiNode(env.PATH ?? '')
   if (compatibleNode) env.PI_AGENT_NODE = compatibleNode
+  if (basename(profile.executable) !== 'pi-agent') return env
   if (env.PI_AGENT_PI) return env
   const verified = env.PI_AGENT_VERIFIED_PI_EXECUTABLE
     ? packagePiExecutable(env.PI_AGENT_VERIFIED_PI_EXECUTABLE)
