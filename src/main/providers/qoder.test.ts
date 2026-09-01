@@ -34,6 +34,7 @@ import {
   expandQoderProjectCommand,
   parseQoderBackgroundTaskFailures,
   parseQoderHookLog,
+  parseQoderSubagentTerminals,
   qoderHookFallbackOnly,
   qoderProviderTurnIdFromLog,
   resolveQoderSdkExecutable
@@ -604,6 +605,122 @@ describe('Qoder provider adapter', () => {
     })
   })
 
+  it('keeps the Qoder input stream open until background Agents settle and the root responds again', async () => {
+    let inputReleasedBeforeTerminal = false
+    sdk.query.mockImplementation(({ prompt }) => ({
+      async *[Symbol.asyncIterator]() {
+        const input = prompt[Symbol.asyncIterator]()
+        await input.next()
+        yield {
+          type: 'assistant',
+          message: {
+            content: [{
+              type: 'tool_use', id: 'agent-1', name: 'local_agent',
+              input: { description: 'inspect', run_in_background: true }
+            }]
+          }
+        }
+        yield {
+          type: 'user',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'agent-1', content: 'launched' }] },
+          tool_use_result: { status: 'async_launched', taskId: 'task-1' }
+        }
+        yield { type: 'system', subtype: 'task_started', task_id: 'task-1', tool_use_id: 'agent-1' }
+        yield { type: 'result', subtype: 'success', result: 'waiting' }
+        const inputDone = input.next().then(() => { inputReleasedBeforeTerminal = true })
+        await Promise.resolve()
+        expect(inputReleasedBeforeTerminal).toBe(false)
+        yield { type: 'system', subtype: 'task_notification', task_id: 'task-1', status: 'completed', summary: 'done' }
+        yield { type: 'result', subtype: 'success', result: 'all done' }
+        await inputDone
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    }))
+    const events: TraceEvent[] = []
+
+    const result = await createQoderAdapter().run({
+      runId: 'run-background-agent',
+      prompt: 'delegate',
+      attachments: [],
+      emit: (event) => events.push(event)
+    }).promise
+
+    expect(result.status).toBe('completed')
+    expect(inputReleasedBeforeTerminal).toBe(true)
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'agent', tool: 'Agent', toolUseId: 'agent-1'
+    }))
+    expect(events.filter((event) => event.tool === 'Agent' && event.stage === 'tool_result' && event.runtimeMetadata?.agentStatus === 'completed')).toHaveLength(1)
+  })
+
+  it('closes every tracked background Agent as stopped when Scry interrupts before notifications arrive', async () => {
+    let rootSeen!: () => void
+    const root = new Promise<void>((resolve) => { rootSeen = resolve })
+    sdk.query.mockImplementation(({ options }) => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'agent-stop', name: 'Agent', input: { run_in_background: true } }] }
+        }
+        yield {
+          type: 'user',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'agent-stop', content: 'launched' }] },
+          tool_use_result: { status: 'async_launched', taskId: 'task-stop' }
+        }
+        yield { type: 'system', subtype: 'task_started', task_id: 'task-stop', tool_use_id: 'agent-stop' }
+        yield { type: 'result', subtype: 'success', result: 'waiting' }
+        rootSeen()
+        await new Promise<void>((resolve) => options.abortController.signal.addEventListener('abort', () => resolve(), { once: true }))
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    }))
+    const events: TraceEvent[] = []
+    const handle = createQoderAdapter().run({
+      runId: 'run-interrupted-agent',
+      prompt: 'delegate',
+      attachments: [],
+      emit: (event) => events.push(event)
+    })
+
+    await root
+    handle.interrupt()
+    await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
+    expect(events.filter((event) => event.tool === 'Agent' && event.stage === 'tool_result')).toContainEqual(expect.objectContaining({
+      toolUseId: 'agent-stop',
+      isError: false,
+      runtimeMetadata: expect.objectContaining({ source: 'qoder_host_interruption', agentStatus: 'stopped' })
+    }))
+  })
+
+  it('fails the run instead of leaving unknown when Qoder transport ends with an active local Agent', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'agent-lost', name: 'Agent', input: { run_in_background: true } }] }
+        }
+        yield { type: 'system', subtype: 'task_started', task_id: 'task-lost', tool_use_id: 'agent-lost' }
+        yield { type: 'result', subtype: 'success', result: 'waiting' }
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const events: TraceEvent[] = []
+
+    const result = await createQoderAdapter().run({
+      runId: 'run-lost-agent', prompt: 'delegate', attachments: [],
+      emit: (event) => events.push(event)
+    }).promise
+
+    expect(result.status).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      tool: 'Agent', stage: 'tool_result', toolUseId: 'agent-lost', isError: true,
+      runtimeMetadata: expect.objectContaining({ source: 'qoder_transport_ended', agentStatus: 'failed' })
+    }))
+  })
+
   it('managed Qoder 返回 native promptId、fork message id 与失败状态，并只在显式启用时注入 managed 环境', async () => {
     sdk.runtimeCliEnv.mockImplementation((_base?: Record<string, string>, options: { managedRecorder?: boolean } = {}) =>
       options?.managedRecorder ? {
@@ -767,6 +884,70 @@ describe('Qoder provider adapter', () => {
     }
   })
 
+  it('把真实 Qoder 批量取消日志回写为四个 Agent stopped 终态', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'scry-qoder-agent-cancel-test-'))
+    const runLogDir = join(configDir, 'logs', 'runs', 'run-p127')
+    await mkdir(runLogDir, { recursive: true })
+    await writeFile(join(runLogDir, 'qodercli.log'), [
+      ...['a', 'b', 'c', 'd'].map((id, index) =>
+        `2026-09-01T18:21:08.0${44 + index}+08:00 ERROR debug.message [SubagentRun] error agentId=agent-${id} taskId=task-${id} sessionId=qoder-session parentToolUseId=agent-${id} Error [AbortError]: Operation cancelled by user`
+      ),
+      '2026-09-01T18:21:08.360+08:00 WARN  process.exiting exit_code=143 reason="signal_term" message="SIGTERM received"'
+    ].join('\n'))
+    const previousConfigDir = process.env.QODER_CONFIG_DIR
+    process.env.QODER_CONFIG_DIR = configDir
+    try {
+      const child = Object.assign(new EventEmitter(), { pid: 127, kill: vi.fn() })
+      sdk.spawn.mockReturnValue(child)
+      sdk.query.mockImplementation(({ options }) => {
+        options.spawnQoderCLIProcess({
+          command: '/bin/qodercli', args: [], cwd: '/repo', env: {}, signal: new AbortController().signal
+        })
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              type: 'assistant', session_id: 'qoder-session',
+              message: {
+                content: ['a', 'b', 'c', 'd'].map((id) => ({
+                  type: 'tool_use', id: `agent-${id}`, name: 'Agent', input: { run_in_background: true }
+                }))
+              }
+            }
+            for (const id of ['a', 'b', 'c', 'd']) {
+              yield { type: 'system', subtype: 'task_started', task_id: `task-${id}`, tool_use_id: `agent-${id}` }
+            }
+            // A real SDK terminal for one child must win over the duplicate log line.
+            yield { type: 'system', subtype: 'task_notification', task_id: 'task-a', status: 'stopped', summary: 'stopped' }
+            yield { type: 'result', subtype: 'success', session_id: 'qoder-session', result: 'waiting' }
+          },
+          close: vi.fn().mockResolvedValue(undefined),
+          interrupt: vi.fn().mockResolvedValue(undefined)
+        }
+      })
+      const events: TraceEvent[] = []
+
+      const result = await createQoderAdapter().run({
+        runId: 'run-four-cancelled-agents', prompt: 'delegate four', cwd: '/repo', attachments: [],
+        emit: (event) => events.push(event)
+      }).promise
+
+      expect(result.status).toBe('failed')
+      const terminals = events.filter((event) => event.tool === 'Agent' && event.stage === 'tool_result')
+      expect(terminals).toHaveLength(4)
+      expect(terminals.map((event) => [event.toolUseId, event.runtimeMetadata?.agentStatus])).toEqual([
+        ['agent-a', 'stopped'], ['agent-b', 'stopped'], ['agent-c', 'stopped'], ['agent-d', 'stopped']
+      ])
+      expect(terminals.map((event) => event.runtimeMetadata?.source)).toEqual([
+        'provider_task_notification', 'qoder_cli_log', 'qoder_cli_log', 'qoder_cli_log'
+      ])
+      expect(terminals.every((event) => event.isError === false)).toBe(true)
+    } finally {
+      if (previousConfigDir == null) delete process.env.QODER_CONFIG_DIR
+      else process.env.QODER_CONFIG_DIR = previousConfigDir
+      await rm(configDir, { recursive: true, force: true })
+    }
+  })
+
   it('在送入 SDK 前展开项目 Qoder command，避免 slash command 零 turn 退出', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'scry-qoder-command-test-'))
     const commandsDir = join(cwd, '.qoder', 'commands')
@@ -790,8 +971,9 @@ describe('Qoder provider adapter', () => {
       await expect(
         expandQoderProjectCommand('/rate-native-rate-workflow 85008418', cwd)
       ).resolves.toBe(expanded)
+      let capturedPrompt: AsyncIterable<Record<string, unknown>> | undefined
       sdk.query.mockImplementation(({ prompt }) => {
-        expect(prompt).toBe(expanded)
+        capturedPrompt = prompt
         return {
           async *[Symbol.asyncIterator]() {
             yield { type: 'result', subtype: 'success', result: 'done' }
@@ -808,6 +990,12 @@ describe('Qoder provider adapter', () => {
         attachments: [],
         emit: vi.fn()
       }).promise
+      const promptIterator = capturedPrompt![Symbol.asyncIterator]()
+      await expect(promptIterator.next()).resolves.toMatchObject({
+        done: false,
+        value: { type: 'user', message: { content: [{ type: 'text', text: expanded }] } }
+      })
+      await expect(promptIterator.next()).resolves.toMatchObject({ done: true })
       expect(sdk.query).toHaveBeenCalledOnce()
     } finally {
       await rm(cwd, { recursive: true, force: true })
@@ -1274,6 +1462,25 @@ describe('Qoder provider adapter', () => {
         output: '后台 Bash 任务异常结束（exit 143 · signal 15）',
         isError: true,
         runtimeMetadata: expect.objectContaining({ backgroundTask: true, exitCode: 143, signal: '15' })
+      })
+    ])
+  })
+
+  it('recovers cancelled and failed Qoder subagent terminals from the process log', () => {
+    const log = [
+      '2026-09-01T18:21:08.044+08:00 ERROR debug.message [SubagentRun] error agentId=agent-a taskId=task-a sessionId=s1 parentToolUseId=agent-call-a Error [AbortError]: Operation cancelled by user',
+      '2026-09-01T18:21:08.045+08:00 ERROR debug.message [SubagentRun] error agentId=agent-b taskId=task-b sessionId=s1 parentToolUseId=agent-call-b Error: writer failed',
+      '2026-09-01T18:21:08.046+08:00 ERROR debug.message [SubagentRun] error agentId=agent-c taskId=task-c sessionId=other parentToolUseId=agent-call-c Error [AbortError]: Operation cancelled by user'
+    ].join('\n')
+
+    expect(parseQoderSubagentTerminals('run-1', log, 's1')).toEqual([
+      expect.objectContaining({
+        tool: 'Agent', toolUseId: 'agent-call-a', isError: false,
+        runtimeMetadata: expect.objectContaining({ agentStatus: 'stopped', taskId: 'task-a', qoderAgentId: 'agent-a' })
+      }),
+      expect.objectContaining({
+        tool: 'Agent', toolUseId: 'agent-call-b', isError: true,
+        runtimeMetadata: expect.objectContaining({ agentStatus: 'failed', taskId: 'task-b', qoderAgentId: 'agent-b' })
       })
     ])
   })

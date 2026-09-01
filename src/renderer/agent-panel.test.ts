@@ -253,6 +253,42 @@ describe('deriveAgentRows', () => {
     expect(row.recentActivity[0]?.label).toBe(activity)
   })
 
+  it('优先显示 Provider 的 Agent invocation name，而不是泛化类型名', () => {
+    const [row] = deriveAgentRows([turn([
+      event({
+        id: 'start', kind: 'agent', stage: 'agent:general-purpose', tool: 'Agent', toolUseId: 'named',
+        name: 'general-purpose', input: { name: 'judge-writer', description: 'Write judge paper article' }
+      }),
+      event({
+        id: 'result', kind: 'tool', stage: 'tool_result', tool: 'Agent', toolUseId: 'named',
+        ts: '2026-08-09T08:00:01.000Z', runtimeMetadata: { agentStatus: 'completed' }
+      })
+    ])], { busy: false })
+
+    expect(row).toMatchObject({ name: 'judge-writer', status: 'completed' })
+  })
+
+  it('并发 Agent 只给有终态证据的行定性，其余继续保持 unknown', () => {
+    const starts = ['a', 'b', 'c', 'd'].map((id) => event({
+      id: `start-${id}`, kind: 'agent', stage: `agent:${id}`, tool: 'Agent', toolUseId: `agent-${id}`, name: id
+    }))
+    const rows = deriveAgentRows([turn([
+      ...starts,
+      event({
+        id: 'stopped-a', kind: 'tool', stage: 'tool_result', tool: 'Agent', toolUseId: 'agent-a',
+        ts: '2026-08-09T08:00:01.000Z', runtimeMetadata: { agentStatus: 'stopped' }
+      }),
+      event({
+        id: 'failed-b', kind: 'tool', stage: 'tool_result', tool: 'Agent', toolUseId: 'agent-b', isError: true,
+        ts: '2026-08-09T08:00:02.000Z', runtimeMetadata: { agentStatus: 'failed' }
+      })
+    ])], { busy: false })
+
+    expect(rows.map((row) => [row.name, row.status])).toEqual([
+      ['a', 'stopped'], ['b', 'failed'], ['c', 'unknown'], ['d', 'unknown']
+    ])
+  })
+
   it('历史 turn 缺少 Agent 终态时保持 unknown，即使外部 busy 暂时为 true', () => {
     const historical = turn([
       event({ id: 'start', kind: 'agent', stage: 'agent:Explore', tool: 'Task', toolUseId: 'orphan', name: 'Explore' })
