@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import MarkdownImpl from './MarkdownImpl'
+import MarkdownImpl, { normalizeMarkdownForDisplay } from './MarkdownImpl'
 
 describe('MarkdownImpl trust boundary', () => {
   it('does not emit remote image requests or dangerous links', () => {
@@ -20,5 +20,26 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('target="_blank"')
     expect(html).toContain('rel="noopener noreferrer"')
     expect(html).toContain('<img')
+  })
+
+  it('repairs common model-authored strong spacing without touching code', () => {
+    const source = '**我的判断： **最值得关注。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
+    expect(normalizeMarkdownForDisplay(source)).toBe(
+      '**我的判断：** 最值得关注。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
+    )
+
+    const html = renderToStaticMarkup(<MarkdownImpl>{source}</MarkdownImpl>)
+    expect(html).toContain('<strong>我的判断：</strong> 最值得关注。')
+    expect(html).toContain('<code>** inline literal **</code>')
+    expect(html).toContain('** fenced literal **')
+  })
+
+  it('wraps GFM tables in a keyboard-scrollable region', () => {
+    const html = renderToStaticMarkup(
+      <MarkdownImpl>{'| 项目 | 状态 |\n| --- | --- |\n| Scry | ready |'}</MarkdownImpl>
+    )
+    expect(html).toContain('class="md-table-scroll"')
+    expect(html).toContain('aria-label="表格，可横向滚动"')
+    expect(html).toContain('<table>')
   })
 })
