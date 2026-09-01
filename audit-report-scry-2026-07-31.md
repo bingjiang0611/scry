@@ -245,7 +245,7 @@ Scry 是一个本地 Electron + React + TypeScript 桌面工作台，通过 Clau
 - Status: Confirmed
 - Affected area: scry.db schema migration
 - Evidence:
-  - File: src/main/db.ts:86-134；src/main/span-ledger.ts:16-65；docs/product/billing-guardian-issues.md:141
+  - File: src/main/db.ts:86-134；src/main/span-ledger.ts:16-65
   - Function / Module: initDb、migrate、DDL_V2、DDL_V3
   - Relevant behavior: DDL 逐条执行后才更新 user_version，无 transaction；未 guard 的 ALTER TABLE ADD COLUMN 重跑会 duplicate-column；异常后 db=null。
 - Problem: 某条 ALTER 成功而 version 未更新时，重启再次执行同一 ALTER，并在每次启动永久失败。
