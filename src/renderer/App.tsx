@@ -545,6 +545,14 @@ export function App() {
     draftAttachmentsRef.current = draftAttachments
   }, [draftAttachments])
 
+  useEffect(() => {
+    if (!archiveUndo) return
+    const timeout = window.setTimeout(() => {
+      setArchiveUndo((current) => current === archiveUndo ? null : current)
+    }, 5_000)
+    return () => window.clearTimeout(timeout)
+  }, [archiveUndo])
+
   useEffect(
     () => () => {
       for (const attachment of draftAttachmentsRef.current) {
@@ -1087,8 +1095,9 @@ export function App() {
 
   const undoArchive = async (): Promise<void> => {
     if (!archiveUndo) return
-    await window.scry.setSessionArchived(archiveUndo.ref, false)
-    setArchiveUndo(null)
+    const pending = archiveUndo
+    await window.scry.setSessionArchived(pending.ref, false)
+    setArchiveUndo((current) => current === pending ? null : current)
     workspace.loadProjects()
   }
 

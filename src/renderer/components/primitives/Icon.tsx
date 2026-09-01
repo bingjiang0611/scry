@@ -7,7 +7,7 @@ export type IconName =
   | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
   | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'diff' | 'terminal' | 'agents' | 'panel'
-  | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit'
+  | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit' | 'compose'
 
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -147,6 +147,12 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </>
+  ),
+  compose: (
+    <>
+      <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
     </>
   )
 }

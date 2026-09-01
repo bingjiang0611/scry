@@ -717,7 +717,7 @@ describe('Sidebar 项目分组', () => {
     expect(runtimeOnlyHtml).toContain('class="sb-navdot online"')
   })
 
-  it('同名项目标题带完整路径提示，hover 时能区分 cwd', () => {
+  it('同名项目保留路径标识但 hover 不显示具体路径', () => {
     const html = renderToStaticMarkup(
       <Sidebar
         projects={[
@@ -749,12 +749,16 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('<button type="button" class="sb-proj-head')
     expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('class="ico sb-project-folder"')
+    expect(html).toContain('aria-label="sample-workspace · /Users/example/IdeaProjects/sample-workspace"')
+    expect(html).toContain('aria-label="sample-workspace · /Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace"')
     expect(html).toContain('data-project-path="/Users/example/IdeaProjects/sample-workspace"')
     expect(html).toContain('data-project-path="/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace"')
-    expect(html).toContain('/Users/example/.treehouse/sample-workspace-3b0c3e/7/sample-workspace')
+    expect(html).not.toContain('class="ppath"')
+    expect(html).not.toContain('title="sample-workspace')
   })
 
-  it('没有会话的项目仍保留，项目树不显示计数或行内新建按钮', () => {
+  it('没有会话的项目仍保留，并提供 Codex 风格的行内新建按钮', () => {
     const html = renderToStaticMarkup(
       <Sidebar
         projects={[{
@@ -781,8 +785,10 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('暂无会话')
     expect(html).not.toContain('class="cnt"')
     expect(html).not.toContain('class="pcnt"')
-    expect(html).not.toContain('aria-label="在 empty-project 新建会话"')
-    expect(html).toContain('aria-label="管理项目 empty-project"')
+    expect(html).toContain('aria-label="在 empty-project 中新建会话 · /Users/example/empty-project"')
+    expect(html).toContain('class="sb-proj-act sb-proj-new"')
+    expect(html).toContain('class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"')
+    expect(html).toContain('aria-label="管理项目 empty-project · /Users/example/empty-project"')
     expect(html).toContain('class="sb-proj-head on"')
     expect(html).toContain('class="ico sb-project-pin"')
   })
