@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import { realpathSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ProviderId } from '../shared/provider.js'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
-import { recorderDaemonStatus, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
+import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
 import { RECORDER_VERSION, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
+import { initWorkspace } from './workspace-init.js'
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
@@ -22,7 +23,7 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-const VALUE_FLAGS = new Set(['workspace', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot'])
+const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot'])
 const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -69,7 +70,12 @@ function intFlag(args: ParsedArgs, key: string): number | undefined {
 }
 
 function workspaceOf(args: ParsedArgs): string {
-  return resolve(flag(args, 'workspace') ?? process.cwd())
+  const workspace = resolve(flag(args, 'workspace') ?? process.cwd())
+  try {
+    return realpathSync(workspace)
+  } catch {
+    return workspace
+  }
 }
 
 function providerOf(args: ParsedArgs): ProviderId {
@@ -83,7 +89,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry recorder hook|recover|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry recorder hook|recover|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -109,15 +115,32 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
     const event = flag(args, 'event')
     if (!event) throw new Error('--event is required')
     const provider = providerOf(args)
+    const managed = args.flags.has('managed')
+    const daemonEnabled = !managed && process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
+    if (daemonEnabled) {
+      try {
+        const result = await sendRecorderDaemonHook({
+          provider,
+          event,
+          workspace,
+          payload,
+          timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
+        })
+        if (verbose) print(result)
+        return 0
+      } catch {
+        // Cold start or stale socket: record this event directly, then start the daemon.
+      }
+    }
     delegatedToCore = true
     const result = await handleRecorderHook({
       provider,
       event,
       workspace,
       payload,
-      managed: args.flags.has('managed')
+      managed
     })
-    if (args.flags.has('start-daemon') && result.status !== 'disabled') {
+    if (daemonEnabled && result.status !== 'disabled') {
       const scriptPath = process.argv[1]
       if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
     }
@@ -129,6 +152,34 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
   }
   // Hook mode is observational and must never block the Provider.
   return 0
+}
+
+async function initCommand(args: ParsedArgs): Promise<number> {
+  const scriptPath = process.argv[1]
+  if (!scriptPath) throw new Error('cannot locate scry CLI entrypoint')
+  const result = await initWorkspace({
+    workspace: workspaceOf(args),
+    providers: flag(args, 'providers'),
+    cliPath: scriptPath
+  })
+  const enablement = await recorderEnablement(result.workspace)
+  if (!enablement.enabled) throw new Error(`recorder 初始化后仍不可用：${enablement.reason}${enablement.detail ? ` (${enablement.detail})` : ''}`)
+  await refreshRecorderPendingHealth(enablement.dataRoot)
+  const [health, store] = await Promise.all([readHealth(enablement.dataRoot), verifyStore(enablement.dataRoot)])
+  const healthy = store.ok && !health.lastError && health.pendingCount === 0
+  if (args.flags.has('json')) {
+    print({ ...result, doctor: { healthy, health, store } })
+    return store.ok ? 0 : 4
+  }
+  process.stdout.write(`Scry 已初始化：${result.workspace}\n`)
+  process.stdout.write(`已配置 Provider：${result.providers.join('、')}\n`)
+  process.stdout.write(`本次写入 ${result.changedFiles.length} 个文件，保留 ${result.unchangedFiles.length} 个未变化文件。\n`)
+  for (const path of result.changedFiles) process.stdout.write(`  - ${relative(result.workspace, path) || path}\n`)
+  if (!healthy) process.stdout.write('提醒：已有 pending 或错误记录；初始化已完成，请再运行 scry doctor 查看详情。\n')
+  process.stdout.write('当前只确认配置和本地存储可用；Provider 是否真正加载 Hook，要在重启后执行一轮任务验证。\n')
+  if (result.codexTrustRequired) process.stdout.write('Codex：重启后在这个项目中执行 /hooks，并信任项目 Hook。\n')
+  process.stdout.write(`验证命令：scry turns list --workspace "${result.workspace}"\n`)
+  return store.ok ? 0 : 4
 }
 
 async function recorderCommand(args: ParsedArgs): Promise<number> {
@@ -312,13 +363,14 @@ export async function runScryCli(argv: string[]): Promise<number> {
         }
         return 0
       }
+    case 'init': return initCommand(args)
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
     case 'doctor': return doctorCommand(args)
     case 'integrations': return integrationsCommand(args)
     case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry recorder|turns|doctor|integrations|upgrade ...')
+      throw new Error('usage: scry init|recorder|turns|doctor|integrations|upgrade ...')
   }
 }
 

@@ -54,18 +54,46 @@ try {
 
   const workspace = join(temporaryRoot, 'workspace')
   mkdirSync(workspace)
-  writeFileSync(join(workspace, 'scry.config.json'), `${JSON.stringify({
-    schemaVersion: 1,
-    enabled: true,
-    workspaceId: 'cli-package-smoke',
-    dataDir: '.scry',
-    repositories: { mode: 'workspace-only' },
-    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: false, hooks: true }
-  }, null, 2)}\n`)
+  run('git', ['init', '-q'], { cwd: workspace })
+  const initOutput = run(bin, ['init', '--providers', 'claude,codex,qoder,opencode'], { cwd: workspace })
+  assert.match(initOutput, /Scry 已初始化/)
+  assert.ok(existsSync(join(workspace, 'scry.config.json')), 'init should create recorder config')
+  assert.ok(existsSync(join(workspace, '.scry', 'provider-hook.sh')), 'init should create provider bridge')
+  assert.ok(existsSync(join(workspace, '.opencode', 'plugins', 'scry-recorder.js')), 'init should create OpenCode plugin')
+  const codexHooks = readFileSync(join(workspace, '.codex', 'hooks.json'), 'utf8')
+  assert.equal((codexHooks.match(/codex UserPromptSubmit/g) ?? []).length, 1, 'init should add one Codex prompt hook')
+  run(bin, ['init', '--providers', 'claude,codex,qoder,opencode'], { cwd: workspace })
+  assert.equal((readFileSync(join(workspace, '.codex', 'hooks.json'), 'utf8').match(/codex UserPromptSubmit/g) ?? []).length, 1, 'init should be idempotent')
+
   const doctor = JSON.parse(run(bin, ['doctor', '--workspace', workspace], { cwd: installRoot }))
   assert.equal(doctor.healthy, true, 'fresh installed CLI should pass doctor')
 
-  process.stdout.write(`${JSON.stringify({ package: packageJson.name, version, bin: 'ok', doctor: 'healthy' })}\n`)
+  const hook = join(workspace, '.scry', 'provider-hook.sh')
+  run(hook, ['claude', 'UserPromptSubmit'], {
+    cwd: workspace,
+    input: JSON.stringify({ session_id: 'package-smoke', prompt: 'record this turn', cwd: workspace })
+  })
+  try {
+    let daemon
+    const deadline = Date.now() + 30_000
+    do {
+      daemon = JSON.parse(run(bin, ['recorder', 'status', '--workspace', workspace], { cwd: installRoot }))
+      if (!daemon.running) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+    } while (!daemon.running && Date.now() < deadline)
+    assert.equal(daemon.running, true, 'first direct hook should start the workspace daemon')
+
+    run(hook, ['claude', 'Stop'], {
+      cwd: workspace,
+      input: JSON.stringify({ session_id: 'package-smoke', assistant_response: 'done', cwd: workspace })
+    })
+    const records = JSON.parse(run(bin, ['turns', 'list', '--workspace', workspace], { cwd: installRoot }))
+    assert.equal(records.length, 1, 'initialized provider bridge should write one completed turn')
+    assert.equal(records[0].status, 'completed')
+  } finally {
+    run(bin, ['recorder', 'stop', '--workspace', workspace], { cwd: installRoot })
+  }
+
+  process.stdout.write(`${JSON.stringify({ package: packageJson.name, version, bin: 'ok', init: 'idempotent', hook: 'recorded', doctor: 'healthy' })}\n`)
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true })
 }
