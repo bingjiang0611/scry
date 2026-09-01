@@ -12,7 +12,13 @@ import {
   recoverManagedRecorderTurns
 } from '../../core/turn-recorder/managed'
 import { listRecords, stableHash } from '../../core/turn-recorder/store'
-import { createPiAdapter, piRpcEnvironment, piUserEntryIdAfterBaseline, probePiAgent } from './pi'
+import {
+  createPiAdapter,
+  piRpcEnvironment,
+  piUserEntryIdAfterBaseline,
+  piVersionProbeEnvironment,
+  probePiAgent
+} from './pi'
 
 const fixtureSource = `#!/usr/bin/env node
 let buffer = ''
@@ -149,7 +155,7 @@ describe('Pi RPC Provider', () => {
     }
   })
 
-  it('selects a compatible Node later on PATH for pi-agent', () => {
+  it('selects a compatible Node later on PATH for pi-agent', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-pi-node-'))
     try {
       const oldBin = join(dir, 'old', 'bin')
@@ -178,14 +184,19 @@ describe('Pi RPC Provider', () => {
         HOME: dir,
         PI_AGENT_NODE: join(oldBin, 'node')
       }).PI_AGENT_NODE).toBe(join(oldBin, 'node'))
-      expect(piRpcEnvironment({
+      const nativeProfile = {
         id: 'pi:default',
         label: 'Pi',
         executable: nativeWrapper
-      }, {
+      }
+      expect(piRpcEnvironment(nativeProfile, {
         PATH: `${oldBin}${delimiter}${newBin}`,
         HOME: dir
       }).PI_AGENT_NODE).toBe(realpathSync(join(newBin, 'node')))
+      await expect(piVersionProbeEnvironment(nativeProfile, {
+        PATH: `${oldBin}${delimiter}${newBin}`,
+        HOME: dir
+      })).resolves.toMatchObject({ PI_AGENT_NODE: realpathSync(join(newBin, 'node')) })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

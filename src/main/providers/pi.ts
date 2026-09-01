@@ -26,7 +26,7 @@ import {
   type TraceEvent
 } from '../../shared/trace'
 import { AgentRuntimeError } from '../run-outcome'
-import { resolveCommandOnPath, sanitizeProviderEnv, shellEnv } from '../claude-locate'
+import { execFileText, resolveCommandOnPath, sanitizeProviderEnv, shellEnv } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
@@ -91,6 +91,11 @@ function piRuntimeFromBootstrap(bootstrap: string): string | undefined {
   }
 }
 
+function compatibleNodeVersion(raw: string): boolean {
+  const [major, minor] = raw.trim().split('.').map(Number)
+  return major > 23 || (major === 23 && minor >= 6)
+}
+
 function compatiblePiNode(pathValue: string): string | undefined {
   for (const directory of pathValue.split(delimiter)) {
     const candidate = resolveCommandOnPath('node', directory)
@@ -99,8 +104,8 @@ function compatiblePiNode(pathValue: string): string | undefined {
       const version = execFileSync(candidate, ['-p', 'process.versions.node'], {
         encoding: 'utf8',
         timeout: 1_500
-      }).trim().split('.').map(Number)
-      if (version[0] > 23 || (version[0] === 23 && version[1] >= 6)) return realpathSync(candidate)
+      })
+      if (compatibleNodeVersion(version)) return realpathSync(candidate)
     } catch {
       // Keep scanning: version-manager PATHs commonly contain an older Node before the active one.
     }
@@ -108,15 +113,17 @@ function compatiblePiNode(pathValue: string): string | undefined {
   return undefined
 }
 
-export function piRpcEnvironment(
-  profile: PiAgentProfile,
-  baseEnv: Record<string, string> = shellEnv()
-): Record<string, string> {
-  const env = sanitizeProviderEnv(baseEnv, 'pi')
-  // 原生 `pi` 也可能是转发到 pi-agent 的 shell wrapper。Finder 的 PATH 常先命中旧 Node，
-  // 因此所有 Pi Profile 都先固定一个兼容 Node，避免内置 Profile 的 --version 误报退出码 1。
-  const compatibleNode = env.PI_AGENT_NODE ? undefined : compatiblePiNode(env.PATH ?? '')
-  if (compatibleNode) env.PI_AGENT_NODE = compatibleNode
+async function compatiblePiNodeAsync(pathValue: string): Promise<string | undefined> {
+  for (const directory of pathValue.split(delimiter)) {
+    const candidate = resolveCommandOnPath('node', directory)
+    if (!candidate) continue
+    const version = await execFileText(candidate, ['-p', 'process.versions.node'], { timeout: 1_500 })
+    if (compatibleNodeVersion(version)) return realpathSync(candidate)
+  }
+  return undefined
+}
+
+function completePiEnvironment(profile: PiAgentProfile, env: Record<string, string>): Record<string, string> {
   if (basename(profile.executable) !== 'pi-agent') return env
   if (env.PI_AGENT_PI) return env
   const verified = env.PI_AGENT_VERIFIED_PI_EXECUTABLE
@@ -126,6 +133,27 @@ export function piRpcEnvironment(
   const runtime = verified ?? (onPath ? piRuntimeFromBootstrap(onPath) : undefined)
   if (runtime) env.PI_AGENT_PI = runtime
   return env
+}
+
+export function piRpcEnvironment(
+  profile: PiAgentProfile,
+  baseEnv: Record<string, string> = shellEnv()
+): Record<string, string> {
+  const env = sanitizeProviderEnv(baseEnv, 'pi')
+  const compatibleNode = env.PI_AGENT_NODE ? undefined : compatiblePiNode(env.PATH ?? '')
+  if (compatibleNode) env.PI_AGENT_NODE = compatibleNode
+  return completePiEnvironment(profile, env)
+}
+
+export async function piVersionProbeEnvironment(
+  profile: PiAgentProfile,
+  baseEnv: Record<string, string> = shellEnv()
+): Promise<Record<string, string>> {
+  const env = sanitizeProviderEnv(baseEnv, 'pi')
+  // Finder 的 PATH 常先命中旧 Node；异步寻找兼容版本，避免扫描时阻塞 Electron 主线程。
+  const compatibleNode = env.PI_AGENT_NODE ? undefined : await compatiblePiNodeAsync(env.PATH ?? '')
+  if (compatibleNode) env.PI_AGENT_NODE = compatibleNode
+  return completePiEnvironment(profile, env)
 }
 
 let eventCounter = 0

@@ -498,7 +498,10 @@ async function resolveCodexBinAsync(): Promise<string | undefined> {
 }
 
 export async function detectAgents(options: {
-  versionProbeEnv?: (agent: { id: string; name: string; bin: string }, path: string) => NodeJS.ProcessEnv | undefined
+  versionProbeEnv?: (
+    agent: { id: string; name: string; bin: string },
+    path: string
+  ) => NodeJS.ProcessEnv | undefined | Promise<NodeJS.ProcessEnv | undefined>
 } = {}): Promise<DetectedAgent[]> {
   const found = await Promise.all(
     KNOWN_AGENTS.map(async (a): Promise<DetectedAgent | null> => {
@@ -512,7 +515,8 @@ export async function detectAgents(options: {
               ? await resolveCodexBinAsync()
               : await whichAsync(a.bin))
       if (!path) return null
-      const probe = await agentVersionAsync(a.id, path, options.versionProbeEnv?.(a, path))
+      const env = await options.versionProbeEnv?.(a, path)
+      const probe = await agentVersionAsync(a.id, path, env)
       return { ...a, path, version: probe.version, health: probe.health }
     })
   )
