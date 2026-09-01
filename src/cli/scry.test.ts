@@ -37,10 +37,11 @@ function captureStdout(): { text: () => string } {
 
 describe('Scry CLI arguments', () => {
   it('支持等号参数且布尔参数不吞 positional', () => {
-    const parsed = parseArgs(['turns', 'summary', '--all', 'session-1', '--workspace=/repo'])
+    const parsed = parseArgs(['turns', 'summary', '--all', 'session-1', '--workspace=/repo', '--providers=claude,codex'])
     expect(parsed.positionals).toEqual(['turns', 'summary', 'session-1'])
     expect(parsed.flags.get('all')).toBe(true)
     expect(parsed.flags.get('workspace')).toBe('/repo')
+    expect(parsed.flags.get('providers')).toBe('claude,codex')
   })
 
   it('拒绝未知参数和缺失值', () => {

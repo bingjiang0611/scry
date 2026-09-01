@@ -5,9 +5,28 @@ Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用�
 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.28 \
+npm install -g @ali/scry-turn-recorder@0.2.29 \
   --registry=https://registry.anpm.alibaba-inc.com
 ```
+
+安装后，在要采集的 Git 项目根目录初始化：
+
+```bash
+cd /path/to/project
+scry init
+```
+
+`scry init` 会自动检测 Claude Code、Codex、Qoder 和 OpenCode，也可以明确指定：
+
+```bash
+scry init --providers claude,codex,qoder,opencode
+```
+
+它会创建 `scry.config.json` 和 `.scry/provider-hook.sh`，并把 Recorder Hook 合并到各 Provider 的项目配置中；已有 Hook 会保留，重复执行不会重复添加。命令只接受 Git 项目根目录，不会自动执行 `git init`。Pi 使用全局 lifecycle 扩展，仍单独运行 `scry integrations install-pi`。
+
+初始化后要重启 Provider。Codex 还需要在项目中执行 `/hooks` 并信任项目 Hook；CLI 不能代替用户完成这一步。`init` 自带的检查只能证明配置和本地 Store 可用，执行一轮真实任务后 `scry turns list --workspace "$PWD"` 出现新记录，才说明 Hook 已经真正加载。
+
+初始化只开启本地记录，不会安装 rate-native 的 uploader、审计或业务 Hook，也不会上传数据。
 
 独立 npm 安装默认不后台联网。设置 `SCRY_AUTO_UPDATE=1` 后，`scry` 才会在交互式命令结束后检查兼容更新；后台任务只检查、不安装，升级仍需前台运行 `scry upgrade`。检查至多每天一次，失败后 6 小时再试。桌面 App 内置 CLI、recorder、daemon 和 CI 不触发后台检查。
 
@@ -41,7 +60,7 @@ scry --help
 
 参数同时支持 `--workspace <root>` 与 `--workspace=<root>`；未知参数或缺少参数值会直接报错。`turns show/timeline` 未找到记录时输出 `{ "found": false }` 并退出 1，退出码 4 只表示 store 损坏。
 
-Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，首事件由 `scry recorder hook --start-daemon` 直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。Agent、skill 和用户提示词不应主动调用这些记录命令。
+Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，CLI 会让首事件直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。`--start-daemon` 只保留给旧集成兼容。Agent、skill 和用户提示词不应主动调用这些记录命令。
 
 需要在正式 record 落盘后唤醒外部 uploader 时，`scry.config.json` 的 `commitHook` 必须声明 workspace 相对的 `entry` 与完整 `files` 清单。Scry App 首次使用会展示完整 bundle 指纹；批准后只执行复制到 Scry userData 的冻结副本，入口或任一依赖变化都会重新询问。CLI/daemon 不会自动信任 workspace 配置；其宿主需显式设置绝对、可执行的 `SCRY_RECORDER_COMMIT_HOOK`，并在修改后执行 `scry recorder restart --workspace <repo>`。record 持久化且 runtime 清理后，recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON，并仅在回调 exit 0 后推进 durable ACK；失败、超时或进程中断会在下一次 hook/recovery 重试。
 
