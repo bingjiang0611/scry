@@ -131,8 +131,7 @@ React renderer
 - `src/renderer/components/`、`hooks/`：聊天、会话、分析、诊断、MCP trust、workspace、terminal 等 UI。
 - `packages/turn-recorder-cli/`：独立 npm 包、README 与 Pi integration。
 - `scripts/`：package allowlist、Electron security smoke、release policy、atomic installer、CLI tarball smoke。
-- `docs/rfc/scry/turn-recorder-cli.md`：turn record 与 evidence 语义权威设计。
-- `docs/archive/`：历史任务记录，不是当前实现权威。
+- `src/shared/turn-record.ts`、`src/core/turn-recorder/`、`packages/turn-recorder-cli/README.md`：turn record 与 evidence 语义权威实现。
 
 ## 跨表面检查清单
 

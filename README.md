@@ -96,7 +96,7 @@ export PATH="$HOME/.local/bin:$PATH"
 维护者发布前运行 `npm run publish:cli`。该命令会通过 package lifecycle 强制执行
 typecheck、tests、CLI build，并固定发布到内网 registry；不要从陈旧 `dist` 手工发布。
 
-合同与接入约束见 [`docs/rfc/scry/turn-recorder-cli.md`](./docs/rfc/scry/turn-recorder-cli.md)。
+合同与接入约束见 [`packages/turn-recorder-cli/README.md`](./packages/turn-recorder-cli/README.md) 及 `src/shared/turn-record.ts`。
 
 ## 技术栈
 
