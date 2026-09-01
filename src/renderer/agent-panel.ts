@@ -165,8 +165,14 @@ function ensureAgent(agents: Map<string, AgentAccumulator>, id: string, indexed:
 
 function updateIdentity(agent: AgentAccumulator, indexed: IndexedEvent): void {
   const { event } = indexed
-  const nextName = meaningfulName(event.name)
   const input = record(event.input)
+  const inputName = typeof input.name === 'string'
+    ? input.name
+    : typeof input.invocationName === 'string'
+      ? input.invocationName
+      : undefined
+  const description = typeof input.description === 'string' ? input.description : undefined
+  const nextName = meaningfulName(inputName) ?? meaningfulName(event.name) ?? meaningfulName(description)
   const nameRank = event.kind === 'agent'
     ? typeof input.activity === 'string' ? 2 : 3
     : 1

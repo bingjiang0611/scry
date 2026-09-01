@@ -211,8 +211,16 @@ function normalizeAgentTaskMessage(
   if (!identity) return []
   const source = `provider_${subtype}`
   if (subtype === 'task_notification') {
-    const status = stringValue(message.status)
-    if (status !== 'completed' && status !== 'failed' && status !== 'stopped') return []
+    const providerStatus = stringValue(message.status)
+    const status = providerStatus === 'completed'
+      ? 'completed'
+      : providerStatus === 'failed' || providerStatus === 'error'
+        ? 'failed'
+        : providerStatus === 'stopped' || providerStatus === 'cancelled' || providerStatus === 'canceled' ||
+            providerStatus === 'interrupted' || providerStatus === 'killed'
+          ? 'stopped'
+          : undefined
+    if (!status) return []
     const summary = stringValue(message.summary)
     return [base(ctx, {
       kind: 'tool',
@@ -225,6 +233,7 @@ function normalizeAgentTaskMessage(
       runtimeMetadata: {
         source,
         agentStatus: status,
+        ...(providerStatus !== status ? { providerAgentStatus: providerStatus } : {}),
         ...(identity.taskId ? { taskId: identity.taskId } : {})
       }
     })]

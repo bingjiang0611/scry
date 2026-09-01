@@ -549,6 +549,31 @@ describe('normalizeSdkMessage', () => {
     }, c)).toEqual([])
   })
 
+  it.each(['cancelled', 'canceled', 'interrupted', 'killed'])('把 Provider Agent 终态 %s 归一为 stopped，并保留原始状态', (providerStatus) => {
+    const c = ctx()
+    normalizeSdkMessage({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'agent-cancel', name: 'Agent', input: { description: '后台任务' } }] }
+    }, c)
+    normalizeSdkMessage({
+      type: 'system', subtype: 'task_started', task_id: 'task-cancel', tool_use_id: 'agent-cancel'
+    }, c)
+
+    const [terminal] = normalizeSdkMessage({
+      type: 'system', subtype: 'task_notification', task_id: 'task-cancel', status: providerStatus, summary: '已结束'
+    }, c)
+
+    expect(terminal).toMatchObject({
+      kind: 'tool', stage: 'tool_result', tool: 'Agent', toolUseId: 'agent-cancel', isError: false,
+      runtimeMetadata: {
+        source: 'provider_task_notification',
+        agentStatus: 'stopped',
+        providerAgentStatus: providerStatus,
+        taskId: 'task-cancel'
+      }
+    })
+  })
+
   it('保留 remote_launched 判别状态', () => {
     const c = ctx()
     normalizeSdkMessage({

@@ -1,4 +1,4 @@
-import { forkSession, getSessionMessages, qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
+import { forkSession, getSessionMessages, qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SDKUserMessage, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
 import { spawn } from 'node:child_process'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
@@ -166,6 +166,40 @@ function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
   }
 }
 
+function livePrompt(text: string): { stream: AsyncIterable<SDKUserMessage>; release: () => void } {
+  let release = (): void => {}
+  const wait = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return {
+    stream: (async function* (): AsyncIterable<SDKUserMessage> {
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text }] },
+        parent_tool_use_id: null
+      } as SDKUserMessage
+      await wait
+    })(),
+    release
+  }
+}
+
+function qoderSdkMessage(message: unknown): unknown {
+  const raw = message as Record<string, unknown>
+  if (raw?.type !== 'assistant') return message
+  const assistant = raw.message as Record<string, unknown> | undefined
+  if (!Array.isArray(assistant?.content)) return message
+  let changed = false
+  const content = assistant.content.map((block) => {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) return block
+    const item = block as Record<string, unknown>
+    if (item.type !== 'tool_use' || item.name !== 'local_agent') return block
+    changed = true
+    return { ...item, name: 'Agent' }
+  })
+  return changed ? { ...raw, message: { ...assistant, content } } : message
+}
+
 function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
   if (!pid) return
   try {
@@ -220,8 +254,8 @@ function qoderOptions(
         SCRY_MANAGED_RUN_ID: managedIdentity.runId,
         SCRY_MANAGED_PROMPT_HASH: managedIdentity.promptHash
       } : {}),
-      // Scry owns cancellation through the run's AbortController. Let Qoder wait for
-      // background shell tasks instead of force-stopping them after ten minutes.
+      // Scry owns cancellation through the run's AbortController. Disable Qoder's
+      // overall print-mode ceiling for background shell, Agent and workflow tasks.
       QODERCLI_PRINT_BG_WAIT_CEILING_MS: '0'
     },
     ...permissions,
@@ -365,6 +399,53 @@ export function parseQoderBackgroundTaskFailures(runId: string, text: string, se
     })
   }
   return events
+}
+
+export function parseQoderSubagentTerminals(runId: string, text: string, sessionId?: string): TraceEvent[] {
+  const events: TraceEvent[] = []
+  for (const line of text.split('\n')) {
+    const match = line.match(/^(\S+)\s+\S+\s+debug\.message\s+\[SubagentRun\]\s+error\s+(.+)$/)
+    if (!match) continue
+    const detail = fields(match[2])
+    if (sessionId && detail.sessionId !== sessionId) continue
+    if (!detail.parentToolUseId || !detail.taskId) continue
+    const stopped = /AbortError|cancelled|canceled|closing|SIGTERM|terminated/i.test(match[2])
+    const agentStatus = stopped ? 'stopped' : 'failed'
+    const output = stopped ? '后台 Agent 已停止' : '后台 Agent 失败'
+    events.push({
+      id: `qoder-log:agent:${detail.taskId}:${detail.parentToolUseId}:response`,
+      runId,
+      ts: new Date(match[1]).toISOString(),
+      kind: 'tool',
+      stage: 'tool_result',
+      tool: 'Agent',
+      toolUseId: detail.parentToolUseId,
+      text: output,
+      output,
+      isError: !stopped,
+      runtimeMetadata: {
+        source: 'qoder_cli_log',
+        agentStatus,
+        taskId: detail.taskId,
+        qoderAgentId: detail.agentId
+      }
+    })
+  }
+  return events
+}
+
+function observedAgentStatus(event: TraceEvent): string | undefined {
+  const status = event.runtimeMetadata?.agentStatus
+  return typeof status === 'string' ? status : undefined
+}
+
+function isAgentLaunchStatus(status: string | undefined): boolean {
+  return status === 'async_launched' || status === 'remote_launched' || status === 'running' || status === 'in_progress'
+}
+
+function isAgentTerminalStatus(status: string | undefined): boolean {
+  return status === 'completed' || status === 'failed' || status === 'error' || status === 'stopped' ||
+    status === 'cancelled' || status === 'canceled' || status === 'interrupted' || status === 'killed'
 }
 
 function hookFingerprint(event: TraceEvent): string {
@@ -647,7 +728,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 externalSessionId = raw.session_id
                 request.onExternalSessionId?.(raw.session_id)
               }
-              for (const event of normalizeSdkMessage(message, ctx)) request.emit(qoderTrace(event))
+              for (const event of normalizeSdkMessage(qoderSdkMessage(message), ctx)) request.emit(qoderTrace(event))
             }
           })()
           let providerResult: ProviderRunResult
@@ -718,8 +799,45 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       })
       let providerFailureSeen = false
       let streamedText = ''
+      let releaseProviderPrompt = (): void => {}
       const sdkHooks: TraceEvent[] = []
+      const activeAgentCalls = new Set<string>()
+      const terminalAgentCalls = new Set<string>()
       const ctx: NormalizeCtx = { runId: request.runId, cwd: request.cwd, newId, now: () => new Date().toISOString() }
+      const observeAgentEvent = (event: TraceEvent): void => {
+        if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
+        const status = observedAgentStatus(event)
+        if (event.stage === 'agent_activity' || isAgentLaunchStatus(status)) {
+          activeAgentCalls.add(event.toolUseId)
+          return
+        }
+        if (event.tool === 'Agent' && event.stage === 'tool_result' && isAgentTerminalStatus(status)) {
+          activeAgentCalls.delete(event.toolUseId)
+          terminalAgentCalls.add(event.toolUseId)
+        }
+      }
+      const emitAgentFallback = (event: TraceEvent): void => {
+        if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
+        observeAgentEvent(event)
+        request.emit(event)
+      }
+      const settleUnreportedAgents = (agentStatus: 'failed' | 'stopped', source: string): void => {
+        for (const toolUseId of activeAgentCalls) {
+          emitAgentFallback({
+            id: `qoder-fallback:agent:${request.runId}:${toolUseId}:${agentStatus}`,
+            runId: request.runId,
+            ts: new Date().toISOString(),
+            kind: 'tool',
+            stage: 'tool_result',
+            tool: 'Agent',
+            toolUseId,
+            text: agentStatus === 'stopped' ? '后台 Agent 已停止' : '后台 Agent 在 Qoder 结束前未返回终态',
+            output: agentStatus === 'stopped' ? '后台 Agent 已停止' : '后台 Agent 在 Qoder 结束前未返回终态',
+            isError: agentStatus === 'failed',
+            runtimeMetadata: { source, agentStatus }
+          })
+        }
+      }
       const promise: Promise<ProviderRunResult> = (async () => {
         const forkBaseline = new Set<string>()
         if (request.resume) {
@@ -734,8 +852,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         const providerPrompt = request.cwd && projectCommandMatch(request.prompt)
           ? await expandQoderProjectCommand(request.prompt, request.cwd)
           : request.prompt
+        const prompt = livePrompt(providerPrompt)
+        releaseProviderPrompt = prompt.release
         q = query({
-          prompt: providerPrompt,
+          // Keep stdin open after the root result while Qoder-owned background Agents
+          // are active. Otherwise qodercli enters its bounded print-mode drain and can
+          // abandon a long-running child before its task_notification reaches Scry.
+          prompt: prompt.stream,
           options: {
             ...qoderOptions(
               request.cwd,
@@ -860,8 +983,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                   if (raw.type === 'result' && (raw.subtype !== 'success' || raw.is_error === true)) {
                     providerStatus = 'failed'
                   }
-                  for (const rawEvent of normalizeSdkMessage(message, ctx)) {
+                  for (const rawEvent of normalizeSdkMessage(qoderSdkMessage(message), ctx)) {
                     const event = qoderTrace(rawEvent)
+                    observeAgentEvent(event)
                     if (event.kind === 'harness' && event.stage === 'result' && event.isError) providerFailureSeen = true
                     if (event.kind === 'hook') sdkHooks.push(event)
                     if (event.kind === 'model' && event.stage === 'text_delta') {
@@ -876,6 +1000,10 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                       request.emit(event)
                     }
                   }
+                  // A root result is terminal only when every observed async Agent has
+                  // a terminal notification. The next root result after the last child
+                  // notification releases the live input stream.
+                  if (raw.type === 'result' && activeAgentCalls.size === 0) releaseProviderPrompt()
                 }
               })(),
               unexpectedExit
@@ -885,6 +1013,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           }
         } finally {
           streamSettled = true
+          releaseProviderPrompt()
           if (exitTimer) clearTimeout(exitTimer)
           try {
             await q.close()
@@ -900,6 +1029,14 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             const backgroundFailures = parseQoderBackgroundTaskFailures(request.runId, log, externalSessionId)
             for (const event of backgroundFailures) request.emit(event)
             if (backgroundFailures.length > 0) providerStatus = 'failed'
+            const subagentTerminals = parseQoderSubagentTerminals(request.runId, log, externalSessionId)
+            const missingSubagentTerminals = subagentTerminals.filter(
+              (event) => event.toolUseId && !terminalAgentCalls.has(event.toolUseId)
+            )
+            for (const event of missingSubagentTerminals) emitAgentFallback(event)
+            if (!stopped && missingSubagentTerminals.some((event) => observedAgentStatus(event) !== 'completed')) {
+              providerStatus = 'failed'
+            }
             if (logHooksEnabled) {
               const fallback = parseQoderHookLog(request.runId, log, externalSessionId)
               for (const event of qoderHookFallbackOnly(sdkHooks, fallback)) request.emit(event)
@@ -916,6 +1053,14 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           }
         } else if ((request.managedRecorder === true || logHooksEnabled) && !qoderPid) {
           lastHookFallbackError = 'Qoder log fallback could not identify the current CLI process'
+        }
+        if (activeAgentCalls.size > 0) {
+          if (stopped) {
+            settleUnreportedAgents('stopped', 'qoder_host_interruption')
+          } else {
+            settleUnreportedAgents('failed', 'qoder_transport_ended')
+            providerStatus = 'failed'
+          }
         }
         if (externalSessionId) {
           try {
@@ -940,6 +1085,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       })()
       const interrupt = (): void => {
         stopped = true
+        releaseProviderPrompt()
         controller.abort()
         void q?.interrupt().catch(() => {})
       }
