@@ -33,6 +33,17 @@ describe('runtime CLI discovery constraints', () => {
     expect(Date.now() - started).toBeLessThan(1_000)
   })
 
+  it('版本探测超时会收敛为 unavailable，而不是让完整扫描一直等待', async () => {
+    const probe = await probeCliVersion('/bin/sh', ['-c', "trap '' TERM; sleep 60"], { timeout: 50 })
+    expect(probe).toMatchObject({
+      health: {
+        state: 'unavailable',
+        transport: 'CLI version probe',
+        lastError: '版本探测超时（0.05s）'
+      }
+    })
+  })
+
   it('版本探测被 SIGKILL 时把已安装 CLI 标记为不可用', async () => {
     const probe = await probeCliVersion('/bin/sh', ['-c', 'kill -9 $$'])
     expect(probe).toMatchObject({

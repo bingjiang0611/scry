@@ -183,6 +183,7 @@ React renderer
 ## 测试约定
 
 - 测试与实现 colocate 为 `*.test.ts` / `*.test.tsx`；Provider wire 差异使用 fixture/contract test，不用 shared mock 抹平。
+- Provider 发现链路同时覆盖 fast/full 两阶段探测、版本探测超时收敛和已保存的自定义 Profile；扫描中不展示中间卡片，完整结果一次展示。
 - trust、permission、path、IPC 和 deletion 逻辑同时测试 allow 与 deny/mismatch/stale 路径。
 - evidence 测试要覆盖真实空值、不可观测、partial、重复和乱序，不只测完整 happy path。
 - Recorder 测试覆盖 crash fence、原子写、lock recovery、duplicate event/Stop、cursor 与 corrupt record。
