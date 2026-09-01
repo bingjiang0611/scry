@@ -22,7 +22,10 @@ function normalizeStrongSpacing(segment: string): string {
     /(^|[^\\*])\*\*([ \t]*)([^*\n]*?\S)([ \t]*)\*\*/g,
     (match, prefix: string, _leading: string, content: string, trailing: string, offset: number, source: string) => {
       const next = source[offset + match.length]
-      const needsSeparator = !!trailing || (!!next && /[\p{L}\p{N}]/u.test(next))
+      const contentEnd = content.at(-1) ?? ''
+      const needsSeparator = !!trailing || (
+        !!next && /[\p{L}\p{N}]/u.test(next) && /[\p{P}\p{S}]/u.test(contentEnd)
+      )
       return `${prefix}**${content}**${needsSeparator ? ' ' : ''}`
     }
   )
