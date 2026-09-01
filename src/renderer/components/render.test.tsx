@@ -2153,21 +2153,36 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         path: '/usr/local/bin/claude'
       }]
     })
-    expect(fastHtml).toContain('1/1 个 Provider 可用')
-    expect(fastHtml).toContain('正在补齐版本信息')
-    expect(fastHtml).toContain('data-health="available"')
-    // 扫描中只影响「重新扫描」按钮自身（扫描中… + data-busy），
-    // 不能把已知 Provider 的状态降成“探测中”
+    // 快速 PATH 探测可能已经返回，但完整版本/descriptor 探测完成前不展示中间结果。
+    expect(fastHtml).toContain('aria-busy="true"')
+    expect(fastHtml).toContain('data-tone="neutral"')
+    expect(fastHtml).toContain('正在检测本机 Provider')
+    expect(fastHtml).toContain('正在探测本机 agent CLI')
     expect(fastHtml).toContain('data-busy="true"')
     expect(fastHtml).toContain('扫描中…')
-    expect(fastHtml).not.toContain('探测中')
-    expect(fastHtml).not.toContain('状态未知')
+    expect(fastHtml).not.toContain('1/1 个 Provider 可用')
+    expect(fastHtml).not.toContain('data-health="available"')
+    expect(fastHtml).not.toContain('/usr/local/bin/claude')
 
     const completeHtml = renderWelcome({ agentScanning: false })
     expect(completeHtml).toContain('data-tone="warn"')
     expect(completeHtml).toContain('未检测到可用 Provider')
     expect(completeHtml).toContain('完整探测未返回可用 agent CLI')
     expect(completeHtml).not.toContain('Provider 就绪')
+
+    const detectedHtml = renderWelcome({
+      agentScanning: false,
+      agents: [{
+        id: 'claude',
+        name: 'Claude Code',
+        bin: 'claude',
+        path: '/usr/local/bin/claude'
+      }]
+    })
+    expect(detectedHtml).toContain('1/1 个 Provider 可用')
+    expect(detectedHtml).toContain('data-health="available"')
+    expect(detectedHtml).toContain('/usr/local/bin/claude')
+    expect(detectedHtml).not.toContain('aria-busy="true"')
   })
 
   it('ChatView 将运行期细节收敛为可用 / 不可用两种 executable 状态', () => {
