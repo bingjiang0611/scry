@@ -1020,11 +1020,15 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 .overview-dossier .overview-metric > span { margin-bottom: 9px; font-size: 10px; }
-.overview-dossier .overview-metric > strong { font-size: 17px; letter-spacing: -0.025em; }
+.overview-dossier .overview-metric > strong {
+  font-size: clamp(14px, 4.2cqi, 17px);
+  letter-spacing: -0.025em;
+}
 .overview-dossier .overview-metric > small { margin-top: 8px; font-size: 10.5px; line-height: 1.4; }
 
 .overview-dossier .overview-metric-foot {
   min-height: 41px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0 12px 12px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -1596,6 +1600,45 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   .evidence-segments .segment-ledger > .segment-row { grid-template-columns: minmax(130px, 1fr) 64px 100px; }
   .evidence-segments .segment-row > time,
   .evidence-segments .segment-row > b:nth-of-type(2) { display: none; }
+}
+
+@container (max-width: 400px) {
+  .overview-dossier .ctx-gauge {
+    min-height: 80px;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 11px;
+    padding: 11px 12px;
+  }
+
+  .overview-dossier .ctx-gauge .ring {
+    width: 48px;
+    height: 48px;
+  }
+
+  .overview-dossier .overview-metric-grid { margin: 10px 10px 0; }
+
+  .overview-dossier .overview-metric {
+    min-height: 96px;
+    padding: 9px;
+  }
+
+  .overview-dossier .overview-metric > span { margin-bottom: 7px; }
+  .overview-dossier .overview-metric > strong { line-height: 1.15; }
+  .overview-dossier .overview-metric > small {
+    overflow: visible;
+    margin-top: 7px;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .overview-dossier .overview-metric-foot {
+    margin: 0 10px 10px;
+  }
+
+  .overview-dossier .overview-metric-foot span {
+    padding-inline: 5px;
+    font-size: 10.5px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
