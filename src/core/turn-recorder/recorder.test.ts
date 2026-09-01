@@ -2360,7 +2360,7 @@ describe('nested Git turn diff', () => {
     ])
   }, 35_000)
 
-  it('即使接入方未忽略 .scry，Recorder 自身文件也不污染 Diff', async () => {
+  it('接入方通过 Git exclude 忽略 .scry 时仍能采集业务 Diff', async () => {
     const root = await workspace()
     await pexecFile('git', ['init'], { cwd: root })
     await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
@@ -2368,6 +2368,7 @@ describe('nested Git turn diff', () => {
     await writeFile(join(root, 'a.txt'), 'before\n')
     await pexecFile('git', ['add', 'a.txt'], { cwd: root })
     await pexecFile('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'baseline'], { cwd: root })
+    await appendFile(join(root, '.git', 'info', 'exclude'), '\n.scry/\n')
     const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
     config.capture.diff = true
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
