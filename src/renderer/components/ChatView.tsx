@@ -176,22 +176,23 @@ export function ChatView({
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
   const selectedAgentName = selectedAgent?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  const agentGroups = groupAgentsByProvider(agents)
+  // PATH 快速探测与完整版本/descriptor 探测会先后返回。扫描期间不渲染中间结果，
+  // 避免 Provider 卡片在冷启动或重新扫描时先出现、随后整组刷新。
+  const providerAgents = agentScanning ? [] : agents
+  const agentGroups = groupAgentsByProvider(providerAgents)
   const unavailableProviderCount = agentGroups.filter((group) =>
     group.agents.every((agent) => agent.health?.state === 'unavailable')
   ).length
-  const unavailableProfileCount = agents.filter((agent) => agent.health?.state === 'unavailable').length
+  const unavailableProfileCount = providerAgents.filter((agent) => agent.health?.state === 'unavailable').length
   const availableProviderCount = agentGroups.length - unavailableProviderCount
   const providerReadiness = agentGroups.length > 0
     ? unavailableProviderCount === 0
       ? {
           tone: unavailableProfileCount > 0 ? 'warn' : 'ok',
           summary: `${availableProviderCount}/${agentGroups.length} 个 Provider 可用`,
-          detail: agentScanning
-            ? '已发现本机可执行文件；正在补齐版本信息'
-            : unavailableProfileCount > 0
-              ? `${unavailableProfileCount} 个 Profile 不可用；其他 Profile 仍可使用`
-              : '本机可执行文件已确认；账号与用量状态在运行后采集'
+          detail: unavailableProfileCount > 0
+            ? `${unavailableProfileCount} 个 Profile 不可用；其他 Profile 仍可使用`
+            : '本机可执行文件已确认；账号与用量状态在运行后采集'
         }
       : {
           tone: 'warn',
@@ -308,7 +309,7 @@ export function ChatView({
                 </p>
               </header>
 
-              <section className="welcome-provider-field" aria-label="Provider">
+              <section className="welcome-provider-field" aria-label="Provider" aria-busy={agentScanning}>
                 <div className="welcome-provider-head" data-tone={providerReadiness.tone}>
                   <div role="status">
                     <span className="welcome-ready-title">
@@ -422,7 +423,7 @@ export function ChatView({
                       </button>
                     )
                   })}
-                  {agents.length === 0 && (
+                  {providerAgents.length === 0 && (
                     <div className="welcome-list-empty" role="status">
                       {agentScanning
                         ? '正在探测本机 agent CLI…'
