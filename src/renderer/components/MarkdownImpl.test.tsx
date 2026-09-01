@@ -23,9 +23,9 @@ describe('MarkdownImpl trust boundary', () => {
   })
 
   it('repairs common model-authored strong spacing without touching code', () => {
-    const source = '**我的判断： **最值得关注。\n\n**结论：**继续优化。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
+    const source = '**我的判断： **最值得关注。\n\n**结论：**继续优化。\n\n先**检查**项目。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
     expect(normalizeMarkdownForDisplay(source)).toBe(
-      '**我的判断：** 最值得关注。\n\n**结论：** 继续优化。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
+      '**我的判断：** 最值得关注。\n\n**结论：** 继续优化。\n\n先**检查**项目。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
     )
 
     const html = renderToStaticMarkup(<MarkdownImpl>{source}</MarkdownImpl>)
