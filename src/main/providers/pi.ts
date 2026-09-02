@@ -464,6 +464,18 @@ async function proveExplicitPiSkill(rpc: PiRpcProcess, request: ProviderRunReque
   })
 }
 
+function piRpcArgs(options: { noSession?: boolean; session?: string; offline?: boolean } = {}): string[] {
+  // Pi project trust is independent from Scry's full-access run mode. Do not pass
+  // --approve/--no-approve: RPC should honor Pi's saved/default project trust so
+  // catalogs and runs agree without silently trusting repository-controlled resources.
+  return [
+    '--mode', 'rpc',
+    ...(options.noSession ? ['--no-session'] : []),
+    ...(options.session ? ['--session', options.session] : []),
+    ...(options.offline ? ['--offline'] : [])
+  ]
+}
+
 async function withPiRpc<T>(
   profile: PiAgentProfile,
   cwd: string | undefined,
@@ -479,7 +491,7 @@ async function withPiRpc<T>(
 }
 
 export async function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiProbe> {
-  return withPiRpc(profile, cwd, ['--mode', 'rpc', '--no-session', '--no-approve', '--offline'], async (rpc) => {
+  return withPiRpc(profile, cwd, piRpcArgs({ noSession: true, offline: true }), async (rpc) => {
     const [state, models, levels, commands] = await Promise.all([
       rpc.send({ type: 'get_state' }),
       rpc.send({ type: 'get_available_models' }),
@@ -687,7 +699,7 @@ async function runPiAgent(
       nextAction: '在权限选择器中选择“本机完全访问”；Pi 没有可映射的内置沙箱或审批模式'
     })
   }
-  const args = ['--mode', 'rpc', '--approve', ...(request.resume ? ['--session', request.resume] : [])]
+  const args = piRpcArgs({ session: request.resume })
   const rpc = PiRpcProcess.start(profile, args, request.cwd)
   state.rpc = rpc
   const usage: UsageAggregate = {
@@ -1031,7 +1043,7 @@ export function createPiAdapter(options: {
         return withPiRpc(
           profile,
           request.cwd,
-          ['--mode', 'rpc', '--approve', '--session', request.sourceSessionId],
+          piRpcArgs({ session: request.sourceSessionId }),
           async (rpc) => {
             const snapshot = await rpc.send({ type: 'get_entries' })
             const entries = record(snapshot.data).entries
