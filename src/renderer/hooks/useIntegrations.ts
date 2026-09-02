@@ -22,6 +22,7 @@ export const capabilityMatchesContext = <T>(
   context: ProviderContext
 ): capability is CapabilityEnvelope<T> =>
   capability !== null && contextKey(capability) === contextKey(context)
+export const capabilityRows = <T>(capability: CapabilityEnvelope<T[]>): T[] => capability.data ?? []
 const modelKey = (model: AgentModelRef): string => `${model.providerId ?? ''}\0${model.id}`
 const RUN_CONTROL_PREFERENCES_KEY = 'scry:run-control-preferences:v1'
 const PROVIDER_IDS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
@@ -622,9 +623,12 @@ export function useIntegrations(cwd: string | null) {
       const result = await window.scry.listSkills(context)
       if (seq !== skillRefreshRequestSeq.current || contextKey(context) !== contextKey(providerContextRef.current)) return
       setSkillCapability(result)
-      if (result.data) setSkills(result.data)
+      setSkills(capabilityRows(result))
     } catch {
-      // 后台刷新失败时保留当前缓存；用户仍可再次点刷新。
+      if (seq === skillRefreshRequestSeq.current && contextKey(context) === contextKey(providerContextRef.current)) {
+        setSkills([])
+        setSkillCapability(null)
+      }
     } finally {
       if (seq === skillRefreshRequestSeq.current) setSkillsRefreshing(false)
     }
@@ -909,7 +913,7 @@ export function useIntegrations(cwd: string | null) {
       .then((skillResult) => {
         if (seq !== integrationRequestSeq.current || contextKey(providerContext) !== contextKey(providerContextRef.current)) return
         setSkillCapability(skillResult)
-        if (skillResult.data) setSkills(skillResult.data)
+        setSkills(capabilityRows(skillResult))
       })
       .catch(() => {})
       .finally(() => {

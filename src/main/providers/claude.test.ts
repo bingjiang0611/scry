@@ -205,6 +205,54 @@ describe('Claude provider adapter', () => {
     expect(runner.captureInit).not.toHaveBeenCalled()
   })
 
+  it('invalidates the same-cwd native command cache for a new session', async () => {
+    const control = (name: string) => ({
+      supportedModels: vi.fn().mockResolvedValue([]),
+      supportedCommands: vi.fn().mockResolvedValue([{ name, description: name, argumentHint: '' }]),
+      close: vi.fn()
+    })
+    sdk.query.mockReturnValueOnce(control('old-command')).mockReturnValueOnce(control('new-command'))
+    const adapter = createClaudeAdapter('/tmp/scry-home')
+    const context = { providerId: 'claude' as const, cwd: '/repo' }
+
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({ data: [expect.objectContaining({ name: 'old-command' })] })
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({ data: [expect.objectContaining({ name: 'old-command' })] })
+    await adapter.invalidateContext?.(context)
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({ data: [expect.objectContaining({ name: 'new-command' })] })
+
+    expect(sdk.query).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let an in-flight pre-invalidation command read refill the same-cwd cache', async () => {
+    let resolveOldCommands: (commands: Array<{ name: string; description: string; argumentHint: string }>) => void = () => {}
+    const oldCommands = new Promise<Array<{ name: string; description: string; argumentHint: string }>>((resolve) => {
+      resolveOldCommands = resolve
+    })
+    const control = (commands: Promise<Array<{ name: string; description: string; argumentHint: string }>>) => ({
+      supportedModels: vi.fn().mockResolvedValue([]),
+      supportedCommands: vi.fn().mockReturnValue(commands),
+      close: vi.fn()
+    })
+    sdk.query
+      .mockReturnValueOnce(control(oldCommands))
+      .mockReturnValueOnce(control(Promise.resolve([{ name: 'fresh-command', description: 'fresh', argumentHint: '' }])))
+    const adapter = createClaudeAdapter('/tmp/scry-home')
+    const context = { providerId: 'claude' as const, cwd: '/repo' }
+
+    const staleRead = adapter.commands!.list(context)
+    await vi.waitFor(() => expect(sdk.query).toHaveBeenCalledTimes(1))
+    await adapter.invalidateContext?.(context)
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({
+      data: [expect.objectContaining({ name: 'fresh-command' })]
+    })
+    resolveOldCommands([{ name: 'stale-command', description: 'stale', argumentHint: '' }])
+    await expect(staleRead).resolves.toMatchObject({ data: [expect.objectContaining({ name: 'stale-command' })] })
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({
+      data: [expect.objectContaining({ name: 'fresh-command' })]
+    })
+    expect(sdk.query).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the declared read mode when the native command catalog is temporarily unavailable', async () => {
     sdk.query.mockReturnValue({
       supportedModels: vi.fn().mockRejectedValue(new Error('control process stopped')),

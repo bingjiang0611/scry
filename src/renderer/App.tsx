@@ -58,6 +58,15 @@ export function providerContextCacheKey(context: ProviderContext): string {
   return `${context.providerId}\0${context.agentProfileId ?? ''}\0${context.cwd ?? ''}`
 }
 
+export function failedSlashCatalog<T, V>(
+  cache: Map<string, V>,
+  key: string,
+  error: unknown
+): { commands: T[]; reason: string } {
+  cache.delete(key)
+  return { commands: [], reason: error instanceof Error ? error.message : String(error) }
+}
+
 interface ChatScrollBox {
   scrollHeight: number
   scrollTop: number
@@ -358,9 +367,22 @@ export async function restoreFocusedRunSelection(
   return true
 }
 
+interface ProviderCatalogRefreshEffects {
+  invalidateProviderContext?: () => Promise<unknown> | unknown
+  refreshSkills: () => Promise<unknown> | unknown
+  retrySlash: () => void
+}
+
+export async function applyProviderCatalogRefresh(effects: ProviderCatalogRefreshEffects): Promise<void> {
+  await effects.invalidateProviderContext?.()
+  await effects.refreshSkills()
+  effects.retrySlash()
+}
+
 interface NewConversationEffects {
   clearTurns: (options?: { preserveRunning?: boolean }) => void
   newSession: () => Promise<boolean>
+  refreshProviderCatalogs?: () => Promise<void> | void
   setActiveSessionId: (sessionId: string | null) => void
   setView: (view: AppView) => void
   focusComposer: () => void
@@ -371,6 +393,8 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
   if (effects.isCurrent && !effects.isCurrent()) return
   effects.clearTurns()
   await effects.newSession()
+  if (effects.isCurrent && !effects.isCurrent()) return
+  await effects.refreshProviderCatalogs?.()
   if (effects.isCurrent && !effects.isCurrent()) return
   effects.setActiveSessionId(null)
   effects.setView('chat')
@@ -551,9 +575,19 @@ export function App() {
   // 输入命令 token 时总是开菜单：加载中/清单空/无匹配 都摊开显示，不再静默藏掉
   const slashOpen = slashToken != null && !slashHidden
   const retrySlash = (): void => {
+    slashRequestSeqRef.current += 1
     slashCacheRef.current.delete(integrationContextKeyRef.current)
+    setSlashCmds([])
+    setSlashReason(null)
     setSlashRefreshKey((key) => key + 1)
   }
+  const refreshProviderCatalogs = (): Promise<void> => applyProviderCatalogRefresh({
+    invalidateProviderContext: typeof window.scry.invalidateProviderContext === 'function'
+      ? () => window.scry.invalidateProviderContext(integrations.providerContext)
+      : undefined,
+    refreshSkills: integrations.refreshSkills,
+    retrySlash
+  })
 
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachments
@@ -861,16 +895,23 @@ export function App() {
     Promise.resolve()
       .then(() => fn(context))
       .then((result) => {
+        if (seq !== slashRequestSeqRef.current || requestKey !== integrationContextKeyRef.current) return
         slashCacheRef.current.set(requestKey, {
           commands: result.data ?? [],
           reason: result.reason ?? null
         })
-        if (seq !== slashRequestSeqRef.current || requestKey !== integrationContextKeyRef.current) return
         setSlashCmds(result.data ?? [])
         setSlashReason(result.reason ?? null)
       })
       .catch((error) => {
-        if (seq === slashRequestSeqRef.current) setSlashReason(String((error as Error).message))
+        if (seq !== slashRequestSeqRef.current || requestKey !== integrationContextKeyRef.current) return
+        const failure = failedSlashCatalog<SlashCmd, { commands: SlashCmd[]; reason: string | null }>(
+          slashCacheRef.current,
+          requestKey,
+          error
+        )
+        setSlashCmds(failure.commands)
+        setSlashReason(failure.reason)
       })
       .finally(() => {
         if (seq === slashRequestSeqRef.current) setSlashLoading(false)
@@ -1000,6 +1041,7 @@ export function App() {
     await applyNewConversationEffects({
       clearTurns: session.clearTurns,
       newSession: () => window.scry.newSession(integrations.providerContext),
+      refreshProviderCatalogs,
       setActiveSessionId: selectSessionId,
       setView,
       focusComposer: () => window.setTimeout(() => taRef.current?.focus(), 0),
@@ -1132,9 +1174,7 @@ export function App() {
 
   const openSkills = (): void => {
     setShowSkills(true)
-    if (!integrations.skillCapability && !integrations.skillsRefreshing) {
-      void integrations.refreshSkills()
-    }
+    void refreshProviderCatalogs()
   }
   const openMcp = (): void => {
     setShowMcp(true)
@@ -1482,7 +1522,7 @@ export function App() {
               skills={integrations.skills}
               capability={integrations.skillCapability}
               refreshing={integrations.skillsRefreshing}
-              onRefresh={() => { void integrations.refreshSkills() }}
+              onRefresh={() => { void refreshProviderCatalogs() }}
               onClose={() => setShowSkills(false)}
             />
           )}

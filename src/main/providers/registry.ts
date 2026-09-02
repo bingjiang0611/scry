@@ -106,6 +106,11 @@ export class ProviderRegistry {
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的 Skill 读取接口'))
   }
 
+  invalidateContext(context: ProviderContext): Promise<void> | void {
+    if (this.disabledProviders.has(context.providerId)) return
+    return this.get(context.providerId).invalidateContext?.(context)
+  }
+
   mcpSnapshot(
     context: ProviderContext,
     refresh = false,

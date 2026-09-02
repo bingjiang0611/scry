@@ -615,6 +615,7 @@ export function createCodexAdapter(
   const clientIdleTimers = new Map<CodexAppServerClient, ReturnType<typeof setTimeout>>()
   const CLIENT_IDLE_MS = 60_000
   const modelCache = new Map<string, { data: AgentRunControlCatalog; observedAt: number }>()
+  const forcedSkillReloads = new Map<string, number>()
   let lastClient: CodexAppServerClient | null = null
   let lastOkAt: number | undefined
   let lastErrorAt: number | undefined
@@ -795,10 +796,13 @@ export function createCodexAdapter(
   }
   const skills = {
     list: async (context: ProviderContext, forceReload = false) => {
+      const key = context.cwd ?? ''
+      const reloadGeneration = forcedSkillReloads.get(key)
+      const reload = forceReload || reloadGeneration != null
       try {
         const response = await request<{ data?: Array<{ cwd?: string; skills?: unknown[]; errors?: unknown[] }> }>('skills/list', {
           cwds: context.cwd ? [context.cwd] : [],
-          forceReload
+          forceReload: reload
         }, context.cwd)
         const group = response.data?.find((item) => !context.cwd || item.cwd === context.cwd) ?? response.data?.[0]
         const data: SkillMeta[] = (group?.skills ?? []).map((raw) => {
@@ -817,6 +821,10 @@ export function createCodexAdapter(
           : capabilityReady(context, 'read' as const, data)
       } catch (error) {
         return capabilityUnknown<SkillMeta[]>(context, 'read', String((error as Error).message))
+      } finally {
+        if (reloadGeneration != null && forcedSkillReloads.get(key) === reloadGeneration) {
+          forcedSkillReloads.delete(key)
+        }
       }
     }
   }
@@ -1511,6 +1519,11 @@ export function createCodexAdapter(
         getProviderTurnId: () => turnId
       }
     },
+    invalidateContext(context) {
+      const key = context.cwd ?? ''
+      forcedSkillReloads.set(key, (forcedSkillReloads.get(key) ?? 0) + 1)
+      modelCache.delete(key)
+    },
     skills,
     commands: {
       list: async (context): Promise<CapabilityEnvelope<ProviderCommand[]>> => {
@@ -1738,6 +1751,7 @@ export function createCodexAdapter(
       await Promise.all([...clients.values()].map((client) => client.shutdown()))
       clients.clear()
       modelCache.clear()
+      forcedSkillReloads.clear()
       lastClient = null
       isolatedHome?.cleanup()
       isolatedHome = undefined

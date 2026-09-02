@@ -68,6 +68,20 @@ describe('ProviderRegistry', () => {
     })
   })
 
+  it('invalidates only the selected provider context', async () => {
+    const invalidateContext = vi.fn()
+    const claude = adapter('claude')
+    claude.invalidateContext = invalidateContext
+    const codex = adapter('codex')
+    const registry = new ProviderRegistry([claude, codex])
+    const context = { providerId: 'claude' as const, cwd: '/repo' }
+
+    await registry.invalidateContext(context)
+
+    expect(invalidateContext).toHaveBeenCalledOnce()
+    expect(invalidateContext).toHaveBeenCalledWith(context)
+  })
+
   it('routes MCP authentication through the exact provider facet', async () => {
     const reauthenticate = vi.fn().mockResolvedValue({
       providerId: 'codex',

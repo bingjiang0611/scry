@@ -1347,10 +1347,12 @@ handleTrusted('agent:setCwd', (_e, dir: string | null) => {
   return cwd ?? null
 })
 
-handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
+handleTrusted('agent:newSession', async (_event, context: ProviderContext) => {
   dockBadge.view(null, Boolean(win?.isFocused()))
   const cwd = context?.cwd ?? currentCwd
   if (context?.providerId) {
+    const normalizedContext = { ...context, cwd }
+    await providerRegistry.invalidateContext(normalizedContext)
     const key = providerContextKey(context.providerId, cwd ?? '', context.agentProfileId)
     bumpSessionRevision(key)
     sessionByContext.delete(key)
@@ -1360,6 +1362,11 @@ handleTrusted('agent:newSession', (_event, context: ProviderContext) => {
   return true
 })
 
+handleTrusted('agent:invalidateProviderContext', async (_event, context: ProviderContext) => {
+  const normalizedContext = { ...context, cwd: context.cwd ?? currentCwd }
+  await providerRegistry.invalidateContext(normalizedContext)
+  return true
+})
 handleTrusted('agent:listSkills', (_e, context: ProviderContext) =>
   withProviderOperation(context.providerId, () => providerRegistry.listSkills(context), context.agentProfileId)
 )

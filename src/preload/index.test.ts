@@ -54,6 +54,7 @@ const invokeChannels = {
   terminalClose: 'terminal:close',
   setCwd: 'agent:setCwd',
   newSession: 'agent:newSession',
+  invalidateProviderContext: 'agent:invalidateProviderContext',
   listSessions: 'agent:listSessions',
   listProjects: 'agent:listProjects',
   setProjectPinned: 'agent:setProjectPinned',
