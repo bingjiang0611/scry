@@ -170,6 +170,41 @@ describe('Qoder provider adapter', () => {
     }
   })
 
+  it('discovers project-only .mcp.json and reflects deletion without stale Qoder results', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-qoder-project-mcp-test-'))
+    const cwd = join(home, 'repo')
+    const projectConfig = join(cwd, '.mcp.json')
+    await mkdir(join(home, '.qoder'), { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    await writeFile(join(home, '.qoder', 'mcp.json'), JSON.stringify({ mcpServers: {} }))
+    await writeFile(projectConfig, JSON.stringify({
+      mcpServers: {
+        arthas: { type: 'http', url: 'https://mcp.example.test/arthas' },
+        trace: { type: 'sse', url: 'https://mcp.example.test/trace' }
+      }
+    }))
+    try {
+      const adapter = createQoderAdapter(home)
+      await expect(adapter.mcp!.snapshot({ providerId: 'qoder', cwd })).resolves.toMatchObject({
+        state: 'degraded',
+        data: {
+          configured: [
+            expect.objectContaining({ name: 'arthas', scope: 'project', transport: 'http' }),
+            expect.objectContaining({ name: 'trace', scope: 'project', transport: 'http' })
+          ]
+        }
+      })
+
+      await rm(projectConfig)
+      await expect(adapter.mcp!.snapshot({ providerId: 'qoder', cwd })).resolves.toMatchObject({
+        state: 'degraded',
+        data: { configured: [], runtime: null }
+      })
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('redacts credentials from native MCP refresh failures', async () => {
     const home = await mkdtemp(join(tmpdir(), 'scry-qoder-mcp-error-test-'))
     await mkdir(join(home, '.qoder'), { recursive: true })
