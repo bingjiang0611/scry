@@ -152,7 +152,10 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
         </section>
 
         <nav className="diff-file-nav" aria-label={sessionScope ? '本会话改动文件' : '本轮改动文件'}>
-          <div className="diff-file-nav-title">Files</div>
+          <div className="diff-file-nav-title">
+            <span>Files</span>
+            <span>{turnDiff.files.length}</span>
+          </div>
           {turnDiff.files.map((file) => (
             <button
               type="button"
