@@ -37,6 +37,7 @@ import { useAgentSession } from './hooks/useAgentSession'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
+import { selectedExternalSessionId, sessionSelectionChanged } from './session-selection'
 
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
@@ -264,8 +265,9 @@ export function activeRunForSession(
   return (
     runs.find((run) => {
       if (run.done) return false
-      const runSessionId = run.externalSessionId ?? run.sessionId
-      return (run.cwd ?? '') === cwd && (run.runId === sessionId || runSessionId === sessionId) &&
+      const identityMatches = [run.runId, run.sessionId, run.externalSessionId]
+        .some((id) => id === sessionId)
+      return (run.cwd ?? '') === cwd && identityMatches &&
         run.providerId === providerId && run.agentProfileId === agentProfileId
     }) ?? null
   )
@@ -461,6 +463,18 @@ export function App() {
     [setActiveSessionId]
   )
   const integrations = useIntegrations(cwd)
+  const selectedProviderSessionId = useMemo(() => selectedExternalSessionId(projects, {
+    cwd,
+    sessionId: activeSessionId,
+    providerId: integrations.selectedProviderId,
+    agentProfileId: integrations.providerContext.agentProfileId
+  }), [
+    activeSessionId,
+    cwd,
+    integrations.providerContext.agentProfileId,
+    integrations.selectedProviderId,
+    projects
+  ])
   const providerSendBlockedReason = !integrations.agentsHydrated
     ? '正在检测本机 Provider，暂不能发送'
     : !integrations.selectedAgent
@@ -1027,7 +1041,22 @@ export function App() {
     if (cwdChanged && !confirmWorkspaceTransition()) return
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
-    const switchingSession = activeSessionIdRef.current !== sessionId
+    const switchingSession = sessionSelectionChanged(
+      {
+        cwd: cwdRef.current,
+        sessionId: activeSessionIdRef.current,
+        providerId: integrations.selectedProviderId,
+        agentProfileId: integrations.providerContext.agentProfileId
+      },
+      {
+        cwd: projectCwd,
+        sessionId,
+        externalSessionId,
+        runId: knownRunId,
+        providerId,
+        agentProfileId
+      }
+    )
     let runId = knownRunId
     if (!runId) {
       const activeRuns = await window.scry.activeRuns()
@@ -1400,7 +1429,7 @@ export function App() {
               overview: (
                 <OverviewPanel
                   turns={session.turns}
-                  sessionId={activeSessionId}
+                  sessionId={selectedProviderSessionId}
                   selected={session.selected}
                   usage={integrations.usage}
                   stats={integrations.stats}

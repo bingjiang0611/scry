@@ -34,7 +34,7 @@ import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hoo
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
-import { Sidebar, sidebarSessionIsActive } from './Sidebar'
+import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
 import { CliPicker } from './Pickers'
 import { pathContains, WorkspacePanel, workspaceReferenceToken } from './WorkspacePanel'
@@ -424,26 +424,28 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
     expect(calls).toEqual(['session:session-1', 'loadProjects'])
   })
 
-  it('只把匹配 cwd/provider/session 的未完成 run 恢复到所选会话', () => {
+  it('只把匹配 cwd/provider/profile 与任一会话别名的未完成 run 恢复到所选会话', () => {
     const run = {
       runId: 'run-1',
-      providerId: 'claude' as const,
+      sessionId: 'catalog-session',
+      externalSessionId: 'provider-session',
+      providerId: 'pi' as const,
+      agentProfileId: 'pi:default',
       cwd: '/repo/a',
-      externalSessionId: 'session-1',
       userText: 'work',
       items: [],
       done: false
     }
 
-    expect(activeRunForSession(run, '/repo/a', 'session-1', 'claude')).toBe(run)
-    expect(activeRunForSession([{ ...run, runId: 'other', externalSessionId: 'other' }, run], '/repo/a', 'session-1', 'claude')).toBe(run)
-    expect(activeRunForSession({ ...run, externalSessionId: undefined }, '/repo/a', 'run-1', 'claude')).toEqual({
-      ...run,
-      externalSessionId: undefined
-    })
-    expect(activeRunForSession(run, '/repo/b', 'session-1', 'claude')).toBeNull()
-    expect(activeRunForSession({ ...run, done: true }, '/repo/a', 'session-1', 'claude')).toBeNull()
-    expect(activeRunForSession({ ...run, cwd: undefined }, '', 'session-1', 'claude')).toMatchObject({ runId: 'run-1' })
+    for (const alias of ['run-1', 'catalog-session', 'provider-session']) {
+      expect(activeRunForSession(run, '/repo/a', alias, 'pi', 'pi:default')).toBe(run)
+    }
+    expect(activeRunForSession([{ ...run, runId: 'other', sessionId: 'other', externalSessionId: 'other' }, run], '/repo/a', 'catalog-session', 'pi', 'pi:default')).toBe(run)
+    expect(activeRunForSession(run, '/repo/b', 'catalog-session', 'pi', 'pi:default')).toBeNull()
+    expect(activeRunForSession(run, '/repo/a', 'catalog-session', 'qoder')).toBeNull()
+    expect(activeRunForSession(run, '/repo/a', 'catalog-session', 'pi', 'pi:other')).toBeNull()
+    expect(activeRunForSession({ ...run, done: true }, '/repo/a', 'catalog-session', 'pi', 'pi:default')).toBeNull()
+    expect(activeRunForSession({ ...run, cwd: undefined }, '', 'catalog-session', 'pi', 'pi:default')).toMatchObject({ runId: 'run-1' })
   })
 
   it('恢复 live run 时先加载同一 session 的已停止历史轮次', async () => {
@@ -661,26 +663,6 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
 })
 
 describe('Sidebar 项目分组', () => {
-  it('会话选中态同时绑定项目与会话别名，不会加深另一个项目的同 ID 会话', () => {
-    const session = {
-      sessionId: 'provider-session',
-      externalSessionId: 'provider-session',
-      runId: 'run-1',
-      providerId: 'qoder' as const,
-      mtime: 1,
-      preview: '提交吧',
-      count: 1
-    }
-    const selection = {
-      activeCwd: '/repo/target',
-      activeSessionId: 'run-1',
-      activeProviderId: 'qoder' as const
-    }
-
-    expect(sidebarSessionIsActive('/repo/other', session, selection)).toBe(false)
-    expect(sidebarSessionIsActive('/repo/target', session, selection)).toBe(true)
-  })
-
   it('Skill 和 MCP 与分析、诊断同组展示，并保留 MCP 真实连接状态', () => {
     const renderIntegrations = (
       mcps: ComponentProps<typeof Sidebar>['mcps'],
