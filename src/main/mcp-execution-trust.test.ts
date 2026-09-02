@@ -112,11 +112,17 @@ describe('MCP execution trust', () => {
       expect(testDenied).toEqual({ mode: 'deny' })
       expect(shownPrompt).toMatchObject({
         status: 'block',
-        cancelLabel: '隔离风险 MCP 并继续',
-        confirmLabel: '仍然执行 1 个 MCP'
+        title: 'MCP 风险提示',
+        message: 'chrome-devtools 存在高风险，是否继续启用？',
+        cancelLabel: '禁用并继续',
+        confirmLabel: '继续启用'
       })
       expect(shownPrompt?.pages.join('\n')).toContain('chrome-devtools')
-      expect(shownPrompt?.pages.join('\n')).toContain('Guard：阻断 · 高 1 / 未完整扫描 1')
+      expect(shownPrompt?.pages.join('\n')).toContain('检测结果：高风险 1 项 · 1 个 MCP 未完整扫描')
+      expect(shownPrompt?.pages.join('\n')).toContain('风险原因：启动时可能下载并运行远程代码')
+      expect(shownPrompt?.pages[0]).toContain('• chrome-devtools · stdio · npx')
+      expect(shownPrompt?.pages[0].split('\n').length).toBeLessThanOrEqual(9)
+      expect(shownPrompt?.pages[0]).not.toMatch(/工作目录|继承环境|值摘要|配置#|args：/)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -215,11 +221,13 @@ describe('MCP execution trust', () => {
         }
       })
       const summary = mcpExecutionAuthorizationDetail(snapshot, 'run', snapshot.targets)
-      expect(summary).toContain('Authorization')
-      expect(summary).toContain('API_KEY')
+      expect(summary).toContain('风险原因：会向 MCP 传递敏感环境变量')
+      expect(summary).toContain('https://example.test')
       expect(snapshot.executionEnv).toHaveProperty('HTTPS_PROXY')
       expect(snapshot.executionEnv).not.toHaveProperty('HTTP_PROXY')
-      expect(summary).toContain('继承环境：')
+      expect(summary).not.toContain('Authorization')
+      expect(summary).not.toContain('API_KEY')
+      expect(summary).not.toContain('继承环境：')
       expect(summary).not.toContain('secret-token')
       expect(summary).not.toContain('secret-key')
       expect(summary).not.toContain('inherited-secret')
@@ -441,7 +449,7 @@ describe('MCP execution trust', () => {
       const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir })
       const detail = mcpExecutionAuthorizationPages(snapshot, 'run', snapshot.targets)[0]
 
-      expect(detail).toContain('[.mcp×1]')
+      expect(detail).not.toContain('项目 .mcp.json')
       expect(detail).toContain('https://payments.attacker-controlled.example')
       for (const line of detail.split('\n')) {
         if (line.startsWith('• ') || line.startsWith('  → ')) expect(displayWidth(line)).toBeLessThanOrEqual(84)
@@ -564,17 +572,16 @@ describe('MCP execution trust', () => {
       for (const line of lines.filter((item) => item.startsWith('• '))) {
         expect(displayWidth(line)).toBeLessThanOrEqual(84)
       }
-      expect(detail.match(/继承环境：/g)).toHaveLength(1)
-      expect(detail).toContain('执行对象（15）')
-      expect(detail).toContain('项目 .mcp.json 15')
-      expect(detail.match(/\[\.mcp×15\]/g)).toHaveLength(1)
+      expect(detail).not.toContain('继承环境：')
+      expect(detail).toContain('MCP（15）')
+      expect(detail).not.toContain('项目 .mcp.json')
       for (let index = 1; index <= 15; index++) {
         expect(detail).toContain(`server-${String(index).padStart(2, '0')}`)
       }
-      expect(detail).toContain('env：API_KEY')
-      expect(detail).toContain('headers：Authorization')
-      expect(detail).toContain('query：token')
-      expect(detail).toContain('值摘要#')
+      expect(detail).not.toContain('env：API_KEY')
+      expect(detail).not.toContain('headers：Authorization')
+      expect(detail).not.toContain('query：token')
+      expect(detail).not.toContain('值摘要#')
       expect(detail).not.toMatch(/url-user|url-secret|query-secret|configured-secret|header-secret/)
       expect(detail).not.toMatch(/target:|source:|configured env:|\(none\)/)
     } finally {
@@ -604,13 +611,13 @@ describe('MCP execution trust', () => {
       const last = mcpExecutionAuthorizationDialogOptions(prompt, prompt.pages.length - 1, 'darwin')
       expect(first).toMatchObject({ type: 'warning', defaultId: 0, cancelId: 0, textWidth: 600 })
       expect(first.buttons).toEqual(['取消', `查看下一页（2/${prompt.pages.length}）`])
-      expect(last.buttons).toEqual(['取消', '仍然执行 30 个 MCP'])
+      expect(last.buttons).toEqual(['取消', '继续'])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  it('splits one oversized target without losing or duplicating configured keys', () => {
+  it('keeps a target with many configured keys concise and fully redacted', () => {
     const { root, homeDir, cwd } = fixture()
     try {
       const env = Object.fromEntries(Array.from({ length: 120 }, (_, index) => [
@@ -624,14 +631,14 @@ describe('MCP execution trust', () => {
       const pages = mcpExecutionAuthorizationPages(snapshot, 'run', snapshot.targets)
       const combined = pages.join('\n')
 
-      expect(pages.length).toBeGreaterThan(1)
-      expect(combined).toContain('oversized（续）')
+      expect(pages).toHaveLength(1)
+      expect(combined).toContain('oversized')
+      expect(combined).not.toContain('（续）')
       for (let index = 1; index <= 120; index++) {
-        const key = `ENV_KEY_${String(index).padStart(3, '0')}`
-        expect(combined.match(new RegExp(key, 'g'))).toHaveLength(1)
+        expect(combined).not.toContain(`ENV_KEY_${String(index).padStart(3, '0')}`)
         expect(combined).not.toContain(`secret-${index}`)
       }
-      for (const page of pages) expect(page.split('\n').length).toBeLessThanOrEqual(25)
+      expect(pages[0].split('\n').length).toBeLessThanOrEqual(10)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -730,7 +737,7 @@ describe('MCP execution trust', () => {
       expect(safeGuard.high).toBe(0)
       expect(safeGuard.status).not.toBe('block')
       expect(mcpExecutionBlockingTargetIds(snapshot, [risky, safe])).toEqual([risky.targetId])
-      expect(mcpExecutionAuthorizationPrompt(snapshot, 'run', [risky]).cancelLabel).toBe('隔离风险 MCP 并继续')
+      expect(mcpExecutionAuthorizationPrompt(snapshot, 'run', [risky]).cancelLabel).toBe('禁用并继续')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -749,10 +756,10 @@ describe('MCP execution trust', () => {
       const detail = mcpExecutionAuthorizationDetail(snapshot, `test:${snapshot.targets[0].targetId}`, [snapshot.targets[0]])
 
       expect(detail).toContain('操作：测试单个 MCP 连接')
-      expect(detail).toContain('执行对象（1）')
+      expect(detail).toContain('MCP：')
       expect(detail).toContain('first')
       expect(detail).not.toContain('second')
-      expect(detail).toContain('项目 .mcp.json 1')
+      expect(detail).not.toContain('项目 .mcp.json')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -769,7 +776,7 @@ describe('MCP execution trust', () => {
       const detail = mcpExecutionAuthorizationDetail(snapshot, `auth:${selected[0].targetId}`, selected)
 
       expect(detail).toContain('操作：认证单个 MCP')
-      expect(detail).toContain('执行对象（1）')
+      expect(detail).toContain('MCP：')
       expect(detail).toContain('remote')
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -791,9 +798,8 @@ describe('MCP execution trust', () => {
       const detail = mcpExecutionAuthorizationDetail(snapshot, `test:${snapshot.targets[0].targetId}`, selected)
 
       expect(guard).toMatchObject({ status: 'warn', incomplete: 1 })
-      expect(detail).toContain('Guard：警告')
-      expect(detail).toContain('未完整扫描 1')
-      expect(detail).not.toContain('Guard：通过')
+      expect(detail).toContain('检测结果：1 个 MCP 未完整扫描')
+      expect(detail).not.toContain('未发现风险项')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -861,7 +867,7 @@ describe('MCP execution trust', () => {
       const detail = mcpExecutionAuthorizationDetail(snapshot, 'run', snapshot.targets)
 
       expect(detail).toContain('gone')
-      expect(detail).toContain('警告：executable 不存在或不是可执行文件：/usr/local/scry-missing-bin')
+      expect(detail).toContain('无法验证启动程序：executable 不存在或不是可执行文件：/usr/local/scry-missing-bin')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
