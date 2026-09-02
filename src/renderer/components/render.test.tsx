@@ -22,6 +22,7 @@ import {
   dequeueStartedPrompt,
   enqueuePrompt,
   failedSlashCatalog,
+  hasSessionOverviewContext,
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
   providerContextCacheKey,
@@ -72,6 +73,13 @@ describe('Pi Profile renderer identity', () => {
     const custom = providerContextCacheKey({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef', cwd: '/repo' })
     expect(native).not.toBe(custom)
     expect(native).toBe('pi\0pi:default\0/repo')
+  })
+
+  it('新建空会话不会继续渲染上一会话的 Overview 聚合证据', () => {
+    expect(hasSessionOverviewContext(null, 0, false)).toBe(false)
+    expect(hasSessionOverviewContext('session-1', 0, false)).toBe(true)
+    expect(hasSessionOverviewContext(null, 1, false)).toBe(true)
+    expect(hasSessionOverviewContext(null, 0, true)).toBe(true)
   })
 
   it('removes rejected slash catalogs instead of leaving stale commands selectable', () => {
@@ -2440,7 +2448,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       focusComposer: () => calls.push('focus')
     })
 
-    expect(calls).toEqual(['clear:undefined', 'newSession', 'refreshCatalogs', 'active:null', 'view:chat', 'focus'])
+    expect(calls).toEqual(['clear:undefined', 'newSession', 'active:null', 'view:chat', 'focus', 'refreshCatalogs'])
   })
 
   it('剪贴板图片提取会去重 files/items 里的同一张图', () => {
