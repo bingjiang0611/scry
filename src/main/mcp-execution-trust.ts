@@ -36,6 +36,7 @@ export interface McpExecutionSnapshot {
   errors: string[]
   warnings: string[]
   selectedTargetId?: string
+  executionTargetIds?: string[]
 }
 
 function stableJson(value: unknown): string {
@@ -291,14 +292,23 @@ export function buildMcpExecutionSnapshot(args: {
 }
 
 export class McpExecutionTrust {
-  private readonly grants = new Set<string>()
+  private readonly grants = new Map<string, string[] | null>()
 
-  isGranted(operation: McpExecutionOperation, snapshot: McpExecutionSnapshot): boolean {
-    return this.grants.has(`${operation}\0${snapshot.cwd}\0${snapshot.fingerprint}`)
+  private key(operation: McpExecutionOperation, snapshot: McpExecutionSnapshot): string {
+    return `${operation}\0${snapshot.cwd}\0${snapshot.fingerprint}`
   }
 
-  grant(operation: McpExecutionOperation, snapshot: McpExecutionSnapshot): void {
-    this.grants.add(`${operation}\0${snapshot.cwd}\0${snapshot.fingerprint}`)
+  isGranted(operation: McpExecutionOperation, snapshot: McpExecutionSnapshot): boolean {
+    return this.grants.has(this.key(operation, snapshot))
+  }
+
+  grantedTargetIds(operation: McpExecutionOperation, snapshot: McpExecutionSnapshot): string[] | undefined {
+    const targetIds = this.grants.get(this.key(operation, snapshot))
+    return targetIds ? [...targetIds] : undefined
+  }
+
+  grant(operation: McpExecutionOperation, snapshot: McpExecutionSnapshot, targetIds?: string[]): void {
+    this.grants.set(this.key(operation, snapshot), targetIds ? [...new Set(targetIds)].sort() : null)
   }
 }
 
@@ -608,6 +618,17 @@ export function mcpExecutionGuardSummary(
   return { ...counts, status, incomplete: incompleteIds.size }
 }
 
+export function mcpExecutionBlockingTargetIds(
+  snapshot: McpExecutionSnapshot,
+  selected: ResolvedMcpConfig[]
+): string[] {
+  const selectedIds = new Set(selected.map((target) => target.targetId))
+  return [...new Set(snapshot.report.findings
+    .filter((finding) => finding.severity === 'critical' || finding.severity === 'high')
+    .flatMap((finding) => finding.affectedTargets.map((target) => target.targetId))
+    .filter((targetId) => selectedIds.has(targetId)))]
+}
+
 export function guardSummaryLine(summary: McpExecutionGuardSummary): string {
   const labels: Array<[Severity, string]> = [
     ['critical', '严重'], ['high', '高'], ['medium', '中'], ['low', '低'], ['info', '信息']
@@ -711,6 +732,7 @@ export interface McpExecutionAuthorizationPrompt {
   status: ScanReport['summary']['status']
   title: string
   message: string
+  cancelLabel: string
   confirmLabel: string
   pages: string[]
 }
@@ -725,6 +747,7 @@ export function mcpExecutionAuthorizationPrompt(
     status: severity.status,
     title: '授权 MCP 执行',
     message: `允许 Scry 执行 ${selected.length} 个 MCP 配置？`,
+    cancelLabel: operation === 'run' && severity.status === 'block' ? '隔离风险 MCP 并继续' : '取消',
     confirmLabel: severity.status === 'pass' ? `执行 ${selected.length} 个 MCP` : `仍然执行 ${selected.length} 个 MCP`,
     pages: mcpExecutionAuthorizationPages(snapshot, operation, selected)
   }
@@ -741,7 +764,7 @@ export function mcpExecutionAuthorizationDialogOptions(
     title: prompt.title,
     message: prompt.pages.length > 1 ? `${prompt.message}（第 ${pageIndex + 1}/${prompt.pages.length} 页）` : prompt.message,
     detail: prompt.pages[pageIndex],
-    buttons: ['取消', lastPage ? prompt.confirmLabel : `查看下一页（${pageIndex + 2}/${prompt.pages.length}）`],
+    buttons: [prompt.cancelLabel, lastPage ? prompt.confirmLabel : `查看下一页（${pageIndex + 2}/${prompt.pages.length}）`],
     defaultId: 0,
     cancelId: 0,
     noLink: true,
