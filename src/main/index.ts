@@ -156,10 +156,8 @@ import {
 import {
   buildMcpExecutionSnapshot,
   confirmMcpExecutionAuthorization,
+  decideMcpExecutionAuthorization,
   McpExecutionTrust,
-  mcpExecutionAuthorizationPrompt,
-  mcpExecutionBlockingTargetIds,
-  mcpExecutionGuardSummary,
   type McpExecutionOperation,
   type McpExecutionSnapshot
 } from './mcp-execution-trust'
@@ -746,27 +744,17 @@ async function ensureMcpExecutionAuthorized(
     ? mcpExecutionTrust.grantedTargetIds(operation, snapshot)
     : undefined
   if (!hasGrant) {
-    const guardSummary = mcpExecutionGuardSummary(snapshot, selected)
-    if (guardSummary.status === 'block') {
-      const blockingIds = mcpExecutionBlockingTargetIds(snapshot, selected)
-      const blocked = blockingIds.length > 0
-        ? selected.filter((target) => blockingIds.includes(target.targetId))
-        : selected
-      const prompt = mcpExecutionAuthorizationPrompt(snapshot, operation, blocked)
-      const approved = autoApproveTestTrust || await confirmMcpExecutionAuthorization(prompt, async (options) => {
+    const decision = await decideMcpExecutionAuthorization(snapshot, operation, selected, async (prompt) => {
+      if (autoApproveTestTrust) return true
+      return confirmMcpExecutionAuthorization(prompt, async (options) => {
         const result = win && !win.isDestroyed()
           ? await dialog.showMessageBox(win, options)
           : await dialog.showMessageBox(options)
         return { response: result.response }
       })
-      if (!approved) {
-        if (operation !== 'run') throw new Error('用户未授权执行当前 MCP 配置')
-        const blockedIds = new Set(blocked.map((target) => target.targetId))
-        executionTargetIds = selected
-          .filter((target) => !blockedIds.has(target.targetId))
-          .map((target) => target.targetId)
-      }
-    }
+    })
+    if (decision.mode === 'deny') throw new Error('用户未授权执行当前 MCP 配置')
+    if (decision.mode === 'allow-targets') executionTargetIds = decision.targetIds
     // 非阻断配置默认允许；高风险配置必须显式授权，拒绝时仅隔离风险 MCP，不阻断 Agent 会话。
   }
 
