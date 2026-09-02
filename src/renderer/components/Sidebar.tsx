@@ -19,8 +19,26 @@ const activeTimeTitle = (ms: number): string =>
     second: '2-digit'
   }).format(new Date(ms))}`
 
-const sessionKey = (session: SessionMeta): string =>
-  `${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
+const sessionKey = (cwd: string, session: SessionMeta): string =>
+  `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
+
+export function sidebarSessionIsActive(
+  cwd: string,
+  session: SessionMeta,
+  selection: {
+    activeCwd: string | null
+    activeSessionId?: string | null
+    activeProviderId?: SessionProviderId
+    activeAgentProfileId?: string
+  }
+): boolean {
+  if ((selection.activeCwd ?? '') !== cwd) return false
+  if (session.providerId !== selection.activeProviderId) return false
+  if (session.agentProfileId !== selection.activeAgentProfileId) return false
+  if (!selection.activeSessionId) return false
+  return [session.sessionId, session.externalSessionId, session.runId]
+    .some((id) => id === selection.activeSessionId)
+}
 
 export function Sidebar({
   id,
@@ -130,9 +148,12 @@ export function Sidebar({
     }))
     .filter((project) => project.projectMatch || project.sessions.length > 0)
   const mcpSummary = summarizeMcpNav(mcps, mcpLive)
-  const isActive = (session: SessionMeta): boolean =>
-    session.sessionId === activeSessionId && session.providerId === activeProviderId &&
-    session.agentProfileId === activeAgentProfileId
+  const isActive = (cwd: string, session: SessionMeta): boolean => sidebarSessionIsActive(cwd, session, {
+    activeCwd,
+    activeSessionId,
+    activeProviderId,
+    activeAgentProfileId
+  })
   const openProjectMenu = (event: ReactMouseEvent<HTMLButtonElement>, project: ProjectMeta): void => {
     const rect = event.currentTarget.getBoundingClientRect()
     setProjectMenu({
@@ -217,11 +238,11 @@ export function Sidebar({
             <div className="sb-pinned">
               {pinned.map(({ session, cwd, name }) => (
                 <SessionRow
-                  key={sessionKey(session)}
+                  key={sessionKey(cwd, session)}
                   session={session}
                   cwd={cwd}
                   projectName={name}
-                  active={isActive(session)}
+                  active={isActive(cwd, session)}
                   running={Boolean(session.runId && runningRunIds.has(session.runId))}
                   onPick={onPick}
                   onTogglePin={onTogglePin}
@@ -283,10 +304,10 @@ export function Sidebar({
                 <div className="sb-sess-list">
                   {p.sessions.map((s) => (
                     <SessionRow
-                      key={sessionKey(s)}
+                      key={sessionKey(p.cwd, s)}
                       session={s}
                       cwd={p.cwd}
-                      active={isActive(s)}
+                      active={isActive(p.cwd, s)}
                       running={Boolean(s.runId && runningRunIds.has(s.runId))}
                       onPick={onPick}
                       onTogglePin={onTogglePin}
