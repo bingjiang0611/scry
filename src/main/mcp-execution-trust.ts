@@ -658,7 +658,31 @@ function splitTargetBlock(block: AuthorizationTargetBlock): AuthorizationTargetB
   return chunks
 }
 
-function targetPages(selected: ResolvedMcpConfig[]): string[][] {
+function mcpExecutionDecisionTargetBlock(target: ResolvedMcpConfig): AuthorizationTargetBlock {
+  const { destination, url } = mcpTargetDisplayFacts(target)
+  const name = compactIdentity(target.name, 28)
+  const scope = scopeLabel(target.scope)
+  const transport = target.transport === 'http' ? 'HTTP' : target.transport
+  const identity = `• ${name} · ${compactIdentity(transport, 8)}`
+  const endpointWidth = Math.max(12, DETAIL_COLUMNS - displayWidth(`${identity} · `))
+  const digest = targetAuthorizationDigest(target)
+  const lines = url && urlNeedsOwnLine(url, endpointWidth)
+    ? [identity, `  连接：${summarizedUrl(url, DETAIL_COLUMNS - 8, digest)}`]
+    : [`${identity} · ${url ? summarizedUrl(url, endpointWidth, digest) : compactIdentity(target.detail || destination, endpointWidth)}`]
+  if (target.executableError) {
+    lines.push(`  无法验证启动程序：${compactIdentity(target.executableError, DETAIL_COLUMNS - 12)}`)
+  }
+  return {
+    scope,
+    continuation: `• ${name}（续）`,
+    lines
+  }
+}
+
+function targetPages(
+  selected: ResolvedMcpConfig[],
+  blockForTarget: (target: ResolvedMcpConfig, groupMarker?: string) => AuthorizationTargetBlock = mcpExecutionAuthorizationTargetBlock
+): string[][] {
   const groups = new Map<string, ResolvedMcpConfig[]>()
   for (const target of selected) {
     const scope = scopeLabel(target.scope)
@@ -675,7 +699,7 @@ function targetPages(selected: ResolvedMcpConfig[]): string[][] {
   for (const [scope, targets] of groups) {
     for (const [targetIndex, target] of targets.entries()) {
       const groupMarker = targetIndex === 0 ? compactScopeMarker(scope, targets.length) : ''
-      const original = mcpExecutionAuthorizationTargetBlock(target, groupMarker)
+      const original = blockForTarget(target, groupMarker)
       for (const block of splitTargetBlock(original)) {
         if (page.length > 0 && page.length + block.lines.length > TARGET_LINES_PER_PAGE) flush()
         page.push(...block.lines)
@@ -698,33 +722,58 @@ export function mcpExecutionAuthorizationDetail(
   return mcpExecutionAuthorizationPages(snapshot, operation, selected).join('\n\n')
 }
 
+function guardDecisionSummary(summary: McpExecutionGuardSummary): string {
+  const risks = [
+    summary.critical > 0 ? `严重风险 ${summary.critical} 项` : '',
+    summary.high > 0 ? `高风险 ${summary.high} 项` : '',
+    summary.medium > 0 ? `中风险 ${summary.medium} 项` : '',
+    summary.low > 0 ? `低风险 ${summary.low} 项` : ''
+  ].filter(Boolean)
+  if (summary.incomplete > 0) risks.push(`${summary.incomplete} 个 MCP 未完整扫描`)
+  return risks.length > 0 ? risks.join(' · ') : '未发现风险项'
+}
+
+function findingDecisionLabel(ruleId: string): string {
+  if (ruleId === 'MCP-CMD-001') return '启动命令可执行任意脚本'
+  if (ruleId === 'MCP-CMD-002') return '启动时可能下载并运行远程代码'
+  if (ruleId === 'MCP-ENV-001') return '会向 MCP 传递敏感环境变量'
+  if (ruleId === 'MCP-FS-001') return '配置涉及工作目录外的文件访问'
+  if (ruleId === 'MCP-HTTP-001') return '远程连接使用了高风险地址或传输方式'
+  if (ruleId === 'MCP-SECRET-001') return '配置中包含敏感凭据'
+  if (ruleId === 'MCP-TOOL-001' || ruleId === 'MCP-TOOL-003') return 'MCP 暴露了高风险工具能力'
+  return 'Guard 检测到高风险配置'
+}
+
+function guardDecisionReasons(snapshot: McpExecutionSnapshot, selected: ResolvedMcpConfig[]): string {
+  const selectedIds = new Set(selected.map((target) => target.targetId))
+  const reasons = [...new Set(snapshot.report.findings
+    .filter((finding) => (finding.severity === 'critical' || finding.severity === 'high') &&
+      finding.affectedTargets.some((target) => selectedIds.has(target.targetId)))
+    .map((finding) => findingDecisionLabel(finding.rule?.id ?? 'unknown')))]
+  if (reasons.length === 0) return ''
+  const visible = reasons.slice(0, 2)
+  return `${visible.join('；')}${reasons.length > visible.length ? `；另 ${reasons.length - visible.length} 项` : ''}`
+}
+
 export function mcpExecutionAuthorizationPages(
   snapshot: McpExecutionSnapshot,
   operation: McpExecutionOperation,
   selected: ResolvedMcpConfig[]
 ): string[] {
   const severity = mcpExecutionGuardSummary(snapshot, selected)
-  const inheritedKeys = Object.keys(snapshot.executionEnv).sort()
-  const proxyKeys = inheritedKeys.filter((key) => /^(?:https?|all|no)_proxy$/i.test(key))
-  const sources = new Map<string, number>()
-  for (const target of selected) {
-    const label = scopeLabel(target.scope)
-    sources.set(label, (sources.get(label) ?? 0) + 1)
-  }
-  const sourceSequence = [...sources.entries()].map(([label, count]) => `${label} ${count}`).join(' → ') || '无'
-  const common = [
-    `工作目录：${compactIdentity(snapshot.cwd, DETAIL_COLUMNS - 10)}`,
-    `操作：${operationLabel(operation)} · ${guardSummaryLine(severity)}`,
-    `继承环境：${inheritedKeys.length} 个白名单键${proxyKeys.length > 0 ? `（代理 ${proxyKeys.length}）` : ''} · 值摘要#${redactionDigest(stableJson(snapshot.executionEnv))}`
-  ]
-  const pages = targetPages(selected)
+  const reasons = guardDecisionReasons(snapshot, selected)
+  const pages = targetPages(selected, mcpExecutionDecisionTargetBlock)
   return pages.map((targets, index) => [
-    ...common,
+    `操作：${operationLabel(operation)}`,
+    `检测结果：${guardDecisionSummary(severity)}`,
+    ...(reasons ? [`风险原因：${reasons}`] : []),
     '',
-    `执行对象（${selected.length}${pages.length > 1 ? `；清单 ${index + 1}/${pages.length}` : ''}）：${sourceSequence}`,
+    `${selected.length === 1 ? 'MCP' : `MCP（${selected.length}${pages.length > 1 ? `，第 ${index + 1}/${pages.length} 页` : ''}）`}：`,
     ...targets,
     '',
-    '授权绑定当前进程、目录、配置与操作；变化或重启后重新询问。'
+    operation === 'run' && severity.status === 'block'
+      ? `禁用后，会话仍会继续，只是不启动${selected.length === 1 ? '这个' : '这些'} MCP。`
+      : '取消后不会执行本次操作；配置变化后会重新询问。'
   ].join('\n'))
 }
 
@@ -743,12 +792,15 @@ export function mcpExecutionAuthorizationPrompt(
   selected: ResolvedMcpConfig[]
 ): McpExecutionAuthorizationPrompt {
   const severity = mcpExecutionGuardSummary(snapshot, selected)
+  const targetName = selected.length === 1 ? compactIdentity(selected[0].name, 36) : `${selected.length} 个 MCP`
   return {
     status: severity.status,
-    title: '授权 MCP 执行',
-    message: `允许 Scry 执行 ${selected.length} 个 MCP 配置？`,
-    cancelLabel: operation === 'run' && severity.status === 'block' ? '隔离风险 MCP 并继续' : '取消',
-    confirmLabel: severity.status === 'pass' ? `执行 ${selected.length} 个 MCP` : `仍然执行 ${selected.length} 个 MCP`,
+    title: severity.status === 'block' ? 'MCP 风险提示' : '确认 MCP 操作',
+    message: severity.status === 'block'
+      ? `${targetName} 存在高风险，是否继续启用？`
+      : `是否继续${operationLabel(operation)}？`,
+    cancelLabel: operation === 'run' && severity.status === 'block' ? '禁用并继续' : '取消',
+    confirmLabel: severity.status === 'block' ? '继续启用' : '继续',
     pages: mcpExecutionAuthorizationPages(snapshot, operation, selected)
   }
 }
