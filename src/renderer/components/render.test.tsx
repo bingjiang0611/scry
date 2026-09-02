@@ -34,7 +34,7 @@ import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hoo
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
-import { Sidebar } from './Sidebar'
+import { Sidebar, sidebarSessionIsActive } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
 import { CliPicker } from './Pickers'
 import { pathContains, WorkspacePanel, workspaceReferenceToken } from './WorkspacePanel'
@@ -661,6 +661,26 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
 })
 
 describe('Sidebar 项目分组', () => {
+  it('会话选中态同时绑定项目与会话别名，不会加深另一个项目的同 ID 会话', () => {
+    const session = {
+      sessionId: 'provider-session',
+      externalSessionId: 'provider-session',
+      runId: 'run-1',
+      providerId: 'qoder' as const,
+      mtime: 1,
+      preview: '提交吧',
+      count: 1
+    }
+    const selection = {
+      activeCwd: '/repo/target',
+      activeSessionId: 'run-1',
+      activeProviderId: 'qoder' as const
+    }
+
+    expect(sidebarSessionIsActive('/repo/other', session, selection)).toBe(false)
+    expect(sidebarSessionIsActive('/repo/target', session, selection)).toBe(true)
+  })
+
   it('Skill 和 MCP 与分析、诊断同组展示，并保留 MCP 真实连接状态', () => {
     const renderIntegrations = (
       mcps: ComponentProps<typeof Sidebar>['mcps'],

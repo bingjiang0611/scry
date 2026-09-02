@@ -218,11 +218,25 @@ select:focus-visible,
 .sb-navitem:hover,
 .sb-navitem.active,
 .sb-sess:hover,
-.sb-sess.active,
+.sb-sess-row:focus-within .sb-sess {
+  background: var(--surface-hover);
+}
+
+.sb-sess.active {
+  background: var(--selected-soft);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--selected);
+}
+
 .sb-proj-row.active .sb-proj-head {
   background: var(--surface-strong);
   color: var(--fg);
   box-shadow: none;
+}
+
+.sb-sess.active .sb-sesstext {
+  color: var(--fg);
+  font-weight: 550;
 }
 
 .sb-navitem.active .ico,
