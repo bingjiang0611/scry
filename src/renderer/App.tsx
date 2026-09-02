@@ -58,6 +58,14 @@ export function providerContextCacheKey(context: ProviderContext): string {
   return `${context.providerId}\0${context.agentProfileId ?? ''}\0${context.cwd ?? ''}`
 }
 
+export function hasSessionOverviewContext(
+  sessionId: string | null,
+  turnCount: number,
+  busy: boolean
+): boolean {
+  return sessionId !== null || turnCount > 0 || busy
+}
+
 export function failedSlashCatalog<T, V>(
   cache: Map<string, V>,
   key: string,
@@ -394,11 +402,10 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
   effects.clearTurns()
   await effects.newSession()
   if (effects.isCurrent && !effects.isCurrent()) return
-  await effects.refreshProviderCatalogs?.()
-  if (effects.isCurrent && !effects.isCurrent()) return
   effects.setActiveSessionId(null)
   effects.setView('chat')
   effects.focusComposer()
+  await effects.refreshProviderCatalogs?.()
 }
 
 export function App() {
@@ -1196,6 +1203,11 @@ export function App() {
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
     [integrations.selectedId, session.turns]
   )
+  const showSessionOverview = hasSessionOverviewContext(
+    selectedProviderSessionId,
+    session.turns.length,
+    session.busy
+  )
   const toggleOverviewPanel = (): void => {
     if (view !== 'chat') return
     if (!rightSurface.visible || surfacePane.collapsed) {
@@ -1466,7 +1478,7 @@ export function App() {
             onHide={() => handleRightSurfaceAction({ type: 'hide' })}
             onToggleMaximized={() => handleRightSurfaceAction({ type: 'toggle-maximized' })}
             contents={{
-              overview: (
+              overview: showSessionOverview ? (
                 <OverviewPanel
                   turns={session.turns}
                   sessionId={selectedProviderSessionId}
@@ -1481,6 +1493,11 @@ export function App() {
                   onOpenTurn={openTurnInChat}
                   onOpenSessionDiff={openSessionNetDiff}
                 />
+              ) : (
+                <div className="surface-unavailable">
+                  <b>新会话暂无证据</b>
+                  <span>发送第一条消息后，这里会显示当前会话的调用、文件与用量。</span>
+                </div>
               ),
               files: cwd ? (
                 <WorkspacePanel
