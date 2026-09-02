@@ -753,6 +753,36 @@ export function mcpExecutionAuthorizationPrompt(
   }
 }
 
+export type McpExecutionAuthorizationDecision =
+  | { mode: 'allow-all' }
+  | { mode: 'allow-targets'; targetIds: string[] }
+  | { mode: 'deny' }
+
+export async function decideMcpExecutionAuthorization(
+  snapshot: McpExecutionSnapshot,
+  operation: McpExecutionOperation,
+  selected: ResolvedMcpConfig[],
+  confirm: (prompt: McpExecutionAuthorizationPrompt) => Promise<boolean>
+): Promise<McpExecutionAuthorizationDecision> {
+  const guardSummary = mcpExecutionGuardSummary(snapshot, selected)
+  if (guardSummary.status !== 'block') return { mode: 'allow-all' }
+
+  const blockingIds = mcpExecutionBlockingTargetIds(snapshot, selected)
+  const blocked = blockingIds.length > 0
+    ? selected.filter((target) => blockingIds.includes(target.targetId))
+    : selected
+  if (await confirm(mcpExecutionAuthorizationPrompt(snapshot, operation, blocked))) return { mode: 'allow-all' }
+  if (operation !== 'run') return { mode: 'deny' }
+
+  const blockedIds = new Set(blocked.map((target) => target.targetId))
+  return {
+    mode: 'allow-targets',
+    targetIds: selected
+      .filter((target) => !blockedIds.has(target.targetId))
+      .map((target) => target.targetId)
+  }
+}
+
 export function mcpExecutionAuthorizationDialogOptions(
   prompt: McpExecutionAuthorizationPrompt,
   pageIndex: number,

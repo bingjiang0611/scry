@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildMcpExecutionSnapshot,
   confirmMcpExecutionAuthorization,
+  decideMcpExecutionAuthorization,
   McpExecutionTrust,
   mcpExecutionAuthorizationDetail,
   mcpExecutionAuthorizationDialogOptions,
@@ -65,6 +66,97 @@ describe('MCP execution trust', () => {
 
       expect(trust.isGranted('run', snapshot)).toBe(true)
       expect(trust.grantedTargetIds('run', snapshot)).toEqual([safe.targetId])
+
+      const isolated = new McpExecutionTrust()
+      isolated.grant('run', snapshot, [])
+      expect(isolated.isGranted('run', snapshot)).toBe(true)
+      expect(isolated.grantedTargetIds('run', snapshot)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('lets a Qoder session continue without the rejected npx MCP from the reported regression', async () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
+        mcpServers: {
+          'chrome-devtools': {
+            command: 'npx',
+            args: ['-y', 'chrome-devtools-mcp@1.6.0']
+          }
+        }
+      }))
+      const snapshot = buildMcpExecutionSnapshot({ providerId: 'qoder', cwd, homeDir })
+      const selected = snapshot.targets.filter((target) => target.enabled)
+      let shownPrompt: Parameters<Parameters<typeof decideMcpExecutionAuthorization>[3]>[0] | undefined
+
+      const isolated = await decideMcpExecutionAuthorization(snapshot, 'run', selected, async (prompt) => {
+        shownPrompt = prompt
+        return false
+      })
+      const approved = await decideMcpExecutionAuthorization(snapshot, 'run', selected, async () => true)
+      const testDenied = await decideMcpExecutionAuthorization(
+        snapshot,
+        `test:${selected[0].targetId}`,
+        selected,
+        async () => false
+      )
+
+      expect(snapshot.report.findings).toContainEqual(expect.objectContaining({
+        severity: 'high',
+        rule: expect.objectContaining({ id: 'MCP-CMD-002' })
+      }))
+      expect(isolated).toEqual({ mode: 'allow-targets', targetIds: [] })
+      expect(approved).toEqual({ mode: 'allow-all' })
+      expect(testDenied).toEqual({ mode: 'deny' })
+      expect(shownPrompt).toMatchObject({
+        status: 'block',
+        cancelLabel: '隔离风险 MCP 并继续',
+        confirmLabel: '仍然执行 1 个 MCP'
+      })
+      expect(shownPrompt?.pages.join('\n')).toContain('chrome-devtools')
+      expect(shownPrompt?.pages.join('\n')).toContain('Guard：阻断 · 高 1 / 未完整扫描 1')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps safe MCP targets when the user isolates only blocking targets', async () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
+        mcpServers: {
+          safe: { command: '/bin/echo' },
+          risky: { command: 'npx', args: ['-y', 'remote-package@1.0.0'] }
+        }
+      }))
+      const snapshot = buildMcpExecutionSnapshot({ providerId: 'qoder', cwd, homeDir })
+      const selected = snapshot.targets.filter((target) => target.enabled)
+      const safe = selected.find((target) => target.name === 'safe')!
+
+      await expect(decideMcpExecutionAuthorization(snapshot, 'run', selected, async () => false))
+        .resolves.toEqual({ mode: 'allow-targets', targetIds: [safe.targetId] })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not prompt for a non-blocking MCP snapshot', async () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
+        mcpServers: { safe: { command: '/bin/echo' } }
+      }))
+      const snapshot = buildMcpExecutionSnapshot({ providerId: 'qoder', cwd, homeDir })
+      const selected = snapshot.targets.filter((target) => target.enabled)
+      let prompted = false
+
+      await expect(decideMcpExecutionAuthorization(snapshot, 'run', selected, async () => {
+        prompted = true
+        return false
+      })).resolves.toEqual({ mode: 'allow-all' })
+      expect(prompted).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
