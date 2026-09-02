@@ -21,6 +21,10 @@ import {
 } from './pi'
 
 const fixtureSource = `#!/usr/bin/env node
+if (process.argv.includes('--approve') || process.argv.includes('--no-approve')) {
+  process.stderr.write('Scry must not override Pi project trust')
+  process.exit(64)
+}
 let buffer = ''
 let leafId = 'active-leaf'
 let sessionId = 'pi-session-1'
@@ -240,7 +244,7 @@ describe('Pi RPC Provider', () => {
     }
   })
 
-  it('probes native models, permissions, commands and skills for the selected profile', async () => {
+  it('probes native models, permissions, commands and skills without overriding Pi project trust', async () => {
     await withFixture(async (profile, cwd) => {
       const probe = await probePiAgent(profile, cwd)
       expect(probe).toMatchObject({ levels: ['off', 'high'], models: [{ id: 'test-model' }] })
