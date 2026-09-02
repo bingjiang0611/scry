@@ -8,6 +8,7 @@ import type { ProjectMeta, SessionMeta } from '../env'
 import type { McpMeta, SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
 import type { McpLiveStatus } from '@shared/trace'
+import { sessionMatchesSelection } from '../session-selection'
 
 const activeTimeTitle = (ms: number): string =>
   `最近活动：${new Intl.DateTimeFormat('zh-CN', {
@@ -21,24 +22,6 @@ const activeTimeTitle = (ms: number): string =>
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
-
-export function sidebarSessionIsActive(
-  cwd: string,
-  session: SessionMeta,
-  selection: {
-    activeCwd: string | null
-    activeSessionId?: string | null
-    activeProviderId?: SessionProviderId
-    activeAgentProfileId?: string
-  }
-): boolean {
-  if ((selection.activeCwd ?? '') !== cwd) return false
-  if (session.providerId !== selection.activeProviderId) return false
-  if (session.agentProfileId !== selection.activeAgentProfileId) return false
-  if (!selection.activeSessionId) return false
-  return [session.sessionId, session.externalSessionId, session.runId]
-    .some((id) => id === selection.activeSessionId)
-}
 
 export function Sidebar({
   id,
@@ -148,11 +131,11 @@ export function Sidebar({
     }))
     .filter((project) => project.projectMatch || project.sessions.length > 0)
   const mcpSummary = summarizeMcpNav(mcps, mcpLive)
-  const isActive = (cwd: string, session: SessionMeta): boolean => sidebarSessionIsActive(cwd, session, {
-    activeCwd,
-    activeSessionId,
-    activeProviderId,
-    activeAgentProfileId
+  const isActive = (cwd: string, session: SessionMeta): boolean => sessionMatchesSelection(cwd, session, {
+    cwd: activeCwd,
+    sessionId: activeSessionId,
+    providerId: activeProviderId,
+    agentProfileId: activeAgentProfileId
   })
   const openProjectMenu = (event: ReactMouseEvent<HTMLButtonElement>, project: ProjectMeta): void => {
     const rect = event.currentTarget.getBoundingClientRect()
