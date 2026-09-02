@@ -11,6 +11,7 @@ import {
   mcpExecutionAuthorizationPages,
   mcpExecutionAuthorizationPrompt,
   mcpExecutionAuthorizationTargetLine,
+  mcpExecutionBlockingTargetIds,
   mcpExecutionGuardSummary
 } from './mcp-execution-trust'
 
@@ -42,6 +43,28 @@ describe('MCP execution trust', () => {
       const changed = buildMcpExecutionSnapshot({ cwd, homeDir })
       expect(changed.fingerprint).not.toBe(first.fingerprint)
       expect(trust.isGranted('run', changed)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('remembers a fingerprint-bound subset grant without turning it into a full grant', () => {
+    const { root, homeDir, cwd } = fixture()
+    try {
+      writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
+        mcpServers: {
+          safe: { command: '/bin/echo' },
+          risky: { command: 'npx', args: ['-y', 'remote-package@1.0.0'] }
+        }
+      }))
+      const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir })
+      const safe = snapshot.targets.find((target) => target.name === 'safe')!
+      const trust = new McpExecutionTrust()
+
+      trust.grant('run', snapshot, [safe.targetId])
+
+      expect(trust.isGranted('run', snapshot)).toBe(true)
+      expect(trust.grantedTargetIds('run', snapshot)).toEqual([safe.targetId])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -547,6 +570,7 @@ describe('MCP execution trust', () => {
       status: 'warn' as const,
       title: '授权 MCP 执行',
       message: '允许执行？',
+      cancelLabel: '取消',
       confirmLabel: '仍然执行',
       pages: ['page-one', 'page-two', 'page-three']
     }
@@ -571,6 +595,7 @@ describe('MCP execution trust', () => {
     const base = {
       title: '授权 MCP 执行',
       message: '允许执行？',
+      cancelLabel: '取消',
       pages: ['detail']
     }
     const pass = mcpExecutionAuthorizationDialogOptions({
@@ -612,6 +637,8 @@ describe('MCP execution trust', () => {
       expect(riskyGuard.high).toBeGreaterThan(0)
       expect(safeGuard.high).toBe(0)
       expect(safeGuard.status).not.toBe('block')
+      expect(mcpExecutionBlockingTargetIds(snapshot, [risky, safe])).toEqual([risky.targetId])
+      expect(mcpExecutionAuthorizationPrompt(snapshot, 'run', [risky]).cancelLabel).toBe('隔离风险 MCP 并继续')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
