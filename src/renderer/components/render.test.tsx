@@ -10,6 +10,7 @@ import type { Turn } from '../format'
 import type { ParsedTurn } from '../env'
 import {
   App,
+  EmptySessionOverview,
   activeRunForSession,
   attachmentsAfterSuccessfulSubmit,
   appendWorkspaceReference,
@@ -80,6 +81,12 @@ describe('Pi Profile renderer identity', () => {
     expect(hasSessionOverviewContext('session-1', 0, false)).toBe(true)
     expect(hasSessionOverviewContext(null, 1, false)).toBe(true)
     expect(hasSessionOverviewContext(null, 0, true)).toBe(true)
+
+    const html = renderToStaticMarkup(<EmptySessionOverview />)
+    expect(html).toContain('新会话暂无证据')
+    expect(html).toContain('发送第一条消息后')
+    expect(html).not.toContain('累计 Token 用量')
+    expect(html).not.toContain('工作区未提交改动')
   })
 
   it('removes rejected slash catalogs instead of leaving stale commands selectable', () => {
@@ -2431,6 +2438,18 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     })
 
     expect(calls).toEqual(['invalidate', 'skills', 'slash'])
+  })
+
+  it('Provider catalog 刷新失败也会清除旧 slash cache，且不会阻塞新会话', async () => {
+    const calls: string[] = []
+
+    await expect(applyProviderCatalogRefresh({
+      invalidateProviderContext: async () => { throw new Error('main unavailable') },
+      refreshSkills: async () => { calls.push('skills'); throw new Error('preload unavailable') },
+      retrySlash: () => calls.push('slash')
+    })).resolves.toBeUndefined()
+
+    expect(calls).toEqual(['skills', 'slash'])
   })
 
   it('新建会话只脱离正在运行的会话，不调用 stop', async () => {

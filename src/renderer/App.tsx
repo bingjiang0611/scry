@@ -66,6 +66,15 @@ export function hasSessionOverviewContext(
   return sessionId !== null || turnCount > 0 || busy
 }
 
+export function EmptySessionOverview() {
+  return (
+    <div className="surface-unavailable">
+      <b>新会话暂无证据</b>
+      <span>发送第一条消息后，这里会显示当前会话的调用、文件与用量。</span>
+    </div>
+  )
+}
+
 export function failedSlashCatalog<T, V>(
   cache: Map<string, V>,
   key: string,
@@ -382,9 +391,18 @@ interface ProviderCatalogRefreshEffects {
 }
 
 export async function applyProviderCatalogRefresh(effects: ProviderCatalogRefreshEffects): Promise<void> {
-  await effects.invalidateProviderContext?.()
-  await effects.refreshSkills()
-  effects.retrySlash()
+  try {
+    try {
+      await effects.invalidateProviderContext?.()
+    } catch {
+      // A failed main-process invalidation must not strand the renderer on old commands.
+    }
+    await effects.refreshSkills()
+  } catch {
+    // refreshSkills normally projects failure into capability state; older preload implementations may reject.
+  } finally {
+    effects.retrySlash()
+  }
 }
 
 interface NewConversationEffects {
@@ -1494,10 +1512,7 @@ export function App() {
                   onOpenSessionDiff={openSessionNetDiff}
                 />
               ) : (
-                <div className="surface-unavailable">
-                  <b>新会话暂无证据</b>
-                  <span>发送第一条消息后，这里会显示当前会话的调用、文件与用量。</span>
-                </div>
+                <EmptySessionOverview />
               ),
               files: cwd ? (
                 <WorkspacePanel
