@@ -14,12 +14,14 @@ import {
   attachmentsAfterSuccessfulSubmit,
   appendWorkspaceReference,
   applyNewConversationEffects,
+  applyProviderCatalogRefresh,
   applySessionCapturedEffects,
   applyTurnDoneEffects,
   chatBottomDistance,
   commitDraftAfterStart,
   dequeueStartedPrompt,
   enqueuePrompt,
+  failedSlashCatalog,
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
   providerContextCacheKey,
@@ -70,6 +72,17 @@ describe('Pi Profile renderer identity', () => {
     const custom = providerContextCacheKey({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef', cwd: '/repo' })
     expect(native).not.toBe(custom)
     expect(native).toBe('pi\0pi:default\0/repo')
+  })
+
+  it('removes rejected slash catalogs instead of leaving stale commands selectable', () => {
+    const cache = new Map([['qoder\0\0/repo', { commands: [{ name: 'old' }], reason: null }]])
+
+    expect(failedSlashCatalog<{ name: string }, { commands: Array<{ name: string }>; reason: null }>(
+      cache,
+      'qoder\0\0/repo',
+      new Error('catalog unavailable')
+    )).toEqual({ commands: [], reason: 'catalog unavailable' })
+    expect(cache.size).toBe(0)
   })
 })
 
@@ -2400,6 +2413,18 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(calls).toEqual([{ top: 664, behavior: 'auto' }])
   })
 
+  it('手动刷新按 Provider 失效、Skill 回读、slash 重取的顺序执行', async () => {
+    const calls: string[] = []
+
+    await applyProviderCatalogRefresh({
+      invalidateProviderContext: async () => { calls.push('invalidate') },
+      refreshSkills: async () => { calls.push('skills') },
+      retrySlash: () => calls.push('slash')
+    })
+
+    expect(calls).toEqual(['invalidate', 'skills', 'slash'])
+  })
+
   it('新建会话只脱离正在运行的会话，不调用 stop', async () => {
     const calls: string[] = []
 
@@ -2409,12 +2434,13 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         calls.push('newSession')
         return true
       },
+      refreshProviderCatalogs: async () => { calls.push('refreshCatalogs') },
       setActiveSessionId: (sessionId) => calls.push(`active:${String(sessionId)}`),
       setView: (view) => calls.push(`view:${view}`),
       focusComposer: () => calls.push('focus')
     })
 
-    expect(calls).toEqual(['clear:undefined', 'newSession', 'active:null', 'view:chat', 'focus'])
+    expect(calls).toEqual(['clear:undefined', 'newSession', 'refreshCatalogs', 'active:null', 'view:chat', 'focus'])
   })
 
   it('剪贴板图片提取会去重 files/items 里的同一张图', () => {

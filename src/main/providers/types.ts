@@ -149,5 +149,6 @@ export interface ProviderAdapter {
   readonly commands?: CommandsFacet
   readonly hookTrust?: HookTrustFacet
   readonly runControls?: RunControlsFacet
+  invalidateContext?(context: ProviderContext): Promise<void> | void
   dispose?(): Promise<void> | void
 }

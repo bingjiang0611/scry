@@ -5,6 +5,7 @@ import {
   applyDataUpdatedEffects,
   authoritativeRefreshAfterToggle,
   capabilityMatchesContext,
+  capabilityRows,
   isAuthoritativeRunControlCatalog,
   mergeMcpLiveSnapshot,
   mcpAuthVerificationError,
@@ -50,6 +51,21 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
     expect(capabilityMatchesContext(capability, { providerId: 'qoder', cwd: '/repo-a' })).toBe(true)
     expect(capabilityMatchesContext(capability, { providerId: 'qoder', cwd: '/repo-b' })).toBe(false)
     expect(capabilityMatchesContext(capability, { providerId: 'codex', cwd: '/repo-a' })).toBe(false)
+  })
+
+  it('权威能力回读无数据时清空旧列表，而不是继续展示陈旧 Skill', () => {
+    const unavailable: CapabilityEnvelope<string[]> = {
+      providerId: 'qoder',
+      cwd: '/repo',
+      mode: 'read',
+      state: 'unknown',
+      data: null,
+      reason: 'catalog unavailable'
+    }
+    const empty: CapabilityEnvelope<string[]> = { ...unavailable, state: 'ready', data: [] }
+
+    expect(capabilityRows(unavailable)).toEqual([])
+    expect(capabilityRows(empty)).toEqual([])
   })
 
   it('操作成功后执行一次 provider 回读并返回权威快照', async () => {

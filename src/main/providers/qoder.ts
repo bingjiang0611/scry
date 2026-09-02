@@ -57,6 +57,7 @@ interface QoderSkillDescriptor {
   name: string
   description: string
   source: string
+  location: string
 }
 
 function qoderRecord(value: unknown): Record<string, unknown> {
@@ -82,18 +83,20 @@ function qoderSkillCatalog(
   for (const row of rows) {
     if (typeof row.name !== 'string' || !row.name) continue
     const current = byName.get(row.name)
+    const location = [row.path, row.location, row.dir].find((value): value is string => typeof value === 'string')
     byName.set(row.name, {
       name: row.name,
       description: typeof row.description === 'string'
         ? row.description
         : current?.description ?? descriptions.get(row.name) ?? '',
-      source: typeof row.source === 'string' ? row.source : current?.source ?? 'unknown'
+      source: typeof row.source === 'string' ? row.source : current?.source ?? 'unknown',
+      location: location ?? current?.location ?? ''
     })
   }
   const skills = [...byName.values()]
   const legacyTotal = typeof usageSkills.totalSkills === 'number' ? usageSkills.totalSkills : undefined
   const modernTotal = typeof usageSkills.count === 'number' ? usageSkills.count : undefined
-  const total = Math.max(skills.length, legacyTotal ?? modernTotal ?? 0)
+  const total = Math.max(skills.length, legacyTotal ?? 0, modernTotal ?? 0)
   const included = Array.isArray(initializedSkills)
     ? skills.length
     : typeof usageSkills.includedSkills === 'number'
@@ -643,6 +646,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
   const skillCache = new Map<string, Cached<{ data: SkillMeta[]; total: number; included: number }>>()
   const commandCache = new Map<string, Cached<{ commands: SlashCommand[]; skillNames?: Set<string>; reason?: string }>>()
   const modelCache = new Map<string, Cached<AgentRunControlCatalog>>()
+  const contextGenerations = new Map<string, number>()
   let lastHookFallbackError: string | undefined
   let hookFallbackObserved = false
 
@@ -1266,10 +1270,20 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         }
       }
     },
+    invalidateContext(context) {
+      const key = context.cwd ?? ''
+      contextGenerations.set(key, (contextGenerations.get(key) ?? 0) + 1)
+      skillCache.delete(key)
+      commandCache.delete(key)
+      modelCache.delete(key)
+      const control = controls.get(key)
+      if (control) closeControl(key, control)
+    },
     skills: {
       list: async (context) => {
         try {
           const key = context.cwd ?? ''
+          const generation = contextGenerations.get(key) ?? 0
           let value = skillCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
             const catalog = await withControl(context, async (q, initialized) => {
@@ -1278,7 +1292,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               return {
                 data: catalog.skills.map((skill) => ({
                   name: skill.name,
-                  dir: skill.source,
+                  dir: skill.location,
                   scope: qoderSkillScope(skill.source),
                   description: skill.description,
                   enabled: true
@@ -1288,12 +1302,14 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               }
             })
             value = { data: catalog, observedAt: Date.now() }
-            skillCache.delete(key)
-            skillCache.set(key, value)
-            while (skillCache.size > 16) {
-              const oldest = skillCache.keys().next().value
-              if (oldest === undefined) break
-              skillCache.delete(oldest)
+            if ((contextGenerations.get(key) ?? 0) === generation) {
+              skillCache.delete(key)
+              skillCache.set(key, value)
+              while (skillCache.size > 16) {
+                const oldest = skillCache.keys().next().value
+                if (oldest === undefined) break
+                skillCache.delete(oldest)
+              }
             }
           }
           const ready = capabilityReady(context, 'read', value.data.data, value.observedAt)
@@ -1309,6 +1325,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       list: async (context) => {
         try {
           const key = context.cwd ?? ''
+          const generation = contextGenerations.get(key) ?? 0
           let value = commandCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
             value = {
@@ -1334,12 +1351,14 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               }),
               observedAt: Date.now()
             }
-            commandCache.delete(key)
-            commandCache.set(key, value)
-            while (commandCache.size > 16) {
-              const oldest = commandCache.keys().next().value
-              if (oldest === undefined) break
-              commandCache.delete(oldest)
+            if ((contextGenerations.get(key) ?? 0) === generation) {
+              commandCache.delete(key)
+              commandCache.set(key, value)
+              while (commandCache.size > 16) {
+                const oldest = commandCache.keys().next().value
+                if (oldest === undefined) break
+                commandCache.delete(oldest)
+              }
             }
           }
           const ready = capabilityReady(
@@ -1363,6 +1382,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       read: async (context) => {
         try {
           const key = context.cwd ?? ''
+          const generation = contextGenerations.get(key) ?? 0
           let value = modelCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
             const models = await withControl(context, (q, initialized) => {
@@ -1388,12 +1408,14 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 permissions: permissionOptions()
               }
             }
-            modelCache.delete(key)
-            modelCache.set(key, value)
-            while (modelCache.size > 16) {
-              const oldest = modelCache.keys().next().value
-              if (oldest === undefined) break
-              modelCache.delete(oldest)
+            if ((contextGenerations.get(key) ?? 0) === generation) {
+              modelCache.delete(key)
+              modelCache.set(key, value)
+              while (modelCache.size > 16) {
+                const oldest = modelCache.keys().next().value
+                if (oldest === undefined) break
+                modelCache.delete(oldest)
+              }
             }
           }
           return capabilityReady(context, 'read', value.data, value.observedAt)
@@ -1411,6 +1433,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       skillCache.clear()
       commandCache.clear()
       modelCache.clear()
+      contextGenerations.clear()
     }
   }
 }

@@ -234,6 +234,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
   let pathResolved = false
   const controlCache = new Map<string, CachedControls>()
   const pendingControls = new Map<string, Promise<CachedControls>>()
+  const controlGenerations = new Map<string, number>()
 
   const executable = (): string | undefined => {
     if (!pathResolved) {
@@ -249,6 +250,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     if (cached && Date.now() - cached.observedAt < CONTROL_TTL_MS) return cached
     const pending = pendingControls.get(key)
     if (pending) return pending
+    const generation = controlGenerations.get(key) ?? 0
     const load = (async () => {
       const path = executable()
       if (!path) throw new Error('Claude Code executable 未找到')
@@ -279,7 +281,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
             permissions: permissionOptions()
           }
         }
-        controlCache.set(key, value)
+        if ((controlGenerations.get(key) ?? 0) === generation) controlCache.set(key, value)
         return value
       } finally {
         prompt.release()
@@ -290,7 +292,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     try {
       return await load
     } finally {
-      pendingControls.delete(key)
+      if (pendingControls.get(key) === load) pendingControls.delete(key)
     }
   }
 
@@ -391,6 +393,12 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         getExternalSessionId: handle.getSessionId,
         getProviderTurnId: handle.getProviderTurnId
       }
+    },
+    invalidateContext(context) {
+      const key = context.cwd ?? ''
+      controlGenerations.set(key, (controlGenerations.get(key) ?? 0) + 1)
+      controlCache.delete(key)
+      pendingControls.delete(key)
     },
     skills: {
       list: async (context) => capabilityReady(context, 'read', listSkills(context.cwd, homeDir))

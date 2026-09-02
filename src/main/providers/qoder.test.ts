@@ -438,7 +438,12 @@ describe('Qoder provider adapter', () => {
 
   it('enables .agents compatibility skills and reads the modern initialization catalog', async () => {
     const initialization = {
-      skills: [{ name: 'kami', description: 'Typeset polished documents', source: 'project' }]
+      skills: [{
+        name: 'kami',
+        description: 'Typeset polished documents',
+        source: 'project',
+        path: '/repo/.agents/skills/kami/SKILL.md'
+      }]
     }
     sdk.query.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue(initialization),
@@ -461,7 +466,7 @@ describe('Qoder provider adapter', () => {
       state: 'ready',
       data: [{
         name: 'kami',
-        dir: 'project',
+        dir: '/repo/.agents/skills/kami/SKILL.md',
         scope: 'project',
         description: 'Typeset polished documents',
         enabled: true
@@ -476,6 +481,96 @@ describe('Qoder provider adapter', () => {
         settings: { skills: { loadFromAgentsDirectory: true } }
       })
     }))
+    await adapter.dispose?.()
+  })
+
+  it('keeps conflicting legacy and modern totals degraded instead of hiding missing Skills', async () => {
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({
+        skills: [{ name: 'one', description: 'One Skill', source: 'project' }]
+      }),
+      getContextUsage: vi.fn().mockResolvedValue({
+        skills: {
+          totalSkills: 0,
+          includedSkills: 1,
+          count: 3,
+          items: [{ name: 'one', source: 'project' }]
+        }
+      }),
+      supportedCommands: vi.fn().mockResolvedValue([
+        { name: 'one', description: 'One Skill', argumentHint: '' }
+      ]),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+    const context = { providerId: 'qoder' as const, cwd: '/repo' }
+
+    await expect(adapter.skills!.list(context)).resolves.toMatchObject({
+      state: 'degraded',
+      reason: expect.stringContaining('1/3'),
+      data: [expect.objectContaining({ name: 'one', dir: '', scope: 'project' })]
+    })
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({
+      state: 'degraded',
+      reason: expect.stringContaining('1/3'),
+      data: [expect.objectContaining({ name: 'one', source: 'skill' })]
+    })
+    await adapter.dispose?.()
+  })
+
+  it('invalidates same-cwd control and catalog caches for a new session', async () => {
+    const control = (name: string) => ({
+      initializationResult: vi.fn().mockResolvedValue({
+        skills: [{ name, description: `${name} description`, source: 'project' }]
+      }),
+      getContextUsage: vi.fn().mockResolvedValue({ skills: { count: 1, items: [{ name, source: 'project' }] } }),
+      supportedCommands: vi.fn().mockResolvedValue([{ name, description: `${name} description`, argumentHint: '' }]),
+      close: sdk.close
+    })
+    sdk.query.mockReturnValueOnce(control('old-skill')).mockReturnValueOnce(control('new-skill'))
+    const adapter = createQoderAdapter()
+    const context = { providerId: 'qoder' as const, cwd: '/repo' }
+
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({ data: [expect.objectContaining({ name: 'old-skill' })] })
+    await adapter.invalidateContext?.(context)
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({ data: [expect.objectContaining({ name: 'new-skill' })] })
+
+    expect(sdk.query).toHaveBeenCalledTimes(2)
+    expect(sdk.close).toHaveBeenCalled()
+    await adapter.dispose?.()
+  })
+
+  it('does not let an in-flight pre-invalidation catalog read refill Qoder caches', async () => {
+    let resolveOldUsage: (usage: unknown) => void = () => {}
+    const oldUsage = new Promise((resolve) => { resolveOldUsage = resolve })
+    const control = (name: string, usage: Promise<unknown>) => ({
+      initializationResult: vi.fn().mockResolvedValue({
+        skills: [{ name, description: `${name} description`, source: 'project' }]
+      }),
+      getContextUsage: vi.fn().mockReturnValue(usage),
+      supportedCommands: vi.fn().mockResolvedValue([{ name, description: `${name} description`, argumentHint: '' }]),
+      close: sdk.close
+    })
+    sdk.query
+      .mockReturnValueOnce(control('stale-skill', oldUsage))
+      .mockReturnValueOnce(control('fresh-skill', Promise.resolve({
+        skills: { count: 1, items: [{ name: 'fresh-skill', source: 'project' }] }
+      })))
+    const adapter = createQoderAdapter()
+    const context = { providerId: 'qoder' as const, cwd: '/repo' }
+
+    const staleRead = adapter.commands!.list(context)
+    await vi.waitFor(() => expect(sdk.query).toHaveBeenCalledTimes(1))
+    await adapter.invalidateContext?.(context)
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({
+      data: [expect.objectContaining({ name: 'fresh-skill' })]
+    })
+    resolveOldUsage({ skills: { count: 1, items: [{ name: 'stale-skill', source: 'project' }] } })
+    await expect(staleRead).resolves.toMatchObject({ data: [expect.objectContaining({ name: 'stale-skill' })] })
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({
+      data: [expect.objectContaining({ name: 'fresh-skill' })]
+    })
+    expect(sdk.query).toHaveBeenCalledTimes(2)
     await adapter.dispose?.()
   })
 

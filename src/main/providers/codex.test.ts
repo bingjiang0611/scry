@@ -813,6 +813,56 @@ describe('Codex provider adapter', () => {
     expect(appServer.request).toHaveBeenLastCalledWith('skills/list', { cwds: ['/isolated-copy'], forceReload: false })
   })
 
+  it('forces a same-cwd Skill reload after starting a new session', async () => {
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'skills/list') {
+        return { data: [{ cwd: '/isolated-copy', skills: [{ name: 'fresh-skill', path: '/isolated-copy/.agents/skills/fresh-skill/SKILL.md', enabled: true }] }] }
+      }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const adapter = createCodexAdapter()
+    const context = { providerId: 'codex' as const, cwd: '/isolated-copy' }
+
+    await adapter.invalidateContext?.(context)
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({
+      data: [expect.objectContaining({ name: 'fresh-skill', source: 'skill' })]
+    })
+
+    expect(appServer.request).toHaveBeenLastCalledWith('skills/list', {
+      cwds: ['/isolated-copy'],
+      forceReload: true
+    })
+  })
+
+  it('preserves a newer forced Skill reload when an older forced request finishes late', async () => {
+    let resolveFirst: (value: unknown) => void = () => {}
+    const first = new Promise((resolve) => { resolveFirst = resolve })
+    appServer.request
+      .mockImplementationOnce(async (method) => {
+        if (method !== 'skills/list') throw new Error(`unexpected request: ${method}`)
+        return first
+      })
+      .mockImplementationOnce(async (method) => {
+        if (method !== 'skills/list') throw new Error(`unexpected request: ${method}`)
+        return { data: [{ cwd: '/isolated-copy', skills: [] }] }
+      })
+    const adapter = createCodexAdapter()
+    const context = { providerId: 'codex' as const, cwd: '/isolated-copy' }
+
+    await adapter.invalidateContext?.(context)
+    const olderReload = adapter.skills!.list(context)
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledTimes(1))
+    await adapter.invalidateContext?.(context)
+    resolveFirst({ data: [{ cwd: '/isolated-copy', skills: [] }] })
+    await olderReload
+    await adapter.skills!.list(context)
+
+    expect(appServer.request).toHaveBeenNthCalledWith(2, 'skills/list', {
+      cwds: ['/isolated-copy'],
+      forceReload: true
+    })
+  })
+
   it('keeps unapproved Codex hooks out of the app-server process', async () => {
     appServer.request.mockResolvedValue({ data: [{ cwd: '/isolated-copy', skills: [] }] })
 
