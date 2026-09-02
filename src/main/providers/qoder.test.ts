@@ -436,6 +436,49 @@ describe('Qoder provider adapter', () => {
     await adapter.dispose?.()
   })
 
+  it('enables .agents compatibility skills and reads the modern initialization catalog', async () => {
+    const initialization = {
+      skills: [{ name: 'kami', description: 'Typeset polished documents', source: 'project' }]
+    }
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue(initialization),
+      getContextUsage: vi.fn().mockResolvedValue({
+        skills: {
+          count: 1,
+          items: [{ name: 'kami', source: 'project', percentageOfContext: 0 }]
+        }
+      }),
+      supportedCommands: vi.fn().mockResolvedValue([
+        { name: 'kanban', description: 'Show kanban items', argumentHint: '' },
+        { name: 'kami', description: 'Typeset polished documents', argumentHint: '' }
+      ]),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+    const context = { providerId: 'qoder' as const, cwd: '/repo' }
+
+    await expect(adapter.skills!.list(context)).resolves.toMatchObject({
+      state: 'ready',
+      data: [{
+        name: 'kami',
+        dir: 'project',
+        scope: 'project',
+        description: 'Typeset polished documents',
+        enabled: true
+      }]
+    })
+    await expect(adapter.commands!.list(context)).resolves.toMatchObject({
+      state: 'ready',
+      data: expect.arrayContaining([expect.objectContaining({ name: 'kami', source: 'skill' })])
+    })
+    expect(sdk.query).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        settings: { skills: { loadFromAgentsDirectory: true } }
+      })
+    }))
+    await adapter.dispose?.()
+  })
+
   it('classifies only catalog-backed Skill commands and leaves other command sources unknown', async () => {
     sdk.query.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue({}),

@@ -53,6 +53,55 @@ function qoderSkillScope(source: string): 'project' | 'user' | 'unknown' {
   return normalized === 'project' || normalized === 'user' ? normalized : 'unknown'
 }
 
+interface QoderSkillDescriptor {
+  name: string
+  description: string
+  source: string
+}
+
+function qoderRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function qoderSkillCatalog(
+  initialized: unknown,
+  usage: unknown,
+  commands: SlashCommand[]
+): { skills: QoderSkillDescriptor[]; total: number; included: number } {
+  const descriptions = new Map(commands.map((command) => [command.name, command.description]))
+  const initializedSkills = qoderRecord(initialized).skills
+  const usageSkills = qoderRecord(qoderRecord(usage).skills)
+  const legacySkills = Array.isArray(usageSkills.skillFrontmatter) ? usageSkills.skillFrontmatter : []
+  const modernSkills = Array.isArray(usageSkills.items) ? usageSkills.items : []
+  const rows = [
+    ...(Array.isArray(initializedSkills) ? initializedSkills : []),
+    ...legacySkills,
+    ...modernSkills
+  ].map(qoderRecord)
+  const byName = new Map<string, QoderSkillDescriptor>()
+  for (const row of rows) {
+    if (typeof row.name !== 'string' || !row.name) continue
+    const current = byName.get(row.name)
+    byName.set(row.name, {
+      name: row.name,
+      description: typeof row.description === 'string'
+        ? row.description
+        : current?.description ?? descriptions.get(row.name) ?? '',
+      source: typeof row.source === 'string' ? row.source : current?.source ?? 'unknown'
+    })
+  }
+  const skills = [...byName.values()]
+  const legacyTotal = typeof usageSkills.totalSkills === 'number' ? usageSkills.totalSkills : undefined
+  const modernTotal = typeof usageSkills.count === 'number' ? usageSkills.count : undefined
+  const total = Math.max(skills.length, legacyTotal ?? modernTotal ?? 0)
+  const included = Array.isArray(initializedSkills)
+    ? skills.length
+    : typeof usageSkills.includedSkills === 'number'
+      ? Math.min(usageSkills.includedSkills, skills.length)
+      : skills.length
+  return { skills, total, included }
+}
+
 function projectCommandMatch(prompt: string): RegExpMatchArray | null {
   return prompt.match(/^\/([A-Za-z0-9][A-Za-z0-9._-]*)(?:[ \t]+([\s\S]*))?$/)
 }
@@ -262,6 +311,9 @@ function qoderOptions(
     includePartialMessages: true,
     includeHookEvents: true,
     settingSources: ['user', 'project', 'local'],
+    // Qoder SDK mode disables the cross-agent compatibility directory by default.
+    // Enable discovery only; Qoder's native folder trust still gates project skills.
+    settings: { skills: { loadFromAgentsDirectory: true } },
     // Qoder must never discover MCP implicitly. Scry injects only the exact
     // fingerprinted configs that passed Scry's Guard and execution checks.
     strictMcpConfig: true,
@@ -1220,20 +1272,19 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           const key = context.cwd ?? ''
           let value = skillCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            const catalog = await withControl(context, async (q) => {
+            const catalog = await withControl(context, async (q, initialized) => {
               const [usage, commands] = await Promise.all([q.getContextUsage(), q.supportedCommands()])
-              const descriptions = new Map(commands.map((command) => [command.name, command.description]))
-              const skills = usage.skills
+              const catalog = qoderSkillCatalog(initialized, usage, commands)
               return {
-                data: (skills?.skillFrontmatter ?? []).map((skill) => ({
+                data: catalog.skills.map((skill) => ({
                   name: skill.name,
                   dir: skill.source,
                   scope: qoderSkillScope(skill.source),
-                  description: descriptions.get(skill.name) ?? '',
+                  description: skill.description,
                   enabled: true
                 })),
-                total: skills?.totalSkills ?? 0,
-                included: skills?.includedSkills ?? 0
+                total: catalog.total,
+                included: catalog.included
               }
             })
             value = { data: catalog, observedAt: Date.now() }
@@ -1261,20 +1312,24 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           let value = commandCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
             value = {
-              data: await withControl(context, async (q) => {
+              data: await withControl(context, async (q, initialized) => {
                 const commands = await q.supportedCommands()
                 try {
-                  const usage = await q.getContextUsage()
-                  const skills = usage.skills
+                  const catalog = qoderSkillCatalog(initialized, await q.getContextUsage(), commands)
                   return {
                     commands,
-                    skillNames: new Set((skills?.skillFrontmatter ?? []).map((skill) => skill.name)),
-                    ...(skills && skills.includedSkills < skills.totalSkills
-                      ? { reason: `Qoder 仅返回 ${skills.includedSkills}/${skills.totalSkills} 个已加载 Skill，其他命令来源保持未知` }
+                    skillNames: new Set(catalog.skills.map((skill) => skill.name)),
+                    ...(catalog.included < catalog.total
+                      ? { reason: `Qoder 仅返回 ${catalog.included}/${catalog.total} 个已加载 Skill，其他命令来源保持未知` }
                       : {})
                   }
                 } catch (error) {
-                  return { commands, reason: `Qoder Skill catalog 读取失败，命令来源保持未知：${String((error as Error).message)}` }
+                  const initializedCatalog = qoderSkillCatalog(initialized, undefined, commands)
+                  return {
+                    commands,
+                    skillNames: new Set(initializedCatalog.skills.map((skill) => skill.name)),
+                    reason: `Qoder Skill catalog 读取失败，命令来源按初始化证据分类：${String((error as Error).message)}`
+                  }
                 }
               }),
               observedAt: Date.now()
