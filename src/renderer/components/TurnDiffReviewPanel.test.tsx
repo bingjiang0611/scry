@@ -62,4 +62,18 @@ describe('TurnDiffReviewPanel 会话基线文案', () => {
     expect(html).not.toContain('自恢复以来')
     expect(html).not.toContain('第一轮前基线')
   })
+
+  it('文件导航显式显示完整条目数，避免窄栏只露出前三项时被误认成缺数据', () => {
+    const turnDiff = snapshot()
+    turnDiff.files = Array.from({ length: 17 }, (_, index) => ({
+      path: `/repo/file-${index + 1}.ts`,
+      added: index + 1,
+      deleted: 0
+    }))
+
+    const html = markup({ turnDiff })
+    expect(html).toContain('<span>Files</span><span>17</span>')
+    expect((html.match(/title="\/repo\/file-/g) ?? []).length).toBe(17)
+    expect(html).toContain('/repo/file-17.ts')
+  })
 })
