@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, chmod, mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
+import { piIntegrationStatus } from './pi-integration.js'
 
 export type InitProvider = 'claude' | 'codex' | 'qoder' | 'opencode'
 
@@ -414,4 +415,267 @@ export async function initWorkspace(options: WorkspaceInitOptions): Promise<Work
     unchangedFiles,
     codexTrustRequired: providers.includes('codex')
   }
+}
+
+export interface ProviderIntegrationDiff {
+  provider: InitProvider
+  path: string
+  present: boolean
+  /** Lifecycle events that carry a managed entry, identified by handler id. */
+  managedEvents: string[]
+  missingEvents: string[]
+  /** Events whose managed entry appears more than once (drift from command reshapes). */
+  duplicateEvents: string[]
+  /** Entries written by someone else; uninstall must preserve them. */
+  foreignEntries: number
+  detail?: string
+}
+
+export interface ArtifactDiff {
+  path: string
+  kind: 'opencode-plugin' | 'hook-script' | 'cli-path' | 'node-bin-dir' | 'git-exclude' | 'config' | 'records'
+  status: 'managed' | 'present' | 'absent' | 'unmanaged'
+  detail?: string
+}
+
+export interface IntegrationsDiffResult {
+  workspace: string
+  providers: ProviderIntegrationDiff[]
+  artifacts: ArtifactDiff[]
+  pi: { installed: boolean; scope: 'user-global'; detail: string }
+}
+
+function managedCommand(value: unknown): boolean {
+  const entry = object(value)
+  return typeof entry?.command === 'string' && entry.command.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`)
+}
+
+async function providerDiff(workspace: string, provider: Exclude<InitProvider, 'opencode'>): Promise<ProviderIntegrationDiff> {
+  const path = join(workspace, CONFIG_PATHS[provider])
+  const source = await readOptional(path)
+  if (source == null) {
+    return {
+      provider,
+      path,
+      present: false,
+      managedEvents: [],
+      missingEvents: [...EVENTS],
+      duplicateEvents: [],
+      foreignEntries: 0
+    }
+  }
+  let hooks: Record<string, unknown> | null
+  try {
+    hooks = object(object(JSON.parse(source))?.hooks)
+  } catch (error) {
+    return {
+      provider,
+      path,
+      present: true,
+      managedEvents: [],
+      missingEvents: [...EVENTS],
+      duplicateEvents: [],
+      foreignEntries: 0,
+      detail: `不是合法 JSON：${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  const managedEvents: string[] = []
+  const duplicateEvents: string[] = []
+  let foreignEntries = 0
+  for (const event of EVENTS) {
+    const groups = hooks?.[event]
+    if (!Array.isArray(groups)) continue
+    let managed = 0
+    for (const group of groups) {
+      const entries = object(group)?.hooks
+      if (!Array.isArray(entries)) continue
+      for (const entry of entries) {
+        if (managedCommand(entry)) managed++
+        else foreignEntries++
+      }
+    }
+    if (managed > 0) managedEvents.push(event)
+    if (managed > 1) duplicateEvents.push(event)
+  }
+  return {
+    provider,
+    path,
+    present: true,
+    managedEvents,
+    missingEvents: EVENTS.filter((event) => !managedEvents.includes(event)),
+    duplicateEvents,
+    foreignEntries
+  }
+}
+
+export async function integrationsDiff(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<IntegrationsDiffResult> {
+  const root = resolve(workspace)
+  const providers: ProviderIntegrationDiff[] = []
+  for (const provider of PROVIDERS) {
+    if (provider === 'opencode') continue
+    providers.push(await providerDiff(root, provider))
+  }
+  const pluginPath = join(root, '.opencode/plugins/scry-recorder.js')
+  const plugin = await readOptional(pluginPath)
+  providers.push({
+    provider: 'opencode',
+    path: pluginPath,
+    present: plugin != null,
+    managedEvents: plugin?.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`) ? [...EVENTS] : [],
+    missingEvents: plugin?.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`) ? [] : [...EVENTS],
+    duplicateEvents: [],
+    foreignEntries: plugin != null && !plugin.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`) ? 1 : 0,
+    ...(plugin != null && !plugin.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`)
+      ? { detail: '插件已存在但不由 Scry 管理' }
+      : {})
+  })
+
+  const artifacts: ArtifactDiff[] = []
+  const hookScript = join(root, '.scry/provider-hook.sh')
+  const hookSource = await readOptional(hookScript)
+  artifacts.push({
+    path: hookScript,
+    kind: 'hook-script',
+    status: hookSource == null ? 'absent' : hookSource.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`) ? 'managed' : 'unmanaged'
+  })
+  for (const [relative, kind] of [['.scry/cli-path', 'cli-path'], ['.scry/node-bin-dir', 'node-bin-dir']] as const) {
+    artifacts.push({
+      path: join(root, relative),
+      kind,
+      status: await exists(join(root, relative)) ? 'managed' : 'absent'
+    })
+  }
+  artifacts.push({
+    path: join(root, 'scry.config.json'),
+    kind: 'config',
+    status: await exists(join(root, 'scry.config.json')) ? 'present' : 'absent',
+    detail: 'uninstall 保留；删除后 recorder 会 fail closed'
+  })
+  artifacts.push({
+    path: join(root, '.scry/records'),
+    kind: 'records',
+    status: await exists(join(root, '.scry/records')) ? 'present' : 'absent',
+    detail: 'uninstall 保留；轮次记录属于你，不要手删单个文件（会制造 sequence gap）'
+  })
+  const excludePath = await gitExcludePath(root).catch(() => null)
+  if (excludePath) {
+    const exclude = await readOptional(excludePath)
+    artifacts.push({
+      path: excludePath,
+      kind: 'git-exclude',
+      status: exclude?.includes('.scry/') ? 'managed' : 'absent',
+      detail: 'uninstall 保留：记录仍在仓库内，移除忽略会导致误提交'
+    })
+  }
+  const pi = await piIntegrationStatus({ home: env.HOME }).catch(() => null)
+  return {
+    workspace: root,
+    providers,
+    artifacts,
+    pi: {
+      installed: pi?.installed === true,
+      scope: 'user-global',
+      detail: 'Pi 集成是用户级扩展，不属于本 workspace；需单独处理'
+    }
+  }
+}
+
+export interface IntegrationsUninstallResult {
+  workspace: string
+  rewritten: string[]
+  removed: string[]
+  retained: Array<{ path: string; reason: string }>
+  skipped: Array<{ path: string; reason: string }>
+}
+
+/**
+ * Remove only entries carrying our handler id. Foreign hooks in the same group survive, and a
+ * group is dropped solely when it becomes empty. Records, config and the Git exclude entry are
+ * retained on purpose and reported, so uninstall never silently discards a team's evidence.
+ */
+export async function integrationsUninstall(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<IntegrationsUninstallResult> {
+  const root = resolve(workspace)
+  const rewritten: string[] = []
+  const removed: string[] = []
+  const retained: Array<{ path: string; reason: string }> = []
+  const skipped: Array<{ path: string; reason: string }> = []
+
+  for (const provider of PROVIDERS) {
+    if (provider === 'opencode') continue
+    const path = join(root, CONFIG_PATHS[provider])
+    const source = await readOptional(path)
+    if (source == null) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(source)
+    } catch {
+      skipped.push({ path, reason: '不是合法 JSON，未修改' })
+      continue
+    }
+    const settings = object(parsed)
+    const hooks = object(settings?.hooks)
+    if (!settings || !hooks) continue
+    let changed = false
+    for (const event of EVENTS) {
+      const groups = hooks[event]
+      if (!Array.isArray(groups)) continue
+      const keptGroups: unknown[] = []
+      for (const group of groups) {
+        const record = object(group)
+        const entries = record?.hooks
+        if (!Array.isArray(entries)) {
+          keptGroups.push(group)
+          continue
+        }
+        const keptEntries = entries.filter((entry) => !managedCommand(entry))
+        if (keptEntries.length !== entries.length) changed = true
+        if (keptEntries.length === 0) continue
+        keptGroups.push(keptEntries.length === entries.length ? group : { ...record, hooks: keptEntries })
+      }
+      if (keptGroups.length === 0) delete hooks[event]
+      else hooks[event] = keptGroups
+    }
+    if (Object.keys(hooks).length === 0) delete settings.hooks
+    if (!changed) continue
+    const mode = await stat(path).then((info) => info.mode & 0o777).catch(() => 0o600)
+    await writeAtomic(path, `${JSON.stringify(settings, null, 2)}\n`, mode)
+    rewritten.push(path)
+  }
+
+  const pluginPath = join(root, '.opencode/plugins/scry-recorder.js')
+  const plugin = await readOptional(pluginPath)
+  if (plugin != null) {
+    if (plugin.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`)) {
+      await rm(pluginPath, { force: true })
+      removed.push(pluginPath)
+    } else {
+      skipped.push({ path: pluginPath, reason: '不由 Scry 管理，未删除' })
+    }
+  }
+
+  for (const relative of ['.scry/provider-hook.sh', '.scry/cli-path', '.scry/node-bin-dir']) {
+    const path = join(root, relative)
+    if (!await exists(path)) continue
+    await rm(path, { force: true })
+    removed.push(path)
+  }
+
+  if (await exists(join(root, '.scry/records'))) {
+    retained.push({ path: join(root, '.scry/records'), reason: '轮次记录归你所有，不自动删除' })
+  }
+  if (await exists(join(root, 'scry.config.json'))) {
+    retained.push({ path: join(root, 'scry.config.json'), reason: '保留以便重新 init；删除后 recorder fail closed' })
+  }
+  const excludePath = await gitExcludePath(root).catch(() => null)
+  if (excludePath && (await readOptional(excludePath))?.includes('.scry/')) {
+    retained.push({ path: excludePath, reason: '保留 .scry/ 忽略，避免记录被误提交' })
+  }
+  const pi = await piIntegrationStatus({ home: env.HOME }).catch(() => null)
+  if (pi?.installed) {
+    retained.push({ path: pi.target, reason: 'Pi 用户级扩展，不属于本 workspace；需手动移除' })
+  }
+  return { workspace: root, rewritten, removed, retained, skipped }
 }

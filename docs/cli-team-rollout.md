@@ -252,17 +252,24 @@ pi        yes       global      unknown  1m ago    1m ago      ok
 
 删除 v1 的 `record_without_terminal_status`：committed record 的 `status` 是封闭 union 且被 `isAgentTurnRecord` 强校验（`turn-record.ts:196`），该状态不存在。
 
-### W3 `integrations diff` / `uninstall`（`repair` 降 P1）
+### W3 `integrations diff` / `uninstall` — ✅ 已实现（`repair` 仍在 P1）
+
+实现：`src/cli/workspace-init.ts` 的 `integrationsDiff` / `integrationsUninstall`（与 init 共用路径、`HANDLER_ID`、`writeAtomic`）+ `src/cli/scry.ts` 分发。`diff` 退出 3 表示检出漂移（重复或部分事件缺失）；`uninstall` 不带 `--yes` 退出 3 且零副作用。重写 Provider 配置时**保留原文件权限**（`stat` 后回写），不强制 0600。
+
+实测：在 `.claude/settings.local.json` 的 `Stop` 里手写一条 `echo my-own-hook`，`uninstall --yes` 后该条**原样保留**，只含我们条目的 group 被删、空事件 key 被移除；`provider-hook.sh` / `cli-path` / `node-bin-dir` 删除；records、`scry.config.json`、`.git/info/exclude` 保留并逐条给出理由；坡 JSON 与非托管 OpenCode 插件进 `skipped` 而不被修改。卸载后 `status` 退 2、`verify-capture` 退 3。
+
+原计划要点：
 
 - **必须新增按 handler id 的识别层**。`HANDLER_ID` 只作为字符串出现在 `hookCommand()` 生成的命令里（`workspace-init.ts:147-150`），Claude/Codex/Qoder 的 JSON 无 marker 块，判「已安装」用 command **全等**（`workspace-init.ts:176-186`）。命令形状一变（换 flag、换 `PROJECT_DIR` 变量、上 Windows）就会追加第二条 hook；`scripts/cli-package-smoke.mjs:63-66` 正是用出现次数断言幂等。
 - 识别规则：命中 `SCRY_HANDLER_ID=turn-recorder-v1` 即视为托管条目；group 内混有用户 hook 时只删 scry 条目，group 空了才删 group。
 - `uninstall` 覆盖面必须完整：Provider hook 条目、OpenCode 插件（含 marker，`workspace-init.ts:349`）、`.scry/provider-hook.sh`、`.scry/cli-path`、`.scry/node-bin-dir`、`.git/info/exclude` 条目（`workspace-init.ts:335-341`）、Pi **全局** extension 的处理说明；并打印保留了什么（records 保留）。
 - `diff` 零副作用。
 
-### W4 `doctor` 稳定 schema
+### W4 `doctor` 稳定 schema — ✅ 已实现
 
-- `doctor` 现在**已只输出 JSON**，`--json` 是已注册但被忽略的 flag（`scry.ts:36,270-309`）。工作内容是「稳定 schema」，不是「新增 --json」。
-- **必须保留现有退出码 0/2/3/4/5**（`scry.ts:288-308`）并写进文档，团队 CI 会依赖。
+- 输出新增 `schemaVersion: 1`、`status: healthy|degraded|corrupt|unavailable`、`checks[] {id, status, detail, remediation?}`；check id 固定为 `recorder.enabled` / `store.integrity` / `turns.pending` / `recorder.lastError`，已有用例断言顺序。
+- **退出码作为冻结合同保留**：0 healthy、2 disabled、3 missing/invalid config、4 store corrupt、5 degraded，每个都有回归用例。
+- `--json` 仍是已注册但无意义的 flag（输出本来就是 JSON），未新增行为。
 
 ### W5 `notify-drain`
 
@@ -324,10 +331,11 @@ v1 的 team preset 等价于默认值：`toolOutput` 默认已是 `summary`、`d
 
 其余：只读、per-file cursor + 记录级 hash 去重、`--dry-run` 先打印扫描面与将被标 `partial/inferred` 的字段、绝不默认递归 home。
 
-**W10 `records archive` + 容量文档（v2 新增）**
+**W10 容量文档 — ✅ 已完成；`records archive` 仍在 P1**
 
 - 全仓库无 retention/prune；`listRecords`/`verifyStore`/`turns list`/`doctor` 全量读，drain 每个 hook 事件 `readdir` 整个 records 目录（`store.ts:69,337,355`）。
-- P0 至少文档化「不要手删 records」（会触发 `sequence gap`）+ 给容量预估；P1 提供合规归档命令（保留序号连续性证明）。
+- README 新增「容量与保留」，给**实测**数字而不是拍脑袋：无工具无 diff 的轮次约 2.9 KB；5 次 Edit + 5 个文件 diff 的轮次 6.6–9.9 KB（diff 约 5.4 KB、tools 约 2.2 KB）；按 8 KB/轮、100 轮/天估算约 20 MB/月。
+- 已写明手删单个 record 会被 `doctor` 当作 store 损坏（退出 4），并给出目前唯一安全做法（先 `turns export`，再整体删 `records/` 与 `notifications/`，并提醒重放需幂等）。
 
 **W11 `support-bundle`**
 
@@ -441,6 +449,22 @@ Uploader 的退避、oversized、401、outbox 幂等测试属独立包。
 | records 无限增长、手删致 `sequence gap` | P0 文档化 + P1 `records archive` |
 | 试点团队版本分裂 | §11 公告人工 `scry upgrade` |
 | 有人把网络能力加回 CLI | §9.1 静态检查 + 本文件作为决策记录 |
+
+## 12.5 P0 交付状态（2026-09-03）
+
+| 工作项 | 状态 |
+|---|---|
+| P0-0 commit hook 指纹授权门 | ✅ `commit-hook status/trust/revoke` |
+| §5.3 drain 预算 + at-least-once 合同 | ✅ 8 条 / 1.5s + `recorder notify-drain` |
+| W1 `scry status` 六阶段矩阵 | ✅ |
+| W2 `scry verify-capture` | ✅ 6 个原因码 |
+| W3 `integrations diff` / `uninstall` | ✅ 按 handler id 识别 |
+| W4 `doctor` 稳定 schema + 冻结退出码 | ✅ |
+| W10 records 容量文档 | ✅ README「容量与保留」 |
+| `integrations repair` | ⏭ P1 |
+| `records archive` | ⏭ P1 |
+
+P0 未做版本升级：`0.2.31` 保持不变，等准备发布时一次性升 `0.3.0`（并按 §11 公告存量安装需人工 `scry upgrade`）。
 
 ## 13. 落地顺序
 
