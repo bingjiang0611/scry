@@ -4,6 +4,7 @@ import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { canOpenWorkspaceFileExternally } from '@shared/workspace'
 import { resolveWorkspaceFileTarget, type WorkspaceFileTarget } from '../workspace-links'
+import { Icon } from './primitives/Icon'
 
 function safeExternalHref(href: string | undefined): string | undefined {
   if (!href) return undefined
@@ -145,7 +146,9 @@ const MarkdownImpl = memo(function MarkdownImpl({ children }: { children: string
           aria-label={title}
           onClick={() => open?.(target)}
         >
+          <Icon name="file" className="md-file-ref-icon" />
           <code {...props} className={className}>{codeChildren}</code>
+          <span className="md-file-ref-label" aria-hidden="true">{external ? '外部打开' : '打开'}</span>
         </button>
       )
     }
