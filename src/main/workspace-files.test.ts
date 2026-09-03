@@ -6,6 +6,7 @@ import {
   createWorkspaceEntry,
   listWorkspace,
   moveWorkspaceEntry,
+  openWorkspaceFileExternally,
   readWorkspaceFile,
   renameWorkspaceEntry,
   trashWorkspaceEntry,
@@ -75,6 +76,26 @@ describe('workspace files', () => {
 
     await expect(readWorkspaceFile({ cwd: root, path: 'binary.dat' })).rejects.toThrow('二进制')
     await expect(readWorkspaceFile({ cwd: root, path: 'invalid.txt' })).rejects.toThrow('UTF-8')
+  })
+
+  it('只允许把工作区内的安全预览格式交给外部应用', async () => {
+    const root = await fixture()
+    await writeFile(join(root, 'report.pdf'), '%PDF fixture')
+    await writeFile(join(root, 'page.html'), '<h1>Scry</h1>')
+    await writeFile(join(root, 'run.command'), 'echo unsafe')
+    await mkdir(join(root, 'node_modules'))
+    await writeFile(join(root, 'node_modules', 'hidden.pdf'), '%PDF hidden')
+    await symlink(join(root, 'report.pdf'), join(root, 'linked.pdf'))
+    const open = vi.fn(async () => {})
+
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'report.pdf' }, open)).resolves.toBe(true)
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'page.html' }, open)).resolves.toBe(true)
+    expect(open).toHaveBeenNthCalledWith(1, join(await realpath(root), 'report.pdf'))
+    expect(open).toHaveBeenNthCalledWith(2, join(await realpath(root), 'page.html'))
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'run.command' }, open)).rejects.toThrow('不允许')
+    await expect(openWorkspaceFileExternally({ cwd: root, path: '../outside.pdf' }, open)).rejects.toThrow('不能越过')
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'node_modules/hidden.pdf' }, open)).rejects.toThrow('受保护')
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'linked.pdf' }, open)).rejects.toThrow('符号链接')
   })
 
   it('新建、保存和重命名均拒绝覆盖同名目标', async () => {

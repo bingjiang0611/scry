@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import type { WorkspaceEntry, WorkspaceEntryKind, WorkspaceFileSnapshot } from '@shared/workspace'
+import { canOpenWorkspaceFileExternally, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFileSnapshot } from '@shared/workspace'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 
@@ -21,9 +21,16 @@ function parentPath(path: string): string {
   return index < 0 ? '' : path.slice(0, index)
 }
 
+export interface WorkspaceOpenRequest {
+  id: number
+  cwd: string
+  path: string
+}
+
 interface WorkspacePanelProps {
   cwd: string
   refreshKey?: number
+  openRequest?: WorkspaceOpenRequest | null
   onClose: () => void
   onAddReference: (entry: WorkspaceEntry) => void
   onDirtyChange?: (dirty: boolean) => void
@@ -34,7 +41,7 @@ type ItemDialog =
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
   | { kind: 'move'; entry: WorkspaceEntry; value: string }
 
-export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, onDirtyChange }: WorkspacePanelProps) {
+export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange }: WorkspacePanelProps) {
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
@@ -49,6 +56,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
   const [mutating, setMutating] = useState(false)
   const loadSequence = useRef(new Map<string, number>())
   const handledRefreshKey = useRef(refreshKey)
+  const handledOpenRequestId = useRef<number | null>(null)
 
   const loadDirectory = useCallback(
     async (path = ''): Promise<void> => {
@@ -117,10 +125,29 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
     [dirty]
   )
 
-  const openFile = (entry: WorkspaceEntry): void => {
-    if (entry.kind !== 'file' || (selected?.path !== entry.path && !confirmLeave())) return
-    setSelected(entry)
+  useEffect(() => {
+    if (!openRequest || handledOpenRequestId.current === openRequest.id) return
+    handledOpenRequestId.current = openRequest.id
+    if (selected?.path === openRequest.path || !confirmLeave()) return
+    setSelected({
+      kind: 'file',
+      name: openRequest.path.split('/').at(-1) ?? openRequest.path,
+      path: openRequest.path,
+      mtimeMs: 0
+    })
     setContext(null)
+  }, [confirmLeave, openRequest, selected?.path])
+
+  const openFile = (entry: WorkspaceEntry): void => {
+    if (entry.kind !== 'file') return
+    setContext(null)
+    if (canOpenWorkspaceFileExternally(entry.path)) {
+      setError(null)
+      void window.scry.workspaceOpenExternal({ cwd, path: entry.path }).catch((openError) => setError(errorMessage(openError)))
+      return
+    }
+    if (selected?.path !== entry.path && !confirmLeave()) return
+    setSelected(entry)
   }
 
   const toggleDirectory = async (entry: WorkspaceEntry): Promise<void> => {
@@ -134,7 +161,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
   }
 
   const requestClose = (): void => {
-    if (confirmLeave()) onClose()
+    onClose()
   }
 
   const submitDialog = async (): Promise<void> => {
@@ -271,6 +298,9 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
     setItemDialog({ kind: 'create', parentPath: parent, entryKind, value: '' })
   }
 
+  const selectedCwd = selected && openRequest?.path === selected.path ? openRequest.cwd : cwd
+  const selectedReadOnly = selectedCwd !== cwd
+
   return (
     <section className="workspace-panel" aria-label="工作区文件">
       <header className="workspace-head">
@@ -283,7 +313,9 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
         )}
         <div className="workspace-title">
           <b>{selected?.name ?? '文件'}</b>
-          <span title={selected?.path ?? cwd}>{selected?.path ?? cwd}</span>
+          <span title={selected ? `${selectedCwd}/${selected.path}` : cwd}>
+            {selected ? `${selectedReadOnly ? `${selectedCwd}/` : ''}${selected.path}` : cwd}
+          </span>
         </div>
         {!selected && (
           <>
@@ -312,9 +344,10 @@ export function WorkspacePanel({ cwd, refreshKey = 0, onClose, onAddReference, o
       {selected ? (
         <FileEditor
           key={`${cwd}:${selected.path}`}
-          cwd={cwd}
+          cwd={selectedCwd}
           entry={selected}
           refreshKey={refreshKey}
+          readOnly={selectedReadOnly}
           onDirtyChange={setDirty}
           onError={setError}
         />
@@ -512,12 +545,14 @@ function FileEditor({
   cwd,
   entry,
   refreshKey,
+  readOnly,
   onDirtyChange,
   onError
 }: {
   cwd: string
   entry: WorkspaceEntry
   refreshKey: number
+  readOnly: boolean
   onDirtyChange: (dirty: boolean) => void
   onError: (error: string | null) => void
 }) {
@@ -536,7 +571,8 @@ function FileEditor({
     setLoading(true)
     onError(null)
     try {
-      const next = await window.scry.workspaceRead({ cwd, path: entry.path })
+      const read = readOnly ? window.scry.workspaceReadKnown : window.scry.workspaceRead
+      const next = await read({ cwd, path: entry.path })
       if (loadSequence.current !== sequence) return
       setSnapshot(next)
       setContent(next.content)
@@ -547,7 +583,7 @@ function FileEditor({
     } finally {
       if (loadSequence.current === sequence) setLoading(false)
     }
-  }, [cwd, entry.path, onError])
+  }, [cwd, entry.path, onError, readOnly])
 
   useEffect(() => {
     void load()
@@ -565,7 +601,7 @@ function FileEditor({
   }, [dirty, onDirtyChange])
 
   const save = useCallback(async (): Promise<void> => {
-    if (!snapshot || !dirty || saving) return
+    if (readOnly || !snapshot || !dirty || saving) return
     setSaving(true)
     onError(null)
     try {
@@ -582,7 +618,7 @@ function FileEditor({
     } finally {
       setSaving(false)
     }
-  }, [content, cwd, dirty, entry.path, onError, saving, snapshot])
+  }, [content, cwd, dirty, entry.path, onError, readOnly, saving, snapshot])
 
   const onEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
@@ -598,7 +634,7 @@ function FileEditor({
   return (
     <div className={`workspace-editor ${markdown ? 'markdown' : ''}`}>
       <div className="workspace-editorbar">
-        <span>{dirty ? '未保存' : '已保存'} · {Math.round(snapshot.size / 1024 * 10) / 10} KiB</span>
+        <span>{readOnly ? '只读预览' : dirty ? '未保存' : '已保存'} · {Math.round(snapshot.size / 1024 * 10) / 10} KiB</span>
         <button
           type="button"
           className="btn"
@@ -609,9 +645,11 @@ function FileEditor({
         >
           重新载入
         </button>
-        <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
-          {saving ? '保存中…' : '保存 ⌘S'}
-        </button>
+        {!readOnly && (
+          <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
+            {saving ? '保存中…' : '保存 ⌘S'}
+          </button>
+        )}
       </div>
       <div className="workspace-editorbody">
         <div className="workspace-source">
@@ -621,6 +659,7 @@ function FileEditor({
             value={content}
             onChange={(event) => setContent(event.target.value)}
             onKeyDown={onEditorKeyDown}
+            readOnly={readOnly}
             spellCheck={false}
             aria-label={`编辑 ${entry.name}`}
           />

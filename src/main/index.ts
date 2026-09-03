@@ -98,6 +98,7 @@ import {
   createWorkspaceEntry,
   listWorkspace,
   moveWorkspaceEntry,
+  openWorkspaceFileExternally,
   readWorkspaceFile,
   renameWorkspaceEntry,
   trashWorkspaceEntry,
@@ -1288,6 +1289,18 @@ handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
   listWorkspace(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
   readWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:readKnown', (_event, request: WorkspacePathRequest) =>
+  readWorkspaceFile({ ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
+handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>
+  openWorkspaceFileExternally(
+    authorizedWorkspaceRequest(currentCwd, request),
+    (path) => shell.openExternal(pathToFileURL(path).href)
+  ))
+handleTrusted('workspace:openKnownExternal', (_event, request: WorkspacePathRequest) =>
+  openWorkspaceFileExternally(
+    { ...request, cwd: resolveKnownProjectDirectory(request.cwd) },
+    (path) => shell.openExternal(pathToFileURL(path).href)
+  ))
 handleTrusted('workspace:write', (_event, request: WorkspaceWriteRequest) =>
   writeWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:create', (_event, request: WorkspaceCreateRequest) =>

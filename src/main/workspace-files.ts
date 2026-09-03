@@ -2,16 +2,17 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import type {
-  WorkspaceCreateRequest,
-  WorkspaceEntry,
-  WorkspaceFileSnapshot,
-  WorkspaceListRequest,
-  WorkspaceListResult,
-  WorkspaceMoveRequest,
-  WorkspacePathRequest,
-  WorkspaceRenameRequest,
-  WorkspaceWriteRequest
+import {
+  canOpenWorkspaceFileExternally,
+  type WorkspaceCreateRequest,
+  type WorkspaceEntry,
+  type WorkspaceFileSnapshot,
+  type WorkspaceListRequest,
+  type WorkspaceListResult,
+  type WorkspaceMoveRequest,
+  type WorkspacePathRequest,
+  type WorkspaceRenameRequest,
+  type WorkspaceWriteRequest
 } from '../shared/workspace.js'
 
 export const WORKSPACE_FILE_LIMIT = 2 * 1024 * 1024
@@ -148,6 +149,20 @@ export async function readWorkspaceFile(request: WorkspacePathRequest): Promise<
     revision: revision(bytes),
     language: language(target.path)
   }
+}
+
+export async function openWorkspaceFileExternally(
+  request: WorkspacePathRequest,
+  open: (path: string) => Promise<void>
+): Promise<true> {
+  if (!canOpenWorkspaceFileExternally(request.path)) {
+    throw new Error('该文件类型不允许从 Scry 打开到外部应用')
+  }
+  const target = await checkedPath(request.cwd, request.path)
+  const info = await lstat(target.path)
+  if (!info.isFile()) throw new Error('目标不是文件')
+  await open(target.path)
+  return true
 }
 
 export async function writeWorkspaceFile(request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot> {

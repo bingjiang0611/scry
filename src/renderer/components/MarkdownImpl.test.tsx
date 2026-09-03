@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import MarkdownImpl, { normalizeMarkdownForDisplay } from './MarkdownImpl'
+import MarkdownImpl, { normalizeMarkdownForDisplay, WorkspaceFileLinkProvider } from './MarkdownImpl'
 
 describe('MarkdownImpl trust boundary', () => {
   it('does not emit remote image requests or dangerous links', () => {
@@ -33,6 +33,34 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('<strong>结论：</strong> 继续优化。')
     expect(html).toContain('<code>** inline literal **</code>')
     expect(html).toContain('** fenced literal **')
+  })
+
+  it('turns workspace file code spans into explicit internal or browser actions', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'`/repo/src/App.tsx` `/repo/docs/report.pdf` `Promise<void>`\n\n```text\n/repo/src/fenced.ts\n```'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+
+    expect(html).toContain('class="md-file-ref"')
+    expect(html).toContain('src/App.tsx · 在右侧文件面板打开')
+    expect(html).toContain('docs/report.pdf · 在外部应用打开')
+    expect(html.match(/class="md-file-ref"/g)).toHaveLength(2)
+    expect(html).toContain('<code>Promise&lt;void&gt;</code>')
+    expect(html).toContain('/repo/src/fenced.ts')
+  })
+
+  it('keeps explicitly linked code as one HTTP link instead of nesting a file button', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'[`/repo/src/App.tsx`](https://example.com)'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+
+    expect(html).toContain('<a href="https://example.com"')
+    expect(html).toContain('<code>/repo/src/App.tsx</code>')
+    expect(html).not.toContain('md-file-ref')
+    expect(html).not.toContain('<a href="https://example.com"><button')
   })
 
   it('wraps GFM tables in a keyboard-scrollable region', () => {

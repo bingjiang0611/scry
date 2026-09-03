@@ -1,7 +1,9 @@
-import { memo, useDeferredValue } from 'react'
+import { createContext, memo, useContext, useDeferredValue, useMemo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { canOpenWorkspaceFileExternally } from '@shared/workspace'
+import { resolveWorkspaceFileTarget, type WorkspaceFileTarget } from '../workspace-links'
 
 function safeExternalHref(href: string | undefined): string | undefined {
   if (!href) return undefined
@@ -15,6 +17,15 @@ function safeExternalHref(href: string | undefined): string | undefined {
 
 function safeImageSrc(src: string | undefined): string | undefined {
   return src?.startsWith('data:image/') || src?.startsWith('blob:') ? src : undefined
+}
+
+function linkedCodeText(node: unknown): string | null {
+  const children = (node as { children?: unknown[] } | undefined)?.children
+  if (children?.length !== 1) return null
+  const code = children[0] as { type?: string; tagName?: string; children?: unknown[] }
+  if (code.type !== 'element' || code.tagName !== 'code') return null
+  const text = code.children?.[0] as { type?: string; value?: unknown } | undefined
+  return code.children?.length === 1 && text?.type === 'text' && typeof text.value === 'string' ? text.value : null
 }
 
 function normalizeStrongSpacing(segment: string): string {
@@ -65,12 +76,37 @@ export function normalizeMarkdownForDisplay(source: string): string {
   }).join('\n')
 }
 
-const components: Components = {
-  a: ({ node: _node, href, children, ...props }) => {
+interface WorkspaceFileLinkContextValue {
+  workspaces: readonly string[]
+  onOpen: (target: WorkspaceFileTarget) => void
+}
+
+const WorkspaceFileLinkContext = createContext<WorkspaceFileLinkContextValue | null>(null)
+
+export function WorkspaceFileLinkProvider({
+  workspaces,
+  onOpen,
+  children
+}: {
+  workspaces: readonly string[]
+  onOpen?: (target: WorkspaceFileTarget) => void
+  children: ReactNode
+}) {
+  const value = useMemo<WorkspaceFileLinkContextValue | null>(
+    () => workspaces.length > 0 && onOpen ? { workspaces, onOpen } : null,
+    [onOpen, workspaces]
+  )
+  return <WorkspaceFileLinkContext.Provider value={value}>{children}</WorkspaceFileLinkContext.Provider>
+}
+
+const baseComponents: Components = {
+  a: ({ node, href, children, ...props }) => {
     const safe = safeExternalHref(href)
-    if (!safe) return <span>{children}</span>
+    const codeText = linkedCodeText(node)
+    const content = codeText == null ? children : <code>{codeText}</code>
+    if (!safe) return <span>{content}</span>
     const external = safe.startsWith('http://') || safe.startsWith('https://')
-    return <a {...props} href={safe} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{children}</a>
+    return <a {...props} href={safe} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{content}</a>
   },
   img: ({ src, alt }) => {
     const safe = safeImageSrc(typeof src === 'string' ? src : undefined)
@@ -88,6 +124,32 @@ const components: Components = {
 const MarkdownImpl = memo(function MarkdownImpl({ children }: { children: string }) {
   const deferredChildren = useDeferredValue(children)
   const normalizedChildren = normalizeMarkdownForDisplay(deferredChildren)
+  const workspaceFileLink = useContext(WorkspaceFileLinkContext)
+  const components = useMemo<Components>(() => ({
+    ...baseComponents,
+    code: ({ node: _node, children: codeChildren, className, ...props }) => {
+      const reference = String(codeChildren)
+      const target = workspaceFileLink && !reference.includes('\n')
+        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces, reference)
+        : null
+      if (!target) return <code {...props} className={className}>{codeChildren}</code>
+
+      const external = canOpenWorkspaceFileExternally(target.path)
+      const open = workspaceFileLink?.onOpen
+      const title = external ? `${target.path} · 在外部应用打开` : `${target.path} · 在右侧文件面板打开`
+      return (
+        <button
+          type="button"
+          className="md-file-ref"
+          title={title}
+          aria-label={title}
+          onClick={() => open?.(target)}
+        >
+          <code {...props} className={className}>{codeChildren}</code>
+        </button>
+      )
+    }
+  }), [workspaceFileLink])
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
