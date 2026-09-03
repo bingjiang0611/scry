@@ -47,6 +47,19 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     expect(String(s.input_preview)).toContain('ls')
   })
 
+  it('Skill 路径引用不作为真实 Skill span 入账', () => {
+    const items = [
+      ev({
+        id: 'skill-reference', kind: 'skill', stage: 'skill:hsf-invoke', name: 'hsf-invoke',
+        input: { source: 'skill_path_in_bash', command: 'git show -- .claude/skills/hsf-invoke/SKILL.md' }
+      }),
+      ev({ id: 'bash-1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'bash-1' })
+    ]
+
+    const { spans } = spanRowsFromItems({ runId: 'run-1', items, nowMs: 1 })
+    expect(spans.map(asSpan)).toEqual([expect.objectContaining({ id: 'bash-1', kind: 'tool', tool: 'Bash' })])
+  })
+
   it('tool_result is_error=true 回填到 tool span', () => {
     const items = [
       ev({ id: 's1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu1' }),

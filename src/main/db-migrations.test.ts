@@ -94,6 +94,27 @@ describe('SQLite migrations', () => {
     }
   })
 
+  it('removes only legacy Skill reference spans in v12', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase(), DB_MIGRATIONS.slice(0, 11))
+      const insert = db.prepare('INSERT INTO spans (id, kind, input_preview) VALUES (?, ?, ?)')
+      insert.run('explicit-skill', 'skill', JSON.stringify({ skill: 'kami' }))
+      insert.run('file-reference', 'skill', JSON.stringify({ source: 'skill_file', path: '/repo/.claude/skills/kami/render.py' }))
+      insert.run('bash-reference', 'skill', JSON.stringify({ source: 'skill_path_in_bash', command: 'git show' }))
+      insert.run('ordinary-tool', 'tool', JSON.stringify({ source: 'skill_path_in_command' }))
+
+      migrateDatabase(db.asProductionDatabase())
+
+      expect(db.prepare('SELECT id FROM spans ORDER BY id').all()).toEqual([
+        { id: 'explicit-skill' },
+        { id: 'ordinary-tool' }
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   it('keeps replayed file evidence idempotent', () => {
     const db = new MigrationTestDatabase()
     try {

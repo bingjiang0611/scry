@@ -508,6 +508,25 @@ describe('aggregateSegments（P1 按 skill 切段）', () => {
     ])
   })
 
+  it('Skill 路径引用不冒充真实调用或 Skill 段', () => {
+    const logical = logicalCallEventsForTurn([
+      ev({
+        id: 'history-inspection',
+        kind: 'skill',
+        stage: 'skill:hsf-invoke',
+        name: 'hsf-invoke',
+        input: { source: 'skill_path_in_bash', command: 'git show -- .claude/skills/hsf-invoke/SKILL.md' }
+      }),
+      ev({ kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'bash-1' })
+    ])
+
+    expect(logical.filter((event) => event.kind === 'skill')).toEqual([])
+    expect(aggregateCalls(logical)).toMatchObject({ skillTotal: 0, ordinaryToolTotal: 1, totalCalls: 1 })
+    expect(aggregateSegments(logical)).toEqual([
+      { skill: '（无 skill）', tools: 1, agents: 0, reads: 0, writes: 0, errors: 0 }
+    ])
+  })
+
   it('具名 skill 段即使 0 工具也保留；无 skill 空段不保留', () => {
     const segs = aggregateSegments([ev({ kind: 'skill', stage: 'skill:foo', name: 'foo' })])
     expect(segs).toEqual([{ skill: 'foo', tools: 0, agents: 0, reads: 0, writes: 0, errors: 0 }])

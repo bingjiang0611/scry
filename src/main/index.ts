@@ -1595,7 +1595,11 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
   if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
   else sessionByContext.delete(key)
   if (cwd) rememberProject(cwd)
-  const merged = mergeSessionTurns(turns, archived, { userDataDir: app.getPath('userData') })
+  const merged = await providerRegistry.enrichSession(
+    { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+    mergeSessionTurns(turns, archived, { userDataDir: app.getPath('userData') })
+  )
+  if (requestRevision !== loadSessionRevision) return null
   const hookConfig =
     cwd && payload.providerId === 'claude'
       ? loadClaudeHookConfig(cwd, homeDir)

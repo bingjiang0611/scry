@@ -12,6 +12,7 @@ import {
   type SkillMeta
 } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
+import type { ParsedTurn } from '../normalize'
 import type {
   AuthorizedMcpExecution,
   McpAuthInteraction,
@@ -64,6 +65,11 @@ export class ProviderRegistry {
         : { model: undefined, effort: undefined, permissionMode: 'default' }),
       emit: (event) => request.emit({ ...event, providerId, runtimeProvider: adapter.runtimeProvider })
     })
+  }
+
+  enrichSession(context: ProviderContext, turns: ParsedTurn[]): Promise<ParsedTurn[]> {
+    if (this.disabledProviders.has(context.providerId)) return Promise.resolve(turns)
+    return this.get(context.providerId).sessionEvidence?.enrich(context, turns) ?? Promise.resolve(turns)
   }
 
   runControls(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>> {

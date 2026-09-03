@@ -17,7 +17,7 @@ import {
 import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
-import { extractUserText, normalizeSdkMessage, type NormalizeCtx } from '../normalize'
+import { extractUserText, normalizeSdkMessage, type NormalizeCtx, type ParsedTurn } from '../normalize'
 import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
@@ -40,6 +40,7 @@ const PROBE_TTL_MS = 30_000
 const CONTROL_READY_TIMEOUT_MS = 20_000
 const CONTROL_READY_TIMEOUT_REASON = `Qoder 控制会话 ${CONTROL_READY_TIMEOUT_MS / 1000} 秒内未完成初始化`
 const QODER_MCP_AUTH_TIMEOUT_MS = 120_000
+const QODER_CONTEXT_USAGE_TIMEOUT_MS = 2_000
 const MAX_PROJECT_COMMAND_BYTES = 256 * 1024
 let counter = 0
 const newId = (): string => `qoder-${Date.now().toString(36)}-${(counter++).toString(36)}`
@@ -593,7 +594,133 @@ function qoderMcpSnapshot(statuses: McpServerStatus[], configured?: McpSnapshot[
   }
 }
 
-function qoderTrace(event: TraceEvent): TraceEvent {
+interface QoderContextEvidence {
+  contextTokens: number
+  contextWindow: number
+  model?: string
+  percentage?: number
+  rawContextWindow?: number
+  source: 'qoder_control' | 'qoder_native_transcript'
+  quality: 'exact' | 'inferred'
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function qoderControlContext(value: unknown): QoderContextEvidence | undefined {
+  const raw = qoderRecord(value)
+  const contextTokens = finiteNumber(raw.totalTokens)
+  const contextWindow = finiteNumber(raw.maxTokens)
+  if (contextTokens == null || contextTokens < 0 || contextWindow == null || contextWindow <= 0) return undefined
+  const model = typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : undefined
+  return {
+    contextTokens,
+    contextWindow,
+    ...(model ? { model } : {}),
+    ...(finiteNumber(raw.percentage) != null ? { percentage: finiteNumber(raw.percentage) } : {}),
+    ...(finiteNumber(raw.rawMaxTokens) != null ? { rawContextWindow: finiteNumber(raw.rawMaxTokens) } : {}),
+    source: 'qoder_control',
+    quality: 'exact'
+  }
+}
+
+function qoderTranscriptContexts(messages: unknown[]): Array<QoderContextEvidence & { ts: number }> {
+  const contexts: Array<QoderContextEvidence & { ts: number }> = []
+  for (const value of messages) {
+    const raw = qoderRecord(value)
+    if (raw.type !== 'assistant') continue
+    const ts = typeof raw.timestamp === 'string' ? new Date(raw.timestamp).getTime() : finiteNumber(raw.timestamp)
+    if (ts == null || !Number.isFinite(ts)) continue
+    const message = qoderRecord(raw.message)
+    const usage = qoderRecord(message.usage)
+    const contextTokens = finiteNumber(usage.input_tokens)
+    const ratio = finiteNumber(usage.context_usage_ratio)
+    if (contextTokens == null || contextTokens < 0 || ratio == null || ratio <= 0) continue
+    const contextWindow = Math.round(contextTokens / ratio)
+    if (contextWindow <= 0) continue
+    const model = typeof message.model === 'string' && message.model.trim() ? message.model.trim() : undefined
+    contexts.push({
+      ts,
+      contextTokens,
+      contextWindow,
+      ...(model ? { model } : {}),
+      percentage: ratio * 100,
+      source: 'qoder_native_transcript',
+      quality: 'inferred'
+    })
+  }
+  return contexts
+}
+
+function withQoderContext(event: TraceEvent, evidence: QoderContextEvidence | undefined): TraceEvent {
+  if (!evidence || event.kind !== 'harness' || event.stage !== 'result') return event
+  const hasContext = event.contextTokens != null && event.modelUsage?.some((row) =>
+    row.contextWindow != null && row.contextWindow > 0
+  )
+  if (hasContext) return event
+  const rows = event.modelUsage?.length
+    ? event.modelUsage
+    : [{ model: evidence.model ?? 'unknown' }]
+  let attached = false
+  const modelUsage = rows.map((row) => {
+    if (attached || (evidence.model && row.model !== evidence.model)) return row
+    attached = true
+    return { ...row, contextWindow: evidence.contextWindow }
+  })
+  if (!attached && evidence.model) modelUsage.push({ model: evidence.model, contextWindow: evidence.contextWindow })
+  return {
+    ...event,
+    contextTokens: evidence.contextTokens,
+    contextUsageSource: evidence.source,
+    contextUsageQuality: evidence.quality,
+    modelUsage,
+    runtimeMetadata: {
+      ...(event.runtimeMetadata ?? {}),
+      contextUsageSource: evidence.source,
+      contextUsageQuality: evidence.quality,
+      ...(evidence.percentage != null ? { contextUsagePercentage: evidence.percentage } : {}),
+      ...(evidence.rawContextWindow != null ? { rawContextWindow: evidence.rawContextWindow } : {})
+    }
+  }
+}
+
+function enrichQoderHistory(turns: ParsedTurn[], messages: unknown[]): ParsedTurn[] {
+  const contexts = qoderTranscriptContexts(messages)
+  if (contexts.length === 0) return turns
+  let previousEnd = Number.NEGATIVE_INFINITY
+  return turns.map((turn) => {
+    const timestamps = turn.items.map((event) => new Date(event.ts).getTime()).filter(Number.isFinite)
+    if (timestamps.length === 0) return turn
+    const end = Math.max(...timestamps)
+    const evidence = [...contexts].reverse().find((context) => context.ts > previousEnd && context.ts <= end)
+    previousEnd = end
+    if (!evidence) return turn
+    return {
+      ...turn,
+      items: turn.items.map((event) => withQoderContext(event, evidence))
+    }
+  })
+}
+
+async function qoderLiveContext(query: Query): Promise<QoderContextEvidence | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const value = await Promise.race([
+      query.getContextUsage(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), QODER_CONTEXT_USAGE_TIMEOUT_MS)
+      })
+    ])
+    return qoderControlContext(value)
+  } catch {
+    return undefined
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+function qoderTrace(event: TraceEvent, contextEvidence?: QoderContextEvidence): TraceEvent {
   if (event.kind === 'hook') {
     return {
       ...event,
@@ -604,7 +731,7 @@ function qoderTrace(event: TraceEvent): TraceEvent {
   if (event.kind !== 'harness' || event.stage !== 'result') return event
   const reportedTokens = [event.tokensIn, event.tokensOut, event.cacheReadTokens, event.cacheCreationTokens, event.reasoningTokens]
   const reportedZeroUsage = reportedTokens.some((value) => value != null) && reportedTokens.every((value) => value == null || value === 0)
-  return {
+  const normalized = {
     ...event,
     tokensIn: reportedZeroUsage ? undefined : event.tokensIn,
     tokensOut: reportedZeroUsage ? undefined : event.tokensOut,
@@ -629,16 +756,17 @@ function qoderTrace(event: TraceEvent): TraceEvent {
         costSource: undefined,
         costConfidence: undefined,
         costUnit: undefined,
-        billingProvider: 'qoder',
+        billingProvider: 'qoder' as const,
         upstreamProvider: 'qoder',
         usageSource: 'qoder_sdk'
       }
     }),
     runtimeMetadata: { ...(event.runtimeMetadata ?? {}), source: 'qoder_sdk', billingProvider: 'qoder', reportedZeroUsage },
-    billingProvider: 'qoder',
+    billingProvider: 'qoder' as const,
     upstreamProvider: 'qoder',
     usageSource: 'qoder_sdk'
   }
+  return withQoderContext(normalized, contextEvidence)
 }
 
 export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
@@ -1039,8 +1167,12 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                   if (raw.type === 'result' && (raw.subtype !== 'success' || raw.is_error === true)) {
                     providerStatus = 'failed'
                   }
+                  let contextEvidence: QoderContextEvidence | undefined
+                  if (raw.type === 'result' && activeAgentCalls.size === 0 && typeof q!.getContextUsage === 'function') {
+                    contextEvidence = await qoderLiveContext(q!)
+                  }
                   for (const rawEvent of normalizeSdkMessage(qoderSdkMessage(message), ctx)) {
-                    const event = qoderTrace(rawEvent)
+                    const event = qoderTrace(rawEvent, contextEvidence)
                     observeAgentEvent(event)
                     if (event.kind === 'harness' && event.stage === 'result' && event.isError) providerFailureSeen = true
                     if (event.kind === 'hook') sdkHooks.push(event)
@@ -1152,6 +1284,20 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: currentProviderTurnId,
         getForkTurnId: () => forkTurnId
+      }
+    },
+    sessionEvidence: {
+      async enrich(context, turns) {
+        if (!context.externalSessionId) return turns
+        try {
+          const messages = await getSessionMessages(context.externalSessionId, {
+            dir: context.cwd,
+            includeSystemMessages: true
+          })
+          return enrichQoderHistory(turns, messages)
+        } catch {
+          return turns
+        }
       }
     },
     mcp: {

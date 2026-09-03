@@ -778,6 +778,140 @@ describe('Qoder provider adapter', () => {
     })
   })
 
+  it('uses Qoder control context usage instead of the zero SDK model window', async () => {
+    const getContextUsage = vi.fn().mockResolvedValue({
+      totalTokens: 103_176,
+      maxTokens: 1_000_000,
+      rawMaxTokens: 1_000_000,
+      percentage: 10.3176,
+      model: 'ultimate'
+    })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          usage: { input_tokens: 31_803, output_tokens: 301 },
+          modelUsage: {
+            ultimate: { inputTokens: 103_176, outputTokens: 301, contextWindow: 0 }
+          }
+        }
+      },
+      getContextUsage,
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const events: TraceEvent[] = []
+
+    await createQoderAdapter().run({
+      runId: 'run-context', prompt: 'work', attachments: [], emit: (event) => events.push(event)
+    }).promise
+
+    expect(getContextUsage).toHaveBeenCalledOnce()
+    expect(events.find((event) => event.kind === 'harness')).toMatchObject({
+      contextTokens: 103_176,
+      modelUsage: [expect.objectContaining({ model: 'ultimate', contextWindow: 1_000_000 })],
+      runtimeMetadata: expect.objectContaining({
+        contextUsageSource: 'qoder_control',
+        contextUsageQuality: 'exact',
+        contextUsagePercentage: 10.3176,
+        rawContextWindow: 1_000_000
+      })
+    })
+  })
+
+  it('enriches archived Qoder context from native usage ratio as inferred window evidence', async () => {
+    sdk.getSessionMessages.mockResolvedValue([{
+      type: 'assistant', timestamp: '2026-09-03T03:00:10.000Z',
+      message: { model: 'ultimate', usage: { input_tokens: 103_176, context_usage_ratio: 0.103176 } }
+    }])
+    const adapter = createQoderAdapter()
+    const turns = await adapter.sessionEvidence!.enrich(
+      { providerId: 'qoder', cwd: '/repo', externalSessionId: 'session-1' },
+      [{
+        userText: 'work',
+        items: [{
+          id: 'result-1', runId: 'run-history', ts: '2026-09-03T03:00:12.000Z',
+          kind: 'harness', stage: 'result', contextTokens: 31_803,
+          modelUsage: [{ model: 'ultimate', contextWindow: 0 }]
+        }]
+      }]
+    )
+
+    expect(turns[0].items[0]).toMatchObject({
+      contextTokens: 103_176,
+      modelUsage: [{ model: 'ultimate', contextWindow: 1_000_000 }],
+      runtimeMetadata: expect.objectContaining({
+        contextUsageSource: 'qoder_native_transcript',
+        contextUsageQuality: 'inferred',
+        contextUsagePercentage: 10.3176
+      })
+    })
+  })
+
+  it('pairs adjacent archived turns with disjoint native usage intervals', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      {
+        type: 'assistant', timestamp: '2026-09-03T03:00:10.000Z',
+        message: { model: 'ultimate', usage: { input_tokens: 100_000, context_usage_ratio: 0.1 } }
+      },
+      {
+        type: 'assistant', timestamp: '2026-09-03T03:00:20.000Z',
+        message: { model: 'ultimate', usage: { input_tokens: 200_000, context_usage_ratio: 0.2 } }
+      }
+    ])
+    const result = (id: string, ts: string): TraceEvent => ({
+      id, runId: id, ts, kind: 'harness', stage: 'result', modelUsage: [{ model: 'ultimate', contextWindow: 0 }]
+    })
+
+    const turns = await createQoderAdapter().sessionEvidence!.enrich(
+      { providerId: 'qoder', cwd: '/repo', externalSessionId: 'session-1' },
+      [
+        { userText: 'one', items: [result('one', '2026-09-03T03:00:12.000Z')] },
+        { userText: 'two', items: [result('two', '2026-09-03T03:00:22.000Z')] }
+      ]
+    )
+
+    expect(turns.map((turn) => turn.items[0].contextTokens)).toEqual([100_000, 200_000])
+  })
+
+  it('keeps complete archived context and does not attach evidence to a different model', async () => {
+    sdk.getSessionMessages.mockResolvedValue([{
+      type: 'assistant', timestamp: '2026-09-03T03:00:10.000Z',
+      message: { model: 'ultimate', usage: { input_tokens: 100_000, context_usage_ratio: 0.1 } }
+    }])
+    const adapter = createQoderAdapter()
+    const turns = await adapter.sessionEvidence!.enrich(
+      { providerId: 'qoder', cwd: '/repo', externalSessionId: 'session-1' },
+      [{
+        userText: 'work',
+        items: [
+          {
+            id: 'exact', runId: 'run-history', ts: '2026-09-03T03:00:11.000Z', kind: 'harness', stage: 'result',
+            contextTokens: 50_000, contextUsageQuality: 'exact', modelUsage: [{ model: 'performance', contextWindow: 200_000 }]
+          },
+          {
+            id: 'mismatch', runId: 'run-history', ts: '2026-09-03T03:00:12.000Z', kind: 'harness', stage: 'result',
+            modelUsage: [{ model: 'performance', contextWindow: 0 }]
+          }
+        ]
+      }]
+    )
+
+    expect(turns[0].items[0]).toMatchObject({
+      contextTokens: 50_000,
+      contextUsageQuality: 'exact',
+      modelUsage: [{ model: 'performance', contextWindow: 200_000 }]
+    })
+    expect(turns[0].items[1]).toMatchObject({
+      contextTokens: 100_000,
+      modelUsage: [
+        { model: 'performance', contextWindow: 0 },
+        { model: 'ultimate', contextWindow: 1_000_000 }
+      ]
+    })
+  })
+
   it('keeps the Qoder input stream open until background Agents settle and the root responds again', async () => {
     let inputReleasedBeforeTerminal = false
     sdk.query.mockImplementation(({ prompt }) => ({

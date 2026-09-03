@@ -9,13 +9,13 @@ function skillSource(event: TraceEvent): string | undefined {
   return typeof input?.source === 'string' ? input.source : undefined
 }
 
-function isSkillPathEvidence(event: TraceEvent): boolean {
+export function isSkillReferenceEvidence(event: TraceEvent): boolean {
   const source = skillSource(event)
   return source === 'skill_file' || source === 'skill_path_in_bash' || source === 'skill_path_in_command'
 }
 
-// Skill trace 同时承载真实调用、注入和内部文件路径证据。所有记录与 UI 统计必须先走
-// 同一套去重，避免同一轮在本地记录、上传看板和 Scry 纵览里出现不同计数。
+// Skill trace 同时承载真实调用、注入和文件路径引用。调用统计只接受 Provider 明确调用
+// 或 Skill 注入；单纯读取、diff、git show 中出现路径仍保留为推断证据，但不能冒充执行。
 export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
   const skillEvents = new Map<string, TraceEvent[]>()
   for (const event of items) {
@@ -28,7 +28,7 @@ export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
 
   const kept = new Set<TraceEvent>()
   for (const events of skillEvents.values()) {
-    const direct = events.filter((event) => skillSource(event) !== 'skill_injection' && !isSkillPathEvidence(event))
+    const direct = events.filter((event) => skillSource(event) !== 'skill_injection' && !isSkillReferenceEvidence(event))
     if (direct.length > 0) {
       const identities = new Set<string>()
       for (const event of direct) {
@@ -43,7 +43,8 @@ export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
       }
       continue
     }
-    kept.add(events.find((event) => skillSource(event) === 'skill_injection') ?? events[0])
+    const injected = events.find((event) => skillSource(event) === 'skill_injection')
+    if (injected) kept.add(injected)
   }
 
   const callIdentities = new Set<string>()

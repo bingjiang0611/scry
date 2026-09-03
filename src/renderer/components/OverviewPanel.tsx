@@ -605,7 +605,14 @@ export function OverviewPanel({
       const win = modelRow?.contextWindow
       const model = modelRow?.model
       if (r.contextTokens != null && win != null && win > 0)
-        return { used: r.contextTokens, win, pct: Math.round((r.contextTokens / win) * 100), model }
+        return {
+          used: r.contextTokens,
+          win,
+          pct: Math.round((r.contextTokens / win) * 100),
+          model,
+          quality: r.contextUsageQuality,
+          source: r.contextUsageSource
+        }
     }
     return null
   }, [results])
@@ -795,7 +802,9 @@ export function OverviewPanel({
                   {fmtTok(ctx.used)} / {fmtTok(ctx.win)}
                 </div>
                 <div className="sub">
-                  已占 {ctx.pct}% · 残余 {fmtTok(Math.max(0, ctx.win - ctx.used))} · 最近一轮完整 prompt÷窗口
+                  已占 {ctx.pct}% · 残余 {fmtTok(Math.max(0, ctx.win - ctx.used))} · {
+                    ctx.quality === 'inferred' ? '推断：Provider usage 比例换算' : '最近一轮 Provider 上下文用量'
+                  }
                 </div>
               </>
             ) : (

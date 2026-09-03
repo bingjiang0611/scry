@@ -3,6 +3,7 @@
 import { type DbStats, type TraceEvent, maskSecrets } from '../shared/trace'
 import { providerDangerCoverage, type ProviderId } from '../shared/provider'
 import { providerUsageResultEvents } from '../shared/result-timing'
+import { isSkillReferenceEvidence } from '../shared/logical-calls'
 
 // v1（旧）：保留建表兼容旧库，P0 起不再写/读。
 export const DDL_V1 = [
@@ -161,6 +162,17 @@ export const DDL_V11 = [
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_file_ops_identity
      ON file_ops(span_id, op, path, source) WHERE span_id IS NOT NULL`
+]
+
+// v12（证据纠偏）：旧版曾把 Skill 文件路径引用写成真实 Skill span。
+// 只删除 input 中带明确推断 source 的派生行；Provider 原生 Skill 调用没有这些 source。
+export const DDL_V12 = [
+  `DELETE FROM spans
+   WHERE kind = 'skill' AND (
+     input_preview LIKE '%"source":"skill_file"%' OR
+     input_preview LIKE '%"source":"skill_path_in_bash"%' OR
+     input_preview LIKE '%"source":"skill_path_in_command"%'
+   )`
 ]
 
 export const UPSERT_SESSION_REF_SQL = `INSERT INTO session_refs (
@@ -546,7 +558,7 @@ export function spanRowsFromItems(args: {
       ])
       continue
     }
-    if (e.stage === 'tool_result' || e.stage === 'text_delta') continue // 不落 span
+    if (e.stage === 'tool_result' || e.stage === 'text_delta' || isSkillReferenceEvidence(e)) continue // 不落 span
     if (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') {
       const r = e.toolUseId ? results.get(e.toolUseId) : undefined
       const tStart = tsMs(e.ts, nowMs)
