@@ -9,7 +9,7 @@ import {
   type RuntimeProvider
 } from '@shared/runtime'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
-import type { WorkspaceEntry } from '@shared/workspace'
+import { canOpenWorkspaceFileExternally, type WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
 import { ChatView } from './components/ChatView'
@@ -19,7 +19,7 @@ import { ViewChrome } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
 import { SkillsModal, McpModal, SettingsModal } from './components/Modals'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
-import { WorkspacePanel, workspaceReferenceToken } from './components/WorkspacePanel'
+import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { AgentsSurface } from './components/AgentsSurface'
 import {
@@ -38,6 +38,7 @@ import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type Ap
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
 import { selectedExternalSessionId, sessionSelectionChanged } from './session-selection'
+import type { WorkspaceFileTarget } from './workspace-links'
 
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
@@ -449,6 +450,10 @@ export function App() {
     removeRecentFolder,
     catalogHealth
   } = workspace
+  const workspaceRoots = useMemo(
+    () => [...new Set([cwd, ...projects.map((project) => project.cwd)].filter((root): root is string => !!root))],
+    [cwd, projects]
+  )
   const [rightSurface, dispatchRightSurface] = useReducer(
     reduceRightSurfaceState,
     createRightSurfaceState({ visible: false })
@@ -457,6 +462,12 @@ export function App() {
   const terminalOpen = rightSurface.openIds.includes('terminal')
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
+  const [workspaceOpenRequest, setWorkspaceOpenRequest] = useState<WorkspaceOpenRequest | null>(null)
+  const workspaceOpenSequenceRef = useRef(0)
+
+  useEffect(() => {
+    setWorkspaceOpenRequest(null)
+  }, [cwd])
 
   useEffect(() => {
     const setWindowTheme = window.scry.setTheme
@@ -1310,6 +1321,20 @@ export function App() {
       return next
     })
   }
+  const openWorkspaceFile = useCallback((target: WorkspaceFileTarget): void => {
+    if (!cwd) return
+    setComposerError(null)
+    if (canOpenWorkspaceFileExternally(target.path)) {
+      const open = target.cwd === cwd ? window.scry.workspaceOpenExternal : window.scry.workspaceOpenKnownExternal
+      void open({ cwd: target.cwd, path: target.path }).catch((error) => {
+        setComposerError(error instanceof Error ? error.message : String(error))
+      })
+      return
+    }
+    surfacePane.restore()
+    setWorkspaceOpenRequest({ id: ++workspaceOpenSequenceRef.current, ...target })
+    dispatchRightSurface({ type: 'open', kind: 'files' })
+  }, [cwd, surfacePane.restore])
   const addWorkspaceReference = useCallback((entry: WorkspaceEntry): void => {
     setInput((current) => appendWorkspaceReference(current, workspaceReferenceToken(entry)))
     window.setTimeout(() => taRef.current?.focus(), 0)
@@ -1407,6 +1432,7 @@ export function App() {
               scrollRef={scrollRef}
               textareaRef={taRef}
               cwd={cwd}
+              workspaceRoots={workspaceRoots}
               recent={recent}
               agents={integrations.agents}
               selectedAgentId={integrations.selectedId}
@@ -1433,6 +1459,7 @@ export function App() {
               onTurnRef={setTurnRef}
               onSelect={session.setSelected}
               onOpenDiff={openTurnDiffReview}
+              onOpenFile={openWorkspaceFile}
               onAnswerQuestion={session.answerQuestion}
               onInput={(value) => {
                 setInput(value)
@@ -1518,6 +1545,7 @@ export function App() {
                 <WorkspacePanel
                   cwd={cwd}
                   refreshKey={workspaceRefreshKey}
+                  openRequest={workspaceOpenRequest}
                   onDirtyChange={setWorkspaceDirty}
                   onAddReference={addWorkspaceReference}
                   onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })}

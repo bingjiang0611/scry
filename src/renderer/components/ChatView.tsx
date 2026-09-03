@@ -14,6 +14,8 @@ import type { DraftAttachment, QueuedPrompt } from '../App'
 import { AssistantTurn, UserMessage } from './ChatTurn'
 import { WorkdirPicker, CliPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
 import { Icon } from './primitives/Icon'
+import { WorkspaceFileLinkProvider } from './MarkdownImpl'
+import type { WorkspaceFileTarget } from '../workspace-links'
 
 interface ChatViewProps {
   turns: Turn[]
@@ -21,6 +23,7 @@ interface ChatViewProps {
   scrollRef: RefObject<HTMLDivElement>
   textareaRef: RefObject<HTMLTextAreaElement>
   cwd: string | null
+  workspaceRoots?: readonly string[]
   recent: string[]
   agents: DetectedAgent[]
   selectedAgentId: string
@@ -31,7 +34,6 @@ interface ChatViewProps {
   runControlsLoading?: boolean
   runControlsReason?: string | null
   input: string
-  composerError?: string | null
   sendBlockedReason?: string | null
   submitting?: boolean
   busy: boolean
@@ -47,6 +49,7 @@ interface ChatViewProps {
   onTurnRef?: (runId: string, el: HTMLDivElement | null) => void
   onSelect: (event: TraceEvent) => void
   onOpenDiff?: (turn: Turn, turnDiff: TurnDiffSnapshot, initialPath?: string) => void
+  onOpenFile?: (target: WorkspaceFileTarget) => void
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onInput: (value: string) => void
   onChooseFolder: () => void
@@ -122,6 +125,7 @@ export function ChatView({
   scrollRef,
   textareaRef,
   cwd,
+  workspaceRoots = cwd ? [cwd] : [],
   recent,
   agents,
   selectedAgentId,
@@ -132,7 +136,6 @@ export function ChatView({
   runControlsLoading = false,
   runControlsReason = null,
   input,
-  composerError = null,
   sendBlockedReason = null,
   submitting = false,
   busy,
@@ -148,6 +151,7 @@ export function ChatView({
   onTurnRef,
   onSelect,
   onOpenDiff,
+  onOpenFile,
   onAnswerQuestion,
   onInput,
   onChooseFolder,
@@ -259,8 +263,6 @@ export function ChatView({
       description: option.description
     }))
   ]
-  // 合法缓存选择由运行控制层返回 null；非空阻塞原因必须可见，不能留下无解释的禁用按钮。
-  const composerStatus = composerError ?? sendBlockedReason
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
@@ -288,7 +290,8 @@ export function ChatView({
 
   return (
     <>
-      <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
+      <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
+        <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
         {turns.length > 0 && (
           <div className="chat-evidence-source" role="note" aria-label="会话证据来源">
             <span><i aria-hidden="true" />本机真实会话</span>
@@ -464,8 +467,9 @@ export function ChatView({
             </div>
             )
           })}
+          </div>
         </div>
-      </div>
+      </WorkspaceFileLinkProvider>
 
       <div className="composer runtime-composer">
         <div className="composer-shell evidence-composer-shell">
@@ -594,8 +598,6 @@ export function ChatView({
           ref={textareaRef}
           className="input"
           aria-label="描述任务"
-          aria-describedby={composerStatus ? 'composer-status' : undefined}
-          placeholder={sendBlockedReason ? '当前 Provider 不可发送；草稿会保留' : `给 ${selectedAgentName} 一个任务，或输入 / 使用命令…`}
           value={input}
           onChange={(event) => onInput(event.target.value)}
           onPaste={(event) => {
@@ -646,7 +648,6 @@ export function ChatView({
             }
           }}
         />
-        {composerStatus && <div id="composer-status" className="composer-error" role="alert">{composerStatus}</div>}
         <div className="composer-bottom">
           <div className="composer-controls" role="group" aria-label="运行配置">
             <div className="run-control-scroll">
@@ -690,8 +691,6 @@ export function ChatView({
             disabled={submitting || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
             aria-busy={submitting}
             aria-label={sendActionLabel}
-            aria-describedby={composerStatus ? 'composer-status' : undefined}
-            title={sendBlockedReason ?? sendActionLabel}
           >
             <Icon name="arrowUp" />
             <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>

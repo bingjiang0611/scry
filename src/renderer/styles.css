@@ -1231,6 +1231,31 @@ body.pane-resizing * {
   font: 0.86em/1.45 ui-monospace, Menlo, monospace;
   overflow-wrap: anywhere;
 }
+.md-file-ref {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.md-file-ref code {
+  transition: border-color 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
+}
+.md-file-ref:hover code {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.md-file-ref:focus-visible {
+  outline: none;
+}
+.md-file-ref:focus-visible code {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .md pre {
   margin: 0.95em 0;
   padding: 12px 14px;
