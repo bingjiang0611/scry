@@ -8,6 +8,7 @@ import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { turnChangeHints } from './change-journal.js'
+import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
@@ -2110,7 +2111,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
           ...pending
         })
       }
-      await drainCommitNotifications(enablement.dataRoot, input.env ?? process.env)
+      const hookEnv = input.env ?? process.env
+      await drainCommitNotifications(enablement.dataRoot, await activatedCommitHookEnv(enablement, hookEnv))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       await appendRotatingLog(join(enablement.dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR recorder post-processing: ${message}`).catch(() => undefined)
@@ -2119,6 +2121,34 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
   } catch (error) {
     await recordError(enablement.dataRoot, error)
     throw error
+  }
+}
+
+/**
+ * Resolve the CLI-side commit hook grant before draining notifications. A managed host
+ * injects the entry itself, so `host-provided` is passed through untouched. Every other
+ * non-trusted state fails closed: the env is returned unchanged, no entry is executed, and
+ * the reason is logged so `commit-hook status` can explain the stall instead of reporting
+ * an empty backlog.
+ */
+async function activatedCommitHookEnv(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  env: NodeJS.ProcessEnv
+): Promise<NodeJS.ProcessEnv> {
+  try {
+    const activation = await resolveCommitHookActivation(enablement.workspaceRoot, enablement.config, env)
+    if (activation.status === 'bundle-invalid' || activation.status === 'fingerprint-mismatch') {
+      const detail = activation.status === 'bundle-invalid'
+        ? activation.detail
+        : `expected ${activation.expected}, found ${activation.actual}`
+      await appendRotatingLog(
+        join(enablement.dataRoot, 'logs', 'recorder.log'),
+        `${new Date().toISOString()} ERROR commit hook not activated (${activation.status}): ${detail}`
+      ).catch(() => undefined)
+    }
+    return commitHookEnv(activation, env)
+  } catch {
+    return env
   }
 }
 
@@ -2215,7 +2245,7 @@ export async function recoverRecorder(
     ...(await pendingHealth(enablement.dataRoot)),
     ...(recovered ? { increment: { recoveredRecords: recovered } } : {})
   })
-  await drainCommitNotifications(enablement.dataRoot, env)
+  await drainCommitNotifications(enablement.dataRoot, await activatedCommitHookEnv(enablement, env))
   return { recovered, pending }
 }
 
