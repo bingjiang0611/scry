@@ -138,16 +138,21 @@ scry CLI
 
 **合同措辞**：交付语义为 at-least-once；去重键为 `(workspace, recordId)`；`sequence` 只保证同 workspace 内单调，**不**保证「恰好投递一次」。Uploader 必须按 `recordId` 唯一约束 + 幂等 upsert。
 
-### 5.3 drain 预算（v2 新增，必须改实现）
+### 5.3 drain 预算 — ✅ 已实现
 
 现状风险链：`recorder.ts:2113` 在**每个** hook 事件后同步 `await drainCommitNotifications` → `store.ts:241` 对全部 pending **串行**调用，每条上限 10s → 单次 drain 最坏 `pending × 10s`，无上限。而 daemon 客户端超时仅 1s / 4s（`scry.ts:127`），超时后走「直接处理」回退分支再触发第二次 drain，撞 `commit-notification.lock`（2s）→ 锁超时、日志报错、计数抖动；Provider 侧 hook timeout 只有 10 / 15s（`workspace-init.ts:180`），慢 Uploader 会把用户 Agent 的 Stop hook 拖到被 Provider 杀掉。
 
-要求：
+已落实：
 
-- hook 事件路径只做**有界 drain**：单次最多 N 条或总预算 ≤ 1.5s，剩余留给下次 hook / recovery / 显式命令。
-- 完整 drain 交给 daemon 空闲期或 `scry recorder notify-drain`。
-- 10s 是**熔断上限**，不是预算；Uploader 的 exit 0 目标延迟 ≤ 200ms。
-- `status` 必须暴露「本次被预算截断」。
+- `HOOK_DRAIN_MAX_RECORDS = 8`、`HOOK_DRAIN_BUDGET_MS = 1500`（`store.ts`），仅 hook 事件路径（`recorder.ts`）传入；`recorder recover` 与 `recorder notify-drain` 保持无界。
+- 预算只在两条记录**之间**检查，所以 `COMMIT_HOOK_TIMEOUT_MS`（10s）仍是单条熔断上限，不是批预算；时间预算下仍保证至少投递一条，避免永不前进。
+- `DrainResult` 新增 `truncated`；hook 失败**不**标记为截断，便于区分停滞原因。
+- 截断状态持久到 `.scry/notifications/drain-status.json`（`{ sync: false }`，仅在状态转换时写），`status` 以 `lastDrainTruncated` 暴露。
+- Uploader 的 exit 0 目标延迟 ≤ 200ms（合同要求，不由 CLI 强制）。
+
+实测（`SCRY_RECORDER_TRANSPORT=direct` 隔离单次 drain，10 条积压）：一个 hook 事件只投递 8 条，`ackedThrough: 8`、`notifyBacklog: 2`、`lastDrainTruncated: true`；下一事件接着投递；`notify-drain` 清空剩余并把 `lastDrainTruncated` 回落。
+
+实测发现并已确认为预期：daemon 冷启动时的 recovery 会做一次**无界** drain。它不在 hook 同步路径上（`waitForReady: false`），不影响 Provider hook 超时，但会让“一个轮次看上去投递了全部积压”；诊断时应以 `direct` 传输隔离。
 
 ### 5.4 信任边界（诚实表述）
 
@@ -199,7 +204,11 @@ Windows 支持 / 兼容矩阵
 - `status` 对应状态：`not-configured` / `configured_but_not_activated` / `trusted` / `blocked:fingerprint-mismatch`。
 - 不做这项，P0 与「团队推广」目标无关。
 
-### W1 `scry status`
+### W1 `scry status` — ✅ 已实现
+
+实现：`src/cli/status.ts`（报告组装）、`src/core/turn-recorder/provider-activity.ts`（`HookSeen` 证据，`{ sync: false }` + 全程 fail open）、`src/cli/workspace-init.ts`（`detectWorkspaceProviders` / `providerHookInstalled` 按 `SCRY_HANDLER_ID` 识别）。退出码：0 至少一个 Provider 在 capturing，2 recorder 未启用或无任何已配置 Provider，3 已配置但无事件/无 record。
+
+实测输出形状（新仓库，仅 `init --providers claude`）：claude `configured: workspace` / `state: configured-no-events`，其他 `not-configured`，全部 `trusted: unknown`；采到一轮后 claude 转 `capturing` 且 `recordSeen.sequence: 1`。
 
 新增 `src/cli/status.ts`，逐 Provider 输出，任一阶段不可知必须显式 `unknown`：
 

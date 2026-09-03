@@ -243,10 +243,60 @@ export async function commitNotificationStatus(
   }
 }
 
+/**
+ * Hook-path drain budget. The commit hook runs on the provider lifecycle critical path, so
+ * a backlog must never be flushed synchronously: providers cap their hook at 10-15s and the
+ * daemon client at 1-4s. The budget is checked between invocations, so COMMIT_HOOK_TIMEOUT_MS
+ * remains the per-record circuit breaker, not the batch budget. Remaining records stay
+ * pending and are picked up by the next hook, `recorder recover`, or `recorder notify-drain`.
+ */
+export const HOOK_DRAIN_MAX_RECORDS = 8
+export const HOOK_DRAIN_BUDGET_MS = 1_500
+
+export interface DrainOptions {
+  maxRecords?: number
+  budgetMs?: number
+  now?: () => number
+}
+
+export interface DrainResult {
+  delivered: number
+  pending: number
+  truncated: boolean
+}
+
+interface DrainStatusFile {
+  schemaVersion: 1
+  at: string
+  truncated: boolean
+  delivered: number
+  pending: number
+}
+
+async function recordDrainTruncation(dataRoot: string, result: DrainResult): Promise<void> {
+  const path = join(dataRoot, 'notifications', 'drain-status.json')
+  const previous = await readJson<DrainStatusFile>(path)
+  if (!result.truncated && !previous?.truncated) return
+  await writeJsonAtomic(path, {
+    schemaVersion: 1,
+    at: new Date().toISOString(),
+    truncated: result.truncated,
+    delivered: result.delivered,
+    pending: result.pending
+  } satisfies DrainStatusFile, { sync: false }).catch(() => undefined)
+}
+
+export async function readDrainStatus(dataRoot: string): Promise<{ truncated: boolean; at: string | null }> {
+  const status = await readJson<DrainStatusFile>(join(dataRoot, 'notifications', 'drain-status.json'))
+  if (status?.schemaVersion !== 1) return { truncated: false, at: null }
+  return { truncated: status.truncated === true, at: typeof status.at === 'string' ? status.at : null }
+}
+
 export async function drainCommitNotifications(
   dataRoot: string,
-  env: NodeJS.ProcessEnv = process.env
-): Promise<{ delivered: number; pending: number }> {
+  env: NodeJS.ProcessEnv = process.env,
+  options: DrainOptions = {}
+): Promise<DrainResult> {
   let hook: string | null
   try {
     hook = await configuredCommitHook(env)
@@ -256,9 +306,9 @@ export async function drainCommitNotifications(
     const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
     const fingerprint = configuredCommitHookFingerprint(env)
     const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint ? state.ackedThrough : 0
-    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length }
+    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length, truncated: false }
   }
-  if (!hook) return { delivered: 0, pending: 0 }
+  if (!hook) return { delivered: 0, pending: 0, truncated: false }
   try {
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
       const statePath = join(dataRoot, 'notifications', 'commit-hook-state.json')
@@ -269,8 +319,19 @@ export async function drainCommitNotifications(
         ? state.ackedThrough
         : 0
       const pending = (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough)
+      const now = options.now ?? Date.now
+      const deadline = options.budgetMs != null ? now() + options.budgetMs : null
       let delivered = 0
+      let truncated = false
       for (const file of pending) {
+        if (options.maxRecords != null && delivered >= options.maxRecords) {
+          truncated = true
+          break
+        }
+        if (deadline != null && delivered > 0 && now() >= deadline) {
+          truncated = true
+          break
+        }
         const record = await readRecordFile(join(dataRoot, 'records', file.name))
         if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
         if (!await invokeCommitHook(hook, commitNotification(record), env)) {
@@ -278,7 +339,9 @@ export async function drainCommitNotifications(
             join(dataRoot, 'logs', 'recorder.log'),
             `${new Date().toISOString()} ERROR commit notification: commit hook did not ACK sequence ${record.sequence}`
           ).catch(() => undefined)
-          return { delivered, pending: pending.length - delivered }
+          const failure = { delivered, pending: pending.length - delivered, truncated: false }
+          await recordDrainTruncation(dataRoot, failure)
+          return failure
         }
         await writeJsonAtomic(statePath, {
           schemaVersion: 1,
@@ -287,7 +350,9 @@ export async function drainCommitNotifications(
         } satisfies CommitHookState)
         delivered++
       }
-      return { delivered, pending: pending.length - delivered }
+      const result = { delivered, pending: pending.length - delivered, truncated }
+      await recordDrainTruncation(dataRoot, result)
+      return result
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -295,7 +360,7 @@ export async function drainCommitNotifications(
     const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
     const fingerprint = configuredCommitHookFingerprint(env)
     const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint ? state.ackedThrough : 0
-    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length }
+    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length, truncated: false }
   }
 }
 

@@ -48,6 +48,7 @@ scry integrations status-pi
 
 ```bash
 scry doctor --workspace "$PWD"
+scry status --workspace "$PWD"
 scry commit-hook status --workspace "$PWD"
 scry turns list --workspace "$PWD"
 scry turns show <sequence|recordId> --workspace "$PWD"
@@ -57,6 +58,16 @@ scry turns summary <sessionId> --workspace "$PWD"
 scry turns summary --all --workspace "$PWD"
 scry turns export --workspace "$PWD" --after 0 --limit 100
 scry --help
+```
+
+`scry status` 逐 Provider 输出六个阶段：detected、configured（workspace / global / no）、trusted、hookSeen、recordSeen、state。`configured` 只证明配置已写入，`hookSeen` 证明 lifecycle hook 真的到达了 recorder，`recordSeen` 才证明轮次已提交；三者不可互相代替。`trusted` 永远是 `unknown`：Codex 要求交互式 `/hooks` 确认，其余 Provider 不向 CLI 暴露信任状态，写成 `n/a` 等于声称“不需要信任”。退出码：0 至少一个 Provider 正在采集，2 recorder 未启用或没有已配置 Provider，3 已配置但还没有真实事件或 record。Pi 单独标为 `global`，因为它是用户级 lifecycle 扩展而不是项目 hook。
+
+`openTurnsPending`（未收敛的 open turn）与 commit hook 的 `notifyBacklog`（未 ACK 记录数）是两个不同指标，不要混用。
+
+commit hook 投递在 Provider lifecycle 关键路径上有界执行：每个 hook 事件最多投递 8 条、预算 1.5s（仅在两条之间检查，单条仍以 10s 熔断），剩余保持 pending 并在 `status` 以 `lastDrainTruncated` 标出。需要一次清空时用：
+
+```bash
+scry recorder notify-drain --workspace "$PWD"
 ```
 
 参数同时支持 `--workspace <root>` 与 `--workspace=<root>`；未知参数或缺少参数值会直接报错。`turns show/timeline` 未找到记录时输出 `{ "found": false }` 并退出 1，退出码 4 只表示 store 损坏。

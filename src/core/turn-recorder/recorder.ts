@@ -9,6 +9,7 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
+import { recordProviderActivity } from './provider-activity.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
@@ -25,6 +26,8 @@ import {
   type RecorderSessionState as SessionState
 } from './runtime-state.js'
 import {
+  HOOK_DRAIN_BUDGET_MS,
+  HOOK_DRAIN_MAX_RECORDS,
   RECORDER_VERSION,
   clearRuntimeTurn,
   commitRecord,
@@ -2111,8 +2114,15 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
           ...pending
         })
       }
+      await recordProviderActivity(enablement.dataRoot, input.provider, input.event)
       const hookEnv = input.env ?? process.env
-      await drainCommitNotifications(enablement.dataRoot, await activatedCommitHookEnv(enablement, hookEnv))
+      // Bounded on the provider critical path; the remainder waits for the next hook,
+      // `recorder recover`, or `recorder notify-drain`.
+      await drainCommitNotifications(
+        enablement.dataRoot,
+        await activatedCommitHookEnv(enablement, hookEnv),
+        { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS }
+      )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       await appendRotatingLog(join(enablement.dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR recorder post-processing: ${message}`).catch(() => undefined)
