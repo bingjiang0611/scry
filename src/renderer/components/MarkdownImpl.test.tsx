@@ -20,6 +20,9 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('target="_blank"')
     expect(html).toContain('rel="noopener noreferrer"')
     expect(html).toContain('<img')
+    // 内联图片仍然放行，但按需解码，避免长会话一次性解码所有历史图片。
+    expect(html).toContain('loading="lazy"')
+    expect(html).toContain('decoding="async"')
   })
 
   it('repairs common model-authored strong spacing without touching code', () => {

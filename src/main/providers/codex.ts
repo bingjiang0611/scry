@@ -1524,6 +1524,9 @@ export function createCodexAdapter(
         promise,
         interrupt,
         forceKill: () => activeClient?.close(),
+        // app-server client 按 cwd 复用（clientActivity 计数）：close() 会断掉同一 client 上
+        // 所有并发 run，所以不能当作 run-scoped 硬杀自动发出。
+        forceKillScope: 'shared_transport',
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: () => turnId
       }

@@ -63,6 +63,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
         promise,
         interrupt: () => { stopped = true },
         forceKill: () => { stopped = true },
+        forceKillScope: 'run_scoped',
         getExternalSessionId: () => sessionId,
         getProviderTurnId: () => `${request.runId}:provider-turn`
       }

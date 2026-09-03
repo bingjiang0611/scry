@@ -27,7 +27,7 @@ import {
   reduceRightSurfaceState,
   type RightSurfaceAction
 } from './right-surface'
-import type { ParsedTurn, ProjectMeta, SessionMeta, SessionRef } from './env'
+import type { ParsedTurn, ProjectMeta, SessionHistoryPage, SessionMeta, SessionRef } from './env'
 import { resolveTurnDiffReview, sessionNetDiffReview } from './turn-diff'
 import type { Turn } from './format'
 import { useResizablePane } from './hooks/useResizablePane'
@@ -317,11 +317,11 @@ export async function restoreActiveSessionSelection(
       agentProfileId?: string
       cwd: string
       externalSessionId: string
-    }) => Promise<ParsedTurn[] | null>
+    }) => Promise<SessionHistoryPage | null>
     replaceWithParsedSession: (
       sessionId: string,
       parsed: ParsedTurn[],
-      options: { activeRun: ActiveRun }
+      options: { activeRun: ActiveRun; page?: SessionHistoryPage | null }
     ) => void
     isCurrent?: () => boolean
   }
@@ -331,7 +331,7 @@ export async function restoreActiveSessionSelection(
   effects.prepareRunFocus(args.runId)
   const activeRun = await effects.adoptActiveRun(args.runId)
   if (!activeRun || (effects.isCurrent && !effects.isCurrent())) return false
-  const parsed = args.externalSessionId
+  const page = args.externalSessionId
     ? await effects.loadSession({
         providerId: args.providerId,
         agentProfileId: args.agentProfileId,
@@ -340,7 +340,7 @@ export async function restoreActiveSessionSelection(
       })
     : null
   if (effects.isCurrent && !effects.isCurrent()) return false
-  effects.replaceWithParsedSession(args.sessionId, parsed ?? [], { activeRun })
+  effects.replaceWithParsedSession(args.sessionId, page?.turns ?? [], { activeRun, page })
   return true
 }
 
@@ -354,11 +354,11 @@ export async function restoreFocusedRunSelection(
       agentProfileId?: string
       cwd: string
       externalSessionId: string
-    }) => Promise<ParsedTurn[] | null>
+    }) => Promise<SessionHistoryPage | null>
     replaceWithParsedSession: (
       sessionId: string,
       parsed: ParsedTurn[],
-      options: { activeRun: ActiveRun; preserveFocusDeltas?: boolean }
+      options: { activeRun: ActiveRun; preserveFocusDeltas?: boolean; page?: SessionHistoryPage | null }
     ) => void
     isCurrent?: () => boolean
   }
@@ -374,14 +374,14 @@ export async function restoreFocusedRunSelection(
     preserveFocusDeltas: Boolean(externalSessionId)
   })
   if (!externalSessionId) return true
-  const parsed = await effects.loadSession({
+  const page = await effects.loadSession({
     providerId: run.providerId,
     agentProfileId: run.agentProfileId,
     cwd,
     externalSessionId
   }).catch(() => null)
   if (effects.isCurrent && !effects.isCurrent()) return false
-  effects.replaceWithParsedSession(sessionId, parsed ?? [], { activeRun: run })
+  effects.replaceWithParsedSession(sessionId, page?.turns ?? [], { activeRun: run, page })
   return true
 }
 
@@ -430,7 +430,7 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
 export function App() {
   const [theme, setTheme] = useState<AppTheme>(() => readStoredTheme(browserThemeStorage()))
   const [input, setInput] = useState('')
-  const [composerError, setComposerError] = useState<string | null>(null)
+  const [, setComposerError] = useState<string | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachment[]>([])
   const draftStartPendingRef = useRef(false)
@@ -1173,10 +1173,11 @@ export function App() {
     await window.scry.focusRun(null)
     if (!isCurrent()) return
     if (!externalSessionId) return
-    const parsed = await window.scry.loadSession({ providerId, agentProfileId, cwd: projectCwd, externalSessionId })
+    const page = await window.scry.loadSession({ providerId, agentProfileId, cwd: projectCwd, externalSessionId })
     if (!isCurrent()) return
-    session.replaceWithParsedSession(sessionId, parsed ?? [], {
-      activeRun: null
+    session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
+      activeRun: null,
+      page
     })
   }
 
@@ -1343,6 +1344,31 @@ export function App() {
     setQueuedPrompts([])
     await session.stopRun()
   }
+  const [historyOlderLoading, setHistoryOlderLoading] = useState(false)
+  // 更早轮次按需取回：请求只带当前窗口的 offset，main 侧再用 revision + 会话身份栅栏；
+  // 过期响应由 prependOlderTurns 丢弃，不会把别的会话的轮次拼进时间线。
+  const loadOlderTurns = async (): Promise<void> => {
+    const historyWindow = session.historyWindow
+    if (!historyWindow?.hasOlder || historyOlderLoading) return
+    if (typeof window.scry.loadSessionOlder !== 'function' || !selectedProviderSessionId) return
+    setHistoryOlderLoading(true)
+    try {
+      const page = await window.scry
+        .loadSessionOlder(
+          {
+            providerId: integrations.selectedProviderId,
+            agentProfileId: integrations.providerContext.agentProfileId,
+            cwd: cwd ?? '',
+            externalSessionId: selectedProviderSessionId
+          },
+          { before: historyWindow.offset }
+        )
+        .catch(() => null)
+      session.prependOlderTurns(historyWindow.sessionId, page)
+    } finally {
+      setHistoryOlderLoading(false)
+    }
+  }
 
   return (
     <div
@@ -1443,7 +1469,6 @@ export function App() {
               runControlsLoading={integrations.runControlsLoading}
               runControlsReason={integrations.runControlCapability?.reason}
               input={input}
-              composerError={composerError}
               sendBlockedReason={providerSendBlockedReason}
               submitting={composerSubmitting}
               busy={session.busy}
@@ -1455,6 +1480,11 @@ export function App() {
               slashReason={slashReason}
               slashSel={slashSel}
               pendingQuestions={session.pendingQuestions}
+              stopStates={session.stopStates}
+              historyWindow={session.historyWindow}
+              historyOlderLoading={historyOlderLoading}
+              onLoadOlderTurns={() => { void loadOlderTurns() }}
+              traceHealth={session.traceHealth}
               focusedTurnRunId={focusedTurnRunId}
               onTurnRef={setTurnRef}
               onSelect={session.setSelected}

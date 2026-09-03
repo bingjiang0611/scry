@@ -2,6 +2,7 @@ import type {
   AgentInputAttachment,
   AgentIntervention,
   AgentQuestionRequest,
+  AgentStopState,
   RunTerminationReason,
   RuntimeFailureStage,
   RuntimeProvider
@@ -62,6 +63,8 @@ export interface ActiveRun {
   items: TraceEvent[]
   done: boolean
   providerSettled?: boolean
+  /** 已请求停止时的真实停止进度；缺失表示没有人请求过停止，不表示已终止。 */
+  stopState?: AgentStopState
   sessionId?: string
   error?: string
   errorHint?: string

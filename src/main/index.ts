@@ -33,7 +33,14 @@ import {
   type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
-import { mergeSessionTurns, restoreTraceArchiveTurn } from './session-history'
+import {
+  mergeSessionTurns,
+  restoreTraceArchiveTurn,
+  sessionHistoryPage,
+  type LoadedSessionTurn,
+  type SessionHistoryPage,
+  type SessionHistoryPageRequest
+} from './session-history'
 import {
   appSessionCanResume,
   cleanupAppStoreAtomicTemps,
@@ -52,6 +59,7 @@ import {
   normalizeAgentStartRequest,
   providerIdForAgentId,
   runTerminationHint,
+  type AgentForceKillScope,
   type AgentInputAttachment,
   type AgentStartRequest,
   type RuntimeProvider
@@ -80,6 +88,7 @@ import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
+import { RunStopLifecycle } from './run-stop-lifecycle'
 import { DockBadgeState } from './dock-badge'
 import { archiveSessionId } from './session-id'
 import {
@@ -114,6 +123,7 @@ import type {
 } from '../shared/workspace'
 import { createTerminalManager, type TerminalManager } from './terminal-manager'
 import { TerminalOutputBridge } from './terminal-output'
+import { TraceOutputBridge } from './trace-output'
 import {
   authorizedWorkspaceRequest,
   canonicalExistingDirectory,
@@ -237,6 +247,17 @@ const sessionByContext = new Map<string, string>()
 const sessionRevisionByContext = new Map<string, number>()
 const sessionAliasesByContext = new Map<string, Map<string, string>>()
 let loadSessionRevision = 0
+// 已加载会话的单条历史缓存：翻页取更早轮次时回放同一份已归一化历史，
+// 不重解析 transcript、不重读 archive，也不重新 hydrate 附件。revision 不匹配就作废。
+// 诚实边界：它保存的是**整个**会话的全部轮次，不是当前页。分页只收窄 IPC 与 renderer 挂载量，
+// main 侧的全量解析开销与这份常驻内存都还在（每次只保留一条，切会话即作废）。
+let sessionHistoryCache: {
+  revision: number
+  key: string
+  turns: LoadedSessionTurn[]
+  hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
+} | null = null
+
 // 会话级净 diff 的持久 baseline registry：每个 (provider,cwd) 上下文一份贯穿会话的 Git 快照。
 // revision + 原生 session id 双重锚定，绝不串会话；找不到可复用基线时当场重锚并标 origin=resumed，
 // 不再像旧实现那样在 resume/loadSession 之后彻底不落 session_diff。
@@ -1078,12 +1099,19 @@ function createWindow(): void {
   createdWindow.on('focus', () => dockBadge.focusWindow())
   createdWindow.on('closed', () => {
     closeAllTerminals(true)
+    // renderer 消失后没人再 ACK 在途 trace 字节；不清零会让下一个窗口永久卡在 high-water。
+    traceOutput.reset()
     if (win === createdWindow) win = null
   })
   createdWindow.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) closeAllTerminals(true)
+    if (!details.isMainFrame || details.isSameDocument) return
+    closeAllTerminals(true)
+    traceOutput.reset()
   })
-  createdWindow.webContents.on('render-process-gone', () => closeAllTerminals(true))
+  createdWindow.webContents.on('render-process-gone', () => {
+    closeAllTerminals(true)
+    traceOutput.reset()
+  })
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error(`[scry] preload failed: ${preloadPath}`, error)
   })
@@ -1117,12 +1145,16 @@ function createWindow(): void {
   })
   let windowShown = false
   const onIpcMessage = (_event: unknown, channel: string): void => {
-    if (channel === 'app:rendererReady' && win && isTrustedRendererUrl(win.webContents.getURL(), rendererEntryUrl)) showWindow()
+    if (channel !== 'app:rendererReady' || !win) return
+    if (!isTrustedRendererUrl(win.webContents.getURL(), rendererEntryUrl)) return
+    // renderer 已经挂好监听：恢复 trace 投递，而不是靠定时器轮询等它就绪。
+    // 监听器刻意不在首次 show 之后摘除，这样 renderer 重挂后也能重新驱动投递。
+    traceOutput.rendererReady()
+    showWindow()
   }
   const showWindow = (): void => {
     if (windowShown || !win || win.isDestroyed()) return
     windowShown = true
-    win.webContents.removeListener('ipc-message', onIpcMessage)
     win.show()
   }
   // ready-to-show 只代表第一帧能画，React 还没恢复 workspace/active run；此时 show 会先闪欢迎页。
@@ -1264,6 +1296,7 @@ handleTrusted('agent:chooseFolder', async () => {
   if (r.canceled || r.filePaths.length === 0) return null
   const dir = canonicalExistingDirectory(r.filePaths[0])
   loadSessionRevision++
+  sessionHistoryCache = null
   rememberProject(dir)
   setCurrentCwd(dir)
   return dir
@@ -1355,6 +1388,7 @@ handleTrusted('terminal:close', async (event, request: TerminalCloseRequest) => 
 
 handleTrusted('agent:setCwd', (_e, dir: string | null) => {
   loadSessionRevision++
+  sessionHistoryCache = null
   const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
   setCurrentCwd(cwd)
   return cwd ?? null
@@ -1532,7 +1566,26 @@ handleTrusted('agent:revealProject', (_event, cwd: unknown) => {
 })
 
 // 加载一个历史会话：解析 transcript 成对话轮次，并把它设为当前会话（后续对话会 resume）
-handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
+function sessionHistoryCacheKey(payload: ProviderContext, cwd: string): string {
+  return `${providerContextKey(payload.providerId, cwd, payload.agentProfileId)}\u0000${payload.externalSessionId ?? ''}`
+}
+
+// Hook 命令附写只对当前页的事件做，而不是对整个会话的全部事件做。
+function pageWithHookCommands(
+  page: SessionHistoryPage,
+  hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
+): SessionHistoryPage {
+  if (!hookConfig) return page
+  return {
+    ...page,
+    turns: page.turns.map((turn) => ({
+      ...turn,
+      items: turn.items.map((event) => attachConfiguredHookCommands(event, hookConfig))
+    }))
+  }
+}
+
+handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?: SessionHistoryPageRequest) => {
   if (!payload.externalSessionId) return null
   const requestRevision = ++loadSessionRevision
   const catalogMatches = appSessionStore().load().filter((session) =>
@@ -1606,11 +1659,25 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext) => {
       : payload.providerId === 'codex'
         ? cwd ? loadCodexHookConfig(cwd, homeDir) : null
         : null
-  if (!hookConfig) return merged
-  return merged.map((turn) => ({
-    ...turn,
-    items: turn.items.map((event) => attachConfiguredHookCommands(event, hookConfig))
-  }))
+  sessionHistoryCache = {
+    revision: requestRevision,
+    key: sessionHistoryCacheKey(payload, cwd),
+    turns: merged,
+    hookConfig
+  }
+  return pageWithHookCommands(sessionHistoryPage(merged, { before: undefined, limit: request?.limit }), hookConfig)
+})
+
+// 更早轮次的纯读取：不重做任何会话切换副作用（cwd / baseline / dock badge / resume）。
+// revision 或 session 身份不匹配时返回 null：renderer 将它当作过期请求丢弃，而不是拼上错会话的轮次。
+handleTrusted('agent:loadSessionOlder', (_e, payload: ProviderContext, request: SessionHistoryPageRequest) => {
+  if (!payload.externalSessionId) return null
+  const cache = sessionHistoryCache
+  if (!cache || cache.revision !== loadSessionRevision) return null
+  const cwd = payload.cwd?.trim() ? resolveKnownProjectDirectory(payload.cwd) : ''
+  if (cache.key !== sessionHistoryCacheKey(payload, cwd)) return null
+  if (request?.before == null || !Number.isFinite(request.before) || request.before <= 0) return null
+  return pageWithHookCommands(sessionHistoryPage(cache.turns, request), cache.hookConfig)
 })
 
 type SessionDeletionRequest = Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }
@@ -1849,6 +1916,11 @@ interface RunControl {
   providerId: ProviderId
   interrupt: () => void
   forceKill: () => void
+  /**
+   * 硬杀当下的真实作用范围，直接来自 Provider handle。handle 还没创建时返回 undefined：
+   * 没有可调用对象就不能声称已经发出 run-scoped 强制终止。
+   */
+  forceKillScope: () => AgentForceKillScope | undefined
   cwd?: string
   resume?: string
   getExternalSessionId: () => string | undefined
@@ -1864,6 +1936,18 @@ interface RunControl {
 
 // 每个 run 独立持有 Provider handle、问题与 diff 生命周期；focused 只表示当前 UI 正在看谁。
 const runs = new RunRegistry<ActiveRun, RunControl>()
+// 停止是一个生命周期而不是一次调用：它把真实进度（已请求/已强杀/未确认终止）发给 renderer，
+// 并把同一份快照挂在 ActiveRun 上，让重挂的 renderer 也能拿到诚实状态。
+const runStopLifecycle = new RunStopLifecycle({
+  publish: (state) => {
+    const run = runs.get(state.runId)?.state
+    if (run) run.stopState = state
+    if (!rendererCanReceive()) return
+    flushTraceSend()
+    win?.webContents.send('agent:stopState', state)
+  },
+  warn: (message, runId, error) => console.warn(`[scry] ${message}:`, runId, error)
+})
 const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) => {
   if (change.kind === 'open') {
     const run = runs.get(change.request.runId)?.state
@@ -1896,24 +1980,24 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
   }
   if (runs.isFocused(change.runId)) win?.webContents.send('agent:userQuestionClosed', change)
 })
-// 性能：把 onTrace 逐条 IPC 合批——流式期每 token 一条 IPC（每秒上百）→ 缓冲 ~16ms 一批数组发。
-// 保序（FIFO buffer）、不丢（done/error 前 flushTraceSend 强制清空）。
-let traceSendBuf: TraceEvent[] = []
-let traceSendTimer: ReturnType<typeof setTimeout> | null = null
-const TRACE_FLUSH_MS = 50
+// 性能：把 onTrace 逐条 IPC 合批——流式期每 token 一条 IPC（每秒上百）→ 缓冲一批数组发。
+// 保序（FIFO buffer）、不丢（done/error 前 flushTraceSend 强制清空全部）。
+// 有界与背压由 TraceOutputBridge 承担：单批受事件/字节上限约束，在途字节到 high-water
+// 就等 renderer ACK；过载时只停止镜像最新事件并如实上报缺口，权威证据仍在 runState 与归档。
+const traceOutput = new TraceOutputBridge({
+  canSend: rendererCanReceive,
+  send: (payload) => win?.webContents.send('agent:trace', payload),
+  publishHealth: (state) => {
+    if (!rendererCanReceive()) return
+    win?.webContents.send('agent:traceHealth', state)
+  },
+  warn: (message, state) => console.warn(`[scry] ${message}:`, state)
+})
 function flushTraceSend(): void {
-  if (traceSendTimer) {
-    clearTimeout(traceSendTimer)
-    traceSendTimer = null
-  }
-  if (traceSendBuf.length === 0) return
-  const batch = traceSendBuf
-  traceSendBuf = []
-  if (rendererCanReceive()) win?.webContents.send('agent:trace', batch)
+  traceOutput.flushAll()
 }
 function queueTrace(ev: TraceEvent): void {
-  traceSendBuf.push(ev)
-  if (!traceSendTimer) traceSendTimer = setTimeout(flushTraceSend, TRACE_FLUSH_MS)
+  traceOutput.push(ev)
 }
 
 handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
@@ -2624,6 +2708,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     }>
     interrupt: () => void
     forceKill: () => void
+    forceKillScope: AgentForceKillScope
     getExternalSessionId: () => string | undefined
     getProviderTurnId?: () => string | undefined
     getForkTurnId?: () => string | undefined
@@ -2696,6 +2781,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       interrupted = true
       h?.forceKill()
     },
+    forceKillScope: () => h?.forceKillScope,
     cwd,
     resume,
     getExternalSessionId: () => h?.getExternalSessionId(),
@@ -3111,6 +3197,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
     .finally(() => {
       runState.providerSettled = true
+      // settle 是唯一的终止证据来源；它同时取消所有未触发的升级定时器。
+      runStopLifecycle.settle(runId)
       userQuestionBroker.cancelRun(runId)
       runs.remove(runId)
       resolveSettled?.()
@@ -3124,6 +3212,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
 
 // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
 handleTrusted('agent:activeRun', (): ActiveRun | null => runs.focusedState())
+// live trace 降级恢复专用：忽略 done，只要 registry 里还有这个 run 就给出权威事件序列。
+// activeRun 会因为 done=true 返回 null，那样终态被跳过的事件永远补不回来。
+handleTrusted('agent:focusedRunSnapshot', (): ActiveRun | null => runs.focusedSnapshot())
 handleTrusted('agent:activeRuns', (): ActiveRun[] => runs.activeStates())
 handleTrusted('agent:focusRun', (_event, runId: string | null): boolean => {
   const focused = runs.focus(runId)
@@ -3178,30 +3269,34 @@ handleTrusted('agent:diagnostics', () => {
   return { claudeVersion: getClaudeVersion(), sdkVersion, settingSources: '默认（SDK 加载 user/project/local）' }
 })
 
+// trace live 镜像的消费确认：preload 把一批事件分发给 renderer 后回 ACK，main 才继续发下一批。
+handleTrusted('agent:traceAck', (_event, request: { bytes: number }) => {
+  if (!request || typeof request.bytes !== 'number') throw new Error('trace 输出确认无效')
+  traceOutput.ack(request.bytes)
+  return true as const
+})
+// renderer 已经用权威快照（activeRun）对齐 live 视图，降级标记可以清除。
+handleTrusted('agent:traceResynchronized', () => {
+  traceOutput.resynchronized()
+  return true as const
+})
+
 handleTrusted('agent:stop', (_event, runId: string) => {
   const entry = runs.get(runId)
   if (!entry || entry.state.done) return false
   const stopping = entry.control
-  stopping.interrupt()
+  // 有界升级取代旧的「2s 后假装这一轮已结束」：先协作取消，窗口到点升级 forceKill，
+  // 再到点只诚实报告 Provider 未确认终止。终态仍然只能由真实 settle 产生。
+  runStopLifecycle.request({
+    runId: stopping.runId,
+    providerId: stopping.providerId,
+    agentProfileId: stopping.runState.agentProfileId,
+    runtimeProvider: stopping.runtimeProvider,
+    interrupt: stopping.interrupt,
+    forceKill: stopping.forceKill,
+    forceKillScope: stopping.forceKillScope
+  })
   userQuestionBroker.cancelRun(stopping.runId)
-  // A2：强制超时兜底——若 SDK 2s 内没结束（interrupt 卡住），强制通知 renderer 结束，防 UI 永久卡在运行态
-  setTimeout(async () => {
-    const current = runs.get(stopping.runId)
-    if (current?.control !== stopping || current.state.done) return
-    if (stopping.canonicalLifecycle) return
-    // 这里只结束 UI 等待。Provider、diff 与持久化仍是 unsettled；删除、续开和退出
-    // 必须继续把该 registry entry 当作在途，直到 runtime promise 真正 settle。
-    if (runs.get(stopping.runId)?.control !== stopping) return
-    stopping.runState.done = true
-    flushTraceSend()
-    win?.webContents.send('agent:turnDone', {
-      runId: stopping.runId,
-      stopped: true,
-      providerId: stopping.providerId,
-      agentProfileId: stopping.runState.agentProfileId
-    })
-    // 控制器保留到 Provider promise 真正 settle，避免迟到 reject/error 找不到自身状态或误命中其他 run。
-  }, 2000)
   return true
 })
 
@@ -3272,6 +3367,8 @@ app.on('before-quit', (event) => {
   isShuttingDown = true
   quitCleanupStarted = true
   closeAllTerminals(true)
+  runStopLifecycle.close()
+  traceOutput.close()
   sessionDiffBaselines.disposeAll()
   const controls = runs.unsettledControls()
   const cleanup = settleRunsForShutdown(controls, {

@@ -6,7 +6,8 @@ import type {
   AgentQuestionRequest,
   AgentQuestionResponse,
   AgentRunControlCatalog,
-  AgentRunControls
+  AgentRunControls,
+  AgentStopState
 } from '@shared/runtime'
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
@@ -16,6 +17,8 @@ import { WorkdirPicker, CliPicker, RunControlSelect, groupAgentsByProvider, piPr
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import type { WorkspaceFileTarget } from '../workspace-links'
+import { runStopStatus } from '../run-stop-status'
+import type { SessionHistoryWindow, TraceLiveHealth } from '../hooks/useAgentSession'
 
 interface ChatViewProps {
   turns: Turn[]
@@ -45,6 +48,11 @@ interface ChatViewProps {
   slashReason?: string | null
   slashSel: number
   pendingQuestions?: AgentQuestionRequest[]
+  stopStates?: Readonly<Record<string, AgentStopState>>
+  historyWindow?: SessionHistoryWindow | null
+  historyOlderLoading?: boolean
+  onLoadOlderTurns?: () => void
+  traceHealth?: TraceLiveHealth
   focusedTurnRunId?: string | null
   onTurnRef?: (runId: string, el: HTMLDivElement | null) => void
   onSelect: (event: TraceEvent) => void
@@ -147,6 +155,11 @@ export function ChatView({
   slashReason = null,
   slashSel,
   pendingQuestions = [],
+  stopStates = {},
+  historyWindow = null,
+  historyOlderLoading = false,
+  onLoadOlderTurns,
+  traceHealth,
   focusedTurnRunId = null,
   onTurnRef,
   onSelect,
@@ -266,7 +279,9 @@ export function ChatView({
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
-  const busyTurn = busy ? turns.find((turn) => !turn.done && !turn.error) : undefined
+  const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
+  const stopStatus = runStopStatus(inFlightTurn ? stopStates[inFlightTurn.runId] : undefined)
+  const busyTurn = busy ? inFlightTurn : undefined
   const runStartedAt = busyTurn?.items[0]?.ts != null ? Date.parse(busyTurn.items[0].ts) : Number.NaN
   const [, setNowTick] = useState(0)
   useEffect(() => {
@@ -437,6 +452,22 @@ export function ChatView({
               </section>
             </div>
           )}
+          {historyWindow?.hasOlder && (
+            <div className="history-window-note" role="note" aria-label="历史轮次范围">
+              <span>
+                仅挂载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·
+                更早轮次仍在本机归档中，未丢弃
+              </span>
+              <button
+                type="button"
+                className="history-window-more"
+                onClick={() => onLoadOlderTurns?.()}
+                disabled={historyOlderLoading || !onLoadOlderTurns}
+              >
+                {historyOlderLoading ? '加载中…' : '加载更早轮次'}
+              </button>
+            </div>
+          )}
           {turns.map((turn, index) => {
             const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
             const editable = index === turns.length - 1 && turn.done && !busy && queuedPrompts.length === 0 &&
@@ -547,7 +578,7 @@ export function ChatView({
           <div className="draft-attachments" aria-label="已粘贴图片">
             {draftAttachments.map((attachment) => (
               <div className="draft-attachment" key={attachment.id} title={attachment.name}>
-                <img src={attachment.previewUrl} alt="" />
+                <img src={attachment.previewUrl} alt="" loading="lazy" decoding="async" />
                 <span>{attachment.name}</span>
                 <button type="button" onClick={() => onRemoveDraftAttachment(attachment.id)} title="移除图片">
                   <Icon name="x" />
@@ -576,13 +607,21 @@ export function ChatView({
           />
         </div>
         {busy && (
-          <div className="run-status" role="status" aria-live="polite">
+          <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone}>
             <span className="run-status-left">
               <i className="run-status-dot" aria-hidden="true" />
-              <b>运行中</b>
-              <span className="run-status-hint">可继续输入，新消息将加入队列</span>
+              <b>{stopStatus.label}</b>
+              <span className="run-status-hint">{stopStatus.hint}</span>
             </span>
             <span className="run-status-meta">
+              {traceHealth?.degraded && (
+                <span
+                  className="run-status-trace-degraded"
+                  title="实时视图为了保持界面可用而暂停镜像最新事件；本轮完整证据仍在 runState 与本机归档里，收口后会自动对齐"
+                >
+                  实时视图已降级 · 缺 {traceHealth.skippedEvents} 条
+                </span>
+              )}
               {elapsedMs != null && (
                 <span className="run-status-elapsed" title="已用时长按当前 run 首个事件时间戳（TraceEvent.ts）计算">
                   {formatElapsedMs(elapsedMs)}

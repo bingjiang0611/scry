@@ -390,6 +390,8 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         })),
         interrupt: handle.interrupt,
         forceKill: handle.forceKill,
+        // SDK query 每轮自己 spawn 一个 CLI 子进程：SIGKILL 只作用于本 run 的进程组。
+        forceKillScope: 'run_scoped',
         getExternalSessionId: handle.getSessionId,
         getProviderTurnId: handle.getProviderTurnId
       }

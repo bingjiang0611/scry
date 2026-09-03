@@ -7,6 +7,7 @@ import type {
   AgentQuestionResponse,
   AgentRunControlCatalog,
   AgentStartRequest,
+  AgentStopState,
   RuntimeProvider
 } from '../shared/runtime'
 import type {
@@ -24,7 +25,12 @@ import type {
   SkillMeta
 } from '../shared/provider'
 import type { DetectedAgent as LocatedAgent } from '../main/claude-locate'
-import type { LoadedSessionTurn } from '../main/session-history'
+import type {
+  LoadedSessionTurn,
+  SessionHistoryPage,
+  SessionHistoryPageRequest
+} from '../main/session-history'
+import type { TraceBacklogState, TraceBatch } from '../main/trace-output'
 import type {
   WorkspaceCreateRequest,
   WorkspaceEntry,
@@ -85,6 +91,8 @@ export type DetectedAgent = LocatedAgent & {
 }
 
 export type ParsedTurn = LoadedSessionTurn
+export type { SessionHistoryPage, SessionHistoryPageRequest }
+export type { TraceBacklogState }
 
 const api = {
   rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
@@ -149,7 +157,11 @@ const api = {
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),
   gitDiff: (cwd: string): Promise<DiffFile[]> => ipcRenderer.invoke('agent:gitDiff', cwd),
   diagnostics: (): Promise<Diagnostics> => ipcRenderer.invoke('agent:diagnostics'),
-  loadSession: (context: ProviderContext): Promise<ParsedTurn[] | null> => ipcRenderer.invoke('agent:loadSession', context),
+  // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。
+  loadSession: (context: ProviderContext, request?: SessionHistoryPageRequest): Promise<SessionHistoryPage | null> =>
+    ipcRenderer.invoke('agent:loadSession', context, request),
+  loadSessionOlder: (context: ProviderContext, request: SessionHistoryPageRequest): Promise<SessionHistoryPage | null> =>
+    ipcRenderer.invoke('agent:loadSessionOlder', context, request),
   deleteSession: (context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult> =>
     ipcRenderer.invoke('agent:deleteSession', context),
   setSessionPinned: (context: SessionRef, pinned: boolean): Promise<boolean> =>
@@ -159,19 +171,34 @@ const api = {
   deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
   start: (request: AgentStartRequest): Promise<{ runId: string }> => ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
+  /** 权威事件快照（忽略 done）：live trace 降级后用它重新对齐，包含终态被跳过的事件。 */
+  focusedRunSnapshot: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:focusedRunSnapshot'),
   activeRuns: (): Promise<ActiveRun[]> => ipcRenderer.invoke('agent:activeRuns'),
   focusRun: (runId: string | null): Promise<boolean> => ipcRenderer.invoke('agent:focusRun', runId),
   adoptActiveRun: (runId: string): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:adoptActiveRun', runId),
   answerQuestion: (response: AgentQuestionResponse): Promise<boolean> => ipcRenderer.invoke('agent:answerQuestion', response),
   stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('agent:stop', runId),
   onTrace: (cb: (ev: TraceEvent) => void): (() => void) => {
-    // main 合批发数组（性能）→ 这里拆回逐条 cb，渲染侧契约不变（仍是「每事件一次 cb」）
-    const l = (_: unknown, evs: TraceEvent[]): void => {
-      for (const ev of evs) cb(ev)
+    // main 合批发数组（性能）→ 这里拆回逐条 cb，渲染侧契约不变（仍是「每事件一次 cb」）。
+    // 分发完成后回 ACK：main 用它做有界背压，绝不因此丢弃或重排事件。
+    const l = (_: unknown, payload: TraceBatch): void => {
+      try {
+        for (const ev of payload.events) cb(ev)
+      } finally {
+        ipcRenderer.invoke('agent:traceAck', { bytes: payload.bytes }).catch(() => {
+          // main 已退出或窗口正在销毁时 ACK 失败不影响证据；归档仍是权威来源。
+        })
+      }
     }
     ipcRenderer.on('agent:trace', l)
     return () => ipcRenderer.removeListener('agent:trace', l)
   },
+  onTraceHealth: (cb: (state: TraceBacklogState) => void): (() => void) => {
+    const l = (_: unknown, state: TraceBacklogState): void => cb(state)
+    ipcRenderer.on('agent:traceHealth', l)
+    return () => ipcRenderer.removeListener('agent:traceHealth', l)
+  },
+  traceResynchronized: (): Promise<true> => ipcRenderer.invoke('agent:traceResynchronized'),
   onTerminalData: (cb: (event: TerminalDataEvent) => void): (() => void) => {
     const listener = (_: unknown, events: TerminalDataEvent[]): void => {
       for (const event of events) cb(event)
@@ -188,6 +215,11 @@ const api = {
     const l = (_: unknown, e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; stopped?: boolean }): void => cb(e)
     ipcRenderer.on('agent:turnDone', l)
     return () => ipcRenderer.removeListener('agent:turnDone', l)
+  },
+  onStopState: (cb: (state: AgentStopState) => void): (() => void) => {
+    const l = (_: unknown, state: AgentStopState): void => cb(state)
+    ipcRenderer.on('agent:stopState', l)
+    return () => ipcRenderer.removeListener('agent:stopState', l)
   },
   onDataUpdated: (cb: (e: { runId: string }) => void): (() => void) => {
     const l = (_: unknown, e: { runId: string }): void => cb(e)

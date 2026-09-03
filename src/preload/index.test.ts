@@ -81,6 +81,7 @@ const invokeChannels = {
   gitDiff: 'agent:gitDiff',
   diagnostics: 'agent:diagnostics',
   loadSession: 'agent:loadSession',
+  loadSessionOlder: 'agent:loadSessionOlder',
   deleteSession: 'agent:deleteSession',
   setSessionPinned: 'agent:setSessionPinned',
   setSessionArchived: 'agent:setSessionArchived',
@@ -88,17 +89,21 @@ const invokeChannels = {
   start: 'agent:start',
   activeRun: 'agent:activeRun',
   activeRuns: 'agent:activeRuns',
+  focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',
   adoptActiveRun: 'agent:adoptActiveRun',
   answerQuestion: 'agent:answerQuestion',
-  stop: 'agent:stop'
+  stop: 'agent:stop',
+  traceResynchronized: 'agent:traceResynchronized'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const listenerChannels = {
   onTrace: 'agent:trace',
+  onTraceHealth: 'agent:traceHealth',
   onTerminalData: 'terminal:data',
   onTerminalExit: 'terminal:exit',
   onTurnDone: 'agent:turnDone',
+  onStopState: 'agent:stopState',
   onDataUpdated: 'agent:dataUpdated',
   onSession: 'agent:session',
   onFocusedRun: 'agent:focusedRun',
@@ -165,8 +170,19 @@ describe('preload IPC boundary', () => {
     const traceCallback = vi.fn()
     api.onTrace(traceCallback)
     const traceListener = electron.on.mock.calls.at(-1)?.[1]
-    traceListener?.(null, [{ id: 'one' }, { id: 'two' }])
+    electron.invoke.mockClear()
+    traceListener?.(null, { events: [{ id: 'one' }, { id: 'two' }], bytes: 1024 })
     expect(traceCallback.mock.calls.map(([event]) => event.id)).toEqual(['one', 'two'])
+    // 分发完成后必须回一次 ACK，否则 main 的有界背压会永久停在 high-water。
+    expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', { bytes: 1024 })
+
+    const throwingCallback = vi.fn(() => { throw new Error('renderer 处理失败') })
+    api.onTrace(throwingCallback)
+    const throwingListener = electron.on.mock.calls.at(-1)?.[1]
+    electron.invoke.mockClear()
+    expect(() => throwingListener?.(null, { events: [{ id: 'boom' }], bytes: 8 })).toThrow('renderer 处理失败')
+    // renderer 回调抛错也要 ACK：否则一次渲染异常会让实时视图永久停更。
+    expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', { bytes: 8 })
 
     const terminalCallback = vi.fn()
     api.onTerminalData(terminalCallback)

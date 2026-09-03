@@ -7,7 +7,7 @@ import { createRef, type ComponentProps } from 'react'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentQuestionRequest } from '@shared/runtime'
 import type { Turn } from '../format'
-import type { ParsedTurn } from '../env'
+import type { ParsedTurn, SessionHistoryPage } from '../env'
 import {
   App,
   EmptySessionOverview,
@@ -35,7 +35,7 @@ import {
   takeNextQueuedPrompt
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
-import { AssistantTurn, UserMessage } from './ChatTurn'
+import { AssistantTurn, UserMessage, attachmentSrc } from './ChatTurn'
 import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
@@ -298,6 +298,75 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('停止')
   })
 
+  it('停止阶段照实描述请求进度，不宣布这一轮已终止', () => {
+    const stopping = renderWelcome({
+      turns: [runningTurn],
+      busy: true,
+      stopStates: {
+        'run-running-abc': {
+          runId: 'run-running-abc',
+          providerId: 'claude',
+          runtimeProvider: 'claude_sdk',
+          phase: 'interrupt_requested',
+          requestedAt: '2026-08-10T00:00:10.000Z',
+          updatedAt: '2026-08-10T00:00:10.000Z',
+          providerSettled: false,
+          window: { gracefulMs: 6000, forceKillMs: 4000 }
+        }
+      }
+    })
+    expect(stopping).toContain('data-stop-tone="stopping"')
+    expect(stopping).toContain('<b>停止中</b>')
+    expect(stopping).not.toContain('<b>运行中</b>')
+  })
+
+  it('Provider 未确认终止时仍算 busy：状态条如实标注，新消息进队列而不是立刻发送', () => {
+    const html = renderWelcome({
+      turns: [runningTurn],
+      // main 的 admission 在 providerSettled=false 时仍会拒绝新一轮，所以这里必须仍是 busy。
+      busy: true,
+      stopStates: {
+        'run-running-abc': {
+          runId: 'run-running-abc',
+          providerId: 'claude',
+          runtimeProvider: 'claude_sdk',
+          phase: 'provider_unsettled',
+          requestedAt: '2026-08-10T00:00:10.000Z',
+          updatedAt: '2026-08-10T00:00:20.000Z',
+          providerSettled: false,
+          window: { gracefulMs: 6000, forceKillMs: 4000 }
+        }
+      }
+    })
+    expect(html).toContain('data-stop-tone="unsettled"')
+    expect(html).toContain('Provider 未确认终止')
+    expect(html).toContain('可能还在后台运行')
+    expect(html).toContain('先进队列')
+    // 发送键仍然是「加入队列」，输入框保持可编辑。
+    expect(html).toContain('加入队列')
+    expect(html).toContain('class="input"')
+  })
+
+  it('实时视图降级时如实标注缺口，并说明归档仍是权威证据', () => {
+    const html = renderWelcome({
+      turns: [runningTurn],
+      busy: true,
+      traceHealth: { degraded: true, skippedEvents: 42 }
+    })
+    expect(html).toContain('run-status-trace-degraded')
+    expect(html).toContain('实时视图已降级 · 缺 42 条')
+    expect(html).toContain('本机归档')
+  })
+
+  it('实时视图健康时不显示降级标注', () => {
+    const html = renderWelcome({
+      turns: [runningTurn],
+      busy: true,
+      traceHealth: { degraded: false, skippedEvents: 0 }
+    })
+    expect(html).not.toContain('run-status-trace-degraded')
+  })
+
   it('busy 时 placeholder 不再承担状态文案', () => {
     const html = renderWelcome({ turns: [runningTurn], busy: true })
     expect(html).not.toContain('运行中，可继续输入并加入队列')
@@ -307,6 +376,31 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     const html = renderWelcome({ turns: [], busy: false })
     expect(html).not.toContain('run-status')
     expect(html).not.toContain('停止')
+  })
+
+  // 分页只收窄 IPC 载荷与 renderer 挂载量；main 侧仍全量解析并缓存整个会话，
+  // 所以文案只能声称「挂载」范围，不能声称降低了 main 的加载/内存。
+  it('分页历史显式说明只挂载最近轮次，并提供取回更早轮次的入口', () => {
+    const html = renderWelcome({
+      turns: [runningTurn],
+      busy: false,
+      historyWindow: { sessionId: 's1', offset: 460, totalTurns: 500, hasOlder: true, completeness: 'partial' },
+      onLoadOlderTurns: () => {}
+    })
+    expect(html).toContain('history-window-note')
+    expect(html).toContain('仅挂载最近')
+    expect(html).toContain('<b>40</b> / 500 轮')
+    expect(html).toContain('更早轮次仍在本机归档中，未丢弃')
+    expect(html).toContain('加载更早轮次')
+  })
+
+  it('完整历史不显示分页提示', () => {
+    const html = renderWelcome({
+      turns: [runningTurn],
+      busy: false,
+      historyWindow: { sessionId: 's1', offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete' }
+    })
+    expect(html).not.toContain('history-window-note')
   })
 
   it('busy 时发送键文案为「加入队列」', () => {
@@ -479,6 +573,13 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
   it('恢复 live run 时先加载同一 session 的已停止历史轮次', async () => {
     const calls: string[] = []
     const archived: ParsedTurn[] = [{ userText: '第一轮（已停止）', items: [] }]
+    const archivedPage: SessionHistoryPage = {
+      turns: archived,
+      offset: 0,
+      totalTurns: 1,
+      hasOlder: false,
+      completeness: 'complete'
+    }
     const activeRun: ActiveRun = {
       runId: 'run-2',
       providerId: 'claude' as const,
@@ -506,7 +607,7 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
         },
         loadSession: async (context) => {
           calls.push(`load:${context.externalSessionId}`)
-          return archived
+          return archivedPage
         },
         replaceWithParsedSession: (sessionId, parsed, options) => {
           replacement = { sessionId, parsed, activeRun: options.activeRun }
@@ -543,14 +644,21 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
       done: false
     }
     const archived: ParsedTurn[] = [{ runId: 'older-run', userText: '上一轮', items: [], done: true }]
+    const archivedPage: SessionHistoryPage = {
+      turns: archived,
+      offset: 0,
+      totalTurns: 1,
+      hasOlder: false,
+      completeness: 'complete'
+    }
     const calls: string[] = []
-    let resolveHistory: ((turns: ParsedTurn[]) => void) | undefined
+    let resolveHistory: ((page: SessionHistoryPage) => void) | undefined
     let replacement: { sessionId: string; parsed: ParsedTurn[]; activeRun: ActiveRun } | undefined
 
     const restoring = restoreFocusedRunSelection(activeRun, {
       prepareRunFocus: (runId) => calls.push(`prepare:${runId}`),
       selectContext: (context) => calls.push(`select:${context.providerId}:${context.cwd}:${context.sessionId}`),
-      loadSession: async () => new Promise<ParsedTurn[]>((resolve) => {
+      loadSession: async () => new Promise<SessionHistoryPage>((resolve) => {
         calls.push('load')
         resolveHistory = resolve
       }),
@@ -568,7 +676,7 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
     ])
     expect(replacement).toEqual({ sessionId: 'session-claude', parsed: [], activeRun })
     expect(replacement?.activeRun.pendingQuestions).toEqual([pendingQuestion])
-    resolveHistory?.(archived)
+    resolveHistory?.(archivedPage)
     await expect(restoring).resolves.toBe(true)
     expect(calls).toEqual([
       'prepare:run-claude',
@@ -591,18 +699,18 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
       done: false
     }
     let current = true
-    let resolveHistory: ((turns: ParsedTurn[]) => void) | undefined
+    let resolveHistory: ((page: SessionHistoryPage | null) => void) | undefined
     const replacements: string[] = []
     const restoring = restoreFocusedRunSelection(activeRun, {
       prepareRunFocus: () => {},
       selectContext: () => {},
-      loadSession: async () => new Promise<ParsedTurn[]>((resolve) => { resolveHistory = resolve }),
+      loadSession: async () => new Promise<SessionHistoryPage | null>((resolve) => { resolveHistory = resolve }),
       replaceWithParsedSession: (sessionId) => replacements.push(sessionId),
       isCurrent: () => current
     })
 
     current = false
-    resolveHistory?.([])
+    resolveHistory?.(null)
     await expect(restoring).resolves.toBe(false)
     expect(replacements).toEqual(['session-claude'])
   })
@@ -1597,6 +1705,26 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(streamingHtml).not.toContain('临时草稿')
   })
 
+  it('未收口的尾部流式文本单独渲染并标 streaming，终态后不再标 streaming', () => {
+    const items = [
+      ev({ id: 'tool-1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', input: { command: 'npm test' } }),
+      ev({ id: 'delta-1', kind: 'model', stage: 'text_delta', text: '正在' }),
+      ev({ id: 'delta-2', kind: 'model', stage: 'text_delta', text: '收敛结论' })
+    ]
+    const live = renderToStaticMarkup(
+      <AssistantTurn turn={{ runId: 'run-live-tail', userText: '继续', done: false, items }} selectedId={null} onSelect={() => {}} />
+    )
+    expect(live).toContain('class="model-text md streaming"')
+    expect(live).toContain('正在收敛结论')
+    expect(live.indexOf('npm test')).toBeLessThan(live.indexOf('正在收敛结论'))
+
+    const finished = renderToStaticMarkup(
+      <AssistantTurn turn={{ runId: 'run-live-tail', userText: '继续', done: true, items }} selectedId={null} onSelect={() => {}} />
+    )
+    expect(finished).not.toContain('class="model-text md streaming"')
+    expect(finished).toContain('正在收敛结论')
+  })
+
   it('兼容合并旧 Codex text 增量，避免每个 token 各占一行', () => {
     const codexTurn: Turn = {
       runId: 'run-codex-legacy-stream',
@@ -2340,6 +2468,8 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="放大查看图片 sent.png"')
     expect(chatHtml).not.toContain('<figcaption>sent.png</figcaption>')
     expect(chatHtml).toContain('class="user-attachment"')
+    // 历史缩略图与草稿预览都按需解码：CSP 与远程图片阻断不变，只改解码时机。
+    expect(chatHtml.match(/<img[^>]*loading="lazy"[^>]*decoding="async"/g)?.length).toBe(2)
     expect(chatHtml).toContain('排队')
   })
 
@@ -4800,5 +4930,23 @@ describe('AnalyticsView 渲染：四章真实证据叙事', () => {
   it('不伪造 per-tool Token share 或 Markdown 星号', () => {
     expect(html).toContain('不制造 Token 份额')
     expect(html).not.toContain('**')
+  })
+})
+
+
+describe('附件预览 data URL 复用', () => {
+  it('同一附件对象只构造一次 data URL，不同对象各自构造', () => {
+    const attachment = {
+      kind: 'image' as const,
+      name: 'shot.png',
+      mimeType: 'image/png' as const,
+      dataBase64: 'aGVsbG8=',
+      size: 5
+    }
+    const first = attachmentSrc(attachment)
+    expect(attachmentSrc(attachment)).toBe(first)
+    expect(first).toBe('data:image/png;base64,aGVsbG8=')
+    const other = attachmentSrc({ ...attachment, dataBase64: 'aGk=' })
+    expect(other).toBe('data:image/png;base64,aGk=')
   })
 })

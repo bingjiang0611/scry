@@ -23,6 +23,64 @@ export interface LoadedSessionTurn {
 
 const ATTACHMENT_MARKER = 'Scry pasted image attachments:'
 
+/**
+ * 默认只**交付**最近一段轮次。
+ *
+ * 保证的范围：一次 agent:loadSession 的 IPC 载荷与 renderer 挂载的 turn 数受此上限约束，
+ * 所以长会话（数千轮、数十万事件）不会再因为单次 structured clone + 全量挂载卡死界面。
+ *
+ * 明确不保证：main 进程仍然完整读取、解析、合并并 hydrate 整个会话，然后把全部轮次留在
+ * 单条 sessionHistoryCache 里供翻页复用。也就是说这不降低 main 侧的解析开销与常驻内存，
+ * 只降低 IPC 传输量与 renderer 的挂载/渲染量。更早的轮次一律可按页取回，不丢弃。
+ */
+export const DEFAULT_SESSION_HISTORY_PAGE_SIZE = 40
+export const MAX_SESSION_HISTORY_PAGE_SIZE = 200
+
+export interface SessionHistoryPageRequest {
+  /** 只取序号小于 before 的更早轮次；缺省从最新一轮往回取。 */
+  before?: number
+  limit?: number
+}
+
+export interface SessionHistoryPage {
+  turns: LoadedSessionTurn[]
+  /** 本页首个 turn 在整个会话里的 0-based 序号，保证确定顺序与可拼接。 */
+  offset: number
+  totalTurns: number
+  hasOlder: boolean
+  /** partial 表示更早轮次仍在归档里可取，不是被丢弃也不是不存在。 */
+  completeness: 'complete' | 'partial'
+}
+
+function boundedPageSize(limit: number | undefined): number {
+  if (limit == null || !Number.isFinite(limit)) return DEFAULT_SESSION_HISTORY_PAGE_SIZE
+  return Math.min(MAX_SESSION_HISTORY_PAGE_SIZE, Math.max(1, Math.floor(limit)))
+}
+
+/**
+ * 最近优先的确定性分页：输入已经是按时间升序的权威轮次序列，页内保持同一顺序。
+ * 相邻页严格相邻（offset + turns.length === 上一页 offset），让 renderer 能校验拼接。
+ * 这里只做切片：调用方必须已经持有完整的权威轮次序列，本函数不做任何源级别的按需读取。
+ */
+export function sessionHistoryPage(
+  turns: readonly LoadedSessionTurn[],
+  request: SessionHistoryPageRequest = {}
+): SessionHistoryPage {
+  const totalTurns = turns.length
+  const limit = boundedPageSize(request.limit)
+  const end = request.before == null
+    ? totalTurns
+    : Math.max(0, Math.min(Math.floor(request.before), totalTurns))
+  const offset = Math.max(0, end - limit)
+  return {
+    turns: turns.slice(offset, end),
+    offset,
+    totalTurns,
+    hasOlder: offset > 0,
+    completeness: offset === 0 && end === totalTurns ? 'complete' : 'partial'
+  }
+}
+
 export interface SessionHistoryContext {
   userDataDir: string
   attachmentBudgetBytes?: number

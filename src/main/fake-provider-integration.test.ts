@@ -63,6 +63,7 @@ describe('fake Provider end-to-end contract', () => {
           promise: Promise.resolve({ externalSessionId: sessionId, status: 'completed' }),
           interrupt: () => undefined,
           forceKill: () => undefined,
+          forceKillScope: 'run_scoped' as const,
           getExternalSessionId: () => sessionId
         }
       }

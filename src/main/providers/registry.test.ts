@@ -18,6 +18,7 @@ function adapter(id: 'claude' | 'codex'): ProviderAdapter {
       promise: Promise.resolve({ externalSessionId: 'session-1' }),
       interrupt: vi.fn(),
       forceKill: vi.fn(),
+      forceKillScope: 'run_scoped' as const,
       getExternalSessionId: () => 'session-1'
     })
   }
@@ -36,6 +37,7 @@ describe('ProviderRegistry', () => {
         promise: Promise.resolve({}),
         interrupt: () => {},
         forceKill: () => {},
+        forceKillScope: 'run_scoped' as const,
         getExternalSessionId: () => undefined
       }
     }

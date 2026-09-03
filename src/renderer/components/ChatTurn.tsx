@@ -1,5 +1,5 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
-import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -36,6 +36,7 @@ import {
 } from '../format'
 import type { FileRow, HookGroup, HookScriptRow, HookSummary, Turn } from '../format'
 import { displayDiffPath, editActionLineCounts, turnDiffViewOf } from '../turn-diff'
+import { TurnStreamProjectionCache, isStreamTextFragment } from '../turn-stream-projection'
 
 function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
   const event = turn.items.find((item) => item.providerId || item.runtimeProvider)
@@ -46,8 +47,15 @@ function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
 
 // 用户消息：① 斜杠命令 → 气泡内 .slash chip；② skill 注入(claude code 塞的 SKILL.md，非用户输入)
 // → 中性折叠注记，不当蓝气泡；③ 普通文本/命令 → 蓝色右对齐气泡 + markdown + 超长折叠。
-function attachmentSrc(attachment: AgentInputAttachment): string {
-  return `data:${attachment.mimeType};base64,${attachment.dataBase64}`
+// 附件 data URL 只按对象身份构造一次：单张图最多 10MiB，重复拼 base64 字符串会在
+// 每次渲染（尤其流式期高频重渲染）产生数 MB 的临时字符串。WeakMap 随附件对象一起回收。
+const attachmentSrcCache = new WeakMap<AgentInputAttachment, string>()
+export function attachmentSrc(attachment: AgentInputAttachment): string {
+  const cached = attachmentSrcCache.get(attachment)
+  if (cached != null) return cached
+  const src = `data:${attachment.mimeType};base64,${attachment.dataBase64}`
+  attachmentSrcCache.set(attachment, src)
+  return src
 }
 
 function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachment; onClose: () => void }) {
@@ -61,7 +69,12 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
         <Icon name="x" />
       </button>
       <div className="image-lightbox-stage">
-        <img src={attachmentSrc(attachment)} alt={attachment.name} style={{ transform: `scale(${zoom})` }} />
+        <img
+          src={attachmentSrc(attachment)}
+          alt={attachment.name}
+          decoding="async"
+          style={{ transform: `scale(${zoom})` }}
+        />
       </div>
       <div className="image-lightbox-zoom" aria-label="图片缩放">
         <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))} disabled={zoom <= 0.5} aria-label="缩小图片">
@@ -200,7 +213,7 @@ function UserMessageImpl({
                 onClick={() => setPreview(attachment)}
                 aria-label={`放大查看图片 ${attachment.name}`}
               >
-                <img src={attachmentSrc(attachment)} alt="" />
+                <img src={attachmentSrc(attachment)} alt="" loading="lazy" decoding="async" />
               </button>
             ))}
           </div>
@@ -1212,11 +1225,18 @@ function AssistantTurnImpl({
   pendingQuestions?: AgentQuestionRequest[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
 }) {
+  // 长轮次流式期把「还在增长的尾部文本」与结构化事件分开：只有结构真的变了才重算
+  // 下面这些 O(全部事件) 的投影，纯 token 增量只更新一个字符串。
+  const projectionCache = useRef<TurnStreamProjectionCache>()
+  if (!projectionCache.current) projectionCache.current = new TurnStreamProjectionCache()
+  const terminal = turn.done || !!turn.error
+  const projection = projectionCache.current.project(turn.items)
+  const structuralItems = projection.structuralItems as TraceEvent[]
   // 把 tool_result 合并进对应 tool_use（加 output），并从流里过滤掉单独的 tool_result 事件
   const items = useMemo(() => {
     const results = new Map<string, TraceEvent>()
-    for (const e of turn.items) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
-    return turn.items
+    for (const e of structuralItems) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
+    return structuralItems
       .filter((e) => e.stage !== 'tool_result')
       .map((e) => {
         const r = e.toolUseId && (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
@@ -1224,7 +1244,7 @@ function AssistantTurnImpl({
           : undefined
         return r ? { ...e, output: r.text, isError: r.isError ?? e.isError, durationMs: r.durationMs ?? e.durationMs } : e
       })
-  }, [turn.items])
+  }, [structuralItems])
   const visibleItems = useMemo(() => logicalCallEventsForTurn(items), [items])
   const result = resultOf({ items })
   const turnDiffView = turnDiffViewOf(items)
@@ -1236,12 +1256,12 @@ function AssistantTurnImpl({
   )
   // 轮次跑完且该文件真的出现在本轮 Git 快照里，才把工具卡接到同一个 Diff 面板；
   // 运行中或该文件没有净改动时不给假入口。
-  const openFileDiffFor = (event: TraceEvent): (() => void) | undefined => {
+  const openFileDiffFor = useCallback((event: TraceEvent): (() => void) | undefined => {
     if (!onOpenDiff || !turnDiff || !turn.done) return undefined
     const path = event.filePath
     if (!path || !diffPaths.has(path)) return undefined
     return () => onOpenDiff(turn, turnDiff, path)
-  }
+  }, [diffPaths, onOpenDiff, turn, turnDiff])
   const { structured } = useMemo(() => aggregateFiles(items), [items])
   const hookSummary = useMemo(() => aggregateHooks(items), [items])
   const hasFiles =
@@ -1249,10 +1269,16 @@ function AssistantTurnImpl({
     (turnDiff?.status === 'captured' && turnDiff.files.length > 0) ||
     turnDiff?.status === 'timeout' ||
     turnDiff?.status === 'failed'
-  const toolItems = visibleItems.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
-  const maxDur = Math.max(1, ...toolItems.map((e) => e.durationMs ?? 0))
+  const maxDur = useMemo(() => {
+    let max = 1
+    for (const event of visibleItems) {
+      if (event.kind !== 'tool' && event.kind !== 'skill' && event.kind !== 'agent') continue
+      max = Math.max(max, event.durationMs ?? 0)
+    }
+    return max
+  }, [visibleItems])
   const toolN = useMemo(() => aggregateCalls(visibleItems).totalCalls, [visibleItems])
-  const errs = turn.items.filter(isOverviewToolErrorEvent).length
+  const errs = useMemo(() => structuralItems.filter(isOverviewToolErrorEvent).length, [structuralItems])
   const runtime = runtimeTitleForTurn(turn)
   // P1：subagent 内部步骤（parentToolUseId 指向父 Task tool_use）按父分组，折叠进父 Task 卡
   const childrenByParent = useMemo(() => {
@@ -1308,6 +1334,136 @@ function AssistantTurnImpl({
       (request.runId === turn.runId || itemRunIds.has(request.runId)) &&
       !renderedPendingQuestionKeys.has(`${request.runId}\0${request.questionId}`)
   )
+  // C1：合并连续 text_delta；旧版 Codex 曾把每个流式增量误标成 text，这里兼容已在途的旧事件。
+  // 遇到可见事件就落成独立段，保留模型说明与工具调用的真实顺序。
+  // 完整 text 块只替换当前尚未落盘的流式片段，避免整轮进度被拼成一个超长段落。
+  // 尾部还在增长的顶层流式文本不进这里：它单独渲染，所以纯 token 增量不会重建整条时间线。
+  const turnFlowBody = useMemo(() => {
+      const out: ReactNode[] = []
+      let live = ''
+      let liveKey = ''
+      const flushLive = (streaming = false): void => {
+        if (!live) return
+        flushTools()
+        out.push(
+          <div className={`model-text md${streaming ? ' streaming' : ''}`} key={liveKey || `live-${out.length}`}>
+            <Markdown>{live}</Markdown>
+          </div>
+        )
+        live = ''
+        liveKey = ''
+      }
+      // 方案 C：把连续的 tool/skill/agent 攒进一组，遇到 text/thinking 或收尾再落成一个折叠的 ToolGroup。
+      let toolBuf: { ev: TraceEvent; node: ReactNode }[] = []
+      function flushTools(): void {
+        if (toolBuf.length === 0) return
+        const buf = toolBuf
+        toolBuf = []
+        const forceOpen = buf.some(({ ev }) =>
+          ev.tool === 'AskUserQuestion' ||
+          (ev.toolUseId ? interventionsByQuestionId.has(ev.toolUseId) : false) ||
+          pendingQuestions.some((request) => request.runId === ev.runId && request.questionId === ev.toolUseId)
+        )
+        out.push(
+          <ToolGroup
+            key={`tg-${buf[0].ev.id}`}
+            events={buf.map((b) => b.ev)}
+            forceOpen={forceOpen}
+            reveal={buf.some(({ ev }) =>
+              ev.id === selectedId ||
+              (ev.toolUseId ? childrenByParent.get(ev.toolUseId)?.some((child) => child.id === selectedId) : false)
+            )}
+          >
+            {buf.map((b) => b.node)}
+          </ToolGroup>
+        )
+      }
+      for (const ev of visibleItems) {
+        if (ev.kind === 'harness') continue
+        // 只有父调用真实存在时才折叠。Provider 给出孤儿 parent id 时，仍按顶层事件渲染，
+        // 避免一条坏归因把后续根 agent 内容整段吞掉。
+        if (ev.parentToolUseId && knownToolUseIds.has(ev.parentToolUseId)) continue
+        if (isStreamTextFragment(ev)) {
+          if (!live) liveKey = ev.id
+          live += ev.text ?? ''
+          continue
+        }
+        if (ev.kind === 'model' && ev.stage === 'text') {
+          live = '' // 完整块到达，丢弃当前流式预览
+          liveKey = ''
+          if (ev.text) {
+            flushTools()
+            out.push(
+              <div className="model-text md" key={ev.id}>
+                <Markdown>{ev.text}</Markdown>
+              </div>
+            )
+          }
+          continue
+        }
+        if (ev.kind === 'model' && ev.stage === 'thinking') {
+          flushLive()
+          flushTools()
+          out.push(<ThinkingBlock key={ev.id} text={ev.thinking ?? ''} />)
+          continue
+        }
+        if (ev.kind === 'hook') continue // hook lifecycle 放右侧 HOOKS，避免主对话流被 started/progress/response 刷屏
+        if (ev.kind !== 'tool' && ev.kind !== 'skill' && ev.kind !== 'agent') continue
+        flushLive()
+        const pendingQuestion = pendingQuestions.find(
+          (request) => request.runId === ev.runId && request.questionId === ev.toolUseId
+        )
+        // 若该 tool_use 催生了 subagent（其 toolUseId 是某些事件的 parentToolUseId），折叠渲染子步骤
+        const kids = ev.toolUseId ? childrenByParent.get(ev.toolUseId) : undefined
+        toolBuf.push({
+          ev,
+          node: (
+            <div key={ev.id}>
+              <ToolItem
+                ev={ev}
+                selected={selectedId === ev.id}
+                onSelect={() => onSelect(ev)}
+                maxDur={maxDur}
+                pendingQuestion={pendingQuestion}
+                intervention={ev.toolUseId ? interventionsByQuestionId.get(ev.toolUseId) : undefined}
+                queuedQuestionCount={pendingQuestions.length}
+                onAnswerQuestion={onAnswerQuestion}
+                onOpenFileDiff={openFileDiffFor(ev)}
+                turnDone={turn.done}
+              />
+              {kids?.length ? (
+                <SubagentBlock
+                  items={kids}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  pendingQuestions={pendingQuestions}
+                  interventions={interventions}
+                  onAnswerQuestion={onAnswerQuestion}
+                  turnDone={turn.done}
+                />
+              ) : null}
+            </div>
+          )
+        })
+      }
+    flushLive(!turn.done)
+    flushTools()
+    return out
+  }, [
+    childrenByParent,
+    interventions,
+    interventionsByQuestionId,
+    visibleItems,
+    knownToolUseIds,
+    maxDur,
+    onAnswerQuestion,
+    onSelect,
+    openFileDiffFor,
+    pendingQuestions,
+    selectedId,
+    turn.done
+  ])
+
   return (
     <div className="turn-assistant">
       <div className="who">
@@ -1335,125 +1491,14 @@ function AssistantTurnImpl({
         )}
       </div>
       {hookSummary.groups.length > 0 && <HooksSummary summary={hookSummary} />}
-      {(() => {
-        // C1：合并连续 text_delta；旧版 Codex 曾把每个流式增量误标成 text，这里兼容已在途的旧事件。
-        // 遇到可见事件就落成独立段，保留模型说明与工具调用的真实顺序。
-        // 完整 text 块只替换当前尚未落盘的流式片段，避免整轮进度被拼成一个超长段落。
-        const out: ReactNode[] = []
-        let live = ''
-        let liveKey = ''
-        const flushLive = (streaming = false): void => {
-          if (!live) return
-          flushTools()
-          out.push(
-            <div className={`model-text md${streaming ? ' streaming' : ''}`} key={liveKey || `live-${out.length}`}>
-              <Markdown>{live}</Markdown>
-            </div>
-          )
-          live = ''
-          liveKey = ''
-        }
-        // 方案 C：把连续的 tool/skill/agent 攒进一组，遇到 text/thinking 或收尾再落成一个折叠的 ToolGroup。
-        let toolBuf: { ev: TraceEvent; node: ReactNode }[] = []
-        function flushTools(): void {
-          if (toolBuf.length === 0) return
-          const buf = toolBuf
-          toolBuf = []
-          const forceOpen = buf.some(({ ev }) =>
-            ev.tool === 'AskUserQuestion' ||
-            (ev.toolUseId ? interventionsByQuestionId.has(ev.toolUseId) : false) ||
-            pendingQuestions.some((request) => request.runId === ev.runId && request.questionId === ev.toolUseId)
-          )
-          out.push(
-            <ToolGroup
-              key={`tg-${buf[0].ev.id}`}
-              events={buf.map((b) => b.ev)}
-              forceOpen={forceOpen}
-              reveal={buf.some(({ ev }) =>
-                ev.id === selectedId ||
-                (ev.toolUseId ? childrenByParent.get(ev.toolUseId)?.some((child) => child.id === selectedId) : false)
-              )}
-            >
-              {buf.map((b) => b.node)}
-            </ToolGroup>
-          )
-        }
-        for (const ev of visibleItems) {
-          if (ev.kind === 'harness') continue
-          // 只有父调用真实存在时才折叠。Provider 给出孤儿 parent id 时，仍按顶层事件渲染，
-          // 避免一条坏归因把后续根 agent 内容整段吞掉。
-          if (ev.parentToolUseId && knownToolUseIds.has(ev.parentToolUseId)) continue
-          const isStreamFragment =
-            ev.kind === 'model' &&
-            (ev.stage === 'text_delta' ||
-              (ev.stage === 'text' && (ev.providerId === 'codex' || ev.runtimeProvider === 'codex_cli')))
-          if (isStreamFragment) {
-            if (!live) liveKey = ev.id
-            live += ev.text ?? ''
-            continue
-          }
-          if (ev.kind === 'model' && ev.stage === 'text') {
-            live = '' // 完整块到达，丢弃当前流式预览
-            liveKey = ''
-            if (ev.text) {
-              flushTools()
-              out.push(
-                <div className="model-text md" key={ev.id}>
-                  <Markdown>{ev.text}</Markdown>
-                </div>
-              )
-            }
-            continue
-          }
-          if (ev.kind === 'model' && ev.stage === 'thinking') {
-            flushLive()
-            flushTools()
-            out.push(<ThinkingBlock key={ev.id} text={ev.thinking ?? ''} />)
-            continue
-          }
-          if (ev.kind === 'hook') continue // hook lifecycle 放右侧 HOOKS，避免主对话流被 started/progress/response 刷屏
-          if (ev.kind !== 'tool' && ev.kind !== 'skill' && ev.kind !== 'agent') continue
-          flushLive()
-          const pendingQuestion = pendingQuestions.find(
-            (request) => request.runId === ev.runId && request.questionId === ev.toolUseId
-          )
-          // 若该 tool_use 催生了 subagent（其 toolUseId 是某些事件的 parentToolUseId），折叠渲染子步骤
-          const kids = ev.toolUseId ? childrenByParent.get(ev.toolUseId) : undefined
-          toolBuf.push({
-            ev,
-            node: (
-              <div key={ev.id}>
-                <ToolItem
-                  ev={ev}
-                  selected={selectedId === ev.id}
-                  onSelect={() => onSelect(ev)}
-                  maxDur={maxDur}
-                  pendingQuestion={pendingQuestion}
-                  intervention={ev.toolUseId ? interventionsByQuestionId.get(ev.toolUseId) : undefined}
-                  queuedQuestionCount={pendingQuestions.length}
-                  onAnswerQuestion={onAnswerQuestion}
-                  onOpenFileDiff={openFileDiffFor(ev)}
-                  turnDone={turn.done}
-                />
-                {kids?.length ? (
-                  <SubagentBlock
-                    items={kids}
-                    selectedId={selectedId}
-                    onSelect={onSelect}
-                    pendingQuestions={pendingQuestions}
-                    interventions={interventions}
-                    onAnswerQuestion={onAnswerQuestion}
-                    turnDone={turn.done}
-                  />
-                ) : null}
-              </div>
-            )
-          })
-        }
-        flushLive(!turn.done)
-        flushTools()
-        return <div className="turn-flow">{out}</div>
-      })()}
+      <div className="turn-flow">
+        {turnFlowBody}
+        {projection.liveText && (
+          <div className={`model-text md${terminal ? '' : ' streaming'}`} key={projection.liveKey || 'live-tail'}>
+            <Markdown>{projection.liveText}</Markdown>
+          </div>
+        )}
+      </div>
       {unmatchedPendingQuestions.map((request) => (
         <div className="tool-card k-tool question-pending-fallback" key={`${request.runId}:${request.questionId}`}>
           <div className="tool-row">

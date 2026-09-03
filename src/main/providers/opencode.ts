@@ -1467,6 +1467,9 @@ export function createOpenCodeAdapter(
         promise,
         interrupt,
         forceKill: () => manager?.forceClose(),
+        // OpenCode server 按 cwd 复用（managerActivity 计数）：forceClose() 会终止整个
+        // server 及其上其他并发 run。
+        forceKillScope: 'shared_transport',
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: () => providerTurnId,
         getRecordingFailure: () => recordingFailure
