@@ -40,6 +40,9 @@ scry upgrade          # 立即升级到 registry 的 latest
 ```bash
 scry integrations install-pi
 scry integrations status-pi
+scry integrations diff --workspace "$PWD"
+scry integrations uninstall --workspace "$PWD"          # 只打印计划
+scry integrations uninstall --yes --workspace "$PWD"    # 执行
 ```
 
 扩展把 Pi 的顶层 prompt、工具、assistant、usage 和模型响应区间按顺序投递到同一 workspace recorder；失败始终 fail-open，不阻断 Pi。
@@ -144,6 +147,23 @@ scry recorder restart --workspace "$PWD"
 ```
 
 创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/timeline/summary/export/verify` 仍可只读已有数据。
+
+## 容量与保留
+
+`.scry/records/` 是 append-only 的事实源：一轮一个 JSON，文件名带 20 位序号且必须连续。当前版本**没有自动清理或归档**，容量由使用者自己控制。
+
+实测单条体积（macOS，CLI 0.2.31）：
+
+| 轮次形态 | 大小 |
+|---|---|
+| 只有 prompt，无工具、无 diff | 约 2.9 KB |
+| 5 次 Edit + 5 个文件 diff | 约 6.6–9.9 KB（其中 diff 约 5.4 KB、tools 约 2.2 KB） |
+
+粗估：以平均 8 KB/轮、每人每天 100 轮计，约 0.8 MB/天、约 20 MB/月。主要变量是 diff，已有硬上限（单文件 patch 32 KiB、单轮合计 128 KiB）；工具输出只存摘要，单次 input 超 8 KiB 会省略并标 `partial`。想进一步降低占用可把 `capture.diff` 或 `capture.toolOutput` 关掉。
+
+**不要手动删除单个 record 文件。** `turns verify` 与 `doctor` 会把序号空洞当作 store 损坏（`doctor` 退出 4），而不是当作“已清理”。需要释放空间时，目前只有一个安全做法：先用 `scry turns export` 导出需要保留的部分，再整体删除 `.scry/records/` 与 `.scry/notifications/`（下一轮从序号 1 重新开始；已配置 commit hook 时会重放，Uploader 必须按 `recordId` 幂等）。
+
+另注意：`listRecords`、`turns list`、`doctor`、commit 通知 drain 都会扫描整个 records 目录，所以长期不清理的仓库会同时看到磁盘增长和命令变慢。
 
 ## 数据口径
 

@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -15,8 +15,9 @@ afterEach(async () => {
 })
 
 async function workspace(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'scry-cli-test-'))
-  roots.push(root)
+  const created = await mkdtemp(join(tmpdir(), 'scry-cli-test-'))
+  roots.push(created)
+  const root = await realpath(created)
   await writeFile(join(root, 'scry.config.json'), JSON.stringify({
     schemaVersion: 1,
     enabled: true,
@@ -328,5 +329,156 @@ describe('scry verify-capture', () => {
     expect(result.detail).toContain('previously seen from claude')
     expect(result.evidence.hookEventsEverSeen.claude.events).toBeGreaterThan(0)
     expect(result.evidence.hookEvents).toEqual({})
+  })
+})
+
+describe('scry integrations diff/uninstall', () => {
+  const managed = "SCRY_HANDLER_ID=turn-recorder-v1 sh -c 'exec ./.scry/provider-hook.sh claude Stop'"
+  const foreign = 'echo user-hook'
+
+  async function claudeWorkspace(hooks: Record<string, unknown>): Promise<string> {
+    const root = await workspace()
+    await mkdir(join(root, '.claude'), { recursive: true })
+    await writeFile(join(root, '.claude', 'settings.local.json'), JSON.stringify({ hooks }, null, 2))
+    await mkdir(join(root, '.scry'), { recursive: true })
+    await writeFile(join(root, '.scry', 'provider-hook.sh'), '#!/bin/sh\nexport SCRY_HANDLER_ID=turn-recorder-v1\n')
+    await writeFile(join(root, '.scry', 'cli-path'), '/usr/local/bin/scry\n')
+    return root
+  }
+
+  it('diff 零副作用，并按 handler id 报告托管条目与外部条目', async () => {
+    const root = await claudeWorkspace({
+      Stop: [{ hooks: [{ type: 'command', command: managed }, { type: 'command', command: foreign }] }]
+    })
+    const before = await readFile(join(root, '.claude', 'settings.local.json'), 'utf8')
+    const stdout = captureStdout()
+    await expect(runScryCli(['integrations', 'diff', '--workspace', root])).resolves.toBe(3)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    const claude = result.providers.find((row: any) => row.provider === 'claude')
+    expect(claude).toMatchObject({ present: true, managedEvents: ['Stop'], foreignEntries: 1 })
+    expect(claude.missingEvents).toContain('UserPromptSubmit')
+    expect(result.pi.scope).toBe('user-global')
+    expect(await readFile(join(root, '.claude', 'settings.local.json'), 'utf8')).toBe(before)
+  })
+
+  it('diff 检出命令形状漂移造成的重复托管条目', async () => {
+    const root = await claudeWorkspace({
+      Stop: [
+        { hooks: [{ type: 'command', command: managed }] },
+        { hooks: [{ type: 'command', command: `${managed} --legacy` }] }
+      ]
+    })
+    const stdout = captureStdout()
+    await expect(runScryCli(['integrations', 'diff', '--workspace', root])).resolves.toBe(3)
+    const claude = (JSON.parse(stdout.text()) as Record<string, any>).providers.find((row: any) => row.provider === 'claude')
+    expect(claude.duplicateEvents).toEqual(['Stop'])
+  })
+
+  it('uninstall 不带 --yes 只打印计划', async () => {
+    const root = await claudeWorkspace({ Stop: [{ hooks: [{ type: 'command', command: managed }] }] })
+    const before = await readFile(join(root, '.claude', 'settings.local.json'), 'utf8')
+    const stdout = captureStdout()
+    await expect(runScryCli(['integrations', 'uninstall', '--workspace', root])).resolves.toBe(3)
+    expect((JSON.parse(stdout.text()) as Record<string, any>).status).toBe('approval-required')
+    expect(await readFile(join(root, '.claude', 'settings.local.json'), 'utf8')).toBe(before)
+    await expect(access(join(root, '.scry', 'provider-hook.sh'))).resolves.toBeUndefined()
+  })
+
+  it('uninstall --yes 只删托管条目，保留用户 hook、records 与配置', async () => {
+    const root = await claudeWorkspace({
+      Stop: [{ hooks: [{ type: 'command', command: managed }, { type: 'command', command: foreign }] }],
+      PreToolUse: [{ hooks: [{ type: 'command', command: managed }] }]
+    })
+    await mkdir(join(root, '.scry', 'records'), { recursive: true })
+    await writeFile(join(root, '.scry', 'records', 'keep.json'), '{}')
+    const stdout = captureStdout()
+    await expect(runScryCli(['integrations', 'uninstall', '--yes', '--workspace', root])).resolves.toBe(0)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+
+    const settings = JSON.parse(await readFile(join(root, '.claude', 'settings.local.json'), 'utf8')) as Record<string, any>
+    expect(settings.hooks.Stop[0].hooks).toEqual([{ type: 'command', command: foreign }])
+    // A group that only held our entry is dropped, and an empty event key is removed.
+    expect(settings.hooks.PreToolUse).toBeUndefined()
+    await expect(access(join(root, '.scry', 'provider-hook.sh'))).rejects.toThrow()
+    await expect(access(join(root, '.scry', 'cli-path'))).rejects.toThrow()
+    await expect(access(join(root, '.scry', 'records', 'keep.json'))).resolves.toBeUndefined()
+    await expect(access(join(root, 'scry.config.json'))).resolves.toBeUndefined()
+    expect(result.retained.map((item: any) => item.path)).toContain(join(root, '.scry', 'records'))
+    expect(result.rewritten).toContain(join(root, '.claude', 'settings.local.json'))
+  })
+
+  it('坏 JSON 与非托管 OpenCode 插件被跳过而不是破坏', async () => {
+    const root = await workspace()
+    await mkdir(join(root, '.claude'), { recursive: true })
+    await writeFile(join(root, '.claude', 'settings.local.json'), '{ not json')
+    await mkdir(join(root, '.opencode', 'plugins'), { recursive: true })
+    await writeFile(join(root, '.opencode', 'plugins', 'scry-recorder.js'), '// hand written\n')
+    const stdout = captureStdout()
+    await expect(runScryCli(['integrations', 'uninstall', '--yes', '--workspace', root])).resolves.toBe(0)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result.skipped.map((item: any) => item.path)).toEqual([
+      join(root, '.claude', 'settings.local.json'),
+      join(root, '.opencode', 'plugins', 'scry-recorder.js')
+    ])
+    expect(await readFile(join(root, '.claude', 'settings.local.json'), 'utf8')).toBe('{ not json')
+    await expect(access(join(root, '.opencode', 'plugins', 'scry-recorder.js'))).resolves.toBeUndefined()
+  })
+})
+
+describe('scry doctor schema and exit codes', () => {
+  it('健康时输出稳定 schema 并退出 0', async () => {
+    const root = await workspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    expect(report).toMatchObject({ schemaVersion: 1, status: 'healthy', healthy: true, enabled: true })
+    expect(report.checks.map((check: any) => check.id)).toEqual([
+      'recorder.enabled', 'store.integrity', 'turns.pending', 'recorder.lastError'
+    ])
+    expect(report.checks.every((check: any) => check.status === 'pass')).toBe(true)
+    expect(report.recorderVersion).toBe(RECORDER_VERSION)
+  })
+
+  it('缺少配置退出 3，sentinel 关闭退出 2', async () => {
+    const missing = await mkdtemp(join(tmpdir(), 'scry-cli-doctor-'))
+    roots.push(missing)
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', missing])).resolves.toBe(3)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    expect(report).toMatchObject({ schemaVersion: 1, status: 'unavailable', enabled: false, reason: 'missing_config' })
+    expect(report.checks[0].remediation).toContain('scry init')
+
+    const disabled = await workspace()
+    await writeFile(join(disabled, '.scry-disabled'), '')
+    await expect(runScryCli(['doctor', '--workspace', disabled])).resolves.toBe(2)
+  })
+
+  it('store 损坏退出 4', async () => {
+    const degraded = await workspace()
+    for (const session of ['doctor-a', 'doctor-b']) {
+      await handleRecorderHook({
+        provider: 'claude',
+        event: 'UserPromptSubmit',
+        workspace: degraded,
+        payload: { session_id: session, timestamp: '2026-07-19T12:00:00.000Z', prompt: 'p' }
+      })
+      await handleRecorderHook({
+        provider: 'claude',
+        event: 'Stop',
+        workspace: degraded,
+        payload: { session_id: session, timestamp: '2026-07-19T12:00:01.000Z' }
+      })
+    }
+    const records = join(degraded, '.scry', 'records')
+    const [name] = (await readdir(records)).sort()
+    // Removing a committed record leaves a sequence gap: doctor must report corrupt, not healthy.
+    await rm(join(records, name))
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', degraded])).resolves.toBe(4)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    expect(report.status).toBe('corrupt')
+    const integrity = report.checks.find((check: any) => check.id === 'store.integrity')
+    expect(integrity.status).toBe('fail')
+    expect(integrity.remediation).toContain('do not delete individual record files')
   })
 })

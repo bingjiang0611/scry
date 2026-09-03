@@ -18,7 +18,7 @@ import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { workspaceStatus } from './status.js'
 import { verifyCapture } from './verify-capture.js'
-import { initWorkspace } from './workspace-init.js'
+import { initWorkspace, integrationsDiff, integrationsUninstall } from './workspace-init.js'
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
@@ -98,7 +98,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi|diff|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -436,6 +436,11 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
   throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|verify ...')
 }
 
+/**
+ * Stable schema for team CI: `schemaVersion`, `status`, `checks[]`, `runtime`, `evidence`.
+ * Exit codes are a frozen contract: 0 healthy, 2 recorder disabled, 3 config missing/invalid,
+ * 4 store corrupt, 5 degraded (pending turns or a recorded error).
+ */
 async function doctorCommand(args: ParsedArgs): Promise<number> {
   const workspace = workspaceOf(args)
   const enablement = await recorderEnablement(workspace)
@@ -444,19 +449,61 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     nodeVersion: process.versions.node,
     platform: `${process.platform}-${process.arch}`
   }
+  type Check = { id: string; status: 'pass' | 'fail' | 'warn'; detail: string; remediation?: string }
   if (!enablement.enabled) {
-    print({ healthy: false, enabled: false, ...runtime, reason: enablement.reason, detail: enablement.detail })
-    return enablement.reason === 'invalid_config' || enablement.reason === 'missing_config' ? 3 : 2
+    const missing = enablement.reason === 'invalid_config' || enablement.reason === 'missing_config'
+    const checks: Check[] = [{
+      id: 'recorder.enabled',
+      status: 'fail',
+      detail: enablement.detail ? `${enablement.reason}: ${enablement.detail}` : enablement.reason,
+      remediation: missing ? 'run `scry init` in the Git repository root' : 'remove `.scry-disabled` or set SCRY_RECORDER_ENABLED=1'
+    }]
+    print({
+      schemaVersion: 1,
+      status: 'unavailable',
+      healthy: false,
+      enabled: false,
+      ...runtime,
+      workspace,
+      reason: enablement.reason,
+      detail: enablement.detail,
+      checks
+    })
+    return missing ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
   const [health, store] = await Promise.all([readHealth(enablement.dataRoot), verifyStore(enablement.dataRoot)])
   const degraded = !!health.lastError || health.pendingCount > 0
+  const checks: Check[] = [
+    { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
+    {
+      id: 'store.integrity',
+      status: store.ok ? 'pass' : 'fail',
+      detail: store.ok ? `${store.records} records, sequence contiguous` : store.errors.join('; '),
+      ...(store.ok ? {} : { remediation: 'do not delete individual record files; run `scry turns verify` for detail' })
+    },
+    {
+      id: 'turns.pending',
+      status: health.pendingCount > 0 ? 'warn' : 'pass',
+      detail: `${health.pendingCount} turn(s) awaiting recovery`,
+      ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`' } : {})
+    },
+    {
+      id: 'recorder.lastError',
+      status: health.lastError ? 'warn' : 'pass',
+      detail: health.lastError ? `${health.lastError.at}: ${health.lastError.message}` : 'no recorded error',
+      ...(health.lastError ? { remediation: 'inspect .scry/logs/recorder.log' } : {})
+    }
+  ]
   print({
+    schemaVersion: 1,
+    status: !store.ok ? 'corrupt' : degraded ? 'degraded' : 'healthy',
     healthy: store.ok && !degraded,
     enabled: true,
     ...runtime,
     workspace: enablement.workspaceRoot,
     dataRoot: enablement.dataRoot,
+    checks,
     health,
     store
   })
@@ -475,7 +522,31 @@ async function integrationsCommand(args: ParsedArgs): Promise<number> {
     print(status)
     return status.installed ? 0 : 1
   }
-  throw new Error('usage: scry integrations install-pi|status-pi')
+  if (action === 'diff') {
+    const workspace = workspaceOf(args)
+    const result = await integrationsDiff(workspace)
+    print(result)
+    const drift = result.providers.some((row) => row.duplicateEvents.length > 0 || (row.present && row.managedEvents.length > 0 && row.missingEvents.length > 0))
+    return drift ? 3 : 0
+  }
+  if (action === 'uninstall') {
+    const workspace = workspaceOf(args)
+    if (!args.flags.has('yes')) {
+      const plan = await integrationsDiff(workspace)
+      print({
+        action: 'uninstall',
+        status: 'approval-required',
+        ...plan,
+        willRemove: 'managed hook entries, .opencode plugin (if managed), .scry/provider-hook.sh, .scry/cli-path, .scry/node-bin-dir',
+        willRetain: 'scry.config.json, .scry/records, Git exclude entry, Pi user-global extension',
+        next: 're-run with --yes'
+      })
+      return 3
+    }
+    print({ action: 'uninstall', status: 'done', ...await integrationsUninstall(workspace) })
+    return 0
+  }
+  throw new Error('usage: scry integrations install-pi|status-pi|diff|uninstall [--yes]')
 }
 
 async function upgradeCommand(args: ParsedArgs): Promise<number> {
