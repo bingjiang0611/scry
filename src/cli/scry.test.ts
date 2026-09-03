@@ -432,10 +432,35 @@ describe('scry doctor schema and exit codes', () => {
     const report = JSON.parse(stdout.text()) as Record<string, any>
     expect(report).toMatchObject({ schemaVersion: 1, status: 'healthy', healthy: true, enabled: true })
     expect(report.checks.map((check: any) => check.id)).toEqual([
-      'recorder.enabled', 'store.integrity', 'turns.pending', 'recorder.lastError'
+      'recorder.enabled', 'store.integrity', 'turns.pending', 'turns.stale', 'recorder.lastError'
     ])
     expect(report.checks.every((check: any) => check.status === 'pass')).toBe(true)
     expect(report.recorderVersion).toBe(RECORDER_VERSION)
+  })
+
+  it('过期未收敛的 open 轮次报 degraded 退出 5，并指向 recover', async () => {
+    const root = await workspace()
+    // 三天前开始、没有 transcript：不可能再收敛。
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: {
+        session_id: 'stale-1',
+        timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString(),
+        prompt: '开了就没结束'
+      }
+    })
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(5)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    expect(report).toMatchObject({ status: 'degraded', healthy: false })
+    const stale = report.checks.find((check: any) => check.id === 'turns.stale')
+    expect(stale.status).toBe('warn')
+    expect(stale.remediation).toContain('scry recorder recover')
+    expect(report.staleOpenTurns).toMatchObject([{ provider: 'claude', sessionId: 'stale-1' }])
+    // pendingCount 只统计 managed/closing/quarantined，孤儿轮次不在其中，所以必须单独报。
+    expect(report.health.pendingCount).toBe(0)
   })
 
   it('缺少配置退出 3，sentinel 关闭退出 2', async () => {

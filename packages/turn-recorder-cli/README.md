@@ -192,6 +192,25 @@ scry capture show --workspace "$PWD"    # 看解析后的生效值（含配置�
 
 当前没有单独关闭工具入参的开关。如果你的场景要求本地不留任何代码与命令，应设 `diff: false` 并评估工具入参是否可接受，或者不要在该仓库启用 Recorder。
 
+## 未结束的轮次
+
+一轮从 `UserPromptSubmit` 开始、`Stop` 结束。如果 Provider 被 `kill -9`、崩溃或终端被直接关闭,结束事件永远不会到,这一轮就停在 `.scry/runtime/` 里。
+
+超过 **24 小时**且 **transcript 已停止增长**的这类轮次会被判定为不可能再收敛,由 `scry recorder recover`(daemon 空闲时也会自动跑)收敛为 `interrupted`:
+
+```bash
+scry doctor            # 退出 5，turns.stale 报出数量与最久时长
+scry recorder recover  # {"recovered":1,"pending":0,"expired":1}
+```
+
+两个判据必须同时满足:只看轮次年龄会把跑了 30 小时的长任务误判为中断,而长任务会持续往 transcript 追加内容。
+
+收敛后的记录 `status` 为 `interrupted`,已观测到的证据段降级为 `partial`,原因为 `turn never received a terminal event and its transcript stopped changing before the expiry window`;完全没观测到的段仍是 `unavailable`。**不会**把未观测当作"没有发生"。
+
+窗口可用 `SCRY_OPEN_TURN_EXPIRY_MS` 收紧(主要供测试),下限 1 秒、上限 30 天。
+
+顺带说明:daemon 在有未结束轮次时不会因空闲退出 —— 这是防止它在有活干时退场。因此孤儿轮次也是 daemon 长期不退出的原因,收敛之后它才会正常退出。
+
 ## 容量与保留
 
 `.scry/records/` 是 append-only 的事实源：一轮一个 JSON，文件名带 20 位序号且必须连续。当前版本**没有自动清理或归档**，容量由使用者自己控制。

@@ -526,6 +526,26 @@ P0 未做版本升级：`0.2.31` 保持不变，等准备发布时一次性升 `
 
 `finishGitTurnDiff` 随本轮改动文件数近似线性增长:0 个文件 586.5ms、5 个 1110.7ms、50 个 2718.8ms。但 `Stop` 不在用户等待路径上(回复已呈现),约束只是 Provider 的 10–15s hook 超时,当前仍有余量。继续优化需要动 diff 采集算法(增量 numstat、跳过 patch 生成),属于有回归风险、而收益用户不可感知的改动,暂不进行。
 
+## 12.8 open turn 过期收敛
+
+原有实现里,一个永远等不到终态的轮次会有三重后果:记录永久不产生、`doctor` 仍报 healthy(`pendingCount` 只统计 managed/closing/quarantined)、daemon 因 `recorderHasOpenTurn` 为真而无限重排空闲定时器。本机实测证据:一个 treehouse worktree 的 daemon 存活 **3 天 8 小时**,该 workspace 有 2 个 8 月 29 / 31 日的 `status: open`;另一个活跃 workspace 累积 **48 个**孤儿轮次。
+
+现在的判定是**双判据**:轮次年龄超过 24 小时 **且** transcript mtime 也超过 24 小时未变。只看年龄会把跑了 30 小时的长任务误判为中断,而长任务会持续追加 transcript。无 transcript 的轮次只按年龄判定。
+
+收敛结果:`status: 'interrupted'`,已观测证据段降级 `partial` 并给出原因,未观测段保持 `unavailable`。`recoverRecorder` 返回值新增 `expired` 计数(与 `recovered` 区分强制过期与正常恢复);`doctor` 新增 `turns.stale` 检查与 `staleOpenTurns[]`,命中时报 `degraded`(退出码 5,沿用既有语义,未新增退出码)。
+
+实测(3 天前开启、无 transcript 的孤儿轮次):
+
+```
+doctor          exit=5  turns.stale: warn | 1 open turn(s) past the expiry window; oldest 72h
+recorder recover        {"recovered":1,"pending":0,"expired":1}
+记录             status=interrupted  tools=unavailable（未观测，非 partial）
+收敛后 doctor    exit=0
+daemon（idle=2s）      启动 True → idle 后 False   ← 原先会永不退出
+```
+
+一个测试驱动出的实现缺陷:最初按"是否在 stale 候选集合里"计数 `expired`,但候选轮次仍可能靠真实终态(如 Codex `turn_aborted`)收敛;既有用例立刻失败,改为只在真正走过期分支时计数。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。

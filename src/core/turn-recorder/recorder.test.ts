@@ -1,4 +1,4 @@
-import { access, appendFile, chmod, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rm, unlink, writeFile } from 'node:fs/promises'
+import { access, appendFile, chmod, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rm, unlink, utimes, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -496,7 +496,7 @@ describe('turn recorder state machine', () => {
         timestamp: '2026-07-19T12:00:10.000Z'
       })
     })).resolves.toMatchObject({ status: 'pending' })
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 0 })
 
     const records = await listRecords(join(root, '.scry'))
     expect(records.map((record) => [record.providerTurnId, record.turnIndex, record.status, record.user.value?.text])).toEqual([
@@ -548,7 +548,7 @@ describe('turn recorder state machine', () => {
       })
     })
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 1 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 1, expired: 0 })
     await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
 
     await appendFile(transcript, `\n${JSON.stringify({
@@ -556,7 +556,7 @@ describe('turn recorder state machine', () => {
       promptId: 'target-turn',
       message: { role: 'user', content: 'target prompt' }
     })}\n`)
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 0 })
     await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
       {
         providerTurnId: 'target-turn',
@@ -605,10 +605,71 @@ describe('turn recorder state machine', () => {
       })
     })
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 0 })
     await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
       { providerTurnId: 'claude-root', user: { value: { text: 'root prompt' } } }
     ])
+  })
+
+  it('超过过期窗口且 transcript 停止增长的 open 轮次收敛为 interrupted，证据降级为 partial', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'transcript.jsonl')
+    const startedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
+    // 只有用户消息、没有任何 assistant 终态：这一轮永远等不到 Stop。
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '跑一个长任务' } }))
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-expired', { prompt: '跑一个长任务', transcript_path: transcript, timestamp: startedAt })
+    })
+    // transcript 已停止增长：把 mtime 推回 3 天前。
+    const stoppedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000)
+    await utimes(transcript, stoppedAt, stoppedAt)
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.status).toBe('interrupted')
+    // 没有观测到终态，就不能声称"这一轮没用工具"。
+    expect(record.tools.status).toBe('partial')
+    expect(record.tools.omissionReason).toContain('terminal event')
+  })
+
+  it('transcript 仍在增长的长任务不被误判为过期', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'transcript.jsonl')
+    const startedAt = new Date(Date.now() - 30 * 60 * 60 * 1_000).toISOString()
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '长任务' } }))
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-longrun', { prompt: '长任务', transcript_path: transcript, timestamp: startedAt })
+    })
+    // 轮次已开了 30 小时，但 transcript 刚刚才写过：仍在工作，不能收敛。
+    await appendFile(transcript, `\n${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '还在跑' }] } })}\n`)
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+  })
+
+  it('SCRY_OPEN_TURN_EXPIRY_MS 可收紧窗口，且无 transcript 的 open 轮次同样会过期', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-no-transcript', {
+        prompt: '没有 transcript',
+        timestamp: new Date(Date.now() - 60_000).toISOString()
+      })
+    })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+
+    const env = { ...process.env, SCRY_OPEN_TURN_EXPIRY_MS: '1000' }
+    await expect(recoverRecorder(root, env)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.status).toBe('interrupted')
   })
 
   it('Claude 只有 promptHash 时未匹配 transcript 也保持 pending', async () => {
@@ -1107,7 +1168,7 @@ describe('Codex rollout recorder evidence', () => {
     ].map((line) => JSON.stringify(line)).join('\n')}\n`)
     await unlink(active)
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 0 })
     const [record] = await listRecords(join(root, '.scry'))
     expect(record).toMatchObject({
       sessionId: 'codex-session-aborted',
@@ -1154,7 +1215,7 @@ describe('Codex rollout recorder evidence', () => {
       })
     })
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
     await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
   })
 
@@ -1182,7 +1243,7 @@ describe('Codex rollout recorder evidence', () => {
       })
     })
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
     await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
   })
 
@@ -1203,7 +1264,7 @@ describe('Codex rollout recorder evidence', () => {
       })
     })
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
     await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
   })
 
@@ -1236,7 +1297,7 @@ describe('Codex rollout recorder evidence', () => {
     })
     releaseRecovery()
 
-    await expect(recovery).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(recovery).resolves.toEqual({ recovered: 1, pending: 0, expired: 0 })
     await expect(next).resolves.toMatchObject({ status: 'started' })
     const open = JSON.parse(await readFile(join(
       root, '.scry', 'runtime', 'codex', safeKey('codex-race-session'), 'open.json'
@@ -2177,7 +2238,7 @@ describe('record store cursor and recovery semantics', () => {
       closingAt: '2026-07-19T12:00:01.000Z'
     }))
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 0 })
     await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
       { sessionId: 'recover-me', status: 'completed' }
     ])

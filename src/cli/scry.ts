@@ -6,7 +6,14 @@ import { fileURLToPath } from 'node:url'
 import type { ProviderId } from '../shared/provider.js'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
-import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
+import {
+  handleRecorderHook,
+  openTurnExpiryMs,
+  recoverRecorder,
+  recorderEnablement,
+  refreshRecorderPendingHealth
+} from '../core/turn-recorder/recorder.js'
+import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readArchiveState, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import {
   commitHookEnv,
@@ -617,8 +624,14 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     return missing ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
-  const [health, store] = await Promise.all([readHealth(enablement.dataRoot), verifyStore(enablement.dataRoot)])
-  const degraded = !!health.lastError || health.pendingCount > 0
+  const [health, store, staleOpenTurns] = await Promise.all([
+    readHealth(enablement.dataRoot),
+    verifyStore(enablement.dataRoot),
+    recorderStaleOpenTurns(enablement.dataRoot, openTurnExpiryMs())
+  ])
+  // Stale open turns are real data loss until recovery closes them, so they degrade the report
+  // instead of hiding behind `pendingCount`, which only counts managed/closing/quarantined turns.
+  const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0
   const checks: Check[] = [
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
     {
@@ -632,6 +645,16 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
       status: health.pendingCount > 0 ? 'warn' : 'pass',
       detail: `${health.pendingCount} turn(s) awaiting recovery`,
       ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`' } : {})
+    },
+    {
+      id: 'turns.stale',
+      status: staleOpenTurns.length > 0 ? 'warn' : 'pass',
+      detail: staleOpenTurns.length > 0
+        ? `${staleOpenTurns.length} open turn(s) past the expiry window; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h`
+        : 'no open turn past the expiry window',
+      ...(staleOpenTurns.length > 0
+        ? { remediation: 'run `scry recorder recover` to close them as interrupted' }
+        : {})
     },
     {
       id: 'recorder.lastError',
@@ -650,7 +673,13 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     dataRoot: enablement.dataRoot,
     checks,
     health,
-    store
+    store,
+    staleOpenTurns: staleOpenTurns.map((turn) => ({
+      provider: turn.provider,
+      sessionId: turn.sessionId,
+      startedAt: turn.startedAt,
+      ageMs: turn.ageMs
+    }))
   })
   if (!store.ok) return 4
   return degraded ? 5 : 0
