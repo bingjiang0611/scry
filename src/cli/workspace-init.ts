@@ -79,14 +79,34 @@ function parseProviders(source: string): InitProvider[] {
   return result
 }
 
-async function detectProviders(workspace: string, env: NodeJS.ProcessEnv): Promise<InitProvider[]> {
+/** Non-throwing detection shared by `init` and `status`. */
+export async function detectWorkspaceProviders(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<InitProvider[]> {
   const checks: Array<[InitProvider, boolean]> = [
     ['claude', await exists(join(workspace, '.claude')) || await commandExists('claude', env)],
     ['codex', await exists(join(workspace, '.codex')) || await commandExists('codex', env)],
     ['qoder', await exists(join(workspace, '.qoder')) || await commandExists('qodercli', env) || await commandExists('qoder', env)],
     ['opencode', await exists(join(workspace, '.opencode')) || await commandExists('opencode', env)]
   ]
-  const providers = checks.filter(([, found]) => found).map(([provider]) => provider)
+  return checks.filter(([, found]) => found).map(([provider]) => provider)
+}
+
+/**
+ * Identify managed hooks by handler id rather than by exact command equality, so a changed
+ * command shape is still recognised as installed instead of silently appending a duplicate.
+ */
+export async function providerHookInstalled(workspace: string, provider: InitProvider): Promise<boolean> {
+  const path = provider === 'opencode'
+    ? join(workspace, '.opencode/plugins/scry-recorder.js')
+    : join(workspace, CONFIG_PATHS[provider])
+  const source = await readFile(path, 'utf8').catch(() => null)
+  return source != null && source.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`)
+}
+
+async function detectProviders(workspace: string, env: NodeJS.ProcessEnv): Promise<InitProvider[]> {
+  const providers = await detectWorkspaceProviders(workspace, env)
   if (providers.length === 0) {
     throw new Error(`没有检测到 Provider；请显式指定，例如：scry init --providers claude,codex`)
   }

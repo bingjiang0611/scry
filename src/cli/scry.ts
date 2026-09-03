@@ -6,7 +6,7 @@ import type { ProviderId } from '../shared/provider.js'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
-import { RECORDER_VERSION, commitNotificationStatus, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readDrainStatus, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import {
   commitHookEnv,
   inspectCommitHookBundle,
@@ -16,6 +16,7 @@ import {
 } from '../core/turn-recorder/commit-hook-grant.js'
 import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
+import { workspaceStatus } from './status.js'
 import { initWorkspace } from './workspace-init.js'
 import {
   consumeUpdateNotice,
@@ -96,7 +97,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -187,6 +188,20 @@ async function initCommand(args: ParsedArgs): Promise<number> {
   if (result.codexTrustRequired) process.stdout.write('Codex：重启后在这个项目中执行 /hooks，并信任项目 Hook。\n')
   process.stdout.write(`验证命令：scry turns list --workspace "${result.workspace}"\n`)
   return store.ok ? 0 : 4
+}
+
+/**
+ * Six-stage provider matrix. Exit codes: 0 capturing or nothing to report, 2 recorder not
+ * enabled for this workspace, 3 configured providers exist but no hook event has ever
+ * arrived (or events arrived without a committed record).
+ */
+async function statusCommand(args: ParsedArgs): Promise<number> {
+  const report = await workspaceStatus(workspaceOf(args))
+  print(report)
+  if (!report.recorder.enabled) return 2
+  const configured = report.providers.filter((row) => row.configured !== 'no')
+  if (configured.length === 0) return 2
+  return configured.some((row) => row.state === 'capturing') ? 0 : 3
 }
 
 /**
@@ -293,6 +308,26 @@ async function recorderCommand(args: ParsedArgs): Promise<number> {
   if (action === 'recover') {
     print(await recoverRecorder(workspaceOf(args)))
     return 0
+  }
+  if (action === 'notify-drain') {
+    // Unbounded on purpose: the hook path drains within a budget, this flushes the rest.
+    const workspace = workspaceOf(args)
+    const enablement = await recorderEnablement(workspace)
+    if (!enablement.enabled) {
+      print({ action: 'notify-drain', workspace, status: 'disabled', reason: enablement.reason })
+      return 2
+    }
+    const activation = await resolveCommitHookActivation(workspace, enablement.config)
+    if (activation.status !== 'trusted' && activation.status !== 'host-provided') {
+      print({ action: 'notify-drain', workspace, status: 'not-activated', activation })
+      return activation.status === 'not-configured' ? 0 : 3
+    }
+    const result = await drainCommitNotifications(
+      enablement.dataRoot,
+      commitHookEnv(activation, process.env)
+    )
+    print({ action: 'notify-drain', workspace, activation: activation.status, ...result, lastDrainTruncated: (await readDrainStatus(enablement.dataRoot)).truncated })
+    return result.pending > 0 ? 3 : 0
   }
   if (action === 'serve') {
     await serveRecorderDaemon({ workspace: workspaceOf(args), socketPath: flag(args, 'socket') })
@@ -469,6 +504,7 @@ export async function runScryCli(argv: string[]): Promise<number> {
         return 0
       }
     case 'init': return initCommand(args)
+    case 'status': return statusCommand(args)
     case 'commit-hook': return commitHookCommand(args)
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
@@ -476,7 +512,7 @@ export async function runScryCli(argv: string[]): Promise<number> {
     case 'integrations': return integrationsCommand(args)
     case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry init|commit-hook|recorder|turns|doctor|integrations|upgrade ...')
+      throw new Error('usage: scry init|status|commit-hook|recorder|turns|doctor|integrations|upgrade ...')
   }
 }
 
