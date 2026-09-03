@@ -43,6 +43,9 @@ describe('MarkdownImpl trust boundary', () => {
     )
 
     expect(html).toContain('class="md-file-ref"')
+    expect(html.match(/md-file-ref-icon/g)).toHaveLength(2)
+    expect(html).toContain('aria-hidden="true">打开</span>')
+    expect(html).toContain('aria-hidden="true">外部打开</span>')
     expect(html).toContain('src/App.tsx · 在右侧文件面板打开')
     expect(html).toContain('docs/report.pdf · 在外部应用打开')
     expect(html.match(/class="md-file-ref"/g)).toHaveLength(2)
