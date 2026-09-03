@@ -17,6 +17,7 @@ import {
 import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { workspaceStatus } from './status.js'
+import { verifyCapture } from './verify-capture.js'
 import { initWorkspace } from './workspace-init.js'
 import {
   consumeUpdateNotice,
@@ -31,7 +32,7 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot'])
+const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout'])
 const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'quiet', 'show', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -97,7 +98,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -188,6 +189,21 @@ async function initCommand(args: ParsedArgs): Promise<number> {
   if (result.codexTrustRequired) process.stdout.write('Codex：重启后在这个项目中执行 /hooks，并信任项目 Hook。\n')
   process.stdout.write(`验证命令：scry turns list --workspace "${result.workspace}"\n`)
   return store.ok ? 0 : 4
+}
+
+/**
+ * Proof-of-capture. Exit codes: 0 a real turn was recorded, 2 recorder unavailable for this
+ * workspace, 3 nothing was captured within the timeout (reason explains which stage failed).
+ */
+async function verifyCaptureCommand(args: ParsedArgs): Promise<number> {
+  const seconds = intFlag(args, 'timeout')
+  const result = await verifyCapture(workspaceOf(args), {
+    ...(seconds != null ? { timeoutMs: seconds * 1_000 } : {}),
+    onWait: (message) => process.stderr.write(`scry: ${message}\n`)
+  })
+  print(result)
+  if (result.reason === 'ok') return 0
+  return result.reason === 'missing_config' || result.reason === 'disabled' ? 2 : 3
 }
 
 /**
@@ -505,6 +521,7 @@ export async function runScryCli(argv: string[]): Promise<number> {
       }
     case 'init': return initCommand(args)
     case 'status': return statusCommand(args)
+    case 'verify-capture': return verifyCaptureCommand(args)
     case 'commit-hook': return commitHookCommand(args)
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
@@ -512,7 +529,7 @@ export async function runScryCli(argv: string[]): Promise<number> {
     case 'integrations': return integrationsCommand(args)
     case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry init|status|commit-hook|recorder|turns|doctor|integrations|upgrade ...')
+      throw new Error('usage: scry init|status|verify-capture|commit-hook|recorder|turns|doctor|integrations|upgrade ...')
   }
 }
 

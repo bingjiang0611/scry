@@ -227,11 +227,28 @@ pi        yes       global      unknown  1m ago    1m ago      ok
 - commitHook 段字段命名必须与 recorder health 区分：`openTurnsPending`（`RecorderHealth.pendingCount`，未收敛 open turn，`store.ts:16`）vs `notifyBacklog`（未 ACK 记录数）。
 - **禁止把「未激活」显示为「无积压」**：未激活时 drain 返回 `{0,0}`（`store.ts:229`），必须显示 `configured_but_not_activated`，不能显示 `notifyBacklog: 0`。
 
-### W2 `scry verify-capture`
+### W2 `scry verify-capture` — ✅ 已实现
 
-原因码收敛为真实状态（`config.ts:137-165`）：
+实现：`src/cli/verify-capture.ts`。原因码（每个都对应一个真实可达状态，均有用例）：
 
-`missing_config` / `disabled`(sentinel/env) / `daemon_unavailable` / `no_hook_event` / `pending_open_turn` / `ok`
+| 原因码 | 含义 | 退出码 |
+|---|---|---|
+| `ok` | 等待期间提交了**新** record | 0 |
+| `missing_config` | 无 `scry.config.json` 或非法配置 | 2 |
+| `disabled` | sentinel / env / `enabled:false` | 2 |
+| `pending_open_turn` | hook 已到达，轮次还在进行或待恢复 | 3 |
+| `events_without_record` | 等待期间有事件，无 in-flight 也无新 record | 3 |
+| `no_hook_event` | 等待期间无事件（detail 区分“从未到达过”与“以前到过”） | 3 |
+
+与 v2 计划的差异及理由：
+
+- **删掉 `daemon_unavailable`**：daemon 未运行不是采集失败——冷启动会先直接落盘再拉起后台进程。把它当失败会误导接入方。daemon 状态降为 evidence 字段。
+- **新增 `events_without_record`**：真实可达（事件被 ignore / dropped / orphan），不能塞进 `pending_open_turn` 假装成“马上就好”。
+- **区分两个 pending 信号**：`RecorderHealth.pendingCount`（`runtime-state.ts:77`）只统计 managed / closing / quarantined 的**待恢复**轮次，不包含正在进行的轮次。因此 evidence 同时给 `openTurnInFlight`（复用 `recorderHasOpenTurn`）与 `openTurnsPending`，两者不可互相代替。
+- **只承认新 record**：以启动时的 `snapshotMaxSequence` 为基线，历史记录不能冒充本次证据。
+- **结果为 `ok` 也要逐段报证据状态**：`record.evidence` 输出 `status/quality`，避免绿色掩盖 `unavailable`。
+
+实测四种路径（packaged CLI，`direct` 传输）：未采过 → `no_hook_event`；只发 `UserPromptSubmit` → `pending_open_turn` 且 `openTurnInFlight: true` / `openTurnsPending: 0`；等待中补上 `Stop` → `ok`、`waitedMs 2033`、`record seq 1`，且 `assistant`/`tools`/`usage` 等诚实报 `unavailable`；事件在等待前发生 → `no_hook_event` 且 detail 写明“previously seen from claude”。
 
 删除 v1 的 `record_without_terminal_status`：committed record 的 `status` 是封闭 union 且被 `isAgentTurnRecord` 强校验（`turn-record.ts:196`），该状态不存在。
 

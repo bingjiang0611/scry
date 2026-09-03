@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
+import { verifyCapture } from './verify-capture'
 import { parseArgs, runScryCli } from './scry'
 
 const roots: string[] = []
@@ -241,5 +242,91 @@ describe('scry recorder notify-drain', () => {
     } finally {
       delete process.env.SCRY_GRANT_DIR
     }
+  })
+})
+
+describe('scry verify-capture', () => {
+  it('缺少配置时报 missing_config 并退出 2', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-cli-verify-'))
+    roots.push(root)
+    const stdout = captureStdout()
+    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(2)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result).toMatchObject({ reason: 'missing_config', record: null })
+    expect(result.remediation).toContain('scry init')
+  })
+
+  it('被 sentinel 关闭时报 disabled 而不是 no_hook_event', async () => {
+    const root = await workspace()
+    await writeFile(join(root, '.scry-disabled'), '')
+    const stdout = captureStdout()
+    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(2)
+    expect((JSON.parse(stdout.text()) as Record<string, any>).reason).toBe('disabled')
+  })
+
+  it('没有任何 hook 事件时报 no_hook_event 并退出 3', async () => {
+    const root = await workspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(3)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result.reason).toBe('no_hook_event')
+    expect(result.evidence.hookEvents).toEqual({})
+    expect(result.remediation).toContain('/hooks')
+  })
+
+  it('事件到达但轮次未收敛时报 pending_open_turn', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: { session_id: 'verify-open', timestamp: '2026-07-19T12:00:00.000Z', prompt: 'work' }
+    })
+    const stdout = captureStdout()
+    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(3)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result.reason).toBe('pending_open_turn')
+    expect(result.evidence.hookEventsEverSeen.claude.events).toBeGreaterThan(0)
+    // openTurnInFlight means "a turn is running"; openTurnsPending means "a turn needs
+    // recovery". They are different signals and must not be conflated.
+    expect(result.evidence.openTurnInFlight).toBe(true)
+    expect(result.evidence.openTurnsPending).toBe(0)
+    expect(result.detail).toContain('still in flight')
+  })
+
+  it('采到新轮次时报 ok，并逐段暴露证据状态', async () => {
+    const root = await workspace()
+    const payload = { session_id: 'verify-ok', timestamp: '2026-07-19T12:00:00.000Z', prompt: 'work' }
+    const capture = verifyCapture(root, { timeoutMs: 15_000 })
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: { ...payload, timestamp: '2026-07-19T12:00:01.000Z' }
+    })
+    const result = await capture
+    expect(result.reason).toBe('ok')
+    expect(result.record).toMatchObject({ sequence: 1, provider: 'claude', status: 'completed' })
+    expect(result.record?.evidence.user).toBe('available/exact')
+    // A green result must still surface sections the provider cannot supply.
+    expect(Object.values(result.record?.evidence ?? {}).some((value) => value.startsWith('unavailable'))).toBe(true)
+  })
+
+  it('已有历史记录时只承认新提交的轮次', async () => {
+    const root = await workspace()
+    const first = { session_id: 'verify-old', timestamp: '2026-07-19T12:00:00.000Z', prompt: 'old' }
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: first })
+    await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: { ...first, timestamp: '2026-07-19T12:00:01.000Z' } })
+
+    const stdout = captureStdout()
+    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(3)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    // A previously committed record must never be reported as this run's proof of capture.
+    expect(result.reason).toBe('no_hook_event')
+    expect(result.record).toBeNull()
+    expect(result.detail).toContain('previously seen from claude')
+    expect(result.evidence.hookEventsEverSeen.claude.events).toBeGreaterThan(0)
+    expect(result.evidence.hookEvents).toEqual({})
   })
 })
