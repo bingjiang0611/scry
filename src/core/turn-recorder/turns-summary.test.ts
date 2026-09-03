@@ -53,6 +53,38 @@ function record(
 }
 
 describe('turn CLI model timing summaries', () => {
+  it('does not promote legacy context without provenance to exact', () => {
+    const summary = summarizeTurnRecords([record(1, undefined, {
+      usage: {
+        status: 'available', quality: 'exact', source: ['legacy-record'],
+        value: { contextTokens: 75, contextWindow: 100, model: 'legacy-model' }
+      }
+    })], 'session-1')
+
+    expect(summary.usage.context).toMatchObject({
+      used: 75,
+      window: 100,
+      quality: 'inferred',
+      source: 'legacy_unattributed_context'
+    })
+    expect(summary.usage.contextCoverage.quality).toBe('inferred')
+  })
+
+  it('filters legacy Skill path-reference records without rewriting canonical files', () => {
+    const summary = summarizeTurnRecords([record(1, undefined, {
+      skills: {
+        status: 'available', quality: 'exact', source: ['fixture'],
+        value: [{
+          category: 'skill', name: 'hsf-invoke', status: 'success',
+          input: { source: 'skill_file', path: '/repo/.claude/skills/hsf-invoke/SKILL.md' }
+        }]
+      }
+    })], 'session-1')
+
+    expect(summary.calls.skills).toEqual({ total: 0, byName: [] })
+    expect(summary.calls.coverage.quality).toBe('inferred')
+  })
+
   it('OpenCode 历史 record 即使写过危险精确零，summary 仍按能力口径返回未知', () => {
     const summary = summarizeTurnRecords([record(1, undefined, {
       provider: { id: 'opencode' },
@@ -321,6 +353,9 @@ describe('turn CLI model timing summaries', () => {
           cacheCreationTokens: 0,
           contextTokens: 50,
           contextWindow: 100,
+          contextModel: 'fixture-model',
+          contextUsageSource: 'fixture_control',
+          contextUsageQuality: 'inferred',
           model: 'fixture-model'
         }),
         files: exact([{ path: '/repo/src/b.ts', operation: 'edit' }]),
@@ -349,7 +384,11 @@ describe('turn CLI model timing summaries', () => {
       totalTokens: 12,
       inputTokens: 10,
       outputTokens: 2,
-      context: { used: 50, window: 100, pct: 50, remaining: 50, model: 'fixture-model' }
+      context: {
+        used: 50, window: 100, pct: 50, remaining: 50, model: 'fixture-model',
+        source: 'fixture_control', quality: 'inferred'
+      },
+      contextCoverage: { quality: 'inferred' }
     })
     expect(summary.files).toMatchObject({
       uniquePaths: 2,

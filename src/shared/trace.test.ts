@@ -1,5 +1,40 @@
 import { describe, expect, it } from 'vitest'
-import { fileOpOf, mcpCallsForEvent, mcpPayloadFailed, normalizeTurnDiffSnapshot, parseMcp } from './trace.js'
+import { contextUsageEvidence, fileOpOf, mcpCallsForEvent, mcpPayloadFailed, normalizeTurnDiffSnapshot, parseMcp } from './trace.js'
+
+describe('context usage evidence', () => {
+  it('binds context tokens only to the declared model', () => {
+    expect(contextUsageEvidence({
+      contextTokens: 50,
+      contextModel: 'same-model',
+      contextProvider: 'new-provider',
+      modelUsage: [
+        { model: 'same-model', upstreamProvider: 'old-provider', contextWindow: 100 },
+        { model: 'same-model', upstreamProvider: 'new-provider', contextWindow: 1_000 }
+      ]
+    })).toMatchObject({ used: 50, window: 1_000, model: 'same-model', provider: 'new-provider' })
+  })
+
+  it('does not guess between same-model rows from different providers', () => {
+    expect(contextUsageEvidence({
+      contextTokens: 50,
+      contextModel: 'shared-model',
+      modelUsage: [
+        { model: 'shared-model', upstreamProvider: 'provider-a', contextWindow: 100 },
+        { model: 'shared-model', upstreamProvider: 'provider-b', contextWindow: 1_000 }
+      ]
+    })).toBeNull()
+  })
+
+  it('does not guess from the only positive window in a multi-model legacy result', () => {
+    expect(contextUsageEvidence({
+      contextTokens: 50,
+      modelUsage: [
+        { model: 'old-model', contextWindow: 100 },
+        { model: 'new-model' }
+      ]
+    })).toBeNull()
+  })
+})
 
 describe('file tool evidence', () => {
   it('normalizes Claude file_path and Pi lowercase path contracts', () => {

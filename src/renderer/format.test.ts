@@ -1034,6 +1034,36 @@ describe('analyzeBilling（Billing Guardian token 用量解释）', () => {
     expect(result).toMatchObject({ tokensIn: undefined, tokensOut: undefined, cacheReadTokens: undefined })
   })
 
+  it('多 result 合并上下文时同步保留模型、来源与质量', () => {
+    const result = resultOf({
+      runId: 'context', userText: 'context', done: true,
+      items: [
+        ev({
+          id: 'r1', kind: 'harness', stage: 'result', contextTokens: 50,
+          contextModel: 'model-a', contextProvider: 'new-provider',
+          contextUsageSource: 'native_ratio', contextUsageQuality: 'inferred',
+          modelUsage: [
+            { model: 'model-a', upstreamProvider: 'old-provider', contextWindow: 100 },
+            { model: 'model-a', upstreamProvider: 'new-provider', contextWindow: 1_000 }
+          ]
+        }),
+        ev({ id: 'r2', kind: 'harness', stage: 'result', tokensOut: 2 })
+      ]
+    })
+
+    expect(result).toMatchObject({
+      contextTokens: 50,
+      contextModel: 'model-a',
+      contextProvider: 'new-provider',
+      contextUsageSource: 'native_ratio',
+      contextUsageQuality: 'inferred',
+      modelUsage: [
+        expect.objectContaining({ model: 'model-a', upstreamProvider: 'old-provider', contextWindow: 100 }),
+        expect.objectContaining({ model: 'model-a', upstreamProvider: 'new-provider', contextWindow: 1_000 })
+      ]
+    })
+  })
+
   it('多条 usage result 会聚合 reasoning token', () => {
     const result = resultOf({
       runId: 'reasoning', userText: 'reasoning', done: true,

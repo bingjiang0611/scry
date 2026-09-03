@@ -1526,6 +1526,10 @@ describe('Codex provider adapter', () => {
       cacheCreationTokens: 12,
       reasoningTokens: 6,
       contextTokens: 200,
+      contextModel: 'gpt-test',
+      contextProvider: 'openai',
+      contextUsageSource: 'codex_app_server_last_usage',
+      contextUsageQuality: 'exact',
       modelUsage: [{
         model: 'gpt-test',
         inputTokens: 400,
@@ -1535,6 +1539,53 @@ describe('Codex provider adapter', () => {
         reasoningTokens: 6,
         contextWindow: 200_000
       }]
+    })
+  })
+
+  it('uses the first cumulative-only resume update as a baseline instead of charging session history', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt', planType: 'pro' } }
+      if (method === 'thread/resume') return { thread: { id: 'thread-resume-baseline' }, model: 'gpt-test', modelProvider: 'openai' }
+      if (method === 'turn/start') return { turn: { id: 'turn-resume-baseline' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-resume-baseline', prompt: 'continue', cwd: '/isolated-copy',
+      resume: 'thread-resume-baseline', attachments: [], emit: (event) => events.push(event)
+    })
+
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    const baseline = {
+      threadId: 'thread-resume-baseline', turnId: 'turn-resume-baseline',
+      tokenUsage: { total: { inputTokens: 10_000, outputTokens: 1_000, totalTokens: 11_000 }, modelContextWindow: 200_000 }
+    }
+    notify?.('thread/tokenUsage/updated', baseline)
+    notify?.('thread/tokenUsage/updated', baseline)
+    notify?.('thread/tokenUsage/updated', {
+      threadId: 'thread-resume-baseline', turnId: 'turn-resume-baseline',
+      tokenUsage: {
+        total: { inputTokens: 10_100, outputTokens: 1_020, totalTokens: 11_120 },
+        last: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        modelContextWindow: 200_000
+      }
+    })
+    notify?.('turn/completed', {
+      threadId: 'thread-resume-baseline',
+      turn: { id: 'turn-resume-baseline', status: 'completed', error: null }
+    })
+    await handle.promise
+
+    expect(events.find((event) => event.kind === 'harness' && event.stage === 'result')).toMatchObject({
+      tokensIn: 100,
+      tokensOut: 20,
+      contextTokens: 100,
+      contextModel: 'gpt-test'
     })
   })
 

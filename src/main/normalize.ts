@@ -20,7 +20,9 @@ export interface NormalizeCtx {
   newId: () => string
   now: () => string
   latestContextTokens?: number // 最近一次 assistant usage 的完整 prompt；result.usage 可能是累计值，不能当当前上下文
-  lastInferredSkill?: string // 从注入文本 / skill 文件路径推断的 skill；只用于压连续重复
+  latestContextModel?: string // contextTokens 的模型身份；多模型 usage 不能按 modelUsage 顺序猜窗口
+  contextTokensFromUsage?: (usage: unknown) => number // Provider-specific cache 口径；缺省为 Anthropic 分项相加
+  lastSkillName?: string // Skill 注入与原生 Skill 调用去重；路径引用不参与
   toolUseById?: Map<string, TraceEvent> // SDK tool_result 不重复携带工具身份时，用对应 tool_use 补全
   agentToolUseIds?: Set<string> // task_* 只回指已观测的 Agent tool_use，不把其他后台任务混进来
   agentTaskToolUseById?: Map<string, string> // 仅保留由 Agent tool_use 建立的 task_id 别名
@@ -77,41 +79,12 @@ function cleanSkillPart(part: string | undefined): string | undefined {
   return s
 }
 
-function cleanPathPart(part: string): string {
-  return part.trim().replace(/[),;]+$/g, '')
-}
-
-function skillNameFromSkillPath(path: string): string | undefined {
-  const parts = path.split(/[\\/]+/).map(cleanPathPart).filter(Boolean)
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (parts[i] !== 'skills') continue
-    const name = cleanSkillPart(parts[i + 1])
-    if (!name) continue
-    const owner = parts[i - 1]
-    const tail = parts.slice(i + 2)
-    const knownSkillRoot = owner === '.claude' || owner === '.codex' || owner === '.agents'
-    const readsSkillMd = tail.includes('SKILL.md')
-    if (knownSkillRoot || readsSkillMd) return name
-  }
-  return undefined
-}
-
-function skillNamesFromTextPaths(text: string): string[] {
-  const out = new Set<string>()
-  const pathLike = /(?:^|[\s"'`=])([^\s"'`]*skills\/[^\s"'`]+(?:\/[^\s"'`]*)?)/g
-  for (const m of text.matchAll(pathLike)) {
-    const name = skillNameFromSkillPath(m[1])
-    if (name) out.add(name)
-  }
-  return [...out]
-}
-
-function inferredSkillEvent(ctx: NormalizeCtx, name: string, input: Record<string, unknown>, messageId?: string): TraceEvent[] {
+function skillInjectionEvent(ctx: NormalizeCtx, name: string, input: Record<string, unknown>, messageId?: string): TraceEvent[] {
   const skill = cleanSkillPart(name)
   if (!skill) return []
   const key = skill.toLowerCase()
-  if (ctx.lastInferredSkill === key) return []
-  ctx.lastInferredSkill = key
+  if (ctx.lastSkillName === key) return []
+  ctx.lastSkillName = key
   return [
     base(ctx, {
       kind: 'skill',
@@ -124,33 +97,10 @@ function inferredSkillEvent(ctx: NormalizeCtx, name: string, input: Record<strin
   ]
 }
 
-function inferredSkillEventsForToolBlock(b: Block, ctx: NormalizeCtx, messageId?: string): TraceEvent[] {
-  const input = b.input ?? {}
-  if (b.name === 'Read' && typeof input.file_path === 'string') {
-    const name = skillNameFromSkillPath(input.file_path)
-    return name ? inferredSkillEvent(ctx, name, { source: 'skill_file', path: input.file_path }, messageId) : []
-  }
-  if (b.name === 'Bash' && typeof input.command === 'string') {
-    return skillNamesFromTextPaths(input.command).flatMap((name) =>
-      inferredSkillEvent(ctx, name, { source: 'skill_path_in_bash', command: input.command }, messageId)
-    )
-  }
-  return []
-}
-
-function transcriptContextModel(model: unknown): { model?: string; contextWindow?: number } {
-  if (typeof model !== 'string') return {}
-  if (model === 'claude-opus-4-8' || model === 'claude-opus-4-8[1m]') {
-    return { model: 'claude-opus-4-8[1m]', contextWindow: 1_000_000 }
-  }
-  return { model }
-}
-
 function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: NormalizeCtx): TraceEvent | null {
   const usage = msg?.usage
   if (!usage || typeof usage !== 'object') return null
-  const modelCtx = transcriptContextModel(msg?.model)
-  const model = modelCtx.model ?? (typeof msg?.model === 'string' ? msg.model : 'unknown')
+  const model = typeof msg?.model === 'string' ? msg.model : 'unknown'
   const inputTokens = usageNumber(usage, 'input_tokens') ?? 0
   const outputTokens = usageNumber(usage, 'output_tokens') ?? 0
   const cacheReadTokens = usageNumber(usage, 'cache_read_input_tokens') ?? 0
@@ -163,8 +113,7 @@ function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: No
     outputTokens,
     cacheReadTokens,
     cacheCreationTokens,
-    ...split,
-    contextWindow: modelCtx.contextWindow
+    ...split
   }
   return base(ctx, {
     kind: 'harness',
@@ -176,6 +125,9 @@ function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: No
     cacheCreationTokens,
     ...split,
     contextTokens: contextTokensFromUsage(usage) || undefined,
+    contextModel: model,
+    contextUsageSource: 'provider_transcript',
+    contextUsageQuality: 'exact',
     modelUsage: [modelRow]
   })
 }
@@ -434,9 +386,9 @@ export function normalizeBlocks(
     } else if (b.type === 'thinking' && b.thinking) {
       out.push(base(ctx, { kind: 'model', stage: 'thinking', thinking: b.thinking, parentToolUseId, messageId }))
     } else if (b.type === 'tool_use' && b.name) {
-      out.push(...inferredSkillEventsForToolBlock(b, ctx, messageId))
+      // 路径读取与命令参数不证明 Skill 执行；只接受 Provider 明确声明的 Skill 调用。
       const cls = classifyTool(b.name, b.input)
-      if (cls.kind === 'skill') ctx.lastInferredSkill = cls.name.toLowerCase()
+      if (cls.kind === 'skill') ctx.lastSkillName = cls.name.toLowerCase()
       const mcp = parseMcp(b.name, b.input)
       const fo = fileOpOf(b.name, b.input)
       const danger = classifyDanger(b.name, b.input, ctx.cwd) // P3 审计：标记危险调用（不阻塞）
@@ -471,8 +423,11 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
   if (m.type === 'attachment') return normalizeHookAttachment(m, ctx)
   if (m.type === 'assistant') {
     const msg = m.message as Record<string, unknown> | undefined
-    const ctxTokens = contextTokensFromUsage(msg?.usage)
-    if (ctxTokens > 0) ctx.latestContextTokens = ctxTokens
+    const ctxTokens = ctx.contextTokensFromUsage?.(msg?.usage) ?? contextTokensFromUsage(msg?.usage)
+    if (ctxTokens > 0) {
+      ctx.latestContextTokens = ctxTokens
+      ctx.latestContextModel = typeof msg?.model === 'string' && msg.model ? msg.model : undefined
+    }
     const content = msg?.content as Block[] | undefined
     if (Array.isArray(content)) {
       return normalizeBlocks(content, (m.parent_tool_use_id as string | null) ?? null, ctx, msg?.id as string | undefined)
@@ -489,7 +444,7 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
       for (const b of content as Array<Record<string, unknown>>) {
         if (b.type === 'text' && typeof b.text === 'string') {
           const name = injectedSkillName(b.text)
-          if (name) out.push(...inferredSkillEvent(ctx, name, { source: 'skill_injection' }))
+          if (name) out.push(...skillInjectionEvent(ctx, name, { source: 'skill_injection' }))
         } else if (b.type === 'tool_result' && b.tool_use_id) {
           const toolUseId = String(b.tool_use_id)
           const started = ctx.toolUseById?.get(toolUseId)
@@ -613,7 +568,7 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
     const hasMu = modelUsage.length > 0
     // 当前上下文占用优先取最近 assistant usage。SDK result.usage 在部分版本里是整轮累计，
     // 会把 cache_read 累到超过 context window，不能直接当"当前装了多满"。
-    const fallbackCtxTokens = contextTokensFromUsage(u)
+    const fallbackCtxTokens = ctx.contextTokensFromUsage?.(u) ?? contextTokensFromUsage(u)
     const ctxTokens = ctx.latestContextTokens ?? fallbackCtxTokens
     const modelCostRows = modelUsage.filter((row) => row.costUsd != null)
     const modelCostUsd = modelCostRows.length === modelUsage.length && modelUsage.length > 0 ? modelCostRows.reduce((s, row) => s + (row.costUsd ?? 0), 0) : undefined
@@ -633,7 +588,12 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
         tokensOut: hasMu ? tout : u.output_tokens,
         cacheReadTokens: hasMu ? cr : u.cache_read_input_tokens,
         cacheCreationTokens: hasMu ? cc : u.cache_creation_input_tokens,
-        contextTokens: ctxTokens > 0 ? ctxTokens : undefined,
+        ...(ctxTokens > 0 ? {
+          contextTokens: ctxTokens,
+          contextModel: ctx.latestContextModel ?? (modelUsage.length === 1 ? modelUsage[0].model : undefined),
+          contextUsageSource: 'provider_usage',
+          contextUsageQuality: 'exact' as const
+        } : {}),
         durationMs: m.duration_ms as number | undefined,
         durationApiMs: m.duration_api_ms as number | undefined,
         modelUsage: hasMu ? modelUsage : undefined,
@@ -726,7 +686,8 @@ function transcriptContextForLine(ctx: NormalizeCtx, line: Record<string, unknow
 function syncTranscriptContext(ctx: NormalizeCtx, lineCtx: NormalizeCtx): void {
   if (lineCtx === ctx) return
   ctx.latestContextTokens = lineCtx.latestContextTokens
-  ctx.lastInferredSkill = lineCtx.lastInferredSkill
+  ctx.latestContextModel = lineCtx.latestContextModel
+  ctx.lastSkillName = lineCtx.lastSkillName
   ctx.toolUseById = lineCtx.toolUseById
   ctx.agentToolUseIds = lineCtx.agentToolUseIds
   ctx.agentTaskToolUseById = lineCtx.agentTaskToolUseById
@@ -768,7 +729,7 @@ export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): Pars
           suppressMetaAssistant = true
           continue
         }
-        if (text && !injectedSkill) lineCtx.lastInferredSkill = undefined
+        if (text && !injectedSkill) lineCtx.lastSkillName = undefined
         const userEvents = normalizeSdkMessage(o, lineCtx)
         if (injectedSkill && cur) {
           cur.items.push(...userEvents)

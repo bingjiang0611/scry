@@ -60,6 +60,24 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     expect(spans.map(asSpan)).toEqual([expect.objectContaining({ id: 'bash-1', kind: 'tool', tool: 'Bash' })])
   })
 
+  it('同名原生 Skill 调用优先于注入影子，只写一个 logical span', () => {
+    const items = [
+      ev({
+        id: 'skill-injection', kind: 'skill', stage: 'skill:kami', name: 'kami',
+        input: { source: 'skill_injection' }
+      }),
+      ev({
+        id: 'skill-direct', kind: 'skill', stage: 'skill:kami', name: 'kami', toolUseId: 'skill-1',
+        input: { source: 'qoder_tool' }
+      })
+    ]
+
+    const { spans } = spanRowsFromItems({ runId: 'run-1', items, nowMs: 1 })
+    expect(spans.map(asSpan)).toEqual([
+      expect.objectContaining({ id: 'skill-direct', kind: 'skill', name: 'kami' })
+    ])
+  })
+
   it('tool_result is_error=true 回填到 tool span', () => {
     const items = [
       ev({ id: 's1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu1' }),
@@ -81,8 +99,13 @@ describe('spanRowsFromItems（P0 行映射）', () => {
         cacheReadTokens: 66665,
         cacheCreationTokens: 110635,
         durationApiMs: 21900,
+        contextTokens: 200157,
+        contextModel: 'claude-opus-4-8[1m]',
+        contextProvider: 'anthropic',
+        contextUsageSource: 'provider_control',
+        contextUsageQuality: 'inferred',
         modelUsage: [
-          { model: 'claude-opus-4-8[1m]', inputTokens: 30054, outputTokens: 381, cacheReadTokens: 66665, cacheCreationTokens: 110635, costUsd: 0.88, contextWindow: 1000000 }
+          { model: 'claude-opus-4-8[1m]', inputTokens: 30054, outputTokens: 381, cacheReadTokens: 66665, cacheCreationTokens: 110635, costUsd: 0.88, contextWindow: 1000000, upstreamProvider: 'anthropic' }
         ]
       })
     ]
@@ -103,9 +126,15 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     expect(asMu(modelUsage[0])).toMatchObject({
       span_id: 'res',
       model: 'claude-opus-4-8[1m]',
+      upstream_provider: 'anthropic',
       input_tokens: 30054,
       cache_creation_tokens: 110635,
-      context_window: 1000000
+      context_window: 1000000,
+      context_tokens: 200157,
+      context_model: 'claude-opus-4-8[1m]',
+      context_provider: 'anthropic',
+      context_source: 'provider_control',
+      context_quality: 'inferred'
     })
   })
 

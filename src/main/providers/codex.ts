@@ -292,6 +292,9 @@ const subtractUsage = (current: TokenUsage, baseline: TokenUsage): TokenUsage =>
   }
 }
 
+const hasPositiveUsage = (usage: TokenUsage): boolean =>
+  Object.values(usage).some((value) => value != null && value > 0)
+
 const addUsage = (current: TokenUsage | undefined, delta: TokenUsage): TokenUsage => {
   const add = (left: number | undefined, right: number | undefined): number | undefined =>
     left == null && right == null ? undefined : (left ?? 0) + (right ?? 0)
@@ -1233,11 +1236,13 @@ export function createCodexAdapter(
                   ? subtractUsage(total, lastSeenCumulativeUsage)
                   : usage.last
                     ? last
-                    : total
+                    : runRequest.resume
+                      ? undefined
+                      : total
                 : usage.last
                   ? last
                   : undefined
-              if (delta) turnUsage = addUsage(turnUsage, delta)
+              if (delta && hasPositiveUsage(delta)) turnUsage = addUsage(turnUsage, delta)
               if (usage.total) lastSeenCumulativeUsage = total
               lastRequestUsage = usage.last ? last : undefined
               modelContextWindow = usageNumber(usage.modelContextWindow) ?? modelContextWindow
@@ -1301,6 +1306,10 @@ export function createCodexAdapter(
                 cacheCreationTokens: finalUsage?.cacheWriteInputTokens,
                 reasoningTokens: finalUsage?.reasoningOutputTokens,
                 contextTokens: lastRequestUsage?.inputTokens,
+                contextModel: lastRequestUsage?.inputTokens != null && modelContextWindow && model ? model : undefined,
+                contextProvider: lastRequestUsage?.inputTokens != null && modelContextWindow ? modelProvider ?? 'openai' : undefined,
+                contextUsageSource: lastRequestUsage?.inputTokens != null && modelContextWindow ? 'codex_app_server_last_usage' : undefined,
+                contextUsageQuality: lastRequestUsage?.inputTokens != null && modelContextWindow ? 'exact' : undefined,
                 isError: turn.status === 'failed',
                 ...(terminationReason ? { terminationReason } : {}),
                 ...(providerStopReason ? { providerStopReason } : {}),

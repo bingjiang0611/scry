@@ -14,6 +14,10 @@ export interface SessionDeletionDependencies {
   }
   deleteUsage(runIds: ReadonlySet<string>): { preservedInvalid: number }
   deleteManaged?(runIds: ReadonlySet<string>): Promise<{ failed: Array<{ path: string; error: string }> }>
+  deleteOutbox?(runIds: ReadonlySet<string>): {
+    failed: Array<{ path: string; error: string }>
+    preservedInvalid?: number
+  }
   deleteAttachments(runId: string): { failed?: string }
   deleteTranscripts(): { failed: Array<{ path: string; error: string }> }
   deleteCatalog(): void
@@ -55,6 +59,19 @@ export async function deleteOwnedSessionData(
     return result
   }
   result.deleted.push('recovery journals')
+
+  if (dependencies.deleteOutbox) {
+    const outbox = dependencies.deleteOutbox(runIds)
+    if (outbox.failed.length > 0) {
+      result.failed.push(...outbox.failed.map((failure) => ({ store: failure.path, error: failure.error })))
+      result.reason = 'partial_failure'
+      return result
+    }
+    if ((outbox.preservedInvalid ?? 0) > 0) {
+      result.retained.push(`${outbox.preservedInvalid} 个无法归属的损坏 database turn outbox`)
+    }
+    result.deleted.push('database turn outbox')
+  }
 
   try {
     const usage = dependencies.deleteUsage(runIds)

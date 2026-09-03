@@ -670,7 +670,7 @@ describe('normalizeSdkMessage', () => {
     expect(evs[0]).toMatchObject({ kind: 'skill', stage: 'skill:workflow-orchestrator', name: 'workflow-orchestrator', tool: 'Skill' })
   })
 
-  it('从 Read 的 skill 文件路径通用推断 skill 事件', () => {
+  it('不把 Read 的 Skill 文件路径误报为 Skill 执行', () => {
     const filePath = '/Users/x/sample-workspace/.claude/skills/consumer-doc/SKILL.md'
     const evs = normalizeSdkMessage(
       {
@@ -682,105 +682,27 @@ describe('normalizeSdkMessage', () => {
       },
       ctx()
     )
-    expect(evs[0]).toMatchObject({
-      kind: 'skill',
-      stage: 'skill:consumer-doc',
-      name: 'consumer-doc',
-      tool: 'Skill',
-      messageId: 'msg_skill_read',
-      input: { source: 'skill_file', path: filePath }
-    })
-    expect(evs[1]).toMatchObject({ kind: 'tool', tool: 'Read', toolUseId: 'read-1', filePath })
+    expect(evs).toHaveLength(1)
+    expect(evs[0]).toMatchObject({ kind: 'tool', tool: 'Read', toolUseId: 'read-1', filePath })
   })
 
-  it('从 Bash 命令里的 skill 路径通用推断 skill 事件', () => {
+  it('不把 Bash 命令中的 Skill 路径误报为 Skill 执行', () => {
     const evs = normalizeSdkMessage(
       {
         type: 'assistant',
         message: {
-          content: [
-            {
-              type: 'tool_use',
-              id: 'bash-1',
-              name: 'Bash',
-              input: { command: 'cd /Users/x/sample-workspace && sed -n "1,120p" .claude/skills/consumer-doc/SKILL.md' }
-            }
-          ]
+          content: [{
+            type: 'tool_use',
+            id: 'bash-1',
+            name: 'Bash',
+            input: { command: 'cat .claude/skills/consumer-doc/SKILL.md' }
+          }]
         }
       },
       ctx()
     )
-    expect(evs[0]).toMatchObject({
-      kind: 'skill',
-      stage: 'skill:consumer-doc',
-      name: 'consumer-doc',
-      input: { source: 'skill_path_in_bash' }
-    })
-    expect(evs[1]).toMatchObject({ kind: 'tool', tool: 'Bash', toolUseId: 'bash-1' })
-  })
-
-  it('同一轮里 Bash 路径和 Read 同一个 skill 时只推断一次', () => {
-    const c = ctx()
-    const bash = normalizeSdkMessage(
-      {
-        type: 'assistant',
-        message: {
-          content: [
-            {
-              type: 'tool_use',
-              id: 'bash-1',
-              name: 'Bash',
-              input: { command: 'cat .claude/skills/consumer-doc/SKILL.md' }
-            }
-          ]
-        }
-      },
-      c
-    )
-    const read = normalizeSdkMessage(
-      {
-        type: 'assistant',
-        message: {
-          content: [
-            {
-              type: 'tool_use',
-              id: 'read-1',
-              name: 'Read',
-              input: { file_path: '/Users/x/sample-workspace/.claude/skills/consumer-doc/SKILL.md' }
-            }
-          ]
-        }
-      },
-      c
-    )
-    expect(bash.filter((e) => e.kind === 'skill')).toHaveLength(1)
-    expect(read.filter((e) => e.kind === 'skill')).toHaveLength(0)
-    expect(read[0]).toMatchObject({ kind: 'tool', tool: 'Read', toolUseId: 'read-1' })
-  })
-
-  it('中间切到别的 skill 后，再读回原 skill 会重新分段', () => {
-    const c = ctx()
-    const readSkill = (name: string) =>
-      normalizeSdkMessage(
-        {
-          type: 'assistant',
-          message: {
-            content: [
-              {
-                type: 'tool_use',
-                id: `read-${name}`,
-                name: 'Read',
-                input: { file_path: `/Users/x/sample-workspace/.claude/skills/${name}/SKILL.md` }
-              }
-            ]
-          }
-        },
-        c
-      ).find((e) => e.kind === 'skill')
-
-    expect(readSkill('workflow-orchestrator')).toMatchObject({ name: 'workflow-orchestrator' })
-    expect(readSkill('consumer-doc')).toMatchObject({ name: 'consumer-doc' })
-    expect(readSkill('workflow-orchestrator')).toMatchObject({ name: 'workflow-orchestrator' })
+    expect(evs).toHaveLength(1)
+    expect(evs[0]).toMatchObject({ kind: 'tool', tool: 'Bash', toolUseId: 'bash-1' })
   })
 
   it('SDK hook_response 生成 hook 事件', () => {
@@ -984,18 +906,20 @@ describe('parseTranscriptToTurns', () => {
       kind: 'harness',
       stage: 'result',
       contextTokens: 200157,
+      contextModel: 'claude-opus-4-8',
+      contextUsageSource: 'provider_transcript',
+      contextUsageQuality: 'exact',
       tokensIn: 2,
       tokensOut: 0,
       cacheReadTokens: 198776,
       cacheCreationTokens: 1379,
       modelUsage: [
         {
-          model: 'claude-opus-4-8[1m]',
+          model: 'claude-opus-4-8',
           inputTokens: 2,
           outputTokens: 0,
           cacheReadTokens: 198776,
-          cacheCreationTokens: 1379,
-          contextWindow: 1000000
+          cacheCreationTokens: 1379
         }
       ]
     })

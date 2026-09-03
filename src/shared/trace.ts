@@ -415,6 +415,8 @@ export interface TraceEvent {
   cacheCreation1hTokens?: number
   reasoningTokens?: number
   contextTokens?: number // 仅 result：Provider 当前上下文占用；不同 Provider 的 cache 记账口径由 adapter 吸收
+  contextModel?: string // 仅 result：contextTokens 所属模型；多模型会话不得按数组顺序猜窗口
+  contextProvider?: string // 仅 result：contextTokens 所属 upstream provider；与 contextModel 共同绑定窗口
   contextUsageSource?: string // 仅 result：上下文证据来源，如 qoder_control / qoder_native_transcript
   contextUsageQuality?: 'exact' | 'inferred' // 仅 result：推导窗口必须显式呈现，不能冒充精确证据
   modelUsage?: ModelUsageRow[] // 仅 result：per-model 明细
@@ -434,6 +436,43 @@ export interface TraceEvent {
   runtimeMetadata?: Record<string, unknown>
   intervention?: AgentIntervention
   compaction?: ContextCompaction
+}
+
+export interface ContextUsageEvidence {
+  used: number
+  window: number
+  model: string
+  provider?: string
+  source?: string
+  quality?: 'exact' | 'inferred'
+}
+
+export function contextUsageEvidence(event: Pick<TraceEvent, 'contextTokens' | 'contextModel' | 'contextProvider' | 'contextUsageSource' | 'contextUsageQuality' | 'modelUsage'>): ContextUsageEvidence | null {
+  if (event.contextTokens == null || !Number.isFinite(event.contextTokens) || event.contextTokens < 0) return null
+  const candidates = (event.modelUsage ?? []).filter((row) =>
+    row.contextWindow != null && Number.isFinite(row.contextWindow) && row.contextWindow > 0
+  )
+  const modelMatches = event.contextModel
+    ? candidates.filter((candidate) => candidate.model === event.contextModel)
+    : []
+  const row = event.contextModel
+    ? event.contextProvider
+      ? modelMatches.find((candidate) => candidate.upstreamProvider === event.contextProvider)
+      : modelMatches.length === 1
+        ? modelMatches[0]
+        : undefined
+    : event.modelUsage?.length === 1 && candidates.length === 1
+      ? candidates[0]
+      : undefined
+  if (!row?.contextWindow) return null
+  return {
+    used: event.contextTokens,
+    window: row.contextWindow,
+    model: row.model,
+    ...(event.contextProvider ?? row.upstreamProvider ? { provider: event.contextProvider ?? row.upstreamProvider } : {}),
+    ...(event.contextUsageSource ? { source: event.contextUsageSource } : {}),
+    ...(event.contextUsageQuality ? { quality: event.contextUsageQuality } : {})
+  }
 }
 
 // 工具名 → kind 分类

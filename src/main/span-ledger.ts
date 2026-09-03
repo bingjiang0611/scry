@@ -3,7 +3,7 @@
 import { type DbStats, type TraceEvent, maskSecrets } from '../shared/trace'
 import { providerDangerCoverage, type ProviderId } from '../shared/provider'
 import { providerUsageResultEvents } from '../shared/result-timing'
-import { isSkillReferenceEvidence } from '../shared/logical-calls'
+import { logicalCallEventsForTurn } from '../shared/logical-calls'
 
 // v1（旧）：保留建表兼容旧库，P0 起不再写/读。
 export const DDL_V1 = [
@@ -175,6 +175,50 @@ export const DDL_V12 = [
    )`
 ]
 
+// v13（上下文 provenance + Skill 去重）：字段级保存 context 证据，并删除同轮已有原生调用时的注入影子。
+export const DDL_V13 = [
+  `ALTER TABLE model_usage ADD COLUMN context_tokens INTEGER`,
+  `ALTER TABLE model_usage ADD COLUMN context_model TEXT`,
+  `ALTER TABLE model_usage ADD COLUMN context_provider TEXT`,
+  `ALTER TABLE model_usage ADD COLUMN context_source TEXT`,
+  `ALTER TABLE model_usage ADD COLUMN context_quality TEXT`,
+  `DELETE FROM spans AS injected
+   WHERE injected.kind = 'skill'
+     AND injected.input_preview LIKE '%"source":"skill_injection"%'
+     AND EXISTS (
+       SELECT 1 FROM spans AS direct
+       WHERE direct.kind = 'skill'
+         AND direct.run_id = injected.run_id
+         AND direct.name = injected.name
+         AND direct.id <> injected.id
+         AND COALESCE(direct.input_preview, '') NOT LIKE '%"source":"skill_injection"%'
+         AND COALESCE(direct.input_preview, '') NOT LIKE '%"source":"skill_file"%'
+         AND COALESCE(direct.input_preview, '') NOT LIKE '%"source":"skill_path_in_bash"%'
+         AND COALESCE(direct.input_preview, '') NOT LIKE '%"source":"skill_path_in_command"%'
+     )`
+]
+
+// v14（model identity）：同名模型可来自不同 upstream provider，不能在 SQLite 主键上互相覆盖。
+export const DDL_V14 = [
+  `ALTER TABLE model_usage RENAME TO model_usage_v13`,
+  `CREATE TABLE model_usage (
+     span_id TEXT, model TEXT, upstream_provider TEXT NOT NULL DEFAULT '',
+     input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_creation_tokens INTEGER,
+     cost_usd REAL, context_window INTEGER, context_tokens INTEGER, context_model TEXT,
+     context_provider TEXT, context_source TEXT, context_quality TEXT,
+     PRIMARY KEY(span_id, model, upstream_provider))`,
+  `INSERT INTO model_usage (
+     span_id, model, upstream_provider, input_tokens, output_tokens, cache_read_tokens,
+     cache_creation_tokens, cost_usd, context_window, context_tokens, context_model,
+     context_provider, context_source, context_quality
+   )
+   SELECT span_id, model, '', input_tokens, output_tokens, cache_read_tokens,
+     cache_creation_tokens, cost_usd, context_window, context_tokens, context_model,
+     context_provider, context_source, context_quality
+   FROM model_usage_v13`,
+  `DROP TABLE model_usage_v13`
+]
+
 export const UPSERT_SESSION_REF_SQL = `INSERT INTO session_refs (
   scry_session_id, provider_id, runtime_provider, cwd, external_session_id, preview, created_ts, updated_ts
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -186,8 +230,11 @@ export const SPAN_COLS = [
   'input_preview', 'output_preview', 'cost_usd', 'tokens_in', 'tokens_out', 'cache_read_tokens', 'cache_creation_tokens', 'model', 'cwd',
   'danger_level', 'danger_reason'
 ] as const
+export const DELETE_MODEL_USAGE_FOR_SPAN_SQL = 'DELETE FROM model_usage WHERE span_id = ?'
+
 export const MODEL_USAGE_COLS = [
-  'span_id', 'model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'cost_usd', 'context_window'
+  'span_id', 'model', 'upstream_provider', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'cost_usd', 'context_window',
+  'context_tokens', 'context_model', 'context_provider', 'context_source', 'context_quality'
 ] as const
 export const FILE_OP_COLS = ['span_id', 'session_id', 'op', 'path', 'source', 'confidence', 'lines_added', 'lines_deleted'] as const
 export const HUMAN_INTERVENTION_COLS = [
@@ -522,10 +569,11 @@ export function spanRowsFromItems(args: {
 }): LedgerRows {
   const { items, sessionId, cwd, nowMs } = args
   const rows: LedgerRows = { spans: [], modelUsage: [], fileOps: [], interventions: [] }
+  const logicalItems = logicalCallEventsForTurn(items)
   const results = new Map<string, TraceEvent>()
-  for (const e of items) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
+  for (const e of logicalItems) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
 
-  for (const e of items) {
+  for (const e of logicalItems) {
     if (e.intervention) {
       const intervention = e.intervention
       rows.interventions.push([
@@ -558,7 +606,7 @@ export function spanRowsFromItems(args: {
       ])
       continue
     }
-    if (e.stage === 'tool_result' || e.stage === 'text_delta' || isSkillReferenceEvidence(e)) continue // 不落 span
+    if (e.stage === 'tool_result' || e.stage === 'text_delta') continue // 不落 span
     if (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') {
       const r = e.toolUseId ? results.get(e.toolUseId) : undefined
       const tStart = tsMs(e.ts, nowMs)
@@ -588,10 +636,18 @@ export function spanRowsFromItems(args: {
       result.modelUsage?.[0]?.model ?? null, cwd ?? null,
       null, null
     ])
+    const contextModel = result.contextModel ?? (result.modelUsage?.length === 1 ? result.modelUsage[0].model : undefined)
     for (const mu of result.modelUsage ?? []) {
+      const ownsContext = result.contextTokens != null && contextModel === mu.model &&
+        (!result.contextProvider || mu.upstreamProvider === result.contextProvider)
       rows.modelUsage.push([
-        result.id, mu.model, mu.inputTokens ?? null, mu.outputTokens ?? null,
-        mu.cacheReadTokens ?? null, mu.cacheCreationTokens ?? null, mu.costUsd ?? null, mu.contextWindow ?? null
+        result.id, mu.model, mu.upstreamProvider ?? '', mu.inputTokens ?? null, mu.outputTokens ?? null,
+        mu.cacheReadTokens ?? null, mu.cacheCreationTokens ?? null, mu.costUsd ?? null, mu.contextWindow ?? null,
+        ownsContext ? result.contextTokens : null,
+        ownsContext ? contextModel : null,
+        ownsContext ? result.contextProvider ?? mu.upstreamProvider ?? null : null,
+        ownsContext ? result.contextUsageSource ?? null : null,
+        ownsContext ? result.contextUsageQuality ?? null : null
       ])
     }
   }

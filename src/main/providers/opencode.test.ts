@@ -1715,6 +1715,16 @@ describe('OpenCode provider adapter', () => {
       cost: 99, providerID: 'anthropic', modelID: 'model-a'
     }
     const client = {
+      v2: {
+        model: {
+          list: vi.fn(async () => ({
+            data: {
+              location: { project: '/repo', worktree: '/repo', directory: '/repo' },
+              data: [{ id: 'model-a', providerID: 'anthropic', limit: { context: 200_000 } }]
+            }
+          }))
+        }
+      },
       session: {
         create: vi.fn(async () => ({ data: { id: 'session-aggregate' } })),
         command: vi.fn(async () => ({ data: { info: final, parts: [] } })),
@@ -1760,11 +1770,16 @@ describe('OpenCode provider adapter', () => {
         reasoningTokens: 3,
         cacheReadTokens: 300,
         cacheCreationTokens: 9,
+        contextTokens: 226,
+        contextModel: 'model-a',
+        contextProvider: 'anthropic',
+        contextUsageSource: 'opencode_message_usage',
+        contextUsageQuality: 'exact',
         costUsd: expect.closeTo(0.3),
         usageSource: 'opencode_turn_messages',
         modelUsage: [{
           model: 'model-a', inputTokens: 30, outputTokens: 6, reasoningTokens: 3,
-          cacheReadTokens: 300, cacheCreationTokens: 9, costUsd: expect.closeTo(0.3),
+          cacheReadTokens: 300, cacheCreationTokens: 9, costUsd: expect.closeTo(0.3), contextWindow: 200_000,
           billingProvider: 'anthropic', upstreamProvider: 'anthropic', usageSource: 'opencode_turn_messages',
           costSource: 'provider_reported', costConfidence: 'provider_reported', costUnit: 'usd'
         }],

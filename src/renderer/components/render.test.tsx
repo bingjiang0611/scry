@@ -2854,6 +2854,27 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(inferredHtml).toContain('推断：Provider usage 比例换算')
   })
 
+  it('旧上下文缺少 provenance 时明确标记质量未知，不默认精确', () => {
+    const legacy: Turn = {
+      runId: 'legacy-context',
+      userText: 'x',
+      done: true,
+      items: [ev({
+        id: 'legacy-context-result',
+        kind: 'harness',
+        stage: 'result',
+        contextTokens: 50_000,
+        modelUsage: [{ model: 'legacy-model', contextWindow: 200_000 }]
+      })]
+    }
+    const legacyHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[legacy]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(legacyHtml).toContain('旧记录：证据质量未标记')
+    expect(legacyHtml).not.toContain('精确：最近一轮 Provider 上下文用量')
+  })
+
   it('上下文缺少占用或窗口任一字段时保持未知，不拼出假比例', () => {
     const missingWindow: Turn = {
       runId: 'missing-window',

@@ -1,5 +1,6 @@
 // renderer 共享的纯逻辑：常量 / 视图类型 / 格式化与投影 helper。无 React 依赖，给各组件复用。
 import {
+  contextUsageEvidence,
   maskSecrets,
   mcpCallsForEvent,
   type TraceEvent,
@@ -843,8 +844,9 @@ function aggregateModelUsage(rows: ModelUsageRow[]): ModelUsageRow[] | undefined
   if (rows.length === 0) return undefined
   const map = new Map<string, ModelUsageRow>()
   for (const row of rows) {
+    const identity = `${row.upstreamProvider ?? ''}\0${row.model}`
     const prev =
-      map.get(row.model) ??
+      map.get(identity) ??
       ({
         model: row.model,
         inputTokens: 0,
@@ -858,7 +860,11 @@ function aggregateModelUsage(rows: ModelUsageRow[]): ModelUsageRow[] | undefined
         costSource: row.costSource,
         costConfidence: row.costConfidence,
         costUnit: row.costUnit,
-        contextWindow: row.contextWindow
+        contextWindow: row.contextWindow,
+        billingProvider: row.billingProvider,
+        upstreamProvider: row.upstreamProvider,
+        accountLabel: row.accountLabel,
+        usageSource: row.usageSource
       } satisfies ModelUsageRow)
     prev.inputTokens = (prev.inputTokens ?? 0) + (row.inputTokens ?? 0)
     prev.outputTokens = (prev.outputTokens ?? 0) + (row.outputTokens ?? 0)
@@ -873,7 +879,7 @@ function aggregateModelUsage(rows: ModelUsageRow[]): ModelUsageRow[] | undefined
     prev.costConfidence = prev.costConfidence ?? row.costConfidence
     prev.costUnit = prev.costUnit ?? row.costUnit
     prev.contextWindow = row.contextWindow ?? prev.contextWindow
-    map.set(row.model, prev)
+    map.set(identity, prev)
   }
   return [...map.values()]
 }
@@ -892,7 +898,7 @@ export function resultOf(t: Turn | Pick<Turn, 'items'>): TraceEvent | undefined 
   const knownCosts = results.filter((e) => e.costUsd != null)
   const costKnown = knownCosts.length === results.length
   const modelUsage = aggregateModelUsage(results.flatMap((e) => e.modelUsage ?? []))
-  const contextSource = [...results].reverse().find((e) => e.contextTokens != null || e.modelUsage?.some((m) => m.contextWindow))
+  const contextSource = [...results].reverse().find((event) => event.contextTokens != null)
   const sumObserved = (pick: (event: TraceEvent) => number | undefined): number | undefined => {
     const values = results.map(pick).filter((value): value is number => value != null)
     return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : undefined
@@ -914,7 +920,11 @@ export function resultOf(t: Turn | Pick<Turn, 'items'>): TraceEvent | undefined 
     durationApiMs: results.reduce((s, e) => s + (e.durationApiMs ?? 0), 0) || undefined,
     durationMs: wall?.durationMs,
     contextTokens: contextSource?.contextTokens,
-    modelUsage: contextSource?.modelUsage?.some((m) => m.contextWindow) ? (modelUsage ?? contextSource.modelUsage) : modelUsage
+    contextModel: contextSource?.contextModel,
+    contextProvider: contextSource?.contextProvider,
+    contextUsageSource: contextSource?.contextUsageSource,
+    contextUsageQuality: contextSource?.contextUsageQuality,
+    modelUsage: contextSource ? (modelUsage ?? contextSource.modelUsage) : modelUsage
   }
 }
 
@@ -1222,8 +1232,9 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
   const allTurnRows: BillingTurnRow[] = turns.map((t, i) => {
     const r = resultOf(t)
     const model = r?.modelUsage?.[0]
-    const contextWindow = model?.contextWindow
-    const contextTokens = r?.contextTokens
+    const context = r ? contextUsageEvidence(r) : null
+    const contextWindow = context?.window
+    const contextTokens = context?.used
     const tokensTotal = resultTokenTotal(r)
     const tokenKnown = hasTokenUsage(r)
     const cacheAccounting = tokenCacheAccounting(r)
@@ -1249,7 +1260,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
         contextTokens != null && contextWindow != null && contextWindow > 0
           ? Math.round((contextTokens / contextWindow) * 100)
           : undefined,
-      model: model?.model,
+      model: context?.model ?? model?.model,
       toolCount,
       errorCount,
       result: r

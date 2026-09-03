@@ -161,7 +161,13 @@ describe('aggregateTurnEvidence', () => {
         tokensOut: 5,
         durationApiMs: 123,
         contextTokens: 42,
-        modelUsage: [{ model: 'fixture-model', contextWindow: 100, inputTokens: 10, outputTokens: 5 }]
+        contextModel: 'fixture-model',
+        contextProvider: 'fixture-provider',
+        contextUsageSource: 'fixture_control',
+        contextUsageQuality: 'inferred',
+        modelUsage: [{
+          model: 'fixture-model', upstreamProvider: 'fixture-provider', contextWindow: 100, inputTokens: 10, outputTokens: 5
+        }]
       }
     ] }).usage.value).toMatchObject({
       inputTokens: 10,
@@ -169,7 +175,40 @@ describe('aggregateTurnEvidence', () => {
       apiDurationMs: 123,
       contextTokens: 42,
       contextWindow: 100,
+      contextModel: 'fixture-model',
+      contextProvider: 'fixture-provider',
+      contextUsageSource: 'fixture_control',
+      contextUsageQuality: 'inferred',
       model: 'fixture-model'
+    })
+    const numeratorOnly = aggregateTurnEvidence({ events: [
+      {
+        id: 'numerator-only', ts: '2026-01-01T00:00:04.000Z', runId: 'r',
+        kind: 'harness', stage: 'result', tokensIn: 2,
+        contextTokens: 50, contextModel: 'unknown-window',
+        contextUsageSource: 'provider_usage', contextUsageQuality: 'exact',
+        modelUsage: [{ model: 'other-model', contextWindow: 100 }]
+      }
+    ] }).usage
+    expect(numeratorOnly.value).toMatchObject({
+      contextTokens: 50,
+      contextModel: 'unknown-window',
+      contextUsageSource: 'provider_usage',
+      contextUsageQuality: 'exact'
+    })
+    expect(numeratorOnly.quality).toBe('exact')
+
+    const legacy = aggregateTurnEvidence({ events: [{
+      id: 'legacy', ts: '2026-01-01T00:00:05.000Z', runId: 'r',
+      kind: 'harness', stage: 'result', contextTokens: 75,
+      modelUsage: [{ model: 'legacy-model', contextWindow: 100 }]
+    }] }).usage
+    expect(legacy.quality).toBe('inferred')
+    expect(legacy.value).toMatchObject({
+      contextTokens: 75,
+      contextWindow: 100,
+      contextUsageSource: 'legacy_unattributed_context',
+      contextUsageQuality: 'inferred'
     })
   })
 

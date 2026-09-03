@@ -52,7 +52,8 @@ process.stdin.on('data', (chunk) => {
       cwd: process.cwd()
     })
     else if (command.type === 'get_available_models') response({ models: [{
-      provider: 'test-provider', id: 'test-model', name: 'Test Model', thinkingLevelMap: { off: null, high: 'high' }
+      provider: 'openai-codex', id: 'test-model', name: 'Test Model', contextWindow: 200000,
+      thinkingLevelMap: { off: null, high: 'high' }
     }] })
     else if (command.type === 'get_available_thinking_levels') response({ levels: ['off', 'high'] })
     else if (command.type === 'get_commands') response({ commands: [
@@ -255,7 +256,7 @@ describe('Pi RPC Provider', () => {
         state: 'ready',
         agentProfileId: profile.id,
         data: {
-          models: [expect.objectContaining({ model: { providerId: 'test-provider', id: 'test-model' } })],
+          models: [expect.objectContaining({ model: { providerId: 'openai-codex', id: 'test-model' } })],
           permissions: [expect.objectContaining({ id: 'full_access' })]
         }
       })
@@ -268,6 +269,32 @@ describe('Pi RPC Provider', () => {
       expect(adapter.mcp).toBeUndefined()
     })
   }, 20_000)
+
+  it('enriches archived Pi context only from the exact upstream provider and model window', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const turns = await adapter.sessionEvidence!.enrich(
+        { providerId: 'pi', agentProfileId: profile.id, cwd, externalSessionId: 'pi-session-1' },
+        [{
+          userText: 'work',
+          items: [{
+            id: 'result-history', runId: 'run-history', ts: new Date().toISOString(),
+            kind: 'harness', stage: 'result', contextTokens: 10, contextModel: 'test-model',
+            upstreamProvider: 'openai-codex', modelUsage: [{ model: 'test-model', upstreamProvider: 'openai-codex' }]
+          }]
+        }]
+      )
+
+      expect(turns[0].items[0]).toMatchObject({
+        contextTokens: 10,
+        contextModel: 'test-model',
+        contextProvider: 'openai-codex',
+        contextUsageSource: 'pi_rpc_archive_usage+current_model_catalog',
+        contextUsageQuality: 'inferred',
+        modelUsage: [{ model: 'test-model', upstreamProvider: 'openai-codex', contextWindow: 200_000 }]
+      })
+    })
+  }, 10_000)
 
   it('forks Pi before the edited user entry and returns the new native session', async () => {
     await withFixture(async (profile, cwd) => {
@@ -318,8 +345,12 @@ describe('Pi RPC Provider', () => {
         expect.objectContaining({ kind: 'agent', tool: 'Agent', toolUseId: 'tool-1' }),
         expect.objectContaining({
           kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 4, costUsd: 0.01,
+          contextTokens: 10, contextModel: 'test-model', contextProvider: 'openai-codex',
+          contextUsageSource: 'pi_rpc_assistant_usage', contextUsageQuality: 'exact',
           billingProvider: 'codex', upstreamProvider: 'openai-codex',
-          modelUsage: [expect.objectContaining({ billingProvider: 'codex', upstreamProvider: 'openai-codex' })]
+          modelUsage: [expect.objectContaining({
+            billingProvider: 'codex', upstreamProvider: 'openai-codex', contextWindow: 200000
+          })]
         })
       ]))
     })

@@ -3,7 +3,7 @@ import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared
 import { deriveModelTiming } from '../../shared/model-timing.js'
 import { providerDangerCoverage } from '../../shared/provider.js'
 import { providerUsageResultEvents } from '../../shared/result-timing.js'
-import { HOOK_DELIVERY_STAGE, mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
+import { contextUsageEvidence, HOOK_DELIVERY_STAGE, mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import { limitTurnDiffPatchBytes } from './git.js'
 import {
   available,
@@ -171,9 +171,9 @@ function sumCostUsd(events: TraceEvent[]): number | undefined {
 function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   const results = providerUsageResultEvents(events)
   if (!results.length) return undefined
-  const latest = results.at(-1)
   const models = new Set(results.flatMap((event) => event.modelUsage ?? []).map((row) => row.model).filter(Boolean))
-  const contextModel = latest?.modelUsage?.find((row) => row.contextWindow != null && row.contextWindow > 0)
+  const contextResult = [...results].reverse().find((event) => event.contextTokens != null)
+  const context = contextResult ? contextUsageEvidence(contextResult) : null
   return {
     inputTokens: sumObserved(results, (event) => event.tokensIn),
     outputTokens: sumObserved(results, (event) => event.tokensOut),
@@ -182,8 +182,18 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
     reasoningTokens: sumObserved(results, (event) => event.reasoningTokens),
     costUsd: sumCostUsd(results),
     apiDurationMs: sumObserved(results, (event) => event.durationApiMs),
-    ...(latest?.contextTokens != null ? { contextTokens: latest.contextTokens } : {}),
-    ...(contextModel?.contextWindow != null ? { contextWindow: contextModel.contextWindow } : {}),
+    ...(contextResult ? {
+      contextTokens: contextResult.contextTokens,
+      ...(contextResult.contextModel ? { contextModel: contextResult.contextModel } : {}),
+      ...(contextResult.contextProvider ? { contextProvider: contextResult.contextProvider } : {}),
+      contextUsageSource: contextResult.contextUsageSource ?? 'legacy_unattributed_context',
+      contextUsageQuality: contextResult.contextUsageQuality ?? 'inferred'
+    } : {}),
+    ...(context ? {
+      contextWindow: context.window,
+      contextModel: context.model,
+      ...(context.provider ? { contextProvider: context.provider } : {})
+    } : {}),
     ...(models.size === 1 ? { model: [...models][0] } : {})
   }
 }
@@ -524,7 +534,7 @@ export function aggregateTurnEvidence(args: {
     usage: !observable.usage
       ? unavailable('provider usage was not observable', [source])
       : usage
-        ? available(usage, [source])
+        ? available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
         : unavailable('no authoritative usage event was captured', [source]),
     compactions: available(compactions, [source]),
     ...(modelTiming

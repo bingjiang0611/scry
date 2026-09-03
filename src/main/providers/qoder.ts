@@ -14,7 +14,7 @@ import {
   type AgentPermissionMode,
   type AgentRunControlCatalog
 } from '../../shared/runtime'
-import type { McpLiveStatus, TraceEvent } from '../../shared/trace'
+import { contextUsageEvidence, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { extractUserText, normalizeSdkMessage, type NormalizeCtx, type ParsedTurn } from '../normalize'
@@ -625,6 +625,10 @@ function qoderControlContext(value: unknown): QoderContextEvidence | undefined {
   }
 }
 
+function qoderContextTokensFromUsage(value: unknown): number {
+  return finiteNumber(qoderRecord(value).input_tokens) ?? 0
+}
+
 function qoderTranscriptContexts(messages: unknown[]): Array<QoderContextEvidence & { ts: number }> {
   const contexts: Array<QoderContextEvidence & { ts: number }> = []
   for (const value of messages) {
@@ -634,6 +638,8 @@ function qoderTranscriptContexts(messages: unknown[]): Array<QoderContextEvidenc
     if (ts == null || !Number.isFinite(ts)) continue
     const message = qoderRecord(raw.message)
     const usage = qoderRecord(message.usage)
+    // Qoder 的 input_tokens 已是当前完整 prompt；cache_read_input_tokens 是其中的复用子集，
+    // 与 input_tokens 相加会重复计算。原生 context_usage_ratio 也直接以 input_tokens 为分子。
     const contextTokens = finiteNumber(usage.input_tokens)
     const ratio = finiteNumber(usage.context_usage_ratio)
     if (contextTokens == null || contextTokens < 0 || ratio == null || ratio <= 0) continue
@@ -655,16 +661,16 @@ function qoderTranscriptContexts(messages: unknown[]): Array<QoderContextEvidenc
 
 function withQoderContext(event: TraceEvent, evidence: QoderContextEvidence | undefined): TraceEvent {
   if (!evidence || event.kind !== 'harness' || event.stage !== 'result') return event
-  const hasContext = event.contextTokens != null && event.modelUsage?.some((row) =>
-    row.contextWindow != null && row.contextWindow > 0
-  )
-  if (hasContext) return event
+  const existing = contextUsageEvidence(event)
+  const genericSource = event.contextUsageSource === 'provider_usage' || event.contextUsageSource === 'provider_transcript'
+  if (evidence.quality === 'inferred' && !genericSource && (existing || event.contextUsageQuality === 'exact')) return event
   const rows = event.modelUsage?.length
     ? event.modelUsage
     : [{ model: evidence.model ?? 'unknown' }]
   let attached = false
+  const canAttachWithoutModel = !evidence.model && rows.length === 1
   const modelUsage = rows.map((row) => {
-    if (attached || (evidence.model && row.model !== evidence.model)) return row
+    if (attached || (!canAttachWithoutModel && row.model !== evidence.model)) return row
     attached = true
     return { ...row, contextWindow: evidence.contextWindow }
   })
@@ -672,13 +678,12 @@ function withQoderContext(event: TraceEvent, evidence: QoderContextEvidence | un
   return {
     ...event,
     contextTokens: evidence.contextTokens,
+    contextModel: evidence.model ?? (modelUsage.length === 1 ? modelUsage[0].model : undefined),
     contextUsageSource: evidence.source,
     contextUsageQuality: evidence.quality,
     modelUsage,
     runtimeMetadata: {
       ...(event.runtimeMetadata ?? {}),
-      contextUsageSource: evidence.source,
-      contextUsageQuality: evidence.quality,
       ...(evidence.percentage != null ? { contextUsagePercentage: evidence.percentage } : {}),
       ...(evidence.rawContextWindow != null ? { rawContextWindow: evidence.rawContextWindow } : {})
     }
@@ -761,6 +766,9 @@ function qoderTrace(event: TraceEvent, contextEvidence?: QoderContextEvidence): 
         usageSource: 'qoder_sdk'
       }
     }),
+    contextProvider: event.contextTokens != null ? 'qoder' : undefined,
+    contextUsageSource: event.contextTokens != null ? 'qoder_sdk_usage' : undefined,
+    contextUsageQuality: event.contextTokens != null ? 'exact' as const : undefined,
     runtimeMetadata: { ...(event.runtimeMetadata ?? {}), source: 'qoder_sdk', billingProvider: 'qoder', reportedZeroUsage },
     billingProvider: 'qoder' as const,
     upstreamProvider: 'qoder',
@@ -887,7 +895,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         let externalSessionId = request.resume
         let q: Query | undefined
         let qoderPid: number | undefined
-        const ctx: NormalizeCtx = { runId: request.runId, cwd: request.cwd, newId, now: () => new Date().toISOString() }
+        const ctx: NormalizeCtx = {
+          runId: request.runId,
+          cwd: request.cwd,
+          newId,
+          now: () => new Date().toISOString(),
+          contextTokensFromUsage: qoderContextTokensFromUsage
+        }
         const promise: Promise<ProviderRunResult> = (async () => {
           q = query({
             prompt: prompt.stream,
@@ -987,7 +1001,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       const sdkHooks: TraceEvent[] = []
       const activeAgentCalls = new Set<string>()
       const terminalAgentCalls = new Set<string>()
-      const ctx: NormalizeCtx = { runId: request.runId, cwd: request.cwd, newId, now: () => new Date().toISOString() }
+      const ctx: NormalizeCtx = {
+        runId: request.runId,
+        cwd: request.cwd,
+        newId,
+        now: () => new Date().toISOString(),
+        contextTokensFromUsage: qoderContextTokensFromUsage
+      }
       const observeAgentEvent = (event: TraceEvent): void => {
         if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
         const status = observedAgentStatus(event)

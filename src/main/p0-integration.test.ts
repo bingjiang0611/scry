@@ -12,6 +12,8 @@ import {
   DDL_V1,
   DDL_V2,
   DDL_V3,
+  DDL_V13,
+  DDL_V14,
   SPAN_COLS,
   MODEL_USAGE_COLS,
   FILE_OP_COLS,
@@ -57,6 +59,8 @@ const CLAUDE = process.env.CLAUDE_BIN || `${process.env.HOME}/.nvm/versions/node
       for (const stmt of DDL_V1) db.prepare(stmt).run()
       for (const stmt of DDL_V2) db.prepare(stmt).run()
       for (const stmt of DDL_V3) db.prepare(stmt).run()
+      for (const stmt of DDL_V13) db.prepare(stmt).run()
+      for (const stmt of DDL_V14) db.prepare(stmt).run()
       const rows = spanRowsFromItems({ runId, sessionId: res.sessionId, cwd, items, nowMs: Date.now() })
       const insSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
       const insMu = db.prepare(sqlInsert('model_usage', MODEL_USAGE_COLS))
