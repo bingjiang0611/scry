@@ -148,7 +148,6 @@ const MarkdownImpl = memo(function MarkdownImpl({ children }: { children: string
         >
           <Icon name="file" className="md-file-ref-icon" />
           <code {...props} className={className}>{codeChildren}</code>
-          <span className="md-file-ref-label" aria-hidden="true">{external ? '外部打开' : '打开'}</span>
         </button>
       )
     }
