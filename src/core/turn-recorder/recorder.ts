@@ -3,7 +3,7 @@ import { open as openFile, readdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { HOOK_DELIVERY_STAGE, classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
-import { disabled, partial, type AgentTurnRecord } from '../../shared/turn-record.js'
+import { disabled, partial, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
@@ -20,6 +20,7 @@ import {
   recorderPendingHealth,
   recorderSessionLock as sessionLock,
   recorderSessionRoot as sessionRoot,
+  recorderStaleOpenTurns,
   recorderStatePath as statePath,
   recorderTurnRoot as turnRoot,
   type RecorderOpenTurnState as OpenTurnState,
@@ -92,6 +93,11 @@ const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/comple
 const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'])
 const STALE_TERMINAL_WINDOW_MS = 30_000
 const DEFERRED_TERMINAL_GRACE_MS = 180_000
+/**
+ * After this long with no terminal event and no transcript growth, an open turn is treated as
+ * interrupted rather than left to block recovery, `doctor` and daemon shutdown forever.
+ */
+export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000
 const TRANSCRIPT_REWIND_BYTES = 4 * 1024 * 1024
 const MAX_TRANSCRIPT_READ_BYTES = 32 * 1024 * 1024
 
@@ -1697,12 +1703,32 @@ function terminalStatus(payload: Record<string, unknown>, fallback: AgentTurnRec
   return fallback
 }
 
+/** Re-stamp every populated evidence section as `partial` with one shared reason. */
+function degradeEvidenceSections(evidence: TurnEvidence, reason: string): void {
+  const source = evidence.tools.source
+  if (evidence.tools.value) evidence.tools = partial(evidence.tools.value, source, reason)
+  if (evidence.skills.value) evidence.skills = partial(evidence.skills.value, source, reason)
+  if (evidence.mcps.value) evidence.mcps = partial(evidence.mcps.value, source, reason)
+  if (evidence.files.value) evidence.files = partial(evidence.files.value, source, reason)
+  if (evidence.errors.value) evidence.errors = partial(evidence.errors.value, source, reason)
+  if (evidence.usage.value) evidence.usage = partial(evidence.usage.value, source, reason)
+  if (evidence.hooks.value) evidence.hooks = partial(evidence.hooks.value, source, reason)
+  if (evidence.compactions?.value) evidence.compactions = partial(evidence.compactions.value, source, reason)
+  if (evidence.modelSegments?.value) evidence.modelSegments = partial(evidence.modelSegments.value, source, reason)
+  if (evidence.dangerousOperations.value) {
+    evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)
+  }
+  if (evidence.modelTiming?.value && evidence.modelTiming.value.method !== 'provider_api') {
+    evidence.modelTiming = partial(evidence.modelTiming.value, evidence.modelTiming.source, reason)
+  }
+}
+
 async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   open: OpenTurnState,
   payload: Record<string, unknown>,
   fallbackStatus: AgentTurnRecord['status'],
-  options: { allowUnstableTranscript?: boolean } = {}
+  options: { allowUnstableTranscript?: boolean; interruptedReason?: string } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const runId = `${open.provider}:${open.sessionId}:${open.generation}`
@@ -1791,24 +1817,14 @@ async function finalizeOpenTurn(
     }
   })
   if (transcript.complete === false) {
-    const source = evidence.tools.source
-    const reason = 'transcript snapshot was incomplete or one or more child agent transcripts were unavailable'
-    if (evidence.tools.value) evidence.tools = partial(evidence.tools.value, source, reason)
-    if (evidence.skills.value) evidence.skills = partial(evidence.skills.value, source, reason)
-    if (evidence.mcps.value) evidence.mcps = partial(evidence.mcps.value, source, reason)
-    if (evidence.files.value) evidence.files = partial(evidence.files.value, source, reason)
-    if (evidence.errors.value) evidence.errors = partial(evidence.errors.value, source, reason)
-    if (evidence.usage.value) evidence.usage = partial(evidence.usage.value, source, reason)
-    if (evidence.hooks.value) evidence.hooks = partial(evidence.hooks.value, source, reason)
-    if (evidence.compactions?.value) evidence.compactions = partial(evidence.compactions.value, source, reason)
-    if (evidence.modelSegments?.value) evidence.modelSegments = partial(evidence.modelSegments.value, source, reason)
-    if (evidence.dangerousOperations.value) {
-      evidence.dangerousOperations = partial(evidence.dangerousOperations.value, source, reason)
-    }
-    if (evidence.modelTiming?.value && evidence.modelTiming.value.method !== 'provider_api') {
-      evidence.modelTiming = partial(evidence.modelTiming.value, evidence.modelTiming.source, reason)
-    }
+    degradeEvidenceSections(
+      evidence,
+      'transcript snapshot was incomplete or one or more child agent transcripts were unavailable'
+    )
   }
+  // An expired turn was force-closed without a terminal event, so nothing it holds can be called
+  // complete, even when the transcript window itself parsed cleanly.
+  if (options.interruptedReason) degradeEvidenceSections(evidence, options.interruptedReason)
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
   if (!enablement.config.capture.assistant) {
     evidence.assistant = disabled('assistant capture disabled by config')
@@ -2189,15 +2205,23 @@ export async function recoverRecorder(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env,
   probe?: RecorderRecoveryProbe
-): Promise<{ recovered: number; pending: number }> {
+): Promise<{ recovered: number; pending: number; expired: number }> {
   const enablement = await resolveRecorderEnablement(workspace, env)
-  if (!enablement.enabled) return { recovered: 0, pending: 0 }
+  if (!enablement.enabled) return { recovered: 0, pending: 0, expired: 0 }
+  const expiryMs = openTurnExpiryMs(env)
+  const stale = new Set(
+    (await recorderStaleOpenTurns(enablement.dataRoot, expiryMs)).map((turn) => `${turn.provider}:${turn.sessionId}`)
+  )
   let recovered = 0
   let pending = 0
+  let expired = 0
   let managedPresent = false
   for (const item of await runtimeSessions(enablement.dataRoot)) {
     const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
     if (!initial) continue
+    // Membership in `stale` only means the turn was a candidate; a candidate can still converge
+    // through a real terminal status, and that must not be reported as a forced expiry.
+    let forcedExpiry = false
     const result = await withDirectoryLock(
       sessionLock(enablement.dataRoot, item.provider, initial.sessionId),
       async () => {
@@ -2209,7 +2233,17 @@ export async function recoverRecorder(
         if (open.managedByScry) return { status: 'managed' as const }
         await probe?.(open)
         if (open.status === 'open') {
-          if (!open.transcriptPath) return { status: 'idle' as const }
+          if (!open.transcriptPath) {
+            if (!stale.has(`${open.provider}:${open.sessionId}`)) return { status: 'idle' as const }
+            forcedExpiry = true
+            return finalizeOpenTurn(
+              enablement,
+              open,
+              { timestamp: new Date().toISOString() },
+              'interrupted',
+              { allowUnstableTranscript: true, interruptedReason: OPEN_TURN_EXPIRED_REASON }
+            )
+          }
           const transcript = await stableTranscript(
             open.transcriptPath,
             `${open.provider}:${open.sessionId}:${open.generation}`,
@@ -2219,7 +2253,17 @@ export async function recoverRecorder(
             open.transcriptStartOffset
           )
           if (!transcript.terminalStatus || !transcript.completedAt || transcript.identityMatched === false) {
-            return { status: 'idle' as const }
+            // Nothing terminal will arrive for an expired turn; leaving it open loses the turn
+            // outright and keeps the daemon alive forever, so close it and say so in the record.
+            if (!stale.has(`${open.provider}:${open.sessionId}`)) return { status: 'idle' as const }
+            forcedExpiry = true
+            return finalizeOpenTurn(
+              enablement,
+              open,
+              { timestamp: new Date().toISOString() },
+              'interrupted',
+              { allowUnstableTranscript: true, interruptedReason: OPEN_TURN_EXPIRED_REASON }
+            )
           }
           open.status = 'closing'
           open.closingAt = transcript.completedAt
@@ -2244,7 +2288,10 @@ export async function recoverRecorder(
     )
     if (result.status === 'managed') managedPresent = true
     else if (result.status === 'pending') pending++
-    else if (result.status === 'committed' || result.status === 'duplicate') recovered++
+    else if (result.status === 'committed' || result.status === 'duplicate') {
+      recovered++
+      if (forcedExpiry) expired++
+    }
   }
   if (managedPresent) {
     const managed = await recoverManagedRecorderTurns(workspace, env)
@@ -2256,7 +2303,17 @@ export async function recoverRecorder(
     ...(recovered ? { increment: { recoveredRecords: recovered } } : {})
   })
   await drainCommitNotifications(enablement.dataRoot, await activatedCommitHookEnv(enablement, env))
-  return { recovered, pending }
+  return { recovered, pending, expired }
+}
+
+export const OPEN_TURN_EXPIRED_REASON =
+  'turn never received a terminal event and its transcript stopped changing before the expiry window'
+
+/** `SCRY_OPEN_TURN_EXPIRY_MS` exists so tests can expire a turn without waiting a day. */
+export function openTurnExpiryMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.SCRY_OPEN_TURN_EXPIRY_MS)
+  if (!Number.isFinite(raw) || raw < 1_000) return OPEN_TURN_EXPIRY_MS
+  return Math.min(raw, 30 * 24 * 60 * 60 * 1_000)
 }
 
 export async function recorderEnablement(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<RecorderEnablement> {

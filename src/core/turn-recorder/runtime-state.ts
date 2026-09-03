@@ -1,4 +1,4 @@
-import { access } from 'node:fs/promises'
+import { access, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { GitTurnDiffCapture } from './git.js'
@@ -101,6 +101,43 @@ export async function recorderPendingHealth(
     }
   }
   return { pendingCount, oldestPendingAgeMs }
+}
+
+/**
+ * Open turns that can no longer converge: nothing terminal arrived and the transcript stopped
+ * growing. A long-running turn keeps appending to its transcript, so the file's mtime — not the
+ * turn's age alone — is what separates "still working" from "the Provider died".
+ */
+export async function recorderStaleOpenTurns(
+  dataRoot: string,
+  expiryMs: number,
+  now = Date.now()
+): Promise<Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }>> {
+  const result: Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }> = []
+  for (const provider of ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const) {
+    const providerRoot = join(dataRoot, 'runtime', provider)
+    for (const session of await listFiles(providerRoot)) {
+      const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(join(providerRoot, session)))
+      if (!open || open.status !== 'open' || open.managedByScry) continue
+      const startedAt = Date.parse(open.startedAt)
+      if (!Number.isFinite(startedAt) || now - startedAt <= expiryMs) continue
+      if (open.transcriptPath) {
+        const touchedAt = await transcriptTouchedAt(open.transcriptPath)
+        // Unreadable transcript counts as no activity: the turn cannot converge from it either.
+        if (touchedAt != null && now - touchedAt <= expiryMs) continue
+      }
+      result.push({ provider, sessionId: open.sessionId, startedAt: open.startedAt, ageMs: now - startedAt })
+    }
+  }
+  return result
+}
+
+async function transcriptTouchedAt(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).mtimeMs
+  } catch {
+    return null
+  }
 }
 
 export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
