@@ -13,6 +13,8 @@ export interface RecorderConfig {
     exclude?: string[]
   }
   capture: {
+    /** Named baseline; explicit fields below still win. */
+    preset: CapturePreset
     prompt: boolean
     assistant: boolean
     toolOutput: 'none' | 'summary'
@@ -20,6 +22,23 @@ export interface RecorderConfig {
     hooks: boolean
     patchExcludeBasenames?: string[]
   }
+}
+
+/**
+ * `local-full` keeps today's behaviour. `team-minimal` stops prompt and assistant bodies from
+ * ever reaching disk and drops tool output, for teams that want turn accounting without local
+ * transcript copies. Presets only move defaults; an explicit field always overrides them.
+ */
+export type CapturePreset = 'local-full' | 'team-minimal'
+
+export const CAPTURE_PRESETS: Record<CapturePreset, Omit<RecorderConfig['capture'], 'preset' | 'patchExcludeBasenames'>> = {
+  'local-full': { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true },
+  'team-minimal': { prompt: false, assistant: false, toolOutput: 'none', diff: true, hooks: true }
+}
+
+/** Written into every record so a stored turn can explain which policy produced it. */
+export function capturePolicyVersion(capture: RecorderConfig['capture']): string {
+  return `${capture.preset}@1`
 }
 
 export interface RecorderCommitHookConfig {
@@ -34,14 +53,6 @@ export type RecorderEnablement =
 export type RecorderLocation =
   | { valid: true; workspaceRoot: string; dataRoot: string; config: RecorderConfig }
   | { valid: false; reason: 'missing_config' | 'invalid_config'; detail?: string }
-
-const DEFAULT_CAPTURE: RecorderConfig['capture'] = {
-  prompt: true,
-  assistant: true,
-  toolOutput: 'summary',
-  diff: true,
-  hooks: true
-}
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -93,14 +104,29 @@ function parseConfig(raw: unknown): RecorderConfig {
     dataDir,
     ...(commitHook ? { commitHook } : {}),
     repositories: { mode, maxDepth, exclude: stringArray(repositories.exclude) },
-    capture: {
-      prompt: captureRaw.prompt !== false,
-      assistant: captureRaw.assistant !== false,
-      toolOutput: captureRaw.toolOutput === 'none' ? 'none' : DEFAULT_CAPTURE.toolOutput,
-      diff: captureRaw.diff !== false,
-      hooks: captureRaw.hooks !== false,
-      patchExcludeBasenames
-    }
+    capture: resolveCapture(captureRaw, patchExcludeBasenames)
+  }
+}
+
+function resolveCapture(
+  raw: Record<string, unknown>,
+  patchExcludeBasenames: string[]
+): RecorderConfig['capture'] {
+  const presetRaw = typeof raw.preset === 'string' ? raw.preset.trim() : undefined
+  if (presetRaw && !(presetRaw in CAPTURE_PRESETS)) {
+    throw new Error(`capture.preset must be one of: ${Object.keys(CAPTURE_PRESETS).join(', ')}`)
+  }
+  const preset = (presetRaw ?? 'local-full') as CapturePreset
+  const base = CAPTURE_PRESETS[preset]
+  const boolean = (value: unknown, fallback: boolean): boolean => typeof value === 'boolean' ? value : fallback
+  return {
+    preset,
+    prompt: boolean(raw.prompt, base.prompt),
+    assistant: boolean(raw.assistant, base.assistant),
+    toolOutput: raw.toolOutput === 'none' ? 'none' : raw.toolOutput === 'summary' ? 'summary' : base.toolOutput,
+    diff: boolean(raw.diff, base.diff),
+    hooks: boolean(raw.hooks, base.hooks),
+    patchExcludeBasenames
   }
 }
 

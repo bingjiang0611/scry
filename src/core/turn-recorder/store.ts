@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join } from 'node:path'
 import { isAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
@@ -128,7 +128,12 @@ export async function commitRecord(
     if (duplicate) {
       return { status: 'duplicate' as const, record: await readRecordFile(join(dataRoot, 'records', duplicate.name)) }
     }
-    const sequence = (files.at(-1)?.sequence ?? 0) + 1
+    // The allocator must clear the archive floor, otherwise archiving every live record would
+    // restart numbering at 1 and collide with sequences that were already issued. Duplicate
+    // detection only scans live records: archiving is therefore restricted to finalized turns
+    // (and, when a commit hook exists, acknowledged ones), which cannot be re-committed.
+    const archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
+    const sequence = Math.max(files.at(-1)?.sequence ?? 0, archivedThrough) + 1
     const record: AgentTurnRecord = { ...draft, sequence }
     const filename = `${String(sequence).padStart(20, '0')}-${record.recordId}.json`
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
@@ -440,10 +445,87 @@ export async function showRecord(dataRoot: string, selector: string): Promise<Ag
   return match ? await readRecordFile(join(dataRoot, 'records', match.name)) : null
 }
 
-export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; records: number; errors: string[] }> {
+export interface ArchiveEntry {
+  at: string
+  from: number
+  to: number
+  count: number
+  target: string
+}
+
+export interface ArchiveState {
+  schemaVersion: 1
+  /** Highest sequence intentionally moved out of `records/`. */
+  archivedThrough: number
+  archives: ArchiveEntry[]
+}
+
+const ARCHIVE_STATE = 'archive-state.json'
+
+export async function readArchiveState(dataRoot: string): Promise<ArchiveState | null> {
+  const state = await readJson<ArchiveState>(join(dataRoot, ARCHIVE_STATE))
+  if (state?.schemaVersion !== 1 || !Number.isSafeInteger(state.archivedThrough) || state.archivedThrough < 0) return null
+  return { ...state, archives: Array.isArray(state.archives) ? state.archives : [] }
+}
+
+/**
+ * Move a contiguous prefix of records out of `records/` and record the floor that explains the
+ * resulting gap. Only sequences at or below `throughSequence` may be archived, so the remaining
+ * store still starts exactly one past the recorded floor; anything else stays a hard error.
+ * Callers own the delivery question — a record that was never ACKed must not be archived.
+ */
+export async function archiveRecords(
+  dataRoot: string,
+  options: { throughSequence: number; target: string }
+): Promise<{ archived: Array<{ name: string; sequence: number; recordId: string; sha256: string }>; archivedThrough: number; target: string }> {
+  const state = await readArchiveState(dataRoot)
+  const floor = state?.archivedThrough ?? 0
+  const files = (await recordFiles(dataRoot)).filter((file) => file.sequence <= options.throughSequence)
+  const archived: Array<{ name: string; sequence: number; recordId: string; sha256: string }> = []
+  if (files.length === 0) return { archived, archivedThrough: floor, target: options.target }
+  const recordsTarget = join(options.target, 'records')
+  await mkdir(recordsTarget, { recursive: true, mode: 0o700 })
+  let archivedThrough = floor
+  for (const file of files) {
+    const source = join(dataRoot, 'records', file.name)
+    const content = await readFile(source)
+    await writeFile(join(recordsTarget, file.name), content, { mode: 0o600 })
+    await rm(source, { force: true })
+    archivedThrough = file.sequence
+    // Persist the floor after each move so a crash mid-archive still explains the gap.
+    await writeJsonAtomic(join(dataRoot, ARCHIVE_STATE), {
+      schemaVersion: 1,
+      archivedThrough,
+      archives: [
+        ...(state?.archives ?? []),
+        { at: new Date().toISOString(), from: files[0].sequence, to: archivedThrough, count: archived.length + 1, target: options.target }
+      ].slice(-50)
+    } satisfies ArchiveState)
+    archived.push({
+      name: file.name,
+      sequence: file.sequence,
+      recordId: file.recordId,
+      sha256: createHash('sha256').update(content).digest('hex')
+    })
+  }
+  await writeJsonAtomic(join(options.target, 'manifest.json'), {
+    schemaVersion: 1,
+    at: new Date().toISOString(),
+    recorderVersion: RECORDER_VERSION,
+    from: archived[0].sequence,
+    to: archivedThrough,
+    count: archived.length,
+    records: archived
+  })
+  return { archived, archivedThrough, target: options.target }
+}
+
+export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
   const files = await recordFiles(dataRoot)
   const errors: string[] = []
-  let previous = 0
+  // An archived prefix is only acceptable when an archive operation recorded the floor.
+  const archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
+  let previous = archivedThrough
   const ids = new Set<string>()
   for (const file of files) {
     if (file.sequence <= previous) errors.push(`non-monotonic sequence: ${file.name}`)
@@ -457,7 +539,7 @@ export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; reco
       errors.push(error instanceof Error ? error.message : String(error))
     }
   }
-  return { ok: errors.length === 0, records: files.length, errors }
+  return { ok: errors.length === 0, records: files.length, errors, archivedThrough }
 }
 
 const EMPTY_HEALTH: RecorderHealth = {

@@ -337,7 +337,17 @@ v1 的 team preset 等价于默认值：`toolOutput` 默认已是 `summary`、`d
 
 其余：只读、per-file cursor + 记录级 hash 去重、`--dry-run` 先打印扫描面与将被标 `partial/inferred` 的字段、绝不默认递归 home。
 
-**W10 容量文档 — ✅ 已完成；`records archive` 仍在 P1**
+**W10 容量文档与归档 — ✅ 已完成**
+
+`scry records archive --before <30d|ISO>` 搬移连续前缀到 `archive/<cutoff>/`（含 sha256 manifest），并把 floor 写入 `archive-state.json`。
+
+三条硬性约束（均有用例）：
+
+1. `verifyStore` 只接受被 floor 解释的空洞；手动删除仍报 `sequence gap`。
+2. **序号分配器必须跨过 floor**——实测发现的真实 bug：`commitRecord` 原先只按 `files.at(-1).sequence + 1` 取号，归档全部记录后会从 1 重新开始并与已发出的序号冲突。现取 `max(liveMax, archivedThrough) + 1`。
+3. 配置了 commit hook 时拒绝归档未 ACK 的记录（退出 5），除非 `--force`。
+
+原始要点：
 
 - 全仓库无 retention/prune；`listRecords`/`verifyStore`/`turns list`/`doctor` 全量读，drain 每个 hook 事件 `readdir` 整个 records 目录（`store.ts:69,337,355`）。
 - README 新增「容量与保留」，给**实测**数字而不是拍脑袋：无工具无 diff 的轮次约 2.9 KB；5 次 Edit + 5 个文件 diff 的轮次 6.6–9.9 KB（diff 约 5.4 KB、tools 约 2.2 KB）；按 8 KB/轮、100 轮/天估算约 20 MB/月。
@@ -468,9 +478,12 @@ Uploader 的退避、oversized、401、outbox 幂等测试属独立包。
 | W4 `doctor` 稳定 schema + 冻结退出码 | ✅ |
 | W10 records 容量文档 | ✅ README「容量与保留」 |
 | W7a `turns project` 只读投影（P1 首位） | ✅ `team-metadata@1` |
-| `integrations repair` | ⏭ P1 |
-| `records archive` | ⏭ P1 |
-| 官方 Uploader（独立包） | ⏭ P1 |
+| W8 `capture` preset + record `capturePolicy` | ✅ `local-full` / `team-minimal` |
+| W9 `support-bundle` | ✅ 脱敏诊断包 |
+| W10 `records archive` + 归档 floor | ✅ |
+| `integrations repair` | ✅ 按 handler id 重写 |
+| 官方 Uploader（独立包） | ⏸ 用户决定暂不做 |
+| W6 `import` | ⏭ 未做（需先定记录归属） |
 
 P0 未做版本升级：`0.2.31` 保持不变，等准备发布时一次性升 `0.3.0`（并按 §11 公告存量安装需人工 `scry upgrade`）。
 

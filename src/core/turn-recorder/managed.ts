@@ -8,7 +8,8 @@ import {
   type Evidence,
   type TurnEvidence
 } from '../../shared/turn-record.js'
-import { resolveRecorderEnablement, type RecorderEnablement } from './config.js'
+import {
+  capturePolicyVersion, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import {
   SESSION_LOCK_WAIT_MS,
@@ -379,6 +380,7 @@ function recordDraft(
     recordKind: 'agent_turn',
     recordId,
     recorderVersion: RECORDER_VERSION,
+    capturePolicy: capturePolicyVersion(enablement.config.capture),
     workspace: { id: enablement.config.workspaceId, root: enablement.workspaceRoot },
     provider: {
       id: open.provider,
