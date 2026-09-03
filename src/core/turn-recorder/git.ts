@@ -241,14 +241,25 @@ export async function beginGitTurnDiff(
   let tempDir: string | undefined
   try {
     const canonicalCwd = await realpath(cwd)
-    let inside: string
+    // One `rev-parse` answers every layout question at once. Each git spawn costs ~75ms on macOS,
+    // and this runs on the Provider's turn-start hook, so the four separate calls this replaces
+    // were the largest avoidable cost in the capture path.
+    let layout: string[]
     try {
-      inside = (await gitCommand(['rev-parse', '--is-inside-work-tree'], { cwd: canonicalCwd, deadline })).trim()
+      layout = (await gitCommand(
+        ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--git-path', 'index'],
+        { cwd: canonicalCwd, deadline }
+      )).split('\n').map((line) => line.trim())
     } catch (error) {
+      // Bare repositories exit 128 on `--show-toplevel`, and non-repositories exit 128 immediately;
+      // both meant `not_git` when the work-tree probe was a separate call.
       if (error instanceof GitDeadlineError) throw error
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
-    if (inside !== 'true') return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
+    const [inside, repoRoot, commonDirRaw, indexPathRaw] = layout
+    if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw) {
+      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
+    }
     let head = ''
     try {
       head = (await gitCommand(['rev-parse', '--verify', 'HEAD'], { cwd: canonicalCwd, deadline })).trim()
@@ -256,10 +267,7 @@ export async function beginGitTurnDiff(
       if (error instanceof GitDeadlineError) throw error
     }
     if (!head) return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
-    const repoRoot = (await gitCommand(['rev-parse', '--show-toplevel'], { cwd: canonicalCwd, deadline })).trim()
-    const commonDirRaw = (await gitCommand(['rev-parse', '--git-common-dir'], { cwd: canonicalCwd, deadline })).trim()
     const commonDir = isAbsolute(commonDirRaw) ? commonDirRaw : resolve(canonicalCwd, commonDirRaw)
-    const indexPathRaw = (await gitCommand(['rev-parse', '--git-path', 'index'], { cwd: canonicalCwd, deadline })).trim()
     const indexPath = isAbsolute(indexPathRaw) ? indexPathRaw : resolve(canonicalCwd, indexPathRaw)
     const scope = relative(repoRoot, canonicalCwd) || '.'
     if (scope.startsWith('..')) throw new Error('Selected cwd is outside the Git worktree')
