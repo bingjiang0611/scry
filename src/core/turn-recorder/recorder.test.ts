@@ -1,4 +1,4 @@
-import { access, appendFile, chmod, mkdir, mkdtemp, open as openFile, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'
+import { access, appendFile, chmod, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rm, unlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
-import { commitNotificationStatus, commitRecord, readDrainStatus, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
+import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, readDrainStatus, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
 import { inspectCommitHookBundle, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 
@@ -2206,7 +2206,7 @@ describe('record store cursor and recovery semantics', () => {
     await writeFile(join(root, '.scry', 'records', 'rename-before-crash.tmp'), '{"partial":true}')
     await completeTurn(root, 'b')
     expect((await listRecords(join(root, '.scry'))).map((record) => record.sequence)).toEqual([1, 2])
-    await expect(verifyStore(join(root, '.scry'))).resolves.toEqual({ ok: true, records: 2, errors: [] })
+    await expect(verifyStore(join(root, '.scry'))).resolves.toEqual({ ok: true, records: 2, errors: [], archivedThrough: 0 })
   })
 
   it('正式文件已 rename 后重试提交保持幂等，并能回收死进程锁', async () => {
@@ -2496,5 +2496,37 @@ describe('commit notification drain budget', () => {
 
     await expect(drainCommitNotifications(join(root, '.scry'), { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }))
       .resolves.toEqual({ delivered: 4, pending: 0, truncated: false })
+  })
+})
+
+describe('archive floor and sequence allocation', () => {
+  it('归档全部记录后新轮次从 floor+1 继续，store 仍连续', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'floor-1')
+    await completeTurn(root, 'floor-2')
+    const dataRoot = join(root, '.scry')
+
+    const archived = await archiveRecords(dataRoot, { throughSequence: 2, target: join(root, 'archive-1') })
+    expect(archived.archived.map((item) => item.sequence)).toEqual([1, 2])
+    expect((await readArchiveState(dataRoot))?.archivedThrough).toBe(2)
+    // An archived prefix is explained by the floor, so an empty live store is still valid.
+    await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, records: 0, archivedThrough: 2 })
+
+    await completeTurn(root, 'floor-3')
+    expect((await listRecords(dataRoot)).map((record) => record.sequence)).toEqual([3])
+    await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, records: 1, archivedThrough: 2 })
+  })
+
+  it('未记录 floor 的手动删除仍然报 sequence gap', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'gap-1')
+    await completeTurn(root, 'gap-2')
+    const dataRoot = join(root, '.scry')
+    const [first] = (await readdir(join(dataRoot, 'records'))).sort()
+    await rm(join(dataRoot, 'records', first))
+
+    const store = await verifyStore(dataRoot)
+    expect(store.ok).toBe(false)
+    expect(store.errors.join(' ')).toContain('sequence gap')
   })
 })

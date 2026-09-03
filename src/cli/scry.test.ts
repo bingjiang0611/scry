@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -524,9 +524,10 @@ describe('scry turns project', () => {
     const projected = JSON.parse(text) as Record<string, any>
 
     expect(Object.keys(projected).sort()).toEqual([
-      'compactions', 'completedAt', 'counts', 'dangerousOperations', 'diffStats', 'durationMs', 'errors',
-      'evidence', 'interventions', 'modelTiming', 'policyVersion', 'provider', 'recordId', 'recorderVersion',
-      'schemaVersion', 'sequence', 'sessionId', 'startedAt', 'status', 'turnIndex', 'usage', 'workspaceIdHash'
+      'capturePolicy', 'compactions', 'completedAt', 'counts', 'dangerousOperations', 'diffStats', 'durationMs',
+      'errors', 'evidence', 'interventions', 'modelTiming', 'policyVersion', 'provider', 'recordId',
+      'recorderVersion', 'schemaVersion', 'sequence', 'sessionId', 'startedAt', 'status', 'turnIndex', 'usage',
+      'workspaceIdHash'
     ])
     expect(text).not.toContain(SECRET_PROMPT)
     expect(text).not.toContain('SECRET-TOOL-OUTPUT')
@@ -573,5 +574,189 @@ describe('scry turns project', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['turns', 'project', '999', '--workspace', root])).resolves.toBe(1)
     expect((JSON.parse(stdout.text()) as Record<string, any>).found).toBe(false)
+  })
+})
+
+describe('scry capture presets', () => {
+  it('默认 local-full，show 报告 preset 与 policyVersion', async () => {
+    const root = await workspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(0)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result).toMatchObject({ preset: 'local-full', policyVersion: 'local-full@1' })
+    expect(result.effective).toMatchObject({ prompt: true, assistant: true, toolOutput: 'summary' })
+    // The fixture config disables diff, so it is reported as an explicit override of the baseline.
+    expect(result.overrides).toEqual(['diff'])
+  })
+
+  it('team-minimal 关闭正文采集，record 落 capturePolicy 且证据标 disabled', async () => {
+    const root = await workspace()
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
+    config.capture = { preset: 'team-minimal' }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+
+    const stdout = captureStdout()
+    await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(0)
+    expect((JSON.parse(stdout.text()) as Record<string, any>).effective).toMatchObject({
+      prompt: false, assistant: false, toolOutput: 'none', diff: true
+    })
+    vi.restoreAllMocks()
+
+    const SECRET = 'MINIMAL-SHOULD-NOT-STORE-THIS'
+    const payload = { session_id: 'min-1', timestamp: '2026-07-19T12:00:00.000Z', prompt: SECRET }
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: { ...payload, timestamp: '2026-07-19T12:00:01.000Z' }
+    })
+    const [record] = await readdir(join(root, '.scry', 'records'))
+    const stored = await readFile(join(root, '.scry', 'records', record), 'utf8')
+    expect(stored).not.toContain(SECRET)
+    const parsed = JSON.parse(stored) as Record<string, any>
+    expect(parsed.capturePolicy).toBe('team-minimal@1')
+    // Disabled is a distinct state from "captured but empty".
+    expect(parsed.user.status).toBe('disabled')
+  })
+
+  it('显式字段覆盖 preset，非法 preset 报错', async () => {
+    const root = await workspace()
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
+    config.capture = { preset: 'team-minimal', prompt: true }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    const stdout = captureStdout()
+    await runScryCli(['capture', 'show', '--workspace', root])
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result.effective.prompt).toBe(true)
+    expect(result.overrides).toEqual(['prompt'])
+
+    config.capture = { preset: 'nope' }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(2)
+  })
+
+  it('explain 说明字段关闭后写入什么', async () => {
+    const root = await workspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['capture', 'explain', 'prompt', '--workspace', root])).resolves.toBe(0)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result).toMatchObject({ field: 'prompt', captured: true })
+    expect(result.whenOff).toContain('disabled')
+    await expect(runScryCli(['capture', 'explain', 'nonsense', '--workspace', root])).rejects.toThrow(/--field must be one of/)
+  })
+})
+
+describe('scry records archive', () => {
+  async function withTurns(count: number): Promise<string> {
+    const root = await workspace()
+    for (let index = 1; index <= count; index++) {
+      const payload = { session_id: `arch-${index}`, timestamp: '2026-07-19T12:00:00.000Z', prompt: 'p' }
+      await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
+      await handleRecorderHook({
+        provider: 'claude',
+        event: 'Stop',
+        workspace: root,
+        payload: { ...payload, timestamp: '2026-07-19T12:00:01.000Z' }
+      })
+    }
+    return root
+  }
+
+  it('归档搬移前缀并记录 floor，store 仍然 ok', async () => {
+    const root = await withTurns(3)
+    const out = join(root, 'archived')
+    const stdout = captureStdout()
+    // Records are stamped with the payload timestamp, so a future cutoff selects all of them.
+    await expect(runScryCli(['records', 'archive', '--before', '2030-01-01T00:00:00.000Z', '--out', out, '--yes', '--workspace', root])).resolves.toBe(0)
+    const result = JSON.parse(stdout.text()) as Record<string, any>
+    expect(result).toMatchObject({ status: 'done', archived: 3, archivedThrough: 3, remaining: 0, storeOk: true })
+    expect((await readdir(join(out, 'records'))).length).toBe(3)
+    const manifest = JSON.parse(await readFile(join(out, 'manifest.json'), 'utf8')) as Record<string, any>
+    expect(manifest.records[0].sha256).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('归档后新轮次接着 floor 继续，doctor 不报损坏', async () => {
+    const root = await withTurns(2)
+    await runScryCli(['records', 'archive', '--before', '2030-01-01T00:00:00.000Z', '--yes', '--workspace', root])
+    const payload = { session_id: 'arch-next', timestamp: '2026-07-19T13:00:00.000Z', prompt: 'p' }
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
+    await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: { ...payload, timestamp: '2026-07-19T13:00:01.000Z' } })
+
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    expect(report.status).toBe('healthy')
+    expect(report.store).toMatchObject({ ok: true, records: 1, archivedThrough: 2 })
+  })
+
+  it('不带 --yes 只打印计划；无候选时退出 3', async () => {
+    const root = await withTurns(1)
+    const plan = captureStdout()
+    await expect(runScryCli(['records', 'archive', '--before', '2030-01-01T00:00:00.000Z', '--workspace', root])).resolves.toBe(3)
+    expect((JSON.parse(plan.text()) as Record<string, any>).status).toBe('approval-required')
+    expect((await readdir(join(root, '.scry', 'records'))).length).toBe(1)
+
+    vi.restoreAllMocks()
+    const empty = captureStdout()
+    await expect(runScryCli(['records', 'archive', '--before', '2000-01-01T00:00:00.000Z', '--workspace', root])).resolves.toBe(3)
+    expect((JSON.parse(empty.text()) as Record<string, any>).status).toBe('nothing-to-archive')
+  })
+
+  it('配置了 commit hook 但尚未投递时拒绝归档', async () => {
+    const root = await withTurns(2)
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
+    config.commitHook = { entry: 'uploader.sh', files: ['uploader.sh'] }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    await writeFile(join(root, 'uploader.sh'), '#!/bin/sh\nexit 0\n')
+    await chmod(join(root, 'uploader.sh'), 0o700)
+    process.env.SCRY_GRANT_DIR = join(root, 'grants')
+    try {
+      const stdout = captureStdout()
+      await expect(runScryCli(['records', 'archive', '--before', '2030-01-01T00:00:00.000Z', '--yes', '--workspace', root])).resolves.toBe(5)
+      const result = JSON.parse(stdout.text()) as Record<string, any>
+      expect(result).toMatchObject({ status: 'refused', reason: 'undelivered-records' })
+      expect(result.remediation).toContain('notify-drain')
+      expect((await readdir(join(root, '.scry', 'records'))).length).toBe(2)
+    } finally {
+      delete process.env.SCRY_GRANT_DIR
+    }
+  })
+})
+
+describe('scry support-bundle', () => {
+  it('只输出脱敏诊断，不含 record 正文、路径与 env 值', async () => {
+    const root = await workspace()
+    const SECRET = 'BUNDLE-MUST-NOT-CONTAIN-THIS'
+    const payload = { session_id: 'bundle-1', timestamp: '2026-07-19T12:00:00.000Z', prompt: SECRET }
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
+    await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: { ...payload, timestamp: '2026-07-19T12:00:01.000Z' } })
+
+    const stdout = captureStdout()
+    await expect(runScryCli(['support-bundle', 'create', '--workspace', root])).resolves.toBe(0)
+    const text = stdout.text()
+    const bundle = JSON.parse(text) as Record<string, any>
+
+    expect(text).not.toContain(SECRET)
+    expect(text).not.toContain(root)
+    expect(bundle.workspace.idHash).toMatch(/^sha256:[a-f0-9]{32}$/)
+    expect(bundle.workspace.configFingerprint).toMatch(/^sha256:[a-f0-9]{32}$/)
+    expect(bundle.workspace.capturePolicy).toBe('local-full@1')
+    expect(bundle.recorder).toMatchObject({ enabled: true })
+    expect(bundle.recorder.store).toMatchObject({ ok: true, records: 1 })
+    expect(bundle.omitted.length).toBeGreaterThan(0)
+  })
+
+  it('写入文件时权限 0600，且 recorder 未启用退出 2', async () => {
+    const root = await workspace()
+    const out = join(root, 'bundle.json')
+    await expect(runScryCli(['support-bundle', 'create', '--out', out, '--workspace', root])).resolves.toBe(0)
+    expect((await stat(out)).mode & 0o777).toBe(0o600)
+
+    const bare = await mkdtemp(join(tmpdir(), 'scry-cli-bundle-'))
+    roots.push(bare)
+    const stdout = captureStdout()
+    await expect(runScryCli(['support-bundle', 'create', '--workspace', bare])).resolves.toBe(2)
+    expect((JSON.parse(stdout.text()) as Record<string, any>).recorder).toMatchObject({ enabled: false, reason: 'missing_config' })
   })
 })

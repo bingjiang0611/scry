@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { realpathSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
+import { writeFile } from 'node:fs/promises'
+import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ProviderId } from '../shared/provider.js'
-import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
+import { CAPTURE_PRESETS, capturePolicyVersion, resolveRecorderLocation, type CapturePreset } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
-import { RECORDER_VERSION, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readDrainStatus, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readArchiveState, readDrainStatus, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import {
   commitHookEnv,
   inspectCommitHookBundle,
@@ -19,7 +20,8 @@ import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { workspaceStatus } from './status.js'
 import { verifyCapture } from './verify-capture.js'
 import { PROJECTION_POLICIES, isProjectionPolicy, projectTurn } from './turns-project.js'
-import { initWorkspace, integrationsDiff, integrationsUninstall } from './workspace-init.js'
+import { collectSupportBundle } from './support-bundle.js'
+import { initWorkspace, integrationsDiff, integrationsRepair, integrationsUninstall } from './workspace-init.js'
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
@@ -33,8 +35,8 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout', 'policy'])
-const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'quiet', 'show', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
+const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout', 'policy', 'before', 'out', 'preset'])
+const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'show', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
@@ -99,7 +101,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi|diff|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode] [--preset local-full|team-minimal]\n  scry capture show|explain <field>\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -167,10 +169,15 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
 async function initCommand(args: ParsedArgs): Promise<number> {
   const scriptPath = process.argv[1]
   if (!scriptPath) throw new Error('cannot locate scry CLI entrypoint')
+  const preset = flag(args, 'preset')
+  if (preset && !(preset in CAPTURE_PRESETS)) {
+    throw new Error(`--preset must be one of: ${Object.keys(CAPTURE_PRESETS).join(', ')}`)
+  }
   const result = await initWorkspace({
     workspace: workspaceOf(args),
     providers: flag(args, 'providers'),
-    cliPath: scriptPath
+    cliPath: scriptPath,
+    ...(preset ? { preset: preset as CapturePreset } : {})
   })
   const enablement = await recorderEnablement(result.workspace)
   if (!enablement.enabled) throw new Error(`recorder 初始化后仍不可用：${enablement.reason}${enablement.detail ? ` (${enablement.detail})` : ''}`)
@@ -317,6 +324,177 @@ async function commitHookCommand(args: ParsedArgs): Promise<number> {
     case 'bundle-invalid': return 5
     default: return 0
   }
+}
+
+function cutoffFrom(value: string): string {
+  const relative = /^(\d+)d$/.exec(value.trim())
+  if (relative) return new Date(Date.now() - Number(relative[1]) * 86_400_000).toISOString()
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) throw new Error('--before must be an ISO timestamp or <N>d')
+  return new Date(parsed).toISOString()
+}
+
+/**
+ * Archive a contiguous prefix of records. Refuses to archive anything the configured commit hook
+ * has not acknowledged, because moving an undelivered record would silently drop it. Exit codes:
+ * 0 done, 2 recorder unavailable, 3 approval required or nothing to archive, 5 refused.
+ */
+/**
+ * Explain the capture policy actually in force. `explain` answers "is this field captured, why,
+ * and what gets written when it is not", so a team can audit local exposure without reading code.
+ */
+/**
+ * Sanitised diagnostics for a maintainer. Writes to --out when given, otherwise stdout; the
+ * payload lists what it deliberately omits so a recipient can see the boundary.
+ */
+async function supportBundleCommand(args: ParsedArgs): Promise<number> {
+  if (args.positionals[1] !== 'create') throw new Error('usage: scry support-bundle create [--out <path>]')
+  const workspace = workspaceOf(args)
+  const bundle = await collectSupportBundle(workspace)
+  const out = flag(args, 'out')
+  if (!out) {
+    print(bundle)
+    return bundle.recorder.enabled ? 0 : 2
+  }
+  const target = resolve(out)
+  await writeFile(target, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o600 })
+  print({ action: 'support-bundle', status: 'written', path: target, omitted: bundle.omitted })
+  return bundle.recorder.enabled ? 0 : 2
+}
+
+async function captureCommand(args: ParsedArgs): Promise<number> {
+  const action = args.positionals[1] ?? 'show'
+  const workspace = workspaceOf(args)
+  const location = await resolveRecorderLocation(workspace)
+  if (!location.valid) {
+    print({ action, workspace, status: 'unavailable', reason: location.reason, detail: location.detail })
+    return 2
+  }
+  const capture = location.config.capture
+  if (action === 'show') {
+    print({
+      action,
+      workspace: location.workspaceRoot,
+      preset: capture.preset,
+      policyVersion: capturePolicyVersion(capture),
+      effective: capture,
+      presetBaseline: CAPTURE_PRESETS[capture.preset],
+      overrides: Object.entries(CAPTURE_PRESETS[capture.preset])
+        .filter(([key, value]) => (capture as Record<string, unknown>)[key] !== value)
+        .map(([key]) => key)
+    })
+    return 0
+  }
+  if (action === 'explain') {
+    const field = args.positionals[2]
+    const explanations: Record<string, { captured: boolean; stores: string; whenOff: string }> = {
+      prompt: {
+        captured: capture.prompt,
+        stores: 'the user turn text under `user`',
+        whenOff: '`user` is recorded as disabled/unavailable; no prompt text reaches disk'
+      },
+      assistant: {
+        captured: capture.assistant,
+        stores: 'assistant text when the provider exposes it to lifecycle hooks',
+        whenOff: '`assistant` is recorded as disabled/unavailable'
+      },
+      toolOutput: {
+        captured: capture.toolOutput !== 'none',
+        stores: 'a bounded summary of tool output (never the full payload)',
+        whenOff: 'tool calls keep name/status/timing; output summaries are omitted'
+      },
+      diff: {
+        captured: capture.diff,
+        stores: 'per-file added/removed counts and bounded patches',
+        whenOff: '`diff` is recorded as disabled/unavailable'
+      },
+      hooks: {
+        captured: capture.hooks,
+        stores: 'hook handler identity, lifecycle counts and status',
+        whenOff: '`hooks` is recorded as disabled/unavailable'
+      }
+    }
+    const explanation = field ? explanations[field] : undefined
+    if (!explanation) {
+      throw new Error(`--field must be one of: ${Object.keys(explanations).join(', ')}`)
+    }
+    print({ action, field, preset: capture.preset, policyVersion: capturePolicyVersion(capture), ...explanation })
+    return 0
+  }
+  throw new Error('usage: scry capture show|explain <prompt|assistant|toolOutput|diff|hooks>')
+}
+
+async function recordsCommand(args: ParsedArgs): Promise<number> {
+  if (args.positionals[1] !== 'archive') throw new Error('usage: scry records archive --before <30d|ISO> [--out <dir>] [--yes]')
+  const workspace = workspaceOf(args)
+  const enablement = await recorderEnablement(workspace)
+  if (!enablement.enabled) {
+    print({ action: 'archive', workspace, status: 'unavailable', reason: enablement.reason })
+    return 2
+  }
+  const before = flag(args, 'before')
+  if (!before) throw new Error('--before is required, e.g. --before 30d')
+  const cutoff = cutoffFrom(before)
+  const records = await listRecords(enablement.dataRoot)
+  // Only a contiguous prefix may go: an interior hole cannot be explained by an archive floor.
+  const candidates: typeof records = []
+  for (const record of records) {
+    if (record.completedAt >= cutoff) break
+    candidates.push(record)
+  }
+  const activation = await resolveCommitHookActivation(workspace, enablement.config)
+  const notifications = await commitNotificationStatus(enablement.dataRoot, commitHookEnv(activation, process.env))
+  const activated = activation.status === 'trusted' || activation.status === 'host-provided'
+  const throughSequence = candidates.at(-1)?.sequence ?? 0
+  if (candidates.length === 0) {
+    print({ action: 'archive', workspace, status: 'nothing-to-archive', cutoff, records: records.length })
+    return 3
+  }
+  if (activation.status !== 'not-configured' && !args.flags.has('force')) {
+    const acked = activated ? notifications.ackedThrough ?? 0 : 0
+    if (throughSequence > acked) {
+      print({
+        action: 'archive',
+        workspace,
+        status: 'refused',
+        reason: 'undelivered-records',
+        detail: `commit hook has acknowledged through ${activated ? acked : 'nothing (hook not activated)'}, but archiving would move sequence ${throughSequence}`,
+        remediation: 'run `scry recorder notify-drain`, or pass --force to archive undelivered records anyway',
+        cutoff
+      })
+      return 5
+    }
+  }
+  const target = flag(args, 'out') ?? join(enablement.dataRoot, 'archive', `${cutoff.replace(/[:.]/g, '-')}`)
+  if (!args.flags.has('yes')) {
+    print({
+      action: 'archive',
+      workspace,
+      status: 'approval-required',
+      cutoff,
+      target,
+      willArchive: { from: candidates[0].sequence, to: throughSequence, count: candidates.length },
+      willRetain: records.length - candidates.length,
+      note: 'records are moved, not deleted; the archive floor keeps `turns verify` and `doctor` honest',
+      next: 're-run with --yes'
+    })
+    return 3
+  }
+  const result = await archiveRecords(enablement.dataRoot, { throughSequence, target })
+  const store = await verifyStore(enablement.dataRoot)
+  print({
+    action: 'archive',
+    workspace,
+    status: 'done',
+    cutoff,
+    target: result.target,
+    archived: result.archived.length,
+    archivedThrough: result.archivedThrough,
+    remaining: store.records,
+    storeOk: store.ok,
+    archiveState: await readArchiveState(enablement.dataRoot)
+  })
+  return 0
 }
 
 async function recorderCommand(args: ParsedArgs): Promise<number> {
@@ -545,6 +723,18 @@ async function integrationsCommand(args: ParsedArgs): Promise<number> {
     const drift = result.providers.some((row) => row.duplicateEvents.length > 0 || (row.present && row.managedEvents.length > 0 && row.missingEvents.length > 0))
     return drift ? 3 : 0
   }
+  if (action === 'repair') {
+    const workspace = workspaceOf(args)
+    if (!args.flags.has('yes')) {
+      print({ action: 'repair', status: 'approval-required', ...await integrationsDiff(workspace), next: 're-run with --yes' })
+      return 3
+    }
+    const scriptPath = process.argv[1]
+    if (!scriptPath) throw new Error('cannot locate scry CLI entrypoint')
+    const result = await integrationsRepair({ workspace, cliPath: scriptPath })
+    print({ action: 'repair', status: result.providers.length === 0 ? 'nothing-installed' : 'done', ...result })
+    return result.providers.length === 0 ? 3 : 0
+  }
   if (action === 'uninstall') {
     const workspace = workspaceOf(args)
     if (!args.flags.has('yes')) {
@@ -562,7 +752,7 @@ async function integrationsCommand(args: ParsedArgs): Promise<number> {
     print({ action: 'uninstall', status: 'done', ...await integrationsUninstall(workspace) })
     return 0
   }
-  throw new Error('usage: scry integrations install-pi|status-pi|diff|uninstall [--yes]')
+  throw new Error('usage: scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]')
 }
 
 async function upgradeCommand(args: ParsedArgs): Promise<number> {
@@ -610,13 +800,16 @@ export async function runScryCli(argv: string[]): Promise<number> {
     case 'status': return statusCommand(args)
     case 'verify-capture': return verifyCaptureCommand(args)
     case 'commit-hook': return commitHookCommand(args)
+    case 'records': return recordsCommand(args)
+    case 'capture': return captureCommand(args)
+    case 'support-bundle': return supportBundleCommand(args)
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
     case 'doctor': return doctorCommand(args)
     case 'integrations': return integrationsCommand(args)
     case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry init|status|verify-capture|commit-hook|recorder|turns|doctor|integrations|upgrade ...')
+      throw new Error('usage: scry init|status|verify-capture|commit-hook|capture|records|support-bundle|recorder|turns|doctor|integrations|upgrade ...')
   }
 }
 

@@ -41,6 +41,7 @@ scry upgrade          # 立即升级到 registry 的 latest
 scry integrations install-pi
 scry integrations status-pi
 scry integrations diff --workspace "$PWD"
+scry integrations repair --yes --workspace "$PWD"       # 按 handler id 重写托管 hook
 scry integrations uninstall --workspace "$PWD"          # 只打印计划
 scry integrations uninstall --yes --workspace "$PWD"    # 执行
 ```
@@ -160,6 +161,23 @@ scry recorder restart --workspace "$PWD"
 
 创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/timeline/summary/export/verify` 仍可只读已有数据。
 
+## 采集范围
+
+`capture.preset` 给出基线，显式字段永远覆盖基线：
+
+| preset | prompt | assistant | toolOutput | diff | hooks |
+|---|---|---|---|---|---|
+| `local-full`（默认） | ✅ | ✅ | `summary` | ✅ | ✅ |
+| `team-minimal` | ❌ | ❌ | `none` | ✅ | ✅ |
+
+```bash
+scry init --preset team-minimal
+scry capture show --workspace "$PWD"
+scry capture explain prompt --workspace "$PWD"
+```
+
+`team-minimal` 下 prompt 与回复正文**不会落盘**，对应证据段记为 `disabled`（与「采到了但是空」是不同状态）。每条 record 都会写入 `capturePolicy`（如 `team-minimal@1`），因此事后可以解释某条记录当时采了什么；presets 出现之前写的记录没有该字段，`turns project` 会输出 `null` 而不是假设为当前策略。
+
 ## 容量与保留
 
 `.scry/records/` 是 append-only 的事实源：一轮一个 JSON，文件名带 20 位序号且必须连续。当前版本**没有自动清理或归档**，容量由使用者自己控制。
@@ -173,9 +191,29 @@ scry recorder restart --workspace "$PWD"
 
 粗估：以平均 8 KB/轮、每人每天 100 轮计，约 0.8 MB/天、约 20 MB/月。主要变量是 diff，已有硬上限（单文件 patch 32 KiB、单轮合计 128 KiB）；工具输出只存摘要，单次 input 超 8 KiB 会省略并标 `partial`。想进一步降低占用可把 `capture.diff` 或 `capture.toolOutput` 关掉。
 
-**不要手动删除单个 record 文件。** `turns verify` 与 `doctor` 会把序号空洞当作 store 损坏（`doctor` 退出 4），而不是当作“已清理”。需要释放空间时，目前只有一个安全做法：先用 `scry turns export` 导出需要保留的部分，再整体删除 `.scry/records/` 与 `.scry/notifications/`（下一轮从序号 1 重新开始；已配置 commit hook 时会重放，Uploader 必须按 `recordId` 幂等）。
+**不要手动删除单个 record 文件。** `turns verify` 与 `doctor` 会把序号空洞当作 store 损坏（`doctor` 退出 4），而不是当作“已清理”。需要释放空间时用归档：
+
+```bash
+scry records archive --before 30d --workspace "$PWD"          # 只打印计划
+scry records archive --before 30d --yes --workspace "$PWD"    # 执行
+```
+
+归档把**连续前缀**搬到 `.scry/archive/<cutoff>/`（可用 `--out` 指定），写出带 sha256 的 `manifest.json`，并记录一个 floor（`archive-state.json`）。`turns verify` 与 `doctor` 只接受被 floor 解释的空洞——手动删除仍然是损坏。新轮次从 `floor + 1` 继续编号，不会与已发出的序号冲突。
+
+若配置了 commit hook，归档会**拒绝**搬走尚未 ACK 的记录（退出 5），提示先 `scry recorder notify-drain`；确实要放弃投递时才用 `--force`。
 
 另注意：`listRecords`、`turns list`、`doctor`、commit 通知 drain 都会扫描整个 records 目录，所以长期不清理的仓库会同时看到磁盘增长和命令变慢。
+
+## 排障
+
+```bash
+scry support-bundle create --workspace "$PWD"                 # 输出到 stdout
+scry support-bundle create --out ./scry-support.json           # 写文件（0600）
+```
+
+支持包只含：CLI/Node/平台版本、Provider 检测与配置状态、hook 事件计数与最近事件时间、配置指纹与 `capturePolicy`、health 计数、store 计数与 `archivedThrough`、commit hook 激活状态与 ACK/backlog、脱敏后的最近 recorder 日志。
+
+明确不含：record 正文、文件路径列表、环境变量值、workspace 路径与 `workspaceId` 原文（只给哈希）、commit hook entry 内容。日志与错误里的绝对路径会被替换为 `<workspace>` / `<home>`。产物自带 `omitted` 字段说明边界。
 
 ## 数据口径
 

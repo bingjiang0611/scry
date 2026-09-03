@@ -3,12 +3,14 @@ import { constants } from 'node:fs'
 import { access, chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
+import { CAPTURE_PRESETS, resolveRecorderLocation, type CapturePreset } from '../core/turn-recorder/config.js'
 import { piIntegrationStatus } from './pi-integration.js'
 
 export type InitProvider = 'claude' | 'codex' | 'qoder' | 'opencode'
 
 export interface WorkspaceInitOptions {
+  /** Capture preset for a freshly created config; ignored when a config already exists. */
+  preset?: CapturePreset
   workspace: string
   providers?: string
   cliPath: string
@@ -136,14 +138,14 @@ function workspaceId(workspace: string): string {
   return basename(workspace).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace'
 }
 
-function defaultConfig(workspace: string): string {
+function defaultConfig(workspace: string, preset: CapturePreset): string {
   return `${JSON.stringify({
     schemaVersion: 1,
     enabled: true,
     workspaceId: workspaceId(workspace),
     dataDir: '.scry',
     repositories: { mode: 'discover-nested-git', maxDepth: 2 },
-    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+    capture: { preset, ...CAPTURE_PRESETS[preset] }
   }, null, 2)}\n`
 }
 
@@ -373,7 +375,7 @@ export async function initWorkspace(options: WorkspaceInitOptions): Promise<Work
   const configPath = join(workspace, 'scry.config.json')
   const existingConfig = await readOptional(configPath)
   if (existingConfig == null) {
-    planned.set(configPath, { source: defaultConfig(workspace) })
+    planned.set(configPath, { source: defaultConfig(workspace, options.preset ?? 'local-full') })
   } else {
     const location = await resolveRecorderLocation(workspace)
     if (!location.valid) throw new Error(`${configPath} 无效：${location.detail ?? location.reason}`)
@@ -678,4 +680,92 @@ export async function integrationsUninstall(
     retained.push({ path: pi.target, reason: 'Pi 用户级扩展，不属于本 workspace；需手动移除' })
   }
   return { workspace: root, rewritten, removed, retained, skipped }
+}
+
+export interface IntegrationsRepairResult {
+  workspace: string
+  providers: InitProvider[]
+  rewritten: string[]
+  unchanged: string[]
+}
+
+/**
+ * Re-apply managed hooks for providers that are already installed. Managed entries are stripped
+ * by handler id and rewritten in canonical form, which repairs duplicates left by an earlier
+ * command reshape; foreign hooks and providers that were never installed are left alone.
+ */
+export async function integrationsRepair(options: {
+  workspace: string
+  cliPath: string
+  nodePath?: string
+  env?: NodeJS.ProcessEnv
+}): Promise<IntegrationsRepairResult> {
+  const env = options.env ?? process.env
+  const root = resolve(options.workspace)
+  const cliPath = await realpath(options.cliPath).catch(() => options.cliPath)
+  if (!await executable(cliPath)) throw new Error(`Scry CLI 不可执行：${cliPath}`)
+  const nodePath = await realpath(options.nodePath ?? process.execPath).catch(() => options.nodePath ?? process.execPath)
+
+  const diff = await integrationsDiff(root, env)
+  const installed = diff.providers
+    .filter((row) => row.present && row.managedEvents.length > 0)
+    .map((row) => row.provider)
+  if (installed.length === 0) {
+    return { workspace: root, providers: [], rewritten: [], unchanged: [] }
+  }
+
+  const planned = new Map<string, { source: string; mode?: number }>()
+  for (const provider of installed) {
+    if (provider === 'opencode') {
+      planned.set(join(root, '.opencode/plugins/scry-recorder.js'), { source: openCodePluginSource() })
+      continue
+    }
+    const path = join(root, CONFIG_PATHS[provider])
+    const stripped = stripManagedHooks(await readOptional(path), path)
+    planned.set(path, { source: mergeProviderSettings(stripped, path, provider) })
+  }
+  planned.set(join(root, '.scry/cli-path'), { source: `${cliPath}\n` })
+  planned.set(join(root, '.scry/node-bin-dir'), { source: `${dirname(nodePath)}\n` })
+  planned.set(join(root, '.scry/provider-hook.sh'), { source: providerHookSource(), mode: 0o700 })
+
+  const rewritten: string[] = []
+  const unchanged: string[] = []
+  await mkdir(join(root, '.scry'), { recursive: true, mode: 0o700 })
+  for (const [path, value] of planned) {
+    const mode = value.mode ?? await stat(path).then((info) => info.mode & 0o777).catch(() => 0o600)
+    ;(await writeAtomic(path, value.source, mode) ? rewritten : unchanged).push(path)
+  }
+  return { workspace: root, providers: installed, rewritten, unchanged }
+}
+
+/** Drop every managed entry so the canonical merge cannot append a duplicate. */
+function stripManagedHooks(source: string | null, path: string): string | null {
+  if (source == null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(source)
+  } catch (error) {
+    throw new Error(`${path} 不是合法 JSON：${error instanceof Error ? error.message : String(error)}`)
+  }
+  const settings = object(parsed)
+  const hooks = object(settings?.hooks)
+  if (!settings || !hooks) return source
+  for (const event of EVENTS) {
+    const groups = hooks[event]
+    if (!Array.isArray(groups)) continue
+    const kept: unknown[] = []
+    for (const group of groups) {
+      const record = object(group)
+      const entries = record?.hooks
+      if (!Array.isArray(entries)) {
+        kept.push(group)
+        continue
+      }
+      const keptEntries = entries.filter((entry) => !managedCommand(entry))
+      if (keptEntries.length > 0) kept.push(keptEntries.length === entries.length ? group : { ...record, hooks: keptEntries })
+    }
+    if (kept.length === 0) delete hooks[event]
+    else hooks[event] = kept
+  }
+  return `${JSON.stringify(settings, null, 2)}\n`
 }
