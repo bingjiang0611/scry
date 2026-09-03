@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { DB_MIGRATIONS, migrateDatabase } from './db-migrations'
+import { DELETE_MODEL_USAGE_FOR_SPAN_SQL } from './span-ledger'
 
 // Production uses better-sqlite3 rebuilt for Electron's ABI, which Node-based Vitest cannot load.
 // This adapter keeps the exact SQL/transaction behavior while executing against Node's SQLite.
@@ -60,6 +61,9 @@ describe('SQLite migrations', () => {
       expect(db.pragma('user_version', { simple: true })).toBe(DB_MIGRATIONS.length)
       expect(columns(db, 'sessions')).toContain('project_id')
       expect(columns(db, 'spans')).toEqual(expect.arrayContaining(['danger_level', 'danger_reason']))
+      expect(columns(db, 'model_usage')).toEqual(expect.arrayContaining([
+        'upstream_provider', 'context_tokens', 'context_model', 'context_provider', 'context_source', 'context_quality'
+      ]))
       expect(columns(db, 'human_interventions')).toEqual(expect.arrayContaining([
         'run_id', 'question_id', 'kind', 'resolution', 'request_json', 'response_json', 'duration_ms'
       ]))
@@ -109,6 +113,69 @@ describe('SQLite migrations', () => {
       expect(db.prepare('SELECT id FROM spans ORDER BY id').all()).toEqual([
         { id: 'explicit-skill' },
         { id: 'ordinary-tool' }
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('removes only same-turn Skill injection shadows in v13', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase(), DB_MIGRATIONS.slice(0, 12))
+      const insert = db.prepare('INSERT INTO spans (id, run_id, kind, name, input_preview) VALUES (?, ?, ?, ?, ?)')
+      insert.run('direct', 'run-1', 'skill', 'kami', JSON.stringify({ source: 'qoder_tool' }))
+      insert.run('shadow', 'run-1', 'skill', 'kami', JSON.stringify({ source: 'skill_injection' }))
+      insert.run('injection-only', 'run-2', 'skill', 'kami', JSON.stringify({ source: 'skill_injection' }))
+
+      migrateDatabase(db.asProductionDatabase())
+
+      expect(db.prepare('SELECT id FROM spans WHERE kind = \'skill\' ORDER BY id').all()).toEqual([
+        { id: 'direct' },
+        { id: 'injection-only' }
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('replaces provider-less pre-v14 model usage when the same span is replayed', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase(), DB_MIGRATIONS.slice(0, 13))
+      db.prepare('INSERT INTO model_usage (span_id, model, input_tokens) VALUES (?, ?, ?)')
+        .run('span-replay', 'shared-model', 10)
+      migrateDatabase(db.asProductionDatabase())
+
+      db.prepare(DELETE_MODEL_USAGE_FOR_SPAN_SQL).run('span-replay')
+      db.prepare(
+        `INSERT INTO model_usage (span_id, model, upstream_provider, input_tokens)
+         VALUES (?, ?, ?, ?)`
+      ).run('span-replay', 'shared-model', 'provider-a', 20)
+
+      expect(db.prepare(
+        'SELECT upstream_provider provider, input_tokens input FROM model_usage WHERE span_id = ?'
+      ).all('span-replay')).toEqual([{ provider: 'provider-a', input: 20 }])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps same-name model usage from different upstream providers distinct in v14', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase())
+      const insert = db.prepare(
+        `INSERT INTO model_usage (span_id, model, upstream_provider, input_tokens)
+         VALUES (?, ?, ?, ?)`
+      )
+      insert.run('span-1', 'shared-model', 'provider-a', 10)
+      insert.run('span-1', 'shared-model', 'provider-b', 20)
+      expect(db.prepare(
+        'SELECT upstream_provider provider, input_tokens input FROM model_usage ORDER BY upstream_provider'
+      ).all()).toEqual([
+        { provider: 'provider-a', input: 10 },
+        { provider: 'provider-b', input: 20 }
       ])
     } finally {
       db.close()

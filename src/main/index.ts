@@ -18,7 +18,7 @@ import {
 import { AgentRuntimeError } from './run-outcome'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
-import { billingStateQuery, deleteSessionData, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin } from './db'
+import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import {
@@ -1705,6 +1705,9 @@ async function deleteOneSession(
         sessionId: externalSessionId,
         providerId
       })) initialRunIds.add(runId)
+      for (const runId of turnOutboxSessionRunIds(userDataDir, { providerId, cwd, externalSessionId })) {
+        initialRunIds.add(runId)
+      }
       const result = await deleteOwnedSessionData(initialRunIds, {
         resolveRunIds: (runIds) => resolveSessionRunIds({ providerId, cwd, externalSessionId, runIds }),
         deleteDatabase: (runIds) => deleteSessionData({ providerId, cwd, externalSessionId, runIds }),
@@ -1721,6 +1724,11 @@ async function deleteOneSession(
           if (traceProgress.failed.length > 0) return traceProgress
           return deleteManagedTurnArtifacts(userDataDir, runIds)
         },
+        deleteOutbox: (runIds) => deleteTurnOutboxSessionRows(
+          userDataDir,
+          { providerId, cwd, externalSessionId },
+          runIds
+        ),
         deleteAttachments: (runId) => deleteRunAttachments(userDataDir, runId),
         deleteTranscripts: () => deleteTranscriptCopies({ cwd, sessionId: externalSessionId, providerId, userDataDir }),
         deleteCatalog: () => sessionStore.remove({ providerId, agentProfileId, cwd, externalSessionId })

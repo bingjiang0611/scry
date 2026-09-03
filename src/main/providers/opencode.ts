@@ -345,6 +345,11 @@ function rememberOpenCodeMessage(state: OpenCodeEventState, info: Record<string,
 interface OpenCodeTurnAggregate {
   providerTurnId?: string
   timing?: { ts: string; durationMs: number }
+  contextTokens?: number
+  contextModel?: string
+  contextProvider?: string
+  contextUsageSource?: string
+  contextUsageQuality?: 'exact' | 'inferred'
   tokensIn?: number
   tokensOut?: number
   reasoningTokens?: number
@@ -359,7 +364,8 @@ interface OpenCodeTurnAggregate {
 
 function aggregateOpenCodeTurn(
   finalInfo: Record<string, unknown>,
-  observedMessages: Map<string, Record<string, unknown>>
+  observedMessages: Map<string, Record<string, unknown>>,
+  contextWindows: ReadonlyMap<string, number> = new Map()
 ): OpenCodeTurnAggregate {
   const messages = new Map(observedMessages)
   const finalId = openCodeMessageId(finalInfo)
@@ -389,6 +395,7 @@ function aggregateOpenCodeTurn(
   let hasCompleteCost = assistants.length > 0
   const modelRows = new Map<string, ModelUsageRow>()
   const modelCosts = new Map<string, { total: number; complete: boolean }>()
+  let latestContext: { tokens: number; model: string; provider: string } | undefined
   for (const info of assistants) {
     const tokens = record(info.tokens)
     const cache = record(tokens.cache)
@@ -418,6 +425,14 @@ function aggregateOpenCodeTurn(
       billingProvider: billingProviderForUpstream(upstream),
       upstreamProvider: upstream || undefined,
       usageSource: 'opencode_turn_messages'
+    }
+    current.contextWindow = contextWindows.get(key) ?? current.contextWindow
+    if ([input, cacheRead, cacheWrite].some((value) => value != null)) {
+      latestContext = {
+        tokens: (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0),
+        model,
+        provider: upstream
+      }
     }
     current.inputTokens = (current.inputTokens ?? 0) + (input ?? 0)
     current.outputTokens = (current.outputTokens ?? 0) + (output ?? 0)
@@ -469,6 +484,13 @@ function aggregateOpenCodeTurn(
   return {
     providerTurnId: parentId ?? finalId,
     timing,
+    ...(latestContext ? {
+      contextTokens: latestContext.tokens,
+      contextModel: latestContext.model,
+      contextProvider: latestContext.provider,
+      contextUsageSource: 'opencode_message_usage',
+      contextUsageQuality: 'exact' as const
+    } : {}),
     tokensIn: hasUsage ? tokensIn : undefined,
     tokensOut: hasUsage ? tokensOut : undefined,
     reasoningTokens: hasUsage ? reasoningTokens : undefined,
@@ -725,6 +747,21 @@ export async function handleOpenCodeQuestion(
     await unwrap(client.question.reply({ requestID: requestId, directory: request.cwd, answers }), 'question.reply')
   }
   return true
+}
+
+function openCodeModelContextWindows(data: unknown[]): Map<string, number> {
+  const windows = new Map<string, number>()
+  for (const raw of data) {
+    const model = record(raw)
+    const limit = record(model.limit)
+    const contextWindow = typeof limit.context === 'number' && Number.isFinite(limit.context) && limit.context > 0
+      ? limit.context
+      : undefined
+    if (contextWindow && typeof model.id === 'string' && typeof model.providerID === 'string') {
+      windows.set(`${model.providerID}\0${model.id}`, contextWindow)
+    }
+  }
+  return windows
 }
 
 export function openCodeRunControlCatalog(data: unknown[]): AgentRunControlCatalog {
@@ -1146,6 +1183,18 @@ export function createOpenCodeAdapter(
           if (!request.cwd) throw new Error('OpenCode 需要工作目录')
           const server = await serverFor(context, request.mcpExecution, request.openCodePluginTrust)
           client = server.client
+          const modelRequest = client.v2?.model?.list?.({ location: { directory: request.cwd } })
+          const modelContextPromise = modelRequest
+            ? Promise.race([
+                unwrap<{ data?: unknown[] }>(modelRequest, 'model.list')
+                  .then((response) => openCodeModelContextWindows(response.data ?? []))
+                  .catch(() => new Map<string, number>()),
+                new Promise<Map<string, number>>((resolve) => {
+                  const timer = setTimeout(() => resolve(new Map()), 2_000)
+                  timer.unref?.()
+                })
+              ])
+            : Promise.resolve(new Map<string, number>())
           if (stopped) return { externalSessionId, providerTurnId, stopped }
           const permission = openCodePermissionRules(request.permissionMode)
           const model = request.model
@@ -1318,7 +1367,7 @@ export function createOpenCodeAdapter(
               recordingFailure = { message: 'OpenCode managed recorder 权威消息快照缺少父 user message' }
             }
           }
-          const aggregate = aggregateOpenCodeTurn(info, eventState(request).messages)
+          const aggregate = aggregateOpenCodeTurn(info, eventState(request).messages, await modelContextPromise)
           providerTurnId = request.managedRecorder ? parentId : aggregate.providerTurnId
           emitOpenCodeTurnResponseParts(
             request,
@@ -1347,6 +1396,11 @@ export function createOpenCodeAdapter(
             reasoningTokens: aggregateUnavailable ? undefined : aggregate.reasoningTokens,
             cacheReadTokens: aggregateUnavailable ? undefined : aggregate.cacheReadTokens,
             cacheCreationTokens: aggregateUnavailable ? undefined : aggregate.cacheCreationTokens,
+            contextTokens: aggregateUnavailable ? undefined : aggregate.contextTokens,
+            contextModel: aggregateUnavailable ? undefined : aggregate.contextModel,
+            contextProvider: aggregateUnavailable ? undefined : aggregate.contextProvider,
+            contextUsageSource: aggregateUnavailable ? undefined : aggregate.contextUsageSource,
+            contextUsageQuality: aggregateUnavailable ? undefined : aggregate.contextUsageQuality,
             costUsd: cost,
             costSource: cost === undefined ? undefined : 'provider_reported',
             costConfidence: cost === undefined ? undefined : 'provider_reported',

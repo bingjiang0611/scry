@@ -211,6 +211,11 @@ function legacyAgentCall(call: TurnCall): boolean {
   return typeof input?.agentThreadId === 'string' || typeof input?.agentPath === 'string'
 }
 
+function isSkillReferenceCall(call: TurnCall): boolean {
+  const input = call.input && typeof call.input === 'object' ? call.input as Record<string, unknown> : undefined
+  return ['skill_file', 'skill_path_in_bash', 'skill_path_in_command'].includes(String(input?.source ?? ''))
+}
+
 function toolCategory(call: TurnCall): 'tool' | 'agent' {
   if (call.category === 'agent') return 'agent'
   if (call.category === 'tool') return 'tool'
@@ -230,6 +235,10 @@ function orderedCalls(selected: AgentTurnRecord[]): { calls: OrderedCall[]; qual
     }
     if (availableArray(record.skills)) {
       for (const call of record.skills.value) {
+        if (isSkillReferenceCall(call)) {
+          exact = false
+          continue
+        }
         if (call.order == null) exact = false
         calls.push({ call, category: 'skill', record, sourceIndex: sourceIndex++ })
       }
@@ -267,7 +276,11 @@ function summarizeCalls(selected: AgentTurnRecord[]) {
         else ordinary.push(call)
       }
     }
-    if (availableArray(record.skills)) skills.push(...record.skills.value)
+    if (availableArray(record.skills)) {
+      const retained = record.skills.value.filter((call) => !isSkillReferenceCall(call))
+      if (retained.length !== record.skills.value.length) classificationExact = false
+      skills.push(...retained)
+    }
     if (availableArray(record.mcps)) mcps.push(...record.mcps.value)
   }
 
@@ -556,7 +569,16 @@ function summarizeUsage(selected: AgentTurnRecord[]) {
   const apiDurationMs = sumKnown(values.map((value) => value.apiDurationMs))
   const totalTokens = inputTokens == null && outputTokens == null ? null : (inputTokens ?? 0) + (outputTokens ?? 0)
   const models = countRows(values.flatMap((value) => value.model ? [value.model] : []))
-  let context: { used: number; window: number; pct: number; remaining: number; model?: string } | null = null
+  let context: {
+    used: number
+    window: number
+    pct: number
+    remaining: number
+    model?: string
+    provider?: string
+    source?: string
+    quality?: 'exact' | 'inferred'
+  } | null = null
   const contextKnownTurns = selected.filter((record) =>
     finite(record.usage.value?.contextTokens) &&
     finite(record.usage.value?.contextWindow) &&
@@ -570,7 +592,10 @@ function summarizeUsage(selected: AgentTurnRecord[]) {
       window: value.contextWindow,
       pct: Math.round((value.contextTokens / value.contextWindow) * 100),
       remaining: Math.max(0, value.contextWindow - value.contextTokens),
-      ...(value.model ? { model: value.model } : {})
+      ...(value.contextModel ?? value.model ? { model: value.contextModel ?? value.model } : {}),
+      ...(value.contextProvider ? { provider: value.contextProvider } : {}),
+      source: value.contextUsageSource ?? 'legacy_unattributed_context',
+      quality: value.contextUsageQuality ?? 'inferred'
     }
     break
   }
@@ -589,7 +614,9 @@ function summarizeUsage(selected: AgentTurnRecord[]) {
       knownTurns: contextKnownTurns,
       totalTurns: selected.length,
       complete: selected.length > 0 && contextKnownTurns === selected.length,
-      quality: contextKnownTurns > 0 ? 'exact' : 'unavailable'
+      quality: contextKnownTurns > 0
+        ? selected.some((record) => record.usage.value?.contextUsageQuality !== 'exact') ? 'inferred' : 'exact'
+        : 'unavailable'
     } satisfies SummaryCoverage,
     coverage: evidenceCoverage(selected, (record) => record.usage)
   }

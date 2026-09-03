@@ -1,6 +1,7 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import {
+  contextUsageEvidence,
   mcpCallsForEvent,
   type TraceEvent,
   type DbStats,
@@ -600,19 +601,17 @@ export function OverviewPanel({
   // Context% = 最近一轮的当前上下文占用（顶层 usage 完整 prompt）÷ 模型窗口。诚实的"现在装了多满"。
   const ctx = useMemo(() => {
     for (let i = results.length - 1; i >= 0; i--) {
-      const r = results[i]
-      const modelRow = r.modelUsage?.find((row) => row.contextWindow != null && row.contextWindow > 0)
-      const win = modelRow?.contextWindow
-      const model = modelRow?.model
-      if (r.contextTokens != null && win != null && win > 0)
+      const evidence = contextUsageEvidence(results[i])
+      if (evidence) {
         return {
-          used: r.contextTokens,
-          win,
-          pct: Math.round((r.contextTokens / win) * 100),
-          model,
-          quality: r.contextUsageQuality,
-          source: r.contextUsageSource
+          used: evidence.used,
+          win: evidence.window,
+          pct: Math.round((evidence.used / evidence.window) * 100),
+          model: evidence.model,
+          quality: evidence.quality,
+          source: evidence.source
         }
+      }
     }
     return null
   }, [results])
@@ -803,7 +802,11 @@ export function OverviewPanel({
                 </div>
                 <div className="sub">
                   已占 {ctx.pct}% · 残余 {fmtTok(Math.max(0, ctx.win - ctx.used))} · {
-                    ctx.quality === 'inferred' ? '推断：Provider usage 比例换算' : '最近一轮 Provider 上下文用量'
+                    ctx.quality === 'inferred'
+                      ? '推断：Provider usage 比例换算'
+                      : ctx.quality === 'exact'
+                        ? '精确：最近一轮 Provider 上下文用量'
+                        : '旧记录：证据质量未标记'
                   }
                 </div>
               </>

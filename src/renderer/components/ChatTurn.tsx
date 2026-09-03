@@ -3,7 +3,7 @@ import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } fro
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
-import { isOverviewToolErrorEvent, isSkillReferenceEvidence } from '@shared/logical-calls'
+import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import {
   isIncompleteRunTermination,
   normalizeAgentQuestionRequest,
@@ -517,7 +517,8 @@ function SubagentBlock({
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   turnDone?: boolean
 }) {
-  const hasPendingQuestion = items.some((event) =>
+  const visibleItems = useMemo(() => logicalCallEventsForTurn(items), [items])
+  const hasPendingQuestion = visibleItems.some((event) =>
     pendingQuestions.some((request) => request.runId === event.runId && request.questionId === event.toolUseId)
   )
   const [open, setOpen] = useState(hasPendingQuestion)
@@ -525,10 +526,8 @@ function SubagentBlock({
   useEffect(() => {
     if (hasPendingQuestion) setOpen(true)
   }, [hasPendingQuestion])
-  const toolN = items.filter((e) =>
-    (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') && !isSkillReferenceEvidence(e)
-  ).length
-  const maxDur = Math.max(1, ...items.map((e) => e.durationMs ?? 0))
+  const toolN = aggregateCalls(visibleItems).totalCalls
+  const maxDur = Math.max(1, ...visibleItems.map((e) => e.durationMs ?? 0))
   return (
     <div className="subagent">
       <button type="button" className="subhead" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((current) => (hasPendingQuestion ? true : !current))}>
@@ -551,8 +550,7 @@ function SubagentBlock({
               live = ''
               liveKey = ''
             }
-            for (const ev of items) {
-              if (isSkillReferenceEvidence(ev)) continue
+            for (const ev of visibleItems) {
               if (ev.kind === 'model' && ev.stage === 'text_delta') {
                 if (!live) liveKey = ev.id
                 live += ev.text ?? ''
@@ -1227,6 +1225,7 @@ function AssistantTurnImpl({
         return r ? { ...e, output: r.text, isError: r.isError ?? e.isError, durationMs: r.durationMs ?? e.durationMs } : e
       })
   }, [turn.items])
+  const visibleItems = useMemo(() => logicalCallEventsForTurn(items), [items])
   const result = resultOf({ items })
   const turnDiffView = turnDiffViewOf(items)
   const turnDiff = turnDiffView?.turnDiff
@@ -1250,20 +1249,15 @@ function AssistantTurnImpl({
     (turnDiff?.status === 'captured' && turnDiff.files.length > 0) ||
     turnDiff?.status === 'timeout' ||
     turnDiff?.status === 'failed'
-  const toolItems = items.filter((e) =>
-    (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') && !isSkillReferenceEvidence(e)
-  )
+  const toolItems = visibleItems.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
   const maxDur = Math.max(1, ...toolItems.map((e) => e.durationMs ?? 0))
-  const toolN = useMemo(
-    () => aggregateCalls(logicalCallEventsForTurn(items)).totalCalls,
-    [items]
-  )
+  const toolN = useMemo(() => aggregateCalls(visibleItems).totalCalls, [visibleItems])
   const errs = turn.items.filter(isOverviewToolErrorEvent).length
   const runtime = runtimeTitleForTurn(turn)
   // P1：subagent 内部步骤（parentToolUseId 指向父 Task tool_use）按父分组，折叠进父 Task 卡
   const childrenByParent = useMemo(() => {
     const m = new Map<string, TraceEvent[]>()
-    for (const ev of items) {
+    for (const ev of visibleItems) {
       if (ev.parentToolUseId) {
         const arr = m.get(ev.parentToolUseId) ?? []
         arr.push(ev)
@@ -1271,14 +1265,14 @@ function AssistantTurnImpl({
       }
     }
     return m
-  }, [items])
+  }, [visibleItems])
   const { knownToolUseIds, topLevelToolUseIds, interventions, interventionsByQuestionId, itemRunIds } = useMemo(() => {
     const known = new Set<string>()
     const topLevel = new Set<string>()
     const interventionList: NonNullable<TraceEvent['intervention']>[] = []
     const interventionMap = new Map<string, NonNullable<TraceEvent['intervention']>>()
     const runIds = new Set<string>()
-    for (const event of items) {
+    for (const event of visibleItems) {
       runIds.add(event.runId)
       if (event.intervention) {
         interventionList.push(event.intervention)
@@ -1295,13 +1289,13 @@ function AssistantTurnImpl({
       interventionsByQuestionId: interventionMap,
       itemRunIds: runIds
     }
-  }, [items])
+  }, [visibleItems])
   const pendingQuestionKeys = useMemo(
     () => new Set(pendingQuestions.map((request) => `${request.runId}\0${request.questionId}`)),
     [pendingQuestions]
   )
   const renderedPendingQuestionKeys = new Set(
-    items
+    visibleItems
       .filter(
         (event) =>
           (!event.parentToolUseId || !knownToolUseIds.has(event.parentToolUseId) || topLevelToolUseIds.has(event.parentToolUseId)) &&
@@ -1384,8 +1378,8 @@ function AssistantTurnImpl({
             </ToolGroup>
           )
         }
-        for (const ev of items) {
-          if (ev.kind === 'harness' || isSkillReferenceEvidence(ev)) continue
+        for (const ev of visibleItems) {
+          if (ev.kind === 'harness') continue
           // 只有父调用真实存在时才折叠。Provider 给出孤儿 parent id 时，仍按顶层事件渲染，
           // 避免一条坏归因把后续根 agent 内容整段吞掉。
           if (ev.parentToolUseId && knownToolUseIds.has(ev.parentToolUseId)) continue

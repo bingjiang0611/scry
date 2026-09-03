@@ -67,6 +67,10 @@ export interface TurnUsage {
   apiDurationMs?: number
   contextTokens?: number
   contextWindow?: number
+  contextModel?: string
+  contextProvider?: string
+  contextUsageSource?: string
+  contextUsageQuality?: 'exact' | 'inferred'
   model?: string
 }
 

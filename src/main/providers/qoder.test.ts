@@ -810,20 +810,67 @@ describe('Qoder provider adapter', () => {
     expect(getContextUsage).toHaveBeenCalledOnce()
     expect(events.find((event) => event.kind === 'harness')).toMatchObject({
       contextTokens: 103_176,
+      contextModel: 'ultimate',
+      contextUsageSource: 'qoder_control',
+      contextUsageQuality: 'exact',
       modelUsage: [expect.objectContaining({ model: 'ultimate', contextWindow: 1_000_000 })],
       runtimeMetadata: expect.objectContaining({
-        contextUsageSource: 'qoder_control',
-        contextUsageQuality: 'exact',
         contextUsagePercentage: 10.3176,
         rawContextWindow: 1_000_000
       })
     })
   })
 
+  it('uses Qoder input_tokens without double-counting cache when control context is unavailable', async () => {
+    const getContextUsage = vi.fn().mockRejectedValue(new Error('control unavailable'))
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          usage: {
+            input_tokens: 103_176,
+            cache_read_input_tokens: 103_046,
+            output_tokens: 301
+          },
+          modelUsage: {
+            ultimate: {
+              inputTokens: 103_176,
+              cacheReadInputTokens: 103_046,
+              outputTokens: 301,
+              contextWindow: 0
+            }
+          }
+        }
+      },
+      getContextUsage,
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const events: TraceEvent[] = []
+
+    await createQoderAdapter().run({
+      runId: 'run-context-fallback', prompt: 'work', attachments: [], emit: (event) => events.push(event)
+    }).promise
+
+    expect(getContextUsage).toHaveBeenCalledOnce()
+    expect(events.find((event) => event.kind === 'harness')).toMatchObject({
+      contextTokens: 103_176,
+      contextModel: 'ultimate',
+      contextProvider: 'qoder',
+      contextUsageSource: 'qoder_sdk_usage',
+      contextUsageQuality: 'exact',
+      modelUsage: [expect.objectContaining({ model: 'ultimate', contextWindow: 0 })]
+    })
+  })
+
   it('enriches archived Qoder context from native usage ratio as inferred window evidence', async () => {
     sdk.getSessionMessages.mockResolvedValue([{
       type: 'assistant', timestamp: '2026-09-03T03:00:10.000Z',
-      message: { model: 'ultimate', usage: { input_tokens: 103_176, context_usage_ratio: 0.103176 } }
+      message: {
+        model: 'ultimate',
+        usage: { input_tokens: 103_176, cache_read_input_tokens: 103_046, context_usage_ratio: 0.103176 }
+      }
     }])
     const adapter = createQoderAdapter()
     const turns = await adapter.sessionEvidence!.enrich(
@@ -840,10 +887,11 @@ describe('Qoder provider adapter', () => {
 
     expect(turns[0].items[0]).toMatchObject({
       contextTokens: 103_176,
+      contextModel: 'ultimate',
+      contextUsageSource: 'qoder_native_transcript',
+      contextUsageQuality: 'inferred',
       modelUsage: [{ model: 'ultimate', contextWindow: 1_000_000 }],
       runtimeMetadata: expect.objectContaining({
-        contextUsageSource: 'qoder_native_transcript',
-        contextUsageQuality: 'inferred',
         contextUsagePercentage: 10.3176
       })
     })
@@ -909,6 +957,31 @@ describe('Qoder provider adapter', () => {
         { model: 'performance', contextWindow: 0 },
         { model: 'ultimate', contextWindow: 1_000_000 }
       ]
+    })
+  })
+
+  it('does not attach model-less Qoder context evidence to the first row of a multi-model result', async () => {
+    sdk.getSessionMessages.mockResolvedValue([{
+      type: 'assistant', timestamp: '2026-09-03T03:00:10.000Z',
+      message: { usage: { input_tokens: 100_000, context_usage_ratio: 0.1 } }
+    }])
+    const turns = await createQoderAdapter().sessionEvidence!.enrich(
+      { providerId: 'qoder', cwd: '/repo', externalSessionId: 'session-1' },
+      [{
+        userText: 'work',
+        items: [{
+          id: 'multi', runId: 'run-history', ts: '2026-09-03T03:00:12.000Z',
+          kind: 'harness', stage: 'result',
+          modelUsage: [{ model: 'performance' }, { model: 'ultimate' }]
+        }]
+      }]
+    )
+
+    expect(turns[0].items[0]).toMatchObject({
+      contextTokens: 100_000,
+      contextModel: undefined,
+      contextUsageQuality: 'inferred',
+      modelUsage: [{ model: 'performance' }, { model: 'ultimate' }]
     })
   })
 

@@ -31,6 +31,25 @@ describe('owned session deletion', () => {
     expect(result.retained).toContain('workspace .scry/ canonical turn evidence')
   })
 
+  it('deletes the database turn outbox before other replayable projections', async () => {
+    const order: string[] = []
+    const result = await deleteOwnedSessionData(['run-1'], {
+      resolveRunIds: () => ({ status: 'ready', runIds: ['run-1'] }),
+      deleteManaged: async () => { order.push('managed'); return { failed: [] } },
+      deleteOutbox: () => { order.push('outbox'); return { failed: [], preservedInvalid: 1 } },
+      deleteDatabase: () => { order.push('database'); return { status: 'deleted', runIds: ['run-1'] } },
+      deleteUsage: () => { order.push('usage'); return { preservedInvalid: 0 } },
+      deleteAttachments: () => ({}),
+      deleteTranscripts: () => ({ failed: [] }),
+      deleteCatalog: () => order.push('catalog')
+    })
+    expect(result.ok).toBe(true)
+    expect(order.indexOf('managed')).toBeLessThan(order.indexOf('outbox'))
+    expect(order.indexOf('outbox')).toBeLessThan(order.indexOf('usage'))
+    expect(result.deleted).toContain('database turn outbox')
+    expect(result.retained).toContain('1 个无法归属的损坏 database turn outbox')
+  })
+
   it('keeps the catalog retry handle when any owned store fails', async () => {
     const deleteCatalog = vi.fn()
     const deleteTranscripts = vi.fn(() => ({ failed: [] }))

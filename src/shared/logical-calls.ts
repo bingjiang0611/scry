@@ -14,8 +14,8 @@ export function isSkillReferenceEvidence(event: TraceEvent): boolean {
   return source === 'skill_file' || source === 'skill_path_in_bash' || source === 'skill_path_in_command'
 }
 
-// Skill trace 同时承载真实调用、注入和文件路径引用。调用统计只接受 Provider 明确调用
-// 或 Skill 注入；单纯读取、diff、git show 中出现路径仍保留为推断证据，但不能冒充执行。
+// 旧 Skill trace 可能同时包含真实调用、注入和文件路径引用。调用统计只接受 Provider 明确调用
+// 或 Skill 注入；单纯读取、diff、git show 中出现路径不能冒充执行。
 export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
   const skillEvents = new Map<string, TraceEvent[]>()
   for (const event of items) {

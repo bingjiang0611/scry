@@ -19,6 +19,7 @@ import {
 } from '../../shared/runtime'
 import {
   classifyTool,
+  contextUsageEvidence,
   fileOpOf,
   mcpPayloadFailed,
   parseMcp,
@@ -28,6 +29,7 @@ import {
 import { AgentRuntimeError } from '../run-outcome'
 import { execFileText, resolveCommandOnPath, sanitizeProviderEnv, shellEnv } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
+import type { ParsedTurn } from '../normalize'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 import { effortOption } from './run-controls'
@@ -552,6 +554,47 @@ function skillCatalog(probe: PiProbe): SkillMeta[] {
   })
 }
 
+function piModelContextWindows(models: JsonRecord[]): Map<string, number> {
+  const windows = new Map<string, number>()
+  for (const model of models) {
+    const provider = typeof model.provider === 'string' ? model.provider : undefined
+    const id = typeof model.id === 'string' ? model.id : undefined
+    const contextWindow = number(model.contextWindow)
+    if (provider && id && contextWindow != null && contextWindow > 0) {
+      windows.set(`${provider}\0${id}`, contextWindow)
+    }
+  }
+  return windows
+}
+
+function enrichPiHistory(turns: ParsedTurn[], windows: ReadonlyMap<string, number>): ParsedTurn[] {
+  if (windows.size === 0) return turns
+  return turns.map((turn) => ({
+    ...turn,
+    items: turn.items.map((event) => {
+      if (event.kind !== 'harness' || event.stage !== 'result' || event.contextTokens == null) return event
+      if (contextUsageEvidence(event)) return event
+      const model = event.contextModel ?? (event.modelUsage?.length === 1 ? event.modelUsage[0].model : undefined)
+      const provider = event.upstreamProvider ?? (typeof event.runtimeMetadata?.provider === 'string' ? event.runtimeMetadata.provider : undefined)
+      if (!model || !provider) return event
+      const contextWindow = windows.get(`${provider}\0${model}`)
+      if (!contextWindow) return event
+      return {
+        ...event,
+        contextModel: model,
+        contextProvider: provider,
+        contextUsageSource: 'pi_rpc_archive_usage+current_model_catalog',
+        contextUsageQuality: 'inferred',
+        modelUsage: (event.modelUsage ?? [{ model, upstreamProvider: provider, usageSource: 'pi_rpc' }]).map((row) =>
+          row.model === model && (!row.upstreamProvider || row.upstreamProvider === provider)
+            ? { ...row, upstreamProvider: row.upstreamProvider ?? provider, contextWindow }
+            : row
+        )
+      }
+    })
+  }))
+}
+
 function runControlCatalog(probe: PiProbe): AgentRunControlCatalog {
   const current = record(probe.state.model)
   const currentKey = `${String(current.provider ?? '')}\0${String(current.id ?? '')}`
@@ -637,13 +680,21 @@ interface UsageAggregate {
   allCostKnown: boolean
   byModel: Map<string, ModelUsageRow>
   lastContextTokens?: number
+  lastContextModel?: string
+  lastContextProvider?: string
+  contextUsageSource?: string
+  contextUsageQuality?: 'exact' | 'inferred'
   lastStopReason?: string
   lastError?: string
   upstreamProvider?: string
   model?: string
 }
 
-function addAssistantUsage(aggregate: UsageAggregate, message: JsonRecord): void {
+function addAssistantUsage(
+  aggregate: UsageAggregate,
+  message: JsonRecord,
+  contextWindows: ReadonlyMap<string, number>
+): void {
   const usage = record(message.usage)
   const input = number(usage.input)
   const output = number(usage.output)
@@ -651,23 +702,33 @@ function addAssistantUsage(aggregate: UsageAggregate, message: JsonRecord): void
   const cacheWrite = number(usage.cacheWrite)
   const reasoning = number(usage.reasoning)
   const cost = number(record(usage.cost).total)
+  const model = typeof message.model === 'string' ? message.model : 'unknown'
+  const provider = typeof message.provider === 'string' ? message.provider : undefined
+  const key = `${provider ?? ''}\0${model}`
   aggregate.input += input ?? 0
   aggregate.output += output ?? 0
   aggregate.cacheRead += cacheRead ?? 0
   aggregate.cacheWrite += cacheWrite ?? 0
   aggregate.reasoning += reasoning ?? 0
-  aggregate.lastContextTokens = (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+  if ([input, cacheRead, cacheWrite].some((value) => value != null)) {
+    const billingProvider = billingProviderForUpstream(provider)
+    aggregate.lastContextTokens = billingProvider === 'codex' || billingProvider === 'openai'
+      ? (input ?? 0)
+      : (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+    aggregate.lastContextModel = model
+    aggregate.lastContextProvider = provider
+    aggregate.contextUsageSource = 'pi_rpc_assistant_usage'
+    aggregate.contextUsageQuality = 'exact'
+  }
   if (cost == null) aggregate.allCostKnown = false
   else aggregate.cost += cost
-  const model = typeof message.model === 'string' ? message.model : 'unknown'
-  const provider = typeof message.provider === 'string' ? message.provider : undefined
-  const key = `${provider ?? ''}\0${model}`
   const existing = aggregate.byModel.get(key) ?? {
     model,
     billingProvider: billingProviderForUpstream(provider),
     upstreamProvider: provider,
     usageSource: 'pi_rpc'
   }
+  existing.contextWindow = contextWindows.get(key) ?? existing.contextWindow
   existing.inputTokens = (existing.inputTokens ?? 0) + (input ?? 0)
   existing.outputTokens = (existing.outputTokens ?? 0) + (output ?? 0)
   existing.cacheReadTokens = (existing.cacheReadTokens ?? 0) + (cacheRead ?? 0)
@@ -712,6 +773,7 @@ async function runPiAgent(
     allCostKnown: true,
     byModel: new Map()
   }
+  const modelContextWindows = new Map<string, number>()
   const abortController = new AbortController()
   const toolNames = new Map<string, string>()
   const toolStarts = new Map<string, number>()
@@ -750,7 +812,7 @@ async function runPiAgent(
     if (event.type === 'message_end') {
       const message = record(event.message)
       if (message.role !== 'assistant') return
-      addAssistantUsage(usage, message)
+      addAssistantUsage(usage, message, modelContextWindows)
       if (!streamedText || !streamedThinking) {
         const content = Array.isArray(message.content) ? message.content.map(record) : []
         for (const block of content) {
@@ -868,6 +930,14 @@ async function runPiAgent(
       await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })
     }
     if (request.effort) await rpc.send({ type: 'set_thinking_level', level: request.effort })
+    try {
+      const available = record((await rpc.send({ type: 'get_available_models' })).data).models
+      if (Array.isArray(available)) {
+        for (const [key, value] of piModelContextWindows(available.map(record))) modelContextWindows.set(key, value)
+      }
+    } catch {
+      // Model-window telemetry is optional; usage remains available without Context%.
+    }
     const explicitSkillEvent = await proveExplicitPiSkill(rpc, request)
     const entryBaseline = await piEntryBaseline(rpc)
     if (request.managedRecorder) {
@@ -960,6 +1030,10 @@ async function runPiAgent(
       cacheCreationTokens: usage.cacheWrite,
       reasoningTokens: usage.reasoning,
       contextTokens: usage.lastContextTokens,
+      contextModel: usage.lastContextModel,
+      contextProvider: usage.lastContextProvider,
+      contextUsageSource: usage.contextUsageSource,
+      contextUsageQuality: usage.contextUsageQuality,
       costUsd: usage.allCostKnown && usage.byModel.size > 0 ? usage.cost : undefined,
       costSource: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
       costConfidence: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
@@ -1080,6 +1154,16 @@ export function createPiAdapter(options: {
         forceKill: () => state.rpc?.forceTerminate(),
         getExternalSessionId: () => state.sessionId,
         getProviderTurnId: () => state.providerTurnId
+      }
+    },
+    sessionEvidence: {
+      async enrich(context, turns) {
+        try {
+          const probe = await probePiAgent(await profileForContext(context), context.cwd)
+          return enrichPiHistory(turns, piModelContextWindows(probe.models))
+        } catch {
+          return turns
+        }
       }
     },
     skills: {

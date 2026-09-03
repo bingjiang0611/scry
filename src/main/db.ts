@@ -23,6 +23,7 @@ import { maskSecrets, type TraceEvent, type DbStats } from '../shared/trace'
 import {
   SPAN_COLS,
   MODEL_USAGE_COLS,
+  DELETE_MODEL_USAGE_FOR_SPAN_SQL,
   FILE_OP_COLS,
   HUMAN_INTERVENTION_COLS,
   PROVIDER_RAW_USAGE_COLS,
@@ -114,7 +115,7 @@ export interface RecordTurnArgs {
   billingProvider?: BillingProvider
 }
 
-const turnOutboxDir = (): string => join(app.getPath('userData'), 'db-turn-outbox')
+const turnOutboxDir = (userDataDir = app.getPath('userData')): string => join(userDataDir, 'db-turn-outbox')
 const turnOutboxPath = (runId: string): string => join(
   turnOutboxDir(),
   `${createHash('sha256').update(runId).digest('hex')}.json`
@@ -138,6 +139,81 @@ function queueTurnForDatabase(args: RecordTurnArgs): void {
     try { unlinkSync(temporary) } catch { /* temporary may already be renamed */ }
     throw error
   }
+}
+
+interface TurnOutboxSessionIdentity {
+  providerId: ProviderId
+  cwd: string
+  externalSessionId: string
+}
+
+interface TurnOutboxScan {
+  entries: Array<{ path: string; args: RecordTurnArgs }>
+  invalid: string[]
+  failed: Array<{ path: string; error: string }>
+}
+
+function scanTurnOutbox(userDataDir: string): TurnOutboxScan {
+  const dir = turnOutboxDir(userDataDir)
+  const scan: TurnOutboxScan = { entries: [], invalid: [], failed: [] }
+  let names: string[]
+  try {
+    names = readdirSync(dir).filter((name) => /^[a-f0-9]{64}\.json$/.test(name)).sort()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      scan.failed.push({ path: dir, error: error instanceof Error ? error.message : String(error) })
+    }
+    return scan
+  }
+  for (const name of names) {
+    const path = join(dir, name)
+    let raw: string
+    try {
+      raw = readFileSync(path, 'utf8')
+    } catch (error) {
+      scan.failed.push({ path, error: error instanceof Error ? error.message : String(error) })
+      continue
+    }
+    try {
+      const args = JSON.parse(raw) as RecordTurnArgs
+      if (args.runId && Array.isArray(args.items)) scan.entries.push({ path, args })
+      else scan.invalid.push(path)
+    } catch {
+      scan.invalid.push(path)
+    }
+  }
+  return scan
+}
+
+function outboxBelongsToSession(args: RecordTurnArgs, identity: TurnOutboxSessionIdentity): boolean {
+  return args.providerId === identity.providerId && args.cwd === identity.cwd && args.sessionId === identity.externalSessionId
+}
+
+export function turnOutboxSessionRunIds(
+  userDataDir: string,
+  identity: TurnOutboxSessionIdentity
+): string[] {
+  return scanTurnOutbox(userDataDir).entries
+    .filter((entry) => outboxBelongsToSession(entry.args, identity))
+    .map((entry) => entry.args.runId)
+}
+
+export function deleteTurnOutboxSessionRows(
+  userDataDir: string,
+  identity: TurnOutboxSessionIdentity,
+  runIds: ReadonlySet<string>
+): { failed: Array<{ path: string; error: string }>; preservedInvalid: number } {
+  const scan = scanTurnOutbox(userDataDir)
+  const failed = [...scan.failed]
+  for (const entry of scan.entries) {
+    if (!runIds.has(entry.args.runId) || !outboxBelongsToSession(entry.args, identity)) continue
+    try {
+      unlinkSync(entry.path)
+    } catch (error) {
+      failed.push({ path: entry.path, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { failed, preservedInvalid: scan.invalid.length }
 }
 
 function replayDatabaseTurnOutbox(): void {
@@ -254,6 +330,7 @@ export function recordTurn(args: RecordTurnArgs, options: { queueOnFailure?: boo
       priceVersions
     })
     const insSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
+    const deleteMu = db.prepare(DELETE_MODEL_USAGE_FOR_SPAN_SQL)
     const insMu = db.prepare(sqlInsert('model_usage', MODEL_USAGE_COLS))
     const insFo = db.prepare(
       `INSERT OR IGNORE INTO file_ops (${FILE_OP_COLS.join(', ')}) VALUES (${FILE_OP_COLS.map(() => '?').join(', ')})`
@@ -278,6 +355,7 @@ export function recordTurn(args: RecordTurnArgs, options: { queueOnFailure?: boo
         )
       }
       for (const r of rows.spans) insSpan.run(...(r as never[]))
+      for (const spanId of new Set(rows.modelUsage.map((row) => row[0]))) deleteMu.run(spanId)
       for (const r of rows.modelUsage) insMu.run(...(r as never[]))
       for (const r of rows.fileOps) insFo.run(...(r as never[]))
       for (const r of rows.interventions) insIntervention.run(...(r as never[]))
