@@ -570,6 +570,17 @@ describe('每轮 Git 工作树快照', () => {
     }
   }, 30_000)
 
+  it('bare 仓库降级为 not_git：合并后的 rev-parse 以 exit 128 失败而非返回 false', async () => {
+    const bare = await mkdtemp(join(tmpdir(), 'scry-turn-diff-bare-'))
+    try {
+      await pexecFile('git', ['init', '-q', '--bare', '.'], { cwd: bare })
+      const capture = await beginGitTurnDiff(bare)
+      expect({ status: capture.status, reason: capture.reason }).toEqual({ status: 'unavailable', reason: 'not_git' })
+    } finally {
+      await rm(bare, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('非 Git、无 HEAD 与 deadline 分别给出稳定降级原因', async () => {
     const plain = await mkdtemp(join(tmpdir(), 'scry-turn-diff-plain-'))
     const emptyRepo = await initRepo()
