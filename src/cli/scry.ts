@@ -6,7 +6,14 @@ import type { ProviderId } from '../shared/provider.js'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
-import { RECORDER_VERSION, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, commitNotificationStatus, exportRecords, listRecords, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import {
+  commitHookEnv,
+  inspectCommitHookBundle,
+  resolveCommitHookActivation,
+  revokeCommitHookGrant,
+  writeCommitHookGrant
+} from '../core/turn-recorder/commit-hook-grant.js'
 import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { initWorkspace } from './workspace-init.js'
@@ -24,7 +31,7 @@ export interface ParsedArgs {
 }
 
 const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot'])
-const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version'])
+const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'quiet', 'show', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
@@ -89,7 +96,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry recorder hook|recover|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -180,6 +187,104 @@ async function initCommand(args: ParsedArgs): Promise<number> {
   if (result.codexTrustRequired) process.stdout.write('Codex：重启后在这个项目中执行 /hooks，并信任项目 Hook。\n')
   process.stdout.write(`验证命令：scry turns list --workspace "${result.workspace}"\n`)
   return store.ok ? 0 : 4
+}
+
+/**
+ * Exit codes: 0 ok (trusted, host-provided, or nothing configured), 2 storage/config
+ * unavailable, 3 approval required, 4 fingerprint mismatch, 5 bundle invalid. Approval is
+ * never implicit: `trust` without --yes only prints the bundle it would authorize.
+ */
+async function commitHookCommand(args: ParsedArgs): Promise<number> {
+  const action = args.positionals[1] ?? 'status'
+  if (!['status', 'trust', 'revoke'].includes(action)) {
+    throw new Error('usage: scry commit-hook status|trust|revoke [--yes] [--show]')
+  }
+  const workspace = workspaceOf(args)
+  const location = await resolveRecorderLocation(workspace)
+  if (!location.valid) {
+    print({
+      action,
+      workspace,
+      status: 'unavailable',
+      reason: location.reason,
+      ...(location.detail ? { detail: location.detail } : {})
+    })
+    return 2
+  }
+  const { config, dataRoot, workspaceRoot } = location
+  if (action === 'revoke') {
+    const result = await revokeCommitHookGrant(workspaceRoot)
+    print({ action, workspace: workspaceRoot, ...result })
+    return 0
+  }
+  if (action === 'trust') {
+    if (!config.commitHook) {
+      print({ action, workspace: workspaceRoot, status: 'not-configured', detail: 'scry.config.json has no commitHook' })
+      return 2
+    }
+    let bundle
+    try {
+      bundle = await inspectCommitHookBundle(workspaceRoot, config.commitHook)
+    } catch (error) {
+      print({
+        action,
+        workspace: workspaceRoot,
+        status: 'bundle-invalid',
+        detail: error instanceof Error ? error.message : String(error)
+      })
+      return 5
+    }
+    const approved = args.flags.has('yes') && !args.flags.has('show')
+    if (!approved) {
+      print({
+        action,
+        workspace: workspaceRoot,
+        status: 'approval-required',
+        entry: bundle.entry,
+        entryPath: bundle.entryPath,
+        fingerprint: bundle.fingerprint,
+        files: bundle.files,
+        warning: 'the approved entry runs with your privileges and can read every record under the data dir',
+        next: 'review the bundle above, then re-run with --yes'
+      })
+      return 3
+    }
+    const written = await writeCommitHookGrant(workspaceRoot, bundle)
+    print({
+      action,
+      workspace: workspaceRoot,
+      status: 'trusted',
+      grantPath: written.grantPath,
+      entryPath: bundle.entryPath,
+      fingerprint: bundle.fingerprint,
+      next: 'run `scry recorder restart --workspace <root>` so a running daemon picks up the grant'
+    })
+    return 0
+  }
+  const activation = await resolveCommitHookActivation(workspaceRoot, config)
+  const notifications = await commitNotificationStatus(dataRoot, commitHookEnv(activation, process.env))
+  print({
+    action,
+    workspace: workspaceRoot,
+    configured: Boolean(config.commitHook),
+    entry: config.commitHook?.entry ?? null,
+    activation,
+    notifications: {
+      ackedThrough: notifications.ackedThrough,
+      notifyBacklog: activation.status === 'trusted' || activation.status === 'host-provided'
+        ? notifications.notifyBacklog
+        : null,
+      backlogEvidence: activation.status === 'trusted' || activation.status === 'host-provided'
+        ? 'available'
+        : 'unavailable: no activated commit hook, records are retained and never delivered'
+    }
+  })
+  switch (activation.status) {
+    case 'configured-not-trusted': return 3
+    case 'fingerprint-mismatch': return 4
+    case 'bundle-invalid': return 5
+    default: return 0
+  }
 }
 
 async function recorderCommand(args: ParsedArgs): Promise<number> {
@@ -364,13 +469,14 @@ export async function runScryCli(argv: string[]): Promise<number> {
         return 0
       }
     case 'init': return initCommand(args)
+    case 'commit-hook': return commitHookCommand(args)
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
     case 'doctor': return doctorCommand(args)
     case 'integrations': return integrationsCommand(args)
     case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry init|recorder|turns|doctor|integrations|upgrade ...')
+      throw new Error('usage: scry init|commit-hook|recorder|turns|doctor|integrations|upgrade ...')
   }
 }
 

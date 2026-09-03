@@ -48,6 +48,7 @@ scry integrations status-pi
 
 ```bash
 scry doctor --workspace "$PWD"
+scry commit-hook status --workspace "$PWD"
 scry turns list --workspace "$PWD"
 scry turns show <sequence|recordId> --workspace "$PWD"
 scry turns timeline <sequence|recordId> --workspace "$PWD"
@@ -62,7 +63,22 @@ scry --help
 
 Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，CLI 会让首事件直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。`--start-daemon` 只保留给旧集成兼容。Agent、skill 和用户提示词不应主动调用这些记录命令。
 
-需要在正式 record 落盘后唤醒外部 uploader 时，`scry.config.json` 的 `commitHook` 必须声明 workspace 相对的 `entry` 与完整 `files` 清单。Scry App 首次使用会展示完整 bundle 指纹；批准后只执行复制到 Scry userData 的冻结副本，入口或任一依赖变化都会重新询问。CLI/daemon 不会自动信任 workspace 配置；其宿主需显式设置绝对、可执行的 `SCRY_RECORDER_COMMIT_HOOK`，并在修改后执行 `scry recorder restart --workspace <repo>`。record 持久化且 runtime 清理后，recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON，并仅在回调 exit 0 后推进 durable ACK；失败、超时或进程中断会在下一次 hook/recovery 重试。
+需要在正式 record 落盘后唤醒外部 uploader 时，`scry.config.json` 的 `commitHook` 必须声明 workspace 相对的 `entry` 与完整 `files` 清单。Scry App 首次使用会展示完整 bundle 指纹；批准后只执行复制到 Scry userData 的冻结副本，入口或任一依赖变化都会重新询问。record 持久化且 runtime 清理后，recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON，并仅在回调 exit 0 后推进 durable ACK；失败、超时或进程中断会在下一次 hook/recovery 重试。
+
+独立 CLI 不会因为仓库里写了 `commitHook` 就执行它——仓库内配置不能自我授权。必须显式授权一次：
+
+```bash
+scry commit-hook trust --workspace "$PWD"          # 只打印将被授权的 entry、files 与指纹
+scry commit-hook trust --yes --workspace "$PWD"    # 确认授权
+scry commit-hook status --workspace "$PWD"
+scry commit-hook revoke --workspace "$PWD"
+```
+
+授权记录写在仓库之外（默认 `~/.scry/grants/<workspace-hash>.json`，`0600`，可用 `SCRY_GRANT_DIR` 覆盖），只包含 canonical workspace 路径、entry 绝对路径与 bundle 指纹。每次投递前都会重新校验 entry 与全部 `files` 的内容指纹：未授权、指纹不符或 bundle 非法时一律 fail closed，不执行任何程序，record 照常保留待后续投递，原因写入 `.scry/logs/recorder.log`。授权后修改 hook 需重新 `trust`，并执行 `scry recorder restart --workspace <repo>` 让运行中的 daemon 生效。宿主（Scry App）自行设置 `SCRY_RECORDER_COMMIT_HOOK` 时优先生效，CLI 不覆盖。
+
+`commit-hook status` 退出码：0 已激活或未配置，2 配置/存储不可用，3 待授权，4 指纹不符，5 bundle 非法。未激活时 `notifyBacklog` 显式为 `null` 且标注 `unavailable`，不会伪装成 0。
+
+被授权的 entry 以你自己的权限运行，并且能读取数据目录下的全部 record 正文。授权是执行授权，不是脱敏机制。
 
 Scry 启动且启用精确记录的 Claude、Codex、Qoder、OpenCode 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
 身份，Scry App 在 result、Hook 与 diff 全部收齐后，把 trace archive 使用的同一份

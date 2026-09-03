@@ -134,6 +134,8 @@ scry CLI
 2. `SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT` 变化 → `ackedThrough` 归零 → 全量重放（`store.ts:236-240`）。
 3. hook 已 exit 0 但 `writeJsonAtomic(statePath)`（`store.ts:251`）前崩溃 → 该条必然重投。
 
+实测确认（P0-0 验证）：篡改 entry 后重新授权，`ackedThrough` 归零并把 1–4 全部重放，实际投递行数为 2 + 4 = 6。**这不是 bug，是必须写进合同的语义。**
+
 **合同措辞**：交付语义为 at-least-once；去重键为 `(workspace, recordId)`；`sequence` 只保证同 workspace 内单调，**不**保证「恰好投递一次」。Uploader 必须按 `recordId` 唯一约束 + 幂等 upsert。
 
 ### 5.3 drain 预算（v2 新增，必须改实现）
@@ -184,7 +186,12 @@ Windows 支持 / 兼容矩阵
 
 ## 7. 工作项
 
-### P0-0（前置）`scry commit-hook trust`
+### P0-0（前置）`scry commit-hook trust` — ✅ 已实现
+
+实现位置：`src/core/turn-recorder/commit-hook-grant.ts`（授权与激活）、`src/cli/scry.ts`（`commit-hook status|trust|revoke`）、`src/core/turn-recorder/recorder.ts`（drain 前解析激活，非 trusted 一律 fail closed 并写 `recorder.log`）、`src/core/turn-recorder/store.ts`（`commitNotificationStatus`）。
+
+实测（临时仓库，`SCRY_GRANT_DIR` 隔离）：未授权时完成一轮 → entry **未执行**、record 保留、`status` 退出 3 且 `notifyBacklog: null`；`trust --yes` 后新一轮 → 积压的第 1 条与新的第 2 条一起投递、`ackedThrough: 2`；篡改 entry 后 → `fingerprint-mismatch`、退出 4、新轮次不投递、篡改脚本从未运行、日志留下原因；重新 `trust --yes` → 恢复投递。
+
 
 - 计算 `entry` + `files` 全清单的内容 hash（可含 inode/size），生成 `fingerprint`。
 - 授权记录落**仓库外**可信位置（如 `~/.scry/grants/<workspace-hash>.json`，`0600`），内容为 canonical workspace 路径 + entry 绝对路径 + fingerprint + 批准时间。

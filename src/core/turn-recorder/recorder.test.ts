@@ -6,7 +6,9 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
-import { commitRecord, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
+import { commitNotificationStatus, commitRecord, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
+import { inspectCommitHookBundle, writeCommitHookGrant } from './commit-hook-grant'
+import { resolveRecorderLocation } from './config'
 
 const roots: string[] = []
 const pexecFile = promisify(execFile)
@@ -2378,4 +2380,65 @@ describe('nested Git turn diff', () => {
       expect.objectContaining({ path: join(await realpath(root), 'a.txt'), added: 1, deleted: 1, patchStatus: 'captured' })
     ])
   }, 35_000)
+})
+
+describe('CLI-side commit hook activation gate', () => {
+  async function gateWorkspace(): Promise<{ root: string; grantDir: string; env: NodeJS.ProcessEnv; hook: { path: string; capture: string } }> {
+    const root = await workspace()
+    const hook = await commitHook(root)
+    const grantDir = join(root, '..', `grants-${safeKey(root)}`)
+    roots.push(grantDir)
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, unknown>
+    config.commitHook = { entry: 'commit-hook.sh', files: ['commit-hook.sh'] }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    const env: NodeJS.ProcessEnv = { ...process.env, SCRY_GRANT_DIR: grantDir }
+    delete env.SCRY_RECORDER_COMMIT_HOOK
+    return { root, grantDir, env, hook }
+  }
+
+  async function completeTurnWithEnv(root: string, sessionId: string, env: NodeJS.ProcessEnv): Promise<void> {
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: payload(sessionId, { prompt: 'gate' }), env })
+    await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: payload(sessionId, { timestamp: '2026-07-19T12:00:01.000Z' }), env })
+  }
+
+  it('配置了 commitHook 但未授权时，绝不执行 entry，记录仍完整保留', async () => {
+    const { root, env, hook } = await gateWorkspace()
+
+    await completeTurnWithEnv(root, 'gate-untrusted', env)
+
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
+    await expect(access(hook.capture)).rejects.toThrow()
+    await expect(access(join(root, '.scry', 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
+    const status = await commitNotificationStatus(join(root, '.scry'), env)
+    expect(status).toMatchObject({ hookConfigured: false, ackedThrough: null, notifyBacklog: 1 })
+  })
+
+  it('显式授权后才激活投递，并推进 durable ACK', async () => {
+    const { root, env, hook } = await gateWorkspace()
+    const location = await resolveRecorderLocation(root)
+    if (!location.valid || !location.config.commitHook) throw new Error('fixture config invalid')
+    await writeCommitHookGrant(root, await inspectCommitHookBundle(root, location.config.commitHook), env)
+
+    await completeTurnWithEnv(root, 'gate-trusted', env)
+
+    const notification = JSON.parse((await readFile(hook.capture, 'utf8')).trim()) as Record<string, unknown>
+    expect(notification).toMatchObject({ event: 'record-committed', sessionId: 'gate-trusted', sequence: 1 })
+    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+      .resolves.toContain('"ackedThrough":1')
+  })
+
+  it('授权后 entry 被篡改则 fail closed，并在 recorder 日志留下原因', async () => {
+    const { root, env, hook } = await gateWorkspace()
+    const location = await resolveRecorderLocation(root)
+    if (!location.valid || !location.config.commitHook) throw new Error('fixture config invalid')
+    await writeCommitHookGrant(root, await inspectCommitHookBundle(root, location.config.commitHook), env)
+    await writeFile(hook.path, `#!/bin/sh\ncat >> ${JSON.stringify(hook.capture)}\necho tampered\nexit 0\n`)
+    await chmod(hook.path, 0o700)
+
+    await completeTurnWithEnv(root, 'gate-tampered', env)
+
+    await expect(access(hook.capture)).rejects.toThrow()
+    await expect(readFile(join(root, '.scry', 'logs', 'recorder.log'), 'utf8'))
+      .resolves.toContain('commit hook not activated (fingerprint-mismatch)')
+  })
 })

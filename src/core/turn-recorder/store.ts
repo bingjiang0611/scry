@@ -211,6 +211,38 @@ async function invokeCommitHook(
   })
 }
 
+export interface CommitNotificationStatus {
+  hookConfigured: boolean
+  hookFingerprint: string
+  ackedThrough: number | null
+  notifyBacklog: number
+}
+
+/**
+ * Durable ACK cursor plus backlog for the configured commit hook. `ackedThrough` is null
+ * when no state file matches the current hook fingerprint, so callers can distinguish
+ * "nothing acknowledged yet" from "acknowledged through sequence 0".
+ */
+export async function commitNotificationStatus(
+  dataRoot: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<CommitNotificationStatus> {
+  const hookConfigured = Boolean(env.SCRY_RECORDER_COMMIT_HOOK?.trim())
+  const fingerprint = configuredCommitHookFingerprint(env)
+  const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
+  const acked = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint &&
+    Number.isSafeInteger(state.ackedThrough) && state.ackedThrough >= 0
+    ? state.ackedThrough
+    : null
+  const files = await recordFiles(dataRoot)
+  return {
+    hookConfigured,
+    hookFingerprint: fingerprint,
+    ackedThrough: acked,
+    notifyBacklog: files.filter((file) => file.sequence > (acked ?? 0)).length
+  }
+}
+
 export async function drainCommitNotifications(
   dataRoot: string,
   env: NodeJS.ProcessEnv = process.env
