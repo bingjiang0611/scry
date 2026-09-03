@@ -523,10 +523,9 @@ describe('scry turns project', () => {
     const projected = JSON.parse(text) as Record<string, any>
 
     expect(Object.keys(projected).sort()).toEqual([
-      'capturePolicy', 'compactions', 'completedAt', 'counts', 'dangerousOperations', 'diffStats', 'durationMs',
-      'errors', 'evidence', 'interventions', 'modelTiming', 'policyVersion', 'provider', 'recordId',
-      'recorderVersion', 'schemaVersion', 'sequence', 'sessionId', 'startedAt', 'status', 'turnIndex', 'usage',
-      'workspaceIdHash'
+      'compactions', 'completedAt', 'counts', 'dangerousOperations', 'diffStats', 'durationMs', 'errors',
+      'evidence', 'interventions', 'modelTiming', 'policyVersion', 'provider', 'recordId', 'recorderVersion',
+      'schemaVersion', 'sequence', 'sessionId', 'startedAt', 'status', 'turnIndex', 'usage', 'workspaceIdHash'
     ])
     expect(text).not.toContain(SECRET_PROMPT)
     expect(text).not.toContain('SECRET-TOOL-OUTPUT')
@@ -576,33 +575,24 @@ describe('scry turns project', () => {
   })
 })
 
-describe('scry capture presets', () => {
-  it('默认 local-full，show 报告 preset 与 policyVersion', async () => {
+describe('scry capture', () => {
+  it('show 输出解析后的生效配置，并说明它不覆盖工具入参与 diff', async () => {
     const root = await workspace()
     const stdout = captureStdout()
     await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(0)
     const result = JSON.parse(stdout.text()) as Record<string, any>
-    expect(result).toMatchObject({ preset: 'local-full', policyVersion: 'local-full@1' })
-    expect(result.effective).toMatchObject({ prompt: true, assistant: true, toolOutput: 'summary' })
-    // The fixture config disables diff, so it is reported as an explicit override of the baseline.
-    expect(result.overrides).toEqual(['diff'])
+    expect(result.effective).toMatchObject({ prompt: true, assistant: true, toolOutput: 'summary', hooks: true })
+    expect(result.note).toContain('tool inputs')
   })
 
-  it('team-minimal 关闭正文采集，record 落 capturePolicy 且证据标 disabled', async () => {
+  it('显式关闭正文后 record 以 disabled 解释缺失，无需额外 policy 字段', async () => {
     const root = await workspace()
     const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
-    config.capture = { preset: 'team-minimal' }
+    config.capture = { prompt: false, assistant: false, toolOutput: 'none' }
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
 
-    const stdout = captureStdout()
-    await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(0)
-    expect((JSON.parse(stdout.text()) as Record<string, any>).effective).toMatchObject({
-      prompt: false, assistant: false, toolOutput: 'none', diff: true
-    })
-    vi.restoreAllMocks()
-
-    const SECRET = 'MINIMAL-SHOULD-NOT-STORE-THIS'
-    const payload = { session_id: 'min-1', timestamp: '2026-07-19T12:00:00.000Z', prompt: SECRET }
+    const SECRET = 'SHOULD-NOT-BE-STORED'
+    const payload = { session_id: 'cap-1', timestamp: '2026-07-19T12:00:00.000Z', prompt: SECRET }
     await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
     await handleRecorderHook({
       provider: 'claude',
@@ -610,31 +600,15 @@ describe('scry capture presets', () => {
       workspace: root,
       payload: { ...payload, timestamp: '2026-07-19T12:00:01.000Z' }
     })
-    const [record] = await readdir(join(root, '.scry', 'records'))
-    const stored = await readFile(join(root, '.scry', 'records', record), 'utf8')
+    const [file] = await readdir(join(root, '.scry', 'records'))
+    const stored = await readFile(join(root, '.scry', 'records', file), 'utf8')
     expect(stored).not.toContain(SECRET)
-    const parsed = JSON.parse(stored) as Record<string, any>
-    expect(parsed.capturePolicy).toBe('team-minimal@1')
-    // Disabled is a distinct state from "captured but empty".
-    expect(parsed.user.status).toBe('disabled')
+    const record = JSON.parse(stored) as Record<string, any>
+    // `disabled` + reason already records that config, not the provider, withheld it.
+    expect(record.user.status).toBe('disabled')
+    expect(record.user.omissionReason).toContain('config')
+    expect(record.capturePolicy).toBeUndefined()
   })
-
-  it('显式字段覆盖 preset，非法 preset 报错', async () => {
-    const root = await workspace()
-    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
-    config.capture = { preset: 'team-minimal', prompt: true }
-    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
-    const stdout = captureStdout()
-    await runScryCli(['capture', 'show', '--workspace', root])
-    const result = JSON.parse(stdout.text()) as Record<string, any>
-    expect(result.effective.prompt).toBe(true)
-    expect(result.overrides).toEqual(['prompt'])
-
-    config.capture = { preset: 'nope' }
-    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
-    await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(2)
-  })
-
 })
 
 describe('scry records archive', () => {
@@ -731,7 +705,7 @@ describe('scry support-bundle', () => {
     expect(text).not.toContain(root)
     expect(bundle.workspace.idHash).toMatch(/^sha256:[a-f0-9]{32}$/)
     expect(bundle.workspace.configFingerprint).toMatch(/^sha256:[a-f0-9]{32}$/)
-    expect(bundle.workspace.capturePolicy).toBe('local-full@1')
+    expect(bundle.workspace.capture).toMatchObject({ prompt: true, assistant: true, toolOutput: 'summary' })
     expect(bundle.recorder).toMatchObject({ enabled: true })
     expect(bundle.recorder.store).toMatchObject({ ok: true, records: 1 })
     expect(bundle.omitted.length).toBeGreaterThan(0)

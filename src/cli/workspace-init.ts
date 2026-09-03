@@ -3,14 +3,12 @@ import { constants } from 'node:fs'
 import { access, chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { CAPTURE_PRESETS, resolveRecorderLocation, type CapturePreset } from '../core/turn-recorder/config.js'
+import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { piIntegrationStatus } from './pi-integration.js'
 
 export type InitProvider = 'claude' | 'codex' | 'qoder' | 'opencode'
 
 export interface WorkspaceInitOptions {
-  /** Capture preset for a freshly created config; ignored when a config already exists. */
-  preset?: CapturePreset
   workspace: string
   providers?: string
   cliPath: string
@@ -138,14 +136,14 @@ function workspaceId(workspace: string): string {
   return basename(workspace).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace'
 }
 
-function defaultConfig(workspace: string, preset: CapturePreset): string {
+function defaultConfig(workspace: string): string {
   return `${JSON.stringify({
     schemaVersion: 1,
     enabled: true,
     workspaceId: workspaceId(workspace),
     dataDir: '.scry',
     repositories: { mode: 'discover-nested-git', maxDepth: 2 },
-    capture: { preset, ...CAPTURE_PRESETS[preset] }
+    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
   }, null, 2)}\n`
 }
 
@@ -375,7 +373,7 @@ export async function initWorkspace(options: WorkspaceInitOptions): Promise<Work
   const configPath = join(workspace, 'scry.config.json')
   const existingConfig = await readOptional(configPath)
   if (existingConfig == null) {
-    planned.set(configPath, { source: defaultConfig(workspace, options.preset ?? 'local-full') })
+    planned.set(configPath, { source: defaultConfig(workspace) })
   } else {
     const location = await resolveRecorderLocation(workspace)
     if (!location.valid) throw new Error(`${configPath} 无效：${location.detail ?? location.reason}`)

@@ -10,7 +10,7 @@ import { aggregateTurnEvidence } from './aggregate.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
 import { recordProviderActivity } from './provider-activity.js'
-import { capturePolicyVersion, discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
+import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
@@ -1827,7 +1827,6 @@ async function finalizeOpenTurn(
     recordKind: 'agent_turn',
     recordId,
     recorderVersion: RECORDER_VERSION,
-    capturePolicy: capturePolicyVersion(enablement.config.capture),
     workspace: { id: enablement.config.workspaceId, root: enablement.workspaceRoot },
     provider: {
       id: open.provider,
