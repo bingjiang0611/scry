@@ -970,6 +970,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             void q?.interrupt().catch(() => {})
           },
           forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
+          // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
+          forceKillScope: 'run_scoped',
           getExternalSessionId: () => externalSessionId,
           getProviderTurnId: () => undefined
         }
@@ -1301,6 +1303,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         promise,
         interrupt,
         forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
+        // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
+        forceKillScope: 'run_scoped',
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: currentProviderTurnId,
         getForkTurnId: () => forkTurnId

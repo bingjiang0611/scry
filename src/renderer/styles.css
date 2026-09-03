@@ -8216,6 +8216,31 @@ textarea:focus-visible,
   font-size: 12px;
 }
 
+/* 停止阶段是请求进度而不是终止证据：升级中用 warn，Provider 未确认终止用 bad，
+   并且允许提示换行完整显示，避免把「可能仍在后台运行」这类关键限定截断。 */
+.run-status[data-stop-tone='stopping'] .run-status-dot,
+.run-status[data-stop-tone='unsettled'] .run-status-dot {
+  animation: none;
+}
+
+.run-status[data-stop-tone='stopping'] .run-status-dot {
+  background: var(--warn);
+}
+
+.run-status[data-stop-tone='unsettled'] .run-status-dot {
+  background: var(--bad);
+}
+
+.run-status[data-stop-tone='unsettled'] .run-status-left b {
+  color: var(--bad);
+}
+
+.run-status[data-stop-tone='stopping'] .run-status-hint,
+.run-status[data-stop-tone='unsettled'] .run-status-hint {
+  white-space: normal;
+  overflow: visible;
+}
+
 /* 运行配置分组：会话环境（目录/Provider）与运行配置（模型/强度/权限）之间 */
 .run-group-sep {
   width: 1px;

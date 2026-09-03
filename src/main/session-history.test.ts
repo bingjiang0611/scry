@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TraceArchive } from './transcript-archive'
-import { mergeSessionTurns } from './session-history'
+import {
+  DEFAULT_SESSION_HISTORY_PAGE_SIZE,
+  MAX_SESSION_HISTORY_PAGE_SIZE,
+  mergeSessionTurns,
+  sessionHistoryPage,
+  type LoadedSessionTurn
+} from './session-history'
 
 const roots: string[] = []
 
@@ -590,5 +596,63 @@ describe('session history merge', () => {
       error: 'Request interrupted by user',
       errorHint: '可以继续发送'
     })
+  })
+})
+
+
+// 契约范围：sessionHistoryPage 只对「已经在内存里的权威轮次序列」做确定性切片。
+// 它收窄的是 IPC 载荷与 renderer 挂载量，不减少 main 侧的解析开销或常驻内存。
+describe('session history pagination contract (delivery slice only, not source-level paging)', () => {
+  const history = (count: number): LoadedSessionTurn[] =>
+    Array.from({ length: count }, (_unused, index) => ({
+      runId: `run-${index}`,
+      userText: `turn ${index}`,
+      items: [{ id: `ev-${index}`, runId: `run-${index}`, ts: '', kind: 'model', stage: 'text', text: `t${index}` }],
+      done: true
+    }))
+
+  it('默认只交付最近一页给 renderer，并显式标注仍有更早轮次', () => {
+    const turns = history(500)
+    const page = sessionHistoryPage(turns)
+    expect(page.turns).toHaveLength(DEFAULT_SESSION_HISTORY_PAGE_SIZE)
+    expect(page.offset).toBe(500 - DEFAULT_SESSION_HISTORY_PAGE_SIZE)
+    expect(page.totalTurns).toBe(500)
+    expect(page.hasOlder).toBe(true)
+    expect(page.completeness).toBe('partial')
+    // 最近优先且页内保持时间升序。
+    expect(page.turns[0].runId).toBe('run-460')
+    expect(page.turns.at(-1)?.runId).toBe('run-499')
+  })
+
+  it('相邻页严格相邻且能一直回溯到第一轮，不丢任何轮次', () => {
+    const turns = history(95)
+    const collected: LoadedSessionTurn[] = []
+    let before: number | undefined
+    for (let guard = 0; guard < 10; guard++) {
+      const page = sessionHistoryPage(turns, { before, limit: 40 })
+      expect(page.offset + page.turns.length).toBe(before ?? turns.length)
+      collected.unshift(...page.turns)
+      if (!page.hasOlder) {
+        expect(page.offset).toBe(0)
+        break
+      }
+      before = page.offset
+    }
+    expect(collected.map((turn) => turn.runId)).toEqual(turns.map((turn) => turn.runId))
+  })
+
+  it('小于一页的会话是 complete，没有更早轮次', () => {
+    const page = sessionHistoryPage(history(3))
+    expect(page).toMatchObject({ offset: 0, totalTurns: 3, hasOlder: false, completeness: 'complete' })
+    expect(sessionHistoryPage([])).toMatchObject({ totalTurns: 0, hasOlder: false, completeness: 'complete' })
+  })
+
+  it('限制页大小并夹取越界 before，避免 renderer 传入任意值放大负载', () => {
+    const turns = history(1000)
+    expect(sessionHistoryPage(turns, { limit: 10_000 }).turns).toHaveLength(MAX_SESSION_HISTORY_PAGE_SIZE)
+    expect(sessionHistoryPage(turns, { limit: 0 }).turns).toHaveLength(1)
+    expect(sessionHistoryPage(turns, { limit: Number.NaN }).turns).toHaveLength(DEFAULT_SESSION_HISTORY_PAGE_SIZE)
+    expect(sessionHistoryPage(turns, { before: 5_000, limit: 5 }).offset).toBe(995)
+    expect(sessionHistoryPage(turns, { before: -3, limit: 5 })).toMatchObject({ offset: 0, turns: [] })
   })
 })

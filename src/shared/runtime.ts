@@ -117,6 +117,51 @@ export interface AgentRunControls {
   permissionMode: AgentPermissionMode
 }
 
+/**
+ * 硬杀（forceKill）的真实作用范围。它是 Provider transport 的事实，不是偏好：
+ * - run_scoped：硬杀只会终止这一个 run 自己持有的进程/连接。
+ * - shared_transport：transport 由同一 cwd 的其他并发 run 复用（Codex app-server client、
+ *   OpenCode server），硬杀会连带终止无关 run，因此自动升级不允许发出它。
+ */
+export type AgentForceKillScope = 'run_scoped' | 'shared_transport'
+
+/**
+ * 停止请求的真实进度。它描述 Scry 对 Provider 做了什么以及拿到了什么证据，
+ * 不代表「这一轮已经结束」——只有 Provider runtime 真正 settle 才是终止证据。
+ * - interrupt_requested：已发出协作式取消，等待 Provider 收口。
+ * - force_kill_requested：优雅窗口耗尽，已升级到 run-scoped forceKill，仍在等待 settle。
+ * - no_safe_force_kill：优雅窗口耗尽，但硬杀只能作用于共享 transport，会波及无关 run；
+ *   Scry 没有发出硬杀，这一轮的终止仍然未被 Provider 确认。
+ * - provider_unsettled：forceKill 窗口也耗尽，Provider 未确认终止（可能仍在后台运行）。
+ * - settled：Provider runtime 已 settle，终止有证据。
+ */
+export type AgentStopPhase =
+  | 'interrupt_requested'
+  | 'force_kill_requested'
+  | 'no_safe_force_kill'
+  | 'provider_unsettled'
+  | 'settled'
+
+export interface AgentStopEscalationWindow {
+  gracefulMs: number
+  forceKillMs: number
+}
+
+export interface AgentStopState {
+  runId: string
+  providerId: ProviderId
+  runtimeProvider: RuntimeProvider
+  agentProfileId?: string
+  phase: AgentStopPhase
+  requestedAt: string
+  updatedAt: string
+  /** no_safe_force_kill 的事实原因，避免把「共享 transport」「句柄未建立」和「硬杀调用失败」混为一谈。 */
+  forceKillBlockReason?: 'shared_transport' | 'scope_unavailable' | 'force_kill_failed'
+  /** Provider runtime 是否已 settle。与 phase 分开保存，避免把「已请求」读成「已终止」。 */
+  providerSettled: boolean
+  window: AgentStopEscalationWindow
+}
+
 export interface AgentForkLastTurn {
   replaceRunId: string
   replaceProviderTurnId: string

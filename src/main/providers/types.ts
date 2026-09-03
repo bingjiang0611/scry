@@ -10,6 +10,7 @@ import type {
   SkillMeta
 } from '../../shared/provider'
 import type {
+  AgentForceKillScope,
   AgentForkLastTurn,
   AgentInputAttachment,
   AgentModelRef,
@@ -38,6 +39,12 @@ export interface ProviderRunHandle {
   promise: Promise<ProviderRunResult>
   interrupt: () => void
   forceKill: () => void
+  /**
+   * forceKill 实际会杀掉什么。必填：只有 adapter 能证明硬杀仅限于本 run 时
+   * 才能写 run_scoped；复用 client/server 的 transport 必须写 shared_transport，
+   * 自动停止升级会据此拒绝发出会波及其他 run 的硬杀。
+   */
+  forceKillScope: AgentForceKillScope
   getExternalSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
   getForkTurnId?: () => string | undefined

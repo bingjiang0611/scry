@@ -55,6 +55,39 @@ describe('RunRegistry', () => {
     expect(registry.unsettledStates()).toEqual([])
   })
 
+  // live trace 降级恢复需要一个忽略 done 的权威快照口：done 之后 focusedState 会返回 null，
+  // 那样终态被跳过的事件永远补不回来。registry entry 存在期间 focusedSnapshot 必须仍可用。
+  it('focusedSnapshot 在 UI done 之后、registry 移除之前仍给出权威快照', () => {
+    const registry = new RunRegistry<
+      { runId: string; done: boolean },
+      { runId: string }
+    >()
+    const state = { runId: 'run-a', done: false, providerSettled: false }
+    registry.register(state, { runId: 'run-a' })
+    expect(registry.focusedSnapshot()).toEqual(state)
+
+    state.done = true
+    expect(registry.focusedState()).toBeNull()
+    expect(registry.focusedSnapshot()).toEqual(state)
+
+    registry.remove('run-a')
+    expect(registry.focusedSnapshot()).toBeNull()
+  })
+
+  it('focusedSnapshot 没有焦点或焦点已移除时返回 null，不返回别的 run', () => {
+    const registry = new RunRegistry<
+      { runId: string; done: boolean },
+      { runId: string }
+    >()
+    expect(registry.focusedSnapshot()).toBeNull()
+    registry.register({ runId: 'run-a', done: false }, { runId: 'run-a' })
+    registry.register({ runId: 'run-b', done: true }, { runId: 'run-b' })
+    // register 会把焦点切到最新注册的 run。
+    expect(registry.focusedSnapshot()?.runId).toBe('run-b')
+    registry.focus(null)
+    expect(registry.focusedSnapshot()).toBeNull()
+  })
+
   // 终态 enrichment（turn_diff / session_diff）是在 runState.done 翻 true 之后才落的，
   // 那一刻 isFocused 已经是 false，但 registry entry 要到 runtime promise settle 才移除。
   it('done 之后不再 focused，但仍是 renderer 正在看的 run（终态 enrichment 可发布）', () => {

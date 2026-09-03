@@ -954,6 +954,8 @@ describe('Codex provider adapter', () => {
       emit: (event) => events.push(event)
     })
 
+    // app-server client 按 cwd 复用，硬杀会断掉同一 client 上的其他并发 run。
+    expect(handle.forceKillScope).toBe('shared_transport')
     await vi.waitFor(() => expect(notify).toBeTypeOf('function'))
     notify?.('item/started', {
       threadId: 'thread-other',

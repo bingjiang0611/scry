@@ -1,9 +1,40 @@
-import type { DetectedAgent, ParsedTurn, ProjectMeta, ScryApi, SessionMeta, SessionRef } from '../preload'
+import type {
+  DetectedAgent,
+  ParsedTurn,
+  ProjectMeta,
+  ScryApi,
+  SessionHistoryPage,
+  SessionHistoryPageRequest,
+  SessionMeta,
+  SessionRef,
+  TraceBacklogState
+} from '../preload'
 
-export type { DetectedAgent, ParsedTurn, ProjectMeta, SessionMeta, SessionRef }
+export type {
+  DetectedAgent,
+  ParsedTurn,
+  ProjectMeta,
+  SessionHistoryPage,
+  SessionHistoryPageRequest,
+  SessionMeta,
+  SessionRef,
+  TraceBacklogState
+}
 export type { McpMeta, SkillMeta } from '@shared/provider'
 
-type OptionalBridgeMethod = 'rendererReady' | 'setTheme' | 'detectFast' | 'catalogHealth' | 'runControls' | 'onFocusedRun' | 'onDataUpdated'
+type OptionalBridgeMethod =
+  | 'rendererReady'
+  | 'setTheme'
+  | 'detectFast'
+  | 'catalogHealth'
+  | 'runControls'
+  | 'onFocusedRun'
+  | 'onDataUpdated'
+  | 'onStopState'
+  | 'loadSessionOlder'
+  | 'onTraceHealth'
+  | 'traceResynchronized'
+  | 'focusedRunSnapshot'
 type RendererScryApi = Omit<ScryApi, OptionalBridgeMethod> & Partial<Pick<ScryApi, OptionalBridgeMethod>>
 
 declare global {

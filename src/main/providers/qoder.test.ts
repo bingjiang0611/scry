@@ -1065,6 +1065,8 @@ describe('Qoder provider adapter', () => {
     })
 
     await root
+    // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀仅限本 run。
+    expect(handle.forceKillScope).toBe('run_scoped')
     handle.interrupt()
     await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
     expect(events.filter((event) => event.tool === 'Agent' && event.stage === 'tool_result')).toContainEqual(expect.objectContaining({

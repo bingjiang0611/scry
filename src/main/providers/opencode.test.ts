@@ -870,6 +870,8 @@ describe('OpenCode provider adapter', () => {
         attachments: [],
         emit: () => {}
       })
+      // server 按 cwd 复用，forceClose() 会终止其上所有并发 run。
+      expect(handle.forceKillScope).toBe('shared_transport')
       await expect(handle.promise).rejects.toMatchObject({
         name: 'AgentRuntimeError',
         brief: {

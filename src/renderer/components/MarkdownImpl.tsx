@@ -110,9 +110,11 @@ const baseComponents: Components = {
     return <a {...props} href={safe} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{content}</a>
   },
   img: ({ src, alt }) => {
+    // 只放行内联 data:/blob: 图片（远程图片仍然阻断）；懒加载 + 异步解码避免长会话里
+    // 一次性解码所有历史图片阻塞主线程。
     const safe = safeImageSrc(typeof src === 'string' ? src : undefined)
     return safe
-      ? <img src={safe} alt={alt ?? ''} />
+      ? <img src={safe} alt={alt ?? ''} loading="lazy" decoding="async" />
       : <span role="img" aria-label={alt ? `已阻止远程图片：${alt}` : '已阻止远程图片'}>[远程图片已阻止]</span>
   },
   table: ({ node: _node, children, ...props }) => (

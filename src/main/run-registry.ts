@@ -51,6 +51,16 @@ export class RunRegistry<
     return state && !state.done ? state : null
   }
 
+  /**
+   * 被聚焦 run 的权威快照，忽略 done。终态 enrichment 到 registry 移除之间仍然有效，
+   * 所以 UI 已经收口但 runtime promise 还没 settle 时也能拿到完整事件序列。
+   * 与 focusedState 不同：那个刻意只返回「仍在运行」的 run 供 UI 恢复运行态。
+   */
+  focusedSnapshot(): State | null {
+    if (!this.focusedRunId) return null
+    return this.entries.get(this.focusedRunId)?.state ?? null
+  }
+
   isFocused(runId: string): boolean {
     const state = this.entries.get(runId)?.state
     return this.focusedRunId === runId && Boolean(state && !state.done)

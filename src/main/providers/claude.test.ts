@@ -472,6 +472,8 @@ describe('Claude provider adapter', () => {
       emit: vi.fn()
     })
 
+    // SDK query 每轮自己 spawn CLI 子进程：硬杀仅限本 run。
+    expect(handle.forceKillScope).toBe('run_scoped')
     await expect(handle.promise).resolves.toMatchObject({
       externalSessionId: 'session-1',
       providerTurnId: 'root-prompt-id'

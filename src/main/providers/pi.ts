@@ -1152,6 +1152,8 @@ export function createPiAdapter(options: {
           setTimeout(() => state.rpc?.abort(), 2_000)
         },
         forceKill: () => state.rpc?.forceTerminate(),
+        // 每轮 run 自己 spawn 一个 Pi RPC 子进程：SIGKILL 不会波及其他 run。
+        forceKillScope: 'run_scoped',
         getExternalSessionId: () => state.sessionId,
         getProviderTurnId: () => state.providerTurnId
       }

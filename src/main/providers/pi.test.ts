@@ -575,6 +575,8 @@ describe('Pi RPC Provider', () => {
         runId: 'run-hang', prompt: 'hang', cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', emit: vi.fn()
       })
+      // 每轮 run 自己 spawn Pi RPC 子进程：硬杀仅限本 run。
+      expect(handle.forceKillScope).toBe('run_scoped')
       setTimeout(() => handle.interrupt(), 50)
       await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
     })
