@@ -478,7 +478,7 @@ Uploader 的退避、oversized、401、outbox 幂等测试属独立包。
 | W4 `doctor` 稳定 schema + 冻结退出码 | ✅ |
 | W10 records 容量文档 | ✅ README「容量与保留」 |
 | W7a `turns project` 只读投影（P1 首位） | ✅ `team-metadata@1` |
-| W8 `capture` preset + record `capturePolicy` | ✅ `local-full` / `team-minimal`（`capture show`；`explain` 经消融删除） |
+| W8 `capture` preset + record `capturePolicy` | ❌ 已删除（见 §12.6） |
 | W9 `support-bundle` | ✅ 脱敏诊断包 |
 | W10 `records archive` + 归档 floor | ✅ |
 | `integrations repair` | ✅ 按 handler id 重写 |
@@ -486,6 +486,18 @@ Uploader 的退避、oversized、401、outbox 幂等测试属独立包。
 | W6 `import` | ⏭ 未做（需先定记录归属） |
 
 P0 未做版本升级：`0.2.31` 保持不变，等准备发布时一次性升 `0.3.0`（并按 §11 公告存量安装需人工 `scry upgrade`）。
+
+## 12.6 已撤销：capture preset 与 capturePolicy
+
+`team-minimal` preset、`CAPTURE_PRESETS` 注册表、`init --preset` 与记录上的 `capturePolicy` 字段已全部删除。撤销理由：
+
+1. **零能力增益**：`{"prompt":false,"assistant":false,"toolOutput":"none"}` 本来就能配出完全相同的效果，preset 只是给这组值起名。
+2. **命名夸大保护力**：实测确认（`recorder.ts:1674`、`aggregate.ts:70`）`toolOutput: 'none'` 只关工具**输出**摘要；工具**入参**、文件路径与 diff patch 仍会落盘。叫 `team-minimal` 会让接入方以为敏感内容已被移除。
+3. **`capturePolicy` 是第二套同义状态**：证据模型已经用 `disabled` + `omissionReason: ... disabled by config` 区分「配置关掉」与「Provider 不支持（`unavailable`）」，再存一个策略字段属于重复。
+
+保留 `scry capture show`：它输出解析后的生效值（含配置省略的默认），并明确说明关闭正文不覆盖工具入参与 diff。
+
+若将来真要做「最小采集」，正确做法是在 `aggregate.ts` 增加 `capture.toolInput: 'none' | 'full'` 这一真实开关，而不是给现有值起别名。
 
 ## 13. 落地顺序
 

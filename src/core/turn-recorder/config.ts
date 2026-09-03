@@ -13,8 +13,6 @@ export interface RecorderConfig {
     exclude?: string[]
   }
   capture: {
-    /** Named baseline; explicit fields below still win. */
-    preset: CapturePreset
     prompt: boolean
     assistant: boolean
     toolOutput: 'none' | 'summary'
@@ -24,22 +22,6 @@ export interface RecorderConfig {
   }
 }
 
-/**
- * `local-full` keeps today's behaviour. `team-minimal` stops prompt and assistant bodies from
- * ever reaching disk and drops tool output, for teams that want turn accounting without local
- * transcript copies. Presets only move defaults; an explicit field always overrides them.
- */
-export type CapturePreset = 'local-full' | 'team-minimal'
-
-export const CAPTURE_PRESETS: Record<CapturePreset, Omit<RecorderConfig['capture'], 'preset' | 'patchExcludeBasenames'>> = {
-  'local-full': { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true },
-  'team-minimal': { prompt: false, assistant: false, toolOutput: 'none', diff: true, hooks: true }
-}
-
-/** Written into every record so a stored turn can explain which policy produced it. */
-export function capturePolicyVersion(capture: RecorderConfig['capture']): string {
-  return `${capture.preset}@1`
-}
 
 export interface RecorderCommitHookConfig {
   entry: string
@@ -108,24 +90,21 @@ function parseConfig(raw: unknown): RecorderConfig {
   }
 }
 
+/**
+ * Every field defaults to on; only an explicit `false` (or `toolOutput: 'none'`) turns it off.
+ * A disabled section is recorded as `disabled` with a reason, so the record itself explains what
+ * was captured — no separate policy field is needed to reconstruct that later.
+ */
 function resolveCapture(
   raw: Record<string, unknown>,
   patchExcludeBasenames: string[]
 ): RecorderConfig['capture'] {
-  const presetRaw = typeof raw.preset === 'string' ? raw.preset.trim() : undefined
-  if (presetRaw && !(presetRaw in CAPTURE_PRESETS)) {
-    throw new Error(`capture.preset must be one of: ${Object.keys(CAPTURE_PRESETS).join(', ')}`)
-  }
-  const preset = (presetRaw ?? 'local-full') as CapturePreset
-  const base = CAPTURE_PRESETS[preset]
-  const boolean = (value: unknown, fallback: boolean): boolean => typeof value === 'boolean' ? value : fallback
   return {
-    preset,
-    prompt: boolean(raw.prompt, base.prompt),
-    assistant: boolean(raw.assistant, base.assistant),
-    toolOutput: raw.toolOutput === 'none' ? 'none' : raw.toolOutput === 'summary' ? 'summary' : base.toolOutput,
-    diff: boolean(raw.diff, base.diff),
-    hooks: boolean(raw.hooks, base.hooks),
+    prompt: raw.prompt !== false,
+    assistant: raw.assistant !== false,
+    toolOutput: raw.toolOutput === 'none' ? 'none' : 'summary',
+    diff: raw.diff !== false,
+    hooks: raw.hooks !== false,
     patchExcludeBasenames
   }
 }

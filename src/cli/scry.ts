@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ProviderId } from '../shared/provider.js'
-import { CAPTURE_PRESETS, capturePolicyVersion, resolveRecorderLocation, type CapturePreset } from '../core/turn-recorder/config.js'
+import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
 import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readArchiveState, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
@@ -35,7 +35,7 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout', 'policy', 'before', 'out', 'preset'])
+const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout', 'policy', 'before', 'out'])
 const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -101,7 +101,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode] [--preset local-full|team-minimal]\n  scry capture show\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry capture show\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -169,15 +169,10 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
 async function initCommand(args: ParsedArgs): Promise<number> {
   const scriptPath = process.argv[1]
   if (!scriptPath) throw new Error('cannot locate scry CLI entrypoint')
-  const preset = flag(args, 'preset')
-  if (preset && !(preset in CAPTURE_PRESETS)) {
-    throw new Error(`--preset must be one of: ${Object.keys(CAPTURE_PRESETS).join(', ')}`)
-  }
   const result = await initWorkspace({
     workspace: workspaceOf(args),
     providers: flag(args, 'providers'),
-    cliPath: scriptPath,
-    ...(preset ? { preset: preset as CapturePreset } : {})
+    cliPath: scriptPath
   })
   const enablement = await recorderEnablement(result.workspace)
   if (!enablement.enabled) throw new Error(`recorder 初始化后仍不可用：${enablement.reason}${enablement.detail ? ` (${enablement.detail})` : ''}`)
@@ -338,7 +333,7 @@ function cutoffFrom(value: string): string {
  * has not acknowledged, because moving an undelivered record would silently drop it. Exit codes:
  * 0 done, 2 recorder unavailable, 3 approval required or nothing to archive, 5 refused.
  */
-/** Report the capture policy actually in force: preset baseline plus explicit overrides. */
+/** Report the capture settings actually in force, including defaults the config omits. */
 /**
  * Sanitised diagnostics for a maintainer. Writes to --out when given, otherwise stdout; the
  * payload lists what it deliberately omits so a recipient can see the boundary.
@@ -371,13 +366,9 @@ async function captureCommand(args: ParsedArgs): Promise<number> {
     print({
       action,
       workspace: location.workspaceRoot,
-      preset: capture.preset,
-      policyVersion: capturePolicyVersion(capture),
+      /** Resolved values, including defaults the config file may omit. */
       effective: capture,
-      presetBaseline: CAPTURE_PRESETS[capture.preset],
-      overrides: Object.entries(CAPTURE_PRESETS[capture.preset])
-        .filter(([key, value]) => (capture as Record<string, unknown>)[key] !== value)
-        .map(([key]) => key)
+      note: 'disabling prompt/assistant/toolOutput does not remove tool inputs, file paths or diff patches'
     })
     return 0
   }

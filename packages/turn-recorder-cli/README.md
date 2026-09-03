@@ -163,19 +163,34 @@ scry recorder restart --workspace "$PWD"
 
 ## 采集范围
 
-`capture.preset` 给出基线，显式字段永远覆盖基线：
+默认全部开启；每一项都可以在 `scry.config.json` 里显式关闭：
 
-| preset | prompt | assistant | toolOutput | diff | hooks |
-|---|---|---|---|---|---|
-| `local-full`（默认） | ✅ | ✅ | `summary` | ✅ | ✅ |
-| `team-minimal` | ❌ | ❌ | `none` | ✅ | ✅ |
-
-```bash
-scry init --preset team-minimal
-scry capture show --workspace "$PWD"
+```json
+{
+  "capture": {
+    "prompt": true,
+    "assistant": true,
+    "toolOutput": "summary",
+    "diff": true,
+    "hooks": true,
+    "patchExcludeBasenames": []
+  }
+}
 ```
 
-`team-minimal` 下 prompt 与回复正文**不会落盘**，对应证据段记为 `disabled`（与「采到了但是空」是不同状态）。每条 record 都会写入 `capturePolicy`（如 `team-minimal@1`），因此事后可以解释某条记录当时采了什么；presets 出现之前写的记录没有该字段，`turns project` 会输出 `null` 而不是假设为当前策略。
+```bash
+scry capture show --workspace "$PWD"    # 看解析后的生效值（含配置省略掉的默认）
+```
+
+关闭某项后，对应证据段记为 `disabled` 并带 `omissionReason: ... disabled by config`，与 Provider 不支持导致的 `unavailable`、以及“真的没有发生”的空数组是三个不同状态。因此**不需要**额外的 policy 字段来事后解释某条记录采了什么——记录自己就说明了。
+
+**注意关闭正文并不等于脱敏。** 即使 `prompt`、`assistant` 关闭、`toolOutput` 设为 `none`，以下内容仍会写入记录：
+
+- 工具入参（Bash 命令原文、Edit 的 old/new 字符串等）
+- 文件路径
+- diff patch（除非同时 `diff: false`）
+
+当前没有单独关闭工具入参的开关。如果你的场景要求本地不留任何代码与命令，应设 `diff: false` 并评估工具入参是否可接受，或者不要在该仓库启用 Recorder。
 
 ## 容量与保留
 

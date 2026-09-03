@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { resolveRecorderEnablement, capturePolicyVersion } from '../core/turn-recorder/config.js'
+import { resolveRecorderEnablement, type RecorderConfig } from '../core/turn-recorder/config.js'
 import { resolveCommitHookActivation, commitHookEnv } from '../core/turn-recorder/commit-hook-grant.js'
 import { readProviderActivity, type ProviderActivityFile } from '../core/turn-recorder/provider-activity.js'
 import {
@@ -25,7 +25,7 @@ export interface SupportBundle {
   schemaVersion: 1
   generatedAt: string
   runtime: { recorderVersion: string; nodeVersion: string; platform: string }
-  workspace: { idHash: string; configFingerprint: string | null; capturePolicy: string | null }
+  workspace: { idHash: string; configFingerprint: string | null; capture: RecorderConfig['capture'] | null }
   recorder:
     | { enabled: false; reason: string }
     | {
@@ -96,7 +96,7 @@ export async function collectSupportBundle(
     workspace: {
       idHash: hash(enablement.enabled ? enablement.config.workspaceId : workspaceRoot),
       configFingerprint: configSource ? hash(configSource) : null,
-      capturePolicy: enablement.enabled ? capturePolicyVersion(enablement.config.capture) : null
+      capture: enablement.enabled ? enablement.config.capture : null
     },
     providers,
     omitted

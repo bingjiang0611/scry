@@ -183,8 +183,6 @@ export interface AgentTurnRecord extends TurnEvidence {
   sequence: number
   recordId: string
   recorderVersion: string
-  /** Capture policy in force when this turn was recorded; absent on records written before presets. */
-  capturePolicy?: string
   workspace: { id: string; root: string }
   provider: { id: ProviderId; version?: string; model?: string }
   sessionId: string

@@ -25,8 +25,6 @@ export interface ProjectedTurn {
   schemaVersion: 1
   policyVersion: ProjectionPolicy
   recorderVersion: string
-  /** Null on records written before capture presets existed — not silently assumed current. */
-  capturePolicy: string | null
   workspaceIdHash: string
   provider: { id: string; model: string | null }
   sessionId: string
@@ -123,7 +121,6 @@ export function projectTurn(
     schemaVersion: 1,
     policyVersion: policy,
     recorderVersion: record.recorderVersion,
-    capturePolicy: record.capturePolicy ?? null,
     // The workspace id is often the directory name, so it is hashed rather than sent.
     workspaceIdHash: `sha256:${createHash('sha256').update(record.workspace.id).digest('hex')}`,
     provider: { id: record.provider.id, model: record.provider.model ?? null },
