@@ -1358,7 +1358,7 @@ describe('Codex rollout recorder evidence', () => {
     ])
   })
 
-  it('解析 task/token_count/tool/skill/hook，未观测项不伪造 exact 空数组', async () => {
+  it('解析 task/token_count/tool/hook，Skill 路径引用不算执行', async () => {
     const root = await workspace()
     const rollout = join(root, 'rollout.jsonl')
     const lines = [
@@ -1453,9 +1453,7 @@ describe('Codex rollout recorder evidence', () => {
     expect(record.tools.value).toEqual([
       expect.objectContaining({ id: 'call-1', name: 'Bash', status: 'success' })
     ])
-    expect(record.skills.value).toEqual([
-      expect.objectContaining({ name: 'rate-workflow' })
-    ])
+    expect(record.skills.value).toEqual([])
     expect(record.hooks.value).toEqual([
       expect.objectContaining({ event: 'UserPromptSubmit', status: 'success' })
     ])
@@ -1524,7 +1522,7 @@ describe('Codex rollout recorder evidence', () => {
     ])
   })
 
-  it('真实 Stop 早于 task_complete 时按完整 rollout 去重，并恢复 namespace、逐项错误、skill 与 usage', async () => {
+  it('真实 Stop 早于 task_complete 时按完整 rollout 去重，且 Skill 路径引用不算执行', async () => {
     const root = await workspace()
     const rollout = join(root, 'early-stop-rollout.jsonl')
     const lines = [
@@ -1650,9 +1648,7 @@ rs.forEach((r, i) => text(\`RESULT \${i + 1}\\n\${JSON.stringify(r)}\`));`
       expect.objectContaining({ mcp: expect.objectContaining({ server: 'workitem', action: 'query' }) }),
       expect.objectContaining({ mcp: expect.objectContaining({ server: 'node_repl', action: 'js' }) })
     ])
-    expect(record.skills.value).toEqual([
-      expect.objectContaining({ name: 'control-chrome' })
-    ])
+    expect(record.skills.value).toEqual([])
     expect(record.errors.value).toHaveLength(1)
     expect(record.usage.value).toMatchObject({
       inputTokens: 250,
@@ -2002,7 +1998,7 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
     expect(record.mcps.value).toEqual([
       expect.objectContaining({ id: 'exec-1:2', name: 'Bash', mcp: expect.objectContaining({ server: 'workitem', action: 'query' }) })
     ])
-    expect(record.skills.value?.map((call) => call.name)).toEqual(['rate-workflow', 'browser-use'])
+    expect(record.skills.value?.map((call) => call.name)).toEqual(['rate-workflow'])
     expect(record.files.value).toEqual([{ path: '/repo/new.txt', operation: 'edit' }])
     expect(record.usage.value).toMatchObject({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, reasoningTokens: 5 })
   })
