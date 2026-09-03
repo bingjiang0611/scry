@@ -1257,12 +1257,6 @@ body.pane-resizing * {
   text-underline-offset: 0.14em;
   transition: border-color 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
 }
-.md-file-ref-label {
-  margin-left: 0.32em;
-  color: var(--accent);
-  font: 650 0.75em/1 var(--font-ui);
-  white-space: nowrap;
-}
 .md-file-ref:hover code {
   border-color: var(--accent);
   background: var(--accent-soft);
