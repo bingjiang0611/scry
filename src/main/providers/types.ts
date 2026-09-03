@@ -20,6 +20,7 @@ import type {
   RuntimeProvider
 } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
+import type { ParsedTurn } from '../normalize'
 import type { CodexHookInspection, CodexHookTrustGrant } from '../codex-hook-trust'
 import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 
@@ -138,6 +139,10 @@ export interface RunControlsFacet {
   read(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>>
 }
 
+export interface SessionEvidenceFacet {
+  enrich(context: ProviderContext, turns: ParsedTurn[]): Promise<ParsedTurn[]>
+}
+
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
@@ -149,6 +154,7 @@ export interface ProviderAdapter {
   readonly commands?: CommandsFacet
   readonly hookTrust?: HookTrustFacet
   readonly runControls?: RunControlsFacet
+  readonly sessionEvidence?: SessionEvidenceFacet
   invalidateContext?(context: ProviderContext): Promise<void> | void
   dispose?(): Promise<void> | void
 }

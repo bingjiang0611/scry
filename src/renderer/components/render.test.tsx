@@ -2831,6 +2831,29 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('已占 44%')
   })
 
+  it('上下文推断证据必须显式标注，不能冒充 Provider 精确值', () => {
+    const inferred: Turn = {
+      runId: 'inferred-context',
+      userText: 'x',
+      done: true,
+      items: [ev({
+        id: 'inferred-context-result',
+        kind: 'harness',
+        stage: 'result',
+        contextTokens: 103_176,
+        contextUsageSource: 'qoder_native_transcript',
+        contextUsageQuality: 'inferred',
+        modelUsage: [{ model: 'ultimate', contextWindow: 1_000_000 }]
+      })]
+    }
+    const inferredHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[inferred]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(inferredHtml).toContain('103.2k / 1000.0k')
+    expect(inferredHtml).toContain('推断：Provider usage 比例换算')
+  })
+
   it('上下文缺少占用或窗口任一字段时保持未知，不拼出假比例', () => {
     const missingWindow: Turn = {
       runId: 'missing-window',
@@ -3120,6 +3143,36 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(turnCalls).toContain('aria-label="Skill 2，展开明细"')
     expect(turnCalls).toContain('turn-call-group turn-call-toggle skill')
     expect(turnCalls).toContain('turn-call-count">2</span>')
+  })
+
+  it('每轮 Skill 明细不把 git show 中的 Skill 路径引用算成执行', () => {
+    const evidenceTurn: Turn = {
+      runId: 'skill-reference-evidence',
+      userText: '更新 changelog',
+      done: true,
+      items: [
+        ev({
+          id: 'kami-call', runId: 'skill-reference-evidence', kind: 'skill', stage: 'skill:kami',
+          name: 'kami', tool: 'Skill', toolUseId: 'skill-kami'
+        }),
+        ...['hsf-invoke', 'rate-workflow', 'yixiu-experiment'].map((name, index) => ev({
+          id: `reference-${index}`, runId: 'skill-reference-evidence', kind: 'skill', stage: `skill:${name}`,
+          name, tool: 'Skill', input: { source: 'skill_path_in_bash', command: `git show -- .claude/skills/${name}/SKILL.md` }
+        })),
+        ev({ id: 'bash-call', runId: 'skill-reference-evidence', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'bash-1' }),
+        ev({ id: 'result', runId: 'skill-reference-evidence', kind: 'harness', stage: 'result' })
+      ]
+    }
+
+    const html = renderToStaticMarkup(
+      <OverviewPanel turns={[evidenceTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+    const turnCalls = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮仅展示'))
+    expect(turnCalls).toContain('aria-label="Skill 1，展开明细"')
+    expect(turnCalls).toContain('kami')
+    expect(turnCalls).not.toContain('hsf-invoke')
+    expect(turnCalls).not.toContain('rate-workflow')
+    expect(turnCalls).not.toContain('yixiu-experiment')
   })
 
   it('每轮 Skill 明细按首次调用顺序展示，不按次数或名称重排', () => {

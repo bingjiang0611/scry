@@ -3,7 +3,7 @@ import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } fro
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
-import { isOverviewToolErrorEvent } from '@shared/logical-calls'
+import { isOverviewToolErrorEvent, isSkillReferenceEvidence } from '@shared/logical-calls'
 import {
   isIncompleteRunTermination,
   normalizeAgentQuestionRequest,
@@ -525,7 +525,9 @@ function SubagentBlock({
   useEffect(() => {
     if (hasPendingQuestion) setOpen(true)
   }, [hasPendingQuestion])
-  const toolN = items.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent').length
+  const toolN = items.filter((e) =>
+    (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') && !isSkillReferenceEvidence(e)
+  ).length
   const maxDur = Math.max(1, ...items.map((e) => e.durationMs ?? 0))
   return (
     <div className="subagent">
@@ -550,6 +552,7 @@ function SubagentBlock({
               liveKey = ''
             }
             for (const ev of items) {
+              if (isSkillReferenceEvidence(ev)) continue
               if (ev.kind === 'model' && ev.stage === 'text_delta') {
                 if (!live) liveKey = ev.id
                 live += ev.text ?? ''
@@ -1247,7 +1250,9 @@ function AssistantTurnImpl({
     (turnDiff?.status === 'captured' && turnDiff.files.length > 0) ||
     turnDiff?.status === 'timeout' ||
     turnDiff?.status === 'failed'
-  const toolItems = items.filter((e) => e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
+  const toolItems = items.filter((e) =>
+    (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent') && !isSkillReferenceEvidence(e)
+  )
   const maxDur = Math.max(1, ...toolItems.map((e) => e.durationMs ?? 0))
   const toolN = useMemo(
     () => aggregateCalls(logicalCallEventsForTurn(items)).totalCalls,
@@ -1380,7 +1385,7 @@ function AssistantTurnImpl({
           )
         }
         for (const ev of items) {
-          if (ev.kind === 'harness') continue
+          if (ev.kind === 'harness' || isSkillReferenceEvidence(ev)) continue
           // 只有父调用真实存在时才折叠。Provider 给出孤儿 parent id 时，仍按顶层事件渲染，
           // 避免一条坏归因把后续根 agent 内容整段吞掉。
           if (ev.parentToolUseId && knownToolUseIds.has(ev.parentToolUseId)) continue

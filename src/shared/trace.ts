@@ -414,7 +414,9 @@ export interface TraceEvent {
   cacheCreation5mTokens?: number
   cacheCreation1hTokens?: number
   reasoningTokens?: number
-  contextTokens?: number // 仅 result：最后一次模型调用的完整 prompt（顶层 usage 的 input+cache_read+cache_creation）= 当前上下文占用，÷contextWindow 得 Context%
+  contextTokens?: number // 仅 result：Provider 当前上下文占用；不同 Provider 的 cache 记账口径由 adapter 吸收
+  contextUsageSource?: string // 仅 result：上下文证据来源，如 qoder_control / qoder_native_transcript
+  contextUsageQuality?: 'exact' | 'inferred' // 仅 result：推导窗口必须显式呈现，不能冒充精确证据
   modelUsage?: ModelUsageRow[] // 仅 result：per-model 明细
   isError?: boolean
   output?: string // 工具结果文本（tool_result），渲染时合并进对应 tool_use
