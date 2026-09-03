@@ -18,6 +18,7 @@ import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { workspaceStatus } from './status.js'
 import { verifyCapture } from './verify-capture.js'
+import { PROJECTION_POLICIES, isProjectionPolicy, projectTurn } from './turns-project.js'
 import { initWorkspace, integrationsDiff, integrationsUninstall } from './workspace-init.js'
 import {
   consumeUpdateNotice,
@@ -32,7 +33,7 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout'])
+const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout', 'policy'])
 const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'quiet', 'show', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -98,7 +99,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi|diff|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry integrations install-pi|status-pi|diff|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -389,6 +390,21 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     })))
     return 0
   }
+  if (action === 'project') {
+    const selector = args.positionals[2]
+    if (!selector) throw new Error('usage: scry turns project <sequence|recordId> --policy team-metadata@1')
+    const policy = flag(args, 'policy') ?? 'team-metadata@1'
+    if (!isProjectionPolicy(policy)) {
+      throw new Error(`--policy must be one of: ${PROJECTION_POLICIES.join(', ')}`)
+    }
+    const record = await showRecord(dataRoot, selector)
+    if (!record) {
+      print({ found: false, selector })
+      return 1
+    }
+    print(projectTurn(record, policy))
+    return 0
+  }
   if (action === 'show') {
     const selector = args.positionals[2]
     if (!selector) throw new Error('usage: scry turns show <sequence|recordId> --workspace <root>')
@@ -433,7 +449,7 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print(result)
     return result.ok ? 0 : 4
   }
-  throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|verify ...')
+  throw new Error('usage: scry turns list|show|project|timeline|summary [sessionId|--all]|export|verify ...')
 }
 
 /**

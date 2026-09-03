@@ -93,9 +93,21 @@ scry commit-hook revoke --workspace "$PWD"
 
 授权记录写在仓库之外（默认 `~/.scry/grants/<workspace-hash>.json`，`0600`，可用 `SCRY_GRANT_DIR` 覆盖），只包含 canonical workspace 路径、entry 绝对路径与 bundle 指纹。每次投递前都会重新校验 entry 与全部 `files` 的内容指纹：未授权、指纹不符或 bundle 非法时一律 fail closed，不执行任何程序，record 照常保留待后续投递，原因写入 `.scry/logs/recorder.log`。授权后修改 hook 需重新 `trust`，并执行 `scry recorder restart --workspace <repo>` 让运行中的 daemon 生效。宿主（Scry App）自行设置 `SCRY_RECORDER_COMMIT_HOOK` 时优先生效，CLI 不覆盖。
 
-`commit-hook status` 退出码：0 已激活或未配置，2 配置/存储不可用，3 待授权，4 指纹不符，5 bundle 非法。未激活时 `notifyBacklog` 显式为 `null` 且标注 `unavailable`，不会伪装成 0。
-
 被授权的 entry 以你自己的权限运行，并且能读取数据目录下的全部 record 正文。授权是执行授权，不是脱敏机制。
+
+如果 uploader 只需要统计口径，应让它消费投影而不是 record：
+
+```bash
+scry turns project <sequence|recordId> --policy team-metadata@1 --workspace "$PWD"
+```
+
+`team-metadata@1` 只输出：provider/model、session/record 标识与序号、时间与状态、token 与 cost、模型占用时间、tool/skill/MCP/agent/hook/file 计数、人工介入计数与等待时间、危险操作分级与分类原因、compaction 与 error 计数、diff 行数统计、逐段 evidence 状态、`policyVersion`。
+
+明确不输出：prompt 与回复正文及其 hash、thinking、工具入参与输出、文件路径、patch、repo remote、workspace 路径与 `workspaceId` 原文（只给 `sha256:` 哈希）、环境变量值。不可观测的数值输出 `null` 并在 `evidence` 说明，绝不写成 `0`。危险操作的 `reason` 是分类器产出的固定分类（如「sudo 提权」），不含命令原文。
+
+这样 uploader 可以只被授予调用 CLI 的能力，而完全不需要 `.scry/records` 的读权限——脱敏逻辑留在被评审的 CLI 代码里，而不是散落在各团队脚本中。
+
+`commit-hook status` 退出码：0 已激活或未配置，2 配置/存储不可用，3 待授权，4 指纹不符，5 bundle 非法。未激活时 `notifyBacklog` 显式为 `null` 且标注 `unavailable`，不会伪装成 0。
 
 Scry 启动且启用精确记录的 Claude、Codex、Qoder、OpenCode 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
 身份，Scry App 在 result、Hook 与 diff 全部收齐后，把 trace archive 使用的同一份
