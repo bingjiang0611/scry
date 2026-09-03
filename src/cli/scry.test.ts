@@ -482,3 +482,96 @@ describe('scry doctor schema and exit codes', () => {
     expect(integrity.remediation).toContain('do not delete individual record files')
   })
 })
+
+describe('scry turns project', () => {
+  const SECRET_PROMPT = 'DO-NOT-UPLOAD-THIS-PROMPT-TEXT'
+
+  async function recordedWorkspace(): Promise<string> {
+    const root = await workspace()
+    const payload = { session_id: 'proj-1', timestamp: '2026-07-19T12:00:00.000Z', prompt: SECRET_PROMPT }
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'PreToolUse:Bash',
+      workspace: root,
+      payload: {
+        ...payload,
+        tool_name: 'Bash',
+        tool_use_id: 'proj-1-t1',
+        tool_input: { command: 'sudo rm -rf /secret/path/inside/repo' }
+      }
+    })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'PostToolUse:Bash',
+      workspace: root,
+      payload: { ...payload, tool_name: 'Bash', tool_use_id: 'proj-1-t1', tool_response: 'SECRET-TOOL-OUTPUT' }
+    })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: { ...payload, timestamp: '2026-07-19T12:00:02.000Z' }
+    })
+    return root
+  }
+
+  it('投影只输出白名单字段，且不泄露 prompt/工具输入输出/路径', async () => {
+    const root = await recordedWorkspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['turns', 'project', '1', '--policy', 'team-metadata@1', '--workspace', root])).resolves.toBe(0)
+    const text = stdout.text()
+    const projected = JSON.parse(text) as Record<string, any>
+
+    expect(Object.keys(projected).sort()).toEqual([
+      'compactions', 'completedAt', 'counts', 'dangerousOperations', 'diffStats', 'durationMs', 'errors',
+      'evidence', 'interventions', 'modelTiming', 'policyVersion', 'provider', 'recordId', 'recorderVersion',
+      'schemaVersion', 'sequence', 'sessionId', 'startedAt', 'status', 'turnIndex', 'usage', 'workspaceIdHash'
+    ])
+    expect(text).not.toContain(SECRET_PROMPT)
+    expect(text).not.toContain('SECRET-TOOL-OUTPUT')
+    expect(text).not.toContain('/secret/path/inside/repo')
+    // The workspace path and raw workspace id must never leave the machine.
+    expect(text).not.toContain(root)
+    expect(projected.workspaceIdHash).toMatch(/^sha256:[a-f0-9]{64}$/)
+    expect(projected.policyVersion).toBe('team-metadata@1')
+  })
+
+  it('危险操作只带分类，不带命令原文；计数与证据一致', async () => {
+    const root = await recordedWorkspace()
+    const stdout = captureStdout()
+    await runScryCli(['turns', 'project', '1', '--workspace', root])
+    const projected = JSON.parse(stdout.text()) as Record<string, any>
+
+    expect(projected.counts.tools).toBe(1)
+    expect(projected.dangerousOperations.length).toBeGreaterThan(0)
+    for (const danger of projected.dangerousOperations) {
+      expect(Object.keys(danger).sort()).toEqual(['level', 'reason', 'tool'])
+      expect(danger.reason).not.toContain('rm -rf')
+      expect(danger.reason).not.toContain('/secret')
+    }
+    expect(projected.evidence.tools).toBe('available/exact')
+  })
+
+  it('不可观测的数值输出 null 而不是 0', async () => {
+    const root = await recordedWorkspace()
+    const stdout = captureStdout()
+    await runScryCli(['turns', 'project', '1', '--workspace', root])
+    const projected = JSON.parse(stdout.text()) as Record<string, any>
+
+    // Claude lifecycle hooks expose no usage, so cost/tokens are unavailable — not zero.
+    expect(projected.usage).toBeNull()
+    expect(projected.evidence.usage.startsWith('unavailable')).toBe(true)
+    expect(projected.diffStats).toBeNull()
+    expect(projected.evidence.diff.startsWith('disabled') || projected.evidence.diff.startsWith('unavailable')).toBe(true)
+  })
+
+  it('未知 policy 报错，记录不存在退出 1', async () => {
+    const root = await recordedWorkspace()
+    await expect(runScryCli(['turns', 'project', '1', '--policy', 'team-full@9', '--workspace', root]))
+      .rejects.toThrow(/--policy must be one of/)
+    const stdout = captureStdout()
+    await expect(runScryCli(['turns', 'project', '999', '--workspace', root])).resolves.toBe(1)
+    expect((JSON.parse(stdout.text()) as Record<string, any>).found).toBe(false)
+  })
+})

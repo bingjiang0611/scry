@@ -283,11 +283,17 @@ v1 的 team preset 等价于默认值：`toolOutput` 默认已是 `summary`、`d
 
 ### P1
 
-**W7a `scry turns project`（v2 新增，P1 首位）**
+**W7a `scry turns project` — ✅ 已实现（P1 首位，已完成）**
 
 - 只读、无网络。输入 `recordId` + `--policy <id>`，输出 metadata-only 白名单 JSON。
 - 让 Uploader 默认只消费投影，不需要 `.scry/records` 读权限——把「脱敏」放进被评审的 CLI 代码，而不是每个团队的脚本里。
 - 解决 v1 §0 与 §7 W7 的自相矛盾（一边说投影语义不进 CLI 合同，一边又规定白名单）。
+
+实现：`src/cli/turns-project.ts`（policy 注册表 + 投影）、`scry turns project <selector> [--policy team-metadata@1]`。未知 policy 直接报错，记录不存在退出 1。
+
+实测（uploader 只调 `turns project`、不读 records）：原始 record 内确实含 `CONFIDENTIAL-PROMPT-TEXT` 与 `CONFIDENTIAL-OUTPUT`，而 uploader 实际发出的 payload 对 prompt 正文、工具输出、`/etc/hosts`、`sudo cat` 命令原文、workspace 路径五项检查全部 clean；`usage` 为 `null` 且 `evidence.usage = unavailable/unavailable`（不写成 0）；危险操作只有 `{level: danger, reason: "sudo 提权", tool: "Bash"}`。
+
+字段白名单由用例锁定（键集合精确断言 + 禁止字段不出现断言），改动白名单必须同时改测试。
 
 **W7b `@ali/scry-uploader`（独立包）**
 
@@ -461,8 +467,10 @@ Uploader 的退避、oversized、401、outbox 幂等测试属独立包。
 | W3 `integrations diff` / `uninstall` | ✅ 按 handler id 识别 |
 | W4 `doctor` 稳定 schema + 冻结退出码 | ✅ |
 | W10 records 容量文档 | ✅ README「容量与保留」 |
+| W7a `turns project` 只读投影（P1 首位） | ✅ `team-metadata@1` |
 | `integrations repair` | ⏭ P1 |
 | `records archive` | ⏭ P1 |
+| 官方 Uploader（独立包） | ⏭ P1 |
 
 P0 未做版本升级：`0.2.31` 保持不变，等准备发布时一次性升 `0.3.0`（并按 §11 公告存量安装需人工 `scry upgrade`）。
 
