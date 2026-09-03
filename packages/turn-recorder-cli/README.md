@@ -49,6 +49,7 @@ scry integrations status-pi
 ```bash
 scry doctor --workspace "$PWD"
 scry status --workspace "$PWD"
+scry verify-capture --workspace "$PWD" --timeout 120
 scry commit-hook status --workspace "$PWD"
 scry turns list --workspace "$PWD"
 scry turns show <sequence|recordId> --workspace "$PWD"
@@ -63,6 +64,8 @@ scry --help
 `scry status` 逐 Provider 输出六个阶段：detected、configured（workspace / global / no）、trusted、hookSeen、recordSeen、state。`configured` 只证明配置已写入，`hookSeen` 证明 lifecycle hook 真的到达了 recorder，`recordSeen` 才证明轮次已提交；三者不可互相代替。`trusted` 永远是 `unknown`：Codex 要求交互式 `/hooks` 确认，其余 Provider 不向 CLI 暴露信任状态，写成 `n/a` 等于声称“不需要信任”。退出码：0 至少一个 Provider 正在采集，2 recorder 未启用或没有已配置 Provider，3 已配置但还没有真实事件或 record。Pi 单独标为 `global`，因为它是用户级 lifecycle 扩展而不是项目 hook。
 
 `openTurnsPending`（未收敛的 open turn）与 commit hook 的 `notifyBacklog`（未 ACK 记录数）是两个不同指标，不要混用。
+
+接入后应用 `scry verify-capture` 真实验一次：它先记下当前最大 sequence，然后等你在 Agent 里跑完一轮，只有出现**新** record 才算成功。失败时给出具体阶段：`missing_config`、`disabled`、`no_hook_event`（detail 区分“从未到达过”与“以前到过但本次没有”）、`pending_open_turn`、`events_without_record`。退出码：0 已采到，2 recorder 不可用，3 超时内未采到。结果为 `ok` 时仍会逐段输出证据状态（如 `usage: unavailable/unavailable`），不会用一个绿色结论掩盖不可观测的部分。`openTurnInFlight`（轮次正在进行）与 `openTurnsPending`（轮次待恢复）是两个独立信号。
 
 commit hook 投递在 Provider lifecycle 关键路径上有界执行：每个 hook 事件最多投递 8 条、预算 1.5s（仅在两条之间检查，单条仍以 10s 熔断），剩余保持 pending 并在 `status` 以 `lastDrainTruncated` 标出。需要一次清空时用：
 
