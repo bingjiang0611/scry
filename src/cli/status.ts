@@ -6,9 +6,7 @@ import { readProviderActivity, type ProviderActivityFile } from '../core/turn-re
 import {
   commitNotificationStatus,
   listRecords,
-  readDrainStatus,
-  readHealth,
-  type RecorderHealth
+  readHealth
 } from '../core/turn-recorder/store.js'
 import { commitHookEnv } from '../core/turn-recorder/commit-hook-grant.js'
 import { detectWorkspaceProviders, providerHookInstalled, type InitProvider } from './workspace-init.js'
@@ -27,7 +25,6 @@ export interface ProviderStatusRow {
   /** `workspace` for project hooks, `global` for Pi's user-level extension. */
   configured: 'workspace' | 'global' | 'no'
   trusted: 'unknown'
-  trustedReason: string
   hookSeen: { at: string; event: string; events: number } | null
   recordSeen: { at: string; sequence: number } | null
   state: 'capturing' | 'configured-no-events' | 'events-without-record' | 'not-configured'
@@ -37,12 +34,10 @@ export interface CommitHookStatusSection {
   configured: boolean
   entry: string | null
   activation: CommitHookActivation['status']
-  activationDetail: CommitHookActivation
   ackedThrough: number | null
   /** Null when no hook is activated: the backlog is unobservable, not empty. */
   notifyBacklog: number | null
   backlogEvidence: string
-  lastDrainTruncated: boolean
 }
 
 export interface WorkspaceStatusReport {
@@ -53,11 +48,13 @@ export interface WorkspaceStatusReport {
     | {
         enabled: true
         dataRoot: string
-        /** Open turns awaiting convergence — not the commit-hook backlog. */
+        /** Open turns awaiting convergence — not the commit-hook backlog. Full health counters
+         * live in `scry doctor`; duplicating them here would create a second same-meaning surface. */
         openTurnsPending: number
-        health: RecorderHealth
       }
   providers: ProviderStatusRow[]
+  /** Stated once instead of per row: the CLI can never observe provider hook trust. */
+  trustEvidence: string
   commitHook: CommitHookStatusSection | null
 }
 
@@ -106,17 +103,16 @@ export async function workspaceStatus(
   const providers: ProviderStatusRow[] = []
   for (const provider of PROVIDERS) {
     const seen = activity.providers[provider]
+    const configured = await configuredOf(workspaceRoot, provider, env)
     const base = {
       provider,
-      detected: (detected.has(provider) || provider === 'pi' ? 'yes' : 'no') as 'yes' | 'no',
-      configured: await configuredOf(workspaceRoot, provider, env),
+      // Pi has no project marker to probe: the installed global extension is the only signal.
+      detected: (provider === 'pi' ? configured === 'global' : detected.has(provider)) ? 'yes' as const : 'no' as const,
+      configured,
       trusted: 'unknown' as const,
-      trustedReason: TRUST_UNOBSERVABLE,
       hookSeen: seen ? { at: seen.lastEventAt, event: seen.lastEvent, events: seen.events } : null,
       recordSeen: latestRecord.get(provider) ?? null
     }
-    // Pi detection is the global extension itself; there is no project marker to probe.
-    if (provider === 'pi') base.detected = base.configured === 'global' ? 'yes' : 'no'
     providers.push({ ...base, state: stateOf(base) })
   }
 
@@ -126,6 +122,7 @@ export async function workspaceStatus(
       workspace: workspaceRoot,
       recorder: { enabled: false, reason: enablement.reason, ...(enablement.detail ? { detail: enablement.detail } : {}) },
       providers,
+      trustEvidence: TRUST_UNOBSERVABLE,
       commitHook: null
     }
   }
@@ -134,28 +131,25 @@ export async function workspaceStatus(
   const activation = await resolveCommitHookActivation(workspaceRoot, enablement.config, env)
   const activated = activation.status === 'trusted' || activation.status === 'host-provided'
   const notifications = await commitNotificationStatus(enablement.dataRoot, commitHookEnv(activation, env))
-  const drain = await readDrainStatus(enablement.dataRoot)
   return {
     schemaVersion: 1,
     workspace: workspaceRoot,
     recorder: {
       enabled: true,
       dataRoot: enablement.dataRoot,
-      openTurnsPending: health.pendingCount,
-      health
+      openTurnsPending: health.pendingCount
     },
     providers,
+    trustEvidence: TRUST_UNOBSERVABLE,
     commitHook: {
       configured: Boolean(enablement.config.commitHook),
       entry: enablement.config.commitHook?.entry ?? null,
       activation: activation.status,
-      activationDetail: activation,
       ackedThrough: activated ? notifications.ackedThrough : null,
       notifyBacklog: activated ? notifications.notifyBacklog : null,
       backlogEvidence: activated
         ? 'available'
-        : 'unavailable: no activated commit hook, records are retained and never delivered',
-      lastDrainTruncated: drain.truncated
+        : 'unavailable: no activated commit hook, records are retained and never delivered'
     }
   }
 }

@@ -146,8 +146,8 @@ scry CLI
 
 - `HOOK_DRAIN_MAX_RECORDS = 8`、`HOOK_DRAIN_BUDGET_MS = 1500`（`store.ts`），仅 hook 事件路径（`recorder.ts`）传入；`recorder recover` 与 `recorder notify-drain` 保持无界。
 - 预算只在两条记录**之间**检查，所以 `COMMIT_HOOK_TIMEOUT_MS`（10s）仍是单条熔断上限，不是批预算；时间预算下仍保证至少投递一条，避免永不前进。
-- `DrainResult` 新增 `truncated`；hook 失败**不**标记为截断，便于区分停滞原因。
-- 截断状态持久到 `.scry/notifications/drain-status.json`（`{ sync: false }`，仅在状态转换时写），`status` 以 `lastDrainTruncated` 暴露。
+- `DrainResult` 新增 `truncated`（进程内证据，`notify-drain` 输出携带）；hook 失败**不**标记为截断，便于区分停滞原因。
+- 不为截断另存持久状态：`status` 的 `notifyBacklog` 已如实给出积压条数，失败原因写 `recorder.log`。消融实验删掉了原先的 `drain-status.json`（每个 hook 事件多一次读、且与 backlog 语义重叠）。
 - Uploader 的 exit 0 目标延迟 ≤ 200ms（合同要求，不由 CLI 强制）。
 
 实测（`SCRY_RECORDER_TRANSPORT=direct` 隔离单次 drain，10 条积压）：一个 hook 事件只投递 8 条，`ackedThrough: 8`、`notifyBacklog: 2`、`lastDrainTruncated: true`；下一事件接着投递；`notify-drain` 清空剩余并把 `lastDrainTruncated` 回落。
@@ -478,7 +478,7 @@ Uploader 的退避、oversized、401、outbox 幂等测试属独立包。
 | W4 `doctor` 稳定 schema + 冻结退出码 | ✅ |
 | W10 records 容量文档 | ✅ README「容量与保留」 |
 | W7a `turns project` 只读投影（P1 首位） | ✅ `team-metadata@1` |
-| W8 `capture` preset + record `capturePolicy` | ✅ `local-full` / `team-minimal` |
+| W8 `capture` preset + record `capturePolicy` | ✅ `local-full` / `team-minimal`（`capture show`；`explain` 经消融删除） |
 | W9 `support-bundle` | ✅ 脱敏诊断包 |
 | W10 `records archive` + 归档 floor | ✅ |
 | `integrations repair` | ✅ 按 handler id 重写 |

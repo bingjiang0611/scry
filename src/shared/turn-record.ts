@@ -197,6 +197,25 @@ export interface AgentTurnRecord extends TurnEvidence {
   status: 'completed' | 'failed' | 'cancelled' | 'interrupted'
 }
 
+/** Sections every record must carry, followed by the optional ones. Single source of truth for
+ * validation and for any surface that reports per-section evidence status. */
+export const REQUIRED_EVIDENCE_SECTIONS = [
+  'user', 'assistant', 'tools', 'skills', 'mcps', 'hooks', 'usage', 'files', 'diff',
+  'dangerousOperations', 'errors'
+] as const
+
+export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelTiming'] as const
+
+/** `status/quality` per section; a missing optional section reads as unavailable, never as empty. */
+export function evidenceStatusMap(record: AgentTurnRecord): Record<string, string> {
+  const summary: Record<string, string> = {}
+  for (const section of [...REQUIRED_EVIDENCE_SECTIONS, ...OPTIONAL_EVIDENCE_SECTIONS]) {
+    const evidence = record[section] as Evidence<unknown> | undefined
+    summary[section] = evidence ? `${evidence.status}/${evidence.quality}` : 'unavailable/unavailable'
+  }
+  return summary
+}
+
 export function available<T>(value: T, source: string[], quality: EvidenceQuality = 'exact'): Evidence<T> {
   return { status: 'available', quality, source, value }
 }
@@ -352,19 +371,7 @@ export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
   if (!raw.workspace || typeof raw.workspace !== 'object' || !raw.provider || typeof raw.provider !== 'object') return false
   const provider = raw.provider as Record<string, unknown>
   if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id))) return false
-  const requiredEvidence = [
-    'user',
-    'assistant',
-    'tools',
-    'skills',
-    'mcps',
-    'hooks',
-    'usage',
-    'files',
-    'diff',
-    'dangerousOperations',
-    'errors'
-  ].every((key) => isEvidence(raw[key]))
+  const requiredEvidence = REQUIRED_EVIDENCE_SECTIONS.every((key) => isEvidence(raw[key]))
   return requiredEvidence &&
     (raw.compactions === undefined || isCompactionsEvidence(raw.compactions)) &&
     (raw.modelSegments === undefined || isModelSegmentsEvidence(raw.modelSegments)) &&

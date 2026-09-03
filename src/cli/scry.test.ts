@@ -193,7 +193,7 @@ describe('scry status', () => {
     const report = JSON.parse(stdout.text()) as Record<string, any>
     const claude = report.providers.find((row: any) => row.provider === 'claude')
     expect(claude).toMatchObject({ configured: 'workspace', state: 'configured-no-events', trusted: 'unknown' })
-    expect(claude.trustedReason).toContain('does not expose hook trust state')
+    expect(report.trustEvidence).toContain('does not expose hook trust state')
     expect(report.providers.every((row: any) => row.trusted === 'unknown')).toBe(true)
     expect(report.recorder.openTurnsPending).toBe(0)
   })
@@ -218,8 +218,7 @@ describe('scry status', () => {
     expect(report.commitHook).toMatchObject({
       configured: false,
       activation: 'not-configured',
-      notifyBacklog: null,
-      lastDrainTruncated: false
+      notifyBacklog: null
     })
     expect(report.commitHook.backlogEvidence).toContain('unavailable')
   })
@@ -636,15 +635,6 @@ describe('scry capture presets', () => {
     await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(2)
   })
 
-  it('explain 说明字段关闭后写入什么', async () => {
-    const root = await workspace()
-    const stdout = captureStdout()
-    await expect(runScryCli(['capture', 'explain', 'prompt', '--workspace', root])).resolves.toBe(0)
-    const result = JSON.parse(stdout.text()) as Record<string, any>
-    expect(result).toMatchObject({ field: 'prompt', captured: true })
-    expect(result.whenOff).toContain('disabled')
-    await expect(runScryCli(['capture', 'explain', 'nonsense', '--workspace', root])).rejects.toThrow(/--field must be one of/)
-  })
 })
 
 describe('scry records archive', () => {

@@ -65,13 +65,13 @@ scry turns export --workspace "$PWD" --after 0 --limit 100
 scry --help
 ```
 
-`scry status` 逐 Provider 输出六个阶段：detected、configured（workspace / global / no）、trusted、hookSeen、recordSeen、state。`configured` 只证明配置已写入，`hookSeen` 证明 lifecycle hook 真的到达了 recorder，`recordSeen` 才证明轮次已提交；三者不可互相代替。`trusted` 永远是 `unknown`：Codex 要求交互式 `/hooks` 确认，其余 Provider 不向 CLI 暴露信任状态，写成 `n/a` 等于声称“不需要信任”。退出码：0 至少一个 Provider 正在采集，2 recorder 未启用或没有已配置 Provider，3 已配置但还没有真实事件或 record。Pi 单独标为 `global`，因为它是用户级 lifecycle 扩展而不是项目 hook。
+`scry status` 逐 Provider 输出六个阶段：detected、configured（workspace / global / no）、trusted、hookSeen、recordSeen、state。`configured` 只证明配置已写入，`hookSeen` 证明 lifecycle hook 真的到达了 recorder，`recordSeen` 才证明轮次已提交；三者不可互相代替。`trusted` 永远是 `unknown`（原因在报告级 `trustEvidence` 里说明一次）：Codex 要求交互式 `/hooks` 确认，其余 Provider 不向 CLI 暴露信任状态，写成 `n/a` 等于声称“不需要信任”。退出码：0 至少一个 Provider 正在采集，2 recorder 未启用或没有已配置 Provider，3 已配置但还没有真实事件或 record。Pi 单独标为 `global`，因为它是用户级 lifecycle 扩展而不是项目 hook。
 
-`openTurnsPending`（未收敛的 open turn）与 commit hook 的 `notifyBacklog`（未 ACK 记录数）是两个不同指标，不要混用。
+`openTurnsPending`（未收敛的 open turn）与 commit hook 的 `notifyBacklog`（未 ACK 记录数）是两个不同指标，不要混用。完整 health 计数只在 `scry doctor` 输出，`status` 不重复一份。
 
 接入后应用 `scry verify-capture` 真实验一次：它先记下当前最大 sequence，然后等你在 Agent 里跑完一轮，只有出现**新** record 才算成功。失败时给出具体阶段：`missing_config`、`disabled`、`no_hook_event`（detail 区分“从未到达过”与“以前到过但本次没有”）、`pending_open_turn`、`events_without_record`。退出码：0 已采到，2 recorder 不可用，3 超时内未采到。结果为 `ok` 时仍会逐段输出证据状态（如 `usage: unavailable/unavailable`），不会用一个绿色结论掩盖不可观测的部分。`openTurnInFlight`（轮次正在进行）与 `openTurnsPending`（轮次待恢复）是两个独立信号。
 
-commit hook 投递在 Provider lifecycle 关键路径上有界执行：每个 hook 事件最多投递 8 条、预算 1.5s（仅在两条之间检查，单条仍以 10s 熔断），剩余保持 pending 并在 `status` 以 `lastDrainTruncated` 标出。需要一次清空时用：
+commit hook 投递在 Provider lifecycle 关键路径上有界执行：每个 hook 事件最多投递 8 条、预算 1.5s（仅在两条之间检查，单条仍以 10s 熔断）。剩余保持 pending，`status` 的 `notifyBacklog` 会如实显示积压条数；`recorder notify-drain` 的返回值带 `truncated`，投递失败的原因写在 `.scry/logs/recorder.log`。需要一次清空时用：
 
 ```bash
 scry recorder notify-drain --workspace "$PWD"
@@ -173,7 +173,6 @@ scry recorder restart --workspace "$PWD"
 ```bash
 scry init --preset team-minimal
 scry capture show --workspace "$PWD"
-scry capture explain prompt --workspace "$PWD"
 ```
 
 `team-minimal` 下 prompt 与回复正文**不会落盘**，对应证据段记为 `disabled`（与「采到了但是空」是不同状态）。每条 record 都会写入 `capturePolicy`（如 `team-minimal@1`），因此事后可以解释某条记录当时采了什么；presets 出现之前写的记录没有该字段，`turns project` 会输出 `null` 而不是假设为当前策略。
@@ -198,7 +197,7 @@ scry records archive --before 30d --workspace "$PWD"          # 只打印计划
 scry records archive --before 30d --yes --workspace "$PWD"    # 执行
 ```
 
-归档把**连续前缀**搬到 `.scry/archive/<cutoff>/`（可用 `--out` 指定），写出带 sha256 的 `manifest.json`，并记录一个 floor（`archive-state.json`）。`turns verify` 与 `doctor` 只接受被 floor 解释的空洞——手动删除仍然是损坏。新轮次从 `floor + 1` 继续编号，不会与已发出的序号冲突。
+归档把**连续前缀**搬到 `.scry/archive/<cutoff>/`（可用 `--out` 指定），写出带 sha256 的 `manifest.json`，并把 floor 记进 `archive-state.json`（只有 `archivedThrough` 一个字段；被搬走的内容由 manifest 说明，不再重复记一份历史列表）。`turns verify` 与 `doctor` 只接受被 floor 解释的空洞——手动删除仍然是损坏。新轮次从 `floor + 1` 继续编号，不会与已发出的序号冲突。
 
 若配置了 commit hook，归档会**拒绝**搬走尚未 ACK 的记录（退出 5），提示先 `scry recorder notify-drain`；确实要放弃投递时才用 `--force`。
 

@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
-import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, readDrainStatus, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
+import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
 import { inspectCommitHookBundle, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 
@@ -2410,7 +2410,7 @@ describe('CLI-side commit hook activation gate', () => {
     await expect(access(hook.capture)).rejects.toThrow()
     await expect(access(join(root, '.scry', 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
     const status = await commitNotificationStatus(join(root, '.scry'), env)
-    expect(status).toMatchObject({ hookConfigured: false, ackedThrough: null, notifyBacklog: 1 })
+    expect(status).toEqual({ ackedThrough: null, notifyBacklog: 1 })
   })
 
   it('显式授权后才激活投递，并推进 durable ACK', async () => {
@@ -2458,12 +2458,9 @@ describe('commit notification drain budget', () => {
       .resolves.toEqual({ delivered: 2, pending: 1, truncated: true })
     await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
       .resolves.toContain('"ackedThrough":2')
-    await expect(readDrainStatus(join(root, '.scry'))).resolves.toMatchObject({ truncated: true })
-
     await expect(drainCommitNotifications(join(root, '.scry'), env, { maxRecords: 2 }))
       .resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
     expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(3)
-    await expect(readDrainStatus(join(root, '.scry'))).resolves.toMatchObject({ truncated: false })
   })
 
   it('时间预算只在两次调用之间生效，且至少投递一条以保证前进', async () => {
@@ -2486,7 +2483,6 @@ describe('commit notification drain budget', () => {
 
     await expect(drainCommitNotifications(join(root, '.scry'), { ...process.env, SCRY_RECORDER_COMMIT_HOOK: failing.path }, { maxRecords: 2 }))
       .resolves.toEqual({ delivered: 0, pending: 2, truncated: false })
-    await expect(readDrainStatus(join(root, '.scry'))).resolves.toMatchObject({ truncated: false })
   })
 
   it('无预算的显式 drain 一次清空积压', async () => {
