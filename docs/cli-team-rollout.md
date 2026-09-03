@@ -499,6 +499,33 @@ P0 未做版本升级：`0.2.31` 保持不变，等准备发布时一次性升 `
 
 若将来真要做「最小采集」，正确做法是在 `aggregate.ts` 增加 `capture.toolInput: 'none' | 'full'` 这一真实开关，而不是给现有值起别名。
 
+## 12.7 采集延迟实测与 daemon 定位
+
+`UserPromptSubmit` hook 在用户按下回车、等待 Agent 响应的那一刻同步执行,是唯一被用户直接等待的采集成本。实测(macOS,Apple silicon,git spawn 约 75ms):
+
+| 阶段 | 优化前 | 优化后 |
+|---|---|---|
+| `beginGitTurnDiff` 干净仓库 | 553.6ms | **310.8ms** |
+| 端到端 `UserPromptSubmit`(轻) | 1117.6ms | **870.8ms** |
+| 端到端 `UserPromptSubmit`(重,50 MB transcript) | 1281.1ms | 1057.8ms |
+
+优化内容:`beginGitTurnDiff` 原先用 4 次 `git rev-parse` 分别问 work-tree 探测、toplevel、common dir 与 index 路径,已合并为 1 次调用。bare 仓库在 `--show-toplevel` 上 exit 128 而不是返回 `false`,合并后统一降级为 `not_git`,并有回归测试固定该路径。
+
+复现:`npm run build:cli && npm run bench:git-diff`(`scripts/git-turn-diff-bench.mjs`,只测 `begin`,不设阈值、不是门禁)。
+
+### daemon 的真实定位
+
+同一套基准对比 daemon 与 `SCRY_RECORDER_TRANSPORT=direct`:
+
+- **单事件无收益**:差值 +5.6 / +0.9 / +38.4ms(`UserPromptSubmit`)与 −21.6 / −41.7 / +2.5ms(`Stop`),符号在不同负载档翻转,属噪声。结构上也符合预期 —— hook 脚本无论哪种模式都要启动一个 Node 进程,daemon 只是多一次 socket 往返,且 `daemon.ts` 调用的是同一个 `handleRecorderHook`,没有任何跨事件缓存。
+- **并发有稳定收益**:每档重复 7 轮,2/4/8/16 并发下 daemon 分别快 27.3 / 48.4 / 53.3 / 119.2ms(14%–21%),多数档位 min/max 区间不重叠。机制是 `withDirectoryLock` 为文件系统锁 + 20ms 轮询,冷进程越多轮询周期越多,同时 N 个冷进程还会争 CPU。Provider 会并发触发多个工具 hook,该场景真实。
+
+因此:**不为 shell hook 默认关闭 daemon**(会让真实并发场景退化 14%–21%);**也不为 daemon 增加仓库元信息缓存** —— 合并 `rev-parse` 之后可缓存的静态成本仅剩约 159ms(1 次 `rev-parse` + 1 次 `check-ignore`),而缓存失效判断错误会导致走错仓库根、证据错归属,风险与收益不成比例。
+
+### 剩余成本重心已转移到 `Stop`
+
+`finishGitTurnDiff` 随本轮改动文件数近似线性增长:0 个文件 586.5ms、5 个 1110.7ms、50 个 2718.8ms。但 `Stop` 不在用户等待路径上(回复已呈现),约束只是 Provider 的 10–15s hook 超时,当前仍有余量。继续优化需要动 diff 采集算法(增量 numstat、跳过 patch 生成),属于有回归风险、而收益用户不可感知的改动,暂不进行。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。
