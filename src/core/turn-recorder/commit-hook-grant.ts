@@ -30,7 +30,6 @@ export interface CommitHookGrant {
   schemaVersion: 1
   workspace: string
   entry: string
-  entryPath: string
   fingerprint: string
   approvedAt: string
   approvedByCliVersion: string
@@ -119,7 +118,6 @@ export async function writeCommitHookGrant(
     schemaVersion: 1,
     workspace: resolve(workspaceRoot),
     entry: bundle.entry,
-    entryPath: bundle.entryPath,
     fingerprint: bundle.fingerprint,
     approvedAt: new Date().toISOString(),
     approvedByCliVersion: RECORDER_VERSION

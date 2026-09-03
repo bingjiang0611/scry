@@ -217,8 +217,6 @@ async function invokeCommitHook(
 }
 
 export interface CommitNotificationStatus {
-  hookConfigured: boolean
-  hookFingerprint: string
   ackedThrough: number | null
   notifyBacklog: number
 }
@@ -232,7 +230,6 @@ export async function commitNotificationStatus(
   dataRoot: string,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<CommitNotificationStatus> {
-  const hookConfigured = Boolean(env.SCRY_RECORDER_COMMIT_HOOK?.trim())
   const fingerprint = configuredCommitHookFingerprint(env)
   const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
   const acked = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint &&
@@ -241,8 +238,6 @@ export async function commitNotificationStatus(
     : null
   const files = await recordFiles(dataRoot)
   return {
-    hookConfigured,
-    hookFingerprint: fingerprint,
     ackedThrough: acked,
     notifyBacklog: files.filter((file) => file.sequence > (acked ?? 0)).length
   }
@@ -268,33 +263,6 @@ export interface DrainResult {
   delivered: number
   pending: number
   truncated: boolean
-}
-
-interface DrainStatusFile {
-  schemaVersion: 1
-  at: string
-  truncated: boolean
-  delivered: number
-  pending: number
-}
-
-async function recordDrainTruncation(dataRoot: string, result: DrainResult): Promise<void> {
-  const path = join(dataRoot, 'notifications', 'drain-status.json')
-  const previous = await readJson<DrainStatusFile>(path)
-  if (!result.truncated && !previous?.truncated) return
-  await writeJsonAtomic(path, {
-    schemaVersion: 1,
-    at: new Date().toISOString(),
-    truncated: result.truncated,
-    delivered: result.delivered,
-    pending: result.pending
-  } satisfies DrainStatusFile, { sync: false }).catch(() => undefined)
-}
-
-export async function readDrainStatus(dataRoot: string): Promise<{ truncated: boolean; at: string | null }> {
-  const status = await readJson<DrainStatusFile>(join(dataRoot, 'notifications', 'drain-status.json'))
-  if (status?.schemaVersion !== 1) return { truncated: false, at: null }
-  return { truncated: status.truncated === true, at: typeof status.at === 'string' ? status.at : null }
 }
 
 export async function drainCommitNotifications(
@@ -344,9 +312,7 @@ export async function drainCommitNotifications(
             join(dataRoot, 'logs', 'recorder.log'),
             `${new Date().toISOString()} ERROR commit notification: commit hook did not ACK sequence ${record.sequence}`
           ).catch(() => undefined)
-          const failure = { delivered, pending: pending.length - delivered, truncated: false }
-          await recordDrainTruncation(dataRoot, failure)
-          return failure
+          return { delivered, pending: pending.length - delivered, truncated: false }
         }
         await writeJsonAtomic(statePath, {
           schemaVersion: 1,
@@ -355,9 +321,7 @@ export async function drainCommitNotifications(
         } satisfies CommitHookState)
         delivered++
       }
-      const result = { delivered, pending: pending.length - delivered, truncated }
-      await recordDrainTruncation(dataRoot, result)
-      return result
+      return { delivered, pending: pending.length - delivered, truncated }
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -445,19 +409,10 @@ export async function showRecord(dataRoot: string, selector: string): Promise<Ag
   return match ? await readRecordFile(join(dataRoot, 'records', match.name)) : null
 }
 
-export interface ArchiveEntry {
-  at: string
-  from: number
-  to: number
-  count: number
-  target: string
-}
-
 export interface ArchiveState {
   schemaVersion: 1
   /** Highest sequence intentionally moved out of `records/`. */
   archivedThrough: number
-  archives: ArchiveEntry[]
 }
 
 const ARCHIVE_STATE = 'archive-state.json'
@@ -465,7 +420,7 @@ const ARCHIVE_STATE = 'archive-state.json'
 export async function readArchiveState(dataRoot: string): Promise<ArchiveState | null> {
   const state = await readJson<ArchiveState>(join(dataRoot, ARCHIVE_STATE))
   if (state?.schemaVersion !== 1 || !Number.isSafeInteger(state.archivedThrough) || state.archivedThrough < 0) return null
-  return { ...state, archives: Array.isArray(state.archives) ? state.archives : [] }
+  return { schemaVersion: 1, archivedThrough: state.archivedThrough }
 }
 
 /**
@@ -493,14 +448,7 @@ export async function archiveRecords(
     await rm(source, { force: true })
     archivedThrough = file.sequence
     // Persist the floor after each move so a crash mid-archive still explains the gap.
-    await writeJsonAtomic(join(dataRoot, ARCHIVE_STATE), {
-      schemaVersion: 1,
-      archivedThrough,
-      archives: [
-        ...(state?.archives ?? []),
-        { at: new Date().toISOString(), from: files[0].sequence, to: archivedThrough, count: archived.length + 1, target: options.target }
-      ].slice(-50)
-    } satisfies ArchiveState)
+    await writeJsonAtomic(join(dataRoot, ARCHIVE_STATE), { schemaVersion: 1, archivedThrough } satisfies ArchiveState)
     archived.push({
       name: file.name,
       sequence: file.sequence,

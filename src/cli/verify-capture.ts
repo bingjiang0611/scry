@@ -1,7 +1,6 @@
 import { resolve } from 'node:path'
-import type { AgentTurnRecord } from '../shared/turn-record.js'
+import { evidenceStatusMap, type AgentTurnRecord } from '../shared/turn-record.js'
 import { resolveRecorderEnablement } from '../core/turn-recorder/config.js'
-import { recorderDaemonStatus } from '../core/turn-recorder/daemon.js'
 import { readProviderActivity } from '../core/turn-recorder/provider-activity.js'
 import { refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
 import { recorderHasOpenTurn } from '../core/turn-recorder/runtime-state.js'
@@ -35,7 +34,6 @@ export interface VerifyCaptureEvidence {
   openTurnsPending: number
   droppedEvents: number
   orphanEvents: number
-  daemon: 'running' | 'not-running'
   waitedMs: number
 }
 
@@ -57,30 +55,6 @@ export interface VerifyCaptureResult {
   evidence: VerifyCaptureEvidence
 }
 
-function evidenceSummary(record: AgentTurnRecord): Record<string, string> {
-  const sections: Array<[string, { status: string; quality: string } | undefined]> = [
-    ['user', record.user],
-    ['assistant', record.assistant],
-    ['tools', record.tools],
-    ['skills', record.skills],
-    ['mcps', record.mcps],
-    ['hooks', record.hooks],
-    ['files', record.files],
-    ['usage', record.usage],
-    ['diff', record.diff],
-    ['errors', record.errors],
-    ['dangerousOperations', record.dangerousOperations],
-    ['interventions', record.interventions],
-    ['compactions', record.compactions],
-    ['modelTiming', record.modelTiming]
-  ]
-  const summary: Record<string, string> = {}
-  for (const [name, evidence] of sections) {
-    summary[name] = evidence ? `${evidence.status}/${evidence.quality}` : 'unavailable/unavailable'
-  }
-  return summary
-}
-
 function activityDelta(
   before: Record<string, { events: number } | undefined>,
   after: Record<string, { lastEvent: string; lastEventAt: string; events: number } | undefined>
@@ -96,7 +70,7 @@ function activityDelta(
 
 export async function verifyCapture(
   workspace: string,
-  options: { timeoutMs?: number; env?: NodeJS.ProcessEnv; onWait?: (message: string) => void } = {}
+  options: { timeoutMs?: number; env?: NodeJS.ProcessEnv } = {}
 ): Promise<VerifyCaptureResult> {
   const workspaceRoot = resolve(workspace)
   const env = options.env ?? process.env
@@ -109,7 +83,6 @@ export async function verifyCapture(
     openTurnsPending: 0,
     droppedEvents: 0,
     orphanEvents: 0,
-    daemon: 'not-running',
     waitedMs: 0
   }
   if (!enablement.enabled) {
@@ -131,7 +104,6 @@ export async function verifyCapture(
   const baselineActivity = (await readProviderActivity(dataRoot)).providers
   const baseline = (await exportRecords(dataRoot, { limit: 1 })).snapshotMaxSequence
   const startedAt = Date.now()
-  options.onWait?.(`waiting up to ${Math.round(timeoutMs / 1000)}s for one real turn in ${workspaceRoot}`)
 
   let latest: AgentTurnRecord | null = null
   while (Date.now() - startedAt < timeoutMs) {
@@ -148,7 +120,6 @@ export async function verifyCapture(
   await refreshRecorderPendingHealth(dataRoot).catch(() => undefined)
   const health = await readHealth(dataRoot)
   const activity = (await readProviderActivity(dataRoot)).providers
-  const daemon = (await recorderDaemonStatus(workspaceRoot, env)).running ? 'running' : 'not-running'
   const everSeen: VerifyCaptureEvidence['hookEventsEverSeen'] = {}
   for (const [provider, entry] of Object.entries(activity)) {
     if (entry) everSeen[provider] = { event: entry.lastEvent, at: entry.lastEventAt, events: entry.events }
@@ -160,7 +131,6 @@ export async function verifyCapture(
     openTurnsPending: health.pendingCount,
     droppedEvents: health.droppedEvents,
     orphanEvents: health.orphanEvents,
-    daemon,
     waitedMs: Date.now() - startedAt
   }
 
@@ -176,7 +146,7 @@ export async function verifyCapture(
         provider: latest.provider.id,
         sessionId: latest.sessionId,
         status: latest.status,
-        evidence: evidenceSummary(latest)
+        evidence: evidenceStatusMap(latest)
       },
       evidence
     }

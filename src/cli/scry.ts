@@ -7,7 +7,7 @@ import type { ProviderId } from '../shared/provider.js'
 import { CAPTURE_PRESETS, capturePolicyVersion, resolveRecorderLocation, type CapturePreset } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recoverRecorder, recorderEnablement, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
-import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readArchiveState, readDrainStatus, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readArchiveState, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import {
   commitHookEnv,
   inspectCommitHookBundle,
@@ -36,7 +36,7 @@ export interface ParsedArgs {
 }
 
 const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout', 'policy', 'before', 'out', 'preset'])
-const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'show', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
+const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
@@ -101,7 +101,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode] [--preset local-full|team-minimal]\n  scry capture show|explain <field>\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes] [--show]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode] [--preset local-full|team-minimal]\n  scry capture show\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -205,10 +205,10 @@ async function initCommand(args: ParsedArgs): Promise<number> {
  */
 async function verifyCaptureCommand(args: ParsedArgs): Promise<number> {
   const seconds = intFlag(args, 'timeout')
-  const result = await verifyCapture(workspaceOf(args), {
-    ...(seconds != null ? { timeoutMs: seconds * 1_000 } : {}),
-    onWait: (message) => process.stderr.write(`scry: ${message}\n`)
-  })
+  const workspace = workspaceOf(args)
+  const timeoutMs = seconds != null ? seconds * 1_000 : 120_000
+  process.stderr.write(`scry: waiting up to ${Math.round(timeoutMs / 1000)}s for one real turn in ${workspace}\n`)
+  const result = await verifyCapture(workspace, { timeoutMs })
   print(result)
   if (result.reason === 'ok') return 0
   return result.reason === 'missing_config' || result.reason === 'disabled' ? 2 : 3
@@ -273,8 +273,7 @@ async function commitHookCommand(args: ParsedArgs): Promise<number> {
       })
       return 5
     }
-    const approved = args.flags.has('yes') && !args.flags.has('show')
-    if (!approved) {
+    if (!args.flags.has('yes')) {
       print({
         action,
         workspace: workspaceRoot,
@@ -339,10 +338,7 @@ function cutoffFrom(value: string): string {
  * has not acknowledged, because moving an undelivered record would silently drop it. Exit codes:
  * 0 done, 2 recorder unavailable, 3 approval required or nothing to archive, 5 refused.
  */
-/**
- * Explain the capture policy actually in force. `explain` answers "is this field captured, why,
- * and what gets written when it is not", so a team can audit local exposure without reading code.
- */
+/** Report the capture policy actually in force: preset baseline plus explicit overrides. */
 /**
  * Sanitised diagnostics for a maintainer. Writes to --out when given, otherwise stdout; the
  * payload lists what it deliberately omits so a recipient can see the boundary.
@@ -385,43 +381,7 @@ async function captureCommand(args: ParsedArgs): Promise<number> {
     })
     return 0
   }
-  if (action === 'explain') {
-    const field = args.positionals[2]
-    const explanations: Record<string, { captured: boolean; stores: string; whenOff: string }> = {
-      prompt: {
-        captured: capture.prompt,
-        stores: 'the user turn text under `user`',
-        whenOff: '`user` is recorded as disabled/unavailable; no prompt text reaches disk'
-      },
-      assistant: {
-        captured: capture.assistant,
-        stores: 'assistant text when the provider exposes it to lifecycle hooks',
-        whenOff: '`assistant` is recorded as disabled/unavailable'
-      },
-      toolOutput: {
-        captured: capture.toolOutput !== 'none',
-        stores: 'a bounded summary of tool output (never the full payload)',
-        whenOff: 'tool calls keep name/status/timing; output summaries are omitted'
-      },
-      diff: {
-        captured: capture.diff,
-        stores: 'per-file added/removed counts and bounded patches',
-        whenOff: '`diff` is recorded as disabled/unavailable'
-      },
-      hooks: {
-        captured: capture.hooks,
-        stores: 'hook handler identity, lifecycle counts and status',
-        whenOff: '`hooks` is recorded as disabled/unavailable'
-      }
-    }
-    const explanation = field ? explanations[field] : undefined
-    if (!explanation) {
-      throw new Error(`--field must be one of: ${Object.keys(explanations).join(', ')}`)
-    }
-    print({ action, field, preset: capture.preset, policyVersion: capturePolicyVersion(capture), ...explanation })
-    return 0
-  }
-  throw new Error('usage: scry capture show|explain <prompt|assistant|toolOutput|diff|hooks>')
+  throw new Error('usage: scry capture show')
 }
 
 async function recordsCommand(args: ParsedArgs): Promise<number> {
@@ -521,7 +481,7 @@ async function recorderCommand(args: ParsedArgs): Promise<number> {
       enablement.dataRoot,
       commitHookEnv(activation, process.env)
     )
-    print({ action: 'notify-drain', workspace, activation: activation.status, ...result, lastDrainTruncated: (await readDrainStatus(enablement.dataRoot)).truncated })
+    print({ action: 'notify-drain', workspace, activation: activation.status, ...result })
     return result.pending > 0 ? 3 : 0
   }
   if (action === 'serve') {

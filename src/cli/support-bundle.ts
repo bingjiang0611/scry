@@ -8,8 +8,6 @@ import { readProviderActivity, type ProviderActivityFile } from '../core/turn-re
 import {
   RECORDER_VERSION,
   commitNotificationStatus,
-  readArchiveState,
-  readDrainStatus,
   readHealth,
   verifyStore
 } from '../core/turn-recorder/store.js'
@@ -34,8 +32,7 @@ export interface SupportBundle {
         enabled: true
         health: { droppedEvents: number; orphanEvents: number; pendingCount: number; oldestPendingAgeMs: number; recoveredRecords: number; lastErrorAt: string | null; lastError: string | null }
         store: { ok: boolean; records: number; archivedThrough: number; errors: string[] }
-        commitHook: { activation: string; ackedThrough: number | null; notifyBacklog: number | null; lastDrainTruncated: boolean }
-        archives: number
+        commitHook: { activation: string; ackedThrough: number | null; notifyBacklog: number | null }
       }
   providers: Array<{ provider: string; detected: boolean; configured: boolean; hookEvents: number; lastEventAt: string | null }>
   recorderLogTail: string[]
@@ -109,11 +106,9 @@ export async function collectSupportBundle(
     return { ...base, recorder: { enabled: false, reason: enablement.reason }, recorderLogTail: [] }
   }
 
-  const [health, store, archive, drain] = await Promise.all([
+  const [health, store] = await Promise.all([
     readHealth(enablement.dataRoot),
-    verifyStore(enablement.dataRoot),
-    readArchiveState(enablement.dataRoot),
-    readDrainStatus(enablement.dataRoot)
+    verifyStore(enablement.dataRoot)
   ])
   const activation = await resolveCommitHookActivation(workspaceRoot, enablement.config, env)
   const activated = activation.status === 'trusted' || activation.status === 'host-provided'
@@ -144,10 +139,8 @@ export async function collectSupportBundle(
       commitHook: {
         activation: activation.status,
         ackedThrough: activated ? notifications.ackedThrough : null,
-        notifyBacklog: activated ? notifications.notifyBacklog : null,
-        lastDrainTruncated: drain.truncated
-      },
-      archives: archive?.archives.length ?? 0
+        notifyBacklog: activated ? notifications.notifyBacklog : null
+      }
     },
     recorderLogTail: logTail
   }

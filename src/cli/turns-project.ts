@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { AgentTurnRecord, Evidence, TurnCall } from '../shared/turn-record.js'
+import { evidenceStatusMap, type AgentTurnRecord, type Evidence, type TurnCall } from '../shared/turn-record.js'
 
 /**
  * Read-only projection for external uploaders.
@@ -20,11 +20,6 @@ export type ProjectionPolicy = typeof PROJECTION_POLICIES[number]
 export function isProjectionPolicy(value: string): value is ProjectionPolicy {
   return (PROJECTION_POLICIES as readonly string[]).includes(value)
 }
-
-const EVIDENCE_SECTIONS = [
-  'user', 'assistant', 'tools', 'skills', 'mcps', 'hooks', 'usage',
-  'files', 'diff', 'dangerousOperations', 'errors', 'interventions', 'compactions', 'modelTiming'
-] as const
 
 export interface ProjectedTurn {
   schemaVersion: 1
@@ -77,17 +72,20 @@ function numberOrNull(value: number | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function countCalls(record: AgentTurnRecord, category: TurnCall['category']): number | null {
-  const sections: Array<Evidence<TurnCall[]> | undefined> = [record.tools, record.skills, record.mcps]
-  let total = 0
+type CallCategory = NonNullable<TurnCall['category']>
+
+/** One pass over the call sections; null when no section is observable at all. */
+function callCounts(record: AgentTurnRecord): Record<CallCategory, number | null> {
+  const counts: Record<CallCategory, number> = { tool: 0, skill: 0, agent: 0, mcp: 0 }
   let known = false
-  for (const section of sections) {
+  for (const section of [record.tools, record.skills, record.mcps] as Array<Evidence<TurnCall[]> | undefined>) {
     const calls = usable(section)
     if (!calls) continue
     known = true
-    total += calls.filter((call) => (call.category ?? 'tool') === category).length
+    for (const call of calls) counts[call.category ?? 'tool']++
   }
-  return known ? total : null
+  if (!known) return { tool: null, skill: null, agent: null, mcp: null }
+  return counts
 }
 
 export function projectTurn(
@@ -104,11 +102,8 @@ export function projectTurn(
   const compactions = usable(record.compactions)
   const errors = usable(record.errors)
 
-  const evidence: Record<string, string> = {}
-  for (const section of EVIDENCE_SECTIONS) {
-    const value = record[section] as Evidence<unknown> | undefined
-    evidence[section] = value ? `${value.status}/${value.quality}` : 'unavailable/unavailable'
-  }
+  const evidence = evidenceStatusMap(record)
+  const counts = callCounts(record)
 
   const diffStats = diffs
     ? diffs.reduce(
@@ -154,10 +149,10 @@ export function projectTurn(
       ? { cumulativeMs: numberOrNull(timing.cumulativeMs), occupiedMs: numberOrNull(timing.occupiedMs) }
       : null,
     counts: {
-      tools: countCalls(record, 'tool'),
-      skills: countCalls(record, 'skill'),
-      mcps: countCalls(record, 'mcp'),
-      agents: countCalls(record, 'agent'),
+      tools: counts.tool,
+      skills: counts.skill,
+      mcps: counts.mcp,
+      agents: counts.agent,
       hookInstances: hooks ? hooks.length : null,
       filesTouched: files ? files.length : null
     },
