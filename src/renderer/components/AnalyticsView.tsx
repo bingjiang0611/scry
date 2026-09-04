@@ -74,11 +74,6 @@ function costEvidence(row: UsageAnalyticsAggregate): string {
   return qualities.length > 0 ? qualities.join(' + ') : '成本证据质量未知'
 }
 
-function costMarker(row: UsageAnalyticsAggregate): string {
-  if (row.costKnownRows === 0) return ''
-  return `${row.providerReportedCostRows > 0 ? 'P' : ''}${row.estimatedCostRows > 0 ? '≈' : ''}${row.inferredCostRows > 0 ? '†' : ''}`
-}
-
 function tokenComplete(row: UsageAnalyticsAggregate): boolean {
   return row.usageRows > 0 && row.inputKnownRows === row.usageRows && row.outputKnownRows === row.usageRows
 }
@@ -89,14 +84,11 @@ function tokenEvidence(row: UsageAnalyticsAggregate): string {
 }
 
 function formatAggregateTokens(row: UsageAnalyticsAggregate): string {
-  const value = tokensOf(row)
-  if (value == null) return '—'
-  return `${tokenComplete(row) ? '' : '≥'}${formatTokens(value)}`
+  return formatTokens(tokensOf(row))
 }
 
-function formatKnownTokens(value: number | null, knownRows: number, usageRows: number): string {
-  if (value == null) return '—'
-  return `${usageRows > 0 && knownRows < usageRows ? '≥' : ''}${formatTokens(value)}`
+function formatKnownTokens(value: number | null): string {
+  return formatTokens(value)
 }
 
 function metricValue(row: UsageAnalyticsAggregate, metric: ChartMetric): number | null {
@@ -107,11 +99,6 @@ function metricEvidence(row: UsageAnalyticsAggregate, metric: ChartMetric): stri
   return metric === 'cost' ? costEvidence(row) : tokenEvidence(row)
 }
 
-function metricMarker(row: UsageAnalyticsAggregate, metric: ChartMetric): string {
-  if (metric === 'cost') return costMarker(row)
-  return row.usageRows > 0 && !tokenComplete(row) ? '≥' : ''
-}
-
 function formatShare(value: number | null, total: number | null): string {
   if (value == null || total == null || total <= 0) return '—'
   return `${((value / total) * 100).toFixed(1)}%`
@@ -119,6 +106,16 @@ function formatShare(value: number | null, total: number | null): string {
 
 function isApproximateCost(row: UsageAnalyticsAggregate): boolean {
   return row.estimatedCostRows > 0 || row.inferredCostRows > 0
+}
+
+function modelBreakdownRows(analytics: UsageAnalytics): UsageAnalyticsBreakdownRow[] {
+  const rows = analytics.byModel.filter((row) => row.provider !== 'qoder')
+  const qoder = analytics.byProvider.find((row) => row.provider === 'qoder')
+  if (qoder && (qoder.usageRows > 0 || qoder.costKnownRows > 0)) rows.push(qoder)
+  return rows.sort((a, b) => {
+    const rank = (row: UsageAnalyticsAggregate): number => row.costUsd || tokensOf(row) || 0
+    return rank(b) - rank(a)
+  })
 }
 
 function niceChartMax(value: number): number {
@@ -185,21 +182,16 @@ function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; metric: 
     const baseline = inset.top + plotHeight
     const y = (value: number): number => inset.top + plotHeight - (value / max) * plotHeight
     const series = samples.map(({ provider, samples: providerSamples }) => {
-      const segments: ChartPoint[][] = []
-      let current: ChartPoint[] = []
-      const flush = (): void => {
-        if (current.length > 0) segments.push(current)
-        current = []
+      const points = providerSamples.map((sample, index) => ({
+        x: x(index),
+        y: y(sample.value ?? 0)
+      }))
+      return {
+        provider,
+        samples: providerSamples,
+        segments: points.length > 0 ? [points] : [],
+        missingDays: providerSamples.filter((sample) => sample.value == null).length
       }
-      providerSamples.forEach((sample, index) => {
-        if (sample.value == null) {
-          flush()
-          return
-        }
-        current.push({ x: x(index), y: y(sample.value) })
-      })
-      flush()
-      return { provider, samples: providerSamples, segments }
     })
     return { width, height, inset, plotWidth, plotHeight, baseline, max, x, series }
   }, [analytics, metric])
@@ -214,7 +206,7 @@ function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; metric: 
   return (
     <div className="usage-chart-scroller">
       <div className="usage-chart-wrap">
-        <p className="usage-visually-hidden" id="usage-chart-instructions">聚焦图表后，可使用左右方向键逐日查看证据。</p>
+        <p className="usage-visually-hidden" id="usage-chart-instructions">聚焦图表后，可使用左右方向键逐日查看证据。无记录日沿基线连接以保持走势连续，但不代表实际值为零。</p>
         <svg
           className="usage-chart"
           viewBox={`0 0 ${chart.width} ${chart.height}`}
@@ -255,7 +247,7 @@ function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; metric: 
             const line = smoothPath(points)
             const area = `${line} L ${points.at(-1)!.x},${chart.baseline} L ${points[0].x},${chart.baseline} Z`
             return (
-              <g key={`${series.provider}:segment:${index}`}>
+              <g key={`${series.provider}:segment:${index}`} data-missing-days={series.missingDays}>
                 <path className={`usage-chart-area is-${series.provider}`} d={area} />
                 <path className={`usage-chart-line is-${series.provider}`} d={line} />
               </g>
@@ -343,9 +335,8 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
   const providers = analytics.byProvider.filter((row) => row.usageRows > 0 || row.costKnownRows > 0)
   const providerScale = Math.max(0, ...providers.map((row) => row.costUsd ?? 0))
   const chartProviders = providers.filter((row) => metricValue(row, chartMetric) != null)
-  const rows = breakdownMode === 'model' ? analytics.byModel : [...analytics.byDay].reverse()
+  const rows = breakdownMode === 'model' ? modelBreakdownRows(analytics) : [...analytics.byDay].reverse()
   const activeDays = analytics.byDay.filter((row) => row.usageRows > 0 || row.costKnownRows > 0).length
-  const totalCostMarker = costMarker(totals)
 
   return (
     <main className="usage-page">
@@ -379,10 +370,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
         <section className="usage-overview" aria-label="用量概览">
           <article className="usage-cost-card">
             <span className="usage-eyebrow">RAW TOKEN COST</span>
-            <strong>
-              {formatCost(totals.costUsd)}
-              {totalCostMarker && <sup title={costEvidence(totals)}>{totalCostMarker}</sup>}
-            </strong>
+            <strong>{formatCost(totals.costUsd)}</strong>
             <small>{costEvidence(totals)} · {totals.turns.toLocaleString()} 轮</small>
             <div className="usage-provider-list">
               {providers.length === 0 ? <div className="usage-empty-row">当前范围没有用量记录</div> : providers.map((row) => (
@@ -390,17 +378,14 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                   <div className="usage-provider-main">
                     <ProviderMark provider={row.provider} />
                     <b>{providerLabel(row.provider)}</b>
-                    <span>
-                      {formatCost(row.costUsd)}
-                      {costMarker(row) && <sup className="usage-cost-marker" title={costEvidence(row)}>{costMarker(row)}</sup>}
-                    </span>
+                    <span title={costEvidence(row)}>{formatCost(row.costUsd)}</span>
                   </div>
                   <span className={`usage-provider-track ${row.costUsd == null ? 'is-unknown' : ''}`}>
                     <i className={`is-${row.provider}`} style={{ width: `${row.costUsd == null || row.costUsd === 0 || providerScale === 0 ? 0 : (row.costUsd / providerScale) * 100}%` }} />
                   </span>
                   <small>
                     <span>{formatShare(row.costUsd, totals.costUsd)} 成本 · {formatAggregateTokens(row)} Token</span>
-                    <em>{costEvidence(row)}</em>
+                    <em>{costEvidence(row)} · {tokenComplete(row) ? 'Token 完整' : 'Token 已知下界'}</em>
                   </small>
                 </div>
               ))}
@@ -420,7 +405,6 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                     <span key={row.provider} title={metricEvidence(row, chartMetric)}>
                       <ProviderMark provider={row.provider} />
                       {providerLabel(row.provider)}
-                      {metricMarker(row, chartMetric) && <em className="usage-evidence-marker">{metricMarker(row, chartMetric)}</em>}
                     </span>
                   ))}
                 </div>
@@ -432,10 +416,10 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
 
         <section className="usage-metrics" aria-label="用量摘要">
           <div><span>已处理 Token</span><b>{formatAggregateTokens(totals)}</b><small>{tokenComplete(totals) && activeDays > 0 && totalTokens != null ? `${formatTokens(totalTokens / activeDays)} / 活跃日` : tokenEvidence(totals)}</small></div>
-          <div><span>缓存输入</span><b>{formatKnownTokens(totals.cacheReadTokens, totals.cacheReadKnownRows, totals.usageRows)}</b><small>{totals.cacheReadKnownRows}/{totals.usageRows} 条明细已上报</small></div>
-          <div><span>已观测输入</span><b>{formatKnownTokens(totals.inputTokens, totals.inputKnownRows, totals.usageRows)}</b><small>{totals.inputKnownRows}/{totals.usageRows} 条明细已上报</small></div>
-          <div><span>输出</span><b>{formatKnownTokens(totals.outputTokens, totals.outputKnownRows, totals.usageRows)}</b><small>{totals.outputKnownRows}/{totals.usageRows} 条 · 推理 {formatKnownTokens(totals.reasoningTokens, totals.reasoningKnownRows, totals.usageRows)}</small></div>
-          <div><span>缓存写入</span><b>{formatKnownTokens(totals.cacheWriteTokens, totals.cacheWriteKnownRows, totals.usageRows)}</b><small>{totals.cacheWriteKnownRows}/{totals.usageRows} 条明细已上报</small></div>
+          <div><span>缓存输入</span><b>{formatKnownTokens(totals.cacheReadTokens)}</b><small>{totals.cacheReadKnownRows}/{totals.usageRows} 条明细已上报</small></div>
+          <div><span>已观测输入</span><b>{formatKnownTokens(totals.inputTokens)}</b><small>{totals.inputKnownRows}/{totals.usageRows} 条明细已上报</small></div>
+          <div><span>输出</span><b>{formatKnownTokens(totals.outputTokens)}</b><small>{totals.outputKnownRows}/{totals.usageRows} 条 · 推理 {formatKnownTokens(totals.reasoningTokens)}</small></div>
+          <div><span>缓存写入</span><b>{formatKnownTokens(totals.cacheWriteTokens)}</b><small>{totals.cacheWriteKnownRows}/{totals.usageRows} 条明细已上报</small></div>
         </section>
 
         <section className="usage-breakdown">
@@ -455,7 +439,9 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                 ) : rows.map((row) => {
                   const modelRow = row as UsageAnalyticsBreakdownRow
                   const key = breakdownMode === 'model' ? `${modelRow.provider}:${modelRow.model ?? ''}` : (row as typeof analytics.byDay[number]).day
-                  const label = breakdownMode === 'model' ? modelRow.model ?? '未归因' : (row as typeof analytics.byDay[number]).day
+                  const label = breakdownMode === 'model'
+                    ? modelRow.provider === 'qoder' ? providerLabel('qoder') : modelRow.model ?? '未归因'
+                    : (row as typeof analytics.byDay[number]).day
                   return (
                     <tr key={key}>
                       <th scope="row">
@@ -464,12 +450,9 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                           <b title={label}>{label}</b>
                         </span>
                       </th>
-                      <td title={costEvidence(row)} className={isApproximateCost(row) ? 'is-approximate' : undefined}>
-                        {formatCost(row.costUsd)}
-                        {costMarker(row) && <sup className="usage-cost-marker">{costMarker(row)}</sup>}
-                      </td>
+                      <td title={costEvidence(row)} className={isApproximateCost(row) ? 'is-approximate' : undefined}>{formatCost(row.costUsd)}</td>
                       <td>{formatShare(row.costUsd, totals.costUsd)}</td>
-                      <td title={tokenEvidence(row)}>{formatAggregateTokens(row)}</td>
+                      <td title={tokenEvidence(row)} className={!tokenComplete(row) && row.usageRows > 0 ? 'is-lower-bound' : undefined}>{formatAggregateTokens(row)}</td>
                     </tr>
                   )
                 })}
@@ -479,7 +462,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
         </section>
 
         <footer className="usage-footnote">
-          成本仅汇总 canonical USD 记录；P = Provider 报告，≈ = 估算，† = 推断。Token 的 ≥ 表示已知下界；缺失字段不按 0 处理。
+          成本来源与 Token 覆盖状态见行内说明；部分覆盖只展示已知下界。趋势图为保持连续会将无记录日沿基线连接，悬停仍显示 —，不代表实际值为 0。
         </footer>
       </div>
     </main>
