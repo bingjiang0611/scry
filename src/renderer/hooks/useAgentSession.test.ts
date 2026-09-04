@@ -26,7 +26,8 @@ import {
   sessionTurnsWithActiveRun,
   traceLiveHealthOf,
   turnBlocksInput,
-  upsertPendingQuestion
+  upsertPendingQuestion,
+  visibleTurnsBeforeReplacement
 } from './useAgentSession'
 
 const ev = (id: string, runId = 'r1'): TraceEvent => ({
@@ -86,6 +87,26 @@ describe('useAgentSession state reducers', () => {
       attachments: [image]
     })
     expect(buildAgentStartRequest('   ', { agentId: 'codex', runtimeProvider: 'codex_cli' })).toBeNull()
+    expect(buildAgentStartRequest(' edited ', {
+      agentId: 'qoder',
+      expectedExternalSessionId: 'run-stopped',
+      restartLastTurn: { replaceRunId: 'run-stopped' }
+    })).toMatchObject({
+      prompt: 'edited',
+      expectedExternalSessionId: 'run-stopped',
+      restartLastTurn: { replaceRunId: 'run-stopped' }
+    })
+  })
+
+  it('成功启动编辑重发后只保留被替换轮次之前的可见历史', () => {
+    const turns: Turn[] = [
+      { runId: 'r1', userText: 'first', items: [], done: true },
+      { runId: 'r2', userText: 'stopped', items: [], done: true }
+    ]
+
+    expect(visibleTurnsBeforeReplacement(turns, 'r2')).toEqual([turns[0]])
+    expect(visibleTurnsBeforeReplacement(turns, 'missing')).toBe(turns)
+    expect(visibleTurnsBeforeReplacement(turns, undefined)).toBe(turns)
   })
 
   it('restores an active run and preserves locally buffered trace extras', () => {

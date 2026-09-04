@@ -2078,6 +2078,44 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(userHtml).toContain('title="编辑最后一条消息并从这里建立新分支"')
   })
 
+  it('首轮停止且尚无 Provider 边界时仍显示重新开始编辑入口', () => {
+    const stopped: Turn = { runId: 'run-stopped', userText: '好的', done: true, items: [] }
+    const html = renderWelcome({ turns: [stopped], onEditLastTurn: async () => {} })
+
+    expect(html).toContain('aria-label="编辑最后一条消息"')
+    expect(html).toContain('title="编辑最后一条消息并重新开始"')
+  })
+
+  it('非首轮只有完整的当前与上一轮边界才显示分支编辑入口', () => {
+    const previous: Turn = {
+      runId: 'run-previous', userText: '第一条', done: true, items: [],
+      providerTurnId: 'provider-previous', forkTurnId: 'fork-previous'
+    }
+    const current: Turn = {
+      runId: 'run-current', userText: '第二条', done: true, items: [],
+      providerTurnId: 'provider-current', forkTurnId: 'fork-current'
+    }
+    const branchHtml = renderWelcome({ turns: [previous, current], onEditLastTurn: async () => {} })
+    const missingBoundaryHtml = renderWelcome({
+      turns: [previous, { ...current, providerTurnId: undefined, forkTurnId: undefined }],
+      onEditLastTurn: async () => {}
+    })
+
+    expect(branchHtml).toContain('title="编辑最后一条消息并从这里建立新分支"')
+    expect(missingBoundaryHtml).not.toContain('aria-label="编辑最后一条消息"')
+  })
+
+  it('分页窗口中的第一条可见消息不能冒充会话首轮重新编辑', () => {
+    const stopped: Turn = { runId: 'run-visible', userText: '可见尾部', done: true, items: [] }
+    const html = renderWelcome({
+      turns: [stopped],
+      historyWindow: { sessionId: 'session', offset: 8, totalTurns: 9, hasOlder: true, completeness: 'partial' },
+      onEditLastTurn: async () => {}
+    })
+
+    expect(html).not.toContain('aria-label="编辑最后一条消息"')
+  })
+
   it('长用户消息用紧凑的折叠控件展示行数与展开状态', () => {
     const userHtml = renderToStaticMarkup(<UserMessage text={Array.from({ length: 13 }, (_, index) => `第 ${index + 1} 行`).join('\n')} />)
 

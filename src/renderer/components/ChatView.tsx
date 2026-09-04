@@ -12,7 +12,7 @@ import type {
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
-import { AssistantTurn, UserMessage } from './ChatTurn'
+import { AssistantTurn, UserMessage, type UserMessageEditMode } from './ChatTurn'
 import { WorkdirPicker, CliPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
@@ -470,9 +470,18 @@ export function ChatView({
           )}
           {turns.map((turn, index) => {
             const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
+            const previous = turns[index - 1]
+            const currentBoundaryComplete = !!turn.providerTurnId && !!turn.forkTurnId
+            const currentBoundaryAbsent = !turn.providerTurnId && !turn.forkTurnId
+            const previousBoundaryComplete = !!previous?.providerTurnId && !!previous.forkTurnId
+            const isFirstSessionTurn = index === 0 && (historyWindow?.offset ?? 0) === 0
+            const editMode: UserMessageEditMode | null = isFirstSessionTurn && (currentBoundaryComplete || currentBoundaryAbsent)
+              ? 'restart'
+              : currentBoundaryComplete && previousBoundaryComplete
+                ? 'branch'
+                : null
             const editable = index === turns.length - 1 && turn.done && !busy && queuedPrompts.length === 0 &&
-              pendingQuestions.length === 0 && !!turn.providerTurnId && !!turn.forkTurnId &&
-              (index === 0 || (!!turns[index - 1].providerTurnId && !!turns[index - 1].forkTurnId)) && !!onEditLastTurn
+              pendingQuestions.length === 0 && editMode != null && !!onEditLastTurn
             return (
             <div
               key={turn.runId}
@@ -485,6 +494,7 @@ export function ChatView({
                 text={turn.userText}
                 attachments={turn.attachments}
                 editable={editable}
+                editMode={editMode ?? undefined}
                 onEdit={editable ? (text) => onEditLastTurn!(turn, text) : undefined}
               />
               <AssistantTurn

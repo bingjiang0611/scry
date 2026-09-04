@@ -182,7 +182,13 @@ import {
 import { deleteOwnedSessionData } from './session-deletion'
 import { ensureFailedTerminalResult } from './run-outcome'
 import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
-import { ContextAdmission, expectedSessionMatches, waitForCompletedRuns } from './context-admission'
+import {
+  ContextAdmission,
+  canRestartInterruptedFirstTurn,
+  expectedRestartSourceMatches,
+  expectedSessionMatches,
+  waitForCompletedRuns
+} from './context-admission'
 import {
   cleanupTraceTurnProgressTemps,
   deleteTraceTurnProgress,
@@ -2061,6 +2067,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     let resume = sessionByContext.get(contextKey)
     const expectedSessionId = request.expectedExternalSessionId
     const forkSourceSessionId = request.forkLastTurn ? resume : undefined
+    const restartSourceSessionId = request.restartLastTurn && typeof expectedSessionId === 'string'
+      ? expectedSessionId
+      : undefined
+    const editSourceSessionId = forkSourceSessionId ?? restartSourceSessionId
     const contextRuns = runs.unsettledStates().filter((run) =>
       run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
@@ -2091,7 +2101,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         nextAction: '草稿已保留；确认当前会话后重新发送'
       }
     )
-    if (!expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...catalogAliases()])) {
+    if (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+      !expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...catalogAliases()])) {
       throw contextChangedError()
     }
     if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
@@ -2125,7 +2136,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     const latestContextRuns = runs.unsettledStates().filter((run) =>
       run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
-    if (!expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...latestContextRuns, ...catalogAliases()])) {
+    if (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+      !expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...latestContextRuns, ...catalogAliases()])) {
       throw contextChangedError()
     }
     if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
@@ -2290,10 +2302,37 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       resume = forked.externalSessionId
       sessionByContext.set(contextKey, resume)
     } else {
+      if (archive.turns.length !== 1) {
+        throw new AgentRuntimeError('缺少上一轮边界，已拒绝把多轮会话当成首轮重新开始', {
+          provider: runtimeProvider,
+          stage: 'frontdoor',
+          cwd,
+          nextAction: '加载完整会话后再编辑最后一条消息'
+        })
+      }
       // 编辑首轮不需要复制空历史；直接创建一个新的 Provider 会话。
       resume = undefined
       sessionByContext.delete(contextKey)
     }
+    sessionAliasesByContext.delete(contextKey)
+  } else if (request.restartLastTurn) {
+    if (!restartSourceSessionId) throw contextChangedError()
+    const archive = await readTraceArchiveAsync({
+      cwd: catalogCwd,
+      sessionId: restartSourceSessionId,
+      providerId,
+      userDataDir: app.getPath('userData')
+    })
+    if (!canRestartInterruptedFirstTurn(archive, request.restartLastTurn.replaceRunId)) {
+      throw new AgentRuntimeError('停止轮次已变化或已形成 Provider 边界，已拒绝重新开始', {
+        provider: runtimeProvider,
+        stage: 'frontdoor',
+        cwd,
+        nextAction: '重新打开当前会话；只有首轮在停止前未形成原生边界时才能直接编辑重发'
+      })
+    }
+    resume = undefined
+    sessionByContext.delete(contextKey)
     sessionAliasesByContext.delete(contextKey)
   }
   const committedResume = sessionByContext.get(contextKey)
@@ -2301,7 +2340,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const committedRuns = runs.unsettledStates().filter((run) =>
     run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
   )
-  const committedExpectedSessionId = request.forkLastTurn ? resume ?? null : expectedSessionId
+  const committedExpectedSessionId = request.forkLastTurn || request.restartLastTurn ? resume ?? null : expectedSessionId
   if (
     committedResume !== resume || committedRevision !== contextRevision ||
     !expectedSessionMatches(committedExpectedSessionId, committedResume, [...committedRuns, ...catalogAliases()])
@@ -2440,7 +2479,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       win?.webContents.send('agent:session', {
         runId,
         sessionId: resume,
-        ...(forkSourceSessionId ? { previousSessionId: forkSourceSessionId } : {}),
+        ...(editSourceSessionId ? { previousSessionId: editSourceSessionId } : {}),
         externalSessionId: resume,
         providerId,
         agentProfileId
@@ -2449,7 +2488,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       win?.webContents.send('agent:session', {
         runId,
         sessionId: runId,
-        ...(forkSourceSessionId ? { previousSessionId: forkSourceSessionId } : {}),
+        ...(editSourceSessionId ? { previousSessionId: editSourceSessionId } : {}),
         providerId,
         agentProfileId,
         pending: true
@@ -2687,7 +2726,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       win?.webContents.send('agent:session', {
         runId,
         sessionId,
-        previousSessionId: forkSourceSessionId ?? runId,
+        previousSessionId: editSourceSessionId ?? runId,
         externalSessionId: sessionId,
         providerId,
         agentProfileId
@@ -3127,7 +3166,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       }
       flushTraceSend()
       if (stopped && !canonicalLifecycle) {
-        if (!alreadyDone) win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId, agentProfileId })
+        if (!alreadyDone) win?.webContents.send('agent:turnDone', {
+          runId,
+          stopped: true,
+          providerId,
+          agentProfileId,
+          sessionId: storageSessionId,
+          ...(providerTurnId ? { providerTurnId } : {}),
+          ...(forkTurnId ? { forkTurnId } : {})
+        })
       } else {
         win?.webContents.send('agent:error', { runId, message, category, hint })
         markTerminalAttention(storageSessionId, true)
@@ -3160,7 +3207,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       }
       persistRunData(storageSessionId)
       if (stopped && canonicalLifecycle && !alreadyDone && exactRecorded) {
-        win?.webContents.send('agent:turnDone', { runId, stopped: true, providerId, agentProfileId })
+        win?.webContents.send('agent:turnDone', {
+          runId,
+          stopped: true,
+          providerId,
+          agentProfileId,
+          sessionId: storageSessionId,
+          ...(providerTurnId ? { providerTurnId } : {}),
+          ...(forkTurnId ? { forkTurnId } : {})
+        })
       }
     })
     .catch(async (error) => {

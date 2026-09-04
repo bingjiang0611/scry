@@ -113,6 +113,34 @@ describe('runtime frontdoor mapping', () => {
     })).toThrow('可信会话或轮次边界')
   })
 
+  it('normalizes a stopped first-turn restart without inventing native boundaries', () => {
+    expect(normalizeAgentStartRequest({
+      prompt: 'edited',
+      providerId: 'qoder',
+      expectedExternalSessionId: 'run-stopped',
+      restartLastTurn: { replaceRunId: ' run-stopped ' }
+    })).toMatchObject({
+      expectedExternalSessionId: 'run-stopped',
+      restartLastTurn: { replaceRunId: 'run-stopped' }
+    })
+    expect(() => normalizeAgentStartRequest({
+      prompt: 'edited',
+      providerId: 'qoder',
+      restartLastTurn: { replaceRunId: 'run-stopped' }
+    })).toThrow('可信会话或 run 边界')
+    expect(() => normalizeAgentStartRequest({
+      prompt: 'edited',
+      providerId: 'qoder',
+      expectedExternalSessionId: 'run-stopped',
+      restartLastTurn: { replaceRunId: 'run-stopped' },
+      forkLastTurn: {
+        replaceRunId: 'run-stopped',
+        replaceProviderTurnId: 'provider-turn',
+        replaceForkTurnId: 'fork-turn'
+      }
+    })).toThrow('不能同时请求分支与重新开始')
+  })
+
   it('maps generic permission answers without exposing native request ids', () => {
     const request = agentPermissionQuestion('run-1', 'permission-1', '权限请求', '允许执行命令？', 'git status')
     expect(agentPermissionDecision(request, {

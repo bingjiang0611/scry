@@ -170,11 +170,16 @@ export interface AgentForkLastTurn {
   previousForkTurnId?: string
 }
 
+export interface AgentRestartLastTurn {
+  replaceRunId: string
+}
+
 export interface AgentStartRequest {
   prompt: string
   cwd?: string
   expectedExternalSessionId?: string | null
   forkLastTurn?: AgentForkLastTurn
+  restartLastTurn?: AgentRestartLastTurn
   providerId?: ProviderId
   agentId?: string
   agentProfileId?: string
@@ -240,6 +245,7 @@ export interface NormalizedAgentStartRequest {
   cwd?: string
   expectedExternalSessionId?: string | null
   forkLastTurn?: AgentForkLastTurn
+  restartLastTurn?: AgentRestartLastTurn
   providerId: ProviderId
   agentId: string
   agentProfileId?: string
@@ -383,8 +389,15 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   const replaceForkTurnId = boundedControlValue(payload.forkLastTurn?.replaceForkTurnId)
   const previousProviderTurnId = boundedControlValue(payload.forkLastTurn?.previousProviderTurnId)
   const previousForkTurnId = boundedControlValue(payload.forkLastTurn?.previousForkTurnId)
+  const restartReplaceRunId = boundedControlValue(payload.restartLastTurn?.replaceRunId)
+  if (payload.forkLastTurn && payload.restartLastTurn) {
+    throw new Error('编辑最后一条消息不能同时请求分支与重新开始')
+  }
   if (payload.forkLastTurn && (!replaceRunId || !replaceProviderTurnId || !replaceForkTurnId || typeof payload.expectedExternalSessionId !== 'string')) {
     throw new Error('编辑最后一条消息缺少可信会话或轮次边界')
+  }
+  if (payload.restartLastTurn && (!restartReplaceRunId || typeof payload.expectedExternalSessionId !== 'string')) {
+    throw new Error('重新编辑首轮消息缺少可信会话或 run 边界')
   }
   return {
     prompt: payload.prompt,
@@ -403,6 +416,7 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
         ...(previousForkTurnId ? { previousForkTurnId } : {})
       }
     } : {}),
+    ...(restartReplaceRunId ? { restartLastTurn: { replaceRunId: restartReplaceRunId } } : {}),
     providerId,
     agentId,
     ...(agentProfileId ? { agentProfileId } : {}),
