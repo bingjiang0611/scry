@@ -6,9 +6,19 @@
     "Scry Pinned Summary": {
       "versions": [
         {
+          "path": "Scry Pinned Summary v2.html",
+          "createdAt": "2026-09-04T07:43:54.000Z",
+          "status": "needs-review",
+          "subtitle": "轻量悬浮摘要：Changes、分支、Skills & MCP、Web reading 与 Subagents",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        },
+        {
           "path": "Scry Pinned Summary.html",
           "createdAt": "2026-09-02T13:20:00.000Z",
-          "status": "needs-review",
+          "status": "archived",
           "subtitle": "融合 Codex 与 Qoder 的 Scry 固定上下文摘要 Surface",
           "viewport": {
             "width": 1440,
@@ -19,5 +29,5 @@
     }
   },
   "createdAt": "2026-09-02T13:20:00.000Z",
-  "updatedAt": "2026-09-02T13:20:00.000Z"
+  "updatedAt": "2026-09-04T07:43:54.000Z"
 }
