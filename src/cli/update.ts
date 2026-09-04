@@ -113,11 +113,12 @@ export function npmPrefixFromEntry(entryPath: string): string | null {
   return resolved.slice(0, index) || sep
 }
 
-export function shouldScheduleAutoUpdate(options: AutoUpdateOptions): boolean {
-  const env = options.env ?? process.env
-  if (!options.stderrIsTTY || options.noUpdateCheck) return false
-  if (!options.command || ['upgrade', 'version', '__auto_update'].includes(options.command)) return false
-  if (options.command === 'recorder' && ['hook', 'serve'].includes(options.action ?? '')) return false
+/**
+ * The environment half of the policy, shared by every trigger so there is one answer to "may this
+ * machine install an update at all". `SCRY_CLI_BUNDLED` and `SCRY_RECORDER_MANAGED` mean another
+ * product pins the CLI; the rest are explicit opt-outs.
+ */
+export function autoUpdateAllowedByEnv(env: NodeJS.ProcessEnv = process.env): boolean {
   if (!enabled(env.SCRY_AUTO_UPDATE)) return false
   return ![
     env.SCRY_CLI_BUNDLED,
@@ -126,6 +127,36 @@ export function shouldScheduleAutoUpdate(options: AutoUpdateOptions): boolean {
     env.SCRY_UPDATE_CHILD,
     env.CI
   ].some(enabled)
+}
+
+export function shouldScheduleAutoUpdate(options: AutoUpdateOptions): boolean {
+  const env = options.env ?? process.env
+  if (!options.stderrIsTTY || options.noUpdateCheck) return false
+  if (!options.command || ['upgrade', 'version', '__auto_update'].includes(options.command)) return false
+  if (options.command === 'recorder' && ['hook', 'serve'].includes(options.action ?? '')) return false
+  return autoUpdateAllowedByEnv(env)
+}
+
+/**
+ * Update trigger for the recorder daemon's idle shutdown. Hook events deliberately cannot trigger
+ * one: after the curl fast path they run no Node at all, so a trigger there would re-add a process
+ * launch (measured 79ms) to the hottest path and could swap the CLI between two events of the same
+ * turn. The daemon instead updates when it has already decided to exit, which needs no extra
+ * process and cannot split a turn.
+ *
+ * Pending turns deliberately do not block this. Records are durable and versioned, a newer CLI
+ * recovering an older open turn is a supported path, and `doctor` reports version drift - whereas
+ * requiring zero pending would silently disable updates on exactly the workspaces that accumulate
+ * them.
+ */
+export async function runIdleAutoUpdate(
+  currentVersion: string,
+  entryPath?: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string | null> {
+  if (!autoUpdateAllowedByEnv(env)) return null
+  const result = await runBackgroundUpdate(currentVersion, entryPath)
+  return result?.status === 'updated' ? result.latestVersion ?? null : null
 }
 
 export function isUpdateDue(state: CliUpdateState | null, now = Date.now()): boolean {

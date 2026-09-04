@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -9,6 +9,8 @@ import {
   isUpdateDue,
   npmPrefixFromEntry,
   runBackgroundUpdate,
+  autoUpdateAllowedByEnv,
+  runIdleAutoUpdate,
   shouldScheduleAutoUpdate,
   upgradeCli
 } from './update'
@@ -46,6 +48,24 @@ describe('CLI auto update', () => {
     expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'status', env: optedIn })).toBe(true)
     expect(shouldScheduleAutoUpdate({ ...base, stderrIsTTY: false, env: {} })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, noUpdateCheck: true, env: {} })).toBe(false)
+  })
+
+  it('idle 更新走同一套 env 门，且不因为交互条件而放宽', async () => {
+    // 与 shouldScheduleAutoUpdate 共用 autoUpdateAllowedByEnv，不是第二套策略。
+    expect(autoUpdateAllowedByEnv({})).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1' })).toBe(true)
+    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', SCRY_RECORDER_MANAGED: '1' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', SCRY_CLI_BUNDLED: '1' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', SCRY_UPDATE_CHILD: '1' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', CI: 'true' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '0' })).toBe(false)
+
+    // 没有 opt-in 时 idle 触发器直接返回 null，不做任何网络访问。
+    const root = await mkdtemp(join(tmpdir(), 'scry-idle-update-'))
+    tempDirs.push(root)
+    vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', join(root, 'state.json'))
+    await expect(runIdleAutoUpdate('0.2.32', undefined, {})).resolves.toBeNull()
+    await expect(access(join(root, 'state.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('backs off longer after successful checks than failed checks', () => {

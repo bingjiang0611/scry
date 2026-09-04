@@ -745,6 +745,42 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 3. 排除确实不需要采集的子仓库(实测每个干净仓库约 120–160ms)
 4. 待评估:daemon 缓存逐仓库的 git layout。§12.7 曾以"只值 159ms"否决,但那是单仓库;15 个仓库时静态调用约 1.1s,结论需要重估
 
+## 12.16 自动更新触发点:daemon 空闲窗口
+
+放宽 major 边界(§12.14)之后仍有一个洞:`shouldScheduleAutoUpdate` 要求 stderr 是 TTY 且命令不是 `recorder hook|serve`,所以**只跑 Agent、没人手动敲 `scry` 的机器永远不更新**。本机 `rate-native` 就是实证:hook 一天跑几百次,`0.2.31` 发布后它一直停在 `0.2.30`。
+
+### 为什么不从 hook 事件触发
+
+评估过"每个事件都判断 + 触发后静默 N 小时",否决,三条与频率无关:
+
+1. **快路径里没有 Node**(§12.10 之后 hook 是纯 shell + curl)。要判断就得重新拉起 Node,实测冷启动 79ms,而整条快路径只要 83ms —— 等于把刚省掉的开销原样加回最频繁的 `PreToolUse`/`PostToolUse`。节流能让安装稀有,不能让"判断"免费。
+2. **换版本会落在轮次中间**。一轮 5 类事件跨几分钟,`UserPromptSubmit` 由旧版本写 open、`Stop` 由新版本处理;`rate-native` 的脚本对此更严,`SCRY_RECORDER_REQUIRED_VERSION` 不匹配直接 exit 86,半轮丢失。
+3. **无人看见也无人同意**。hook 路径设计上静默,装完的通知只在下次交互式命令打印,失败无人可见 —— 这是"受审计的本地写入 hook"变成"联网取回并执行远端代码",属于信任边界变更。
+
+### 采用的方案
+
+触发点放在 daemon 的**空闲退出路径**(`daemon.ts` 的 `scheduleIdle`),它天然满足全部约束:
+
+- 该路径已有"有 open 轮次就不退出、改为重排"的保护 → 不可能切断轮次
+- 进程本来就要退出 → 换 CLI 零额外成本,也不会出现"内存里旧代码 / 磁盘上新代码"
+- 已有 `idleCloseProbe` 注入点,测试可确定性驱动,不靠 sleep
+
+分层:core 不得依赖 CLI,所以 daemon 只暴露 `idleUpdate?: () => Promise<string | null>`,策略与网络访问留在 `runIdleAutoUpdate`(`src/cli/update.ts`),由 `recorder serve` 注入。env 门抽成 `autoUpdateAllowedByEnv`,两个触发点共用,避免第二套同义策略。
+
+实测(真机,dist 构建):
+
+| 场景 | 结果 |
+|---|---|
+| 完整一轮 4 个 hook 事件,`SCRY_AUTO_UPDATE=1` | 更新状态文件**未创建** —— hook 路径零检查 |
+| 空闲 1.5s 后退出(registry 指向死地址) | 存活 2.7s 后自行退出,状态写入 `status: error` —— 确实触发了检查 |
+| 只发 `UserPromptSubmit` 不发 `Stop` | 6s 后 daemon 仍存活、状态文件不存在 —— 轮次未结束既不退也不更新 |
+
+### 明确不做的取舍
+
+- **pending 轮次不阻止更新**:记录持久且带版本,新版本恢复旧 open 轮次是既有支持路径;要求零 pending 会在最容易积压的 workspace(如 rate-native 长期 7 个)上永久关闭更新。
+- **`SCRY_AUTO_UPDATE` 仍是 opt-in**:在跑着 Agent 的机器上无人值守安装远端代码,必须由团队显式决定。区别在于改动之后这个开关**第一次对无人机器真正有效**。
+- **代价**:坏版本会无人值守铺开。缓解是内网 registry 可下架 + `allowBreaking: false` 锁在同 major + `doctor` 的 `recorder.version` 留痕。"能自动铺开"与"能自动铺坏"是同一能力,无法只要前者。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。
