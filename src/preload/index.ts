@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { TraceEvent, ActiveRun, DbStats, Diagnostics, DiffFile, UsageStats } from '../shared/trace'
+import type {
+  TraceEvent,
+  ActiveRun,
+  DbStats,
+  DiffFile,
+  UsageAnalytics,
+  UsageAnalyticsRangeDays,
+  UsageStats
+} from '../shared/trace'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResult } from '../shared/billing'
 import type {
   AgentInputAttachment,
@@ -152,11 +160,12 @@ const api = {
   usageStats: (context: ProviderContext): Promise<UsageStats> =>
     ipcRenderer.invoke('agent:usageStats', context),
   stats: (): Promise<DbStats> => ipcRenderer.invoke('agent:stats'),
+  usageAnalytics: (rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> =>
+    ipcRenderer.invoke('agent:usageAnalytics', rangeDays),
   billingState: (): Promise<BillingGuardianState> => ipcRenderer.invoke('agent:billingState'),
   syncBillingAdmin: (): Promise<BillingSyncResult> => ipcRenderer.invoke('agent:syncBillingAdmin'),
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),
   gitDiff: (cwd: string): Promise<DiffFile[]> => ipcRenderer.invoke('agent:gitDiff', cwd),
-  diagnostics: (): Promise<Diagnostics> => ipcRenderer.invoke('agent:diagnostics'),
   // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。
   loadSession: (context: ProviderContext, request?: SessionHistoryPageRequest): Promise<SessionHistoryPage | null> =>
     ipcRenderer.invoke('agent:loadSession', context, request),

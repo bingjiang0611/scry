@@ -25,7 +25,6 @@ const now = (): string => new Date().toISOString()
 
 export type EmitFn = (ev: TraceEvent) => void
 
-// P2 Diagnostics：最近一次会话 init 报的 claude 二进制版本（驱动会话的真实 claude 版本）
 let lastClaudeVersion: string | undefined
 export const getClaudeVersion = (): string | undefined => lastClaudeVersion
 
@@ -409,7 +408,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         }
         if (m.type === 'system' && m.subtype === 'init') {
           captureSessionId(m.session_id)
-          if (m.claude_code_version) lastClaudeVersion = m.claude_code_version // P2 Diagnostics
+          if (m.claude_code_version) lastClaudeVersion = m.claude_code_version
           // MCP 真实状态在 init 消息里（name + status，含 needs-auth），和终端 /mcp 一致。
           // q.mcpServerStatus() 流结束后调会 "Query closed"，所以直接从 init 读。
           if (Array.isArray(m.mcp_servers)) {

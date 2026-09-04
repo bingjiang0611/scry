@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BillingGuardianState } from '@shared/billing'
 import type { CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
-import type { DbStats, Diagnostics, DiffFile, McpLiveStatus, UsageStats } from '@shared/trace'
+import type {
+  DbStats,
+  DiffFile,
+  McpLiveStatus,
+  UsageAnalytics,
+  UsageAnalyticsRangeDays,
+  UsageStats
+} from '@shared/trace'
 import {
   providerIdForAgentId,
   runtimeProviderForAgentId,
@@ -319,9 +326,14 @@ export async function authoritativeRefreshAfterToggle<T>(
   return result.data === true ? refresh() : null
 }
 
-export function applyDataUpdatedEffects(effects: { loadStats: () => void; loadBillingState: () => void }): void {
+export function applyDataUpdatedEffects(effects: {
+  loadStats: () => void
+  loadBillingState: () => void
+  loadAnalytics: () => void
+}): void {
   effects.loadStats()
   effects.loadBillingState()
+  effects.loadAnalytics()
 }
 
 export function mergeMcpLiveSnapshot(
@@ -452,17 +464,22 @@ export function useIntegrations(cwd: string | null) {
   const [mcpRefreshing, setMcpRefreshing] = useState(false)
   const [usage, setUsage] = useState<UsageStats | null>(null)
   const [stats, setStats] = useState<DbStats | null>(null)
+  const [analytics, setAnalytics] = useState<UsageAnalytics | null>(null)
+  const [analyticsRange, setAnalyticsRangeState] = useState<UsageAnalyticsRangeDays>(30)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null)
   const [billingState, setBillingState] = useState<BillingGuardianState | null>(null)
   const [billingSyncing, setBillingSyncing] = useState(false)
   const [billingFixtureLoading, setBillingFixtureLoading] = useState(false)
   const [mcpGuardReportsByCwd, setMcpGuardReportsByCwd] = useState<Record<string, McpGuardReport>>({})
   const [mcpGuardScanning, setMcpGuardScanning] = useState(false)
   const [gitDiff, setGitDiff] = useState<DiffFile[]>([])
-  const [diag, setDiag] = useState<Diagnostics | null>(null)
   const cwdRef = useRef(cwd)
   const gitDiffRequestSeq = useRef(0)
   const integrationRequestSeq = useRef(0)
   const usageRequestSeq = useRef(0)
+  const analyticsRequestSeq = useRef(0)
+  const analyticsRangeRef = useRef<UsageAnalyticsRangeDays>(30)
   const skillRefreshRequestSeq = useRef(0)
   const mcpConfigRequestSeq = useRef(0)
   const mcpLiveRequestSeq = useRef(0)
@@ -573,6 +590,37 @@ export function useIntegrations(cwd: string | null) {
     window.scry.stats().then(setStats)
   }, [])
 
+  const loadAnalytics = useCallback((rangeDays = analyticsRangeRef.current): void => {
+    const query = window.scry.usageAnalytics
+    if (typeof query !== 'function') {
+      setAnalyticsError('分析接口不可用，请重启 Scry')
+      return
+    }
+    const seq = ++analyticsRequestSeq.current
+    setAnalyticsLoading(true)
+    setAnalyticsError(null)
+    void query(rangeDays)
+      .then((result) => {
+        if (seq !== analyticsRequestSeq.current) return
+        setAnalytics(result)
+        if (result.status === 'query_error') setAnalyticsError('SQLite 查询失败，请重试')
+        else if (result.status === 'unavailable') setAnalyticsError('SQLite 暂不可用')
+      })
+      .catch((error) => {
+        if (seq === analyticsRequestSeq.current) setAnalyticsError(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => {
+        if (seq === analyticsRequestSeq.current) setAnalyticsLoading(false)
+      })
+  }, [])
+
+  const setAnalyticsRange = useCallback((rangeDays: UsageAnalyticsRangeDays): void => {
+    analyticsRangeRef.current = rangeDays
+    setAnalyticsRangeState(rangeDays)
+    setAnalytics(null)
+    loadAnalytics(rangeDays)
+  }, [loadAnalytics])
+
   const loadBillingState = useCallback((): void => {
     if (typeof window.scry.billingState === 'function') window.scry.billingState().then(setBillingState).catch(() => {})
   }, [])
@@ -609,10 +657,6 @@ export function useIntegrations(cwd: string | null) {
           if (seq === gitDiffRequestSeq.current && cwdRef.current === dir) setGitDiff([])
         })
     } else setGitDiff([])
-  }, [])
-
-  const loadDiag = useCallback((): void => {
-    if (typeof window.scry.diagnostics === 'function') window.scry.diagnostics().then(setDiag).catch(() => {})
   }, [])
 
   const refreshSkills = useCallback(async (): Promise<void> => {
@@ -833,8 +877,7 @@ export function useIntegrations(cwd: string | null) {
   const refreshAfterTurn = useCallback((): void => {
     loadUsage()
     loadGitDiff()
-    loadDiag()
-  }, [loadDiag, loadGitDiff, loadUsage])
+  }, [loadGitDiff, loadUsage])
 
   const setRunModel = useCallback((model: AgentModelRef | undefined): void => {
     setRunControls((current) => {
@@ -1008,6 +1051,12 @@ export function useIntegrations(cwd: string | null) {
   }, [loadGitDiff])
 
   useEffect(() => {
+    const subscribe = window.scry.onDataUpdated
+    if (typeof subscribe !== 'function') return
+    return subscribe(() => applyDataUpdatedEffects({ loadStats, loadBillingState, loadAnalytics }))
+  }, [loadAnalytics, loadBillingState, loadStats])
+
+  useEffect(() => {
     let cancelled = false
     const fast = typeof window.scry.detectFast === 'function' ? window.scry.detectFast() : Promise.resolve([])
     void fast
@@ -1031,11 +1080,11 @@ export function useIntegrations(cwd: string | null) {
     const timers = [
       window.setTimeout(loadUsage, 260),
       window.setTimeout(loadStats, 900),
-      window.setTimeout(loadBillingState, 980),
-      window.setTimeout(loadDiag, 1100)
+      window.setTimeout(loadAnalytics, 940),
+      window.setTimeout(loadBillingState, 980)
     ]
     return () => timers.forEach((id) => window.clearTimeout(id))
-  }, [loadBillingState, loadDiag, loadStats, loadUsage])
+  }, [loadAnalytics, loadBillingState, loadStats, loadUsage])
 
   const currentSkillCapability = capabilityMatchesContext(skillCapability, providerContext)
     ? skillCapability
@@ -1069,13 +1118,16 @@ export function useIntegrations(cwd: string | null) {
     mcpRefreshing,
     usage,
     stats,
+    analytics,
+    analyticsRange,
+    analyticsLoading,
+    analyticsError,
     billingState,
     billingSyncing,
     billingFixtureLoading,
     mcpGuardReport,
     mcpGuardScanning,
     gitDiff,
-    diag,
     rescan,
     addPiProfile,
     removePiProfile,
@@ -1090,8 +1142,9 @@ export function useIntegrations(cwd: string | null) {
     syncBillingAdmin,
     importBillingFixture,
     loadStats,
+    loadAnalytics,
+    setAnalyticsRange,
     loadGitDiff,
-    loadDiag,
     refreshAfterTurn
   }
 }

@@ -1,11 +1,10 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { basename, dirname, isAbsolute, join } from 'node:path'
-import { readFileSync, realpathSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
-import { getClaudeVersion } from './agent-runner'
 import {
   detectAgents,
   detectAgentsFast,
@@ -18,7 +17,7 @@ import {
 import { AgentRuntimeError } from './run-outcome'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
-import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds } from './db'
+import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsQuery } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import {
@@ -54,7 +53,7 @@ import {
 } from './app-store'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
-import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot } from '../shared/trace'
+import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot, type UsageAnalyticsRangeDays } from '../shared/trace'
 import {
   normalizeAgentStartRequest,
   providerIdForAgentId,
@@ -3239,6 +3238,10 @@ handleTrusted('agent:answerQuestion', (event, response: unknown) => {
 
 // B2：sqlite 跨会话分析（工具频率 / 按目录花费），纯文件做不到的结构化查询
 handleTrusted('agent:stats', () => statsQuery())
+handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => {
+  if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
+  return usageAnalyticsQuery(rangeDays as UsageAnalyticsRangeDays)
+})
 handleTrusted('agent:billingState', async () => {
   await warmShellEnv()
   return billingStateQuery()
@@ -3254,20 +3257,6 @@ handleTrusted('agent:importBillingFixture', async () => {
 
 // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
 handleTrusted('agent:gitDiff', (_e, cwd: string) => gitNumstat(cwd))
-
-// P2 Diagnostics：claude 版本（init 报）+ SDK 声明版本 + settingSources
-handleTrusted('agent:diagnostics', () => {
-  let sdkVersion = 'unknown'
-  try {
-    const pkg = JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')) as {
-      dependencies?: Record<string, string>
-    }
-    sdkVersion = pkg.dependencies?.['@anthropic-ai/claude-agent-sdk'] ?? 'unknown'
-  } catch {
-    /* 读不到就 unknown */
-  }
-  return { claudeVersion: getClaudeVersion(), sdkVersion, settingSources: '默认（SDK 加载 user/project/local）' }
-})
 
 // trace live 镜像的消费确认：preload 把一批事件分发给 renderer 后回 ACK，main 才继续发下一批。
 handleTrusted('agent:traceAck', (_event, request: { bytes: number }) => {

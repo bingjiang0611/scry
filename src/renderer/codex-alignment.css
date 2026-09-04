@@ -146,14 +146,6 @@ select:focus-visible,
   letter-spacing: -0.025em;
 }
 
-.sb-brand .name::after {
-  margin-left: 5px;
-  color: var(--dim2);
-  content: '⌄';
-  font-size: 12px;
-  font-weight: 500;
-}
-
 .sb-new,
 .sb-navitem,
 .sb-proj-head,
@@ -417,12 +409,13 @@ select:focus-visible,
 
 .chat-body,
 .runtime-composer {
-  --evidence-column: 820px;
-  --evidence-gutter: clamp(18px, 3cqi, 30px);
+  --evidence-column: 960px;
+  --evidence-content: calc(var(--evidence-column) - 2 * var(--evidence-gutter));
+  --evidence-gutter: clamp(20px, 3cqi, 36px);
 }
 
 .chat-evidence-source {
-  width: min(748px, calc(100% - 48px));
+  width: min(var(--evidence-content), calc(100% - 2 * var(--evidence-gutter)));
   min-height: 30px;
   flex-basis: 30px;
   align-self: center;
@@ -452,7 +445,7 @@ select:focus-visible,
 }
 
 .chat-body .welcome-field {
-  width: min(748px, 100%);
+  width: min(var(--evidence-content), 100%);
   gap: 24px;
   padding-block: 34px;
   text-align: center;
@@ -531,7 +524,7 @@ select:focus-visible,
 }
 
 .chat-body .transcript-turn {
-  width: min(748px, 100%);
+  width: min(var(--evidence-content), 100%);
   padding: 5px 0 34px;
 }
 
@@ -602,7 +595,7 @@ select:focus-visible,
 }
 
 .chat-body .model-text {
-  max-width: 70ch;
+  max-width: 100%;
   color: var(--fg);
   font-size: 14.5px;
   line-height: 1.72;
@@ -943,214 +936,6 @@ select:focus-visible,
   background: var(--panel2);
 }
 
-/* Analytics and diagnostics ------------------------------------------------- */
-
-.analytics-evidence,
-.diagnostics-evidence-page {
-  padding: clamp(28px, 3.4cqi, 46px) clamp(28px, 4.6cqi, 64px) 28px;
-  background: var(--main-surface);
-}
-
-.analytics-evidence .ae-shell,
-.diagnostics-evidence-page > * {
-  width: min(1120px, 100%);
-  margin-inline: auto;
-}
-
-.analytics-evidence .ae-header,
-.diagnostics-evidence-page .de-view-header {
-  padding-bottom: 22px;
-  border-bottom: 0;
-}
-
-.analytics-evidence .ae-header > div > span,
-.analytics-evidence .ae-code,
-.diagnostics-evidence-page .de-view-header .surface-kicker,
-.de-section-title > span,
-.de-section-title > small {
-  font-family: var(--font-ui);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.analytics-evidence .ae-header h1,
-.diagnostics-evidence-page .de-view-header h2 {
-  font-size: clamp(26px, 2.8cqi, 32px);
-  font-weight: 650;
-  letter-spacing: -0.035em;
-}
-
-.analytics-evidence .ae-header p,
-.diagnostics-evidence-page .de-view-header p {
-  color: var(--dim2);
-  font-size: 14px;
-}
-
-.analytics-evidence .ae-tabs {
-  width: max-content;
-  max-width: 100%;
-  height: 42px;
-  align-items: center;
-  gap: 2px;
-  padding: 4px;
-  overflow-x: auto;
-  border: 0;
-  border-radius: 11px;
-  background: var(--panel2);
-}
-
-.analytics-evidence .ae-tabs button {
-  height: 34px;
-  padding-inline: 12px;
-  border-radius: 8px;
-  color: var(--dim2);
-  font-size: 12.5px;
-}
-
-.analytics-evidence .ae-tabs button.active {
-  background: var(--panel);
-  color: var(--fg);
-  box-shadow: var(--shadow-card);
-}
-
-.analytics-evidence .ae-tabs button.active::after {
-  display: none;
-}
-
-.analytics-evidence .ae-focus {
-  display: none;
-}
-
-.analytics-evidence .ae-chapter {
-  min-height: 520px;
-  gap: clamp(30px, 4cqi, 56px);
-  margin-top: 20px;
-  padding: clamp(26px, 3.2cqi, 40px);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--panel);
-  box-shadow: var(--shadow-card);
-}
-
-.analytics-evidence .ae-story > .ae-value b,
-.analytics-evidence .ae-ratio b {
-  font-size: clamp(44px, 5.3cqi, 60px);
-}
-
-.analytics-evidence .ae-story h2 {
-  margin-top: 28px;
-  font-size: clamp(23px, 2.4cqi, 30px);
-  font-weight: 650;
-}
-
-.analytics-evidence .ae-story p {
-  color: var(--dim);
-  font-size: 14px;
-}
-
-.analytics-evidence .ae-visual {
-  border-left-color: var(--border3);
-}
-
-.analytics-evidence .ae-provider-list > button,
-.analytics-evidence .ae-capabilities > button,
-.analytics-evidence .ae-tool-row,
-.analytics-evidence .ae-latency-row {
-  border-bottom-color: var(--border3);
-}
-
-.analytics-evidence .ae-provider-list > button.active,
-.analytics-evidence .ae-capabilities > button.active {
-  border-radius: 9px;
-  background: var(--panel2);
-  box-shadow: none;
-}
-
-.analytics-evidence .ae-footer {
-  border-top: 0;
-  font-family: var(--font-ui);
-  letter-spacing: 0;
-}
-
-.diagnostics-evidence-page .de-view-header {
-  width: min(1120px, 100%);
-}
-
-.de-shell {
-  width: min(1120px, 100%);
-  margin-top: 14px;
-}
-
-.de-verdict-band {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--panel);
-  box-shadow: var(--shadow-card);
-}
-
-.de-verdict-band[data-tone='exact'],
-.de-verdict-band[data-tone='error'],
-.de-verdict-band[data-tone='unknown'] {
-  border-left-color: var(--border);
-  background: var(--panel);
-}
-
-.de-verdict-main {
-  border-right-color: var(--border3);
-}
-
-.de-workspace {
-  overflow: hidden;
-  margin-top: 18px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--panel);
-  box-shadow: var(--shadow-card);
-}
-
-.de-issue-channel {
-  padding: 18px;
-  border-right-color: var(--border3);
-}
-
-.de-issue-row {
-  min-height: 70px;
-  margin-bottom: 3px;
-  padding-inline: 10px;
-  border-bottom: 0;
-  border-radius: 10px;
-}
-
-.de-issue-row.active {
-  background: var(--panel2);
-  box-shadow: none;
-}
-
-.de-issue-row.de-severity-error:not(.active),
-.de-issue-row.de-severity-warn:not(.active),
-.de-issue-row.de-severity-partial:not(.active),
-.de-issue-row.de-severity-unknown:not(.active),
-.de-issue-row.de-severity-unsupported:not(.active) {
-  box-shadow: none;
-}
-
-.de-inspector {
-  padding: 22px 24px;
-}
-
-.de-next-action {
-  border: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel2);
-}
-
-.de-footer {
-  border-top: 0;
-}
-
 /* Settings, inventory and dialogs ------------------------------------------ */
 
 .modal-overlay {
@@ -1366,9 +1151,6 @@ select:focus-visible,
     max-width: 50%;
   }
 
-  .analytics-evidence .ae-chapter {
-    padding: 22px;
-  }
 }
 
 @media (max-width: 900px) {
@@ -1391,18 +1173,12 @@ select:focus-visible,
     padding-inline: 6px 20px;
   }
 
-  .analytics-evidence,
-  .diagnostics-evidence-page {
-    padding-inline: 18px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .runtime-composer .send,
   .surface-card,
-  .theme-option,
-  .de-issue-row,
-  .analytics-evidence .ae-tabs button {
+  .theme-option {
     transition: none;
   }
 }

@@ -84,13 +84,7 @@ export interface McpLiveStatus {
   serverName?: string
   serverVersion?: string
   tools?: number
-}
-
-// P2 Diagnostics（RFC §8.6）：排查 app 自己 + claude 环境。
-export interface Diagnostics {
-  claudeVersion?: string // 驱动会话的 claude 二进制版本（来自最近一次会话 init）
-  sdkVersion: string // scry 声明的 SDK 依赖版本
-  settingSources: string // app 当前给 query() 的 settingSources（默认不加载文件系统设置）
+  toolNames?: string[]
 }
 
 // P2 Files & Diff（RFC §8.4）：最终 git diff 的每文件增删（绝对路径），与工具足迹对照。
@@ -351,6 +345,57 @@ export interface DbStats {
     permission: number
     waitMs: number
   }
+}
+
+export type UsageAnalyticsRangeDays = 7 | 30 | 90
+
+export interface UsageAnalyticsAggregate {
+  inputTokens: number | null
+  outputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+  reasoningTokens: number | null
+  costUsd: number | null
+  turns: number
+  usageRows: number
+  inputKnownRows: number
+  outputKnownRows: number
+  cacheReadKnownRows: number
+  cacheWriteKnownRows: number
+  reasoningKnownRows: number
+  tokenKnownRows: number
+  costKnownRows: number
+  exactCostRows: number
+  providerReportedCostRows: number
+  estimatedCostRows: number
+  inferredCostRows: number
+}
+
+export interface UsageAnalyticsDayRow extends UsageAnalyticsAggregate {
+  day: string
+}
+
+export interface UsageAnalyticsDailyProviderRow extends UsageAnalyticsDayRow {
+  provider: BillingProvider
+}
+
+export interface UsageAnalyticsBreakdownRow extends UsageAnalyticsAggregate {
+  provider: BillingProvider
+  model: string | null
+}
+
+export interface UsageAnalytics {
+  status: 'ready' | 'unavailable' | 'query_error'
+  rangeDays: UsageAnalyticsRangeDays
+  fromDay: string
+  toDay: string
+  observedAt: number
+  days: string[]
+  totals: UsageAnalyticsAggregate
+  byDay: UsageAnalyticsDayRow[]
+  dailyByProvider: UsageAnalyticsDailyProviderRow[]
+  byProvider: UsageAnalyticsBreakdownRow[]
+  byModel: UsageAnalyticsBreakdownRow[]
 }
 
 export interface UsageStats {

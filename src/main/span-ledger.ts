@@ -1,7 +1,15 @@
 // P0 账本核心（纯逻辑，无 electron/Database 依赖，便于单测 + headless 集成验证）。
 // db.ts 只负责 electron 路径 + 预编译语句执行；本文件负责 schema、TraceEvent→行映射、查询 SQL。
-import { type DbStats, type TraceEvent, maskSecrets } from '../shared/trace'
+import {
+  type DbStats,
+  type TraceEvent,
+  type UsageAnalytics,
+  type UsageAnalyticsAggregate,
+  type UsageAnalyticsRangeDays,
+  maskSecrets
+} from '../shared/trace'
 import { providerDangerCoverage, type ProviderId } from '../shared/provider'
+import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
 import { providerUsageResultEvents } from '../shared/result-timing'
 import { logicalCallEventsForTurn } from '../shared/logical-calls'
 
@@ -217,6 +225,12 @@ export const DDL_V14 = [
      context_provider, context_source, context_quality
    FROM model_usage_v13`,
   `DROP TABLE model_usage_v13`
+]
+
+// v15（Usage Analytics）：范围查询只读取可归因到本机会话的账本行。
+export const DDL_V15 = [
+  `CREATE INDEX IF NOT EXISTS idx_usage_ledger_session_bucket
+     ON usage_ledger(bucket_start) WHERE session_id IS NOT NULL`
 ]
 
 export const UPSERT_SESSION_REF_SQL = `INSERT INTO session_refs (
@@ -510,12 +524,14 @@ export function buildAnalyticsStats(args: {
   }
 }
 
-export const canonicalCostWhere = (a = 'usage_ledger'): string => `(
+export const canonicalCostWhere = (a = 'usage_ledger', peerScope?: string): string => {
+  const scopedPeer = peerScope ? ` AND (${peerScope})` : ''
+  return `(
   ${a}.cost IS NOT NULL AND (
     ${a}.cost_source='provider_bill'
     OR (${a}.cost_source IN ('gateway_reported','provider_reported') AND NOT EXISTS (
       SELECT 1 FROM usage_ledger b
-      WHERE b.provider=${a}.provider AND b.cost_unit=${a}.cost_unit
+      WHERE b.provider=${a}.provider AND b.cost_unit=${a}.cost_unit${scopedPeer}
         AND (b.account_label IS NULL OR ${a}.account_label IS NULL OR b.account_label=${a}.account_label)
         AND (b.bucket_start IS NULL OR ${a}.bucket_start IS NULL OR (
           b.bucket_start <= COALESCE(${a}.bucket_end, ${a}.bucket_start)
@@ -525,7 +541,7 @@ export const canonicalCostWhere = (a = 'usage_ledger'): string => `(
     ))
     OR (${a}.cost_source IN ('sdk_estimate','price_table') AND NOT EXISTS (
       SELECT 1 FROM usage_ledger b
-      WHERE b.provider=${a}.provider AND b.cost_unit=${a}.cost_unit
+      WHERE b.provider=${a}.provider AND b.cost_unit=${a}.cost_unit${scopedPeer}
         AND (b.account_label IS NULL OR ${a}.account_label IS NULL OR b.account_label=${a}.account_label)
         AND (b.bucket_start IS NULL OR ${a}.bucket_start IS NULL OR (
           b.bucket_start <= COALESCE(${a}.bucket_end, ${a}.bucket_start)
@@ -536,10 +552,236 @@ export const canonicalCostWhere = (a = 'usage_ledger'): string => `(
     ))
   )
 )`
+}
 
 // 现有 rollup / preflight / showback 契约都是美元金额；Credits 只在带 costUnit 的对账中展示。
 export const canonicalUsdCostWhere = (a = 'usage_ledger'): string =>
   `(${canonicalCostWhere(a)} AND ${a}.cost_unit='usd')`
+const canonicalSessionUsdCostWhere = (a: string): string =>
+  `(${a}.session_id IS NOT NULL AND ${canonicalCostWhere(a, 'b.session_id IS NOT NULL')} AND ${a}.cost_unit='usd')`
+
+export const USAGE_ANALYTICS_TOKENS_SQL = `SELECT
+  bucket_start tsStart, provider, model,
+  input_tokens inputTokens, output_tokens outputTokens,
+  cache_read_tokens cacheReadTokens, cache_write_tokens cacheWriteTokens,
+  reasoning_tokens reasoningTokens, run_id runId
+  FROM usage_ledger
+  WHERE session_id IS NOT NULL AND bucket_start>=? AND bucket_start<?`
+export const USAGE_ANALYTICS_COSTS_SQL = `SELECT
+  u.bucket_start tsStart, u.provider, u.model,
+  u.cost costUsd, u.cost_source costSource, u.confidence confidence
+  FROM usage_ledger u
+  WHERE u.bucket_start>=? AND u.bucket_start<?
+    AND ${canonicalSessionUsdCostWhere('u')}`
+
+export interface UsageAnalyticsTokenRow {
+  tsStart: number
+  provider: BillingProvider
+  model: string | null
+  inputTokens: number | null
+  outputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+  reasoningTokens: number | null
+  runId: string | null
+}
+
+export interface UsageAnalyticsCostRow {
+  tsStart: number
+  provider: BillingProvider
+  model: string | null
+  costUsd: number
+  costSource: BillingCostSource
+  confidence: BillingConfidence
+}
+
+interface UsageAccumulator {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+  costUsd: number
+  inputKnownRows: number
+  outputKnownRows: number
+  cacheReadKnownRows: number
+  cacheWriteKnownRows: number
+  reasoningKnownRows: number
+  usageRows: number
+  tokenKnownRows: number
+  costKnownRows: number
+  exactCostRows: number
+  providerReportedCostRows: number
+  estimatedCostRows: number
+  inferredCostRows: number
+  runs: Set<string>
+}
+
+const emptyUsageAccumulator = (): UsageAccumulator => ({
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  reasoningTokens: 0,
+  costUsd: 0,
+  inputKnownRows: 0,
+  outputKnownRows: 0,
+  cacheReadKnownRows: 0,
+  cacheWriteKnownRows: 0,
+  reasoningKnownRows: 0,
+  usageRows: 0,
+  tokenKnownRows: 0,
+  costKnownRows: 0,
+  exactCostRows: 0,
+  providerReportedCostRows: 0,
+  estimatedCostRows: 0,
+  inferredCostRows: 0,
+  runs: new Set<string>()
+})
+
+const addUsageTokenRow = (target: UsageAccumulator, row: UsageAnalyticsTokenRow): void => {
+  target.usageRows++
+  if (row.runId) target.runs.add(row.runId)
+  if (row.inputTokens != null) {
+    target.inputTokens += row.inputTokens
+    target.inputKnownRows++
+  }
+  if (row.outputTokens != null) {
+    target.outputTokens += row.outputTokens
+    target.outputKnownRows++
+  }
+  if (row.cacheReadTokens != null) {
+    target.cacheReadTokens += row.cacheReadTokens
+    target.cacheReadKnownRows++
+  }
+  if (row.cacheWriteTokens != null) {
+    target.cacheWriteTokens += row.cacheWriteTokens
+    target.cacheWriteKnownRows++
+  }
+  if (row.reasoningTokens != null) {
+    target.reasoningTokens += row.reasoningTokens
+    target.reasoningKnownRows++
+  }
+  if (row.inputTokens != null || row.outputTokens != null) target.tokenKnownRows++
+}
+
+const addUsageCostRow = (target: UsageAccumulator, row: UsageAnalyticsCostRow): void => {
+  target.costUsd += row.costUsd
+  target.costKnownRows++
+  if (row.confidence === 'exact') target.exactCostRows++
+  else if (row.confidence === 'provider_reported') target.providerReportedCostRows++
+  else if (row.confidence === 'estimated') target.estimatedCostRows++
+  else target.inferredCostRows++
+}
+
+const usageAggregate = (value: UsageAccumulator): UsageAnalyticsAggregate => ({
+  inputTokens: value.inputKnownRows > 0 ? value.inputTokens : null,
+  outputTokens: value.outputKnownRows > 0 ? value.outputTokens : null,
+  cacheReadTokens: value.cacheReadKnownRows > 0 ? value.cacheReadTokens : null,
+  cacheWriteTokens: value.cacheWriteKnownRows > 0 ? value.cacheWriteTokens : null,
+  reasoningTokens: value.reasoningKnownRows > 0 ? value.reasoningTokens : null,
+  costUsd: value.costKnownRows > 0 ? value.costUsd : null,
+  turns: value.runs.size,
+  usageRows: value.usageRows,
+  inputKnownRows: value.inputKnownRows,
+  outputKnownRows: value.outputKnownRows,
+  cacheReadKnownRows: value.cacheReadKnownRows,
+  cacheWriteKnownRows: value.cacheWriteKnownRows,
+  reasoningKnownRows: value.reasoningKnownRows,
+  tokenKnownRows: value.tokenKnownRows,
+  costKnownRows: value.costKnownRows,
+  exactCostRows: value.exactCostRows,
+  providerReportedCostRows: value.providerReportedCostRows,
+  estimatedCostRows: value.estimatedCostRows,
+  inferredCostRows: value.inferredCostRows
+})
+
+export function usageAnalyticsBounds(nowMs: number, rangeDays: UsageAnalyticsRangeDays): { from: number; to: number; days: string[] } {
+  const today = startOfLocalDay(nowMs)
+  const from = new Date(new Date(today).setDate(new Date(today).getDate() - rangeDays + 1)).getTime()
+  const to = new Date(new Date(today).setDate(new Date(today).getDate() + 1)).getTime()
+  const days = Array.from({ length: rangeDays }, (_, index) => {
+    const value = new Date(new Date(from).setDate(new Date(from).getDate() + index)).getTime()
+    return localDay(value)
+  })
+  return { from, to, days }
+}
+
+export function buildUsageAnalytics(args: {
+  nowMs: number
+  rangeDays: UsageAnalyticsRangeDays
+  tokens: UsageAnalyticsTokenRow[]
+  costs: UsageAnalyticsCostRow[]
+}): UsageAnalytics {
+  const bounds = usageAnalyticsBounds(args.nowMs, args.rangeDays)
+  const total = emptyUsageAccumulator()
+  const providers = new Map<BillingProvider, UsageAccumulator>()
+  const models = new Map<string, { provider: BillingProvider; model: string | null; value: UsageAccumulator }>()
+  const days = new Map<string, UsageAccumulator>()
+  const daily = new Map<string, { day: string; provider: BillingProvider; value: UsageAccumulator }>()
+  const targetFor = <K>(map: Map<K, UsageAccumulator>, key: K): UsageAccumulator => {
+    const current = map.get(key)
+    if (current) return current
+    const created = emptyUsageAccumulator()
+    map.set(key, created)
+    return created
+  }
+  const modelTarget = (provider: BillingProvider, model: string | null): UsageAccumulator => {
+    const normalizedModel = model?.trim() || null
+    const key = `${provider}\0${normalizedModel ?? ''}`
+    const current = models.get(key)
+    if (current) return current.value
+    const value = emptyUsageAccumulator()
+    models.set(key, { provider, model: normalizedModel, value })
+    return value
+  }
+  const dailyTarget = (day: string, provider: BillingProvider): UsageAccumulator => {
+    const key = `${day}\0${provider}`
+    const current = daily.get(key)
+    if (current) return current.value
+    const value = emptyUsageAccumulator()
+    daily.set(key, { day, provider, value })
+    return value
+  }
+
+  for (const row of args.tokens) {
+    const day = localDay(row.tsStart)
+    addUsageTokenRow(total, row)
+    addUsageTokenRow(targetFor(providers, row.provider), row)
+    addUsageTokenRow(modelTarget(row.provider, row.model), row)
+    addUsageTokenRow(targetFor(days, day), row)
+    addUsageTokenRow(dailyTarget(day, row.provider), row)
+  }
+  for (const row of args.costs) {
+    const day = localDay(row.tsStart)
+    addUsageCostRow(total, row)
+    addUsageCostRow(targetFor(providers, row.provider), row)
+    addUsageCostRow(modelTarget(row.provider, row.model), row)
+    addUsageCostRow(targetFor(days, day), row)
+    addUsageCostRow(dailyTarget(day, row.provider), row)
+  }
+
+  const rank = (value: UsageAccumulator): number => value.costUsd || value.inputTokens + value.outputTokens
+  return {
+    status: 'ready',
+    rangeDays: args.rangeDays,
+    fromDay: bounds.days[0],
+    toDay: bounds.days.at(-1)!,
+    observedAt: args.nowMs,
+    days: bounds.days,
+    totals: usageAggregate(total),
+    byDay: bounds.days.map((day) => ({ day, ...usageAggregate(days.get(day) ?? emptyUsageAccumulator()) })),
+    dailyByProvider: [...daily.values()]
+      .sort((a, b) => a.day.localeCompare(b.day) || a.provider.localeCompare(b.provider))
+      .map((row) => ({ day: row.day, provider: row.provider, ...usageAggregate(row.value) })),
+    byProvider: [...providers.entries()]
+      .sort((a, b) => rank(b[1]) - rank(a[1]))
+      .map(([provider, value]) => ({ provider, model: null, ...usageAggregate(value) })),
+    byModel: [...models.values()]
+      .sort((a, b) => rank(b.value) - rank(a.value))
+      .map((row) => ({ provider: row.provider, model: row.model, ...usageAggregate(row.value) }))
+  }
+}
 
 const PREVIEW_MAX = 2000
 const preview = (s: string | null | undefined): string | null => {

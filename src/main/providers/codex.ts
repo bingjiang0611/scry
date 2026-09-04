@@ -175,7 +175,8 @@ function codexMcpStatus(value: unknown): McpLiveStatus[] {
             : 'pending',
       serverName: typeof serverInfo.name === 'string' ? serverInfo.name : undefined,
       serverVersion: typeof serverInfo.version === 'string' ? serverInfo.version : undefined,
-      tools: Object.keys(tools).length
+      tools: Object.keys(tools).length,
+      toolNames: Object.keys(tools)
     }
   })
 }

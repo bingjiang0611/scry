@@ -577,7 +577,8 @@ function qoderMcpSnapshot(statuses: McpServerStatus[], configured?: McpSnapshot[
     status: server.status,
     serverName: server.serverInfo?.name,
     serverVersion: server.serverInfo?.version,
-    tools: server.tools?.length
+    tools: server.tools?.length,
+    toolNames: server.tools?.map((tool) => tool.name)
   }))
   const snapshotConfigured: McpSnapshot['configured'] = configured ?? statuses.map((server) => {
     const config = server.config

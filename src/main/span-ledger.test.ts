@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ANALYTICS_RESULTS_SQL, buildAnalyticsStats, canonicalCostWhere, canonicalUsdCostWhere, DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V6, DDL_V7, DDL_V8, HUMAN_INTERVENTION_COLS, INTERVENTION_STATS_SQL, MODEL_USAGE_COLS, nearestRank, spanRowsFromItems, SPAN_COLS, sqlInsert, TOTALS_SQL, UPSERT_SESSION_REF_SQL, USAGE_LEDGER_COLS } from './span-ledger'
+import { ANALYTICS_RESULTS_SQL, buildAnalyticsStats, buildUsageAnalytics, canonicalCostWhere, canonicalUsdCostWhere, DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V6, DDL_V7, DDL_V8, DDL_V15, HUMAN_INTERVENTION_COLS, INTERVENTION_STATS_SQL, MODEL_USAGE_COLS, nearestRank, spanRowsFromItems, SPAN_COLS, sqlInsert, TOTALS_SQL, UPSERT_SESSION_REF_SQL, USAGE_ANALYTICS_COSTS_SQL, USAGE_ANALYTICS_TOKENS_SQL, USAGE_LEDGER_COLS } from './span-ledger'
 import { usageLedgerObjectToRow } from './billing-ledger'
 import type { TraceEvent } from '../shared/trace'
 import type { UsageLedgerObject } from '../shared/billing'
@@ -455,6 +455,104 @@ describe('Analytics v7（五 Provider 口径 + 窗口聚合）', () => {
       expect(rows.map((row) => row.providerId)).toEqual(expect.arrayContaining(['claude', 'codex', 'qoder', 'opencode']))
       expect(rows.find((row) => row.providerId === 'qoder')?.inputTokens).toBeNull()
       expect(db.prepare(TOTALS_SQL).all()).toEqual([{ cost: null, tin: 30, tout: 6, turns: 4, toolCalls: 0, dangerEvents: 0 }])
+    } finally {
+      db.close()
+    }
+  })
+})
+
+describe('Usage Analytics 范围聚合', () => {
+  const now = new Date(2026, 8, 3, 12).getTime()
+  const at = (daysAgo: number): number => new Date(2026, 8, 3 - daysAgo, 10).getTime()
+
+  it('按范围、Provider、模型和日期汇总，并保留未知与估算成本语义', () => {
+    const analytics = buildUsageAnalytics({
+      nowMs: now,
+      rangeDays: 7,
+      tokens: [
+        { tsStart: at(0), provider: 'anthropic', model: 'claude-sonnet', inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 10, reasoningTokens: null, runId: 'run-1' },
+        { tsStart: at(0), provider: 'anthropic', model: 'claude-sonnet', inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, runId: 'run-2' },
+        { tsStart: at(1), provider: 'codex', model: 'gpt-5', inputTokens: 50, outputTokens: 5, cacheReadTokens: 30, cacheWriteTokens: 0, reasoningTokens: 3, runId: 'run-3' }
+      ],
+      costs: [
+        { tsStart: at(0), provider: 'anthropic', model: 'claude-sonnet', costUsd: 0.25, costSource: 'price_table', confidence: 'estimated' },
+        { tsStart: at(1), provider: 'codex', model: 'gpt-5', costUsd: 0.5, costSource: 'provider_reported', confidence: 'provider_reported' }
+      ]
+    })
+
+    expect(analytics.days).toHaveLength(7)
+    expect(analytics.totals).toMatchObject({
+      inputTokens: 150,
+      outputTokens: 25,
+      cacheReadTokens: 110,
+      reasoningTokens: 3,
+      costUsd: 0.75,
+      turns: 3,
+      usageRows: 3,
+      tokenKnownRows: 2,
+      costKnownRows: 2,
+      estimatedCostRows: 1
+    })
+    expect(analytics.byProvider).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'anthropic', costUsd: 0.25, turns: 2 }),
+      expect.objectContaining({ provider: 'codex', costUsd: 0.5, turns: 1 })
+    ]))
+    expect(analytics.byModel).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'codex', model: 'gpt-5', reasoningTokens: 3 })
+    ]))
+    expect(analytics.byDay).toHaveLength(7)
+    expect(analytics.byDay.find((row) => row.day === '2026-09-01')).toMatchObject({ inputTokens: null, costUsd: null, turns: 0 })
+  })
+
+  it('保留字段级覆盖和 inferred 成本，不把部分 Token 或推断成本伪装成完整值', () => {
+    const analytics = buildUsageAnalytics({
+      nowMs: now,
+      rangeDays: 7,
+      tokens: [{ tsStart: at(0), provider: 'qoder', model: 'qoder', inputTokens: 10, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, runId: 'run-partial' }],
+      costs: [{ tsStart: at(0), provider: 'qoder', model: 'qoder', costUsd: 0.001, costSource: 'user_override', confidence: 'inferred' }]
+    })
+
+    expect(analytics.totals).toMatchObject({
+      inputTokens: 10,
+      outputTokens: null,
+      inputKnownRows: 1,
+      outputKnownRows: 0,
+      tokenKnownRows: 1,
+      costKnownRows: 1,
+      exactCostRows: 0,
+      providerReportedCostRows: 0,
+      estimatedCostRows: 0,
+      inferredCostRows: 1
+    })
+  })
+
+  sqliteIt('SQL 只读取本机会话范围，账号级账单不覆盖或混入本地成本', () => {
+    const db = new nodeSqlite!.DatabaseSync(':memory:')
+    try {
+      for (const stmt of [...DDL_V4, ...DDL_V15]) db.prepare(stmt).run()
+      const insert = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
+      const base: Omit<UsageLedgerObject, 'id' | 'sessionId' | 'cost' | 'costSource' | 'confidence'> = {
+        provider: 'anthropic',
+        source: 'test',
+        sourceKind: 'sdk_estimate',
+        runId: 'run-1',
+        model: 'claude-sonnet',
+        usageKind: 'model',
+        inputTokens: 10,
+        outputTokens: 2,
+        costUnit: 'usd',
+        attributionMethod: 'direct',
+        bucketStart: at(0),
+        bucketEnd: at(0),
+        createdTs: at(0)
+      }
+      insert.run(...usageLedgerObjectToRow({ ...base, id: 'local', sessionId: 'session-1', cost: 0.1, costSource: 'sdk_estimate', confidence: 'estimated' }))
+      insert.run(...usageLedgerObjectToRow({ ...base, id: 'account', sessionId: null, runId: null, cost: 5, costSource: 'provider_bill', confidence: 'exact', sourceKind: 'provider_bill' }))
+
+      expect(db.prepare(USAGE_ANALYTICS_TOKENS_SQL).all(at(2), at(-1))).toHaveLength(1)
+      expect(db.prepare(USAGE_ANALYTICS_COSTS_SQL).all(at(2), at(-1))).toEqual([
+        expect.objectContaining({ costUsd: 0.1, confidence: 'estimated' })
+      ])
     } finally {
       db.close()
     }

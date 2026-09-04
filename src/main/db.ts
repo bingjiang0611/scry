@@ -19,7 +19,13 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
-import { maskSecrets, type TraceEvent, type DbStats } from '../shared/trace'
+import {
+  maskSecrets,
+  type TraceEvent,
+  type DbStats,
+  type UsageAnalytics,
+  type UsageAnalyticsRangeDays
+} from '../shared/trace'
 import {
   SPAN_COLS,
   MODEL_USAGE_COLS,
@@ -46,12 +52,18 @@ import {
   ANALYTICS_TOOLS_SQL,
   ANALYTICS_DANGER_SQL,
   ANALYTICS_MCP_SQL,
+  USAGE_ANALYTICS_TOKENS_SQL,
+  USAGE_ANALYTICS_COSTS_SQL,
   UPSERT_SESSION_REF_SQL,
   buildAnalyticsStats,
+  buildUsageAnalytics,
+  usageAnalyticsBounds,
   type AnalyticsResultRow,
   type AnalyticsToolRow,
   type AnalyticsDangerRow,
   type AnalyticsMcpRow,
+  type UsageAnalyticsTokenRow,
+  type UsageAnalyticsCostRow,
   canonicalUsdCostWhere,
   sqlInsert,
   spanRowsFromItems
@@ -70,10 +82,12 @@ let dbFilePath: string | null = null
 let dataRevision = 0
 let billingStateCache: { revision: number; value: BillingGuardianState } | undefined
 let statsCache: { revision: number; observedAt: number; value: DbStats } | undefined
+const usageAnalyticsCache = new Map<UsageAnalyticsRangeDays, { revision: number; toDay: string; value: UsageAnalytics }>()
 const invalidateQueryCaches = (): void => {
   dataRevision++
   billingStateCache = undefined
   statsCache = undefined
+  usageAnalyticsCache.clear()
 }
 const require = createRequire(import.meta.url)
 let billingEnvProvider: () => NodeJS.ProcessEnv = () => process.env
@@ -954,4 +968,27 @@ export function statsQuery(): DbStats {
   const value = computeStats()
   statsCache = { revision: dataRevision, observedAt: now, value }
   return value
+}
+
+export function usageAnalyticsQuery(rangeDays: UsageAnalyticsRangeDays): UsageAnalytics {
+  const nowMs = Date.now()
+  const bounds = usageAnalyticsBounds(nowMs, rangeDays)
+  const cached = usageAnalyticsCache.get(rangeDays)
+  const toDay = bounds.days.at(-1)!
+  if (cached?.revision === dataRevision && cached.toDay === toDay) return cached.value
+  const empty = buildUsageAnalytics({ nowMs, rangeDays, tokens: [], costs: [] })
+  if (!db) return { ...empty, status: 'unavailable' }
+  try {
+    const value = buildUsageAnalytics({
+      nowMs,
+      rangeDays,
+      tokens: db.prepare(USAGE_ANALYTICS_TOKENS_SQL).all(bounds.from, bounds.to) as UsageAnalyticsTokenRow[],
+      costs: db.prepare(USAGE_ANALYTICS_COSTS_SQL).all(bounds.from, bounds.to) as UsageAnalyticsCostRow[]
+    })
+    usageAnalyticsCache.set(rangeDays, { revision: dataRevision, toDay, value })
+    return value
+  } catch (error) {
+    console.warn('[scry] usageAnalyticsQuery 失败:', (error as Error)?.message)
+    return { ...empty, status: 'query_error' }
+  }
 }
