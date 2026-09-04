@@ -5,7 +5,7 @@ import { basename, isAbsolute, join } from 'node:path'
 import { isAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.31'
+export const RECORDER_VERSION = '0.3.0'
 
 export interface RecorderHealth {
   schemaVersion: 1

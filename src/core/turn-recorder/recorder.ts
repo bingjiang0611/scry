@@ -1732,7 +1732,7 @@ async function finalizeOpenTurn(
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const runId = `${open.provider}:${open.sessionId}:${open.generation}`
-  const transcript = open.transcriptPath
+  let transcript = open.transcriptPath
     ? await stableTranscript(
         open.transcriptPath,
         runId,
@@ -1757,8 +1757,21 @@ async function finalizeOpenTurn(
         }
       }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
+  let identityUnmatched = false
   if (transcript.identityMatched === false) {
-    return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+    // Waiting for identity to appear is right while a turn may still converge, but an expired turn
+    // never will: Providers rotate transcripts away, and holding the turn open forever loses it and
+    // keeps the daemon alive. Close it on lifecycle evidence alone rather than borrowing content
+    // that was never confirmed to be this turn's.
+    if (!options.interruptedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+    identityUnmatched = true
+    transcript = {
+      stable: true,
+      observed: false,
+      complete: false,
+      events: [],
+      observable: { tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false }
+    }
   }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
   const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events, transcript.toolStreamComplete === true)
@@ -1833,10 +1846,17 @@ async function finalizeOpenTurn(
   // An expired turn was force-closed without a terminal event, so nothing it holds can be called
   // complete, even when the transcript window itself parsed cleanly.
   if (options.interruptedReason) {
-    degradeEvidenceSections(evidence, options.interruptedReason)
+    const reason = identityUnmatched
+      ? `${options.interruptedReason}; the transcript no longer contains this turn, so only lifecycle-hook evidence remains`
+      : options.interruptedReason
+    degradeEvidenceSections(evidence, reason)
     evidence.diff = unavailable(
       `${options.interruptedReason}; the turn diff baseline spans that window and cannot be attributed to this turn`
     )
+    if (identityUnmatched) {
+      evidence.assistant = unavailable(`${options.interruptedReason}; the transcript no longer contains this turn`)
+      evidence.modelSegments = unavailable(`${options.interruptedReason}; the transcript no longer contains this turn`)
+    }
   }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
   if (!enablement.config.capture.assistant) {
