@@ -648,9 +648,18 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 保留下来的判断依据:`status`(逐 Provider 六阶段,回答"卡在哪一环")与 `doctor`(store 完整性、health、孤儿轮次,回答"是否健康")交集只有 `enabled` 一项,不构成重复。
 
-### 未删除但需要你决定:`records archive`
+### 消融复审后保留:`records archive`
 
-`archiveRecords` / `ArchiveState` / `readArchiveState` / 提交路径的 archive floor / `verifyStore` 的 `archivedThrough` 共约 130 行,当前**零使用**。删除的理由:容量实测约 8 KB/轮、20 MB/月,归档在数年内都不必要;而它是唯一迫使我修改 append-only 提交路径序号分配器的功能(最高风险的核心路径)。保留的理由:一旦有人想手工清理 `.scry/records`,没有 archive floor 的话 `verifyStore` 会报 gap、序号还会被重用 —— archive 是"安全地裁剪历史"的唯一入口,删掉之后这个问题就没有正确答案。
+`archiveRecords` / `ArchiveState` / `readArchiveState` / 提交路径的 archive floor / `verifyStore` 的 `archivedThrough` 共约 130 行,当前零使用,曾作为删除候选被复审。
+
+**结论:保留。** 判断依据不是"以后可能有用",而是它保护的不变量在删除后没有替代答案:用户迟早会自己去清理 `.scry/records`,而没有 archive floor 时,手工删除会让 `verifyStore` 报 sequence gap、并让分配器重用已发出的序号。提供正确入口比拒绝支持更安全 —— 这也正是提交路径分配器要取 `max(liveMax, archivedThrough) + 1` 的唯一理由。
+
+两个不变量都有测试锁定:
+
+- `recorder.test.ts:2591` 归档全部记录后新轮次从 floor+1 继续,store 仍连续
+- `recorder.test.ts:2608` 未记录 floor 的手动删除仍然报 sequence gap
+
+代价也如实记录:这是本轮唯一为新功能而修改 append-only 提交路径的改动,是 recorder 里风险最高的一处。
 
 ## 13. 落地顺序
 
