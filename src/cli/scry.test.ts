@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -5,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
 import { parseArgs, runScryCli } from './scry'
+import { initWorkspace, integrationsRepair } from './workspace-init'
 
 const roots: string[] = []
 
@@ -337,6 +339,13 @@ describe('scry integrations diff/uninstall', () => {
   })
 })
 
+/** `scry init` refuses anything that is not a Git project root. */
+async function gitWorkspace(): Promise<string> {
+  const root = await workspace()
+  execFileSync('git', ['init', '-q', '.'], { cwd: root })
+  return root
+}
+
 describe('scry doctor schema and exit codes', () => {
   it('健康时输出稳定 schema 并退出 0', async () => {
     const root = await workspace()
@@ -345,10 +354,51 @@ describe('scry doctor schema and exit codes', () => {
     const report = JSON.parse(stdout.text()) as Record<string, any>
     expect(report).toMatchObject({ schemaVersion: 1, status: 'healthy', healthy: true, enabled: true })
     expect(report.checks.map((check: any) => check.id)).toEqual([
-      'recorder.enabled', 'store.integrity', 'turns.pending', 'turns.stale', 'recorder.version', 'recorder.lastError'
+      'recorder.enabled', 'store.integrity', 'turns.pending', 'hook.script', 'turns.stale', 'recorder.version', 'recorder.lastError'
     ])
     expect(report.checks.every((check: any) => check.status === 'pass')).toBe(true)
     expect(report.recorderVersion).toBe(RECORDER_VERSION)
+  })
+
+  it('升级后遗留的旧 hook 脚本被 doctor 报 warn，repair 后回到 pass', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'claude', cliPath: process.execPath })
+    const script = join(root, '.scry', 'provider-hook.sh')
+    const current = await readFile(script, 'utf8')
+
+    const fresh = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    expect(JSON.parse(fresh.text()).hookScript).toBe('current')
+
+    // 模拟旧版本写下的脚本：受管标记还在，内容已经不是这个 CLI 会写的了。
+    await writeFile(script, current.replace('#!/bin/sh', '#!/bin/sh\n# 旧版本残留'), { mode: 0o700 })
+    // 旧脚本仍能正确采集，只是拿不到新版本的快路径：warn 但不改退出码，与 recorder.version 一致。
+    const stale = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    const report = JSON.parse(stale.text()) as Record<string, any>
+    expect(report).toMatchObject({ status: 'healthy', hookScript: 'outdated' })
+    expect(report.checks.find((c: any) => c.id === 'hook.script')).toMatchObject({
+      status: 'warn', remediation: 'run `scry integrations repair --yes`'
+    })
+    const diff = captureStdout()
+    await runScryCli(['integrations', 'diff', '--workspace', root])
+    expect(JSON.parse(diff.text()).artifacts.find((a: any) => a.kind === 'hook-script')).toMatchObject({ status: 'outdated' })
+
+    await integrationsRepair({ workspace: root, cliPath: process.execPath })
+    const repaired = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    expect(JSON.parse(repaired.text()).hookScript).toBe('current')
+  })
+
+  it('自建（非受管）hook 脚本不被 doctor 判为过期', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'claude', cliPath: process.execPath })
+    await writeFile(join(root, '.scry', 'provider-hook.sh'), '#!/bin/sh\n# 团队自建桥接\nexit 0\n', { mode: 0o700 })
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    expect(report.hookScript).toBe('unmanaged')
+    expect(report.checks.find((c: any) => c.id === 'hook.script')).toMatchObject({ status: 'pass' })
   })
 
   it('记录由另一份安装写入时只 warn，不改变退出码', async () => {
