@@ -10,6 +10,7 @@ import {
   npmPrefixFromEntry,
   runBackgroundUpdate,
   autoUpdateAllowedByEnv,
+  consumeDefaultOnNotice,
   runIdleAutoUpdate,
   shouldScheduleAutoUpdate,
   upgradeCli
@@ -37,35 +38,59 @@ describe('CLI auto update', () => {
 
   it('does not schedule updates for bundled, managed, recorder, CI or non-interactive runs', () => {
     const base = { command: 'doctor', noUpdateCheck: false, stderrIsTTY: true }
-    expect(shouldScheduleAutoUpdate({ ...base, env: {} })).toBe(false)
-    const optedIn = { SCRY_AUTO_UPDATE: '1' }
-    expect(shouldScheduleAutoUpdate({ ...base, env: optedIn })).toBe(true)
+    // 默认开：未设置该变量时也会调度。
+    expect(shouldScheduleAutoUpdate({ ...base, env: {} })).toBe(true)
+    expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_AUTO_UPDATE: '1' } })).toBe(true)
+    expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_AUTO_UPDATE: '0' } })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_CLI_BUNDLED: '1' } })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_RECORDER_MANAGED: '1' } })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, env: { CI: 'true' } })).toBe(false)
+    expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_NO_UPDATE_CHECK: '1' } })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'hook', env: {} })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'serve', env: {} })).toBe(false)
-    expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'status', env: optedIn })).toBe(true)
+    expect(shouldScheduleAutoUpdate({ ...base, command: 'recorder', action: 'status', env: {} })).toBe(true)
     expect(shouldScheduleAutoUpdate({ ...base, stderrIsTTY: false, env: {} })).toBe(false)
     expect(shouldScheduleAutoUpdate({ ...base, noUpdateCheck: true, env: {} })).toBe(false)
   })
 
   it('idle 更新走同一套 env 门，且不因为交互条件而放宽', async () => {
     // 与 shouldScheduleAutoUpdate 共用 autoUpdateAllowedByEnv，不是第二套策略。
-    expect(autoUpdateAllowedByEnv({})).toBe(false)
+    expect(autoUpdateAllowedByEnv({})).toBe(true)
     expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1' })).toBe(true)
-    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', SCRY_RECORDER_MANAGED: '1' })).toBe(false)
-    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', SCRY_CLI_BUNDLED: '1' })).toBe(false)
-    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', SCRY_UPDATE_CHILD: '1' })).toBe(false)
-    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1', CI: 'true' })).toBe(false)
     expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '0' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: 'false' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_RECORDER_MANAGED: '1' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_CLI_BUNDLED: '1' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_UPDATE_CHILD: '1' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ CI: 'true' })).toBe(false)
+    expect(autoUpdateAllowedByEnv({ SCRY_NO_UPDATE_CHECK: '1' })).toBe(false)
 
-    // 没有 opt-in 时 idle 触发器直接返回 null，不做任何网络访问。
+    // 显式关闭时 idle 触发器不做任何网络访问，也不写状态。
     const root = await mkdtemp(join(tmpdir(), 'scry-idle-update-'))
     tempDirs.push(root)
     vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', join(root, 'state.json'))
-    await expect(runIdleAutoUpdate('0.2.32', undefined, {})).resolves.toBeNull()
+    await expect(runIdleAutoUpdate('0.2.32', undefined, { SCRY_AUTO_UPDATE: '0' })).resolves.toBeNull()
     await expect(access(join(root, 'state.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('默认开时提示一次并且只提示一次；显式设置过该变量则不提示', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-default-notice-'))
+    tempDirs.push(root)
+    const state = join(root, 'state.json')
+    const env = { SCRY_CLI_UPDATE_STATE_PATH: state }
+
+    const first = await consumeDefaultOnNotice(env)
+    expect(first).toContain('SCRY_AUTO_UPDATE=0')
+    expect(await consumeDefaultOnNotice(env)).toBeNull()
+    expect(JSON.parse(await readFile(state, 'utf8')).defaultNoticedAt).toBeTruthy()
+
+    // 自己设过这个变量的人已经知道它存在，不需要被告知。
+    const explicit = await mkdtemp(join(tmpdir(), 'scry-default-notice-'))
+    tempDirs.push(explicit)
+    await expect(consumeDefaultOnNotice({
+      SCRY_CLI_UPDATE_STATE_PATH: join(explicit, 'state.json'), SCRY_AUTO_UPDATE: '1'
+    })).resolves.toBeNull()
+    await expect(access(join(explicit, 'state.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('backs off longer after successful checks than failed checks', () => {

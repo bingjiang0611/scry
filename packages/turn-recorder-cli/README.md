@@ -242,7 +242,15 @@ Scry App 启动 Provider 时设置 `SCRY_RECORDER_MANAGED=1`:此时 lifecycle ho
 scry integrations repair --yes    # 重写受管脚本与 Provider 配置条目
 ```
 
-独立安装**默认不后台联网**。设置 `SCRY_AUTO_UPDATE=1` 后,交互式命令结束时会拉起一个后台任务:它**会直接安装同一个 major 内的更新**(包括跨 minor),装完在下一次命令开头提示一次 `Scry CLI 已自动更新:X → Y`。检查至多每天一次,失败后 6 小时再试,安装禁用 package lifecycle scripts。
+独立安装**默认自动更新**:同一个 major 内的新版本会被直接安装(包括跨 minor),装完在下一次命令开头提示一次 `Scry CLI 已自动更新:X → Y`。检查至多每天一次,失败后 6 小时再试,安装禁用 package lifecycle scripts。首次会在 stderr 提示一行说明与关闭方法,只提示一次。
+
+关闭:
+
+```bash
+export SCRY_AUTO_UPDATE=0     # 或 SCRY_NO_UPDATE_CHECK=1（连检查一起关）
+```
+
+**这个默认值的代价要写明**:发布出去的版本会在无人值守的情况下,装到运行着 Agent 的机器上,并以本机用户权限运行。选择它是因为 opt-in 只能触达"已经知道这个开关存在"的人 —— 其他人会永久停留在初次安装的版本。约束仍在:永不跨 major、永不从 Provider hook 事件触发、host 钉版本(`SCRY_CLI_BUNDLED`/`SCRY_RECORDER_MANAGED`)时不更新、`CI` 下不更新。需要严格版本控制的团队应显式关闭并自行分发。
 
 两个触发点,同一套 env 门(`SCRY_CLI_BUNDLED`、`SCRY_RECORDER_MANAGED`、`SCRY_NO_UPDATE_CHECK`、`CI` 任一开启都不触发):
 
@@ -285,5 +293,6 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 | `SCRY_OPEN_TURN_EXPIRY_MS` | 未结束轮次的过期窗口(默认 24 小时) |
 | `SCRY_CLI_PATH` | hook 必须使用的 CLI 绝对路径 |
 | `SCRY_GRANT_DIR` | commit hook 授权记录目录 |
-| `SCRY_AUTO_UPDATE=1` / `SCRY_NO_UPDATE_CHECK=1` | 开启 / 关闭后台更新检查 |
+| `SCRY_AUTO_UPDATE` | 未设置即开启;`0`/`false`/`no` 关闭自动安装 |
+| `SCRY_NO_UPDATE_CHECK=1` | 连更新检查一起关闭 |
 | `SCRY_CLI_REGISTRY` | 覆盖 npm registry(HTTPS) |
