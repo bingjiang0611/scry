@@ -8,7 +8,7 @@ import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderDaemonStatus, sendRecorderDaemonHook, serveRecorderDaemon, startRecorderDaemon, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import {
   handleRecorderHook,
-  openTurnExpiryMs,
+  OPEN_TURN_EXPIRY_MS,
   recoverRecorder,
   recorderEnablement,
   refreshRecorderPendingHealth
@@ -30,7 +30,6 @@ import { initWorkspace, integrationsDiff, integrationsRepair, integrationsUninst
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
-  consumeDefaultOnNotice,
   runIdleAutoUpdate,
   scheduleBackgroundUpdate,
   shouldScheduleAutoUpdate,
@@ -581,7 +580,7 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
   const [health, store, staleOpenTurns, recordingVersion, hookScript] = await Promise.all([
     readHealth(enablement.dataRoot),
     verifyStore(enablement.dataRoot),
-    recorderStaleOpenTurns(enablement.dataRoot, openTurnExpiryMs()),
+    recorderStaleOpenTurns(enablement.dataRoot, OPEN_TURN_EXPIRY_MS),
     lastRecordVersion(enablement.dataRoot),
     providerHookScriptState(enablement.workspaceRoot)
   ])
@@ -799,8 +798,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     if (autoUpdateEligible) {
       const notice = await consumeUpdateNotice()
       if (notice) process.stderr.write(`${notice}\n`)
-      const defaultOn = await consumeDefaultOnNotice()
-      if (defaultOn) process.stderr.write(`${defaultOn}\n`)
     }
     process.exitCode = await runScryCli(argv)
   } catch (error) {

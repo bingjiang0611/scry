@@ -10,7 +10,6 @@ import {
   npmPrefixFromEntry,
   runBackgroundUpdate,
   autoUpdateAllowedByEnv,
-  consumeDefaultOnNotice,
   runIdleAutoUpdate,
   shouldScheduleAutoUpdate,
   upgradeCli
@@ -71,26 +70,6 @@ describe('CLI auto update', () => {
     vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', join(root, 'state.json'))
     await expect(runIdleAutoUpdate('0.2.32', undefined, { SCRY_AUTO_UPDATE: '0' })).resolves.toBeNull()
     await expect(access(join(root, 'state.json'))).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('默认开时提示一次并且只提示一次；显式设置过该变量则不提示', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'scry-default-notice-'))
-    tempDirs.push(root)
-    const state = join(root, 'state.json')
-    const env = { SCRY_CLI_UPDATE_STATE_PATH: state }
-
-    const first = await consumeDefaultOnNotice(env)
-    expect(first).toContain('SCRY_AUTO_UPDATE=0')
-    expect(await consumeDefaultOnNotice(env)).toBeNull()
-    expect(JSON.parse(await readFile(state, 'utf8')).defaultNoticedAt).toBeTruthy()
-
-    // 自己设过这个变量的人已经知道它存在，不需要被告知。
-    const explicit = await mkdtemp(join(tmpdir(), 'scry-default-notice-'))
-    tempDirs.push(explicit)
-    await expect(consumeDefaultOnNotice({
-      SCRY_CLI_UPDATE_STATE_PATH: join(explicit, 'state.json'), SCRY_AUTO_UPDATE: '1'
-    })).resolves.toBeNull()
-    await expect(access(join(explicit, 'state.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('backs off longer after successful checks than failed checks', () => {
@@ -213,7 +192,10 @@ process.stdout.write(JSON.stringify('1.0.0'))
     }))
     const env = { SCRY_CLI_UPDATE_STATE_PATH: state }
     await expect(consumeUpdateNotice({ ...env, SCRY_CLI_BUNDLED: '1' })).resolves.toBeNull()
-    await expect(consumeUpdateNotice(env)).resolves.toBe('Scry CLI 已自动更新：0.2.12 → 0.2.13')
+    // 默认开意味着没人 opt-in 过，所以证明"确实装了"的这一行同时要给出关闭方法。
+    await expect(consumeUpdateNotice(env)).resolves.toBe(
+      'Scry CLI 已自动更新：0.2.12 → 0.2.13（关闭：SCRY_AUTO_UPDATE=0）'
+    )
     await expect(consumeUpdateNotice(env)).resolves.toBeNull()
   })
 })

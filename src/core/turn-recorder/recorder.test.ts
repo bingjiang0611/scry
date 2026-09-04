@@ -803,7 +803,19 @@ describe('turn recorder state machine', () => {
     await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
   })
 
-  it('SCRY_OPEN_TURN_EXPIRY_MS 可收紧窗口，且无 transcript 的 open 轮次同样会过期', async () => {
+  it('无 transcript 的 open 轮次同样会过期，且窗口内不误杀', async () => {
+    const fresh = await workspace()
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: fresh,
+      payload: payload('claude-fresh-no-transcript', {
+        prompt: '没有 transcript',
+        timestamp: new Date(Date.now() - 60_000).toISOString()
+      })
+    })
+    await expect(recoverRecorder(fresh)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+
     const root = await workspace()
     await handleRecorderHook({
       provider: 'claude',
@@ -811,13 +823,11 @@ describe('turn recorder state machine', () => {
       workspace: root,
       payload: payload('claude-no-transcript', {
         prompt: '没有 transcript',
-        timestamp: new Date(Date.now() - 60_000).toISOString()
+        // 没有 transcript 就没有"还在增长"这个判据，只按年龄判定。
+        timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
       })
     })
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
-
-    const env = { ...process.env, SCRY_OPEN_TURN_EXPIRY_MS: '1000' }
-    await expect(recoverRecorder(root, env)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
     const [record] = await listRecords(join(root, '.scry'))
     expect(record.status).toBe('interrupted')
   })

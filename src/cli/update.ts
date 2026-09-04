@@ -12,7 +12,6 @@ const SUCCESS_INTERVAL_MS = 24 * 60 * 60 * 1_000
 const FAILURE_INTERVAL_MS = 6 * 60 * 60 * 1_000
 
 interface CliUpdateState {
-  defaultNoticedAt?: string
   checkedAt?: string
   currentVersion?: string
   latestVersion?: string
@@ -328,24 +327,13 @@ export async function scheduleBackgroundUpdate(currentVersion: string, entryPath
   child.unref()
 }
 
-/**
- * Default-on removes the moment where someone chose this, so it is replaced by telling them once.
- * Printed on the first interactive command that could auto-update, then never again.
- */
-export async function consumeDefaultOnNotice(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  if (env.SCRY_AUTO_UPDATE !== undefined) return null
-  const path = statePath(env)
-  const state = await readJson<CliUpdateState>(path)
-  if (state?.defaultNoticedAt) return null
-  await writeJsonAtomic(path, { ...(state ?? {}), defaultNoticedAt: new Date().toISOString() }).catch(() => undefined)
-  return 'Scry CLI 会在同一 major 内自动更新自己；关闭：SCRY_AUTO_UPDATE=0'
-}
-
 export async function consumeUpdateNotice(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
   if ([env.SCRY_CLI_BUNDLED, env.SCRY_RECORDER_MANAGED, env.SCRY_NO_UPDATE_CHECK, env.SCRY_UPDATE_CHILD, env.CI].some(enabled)) return null
   const path = statePath(env)
   const state = await readJson<CliUpdateState>(path)
   if (!state?.updatedAt || state.notifiedAt || !state.updatedFrom || !state.updatedTo) return null
   await writeJsonAtomic(path, { ...state, notifiedAt: new Date().toISOString() }).catch(() => undefined)
-  return `Scry CLI 已自动更新：${state.updatedFrom} → ${state.updatedTo}`
+  // Default-on means nobody opted in, so the one line that proves it happened also says how
+  // to stop it. Disclosure rides on the install instead of a second notice with its own state.
+  return `Scry CLI 已自动更新：${state.updatedFrom} → ${state.updatedTo}（关闭：SCRY_AUTO_UPDATE=0）`
 }

@@ -179,28 +179,20 @@ describe('turn recorder daemon', () => {
     }
   })
 
-  it('更新卡住时有界放弃，不把空闲 daemon 一直吊住', async () => {
+  it('更新失败不影响 daemon 退出，也不声称装上了东西', async () => {
     const root = await workspace()
     const dir = await isolatedSocketDir(root)
     const env = { ...process.env, SCRY_RECORDER_SOCKET: join(dir, 'x.sock') }
-    let released = (): void => {}
-    const hang = new Promise<string | null>((resolvePromise) => { released = () => resolvePromise(null) })
     const daemon = await listenRecorderDaemon({
       workspace: root,
       idleMs: 50,
-      idleUpdateTimeoutMs: 100,
       env,
-      idleUpdate: () => hang
+      idleUpdate: async () => { throw new Error('registry unreachable') }
     })
-    try {
-      // 更新永不返回，daemon 仍必须退出，且不能声称装上了什么。
-      await daemon.closed
-      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
-      const log = await readFile(join(dir, 'logs', 'daemon.log'), 'utf8').catch(() => '')
-      expect(log).not.toContain('idle update installed')
-    } finally {
-      released()
-    }
+    await daemon.closed
+    await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
+    const log = await readFile(join(dir, 'logs', 'daemon.log'), 'utf8').catch(() => '')
+    expect(log).not.toContain('idle update installed')
   })
 
   it('idle close 检查期间到达新 start 时不会关闭已写入 open 的 daemon', async () => {

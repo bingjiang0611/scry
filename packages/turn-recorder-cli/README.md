@@ -114,22 +114,34 @@ scry recorder recover  # {"recovered":1,"pending":0,"expired":1}
 
 `completed` 是诚实的:终态确实观测到了(这才是它进 `closing` 的原因),丢的只是内容,所以降级的是证据而不是生命周期结论。
 
-两类卡住的轮次都会让 daemon 长期不退出(有活干时不退场),收敛后它才会正常空闲退出 —— 也才轮到 daemon 侧的自动更新。窗口可用 `SCRY_OPEN_TURN_EXPIRY_MS` 收紧,主要供测试。
+两类卡住的轮次都会让 daemon 长期不退出(有活干时不退场),收敛后它才会正常空闲退出 —— 也才轮到 daemon 侧的自动更新。窗口固定 24 小时,不可配置:调小会把仍在工作的轮次误判为中断,并丢弃它的 diff 归因。
 
 ## 性能与资源
 
 hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的成本直接决定你是否感觉到卡顿。daemon 已运行时,hook 脚本用 `curl --unix-socket` 直投,省掉每事件一次 Node 启动;daemon 不在、`curl` 缺失、`SCRY_RECORDER_TRANSPORT=direct` 或 HTTP 状态码非 200 时自动回退到 CLI —— stdin 会先读进变量再投递,保证回退能重发,不丢事件。
 
-实测(macOS):
+实测基线(macOS / Apple silicon,单个 git 进程约 75ms,取 3–7 次中位数):
 
-| 场景 | 快路径 | 回退到 CLI |
-|---|---|---|
-| 单个工具事件 | 83ms | 155ms(经 daemon)/ 476ms(自己落盘) |
-| 一轮 · 5 次工具调用 | 2.09s | 8.36s |
-| 一轮 · 30 次工具调用 | 5.19s | 32.30s |
+| 场景 | 快路径 | 回退到 CLI 自己落盘 | 提速 |
+|---|---|---|---|
+| 单个工具事件 | **108ms** | 550ms | 80% |
+| 轮次起始事件(含 git 基线) | **874ms** | 1232ms | 29% |
+| 一轮 · 5 次工具调用 | **2.60s** | 8.22s | 68% |
+| 一轮 · 30 次工具调用 | **8.00s** | 34.56s | 77% |
 
-- **CPU**:daemon 静置几乎不占 CPU(30 秒窗口:无进行中轮次 0.0%、1 个 0.1%、20 个 1.3%,单核百分比)。
-- **内存**:单 daemon 常驻 60–110 MB。GC 后堆稳定回落(40 轮只留 1.7 MB),不是泄漏;RSS 不归还属 V8 高水位。
+轮次起始只快 29%,因为它的成本主要不是进程启动,而是 git 基线快照:
+
+| `beginGitTurnDiff` | p50 |
+|---|---|
+| 干净工作树 | 335ms |
+| 3 个未跟踪小文件 | 722ms |
+| 300 个小文件 | 962ms |
+| 一个 50 MB 未跟踪文件 | 1004ms |
+
+`npm run bench:git-diff` 可复现这张表(信息用途,不是门禁)。仓库数量会线性放大这一项:壳仓库套 15 个子仓库时,`begin` 并行后仍需 1.6–2.0s。
+
+- **CPU**:daemon 静置几乎不占 CPU(30 秒窗口 CPU time 增量 <0.2s;20 个进行中轮次约 1.3% 单核)。
+- **内存**:单 daemon 启动后 RSS 约 71 MB,静置 30 秒回落到 64 MB。GC 后堆稳定(40 轮只留 1.7 MB),不是泄漏;RSS 不归还属 V8 高水位。
 - **daemon 是每 workspace 一个,没有全局上限** —— 并行多个 worktree 时占用会叠加,只在需要采集的 worktree 执行 `init`。
 
 不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
@@ -142,7 +154,7 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 
 | 轮次形态 | 大小 |
 |---|---|
-| 只有 prompt,无工具无 diff | 约 2.9 KB |
+| 只有 prompt,无工具无 diff | 2.6 KB |
 | 5 次 Edit + 5 文件 diff | 6.6–9.9 KB |
 
 按 8 KB/轮、100 轮/天估算约 20 MB/月。主要变量是 diff,已有硬上限(单文件 patch 32 KiB、单轮合计 128 KiB);工具输出只存摘要,单次 input 超 8 KiB 会省略并标 `partial`。
@@ -242,7 +254,7 @@ Scry App 启动 Provider 时设置 `SCRY_RECORDER_MANAGED=1`:此时 lifecycle ho
 scry integrations repair --yes    # 重写受管脚本与 Provider 配置条目
 ```
 
-独立安装**默认自动更新**:同一个 major 内的新版本会被直接安装(包括跨 minor),装完在下一次命令开头提示一次 `Scry CLI 已自动更新:X → Y`。检查至多每天一次,失败后 6 小时再试,安装禁用 package lifecycle scripts。首次会在 stderr 提示一行说明与关闭方法,只提示一次。
+独立安装**默认自动更新**:同一个 major 内的新版本会被直接安装(包括跨 minor),装完在下一次命令开头提示一次 `Scry CLI 已自动更新:X → Y(关闭:SCRY_AUTO_UPDATE=0)` —— 默认开意味着没人显式同意过,所以证明它确实装了的这一行同时给出关闭方法。检查至多每天一次,失败后 6 小时再试,安装禁用 package lifecycle scripts。
 
 关闭:
 
@@ -261,7 +273,7 @@ export SCRY_AUTO_UPDATE=0     # 或 SCRY_NO_UPDATE_CHECK=1（连检查一起关�
 
 **Provider 的 hook 事件永远不触发更新**。两个原因:走 curl 快路径时 hook 里根本不启动 Node,加触发点等于把一次进程启动(实测 79ms)加回最热的路径;而且一轮有 5 类事件、跨度几分钟,在事件之间换掉 CLI 会让同一轮跨两个版本(managed 模式下直接 exit 86)。
 
-daemon 的时机是**它已经决定要退出**之后 —— 进程本来就要结束,换 CLI 不额外花钱,也不可能切断轮次:有 open 轮次时 daemon 根本不会进入退出路径。更新有界(120s),卡住就放弃,下个空闲窗口再试。装上后 daemon 立即退出,下一个事件启动的就是新版本;daemon.log 会记一行 `idle update installed X -> Y`。
+daemon 的时机是**它已经决定要退出**之后 —— 进程本来就要结束,换 CLI 不额外花钱,也不可能切断轮次:有 open 轮次时 daemon 根本不会进入退出路径。更新的每一步都有硬超时(查询 8s、安装 120s、校验 8s),失败就放弃,下个空闲窗口再试。装上后 daemon 立即退出,下一个事件启动的就是新版本;daemon.log 会记一行 `idle update installed X -> Y`。
 
 **待投递的轮次不阻止更新** —— 记录本身是持久且带版本的,新版本恢复旧 open 轮次是既有支持路径,`doctor` 也会报版本漂移;反过来若要求"零 pending 才更新",恰恰会在最容易积压的 workspace 上永久关掉更新。
 
@@ -290,7 +302,6 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 | `SCRY_RECORDER_TRANSPORT=direct` | 不使用 daemon,每事件自己落盘 |
 | `SCRY_RECORDER_SOCKET` | 覆盖 daemon socket 路径 |
 | `SCRY_RECORDER_IDLE_MS` | daemon 空闲退出窗口(默认 30 分钟) |
-| `SCRY_OPEN_TURN_EXPIRY_MS` | 未结束轮次的过期窗口(默认 24 小时) |
 | `SCRY_CLI_PATH` | hook 必须使用的 CLI 绝对路径 |
 | `SCRY_GRANT_DIR` | commit hook 授权记录目录 |
 | `SCRY_AUTO_UPDATE` | 未设置即开启;`0`/`false`/`no` 关闭自动安装 |
