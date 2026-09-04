@@ -26,7 +26,7 @@ import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { workspaceStatus } from './status.js'
 import { collectSupportBundle } from './support-bundle.js'
-import { initWorkspace, integrationsDiff, integrationsRepair, integrationsUninstall } from './workspace-init.js'
+import { initWorkspace, integrationsDiff, integrationsRepair, integrationsUninstall, providerHookScriptState } from './workspace-init.js'
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
@@ -570,11 +570,12 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     return missing ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
-  const [health, store, staleOpenTurns, recordingVersion] = await Promise.all([
+  const [health, store, staleOpenTurns, recordingVersion, hookScript] = await Promise.all([
     readHealth(enablement.dataRoot),
     verifyStore(enablement.dataRoot),
     recorderStaleOpenTurns(enablement.dataRoot, openTurnExpiryMs()),
-    lastRecordVersion(enablement.dataRoot)
+    lastRecordVersion(enablement.dataRoot),
+    providerHookScriptState(enablement.workspaceRoot)
   ])
   // Stale open turns are real data loss until recovery closes them, so they degrade the report
   // instead of hiding behind `pendingCount`, which only counts managed/closing/quarantined turns.
@@ -592,6 +593,19 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
       status: health.pendingCount > 0 ? 'warn' : 'pass',
       detail: `${health.pendingCount} turn(s) awaiting recovery`,
       ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`' } : {})
+    },
+    {
+      // Upgrading the CLI leaves this file alone, so an old script keeps running silently. It still
+      // records correctly, only without the newer fast path, so this warns without degrading.
+      id: 'hook.script',
+      status: hookScript === 'outdated' ? 'warn' : 'pass',
+      detail: {
+        current: 'managed hook script matches this CLI',
+        outdated: 'managed hook script was written by an older CLI',
+        unmanaged: 'hook script is not managed by Scry; leaving it untouched',
+        absent: 'no managed hook script in this workspace'
+      }[hookScript],
+      ...(hookScript === 'outdated' ? { remediation: 'run `scry integrations repair --yes`' } : {})
     },
     {
       id: 'turns.stale',
@@ -637,6 +651,7 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     /** Resolved capture settings, including defaults the config file may omit. Turning off
      *  prompt/assistant/toolOutput does not remove tool inputs, file paths or diff patches. */
     capture: enablement.config.capture,
+    hookScript,
     recorderVersions: { thisCli: RECORDER_VERSION, lastRecord: recordingVersion },
     health,
     store,

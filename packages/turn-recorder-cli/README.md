@@ -214,7 +214,24 @@ Scry App 启动 Provider 时设置 `SCRY_RECORDER_MANAGED=1`:此时 lifecycle ho
 
 若 Provider 启动器会改写 `PATH`,应先解析 `scry` 绝对路径并通过 `SCRY_CLI_PATH` 传入;该变量存在时 hook 只执行指定路径,路径失效则 fail-open 跳过本次记录,不回退到改写后的 `PATH`。
 
+升级只换 CLI,**不会改动 workspace 里的 hook 脚本** —— `.scry/provider-hook.sh` 由 `scry init` / `integrations repair` 写入,升级后仍是旧版本内容,采集不会出错但拿不到新版本的加速。`doctor` 会明说:
+
+```json
+{ "hookScript": "outdated",
+  "checks": [{ "id": "hook.script", "status": "warn",
+               "detail": "managed hook script was written by an older CLI",
+               "remediation": "run `scry integrations repair --yes`" }] }
+```
+
+`hookScript` 四种取值:`current`(与本 CLI 一致)、`outdated`(受管但由旧版本写入)、`unmanaged`(团队自建桥接,Scry 不碰)、`absent`。只有 `outdated` 报 `warn`,且**不改变退出码** —— 旧脚本仍在正确采集。
+
+```bash
+scry integrations repair --yes    # 重写受管脚本与 Provider 配置条目
+```
+
 独立安装**默认不后台联网**。设置 `SCRY_AUTO_UPDATE=1` 后,交互式命令结束时会拉起一个后台任务:它**会直接安装同一个 major 内的更新**(包括跨 minor),装完在下一次命令开头提示一次 `Scry CLI 已自动更新:X → Y`。检查至多每天一次,失败后 6 小时再试,安装禁用 package lifecycle scripts。
+
+**只有你亲手在终端里跑 `scry <命令>` 时才会触发**:需要 stderr 是 TTY,且命令不是 `recorder hook` / `recorder serve` —— **Provider 的 hook 事件永远不触发自动更新**,否则采集路径会因为联网而变慢、变不确定。`SCRY_CLI_BUNDLED`、`SCRY_RECORDER_MANAGED`、`SCRY_NO_UPDATE_CHECK`、`CI` 任一开启也不触发。
 
 跨 major(如 `0.x → 1.0.0`)永远不自动安装,只报告可用 —— **破坏性变更靠升 major 表达**,不再用 0.x 的 minor 当边界。
 

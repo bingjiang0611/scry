@@ -148,6 +148,20 @@ function defaultConfig(workspace: string): string {
   }, null, 2)}\n`
 }
 
+/**
+ * `scry upgrade` replaces the CLI, never the workspace files it once wrote, so a script from an
+ * older release keeps running until `init` or `integrations repair` rewrites it. `outdated` is the
+ * state nothing reported before; `unmanaged` means a hand-written bridge that Scry must not touch.
+ */
+export async function providerHookScriptState(
+  workspace: string
+): Promise<'current' | 'outdated' | 'unmanaged' | 'absent'> {
+  const source = await readOptional(join(resolve(workspace), '.scry/provider-hook.sh'))
+  if (source == null) return 'absent'
+  if (!source.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`)) return 'unmanaged'
+  return source === providerHookSource() ? 'current' : 'outdated'
+}
+
 function providerHookSource(): string {
   return `#!/bin/sh
 set -u
@@ -452,7 +466,7 @@ export interface ProviderIntegrationDiff {
 export interface ArtifactDiff {
   path: string
   kind: 'opencode-plugin' | 'hook-script' | 'cli-path' | 'node-bin-dir' | 'git-exclude' | 'config' | 'records'
-  status: 'managed' | 'present' | 'absent' | 'unmanaged'
+  status: 'managed' | 'current' | 'outdated' | 'present' | 'absent' | 'unmanaged'
   detail?: string
 }
 
@@ -550,11 +564,10 @@ export async function integrationsDiff(workspace: string, env: NodeJS.ProcessEnv
 
   const artifacts: ArtifactDiff[] = []
   const hookScript = join(root, '.scry/provider-hook.sh')
-  const hookSource = await readOptional(hookScript)
   artifacts.push({
     path: hookScript,
     kind: 'hook-script',
-    status: hookSource == null ? 'absent' : hookSource.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`) ? 'managed' : 'unmanaged'
+    status: await providerHookScriptState(root)
   })
   for (const [relative, kind] of [['.scry/cli-path', 'cli-path'], ['.scry/node-bin-dir', 'node-bin-dir']] as const) {
     artifacts.push({
