@@ -46,6 +46,13 @@ export interface RecorderHookInput {
   payload: Record<string, unknown>
   env?: NodeJS.ProcessEnv
   managed?: boolean
+  /**
+   * Skip commit-hook delivery so a long-lived caller can run it after answering the Provider.
+   * Recording is what the hook must wait for; waking an external uploader is not, and its budget
+   * is paid on every event. Only a caller that outlives the response may set this — a one-shot CLI
+   * process would drop the delivery entirely.
+   */
+  deferDelivery?: boolean
 }
 
 export interface RecorderHookResult {
@@ -2164,14 +2171,16 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         })
       }
       await recordProviderActivity(enablement.dataRoot, input.provider, input.event)
-      const hookEnv = input.env ?? process.env
-      // Bounded on the provider critical path; the remainder waits for the next hook,
-      // `recorder recover`, or `recorder notify-drain`.
-      await drainCommitNotifications(
-        enablement.dataRoot,
-        await activatedCommitHookEnv(enablement, hookEnv),
-        { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS }
-      )
+      if (!input.deferDelivery) {
+        const hookEnv = input.env ?? process.env
+        // Bounded on the provider critical path; the remainder waits for the next hook,
+        // `recorder recover`, or `recorder notify-drain`.
+        await drainCommitNotifications(
+          enablement.dataRoot,
+          await activatedCommitHookEnv(enablement, hookEnv),
+          { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS }
+        )
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       await appendRotatingLog(join(enablement.dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR recorder post-processing: ${message}`).catch(() => undefined)
@@ -2337,6 +2346,26 @@ export async function recoverRecorder(
   })
   await drainCommitNotifications(enablement.dataRoot, await activatedCommitHookEnv(enablement, env))
   return { recovered, pending, expired }
+}
+
+/** Deliver committed records outside the hook response. Bounded like the inline path was. */
+export async function drainRecorderDelivery(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<void> {
+  const enablement = await resolveRecorderEnablement(workspace, env)
+  if (!enablement.enabled) return
+  await drainCommitNotifications(
+    enablement.dataRoot,
+    await activatedCommitHookEnv(enablement, env),
+    { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS }
+  ).catch(async (error) => {
+    const message = error instanceof Error ? error.message : String(error)
+    await appendRotatingLog(
+      join(enablement.dataRoot, 'logs', 'recorder.log'),
+      `${new Date().toISOString()} ERROR deferred delivery: ${message}`
+    ).catch(() => undefined)
+  })
 }
 
 export const OPEN_TURN_EXPIRED_REASON =
