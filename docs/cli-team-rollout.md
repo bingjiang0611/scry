@@ -781,6 +781,50 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 - **`SCRY_AUTO_UPDATE` 仍是 opt-in**:在跑着 Agent 的机器上无人值守安装远端代码,必须由团队显式决定。区别在于改动之后这个开关**第一次对无人机器真正有效**。
 - **代价**:坏版本会无人值守铺开。缓解是内网 registry 可下架 + `allowBreaking: false` 锁在同 major + `doctor` 的 `recorder.version` 留痕。"能自动铺开"与"能自动铺坏"是同一能力,无法只要前者。
 
+## 12.17 `closing` 轮次的过期出口(§12.8 漏掉的一半)
+
+§12.8 给 open 轮次加了过期收敛,§12.13/`6e2b031` 又处理了 transcript 被轮转后 `identityMatched === false` 的情况 —— 但**只覆盖了 `status === 'open'` 那一半**。过期出口写在 `if (open.status === 'open')` 分支里,轮次一旦进入 `closing` 就再也到不了它:
+
+```ts
+if (open.status !== 'closing') return idle
+return finalizeOpenTurn(..., 'completed', { allowUnstableTranscript: true })  // 没有 forcedReason
+```
+
+而 `finalizeOpenTurn` 在 `identityMatched === false` 且没有 `forcedReason` 时返回 `pending`。结果是**永久重试循环**。
+
+### 实测(本机 rate-native 的真实数据副本)
+
+```
+recover → { recovered: 0, pending: 7, expired: 0 }
+逐个探测 → 7/7 都是 pending: target turn is not present in transcript snapshot
+最久的 closingAt 距今 612 小时（25 天）
+其中 2 个 transcript 文件已被 Provider 删除，5 个还在但内容已轮转
+```
+
+连带后果三条:`doctor` 的 `pendingCount` 永远是 7(健康信号退化为常量)、daemon 永不空闲退出(实测白活 1 小时以上)、§12.16 的 daemon 侧自动更新永不触发。
+
+### 修法与三个判断
+
+1. **outcome 是 `completed`,不是 `interrupted`**。终态事件确实到过(这才让它进 `closing`,见 `recorder.ts` 既有的 `open.status === 'closing' ? 'completed' : 'interrupted'`),标 `interrupted` 是谎报生命周期。降级的应当只有证据。
+2. **选项改名 `interruptedReason` → `forcedReason`**。它门控的是"不再等待、强制收尾",与 outcome 无关;旧名字把两件事绑在一起,新增 closing 路径时会诱导写错。
+3. **判据用 recorder 自己写状态的时间(open.json mtime),不用 `closingAt`**。`closingAt` 来自 Provider 时间戳,而这个判定会丢弃 diff 证据 —— 不能让 Provider 的时钟偏移触发破坏性决定。这与 open 轮次用 transcript mtime 的既有判据也保持一致。
+
+另外只对**进入本次 recovery 之前就已是 `closing`** 的轮次判过期:本次刚靠真实终态转成 `closing` 的轮次什么都没卡,报成 `expired` 会污染这个计数(既有的 Codex `turn_aborted` 用例立刻抓出了这一点)。
+
+### 验证
+
+```
+真实数据副本（还原 open.json 真实 mtime）   recovered: 7, pending: 0, expired: 7
+同一副本但 mtime 是刚刚（模拟新鲜状态）      recovered: 0, pending: 7, expired: 0   ← 不误杀
+recorder 单测                             81 passed（含既有 9 条曾被打到的用例）
+```
+
+新记录的证据口径:`status: completed`、`user: available`、`assistant/modelSegments/diff: unavailable`、生命周期段 `partial`、`tools: unavailable`(transcript 被丢弃且无 lifecycle 工具事件时,不能声称"这一轮没用工具")。
+
+### 仍未修的相邻问题
+
+同一批数据里有 6 个 codex `open` 轮次卡在 22–24 小时**且不会过期**:双判据要求 transcript 24h 未变,但 codex 多轮共用一个 session transcript,新轮次持续写它,被遗弃的旧轮次因此永远"看起来还在活动"。修法需要把判据从"文件 mtime"改成"该轮次区间之后是否还在增长"(`transcriptStartOffset`),先要逐 Provider 核实写入模式,不与本节混做。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。

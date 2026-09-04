@@ -101,7 +101,20 @@ scry recorder recover  # {"recovered":1,"pending":0,"expired":1}
 
 收敛后的记录:`status` 为 `interrupted`,已观测的证据段降级 `partial` 并说明原因,未观测的段保持 `unavailable`。`diff` 段固定 `unavailable` —— 基线可能是几天前的,发布它等于把之后所有改动(包括别的轮次的工作)算到这一轮头上。
 
-孤儿轮次也是 daemon 长期不退出的原因(有活干时不退场),收敛后它才会正常空闲退出。窗口可用 `SCRY_OPEN_TURN_EXPIRY_MS` 收紧,主要供测试。
+### 结束事件到了却写不出记录
+
+另一种卡法:结束事件**已经到达**(轮次进入 `closing`),但写最终记录时在 transcript 里找不到这一轮 —— Provider 已经把它轮转掉了。这种轮次原本会无限期停在 `closing`,每次 recovery 重试、每次都失败。
+
+超过同一个窗口(以 recorder **最后一次写状态**的时间计,不用 Provider 给的时间戳,避免时钟偏移触发破坏性判定)后不再重试:
+
+| | `status` | 正文 | `diff` |
+|---|---|---|---|
+| 结束事件从未到达 | `interrupted` | `unavailable` | `unavailable` |
+| **结束事件到了但正文已丢** | **`completed`** | `unavailable` | `unavailable` |
+
+`completed` 是诚实的:终态确实观测到了(这才是它进 `closing` 的原因),丢的只是内容,所以降级的是证据而不是生命周期结论。
+
+两类卡住的轮次都会让 daemon 长期不退出(有活干时不退场),收敛后它才会正常空闲退出 —— 也才轮到 daemon 侧的自动更新。窗口可用 `SCRY_OPEN_TURN_EXPIRY_MS` 收紧,主要供测试。
 
 ## 性能与资源
 
