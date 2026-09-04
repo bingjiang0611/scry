@@ -25,8 +25,6 @@ import {
 import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { workspaceStatus } from './status.js'
-import { verifyCapture } from './verify-capture.js'
-import { PROJECTION_POLICIES, isProjectionPolicy, projectTurn } from './turns-project.js'
 import { collectSupportBundle } from './support-bundle.js'
 import { initWorkspace, integrationsDiff, integrationsRepair, integrationsUninstall } from './workspace-init.js'
 import {
@@ -42,7 +40,7 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'timeout', 'policy', 'before', 'out'])
+const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'before', 'out'])
 const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -108,7 +106,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry capture show\n  scry status [--workspace <root>]\n  scry verify-capture [--timeout <seconds>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|project|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -199,21 +197,6 @@ async function initCommand(args: ParsedArgs): Promise<number> {
   if (result.codexTrustRequired) process.stdout.write('Codex：重启后在这个项目中执行 /hooks，并信任项目 Hook。\n')
   process.stdout.write(`验证命令：scry turns list --workspace "${result.workspace}"\n`)
   return store.ok ? 0 : 4
-}
-
-/**
- * Proof-of-capture. Exit codes: 0 a real turn was recorded, 2 recorder unavailable for this
- * workspace, 3 nothing was captured within the timeout (reason explains which stage failed).
- */
-async function verifyCaptureCommand(args: ParsedArgs): Promise<number> {
-  const seconds = intFlag(args, 'timeout')
-  const workspace = workspaceOf(args)
-  const timeoutMs = seconds != null ? seconds * 1_000 : 120_000
-  process.stderr.write(`scry: waiting up to ${Math.round(timeoutMs / 1000)}s for one real turn in ${workspace}\n`)
-  const result = await verifyCapture(workspace, { timeoutMs })
-  print(result)
-  if (result.reason === 'ok') return 0
-  return result.reason === 'missing_config' || result.reason === 'disabled' ? 2 : 3
 }
 
 /**
@@ -360,28 +343,6 @@ async function supportBundleCommand(args: ParsedArgs): Promise<number> {
   return bundle.recorder.enabled ? 0 : 2
 }
 
-async function captureCommand(args: ParsedArgs): Promise<number> {
-  const action = args.positionals[1] ?? 'show'
-  const workspace = workspaceOf(args)
-  const location = await resolveRecorderLocation(workspace)
-  if (!location.valid) {
-    print({ action, workspace, status: 'unavailable', reason: location.reason, detail: location.detail })
-    return 2
-  }
-  const capture = location.config.capture
-  if (action === 'show') {
-    print({
-      action,
-      workspace: location.workspaceRoot,
-      /** Resolved values, including defaults the config file may omit. */
-      effective: capture,
-      note: 'disabling prompt/assistant/toolOutput does not remove tool inputs, file paths or diff patches'
-    })
-    return 0
-  }
-  throw new Error('usage: scry capture show')
-}
-
 async function recordsCommand(args: ParsedArgs): Promise<number> {
   if (args.positionals[1] !== 'archive') throw new Error('usage: scry records archive --before <30d|ISO> [--out <dir>] [--yes]')
   const workspace = workspaceOf(args)
@@ -526,21 +487,6 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     })))
     return 0
   }
-  if (action === 'project') {
-    const selector = args.positionals[2]
-    if (!selector) throw new Error('usage: scry turns project <sequence|recordId> --policy team-metadata@1')
-    const policy = flag(args, 'policy') ?? 'team-metadata@1'
-    if (!isProjectionPolicy(policy)) {
-      throw new Error(`--policy must be one of: ${PROJECTION_POLICIES.join(', ')}`)
-    }
-    const record = await showRecord(dataRoot, selector)
-    if (!record) {
-      print({ found: false, selector })
-      return 1
-    }
-    print(projectTurn(record, policy))
-    return 0
-  }
   if (action === 'show') {
     const selector = args.positionals[2]
     if (!selector) throw new Error('usage: scry turns show <sequence|recordId> --workspace <root>')
@@ -585,7 +531,7 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print(result)
     return result.ok ? 0 : 4
   }
-  throw new Error('usage: scry turns list|show|project|timeline|summary [sessionId|--all]|export|verify ...')
+  throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|verify ...')
 }
 
 /**
@@ -672,6 +618,9 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     workspace: enablement.workspaceRoot,
     dataRoot: enablement.dataRoot,
     checks,
+    /** Resolved capture settings, including defaults the config file may omit. Turning off
+     *  prompt/assistant/toolOutput does not remove tool inputs, file paths or diff patches. */
+    capture: enablement.config.capture,
     health,
     store,
     staleOpenTurns: staleOpenTurns.map((turn) => ({
@@ -778,10 +727,8 @@ export async function runScryCli(argv: string[]): Promise<number> {
       }
     case 'init': return initCommand(args)
     case 'status': return statusCommand(args)
-    case 'verify-capture': return verifyCaptureCommand(args)
     case 'commit-hook': return commitHookCommand(args)
     case 'records': return recordsCommand(args)
-    case 'capture': return captureCommand(args)
     case 'support-bundle': return supportBundleCommand(args)
     case 'recorder': return recorderCommand(args)
     case 'turns': return turnsCommand(args)
@@ -789,7 +736,7 @@ export async function runScryCli(argv: string[]): Promise<number> {
     case 'integrations': return integrationsCommand(args)
     case 'upgrade': return upgradeCommand(args)
     default:
-      throw new Error('usage: scry init|status|verify-capture|commit-hook|capture|records|support-bundle|recorder|turns|doctor|integrations|upgrade ...')
+      throw new Error('usage: scry init|status|commit-hook|records|support-bundle|recorder|turns|doctor|integrations|upgrade ...')
   }
 }
 

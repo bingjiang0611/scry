@@ -2292,10 +2292,9 @@ describe('record store cursor and recovery semantics', () => {
     expect(nextSnapshot.records.map((record) => record.sequence)).toEqual([3])
   })
 
-  it('sequence cache 丢失后从正式记录重建，不覆盖旧记录', async () => {
+  it('序号只由正式记录决定：崩溃残留的 .tmp 不参与分配，也不覆盖旧记录', async () => {
     const root = await workspace()
     await completeTurn(root, 'a')
-    await unlink(join(root, '.scry', 'state', 'next-sequence.json'))
     await writeFile(join(root, '.scry', 'records', 'rename-before-crash.tmp'), '{"partial":true}')
     await completeTurn(root, 'b')
     expect((await listRecords(join(root, '.scry'))).map((record) => record.sequence)).toEqual([1, 2])

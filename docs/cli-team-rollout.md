@@ -628,6 +628,30 @@ daemon 在有未结束轮次时会轮询 recovery(1s 起、指数退避到 15s �
 
 **长轮次内的 O(n²)**:同一轮里连发 400 对工具事件,单对耗时**没有随事件数上升**(第 1–50 对 287.3ms → 第 351–400 对 275.6ms),801 个事件文件合计 328 KB,`Stop` 合并 800 个事件耗时 1477ms。不存在累积退化。
 
+## 12.12 第二轮消融:删除重复面与零消费者
+
+| 删除项 | 依据 |
+|---|---|
+| `state/next-sequence.json` | **只写不读**。生产代码里唯一的引用就是那次写入,注释本身写着"commit recovery always trusts record files, never this value"。每次提交白付一次原子写 |
+| `scry verify-capture`(190 行) | 与 `scry status` **重复**。4 个原因码与 status 的 4 个 `state` 一一对应,`pending_open_turn` 对应 `openTurnsPending`,`disabled` 对应 `recorder.enabled`。唯一独有行为是阻塞等待,而 `status` 退出码 0 已经等价于"采到了",一个 `until` 循环即可替代 |
+| `scry turns project`(177 行) | **零消费者**。它是为独立 uploader 准备的脱敏投影,而 uploader 已被搁置。白名单在没有真实消费方之前只是猜测,验证不了 |
+| `scry capture show` | 折进 `doctor` 输出的 `capture` 字段。它唯一独有的信息是"解析后的默认值",一个字段就能给,不值一个命令 |
+| `--timeout` / `--policy` flag | 随上述命令一并移除 |
+
+替代 `verify-capture` 的写法(`status` 退出码:0 在采集 / 2 未启用 / 3 已配置未采到):
+
+```bash
+i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break; sleep 2; done
+```
+
+实测替代等价:未采到时 `status` exit=3,采一轮后 exit=0。
+
+保留下来的判断依据:`status`(逐 Provider 六阶段,回答"卡在哪一环")与 `doctor`(store 完整性、health、孤儿轮次,回答"是否健康")交集只有 `enabled` 一项,不构成重复。
+
+### 未删除但需要你决定:`records archive`
+
+`archiveRecords` / `ArchiveState` / `readArchiveState` / 提交路径的 archive floor / `verifyStore` 的 `archivedThrough` 共约 130 行,当前**零使用**。删除的理由:容量实测约 8 KB/轮、20 MB/月,归档在数年内都不必要;而它是唯一迫使我修改 append-only 提交路径序号分配器的功能(最高风险的核心路径)。保留的理由:一旦有人想手工清理 `.scry/records`,没有 archive floor 的话 `verifyStore` 会报 gap、序号还会被重用 —— archive 是"安全地裁剪历史"的唯一入口,删掉之后这个问题就没有正确答案。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。

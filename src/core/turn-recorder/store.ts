@@ -137,8 +137,6 @@ export async function commitRecord(
     const record: AgentTurnRecord = { ...draft, sequence }
     const filename = `${String(sequence).padStart(20, '0')}-${record.recordId}.json`
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
-    // Cache only: commit recovery always trusts record files, never this value.
-    await writeJsonAtomic(join(dataRoot, 'state', 'next-sequence.json'), { nextSequence: sequence + 1, rebuiltAt: new Date().toISOString() })
     return { status: 'committed' as const, record }
   })
 }
