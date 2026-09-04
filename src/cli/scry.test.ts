@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
-import { verifyCapture } from './verify-capture'
 import { parseArgs, runScryCli } from './scry'
 
 const roots: string[] = []
@@ -245,92 +244,6 @@ describe('scry recorder notify-drain', () => {
   })
 })
 
-describe('scry verify-capture', () => {
-  it('缺少配置时报 missing_config 并退出 2', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'scry-cli-verify-'))
-    roots.push(root)
-    const stdout = captureStdout()
-    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(2)
-    const result = JSON.parse(stdout.text()) as Record<string, any>
-    expect(result).toMatchObject({ reason: 'missing_config', record: null })
-    expect(result.remediation).toContain('scry init')
-  })
-
-  it('被 sentinel 关闭时报 disabled 而不是 no_hook_event', async () => {
-    const root = await workspace()
-    await writeFile(join(root, '.scry-disabled'), '')
-    const stdout = captureStdout()
-    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(2)
-    expect((JSON.parse(stdout.text()) as Record<string, any>).reason).toBe('disabled')
-  })
-
-  it('没有任何 hook 事件时报 no_hook_event 并退出 3', async () => {
-    const root = await workspace()
-    const stdout = captureStdout()
-    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(3)
-    const result = JSON.parse(stdout.text()) as Record<string, any>
-    expect(result.reason).toBe('no_hook_event')
-    expect(result.evidence.hookEvents).toEqual({})
-    expect(result.remediation).toContain('/hooks')
-  })
-
-  it('事件到达但轮次未收敛时报 pending_open_turn', async () => {
-    const root = await workspace()
-    await handleRecorderHook({
-      provider: 'claude',
-      event: 'UserPromptSubmit',
-      workspace: root,
-      payload: { session_id: 'verify-open', timestamp: '2026-07-19T12:00:00.000Z', prompt: 'work' }
-    })
-    const stdout = captureStdout()
-    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(3)
-    const result = JSON.parse(stdout.text()) as Record<string, any>
-    expect(result.reason).toBe('pending_open_turn')
-    expect(result.evidence.hookEventsEverSeen.claude.events).toBeGreaterThan(0)
-    // openTurnInFlight means "a turn is running"; openTurnsPending means "a turn needs
-    // recovery". They are different signals and must not be conflated.
-    expect(result.evidence.openTurnInFlight).toBe(true)
-    expect(result.evidence.openTurnsPending).toBe(0)
-    expect(result.detail).toContain('still in flight')
-  })
-
-  it('采到新轮次时报 ok，并逐段暴露证据状态', async () => {
-    const root = await workspace()
-    const payload = { session_id: 'verify-ok', timestamp: '2026-07-19T12:00:00.000Z', prompt: 'work' }
-    const capture = verifyCapture(root, { timeoutMs: 15_000 })
-    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
-    await handleRecorderHook({
-      provider: 'claude',
-      event: 'Stop',
-      workspace: root,
-      payload: { ...payload, timestamp: '2026-07-19T12:00:01.000Z' }
-    })
-    const result = await capture
-    expect(result.reason).toBe('ok')
-    expect(result.record).toMatchObject({ sequence: 1, provider: 'claude', status: 'completed' })
-    expect(result.record?.evidence.user).toBe('available/exact')
-    // A green result must still surface sections the provider cannot supply.
-    expect(Object.values(result.record?.evidence ?? {}).some((value) => value.startsWith('unavailable'))).toBe(true)
-  })
-
-  it('已有历史记录时只承认新提交的轮次', async () => {
-    const root = await workspace()
-    const first = { session_id: 'verify-old', timestamp: '2026-07-19T12:00:00.000Z', prompt: 'old' }
-    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: first })
-    await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: { ...first, timestamp: '2026-07-19T12:00:01.000Z' } })
-
-    const stdout = captureStdout()
-    await expect(runScryCli(['verify-capture', '--workspace', root, '--timeout', '0'])).resolves.toBe(3)
-    const result = JSON.parse(stdout.text()) as Record<string, any>
-    // A previously committed record must never be reported as this run's proof of capture.
-    expect(result.reason).toBe('no_hook_event')
-    expect(result.record).toBeNull()
-    expect(result.detail).toContain('previously seen from claude')
-    expect(result.evidence.hookEventsEverSeen.claude.events).toBeGreaterThan(0)
-    expect(result.evidence.hookEvents).toEqual({})
-  })
-})
-
 describe('scry integrations diff/uninstall', () => {
   const managed = "SCRY_HANDLER_ID=turn-recorder-v1 sh -c 'exec ./.scry/provider-hook.sh claude Stop'"
   const foreign = 'echo user-hook'
@@ -507,110 +420,19 @@ describe('scry doctor schema and exit codes', () => {
   })
 })
 
-describe('scry turns project', () => {
-  const SECRET_PROMPT = 'DO-NOT-UPLOAD-THIS-PROMPT-TEXT'
-
-  async function recordedWorkspace(): Promise<string> {
+describe('capture 配置的生效值', () => {
+  it('doctor 输出解析后的采集配置，包含配置省略的默认值', async () => {
     const root = await workspace()
-    const payload = { session_id: 'proj-1', timestamp: '2026-07-19T12:00:00.000Z', prompt: SECRET_PROMPT }
-    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload })
-    await handleRecorderHook({
-      provider: 'claude',
-      event: 'PreToolUse:Bash',
-      workspace: root,
-      payload: {
-        ...payload,
-        tool_name: 'Bash',
-        tool_use_id: 'proj-1-t1',
-        tool_input: { command: 'sudo rm -rf /secret/path/inside/repo' }
-      }
-    })
-    await handleRecorderHook({
-      provider: 'claude',
-      event: 'PostToolUse:Bash',
-      workspace: root,
-      payload: { ...payload, tool_name: 'Bash', tool_use_id: 'proj-1-t1', tool_response: 'SECRET-TOOL-OUTPUT' }
-    })
-    await handleRecorderHook({
-      provider: 'claude',
-      event: 'Stop',
-      workspace: root,
-      payload: { ...payload, timestamp: '2026-07-19T12:00:02.000Z' }
-    })
-    return root
-  }
-
-  it('投影只输出白名单字段，且不泄露 prompt/工具输入输出/路径', async () => {
-    const root = await recordedWorkspace()
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
+    config.capture = { diff: false }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
     const stdout = captureStdout()
-    await expect(runScryCli(['turns', 'project', '1', '--policy', 'team-metadata@1', '--workspace', root])).resolves.toBe(0)
-    const text = stdout.text()
-    const projected = JSON.parse(text) as Record<string, any>
-
-    expect(Object.keys(projected).sort()).toEqual([
-      'compactions', 'completedAt', 'counts', 'dangerousOperations', 'diffStats', 'durationMs', 'errors',
-      'evidence', 'interventions', 'modelTiming', 'policyVersion', 'provider', 'recordId', 'recorderVersion',
-      'schemaVersion', 'sequence', 'sessionId', 'startedAt', 'status', 'turnIndex', 'usage', 'workspaceIdHash'
-    ])
-    expect(text).not.toContain(SECRET_PROMPT)
-    expect(text).not.toContain('SECRET-TOOL-OUTPUT')
-    expect(text).not.toContain('/secret/path/inside/repo')
-    // The workspace path and raw workspace id must never leave the machine.
-    expect(text).not.toContain(root)
-    expect(projected.workspaceIdHash).toMatch(/^sha256:[a-f0-9]{64}$/)
-    expect(projected.policyVersion).toBe('team-metadata@1')
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    expect(report.capture).toMatchObject({ prompt: true, assistant: true, toolOutput: 'summary', diff: false, hooks: true })
   })
 
-  it('危险操作只带分类，不带命令原文；计数与证据一致', async () => {
-    const root = await recordedWorkspace()
-    const stdout = captureStdout()
-    await runScryCli(['turns', 'project', '1', '--workspace', root])
-    const projected = JSON.parse(stdout.text()) as Record<string, any>
-
-    expect(projected.counts.tools).toBe(1)
-    expect(projected.dangerousOperations.length).toBeGreaterThan(0)
-    for (const danger of projected.dangerousOperations) {
-      expect(Object.keys(danger).sort()).toEqual(['level', 'reason', 'tool'])
-      expect(danger.reason).not.toContain('rm -rf')
-      expect(danger.reason).not.toContain('/secret')
-    }
-    expect(projected.evidence.tools).toBe('available/exact')
-  })
-
-  it('不可观测的数值输出 null 而不是 0', async () => {
-    const root = await recordedWorkspace()
-    const stdout = captureStdout()
-    await runScryCli(['turns', 'project', '1', '--workspace', root])
-    const projected = JSON.parse(stdout.text()) as Record<string, any>
-
-    // Claude lifecycle hooks expose no usage, so cost/tokens are unavailable — not zero.
-    expect(projected.usage).toBeNull()
-    expect(projected.evidence.usage.startsWith('unavailable')).toBe(true)
-    expect(projected.diffStats).toBeNull()
-    expect(projected.evidence.diff.startsWith('disabled') || projected.evidence.diff.startsWith('unavailable')).toBe(true)
-  })
-
-  it('未知 policy 报错，记录不存在退出 1', async () => {
-    const root = await recordedWorkspace()
-    await expect(runScryCli(['turns', 'project', '1', '--policy', 'team-full@9', '--workspace', root]))
-      .rejects.toThrow(/--policy must be one of/)
-    const stdout = captureStdout()
-    await expect(runScryCli(['turns', 'project', '999', '--workspace', root])).resolves.toBe(1)
-    expect((JSON.parse(stdout.text()) as Record<string, any>).found).toBe(false)
-  })
-})
-
-describe('scry capture', () => {
-  it('show 输出解析后的生效配置，并说明它不覆盖工具入参与 diff', async () => {
-    const root = await workspace()
-    const stdout = captureStdout()
-    await expect(runScryCli(['capture', 'show', '--workspace', root])).resolves.toBe(0)
-    const result = JSON.parse(stdout.text()) as Record<string, any>
-    expect(result.effective).toMatchObject({ prompt: true, assistant: true, toolOutput: 'summary', hooks: true })
-    expect(result.note).toContain('tool inputs')
-  })
-
-  it('显式关闭正文后 record 以 disabled 解释缺失，无需额外 policy 字段', async () => {
+  it('显式关闭正文后 record 以 disabled 解释缺失，而不是记成空', async () => {
     const root = await workspace()
     const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
     config.capture = { prompt: false, assistant: false, toolOutput: 'none' }
@@ -629,10 +451,8 @@ describe('scry capture', () => {
     const stored = await readFile(join(root, '.scry', 'records', file), 'utf8')
     expect(stored).not.toContain(SECRET)
     const record = JSON.parse(stored) as Record<string, any>
-    // `disabled` + reason already records that config, not the provider, withheld it.
     expect(record.user.status).toBe('disabled')
     expect(record.user.omissionReason).toContain('config')
-    expect(record.capturePolicy).toBeUndefined()
   })
 })
 

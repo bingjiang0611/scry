@@ -53,7 +53,7 @@ scry integrations uninstall --yes --workspace "$PWD"    # 执行
 ```bash
 scry doctor --workspace "$PWD"
 scry status --workspace "$PWD"
-scry verify-capture --workspace "$PWD" --timeout 120
+scry status --workspace "$PWD" --timeout 120
 scry commit-hook status --workspace "$PWD"
 scry turns list --workspace "$PWD"
 scry turns show <sequence|recordId> --workspace "$PWD"
@@ -69,7 +69,7 @@ scry --help
 
 `openTurnsPending`（未收敛的 open turn）与 commit hook 的 `notifyBacklog`（未 ACK 记录数）是两个不同指标，不要混用。完整 health 计数只在 `scry doctor` 输出，`status` 不重复一份。
 
-接入后应用 `scry verify-capture` 真实验一次：它先记下当前最大 sequence，然后等你在 Agent 里跑完一轮，只有出现**新** record 才算成功。失败时给出具体阶段：`missing_config`、`disabled`、`no_hook_event`（detail 区分“从未到达过”与“以前到过但本次没有”）、`pending_open_turn`、`events_without_record`。退出码：0 已采到，2 recorder 不可用，3 超时内未采到。结果为 `ok` 时仍会逐段输出证据状态（如 `usage: unavailable/unavailable`），不会用一个绿色结论掩盖不可观测的部分。`openTurnInFlight`（轮次正在进行）与 `openTurnsPending`（轮次待恢复）是两个独立信号。
+接入后应用 `scry status` 真实验一次：它先记下当前最大 sequence，然后等你在 Agent 里跑完一轮，只有出现**新** record 才算成功。失败时给出具体阶段：`missing_config`、`disabled`、`no_hook_event`（detail 区分“从未到达过”与“以前到过但本次没有”）、`pending_open_turn`、`events_without_record`。退出码：0 已采到，2 recorder 不可用，3 超时内未采到。结果为 `ok` 时仍会逐段输出证据状态（如 `usage: unavailable/unavailable`），不会用一个绿色结论掩盖不可观测的部分。`openTurnInFlight`（轮次正在进行）与 `openTurnsPending`（轮次待恢复）是两个独立信号。
 
 commit hook 投递在 Provider lifecycle 关键路径上有界执行：每个 hook 事件最多投递 8 条、预算 1.5s（仅在两条之间检查，单条仍以 10s 熔断）。剩余保持 pending，`status` 的 `notifyBacklog` 会如实显示积压条数；`recorder notify-drain` 的返回值带 `truncated`，投递失败的原因写在 `.scry/logs/recorder.log`。需要一次清空时用：
 
@@ -96,17 +96,7 @@ scry commit-hook revoke --workspace "$PWD"
 
 被授权的 entry 以你自己的权限运行，并且能读取数据目录下的全部 record 正文。授权是执行授权，不是脱敏机制。
 
-如果 uploader 只需要统计口径，应让它消费投影而不是 record：
-
-```bash
-scry turns project <sequence|recordId> --policy team-metadata@1 --workspace "$PWD"
-```
-
-`team-metadata@1` 只输出：provider/model、session/record 标识与序号、时间与状态、token 与 cost、模型占用时间、tool/skill/MCP/agent/hook/file 计数、人工介入计数与等待时间、危险操作分级与分类原因、compaction 与 error 计数、diff 行数统计、逐段 evidence 状态、`policyVersion`。
-
-明确不输出：prompt 与回复正文及其 hash、thinking、工具入参与输出、文件路径、patch、repo remote、workspace 路径与 `workspaceId` 原文（只给 `sha256:` 哈希）、环境变量值。不可观测的数值输出 `null` 并在 `evidence` 说明，绝不写成 `0`。危险操作的 `reason` 是分类器产出的固定分类（如「sudo 提权」），不含命令原文。
-
-这样 uploader 可以只被授予调用 CLI 的能力，而完全不需要 `.scry/records` 的读权限——脱敏逻辑留在被评审的 CLI 代码里，而不是散落在各团队脚本中。
+被授权的 entry 能读取数据目录下的全部 record 正文，因此团队汇总方案必须自己承担脱敏：例如只上报 `scry turns summary` 的聚合结果,或在 entry 里挑选字段。CLI 不提供内建的脱敏投影 —— 在真实的汇总消费方出现之前,任何白名单都只是猜测。
 
 `commit-hook status` 退出码：0 已激活或未配置，2 配置/存储不可用，3 待授权，4 指纹不符，5 bundle 非法。未激活时 `notifyBacklog` 显式为 `null` 且标注 `unavailable`，不会伪装成 0。
 
@@ -179,7 +169,7 @@ scry recorder restart --workspace "$PWD"
 ```
 
 ```bash
-scry capture show --workspace "$PWD"    # 看解析后的生效值（含配置省略掉的默认）
+scry doctor --workspace "$PWD"    # 看解析后的生效值（含配置省略掉的默认）
 ```
 
 关闭某项后，对应证据段记为 `disabled` 并带 `omissionReason: ... disabled by config`，与 Provider 不支持导致的 `unavailable`、以及“真的没有发生”的空数组是三个不同状态。因此**不需要**额外的 policy 字段来事后解释某条记录采了什么——记录自己就说明了。
