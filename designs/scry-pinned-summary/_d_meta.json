@@ -6,9 +6,19 @@
     "Scry Pinned Summary": {
       "versions": [
         {
+          "path": "Scry Pinned Summary v10.html",
+          "createdAt": "2026-09-04T08:43:25.000Z",
+          "status": "needs-review",
+          "subtitle": "右侧详情打开时使用可点击外部关闭的临时悬浮摘要",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        },
+        {
           "path": "Scry Pinned Summary v9.html",
           "createdAt": "2026-09-04T08:26:17.000Z",
-          "status": "needs-review",
+          "status": "archived",
           "subtitle": "对齐 Codex 的摘要自动收起与三栏重开交互",
           "viewport": {
             "width": 1440,
@@ -99,5 +109,5 @@
     }
   },
   "createdAt": "2026-09-02T13:20:00.000Z",
-  "updatedAt": "2026-09-04T08:26:17.000Z"
+  "updatedAt": "2026-09-04T08:43:25.000Z"
 }
