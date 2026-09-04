@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scry · 非覆盖固定摘要 v3</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #ffffff;
+      --sidebar: #f7f8fa;
+      --ink: #202124;
+      --muted: #7f8288;
+      --faint: #a9abb0;
+      --line: #e8e9eb;
+      --line-strong: #dcdde0;
+      --bubble: #f2f2f3;
+      --hover: #f5f5f6;
+      --green: #34a253;
+      --red: #c94139;
+      --purple: #655cf6;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: var(--bg); color: var(--ink); }
+    button { font: inherit; color: inherit; }
+    svg { display: block; }
+
+    .app {
+      width: 100vw;
+      height: 100vh;
+      min-width: 1080px;
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      background: var(--bg);
+    }
+
+    .sidebar {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--sidebar);
+      border-right: 1px solid var(--line);
+    }
+
+    .brand {
+      height: 55px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .logo {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: #202125;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .brand strong { font-size: 14px; }
+    .brand small { margin-left: auto; color: var(--faint); font-size: 10px; }
+
+    .new-chat {
+      height: 38px;
+      margin: 12px 12px 7px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .new-chat:hover { box-shadow: 0 3px 10px rgba(30, 32, 38, .05); }
+    .new-chat b { margin-left: auto; color: var(--faint); font-size: 10px; font-weight: 500; }
+
+    .search {
+      height: 37px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 19px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .nav { padding: 4px 9px; }
+    .nav button {
+      width: 100%;
+      height: 35px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 8px;
+      color: #62656b;
+      background: transparent;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .nav button:hover { background: rgba(31,33,38,.04); }
+    .nav svg { width: 14px; height: 14px; }
+    .nav small { margin-left: auto; color: var(--faint); }
+    .rule { height: 1px; margin: 10px 13px; background: var(--line); }
+    .label { padding: 5px 18px 7px; color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+
+    .session-list { padding: 0 9px; }
+    .session {
+      width: 100%;
+      min-height: 56px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 5px;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .session:hover { background: rgba(31,33,38,.04); }
+    .session.active { background: #e9eaed; }
+    .session span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .session small { color: var(--faint); font-size: 10px; }
+    .session small i { color: var(--green); font-style: normal; }
+    .side-bottom { margin-top: auto; padding: 12px 17px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+
+    .workspace {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 418px;
+      grid-template-rows: 55px 1fr;
+      position: relative;
+      transition: grid-template-columns 180ms ease;
+    }
+
+    .workspace.summary-closed { grid-template-columns: minmax(0, 1fr) 0; }
+
+    .topbar {
+      grid-column: 1 / -1;
+      position: relative;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.95);
+      backdrop-filter: blur(15px);
+    }
+
+    .tabs { display: flex; gap: 5px; }
+    .tab {
+      height: 33px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 9px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .tab.active { color: var(--ink); background: #f1f2f3; }
+    .tab svg { width: 14px; height: 14px; }
+
+    .toolbar { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+    .runtime {
+      height: 25px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 10px;
+      margin-right: 9px;
+    }
+    .live { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+    .tool-button {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 11px;
+      color: #66696f;
+      background: transparent;
+      cursor: pointer;
+      transition: 140ms ease;
+    }
+    .tool-button:hover { background: #f2f2f3; color: #2b2d31; }
+    .tool-button.active { color: var(--ink); background: #eeeef0; }
+    .tool-button svg { width: 17px; height: 17px; }
+
+    .conversation {
+      grid-column: 1;
+      grid-row: 2;
+      min-width: 0;
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 55% 0, rgba(101,92,246,.025), transparent 30%),
+        white;
+    }
+
+    .scroll {
+      height: 100%;
+      overflow: auto;
+      padding: 44px clamp(55px, 8vw, 128px) 165px;
+    }
+
+    .user {
+      width: fit-content;
+      max-width: 70%;
+      margin-left: auto;
+      padding: 13px 17px;
+      border-radius: 18px 18px 5px 18px;
+      background: var(--bubble);
+      color: #27292d;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .time { margin: 8px 3px 0 auto; width: fit-content; color: var(--faint); font-size: 10px; }
+    .turn { margin-top: 42px; }
+    .turn-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+    .provider-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--purple); }
+    .turn-head b { color: #3d3f44; }
+    .turn-head .run { color: var(--faint); }
+    .turn-head .stats { margin-left: auto; color: var(--faint); }
+    .answer {
+      margin-top: 16px;
+      padding: 3px 0 3px 15px;
+      border-left: 2px solid #7770f5;
+      color: #3d4045;
+      font-size: 13px;
+      line-height: 1.75;
+    }
+    .answer strong { color: #24262a; }
+    .answer ul { margin: 8px 0 0; padding-left: 18px; }
+    .answer li { margin: 6px 0; }
+    .trace-line { margin-top: 18px; padding: 10px 0; display: flex; gap: 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    .trace-line span:last-child { margin-left: auto; }
+
+    .composer {
+      position: absolute;
+      left: clamp(45px, 7vw, 105px);
+      right: clamp(45px, 7vw, 105px);
+      bottom: 20px;
+      min-height: 112px;
+      border: 1px solid var(--line-strong);
+      border-radius: 19px;
+      background: rgba(255,255,255,.96);
+      box-shadow: 0 16px 36px rgba(30,33,40,.08), 0 2px 8px rgba(30,33,40,.04);
+      overflow: hidden;
+    }
+    .placeholder { padding: 17px 18px; color: var(--faint); font-size: 12px; }
+    .composer-footer { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; gap: 13px; padding: 0 13px; border-top: 1px solid #f1f1f2; color: var(--muted); font-size: 10px; }
+    .send { margin-left: auto; width: 29px; height: 29px; display: grid; place-items: center; border: 0; border-radius: 9px; color: white; background: var(--purple); }
+
+    .summary-rail {
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      overflow: hidden;
+      padding: 18px 18px 0 8px;
+      background: white;
+      transition: opacity 140ms ease, padding 180ms ease;
+    }
+    .workspace.summary-closed .summary-rail {
+      opacity: 0;
+      padding-left: 0;
+      padding-right: 0;
+      pointer-events: none;
+    }
+
+    .summary-popover {
+      width: 100%;
+      padding: 18px 20px 17px;
+      border: 1px solid var(--line-strong);
+      border-radius: 25px;
+      background: rgba(255,255,255,.98);
+      box-shadow: 0 18px 45px rgba(25,28,34,.10), 0 2px 10px rgba(25,28,34,.04);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      min-height: 31px;
+      margin-bottom: 3px;
+      color: #8a8c91;
+      font-size: 15px;
+      font-weight: 500;
+    }
+    .section-title button {
+      margin-left: auto;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 9px;
+      color: #8f9196;
+      background: transparent;
+      cursor: pointer;
+    }
+    .section-title button:hover { background: var(--hover); color: #474a4f; }
+    .section-title svg { width: 17px; height: 17px; }
+
+    .summary-row {
+      width: 100%;
+      min-height: 53px;
+      display: grid;
+      grid-template-columns: 35px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      padding: 5px 3px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .summary-row:hover { background: var(--hover); }
+    .summary-row + .summary-row { margin-top: 1px; }
+    .row-icon { width: 31px; height: 31px; display: grid; place-items: center; color: #36383d; }
+    .row-icon svg { width: 19px; height: 19px; }
+    .row-main { min-width: 0; font-size: 15px; color: #2c2e32; }
+    .row-main small { display: block; margin-top: 3px; color: var(--faint); font-size: 9px; }
+    .row-value { display: flex; align-items: center; gap: 8px; color: #6d7075; font-size: 13px; white-space: nowrap; }
+    .row-value svg { width: 15px; height: 15px; color: #8d8f94; }
+    .additions { color: var(--green); }
+    .deletions { color: var(--red); }
+    .count {
+      min-width: 26px;
+      height: 25px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0 8px;
+      border-radius: 999px;
+      color: #5e6166;
+      background: #f0f1f2;
+      font-size: 11px;
+    }
+    .count.good { color: #2b824b; background: #eaf7ee; }
+    .divider { height: 1px; margin: 14px 0 15px; background: var(--line); }
+
+    .popover-footer {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 13px;
+      padding-top: 13px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 9px;
+    }
+    .evidence-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .popover-footer button { margin-left: auto; border: 0; color: #777a80; background: transparent; font-size: 9px; cursor: pointer; }
+    .popover-footer button:hover { color: var(--ink); }
+
+    .tooltip {
+      position: fixed;
+      z-index: 30;
+      top: 59px;
+      right: 52px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: #56595e;
+      background: white;
+      box-shadow: 0 7px 20px rgba(20,23,29,.08);
+      font-size: 10px;
+      opacity: 0;
+      transform: translateY(-4px);
+      pointer-events: none;
+      transition: 130ms ease;
+    }
+    .tool-button.summary:hover + .tooltip { opacity: 1; transform: translateY(0); }
+
+    .toast {
+      position: fixed;
+      z-index: 40;
+      left: 50%;
+      bottom: 24px;
+      transform: translate(-50%, 12px);
+      padding: 9px 12px;
+      border-radius: 9px;
+      color: white;
+      background: rgba(30,31,34,.93);
+      box-shadow: 0 10px 30px rgba(20,22,27,.18);
+      font-size: 10px;
+      opacity: 0;
+      pointer-events: none;
+      transition: 150ms ease;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 1180px) {
+      .app { grid-template-columns: 205px minmax(0, 1fr); }
+      .workspace { grid-template-columns: minmax(0, 1fr) 370px; }
+      .workspace.summary-closed { grid-template-columns: minmax(0, 1fr) 0; }
+      .summary-rail { padding-right: 14px; }
+      .scroll { padding-left: 40px; padding-right: 40px; }
+      .composer { left: 38px; right: 38px; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10m6 10V4m6 16v-7m4 7H2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Zm8 4v10l-8 4-8-4V7m8 4v10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M8 4v5m8-5v5M6 9h12v2a6 6 0 0 1-6 6v4m-4 0h8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="18" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="6" cy="19" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 7.3v9.4M8.2 8c2.7 0 4.2.2 5.6-1.3L16 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-summary" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="7" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 6h8M12 18h8M5 12h15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12m-4-8 4-4 4 4M5 13v6h14v-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 4v16" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-changes" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9 8h6m-3-3v6m-3 5h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-git" viewBox="0 0 24 24"><circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="7" cy="19" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 7v10M9 10c3 0 5 0 6-2l1-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14 6 4 16v4h4L18 10M13 5l2-2 6 6-2 2M10 7l7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 20a6 6 0 0 1 12 0m2-13a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m12 19 7-7-7-7m7 7H5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <main class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">S</span><strong>Scry</strong><small>0.2.34</small></div>
+      <button class="new-chat">＋ 新建会话 <b>⌘N</b></button>
+      <div class="search"><svg width="14" height="14"><use href="#i-list"/></svg>搜索会话或项目</div>
+      <nav class="nav">
+        <button><svg><use href="#i-chart"/></svg>分析</button>
+        <button><svg><use href="#i-pulse"/></svg>诊断<small>1</small></button>
+        <button><svg><use href="#i-box"/></svg>技能<small>8</small></button>
+        <button><svg><use href="#i-plug"/></svg>MCP<small>4/5</small></button>
+      </nav>
+      <div class="rule"></div>
+      <div class="label">最近会话</div>
+      <div class="session-list">
+        <button class="session active"><span>轻量上下文摘要</span><small><i>●</i> Qoder · 刚刚</small></button>
+        <button class="session"><span>停止后编辑消息</span><small>Codex · 16m</small></button>
+        <button class="session"><span>分析 Provider 用量</span><small>Claude · 2h</small></button>
+      </div>
+      <div class="side-bottom">◐&nbsp;&nbsp;外观 · 浅色</div>
+    </aside>
+
+    <section class="workspace" id="workspace">
+      <header class="topbar">
+        <div class="tabs">
+          <button class="tab active"><svg><use href="#i-chat"/></svg>对话</button>
+          <button class="tab"><svg><use href="#i-branch"/></svg>拓扑</button>
+          <button class="tab"><svg><use href="#i-list"/></svg>分段</button>
+        </div>
+        <div class="toolbar">
+          <span class="runtime"><span class="live"></span>Qoder</span>
+          <button class="tool-button" data-toast="分享当前会话" aria-label="分享"><svg><use href="#i-share"/></svg></button>
+          <button class="tool-button summary active" id="summaryToggle" aria-label="切换固定摘要"><svg><use href="#i-summary"/></svg></button>
+          <div class="tooltip">切换固定摘要</div>
+          <button class="tool-button" data-toast="收起右侧工作区" aria-label="收起右侧工作区"><svg><use href="#i-panel"/></svg></button>
+        </div>
+      </header>
+
+      <div class="conversation">
+        <div class="scroll">
+          <div class="user">保留这种轻量卡片样式，但不要覆盖主会话。</div>
+          <div class="time">3:42 PM</div>
+          <article class="turn">
+            <div class="turn-head"><span class="provider-dot"></span><b>Qoder run</b><span class="run">· run-pinned-summary-v2</span><span class="stats">tok 1.2k · tools 5</span></div>
+            <div class="answer">
+              <strong>摘要改为“右侧占位 rail + 轻量卡片”：</strong>
+              <ul>
+                <li>打开时主会话主动收窄，卡片不会遮挡消息、代码或输入框。</li>
+                <li>右侧只在顶部放置摘要卡，下方保持留白，不做整高工作台。</li>
+                <li>关闭后 rail 完全收起，主会话恢复全宽。</li>
+              </ul>
+            </div>
+            <div class="trace-line"><span>本轮证据</span><span>Read 3</span><span>Files 2</span><span>12s</span></div>
+          </article>
+        </div>
+
+        <div class="composer">
+          <div class="placeholder">继续描述你希望调整的摘要样式…</div>
+          <div class="composer-footer"><span>完全访问</span><span>Ultimate</span><span>默认</span><button class="send"><svg width="14" height="14"><use href="#i-arrow"/></svg></button></div>
+        </div>
+      </div>
+
+      <div class="summary-rail" id="summaryRail">
+      <aside class="summary-popover" aria-label="固定摘要">
+        <div class="section-title">Environment<button data-toast="配置摘要显示项" aria-label="配置摘要显示项"><svg><use href="#i-plus"/></svg></button></div>
+        <button class="summary-row" data-toast="打开代码变更">
+          <span class="row-icon"><svg><use href="#i-changes"/></svg></span>
+          <span class="row-main">Changes<small>5 个文件 · 精确采集</small></span>
+          <span class="row-value"><span class="additions">+1,284</span><span class="deletions">−36</span></span>
+        </button>
+        <button class="summary-row" data-toast="打开分支与工作区">
+          <span class="row-icon"><svg><use href="#i-git"/></svg></span>
+          <span class="row-main">main<small>当前分支</small></span>
+          <span class="row-value"><svg><use href="#i-chevron"/></svg></span>
+        </button>
+
+        <div class="divider"></div>
+        <div class="section-title">Context</div>
+        <button class="summary-row" data-toast="打开 Skills 与 MCP">
+          <span class="row-icon"><svg><use href="#i-tool"/></svg></span>
+          <span class="row-main">Skills &amp; MCP<small>3 个 Skill · 4/5 MCP 可用</small></span>
+          <span class="row-value"><span class="count">7</span><svg><use href="#i-chevron"/></svg></span>
+        </button>
+        <button class="summary-row" data-toast="查看本轮网页读取">
+          <span class="row-icon"><svg><use href="#i-globe"/></svg></span>
+          <span class="row-main">Web reading<small>本轮已读取的外部页面</small></span>
+          <span class="row-value"><span class="count">6</span><svg><use href="#i-chevron"/></svg></span>
+        </button>
+        <button class="summary-row" data-toast="打开 Subagents">
+          <span class="row-icon"><svg><use href="#i-users"/></svg></span>
+          <span class="row-main">Subagents<small>1 done · 0 running</small></span>
+          <span class="row-value"><span class="count good">1</span><svg><use href="#i-chevron"/></svg></span>
+        </button>
+
+        <div class="popover-footer"><span class="evidence-dot"></span>4 项可验证 · 1 项部分可用<button data-toast="查看证据来源">证据详情</button></div>
+      </aside>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast">已触发</div>
+  <script>
+    const toggle = document.getElementById('summaryToggle')
+    const workspace = document.getElementById('workspace')
+    const toast = document.getElementById('toast')
+    let toastTimer
+
+    function showToast(message) {
+      toast.textContent = message
+      toast.classList.add('show')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1500)
+    }
+
+    toggle.addEventListener('click', () => {
+      const closed = workspace.classList.toggle('summary-closed')
+      toggle.classList.toggle('active', !closed)
+      toggle.setAttribute('aria-expanded', String(!closed))
+    })
+
+    document.querySelectorAll('[data-toast]').forEach((element) => {
+      element.addEventListener('click', () => showToast(element.dataset.toast))
+    })
+  </script>
+</body>
+</html>

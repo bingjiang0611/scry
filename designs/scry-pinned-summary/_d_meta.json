@@ -6,9 +6,19 @@
     "Scry Pinned Summary": {
       "versions": [
         {
+          "path": "Scry Pinned Summary v3.html",
+          "createdAt": "2026-09-04T07:48:01.000Z",
+          "status": "needs-review",
+          "subtitle": "非覆盖式摘要：右侧占位 rail 内的轻量上下文卡",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        },
+        {
           "path": "Scry Pinned Summary v2.html",
           "createdAt": "2026-09-04T07:43:54.000Z",
-          "status": "needs-review",
+          "status": "archived",
           "subtitle": "轻量悬浮摘要：Changes、分支、Skills & MCP、Web reading 与 Subagents",
           "viewport": {
             "width": 1440,
@@ -29,5 +39,5 @@
     }
   },
   "createdAt": "2026-09-02T13:20:00.000Z",
-  "updatedAt": "2026-09-04T07:43:54.000Z"
+  "updatedAt": "2026-09-04T07:48:01.000Z"
 }
