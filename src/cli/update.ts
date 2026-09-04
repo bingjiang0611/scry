@@ -84,11 +84,19 @@ export function compareVersions(left: string, right: string): number {
   return 0
 }
 
+/**
+ * Auto-update stays inside the same major. 0.x minor used to be a wall too, which meant every
+ * 0.x user had to notice a manual upgrade or silently stop receiving fixes; the wall is now major
+ * only, and a release that really breaks the CLI contract is expected to bump major instead.
+ *
+ * Clients decide this with their own copy of the rule, so a permissive rule only reaches users
+ * through a release their current rule already accepts — hence shipping this inside 0.2.x.
+ */
 export function isCompatibleAutoUpdate(current: string, candidate: string): boolean {
   const from = parseVersion(current)
   const to = parseVersion(candidate)
   if (!from || !to || compareVersions(candidate, current) <= 0) return false
-  return from[0] === 0 ? to[0] === 0 && to[1] === from[1] : to[0] === from[0]
+  return to[0] === from[0]
 }
 
 export function npmPrefixFromEntry(entryPath: string): string | null {
@@ -149,11 +157,16 @@ async function runNpm(
   }
 }
 
+/**
+ * `~` pins the minor and npm's `^` also treats 0.x minor as breaking, so neither range can express
+ * "anything newer inside this major". Spell the bound out instead, or a 0.x install can never see
+ * the next minor even when the compatibility rule allows it.
+ */
 function updateSpec(currentVersion: string, allowBreaking: boolean, checkOnly: boolean): string {
   if (allowBreaking || checkOnly) return 'latest'
   const current = parseVersion(currentVersion)
   if (!current) throw new Error(`invalid version: ${currentVersion}`)
-  return current[0] === 0 ? `~${currentVersion}` : `^${currentVersion}`
+  return `>=${currentVersion} <${current[0] + 1}.0.0`
 }
 
 async function availableVersion(env: NodeJS.ProcessEnv, spec: string): Promise<string> {
@@ -246,10 +259,12 @@ export async function runBackgroundUpdate(currentVersion: string, entryPath?: st
   return await withDirectoryLock(`${path}.lock`, async () => {
     const latestState = await readJson<CliUpdateState>(path)
     if (!isUpdateDue(latestState)) return null
+    // Installs, not just checks: opt-in via SCRY_AUTO_UPDATE, bounded to the same major by
+    // isCompatibleAutoUpdate, and reported afterwards through consumeUpdateNotice.
     return await upgradeCli({
       currentVersion,
       entryPath,
-      checkOnly: true,
+      allowBreaking: false,
       env: { ...process.env, SCRY_CLI_REGISTRY: DEFAULT_REGISTRY }
     })
   }, { waitMs: 100, ttlMs: 3 * 60 * 1_000 }).catch(() => null)

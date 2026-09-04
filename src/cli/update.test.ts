@@ -24,9 +24,13 @@ describe('CLI auto update', () => {
   it('only auto-updates within a compatible release line', () => {
     expect(compareVersions('0.2.13', '0.2.12')).toBeGreaterThan(0)
     expect(isCompatibleAutoUpdate('0.2.12', '0.2.13')).toBe(true)
-    expect(isCompatibleAutoUpdate('0.2.12', '0.3.0')).toBe(false)
+    // 0.x 跨 minor 现在也自动更新：破坏性发布改为升 major。
+    expect(isCompatibleAutoUpdate('0.2.32', '0.3.0')).toBe(true)
     expect(isCompatibleAutoUpdate('1.4.0', '1.5.0')).toBe(true)
     expect(isCompatibleAutoUpdate('1.4.0', '2.0.0')).toBe(false)
+    expect(isCompatibleAutoUpdate('0.9.9', '1.0.0')).toBe(false)
+    // 迁移链：存量 0.2.31 客户端用旧规则也接受 0.2.32，装上之后才拿到新规则。
+    expect(isCompatibleAutoUpdate('0.2.31', '0.2.32')).toBe(true)
   })
 
   it('does not schedule updates for bundled, managed, recorder, CI or non-interactive runs', () => {
@@ -95,27 +99,61 @@ else writeFileSync(process.env.MOCK_SCRY_ENTRY, '#!/usr/bin/env node\\nprocess.s
     expect(saved.notifiedAt).toBe(saved.updatedAt)
   })
 
-  it('background checks never install or execute a registry package', async () => {
+  it('后台任务安装同 major 的更新，包括跨 minor，并把结果留给一次性提示', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-update-'))
+    tempDirs.push(root)
+    const entry = join(root, 'lib/node_modules/scry-turn-recorder/dist/cli/scry.js')
+    const npm = join(root, 'mock-npm.mjs')
+    const npmLog = join(root, 'npm.log')
+    const state = join(root, 'state.json')
+    await mkdir(join(entry, '..'), { recursive: true })
+    await writeFile(entry, '#!/usr/bin/env node\nprocess.stdout.write("0.2.32\\n")\n')
+    await writeFile(npm, `#!/usr/bin/env node
+import { appendFileSync, writeFileSync } from 'node:fs'
+appendFileSync(process.env.MOCK_NPM_LOG, JSON.stringify(process.argv.slice(2)) + '\\n')
+if (process.argv[2] === 'view') process.stdout.write(JSON.stringify('0.3.0'))
+else writeFileSync(process.env.MOCK_SCRY_ENTRY, '#!/usr/bin/env node\\nprocess.stdout.write("0.3.0\\\\n")\\n')
+`)
+    await chmod(npm, 0o755)
+    vi.stubEnv('SCRY_NPM_PATH', npm)
+    vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', state)
+    vi.stubEnv('MOCK_SCRY_ENTRY', entry)
+    vi.stubEnv('MOCK_NPM_LOG', npmLog)
+
+    await expect(runBackgroundUpdate('0.2.32', entry)).resolves.toMatchObject({
+      status: 'updated', latestVersion: '0.3.0'
+    })
+    const calls = (await readFile(npmLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as string[])
+    // 查询范围必须能看见下一个 minor：`~` 与 npm 的 `^` 对 0.x 都做不到。
+    expect(calls[0].join(' ')).toContain('>=0.2.32 <1.0.0')
+    expect(calls.some((call) => call[0] === 'install' && call.includes('--ignore-scripts'))).toBe(true)
+    const saved = JSON.parse(await readFile(state, 'utf8')) as { updatedFrom?: string; updatedTo?: string }
+    expect([saved.updatedFrom, saved.updatedTo]).toEqual(['0.2.32', '0.3.0'])
+  })
+
+  it('后台任务不会跨 major 安装，只报告可用', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-update-'))
     tempDirs.push(root)
     const entry = join(root, 'lib/node_modules/scry-turn-recorder/dist/cli/scry.js')
     const npm = join(root, 'mock-npm.mjs')
     const npmLog = join(root, 'npm.log')
     await mkdir(join(entry, '..'), { recursive: true })
-    await writeFile(entry, '#!/usr/bin/env node\nprocess.stdout.write("0.2.12\\n")\n')
+    await writeFile(entry, '#!/usr/bin/env node\nprocess.stdout.write("0.2.32\\n")\n')
     await writeFile(npm, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs'
 appendFileSync(process.env.MOCK_NPM_LOG, JSON.stringify(process.argv.slice(2)) + '\\n')
-process.stdout.write(JSON.stringify('0.2.13'))
+process.stdout.write(JSON.stringify('1.0.0'))
 `)
     await chmod(npm, 0o755)
     vi.stubEnv('SCRY_NPM_PATH', npm)
     vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', join(root, 'state.json'))
     vi.stubEnv('MOCK_NPM_LOG', npmLog)
-    await expect(runBackgroundUpdate('0.2.12', entry)).resolves.toMatchObject({ status: 'update_available' })
+
+    await expect(runBackgroundUpdate('0.2.32', entry)).resolves.toMatchObject({
+      status: 'update_available', latestVersion: '1.0.0', compatibleAutoUpdate: false
+    })
     const calls = (await readFile(npmLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as string[])
-    expect(calls).toHaveLength(1)
-    expect(calls[0][0]).toBe('view')
+    expect(calls.every((call) => call[0] === 'view')).toBe(true)
   })
 
   it('shows an update notice once and never injects it into the bundled CLI', async () => {
