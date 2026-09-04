@@ -6,9 +6,19 @@
     "Scry Pinned Summary": {
       "versions": [
         {
+          "path": "Scry Pinned Summary v11.html",
+          "createdAt": "2026-09-04T08:50:38.000Z",
+          "status": "needs-review",
+          "subtitle": "吸顶、隐藏滚动条并统一 Skill / MCP 图标",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        },
+        {
           "path": "Scry Pinned Summary v10.html",
           "createdAt": "2026-09-04T08:43:25.000Z",
-          "status": "needs-review",
+          "status": "archived",
           "subtitle": "右侧详情打开时使用可点击外部关闭的临时悬浮摘要",
           "viewport": {
             "width": 1440,
@@ -109,5 +119,5 @@
     }
   },
   "createdAt": "2026-09-02T13:20:00.000Z",
-  "updatedAt": "2026-09-04T08:43:25.000Z"
+  "updatedAt": "2026-09-04T08:50:38.000Z"
 }
