@@ -212,7 +212,17 @@ Scry App 启动 Provider 时设置 `SCRY_RECORDER_MANAGED=1`:此时 lifecycle ho
 
 若 Provider 启动器会改写 `PATH`,应先解析 `scry` 绝对路径并通过 `SCRY_CLI_PATH` 传入;该变量存在时 hook 只执行指定路径,路径失效则 fail-open 跳过本次记录,不回退到改写后的 `PATH`。
 
-独立安装**默认不后台联网**。设置 `SCRY_AUTO_UPDATE=1` 后才会在交互式命令结束后检查兼容更新(只检查、不安装,至多每天一次)。0.x 版本的自动更新要求 minor 相同,**从 `0.2.x` 升到 `0.3.0` 必须手动执行 `scry upgrade`**。
+独立安装**默认不后台联网**。设置 `SCRY_AUTO_UPDATE=1` 后才会在交互式命令结束后检查兼容更新(只检查、不安装,至多每天一次)。
+
+0.x 的自动更新**要求 minor 相同**,所以 `0.2.x → 0.3.0` 必须手动 `scry upgrade`。这是刻意的:0.x 的 minor 升级意味着 breaking(本版就删除了三个命令),而 hook 运行在 Provider 的关键路径上 —— 在轮次进行中静默换掉 CLI,比晚几天升级危险得多。
+
+真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
+
+```json
+{ "recorderVersions": { "thisCli": "0.3.0", "lastRecord": "0.2.30" } }
+```
+
+对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码,因为刚升级完、还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。
 
 ```bash
 scry upgrade --check    # 只检查

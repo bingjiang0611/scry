@@ -14,7 +14,7 @@ import {
   refreshRecorderPendingHealth
 } from '../core/turn-recorder/recorder.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
-import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, listRecords, readArchiveState, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, lastRecordVersion, listRecords, readArchiveState, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import {
   commitHookEnv,
   inspectCommitHookBundle,
@@ -570,10 +570,11 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     return missing ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
-  const [health, store, staleOpenTurns] = await Promise.all([
+  const [health, store, staleOpenTurns, recordingVersion] = await Promise.all([
     readHealth(enablement.dataRoot),
     verifyStore(enablement.dataRoot),
-    recorderStaleOpenTurns(enablement.dataRoot, openTurnExpiryMs())
+    recorderStaleOpenTurns(enablement.dataRoot, openTurnExpiryMs()),
+    lastRecordVersion(enablement.dataRoot)
   ])
   // Stale open turns are real data loss until recovery closes them, so they degrade the report
   // instead of hiding behind `pendingCount`, which only counts managed/closing/quarantined turns.
@@ -603,6 +604,21 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
         : {})
     },
     {
+      // Warn only: right after an upgrade this is expected until the next turn is recorded, so it
+      // must not flip the exit code. It exists to catch the case where the hook keeps using an
+      // older install that a shell-level `scry upgrade` never touched.
+      id: 'recorder.version',
+      status: recordingVersion && recordingVersion !== RECORDER_VERSION ? 'warn' : 'pass',
+      detail: recordingVersion == null
+        ? 'no record yet'
+        : recordingVersion === RECORDER_VERSION
+          ? `records written by ${recordingVersion}`
+          : `newest record written by ${recordingVersion}, this CLI is ${RECORDER_VERSION}`,
+      ...(recordingVersion && recordingVersion !== RECORDER_VERSION
+        ? { remediation: 'hook 与你升级的可能不是同一份安装：检查 SCRY_CLI_PATH 与 .scry/cli-path 指向的 CLI' }
+        : {})
+    },
+    {
       id: 'recorder.lastError',
       status: health.lastError ? 'warn' : 'pass',
       detail: health.lastError ? `${health.lastError.at}: ${health.lastError.message}` : 'no recorded error',
@@ -621,6 +637,7 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     /** Resolved capture settings, including defaults the config file may omit. Turning off
      *  prompt/assistant/toolOutput does not remove tool inputs, file paths or diff patches. */
     capture: enablement.config.capture,
+    recorderVersions: { thisCli: RECORDER_VERSION, lastRecord: recordingVersion },
     health,
     store,
     staleOpenTurns: staleOpenTurns.map((turn) => ({

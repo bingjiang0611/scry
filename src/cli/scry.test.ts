@@ -345,10 +345,41 @@ describe('scry doctor schema and exit codes', () => {
     const report = JSON.parse(stdout.text()) as Record<string, any>
     expect(report).toMatchObject({ schemaVersion: 1, status: 'healthy', healthy: true, enabled: true })
     expect(report.checks.map((check: any) => check.id)).toEqual([
-      'recorder.enabled', 'store.integrity', 'turns.pending', 'turns.stale', 'recorder.lastError'
+      'recorder.enabled', 'store.integrity', 'turns.pending', 'turns.stale', 'recorder.version', 'recorder.lastError'
     ])
     expect(report.checks.every((check: any) => check.status === 'pass')).toBe(true)
     expect(report.recorderVersion).toBe(RECORDER_VERSION)
+  })
+
+  it('记录由另一份安装写入时只 warn，不改变退出码', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: { session_id: 'ver-1', timestamp: '2026-07-19T12:00:00.000Z', prompt: 'x' }
+    })
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: { session_id: 'ver-1', timestamp: '2026-07-19T12:00:01.000Z' }
+    })
+    // 模拟另一份更老的安装写下的记录。
+    const [name] = await readdir(join(root, '.scry', 'records'))
+    const file = join(root, '.scry', 'records', name)
+    const record = JSON.parse(await readFile(file, 'utf8')) as Record<string, any>
+    await writeFile(file, JSON.stringify({ ...record, recorderVersion: '0.1.0' }))
+
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    const check = report.checks.find((c: any) => c.id === 'recorder.version')
+    expect(check.status).toBe('warn')
+    expect(check.detail).toContain('0.1.0')
+    expect(check.remediation).toContain('SCRY_CLI_PATH')
+    expect(report.recorderVersions).toMatchObject({ lastRecord: '0.1.0' })
+    expect(report.status).toBe('healthy')
   })
 
   it('过期未收敛的 open 轮次报 degraded 退出 5，并指向 recover', async () => {

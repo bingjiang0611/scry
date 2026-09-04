@@ -466,6 +466,22 @@ export async function archiveRecords(
   return { archived, archivedThrough, target: options.target }
 }
 
+/**
+ * Which CLI actually wrote the newest record. A workspace can easily end up with more than one
+ * install — a hook pinned through `SCRY_CLI_PATH` and whatever `scry` resolves to in a shell —
+ * and then upgrading one of them silently leaves recording on the other. Reads one file.
+ */
+export async function lastRecordVersion(dataRoot: string): Promise<string | null> {
+  const files = await recordFiles(dataRoot)
+  const newest = files.at(-1)
+  if (!newest) return null
+  try {
+    return (await readRecordFile(join(dataRoot, 'records', newest.name))).recorderVersion
+  } catch {
+    return null
+  }
+}
+
 export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
   const files = await recordFiles(dataRoot)
   const errors: string[] = []
