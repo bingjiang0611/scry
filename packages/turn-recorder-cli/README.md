@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.3.0 \
+npm install -g @ali/scry-turn-recorder@0.2.32 \
   --registry=https://registry.anpm.alibaba-inc.com
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -212,21 +212,13 @@ Scry App 启动 Provider 时设置 `SCRY_RECORDER_MANAGED=1`:此时 lifecycle ho
 
 若 Provider 启动器会改写 `PATH`,应先解析 `scry` 绝对路径并通过 `SCRY_CLI_PATH` 传入;该变量存在时 hook 只执行指定路径,路径失效则 fail-open 跳过本次记录,不回退到改写后的 `PATH`。
 
-独立安装**默认不后台联网**。设置 `SCRY_AUTO_UPDATE=1` 后才会在交互式命令结束后检查兼容更新(只检查、不安装,至多每天一次)。
+独立安装**默认不后台联网**。设置 `SCRY_AUTO_UPDATE=1` 后,交互式命令结束时会拉起一个后台任务:它**会直接安装同一个 major 内的更新**(包括跨 minor),装完在下一次命令开头提示一次 `Scry CLI 已自动更新:X → Y`。检查至多每天一次,失败后 6 小时再试,安装禁用 package lifecycle scripts。
 
-0.x 的自动更新**要求 minor 相同**,所以 `0.2.x → 0.3.0` 必须手动 `scry upgrade`。这是刻意的:0.x 的 minor 升级意味着 breaking(本版就删除了三个命令),而 hook 运行在 Provider 的关键路径上 —— 在轮次进行中静默换掉 CLI,比晚几天升级危险得多。
-
-真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
-
-```json
-{ "recorderVersions": { "thisCli": "0.3.0", "lastRecord": "0.2.30" } }
-```
-
-对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码,因为刚升级完、还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。
+跨 major(如 `0.x → 1.0.0`)永远不自动安装,只报告可用 —— **破坏性变更靠升 major 表达**,不再用 0.x 的 minor 当边界。
 
 ```bash
 scry upgrade --check    # 只检查
-scry upgrade            # 升级到 registry latest
+scry upgrade            # 前台升级到 registry latest（不受 major 边界限制）
 ```
 
 `SCRY_NO_UPDATE_CHECK=1` 或 `--no-update-check` 关闭检查;`SCRY_CLI_REGISTRY` 覆盖 registry(必须 HTTPS)。App 内置 CLI、recorder、daemon 与 CI 不触发后台检查。

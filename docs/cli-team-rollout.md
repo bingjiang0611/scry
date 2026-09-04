@@ -681,6 +681,36 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 **顺带发现的既有问题(与本次改动无关)**:该 workspace 的 `doctor` 在收敛前就报 `corrupt` —— 1315 个序号里有 230 个空洞,而 `archive-state.json` 的 floor 是 0,即这些记录是被手工/外部流程删掉的,只有 1 个能在 `.scry/upload/reconciled` 里找到对应。这正是 §12.12 决定保留 `records archive` 的现实依据:没有 floor 解释的空洞就是损坏,而不是"已清理"。收敛只在末尾追加序号,不改变这一既有状态。
 
+## 12.14 自动更新:边界从 minor 移到 major
+
+本次发布定为 **0.2.32** 而不是 0.3.0。依据是核对了 registry 上已发布的 0.2.31 tarball:它的命令面只有 `init` / `recorder` / `turns` / `doctor` / `integrations install-pi|status-pi` / `upgrade` / `version` —— 本轮删掉的 `verify-capture`、`turns project`、`capture show` **从未发布过**(它们和 `status`、`commit-hook`、`records archive`、`support-bundle` 一样都是本轮新增的,只是压在同一个 0.2.31 版本号上没有单独发版)。相对已发布版本,本次是纯新增,patch 语义正确,存量 0.2.x 用户能够继续接收。
+
+### 三道门,只放宽一道没有用
+
+| 门 | 原行为 | 现行为 |
+|---|---|---|
+| `isCompatibleAutoUpdate` | 0.x 要求 minor 相同 | 同 major 即可 |
+| `updateSpec` | 0.x 用 `~<current>`,锁死 minor | `>=<current> <major+1.0.0` |
+| `runBackgroundUpdate` | `checkOnly: true`,**从不安装** | `allowBreaking: false`,安装同 major 更新 |
+
+第三道门是关键发现:后台任务此前只检查不安装,所谓"自动更新"名不副实 —— 而 `consumeUpdateNotice` 一直在读 `updatedFrom` / `updatedTo` 来打印"已自动更新",那个分支在 `checkOnly: true` 下永远不可达。这说明原设计本就打算安装,后来被改成只检查。现在恢复为安装,那条提示路径也随之变为可达。
+
+第二道门也必须改:`~` 锁 minor,而 npm 的 `^` 对 0.x 同样把 minor 当 breaking,两者都无法表达"同 major 内任意更高版本",必须显式写出上界。
+
+### 迁移链
+
+存量客户端用的是**它自己那份**规则,所以放宽后的规则只能通过一个"旧规则已经接受"的版本送达:
+
+```
+0.2.31（旧规则）──接受同 minor──> 0.2.32（新规则）──接受同 major──> 0.3.x / 0.9.x
+```
+
+因此这次必须发 0.2.32 而不是 0.3.0,否则存量用户拿不到新规则。测试锁定了这条链(`update.test.ts`)。
+
+### 代价
+
+放宽之后,一次真正破坏性的发布会被静默装到用户机器上。唯一的表达手段变成 **major**:破坏 CLI 合同时必须升到 `1.0.0`,而不是靠 0.x 的 minor。这条约定必须遵守,否则用户会在不知情的情况下被换掉命令面。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。
