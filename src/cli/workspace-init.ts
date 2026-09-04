@@ -4,6 +4,7 @@ import { access, chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile }
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
+import { PROTOCOL_VERSION } from '../core/turn-recorder/daemon.js'
 import { piIntegrationStatus } from './pi-integration.js'
 
 export type InitProvider = 'claude' | 'codex' | 'qoder' | 'opencode'
@@ -160,8 +161,25 @@ if [ "\${SCRY_RECORDER_MANAGED:-0}" = "1" ]; then
   scry_bin="$SCRY_CLI_PATH"
   exec "$scry_bin" recorder hook --provider "$1" --event "$2" --workspace "$workspace" --stdin --quiet --managed
 fi
+# Read the payload once so the fallback can resend it: stdin cannot be replayed.
+payload="$(cat)"
+# Posting straight to a running daemon skips a Node start per event, which dominates hook cost.
+# Anything other than HTTP 200 falls through to the CLI, so an old or wedged daemon cannot drop events.
+socket="\${SCRY_RECORDER_SOCKET:-$workspace/.scry/recorder-v1.sock}"
+if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && command -v curl >/dev/null 2>&1; then
+  case "$2" in
+    UserPromptSubmit|Stop) deadline=4 ;;
+    *) deadline=1 ;;
+  esac
+  code="$(printf '%s' "$payload" | curl -s -o /dev/null -w '%{http_code}' --max-time "$deadline" \
+    --unix-socket "$socket" -X POST \
+    -H 'x-scry-protocol: ${PROTOCOL_VERSION}' -H "x-scry-provider: $1" -H "x-scry-event: $2" \
+    -H 'content-type: application/json' --data-binary @- http://localhost/v1/hook 2>/dev/null)" || code=""
+  [ "$code" = "200" ] && exit 0
+fi
 [ -x "$scry_bin" ] || exit 0
-exec "$scry_bin" recorder hook --provider "$1" --event "$2" --workspace "$workspace" --stdin --quiet
+printf '%s' "$payload" | "$scry_bin" recorder hook --provider "$1" --event "$2" --workspace "$workspace" --stdin --quiet
+exit 0
 `
 }
 

@@ -54,6 +54,14 @@ describe('scry init', () => {
     execFileSync(process.execPath, ['--check', openCodePlugin])
     expect(await readFile(join(root, '.git/info/exclude'), 'utf8')).toContain('.scry/')
     execFileSync('sh', ['-n', join(root, '.scry/provider-hook.sh')])
+    const hookScript = await readFile(join(root, '.scry/provider-hook.sh'), 'utf8')
+    // 快路径必须先把 stdin 读进变量，否则回退时无法重发，事件会丢。
+    expect(hookScript.indexOf('payload="$(cat)"')).toBeLessThan(hookScript.indexOf('curl'))
+    // 只有 HTTP 200 才算成功；其余一律回退到 CLI。
+    expect(hookScript).toContain('[ "$code" = "200" ] && exit 0')
+    expect(hookScript).toContain('printf \'%s\' "$payload" | "$scry_bin" recorder hook')
+    // managed 模式不走 socket 快路径。
+    expect(hookScript.indexOf('--managed')).toBeLessThan(hookScript.indexOf('payload="$(cat)"'))
   }, 60_000)
 
   it('拒绝在 Git 子目录初始化，并指出项目根目录', async () => {

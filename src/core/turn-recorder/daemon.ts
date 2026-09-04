@@ -10,7 +10,7 @@ import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from 
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
 
-const PROTOCOL_VERSION = '1'
+export const PROTOCOL_VERSION = '1'
 const DEFAULT_IDLE_MS = 30 * 60 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
 const RECOVERY_POLL_MS = 1_000
