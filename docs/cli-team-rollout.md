@@ -825,6 +825,37 @@ recorder 单测                             81 passed（含既有 9 条曾被打
 
 同一批数据里有 6 个 codex `open` 轮次卡在 22–24 小时**且不会过期**:双判据要求 transcript 24h 未变,但 codex 多轮共用一个 session transcript,新轮次持续写它,被遗弃的旧轮次因此永远"看起来还在活动"。修法需要把判据从"文件 mtime"改成"该轮次区间之后是否还在增长"(`transcriptStartOffset`),先要逐 Provider 核实写入模式,不与本节混做。
 
+## 12.18 自动更新改为默认开(opt-out)
+
+维护者决定把 `SCRY_AUTO_UPDATE` 从 opt-in 改为默认开。理由是 opt-in 只能触达"已经知道这个开关存在"的人:本机 `rate-native` 从未设置它,于是在 0.2.31 发布很久之后仍停在 0.2.30,而 §12.16 的 daemon 触发器对它同样无效。
+
+**这是信任边界变更,不是配置调整**,代价必须写在文档里而不是埋在代码里:发布出去的版本会无人值守地装到运行着 Agent 的机器上,并以本机用户权限运行。一个坏版本或一次 registry 账号被滥用,会自动铺开到所有未显式关闭的机器。
+
+保留的约束(缺一不可):
+
+| 约束 | 作用 |
+|---|---|
+| `isCompatibleAutoUpdate` 同 major | 破坏性变更只能靠升 major 表达,永不自动装 |
+| 永不从 Provider hook 事件触发 | 采集路径不联网、不因更新而变慢(§12.16) |
+| `SCRY_CLI_BUNDLED` / `SCRY_RECORDER_MANAGED` | host 钉版本时不自更新(Scry App 私有 CLI 不受影响) |
+| `CI` | 构建环境不漂移 |
+| `SCRY_AUTO_UPDATE=0` / `SCRY_NO_UPDATE_CHECK=1` | 单一关闭入口 |
+| `npmPrefixFromEntry` 仅认 npm 全局安装 | dev `npm link` 的 realpath 不在 `<prefix>/lib/node_modules/` 下,返回 null,不会覆盖开发目录 |
+
+默认开抹掉了"某人曾经同意过"这个时刻,所以用**一次性告知**替代:未显式设置该变量时,首个可触发更新的交互式命令在 stderr 打一行说明与关闭方法(`consumeDefaultOnNotice`,状态里记 `defaultNoticedAt`,只打一次)。自己设过这个变量的人不会看到 —— 他们已经知道它存在。
+
+实测(dist 构建):
+
+| 场景 | 结果 |
+|---|---|
+| 默认开 + 一整轮 4 个 hook 事件 | 更新状态文件未创建 —— hook 路径仍零检查 |
+| 默认开 + daemon 空闲退出 | 触发检查(registry 指向死地址 → `status: error`) |
+| `SCRY_AUTO_UPDATE=0` + daemon 空闲退出 | 完全不动,不写状态、不联网 |
+
+### 存量用户仍需手动跨一次
+
+已发布的 0.2.31 里 `runBackgroundUpdate` 传的是 `checkOnly: true`(实测下载 tarball 确认:`package/dist/cli/update.js:211`)—— **它只查不装**。所以默认开对存量 0.2.x **无效**:必须有人手动跑一次 `scry upgrade` 或 `npm i -g`,装上 0.2.32 之后,后续版本才会自动安装。这道门槛无法规避,因为让旧代码去装新东西这件事本身要靠旧代码。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。

@@ -30,6 +30,7 @@ import { initWorkspace, integrationsDiff, integrationsRepair, integrationsUninst
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
+  consumeDefaultOnNotice,
   runIdleAutoUpdate,
   scheduleBackgroundUpdate,
   shouldScheduleAutoUpdate,
@@ -798,6 +799,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     if (autoUpdateEligible) {
       const notice = await consumeUpdateNotice()
       if (notice) process.stderr.write(`${notice}\n`)
+      const defaultOn = await consumeDefaultOnNotice()
+      if (defaultOn) process.stderr.write(`${defaultOn}\n`)
     }
     process.exitCode = await runScryCli(argv)
   } catch (error) {

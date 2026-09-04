@@ -12,6 +12,7 @@ const SUCCESS_INTERVAL_MS = 24 * 60 * 60 * 1_000
 const FAILURE_INTERVAL_MS = 6 * 60 * 60 * 1_000
 
 interface CliUpdateState {
+  defaultNoticedAt?: string
   checkedAt?: string
   currentVersion?: string
   latestVersion?: string
@@ -113,13 +114,26 @@ export function npmPrefixFromEntry(entryPath: string): string | null {
   return resolved.slice(0, index) || sep
 }
 
+/** Explicitly switched off, as opposed to simply unset. */
+function turnedOff(value: string | undefined): boolean {
+  return value !== undefined && ['0', 'false', 'no'].includes(value.trim().toLowerCase())
+}
+
 /**
  * The environment half of the policy, shared by every trigger so there is one answer to "may this
- * machine install an update at all". `SCRY_CLI_BUNDLED` and `SCRY_RECORDER_MANAGED` mean another
- * product pins the CLI; the rest are explicit opt-outs.
+ * machine install an update at all".
+ *
+ * Auto-update is **on unless switched off**. An opt-in flag only ever reached machines whose
+ * operator already knew about it, which left everyone else on whatever version they first
+ * installed. The cost of this default is real and stated in the README: a published release
+ * installs itself, unattended, on machines running agents with the local user's permissions. It
+ * stays bounded by `isCompatibleAutoUpdate` (never across a major), never runs from a Provider hook
+ * event, and any of these switches it off:
+ * `SCRY_AUTO_UPDATE=0`, `SCRY_NO_UPDATE_CHECK=1`, or a host that pins the CLI
+ * (`SCRY_CLI_BUNDLED`, `SCRY_RECORDER_MANAGED`).
  */
 export function autoUpdateAllowedByEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (!enabled(env.SCRY_AUTO_UPDATE)) return false
+  if (turnedOff(env.SCRY_AUTO_UPDATE)) return false
   return ![
     env.SCRY_CLI_BUNDLED,
     env.SCRY_RECORDER_MANAGED,
@@ -312,6 +326,19 @@ export async function scheduleBackgroundUpdate(currentVersion: string, entryPath
   })
   child.on('error', () => undefined)
   child.unref()
+}
+
+/**
+ * Default-on removes the moment where someone chose this, so it is replaced by telling them once.
+ * Printed on the first interactive command that could auto-update, then never again.
+ */
+export async function consumeDefaultOnNotice(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+  if (env.SCRY_AUTO_UPDATE !== undefined) return null
+  const path = statePath(env)
+  const state = await readJson<CliUpdateState>(path)
+  if (state?.defaultNoticedAt) return null
+  await writeJsonAtomic(path, { ...(state ?? {}), defaultNoticedAt: new Date().toISOString() }).catch(() => undefined)
+  return 'Scry CLI 会在同一 major 内自动更新自己；关闭：SCRY_AUTO_UPDATE=0'
 }
 
 export async function consumeUpdateNotice(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
