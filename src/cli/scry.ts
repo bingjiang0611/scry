@@ -30,6 +30,7 @@ import { initWorkspace, integrationsDiff, integrationsRepair, integrationsUninst
 import {
   consumeUpdateNotice,
   runBackgroundUpdate,
+  runIdleAutoUpdate,
   scheduleBackgroundUpdate,
   shouldScheduleAutoUpdate,
   upgradeCli
@@ -444,7 +445,13 @@ async function recorderCommand(args: ParsedArgs): Promise<number> {
     return result.pending > 0 ? 3 : 0
   }
   if (action === 'serve') {
-    await serveRecorderDaemon({ workspace: workspaceOf(args), socketPath: flag(args, 'socket') })
+    await serveRecorderDaemon({
+      workspace: workspaceOf(args),
+      socketPath: flag(args, 'socket'),
+      // The daemon is the only trigger that reaches a machine nobody runs `scry` on by hand, and
+      // its idle shutdown is the one moment where replacing the CLI cannot split a turn.
+      idleUpdate: () => runIdleAutoUpdate(RECORDER_VERSION, process.argv[1])
+    })
     return 0
   }
   if (action === 'status') {

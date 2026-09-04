@@ -5,12 +5,16 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { listenRecorderDaemon, recorderDaemonStatus, recorderSocketPath, sendRecorderDaemonHook } from './daemon'
-import { listRecords } from './store'
+import { RECORDER_VERSION, listRecords } from './store'
 
 const roots: string[] = []
+const socketDirs: string[] = []
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  await Promise.all([
+    ...roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    ...socketDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))
+  ])
 })
 
 async function workspace(): Promise<string> {
@@ -29,6 +33,14 @@ async function workspace(): Promise<string> {
 
 function socketPath(root: string): string {
   return join('/private/tmp', `${basename(root)}.sock`)
+}
+
+/** 独立目录，让 daemon.log 断言只看到本条测试写下的内容。 */
+async function isolatedSocketDir(root: string): Promise<string> {
+  const dir = join('/private/tmp', `${basename(root)}-d`)
+  await rm(dir, { recursive: true, force: true })
+  socketDirs.push(dir)
+  return dir
 }
 
 describe('turn recorder daemon', () => {
@@ -120,6 +132,75 @@ describe('turn recorder daemon', () => {
       await daemon.close()
     }
     await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
+  })
+
+  it('空闲退出前触发更新，装完即退出，让下一个事件跑上新版本', async () => {
+    const root = await workspace()
+    // daemon.log 跟随 socket 所在目录（daemon.ts 的 daemonLog），所以这里用独立目录避免串台。
+    const dir = await isolatedSocketDir(root)
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: join(dir, 'x.sock') }
+    const calls: string[] = []
+    const daemon = await listenRecorderDaemon({
+      workspace: root,
+      idleMs: 50,
+      env,
+      idleUpdate: async () => { calls.push('update'); return '9.9.9' }
+    })
+    await daemon.closed
+    expect(calls).toEqual(['update'])
+    await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
+    const log = await readFile(join(dir, 'logs', 'daemon.log'), 'utf8')
+    expect(log).toContain(`idle update installed ${RECORDER_VERSION} -> 9.9.9`)
+  })
+
+  it('轮次未结束时不触发更新，避免同一轮跨两个版本', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    let attempts = 0
+    const daemon = await listenRecorderDaemon({
+      workspace: root,
+      idleMs: 50,
+      env,
+      idleUpdate: async () => { attempts++; return '9.9.9' }
+    })
+    try {
+      await sendRecorderDaemonHook({
+        workspace: root,
+        provider: 'claude',
+        event: 'UserPromptSubmit',
+        payload: { session_id: 'mid-turn', prompt: '一轮开始了' },
+        env
+      })
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 300))
+      expect(attempts).toBe(0)
+      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: true })
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('更新卡住时有界放弃，不把空闲 daemon 一直吊住', async () => {
+    const root = await workspace()
+    const dir = await isolatedSocketDir(root)
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: join(dir, 'x.sock') }
+    let released = (): void => {}
+    const hang = new Promise<string | null>((resolvePromise) => { released = () => resolvePromise(null) })
+    const daemon = await listenRecorderDaemon({
+      workspace: root,
+      idleMs: 50,
+      idleUpdateTimeoutMs: 100,
+      env,
+      idleUpdate: () => hang
+    })
+    try {
+      // 更新永不返回，daemon 仍必须退出，且不能声称装上了什么。
+      await daemon.closed
+      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
+      const log = await readFile(join(dir, 'logs', 'daemon.log'), 'utf8').catch(() => '')
+      expect(log).not.toContain('idle update installed')
+    } finally {
+      released()
+    }
   })
 
   it('idle close 检查期间到达新 start 时不会关闭已写入 open 的 daemon', async () => {
