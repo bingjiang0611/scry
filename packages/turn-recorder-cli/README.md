@@ -192,6 +192,37 @@ scry capture show --workspace "$PWD"    # 看解析后的生效值（含配置�
 
 当前没有单独关闭工具入参的开关。如果你的场景要求本地不留任何代码与命令，应设 `diff: false` 并评估工具入参是否可接受，或者不要在该仓库启用 Recorder。
 
+## 性能与资源占用
+
+Provider 的每个 lifecycle 事件都会执行一次 hook,所以这条路径的成本直接决定你是否会感觉到卡顿或风扇。
+
+**事件投递**:`init` 写出的 hook 脚本在 daemon 已运行时用 `curl --unix-socket` 直接投递,省掉每事件一次 Node 启动;daemon 不在、`curl` 缺失、`SCRY_RECORDER_TRANSPORT=direct`、或 HTTP 状态码不是 200 时,自动回退到 CLI(先把 stdin 读进变量,保证回退能重发,不丢事件)。
+
+实测(macOS,单个工具事件):
+
+```
+curl 快路径      83ms
+CLI → daemon    155ms
+CLI 自己落盘     476ms
+```
+
+一整轮的合计成本:
+
+```
+ 5 次工具调用    快路径 2.09s   不用 daemon  8.36s
+30 次工具调用    快路径 5.19s   不用 daemon 32.30s
+```
+
+**CPU**:daemon 静置时几乎不占 CPU。实测 30 秒窗口:无进行中轮次 0.0%、1 个进行中轮次 0.1%、20 个进行中轮次 1.3%(均为单核百分比)。
+
+**内存**:单个 daemon 常驻约 60–110 MB。堆在 GC 后稳定回落(40 轮只留 1.7 MB),不是泄漏;RSS 不归还属 V8 高水位。**daemon 是每 workspace 一个,没有全局上限** —— 并行跑多个 worktree 时这个占用会叠加,只在需要采集的 worktree 执行 `scry init`。
+
+想彻底不要常驻进程:
+
+```bash
+export SCRY_RECORDER_TRANSPORT=direct   # 行为等价，每事件自己落盘（更慢）
+```
+
 ## 未结束的轮次
 
 一轮从 `UserPromptSubmit` 开始、`Stop` 结束。如果 Provider 被 `kill -9`、崩溃或终端被直接关闭,结束事件永远不会到,这一轮就停在 `.scry/runtime/` 里。

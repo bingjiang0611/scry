@@ -585,6 +585,49 @@ GC 后 heapUsed 相对启动增长: 1.7 MB
 
 因此本机观察到的 239–298 MB 活跃 daemon 对应的是**更大的历史峰值**(该 workspace 有 690 个会话目录、1082 条记录、48 个孤儿轮次),不是持续增长。由于 daemon 是每 workspace 一个且没有全局上限,多 worktree 并行时这个高水位会叠加 —— 这是"每 worktree 一个 daemon"的真实代价,记录在此供后续决定是否需要上限或 RSS 触发的自重启。
 
+## 12.10 事件投递快路径:hook 脚本直投 daemon
+
+§12.7 的结论是 daemon 对 shell hook 几乎没有延迟收益,原因是 hook 脚本无论如何都要启动一个 Node 进程。这条前提现在被去掉了:hook 脚本在 daemon 已运行时用 `curl --unix-socket` 直接 POST `/v1/hook`,不再启动 Node。
+
+实测单个工具事件:
+
+| 路径 | p50 |
+|---|---|
+| curl 直投 daemon | **83ms** |
+| CLI → daemon(旧默认) | 155ms |
+| CLI 自己落盘(`TRANSPORT=direct`) | 476ms |
+
+一整轮的合计:5 次工具调用 2.09s vs 8.36s;30 次工具调用 **5.19s vs 32.30s**(省 83.9%)。工具调用越多差距越大,因为省下的是每事件一次 Node 启动(约 79ms)。
+
+fail-safe 设计:
+- stdin 先读进 `payload` 变量再投递 —— stdin 不可重放,不先缓存就无法回退。
+- 只有 HTTP `200` 算成功,其余(陈旧 socket、协议不匹配、daemon 卡死、curl 缺失)一律回退到 CLI。
+- managed 模式(App 宿主)不走快路径,保持 `--managed` 语义。
+- 协议版本从 `PROTOCOL_VERSION` 插值,不在脚本里写死字面量。
+
+实测四种边界:冷启动无 daemon → 回退且 daemon 被拉起;daemon 在 → 走快路径;daemon 被杀 + socket 删除 → 记录正常;**socket 存在但进程已 `kill -9`(陈旧 socket)→ 回退,记录数正确**。1 MB 工具入参经快路径投递后按既有 8 KiB 预算省略并标 `partial`,没有静默截断。
+
+### 现有 workspace 需要重新生成 hook 脚本
+
+`init` 每次都会重写 `.scry/provider-hook.sh`,所以存量 workspace 需要执行 `scry init` 或 `scry integrations repair` 才能拿到快路径;不执行也只是保持旧的较慢行为,不会出错。
+
+## 12.11 CPU 空转与长轮次
+
+两个可能造成"风扇狂转"的怀疑点都做了实测,结论是都不成立:
+
+**daemon 空转**(静置 30 秒,单核百分比):
+
+```
+无进行中轮次        0.0%
+1 个进行中轮次 小 transcript   0.1%
+1 个进行中轮次 6.8MB transcript 0.4%
+20 个进行中轮次     1.3%
+```
+
+daemon 在有未结束轮次时会轮询 recovery(1s 起、指数退避到 15s 上限),每次都要扫描全部会话目录并解析 transcript;实测该开销在 15 秒退避下可忽略。
+
+**长轮次内的 O(n²)**:同一轮里连发 400 对工具事件,单对耗时**没有随事件数上升**(第 1–50 对 287.3ms → 第 351–400 对 275.6ms),801 个事件文件合计 328 KB,`Stop` 合并 800 个事件耗时 1477ms。不存在累积退化。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。
