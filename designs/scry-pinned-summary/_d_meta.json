@@ -6,9 +6,19 @@
     "Scry Pinned Summary": {
       "versions": [
         {
+          "path": "Scry Pinned Summary v7.html",
+          "createdAt": "2026-09-04T08:09:07.000Z",
+          "status": "needs-review",
+          "subtitle": "Qoder 风格图标列表展开，移除所有辅助小字",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        },
+        {
           "path": "Scry Pinned Summary v6.html",
           "createdAt": "2026-09-04T08:02:34.000Z",
-          "status": "needs-review",
+          "status": "archived",
           "subtitle": "支持 Skills & MCP、Web reading 与 Subagents 行内展开",
           "viewport": {
             "width": 1440,
@@ -69,5 +79,5 @@
     }
   },
   "createdAt": "2026-09-02T13:20:00.000Z",
-  "updatedAt": "2026-09-04T08:02:34.000Z"
+  "updatedAt": "2026-09-04T08:09:07.000Z"
 }

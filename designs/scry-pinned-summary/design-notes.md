@@ -1,6 +1,6 @@
 # Scry 轻量固定摘要 · 设计说明
 
-## 当前方向（v6）
+## 当前方向（v7）
 
 固定摘要不是整高 Surface，也不是覆盖消息的浮层。它由对话顶栏按钮打开：主会话主动收窄，右侧出现窄版占位 rail，约 320px 的轻量摘要卡只放在 rail 顶部。关闭后 rail 完全收起，主会话恢复全宽。
 
@@ -21,7 +21,9 @@
 - 信息使用大行高与单列排列，不用嵌套卡片。
 - 顶栏摘要按钮控制 rail 显示/隐藏。
 - Changes 可进入 Diff 详情；当前分支只读展示，不提供展开交互。
-- Skills & MCP、Web reading、Subagents 支持行内展开；卡片超过视口高度时只滚动卡片自身。
+- 摘要主行只保留标题、数量与箭头，删除所有灰色辅助小字。
+- Skills & MCP、Web reading、Subagents 展开为 Qoder 风格的“图标方块 + 单行名称”列表，不使用分组小标题、树线或状态说明小字。
+- 卡片超过视口高度时只滚动卡片自身。
 - Environment 不提供添加按钮，卡片不展示底部证据摘要或“证据详情”入口。
 - 某项存在精确证据且数量为 0 时不渲染该行；证据 unavailable 时保留该行并明确显示“不可用”。
 - Footer 只保留一句证据质量摘要，避免抢占视觉层级。
@@ -41,5 +43,6 @@
 - `Scry Pinned Summary v3.html`：不覆盖主会话，但 384px 卡片仍然偏宽。
 - `Scry Pinned Summary v4.html`：宽度合适，但存在无需求的添加、分支展开和证据 footer。
 - `Scry Pinned Summary v5.html`：完成静态收敛，但尚未展示 Context 项展开状态。
+- `Scry Pinned Summary v6.html`：展开层级和小字过多，不符合参考 UI。
 
 以上版本均不作为实现蓝本。
