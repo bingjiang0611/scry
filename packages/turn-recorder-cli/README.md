@@ -207,6 +207,8 @@ scry recorder recover  # {"recovered":1,"pending":0,"expired":1}
 
 收敛后的记录 `status` 为 `interrupted`,已观测到的证据段降级为 `partial`,原因为 `turn never received a terminal event and its transcript stopped changing before the expiry window`;完全没观测到的段仍是 `unavailable`。**不会**把未观测当作"没有发生"。
 
+`diff` 段固定为 `unavailable`:这一轮的 diff 基线可能是几天前建立的,发布它就等于把之后所有改动(包括别的轮次的工作)算到这一轮头上。所以过期收敛只释放基线、不发布归因。
+
 窗口可用 `SCRY_OPEN_TURN_EXPIRY_MS` 收紧(主要供测试),下限 1 秒、上限 30 天。
 
 顺带说明:daemon 在有未结束轮次时不会因空闲退出 —— 这是防止它在有活干时退场。因此孤儿轮次也是 daemon 长期不退出的原因,收敛之后它才会正常退出。

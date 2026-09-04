@@ -544,7 +544,46 @@ recorder recover        {"recovered":1,"pending":0,"expired":1}
 daemon（idle=2s）      启动 True → idle 后 False   ← 原先会永不退出
 ```
 
-一个测试驱动出的实现缺陷:最初按"是否在 stale 候选集合里"计数 `expired`,但候选轮次仍可能靠真实终态(如 Codex `turn_aborted`)收敛;既有用例立刻失败,改为只在真正走过期分支时计数。
+### 过期轮次不发布 diff
+
+实测发现的证据错误:过期收敛若照常调用 `finishGitTurnDiff`,会把基线之后的**全部**改动算进这一轮,并标成 `available` + `exact`。实测在轮次开启后写入 3 个无关文件,三者全部被归因:
+
+```
+diff 段 status: available | quality: exact
+  归因到这一轮的文件: x1.ts +3  x2.ts +3  x3.ts +3
+```
+
+修正:过期路径改为 `cancelGitTurnDiff` 释放基线,`evidence.diff` 置为 `unavailable`,原因说明基线跨越过期窗口无法归因。
+
+这同时解决了性能问题 —— git diff 收尾正是过期收敛的主要开销:
+
+| 孤儿轮次数 | 修正前 | 修正后 |
+|---|---|---|
+| 20 | 33.7s / 峰值 RSS 112 MB | **2.5s / 88 MB** |
+| 200 | 624.6s / 峰值 RSS 183 MB | **27.5s / 110 MB** |
+
+### 两个实现缺陷(均由测试或实测抓出)
+
+1. 最初按"是否在 stale 候选集合里"计数 `expired`,但候选轮次仍可能靠真实终态(如 Codex `turn_aborted`)收敛;既有用例立刻失败,改为只在真正走过期分支时计数。第二个过期分支还漏了该标记 —— 记录已是 `interrupted` 但计数为 0,靠交叉核对记录状态与计数才发现。
+2. 首次内存测量得出"堆完全不涨"的结论是**假的**:所有 CDP 请求都被 409 `protocol mismatch` 拒绝,daemon 实际没干活。补上 `x-scry-protocol`/`x-scry-provider`/`x-scry-event` 头并断言 records 数量后才拿到有效数据。
+
+## 12.9 daemon 内存:高水位,非泄漏
+
+通过 CDP 强制 GC 前后对比 40 个真实轮次(transcript 累积 35.4 MB):
+
+```
+启动后    heapUsed  9.4 → GC后 7.8   RSS  65.2 MB
+10 轮后   heapUsed 31.6 → GC后 9.0   RSS  98.0 MB
+20 轮后   heapUsed 28.4 → GC后 9.2   RSS 101.3 MB
+30 轮后   heapUsed 28.8 → GC后 9.5   RSS 108.4 MB
+40 轮后   heapUsed 32.8 → GC后 9.3   RSS 107.0 MB
+
+GC 后 heapUsed 相对启动增长: 1.7 MB
+```
+
+结论:**不是泄漏**。GC 后堆稳定回落到约 9 MB,40 轮只留下 1.7 MB;峰值 28–33 MB 是单轮 transcript 解析的瞬时分配。RSS 从 65 MB 涨到约 107 MB 且不归还,属于 V8/OS 高水位。
+
+因此本机观察到的 239–298 MB 活跃 daemon 对应的是**更大的历史峰值**(该 workspace 有 690 个会话目录、1082 条记录、48 个孤儿轮次),不是持续增长。由于 daemon 是每 workspace 一个且没有全局上限,多 worktree 并行时这个高水位会叠加 —— 这是"每 worktree 一个 daemon"的真实代价,记录在此供后续决定是否需要上限或 RSS 触发的自重启。
 
 ## 13. 落地顺序
 
