@@ -213,13 +213,6 @@
   white-space: nowrap;
 }
 
-.usage-cost-card > strong sup {
-  position: relative;
-  top: -0.14em;
-  margin-left: 2px;
-  font-size: 0.48em;
-}
-
 .usage-cost-card > small {
   min-height: 15px;
   display: block;
@@ -260,17 +253,6 @@
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
-}
-
-.usage-cost-marker,
-.usage-evidence-marker {
-  margin-left: 3px;
-  color: var(--dim2);
-  font-size: 0.72em;
-  font-style: normal;
-  font-weight: 620;
-  letter-spacing: 0;
-  vertical-align: super;
 }
 
 .usage-provider-track {
@@ -445,13 +427,6 @@
 .usage-legend .usage-provider-mark {
   width: 13px;
   height: 13px;
-}
-
-.usage-legend .usage-evidence-marker {
-  margin-left: -2px;
-  color: var(--dim3);
-  font-size: 9px;
-  vertical-align: baseline;
 }
 
 .usage-chart-scroller {
@@ -717,10 +692,13 @@
 
 .usage-table-wrap td.is-approximate {
   color: var(--fg);
+  text-decoration: underline dotted color-mix(in srgb, var(--warn) 62%, transparent);
+  text-underline-offset: 4px;
 }
 
-.usage-table-wrap td.is-approximate .usage-cost-marker {
-  color: var(--warn);
+.usage-table-wrap td.is-lower-bound {
+  text-decoration: underline dotted var(--usage-border);
+  text-underline-offset: 4px;
 }
 
 .usage-model-cell {

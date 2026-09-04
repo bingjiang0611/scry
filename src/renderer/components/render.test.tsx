@@ -4702,10 +4702,50 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(html).not.toContain('诊断')
   })
 
-  it('成本来源包含估算时逐类标注并给出紧凑图例', () => {
+  it('Qoder 的模式名和未归因项在模型明细中合并为一个 Qoder 行', () => {
+    const qoderAggregate = {
+      ...aggregate,
+      costUsd: null,
+      costKnownRows: 0,
+      exactCostRows: 0,
+      providerReportedCostRows: 0,
+      estimatedCostRows: 0,
+      inferredCostRows: 0
+    }
+    const groupedHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          byProvider: [...analytics.byProvider, { provider: 'qoder', model: null, ...qoderAggregate }],
+          byModel: [
+            ...analytics.byModel,
+            { provider: 'qoder', model: 'ultimate', ...qoderAggregate },
+            { provider: 'qoder', model: 'efficient', ...qoderAggregate },
+            { provider: 'qoder', model: null, ...qoderAggregate },
+            { provider: 'qoder', model: 'lite', ...qoderAggregate }
+          ]
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+    const breakdownHtml = groupedHtml.slice(groupedHtml.indexOf('<section class="usage-breakdown">'))
+
+    expect(breakdownHtml).toContain('<b title="Qoder">Qoder</b>')
+    expect(breakdownHtml.match(/usage-provider-mark is-qoder/g)).toHaveLength(1)
+    expect(breakdownHtml).not.toContain('title="ultimate"')
+    expect(breakdownHtml).not.toContain('title="efficient"')
+    expect(breakdownHtml).not.toContain('title="lite"')
+    expect(breakdownHtml).not.toContain('title="未归因"')
+  })
+
+  it('成本来源使用文案标注，不在数字上追加证据符号', () => {
     expect(html).toContain('Provider 报告成本 + 估算成本')
-    expect(html).toContain('>P≈</sup>')
-    expect(html).toContain('P = Provider 报告，≈ = 估算，† = 推断')
+    expect(html).not.toContain('>P≈</sup>')
+    expect(html).toContain('成本来源与 Token 覆盖状态见行内说明')
     expect(html).toContain('aria-describedby="usage-chart-instructions"')
   })
 
@@ -4740,7 +4780,8 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     )
 
     expect(exactHtml).toContain('<small>精确成本 · 2 轮</small>')
-    expect(providerReportedHtml).toContain('title="Provider 报告成本">P</sup>')
+    expect(providerReportedHtml).toContain('<small>Provider 报告成本 · 2 轮</small>')
+    expect(providerReportedHtml).not.toContain('>P</sup>')
   })
 
   it('混合成本来源不被优先级分支吞掉', () => {
@@ -4764,7 +4805,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     )
 
     expect(mixedHtml).toContain('精确成本 + Provider 报告成本 + 估算成本 + 推断成本')
-    expect(mixedHtml).toContain('>P≈†</sup>')
+    expect(mixedHtml).not.toContain('>P≈†</sup>')
   })
 
   it('部分 Token 在总览、Provider 和明细中都显式显示为已知下界', () => {
@@ -4789,12 +4830,15 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    expect(partialHtml).toContain('≥1.00K')
+    expect(partialHtml).toContain('<b>1.00K</b>')
+    expect(partialHtml).not.toContain('≥1.00K')
     expect(partialHtml).toContain('已知下界 · 2/2 条明细有 Token')
+    expect(partialHtml).toContain('Token 已知下界')
+    expect(partialHtml).toContain('class="is-lower-bound"')
     expect(partialHtml).not.toContain('/ 活跃日')
   })
 
-  it('稀疏缺失日和显式未知日都会断开面积趋势，不被补成零', () => {
+  it('稀疏缺失日和显式未知日沿基线连续连接，但保留无记录语义', () => {
     const unavailableCost = {
       ...aggregate,
       costUsd: null,
@@ -4824,9 +4868,10 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    expect(gapHtml.match(/usage-chart-point/g)).toHaveLength(2)
-    expect(gapHtml).not.toContain('usage-chart-line')
-    expect(gapHtml).not.toContain('usage-chart-area')
+    expect(gapHtml).toContain('data-missing-days="2"')
+    expect(gapHtml).toContain('usage-chart-line')
+    expect(gapHtml).toContain('usage-chart-area')
+    expect(gapHtml).toContain('无记录日沿基线连接以保持走势连续，但不代表实际值为零')
   })
 
   it('未知成本不画成零值趋势，小额非零成本不显示成 $0.00 且最大横条占满', () => {
