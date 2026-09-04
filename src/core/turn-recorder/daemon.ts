@@ -12,7 +12,6 @@ import { RECORDER_VERSION } from './store.js'
 
 export const PROTOCOL_VERSION = '1'
 const DEFAULT_IDLE_MS = 30 * 60 * 1_000
-const IDLE_UPDATE_TIMEOUT_MS = 120 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
 const RECOVERY_POLL_MS = 1_000
 const MAX_RECOVERY_POLL_MS = 15_000
@@ -370,7 +369,6 @@ export async function listenRecorderDaemon(args: {
    * network access. Returning the installed version only affects what gets logged.
    */
   idleUpdate?: () => Promise<string | null>
-  idleUpdateTimeoutMs?: number
 }): Promise<RecorderDaemonHandle> {
   const env = args.env ?? process.env
   const enablement = await recorderEnablement(args.workspace, env)
@@ -439,15 +437,9 @@ export async function listenRecorderDaemon(args: {
         await args.idleCloseProbe?.()
         if (closing || activityGeneration !== scheduledGeneration) return
         if (args.idleUpdate) {
-          // Bounded: a wedged package manager must not keep an idle daemon alive, and giving up
-          // only means the next idle window tries again.
-          const timeoutMs = args.idleUpdateTimeoutMs ?? IDLE_UPDATE_TIMEOUT_MS
-          let timer: NodeJS.Timeout | undefined
-          const installed = await Promise.race([
-            args.idleUpdate(),
-            new Promise<null>((resolvePromise) => { timer = setTimeout(() => resolvePromise(null), timeoutMs) })
-          ]).catch(() => null)
-          if (timer) clearTimeout(timer)
+          // No timeout here: every step the caller runs is already bounded (npm query 8s, install
+          // 120s, verify 8s). Racing it again would cut supervision while the install kept going.
+          const installed = await args.idleUpdate().catch(() => null)
           if (installed) {
             await appendRotatingLog(
               daemonLog,

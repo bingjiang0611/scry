@@ -2258,7 +2258,7 @@ export async function recoverRecorder(
 ): Promise<{ recovered: number; pending: number; expired: number }> {
   const enablement = await resolveRecorderEnablement(workspace, env)
   if (!enablement.enabled) return { recovered: 0, pending: 0, expired: 0 }
-  const expiryMs = openTurnExpiryMs(env)
+  const expiryMs = OPEN_TURN_EXPIRY_MS
   const stale = new Set(
     (await recorderStaleOpenTurns(enablement.dataRoot, expiryMs)).map((turn) => `${turn.provider}:${turn.sessionId}`)
   )
@@ -2409,13 +2409,6 @@ async function closingTurnStalled(path: string, expiryMs: number, now = Date.now
 
 export const OPEN_TURN_EXPIRED_REASON =
   'turn never received a terminal event and its transcript stopped changing before the expiry window'
-
-/** `SCRY_OPEN_TURN_EXPIRY_MS` exists so tests can expire a turn without waiting a day. */
-export function openTurnExpiryMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.SCRY_OPEN_TURN_EXPIRY_MS)
-  if (!Number.isFinite(raw) || raw < 1_000) return OPEN_TURN_EXPIRY_MS
-  return Math.min(raw, 30 * 24 * 60 * 60 * 1_000)
-}
 
 export async function recorderEnablement(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<RecorderEnablement> {
   return resolveRecorderEnablement(workspace, env)
