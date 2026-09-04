@@ -641,6 +641,66 @@ describe('turn recorder state machine', () => {
     expect(JSON.parse(delivered[0])).toMatchObject({ event: 'record-committed', sequence: 1 })
   })
 
+  it('终态已到但正文已被轮转的 closing 轮次超窗后收敛为 completed，正文与 diff 标 unavailable', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '这一轮会被轮转掉' } }) + '\n')
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-closing', { prompt: '这一轮会被轮转掉', transcript_path: transcript })
+    })
+    // Provider 轮转掉了这一轮：终态事件到达时 transcript 里已经找不到它。
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '完全不同的一轮' } }) + '\n')
+    await expect(handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('claude-closing', { transcript_path: transcript })
+    })).resolves.toMatchObject({ status: 'pending' })
+
+    const openState = join(root, '.scry', 'runtime', 'claude', safeKey('claude-closing'), 'open.json')
+    expect(JSON.parse(await readFile(openState, 'utf8')).status).toBe('closing')
+    // 已经在 closing 里卡了 5 天：判据是 recorder 自己最后一次写状态的时间，不是 Provider 给的时间戳。
+    const stalledAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1_000)
+    await utimes(openState, stalledAt, stalledAt)
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    // 终态确实到过（这才让它进 closing），所以谎报 interrupted 是错的；只有证据降级。
+    expect(record.status).toBe('completed')
+    expect(record.assistant.status).toBe('unavailable')
+    expect(record.assistant.omissionReason).toContain('no longer contains this turn')
+    // 基线是 5 天前的，diff 不能声称属于这一轮。
+    expect(record.diff.status).toBe('unavailable')
+    // transcript 被丢弃且没有 lifecycle 工具事件：不能声称「这一轮没用工具」。
+    expect(record.tools.status).toBe('unavailable')
+  })
+
+  it('closing 轮次在过期窗口内不强制收尾，仍等待正文出现', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '刚刚结束的一轮' } }) + '\n')
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-fresh-closing', { prompt: '刚刚结束的一轮', transcript_path: transcript })
+    })
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '换成别的内容' } }) + '\n')
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('claude-fresh-closing', { transcript_path: transcript })
+    })
+
+    // 刚结束的轮次可能还会收敛（Provider 稍后补写），不该立刻放弃、更不该丢掉 diff。
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 0, pending: 1, expired: 0 })
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
+  })
+
   it('超过过期窗口且 transcript 停止增长的 open 轮次收敛为 interrupted，证据降级为 partial', async () => {
     const root = await workspace()
     const transcript = join(root, 'transcript.jsonl')

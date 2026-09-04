@@ -1735,7 +1735,15 @@ async function finalizeOpenTurn(
   open: OpenTurnState,
   payload: Record<string, unknown>,
   fallbackStatus: AgentTurnRecord['status'],
-  options: { allowUnstableTranscript?: boolean; interruptedReason?: string } = {}
+  options: {
+    allowUnstableTranscript?: boolean
+    /**
+     * Stop waiting for evidence that will never arrive and force this turn closed, recording why.
+     * Independent of the outcome: an open turn that never ended is `interrupted`, a turn whose
+     * terminal already arrived stays `completed` - what this gates is giving up, not the verdict.
+     */
+    forcedReason?: string
+  } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const runId = `${open.provider}:${open.sessionId}:${open.generation}`
@@ -1770,7 +1778,7 @@ async function finalizeOpenTurn(
     // never will: Providers rotate transcripts away, and holding the turn open forever loses it and
     // keeps the daemon alive. Close it on lifecycle evidence alone rather than borrowing content
     // that was never confirmed to be this turn's.
-    if (!options.interruptedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+    if (!options.forcedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
     transcript = {
       stable: true,
@@ -1785,10 +1793,10 @@ async function finalizeOpenTurn(
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
   // change — including other turns' work — to this one. Release the baseline instead of publishing
   // an attribution we cannot defend, and say why.
-  if (options.interruptedReason) {
+  if (options.forcedReason) {
     await Promise.all(open.captures.map(({ capture }) => cancelGitTurnDiff(capture).catch(() => undefined)))
   }
-  const diffs = options.interruptedReason
+  const diffs = options.forcedReason
     ? []
     : limitTurnDiffPatchBytes(await Promise.all(open.captures.map(async ({ repository, capture }) =>
         finishGitTurnDiff(capture, undefined, {
@@ -1850,19 +1858,19 @@ async function finalizeOpenTurn(
       'transcript snapshot was incomplete or one or more child agent transcripts were unavailable'
     )
   }
-  // An expired turn was force-closed without a terminal event, so nothing it holds can be called
-  // complete, even when the transcript window itself parsed cleanly.
-  if (options.interruptedReason) {
+  // A force-closed turn stopped converging, so nothing it holds can be called complete even when
+  // the transcript window itself parsed cleanly.
+  if (options.forcedReason) {
     const reason = identityUnmatched
-      ? `${options.interruptedReason}; the transcript no longer contains this turn, so only lifecycle-hook evidence remains`
-      : options.interruptedReason
+      ? `${options.forcedReason}; the transcript no longer contains this turn, so only lifecycle-hook evidence remains`
+      : options.forcedReason
     degradeEvidenceSections(evidence, reason)
     evidence.diff = unavailable(
-      `${options.interruptedReason}; the turn diff baseline spans that window and cannot be attributed to this turn`
+      `${options.forcedReason}; the turn diff baseline spans that window and cannot be attributed to this turn`
     )
     if (identityUnmatched) {
-      evidence.assistant = unavailable(`${options.interruptedReason}; the transcript no longer contains this turn`)
-      evidence.modelSegments = unavailable(`${options.interruptedReason}; the transcript no longer contains this turn`)
+      evidence.assistant = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
+      evidence.modelSegments = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
     }
   }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
@@ -2274,6 +2282,9 @@ export async function recoverRecorder(
         }
         if (open.managedByScry) return { status: 'managed' as const }
         await probe?.(open)
+        // A turn that reaches `closing` inside this pass just converged on real terminal evidence;
+        // nothing has been failing to finalize, so it must not be reported as an expiry.
+        const wasAlreadyClosing = open.status === 'closing'
         if (open.status === 'open') {
           if (!open.transcriptPath) {
             if (!stale.has(`${open.provider}:${open.sessionId}`)) return { status: 'idle' as const }
@@ -2283,7 +2294,7 @@ export async function recoverRecorder(
               open,
               { timestamp: new Date().toISOString() },
               'interrupted',
-              { allowUnstableTranscript: true, interruptedReason: OPEN_TURN_EXPIRED_REASON }
+              { allowUnstableTranscript: true, forcedReason: OPEN_TURN_EXPIRED_REASON }
             )
           }
           const transcript = await stableTranscript(
@@ -2304,7 +2315,7 @@ export async function recoverRecorder(
               open,
               { timestamp: new Date().toISOString() },
               'interrupted',
-              { allowUnstableTranscript: true, interruptedReason: OPEN_TURN_EXPIRED_REASON }
+              { allowUnstableTranscript: true, forcedReason: OPEN_TURN_EXPIRED_REASON }
             )
           }
           open.status = 'closing'
@@ -2318,12 +2329,24 @@ export async function recoverRecorder(
             return { status: 'pending' as const, reason: 'unidentified terminal grace period is still active' }
           }
         }
+        // A closing turn already has its terminal event, so the transcript-mtime criterion that
+        // protects long-running turns does not apply: what matters is how long we have been failing
+        // to finalize it. Past the window we stop retrying forever - identity that was rotated out
+        // never comes back, and the diff baseline can no longer be attributed either way.
+        const closingExpired = wasAlreadyClosing &&
+          await closingTurnStalled(openPath(item.sessionDir), expiryMs)
+        if (closingExpired) forcedExpiry = true
         return finalizeOpenTurn(
           enablement,
           open,
           { timestamp: open.closingAt ?? new Date().toISOString() },
+          // The terminal event did arrive - that is what put the turn in `closing` - so calling it
+          // interrupted would misreport the lifecycle. Only the evidence degrades.
           'completed',
-          { allowUnstableTranscript: true }
+          {
+            allowUnstableTranscript: true,
+            ...(closingExpired ? { forcedReason: CLOSING_TURN_EXPIRED_REASON } : {})
+          }
         )
       },
       { waitMs: SESSION_LOCK_WAIT_MS }
@@ -2366,6 +2389,22 @@ export async function drainRecorderDelivery(
       `${new Date().toISOString()} ERROR deferred delivery: ${message}`
     ).catch(() => undefined)
   })
+}
+
+export const CLOSING_TURN_EXPIRED_REASON =
+  'turn received its terminal event but could not be finalized before the expiry window closed'
+
+/**
+ * How long a `closing` turn has been failing to finalize, measured by when the recorder last wrote
+ * its state rather than by `closingAt`: that field carries a Provider-supplied clock, and a skewed
+ * or stale one must not trigger a decision that discards diff evidence. Every real transition
+ * rewrites this file, so its mtime is the recorder's own record of last progress. An unreadable
+ * state declines to force, since giving up needs positive proof.
+ */
+async function closingTurnStalled(path: string, expiryMs: number, now = Date.now()): Promise<boolean> {
+  const touchedAt = await stat(path).then((info) => info.mtimeMs).catch(() => Number.NaN)
+  if (!Number.isFinite(touchedAt)) return false
+  return now - touchedAt >= expiryMs
 }
 
 export const OPEN_TURN_EXPIRED_REASON =
