@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scry · 固定摘要设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f4f5f7;
+      --sidebar: #f7f8fa;
+      --paper: #ffffff;
+      --panel: #fbfbfc;
+      --panel-strong: #f2f3f5;
+      --ink: #1c1d20;
+      --muted: #777a80;
+      --faint: #a4a7ad;
+      --line: #e6e7ea;
+      --line-strong: #dadce0;
+      --accent: #635bff;
+      --accent-soft: #eeecff;
+      --green: #29955a;
+      --green-soft: #eaf7ef;
+      --red: #d14f48;
+      --amber: #9a6500;
+      --amber-soft: #fff6dd;
+      --shadow: 0 14px 38px rgba(27, 30, 38, 0.08), 0 2px 8px rgba(27, 30, 38, 0.04);
+      --radius: 14px;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: var(--canvas); color: var(--ink); }
+    button { font: inherit; color: inherit; }
+    svg { display: block; }
+
+    .app {
+      width: 100vw;
+      height: 100vh;
+      min-width: 1180px;
+      display: grid;
+      grid-template-columns: 228px minmax(560px, 1fr) 408px;
+      background: var(--paper);
+    }
+
+    .sidebar {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--sidebar);
+      border-right: 1px solid var(--line);
+    }
+
+    .brandbar {
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brandmark {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: #1f2024;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .brandbar strong { font-size: 14px; letter-spacing: -0.01em; }
+    .version { margin-left: auto; color: var(--faint); font-size: 10px; }
+
+    .new-chat {
+      height: 36px;
+      margin: 12px 12px 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      background: var(--paper);
+      cursor: pointer;
+    }
+
+    .new-chat:hover { border-color: #caccd2; box-shadow: 0 2px 8px rgba(20, 22, 29, .05); }
+    .new-chat span:first-child { font-size: 18px; line-height: 1; }
+    .new-chat b { font-size: 12px; font-weight: 600; }
+    .new-chat small { margin-left: auto; color: var(--faint); }
+
+    .side-search {
+      height: 34px;
+      margin: 0 12px 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .side-nav, .session-list { padding: 2px 9px; }
+    .side-nav button, .session {
+      width: 100%;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #5f6268;
+      text-align: left;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .side-nav button:hover, .session:hover { background: rgba(30, 32, 38, .045); }
+    .side-nav svg { width: 14px; height: 14px; }
+    .side-nav small { margin-left: auto; color: var(--faint); }
+    .divider { height: 1px; margin: 9px 12px; background: var(--line); }
+    .section-label { padding: 5px 17px 7px; color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+
+    .session {
+      height: auto;
+      min-height: 54px;
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 4px;
+      padding: 9px;
+    }
+
+    .session.active { color: #24262b; background: #e9ebef; }
+    .session .title { width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+    .session .meta { display: flex; gap: 5px; color: var(--faint); font-size: 10px; }
+    .session .dot { color: var(--green); }
+    .sidebar-bottom { margin-top: auto; border-top: 1px solid var(--line); padding: 10px 12px; color: var(--muted); font-size: 12px; }
+
+    .chat {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 52px 1fr;
+      background: var(--paper);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.94);
+    }
+
+    .tabs { display: flex; align-items: center; gap: 4px; }
+    .top-tab {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .top-tab.active { background: var(--panel-strong); color: var(--ink); }
+    .top-tab svg { width: 14px; height: 14px; }
+    .runtime-pills { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 24px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 10px;
+      background: var(--panel);
+    }
+    .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+    .conversation {
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 48% 2%, rgba(99, 91, 255, .035), transparent 31%),
+        var(--paper);
+    }
+
+    .timeline {
+      height: 100%;
+      overflow-y: auto;
+      padding: 36px max(52px, 7vw) 160px;
+    }
+
+    .user-message {
+      width: fit-content;
+      max-width: 72%;
+      margin-left: auto;
+      padding: 12px 15px;
+      border-radius: 16px 16px 5px 16px;
+      background: #f1f2f4;
+      font-size: 13px;
+      line-height: 1.5;
+      box-shadow: inset 0 0 0 1px rgba(34, 36, 42, .025);
+    }
+
+    .turn { margin-top: 28px; }
+    .turn-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #61646a;
+      font-size: 11px;
+    }
+    .provider-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .turn-head b { color: #33353a; font-weight: 650; }
+    .turn-head .run-id { color: var(--faint); }
+    .turn-head .stats { margin-left: auto; color: var(--faint); }
+    .assistant-copy {
+      margin-top: 16px;
+      padding: 2px 0 2px 14px;
+      border-left: 2px solid #7c74ff;
+      font-size: 13px;
+      line-height: 1.7;
+      color: #3c3e43;
+    }
+    .assistant-copy strong { color: #1f2024; }
+    .assistant-copy ul { margin: 9px 0 0; padding-left: 18px; }
+    .assistant-copy li { margin: 6px 0; }
+    .evidence-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 18px;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .evidence-row span:first-child { color: #55585e; }
+
+    .composer {
+      position: absolute;
+      left: max(42px, 6vw);
+      right: max(42px, 6vw);
+      bottom: 20px;
+      min-height: 112px;
+      border: 1px solid var(--line-strong);
+      border-radius: 18px;
+      background: rgba(255,255,255,.96);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .composer-placeholder { padding: 17px 18px; color: var(--faint); font-size: 12px; }
+    .composer-bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-top: 1px solid #f0f0f2; color: var(--muted); font-size: 11px; }
+    .composer-bottom .send { margin-left: auto; width: 28px; height: 28px; border: 0; border-radius: 9px; display: grid; place-items: center; color: white; background: var(--accent); }
+
+    .summary {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 52px 1fr;
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .summary-topbar {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(251,251,252,.96);
+    }
+
+    .summary-tab {
+      height: 31px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--panel-strong);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .summary-tab svg { width: 14px; height: 14px; }
+    .summary-actions { margin-left: auto; display: flex; gap: 3px; }
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .icon-btn:hover { background: #eceef1; color: var(--ink); }
+    .icon-btn svg { width: 15px; height: 15px; }
+    .icon-btn.pinned { color: var(--accent); background: var(--accent-soft); }
+
+    .summary-scroll { min-height: 0; overflow-y: auto; padding: 14px 14px 28px; }
+    .summary-scroll::-webkit-scrollbar { width: 7px; }
+    .summary-scroll::-webkit-scrollbar-thumb { border-radius: 6px; background: #d5d7db; border: 2px solid transparent; background-clip: padding-box; }
+
+    .task-card {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--paper);
+    }
+    .eyebrow { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+    .eyebrow .live { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+    .task-card h2 { margin: 10px 0 5px; font-size: 14px; line-height: 1.45; letter-spacing: -.01em; }
+    .task-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .task-meta { display: flex; gap: 7px; margin-top: 12px; }
+    .evidence-chip {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      color: var(--green);
+      background: var(--green-soft);
+      font-size: 9px;
+      font-weight: 650;
+    }
+    .evidence-chip.partial { color: var(--amber); background: var(--amber-soft); }
+
+    .summary-section { margin-top: 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); overflow: hidden; }
+    .section-head {
+      width: 100%;
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .section-head:hover { background: #fafafb; }
+    .section-head svg { width: 14px; height: 14px; color: #696c72; }
+    .section-head b { font-size: 11px; font-weight: 650; }
+    .section-head small { margin-left: auto; color: var(--faint); font-size: 9px; }
+    .chevron { transition: transform 150ms ease; }
+    .summary-section.collapsed .chevron { transform: rotate(-90deg); }
+    .summary-section.collapsed .section-body { display: none; }
+    .section-body { padding: 0 8px 9px; }
+
+    .info-row {
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 9px;
+    }
+    .info-row.interactive { cursor: pointer; }
+    .info-row.interactive:hover { background: #f5f6f8; }
+    .row-icon {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #5f6268;
+      background: #f1f2f4;
+    }
+    .row-icon svg { width: 14px; height: 14px; }
+    .row-copy { min-width: 0; }
+    .row-title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; }
+    .row-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-copy p { margin: 3px 0 0; color: var(--faint); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-value { display: flex; align-items: center; gap: 7px; color: #55585e; font-size: 10px; white-space: nowrap; }
+    .plus { color: var(--green); }
+    .minus { color: var(--red); }
+    .mini-status { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .mini-status.warn { background: #d4931d; }
+
+    .actions-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 6px; }
+    .soft-button {
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fafafb;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .soft-button:hover { border-color: #cbced4; background: #f4f5f7; }
+    .soft-button.primary { color: var(--accent); border-color: #dcd8ff; background: #f7f6ff; }
+
+    .count-badge { min-width: 18px; height: 18px; display: inline-grid; place-items: center; padding: 0 5px; border-radius: 999px; color: #65686e; background: #eceef1; font-size: 9px; }
+    .source-favicon { font-size: 9px; font-weight: 700; }
+    .source-favicon.github { color: #24262b; }
+    .source-favicon.video { color: #d83b36; }
+    .source-favicon.docs { color: #3277d5; }
+    .unavailable { color: var(--faint); }
+    .unavailable .row-icon { background: #f5f5f6; color: #a4a7ad; }
+    .unavailable .row-value { color: var(--faint); }
+
+    .alignment-note {
+      margin-top: 10px;
+      padding: 11px 12px;
+      border: 1px dashed #d9dbe0;
+      border-radius: 11px;
+      color: var(--muted);
+      background: rgba(255,255,255,.55);
+      font-size: 9px;
+      line-height: 1.55;
+    }
+    .alignment-note b { color: #4a4d52; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translate(-50%, 14px);
+      padding: 9px 12px;
+      border-radius: 9px;
+      color: #fff;
+      background: rgba(28, 29, 32, .92);
+      box-shadow: var(--shadow);
+      font-size: 10px;
+      opacity: 0;
+      pointer-events: none;
+      transition: 160ms ease;
+      z-index: 30;
+    }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+    .app.summary-hidden { grid-template-columns: 228px minmax(560px, 1fr) 52px; }
+    .app.summary-hidden .summary-scroll, .app.summary-hidden .summary-tab span, .app.summary-hidden .summary-actions .hide-when-compact { display: none; }
+    .app.summary-hidden .summary-topbar { padding: 0; justify-content: center; }
+    .app.summary-hidden .summary-tab { width: 34px; padding: 0; justify-content: center; }
+    .app.summary-hidden .summary-actions { margin: 0; }
+    .app.summary-hidden .summary-actions .icon-btn:not(.reopen) { display: none; }
+    .app:not(.summary-hidden) .reopen { display: none; }
+
+    @media (max-width: 1260px) {
+      .app { grid-template-columns: 206px minmax(520px, 1fr) 380px; }
+      .timeline { padding-left: 42px; padding-right: 42px; }
+      .composer { left: 32px; right: 32px; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10m6 10V4m6 16v-7m4 7H2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Zm8 4v10l-8 4-8-4V7m8 4v10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="18" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="6" cy="19" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 7.3v9.4M8.2 8c2.7 0 4.2.2 5.6-1.3L16 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="m14 4 6 6-3 1-4 4-1 5-2-6-5-5 5-1 4-4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m10 14-6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 4v16" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gitdiff" viewBox="0 0 24 24"><circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="19" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 7v10a2 2 0 0 0 2 2h6M17 5v8m-3-5 3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M2.5 19h19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-git" viewBox="0 0 24 24"><path d="m5 3 14 14-2 2L3 5l2-2Z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8.5" cy="8.5" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="15.5" cy="15.5" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 10v4.5a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14 6 4 16v4h4L18 10M13 5l2-2 6 6-2 2M10 7l7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M8 4v5m8-5v5M6 9h12v2a6 6 0 0 1-6 6v4m-4 0h8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 20a6 6 0 0 1 12 0m2-13a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v5h4" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m12 19 7-7-7-7m7 7H5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <main class="app" id="app">
+    <aside class="sidebar">
+      <div class="brandbar"><span class="brandmark">S</span><strong>Scry</strong><span class="version">0.2.34</span></div>
+      <button class="new-chat"><span>＋</span><b>新建会话</b><small>⌘N</small></button>
+      <div class="side-search"><svg width="14" height="14"><use href="#i-list"/></svg><span>搜索会话或项目</span></div>
+      <nav class="side-nav">
+        <button><svg><use href="#i-chart"/></svg><span>分析</span></button>
+        <button><svg><use href="#i-pulse"/></svg><span>诊断</span><small>1</small></button>
+        <button><svg><use href="#i-box"/></svg><span>技能</span><small>8</small></button>
+        <button><svg><use href="#i-plug"/></svg><span>MCP</span><small>4/5</small></button>
+      </nav>
+      <div class="divider"></div>
+      <div class="section-label">最近会话</div>
+      <div class="session-list">
+        <button class="session active"><span class="title">设计固定上下文摘要</span><span class="meta"><span class="dot">●</span> Qoder · 刚刚</span></button>
+        <button class="session"><span class="title">修复停止后的消息编辑</span><span class="meta">Codex · 12m</span></button>
+        <button class="session"><span class="title">分析 Provider 用量</span><span class="meta">Claude · 2h</span></button>
+      </div>
+      <div class="sidebar-bottom">◐&nbsp;&nbsp;外观 · 浅色</div>
+    </aside>
+
+    <section class="chat">
+      <header class="topbar">
+        <div class="tabs">
+          <button class="top-tab active"><svg><use href="#i-chat"/></svg>对话</button>
+          <button class="top-tab"><svg><use href="#i-branch"/></svg>拓扑</button>
+          <button class="top-tab"><svg><use href="#i-list"/></svg>分段</button>
+        </div>
+        <div class="runtime-pills"><span class="pill"><span class="pill-dot"></span>Qoder</span><span class="pill">▢ scry</span></div>
+      </header>
+      <div class="conversation">
+        <div class="timeline">
+          <div class="user-message">参考 Qoder 和 Codex，给 Scry 加一个固定摘要能力。先出设计稿。</div>
+          <article class="turn">
+            <div class="turn-head"><span class="provider-dot"></span><b>Qoder run</b><span class="run-id">· run-summary-design</span><span class="stats">tok 2.4k · tools 8</span></div>
+            <div class="assistant-copy">
+              <strong>先把两套产品的优点合并到 Scry 现有右侧 Surface：</strong>
+              <ul>
+                <li>Codex 的 Environment、Side chats、Subagents 与 Sources 作为信息层级骨架。</li>
+                <li>Qoder 的 Skills &amp; MCP、Artifact、Web reading 补齐运行时上下文。</li>
+                <li>Scry 继续显式展示 exact / partial / unavailable，不用空值冒充“没有”。</li>
+              </ul>
+            </div>
+            <div class="evidence-row"><span>本轮证据</span><span>Read 5</span><span>Git diff 2</span><span>Files 3</span><span style="margin-left:auto">18s</span></div>
+          </article>
+        </div>
+        <div class="composer">
+          <div class="composer-placeholder">继续描述你希望摘要固定展示的内容…</div>
+          <div class="composer-bottom"><span>完全访问</span><span>Ultimate</span><span>默认</span><button class="send"><svg width="14" height="14"><use href="#i-arrow"/></svg></button></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="summary" aria-label="固定摘要面板">
+      <header class="summary-topbar">
+        <button class="summary-tab"><svg><use href="#i-list"/></svg><span>摘要</span></button>
+        <div class="summary-actions">
+          <button class="icon-btn pinned hide-when-compact" id="pinButton" title="取消固定摘要" aria-label="取消固定摘要"><svg><use href="#i-pin"/></svg></button>
+          <button class="icon-btn hide-when-compact" data-toast="最大化摘要 Surface" title="最大化"><svg><use href="#i-expand"/></svg></button>
+          <button class="icon-btn hide-when-compact" id="hideButton" title="收起摘要"><svg><use href="#i-panel"/></svg></button>
+          <button class="icon-btn reopen" id="reopenButton" title="展开摘要"><svg><use href="#i-panel"/></svg></button>
+        </div>
+      </header>
+
+      <div class="summary-scroll">
+        <section class="task-card">
+          <div class="eyebrow"><span class="live"></span>当前会话 · 正在运行</div>
+          <h2>设计固定上下文摘要</h2>
+          <p>Qoder · scry · main · 本机运行</p>
+          <div class="task-meta"><span class="evidence-chip">可验证</span><span class="evidence-chip partial">1 项不可用</span></div>
+        </section>
+
+        <section class="summary-section">
+          <button class="section-head"><svg><use href="#i-laptop"/></svg><b>环境</b><small>4 项</small><svg class="chevron"><use href="#i-chevron"/></svg></button>
+          <div class="section-body">
+            <div class="info-row interactive" data-toast="打开 Diff Surface">
+              <span class="row-icon"><svg><use href="#i-gitdiff"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>代码变更</span></div><p>3 个文件 · 工作区精确采集</p></div>
+              <div class="row-value"><span class="plus">+927</span><span class="minus">−3</span></div>
+            </div>
+            <div class="info-row">
+              <span class="row-icon"><svg><use href="#i-laptop"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>运行位置</span></div><p>Provider 以本机用户权限运行</p></div>
+              <div class="row-value">Local</div>
+            </div>
+            <div class="info-row interactive" data-toast="切换或创建分支">
+              <span class="row-icon"><svg><use href="#i-git"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>Git 分支</span></div><p>工作区 HEAD</p></div>
+              <div class="row-value">main</div>
+            </div>
+            <div class="actions-row"><button class="soft-button" data-toast="打开受控提交流程">提交</button><button class="soft-button primary" data-toast="打开推送确认，不会直接推送">推送…</button></div>
+          </div>
+        </section>
+
+        <section class="summary-section">
+          <button class="section-head"><svg><use href="#i-tool"/></svg><b>Skills &amp; MCP</b><small>4 / 5 可用</small><svg class="chevron"><use href="#i-chevron"/></svg></button>
+          <div class="section-body">
+            <div class="info-row interactive" data-toast="打开技能详情">
+              <span class="row-icon"><svg><use href="#i-tool"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>baoyu-design</span><span class="count-badge">本轮</span></div><p>已加载 · workspace skill</p></div>
+              <div class="row-value"><span class="mini-status"></span></div>
+            </div>
+            <div class="info-row interactive" data-toast="打开 MCP 状态">
+              <span class="row-icon"><svg><use href="#i-plug"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>Browser &amp; Computer Use</span></div><p>2 个连接 · 状态可观测</p></div>
+              <div class="row-value"><span class="mini-status"></span></div>
+            </div>
+            <div class="info-row unavailable">
+              <span class="row-icon"><svg><use href="#i-plug"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>Provider MCP 状态</span></div><p>Qoder 未提供完整状态 API</p></div>
+              <div class="row-value"><span class="mini-status warn"></span>不可用</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="summary-section">
+          <button class="section-head"><svg><use href="#i-users"/></svg><b>关联活动</b><small>2 项</small><svg class="chevron"><use href="#i-chevron"/></svg></button>
+          <div class="section-body">
+            <div class="info-row interactive" data-toast="打开 Side chat">
+              <span class="row-icon"><svg><use href="#i-chat"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>右侧摘要的信息架构</span></div><p>Side chat · 只读调研</p></div>
+              <div class="row-value"><span class="count-badge">1</span></div>
+            </div>
+            <div class="info-row interactive" data-toast="打开 Agent Surface">
+              <span class="row-icon"><svg><use href="#i-users"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>Reviewer</span></div><p>Subagent · 设计审阅完成</p></div>
+              <div class="row-value"><svg width="13" height="13" style="color:var(--green)"><use href="#i-check"/></svg>完成</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="summary-section">
+          <button class="section-head"><svg><use href="#i-link"/></svg><b>来源与产物</b><small>4 项</small><svg class="chevron"><use href="#i-chevron"/></svg></button>
+          <div class="section-body">
+            <div class="info-row interactive" data-toast="打开来源详情">
+              <span class="row-icon"><span class="source-favicon github">GH</span></span>
+              <div class="row-copy"><div class="row-title"><span>github.com/jingyaogong/minimind</span></div><p>用户提供 · 外部来源</p></div>
+              <div class="row-value">来源</div>
+            </div>
+            <div class="info-row interactive" data-toast="打开已读网页">
+              <span class="row-icon"><span class="source-favicon video">▶</span></span>
+              <div class="row-copy"><div class="row-title"><span>youtube.com/watch</span></div><p>Web reading · 已读取</p></div>
+              <div class="row-value">网页</div>
+            </div>
+            <div class="info-row interactive" data-toast="在文件 Surface 中打开">
+              <span class="row-icon"><svg><use href="#i-file"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>Scry Pinned Summary.html</span></div><p>designs/scry-pinned-summary</p></div>
+              <div class="row-value">产物</div>
+            </div>
+            <div class="info-row interactive" data-toast="查看全部来源与产物">
+              <span class="row-icon"><svg><use href="#i-globe"/></svg></span>
+              <div class="row-copy"><div class="row-title"><span>查看全部</span></div><p>按来源、证据质量与时间筛选</p></div>
+              <div class="row-value">4 <svg width="12" height="12"><use href="#i-arrow"/></svg></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="alignment-note"><b>对齐原则：</b>布局对齐 Codex / Qoder，但能力不强行对齐。Provider 没有状态 API 时明确显示“不可用”，真实没有调用时才显示 0。</div>
+      </div>
+    </aside>
+  </main>
+  <div class="toast" id="toast">已触发</div>
+
+  <script>
+    const app = document.getElementById('app')
+    const pinButton = document.getElementById('pinButton')
+    const hideButton = document.getElementById('hideButton')
+    const reopenButton = document.getElementById('reopenButton')
+    const toast = document.getElementById('toast')
+    let toastTimer
+
+    function showToast(message) {
+      toast.textContent = message
+      toast.classList.add('show')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1600)
+    }
+
+    pinButton.addEventListener('click', () => {
+      const pinned = pinButton.classList.toggle('pinned')
+      pinButton.title = pinned ? '取消固定摘要' : '固定摘要'
+      showToast(pinned ? '摘要已固定在当前会话右侧' : '摘要将在离开会话时自动收起')
+    })
+
+    hideButton.addEventListener('click', () => app.classList.add('summary-hidden'))
+    reopenButton.addEventListener('click', () => app.classList.remove('summary-hidden'))
+
+    document.querySelectorAll('.section-head').forEach((button) => {
+      button.addEventListener('click', () => button.closest('.summary-section').classList.toggle('collapsed'))
+    })
+
+    document.querySelectorAll('[data-toast]').forEach((element) => {
+      element.addEventListener('click', () => showToast(element.dataset.toast))
+    })
+  </script>
+</body>
+</html>

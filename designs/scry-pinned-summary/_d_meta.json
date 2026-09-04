@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Pinned Summary": {
+      "versions": [
+        {
+          "path": "Scry Pinned Summary.html",
+          "createdAt": "2026-09-02T13:20:00.000Z",
+          "status": "needs-review",
+          "subtitle": "融合 Codex 与 Qoder 的 Scry 固定上下文摘要 Surface",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-02T13:20:00.000Z",
+  "updatedAt": "2026-09-02T13:20:00.000Z"
+}
