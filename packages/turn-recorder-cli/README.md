@@ -1,159 +1,73 @@
 # @ali/scry-turn-recorder
 
-Scry 的独立本地轮次记录 CLI。它由 Provider 生命周期 hook 调用，在工作区的 `.scry/` 下写入顶层用户轮次记录；CLI 本身不上传数据，也不依赖 Electron 或原生模块。
+Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,把每个顶层用户轮次写成 `.scry/` 下的一个 JSON 文件。
 
-支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围。
+- **不上传任何数据**,不依赖 Electron 或原生模块。
+- **不是沙箱**:它记录发生了什么,不限制 Agent 能做什么。
+- 支持 Node 20 / 22 / 24,macOS 与 Linux。Windows 不在支持范围。
+
+## 安装与接入
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.31 \
+npm install -g @ali/scry-turn-recorder@0.3.0 \
   --registry=https://registry.anpm.alibaba-inc.com
+
+cd /path/to/project      # 必须是 Git 仓库根目录
+scry init                # 自动检测 claude / codex / qoder / opencode
 ```
 
-安装后，在要采集的 Git 项目根目录初始化：
+`init` 创建 `scry.config.json` 与 `.scry/provider-hook.sh`,并把 hook 合并进各 Provider 的项目配置;已有 hook 会保留,重复执行不会重复添加。可用 `--providers claude,codex` 明确指定。Pi 是用户级扩展,另外执行 `scry integrations install-pi`。
+
+接入后必须做两件事,CLI 无法代替:
+
+1. **重启 Provider**,否则新 hook 不会加载。
+2. **Codex 还要在项目里执行 `/hooks` 并信任项目 Hook。**
+
+然后跑一轮真实任务来验证 —— `init` 的自检只能证明配置和本地存储可用:
 
 ```bash
-cd /path/to/project
-scry init
+scry status --workspace "$PWD"    # 退出 0 表示确实采到了
 ```
 
-`scry init` 会自动检测 Claude Code、Codex、Qoder 和 OpenCode，也可以明确指定：
+等待采集就绪的写法(`status` 退出码:0 在采集 / 2 未启用 / 3 已配置但未采到):
 
 ```bash
-scry init --providers claude,codex,qoder,opencode
+i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break; sleep 2; done
 ```
 
-它会创建 `scry.config.json` 和 `.scry/provider-hook.sh`，并把 Recorder Hook 合并到各 Provider 的项目配置中；已有 Hook 会保留，重复执行不会重复添加。命令只接受 Git 项目根目录，不会自动执行 `git init`。Pi 使用全局 lifecycle 扩展，仍单独运行 `scry integrations install-pi`。
+`init` 只开启本地记录,不安装任何 uploader、审计或业务 Hook。
 
-初始化后要重启 Provider。Codex 还需要在项目中执行 `/hooks` 并信任项目 Hook；CLI 不能代替用户完成这一步。`init` 自带的检查只能证明配置和本地 Store 可用，执行一轮真实任务后 `scry turns list --workspace "$PWD"` 出现新记录，才说明 Hook 已经真正加载。
+停止新增记录:创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0`;已有数据仍可只读查询。彻底卸载用 `scry integrations uninstall --yes`。
 
-初始化只开启本地记录，不会安装 rate-native 的 uploader、审计或业务 Hook，也不会上传数据。
+## 日常命令
 
-独立 npm 安装默认不后台联网。设置 `SCRY_AUTO_UPDATE=1` 后，`scry` 才会在交互式命令结束后检查兼容更新；后台任务只检查、不安装，升级仍需前台运行 `scry upgrade`。检查至多每天一次，失败后 6 小时再试。桌面 App 内置 CLI、recorder、daemon 和 CI 不触发后台检查。
+| 命令 | 用途 |
+|---|---|
+| `scry status` | 逐 Provider 六阶段:是否在采集、卡在哪一环 |
+| `scry doctor` | store 完整性、health 计数、孤儿轮次、生效的采集配置 |
+| `scry turns list` | 轮次列表(含 `modelTiming`、compaction 计数) |
+| `scry turns show <序号\|recordId>` | 单轮完整记录 |
+| `scry turns timeline <序号\|recordId>` | 模型文字与 Tool / Skill / MCP / 子 Agent 交错时间线 |
+| `scry turns summary [sessionId\|--all]` | 会话或整个 workspace 的聚合 |
+| `scry turns export --after 0 --limit 100` | 游标分页导出 |
+| `scry turns verify` | 序号连续性与记录完整性 |
+| `scry records archive --before 30d` | 归档旧记录(见「容量与归档」) |
+| `scry support-bundle create` | 脱敏排障包 |
+| `scry recorder status\|stop\|restart\|recover\|notify-drain` | daemon 与恢复 |
+| `scry integrations diff\|repair\|uninstall` | 托管 hook 的漂移检查与修复 |
+| `scry upgrade [--check]` | 升级 CLI |
 
-```bash
-scry upgrade --check  # 只检查
-scry upgrade          # 立即升级到 registry 的 latest
-```
+所有命令都接受 `--workspace <root>` 或 `--workspace=<root>`,输出为 JSON。未知参数直接报错。
 
-直接运行 Pi CLI 需要安装随 recorder 发布的 lifecycle 扩展；安装器会幂等写入受管 loader，且拒绝覆盖用户同名扩展：
+`status` 的三个阶段不可互相代替:`configured` 只证明配置写入,`hookSeen` 证明 hook 真的到达 recorder,`recordSeen` 才证明轮次已提交。`trusted` 永远是 `unknown` —— Codex 需要交互式确认,其余 Provider 不向 CLI 暴露信任状态;写 `n/a` 等于声称"不需要信任"。
 
-```bash
-scry integrations install-pi
-scry integrations status-pi
-scry integrations diff --workspace "$PWD"
-scry integrations repair --yes --workspace "$PWD"       # 按 handler id 重写托管 hook
-scry integrations uninstall --workspace "$PWD"          # 只打印计划
-scry integrations uninstall --yes --workspace "$PWD"    # 执行
-```
+`openTurnsPending`(未收敛的 open turn)与 `notifyBacklog`(commit hook 未 ACK 数)是两个不同指标,不要混用。
 
-扩展把 Pi 的顶层 prompt、工具、assistant、usage 和模型响应区间按顺序投递到同一 workspace recorder；失败始终 fail-open，不阻断 Pi。
+Agent、skill 与提示词不应主动调用这些命令。
 
-设置 `SCRY_NO_UPDATE_CHECK=1` 或传入 `--no-update-check` 可关闭已启用的后台检查；私有 registry 可通过 `SCRY_CLI_REGISTRY` 覆盖，但必须使用 HTTPS。自动安装禁用 package lifecycle scripts。
+## 采集什么
 
-```bash
-scry doctor --workspace "$PWD"
-scry status --workspace "$PWD"
-scry status --workspace "$PWD" --timeout 120
-scry commit-hook status --workspace "$PWD"
-scry turns list --workspace "$PWD"
-scry turns show <sequence|recordId> --workspace "$PWD"
-scry turns timeline <sequence|recordId> --workspace "$PWD"
-scry turns summary --workspace "$PWD"
-scry turns summary <sessionId> --workspace "$PWD"
-scry turns summary --all --workspace "$PWD"
-scry turns export --workspace "$PWD" --after 0 --limit 100
-scry --help
-```
-
-`scry status` 逐 Provider 输出六个阶段：detected、configured（workspace / global / no）、trusted、hookSeen、recordSeen、state。`configured` 只证明配置已写入，`hookSeen` 证明 lifecycle hook 真的到达了 recorder，`recordSeen` 才证明轮次已提交；三者不可互相代替。`trusted` 永远是 `unknown`（原因在报告级 `trustEvidence` 里说明一次）：Codex 要求交互式 `/hooks` 确认，其余 Provider 不向 CLI 暴露信任状态，写成 `n/a` 等于声称“不需要信任”。退出码：0 至少一个 Provider 正在采集，2 recorder 未启用或没有已配置 Provider，3 已配置但还没有真实事件或 record。Pi 单独标为 `global`，因为它是用户级 lifecycle 扩展而不是项目 hook。
-
-`openTurnsPending`（未收敛的 open turn）与 commit hook 的 `notifyBacklog`（未 ACK 记录数）是两个不同指标，不要混用。完整 health 计数只在 `scry doctor` 输出，`status` 不重复一份。
-
-接入后应用 `scry status` 真实验一次：它先记下当前最大 sequence，然后等你在 Agent 里跑完一轮，只有出现**新** record 才算成功。失败时给出具体阶段：`missing_config`、`disabled`、`no_hook_event`（detail 区分“从未到达过”与“以前到过但本次没有”）、`pending_open_turn`、`events_without_record`。退出码：0 已采到，2 recorder 不可用，3 超时内未采到。结果为 `ok` 时仍会逐段输出证据状态（如 `usage: unavailable/unavailable`），不会用一个绿色结论掩盖不可观测的部分。`openTurnInFlight`（轮次正在进行）与 `openTurnsPending`（轮次待恢复）是两个独立信号。
-
-commit hook 投递在 Provider lifecycle 关键路径上有界执行：每个 hook 事件最多投递 8 条、预算 1.5s（仅在两条之间检查，单条仍以 10s 熔断）。剩余保持 pending，`status` 的 `notifyBacklog` 会如实显示积压条数；`recorder notify-drain` 的返回值带 `truncated`，投递失败的原因写在 `.scry/logs/recorder.log`。需要一次清空时用：
-
-```bash
-scry recorder notify-drain --workspace "$PWD"
-```
-
-参数同时支持 `--workspace <root>` 与 `--workspace=<root>`；未知参数或缺少参数值会直接报错。`turns show/timeline` 未找到记录时输出 `{ "found": false }` 并退出 1，退出码 4 只表示 store 损坏。
-
-Provider 集成优先通过 workspace 的 Unix socket 投递事件；socket 不存在时，CLI 会让首事件直接落盘并顺手拉起后台进程，不等待 daemon ready，后续事件自动切到 socket。`--start-daemon` 只保留给旧集成兼容。Agent、skill 和用户提示词不应主动调用这些记录命令。
-
-需要在正式 record 落盘后唤醒外部 uploader 时，`scry.config.json` 的 `commitHook` 必须声明 workspace 相对的 `entry` 与完整 `files` 清单。Scry App 首次使用会展示完整 bundle 指纹；批准后只执行复制到 Scry userData 的冻结副本，入口或任一依赖变化都会重新询问。record 持久化且 runtime 清理后，recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON，并仅在回调 exit 0 后推进 durable ACK；失败、超时或进程中断会在下一次 hook/recovery 重试。
-
-独立 CLI 不会因为仓库里写了 `commitHook` 就执行它——仓库内配置不能自我授权。必须显式授权一次：
-
-```bash
-scry commit-hook trust --workspace "$PWD"          # 只打印将被授权的 entry、files 与指纹
-scry commit-hook trust --yes --workspace "$PWD"    # 确认授权
-scry commit-hook status --workspace "$PWD"
-scry commit-hook revoke --workspace "$PWD"
-```
-
-授权记录写在仓库之外（默认 `~/.scry/grants/<workspace-hash>.json`，`0600`，可用 `SCRY_GRANT_DIR` 覆盖），只包含 canonical workspace 路径、entry 绝对路径与 bundle 指纹。每次投递前都会重新校验 entry 与全部 `files` 的内容指纹：未授权、指纹不符或 bundle 非法时一律 fail closed，不执行任何程序，record 照常保留待后续投递，原因写入 `.scry/logs/recorder.log`。授权后修改 hook 需重新 `trust`，并执行 `scry recorder restart --workspace <repo>` 让运行中的 daemon 生效。宿主（Scry App）自行设置 `SCRY_RECORDER_COMMIT_HOOK` 时优先生效，CLI 不覆盖。
-
-被授权的 entry 以你自己的权限运行，并且能读取数据目录下的全部 record 正文。授权是执行授权，不是脱敏机制。
-
-被授权的 entry 能读取数据目录下的全部 record 正文，因此团队汇总方案必须自己承担脱敏：例如只上报 `scry turns summary` 的聚合结果,或在 entry 里挑选字段。CLI 不提供内建的脱敏投影 —— 在真实的汇总消费方出现之前,任何白名单都只是猜测。
-
-`commit-hook status` 退出码：0 已激活或未配置，2 配置/存储不可用，3 待授权，4 指纹不符，5 bundle 非法。未激活时 `notifyBacklog` 显式为 `null` 且标注 `unavailable`，不会伪装成 0。
-
-Scry 启动且启用精确记录的 Claude、Codex、Qoder、OpenCode 会设置 `SCRY_RECORDER_MANAGED=1`。此时 lifecycle hook 只建立轮次
-身份，Scry App 在 result、Hook 与 diff 全部收齐后，把 trace archive 使用的同一份
-canonical evidence 两阶段提交到 CLI record；managed turn 禁止回退 rollout 近似重建。
-
-如果 Provider 启动器会改写 `PATH`，应先从用户原始环境解析 `scry` 的绝对路径并通过 `SCRY_CLI_PATH` 传给 hook。hook 在该变量存在时只能执行指定路径；路径失效时应 fail-open 跳过本次记录，不能回退到改写后的 `PATH`。未设置该变量的旧集成可继续使用 `command -v scry`。
-
-后台 recorder 不依赖 Scry App 常开，每个 workspace 独立运行，空闲 30 分钟自动退出：
-
-```bash
-scry recorder status --workspace "$PWD"
-scry recorder start --workspace "$PWD"
-scry recorder stop --workspace "$PWD"
-scry recorder restart --workspace "$PWD"
-```
-
-正常使用无需手动启动。深路径 workspace 会自动把 socket 放到系统临时目录。若 daemon transport 出现兼容问题，可设置 `SCRY_RECORDER_TRANSPORT=direct` 临时切回逐 Hook 同步 CLI；`.scry-disabled` 和 `SCRY_RECORDER_ENABLED=0` 仍用于完全停止记录。
-
-工作区根目录需要显式配置，缺少配置时 fail closed，不创建数据目录：
-
-```json
-{
-  "schemaVersion": 1,
-  "enabled": true,
-  "workspaceId": "my-workspace",
-  "dataDir": ".scry",
-  "commitHook": {
-    "entry": ".claude/hooks/scry-record-committed.py",
-    "files": [
-      ".claude/hooks/scry-record-committed.py",
-      ".claude/hooks/scry_turn_uploader.py",
-      ".claude/hooks/flush.py",
-      ".claude/hooks/session_identity.py",
-      ".claude/workflow/archive_snapshot.py",
-      "agent-adapters/shims/run-hook-async.py",
-      "agent-adapters/scripts/generate.py"
-    ]
-  },
-  "repositories": { "mode": "discover-nested-git", "maxDepth": 2 },
-  "capture": {
-    "prompt": true,
-    "assistant": true,
-    "toolOutput": "summary",
-    "diff": true,
-    "hooks": true,
-    "patchExcludeBasenames": [".factorypath"]
-  }
-}
-```
-
-创建 `.scry-disabled` 或设置 `SCRY_RECORDER_ENABLED=0` 可停止新增记录；`turns list/show/timeline/summary/export/verify` 仍可只读已有数据。
-
-## 采集范围
-
-默认全部开启；每一项都可以在 `scry.config.json` 里显式关闭：
+默认全开,每项都可在 `scry.config.json` 里关闭:
 
 ```json
 {
@@ -168,121 +82,155 @@ scry recorder restart --workspace "$PWD"
 }
 ```
 
-```bash
-scry doctor --workspace "$PWD"    # 看解析后的生效值（含配置省略掉的默认）
-```
+`scry doctor` 输出的 `capture` 是解析后的生效值,包含配置里省略的默认值。
 
-关闭某项后，对应证据段记为 `disabled` 并带 `omissionReason: ... disabled by config`，与 Provider 不支持导致的 `unavailable`、以及“真的没有发生”的空数组是三个不同状态。因此**不需要**额外的 policy 字段来事后解释某条记录采了什么——记录自己就说明了。
+关闭某项后对应证据段记为 `disabled` 并带 `omissionReason: ... disabled by config`,与 Provider 不支持的 `unavailable`、以及"真的没发生"的空数组是三个不同状态 —— 记录自己就能解释当时采了什么。
 
-**注意关闭正文并不等于脱敏。** 即使 `prompt`、`assistant` 关闭、`toolOutput` 设为 `none`，以下内容仍会写入记录：
-
-- 工具入参（Bash 命令原文、Edit 的 old/new 字符串等）
-- 文件路径
-- diff patch（除非同时 `diff: false`）
-
-当前没有单独关闭工具入参的开关。如果你的场景要求本地不留任何代码与命令，应设 `diff: false` 并评估工具入参是否可接受，或者不要在该仓库启用 Recorder。
-
-## 性能与资源占用
-
-Provider 的每个 lifecycle 事件都会执行一次 hook,所以这条路径的成本直接决定你是否会感觉到卡顿或风扇。
-
-**事件投递**:`init` 写出的 hook 脚本在 daemon 已运行时用 `curl --unix-socket` 直接投递,省掉每事件一次 Node 启动;daemon 不在、`curl` 缺失、`SCRY_RECORDER_TRANSPORT=direct`、或 HTTP 状态码不是 200 时,自动回退到 CLI(先把 stdin 读进变量,保证回退能重发,不丢事件)。
-
-实测(macOS,单个工具事件):
-
-```
-curl 快路径      83ms
-CLI → daemon    155ms
-CLI 自己落盘     476ms
-```
-
-一整轮的合计成本:
-
-```
- 5 次工具调用    快路径 2.09s   不用 daemon  8.36s
-30 次工具调用    快路径 5.19s   不用 daemon 32.30s
-```
-
-**CPU**:daemon 静置时几乎不占 CPU。实测 30 秒窗口:无进行中轮次 0.0%、1 个进行中轮次 0.1%、20 个进行中轮次 1.3%(均为单核百分比)。
-
-**内存**:单个 daemon 常驻约 60–110 MB。堆在 GC 后稳定回落(40 轮只留 1.7 MB),不是泄漏;RSS 不归还属 V8 高水位。**daemon 是每 workspace 一个,没有全局上限** —— 并行跑多个 worktree 时这个占用会叠加,只在需要采集的 worktree 执行 `scry init`。
-
-想彻底不要常驻进程:
-
-```bash
-export SCRY_RECORDER_TRANSPORT=direct   # 行为等价，每事件自己落盘（更慢）
-```
+> ⚠️ **关闭正文不等于脱敏。** 即使 `prompt`、`assistant` 关闭且 `toolOutput: "none"`,以下内容仍会落盘:**工具入参**(Bash 命令原文、Edit 的 old/new 字符串)、**文件路径**、**diff patch**(除非 `diff: false`)。当前没有单独关闭工具入参的开关。要求本地不留代码与命令的场景,应设 `diff: false` 并评估工具入参是否可接受,或者干脆不在该仓库启用。
 
 ## 未结束的轮次
 
-一轮从 `UserPromptSubmit` 开始、`Stop` 结束。如果 Provider 被 `kill -9`、崩溃或终端被直接关闭,结束事件永远不会到,这一轮就停在 `.scry/runtime/` 里。
+一轮从 `UserPromptSubmit` 开始、`Stop` 结束。Provider 被 `kill -9`、崩溃或终端被直接关闭时,结束事件永远不会到,这一轮会停在 `.scry/runtime/`。
 
-超过 **24 小时**且 **transcript 已停止增长**的这类轮次会被判定为不可能再收敛,由 `scry recorder recover`(daemon 空闲时也会自动跑)收敛为 `interrupted`:
+**同时满足**「超过 24 小时」与「transcript 已停止增长」的轮次判定为不可能再收敛,由 `scry recorder recover`(daemon 空闲时自动跑)收敛为 `interrupted`。两个判据都必需:只看年龄会把跑了 30 小时的长任务误判为中断,而长任务会持续追加 transcript。
 
 ```bash
 scry doctor            # 退出 5，turns.stale 报出数量与最久时长
 scry recorder recover  # {"recovered":1,"pending":0,"expired":1}
 ```
 
-两个判据必须同时满足:只看轮次年龄会把跑了 30 小时的长任务误判为中断,而长任务会持续往 transcript 追加内容。
+收敛后的记录:`status` 为 `interrupted`,已观测的证据段降级 `partial` 并说明原因,未观测的段保持 `unavailable`。`diff` 段固定 `unavailable` —— 基线可能是几天前的,发布它等于把之后所有改动(包括别的轮次的工作)算到这一轮头上。
 
-收敛后的记录 `status` 为 `interrupted`,已观测到的证据段降级为 `partial`,原因为 `turn never received a terminal event and its transcript stopped changing before the expiry window`;完全没观测到的段仍是 `unavailable`。**不会**把未观测当作"没有发生"。
+孤儿轮次也是 daemon 长期不退出的原因(有活干时不退场),收敛后它才会正常空闲退出。窗口可用 `SCRY_OPEN_TURN_EXPIRY_MS` 收紧,主要供测试。
 
-`diff` 段固定为 `unavailable`:这一轮的 diff 基线可能是几天前建立的,发布它就等于把之后所有改动(包括别的轮次的工作)算到这一轮头上。所以过期收敛只释放基线、不发布归因。
+## 性能与资源
 
-窗口可用 `SCRY_OPEN_TURN_EXPIRY_MS` 收紧(主要供测试),下限 1 秒、上限 30 天。
+hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的成本直接决定你是否感觉到卡顿。daemon 已运行时,hook 脚本用 `curl --unix-socket` 直投,省掉每事件一次 Node 启动;daemon 不在、`curl` 缺失、`SCRY_RECORDER_TRANSPORT=direct` 或 HTTP 状态码非 200 时自动回退到 CLI —— stdin 会先读进变量再投递,保证回退能重发,不丢事件。
 
-顺带说明:daemon 在有未结束轮次时不会因空闲退出 —— 这是防止它在有活干时退场。因此孤儿轮次也是 daemon 长期不退出的原因,收敛之后它才会正常退出。
+实测(macOS):
 
-## 容量与保留
+| 场景 | 快路径 | 回退到 CLI |
+|---|---|---|
+| 单个工具事件 | 83ms | 155ms(经 daemon)/ 476ms(自己落盘) |
+| 一轮 · 5 次工具调用 | 2.09s | 8.36s |
+| 一轮 · 30 次工具调用 | 5.19s | 32.30s |
 
-`.scry/records/` 是 append-only 的事实源：一轮一个 JSON，文件名带 20 位序号且必须连续。当前版本**没有自动清理或归档**，容量由使用者自己控制。
+- **CPU**:daemon 静置几乎不占 CPU(30 秒窗口:无进行中轮次 0.0%、1 个 0.1%、20 个 1.3%,单核百分比)。
+- **内存**:单 daemon 常驻 60–110 MB。GC 后堆稳定回落(40 轮只留 1.7 MB),不是泄漏;RSS 不归还属 V8 高水位。
+- **daemon 是每 workspace 一个,没有全局上限** —— 并行多个 worktree 时占用会叠加,只在需要采集的 worktree 执行 `init`。
 
-实测单条体积（macOS，CLI 0.2.31）：
+不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
+
+存量 workspace 升级 CLI 后需要重新生成 hook 脚本才能拿到快路径:`scry integrations repair --yes`(不做也不会错,只是慢)。
+
+## 容量与归档
+
+`.scry/records/` 是 append-only 事实源:一轮一个 JSON,文件名带 20 位序号且必须连续。
 
 | 轮次形态 | 大小 |
 |---|---|
-| 只有 prompt，无工具、无 diff | 约 2.9 KB |
-| 5 次 Edit + 5 个文件 diff | 约 6.6–9.9 KB（其中 diff 约 5.4 KB、tools 约 2.2 KB） |
+| 只有 prompt,无工具无 diff | 约 2.9 KB |
+| 5 次 Edit + 5 文件 diff | 6.6–9.9 KB |
 
-粗估：以平均 8 KB/轮、每人每天 100 轮计，约 0.8 MB/天、约 20 MB/月。主要变量是 diff，已有硬上限（单文件 patch 32 KiB、单轮合计 128 KiB）；工具输出只存摘要，单次 input 超 8 KiB 会省略并标 `partial`。想进一步降低占用可把 `capture.diff` 或 `capture.toolOutput` 关掉。
+按 8 KB/轮、100 轮/天估算约 20 MB/月。主要变量是 diff,已有硬上限(单文件 patch 32 KiB、单轮合计 128 KiB);工具输出只存摘要,单次 input 超 8 KiB 会省略并标 `partial`。
 
-**不要手动删除单个 record 文件。** `turns verify` 与 `doctor` 会把序号空洞当作 store 损坏（`doctor` 退出 4），而不是当作“已清理”。需要释放空间时用归档：
+> ⚠️ **不要手动删除单个 record 文件。** 序号空洞会被 `turns verify` 与 `doctor` 判为 store 损坏(退出 4),而不是"已清理"。
 
 ```bash
 scry records archive --before 30d --workspace "$PWD"          # 只打印计划
 scry records archive --before 30d --yes --workspace "$PWD"    # 执行
 ```
 
-归档把**连续前缀**搬到 `.scry/archive/<cutoff>/`（可用 `--out` 指定），写出带 sha256 的 `manifest.json`，并把 floor 记进 `archive-state.json`（只有 `archivedThrough` 一个字段；被搬走的内容由 manifest 说明，不再重复记一份历史列表）。`turns verify` 与 `doctor` 只接受被 floor 解释的空洞——手动删除仍然是损坏。新轮次从 `floor + 1` 继续编号，不会与已发出的序号冲突。
+归档把**连续前缀**搬到 `.scry/archive/<cutoff>/`(可用 `--out` 指定),写出带 sha256 的 `manifest.json`,并把 floor 记进 `archive-state.json`。只有被 floor 解释的空洞才被接受,新轮次从 `floor + 1` 继续编号。配置了 commit hook 时,归档拒绝搬走未 ACK 的记录(退出 5),提示先 `notify-drain`;确实要放弃投递才用 `--force`。
 
-若配置了 commit hook，归档会**拒绝**搬走尚未 ACK 的记录（退出 5），提示先 `scry recorder notify-drain`；确实要放弃投递时才用 `--force`。
+`turns list`、`doctor` 与投递 drain 都会扫描整个 records 目录,长期不清理会同时看到磁盘增长和命令变慢。
 
-另注意：`listRecords`、`turns list`、`doctor`、commit 通知 drain 都会扫描整个 records 目录，所以长期不清理的仓库会同时看到磁盘增长和命令变慢。
+## commit hook:唤醒外部 uploader
+
+需要在 record 落盘后唤醒外部程序时,在 `scry.config.json` 声明 workspace 相对的 `entry` 与完整 `files` 清单。record 持久化且 runtime 清理后,recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON,**仅在回调 exit 0 后**推进 durable ACK;失败或超时会在下次 hook/recovery 重试。
+
+**仓库内配置不能自我授权**,必须显式批准一次:
+
+```bash
+scry commit-hook trust --workspace "$PWD"          # 只打印 entry、files 与指纹
+scry commit-hook trust --yes --workspace "$PWD"    # 确认授权
+scry commit-hook status --workspace "$PWD"
+scry commit-hook revoke --workspace "$PWD"
+```
+
+授权记录写在仓库之外(默认 `~/.scry/grants/<workspace-hash>.json`,`0600`,可用 `SCRY_GRANT_DIR` 覆盖)。每次投递前重新校验 entry 与全部 `files` 的内容指纹:未授权、指纹不符或 bundle 非法一律 fail closed,不执行任何程序,record 照常保留待后续投递,原因写入 `.scry/logs/recorder.log`。改过 hook 后需重新 `trust`,并 `scry recorder restart` 让运行中的 daemon 生效。
+
+被授权的 entry 以你的权限运行,并能读取全部 record 正文 —— **授权是执行授权,不是脱敏机制**。团队汇总方案必须自己承担脱敏(例如只上报 `turns summary` 的聚合结果);CLI 不提供内建脱敏投影。
+
+投递在 Provider 关键路径上有界执行:每个 hook 事件最多 8 条、预算 1.5s(单条仍以 10s 熔断),剩余保持 pending,`notifyBacklog` 如实显示积压。需要一次清空:
+
+```bash
+scry recorder notify-drain --workspace "$PWD"
+```
+
+投递语义是 **at-least-once**,去重键为 `(workspace, recordId)`。
+
+## 退出码
+
+| 命令 | 0 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| `status` | 在采集 | 未启用 / 无已配置 Provider | 已配置但未采到 | — | — |
+| `doctor` | healthy | recorder 未启用 | 配置缺失或非法 | store 损坏 | degraded |
+| `commit-hook status` | 已激活或未配置 | 不可用 | 待授权 | 指纹不符 | bundle 非法 |
+| `records archive` | 完成 | 不可用 | 待确认 / 无候选 | — | 拒绝(未投递) |
+| `turns show/timeline` | 找到 | — | — | store 损坏 | — |
+
+`turns show/timeline` 未找到记录时输出 `{"found": false}` 并退出 1。
 
 ## 排障
 
 ```bash
-scry support-bundle create --workspace "$PWD"                 # 输出到 stdout
-scry support-bundle create --out ./scry-support.json           # 写文件（0600）
+scry support-bundle create --workspace "$PWD"           # 输出到 stdout
+scry support-bundle create --out ./scry-support.json    # 写文件（0600）
 ```
 
-支持包只含：CLI/Node/平台版本、Provider 检测与配置状态、hook 事件计数与最近事件时间、配置指纹与 `capturePolicy`、health 计数、store 计数与 `archivedThrough`、commit hook 激活状态与 ACK/backlog、脱敏后的最近 recorder 日志。
+只含:CLI/Node/平台版本、Provider 检测与配置状态、hook 事件计数与最近时间、配置指纹与生效 capture、health 与 store 计数、commit hook 激活与 ACK/backlog、脱敏后的最近日志。
 
-明确不含：record 正文、文件路径列表、环境变量值、workspace 路径与 `workspaceId` 原文（只给哈希）、commit hook entry 内容。日志与错误里的绝对路径会被替换为 `<workspace>` / `<home>`。产物自带 `omitted` 字段说明边界。
+不含:record 正文、文件路径列表、环境变量值、workspace 路径与 `workspaceId` 原文(只给哈希)、commit hook entry 内容。日志里的绝对路径替换为 `<workspace>` / `<home>`,产物自带 `omitted` 字段说明边界。
 
-## 数据口径
+正常运行**不产生日志文件**;`.scry/logs/recorder.log` 只在出错时创建,单文件 1 MiB 轮转、保留一代。
 
-- `turns summary` 默认汇总最新 session，与 Scry 当前会话纵览使用同一公开口径；`--all` 才汇总整个 workspace。
-- 新记录的 `modelSegments` 按原始事件顺序保留可见过程文字和 Provider 明文暴露的 thinking；`turns timeline` 将它们与 Tool、Skill、MCP、子 Agent 的开始/结果交错输出。旧记录缺少该字段时明确标为 `unavailable`。
-- 新记录的 `compactions` 保存每轮上下文压缩事件；`turns list` 输出逐轮次数，`turns summary` 汇总总数及 auto/manual 触发方式。旧记录缺少该字段时保持 `unavailable`，不会误算成 0。
-- patch 正文每文件最多 32 KiB、每条 record 合计最多 128 KiB；超过上限或命中 `patchExcludeBasenames` 时仍保留增删计数，并把 diff evidence 标为 `partial` 及对应原因。工具调用骨架全部保留；单次 input 超过 8 KiB 或调用详情合计超过 128 KiB 时只省略详情并标为 `partial`。
-- `普通工具`、`MCP`、`Skill`、`子 Agent` 是四个互斥列；总调用等于四列之和，同一次 MCP 或子 Agent 不会再重复计入普通工具。
-- Hook 同时报告“处理器实例”和“生命周期事件”；文件同时报告结构化文件证据与 Bash 推断读取，并保留 quality/coverage，不能拿不同分母直接比较。
-- Codex 的顶层轮次会合并其子 Agent rollout，但 Token 和最终回复只取顶层权威值，避免重复累计。
-- 无调用记为 `available + []`；Provider 未暴露的数据记为 `unavailable`，不会伪装成 0。Codex rollout 不包含原生 Hook 运行时事件，因此 Hook 通常为 `unavailable`。
-- Codex 会从 rollout 恢复 slash prompt、Usage、文件修改及常见并行工具调用；若子 Agent rollout 缺失，相关字段降级为 `partial`。
-- `turns list` 会为每轮输出紧凑的 `modelTiming`；`turns summary [sessionId]` 除纵览调用、Hook、文件、用量、错误和 diff 外，也汇总人工介入次数/问题数/等待时间、模型累计耗时、去重占用耗时、根/子 Agent 累计值和覆盖率。
-- Codex 当前没有上报服务端精确 latency。新记录的 `response_intervals` 是从同一 Agent 线程的 turn start 或上一段工具/Hook 完成，到 `rawResponse/completed` 的观测区间；它适合定位流程等待，但可能包含请求构造、调度、传输和重试。
-- `cumulativeMs` 会累计并行子 Agent 的模型时间；`occupiedMs` 是所有已观测模型区间的并集，用来与整轮墙钟比较。旧记录缺少 `modelTiming` 时保持 `unavailable`，不会被解释为 0。
-- Recorder 只保证新生成记录使用当前口径；已经上传的旧版本记录不会被自动重写。
+## 证据口径
+
+- 无调用记为 `available + []`;Provider 未暴露的记为 `unavailable`,**不会伪装成 0**。
+- `普通工具` / `MCP` / `Skill` / `子 Agent` 四列互斥,总调用等于四列之和。
+- Hook 同时报告"处理器实例"与"生命周期事件";文件同时报告结构化证据与 Bash 推断读取,并保留 quality/coverage —— 分母不同不可直接相比。
+- Codex 顶层轮次会合并子 Agent rollout,但 token 与最终回复只取顶层权威值;子 rollout 缺失时相关字段降级 `partial`。Codex rollout 不含原生 Hook 事件,Hook 通常为 `unavailable`。
+- Codex 无服务端精确 latency,`response_intervals` 是观测区间,可能包含请求构造、调度、传输与重试。
+- `modelTiming.cumulativeMs` 累计并行子 Agent 时间,`occupiedMs` 是所有模型区间的并集(用于与整轮墙钟比较)。旧记录缺该字段时保持 `unavailable`。
+- `modelSegments` 与 `compactions` 在旧记录缺失时标 `unavailable`,不会误算成 0。
+- Recorder 只保证**新生成**记录使用当前口径,不会重写历史记录。
+
+## managed 模式与更新
+
+Scry App 启动 Provider 时设置 `SCRY_RECORDER_MANAGED=1`:此时 lifecycle hook 只建立轮次身份,App 在 result、Hook 与 diff 全部收齐后两阶段提交 canonical evidence;managed turn 禁止回退到 rollout 近似重建。
+
+若 Provider 启动器会改写 `PATH`,应先解析 `scry` 绝对路径并通过 `SCRY_CLI_PATH` 传入;该变量存在时 hook 只执行指定路径,路径失效则 fail-open 跳过本次记录,不回退到改写后的 `PATH`。
+
+独立安装**默认不后台联网**。设置 `SCRY_AUTO_UPDATE=1` 后才会在交互式命令结束后检查兼容更新(只检查、不安装,至多每天一次)。0.x 版本的自动更新要求 minor 相同,**从 `0.2.x` 升到 `0.3.0` 必须手动执行 `scry upgrade`**。
+
+```bash
+scry upgrade --check    # 只检查
+scry upgrade            # 升级到 registry latest
+```
+
+`SCRY_NO_UPDATE_CHECK=1` 或 `--no-update-check` 关闭检查;`SCRY_CLI_REGISTRY` 覆盖 registry(必须 HTTPS)。App 内置 CLI、recorder、daemon 与 CI 不触发后台检查。
+
+## 环境变量
+
+| 变量 | 作用 |
+|---|---|
+| `SCRY_RECORDER_ENABLED=0` | 停止新增记录 |
+| `SCRY_RECORDER_TRANSPORT=direct` | 不使用 daemon,每事件自己落盘 |
+| `SCRY_RECORDER_SOCKET` | 覆盖 daemon socket 路径 |
+| `SCRY_RECORDER_IDLE_MS` | daemon 空闲退出窗口(默认 30 分钟) |
+| `SCRY_OPEN_TURN_EXPIRY_MS` | 未结束轮次的过期窗口(默认 24 小时) |
+| `SCRY_CLI_PATH` | hook 必须使用的 CLI 绝对路径 |
+| `SCRY_GRANT_DIR` | commit hook 授权记录目录 |
+| `SCRY_AUTO_UPDATE=1` / `SCRY_NO_UPDATE_CHECK=1` | 开启 / 关闭后台更新检查 |
+| `SCRY_CLI_REGISTRY` | 覆盖 npm registry(HTTPS) |

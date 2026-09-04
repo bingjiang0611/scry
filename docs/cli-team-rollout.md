@@ -661,6 +661,26 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 代价也如实记录:这是本轮唯一为新功能而修改 append-only 提交路径的改动,是 recorder 里风险最高的一处。
 
+## 12.13 真实 workspace 收敛实测(rate-native)
+
+在本机真实工作区执行过期收敛,暴露并修掉了一个实现缺口。
+
+**缺口**:Provider 会轮转删除 transcript,此时 `stableTranscript` 返回 `identityMatched === false`,`finalizeOpenTurn` 便永久返回 `pending` —— 轮次既不收敛也不消失。实测第二遍 recover 返回 `expired: 0` 而 `doctor` 仍报 6 个孤儿,才发现这一点。
+
+**修正**:仅在过期路径上,身份无法匹配时不再等待,而是**丢弃整份 transcript 证据**后收敛。绝不借用无法确认归属的内容:`assistant` 与 `modelSegments` 置 `unavailable` 并说明"transcript 已不再包含这一轮",只保留 lifecycle hook 侧属于该轮自己的证据(如 hook 收到的 prompt)。
+
+三遍收敛结果:
+
+```
+第一遍  {'recovered': 29, 'pending': 13, 'expired': 29}
+第二遍  {'recovered': 0,  'pending': 13, 'expired': 0}   ← 暴露缺口
+第三遍  {'recovered': 6,  'pending': 7,  'expired': 6}   ← 修正后
+```
+
+最终:records 1085 → 1120,孤儿轮次 35 → **0**,剩余 14 个 open.json 全部是"还不该被收敛"的(7 个 codex 未满 24 小时、7 个 `closing` 待 App 两阶段提交)。
+
+**顺带发现的既有问题(与本次改动无关)**:该 workspace 的 `doctor` 在收敛前就报 `corrupt` —— 1315 个序号里有 230 个空洞,而 `archive-state.json` 的 floor 是 0,即这些记录是被手工/外部流程删掉的,只有 1 个能在 `.scry/upload/reconciled` 里找到对应。这正是 §12.12 决定保留 `records archive` 的现实依据:没有 floor 解释的空洞就是损坏,而不是"已清理"。收敛只在末尾追加序号,不改变这一既有状态。
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。

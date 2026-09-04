@@ -635,6 +635,34 @@ describe('turn recorder state machine', () => {
     expect(record.tools.omissionReason).toContain('terminal event')
   })
 
+  it('transcript 已被 Provider 轮转删除的过期轮次仍能收敛，只保留 lifecycle 证据', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'rotated-away.jsonl')
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '别的轮次' } }))
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-rotated', {
+        prompt: '这一轮',
+        promptId: 'gone-turn',
+        transcript_path: transcript,
+        timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
+      })
+    })
+    // Provider 把 transcript 轮转掉了：身份再也无法在其中匹配。
+    await unlink(transcript)
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.status).toBe('interrupted')
+    // 绝不借用无法确认归属的 transcript 内容。
+    expect(record.assistant.status).toBe('unavailable')
+    expect(record.assistant.omissionReason).toContain('no longer contains this turn')
+    // hook 侧拿到的 prompt 仍然是这一轮自己的证据。
+    expect(record.user.value?.text).toBe('这一轮')
+  })
+
   it('过期轮次不发布 diff：基线跨越过期窗口，无法归因给这一轮', async () => {
     const root = await workspace()
     // 该 fixture 的 capture.diff 为 false，这里显式打开以覆盖真实默认配置。

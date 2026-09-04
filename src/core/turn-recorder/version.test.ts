@@ -12,6 +12,9 @@ describe('turn recorder version', () => {
       publishConfig: { registry: string }
     }
     expect(RECORDER_VERSION).toBe(packageJson.version)
+    // README 的安装命令必须跟着版本走，否则用户会复制到过期的安装行。
+    const readme = readFileSync(new URL('../../../packages/turn-recorder-cli/README.md', import.meta.url), 'utf8')
+    expect(readme).toContain(`@ali/scry-turn-recorder@${packageJson.version}`)
     expect(packageJson.os).toEqual(['darwin', 'linux'])
     expect(packageJson.publishConfig.registry).toBe('https://registry.anpm.alibaba-inc.com')
   })
