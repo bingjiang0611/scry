@@ -13,11 +13,10 @@ import { canOpenWorkspaceFileExternally, type WorkspaceEntry } from '@shared/wor
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
 import { ChatView } from './components/ChatView'
-import { DiagnosticsView } from './components/DiagnosticsView'
 import { AnalyticsView } from './components/AnalyticsView'
 import { ViewChrome } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
-import { SkillsModal, McpModal, SettingsModal } from './components/Modals'
+import { CapabilitiesModal, SettingsModal } from './components/Modals'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
@@ -42,7 +41,7 @@ import type { WorkspaceFileTarget } from './workspace-links'
 
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
-type AppView = 'chat' | 'diagnostics' | 'analytics'
+type AppView = 'chat' | 'analytics'
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -1210,10 +1209,12 @@ export function App() {
   }
 
   const openSkills = (): void => {
+    setShowMcp(false)
     setShowSkills(true)
     void refreshProviderCatalogs()
   }
   const openMcp = (): void => {
+    setShowSkills(false)
     setShowMcp(true)
     if (!integrations.mcpCapability) void integrations.refreshMcp().catch(() => {})
   }
@@ -1249,11 +1250,7 @@ export function App() {
   }
   const changeView = (next: AppView): void => {
     setView(next)
-    if (next === 'analytics' || next === 'diagnostics') integrations.loadStats()
-    if (next === 'diagnostics') {
-      integrations.loadDiag()
-      integrations.loadGitDiff()
-    }
+    if (next === 'analytics') integrations.loadAnalytics()
   }
   const openTurnDiffReview = useCallback(
     (turn: { runId: string; userText: string }, _turnDiff: TurnDiffSnapshot, initialPath?: string): void => {
@@ -1395,8 +1392,6 @@ export function App() {
           onRevealProject={(project) => void window.scry.revealProject(project.cwd)}
           archiveUndo={archiveUndo}
           onUndoArchive={() => void undoArchive()}
-          onDiagnostics={() => changeView('diagnostics')}
-          diagnosticsActive={view === 'diagnostics'}
           onAnalytics={() => changeView('analytics')}
           analyticsActive={view === 'analytics'}
           onSkills={openSkills}
@@ -1406,7 +1401,6 @@ export function App() {
           mcpLive={integrations.mcpLive}
           catalogHealth={catalogHealth}
           onSettings={() => setShowSettings(true)}
-          themeLabel={theme === 'dark' ? '深色' : '浅色'}
       />
       <PaneSplitter
           className="sidebar-resizer"
@@ -1423,25 +1417,16 @@ export function App() {
       <div className="main-area" id="main-pane">
         <>
         {view !== 'chat' && <div className="aux-view-topbar" aria-hidden="true" />}
-        {view === 'diagnostics' ? (
-          <DiagnosticsView
-            agents={integrations.agents}
-            diag={integrations.diag}
-            mcpLive={integrations.mcpLive}
-            mcps={integrations.mcps}
-            mcpCapability={integrations.mcpCapability}
-            stats={integrations.stats}
-            turns={session.turns}
-            projects={projects}
-            usage={integrations.usage}
-            onReprobe={() => {
-              integrations.loadDiag()
-              integrations.pullMcpLive()
-              integrations.loadStats()
-            }}
+        {view === 'analytics' ? (
+          <AnalyticsView
+            analytics={integrations.analytics}
+            rangeDays={integrations.analyticsRange}
+            loading={integrations.analyticsLoading}
+            error={integrations.analyticsError}
+            onRangeChange={integrations.setAnalyticsRange}
+            onRefresh={() => integrations.loadAnalytics()}
+            onBack={() => changeView('chat')}
           />
-        ) : view === 'analytics' ? (
-          <AnalyticsView stats={integrations.stats} projects={projects} />
         ) : (
           <>
             <ViewChrome
@@ -1562,7 +1547,6 @@ export function App() {
                   stats={integrations.stats}
                   runtimeProvider={panelRuntimeProvider}
                   gitDiff={integrations.gitDiff}
-                  diag={integrations.diag}
                   busy={session.busy}
                   onSelect={session.setSelected}
                   onOpenTurn={openTurnInChat}
@@ -1606,28 +1590,30 @@ export function App() {
         </>
       )}
       <>
-          {showSkills && (
-            <SkillsModal
+          {(showSkills || showMcp) && (
+            <CapabilitiesModal
               key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
+              view={showMcp ? 'mcp' : 'skills'}
+              onViewChange={(nextView) => {
+                if (nextView === 'skills') openSkills()
+                else openMcp()
+              }}
               skills={integrations.skills}
-              capability={integrations.skillCapability}
-              refreshing={integrations.skillsRefreshing}
-              onRefresh={() => { void refreshProviderCatalogs() }}
-              onClose={() => setShowSkills(false)}
-            />
-          )}
-          {showMcp && (
-            <McpModal
+              skillCapability={integrations.skillCapability}
+              skillsRefreshing={integrations.skillsRefreshing}
               mcps={integrations.mcps}
               status={integrations.mcpStatus}
               live={integrations.mcpLive}
-              configRefreshing={integrations.mcpConfigRefreshing}
-              refreshing={integrations.mcpRefreshing}
-              capability={integrations.mcpCapability}
-              onTest={integrations.testMcp}
-              onReauthenticate={integrations.reauthenticateMcp}
-              onRefresh={integrations.pullMcpLive}
-              onClose={() => setShowMcp(false)}
+              mcpConfigRefreshing={integrations.mcpConfigRefreshing}
+              mcpRefreshing={integrations.mcpRefreshing}
+              mcpCapability={integrations.mcpCapability}
+              onTestMcp={integrations.testMcp}
+              onReauthenticateMcp={integrations.reauthenticateMcp}
+              onRefreshMcp={integrations.pullMcpLive}
+              onClose={() => {
+                setShowSkills(false)
+                setShowMcp(false)
+              }}
             />
           )}
           {showSettings && (

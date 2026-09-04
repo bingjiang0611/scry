@@ -5,7 +5,6 @@ import {
   mcpCallsForEvent,
   type TraceEvent,
   type DbStats,
-  type Diagnostics,
   type DiffFile,
   type HookConfiguredCommand,
   type TurnDiffSnapshot
@@ -544,7 +543,6 @@ export function OverviewPanel({
   stats: DbStats | null
   runtimeProvider?: RuntimeProvider
   gitDiff?: DiffFile[]
-  diag?: Diagnostics | null
   busy?: boolean
   onSelect: (ev: TraceEvent) => void
   onOpenTurn?: (runId: string, ev?: TraceEvent | null, target?: 'turn' | 'event') => void

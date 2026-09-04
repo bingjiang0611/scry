@@ -73,7 +73,7 @@ describe('MarkdownImpl trust boundary', () => {
       <MarkdownImpl>{'| 项目 | 状态 |\n| --- | --- |\n| Scry | ready |'}</MarkdownImpl>
     )
     expect(html).toContain('class="md-table-scroll"')
-    expect(html).toContain('aria-label="表格，可横向滚动"')
+    expect(html).toContain('aria-label="表格，可横向和纵向滚动"')
     expect(html).toContain('<table>')
   })
 })

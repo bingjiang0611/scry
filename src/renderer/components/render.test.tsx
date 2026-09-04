@@ -799,7 +799,7 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
 })
 
 describe('Sidebar 项目分组', () => {
-  it('Skill 和 MCP 与分析、诊断同组展示，并保留 MCP 真实连接状态', () => {
+  it('Skill 和 MCP 与分析同组展示，并保留 MCP 真实连接状态', () => {
     const renderIntegrations = (
       mcps: ComponentProps<typeof Sidebar>['mcps'],
       mcpLive: ComponentProps<typeof Sidebar>['mcpLive']
@@ -812,14 +812,12 @@ describe('Sidebar 项目分组', () => {
         onTogglePin={() => {}}
         onArchive={() => {}}
         onAnalytics={() => {}}
-        onDiagnostics={() => {}}
         onSkills={() => {}}
         skillCount={3}
         onMcp={() => {}}
         mcps={mcps}
         mcpLive={mcpLive}
         onSettings={() => {}}
-        themeLabel="浅色"
       />
     )
 
@@ -837,8 +835,11 @@ describe('Sidebar 项目分组', () => {
     expect(disabledHtml).toContain('aria-label="MCP · 1/1 已连接"')
     expect(disabledHtml).toContain('class="sb-navdot online"')
     expect(disabledHtml).toContain('class="sb-navitem sb-settings"')
-    expect(disabledHtml).toContain('<span class="sb-navmeta">浅色</span>')
-    expect(disabledHtml.indexOf('诊断')).toBeLessThan(disabledHtml.indexOf('title="Skills"'))
+    expect(disabledHtml).not.toContain('class="kbd"')
+    expect(disabledHtml).not.toContain('深色')
+    expect(disabledHtml).not.toContain('浅色')
+    expect(disabledHtml).not.toContain('诊断')
+    expect(disabledHtml.indexOf('分析')).toBeLessThan(disabledHtml.indexOf('title="Skills"'))
 
     const partialHtml = renderIntegrations([
       { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
@@ -879,7 +880,6 @@ describe('Sidebar 项目分组', () => {
         onArchive={() => {}}
         onAnalytics={() => {}}
         analyticsActive
-        onDiagnostics={() => {}}
       />
     )
 
@@ -2157,6 +2157,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
   })
 
   it('Pi 完全访问必须由用户明确选择，不把唯一权限静默当成当前值', () => {
+    const reason = '当前 Provider 不支持所选模型、推理强度或权限，请重新选择'
     const chatHtml = renderWelcome({
       selectedAgentId: 'pi:default',
       runControls: { permissionMode: 'default' },
@@ -2164,21 +2165,25 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         models: [{ model: { id: 'pi-model' }, label: 'Pi', efforts: [] }],
         permissions: [{ id: 'full_access', label: '本机完全访问', description: '继承本机用户权限' }]
       },
-      sendBlockedReason: '当前 Provider 不支持所选模型、推理强度或权限，请重新选择'
+      sendBlockedReason: reason
     })
 
     expect(chatHtml).toMatch(/<option value="default"[^>]*disabled=""[^>]*selected="">请选择权限<\/option>/)
     expect(chatHtml).toMatch(/<option value="full_access"[^>]*>本机完全访问<\/option>/)
-    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).not.toContain(reason)
     expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
-  it('Composer 用描述关系说明阻塞原因，不把错误文案伪装成发送动作名', () => {
-    const chatHtml = renderWelcome({ sendBlockedReason: '当前 Provider 不可发送' })
-    expect(chatHtml).toContain('id="composer-status"')
-    expect(chatHtml).toContain('aria-describedby="composer-status"')
-    expect(chatHtml).toContain('aria-label="发送"')
-    expect(chatHtml).not.toContain('aria-label="当前 Provider 不可发送"')
+  it('Composer 在阻塞状态下不展示任何提示', () => {
+    const reason = '当前 Provider 不可发送'
+    const chatHtml = renderWelcome({ sendBlockedReason: reason })
+    const sendButton = chatHtml.match(/<button[^>]*class="send"[^>]*>/u)?.[0] ?? ''
+    expect(chatHtml).not.toContain('id="composer-status"')
+    expect(chatHtml).not.toContain('aria-describedby')
+    expect(chatHtml).not.toContain('placeholder=')
+    expect(chatHtml).not.toContain(reason)
+    expect(sendButton).not.toContain('title=')
+    expect(sendButton).toContain('aria-label="发送"')
   })
 
   it('可选模型后台读取时保持自动模型语义，不把 composer 伪装成阻塞态', () => {
@@ -2200,31 +2205,31 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).not.toContain('读取模型…')
     expect(chatHtml).not.toContain('id="composer-status"')
     expect(chatHtml).not.toContain('当前 Provider 不可发送；草稿会保留')
-    expect(chatHtml).toContain('title="发送"')
+    expect(chatHtml).toContain('aria-label="发送"')
   })
 
-  it('缓存选择失效时展示可行动原因，不留下静默禁用按钮', () => {
+  it('缓存选择失效时静默禁用发送', () => {
     const reason = '最后已知模型目录不包含当前模型、推理强度或权限，请重新选择'
     const chatHtml = renderWelcome({ sendBlockedReason: reason })
 
-    expect(chatHtml).toContain('id="composer-status"')
-    expect(chatHtml).toContain(reason)
-    expect(chatHtml).toContain(`title="${reason}"`)
+    expect(chatHtml).not.toContain('id="composer-status"')
+    expect(chatHtml).not.toContain(reason)
     expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
-  it('Provider 确认不可用时即使运行控制仍在加载，也保留真实阻塞错误', () => {
+  it('Provider 确认不可用时也不在 Composer 展示阻塞提示', () => {
+    const reason = '版本探测被信号 SIGKILL 终止'
     const chatHtml = renderWelcome({
       agents: [{
         id: 'claude', name: 'Claude Code', bin: 'claude', path: '/usr/local/bin/claude',
-        health: { state: 'unavailable', transport: 'Agent SDK', lastError: '版本探测被信号 SIGKILL 终止' }
+        health: { state: 'unavailable', transport: 'Agent SDK', lastError: 'CLI 不可用' }
       }],
       runControlsLoading: true,
-      sendBlockedReason: '版本探测被信号 SIGKILL 终止'
+      sendBlockedReason: reason
     })
-    expect(chatHtml).toContain('id="composer-status"')
-    expect(chatHtml).toContain('版本探测被信号 SIGKILL 终止')
-    expect(chatHtml).toContain('当前 Provider 不可发送；草稿会保留')
+    expect(chatHtml).not.toContain('id="composer-status"')
+    expect(chatHtml).not.toContain(reason)
+    expect(chatHtml).not.toContain('当前 Provider 不可发送；草稿会保留')
   })
 
   it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () => {
@@ -3974,7 +3979,6 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
       onSelect={() => {}}
       usage={null}
       stats={null}
-      diag={{ sdkVersion: '^0.3.186', settingSources: 'none', claudeVersion: '2.1.170' }}
     />
   )
 
@@ -4024,12 +4028,6 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
     expect(html).toContain('TOP TOOLS<span class="more">工具 1 · MCP 1</span>')
   })
 
-  it('诊断不在总览展示', () => {
-    expect(html).not.toContain('诊断')
-    expect(html).not.toContain('SDK 版本')
-    expect(html).not.toContain('2.1.170')
-  })
-
   it('用量报告不在总览展示', () => {
     expect(html).not.toContain('用量报告')
     expect(html).not.toContain('复制 Markdown')
@@ -4037,313 +4035,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
   })
 })
 
-import { DiagnosticsView } from './DiagnosticsView'
-import { ArchivedChatsPanel, filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
-
-describe('DiagnosticsView 渲染：诚实观测态（非拦截语义）', () => {
-  const readyProps: ComponentProps<typeof DiagnosticsView> = {
-    agents: [{ id: 'codex', name: 'Codex', bin: 'codex', path: '/usr/local/bin/codex', version: '1.2.3' }],
-    diag: { sdkVersion: '^0.3.186', settingSources: 'none' },
-    mcpLive: [],
-    mcps: [],
-    mcpCapability: {
-      providerId: 'codex',
-      mode: 'none',
-      state: 'unsupported',
-      data: null,
-      reason: '当前 Provider 不暴露 MCP'
-    },
-    stats: {
-      status: 'ready',
-      totals: { cost: null, tin: null, tout: null, turns: 1 },
-      topTools: [],
-      byCwd: [],
-      byModel: [],
-      toolStats: [],
-      dangerTrend: [],
-      providerCoverage: [
-        { providerId: 'claude', turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, dangerCoverage: 'classified' }
-      ]
-    },
-    turns: [],
-    projects: [{ cwd: '/repo', name: 'repo', mtime: 1, sessions: [] }],
-    usage: { status: 'ready', cost: null, tin: 10, tout: 5, turns: 1, invalidLines: 0 },
-    onReprobe: () => {}
-  }
-  const renderDiagnostics = (overrides: Partial<ComponentProps<typeof DiagnosticsView>> = {}): string =>
-    renderToStaticMarkup(<DiagnosticsView {...readyProps} {...overrides} />)
-  const html = renderToStaticMarkup(
-    <DiagnosticsView
-      agents={[
-        { id: 'claude', name: 'claude', bin: 'claude', path: '/usr/local/bin/claude', version: '2.1.170' },
-        { id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli', version: '1.0.2' }
-      ]}
-      diag={{ sdkVersion: '^0.3.186', settingSources: 'none', claudeVersion: '2.1.170' }}
-      mcpLive={[
-        { name: 'weread', status: 'failed' },
-        { name: 'tracker', status: 'connected' }
-      ]}
-      mcps={[]}
-      stats={{
-        totals: { cost: 0.5, tin: 100, tout: 20, turns: 3 },
-        topTools: [{ tool: 'Bash', n: 5, mcp: 0 }],
-        byCwd: [],
-        byModel: [],
-        toolStats: [],
-        dangerTrend: [{ reason: 'rm 递归强删', level: 'danger', n: 3 }]
-      }}
-      turns={[
-        {
-          runId: 'r',
-          userText: 'x',
-          done: true,
-          items: [
-            ev({ id: 'd1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', input: { command: 'rm -rf x' }, danger: { level: 'danger', reason: 'rm 递归强删' } }),
-            ev({ id: 'r1', kind: 'harness', stage: 'result', costUsd: 0.5 })
-          ]
-        }
-      ]}
-      projects={[]}
-      usage={{ status: 'ready', cost: 0.5, tin: 100, tout: 20, turns: 3, invalidLines: 0 }}
-      onReprobe={() => {}}
-    />
-  )
-
-  it('渲染 hero + 系统判决 + 环境（真实 claude 路径/版本）', () => {
-    expect(html).toContain('诊断')
-    expect(html).toContain('系统状态')
-    expect(html).toContain('/usr/local/bin/claude')
-    expect(html).toContain('2.1.170')
-    expect(html).toContain('Qoder')
-    expect(html).toContain('/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli')
-    expect(html).toContain('1.0.2')
-  })
-
-  it('诊断页不展示 SDK、runtime capability、settingSources 和 node/electron 项', () => {
-    expect(html).not.toContain('<span class="k">sdk</span>')
-    expect(html).not.toContain('<span class="k">runtime capability</span>')
-    expect(html).not.toContain('<span class="k">settingSources</span>')
-    expect(html).not.toContain('<span class="k">node / electron</span>')
-    expect(html).not.toContain('runtime caps')
-    expect(html).not.toContain('settingSources')
-    expect(html).not.toContain('^0.3.186')
-  })
-
-  it('MCP 有 failed → 判决 warn + 需重连', () => {
-    expect(html).toContain('judgement warn')
-    expect(html).toContain('weread')
-  })
-
-  it('危险审计用观测语义（审计放行/未拦截），绝不用 blocked/allowed', () => {
-    expect(html).toContain('观测放行')
-    expect(html).toContain('审计放行')
-    expect(html).toContain('rm 递归强删')
-    expect(html).not.toContain('blocked')
-    expect(html).not.toContain('allowed')
-  })
-
-  it('claude 未检测时判决 bad，SQLite native 健康未知时不伪报加载正常', () => {
-    const missing = renderToStaticMarkup(
-      <DiagnosticsView
-        agents={[]}
-        diag={null}
-        mcpLive={[]}
-        mcps={[]}
-        stats={null}
-        turns={[]}
-        projects={[]}
-        usage={null}
-        onReprobe={() => {}}
-      />
-    )
-    expect(missing).toContain('judgement bad')
-    expect(missing).toContain('未检测到 Provider')
-    expect(missing).toContain('native 健康')
-    expect(missing).not.toContain('运行正常')
-    expect(missing).not.toContain('加载正常')
-  })
-
-  it('Provider 与 MCP 可用但诊断、DB、usage 缺证据时保持 warn，不显示绿色正常', () => {
-    const incomplete = renderToStaticMarkup(
-      <DiagnosticsView
-        agents={[{ id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/bin/qodercli' }]}
-        diag={null}
-        mcpLive={[]}
-        mcps={[]}
-        mcpCapability={{
-          providerId: 'qoder',
-          mode: 'none',
-          state: 'unsupported',
-          data: null,
-          reason: '隔离模式不暴露 MCP'
-        }}
-        stats={null}
-        turns={[]}
-        projects={[]}
-        usage={null}
-        onReprobe={() => {}}
-      />
-    )
-    expect(incomplete).toContain('class="de-verdict-band" data-tone="warn"')
-    expect(incomplete).toContain('诊断 IPC 尚未返回')
-    expect(incomplete).not.toContain('class="de-verdict-band" data-tone="exact"')
-    expect(incomplete).not.toContain('运行正常')
-  })
-
-  it('MCP 有配置但 live 状态未探测时不显示全部连通', () => {
-    const unknown = renderToStaticMarkup(
-      <DiagnosticsView
-        agents={[{ id: 'claude', name: 'claude', bin: 'claude', path: '/usr/local/bin/claude' }]}
-        diag={{ sdkVersion: '^0.3.186', settingSources: 'none' }}
-        mcpLive={[]}
-        mcps={[{ name: 'github', scope: 'user', transport: 'stdio', detail: 'github mcp', enabled: true }]}
-        mcpCapability={{
-          providerId: 'claude',
-          mode: 'manage',
-          state: 'unknown',
-          data: null,
-          reason: 'MCP capability 尚未返回完整证据'
-        }}
-        stats={null}
-        turns={[]}
-        projects={[]}
-        usage={null}
-        onReprobe={() => {}}
-      />
-    )
-    expect(unknown).toContain('judgement warn')
-    expect(unknown).toContain('能力状态未知')
-    expect(unknown).toContain('MCP capability 尚未返回完整证据')
-    expect(unknown).not.toContain('全部连通')
-  })
-
-  it('runtime capability warning 仍参与系统判决，但不再单独展示诊断项', () => {
-    const warningHtml = renderToStaticMarkup(
-      <DiagnosticsView
-        agents={[
-          { id: 'claude', name: 'claude', bin: 'claude', path: '/usr/local/bin/claude', version: '2.1.170' },
-          { id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/Users/example/.nvm/versions/node/v22.22.1/bin/qodercli', version: '1.0.2' }
-        ]}
-        diag={{ sdkVersion: '^0.3.186', settingSources: 'none', claudeVersion: '2.1.170' }}
-        mcpLive={[]}
-        mcps={[]}
-        mcpCapability={{
-          providerId: 'qoder',
-          mode: 'read',
-          state: 'ready',
-          data: { configured: [], runtime: [] }
-        }}
-        stats={null}
-        turns={[
-          {
-            runId: 'qoder-runtime-warning',
-            userText: 'x',
-            done: true,
-            items: [
-              ev({
-                id: 'qoder-result',
-                kind: 'harness',
-                stage: 'result',
-                runtimeProvider: 'qoder_cli',
-                runtimeMetadata: {
-                  capabilityWarnings: [
-                    {
-                      kind: 'mcp',
-                      runtimeProvider: 'qoder_cli',
-                      name: 'dry_alpha',
-                      reason: 'runtime reported MCP server disconnected',
-                      expected: 'connected',
-                      observed: 'disconnected',
-                      evidence: 'runtime:init.mcp_servers'
-                    }
-                  ]
-                }
-              })
-            ]
-          }
-        ]}
-        projects={[]}
-        usage={null}
-        onReprobe={() => {}}
-      />
-    )
-    expect(warningHtml).toContain('judgement warn')
-    expect(warningHtml).toContain('qoder_cli')
-    expect(warningHtml).toContain('dry_alpha')
-    expect(warningHtml).toContain('disconnected')
-    expect(warningHtml).not.toContain('runtime caps')
-    expect(warningHtml).not.toContain('runtime capability warning')
-    expect(warningHtml).not.toContain('运行正常')
-  })
-
-  it('partial usage 保留已解析 turns 与 Token，并通过状态标明部分覆盖', () => {
-    const partial = renderDiagnostics({
-      usage: { status: 'partial', cost: null, tin: 100, tout: 20, turns: 3, invalidLines: 2, sourceBytes: 1536 }
-    })
-
-    expect(partial).toContain('账本证据仅部分可用')
-    expect(partial).toContain('>3</span>')
-    expect(partial).toContain('Token 120')
-    expect(partial).toContain('3 turns · 2 invalid lines · 1.5 KiB · Token 120')
-    expect(partial).not.toContain('≥')
-  })
-
-  it('capabilityWarnings 缺字段保持 unknown，只有显式空数组才是真实 0', () => {
-    const missing = renderDiagnostics({
-      turns: [{
-        runId: 'codex-missing-capability-warnings',
-        userText: 'x',
-        done: true,
-        items: [ev({ id: 'codex-missing-result', kind: 'harness', stage: 'result', runtimeProvider: 'codex_cli' })]
-      }]
-    })
-    const explicitZero = renderDiagnostics({
-      turns: [{
-        runId: 'qoder-explicit-capability-warnings',
-        userText: 'x',
-        done: true,
-        items: [ev({
-          id: 'qoder-explicit-result',
-          kind: 'harness',
-          stage: 'result',
-          runtimeProvider: 'qoder_cli',
-          runtimeMetadata: { capabilityWarnings: [] }
-        })]
-      }]
-    })
-
-    expect(missing).toContain('Runtime capability 证据未知')
-    expect(missing).toContain('result 缺少 capabilityWarnings 字段')
-    expect(missing).not.toContain('Runtime capability 警告为真实 0')
-    expect(explicitZero).toContain('Runtime capability 警告为真实 0')
-    expect(explicitZero).toContain('capabilityWarnings 显式数组 · 0 项')
-  })
-
-  it('危险审计真实 0 需要完整分类覆盖，unsupported 与混合覆盖分别保留语义', () => {
-    const statsWithCoverage = (providerCoverage: NonNullable<NonNullable<typeof readyProps.stats>['providerCoverage']>) => ({
-      ...readyProps.stats!,
-      providerCoverage
-    })
-    const unsupported = renderDiagnostics({
-      stats: statsWithCoverage([
-        { providerId: 'codex', turns: 2, inputKnownTurns: 2, outputKnownTurns: 2, cacheReadKnownTurns: 2, cacheWriteKnownTurns: 0, dangerCoverage: 'unsupported' }
-      ])
-    })
-    const mixed = renderDiagnostics({
-      stats: statsWithCoverage([
-        { providerId: 'claude', turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, dangerCoverage: 'classified' },
-        { providerId: 'opencode', turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 0, cacheWriteKnownTurns: 0, dangerCoverage: 'unsupported' }
-      ])
-    })
-    const classified = renderDiagnostics({ stats: statsWithCoverage(readyProps.stats!.providerCoverage!) })
-
-    expect(unsupported).toContain('当前样本的危险分类未支持')
-    expect(unsupported).not.toContain('完整分类覆盖内危险审计为真实 0')
-    expect(mixed).toContain('危险审计仅部分覆盖')
-    expect(mixed).not.toContain('完整分类覆盖内危险审计为真实 0')
-    expect(classified).toContain('完整分类覆盖内危险审计为真实 0')
-  })
-})
+import { ArchivedChatsPanel, CapabilitiesModal, filterSkillsForScope, McpModal, SettingsModal, SkillsModal } from './Modals'
 
 describe('McpModal 渲染：pending 不伪装 connected', () => {
   it('设置弹窗把当前主题呈现为可访问的单选项', () => {
@@ -4506,7 +4198,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).toContain('<th scope="col">认证</th>')
     expect(row).toContain('inventory-scope--off')
     expect(row).toContain('已关闭')
-    expect(row).toContain('connected · 2 tools')
+    expect(row).toContain('已连接')
+    expect(row).not.toContain('2 tools')
     expect(row).toContain('测试失败 · timeout')
     expect(row).toContain('认证成功，运行状态已刷新')
   })
@@ -4537,7 +4230,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).toContain('aria-label="刷新 Pi MCP 快照"')
     expect(html).toContain('刷新快照')
     expect(html).toContain('不会主动连接 lazy server')
-    expect(html).toContain('仅缓存元数据 · 7 tools')
+    expect(html).toContain('仅缓存元数据')
+    expect(html).not.toContain('7 tools')
     expect(html).toContain('这不是实时连接证据')
     expect(html).toContain('尚未连接')
     expect(html).toContain('lazy server 尚未建立连接')
@@ -4568,7 +4262,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
 
     expect(html).toContain('aria-label="检测全部 MCP 运行状态"')
     expect(html).toContain('检测全部')
-    expect(html).toContain('connected · 7 tools')
+    expect(html).toContain('已连接')
+    expect(html).not.toContain('7 tools')
     expect(html).not.toContain('测试连接')
     expect(html).toContain('不提供单项直测')
   })
@@ -4748,6 +4443,88 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
   })
 })
 
+describe('CapabilitiesModal 精简能力页', () => {
+  const sharedProps: ComponentProps<typeof CapabilitiesModal> = {
+    view: 'skills',
+    onViewChange: () => {},
+    skills: [],
+    skillCapability: { providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [] },
+    mcps: [],
+    status: {},
+    live: [],
+    mcpRefreshing: false,
+    mcpCapability: {
+      providerId: 'qoder',
+      cwd: '/repo',
+      mode: 'read',
+      state: 'ready',
+      data: { configured: [], runtime: [], operations: { authenticate: [] } }
+    },
+    onTestMcp: () => {},
+    onRefreshMcp: () => {},
+    onClose: () => {}
+  }
+
+  it('Skills 只保留双来源、名称和描述', () => {
+    const html = renderToStaticMarkup(
+      <CapabilitiesModal
+        {...sharedProps}
+        skills={[
+          { name: 'project-skill', dir: '/repo/SKILL.md', scope: 'project', description: '项目能力说明', enabled: true },
+          { name: 'provider-skill', dir: 'qoder:builtin', scope: 'qoder', description: 'Provider 能力', enabled: true }
+        ]}
+      />
+    )
+
+    expect(html).toContain('role="tablist" aria-label="能力类型"')
+    expect(html).toContain('role="tablist" aria-label="Skill 来源"')
+    expect(html).toContain('项目能力说明')
+    expect(html).not.toContain('/repo/SKILL.md')
+    expect(html).not.toContain('Provider 能力')
+    expect(html).not.toContain('搜索')
+    expect(html).not.toContain('个结果')
+    expect(html).not.toContain('刷新 MCP 运行状态')
+  })
+
+  it('MCP 不显示列头和工具数量，已关闭归入运行态，并保留真实工具明细与状态认证按钮', () => {
+    const html = renderToStaticMarkup(
+      <CapabilitiesModal
+        {...sharedProps}
+        view="mcp"
+        mcps={[
+          { targetId: 'connected-target', name: 'connected', scope: 'project', transport: 'http', detail: 'https://mcp.example.test', enabled: true },
+          { targetId: 'auth-target', name: 'auth', scope: 'project', transport: 'http', detail: 'https://auth.example.test', enabled: true },
+          { targetId: 'disabled-target', name: 'disabled', scope: 'project', transport: 'stdio', detail: 'disabled', enabled: false }
+        ]}
+        live={[
+          { name: 'connected', status: 'connected', tools: 2, toolNames: ['tool_a', 'tool_b'] },
+          { name: 'auth', status: 'needs-auth' }
+        ]}
+        mcpCapability={{
+          providerId: 'qoder',
+          cwd: '/repo',
+          mode: 'read',
+          state: 'ready',
+          data: { configured: [], runtime: [], operations: { authenticate: ['auth-target'] } }
+        }}
+        onReauthenticateMcp={() => {}}
+      />
+    )
+
+    expect(html).not.toContain('<table')
+    expect(html).not.toContain('Server / 来源')
+    expect(html).not.toContain('Provider 运行态')
+    expect(html).not.toContain('2 tools')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('tool_a')
+    expect(html).toContain('tool_b')
+    expect(html).toContain('inventory-state--disabled')
+    expect(html).toContain('已关闭')
+    expect(html).toContain('class="capability-auth capability-auth--required"')
+    expect(html).toContain('需要认证')
+  })
+})
+
 describe('Skill/MCP 操作能力渲染', () => {
   it('Skill 清单只呈现发现结果，不渲染配置状态、开关与账号证据', () => {
     const html = renderToStaticMarkup(
@@ -4850,89 +4627,258 @@ describe('Skill/MCP 操作能力渲染', () => {
 
 import { AnalyticsView } from './AnalyticsView'
 
-describe('AnalyticsView 渲染：四章真实证据叙事', () => {
+describe('AnalyticsView 渲染：T3 风格用量分析', () => {
+  const aggregate = {
+    inputTokens: 1000, outputTokens: 200, cacheReadTokens: 600, cacheWriteTokens: 100, reasoningTokens: 50,
+    costUsd: 1.25, turns: 2, usageRows: 2,
+    inputKnownRows: 2, outputKnownRows: 2, cacheReadKnownRows: 2, cacheWriteKnownRows: 2, reasoningKnownRows: 2,
+    tokenKnownRows: 2, costKnownRows: 2,
+    exactCostRows: 0, providerReportedCostRows: 1, estimatedCostRows: 1, inferredCostRows: 0
+  }
+  const analytics = {
+    status: 'ready' as const,
+    rangeDays: 30 as const,
+    fromDay: '2026-08-05',
+    toDay: '2026-09-03',
+    observedAt: 1,
+    days: ['2026-08-05', '2026-09-03'],
+    totals: aggregate,
+    byDay: [
+      { day: '2026-08-05', ...aggregate },
+      { day: '2026-09-03', ...aggregate }
+    ],
+    dailyByProvider: [
+      { day: '2026-08-05', provider: 'anthropic' as const, ...aggregate },
+      { day: '2026-09-03', provider: 'anthropic' as const, ...aggregate },
+      { day: '2026-08-05', provider: 'codex' as const, ...aggregate },
+      { day: '2026-09-03', provider: 'codex' as const, ...aggregate }
+    ],
+    byProvider: [
+      { provider: 'anthropic' as const, model: null, ...aggregate },
+      { provider: 'codex' as const, model: null, ...aggregate }
+    ],
+    byModel: [
+      { provider: 'anthropic' as const, model: 'claude-sonnet', ...aggregate },
+      { provider: 'codex' as const, model: 'gpt-5', ...aggregate }
+    ]
+  }
   const html = renderToStaticMarkup(
     <AnalyticsView
-      projects={[{ cwd: '/a/scry', name: 'scry', mtime: 0, sessions: [{ sessionId: 's1', externalSessionId: 's1', providerId: 'claude', mtime: 0, preview: 'x', count: 1 }] }]}
-      stats={{
-        status: 'ready',
-        totals: { cost: 12.47, tin: 3000000, tout: 420000, turns: 847 },
-        topTools: [{ tool: 'Bash', n: 624, mcp: 0 }],
-        byCwd: [{ cwd: '/a/scry', cost: 5.42, turns: 300 }],
-        byModel: [
-          { model: 'claude-sonnet-4-6', tin: 2000000, tout: 300000, cost: 8.0 },
-          { model: 'claude-haiku-4-5', tin: 800000, tout: 100000, cost: 3.0 }
-        ],
-        toolStats: [
-          { tool: 'Bash', n: 624, avgMs: 680, errors: 19 },
-          { tool: 'mcp__obsidian__search', n: 84, avgMs: 1200, errors: 2 }
-        ],
-        dangerTrend: [{ reason: 'git push', level: 'danger', n: 3 }],
-        tokenDaily: Array.from({ length: 30 }, (_, i) => ({ day: `2026-07-${String(i + 1).padStart(2, '0')}`, input: i * 100, output: i * 10, cacheRead: 0, cacheWrite: 0, turns: 1, inputKnownTurns: 1, outputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1 })),
-        dangerDaily: Array.from({ length: 90 }, (_, i) => ({ day: `day-${i}`, danger: i === 89 ? 1 : 0, warn: 0 })),
-        comparison: {
-          current: { tokens: 120000, tokenKnownTurns: 4, turns: 5, toolCalls: 42, danger: 1 },
-          previous: { tokens: 100000, tokenKnownTurns: 4, turns: 4, toolCalls: 40, danger: 0 },
-          change: { tokensPct: 20, turnsPct: 25, toolCallsPct: 5, dangerPct: null }
-        },
-        cacheReuse: [
-          { providerId: 'claude', turns: 2, inputTokens: 100, cacheReadTokens: 80, cacheWriteTokens: 20, inputKnownTurns: 2, cacheReadKnownTurns: 2, cacheWriteKnownTurns: 2, comparableTurns: 2, reuseRate: 0.4, denominator: 'separate_input' },
-          { providerId: 'codex', turns: 1, inputTokens: 100, cacheReadTokens: 30, cacheWriteTokens: null, inputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 0, comparableTurns: 1, reuseRate: 0.3, denominator: 'input_includes_cache' },
-          { providerId: 'qoder', turns: 1, inputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, inputKnownTurns: 0, cacheReadKnownTurns: 0, cacheWriteKnownTurns: 0, comparableTurns: 0, reuseRate: null, denominator: 'unknown' },
-          { providerId: 'opencode', turns: 1, inputTokens: 80, cacheReadTokens: 20, cacheWriteTokens: 4, inputKnownTurns: 1, cacheReadKnownTurns: 1, cacheWriteKnownTurns: 1, comparableTurns: 0, reuseRate: null, denominator: 'upstream_dependent' },
-          { providerId: 'pi', turns: 2, inputTokens: 120, cacheReadTokens: 40, cacheWriteTokens: 0, inputKnownTurns: 2, cacheReadKnownTurns: 2, cacheWriteKnownTurns: 2, comparableTurns: 0, reuseRate: null, denominator: 'unknown' }
-        ],
-        mcpLatency: [{ server: 'obsidian', calls: 84, p50Ms: 900, p95Ms: 2200, errors: 2 }],
-        providerCoverage: (['claude', 'codex', 'qoder', 'opencode', 'pi'] as const).map((providerId) => ({ providerId, turns: providerId === 'pi' ? 2 : 1, inputKnownTurns: providerId === 'qoder' ? 0 : providerId === 'pi' ? 2 : 1, outputKnownTurns: providerId === 'qoder' ? 0 : providerId === 'pi' ? 2 : 1, cacheReadKnownTurns: providerId === 'qoder' ? 0 : providerId === 'pi' ? 2 : 1, cacheWriteKnownTurns: providerId === 'claude' || providerId === 'opencode' ? 1 : providerId === 'pi' ? 2 : 0, dangerCoverage: providerId === 'claude' || providerId === 'qoder' ? 'classified' as const : 'unsupported' as const }))
-      }}
+      analytics={analytics}
+      rangeDays={30}
+      loading={false}
+      error={null}
+      onRangeChange={() => {}}
+      onRefresh={() => {}}
+      onBack={() => {}}
     />
   )
 
-  it('00–03 四章使用真实字段且近 30 天部分覆盖不显示不等号', () => {
-    expect(html).toContain('从量到证据，再到能力盲区')
-    expect(html).toContain('00</span>近 30 天')
-    expect(html).toContain('01</span>Provider 覆盖')
-    expect(html).toContain('02</span>工具与延迟')
-    expect(html).toContain('03</span>风险与盲区')
-    expect(html).toContain('47.9k')
-    expect(html).not.toContain('≥ 47.9k')
-    expect(html).toContain('4/5')
-    expect(html).not.toContain('$12.47')
-    expect(html).toContain('847')
-    expect(html).toContain('UNKNOWN ≠ 0 · UNSUPPORTED ≠ SAFE')
+  it('展示时间范围、返回、刷新、Raw Cost 和面积趋势', () => {
+    expect(html).toContain('<h1>用量</h1>')
+    expect(html).toContain('2026-08-05 至 2026-09-03')
+    expect(html).toContain('aria-label="分析时间范围"')
+    expect(html).toContain('aria-label="返回对话"')
+    expect(html).toContain('aria-label="刷新分析数据"')
+    expect(html).toContain('RAW TOKEN COST')
+    expect(html).toContain('$1.25')
+    expect(html).toContain('每日成本趋势')
+    expect(html).toContain('usage-chart-area')
+    expect(html).toContain('usage-chart-line')
+    expect(html).toContain('Anthropic')
+    expect(html).toContain('Codex')
   })
 
-  it('工具、MCP、项目索引均来自传入聚合，不展示旧模型卡墙', () => {
-    expect(html).toContain('Bash')
-    expect(html).toContain('mcp__obsidian__search')
-    expect(html).toContain('1 个项目索引')
-    expect(html).not.toContain('$5.42')
-    expect(html).not.toContain('模型 Token 分布')
+  it('展示真实摘要与紧凑模型明细，不展示旧四章节和诊断', () => {
+    expect(html).toContain('已处理 Token')
+    expect(html).toContain('缓存输入')
+    expect(html).toContain('已观测输入')
+    expect(html).toContain('缓存写入')
+    expect(html).toContain('推理 50')
+    expect(html).toContain('claude-sonnet')
+    expect(html).toContain('gpt-5')
+    expect(html).not.toContain('<th>Provider</th>')
+    expect(html).not.toContain('风险与盲区')
+    expect(html).not.toContain('诊断')
   })
 
-  it('渲染 30/90 天、日期选择、P50/P95 与五 Provider coverage', () => {
-    expect(html).toContain('30 LOCAL DAYS')
-    expect(html).toContain('90 LOCAL DAYS')
-    expect(html).toContain('P50 900ms')
-    expect(html).toContain('P95 2.2s')
-    expect(html).toContain('Claude')
-    expect(html).toContain('OpenCode')
-    expect(html).toContain('<b>Pi</b><small>PI</small>')
-    expect(html).toContain('未支持')
-    expect(html).toContain('aria-pressed="true"')
+  it('成本来源包含估算时逐类标注并给出紧凑图例', () => {
+    expect(html).toContain('Provider 报告成本 + 估算成本')
+    expect(html).toContain('>P≈</sup>')
+    expect(html).toContain('P = Provider 报告，≈ = 估算，† = 推断')
+    expect(html).toContain('aria-describedby="usage-chart-instructions"')
   })
 
-  it('真实 0 日期只画基线，不伪装成满高 Token 柱', () => {
-    expect(html).toContain('aria-label="2026-07-01，真实 0，0 Token"')
-    expect(html).toMatch(/aria-label="2026-07-01，真实 0，0 Token"[^>]*><span><i style="height:2%"/)
+  it('精确成本与 Provider 报告成本保持不同证据文案', () => {
+    const exactHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          totals: { ...aggregate, exactCostRows: 2, providerReportedCostRows: 0, estimatedCostRows: 0 },
+          byProvider: [{ provider: 'anthropic', model: null, ...aggregate, exactCostRows: 2, providerReportedCostRows: 0, estimatedCostRows: 0 }]
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+    const providerReportedHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          totals: { ...aggregate, exactCostRows: 0, providerReportedCostRows: 2, estimatedCostRows: 0 },
+          byProvider: [{ provider: 'codex', model: null, ...aggregate, exactCostRows: 0, providerReportedCostRows: 2, estimatedCostRows: 0 }]
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+
+    expect(exactHtml).toContain('<small>精确成本 · 2 轮</small>')
+    expect(providerReportedHtml).toContain('title="Provider 报告成本">P</sup>')
   })
 
-  it('不伪造 per-tool Token share 或 Markdown 星号', () => {
-    expect(html).toContain('不制造 Token 份额')
-    expect(html).not.toContain('**')
+  it('混合成本来源不被优先级分支吞掉', () => {
+    const mixed = {
+      ...aggregate,
+      costKnownRows: 4,
+      exactCostRows: 1,
+      providerReportedCostRows: 1,
+      estimatedCostRows: 1,
+      inferredCostRows: 1
+    }
+    const mixedHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{ ...analytics, totals: mixed, byProvider: [{ provider: 'codex', model: null, ...mixed }] }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+
+    expect(mixedHtml).toContain('精确成本 + Provider 报告成本 + 估算成本 + 推断成本')
+    expect(mixedHtml).toContain('>P≈†</sup>')
+  })
+
+  it('部分 Token 在总览、Provider 和明细中都显式显示为已知下界', () => {
+    const partial = {
+      ...aggregate,
+      outputTokens: null,
+      outputKnownRows: 0
+    }
+    const partialHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          totals: partial,
+          byProvider: [{ provider: 'anthropic', model: null, ...partial }],
+          byModel: [{ provider: 'anthropic', model: 'claude-sonnet', ...partial }]
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+
+    expect(partialHtml).toContain('≥1.00K')
+    expect(partialHtml).toContain('已知下界 · 2/2 条明细有 Token')
+    expect(partialHtml).not.toContain('/ 活跃日')
+  })
+
+  it('稀疏缺失日和显式未知日都会断开面积趋势，不被补成零', () => {
+    const unavailableCost = {
+      ...aggregate,
+      costUsd: null,
+      costKnownRows: 0,
+      exactCostRows: 0,
+      providerReportedCostRows: 0,
+      estimatedCostRows: 0,
+      inferredCostRows: 0
+    }
+    const gapHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          days: ['2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'],
+          dailyByProvider: [
+            { day: '2026-08-05', provider: 'codex', ...aggregate },
+            { day: '2026-08-07', provider: 'codex', ...unavailableCost },
+            { day: '2026-08-08', provider: 'codex', ...aggregate }
+          ],
+          byProvider: [{ provider: 'codex', model: null, ...aggregate }]
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+
+    expect(gapHtml.match(/usage-chart-point/g)).toHaveLength(2)
+    expect(gapHtml).not.toContain('usage-chart-line')
+    expect(gapHtml).not.toContain('usage-chart-area')
+  })
+
+  it('未知成本不画成零值趋势，小额非零成本不显示成 $0.00 且最大横条占满', () => {
+    const unknownAggregate = {
+      ...aggregate,
+      costUsd: null,
+      costKnownRows: 0,
+      providerReportedCostRows: 0,
+      estimatedCostRows: 0
+    }
+    const unknownHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          totals: unknownAggregate,
+          byDay: analytics.byDay.map((row) => ({ ...row, ...unknownAggregate })),
+          dailyByProvider: analytics.dailyByProvider.map((row) => ({ ...row, ...unknownAggregate })),
+          byProvider: analytics.byProvider.map((row) => ({ ...row, ...unknownAggregate })),
+          byModel: analytics.byModel.map((row) => ({ ...row, ...unknownAggregate }))
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+    const small = { ...aggregate, costUsd: 0.001 }
+    const smallCostHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          totals: small,
+          dailyByProvider: analytics.dailyByProvider.map((row) => ({ ...row, ...small })),
+          byProvider: [{ provider: 'codex', model: null, ...small }]
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+
+    expect(unknownHtml).toContain('该时间范围没有可绘制的成本数据')
+    expect(unknownHtml).not.toContain('usage-chart-area')
+    expect(unknownHtml).not.toContain('usage-chart-line')
+    expect(smallCostHtml).toContain('&lt;$0.01')
+    expect(smallCostHtml).toContain('$0.0010')
+    expect(smallCostHtml).toContain('style="width:100%"')
   })
 })
-
 
 describe('附件预览 data URL 复用', () => {
   it('同一附件对象只构造一次 data URL，不同对象各自构造', () => {

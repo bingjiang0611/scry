@@ -118,7 +118,7 @@ const baseComponents: Components = {
       : <span role="img" aria-label={alt ? `已阻止远程图片：${alt}` : '已阻止远程图片'}>[远程图片已阻止]</span>
   },
   table: ({ node: _node, children, ...props }) => (
-    <div className="md-table-scroll" role="region" aria-label="表格，可横向滚动" tabIndex={0}>
+    <div className="md-table-scroll" role="region" aria-label="表格，可横向和纵向滚动" tabIndex={0}>
       <table {...props}>{children}</table>
     </div>
   )

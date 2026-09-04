@@ -72,7 +72,7 @@ describe('SQLite migrations', () => {
         'idx_file_ops_session', 'idx_file_ops_span', 'idx_file_ops_identity'
       ]))
       expect(indexes(db, 'usage_ledger')).toEqual(expect.arrayContaining([
-        'idx_usage_ledger_canonical', 'idx_usage_ledger_run', 'idx_usage_ledger_span'
+        'idx_usage_ledger_canonical', 'idx_usage_ledger_run', 'idx_usage_ledger_span', 'idx_usage_ledger_session_bucket'
       ]))
       expect(columns(db, 'billing_sync_state')).toEqual(expect.arrayContaining(['provider', 'last_sync_ts', 'last_error']))
     } finally {

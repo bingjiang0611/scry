@@ -184,7 +184,8 @@ function claudeMcpSnapshot(configured: McpMeta[], statuses: McpServerStatus[]): 
     status: server.status,
     serverName: server.serverInfo?.name,
     serverVersion: server.serverInfo?.version,
-    tools: server.tools?.length
+    tools: server.tools?.length,
+    toolNames: server.tools?.map((tool) => tool.name)
   }))
   for (const item of configured) {
     if (!item.enabled && !runtime.some((status) => status.name === item.name)) {

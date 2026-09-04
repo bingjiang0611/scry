@@ -43,8 +43,6 @@ export function Sidebar({
   onRevealProject,
   archiveUndo = null,
   onUndoArchive,
-  onDiagnostics,
-  diagnosticsActive = false,
   onAnalytics,
   analyticsActive = false,
   onSkills,
@@ -53,8 +51,7 @@ export function Sidebar({
   mcps = [],
   mcpLive = [],
   catalogHealth,
-  onSettings,
-  themeLabel = '深色'
+  onSettings
 }: {
   id?: string
   projects: ProjectMeta[]
@@ -75,8 +72,6 @@ export function Sidebar({
   onRevealProject?: (project: ProjectMeta) => void
   archiveUndo?: { preview: string } | null
   onUndoArchive?: () => void
-  onDiagnostics?: () => void
-  diagnosticsActive?: boolean
   onAnalytics?: () => void
   analyticsActive?: boolean
   onSkills?: () => void
@@ -86,7 +81,6 @@ export function Sidebar({
   mcpLive?: McpLiveStatus[]
   catalogHealth?: CatalogHealth
   onSettings?: () => void
-  themeLabel?: string
 }) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -153,14 +147,13 @@ export function Sidebar({
       </div>
       <button className="sb-new" onClick={onNewChat}>
         <Icon name="plus" /> 新建会话
-        <span className="kbd">⌘N</span>
       </button>
       <div className="sb-search">
         <Icon name="search" />
         <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {(onDiagnostics || onAnalytics || onSkills || onMcp) && (
+      {(onAnalytics || onSkills || onMcp) && (
         <nav className="sb-nav" aria-label="主要视图">
           {onAnalytics && (
             <button
@@ -170,16 +163,6 @@ export function Sidebar({
               onClick={onAnalytics}
             >
               <Icon name="chart" /> 分析
-            </button>
-          )}
-          {onDiagnostics && (
-            <button
-              type="button"
-              className={`sb-navitem ${diagnosticsActive ? 'active' : ''}`}
-              aria-current={diagnosticsActive ? 'page' : undefined}
-              onClick={onDiagnostics}
-            >
-              <Icon name="info" /> 诊断
             </button>
           )}
           {onSkills && (
@@ -379,7 +362,6 @@ export function Sidebar({
         <div className="sb-footer">
           <button type="button" className="sb-navitem sb-settings" onClick={onSettings} aria-haspopup="dialog">
             <Icon name="settings" /> 设置
-            <span className="sb-navmeta">{themeLabel}</span>
           </button>
         </div>
       )}
