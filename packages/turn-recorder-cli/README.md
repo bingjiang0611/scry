@@ -221,6 +221,14 @@ scry upgrade --check    # 只检查
 scry upgrade            # 前台升级到 registry latest（不受 major 边界限制）
 ```
 
+真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
+
+```json
+{ "recorderVersions": { "thisCli": "0.2.32", "lastRecord": "0.2.30" } }
+```
+
+对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。
+
 `SCRY_NO_UPDATE_CHECK=1` 或 `--no-update-check` 关闭检查;`SCRY_CLI_REGISTRY` 覆盖 registry(必须 HTTPS)。App 内置 CLI、recorder、daemon 与 CI 不触发后台检查。
 
 ## 环境变量
