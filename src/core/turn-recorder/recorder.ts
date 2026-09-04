@@ -3,7 +3,7 @@ import { open as openFile, readdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { HOOK_DELIVERY_STAGE, classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
-import { disabled, partial, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
+import { disabled, partial, unavailable, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
@@ -11,7 +11,7 @@ import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
 import { recordProviderActivity } from './provider-activity.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
-import { beginGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
+import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
 import {
@@ -1762,12 +1762,20 @@ async function finalizeOpenTurn(
   }
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
   const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events, transcript.toolStreamComplete === true)
-  const diffs = limitTurnDiffPatchBytes(await Promise.all(open.captures.map(async ({ repository, capture }) =>
-    finishGitTurnDiff(capture, undefined, {
-      ...turnChangeHints(repository, mergedEvents),
-      patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames
-    })
-  )))
+  // An expired turn's baseline can be days old, so finishing its diff would attribute every later
+  // change — including other turns' work — to this one. Release the baseline instead of publishing
+  // an attribution we cannot defend, and say why.
+  if (options.interruptedReason) {
+    await Promise.all(open.captures.map(({ capture }) => cancelGitTurnDiff(capture).catch(() => undefined)))
+  }
+  const diffs = options.interruptedReason
+    ? []
+    : limitTurnDiffPatchBytes(await Promise.all(open.captures.map(async ({ repository, capture }) =>
+        finishGitTurnDiff(capture, undefined, {
+          ...turnChangeHints(repository, mergedEvents),
+          patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames
+        })
+      )))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,
@@ -1824,7 +1832,12 @@ async function finalizeOpenTurn(
   }
   // An expired turn was force-closed without a terminal event, so nothing it holds can be called
   // complete, even when the transcript window itself parsed cleanly.
-  if (options.interruptedReason) degradeEvidenceSections(evidence, options.interruptedReason)
+  if (options.interruptedReason) {
+    degradeEvidenceSections(evidence, options.interruptedReason)
+    evidence.diff = unavailable(
+      `${options.interruptedReason}; the turn diff baseline spans that window and cannot be attributed to this turn`
+    )
+  }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
   if (!enablement.config.capture.assistant) {
     evidence.assistant = disabled('assistant capture disabled by config')

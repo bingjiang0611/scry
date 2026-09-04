@@ -635,6 +635,38 @@ describe('turn recorder state machine', () => {
     expect(record.tools.omissionReason).toContain('terminal event')
   })
 
+  it('过期轮次不发布 diff：基线跨越过期窗口，无法归因给这一轮', async () => {
+    const root = await workspace()
+    // 该 fixture 的 capture.diff 为 false，这里显式打开以覆盖真实默认配置。
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
+    config.capture = { ...config.capture, diff: true }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    await pexecFile('git', ['init', '-q', '.'], { cwd: root })
+    await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '--allow-empty', '-m', 'i'], { cwd: root })
+    const transcript = join(root, 'transcript.jsonl')
+    await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '那一轮' } }))
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('claude-diff-attr', {
+        prompt: '那一轮',
+        transcript_path: transcript,
+        timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
+      })
+    })
+    const stoppedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000)
+    await utimes(transcript, stoppedAt, stoppedAt)
+    // 轮次开启之后发生的改动属于后来的工作，绝不能算进这一轮。
+    await writeFile(join(root, 'later-work.ts'), 'export const later = 1\n')
+
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.diff.status).toBe('unavailable')
+    expect(record.diff.value).toBeUndefined()
+    expect(record.diff.omissionReason).toContain('cannot be attributed')
+  })
+
   it('transcript 仍在增长的长任务不被误判为过期', async () => {
     const root = await workspace()
     const transcript = join(root, 'transcript.jsonl')
