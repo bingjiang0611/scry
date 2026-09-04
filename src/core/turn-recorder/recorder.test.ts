@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
-import { handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
+import { drainRecorderDelivery, handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
 import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
 import { inspectCommitHookBundle, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
@@ -609,6 +609,36 @@ describe('turn recorder state machine', () => {
     await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
       { providerTurnId: 'claude-root', user: { value: { text: 'root prompt' } } }
     ])
+  })
+
+  it('deferDelivery 把投递移出 hook 响应，但记录照常提交且后续可投递', async () => {
+    const root = await workspace()
+    const { path, capture } = await commitHook(root)
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
+    config.commitHook = { entry: 'commit-hook.sh', files: ['commit-hook.sh'] }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: path }
+
+    const payloadFor = (event: string) => ({
+      provider: 'claude' as const,
+      event,
+      workspace: root,
+      payload: payload('defer-1', { prompt: '一轮', timestamp: '2026-07-19T12:00:00.000Z' }),
+      env,
+      deferDelivery: true
+    })
+    await handleRecorderHook(payloadFor('UserPromptSubmit'))
+    await handleRecorderHook({ ...payloadFor('Stop'), payload: payload('defer-1', { timestamp: '2026-07-19T12:00:01.000Z' }) })
+
+    // 记录必须已经落盘，而投递没有在 hook 里发生。
+    expect((await listRecords(join(root, '.scry'))).length).toBe(1)
+    await expect(access(capture)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    // 响应之后由长活进程投递。
+    await drainRecorderDelivery(root, env)
+    const delivered = (await readFile(capture, 'utf8')).trim().split('\n')
+    expect(delivered).toHaveLength(1)
+    expect(JSON.parse(delivered[0])).toMatchObject({ event: 'record-committed', sequence: 1 })
   })
 
   it('超过过期窗口且 transcript 停止增长的 open 轮次收敛为 interrupted，证据降级为 partial', async () => {

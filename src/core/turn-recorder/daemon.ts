@@ -5,7 +5,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
-import { handleRecorderHook, recoverRecorder, recorderEnablement } from './recorder.js'
+import { drainRecorderDelivery, handleRecorderHook, recoverRecorder, recorderEnablement } from './recorder.js'
 import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
@@ -498,9 +498,14 @@ export async function listenRecorderDaemon(args: {
         return
       }
       const payload = await readJsonBody(request)
-      const result = await handleRecorderHook({ provider, event, workspace: enablement.workspaceRoot, payload, env })
+      const result = await handleRecorderHook({
+        provider, event, workspace: enablement.workspaceRoot, payload, env, deferDelivery: true
+      })
       scheduleRecovery(true)
       writeJson(response, 200, { ok: true, status: result.status })
+      // The daemon outlives this response, so delivery runs after it instead of inside the
+      // Provider's hook budget. A crash before it lands is covered by at-least-once redelivery.
+      void drainRecorderDelivery(enablement.workspaceRoot, env).catch(() => undefined)
     } catch (error) {
       errorCount++
       const statusCode = typeof (error as { statusCode?: unknown }).statusCode === 'number' ? (error as { statusCode: number }).statusCode : 500

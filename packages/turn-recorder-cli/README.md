@@ -162,7 +162,9 @@ scry commit-hook revoke --workspace "$PWD"
 
 被授权的 entry 以你的权限运行,并能读取全部 record 正文 —— **授权是执行授权,不是脱敏机制**。团队汇总方案必须自己承担脱敏(例如只上报 `turns summary` 的聚合结果);CLI 不提供内建脱敏投影。
 
-投递在 Provider 关键路径上有界执行:每个 hook 事件最多 8 条、预算 1.5s(单条仍以 10s 熔断),剩余保持 pending,`notifyBacklog` 如实显示积压。需要一次清空:
+**daemon 在响应 Provider 之后才投递**,所以回调耗时不占 hook 预算。没有 daemon 时(`SCRY_RECORDER_TRANSPORT=direct` 或冷启动)只能同步投递,此时每个事件最多 8 条、预算 1.5s(单条仍以 10s 熔断),剩余保持 pending。实测回调 350ms/条、积压 6 条时:同步 1688ms/事件,移出后 500ms/事件。
+
+`notifyBacklog` 如实显示积压。需要一次清空:
 
 ```bash
 scry recorder notify-drain --workspace "$PWD"

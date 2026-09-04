@@ -711,6 +711,40 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 放宽之后,一次真正破坏性的发布会被静默装到用户机器上。唯一的表达手段变成 **major**:破坏 CLI 合同时必须升到 `1.0.0`,而不是靠 0.x 的 minor。这条约定必须遵守,否则用户会在不知情的情况下被换掉命令面。
 
+## 12.15 投递移出 hook 关键路径
+
+`handleRecorderHook` 过去在返回前同步 drain commit 通知。这是错的分工:**记录**必须让 Provider 等,**唤醒外部 uploader** 不必,而它的预算(8 条 / 1.5s)要在每个事件上付。
+
+现在 `RecorderHookInput.deferDelivery` 让长活调用方跳过内联投递,daemon 在 `writeJson(200)` **之后**调用 `drainRecorderDelivery`。一次性 CLI 进程不能设这个标志 —— 它会在投递前退出,那样等于丢投递;因此 direct 模式仍是同步投递。
+
+实测(commit hook 回调 350ms/条、积压 6 条):
+
+| 路径 | 每事件 |
+|---|---|
+| hook 内同步投递(旧行为 / direct 模式) | 1688ms |
+| daemon 响应后投递 | **500ms** |
+
+崩溃窗口由既有的 at-least-once 重投覆盖(`redeliverLatestCommitNotification` + 指纹变化时 `ackedThrough` 归零)。
+
+### 触发这项改动的真实场景:壳仓库 + 15 个子仓库
+
+本机 `rate-native` 是壳仓库,真实代码在嵌套子仓库里,`repositories.mode: discover-nested-git` 发现 **15 个仓库**。实测每轮开始的 git 基线:
+
+```
+串行合计            5.05s
+并行实际（生产路径）  1.6–2.0s      ← begin 已经是 Promise.all
+最慢单仓库           rateplatform 1245ms
+```
+
+该 workspace 的自建 hook 脚本给轮次起止事件 4s 的 curl 超时,超时即回退到 CLI **把同样的活重做一遍**;`transport.log` 累计 **1693 次** `cold-direct`。2s 基线 + 最多 1.5s 投递 + IO 正好在 4s 边缘,所以这项优化直接降低回退概率。
+
+对嵌套采集是硬需求的场景,`workspace-only` 不是选项;可行方向按收益排序:
+
+1. ✅ 投递移出关键路径(本节,最多 −1.5s/事件)
+2. 调大该 workspace 的 `SCRY_RECORDER_SEND_TIMEOUT`(回退比等待更贵)
+3. 排除确实不需要采集的子仓库(实测每个干净仓库约 120–160ms)
+4. 待评估:daemon 缓存逐仓库的 git layout。§12.7 曾以"只值 159ms"否决,但那是单仓库;15 个仓库时静态调用约 1.1s,结论需要重估
+
 ## 13. 落地顺序
 
 1. **P0-0 授权门**（决定方案成立与否）。
