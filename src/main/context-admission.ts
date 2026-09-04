@@ -36,3 +36,21 @@ export function expectedSessionMatches(
     run.runId === expected && (run.externalSessionId ?? run.sessionId) === actual
   )
 }
+
+export function expectedRestartSourceMatches(
+  expected: string | null | undefined,
+  actual: string | undefined,
+  replaceRunId: string
+): boolean {
+  return actual === undefined && expected === replaceRunId
+}
+
+export function canRestartInterruptedFirstTurn(
+  archive: { turns: Array<{ runId: string; status?: string; providerTurnId?: string; forkTurnId?: string }> } | null,
+  replaceRunId: string
+): boolean {
+  if (!archive || archive.turns.length !== 1) return false
+  const head = archive.turns[0]
+  return head.runId === replaceRunId && head.status === 'interrupted' &&
+    head.providerTurnId == null && head.forkTurnId == null
+}

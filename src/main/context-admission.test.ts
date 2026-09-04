@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ContextAdmission, expectedSessionMatches, waitForCompletedRuns } from './context-admission'
+import { ContextAdmission, canRestartInterruptedFirstTurn, expectedRestartSourceMatches, expectedSessionMatches, waitForCompletedRuns } from './context-admission'
 
 describe('context admission', () => {
   it('serializes the same provider workspace while allowing another context through', async () => {
@@ -51,5 +51,23 @@ describe('context admission', () => {
     expect(expectedSessionMatches('session-a', 'session-b', draining)).toBe(false)
     expect(expectedSessionMatches(null, undefined, draining)).toBe(true)
     expect(expectedSessionMatches(null, 'session-b', draining)).toBe(false)
+  })
+
+  it('只把无原生 session 的 provisional run 视为 restart 来源', () => {
+    expect(expectedRestartSourceMatches('run-stopped', undefined, 'run-stopped')).toBe(true)
+    expect(expectedRestartSourceMatches('other-run', undefined, 'run-stopped')).toBe(false)
+    expect(expectedRestartSourceMatches('run-stopped', 'native-session', 'run-stopped')).toBe(false)
+    expect(expectedRestartSourceMatches(null, undefined, 'run-stopped')).toBe(false)
+  })
+
+  it('只允许没有原生边界的 interrupted 首轮重新编辑', () => {
+    const turn = { runId: 'run-stopped', status: 'interrupted' }
+    expect(canRestartInterruptedFirstTurn({ turns: [turn] }, 'run-stopped')).toBe(true)
+    expect(canRestartInterruptedFirstTurn(null, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedFirstTurn({ turns: [turn, { ...turn, runId: 'run-2' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedFirstTurn({ turns: [{ ...turn, status: 'failed' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedFirstTurn({ turns: [{ ...turn, providerTurnId: 'provider-turn' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedFirstTurn({ turns: [{ ...turn, forkTurnId: 'fork-turn' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedFirstTurn({ turns: [turn] }, 'other-run')).toBe(false)
   })
 })

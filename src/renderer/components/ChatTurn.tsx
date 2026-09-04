@@ -89,15 +89,19 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
   )
 }
 
+export type UserMessageEditMode = 'branch' | 'restart'
+
 function UserMessageImpl({
   text,
   attachments = [],
   editable = false,
+  editMode = 'branch',
   onEdit
 }: {
   text: string
   attachments?: AgentInputAttachment[]
   editable?: boolean
+  editMode?: UserMessageEditMode
   onEdit?: (text: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -148,7 +152,11 @@ function UserMessageImpl({
           />
           {editError && <div className="user-edit-error" role="alert">{editError}</div>}
           <div className="user-edit-footer">
-            <span className="user-edit-note">将创建新对话分支，不会回滚工作区文件</span>
+            <span className="user-edit-note">
+              {editMode === 'branch'
+                ? '将创建新对话分支，不会回滚工作区文件'
+                : '本轮尚未形成可分支边界；发送后将从此消息重新开始，不会回滚工作区文件'}
+            </span>
             <div className="user-edit-actions">
               <button type="button" disabled={saving} onClick={() => { setDraft(text); setEditError(null); setEditing(false) }}>取消</button>
               <button
@@ -237,7 +245,7 @@ function UserMessageImpl({
             type="button"
             className="user-message-edit"
             aria-label="编辑最后一条消息"
-            title="编辑最后一条消息并从这里建立新分支"
+            title={editMode === 'branch' ? '编辑最后一条消息并从这里建立新分支' : '编辑最后一条消息并重新开始'}
             onClick={() => { setDraft(text); setEditError(null); setEditing(true) }}
           >
             <Icon name="edit" />

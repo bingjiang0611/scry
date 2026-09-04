@@ -862,28 +862,42 @@ export function App() {
   const editLastTurn = useCallback(async (turn: Turn, text: string): Promise<void> => {
     const latest = session.turns.at(-1)
     const sourceSessionId = activeSessionIdRef.current
-    if (!sourceSessionId || latest?.runId !== turn.runId || !turn.done || !turn.providerTurnId || !turn.forkTurnId) {
+    if (!sourceSessionId || latest?.runId !== turn.runId || !turn.done) {
       throw new Error('最后一条消息已变化，请重新选择后再编辑')
     }
     if (queuedPrompts.length > 0 || session.pendingQuestions.length > 0) {
       throw new Error('请先清空队列并处理当前提问')
     }
+    const currentBoundaryComplete = !!turn.providerTurnId && !!turn.forkTurnId
+    const currentBoundaryAbsent = !turn.providerTurnId && !turn.forkTurnId
     const previousProviderTurnId = session.turns.at(-2)?.providerTurnId
     const previousForkTurnId = session.turns.at(-2)?.forkTurnId
-    const runId = await session.send(text, {
+    const previousBoundaryComplete = !!previousProviderTurnId && !!previousForkTurnId
+    const isFirstSessionTurn = session.turns.length === 1 && (session.historyWindow?.offset ?? 0) === 0
+    const base = {
       ...currentRunRequest(),
       expectedExternalSessionId: sourceSessionId,
-      attachments: turn.attachments ?? [],
-      forkLastTurn: {
-        replaceRunId: turn.runId,
-        replaceProviderTurnId: turn.providerTurnId,
-        replaceForkTurnId: turn.forkTurnId,
-        ...(previousProviderTurnId ? { previousProviderTurnId } : {}),
-        ...(previousForkTurnId ? { previousForkTurnId } : {})
-      }
-    })
+      attachments: turn.attachments ?? []
+    }
+    let runId: string | null
+    if (currentBoundaryComplete && (isFirstSessionTurn || previousBoundaryComplete)) {
+      runId = await session.send(text, {
+        ...base,
+        forkLastTurn: {
+          replaceRunId: turn.runId,
+          replaceProviderTurnId: turn.providerTurnId!,
+          replaceForkTurnId: turn.forkTurnId!,
+          ...(previousProviderTurnId ? { previousProviderTurnId } : {}),
+          ...(previousForkTurnId ? { previousForkTurnId } : {})
+        }
+      })
+    } else if (isFirstSessionTurn && currentBoundaryAbsent) {
+      runId = await session.send(text, { ...base, restartLastTurn: { replaceRunId: turn.runId } })
+    } else {
+      throw new Error('该轮缺少可验证的 Provider 分支边界，无法安全编辑')
+    }
     if (!runId) throw new Error('编辑后的消息为空')
-  }, [currentRunRequest, queuedPrompts.length, session.pendingQuestions.length, session.send, session.turns])
+  }, [currentRunRequest, queuedPrompts.length, session.historyWindow?.offset, session.pendingQuestions.length, session.send, session.turns])
 
   useEffect(() => {
     if (session.busy) {
