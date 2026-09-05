@@ -49,22 +49,35 @@ function emptyUsage() {
 function addUsage(total, message) {
   const usage = message && typeof message.usage === 'object' ? message.usage : {}
   const cost = usage && typeof usage.cost === 'object' ? usage.cost : {}
+  const fields = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite, usage.reasoning, cost.total]
+  if (!fields.some((value) => typeof value === 'number' && Number.isFinite(value))) return false
   total.input_tokens += Number(usage.input) || 0
   total.output_tokens += Number(usage.output) || 0
   total.cache_read_input_tokens += Number(usage.cacheRead) || 0
   total.cache_creation_input_tokens += Number(usage.cacheWrite) || 0
   total.reasoning_tokens += Number(usage.reasoning) || 0
   total.cost_usd += Number(cost.total) || 0
+  return true
 }
 
 function executable() {
+  const configured = process.env.SCRY_CLI_PATH
+  if (configured !== undefined) {
+    if (!isAbsolute(configured) || !existsSync(configured)) {
+      debug('configured SCRY_CLI_PATH is unavailable; refusing PATH fallback')
+      return undefined
+    }
+    try { return realpathSync(configured) } catch {
+      debug('configured SCRY_CLI_PATH cannot be resolved; refusing PATH fallback')
+      return undefined
+    }
+  }
   const candidates = [
-    process.env.SCRY_CLI_PATH,
     join(homedir(), '.local', 'bin', 'scry'),
     ...String(process.env.PATH || '').split(':').filter(Boolean).map((directory) => join(directory, 'scry')),
   ]
   for (const candidate of candidates) {
-    if (!candidate || !isAbsolute(candidate) || !existsSync(candidate)) continue
+    if (!isAbsolute(candidate) || !existsSync(candidate)) continue
     try { return realpathSync(candidate) } catch {}
   }
   return undefined
@@ -81,7 +94,6 @@ function sendSocket(workspace, event, payload) {
   return new Promise((resolve) => {
     const body = JSON.stringify(payload)
     let settled = false
-    let dispatched = false
     const finish = (value) => {
       if (settled) return
       settled = true
@@ -106,13 +118,11 @@ function sendSocket(workspace, event, payload) {
         try { finish(response.statusCode === 200 && JSON.parse(output).ok === true) } catch { finish(false) }
       })
     })
-    req.on('socket', (socket) => {
-      if (socket.connecting) socket.once('connect', () => { dispatched = true })
-      else dispatched = true
-    })
     req.setTimeout(socketTimeoutMs(event), () => {
       req.destroy()
-      finish(dispatched)
+      // A connected socket proves only transport dispatch, not that the daemon validated and
+      // durably recorded the event. Fall back to the idempotent direct path unless it ACKs.
+      finish(false)
     })
     req.on('error', () => finish(false))
     req.end(body)
@@ -177,6 +187,7 @@ export default function scryPiRecorder(pi) {
       providerTurnId,
       assistant: [],
       usage: emptyUsage(),
+      usageObserved: false,
       modelSegments: [],
       startedAt: new Date().toISOString(),
       settled: false,
@@ -200,7 +211,7 @@ export default function scryPiRecorder(pi) {
     if (!active || !message || message.role !== 'assistant') return
     const text = assistantText(message)
     if (text) active.assistant.push(text)
-    addUsage(active.usage, message)
+    active.usageObserved = addUsage(active.usage, message) || active.usageObserved
     const id = message.responseId || message.id || randomUUID()
     const completedAtMs = Date.now()
     const startedAtMs = responseStartedAt ?? completedAtMs
@@ -245,7 +256,7 @@ export default function scryPiRecorder(pi) {
       session_id: turn.sessionId,
       promptId: turn.providerTurnId,
       assistant_response: boundedText(turn.assistant.join('\n')),
-      usage: turn.usage,
+      ...(turn.usageObserved ? { usage: turn.usage } : {}),
       model_segments: turn.modelSegments,
       status: 'completed',
       timestamp: new Date().toISOString(),
@@ -261,7 +272,7 @@ export default function scryPiRecorder(pi) {
         session_id: turn.sessionId,
         promptId: turn.providerTurnId,
         assistant_response: boundedText(turn.assistant.join('\n')),
-        usage: turn.usage,
+        ...(turn.usageObserved ? { usage: turn.usage } : {}),
         model_segments: turn.modelSegments,
         status: 'interrupted',
         timestamp: new Date().toISOString(),

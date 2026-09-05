@@ -2716,6 +2716,35 @@ describe('commit notification drain budget', () => {
 })
 
 describe('archive floor and sequence allocation', () => {
+  it('拒绝把 archive records 指回 live store，且不删除正式记录', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'overlap-1')
+    const dataRoot = join(root, '.scry')
+
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target: dataRoot }))
+      .rejects.toThrow('must not overlap')
+    const dotDotPrefixedTarget = join(dataRoot, 'records', '..archive')
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target: dotDotPrefixedTarget }))
+      .rejects.toThrow('must not overlap')
+    await expect(access(dotDotPrefixedTarget)).rejects.toThrow()
+    expect((await listRecords(dataRoot)).map((record) => record.sequence)).toEqual([1])
+    await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, records: 1, archivedThrough: 0 })
+  })
+
+  it('拒绝覆盖 archive target 中的同名文件', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'occupied-target-1')
+    const dataRoot = join(root, '.scry')
+    const target = join(root, 'archive-occupied')
+    const [recordName] = await readdir(join(dataRoot, 'records'))
+    await mkdir(join(target, 'records'), { recursive: true })
+    await writeFile(join(target, 'records', recordName), 'existing archive data')
+
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target })).rejects.toMatchObject({ code: 'EEXIST' })
+    expect((await listRecords(dataRoot)).map((record) => record.sequence)).toEqual([1])
+    await expect(readArchiveState(dataRoot)).resolves.toBeNull()
+  })
+
   it('归档全部记录后新轮次从 floor+1 继续，store 仍连续', async () => {
     const root = await workspace()
     await completeTurn(root, 'floor-1')
@@ -2744,5 +2773,9 @@ describe('archive floor and sequence allocation', () => {
     const store = await verifyStore(dataRoot)
     expect(store.ok).toBe(false)
     expect(store.errors.join(' ')).toContain('sequence gap')
+    await expect(archiveRecords(dataRoot, { throughSequence: 2, target: join(root, 'archive-gap') }))
+      .rejects.toThrow('sequence gap')
+    expect((await listRecords(dataRoot)).map((record) => record.sequence)).toEqual([2])
+    await expect(readArchiveState(dataRoot)).resolves.toBeNull()
   })
 })

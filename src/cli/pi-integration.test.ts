@@ -46,7 +46,7 @@ describe('Pi recorder integration installer', () => {
 })
 
 describe('Pi recorder extension lifecycle', () => {
-  it('daemon 已接收但响应超时时不冷起重复 CLI', async () => {
+  it('daemon 未 ACK 时回退幂等 direct CLI，避免静默丢事件', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-timeout-'))
     roots.push(root)
     const socket = join(root, 'recorder.sock')
@@ -75,8 +75,7 @@ describe('Pi recorder extension lifecycle', () => {
       extension.default(pi)
       const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-timeout', getLeafId: () => 'pi-timeout-turn' } }
       for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'hello' }, ctx)
-      await new Promise((resolve) => setTimeout(resolve, 120))
-      await expect(readFile(fallback, 'utf8')).rejects.toThrow()
+      await expect(readFile(fallback, 'utf8')).resolves.toBe('')
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
@@ -104,6 +103,34 @@ describe('Pi recorder extension lifecycle', () => {
     const args = await readFile(capture, 'utf8')
     expect(args).toContain('--event UserPromptSubmit')
     expect(args).not.toContain('--start-daemon')
+  })
+
+  it('显式 CLI pin 失效或为空时不回退 PATH 中的未知安装', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-invalid-pin-'))
+    roots.push(root)
+    const capture = join(root, 'fallback-called')
+    const cli = join(root, 'scry')
+    await writeFile(cli, `#!/bin/sh\n: > ${JSON.stringify(capture)}\n`)
+    await chmod(cli, 0o700)
+    const previousPath = process.env.PATH
+    process.env.PATH = root
+    process.env.SCRY_RECORDER_TRANSPORT = 'direct'
+    try {
+      const handlers = new Map<string, Array<(event: any, ctx: any) => any>>()
+      const pi = { on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } }
+      // @ts-expect-error the distributed Pi extension is runtime JavaScript by design
+      const extension = await import('../../packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')
+      extension.default(pi)
+      const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-invalid-pin', getLeafId: () => 'pi-invalid-pin-turn' } }
+      for (const invalidPin of [join(root, 'missing-scry'), '']) {
+        process.env.SCRY_CLI_PATH = invalidPin
+        for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'hello' }, ctx)
+      }
+      await expect(readFile(capture, 'utf8')).rejects.toThrow()
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+    }
   })
 
   it('direct transport 子进程提前关闭 stdin 时不让 EPIPE 杀死 Pi', async () => {
@@ -177,13 +204,16 @@ for (const handler of handlers.get('before_agent_start') ?? []) {
     await emit('message_start', { message })
     await emit('message_end', { message })
     await emit('agent_settled')
+    await emit('before_agent_start', { prompt: 'no usage available' })
+    await emit('agent_settled')
 
     const rows = (await readFile(capture, 'utf8')).trim().split('\n').map((line) => {
       const [args, payload] = line.split('\t', 2)
       return { args, payload: JSON.parse(payload) as Record<string, any> }
     })
     expect(rows.map((row) => row.args.match(/--event ([^ ]+)/)?.[1])).toEqual([
-      'UserPromptSubmit', 'PreToolUse:read', 'PostToolUse:read', 'Stop'
+      'UserPromptSubmit', 'PreToolUse:read', 'PostToolUse:read', 'Stop',
+      'UserPromptSubmit', 'Stop'
     ])
     expect(rows[0].payload).toMatchObject({ session_id: 'pi-session', promptId: 'pi-turn-1', prompt: 'inspect only' })
     expect(rows[3].payload).toMatchObject({
@@ -194,5 +224,6 @@ for (const handler of handlers.get('before_agent_start') ?? []) {
       status: 'completed'
     })
     expect(rows[3].payload.model_segments).toHaveLength(1)
+    expect(rows[5].payload).not.toHaveProperty('usage')
   }, 15_000)
 })
