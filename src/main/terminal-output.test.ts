@@ -89,6 +89,7 @@ describe('TerminalOutputBridge', () => {
     })
     bridge.data({ id: 't', data: '\uD83D' })
     bridge.data({ id: 't', data: '\uDE00' })
+    expect(bridge.snapshot('t').bufferedBytes).toBe(4)
     bridge.ready('t')
     bridge.exit({ id: 't', code: 0, signal: null })
     expect(calls).toEqual(['😀'])
@@ -115,12 +116,37 @@ describe('TerminalOutputBridge', () => {
     bridge.close()
   })
 
-  it('closes only the noisy terminal instead of growing its backlog without bound', () => {
+  it('tracks backlog bytes incrementally across partial flushes', () => {
+    const calls: string[] = []
+    const bridge = new TerminalOutputBridge({
+      canSend: () => true,
+      sendData: (events) => calls.push(events[0].data),
+      sendExit: vi.fn(),
+      closeTerminal: vi.fn(),
+      flushBytes: 4,
+      highWaterBytes: 4,
+      maxBufferBytes: 32
+    })
+    bridge.data({ id: 't', data: 'ab' })
+    bridge.data({ id: 't', data: '你cd' })
+    expect(bridge.snapshot('t')).toMatchObject({ bufferedBytes: 7, inFlightBytes: 0 })
+
+    bridge.ready('t')
+    expect(calls).toEqual(['ab'])
+    expect(bridge.snapshot('t')).toMatchObject({ bufferedBytes: 5, inFlightBytes: 2 })
+    bridge.ack('t', 2)
+    expect(calls).toEqual(['ab', '你c'])
+    expect(bridge.snapshot('t')).toMatchObject({ bufferedBytes: 1, inFlightBytes: 4 })
+    bridge.close()
+  })
+
+  it('closes only the noisy terminal without hiding its eventual exit', () => {
     const closeTerminal = vi.fn()
+    const sendExit = vi.fn()
     const bridge = new TerminalOutputBridge({
       canSend: () => true,
       sendData: vi.fn(),
-      sendExit: vi.fn(),
+      sendExit,
       closeTerminal,
       flushBytes: 100,
       highWaterBytes: 3,
@@ -129,6 +155,9 @@ describe('TerminalOutputBridge', () => {
     bridge.data({ id: 'noisy', data: '123456' })
     expect(closeTerminal).toHaveBeenCalledWith('noisy')
     expect(bridge.snapshot('noisy').bufferedBytes).toBe(0)
+    bridge.ready('noisy')
+    bridge.exit({ id: 'noisy', code: null, signal: 9 })
+    expect(sendExit).toHaveBeenCalledWith({ id: 'noisy', code: null, signal: 9 })
     expect(() => bridge.ack('other', -1)).toThrow('无效')
     bridge.close()
   })

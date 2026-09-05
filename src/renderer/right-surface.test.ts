@@ -132,7 +132,6 @@ describe('right surface catalog', () => {
       'terminal',
       'agents'
     ])
-    expect(new Set(RIGHT_SURFACE_DEFINITIONS.map((surface) => surface.kind)).size).toBe(5)
   })
 
   it('只渲染激活 Surface，同时保留后台终端和未保存文件', () => {

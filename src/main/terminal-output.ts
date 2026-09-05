@@ -18,13 +18,30 @@ interface TerminalOutputState {
   buffer: string
   bufferedBytes: number
   inFlightBytes: number
+  trailingHighSurrogate: boolean
+  closedForOverflow: boolean
   pendingExit?: TerminalExitEvent
   timer?: ReturnType<typeof setTimeout>
 }
 
-function utf8Prefix(value: string, maxBytes: number): { prefix: string; rest: string; bytes: number } {
-  const total = Buffer.byteLength(value, 'utf8')
-  if (total <= maxBytes) return { prefix: value, rest: '', bytes: total }
+function isHighSurrogate(unit: number): boolean {
+  return unit >= 0xD800 && unit <= 0xDBFF
+}
+
+function isLowSurrogate(unit: number): boolean {
+  return unit >= 0xDC00 && unit <= 0xDFFF
+}
+
+function appendedUtf8Bytes(trailingHighSurrogate: boolean, appended: string): number {
+  let bytes = Buffer.byteLength(appended, 'utf8')
+  // Buffer counts an isolated surrogate as the three-byte replacement character. When PTY
+  // chunks split one Unicode scalar, joining them turns those six provisional bytes into four.
+  if (trailingHighSurrogate && isLowSurrogate(appended.charCodeAt(0))) bytes -= 2
+  return bytes
+}
+
+function utf8Prefix(value: string, totalBytes: number, maxBytes: number): { prefix: string; rest: string; bytes: number } {
+  if (totalBytes <= maxBytes) return { prefix: value, rest: '', bytes: totalBytes }
   let units = 0
   let bytes = 0
   for (const character of value) {
@@ -63,10 +80,17 @@ export class TerminalOutputBridge {
 
   data(event: TerminalDataEvent): void {
     const state = this.state(event.id)
+    if (state.closedForOverflow) return
+    state.bufferedBytes += appendedUtf8Bytes(state.trailingHighSurrogate, event.data)
     state.buffer += event.data
-    state.bufferedBytes = Buffer.byteLength(state.buffer, 'utf8')
+    if (event.data.length > 0) state.trailingHighSurrogate = isHighSurrogate(event.data.charCodeAt(event.data.length - 1))
     if (state.bufferedBytes + state.inFlightBytes > this.maxBufferBytes) {
-      this.closeState(event.id)
+      if (state.timer) clearTimeout(state.timer)
+      state.timer = undefined
+      state.buffer = ''
+      state.bufferedBytes = 0
+      state.trailingHighSurrogate = false
+      state.closedForOverflow = true
       this.options.closeTerminal(event.id)
       this.options.warn?.('terminal closed after output backlog exceeded safety limit', event.id)
       return
@@ -115,7 +139,14 @@ export class TerminalOutputBridge {
   private state(id: string): TerminalOutputState {
     let state = this.states.get(id)
     if (!state) {
-      state = { ready: false, buffer: '', bufferedBytes: 0, inFlightBytes: 0 }
+      state = {
+        ready: false,
+        buffer: '',
+        bufferedBytes: 0,
+        inFlightBytes: 0,
+        trailingHighSurrogate: false,
+        closedForOverflow: false
+      }
       this.states.set(id, state)
     }
     return state
@@ -129,16 +160,21 @@ export class TerminalOutputBridge {
     if (!state.ready || !this.options.canSend() || !state.buffer || state.inFlightBytes >= this.highWaterBytes) return
     const available = Math.min(this.flushBytes, this.highWaterBytes - state.inFlightBytes)
     if (available <= 0) return
-    const chunk = utf8Prefix(state.buffer, available)
+    const chunk = utf8Prefix(state.buffer, state.bufferedBytes, available)
     if (chunk.bytes === 0) return
     state.buffer = chunk.rest
-    state.bufferedBytes = Buffer.byteLength(state.buffer, 'utf8')
+    state.bufferedBytes = Math.max(0, state.bufferedBytes - chunk.bytes)
+    if (!chunk.rest) state.trailingHighSurrogate = false
     state.inFlightBytes += chunk.bytes
     this.options.sendData([{ id, data: chunk.prefix }])
   }
 
   private finishIfDrained(id: string, state: TerminalOutputState): void {
-    if (!state.pendingExit || state.bufferedBytes > 0 || state.inFlightBytes > 0 || !state.ready || !this.options.canSend()) return
+    if (
+      !state.pendingExit || state.bufferedBytes > 0 ||
+      (state.inFlightBytes > 0 && !state.closedForOverflow) ||
+      !state.ready || !this.options.canSend()
+    ) return
     const event = state.pendingExit
     this.closeState(id)
     this.options.sendExit(event)

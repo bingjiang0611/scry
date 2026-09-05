@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, isAbsolute, join } from 'node:path'
+import { lstat, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { isAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.32'
+export const RECORDER_VERSION = '0.2.33'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -427,43 +427,74 @@ export async function readArchiveState(dataRoot: string): Promise<ArchiveState |
  * store still starts exactly one past the recorded floor; anything else stays a hard error.
  * Callers own the delivery question — a record that was never ACKed must not be archived.
  */
+function pathContains(root: string, candidate: string): boolean {
+  const fromRoot = relative(root, candidate)
+  return fromRoot === '' || (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`))
+}
+
+function archivePathsOverlap(liveRecords: string, recordsTarget: string): boolean {
+  return pathContains(liveRecords, recordsTarget) || pathContains(recordsTarget, liveRecords)
+}
+
 export async function archiveRecords(
   dataRoot: string,
   options: { throughSequence: number; target: string }
 ): Promise<{ archived: Array<{ name: string; sequence: number; recordId: string; sha256: string }>; archivedThrough: number; target: string }> {
-  const state = await readArchiveState(dataRoot)
-  const floor = state?.archivedThrough ?? 0
-  const files = (await recordFiles(dataRoot)).filter((file) => file.sequence <= options.throughSequence)
-  const archived: Array<{ name: string; sequence: number; recordId: string; sha256: string }> = []
-  if (files.length === 0) return { archived, archivedThrough: floor, target: options.target }
-  const recordsTarget = join(options.target, 'records')
-  await mkdir(recordsTarget, { recursive: true, mode: 0o700 })
-  let archivedThrough = floor
-  for (const file of files) {
-    const source = join(dataRoot, 'records', file.name)
-    const content = await readFile(source)
-    await writeFile(join(recordsTarget, file.name), content, { mode: 0o600 })
-    await rm(source, { force: true })
-    archivedThrough = file.sequence
-    // Persist the floor after each move so a crash mid-archive still explains the gap.
-    await writeJsonAtomic(join(dataRoot, ARCHIVE_STATE), { schemaVersion: 1, archivedThrough } satisfies ArchiveState)
-    archived.push({
-      name: file.name,
-      sequence: file.sequence,
-      recordId: file.recordId,
-      sha256: createHash('sha256').update(content).digest('hex')
+  // Sequence allocation and archive-floor advancement are one store transaction. Without the
+  // shared lock, a concurrent commit can allocate from a half-moved prefix and reuse a sequence.
+  return withDirectoryLock(join(dataRoot, 'locks', 'commit.lock'), async () => {
+    const state = await readArchiveState(dataRoot)
+    const floor = state?.archivedThrough ?? 0
+    const liveFiles = await recordFiles(dataRoot)
+    let expectedSequence = floor + 1
+    for (const file of liveFiles) {
+      if (file.sequence !== expectedSequence) {
+        throw new Error(`cannot archive a store with a sequence gap before ${file.name}`)
+      }
+      expectedSequence += 1
+    }
+    const files = liveFiles.filter((file) => file.sequence <= options.throughSequence)
+    const archived: Array<{ name: string; sequence: number; recordId: string; sha256: string }> = []
+    if (files.length === 0) return { archived, archivedThrough: floor, target: options.target }
+    const liveRecords = join(dataRoot, 'records')
+    const recordsTarget = join(options.target, 'records')
+    if (archivePathsOverlap(resolve(liveRecords), resolve(recordsTarget))) {
+      throw new Error('archive target must not overlap the live records directory')
+    }
+    await mkdir(recordsTarget, { recursive: true, mode: 0o700 })
+    if ((await lstat(recordsTarget)).isSymbolicLink()) throw new Error('archive records target must not be a symbolic link')
+    const [canonicalLive, canonicalTarget] = await Promise.all([realpath(liveRecords), realpath(recordsTarget)])
+    if (archivePathsOverlap(canonicalLive, canonicalTarget)) {
+      throw new Error('archive target must not overlap the live records directory')
+    }
+
+    let archivedThrough = floor
+    for (const file of files) {
+      const source = join(liveRecords, file.name)
+      const content = await readFile(source)
+      await writeFile(join(recordsTarget, file.name), content, { mode: 0o600, flag: 'wx' })
+      await rm(source, { force: true })
+      archivedThrough = file.sequence
+      // Persist the floor after each move so a crash mid-archive still explains the gap.
+      await writeJsonAtomic(join(dataRoot, ARCHIVE_STATE), { schemaVersion: 1, archivedThrough } satisfies ArchiveState)
+      archived.push({
+        name: file.name,
+        sequence: file.sequence,
+        recordId: file.recordId,
+        sha256: createHash('sha256').update(content).digest('hex')
+      })
+    }
+    await writeJsonAtomic(join(options.target, 'manifest.json'), {
+      schemaVersion: 1,
+      at: new Date().toISOString(),
+      recorderVersion: RECORDER_VERSION,
+      from: archived[0].sequence,
+      to: archivedThrough,
+      count: archived.length,
+      records: archived
     })
-  }
-  await writeJsonAtomic(join(options.target, 'manifest.json'), {
-    schemaVersion: 1,
-    at: new Date().toISOString(),
-    recorderVersion: RECORDER_VERSION,
-    from: archived[0].sequence,
-    to: archivedThrough,
-    count: archived.length,
-    records: archived
+    return { archived, archivedThrough, target: options.target }
   })
-  return { archived, archivedThrough, target: options.target }
 }
 
 /**

@@ -64,12 +64,11 @@ describe('Billing Guardian P1 Admin connector', () => {
 
   it('OpenAI Admin HTTP error 保留状态码但不包含密钥', async () => {
     const fetchImpl = async (): Promise<Response> => jsonResponse({ error: { message: 'denied' } }, 403)
-    await expect(
-      fetchOpenAiAdminUsageAndCosts({ apiKey: 'test-key', startTime: 1, fetchImpl, nowMs: 1 })
-    ).rejects.toThrow('HTTP 403')
-    await expect(
-      fetchOpenAiAdminUsageAndCosts({ apiKey: 'test-key', startTime: 1, fetchImpl, nowMs: 1 })
-    ).rejects.not.toThrow('test-key')
+    const error = await fetchOpenAiAdminUsageAndCosts({ apiKey: 'test-key', startTime: 1, fetchImpl, nowMs: 1 })
+      .then(() => null, (reason: unknown) => reason)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('HTTP 403')
+    expect((error as Error).message).not.toContain('test-key')
   })
 
   it('Anthropic Admin 使用官方组织 usage/cost endpoint 和 anthropic-version header', async () => {
