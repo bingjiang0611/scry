@@ -272,13 +272,14 @@ async function main() {
     const started = await window.scry.start({ providerId: 'codex', cwd, prompt: 'packaged fake-provider smoke' })
     const outcome = await terminal
     const externalSessionId = outcome.event.externalSessionId || outcome.event.sessionId
-    const loaded = await window.scry.loadSession({ providerId: 'codex', cwd, externalSessionId })
+    const loadedPage = await window.scry.loadSession({ providerId: 'codex', cwd, externalSessionId })
+    const loaded = loadedPage?.turns || []
     const stats = await window.scry.stats()
     return {
       sameRun: outcome.event.runId === started.runId,
       externalSessionId,
-      loadedTurns: loaded?.length || 0,
-      hasTool: loaded?.some((turn) => turn.items.some((item) => item.stage === 'tool_use')) || false,
+      loadedTurns: loaded.length,
+      hasTool: loaded.some((turn) => turn.items.some((item) => item.stage === 'tool_use')),
       statsStatus: stats.status,
       statsTurns: stats.totals.turns
     }
@@ -403,14 +404,14 @@ async function main() {
     const mainLeft = Math.round(document.querySelector('.main-area')?.getBoundingClientRect().left ?? -1)
     const mainActionLeft = Math.round(document.querySelector('.topbar button')?.getBoundingClientRect().left ?? -1)
 
-    const diagnosticsButton = [...document.querySelectorAll('button.sb-navitem')]
-      .find((node) => node.textContent?.includes('诊断'))
-    diagnosticsButton?.click()
-    const diagnostics = await waitFor(() => !!document.querySelector('.diagnostics-evidence-page'))
+    const analyticsButton = [...document.querySelectorAll('button.sb-navitem')]
+      .find((node) => node.textContent?.includes('分析'))
+    analyticsButton?.click()
+    const analytics = await waitFor(() => !!document.querySelector('.usage-page'))
     const auxTopbar = document.querySelector('.aux-view-topbar')
     const auxRect = auxTopbar?.getBoundingClientRect()
     const auxDrag = auxTopbar ? getComputedStyle(auxTopbar).getPropertyValue('-webkit-app-region') : null
-    const diagnosticsTop = Math.round(document.querySelector('.diagnostics-evidence-page')?.getBoundingClientRect().top ?? -1)
+    const analyticsTop = Math.round(document.querySelector('.usage-page')?.getBoundingClientRect().top ?? -1)
 
     document.querySelector('button.sb-sess')?.click()
     const chatRestored = await waitFor(() => !!document.querySelector('.topbar'))
@@ -428,11 +429,11 @@ async function main() {
       collapsed,
       mainLeft,
       mainActionLeft,
-      diagnostics,
+      analytics,
       auxTop: Math.round(auxRect?.top ?? -1),
       auxHeight: Math.round(auxRect?.height ?? -1),
       auxDrag,
-      diagnosticsTop,
+      analyticsTop,
       chatRestored,
       maximized,
       surfaceLeft,
@@ -443,13 +444,13 @@ async function main() {
   assert.equal(collapsedChrome.collapsed, true)
   assert.ok(collapsedChrome.mainLeft < 16, `collapsed sidebar did not release its layout width: ${JSON.stringify(collapsedChrome)}`)
   assert.ok(collapsedChrome.mainActionLeft >= 80, `collapsed main chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
-  assert.equal(collapsedChrome.diagnostics, true)
+  assert.equal(collapsedChrome.analytics, true)
   assert.deepEqual(
     [collapsedChrome.auxTop, collapsedChrome.auxHeight, collapsedChrome.auxDrag],
     [0, 52, 'drag'],
     `auxiliary view is missing integrated window chrome: ${JSON.stringify(collapsedChrome)}`
   )
-  assert.ok(collapsedChrome.diagnosticsTop >= 52, `Diagnostics overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
+  assert.ok(collapsedChrome.analyticsTop >= 52, `Analytics overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.chatRestored, true)
   assert.equal(collapsedChrome.maximized, true)
   assert.ok(collapsedChrome.surfaceLeft < 16, `maximized Surface did not move into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
