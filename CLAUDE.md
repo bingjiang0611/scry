@@ -226,6 +226,13 @@ git diff --check
 - 修改 packaging、preload、native dependency、resource allowlist 或 Electron security 时追加 `npm run pack:artifact`。
 - 本机 ignored 的 `.claude/`、`.agents/` 等 Agent 目录可能污染 Vitest 自动发现；应限定到项目自有 `src/`、`scripts/` 测试或在 clean checkout 运行，不要删除用户配置来让测试通过。
 
+### UI / 交互修复验收
+
+- 修改前明确用户原始操作步骤、预期结果和受影响的状态转换，不只修截图中的单一状态。按本次范围检查首次/连续多轮发送后立即停止、原生 turn ID 尚未建立/已建立，以及侧边栏开关、固定/悬浮摘要、滚动与焦点等相邻路径；保留 Provider 差异。
+- 把原始复现步骤和最容易回归的相邻操作补成少量针对性用例；涉及事件顺序或 UI 接线时，不能仅靠纯函数测试证明交互正确。再次收到“仍不行”时先补全遗漏的状态或时序，再修复并补回归用例。
+- 在包含当前改动且 main/preload/renderer 版本一致的 App 上重放原始操作，确认目标行为与相关反向操作；构建成功或 App 已启动不等于原问题已验收。
+- 交付分别说明编译/构建、自动测试、原问题真实交互验收的结果与实际范围。截图/观察失败、Provider 不可用或未执行时明确标注，不把前两项写成真实验收通过；这些 focused 用例不额外触发全量发布门禁。
+
 ### 完整 CI / 发布门禁
 
 以下情况才运行完整套件：用户明确要求；改动跨越 Provider/trust/persistence/recorder/IPC/packaging 多个核心边界；准备高风险合入；或构建可安装/正式发布版本。
