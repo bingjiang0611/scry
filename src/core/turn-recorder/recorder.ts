@@ -300,6 +300,29 @@ function hookDeliveryEvent(args: {
   }
 }
 
+interface CaptureLimitation {
+  field: 'assistant_response' | 'tool_input' | 'tool_response' | 'model_segments'
+  status: 'partial' | 'unavailable'
+  reason: 'byte_limit' | 'item_limit' | 'serialization_error'
+}
+
+function captureLimitations(payload: Record<string, unknown>): CaptureLimitation[] {
+  const capture = payload.scry_capture
+  if (!capture || typeof capture !== 'object' || Array.isArray(capture)) return []
+  const raw = capture as Record<string, unknown>
+  if (raw.schemaVersion !== 1 || !raw.fields || typeof raw.fields !== 'object' || Array.isArray(raw.fields)) return []
+  return Object.entries(raw.fields as Record<string, unknown>).flatMap(([field, value]) => {
+    if (!['assistant_response', 'tool_input', 'tool_response', 'model_segments'].includes(field) || !value || typeof value !== 'object' || Array.isArray(value)) return []
+    const limitation = value as Record<string, unknown>
+    if (!['partial', 'unavailable'].includes(String(limitation.status)) || !['byte_limit', 'item_limit', 'serialization_error'].includes(String(limitation.reason))) return []
+    return [{ field, status: limitation.status, reason: limitation.reason } as CaptureLimitation]
+  })
+}
+
+function limitationMetadata(limitations: CaptureLimitation[]): { scryCaptureLimitations: CaptureLimitation[] } | undefined {
+  return limitations.length > 0 ? { scryCaptureLimitations: limitations } : undefined
+}
+
 function lifecycleTraceEvents(args: {
   provider: ProviderId
   event: string
@@ -311,6 +334,7 @@ function lifecycleTraceEvents(args: {
   const toolName = toolNameOf(args.payload)
   const toolUseId = toolUseIdOf(args.payload)
   const input = toolInputOf(args.payload)
+  const limitations = captureLimitations(args.payload)
   const agentId = stringAt(args.payload, 'agent_id', 'agentId')
   const out: TraceEvent[] = []
   const delivery = hookDeliveryEvent(args)
@@ -353,7 +377,10 @@ function lifecycleTraceEvents(args: {
         input,
         ...mcp,
         ...file,
-        ...(danger ? { danger } : {})
+        ...(danger ? { danger } : {}),
+        ...(limitationMetadata(limitations.filter((item) => item.field === 'tool_input'))
+          ? { runtimeMetadata: limitationMetadata(limitations.filter((item) => item.field === 'tool_input')) }
+          : {})
       })
     }
   } else if (/^PostToolUse(?:Failure)?(?::|$)/.test(args.event) || args.event === 'tool.execute.after') {
@@ -369,15 +396,42 @@ function lifecycleTraceEvents(args: {
       toolUseId,
       ...(agentId ? { agentId } : {}),
       ...(args.captureOutput ? { text: summarize(result), output: summarize(result) } : {}),
-      isError: failed
+      isError: failed,
+      ...(limitationMetadata(limitations.filter((item) => item.field === 'tool_response'))
+        ? { runtimeMetadata: limitationMetadata(limitations.filter((item) => item.field === 'tool_response')) }
+        : {})
     })
   }
   const usage = usageTrace(args.payload, args.runId, at)
   if (usage) out.push(usage)
   const assistant = stringAt(args.payload, 'assistant_response', 'assistantResponse', 'result_text')
-  if (assistant) out.push({ id: `assistant-${stableHash(assistant).slice(0, 16)}`, ts: at, runId: args.runId, kind: 'model', stage: 'text', text: assistant })
+  if (assistant) out.push({
+    id: `assistant-${stableHash(assistant).slice(0, 16)}`,
+    ts: at,
+    runId: args.runId,
+    kind: 'model',
+    stage: 'text',
+    text: assistant,
+    ...(limitationMetadata(limitations.filter((item) => item.field === 'assistant_response'))
+      ? { runtimeMetadata: limitationMetadata(limitations.filter((item) => item.field === 'assistant_response')) }
+      : {})
+  })
   const rawSegments = args.payload.model_segments ?? args.payload.modelSegments
   if (Array.isArray(rawSegments)) {
+    const segmentLimitations = [
+      ...limitations.filter((item) => item.field === 'model_segments'),
+      ...(rawSegments.length > 200 ? [{ field: 'model_segments', status: 'partial', reason: 'item_limit' } as CaptureLimitation] : [])
+    ]
+    if (segmentLimitations.length > 0) {
+      out.push({
+        id: `capture-limit-${stableHash([args.event, segmentLimitations]).slice(0, 16)}`,
+        ts: at,
+        runId: args.runId,
+        kind: 'harness',
+        stage: 'capture_limitation',
+        runtimeMetadata: limitationMetadata(segmentLimitations)
+      })
+    }
     for (const raw of rawSegments.slice(0, 200)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
       const segment = raw as Record<string, unknown>
@@ -1244,10 +1298,10 @@ async function codexTurnWithChildren(
     }
     let parsed: ReturnType<typeof parseCodexRollout>
     try {
-      const childSize = (await stat(childPath)).size
-      const childTranscript = await readTranscriptWindow(childPath, childSize)
+      const childIdentity = transcriptIdentity(await stat(childPath))
+      const childTranscript = await readTranscriptWindow(childPath, childIdentity.size, 0, childIdentity)
       parsed = parseCodexRollout(childTranscript.content, runId)
-      complete = complete && !childTranscript.truncated
+      complete = complete && childTranscript.consistent && !childTranscript.truncated
     } catch {
       complete = false
       continue
@@ -1292,28 +1346,58 @@ async function transcriptStartOffset(path: string): Promise<number | undefined> 
   }
 }
 
-async function readTranscriptWindow(
+export interface TranscriptSnapshotIdentity {
+  dev: number
+  ino: number
+  size: number
+  mtimeMs: number
+  ctimeMs: number
+}
+
+function transcriptIdentity(info: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): TranscriptSnapshotIdentity {
+  return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs }
+}
+
+function sameTranscriptIdentity(left: TranscriptSnapshotIdentity, right: TranscriptSnapshotIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
+}
+
+export async function readTranscriptWindow(
   path: string,
   endOffset: number,
-  preferredStartOffset = 0
-): Promise<{ content: string; truncated: boolean }> {
+  preferredStartOffset = 0,
+  expectedIdentity?: TranscriptSnapshotIdentity
+): Promise<{ content: string; truncated: boolean; consistent: boolean }> {
   const boundedEnd = Math.max(0, endOffset)
   const preferredStart = Math.max(0, Math.min(preferredStartOffset, boundedEnd))
   const start = Math.max(preferredStart, boundedEnd - MAX_TRANSCRIPT_READ_BYTES)
   const length = boundedEnd - start
-  if (length === 0) return { content: '', truncated: false }
   const handle = await openFile(path, 'r')
   const buffer = Buffer.allocUnsafe(length)
   let bytesRead = 0
+  let before: TranscriptSnapshotIdentity | undefined
+  let after: TranscriptSnapshotIdentity | undefined
   try {
+    before = transcriptIdentity(await handle.stat())
     while (bytesRead < length) {
       const result = await handle.read(buffer, bytesRead, length - bytesRead, start + bytesRead)
       if (result.bytesRead === 0) break
       bytesRead += result.bytesRead
     }
+    after = transcriptIdentity(await handle.stat())
   } finally {
     await handle.close()
   }
+  let pathIdentity: TranscriptSnapshotIdentity | undefined
+  try {
+    pathIdentity = transcriptIdentity(await stat(path))
+  } catch {
+    // A rotated-away path is unstable even when the already-open handle was still readable.
+  }
+  const consistent = bytesRead === length && !!before && !!after && !!pathIdentity &&
+    (!expectedIdentity || sameTranscriptIdentity(before, expectedIdentity)) &&
+    sameTranscriptIdentity(before, after) && sameTranscriptIdentity(after, pathIdentity)
   let content = buffer.subarray(0, bytesRead).toString('utf8')
   let truncated = start > preferredStart
   if (start > 0) {
@@ -1324,7 +1408,45 @@ async function readTranscriptWindow(
       truncated = true
     }
   }
-  return { content, truncated }
+  return { content, truncated, consistent }
+}
+
+interface TranscriptSnapshotCacheEntry {
+  key: string
+  read: TranscriptRead
+}
+
+const TRANSCRIPT_SNAPSHOT_CACHE_LIMIT = 8
+const transcriptSnapshotCache = new Map<string, TranscriptSnapshotCacheEntry>()
+let transcriptSnapshotCacheHits = 0
+let transcriptSnapshotCacheMisses = 0
+
+/** Process-local diagnostics used by complexity tests and the informational recovery benchmark. */
+export function transcriptSnapshotCacheStats(): { hits: number; misses: number; entries: number } {
+  return { hits: transcriptSnapshotCacheHits, misses: transcriptSnapshotCacheMisses, entries: transcriptSnapshotCache.size }
+}
+
+export function resetTranscriptSnapshotCache(): void {
+  transcriptSnapshotCache.clear()
+  transcriptSnapshotCacheHits = 0
+  transcriptSnapshotCacheMisses = 0
+}
+
+function transcriptSnapshotCacheKey(args: {
+  path: string
+  startOffset?: number
+  stable: boolean
+  runId: string
+  provider: ProviderId
+  promptHash?: string
+  providerTurnId?: string
+  identity: TranscriptSnapshotIdentity
+}): string {
+  return JSON.stringify([
+    args.path, args.startOffset ?? 0, args.stable, args.runId, args.provider,
+    args.promptHash ?? '', args.providerTurnId ?? '', args.identity.dev, args.identity.ino,
+    args.identity.size, args.identity.mtimeMs, args.identity.ctimeMs
+  ])
 }
 
 async function parseTranscriptSnapshot(args: {
@@ -1336,8 +1458,10 @@ async function parseTranscriptSnapshot(args: {
   provider: ProviderId
   promptHash?: string
   providerTurnId?: string
+  identity?: TranscriptSnapshotIdentity
 }): Promise<TranscriptRead> {
-  const snapshot = await readTranscriptWindow(args.path, args.endOffset, args.startOffset)
+  const snapshot = await readTranscriptWindow(args.path, args.endOffset, args.startOffset, args.identity)
+  const stable = args.stable && snapshot.consistent
   if (args.provider === 'codex') {
     const parsed = parseCodexRollout(snapshot.content, args.runId)
     const direct = args.providerTurnId ? parsed.turns.find((turn) => turn.providerTurnId === args.providerTurnId) : undefined
@@ -1369,15 +1493,15 @@ async function parseTranscriptSnapshot(args: {
           }
         }
     return {
-      stable: args.stable,
+      stable,
       observed: parsed.recognized,
       ...(identityMatched != null ? { identityMatched } : {}),
-      complete: args.stable && !snapshot.truncated && enriched.complete,
+      complete: stable && !snapshot.truncated && enriched.complete,
       ...(turn?.terminalStatus ? { terminalStatus: turn.terminalStatus } : {}),
       ...(turn?.completedAt ? { completedAt: turn.completedAt } : {}),
       ...(turn?.startedAt ? { startedAt: turn.startedAt } : {}),
       ...(turn?.durationMs != null ? { durationMs: turn.durationMs } : {}),
-      toolStreamComplete: args.stable && !snapshot.truncated && !!turn && turn.pendingToolCalls.size === 0,
+      toolStreamComplete: stable && !snapshot.truncated && !!turn && turn.pendingToolCalls.size === 0,
       ...(turn?.userText ? { userText: turn.userText } : {}),
       events: enriched.events,
       observable: enriched.observable
@@ -1409,10 +1533,10 @@ async function parseTranscriptSnapshot(args: {
   const identityMatched = !args.providerTurnId && !args.promptHash ? undefined : !!turn
   const events = turn?.items ?? []
   return {
-    stable: args.stable,
+    stable,
     observed: turns.length > 0,
     ...(identityMatched != null ? { identityMatched } : {}),
-    complete: args.stable && !snapshot.truncated,
+    complete: stable && !snapshot.truncated,
     ...(turn?.userText ? { userText: turn.userText } : {}),
     events,
     observable: {
@@ -1451,6 +1575,37 @@ async function readableTranscriptPath(path: string, provider: ProviderId): Promi
   }
 }
 
+async function cachedTranscriptSnapshot(args: {
+  path: string
+  startOffset?: number
+  stable: boolean
+  runId: string
+  provider: ProviderId
+  promptHash?: string
+  providerTurnId?: string
+  identity: TranscriptSnapshotIdentity
+}): Promise<TranscriptRead> {
+  const key = transcriptSnapshotCacheKey(args)
+  const cached = transcriptSnapshotCache.get(key)
+  if (cached) {
+    transcriptSnapshotCache.delete(key)
+    transcriptSnapshotCache.set(key, cached)
+    transcriptSnapshotCacheHits++
+    return cached.read
+  }
+  transcriptSnapshotCacheMisses++
+  const read = await parseTranscriptSnapshot({ ...args, endOffset: args.identity.size })
+  // A read that raced truncation/rotation must be retried; caching it under the stable identity
+  // would otherwise keep a recoverable turn pending for the lifetime of this process.
+  if (!args.stable || read.stable) transcriptSnapshotCache.set(key, { key, read })
+  while (transcriptSnapshotCache.size > TRANSCRIPT_SNAPSHOT_CACHE_LIMIT) {
+    const oldest = transcriptSnapshotCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    transcriptSnapshotCache.delete(oldest)
+  }
+  return read
+}
+
 async function stableTranscript(
   path: string,
   runId: string,
@@ -1461,11 +1616,18 @@ async function stableTranscript(
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
   let previous = -1
-  let latestSize = -1
+  let latestIdentity: TranscriptSnapshotIdentity | undefined
   for (let attempt = 0; attempt < 3; attempt++) {
-    let size: number
+    let identity: TranscriptSnapshotIdentity
     try {
-      size = (await stat(path)).size
+      const info = await stat(path)
+      identity = {
+        dev: info.dev,
+        ino: info.ino,
+        size: info.size,
+        mtimeMs: info.mtimeMs,
+        ctimeMs: info.ctimeMs
+      }
     } catch {
       return {
         stable: true,
@@ -1484,23 +1646,34 @@ async function stableTranscript(
         }
       }
     }
-    latestSize = size
-    if (size === previous) {
-      return parseTranscriptSnapshot({ path, endOffset: size, startOffset, stable: true, runId, provider, promptHash, providerTurnId })
+    latestIdentity = identity
+    if (identity.size === previous) {
+      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, identity })
     }
-    previous = size
+    previous = identity.size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  return parseTranscriptSnapshot({
-    path,
-    endOffset: Math.max(0, latestSize),
-    startOffset,
-    stable: false,
-    runId,
-    provider,
-    promptHash,
-    providerTurnId
-  })
+  return latestIdentity
+    ? cachedTranscriptSnapshot({
+        path,
+        startOffset,
+        stable: false,
+        runId,
+        provider,
+        promptHash,
+        providerTurnId,
+        identity: latestIdentity
+      })
+    : parseTranscriptSnapshot({
+        path,
+        endOffset: 0,
+        startOffset,
+        stable: false,
+        runId,
+        provider,
+        promptHash,
+        providerTurnId
+      })
 }
 
 async function readStoredEvents(path: string): Promise<TraceEvent[]> {

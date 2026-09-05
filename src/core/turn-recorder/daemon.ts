@@ -361,6 +361,10 @@ export async function listenRecorderDaemon(args: {
   env?: NodeJS.ProcessEnv
   idleCloseProbe?: () => Promise<void> | void
   recoveryProbe?: () => Promise<void> | void
+  /** Test seams for deterministic backoff coverage. Production callers leave these unset. */
+  recoveryPollMs?: number
+  maxRecoveryPollMs?: number
+  scheduleRecoveryTimeout?: (run: () => Promise<void>, delayMs: number) => () => void
   /**
    * Optional hook run once the daemon has decided to shut down for inactivity: no open turn, no
    * request for the whole idle window. That is the only safe moment to replace the CLI on disk -
@@ -383,9 +387,11 @@ export async function listenRecorderDaemon(args: {
   let errorCount = 0
   let lastRequestAt: string | undefined
   let idleTimer: NodeJS.Timeout | undefined
-  let recoveryTimer: NodeJS.Timeout | undefined
+  let cancelRecoveryTimer: (() => void) | undefined
   let recoveryInFlight: Promise<{ recovered: number; pending: number }> | undefined
-  let recoveryDelayMs = RECOVERY_POLL_MS
+  const recoveryPollMs = Math.max(1, Math.floor(args.recoveryPollMs ?? RECOVERY_POLL_MS))
+  const maxRecoveryPollMs = Math.max(recoveryPollMs, Math.floor(args.maxRecoveryPollMs ?? MAX_RECOVERY_POLL_MS))
+  let recoveryDelayMs = recoveryPollMs
   let recoveryScheduleGeneration = 0
   let closing: Promise<void> | undefined
   let activityGeneration = 0
@@ -401,23 +407,27 @@ export async function listenRecorderDaemon(args: {
 
   const scheduleRecovery = (reset = false): void => {
     if (closing) return
-    if (reset) recoveryDelayMs = RECOVERY_POLL_MS
-    if (recoveryTimer) clearTimeout(recoveryTimer)
+    if (reset) recoveryDelayMs = recoveryPollMs
+    cancelRecoveryTimer?.()
     const generation = ++recoveryScheduleGeneration
-    recoveryTimer = setTimeout(() => {
-      recoveryTimer = undefined
-      void (async () => {
-        if (!await recorderHasOpenTurn(enablement.dataRoot)) return
-        const result = await runRecovery()
-        if (closing || generation !== recoveryScheduleGeneration) return
-        if (!await recorderHasOpenTurn(enablement.dataRoot)) return
-        recoveryDelayMs = result.recovered > 0
-          ? RECOVERY_POLL_MS
-          : Math.min(MAX_RECOVERY_POLL_MS, recoveryDelayMs * 2)
-        scheduleRecovery()
-      })()
-    }, recoveryDelayMs)
-    recoveryTimer.unref()
+    const run = async (): Promise<void> => {
+      cancelRecoveryTimer = undefined
+      if (!await recorderHasOpenTurn(enablement.dataRoot)) return
+      const result = await runRecovery()
+      if (closing || generation !== recoveryScheduleGeneration) return
+      if (!await recorderHasOpenTurn(enablement.dataRoot)) return
+      recoveryDelayMs = result.recovered > 0
+        ? recoveryPollMs
+        : Math.min(maxRecoveryPollMs, recoveryDelayMs * 2)
+      scheduleRecovery()
+    }
+    if (args.scheduleRecoveryTimeout) {
+      cancelRecoveryTimer = args.scheduleRecoveryTimeout(run, recoveryDelayMs)
+    } else {
+      const timer = setTimeout(() => { void run() }, recoveryDelayMs)
+      timer.unref()
+      cancelRecoveryTimer = () => clearTimeout(timer)
+    }
   }
 
   let closeDaemon: () => Promise<void>
@@ -542,7 +552,9 @@ export async function listenRecorderDaemon(args: {
     if (closing) return closing
     closing = new Promise<void>((resolvePromise) => {
       if (idleTimer) clearTimeout(idleTimer)
-      if (recoveryTimer) clearTimeout(recoveryTimer)
+      cancelRecoveryTimer?.()
+      cancelRecoveryTimer = undefined
+      recoveryScheduleGeneration++
       server.close(() => resolvePromise())
     }).then(async () => {
       await recoveryInFlight

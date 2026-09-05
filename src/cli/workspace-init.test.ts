@@ -50,7 +50,11 @@ describe('scry init', () => {
       }
     }
     const openCodePlugin = join(root, '.opencode/plugins/scry-recorder.js')
-    expect(await readFile(openCodePlugin, 'utf8')).toContain('SCRY_HANDLER_ID=turn-recorder-v1')
+    const openCodeSource = await readFile(openCodePlugin, 'utf8')
+    expect(openCodeSource).toContain('SCRY_HANDLER_ID=turn-recorder-v1')
+    expect(openCodeSource).toContain("reason: 'byte_limit'")
+    expect(openCodeSource).toContain('if (observed.length === 0) return undefined')
+    expect(openCodeSource).toContain('...(observedUsage ? { usage: observedUsage } : {})')
     execFileSync(process.execPath, ['--check', openCodePlugin])
     expect(await readFile(join(root, '.git/info/exclude'), 'utf8')).toContain('.scry/')
     execFileSync('sh', ['-n', join(root, '.scry/provider-hook.sh')])

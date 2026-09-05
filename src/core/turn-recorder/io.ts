@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { link, mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 
 export async function readJson<T>(path: string): Promise<T | null> {
   try {
@@ -32,6 +32,76 @@ export async function writeJsonAtomic(path: string, value: unknown, options: { s
   } catch (error) {
     try { await handle?.close() } catch { /* preserve original error */ }
     await rm(temp, { force: true }).catch(() => {})
+    throw error
+  }
+}
+
+export async function syncDirectory(path: string): Promise<void> {
+  const directory = await open(path, 'r')
+  try {
+    await directory.sync()
+  } finally {
+    await directory.close()
+  }
+}
+
+/** Create each missing directory component and durably link it from its parent. */
+export async function mkdirDurable(path: string, mode = 0o700): Promise<void> {
+  const absolute = resolve(path)
+  const root = parse(absolute).root
+  let current = root
+  for (const part of relative(root, absolute).split(sep).filter(Boolean)) {
+    const next = join(current, part)
+    try {
+      await mkdir(next, { mode })
+      await syncDirectory(current)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const info = await stat(next)
+      if (!info.isDirectory()) throw error
+      // A previous attempt may have created this entry but failed its parent fsync.
+      await syncDirectory(current)
+    }
+    current = next
+  }
+}
+
+export function exclusiveWriteTempPath(path: string, temporaryId: string): string {
+  return `${path}.${temporaryId}.archive-tmp`
+}
+
+/** Durable cross-filesystem copy primitive that never replaces an existing destination. */
+export async function writeFileAtomicExclusive(
+  path: string,
+  content: Buffer,
+  options: {
+    temporaryId?: string
+    onPublished?: () => Promise<void> | void
+    syncDirectory?: (path: string) => Promise<void>
+  } = {}
+): Promise<void> {
+  await mkdirDurable(dirname(path))
+  const temp = exclusiveWriteTempPath(path, options.temporaryId ?? `${process.pid}.${randomUUID()}`)
+  const sync = options.syncDirectory ?? syncDirectory
+  let handle
+  let published = false
+  try {
+    handle = await open(temp, 'wx', 0o600)
+    await handle.writeFile(content)
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    // Sync the new final link before deleting the temporary link. A journaled caller can then
+    // recover either name after a crash without ever mistaking a partial file for the final copy.
+    await link(temp, path)
+    await sync(dirname(path))
+    published = true
+    await options.onPublished?.()
+    await rm(temp)
+    await sync(dirname(path))
+  } catch (error) {
+    try { await handle?.close() } catch { /* preserve original error */ }
+    if (!published) await rm(temp, { force: true }).catch(() => {})
     throw error
   }
 }

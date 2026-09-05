@@ -18,20 +18,49 @@ function timestamp(value) {
   return new Date().toISOString()
 }
 
+function utf8Prefix(text, limit) {
+  const source = Buffer.from(text)
+  if (source.byteLength <= limit) return text
+  let end = limit
+  while (end > Math.max(0, limit - 4)) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(source.subarray(0, end)) } catch { end-- }
+  }
+  return source.subarray(0, end).toString('utf8')
+}
+
+function limitation(field, result) {
+  return result.capture
+    ? { scry_capture: { schemaVersion: 1, fields: { [field]: result.capture } } }
+    : {}
+}
+
 function boundedJson(value) {
   try {
     const source = JSON.stringify(value)
-    if (Buffer.byteLength(source) <= MAX_JSON_BYTES) return value
-    return { truncated: true, bytes: Buffer.byteLength(source), preview: source.slice(0, 4_000) }
+    const bytes = Buffer.byteLength(source)
+    if (bytes <= MAX_JSON_BYTES) return { value }
+    const preview = utf8Prefix(source, 4_000)
+    return {
+      value: { truncated: true, bytes, preview },
+      capture: { status: 'partial', reason: 'byte_limit', originalBytes: bytes, retainedBytes: Buffer.byteLength(preview) }
+    }
   } catch {
-    return { unavailable: true }
+    return {
+      value: { unavailable: true },
+      capture: { status: 'unavailable', reason: 'serialization_error' }
+    }
   }
 }
 
 function boundedText(value, limit = MAX_ASSISTANT_BYTES) {
   const text = String(value ?? '')
-  if (Buffer.byteLength(text) <= limit) return text
-  return Buffer.from(text).subarray(0, limit).toString('utf8')
+  const bytes = Buffer.byteLength(text)
+  if (bytes <= limit) return { value: text }
+  const retained = utf8Prefix(text, limit)
+  return {
+    value: retained,
+    capture: { status: 'partial', reason: 'byte_limit', originalBytes: bytes, retainedBytes: Buffer.byteLength(retained) }
+  }
 }
 
 function assistantText(message) {
@@ -225,24 +254,28 @@ export default function scryPiRecorder(pi) {
 
   pi.on('tool_execution_start', async (event) => {
     if (!active) return
+    const input = boundedJson(event.args)
     await enqueue(active.workspace, `PreToolUse:${event.toolName}`, {
       session_id: active.sessionId,
       promptId: active.providerTurnId,
       tool_name: event.toolName,
       tool_use_id: event.toolCallId,
-      tool_input: boundedJson(event.args),
+      tool_input: input.value,
+      ...limitation('tool_input', input),
       timestamp: new Date().toISOString(),
     })
   })
 
   pi.on('tool_execution_end', async (event) => {
     if (!active) return
+    const output = boundedJson(event.result)
     await enqueue(active.workspace, event.isError ? `PostToolUseFailure:${event.toolName}` : `PostToolUse:${event.toolName}`, {
       session_id: active.sessionId,
       promptId: active.providerTurnId,
       tool_name: event.toolName,
       tool_use_id: event.toolCallId,
-      tool_response: boundedJson(event.result),
+      tool_response: output.value,
+      ...limitation('tool_response', output),
       ...(event.isError ? { error: true } : {}),
       timestamp: new Date().toISOString(),
     })
@@ -252,10 +285,12 @@ export default function scryPiRecorder(pi) {
     const turn = active
     if (!turn || turn.settled) return
     turn.settled = true
+    const assistant = boundedText(turn.assistant.join('\n'))
     await enqueue(turn.workspace, 'Stop', {
       session_id: turn.sessionId,
       promptId: turn.providerTurnId,
-      assistant_response: boundedText(turn.assistant.join('\n')),
+      assistant_response: assistant.value,
+      ...limitation('assistant_response', assistant),
       ...(turn.usageObserved ? { usage: turn.usage } : {}),
       model_segments: turn.modelSegments,
       status: 'completed',
@@ -268,10 +303,12 @@ export default function scryPiRecorder(pi) {
     const turn = active
     if (turn && !turn.settled) {
       turn.settled = true
+      const assistant = boundedText(turn.assistant.join('\n'))
       await enqueue(turn.workspace, 'Stop', {
         session_id: turn.sessionId,
         promptId: turn.providerTurnId,
-        assistant_response: boundedText(turn.assistant.join('\n')),
+        assistant_response: assistant.value,
+        ...limitation('assistant_response', assistant),
         ...(turn.usageObserved ? { usage: turn.usage } : {}),
         model_segments: turn.modelSegments,
         status: 'interrupted',

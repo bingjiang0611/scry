@@ -1,14 +1,15 @@
-import { access, appendFile, chmod, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rm, unlink, utimes, writeFile } from 'node:fs/promises'
+import { access, appendFile, chmod, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
-import { drainRecorderDelivery, handleRecorderHook, mergeTurnTraceEvents, recoverRecorder } from './recorder'
-import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, redeliverLatestCommitNotification, safeKey, verifyStore } from './store'
+import { drainRecorderDelivery, handleRecorderHook, mergeTurnTraceEvents, readTranscriptWindow, recoverRecorder, resetTranscriptSnapshotCache, transcriptSnapshotCacheStats } from './recorder'
+import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, recordStoreIndexStats, redeliverLatestCommitNotification, resetRecordStoreIndex, safeKey, verifyStore } from './store'
 import { inspectCommitHookBundle, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
+import { syncDirectory } from './io'
 
 const roots: string[] = []
 const pexecFile = promisify(execFile)
@@ -63,6 +64,104 @@ async function completeTurn(root: string, sessionId: string, prompt = 'implement
 }
 
 describe('turn recorder state machine', () => {
+  it('recovery 对未变化 transcript 复用有界解析快照', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'codex-cache.jsonl')
+    await writeFile(rollout, [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'cache-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'keep polling' } }
+    ].map((line) => JSON.stringify(line)).join('\n'))
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('cache-session', {
+        turn_id: 'cache-turn',
+        prompt: 'keep polling',
+        rollout_path: rollout
+      })
+    })
+
+    resetTranscriptSnapshotCache()
+    await recoverRecorder(root)
+    expect(transcriptSnapshotCacheStats()).toMatchObject({ hits: 0, misses: 1, entries: 1 })
+    await recoverRecorder(root)
+    expect(transcriptSnapshotCacheStats()).toMatchObject({ hits: 1, misses: 1, entries: 1 })
+
+    await appendFile(rollout, `\n${JSON.stringify({
+      timestamp: '2026-07-19T12:00:01.000Z',
+      type: 'event_msg',
+      payload: { type: 'turn_aborted', turn_id: 'cache-turn', reason: 'interrupted' }
+    })}\n`)
+    await recoverRecorder(root)
+    expect(transcriptSnapshotCacheStats().misses).toBe(2)
+    await expect(listRecords(join(root, '.scry'))).resolves.toHaveLength(1)
+  })
+
+  it('transcript window 在 stat 后截短或轮转时不声明 snapshot consistent', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'changing.jsonl')
+    await writeFile(transcript, 'first line\nsecond line\n')
+    const initial = await stat(transcript)
+    const expected = {
+      dev: initial.dev,
+      ino: initial.ino,
+      size: initial.size,
+      mtimeMs: initial.mtimeMs,
+      ctimeMs: initial.ctimeMs
+    }
+
+    await writeFile(transcript, 'short\n')
+    await expect(readTranscriptWindow(transcript, expected.size, 0, expected)).resolves.toMatchObject({ consistent: false })
+
+    await rename(transcript, `${transcript}.rotated`)
+    await writeFile(transcript, 'first line\nsecond line\n')
+    await expect(readTranscriptWindow(transcript, expected.size, 0, expected)).resolves.toMatchObject({ consistent: false })
+  })
+
+  it('Pi/OpenCode capture metadata 将截断证据投影为 partial 而非 exact', async () => {
+    const root = await workspace()
+    await handleRecorderHook({ provider: 'pi', event: 'UserPromptSubmit', workspace: root, payload: payload('partial-1', { prompt: 'bounded evidence' }) })
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'PreToolUse:read',
+      workspace: root,
+      payload: payload('partial-1', {
+        tool_name: 'read',
+        tool_use_id: 'partial-tool',
+        tool_input: { truncated: true, preview: 'input' },
+        scry_capture: { schemaVersion: 1, fields: { tool_input: { status: 'partial', reason: 'byte_limit' } } }
+      })
+    })
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'PostToolUse:read',
+      workspace: root,
+      payload: payload('partial-1', {
+        tool_name: 'read',
+        tool_use_id: 'partial-tool',
+        tool_response: { truncated: true, preview: 'output' },
+        scry_capture: { schemaVersion: 1, fields: { tool_response: { status: 'partial', reason: 'byte_limit' } } }
+      })
+    })
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('partial-1', {
+        assistant_response: 'partial assistant',
+        scry_capture: { schemaVersion: 1, fields: { assistant_response: { status: 'partial', reason: 'byte_limit' } } }
+      })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.assistant).toMatchObject({ status: 'partial', quality: 'exact', value: { text: 'partial assistant' } })
+    expect(record.modelSegments).toMatchObject({ status: 'partial', quality: 'exact' })
+    expect(record.tools).toMatchObject({ status: 'partial', quality: 'exact' })
+    expect(record.skills).toMatchObject({ status: 'unavailable' })
+    expect(record.mcps).toMatchObject({ status: 'unavailable' })
+  })
+
   it('每个顶层轮次只提交一条正式记录，重复 Stop 不重复', async () => {
     const root = await workspace()
     await completeTurn(root, 's1')
@@ -888,7 +987,9 @@ describe('turn recorder state machine', () => {
     await mkdir(lock, { recursive: true })
     await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now() }))
     const release = new Promise<void>((resolve) => {
-      setTimeout(() => void rm(lock, { recursive: true, force: true }).then(() => resolve()), 2_100)
+      // Keep one real filesystem contention path, but synchronization does not require sleeping
+      // past the generic two-second lock default.
+      setTimeout(() => void rm(lock, { recursive: true, force: true }).then(() => resolve()), 100)
     })
 
     const [first, retry] = await Promise.all([
@@ -2303,6 +2404,23 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
 })
 
 describe('record store cursor and recovery semantics', () => {
+  it('同进程重复读取复用可重建文件名索引，正式写入后按目录 stamp 失效', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'index-1')
+    const dataRoot = join(root, '.scry')
+    resetRecordStoreIndex()
+
+    await listRecords(dataRoot)
+    expect(recordStoreIndexStats()).toMatchObject({ hits: 0, misses: 1, entries: 1 })
+    await listRecords(dataRoot)
+    expect(recordStoreIndexStats()).toMatchObject({ hits: 1, misses: 1, entries: 1 })
+
+    await completeTurn(root, 'index-2')
+    await listRecords(dataRoot)
+    expect(recordStoreIndexStats().misses).toBe(2)
+    await expect(listRecords(dataRoot)).resolves.toHaveLength(2)
+  })
+
   it('records 作为 durable outbox，只向 callback 发送无敏感字段的提交通知', async () => {
     const root = await workspace()
     await completeTurn(root, 'notify-safe', 'do not leak this prompt')
@@ -2715,17 +2833,16 @@ describe('commit notification drain budget', () => {
   })
 })
 
+
 describe('archive floor and sequence allocation', () => {
   it('拒绝把 archive records 指回 live store，且不删除正式记录', async () => {
     const root = await workspace()
     await completeTurn(root, 'overlap-1')
     const dataRoot = join(root, '.scry')
 
-    await expect(archiveRecords(dataRoot, { throughSequence: 1, target: dataRoot }))
-      .rejects.toThrow('must not overlap')
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target: dataRoot })).rejects.toThrow('must not overlap')
     const dotDotPrefixedTarget = join(dataRoot, 'records', '..archive')
-    await expect(archiveRecords(dataRoot, { throughSequence: 1, target: dotDotPrefixedTarget }))
-      .rejects.toThrow('must not overlap')
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target: dotDotPrefixedTarget })).rejects.toThrow('must not overlap')
     await expect(access(dotDotPrefixedTarget)).rejects.toThrow()
     expect((await listRecords(dataRoot)).map((record) => record.sequence)).toEqual([1])
     await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, records: 1, archivedThrough: 0 })
@@ -2745,6 +2862,106 @@ describe('archive floor and sequence allocation', () => {
     await expect(readArchiveState(dataRoot)).resolves.toBeNull()
   })
 
+  it('崩溃在 source 删除后由 journal 幂等恢复，恢复前禁止 sequence 分配', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'journal-1')
+    await completeTurn(root, 'journal-2')
+    const dataRoot = join(root, '.scry')
+    const target = join(root, 'archive-journal')
+    const [original] = await listRecords(dataRoot)
+    const { sequence: _sequence, ...draft } = original
+    let faulted = false
+
+    await expect(archiveRecords(dataRoot, {
+      throughSequence: 2,
+      target,
+      onStep: (phase, sequence) => {
+        if (!faulted && phase === 'source-removed' && sequence === 1) {
+          faulted = true
+          throw new Error('simulated crash')
+        }
+      }
+    })).rejects.toThrow('simulated crash')
+    await expect(readArchiveState(dataRoot)).resolves.toBeNull()
+    await expect(verifyStore(dataRoot)).resolves.toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.stringContaining('pending archive journal')])
+    })
+    await expect(commitRecord(dataRoot, { ...draft, recordId: 'a'.repeat(64) })).rejects.toThrow('pending archive must be resumed')
+
+    const recovered = await archiveRecords(dataRoot, { throughSequence: 2, target })
+    expect(recovered.archived.map((item) => item.sequence)).toEqual([1, 2])
+    await expect(readArchiveState(dataRoot)).resolves.toEqual({ schemaVersion: 1, archivedThrough: 2 })
+    await expect(access(join(dataRoot, 'archive-journal.json'))).rejects.toThrow()
+    await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, records: 0, archivedThrough: 2 })
+  })
+
+  it('target link 已发布但临时 link 未清理时可由 journal 恢复', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'journal-temp-link')
+    const dataRoot = join(root, '.scry')
+    const target = join(root, 'archive-temp-link')
+
+    await expect(archiveRecords(dataRoot, {
+      throughSequence: 1,
+      target,
+      onStep: (phase) => {
+        if (phase === 'target-published') throw new Error('simulated publish crash')
+      }
+    })).rejects.toThrow('simulated publish crash')
+    expect(await readdir(join(target, 'records'))).toHaveLength(2)
+
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target })).resolves.toMatchObject({ archivedThrough: 1 })
+    expect((await readdir(join(target, 'records'))).filter((name) => name.endsWith('.archive-tmp'))).toEqual([])
+    await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, records: 0, archivedThrough: 1 })
+  })
+
+  it('target link 的目录 fsync 失败后重试仍先完成 durability barrier 再删 source', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'journal-fsync')
+    const dataRoot = join(root, '.scry')
+    const target = join(root, 'archive-fsync')
+    let faulted = false
+
+    await expect(archiveRecords(dataRoot, {
+      throughSequence: 1,
+      target,
+      syncDirectory: async (path) => {
+        if (!faulted && path.endsWith('/archive-fsync/records')) {
+          faulted = true
+          throw new Error('simulated directory fsync failure')
+        }
+        await syncDirectory(path)
+      }
+    })).rejects.toThrow('simulated directory fsync failure')
+    await expect(listRecords(dataRoot)).resolves.toHaveLength(1)
+    await expect(readArchiveState(dataRoot)).resolves.toBeNull()
+
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target })).resolves.toMatchObject({ archivedThrough: 1 })
+    await expect(listRecords(dataRoot)).resolves.toHaveLength(0)
+    await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, archivedThrough: 1 })
+  })
+
+  it('journal 恢复前校验 live source，不静默删除冲突内容', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'journal-source-conflict')
+    const dataRoot = join(root, '.scry')
+    const target = join(root, 'archive-source-conflict')
+    const [recordName] = await readdir(join(dataRoot, 'records'))
+
+    await expect(archiveRecords(dataRoot, {
+      throughSequence: 1,
+      target,
+      onStep: (phase) => {
+        if (phase === 'target-published') throw new Error('simulated publish crash')
+      }
+    })).rejects.toThrow('simulated publish crash')
+    await writeFile(join(dataRoot, 'records', recordName), 'corrupted live source')
+
+    await expect(archiveRecords(dataRoot, { throughSequence: 1, target })).rejects.toThrow('does not match journal')
+    await expect(access(join(dataRoot, 'records', recordName))).resolves.toBeUndefined()
+  })
+
   it('归档全部记录后新轮次从 floor+1 继续，store 仍连续', async () => {
     const root = await workspace()
     await completeTurn(root, 'floor-1')
@@ -2754,7 +2971,6 @@ describe('archive floor and sequence allocation', () => {
     const archived = await archiveRecords(dataRoot, { throughSequence: 2, target: join(root, 'archive-1') })
     expect(archived.archived.map((item) => item.sequence)).toEqual([1, 2])
     expect((await readArchiveState(dataRoot))?.archivedThrough).toBe(2)
-    // An archived prefix is explained by the floor, so an empty live store is still valid.
     await expect(verifyStore(dataRoot)).resolves.toMatchObject({ ok: true, records: 0, archivedThrough: 2 })
 
     await completeTurn(root, 'floor-3')
@@ -2773,8 +2989,7 @@ describe('archive floor and sequence allocation', () => {
     const store = await verifyStore(dataRoot)
     expect(store.ok).toBe(false)
     expect(store.errors.join(' ')).toContain('sequence gap')
-    await expect(archiveRecords(dataRoot, { throughSequence: 2, target: join(root, 'archive-gap') }))
-      .rejects.toThrow('sequence gap')
+    await expect(archiveRecords(dataRoot, { throughSequence: 2, target: join(root, 'archive-gap') })).rejects.toThrow('sequence gap')
     expect((await listRecords(dataRoot)).map((record) => record.sequence)).toEqual([2])
     await expect(readArchiveState(dataRoot)).resolves.toBeNull()
   })

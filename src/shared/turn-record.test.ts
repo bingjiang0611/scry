@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAgentTurnRecord } from './turn-record'
+import { evidenceStatusMap, isAgentTurnRecord, validateAgentTurnRecord } from './turn-record'
 
 const availableEmpty = () => ({
   status: 'available',
@@ -37,6 +37,87 @@ function record(): Record<string, unknown> {
     errors: availableEmpty()
   }
 }
+
+describe('AgentTurnRecord strict schema-v1 validation', () => {
+  it.each([
+    ['durationMs', Number.NaN],
+    ['status', 'unknown'],
+    ['startedAt', 'not-a-date'],
+    ['recorderVersion', '']
+  ])('rejects malformed top-level %s', (field, value) => {
+    const malformed = record()
+    malformed[field] = value
+    const result = validateAgentTurnRecord(malformed)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.issues.some((issue) => issue.path === `$.${field}`)).toBe(true)
+  })
+
+  it('rejects impossible evidence state/value combinations and malformed nested calls', () => {
+    const missingValue = record()
+    missingValue.tools = { status: 'available', quality: 'exact', source: ['fixture'] }
+    expect(isAgentTurnRecord(missingValue)).toBe(false)
+
+    const malformedCall = record()
+    malformedCall.tools = {
+      status: 'partial',
+      quality: 'exact',
+      source: ['fixture'],
+      omissionReason: 'bounded',
+      value: [{ name: 'Bash', status: 'invented' }]
+    }
+    expect(isAgentTurnRecord(malformedCall)).toBe(false)
+  })
+
+  it('validates complete intervention request/response contracts', () => {
+    const valid = record()
+    valid.interventions = {
+      status: 'available',
+      quality: 'exact',
+      source: ['fixture'],
+      value: [{
+        kind: 'clarification',
+        source: 'AskUserQuestion',
+        resolution: 'answered',
+        openedAt: '2026-01-01T00:00:00.000Z',
+        closedAt: '2026-01-01T00:00:01.000Z',
+        durationMs: 1_000,
+        request: {
+          runId: 'run-1',
+          questionId: 'question-1',
+          providerId: 'codex',
+          questionKind: 'clarification',
+          questions: [{
+            question: 'Proceed?',
+            header: 'Decision',
+            options: [{ label: 'Yes', description: 'Continue' }],
+            multiSelect: false
+          }]
+        },
+        response: {
+          runId: 'run-1',
+          questionId: 'question-1',
+          behavior: 'answered',
+          answers: { 'Proceed?': 'Yes' }
+        }
+      }]
+    }
+    expect(isAgentTurnRecord(valid)).toBe(true)
+
+    const missingQuestions = structuredClone(valid)
+    ;((missingQuestions.interventions as { value: Array<{ request: Record<string, unknown> }> }).value)[0].request = {}
+    expect(isAgentTurnRecord(missingQuestions)).toBe(false)
+
+    const mismatchedResponse = structuredClone(valid)
+    ;((mismatchedResponse.interventions as { value: Array<{ response: { questionId: string } }> }).value)[0].response.questionId = 'other'
+    expect(isAgentTurnRecord(mismatchedResponse)).toBe(false)
+  })
+
+  it('reports modelSegments in the unified evidence map without rejecting older omission', () => {
+    const legacy = record()
+    if (!isAgentTurnRecord(legacy)) throw new Error('legacy fixture should remain valid')
+    expect(evidenceStatusMap(legacy).modelSegments).toBe('unavailable/unavailable')
+  })
+})
 
 describe('AgentTurnRecord model timing compatibility', () => {
   it('accepts old schema v1 records that predate modelTiming', () => {

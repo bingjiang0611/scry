@@ -1,5 +1,5 @@
 import type { ProviderId } from './provider.js'
-import type { CompactionTrigger, DangerLevel, DiffFile, TurnDiffCollection, TurnDiffReason, TurnDiffStatus } from './trace.js'
+import { normalizeTurnDiffSnapshot, type CompactionTrigger, type DangerLevel, type DiffFile, type TurnDiffCollection, type TurnDiffReason, type TurnDiffStatus } from './trace.js'
 import type { AgentIntervention } from './runtime.js'
 
 export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
@@ -202,7 +202,7 @@ export const REQUIRED_EVIDENCE_SECTIONS = [
   'dangerousOperations', 'errors'
 ] as const
 
-export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelTiming'] as const
+export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelSegments', 'modelTiming'] as const
 
 /** `status/quality` per section; a missing optional section reads as unavailable, never as empty. */
 export function evidenceStatusMap(record: AgentTurnRecord): Record<string, string> {
@@ -231,13 +231,16 @@ export function partial<T>(value: T, source: string[], reason: string, quality: 
 }
 
 function isEvidence(value: unknown): value is Evidence<unknown> {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
-  return (
-    ['available', 'partial', 'disabled', 'unavailable'].includes(String(raw.status)) &&
-    ['exact', 'estimated', 'inferred', 'unavailable'].includes(String(raw.quality)) &&
-    Array.isArray(raw.source)
-  )
+  if (!['available', 'partial', 'disabled', 'unavailable'].includes(String(raw.status))) return false
+  if (!['exact', 'estimated', 'inferred', 'unavailable'].includes(String(raw.quality))) return false
+  if (!Array.isArray(raw.source) || !raw.source.every((source) => typeof source === 'string' && source.length > 0)) return false
+  if (raw.omissionReason !== undefined && (typeof raw.omissionReason !== 'string' || raw.omissionReason.length === 0)) return false
+  if (raw.status === 'available') return raw.value !== undefined && raw.quality !== 'unavailable' && raw.source.length > 0
+  if (raw.status === 'partial') return raw.value !== undefined && raw.quality !== 'unavailable' && typeof raw.omissionReason === 'string' && raw.source.length > 0
+  // Early schema-v1 writers omitted omissionReason, so readers retain that historical compatibility.
+  return raw.quality === 'unavailable'
 }
 
 function isNonNegativeNumber(value: unknown): value is number {
@@ -245,7 +248,7 @@ function isNonNegativeNumber(value: unknown): value is number {
 }
 
 function isModelTimingLane(value: unknown): value is TurnModelTimingLane {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   return (
     Number.isSafeInteger(raw.totalCalls) &&
@@ -258,11 +261,11 @@ function isModelTimingLane(value: unknown): value is TurnModelTimingLane {
 }
 
 function isModelTimingCall(value: unknown): value is TurnModelCallTiming {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   return (
     ['root', 'subagent'].includes(String(raw.scope)) &&
-    typeof raw.completedAt === 'string' &&
+    isDateString(raw.completedAt) &&
     ['provider', 'observed'].includes(String(raw.source)) &&
     (raw.durationMs === undefined || isNonNegativeNumber(raw.durationMs)) &&
     (raw.boundary === undefined || raw.boundary === 'turn_or_activity_end')
@@ -270,7 +273,7 @@ function isModelTimingCall(value: unknown): value is TurnModelCallTiming {
 }
 
 function isActivityCoverage(value: unknown): value is TurnModelTiming['activityCoverage'] {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   return (
     Number.isSafeInteger(raw.totalCalls) &&
@@ -282,7 +285,7 @@ function isActivityCoverage(value: unknown): value is TurnModelTiming['activityC
 }
 
 function isModelTiming(value: unknown): value is TurnModelTiming {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   if (!['provider_api', 'response_intervals', 'non_call_residual'].includes(String(raw.method))) return false
   for (const key of ['cumulativeMs', 'occupiedMs', 'overlapMs']) {
@@ -311,12 +314,12 @@ function isModelTimingEvidence(value: unknown): value is Evidence<TurnModelTimin
 }
 
 function isModelSegment(value: unknown): value is TurnModelSegment {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   return (
     Number.isSafeInteger(raw.order) &&
     Number(raw.order) >= 0 &&
-    typeof raw.at === 'string' &&
+    isDateString(raw.at) &&
     (raw.kind === 'text' || raw.kind === 'thinking') &&
     typeof raw.text === 'string' &&
     raw.text.length > 0 &&
@@ -335,12 +338,12 @@ function isModelSegmentsEvidence(value: unknown): value is Evidence<TurnModelSeg
 }
 
 function isCompaction(value: unknown): value is TurnCompaction {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   return (
     typeof raw.eventId === 'string' &&
     raw.eventId.length > 0 &&
-    typeof raw.at === 'string' &&
+    isDateString(raw.at) &&
     (raw.trigger === undefined || raw.trigger === 'auto' || raw.trigger === 'manual') &&
     (raw.preTokens === undefined || isNonNegativeNumber(raw.preTokens)) &&
     (raw.postTokens === undefined || isNonNegativeNumber(raw.postTokens)) &&
@@ -356,23 +359,210 @@ function isCompactionsEvidence(value: unknown): value is Evidence<TurnCompaction
   return Array.isArray(raw.value) && raw.value.every(isCompaction)
 }
 
-export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
-  if (!value || typeof value !== 'object') return false
+function isDateString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && Number.isFinite(Date.parse(value))
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string'
+}
+
+function isEvidencePayload(value: unknown, validate: (payload: unknown) => boolean, allowUnavailableValue = false): boolean {
+  if (!isEvidence(value)) return false
+  const evidence = value as Evidence<unknown>
+  if (evidence.status === 'available' || evidence.status === 'partial') return validate(evidence.value)
+  return evidence.value === undefined || (allowUnavailableValue && validate(evidence.value))
+}
+
+function isTextPayload(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
-  if (raw.schemaVersion !== 1 || raw.recordKind !== 'agent_turn') return false
-  if (!Number.isSafeInteger(raw.sequence) || Number(raw.sequence) < 1) return false
-  if (typeof raw.recordId !== 'string' || !raw.recordId) return false
-  if (typeof raw.sessionId !== 'string' || !raw.sessionId) return false
-  if (!Number.isSafeInteger(raw.generation) || Number(raw.generation) < 1) return false
-  if (!Number.isSafeInteger(raw.turnIndex) || Number(raw.turnIndex) < 1) return false
-  if (typeof raw.startedAt !== 'string' || typeof raw.completedAt !== 'string') return false
-  if (!raw.workspace || typeof raw.workspace !== 'object' || !raw.provider || typeof raw.provider !== 'object') return false
-  const provider = raw.provider as Record<string, unknown>
-  if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id))) return false
-  const requiredEvidence = REQUIRED_EVIDENCE_SECTIONS.every((key) => isEvidence(raw[key]))
-  return requiredEvidence &&
-    (raw.compactions === undefined || isCompactionsEvidence(raw.compactions)) &&
-    (raw.modelSegments === undefined || isModelSegmentsEvidence(raw.modelSegments)) &&
-    (raw.modelTiming === undefined || isModelTimingEvidence(raw.modelTiming)) &&
-    (raw.interventions === undefined || isEvidence(raw.interventions))
+  return isOptionalString(raw.text) && isOptionalString(raw.textHash)
+}
+
+function isTurnCall(value: unknown): value is TurnCall {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  if (typeof raw.name !== 'string' || !raw.name || !['started', 'success', 'failed', 'cancelled', 'unknown'].includes(String(raw.status))) return false
+  if (raw.category !== undefined && !['tool', 'skill', 'agent', 'mcp'].includes(String(raw.category))) return false
+  for (const key of ['order', 'completedOrder']) if (raw[key] !== undefined && (!Number.isSafeInteger(raw[key]) || Number(raw[key]) < 0)) return false
+  if (raw.durationMs !== undefined && !isNonNegativeNumber(raw.durationMs)) return false
+  if (raw.startedAt !== undefined && !isDateString(raw.startedAt)) return false
+  if (raw.completedAt !== undefined && !isDateString(raw.completedAt)) return false
+  if (!['id', 'parentId', 'outputSummary', 'error'].every((key) => isOptionalString(raw[key]))) return false
+  if (raw.file !== undefined) {
+    if (!raw.file || typeof raw.file !== 'object' || Array.isArray(raw.file)) return false
+    const file = raw.file as Record<string, unknown>
+    if (typeof file.path !== 'string' || !['read', 'write', 'edit'].includes(String(file.operation))) return false
+  }
+  if (raw.mcp !== undefined) {
+    if (!raw.mcp || typeof raw.mcp !== 'object' || Array.isArray(raw.mcp)) return false
+    const mcp = raw.mcp as Record<string, unknown>
+    if (!['server', 'action', 'tool'].every((key) => isOptionalString(mcp[key]))) return false
+  }
+  return true
+}
+
+function isTurnHook(value: unknown): value is TurnHookCall {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  if (typeof raw.event !== 'string' || !raw.event || !['started', 'success', 'failed', 'cancelled', 'unknown'].includes(String(raw.status))) return false
+  for (const key of ['order', 'lifecycleEvents', 'runs', 'failed']) if (raw[key] !== undefined && (!Number.isSafeInteger(raw[key]) || Number(raw[key]) < 0)) return false
+  if (raw.durationMs !== undefined && !isNonNegativeNumber(raw.durationMs)) return false
+  if (raw.startedAt !== undefined && !isDateString(raw.startedAt)) return false
+  if (raw.completedAt !== undefined && !isDateString(raw.completedAt)) return false
+  return ['name', 'command'].every((key) => isOptionalString(raw[key]))
+}
+
+function isTurnUsage(value: unknown): value is TurnUsage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  for (const key of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'reasoningTokens', 'apiDurationMs', 'contextTokens', 'contextWindow']) {
+    if (raw[key] !== undefined && !isNonNegativeNumber(raw[key])) return false
+  }
+  if (raw.costUsd !== undefined && canonicalCostUsd(raw.costUsd as number) !== raw.costUsd) return false
+  if (raw.contextUsageQuality !== undefined && !['exact', 'inferred'].includes(String(raw.contextUsageQuality))) return false
+  return ['contextModel', 'contextProvider', 'contextUsageSource', 'model'].every((key) => isOptionalString(raw[key]))
+}
+
+function isTurnFile(value: unknown): value is TurnFile {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return typeof raw.path === 'string' && raw.path.length > 0 && ['read', 'write', 'edit'].includes(String(raw.operation))
+}
+
+function isTurnDiff(value: unknown): value is TurnDiffSnapshotRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  const normalized = normalizeTurnDiffSnapshot({ version: 1, ...raw })
+  return !!normalized && Array.isArray(raw.files) && normalized.files.length === raw.files.length
+}
+
+function isTurnDanger(value: unknown): value is TurnDanger {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return ['danger', 'warn'].includes(String(raw.level)) && typeof raw.reason === 'string' && raw.reason.length > 0 &&
+    isOptionalString(raw.tool) && isOptionalString(raw.toolUseId)
+}
+
+function isTurnError(value: unknown): value is TurnError {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return typeof raw.message === 'string' && raw.message.length > 0 && typeof raw.source === 'string' && raw.source.length > 0 && isOptionalString(raw.toolUseId)
+}
+
+function isQuestionOption(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return typeof raw.label === 'string' && raw.label.length > 0 && raw.label.length <= 240 &&
+    typeof raw.description === 'string' && raw.description.length > 0 && raw.description.length <= 4_000 &&
+    (raw.preview === undefined || (typeof raw.preview === 'string' && raw.preview.length > 0 && raw.preview.length <= 20_000))
+}
+
+function isQuestionPrompt(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  if (typeof raw.question !== 'string' || raw.question.length === 0 || raw.question.length > 2_000) return false
+  if (typeof raw.header !== 'string' || raw.header.length === 0 || raw.header.length > 120) return false
+  if (!Array.isArray(raw.options) || raw.options.length > 4 || !raw.options.every(isQuestionOption) || typeof raw.multiSelect !== 'boolean') return false
+  const labels = raw.options.map((option) => (option as Record<string, unknown>).label)
+  return new Set(labels).size === labels.length
+}
+
+function isQuestionRequest(value: unknown): value is Record<string, unknown> & { questions: Array<Record<string, unknown>> } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return typeof raw.runId === 'string' && raw.runId.length > 0 &&
+    typeof raw.questionId === 'string' && raw.questionId.length > 0 &&
+    (raw.providerId === undefined || ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(raw.providerId))) &&
+    isOptionalString(raw.agentId) && isOptionalString(raw.source) &&
+    (raw.questionKind === undefined || ['clarification', 'permission'].includes(String(raw.questionKind))) &&
+    Array.isArray(raw.questions) && raw.questions.length > 0 && raw.questions.length <= 4 && raw.questions.every(isQuestionPrompt) &&
+    new Set(raw.questions.map((question) => (question as Record<string, unknown>).question)).size === raw.questions.length
+}
+
+function isQuestionResponse(value: unknown, request: Record<string, unknown> & { questions: Array<Record<string, unknown>> }): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  if (raw.runId !== request.runId || raw.questionId !== request.questionId) return false
+  if (raw.behavior === 'cancelled') return raw.answers === undefined
+  if (raw.behavior !== 'answered' || !raw.answers || typeof raw.answers !== 'object' || Array.isArray(raw.answers)) return false
+  const answers = raw.answers as Record<string, unknown>
+  if (!Object.values(answers).every((answer) => typeof answer === 'string' && answer.length > 0 && answer.length <= 4_000)) return false
+  return request.questions.every((question) => typeof question.question === 'string' && typeof answers[question.question] === 'string')
+}
+
+function isIntervention(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  if (!['clarification', 'permission'].includes(String(raw.kind)) || typeof raw.source !== 'string' || raw.source.length === 0) return false
+  if (!['answered', 'user_cancelled', 'provider_cancelled'].includes(String(raw.resolution))) return false
+  if (!isDateString(raw.openedAt) || !isDateString(raw.closedAt) || Date.parse(raw.closedAt) < Date.parse(raw.openedAt) || !isNonNegativeNumber(raw.durationMs)) return false
+  if (!isQuestionRequest(raw.request) || !isQuestionResponse(raw.response, raw.request)) return false
+  if (raw.request.questionKind !== undefined && raw.request.questionKind !== raw.kind) return false
+  const response = raw.response as Record<string, unknown>
+  return raw.resolution === 'answered' ? response.behavior === 'answered' : response.behavior === 'cancelled'
+}
+
+function isArrayOf(value: unknown, validate: (item: unknown) => boolean): boolean {
+  return Array.isArray(value) && value.every(validate)
+}
+
+export interface TurnRecordValidationIssue {
+  path: string
+  message: string
+}
+
+export type TurnRecordValidationResult =
+  | { ok: true; record: AgentTurnRecord }
+  | { ok: false; issues: TurnRecordValidationIssue[] }
+
+export function validateAgentTurnRecord(value: unknown): TurnRecordValidationResult {
+  const issues: TurnRecordValidationIssue[] = []
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, issues: [{ path: '$', message: 'must be an object' }] }
+  const raw = value as Record<string, unknown>
+  const require = (condition: boolean, path: string, message: string): void => { if (!condition) issues.push({ path, message }) }
+  require(raw.schemaVersion === 1, '$.schemaVersion', 'unsupported schema version')
+  require(raw.recordKind === 'agent_turn', '$.recordKind', 'must be agent_turn')
+  require(Number.isSafeInteger(raw.sequence) && Number(raw.sequence) >= 1, '$.sequence', 'must be a positive safe integer')
+  require(typeof raw.recordId === 'string' && raw.recordId.length > 0, '$.recordId', 'must be a non-empty string')
+  require(typeof raw.recorderVersion === 'string' && raw.recorderVersion.length > 0, '$.recorderVersion', 'must be a non-empty string')
+  require(typeof raw.sessionId === 'string' && raw.sessionId.length > 0, '$.sessionId', 'must be a non-empty string')
+  require(isOptionalString(raw.providerTurnId), '$.providerTurnId', 'must be a string when present')
+  require(Number.isSafeInteger(raw.generation) && Number(raw.generation) >= 1, '$.generation', 'must be a positive safe integer')
+  require(Number.isSafeInteger(raw.turnIndex) && Number(raw.turnIndex) >= 1, '$.turnIndex', 'must be a positive safe integer')
+  require(isDateString(raw.startedAt), '$.startedAt', 'must be a valid timestamp')
+  require(isDateString(raw.completedAt), '$.completedAt', 'must be a valid timestamp')
+  if (isDateString(raw.startedAt) && isDateString(raw.completedAt)) require(Date.parse(raw.completedAt) >= Date.parse(raw.startedAt), '$.completedAt', 'must not precede startedAt')
+  require(isNonNegativeNumber(raw.durationMs), '$.durationMs', 'must be finite and non-negative')
+  require(['completed', 'failed', 'cancelled', 'interrupted'].includes(String(raw.status)), '$.status', 'invalid turn status')
+  const workspace = raw.workspace as Record<string, unknown> | undefined
+  require(!!workspace && typeof workspace.id === 'string' && workspace.id.length > 0 && typeof workspace.root === 'string' && workspace.root.length > 0, '$.workspace', 'invalid workspace identity')
+  const provider = raw.provider as Record<string, unknown> | undefined
+  require(!!provider && ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id)) && isOptionalString(provider.version) && isOptionalString(provider.model), '$.provider', 'invalid provider identity')
+
+  const sections: Array<[string, (payload: unknown) => boolean, boolean?]> = [
+    ['user', isTextPayload], ['assistant', isTextPayload],
+    ['tools', (payload) => isArrayOf(payload, isTurnCall)],
+    ['skills', (payload) => isArrayOf(payload, isTurnCall)],
+    ['mcps', (payload) => isArrayOf(payload, isTurnCall)],
+    ['hooks', (payload) => isArrayOf(payload, isTurnHook)],
+    ['usage', isTurnUsage],
+    ['files', (payload) => isArrayOf(payload, isTurnFile)],
+    ['diff', (payload) => isArrayOf(payload, isTurnDiff), true],
+    ['dangerousOperations', (payload) => isArrayOf(payload, isTurnDanger)],
+    ['errors', (payload) => isArrayOf(payload, isTurnError)]
+  ]
+  for (const [section, validate, allowUnavailableValue] of sections) {
+    require(isEvidencePayload(raw[section], validate, allowUnavailableValue), `$.${section}`, 'invalid evidence envelope or payload')
+  }
+  if (raw.compactions !== undefined) require(isCompactionsEvidence(raw.compactions), '$.compactions', 'invalid compaction evidence')
+  if (raw.modelSegments !== undefined) require(isModelSegmentsEvidence(raw.modelSegments), '$.modelSegments', 'invalid model segment evidence')
+  if (raw.modelTiming !== undefined) require(isModelTimingEvidence(raw.modelTiming), '$.modelTiming', 'invalid model timing evidence')
+  if (raw.interventions !== undefined) require(isEvidencePayload(raw.interventions, (payload) => isArrayOf(payload, isIntervention)), '$.interventions', 'invalid intervention evidence')
+  return issues.length > 0 ? { ok: false, issues } : { ok: true, record: raw as unknown as AgentTurnRecord }
+}
+
+export function isAgentTurnRecord(value: unknown): value is AgentTurnRecord {
+  return validateAgentTurnRecord(value).ok
 }
