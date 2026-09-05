@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scry · 常驻非覆盖摘要 v14</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #ffffff;
+      --sidebar: #f7f8fa;
+      --ink: #202124;
+      --muted: #7f8288;
+      --faint: #a9abb0;
+      --line: #e8e9eb;
+      --line-strong: #dcdde0;
+      --bubble: #f2f2f3;
+      --hover: #f5f5f6;
+      --green: #34a253;
+      --red: #c94139;
+      --purple: #655cf6;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: var(--bg); color: var(--ink); }
+    button { font: inherit; color: inherit; }
+    svg { display: block; }
+
+    .app {
+      width: 100vw;
+      height: 100vh;
+      min-width: 1080px;
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      background: var(--bg);
+    }
+
+    .sidebar {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--sidebar);
+      border-right: 1px solid var(--line);
+    }
+
+    .brand {
+      height: 55px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .logo {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: #202125;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .brand strong { font-size: 14px; }
+    .brand small { margin-left: auto; color: var(--faint); font-size: 10px; }
+
+    .new-chat {
+      height: 38px;
+      margin: 12px 12px 7px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .new-chat:hover { box-shadow: 0 3px 10px rgba(30, 32, 38, .05); }
+    .new-chat b { margin-left: auto; color: var(--faint); font-size: 10px; font-weight: 500; }
+
+    .search {
+      height: 37px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 19px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .nav { padding: 4px 9px; }
+    .nav button {
+      width: 100%;
+      height: 35px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 8px;
+      color: #62656b;
+      background: transparent;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .nav button:hover { background: rgba(31,33,38,.04); }
+    .nav svg { width: 14px; height: 14px; }
+    .nav small { margin-left: auto; color: var(--faint); }
+    .rule { height: 1px; margin: 10px 13px; background: var(--line); }
+    .label { padding: 5px 18px 7px; color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+
+    .session-list { padding: 0 9px; }
+    .session {
+      width: 100%;
+      min-height: 56px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 5px;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .session:hover { background: rgba(31,33,38,.04); }
+    .session.active { background: #e9eaed; }
+    .session span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .session small { color: var(--faint); font-size: 10px; }
+    .session small i { color: var(--green); font-style: normal; }
+    .side-bottom { margin-top: auto; padding: 12px 17px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+
+    .workspace {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 326px 0;
+      grid-template-rows: 55px 1fr;
+      position: relative;
+      transition: grid-template-columns 180ms ease;
+    }
+
+    .workspace.summary-closed { grid-template-columns: minmax(0, 1fr) 0 0; }
+    .workspace.detail-open.summary-closed,
+    .workspace.detail-open:not(.summary-closed) { grid-template-columns: minmax(0, 1fr) 0 360px; }
+
+    .topbar {
+      grid-column: 1 / -1;
+      position: relative;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.95);
+      backdrop-filter: blur(15px);
+    }
+
+    .tabs { display: flex; gap: 5px; }
+    .tab {
+      height: 33px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 9px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .tab.active { color: var(--ink); background: #f1f2f3; }
+    .tab svg { width: 14px; height: 14px; }
+
+    .toolbar { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+    .runtime {
+      height: 25px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 10px;
+      margin-right: 9px;
+    }
+    .live { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+    .tool-button {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 11px;
+      color: #66696f;
+      background: transparent;
+      cursor: pointer;
+      transition: 140ms ease;
+    }
+    .tool-button:hover { background: #f2f2f3; color: #2b2d31; }
+    .tool-button.active { color: var(--ink); background: #eeeef0; }
+    .tool-button svg { width: 17px; height: 17px; }
+
+    .conversation {
+      grid-column: 1;
+      grid-row: 2;
+      min-width: 0;
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 55% 0, rgba(101,92,246,.025), transparent 30%),
+        white;
+    }
+
+    .scroll {
+      height: 100%;
+      overflow: auto;
+      padding: 44px clamp(55px, 8vw, 128px) 165px;
+    }
+
+    .user {
+      width: fit-content;
+      max-width: 70%;
+      margin-left: auto;
+      padding: 13px 17px;
+      border-radius: 18px 18px 5px 18px;
+      background: var(--bubble);
+      color: #27292d;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .time { margin: 8px 3px 0 auto; width: fit-content; color: var(--faint); font-size: 10px; }
+    .turn { margin-top: 42px; }
+    .turn-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+    .provider-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--purple); }
+    .turn-head b { color: #3d3f44; }
+    .turn-head .run { color: var(--faint); }
+    .turn-head .stats { margin-left: auto; color: var(--faint); }
+    .answer {
+      margin-top: 16px;
+      padding: 3px 0 3px 15px;
+      border-left: 2px solid #7770f5;
+      color: #3d4045;
+      font-size: 13px;
+      line-height: 1.75;
+    }
+    .answer strong { color: #24262a; }
+    .answer ul { margin: 8px 0 0; padding-left: 18px; }
+    .answer li { margin: 6px 0; }
+    .trace-line { margin-top: 18px; padding: 10px 0; display: flex; gap: 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    .trace-line span:last-child { margin-left: auto; }
+
+    .composer {
+      position: absolute;
+      left: clamp(45px, 7vw, 105px);
+      right: clamp(45px, 7vw, 105px);
+      bottom: 20px;
+      min-height: 112px;
+      border: 1px solid var(--line-strong);
+      border-radius: 19px;
+      background: rgba(255,255,255,.96);
+      box-shadow: 0 16px 36px rgba(30,33,40,.08), 0 2px 8px rgba(30,33,40,.04);
+      overflow: hidden;
+    }
+    .placeholder { padding: 17px 18px; color: var(--faint); font-size: 12px; }
+    .composer-footer { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; gap: 13px; padding: 0 13px; border-top: 1px solid #f1f1f2; color: var(--muted); font-size: 10px; }
+    .send { margin-left: auto; width: 29px; height: 29px; display: grid; place-items: center; border: 0; border-radius: 9px; color: white; background: var(--purple); }
+
+    .summary-rail {
+      grid-column: 2;
+      grid-row: 2;
+      position: relative;
+      z-index: 12;
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+      padding: 16px 14px 0 8px;
+      background: transparent;
+      transition: opacity 140ms ease, padding 180ms ease;
+    }
+    .workspace.summary-closed .summary-rail {
+      opacity: 0;
+      padding-left: 0;
+      padding-right: 0;
+      pointer-events: none;
+    }
+    .workspace.detail-open .summary-rail {
+      position: absolute;
+      top: 55px;
+      right: 360px;
+      width: 326px;
+      height: calc(100% - 55px);
+      padding: 0 14px 0 8px;
+      background: transparent;
+    }
+    .workspace.detail-open.summary-closed .summary-rail {
+      opacity: 0;
+      padding-left: 8px;
+      padding-right: 14px;
+      pointer-events: none;
+    }
+    .workspace.detail-open:not(.summary-closed) .summary-rail {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .summary-popover {
+      position: relative;
+      width: 100%;
+      height: 520px;
+      max-height: calc(100vh - 108px);
+      overflow-y: auto;
+      padding: 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 20px;
+      background: rgba(255,255,255,.98);
+      box-shadow: 0 18px 45px rgba(25,28,34,.10), 0 2px 10px rgba(25,28,34,.04);
+    }
+    .workspace.detail-open .summary-popover {
+      position: sticky;
+      top: 0;
+    }
+    .summary-popover { scrollbar-width: none; }
+    .summary-popover::-webkit-scrollbar { display: none; }
+
+    .detail-rail {
+      grid-column: 3;
+      grid-row: 2;
+      min-width: 0;
+      overflow: hidden;
+      border-left: 1px solid var(--line);
+      background: white;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 140ms ease;
+    }
+    .workspace.detail-open .detail-rail { opacity: 1; pointer-events: auto; }
+    .detail-surface {
+      width: 360px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: white;
+    }
+    .detail-head {
+      height: 47px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .detail-head svg { width: 15px; height: 15px; }
+    .detail-head button { margin-left: auto; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; }
+    .detail-head button:hover { background: var(--hover); color: var(--ink); }
+    .detail-content { min-height: 0; overflow-y: auto; padding: 18px; }
+    .detail-content h2 { margin: 0 0 16px; font-size: 16px; }
+    .surface-source { padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .source-title { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; gap: 9px; font-size: 12px; line-height: 1.5; word-break: break-word; }
+    .source-title svg { width: 18px; height: 18px; margin-top: 1px; }
+    .surface-source p { margin: 8px 0 0 31px; color: var(--muted); font-size: 10px; }
+    .surface-agent { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .surface-agent .detail-icon { flex: none; }
+    .surface-agent span:last-child { margin-left: auto; color: var(--green); font-size: 10px; }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      min-height: 28px;
+      margin-bottom: 2px;
+      color: #8a8c91;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .section-title button {
+      margin-left: auto;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 9px;
+      color: #8f9196;
+      background: transparent;
+      cursor: pointer;
+    }
+    .section-title button:hover { background: var(--hover); color: #474a4f; }
+    .section-title svg { width: 17px; height: 17px; }
+
+    .summary-row {
+      width: 100%;
+      min-height: 47px;
+      display: grid;
+      grid-template-columns: 31px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 3px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .summary-row:hover { background: var(--hover); }
+    .summary-row.static { cursor: default; }
+    .summary-row.static:hover { background: transparent; }
+    .summary-row + .summary-row { margin-top: 1px; }
+    .summary-row[aria-expanded='true'] { background: #f7f7f8; }
+    .summary-row[aria-expanded='true'] .row-value > svg { transform: rotate(180deg); }
+    .row-value > svg { transition: transform 150ms ease; }
+
+    .detail-panel {
+      display: none;
+      margin: 2px 0 10px 39px;
+      padding: 0;
+    }
+    .expandable.open .detail-panel { display: block; }
+    .detail-row {
+      min-height: 39px;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      padding: 3px 4px 3px 0;
+      color: #303237;
+      font-size: 11px;
+    }
+    .detail-row + .detail-row { margin-top: 2px; }
+    .detail-icon {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #55585d;
+      background: #f0f1f2;
+    }
+    .detail-icon svg { width: 15px; height: 15px; }
+    .detail-icon.youtube { color: #ef3340; font-size: 13px; font-weight: 800; }
+    .detail-icon.github { color: #292b30; font-size: 9px; font-weight: 750; }
+    .detail-row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-row[data-open-surface] { border-radius: 8px; cursor: pointer; }
+    .detail-row[data-open-surface]:hover { background: var(--hover); }
+    .detail-row.unavailable { color: #a0a2a7; }
+    .detail-row.unavailable .detail-icon { color: #aaa; background: #f5f5f6; }
+    .availability { color: #a27826; font-size: 10px; }
+    .detail-more {
+      height: 31px;
+      margin-left: 42px;
+      padding: 0;
+      border: 0;
+      color: #74777d;
+      background: transparent;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .detail-more:hover { color: var(--ink); }
+    .row-icon { width: 29px; height: 29px; display: grid; place-items: center; color: #36383d; }
+    .row-icon svg { width: 17px; height: 17px; }
+    .row-main { min-width: 0; font-size: 13px; color: #2c2e32; }
+    .row-value { display: flex; align-items: center; gap: 7px; color: #6d7075; font-size: 12px; white-space: nowrap; }
+    .row-value svg { width: 15px; height: 15px; color: #8d8f94; }
+    .additions { color: var(--green); }
+    .deletions { color: var(--red); }
+    .count {
+      min-width: 24px;
+      height: 23px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0 8px;
+      border-radius: 999px;
+      color: #5e6166;
+      background: #f0f1f2;
+      font-size: 11px;
+    }
+    .count.good { color: #2b824b; background: #eaf7ee; }
+    .divider { height: 1px; margin: 14px 0 15px; background: var(--line); }
+
+    .popover-footer {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 13px;
+      padding-top: 13px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 9px;
+    }
+    .evidence-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .popover-footer button { margin-left: auto; border: 0; color: #777a80; background: transparent; font-size: 9px; cursor: pointer; }
+    .popover-footer button:hover { color: var(--ink); }
+
+    .tooltip {
+      position: fixed;
+      z-index: 30;
+      top: 59px;
+      right: 52px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: #56595e;
+      background: white;
+      box-shadow: 0 7px 20px rgba(20,23,29,.08);
+      font-size: 10px;
+      opacity: 0;
+      transform: translateY(-4px);
+      pointer-events: none;
+      transition: 130ms ease;
+    }
+    .tool-button.summary:hover + .tooltip { opacity: 1; transform: translateY(0); }
+
+    .toast {
+      position: fixed;
+      z-index: 40;
+      left: 50%;
+      bottom: 24px;
+      transform: translate(-50%, 12px);
+      padding: 9px 12px;
+      border-radius: 9px;
+      color: white;
+      background: rgba(30,31,34,.93);
+      box-shadow: 0 10px 30px rgba(20,22,27,.18);
+      font-size: 10px;
+      opacity: 0;
+      pointer-events: none;
+      transition: 150ms ease;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 1180px) {
+      .app { grid-template-columns: 205px minmax(0, 1fr); }
+      .workspace { grid-template-columns: minmax(0, 1fr) 310px 0; }
+      .workspace.summary-closed { grid-template-columns: minmax(0, 1fr) 0 0; }
+      .workspace.detail-open.summary-closed,
+      .workspace.detail-open:not(.summary-closed) { grid-template-columns: minmax(0, 1fr) 0 340px; }
+      .summary-rail { right: 0; width: 310px; padding-left: 6px; padding-right: 10px; }
+      .workspace.detail-open .summary-rail { right: 340px; width: 310px; padding-left: 6px; padding-right: 10px; }
+      .detail-surface { width: 340px; }
+      .scroll { padding-left: 40px; padding-right: 40px; }
+      .composer { left: 38px; right: 38px; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10m6 10V4m6 16v-7m4 7H2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Zm8 4v10l-8 4-8-4V7m8 4v10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M8 4v5m8-5v5M6 9h12v2a6 6 0 0 1-6 6v4m-4 0h8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="18" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="6" cy="19" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 7.3v9.4M8.2 8c2.7 0 4.2.2 5.6-1.3L16 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-summary" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="7" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 6h8M12 18h8M5 12h15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12m-4-8 4-4 4 4M5 13v6h14v-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 4v16" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-changes" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9 8h6m-3-3v6m-3 5h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-git" viewBox="0 0 24 24"><circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="7" cy="19" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 7v10M9 10c3 0 5 0 6-2l1-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14 6 4 16v4h4L18 10M13 5l2-2 6 6-2 2M10 7l7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 20a6 6 0 0 1 12 0m2-13a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m12 19 7-7-7-7m7 7H5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <main class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">S</span><strong>Scry</strong><small>0.2.34</small></div>
+      <button class="new-chat">＋ 新建会话 <b>⌘N</b></button>
+      <div class="search"><svg width="14" height="14"><use href="#i-list"/></svg>搜索会话或项目</div>
+      <nav class="nav">
+        <button><svg><use href="#i-chart"/></svg>分析</button>
+        <button><svg><use href="#i-pulse"/></svg>诊断<small>1</small></button>
+        <button><svg><use href="#i-box"/></svg>技能<small>8</small></button>
+        <button><svg><use href="#i-plug"/></svg>MCP<small>4/5</small></button>
+      </nav>
+      <div class="rule"></div>
+      <div class="label">最近会话</div>
+      <div class="session-list">
+        <button class="session active"><span>轻量上下文摘要</span><small><i>●</i> Qoder · 刚刚</small></button>
+        <button class="session"><span>停止后编辑消息</span><small>Codex · 16m</small></button>
+        <button class="session"><span>分析 Provider 用量</span><small>Claude · 2h</small></button>
+      </div>
+      <div class="side-bottom">◐&nbsp;&nbsp;外观 · 浅色</div>
+    </aside>
+
+    <section class="workspace" id="workspace">
+      <header class="topbar">
+        <div class="tabs">
+          <button class="tab active"><svg><use href="#i-chat"/></svg>对话</button>
+          <button class="tab"><svg><use href="#i-branch"/></svg>拓扑</button>
+          <button class="tab"><svg><use href="#i-list"/></svg>分段</button>
+        </div>
+        <div class="toolbar">
+          <span class="runtime"><span class="live"></span>Qoder</span>
+          <button class="tool-button" data-toast="分享当前会话" aria-label="分享"><svg><use href="#i-share"/></svg></button>
+          <button class="tool-button summary active" id="summaryToggle" aria-label="切换固定摘要" aria-expanded="true"><svg><use href="#i-summary"/></svg></button>
+          <div class="tooltip">切换固定摘要</div>
+          <button class="tool-button" id="detailToggle" aria-label="切换右侧详情"><svg><use href="#i-panel"/></svg></button>
+        </div>
+      </header>
+
+      <div class="conversation">
+        <div class="scroll">
+          <div class="user">保留这种轻量卡片样式，但不要覆盖主会话。</div>
+          <div class="time">3:42 PM</div>
+          <article class="turn">
+            <div class="turn-head"><span class="provider-dot"></span><b>Qoder run</b><span class="run">· run-pinned-summary-v2</span><span class="stats">tok 1.2k · tools 5</span></div>
+            <div class="answer">
+              <strong>摘要与右侧详情按 Codex 方式联动：</strong>
+              <ul>
+                <li>普通状态悬浮在主会话右上角，不占用布局列。</li>
+                <li>打开右侧详情时摘要自动收起。</li>
+                <li>详情已打开时再次点摘要，吸顶悬浮显示；点击别处立即消失。</li>
+              </ul>
+            </div>
+            <div class="trace-line"><span>本轮证据</span><span>Read 3</span><span>Files 2</span><span>12s</span></div>
+          </article>
+        </div>
+
+        <div class="composer">
+          <div class="placeholder">继续描述你希望调整的摘要样式…</div>
+          <div class="composer-footer"><span>完全访问</span><span>Ultimate</span><span>默认</span><button class="send"><svg width="14" height="14"><use href="#i-arrow"/></svg></button></div>
+        </div>
+      </div>
+
+      <div class="summary-rail" id="summaryRail">
+      <aside class="summary-popover" aria-label="固定摘要">
+        <div class="section-title">Environment</div>
+        <button class="summary-row" data-open-surface="changes">
+          <span class="row-icon"><svg><use href="#i-changes"/></svg></span>
+          <span class="row-main">Changes</span>
+          <span class="row-value"><span class="additions">+1,284</span><span class="deletions">−36</span></span>
+        </button>
+        <div class="summary-row static">
+          <span class="row-icon"><svg><use href="#i-git"/></svg></span>
+          <span class="row-main">main</span>
+          <span class="row-value"></span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="section-title">Context</div>
+        <div class="expandable open">
+          <button class="summary-row" data-accordion aria-expanded="true">
+            <span class="row-icon"><svg><use href="#i-tool"/></svg></span>
+            <span class="row-main">Skills &amp; MCP</span>
+            <span class="row-value"><span class="count">6</span><svg><use href="#i-chevron"/></svg></span>
+          </button>
+          <div class="detail-panel">
+            <div class="detail-row"><span class="detail-icon"><svg><use href="#i-tool"/></svg></span><span class="name">baoyu-design</span></div>
+            <div class="detail-row"><span class="detail-icon"><svg><use href="#i-tool"/></svg></span><span class="name">pi-subagents</span></div>
+            <div class="detail-row"><span class="detail-icon"><svg><use href="#i-tool"/></svg></span><span class="name">list-refresh</span></div>
+            <div class="detail-row"><span class="detail-icon"><svg><use href="#i-plug"/></svg></span><span class="name">Browser &amp; Computer Use</span></div>
+            <div class="detail-row"><span class="detail-icon"><svg><use href="#i-plug"/></svg></span><span class="name">Workspace recorder</span></div>
+            <div class="detail-row"><span class="detail-icon"><svg><use href="#i-plug"/></svg></span><span class="name">Git workspace</span></div>
+          </div>
+        </div>
+        <div class="expandable">
+          <button class="summary-row" data-accordion aria-expanded="false">
+            <span class="row-icon"><svg><use href="#i-globe"/></svg></span>
+            <span class="row-main">Web reading</span>
+            <span class="row-value"><span class="count">6</span><svg><use href="#i-chevron"/></svg></span>
+          </button>
+          <div class="detail-panel">
+            <div class="detail-row" data-open-surface="sources"><span class="detail-icon youtube">▶</span><span class="name">www.youtube.com/watch</span></div>
+            <div class="detail-row" data-open-surface="sources"><span class="detail-icon youtube">▶</span><span class="name">www.youtube.com/watch</span></div>
+            <div class="detail-row" data-open-surface="sources"><span class="detail-icon github">GH</span><span class="name">github.com/jingyaogong/minimind</span></div>
+            <div class="detail-row" data-open-surface="sources"><span class="detail-icon"><svg><use href="#i-globe"/></svg></span><span class="name">developers.openai.com/codex</span></div>
+            <button class="detail-more" data-open-surface="sources">View all</button>
+          </div>
+        </div>
+        <div class="expandable">
+          <button class="summary-row" data-accordion aria-expanded="false">
+            <span class="row-icon"><svg><use href="#i-users"/></svg></span>
+            <span class="row-main">Subagents</span>
+            <span class="row-value"><span class="count good">1</span><svg><use href="#i-chevron"/></svg></span>
+          </button>
+          <div class="detail-panel">
+            <div class="detail-row" data-open-surface="agents"><span class="detail-icon"><svg><use href="#i-users"/></svg></span><span class="name">Reviewer</span></div>
+          </div>
+        </div>
+
+      </aside>
+      </div>
+
+      <div class="detail-rail" id="detailRail">
+        <aside class="detail-surface" aria-label="右侧详情">
+          <header class="detail-head"><svg><use href="#i-panel"/></svg><span id="detailTitle">Sources</span><button id="closeDetail" aria-label="关闭右侧详情">×</button></header>
+          <div class="detail-content" id="detailContent">
+            <h2>Sources</h2>
+            <div class="surface-source"><div class="source-title"><svg><use href="#i-globe"/></svg><span>https://alidocs.dingtalk.com/i/nodes/QOG9lyrgJPPNL2rXlzOwo5lnJzN67Mw4</span></div><p>Provided in the conversation</p></div>
+            <div class="surface-source"><div class="source-title"><svg><use href="#i-globe"/></svg><span>project.aone.alibaba-inc.com/v2/project/952011/req/86116339</span></div><p>Provided in the conversation</p></div>
+            <div class="surface-source"><div class="source-title"><svg><use href="#i-plug"/></svg><span>Upp Hub</span></div><p>Observed tool source</p></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast">已触发</div>
+  <script>
+    const toggle = document.getElementById('summaryToggle')
+    const detailToggle = document.getElementById('detailToggle')
+    const closeDetail = document.getElementById('closeDetail')
+    const detailTitle = document.getElementById('detailTitle')
+    const detailContent = document.getElementById('detailContent')
+    const summaryRail = document.getElementById('summaryRail')
+    const workspace = document.getElementById('workspace')
+    const toast = document.getElementById('toast')
+    let toastTimer
+
+    function showToast(message) {
+      toast.textContent = message
+      toast.classList.add('show')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1500)
+    }
+
+    function renderDetail(kind) {
+      if (kind === 'changes') {
+        detailTitle.textContent = 'Changes'
+        detailContent.innerHTML = '<h2>Changes</h2><div class="surface-source"><div class="source-title"><svg><use href="#i-changes"/></svg><span>src/renderer/components/ContextSummary.tsx</span></div><p>+428 −16</p></div><div class="surface-source"><div class="source-title"><svg><use href="#i-changes"/></svg><span>src/renderer/styles.css</span></div><p>+703 −20</p></div><div class="surface-source"><div class="source-title"><svg><use href="#i-changes"/></svg><span>src/shared/runtime.ts</span></div><p>+153</p></div>'
+        return
+      }
+      if (kind === 'agents') {
+        detailTitle.textContent = 'Subagents'
+        detailContent.innerHTML = '<h2>Subagents</h2><div class="surface-agent"><span class="detail-icon"><svg><use href="#i-users"/></svg></span><span>Reviewer</span><span>Done</span></div>'
+        return
+      }
+      detailTitle.textContent = 'Sources'
+      detailContent.innerHTML = '<h2>Sources</h2><div class="surface-source"><div class="source-title"><svg><use href="#i-globe"/></svg><span>https://alidocs.dingtalk.com/i/nodes/QOG9lyrgJPPNL2rXlzOwo5lnJzN67Mw4</span></div><p>Provided in the conversation</p></div><div class="surface-source"><div class="source-title"><svg><use href="#i-globe"/></svg><span>project.aone.alibaba-inc.com/v2/project/952011/req/86116339</span></div><p>Provided in the conversation</p></div><div class="surface-source"><div class="source-title"><svg><use href="#i-plug"/></svg><span>Upp Hub</span></div><p>Observed tool source</p></div>'
+    }
+
+    function openDetail(kind) {
+      renderDetail(kind)
+      workspace.classList.add('detail-open', 'summary-closed')
+      toggle.classList.remove('active')
+      toggle.setAttribute('aria-expanded', 'false')
+      detailToggle.classList.add('active')
+    }
+
+    function closeDetailSurface() {
+      workspace.classList.remove('detail-open', 'summary-closed')
+      detailToggle.classList.remove('active')
+      toggle.classList.add('active')
+      toggle.setAttribute('aria-expanded', 'true')
+    }
+
+    toggle.addEventListener('click', () => {
+      if (!workspace.classList.contains('detail-open')) {
+        workspace.classList.remove('summary-closed')
+        toggle.classList.add('active')
+        toggle.setAttribute('aria-expanded', 'true')
+        return
+      }
+      const closed = workspace.classList.toggle('summary-closed')
+      toggle.classList.toggle('active', !closed)
+      toggle.setAttribute('aria-expanded', String(!closed))
+    })
+
+    document.addEventListener('pointerdown', (event) => {
+      if (!workspace.classList.contains('detail-open') || workspace.classList.contains('summary-closed')) return
+      if (summaryRail.contains(event.target) || toggle.contains(event.target)) return
+      workspace.classList.add('summary-closed')
+      toggle.classList.remove('active')
+      toggle.setAttribute('aria-expanded', 'false')
+    })
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !workspace.classList.contains('detail-open')) return
+      workspace.classList.add('summary-closed')
+      toggle.classList.remove('active')
+      toggle.setAttribute('aria-expanded', 'false')
+    })
+
+    detailToggle.addEventListener('click', () => {
+      if (workspace.classList.contains('detail-open')) closeDetailSurface()
+      else openDetail('sources')
+    })
+    closeDetail.addEventListener('click', closeDetailSurface)
+
+    document.querySelectorAll('[data-accordion]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const expanded = button.getAttribute('aria-expanded') === 'true'
+        button.setAttribute('aria-expanded', String(!expanded))
+        button.closest('.expandable').classList.toggle('open', !expanded)
+      })
+    })
+
+    document.querySelectorAll('[data-open-surface]').forEach((element) => {
+      element.addEventListener('click', () => openDetail(element.dataset.openSurface))
+    })
+
+    document.querySelectorAll('[data-toast]').forEach((element) => {
+      element.addEventListener('click', () => showToast(element.dataset.toast))
+    })
+  </script>
+</body>
+</html>
