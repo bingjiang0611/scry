@@ -162,6 +162,44 @@ for (const handler of handlers.get('before_agent_start') ?? []) {
     expect(result.stderr).not.toContain('EPIPE')
   })
 
+  it('对 oversized Pi 证据发送显式 partial capture metadata 且保留 UTF-8 边界', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-bounded-'))
+    roots.push(root)
+    const capture = join(root, 'capture.jsonl')
+    const cli = join(root, 'scry')
+    await writeFile(cli, `#!/bin/sh\npayload=$(cat)\nprintf '%s\\n' "$payload" >> ${JSON.stringify(capture)}\n`)
+    await chmod(cli, 0o700)
+    process.env.SCRY_CLI_PATH = cli
+    process.env.SCRY_RECORDER_TRANSPORT = 'direct'
+
+    const handlers = new Map<string, Array<(event: any, ctx: any) => any>>()
+    const pi = { on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } }
+    // @ts-expect-error the distributed Pi extension is runtime JavaScript by design
+    const extension = await import('../../packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')
+    extension.default(pi)
+    const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-bounded', getLeafId: () => 'pi-bounded-turn' } }
+    const emit = async (name: string, event: any = {}) => {
+      for (const handler of handlers.get(name) ?? []) await handler(event, ctx)
+    }
+
+    await emit('before_agent_start', { prompt: 'bounded' })
+    await emit('tool_execution_start', { toolCallId: 'large-tool', toolName: 'read', args: { text: '你'.repeat(70_000) } })
+    await emit('tool_execution_end', { toolCallId: 'large-tool', toolName: 'read', result: { text: 'y'.repeat(70_000) } })
+    const message = { role: 'assistant', id: 'large-response', content: [{ type: 'text', text: '你'.repeat(100_000) }] }
+    await emit('message_start', { message })
+    await emit('message_end', { message })
+    await emit('agent_settled')
+
+    const rows = (await readFile(capture, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, any>)
+    expect(rows[1].scry_capture.fields.tool_input).toMatchObject({ status: 'partial', reason: 'byte_limit' })
+    expect(rows[1].scry_capture.fields.tool_input.retainedBytes).toBe(Buffer.byteLength(rows[1].tool_input.preview))
+    expect(rows[1].tool_input.preview).not.toContain('\uFFFD')
+    expect(rows[2].scry_capture.fields.tool_response).toMatchObject({ status: 'partial', reason: 'byte_limit' })
+    expect(rows[3].scry_capture.fields.assistant_response).toMatchObject({ status: 'partial', reason: 'byte_limit' })
+    expect(String(rows[3].assistant_response)).not.toContain('\uFFFD')
+    expect(Buffer.byteLength(String(rows[3].assistant_response))).toBeLessThanOrEqual(256 * 1024)
+  }, 15_000)
+
   it('按一个顶层轮次串行发送 start、tool 与 settled terminal', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-'))
     roots.push(root)

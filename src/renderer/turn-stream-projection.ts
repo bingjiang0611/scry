@@ -10,12 +10,8 @@ export function isStreamTextFragment(event: TraceEvent): boolean {
   return event.stage === 'text' && (event.providerId === 'codex' || event.runtimeProvider === 'codex_cli')
 }
 
-/**
- * 只有顶层的尾部流式文本能当作 live tail。带 parentToolUseId 的片段属于某个子 agent 面板，
- * 把它抽到主时间线末尾会破坏事件归属与顺序，所以那种情况退回完整重投影。
- */
-function isLiveTailCandidate(event: TraceEvent): boolean {
-  return isStreamTextFragment(event) && event.parentToolUseId == null
+function liveTailScope(event: TraceEvent): string | null | undefined {
+  return isStreamTextFragment(event) ? event.parentToolUseId ?? null : undefined
 }
 
 export interface TurnStreamProjection {
@@ -25,14 +21,23 @@ export interface TurnStreamProjection {
   liveText: string
   /** 尾部第一个流式片段的事件 id，用作稳定 React key。 */
   liveKey: string
+  /** null 表示顶层 live tail；string 表示归属对应父工具的子 agent tail。 */
+  liveParentToolUseId?: string | null
   /** 本次调用是否重算了 structuralItems——测试用它断言更新次数有界。 */
   structuralRecomputed: boolean
 }
 
-function liveTailStart(items: readonly TraceEvent[]): number {
+function liveTailStart(items: readonly TraceEvent[]): { index: number; scope?: string | null } {
+  const scope = items.length > 0 ? liveTailScope(items[items.length - 1]) : undefined
+  if (scope === undefined) return { index: items.length }
+  if (scope !== null && !items.some((event) =>
+    event.toolUseId === scope && event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind)
+  )) {
+    return { index: items.length }
+  }
   let index = items.length
-  while (index > 0 && isLiveTailCandidate(items[index - 1])) index -= 1
-  return index
+  while (index > 0 && liveTailScope(items[index - 1]) === scope) index -= 1
+  return { index, scope }
 }
 
 function samePrefix(previous: readonly TraceEvent[], next: readonly TraceEvent[], length: number): boolean {
@@ -44,7 +49,7 @@ function samePrefix(previous: readonly TraceEvent[], next: readonly TraceEvent[]
 }
 
 /**
- * 长轮次流式渲染的增量投影：把「尾部还在增长的模型文本」与「结构化事件序列」分开。
+ * 长轮次流式渲染的增量投影：把顶层或单一父工具下「尾部还在增长的模型文本」与结构化事件分开。
  *
  * 纯文本增量时 structuralItems 保持同一个引用，下游按引用记忆的聚合（文件/Hook/逻辑调用/
  * 工具分组）就不会每批全量重算；任何插入、更正、result_superseded、replacesStreamedText
@@ -55,18 +60,24 @@ export class TurnStreamProjectionCache {
   private initialized = false
 
   project(items: readonly TraceEvent[]): TurnStreamProjection {
-    const tailStart = liveTailStart(items)
+    const tail = liveTailStart(items)
     let liveText = ''
     let liveKey = ''
-    for (let index = tailStart; index < items.length; index++) {
+    for (let index = tail.index; index < items.length; index++) {
       if (!liveKey) liveKey = items[index].id
       liveText += items[index].text ?? ''
     }
-    const reusable = this.initialized && samePrefix(this.structuralItems, items, tailStart)
+    const reusable = this.initialized && samePrefix(this.structuralItems, items, tail.index)
     if (!reusable) {
-      this.structuralItems = items.slice(0, tailStart)
+      this.structuralItems = items.slice(0, tail.index)
       this.initialized = true
     }
-    return { structuralItems: this.structuralItems, liveText, liveKey, structuralRecomputed: !reusable }
+    return {
+      structuralItems: this.structuralItems,
+      liveText,
+      liveKey,
+      ...(tail.scope !== undefined ? { liveParentToolUseId: tail.scope } : {}),
+      structuralRecomputed: !reusable
+    }
   }
 }

@@ -528,7 +528,9 @@ function SubagentBlock({
   pendingQuestions = [],
   interventions = [],
   onAnswerQuestion,
-  turnDone = false
+  turnDone = false,
+  liveText = '',
+  liveKey: liveTailKey = ''
 }: {
   items: TraceEvent[]
   selectedId: string | null
@@ -537,6 +539,8 @@ function SubagentBlock({
   interventions?: AgentIntervention[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   turnDone?: boolean
+  liveText?: string
+  liveKey?: string
 }) {
   const visibleItems = useMemo(() => logicalCallEventsForTurn(items), [items])
   const hasPendingQuestion = visibleItems.some((event) =>
@@ -565,7 +569,7 @@ function SubagentBlock({
               if (!live) return
               out.push(
                 <div className="model-text md sub" key={liveKey || `sub-live-${out.length}`}>
-                  <Markdown>{live}</Markdown>
+                  <Markdown streaming={!turnDone}>{live}</Markdown>
                 </div>
               )
               live = ''
@@ -613,6 +617,13 @@ function SubagentBlock({
               )
             }
             flushLive()
+            if (liveText) {
+              out.push(
+                <div className="model-text md sub streaming" key={liveTailKey || 'subagent-live-tail'}>
+                  <Markdown streaming={!turnDone}>{liveText}</Markdown>
+                </div>
+              )
+            }
             return out
           })()}
         </div>
@@ -1355,7 +1366,7 @@ function AssistantTurnImpl({
         flushTools()
         out.push(
           <div className={`model-text md${streaming ? ' streaming' : ''}`} key={liveKey || `live-${out.length}`}>
-            <Markdown>{live}</Markdown>
+            <Markdown streaming={streaming}>{live}</Markdown>
           </div>
         )
         live = ''
@@ -1423,6 +1434,7 @@ function AssistantTurnImpl({
         )
         // 若该 tool_use 催生了 subagent（其 toolUseId 是某些事件的 parentToolUseId），折叠渲染子步骤
         const kids = ev.toolUseId ? childrenByParent.get(ev.toolUseId) : undefined
+        const childLiveText = ev.toolUseId && projection.liveParentToolUseId === ev.toolUseId ? projection.liveText : ''
         toolBuf.push({
           ev,
           node: (
@@ -1439,15 +1451,17 @@ function AssistantTurnImpl({
                 onOpenFileDiff={openFileDiffFor(ev)}
                 turnDone={turn.done}
               />
-              {kids?.length ? (
+              {kids?.length || childLiveText ? (
                 <SubagentBlock
-                  items={kids}
+                  items={kids ?? []}
                   selectedId={selectedId}
                   onSelect={onSelect}
                   pendingQuestions={pendingQuestions}
                   interventions={interventions}
                   onAnswerQuestion={onAnswerQuestion}
                   turnDone={turn.done}
+                  liveText={childLiveText}
+                  liveKey={projection.liveKey}
                 />
               ) : null}
             </div>
@@ -1468,6 +1482,9 @@ function AssistantTurnImpl({
     onSelect,
     openFileDiffFor,
     pendingQuestions,
+    projection.liveKey,
+    projection.liveParentToolUseId,
+    projection.liveText,
     selectedId,
     turn.done
   ])
@@ -1501,9 +1518,9 @@ function AssistantTurnImpl({
       {hookSummary.groups.length > 0 && <HooksSummary summary={hookSummary} />}
       <div className="turn-flow">
         {turnFlowBody}
-        {projection.liveText && (
+        {projection.liveParentToolUseId === null && projection.liveText && (
           <div className={`model-text md${terminal ? '' : ' streaming'}`} key={projection.liveKey || 'live-tail'}>
-            <Markdown>{projection.liveText}</Markdown>
+            <Markdown streaming={!terminal}>{projection.liveText}</Markdown>
           </div>
         )}
       </div>

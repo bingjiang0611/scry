@@ -35,6 +35,27 @@ function socketPath(root: string): string {
   return join('/private/tmp', `${basename(root)}.sock`)
 }
 
+function manualRecoveryTimeouts(): {
+  schedule: (run: () => Promise<void>, delayMs: number) => () => void
+  fireNext: () => Promise<number>
+} {
+  const tasks: Array<{ active: boolean; delayMs: number; run: () => Promise<void> }> = []
+  return {
+    schedule: (run, delayMs) => {
+      const task = { active: true, delayMs, run }
+      tasks.push(task)
+      return () => { task.active = false }
+    },
+    fireNext: async () => {
+      const task = tasks.find((candidate) => candidate.active)
+      if (!task) throw new Error('no active recovery timeout')
+      task.active = false
+      await task.run()
+      return task.delayMs
+    }
+  }
+}
+
 /** 独立目录，让 daemon.log 断言只看到本条测试写下的内容。 */
 async function isolatedSocketDir(root: string): Promise<string> {
   const dir = join('/private/tmp', `${basename(root)}-d`)
@@ -100,14 +121,18 @@ describe('turn recorder daemon', () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
     let recoveryRuns = 0
+    const recoveryTimeouts = manualRecoveryTimeouts()
     const daemon = await listenRecorderDaemon({
       workspace: root,
       idleMs: 5_000,
       env,
-      recoveryProbe: () => { recoveryRuns++ }
+      recoveryPollMs: 20,
+      maxRecoveryPollMs: 80,
+      recoveryProbe: () => { recoveryRuns++ },
+      scheduleRecoveryTimeout: recoveryTimeouts.schedule
     })
     try {
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_200))
+      await expect(recoveryTimeouts.fireNext()).resolves.toBe(20)
       expect(recoveryRuns).toBe(0)
     } finally {
       await daemon.close()
@@ -271,7 +296,7 @@ describe('turn recorder daemon', () => {
     }
   })
 
-  it('未观测到终态时退避 recovery poll，rollout 变为终态后仍会提交', async () => {
+  it('未观测到终态时继续 recovery poll，rollout 变为终态后提交', async () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
     const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'delayed-abort.jsonl')
@@ -281,11 +306,15 @@ describe('turn recorder daemon', () => {
       { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'wait for abort' } }
     ].map((line) => JSON.stringify(line)).join('\n'))
     let recoveryRuns = 0
+    const recoveryTimeouts = manualRecoveryTimeouts()
     const daemon = await listenRecorderDaemon({
       workspace: root,
       idleMs: 5_000,
       env,
-      recoveryProbe: () => { recoveryRuns++ }
+      recoveryPollMs: 50,
+      maxRecoveryPollMs: 100,
+      recoveryProbe: () => { recoveryRuns++ },
+      scheduleRecoveryTimeout: recoveryTimeouts.schedule
     })
     try {
       await sendRecorderDaemonHook({
@@ -302,17 +331,17 @@ describe('turn recorder daemon', () => {
         env
       })
 
-      await expect.poll(() => recoveryRuns, { timeout: 2_000 }).toBe(1)
-      await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_200))
+      await expect(recoveryTimeouts.fireNext()).resolves.toBe(50)
       expect(recoveryRuns).toBe(1)
+      await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
 
       await appendFile(rollout, `\n${JSON.stringify({
         timestamp: '2026-07-19T12:00:02.500Z',
         type: 'event_msg',
         payload: { type: 'turn_aborted', turn_id: 'delayed-turn', reason: 'interrupted' }
       })}\n`)
-      await expect.poll(async () => (await listRecords(join(root, '.scry'))).length, { timeout: 2_500 }).toBe(1)
+      await expect(recoveryTimeouts.fireNext()).resolves.toBe(100)
+      await expect(listRecords(join(root, '.scry'))).resolves.toHaveLength(1)
       expect(recoveryRuns).toBe(2)
       await expect(listRecords(join(root, '.scry'))).resolves.toMatchObject([
         { providerTurnId: 'delayed-turn', status: 'interrupted' }

@@ -782,7 +782,7 @@ export function App() {
       setPendingChatEvent(null)
       setFocusedTurnRunId(runId)
     },
-    [session]
+    [session.setSelected]
   )
 
   useEffect(() => {

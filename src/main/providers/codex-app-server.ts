@@ -16,6 +16,9 @@ export interface CodexAppServerOptions {
   cwd?: string
   env?: NodeJS.ProcessEnv
   requestTimeoutMs?: number
+  now?: () => number
+  /** Deterministic timeout seam; production uses an unref'd Node timer. */
+  scheduleRequestTimeout?: (run: () => void, delayMs: number) => () => void
 }
 
 export interface CodexNotificationEnvelope {
@@ -55,7 +58,7 @@ export class CodexAppServerClient {
     method: string
     resolve: (value: unknown) => void
     reject: (error: Error) => void
-    timer: NodeJS.Timeout
+    cancelTimeout: () => void
   }>()
   private readonly listeners = new Set<NotificationListener>()
   private readonly requestListeners = new Set<ServerRequestListener>()
@@ -174,17 +177,24 @@ export class CodexAppServerClient {
   ): Promise<T> {
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const onTimeout = (): void => {
         const suffix = method === 'turn/start' ? ' (termination_unconfirmed)' : ''
         const error = new Error(`Codex app-server request timed out: ${method}${suffix}`)
         this.failGeneration(child, generation, error)
         void this.stopGeneration(child, generation)
-      }, this.options.requestTimeoutMs ?? 30_000)
-      this.pending.set(id, { generation, method, resolve: (value) => resolve(value as T), reject, timer })
+      }
+      const cancelTimeout = this.options.scheduleRequestTimeout
+        ? this.options.scheduleRequestTimeout(onTimeout, this.options.requestTimeoutMs ?? 30_000)
+        : (() => {
+            const timer = setTimeout(onTimeout, this.options.requestTimeoutMs ?? 30_000)
+            timer.unref()
+            return () => clearTimeout(timer)
+          })()
+      this.pending.set(id, { generation, method, resolve: (value) => resolve(value as T), reject, cancelTimeout })
       try {
         this.write({ id, method, params }, generation)
       } catch (error) {
-        clearTimeout(timer)
+        cancelTimeout()
         this.pending.delete(id)
         reject(error as Error)
       }
@@ -219,7 +229,7 @@ export class CodexAppServerClient {
     if (message.id !== undefined && !message.method) {
       const pending = this.pending.get(message.id)
       if (!pending || pending.generation !== generation) return
-      clearTimeout(pending.timer)
+      pending.cancelTimeout()
       this.pending.delete(message.id)
       if (message.error) pending.reject(new Error(message.error.message ?? 'Codex app-server request failed'))
       else pending.resolve(message.result)
@@ -231,7 +241,7 @@ export class CodexAppServerClient {
     }
     if (message.method) {
       if (generation !== this.processGeneration) return
-      const receivedAtMs = Date.now()
+      const receivedAtMs = (this.options.now ?? Date.now)()
       const emittedAtMs =
         typeof message.emittedAtMs === 'number' && Number.isFinite(message.emittedAtMs)
           ? message.emittedAtMs
@@ -246,7 +256,7 @@ export class CodexAppServerClient {
     const id = message.id
     if (id === undefined || !message.method) return
     const envelope = {
-      receivedAtMs: Date.now(),
+      receivedAtMs: (this.options.now ?? Date.now)(),
       emittedAtMs: typeof message.emittedAtMs === 'number' ? message.emittedAtMs : undefined
     }
     try {
@@ -274,7 +284,7 @@ export class CodexAppServerClient {
     if (this.process === child && this.processGeneration === generation) this.process = null
     for (const [id, pending] of this.pending) {
       if (pending.generation !== generation) continue
-      clearTimeout(pending.timer)
+      pending.cancelTimeout()
       pending.reject(error)
       this.pending.delete(id)
     }

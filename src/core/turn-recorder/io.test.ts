@@ -3,9 +3,25 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { withDirectoryLock } from './io'
+import { withDirectoryLock, writeFileAtomicExclusive } from './io'
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'scry-lock-'))
+
+describe('durable archive copy', () => {
+  it('publishes complete bytes and never replaces an existing destination', async () => {
+    const root = tempDir()
+    const target = join(root, 'archive', 'record.json')
+    try {
+      await writeFileAtomicExclusive(target, Buffer.from('first'))
+      await expect(readFile(target, 'utf8')).resolves.toBe('first')
+      await expect(writeFileAtomicExclusive(target, Buffer.from('second'))).rejects.toMatchObject({ code: 'EEXIST' })
+      await expect(readFile(target, 'utf8')).resolves.toBe('first')
+      expect((await readdir(join(root, 'archive'))).filter((name) => name.includes('archive-tmp'))).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('withDirectoryLock', () => {
   it('serializes two contenders recovering the same dead legacy owner', async () => {

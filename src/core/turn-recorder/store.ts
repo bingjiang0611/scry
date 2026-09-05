@@ -1,11 +1,11 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { lstat, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { link, lstat, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { isAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
-import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
+import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.33'
+export const RECORDER_VERSION = '0.2.34'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -26,6 +26,36 @@ export interface ExportPage {
 }
 
 const RECORD_PATTERN = /^(\d{20})-([a-f0-9]{32,64})\.json$/
+
+type RecordFileEntry = { name: string; sequence: number; recordId: string }
+
+interface RecordDirectoryStamp {
+  dev: string
+  ino: string
+  mtimeNs: string
+  ctimeNs: string
+}
+
+/** Disposable process-local projection. Canonical records remain the only persisted authority. */
+interface RecordStoreIndex {
+  stamp: RecordDirectoryStamp
+  entries: RecordFileEntry[]
+}
+
+const RECORD_INDEX_CACHE_LIMIT = 32
+const recordIndexCache = new Map<string, RecordStoreIndex>()
+let recordIndexHits = 0
+let recordIndexMisses = 0
+
+export function recordStoreIndexStats(): { hits: number; misses: number; entries: number } {
+  return { hits: recordIndexHits, misses: recordIndexMisses, entries: recordIndexCache.size }
+}
+
+export function resetRecordStoreIndex(): void {
+  recordIndexCache.clear()
+  recordIndexHits = 0
+  recordIndexMisses = 0
+}
 const COMMIT_HOOK_TIMEOUT_MS = 10_000
 const COMMIT_HOOK_KILL_GRACE_MS = 1_000
 const COMMIT_HOOK_ENV_KEYS = [
@@ -80,12 +110,66 @@ function parseRecordName(name: string): { sequence: number; recordId: string } |
   return Number.isSafeInteger(sequence) && sequence > 0 ? { sequence, recordId: match[2] } : null
 }
 
-async function recordFiles(dataRoot: string): Promise<Array<{ name: string; sequence: number; recordId: string }>> {
-  const out = (await listFiles(join(dataRoot, 'records'))).flatMap((name) => {
-    const parsed = parseRecordName(name)
-    return parsed ? [{ name, ...parsed }] : []
-  })
-  return out.sort((a, b) => a.sequence - b.sequence || a.name.localeCompare(b.name))
+async function recordDirectoryStamp(path: string): Promise<RecordDirectoryStamp | null> {
+  try {
+    const info = await stat(path, { bigint: true })
+    return {
+      dev: String(info.dev),
+      ino: String(info.ino),
+      mtimeNs: String(info.mtimeNs),
+      ctimeNs: String(info.ctimeNs)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
+
+function sameRecordStamp(left: RecordDirectoryStamp | null, right: RecordDirectoryStamp | null): boolean {
+  return left === right || (!!left && !!right && left.dev === right.dev && left.ino === right.ino && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs)
+}
+
+async function scanRecordFiles(dataRoot: string): Promise<{ entries: RecordFileEntry[]; stamp: RecordDirectoryStamp | null }> {
+  const recordsPath = join(dataRoot, 'records')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = await recordDirectoryStamp(recordsPath)
+    const entries = (await listFiles(recordsPath)).flatMap((name) => {
+      const parsed = parseRecordName(name)
+      return parsed ? [{ name, ...parsed }] : []
+    }).sort((a, b) => a.sequence - b.sequence || a.name.localeCompare(b.name))
+    const after = await recordDirectoryStamp(recordsPath)
+    if (sameRecordStamp(before, after)) return { entries, stamp: after }
+  }
+  throw new Error('record store changed while building derived index')
+}
+
+async function recordFiles(dataRoot: string, options: { bypassIndex?: boolean } = {}): Promise<RecordFileEntry[]> {
+  if (!options.bypassIndex) {
+    const stamp = await recordDirectoryStamp(join(dataRoot, 'records'))
+    const cached = recordIndexCache.get(dataRoot)
+    if (cached && sameRecordStamp(cached.stamp, stamp)) {
+      recordIndexCache.delete(dataRoot)
+      recordIndexCache.set(dataRoot, cached)
+      recordIndexHits++
+      return cached.entries.map((entry) => ({ ...entry }))
+    }
+    recordIndexMisses++
+  }
+
+  const scanned = await scanRecordFiles(dataRoot)
+  if (scanned.stamp && !options.bypassIndex) {
+    recordIndexCache.set(dataRoot, { stamp: scanned.stamp, entries: scanned.entries })
+    while (recordIndexCache.size > RECORD_INDEX_CACHE_LIMIT) {
+      const oldest = recordIndexCache.keys().next().value
+      if (typeof oldest !== 'string') break
+      recordIndexCache.delete(oldest)
+    }
+  }
+  return scanned.entries
+}
+
+function invalidateRecordIndex(dataRoot: string): void {
+  recordIndexCache.delete(dataRoot)
 }
 
 /**
@@ -110,20 +194,30 @@ export async function recordStoreStamp(dataRoot: string): Promise<{ count: numbe
 
 export async function readRecordFile(path: string): Promise<AgentTurnRecord> {
   const raw = JSON.parse(await readFile(path, 'utf8')) as unknown
-  if (!isAgentTurnRecord(raw)) throw new Error(`invalid turn record: ${path}`)
+  const validation = validateAgentTurnRecord(raw)
+  if (!validation.ok) {
+    const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
+    throw new Error(`invalid turn record: ${path}: ${detail}`)
+  }
+  const record = validation.record
   const parsed = parseRecordName(basename(path))
-  if (!parsed || parsed.sequence !== raw.sequence || parsed.recordId !== raw.recordId) {
+  if (!parsed || parsed.sequence !== record.sequence || parsed.recordId !== record.recordId) {
     throw new Error(`record filename/content mismatch: ${path}`)
   }
-  return raw
+  return record
 }
 
 export async function commitRecord(
   dataRoot: string,
   draft: Omit<AgentTurnRecord, 'sequence'>
 ): Promise<{ status: 'committed' | 'duplicate'; record: AgentTurnRecord }> {
+  if (!/^[a-f0-9]{32,64}$/.test(draft.recordId)) throw new Error('recordId must be a 32-64 character lowercase hex digest')
   return withDirectoryLock(join(dataRoot, 'locks', 'commit.lock'), async () => {
-    const files = await recordFiles(dataRoot)
+    if (await archiveJournal(dataRoot)) {
+      throw new Error('pending archive must be resumed before committing another record')
+    }
+    // Allocation and duplicate detection never trust a derived projection.
+    const files = await recordFiles(dataRoot, { bypassIndex: true })
     const duplicate = files.find((file) => file.recordId === draft.recordId)
     if (duplicate) {
       return { status: 'duplicate' as const, record: await readRecordFile(join(dataRoot, 'records', duplicate.name)) }
@@ -135,8 +229,14 @@ export async function commitRecord(
     const archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
     const sequence = Math.max(files.at(-1)?.sequence ?? 0, archivedThrough) + 1
     const record: AgentTurnRecord = { ...draft, sequence }
+    const validation = validateAgentTurnRecord(record)
+    if (!validation.ok) {
+      const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
+      throw new Error(`refusing to commit invalid turn record: ${detail}`)
+    }
     const filename = `${String(sequence).padStart(20, '0')}-${record.recordId}.json`
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
+    invalidateRecordIndex(dataRoot)
     return { status: 'committed' as const, record }
   })
 }
@@ -413,20 +513,44 @@ export interface ArchiveState {
   archivedThrough: number
 }
 
-const ARCHIVE_STATE = 'archive-state.json'
-
-export async function readArchiveState(dataRoot: string): Promise<ArchiveState | null> {
-  const state = await readJson<ArchiveState>(join(dataRoot, ARCHIVE_STATE))
-  if (state?.schemaVersion !== 1 || !Number.isSafeInteger(state.archivedThrough) || state.archivedThrough < 0) return null
-  return { schemaVersion: 1, archivedThrough: state.archivedThrough }
+interface ArchiveJournalRecord {
+  name: string
+  sequence: number
+  recordId: string
+  bytes: number
+  sha256: string
 }
 
-/**
- * Move a contiguous prefix of records out of `records/` and record the floor that explains the
- * resulting gap. Only sequences at or below `throughSequence` may be archived, so the remaining
- * store still starts exactly one past the recorded floor; anything else stays a hard error.
- * Callers own the delivery question — a record that was never ACKed must not be archived.
- */
+interface ArchiveJournal {
+  schemaVersion: 1
+  operation: 'archive'
+  transactionId: string
+  createdAt: string
+  target: string
+  throughSequence: number
+  archivedThroughBefore: number
+  records: ArchiveJournalRecord[]
+}
+
+const ARCHIVE_STATE = 'archive-state.json'
+const ARCHIVE_JOURNAL = 'archive-journal.json'
+
+export async function readArchiveState(dataRoot: string): Promise<ArchiveState | null> {
+  const path = join(dataRoot, ARCHIVE_STATE)
+  let raw: unknown
+  try {
+    raw = JSON.parse(await readFile(path, 'utf8'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw new Error(`invalid archive state: ${path}`)
+  }
+  const state = raw as Partial<ArchiveState> | null
+  if (state?.schemaVersion !== 1 || !Number.isSafeInteger(state.archivedThrough) || Number(state.archivedThrough) < 0) {
+    throw new Error(`invalid archive state: ${path}`)
+  }
+  return { schemaVersion: 1, archivedThrough: Number(state.archivedThrough) }
+}
+
 function pathContains(root: string, candidate: string): boolean {
   const fromRoot = relative(root, candidate)
   return fromRoot === '' || (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`))
@@ -436,64 +560,202 @@ function archivePathsOverlap(liveRecords: string, recordsTarget: string): boolea
   return pathContains(liveRecords, recordsTarget) || pathContains(recordsTarget, liveRecords)
 }
 
+function validArchiveJournal(value: unknown): value is ArchiveJournal {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  if (raw.schemaVersion !== 1 || raw.operation !== 'archive' || typeof raw.transactionId !== 'string' || !/^[a-f0-9-]{36}$/.test(raw.transactionId)) return false
+  if (typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt)) || typeof raw.target !== 'string' || !isAbsolute(raw.target)) return false
+  if (!Number.isSafeInteger(raw.throughSequence) || !Number.isSafeInteger(raw.archivedThroughBefore) || !Array.isArray(raw.records)) return false
+  let previous = Number(raw.archivedThroughBefore)
+  for (const item of raw.records) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+    const record = item as Record<string, unknown>
+    const parsed = typeof record.name === 'string' ? parseRecordName(record.name) : null
+    if (!parsed || parsed.sequence !== record.sequence || parsed.recordId !== record.recordId || parsed.sequence !== previous + 1) return false
+    if (!Number.isSafeInteger(record.bytes) || Number(record.bytes) < 0 || typeof record.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(record.sha256)) return false
+    previous = parsed.sequence
+  }
+  return raw.records.length > 0 && Number(raw.throughSequence) >= previous
+}
+
+async function archiveJournal(dataRoot: string): Promise<ArchiveJournal | null> {
+  const path = join(dataRoot, ARCHIVE_JOURNAL)
+  let journal: unknown
+  try {
+    journal = JSON.parse(await readFile(path, 'utf8'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw new Error(`invalid archive journal: ${path}`)
+  }
+  if (!validArchiveJournal(journal)) throw new Error(`invalid archive journal: ${path}`)
+  return journal
+}
+
+async function existingFile(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isFile()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function verifiedArchiveContent(path: string, expected: ArchiveJournalRecord): Promise<Buffer> {
+  const content = await readFile(path)
+  const digest = createHash('sha256').update(content).digest('hex')
+  if (content.byteLength !== expected.bytes || digest !== expected.sha256) {
+    throw new Error(`archive record does not match journal: ${path}`)
+  }
+  return content
+}
+
+export interface ArchiveOptions {
+  throughSequence: number
+  target: string
+  /** Deterministic crash seam used only by recorder durability tests. */
+  onStep?: (phase: 'target-published' | 'copied' | 'source-removed', sequence: number) => Promise<void> | void
+  /** Deterministic fsync fault seam used only by durability tests. */
+  syncDirectory?: (path: string) => Promise<void>
+}
+
+/**
+ * Move a contiguous prefix through a durable journal. A retry with the same target resumes any
+ * verified copy/remove/floor step; a pending journal blocks sequence allocation until reconciled.
+ */
 export async function archiveRecords(
   dataRoot: string,
-  options: { throughSequence: number; target: string }
-): Promise<{ archived: Array<{ name: string; sequence: number; recordId: string; sha256: string }>; archivedThrough: number; target: string }> {
-  // Sequence allocation and archive-floor advancement are one store transaction. Without the
-  // shared lock, a concurrent commit can allocate from a half-moved prefix and reuse a sequence.
+  options: ArchiveOptions
+): Promise<{ archived: ArchiveJournalRecord[]; archivedThrough: number; target: string }> {
   return withDirectoryLock(join(dataRoot, 'locks', 'commit.lock'), async () => {
-    const state = await readArchiveState(dataRoot)
-    const floor = state?.archivedThrough ?? 0
-    const liveFiles = await recordFiles(dataRoot)
-    let expectedSequence = floor + 1
-    for (const file of liveFiles) {
-      if (file.sequence !== expectedSequence) {
-        throw new Error(`cannot archive a store with a sequence gap before ${file.name}`)
-      }
-      expectedSequence += 1
-    }
-    const files = liveFiles.filter((file) => file.sequence <= options.throughSequence)
-    const archived: Array<{ name: string; sequence: number; recordId: string; sha256: string }> = []
-    if (files.length === 0) return { archived, archivedThrough: floor, target: options.target }
     const liveRecords = join(dataRoot, 'records')
     const recordsTarget = join(options.target, 'records')
+    const sync = options.syncDirectory ?? syncDirectory
     if (archivePathsOverlap(resolve(liveRecords), resolve(recordsTarget))) {
       throw new Error('archive target must not overlap the live records directory')
     }
-    await mkdir(recordsTarget, { recursive: true, mode: 0o700 })
+    await mkdirDurable(recordsTarget)
     if ((await lstat(recordsTarget)).isSymbolicLink()) throw new Error('archive records target must not be a symbolic link')
-    const [canonicalLive, canonicalTarget] = await Promise.all([realpath(liveRecords), realpath(recordsTarget)])
-    if (archivePathsOverlap(canonicalLive, canonicalTarget)) {
+    const [canonicalLive, canonicalRecordsTarget, canonicalTarget] = await Promise.all([
+      realpath(liveRecords), realpath(recordsTarget), realpath(options.target)
+    ])
+    if (archivePathsOverlap(canonicalLive, canonicalRecordsTarget)) {
       throw new Error('archive target must not overlap the live records directory')
     }
 
-    let archivedThrough = floor
-    for (const file of files) {
-      const source = join(liveRecords, file.name)
-      const content = await readFile(source)
-      await writeFile(join(recordsTarget, file.name), content, { mode: 0o600, flag: 'wx' })
-      await rm(source, { force: true })
-      archivedThrough = file.sequence
-      // Persist the floor after each move so a crash mid-archive still explains the gap.
-      await writeJsonAtomic(join(dataRoot, ARCHIVE_STATE), { schemaVersion: 1, archivedThrough } satisfies ArchiveState)
-      archived.push({
-        name: file.name,
-        sequence: file.sequence,
-        recordId: file.recordId,
-        sha256: createHash('sha256').update(content).digest('hex')
-      })
+    let journal = await archiveJournal(dataRoot)
+    if (journal) {
+      if (journal.target !== canonicalTarget) throw new Error(`pending archive must be resumed with target ${journal.target}`)
+    } else {
+      const state = await readArchiveState(dataRoot)
+      const floor = state?.archivedThrough ?? 0
+      const liveFiles = await recordFiles(dataRoot, { bypassIndex: true })
+      let expectedSequence = floor + 1
+      for (const file of liveFiles) {
+        if (file.sequence !== expectedSequence) throw new Error(`cannot archive a store with a sequence gap before ${file.name}`)
+        expectedSequence += 1
+      }
+      const files = liveFiles.filter((file) => file.sequence <= options.throughSequence)
+      if (files.length === 0) return { archived: [], archivedThrough: floor, target: options.target }
+      if ((await listFiles(canonicalRecordsTarget)).length > 0 || await existingFile(join(canonicalTarget, 'manifest.json'))) {
+        throw Object.assign(new Error('archive target must be empty'), { code: 'EEXIST' })
+      }
+      const records: ArchiveJournalRecord[] = []
+      for (const file of files) {
+        const source = join(canonicalLive, file.name)
+        await readRecordFile(source)
+        const content = await readFile(source)
+        records.push({
+          ...file,
+          bytes: content.byteLength,
+          sha256: createHash('sha256').update(content).digest('hex')
+        })
+      }
+      journal = {
+        schemaVersion: 1,
+        operation: 'archive',
+        transactionId: randomUUID(),
+        createdAt: new Date().toISOString(),
+        target: canonicalTarget,
+        throughSequence: options.throughSequence,
+        archivedThroughBefore: floor,
+        records
+      }
+      await writeJsonAtomic(join(dataRoot, ARCHIVE_JOURNAL), journal)
     }
-    await writeJsonAtomic(join(options.target, 'manifest.json'), {
+
+    const expectedNames = new Set(journal.records.flatMap((record) => [
+      record.name,
+      basename(exclusiveWriteTempPath(join(canonicalRecordsTarget, record.name), journal.transactionId))
+    ]))
+    for (const name of await listFiles(canonicalRecordsTarget)) {
+      if (!expectedNames.has(name)) throw new Error(`archive target contains a file outside the pending journal: ${name}`)
+    }
+
+    let archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
+    if (archivedThrough < journal.archivedThroughBefore || archivedThrough > journal.records.at(-1)!.sequence) {
+      throw new Error('archive floor is inconsistent with pending journal')
+    }
+    for (const record of journal.records) {
+      const source = join(canonicalLive, record.name)
+      const target = join(canonicalRecordsTarget, record.name)
+      const temporary = exclusiveWriteTempPath(target, journal.transactionId)
+      const sourceExists = await existingFile(source)
+      let targetExists = await existingFile(target)
+      const temporaryExists = await existingFile(temporary)
+      // A pending journal owns both copies, but neither may be silently discarded if its content
+      // differs from the bytes hashed before the archive began.
+      const sourceContent = sourceExists ? await verifiedArchiveContent(source, record) : undefined
+      if (targetExists) await verifiedArchiveContent(target, record)
+      if (temporaryExists) await verifiedArchiveContent(temporary, record)
+      if (!targetExists) {
+        if (temporaryExists) {
+          await link(temporary, target)
+          await sync(canonicalRecordsTarget)
+          targetExists = true
+          await options.onStep?.('target-published', record.sequence)
+        } else {
+          if (!sourceContent) throw new Error(`archive source and target are both missing: ${record.name}`)
+          await writeFileAtomicExclusive(target, sourceContent, {
+            temporaryId: journal.transactionId,
+            onPublished: () => options.onStep?.('target-published', record.sequence),
+            syncDirectory: sync
+          })
+          targetExists = true
+        }
+      }
+      if (temporaryExists && targetExists) {
+        await rm(temporary)
+        await sync(canonicalRecordsTarget)
+      }
+      // This barrier is deliberately unconditional: an existing target may come from a prior
+      // attempt whose link publication succeeded but directory fsync failed.
+      await sync(canonicalRecordsTarget)
+      await options.onStep?.('copied', record.sequence)
+      if (sourceExists) {
+        await rm(source)
+        await sync(canonicalLive)
+      }
+      await options.onStep?.('source-removed', record.sequence)
+      if (archivedThrough < record.sequence) {
+        archivedThrough = record.sequence
+        await writeJsonAtomic(join(dataRoot, ARCHIVE_STATE), { schemaVersion: 1, archivedThrough } satisfies ArchiveState)
+      }
+    }
+
+    await writeJsonAtomic(join(canonicalTarget, 'manifest.json'), {
       schemaVersion: 1,
+      transactionId: journal.transactionId,
       at: new Date().toISOString(),
       recorderVersion: RECORDER_VERSION,
-      from: archived[0].sequence,
+      from: journal.records[0].sequence,
       to: archivedThrough,
-      count: archived.length,
-      records: archived
+      count: journal.records.length,
+      records: journal.records
     })
-    return { archived, archivedThrough, target: options.target }
+    await rm(join(dataRoot, ARCHIVE_JOURNAL))
+    await sync(dataRoot)
+    invalidateRecordIndex(dataRoot)
+    return { archived: journal.records, archivedThrough, target: options.target }
   })
 }
 
@@ -514,10 +776,22 @@ export async function lastRecordVersion(dataRoot: string): Promise<string | null
 }
 
 export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
-  const files = await recordFiles(dataRoot)
+  // Integrity verification always bypasses disposable projections and scans canonical filenames.
+  const files = await recordFiles(dataRoot, { bypassIndex: true })
   const errors: string[] = []
   // An archived prefix is only acceptable when an archive operation recorded the floor.
-  const archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
+  let archivedThrough = 0
+  try {
+    archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error))
+  }
+  try {
+    const journal = await archiveJournal(dataRoot)
+    if (journal) errors.push(`pending archive journal: ${journal.transactionId}`)
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error))
+  }
   let previous = archivedThrough
   const ids = new Set<string>()
   for (const file of files) {

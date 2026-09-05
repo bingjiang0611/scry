@@ -1,5 +1,5 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import {
   contextUsageEvidence,
   mcpCallsForEvent,
@@ -523,19 +523,7 @@ function renderTurnCallDetail(kind: 'mcp' | 'skill', items: TurnCallItem[]): Rea
   )
 }
 
-export function OverviewPanel({
-  turns: liveTurns,
-  sessionId = null,
-  selected,
-  usage,
-  stats,
-  runtimeProvider,
-  gitDiff = [],
-  busy = false,
-  onSelect,
-  onOpenTurn,
-  onOpenSessionDiff
-}: {
+export interface OverviewPanelProps {
   turns: Turn[]
   sessionId?: string | null
   selected: TraceEvent | null
@@ -547,22 +535,63 @@ export function OverviewPanel({
   onSelect: (ev: TraceEvent) => void
   onOpenTurn?: (runId: string, ev?: TraceEvent | null, target?: 'turn' | 'event') => void
   onOpenSessionDiff?: (path?: string) => void
-}) {
-  const [filesFolded, setFilesFolded] = useState(false)
-  const [turns, setTurns] = useState(liveTurns)
+}
+
+function useSampledOverviewTurns(liveTurns: Turn[], sessionId: string | null, busy: boolean): Turn[] {
+  const latestTurns = useRef(liveTurns)
+  latestTurns.current = liveTurns
+  const sampleTimer = useRef<number | null>(null)
   const turnsUpdatedAt = useRef(0)
+  const [sample, setSample] = useState({ sessionId, turns: liveTurns })
+  const turns = sample.sessionId === sessionId ? sample.turns : liveTurns
   useEffect(() => {
-    if (!busy) {
-      setTurns(liveTurns)
+    if (sample.sessionId !== sessionId || !busy) {
+      if (sampleTimer.current != null) window.clearTimeout(sampleTimer.current)
+      sampleTimer.current = null
+      turnsUpdatedAt.current = Date.now()
+      setSample({ sessionId, turns: liveTurns })
       return
     }
-    const delay = Math.max(0, 200 - (Date.now() - turnsUpdatedAt.current))
-    const timer = window.setTimeout(() => {
+    const remaining = 200 - (Date.now() - turnsUpdatedAt.current)
+    if (remaining <= 0) {
       turnsUpdatedAt.current = Date.now()
-      setTurns(liveTurns)
-    }, delay)
-    return () => window.clearTimeout(timer)
-  }, [busy, liveTurns])
+      setSample({ sessionId, turns: liveTurns })
+      return
+    }
+    if (sampleTimer.current == null) {
+      sampleTimer.current = window.setTimeout(() => {
+        sampleTimer.current = null
+        turnsUpdatedAt.current = Date.now()
+        setSample({ sessionId, turns: latestTurns.current })
+      }, remaining)
+    }
+  }, [busy, liveTurns, sample.sessionId, sessionId])
+  useEffect(() => () => {
+    if (sampleTimer.current != null) window.clearTimeout(sampleTimer.current)
+  }, [])
+  return turns
+}
+
+export function OverviewPanel(props: OverviewPanelProps) {
+  const sessionId = props.sessionId ?? null
+  const turns = useSampledOverviewTurns(props.turns, sessionId, props.busy ?? false)
+  return <MemoOverviewPanelBody {...props} sessionId={sessionId} turns={turns} />
+}
+
+function OverviewPanelBody({
+  turns,
+  sessionId = null,
+  selected,
+  usage,
+  stats,
+  runtimeProvider,
+  gitDiff = [],
+  busy = false,
+  onSelect,
+  onOpenTurn,
+  onOpenSessionDiff
+}: OverviewPanelProps) {
+  const [filesFolded, setFilesFolded] = useState(false)
   const [overviewDataTab, setOverviewDataTab] = useState<'turns' | 'session'>('turns')
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
   const dangerAuditRef = useRef<HTMLDivElement>(null)
@@ -1688,3 +1717,5 @@ export function OverviewPanel({
     </aside>
   )
 }
+
+const MemoOverviewPanelBody = memo(OverviewPanelBody)

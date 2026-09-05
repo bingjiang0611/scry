@@ -129,12 +129,35 @@ describe('TurnStreamProjectionCache bounded structural updates', () => {
     expect(replaced.structuralItems.map((event) => event.id)).toEqual(['t-1', 't-final'])
   })
 
-  it('leaves subagent-scoped streaming inside the structural timeline', () => {
+  it('extracts one parent-scoped subagent tail without rebuilding the outer structure', () => {
     const cache = new TurnStreamProjectionCache()
-    const projection = cache.project([tool('t-1'), delta('d-1', 'child', { parentToolUseId: 't-1' })])
-    // 子 agent 片段属于父面板，不能抽到主时间线末尾。
+    const parent = tool('t-1')
+    const first = cache.project([parent, delta('d-1', 'child ', { parentToolUseId: 't-1' })])
+    const second = cache.project([
+      parent,
+      delta('d-1', 'child ', { parentToolUseId: 't-1' }),
+      delta('d-2', 'answer', { parentToolUseId: 't-1' })
+    ])
+
+    expect(first.liveParentToolUseId).toBe('t-1')
+    expect(second.liveText).toBe('child answer')
+    expect(second.structuralItems.map((event) => event.id)).toEqual(['t-1'])
+    expect(second.structuralRecomputed).toBe(false)
+  })
+
+  it('keeps orphan parent-scoped text structural so bad attribution cannot hide it', () => {
+    const cache = new TurnStreamProjectionCache()
+    const orphan = cache.project([delta('d-1', 'visible', { parentToolUseId: 'missing-parent' })])
+    expect(orphan.liveText).toBe('')
+    expect(orphan.structuralItems.map((event) => event.id)).toEqual(['d-1'])
+  })
+
+  it('does not treat a standalone tool result as a parent for scoped live text', () => {
+    const cache = new TurnStreamProjectionCache()
+    const result = { ...tool('orphan-result'), stage: 'tool_result' }
+    const projection = cache.project([result, delta('d-1', 'still visible', { parentToolUseId: 'orphan-result' })])
     expect(projection.liveText).toBe('')
-    expect(projection.structuralItems.map((event) => event.id)).toEqual(['t-1', 'd-1'])
+    expect(projection.structuralItems.map((event) => event.id)).toEqual(['orphan-result', 'd-1'])
   })
 
   it('force-flushes the tail into the structural projection at terminal state', () => {

@@ -256,6 +256,26 @@ const text = (parts) => Array.isArray(parts)
   ? parts.filter((part) => part?.type === 'text' && !part.ignored).map((part) => part.text).filter(Boolean).join('\\n')
   : ''
 
+function utf8Prefix(value, limit) {
+  const source = Buffer.from(String(value ?? ''))
+  if (source.byteLength <= limit) return { value: source.toString('utf8') }
+  let end = limit
+  while (end > Math.max(0, limit - 4)) {
+    try {
+      const retained = new TextDecoder('utf-8', { fatal: true }).decode(source.subarray(0, end))
+      return {
+        value: retained,
+        capture: { status: 'partial', reason: 'byte_limit', originalBytes: source.byteLength, retainedBytes: Buffer.byteLength(retained) }
+      }
+    } catch { end-- }
+  }
+  const retained = source.subarray(0, end).toString('utf8')
+  return {
+    value: retained,
+    capture: { status: 'partial', reason: 'byte_limit', originalBytes: source.byteLength, retainedBytes: Buffer.byteLength(retained) }
+  }
+}
+
 function sessionId(input) {
   const event = object(input?.event)
   const properties = object(event.properties)
@@ -278,8 +298,10 @@ function tool(input, output = {}) {
 }
 
 function usage(state) {
+  const observed = [...(state?.usage?.values() ?? [])]
+  if (observed.length === 0) return undefined
   const totals = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0, cost_usd: 0 }
-  for (const info of state?.usage?.values() ?? []) {
+  for (const info of observed) {
     totals.input_tokens += Number(info.tokens?.input ?? 0)
     totals.output_tokens += Number(info.tokens?.output ?? 0)
     totals.cache_read_input_tokens += Number(info.tokens?.cache?.read ?? 0)
@@ -345,10 +367,13 @@ export const ScryRecorder = async () => ({
       }
     }
     if (envelope.type === 'session.idle') {
+      const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
+      const observedUsage = usage(state)
       deliver('Stop', {
         ...payload('Stop', input),
-        assistant_response: state ? [...state.assistant.values()].join('\\n').slice(0, 262144) : '',
-        usage: usage(state)
+        assistant_response: assistant.value,
+        ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
+        ...(observedUsage ? { usage: observedUsage } : {})
       })
       turns.delete(id)
     }

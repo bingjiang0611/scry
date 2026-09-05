@@ -369,6 +369,40 @@ function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number
   return [...collapseHookRuns(runs), ...aggregateHookDeliveries(events, eventOrder)]
 }
 
+type CaptureField = 'assistant_response' | 'tool_input' | 'tool_response' | 'model_segments'
+
+function captureOmissionReasons(events: TraceEvent[], fields: CaptureField[]): string[] {
+  const reasons = new Set<string>()
+  for (const event of events) {
+    const limitations = event.runtimeMetadata?.scryCaptureLimitations
+    if (!Array.isArray(limitations)) continue
+    for (const raw of limitations) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const item = raw as Record<string, unknown>
+      if (!fields.includes(item.field as CaptureField)) continue
+      const label = item.field === 'assistant_response'
+        ? 'assistant response'
+        : item.field === 'model_segments'
+          ? 'model segments'
+          : item.field === 'tool_input'
+            ? 'tool input'
+            : 'tool response'
+      const reason = item.reason === 'byte_limit'
+        ? 'exceeded the integration byte limit'
+        : item.reason === 'item_limit'
+          ? 'exceeded the integration item limit'
+          : 'could not be serialized by the integration'
+      reasons.add(`${label} ${reason}`)
+    }
+  }
+  return [...reasons]
+}
+
+function joinOmissionReasons(reasons: Array<string | undefined>): string | undefined {
+  const unique = [...new Set(reasons.filter((reason): reason is string => !!reason))]
+  return unique.length > 0 ? unique.join('; ') : undefined
+}
+
 export function aggregateTurnEvidence(args: {
   userText?: string
   events: TraceEvent[]
@@ -480,6 +514,9 @@ export function aggregateTurnEvidence(args: {
   )
   const usage = usageFrom(args.events)
   const modelTiming = deriveModelTiming(args.events)
+  const assistantCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['assistant_response']))
+  const callCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['tool_input', 'tool_response']))
+  const modelSegmentCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['assistant_response', 'model_segments']))
   const interventions = args.events.flatMap((event) => event.intervention ? [event.intervention] : [])
   const compactions: TurnCompaction[] = args.events.flatMap((event) => {
     if (event.kind !== 'harness' || event.stage !== 'context_compaction') return []
@@ -501,25 +538,38 @@ export function aggregateTurnEvidence(args: {
     assistant: !observable.assistant
       ? unavailable('provider does not expose assistant text to lifecycle hooks', [source])
       : assistantText
-        ? available({ text: assistantText, textHash: hash(assistantText) }, [source])
-        : partial({}, [source], 'assistant text was not present in captured events'),
-    modelSegments: observable.assistant
-      ? available(modelSegments, [source])
-      : unavailable('provider does not expose model output to lifecycle hooks', [source]),
+        ? assistantCaptureReason
+          ? partial({ text: assistantText, textHash: hash(assistantText) }, [source], assistantCaptureReason, 'exact')
+          : available({ text: assistantText, textHash: hash(assistantText) }, [source])
+        : partial({}, [source], assistantCaptureReason ?? 'assistant text was not present in captured events'),
+    modelSegments: !observable.assistant
+      ? unavailable('provider does not expose model output to lifecycle hooks', [source])
+      : modelSegmentCaptureReason
+        ? partial(modelSegments, [source], modelSegmentCaptureReason, 'exact')
+        : available(modelSegments, [source]),
     tools: !observable.tools
       ? unavailable('provider tool events were not observable', [source])
-      : omittedCallSections.has('tools')
-        ? partial(tools, [source], 'one or more tool call payloads were omitted by the record byte budget', 'exact')
+      : omittedCallSections.has('tools') || (!!callCaptureReason && tools.length > 0)
+        ? partial(tools, [source], joinOmissionReasons([
+            omittedCallSections.has('tools') ? 'one or more tool call payloads were omitted by the record byte budget' : undefined,
+            callCaptureReason
+          ])!, 'exact')
         : available(tools, [source]),
     skills: !observable.skills
       ? unavailable('provider skill events were not observable', [source])
-      : omittedCallSections.has('skills')
-        ? partial(skills, [source], 'one or more skill call payloads were omitted by the record byte budget', 'exact')
+      : omittedCallSections.has('skills') || (!!callCaptureReason && skills.length > 0)
+        ? partial(skills, [source], joinOmissionReasons([
+            omittedCallSections.has('skills') ? 'one or more skill call payloads were omitted by the record byte budget' : undefined,
+            callCaptureReason
+          ])!, 'exact')
         : available(skills, [source]),
     mcps: !observable.mcps
       ? unavailable('provider MCP events were not observable', [source])
-      : omittedCallSections.has('mcps')
-        ? partial(mcps, [source], 'one or more MCP call payloads were omitted by the record byte budget', 'exact')
+      : omittedCallSections.has('mcps') || (!!callCaptureReason && mcps.length > 0)
+        ? partial(mcps, [source], joinOmissionReasons([
+            omittedCallSections.has('mcps') ? 'one or more MCP call payloads were omitted by the record byte budget' : undefined,
+            callCaptureReason
+          ])!, 'exact')
         : available(mcps, [source]),
     hooks: !observable.hooks
       ? unavailable('provider hook runtime events were not observable', [source])
@@ -540,12 +590,15 @@ export function aggregateTurnEvidence(args: {
     ...(modelTiming
       ? {
           modelTiming:
-            modelTiming.status === 'available'
+            modelTiming.status === 'available' && !modelSegmentCaptureReason
               ? available(modelTiming.value, [source], modelTiming.quality)
               : partial(
                   modelTiming.value,
                   [source],
-                  modelTiming.omissionReason ?? 'model timing coverage was incomplete',
+                  joinOmissionReasons([
+                    modelTiming.status === 'partial' ? modelTiming.omissionReason ?? 'model timing coverage was incomplete' : undefined,
+                    modelSegmentCaptureReason
+                  ]) ?? 'model timing coverage was incomplete',
                   modelTiming.quality
                 )
         }

@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useDeferredValue, useMemo, type ReactNode } from 'react'
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -124,9 +124,42 @@ const baseComponents: Components = {
   )
 }
 
-const MarkdownImpl = memo(function MarkdownImpl({ children }: { children: string }) {
-  const deferredChildren = useDeferredValue(children)
-  const normalizedChildren = normalizeMarkdownForDisplay(deferredChildren)
+function useSampledMarkdownSource(source: string, streaming: boolean): string {
+  const latest = useRef(source)
+  latest.current = source
+  const timer = useRef<number | null>(null)
+  const sampledAt = useRef(0)
+  const [sampled, setSampled] = useState(source)
+  useEffect(() => {
+    if (!streaming || !source.startsWith(sampled)) {
+      if (timer.current != null) window.clearTimeout(timer.current)
+      timer.current = null
+      sampledAt.current = Date.now()
+      setSampled(source)
+      return
+    }
+    if (sampled === source) return
+    const remaining = 120 - (Date.now() - sampledAt.current)
+    if (remaining <= 0) {
+      sampledAt.current = Date.now()
+      setSampled(source)
+    } else if (timer.current == null) {
+      timer.current = window.setTimeout(() => {
+        timer.current = null
+        sampledAt.current = Date.now()
+        setSampled(latest.current)
+      }, remaining)
+    }
+  }, [sampled, source, streaming])
+  useEffect(() => () => {
+    if (timer.current != null) window.clearTimeout(timer.current)
+  }, [])
+  return !streaming || !source.startsWith(sampled) ? source : sampled
+}
+
+const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }: { children: string; streaming?: boolean }) {
+  const sampledChildren = useSampledMarkdownSource(children, streaming)
+  const normalizedChildren = normalizeMarkdownForDisplay(sampledChildren)
   const workspaceFileLink = useContext(WorkspaceFileLinkContext)
   const components = useMemo<Components>(() => ({
     ...baseComponents,
