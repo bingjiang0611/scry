@@ -138,8 +138,18 @@
         {
           "path": "Scry Pinned Summary v14.html",
           "createdAt": "2026-09-05T03:08:55.422Z",
-          "status": "needs-review",
+          "status": "changes-requested",
           "subtitle": "无右侧详情时常驻且占位，不覆盖会话；保留原卡片样式",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          }
+        },
+        {
+          "path": "Scry Pinned Summary v15.html",
+          "createdAt": "2026-09-05T03:18:22.531Z",
+          "status": "needs-review",
+          "subtitle": "Codex 同画布布局，常驻态无割裂；详情态临时摘要精确吸顶",
           "viewport": {
             "width": 1440,
             "height": 900
@@ -149,5 +159,5 @@
     }
   },
   "createdAt": "2026-09-02T13:20:00.000Z",
-  "updatedAt": "2026-09-05T03:13:37.704Z"
+  "updatedAt": "2026-09-05T03:18:22.531Z"
 }
