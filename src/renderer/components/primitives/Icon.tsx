@@ -6,8 +6,8 @@ export type IconName =
   | 'plus' | 'minus' | 'search' | 'folder' | 'file' | 'box' | 'cube' | 'tool' | 'bulb' | 'message'
   | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
-  | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'diff' | 'terminal' | 'agents' | 'panel'
-  | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit' | 'compose'
+  | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'summary' | 'diff' | 'terminal' | 'agents' | 'panel'
+  | 'globe' | 'plug' | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit' | 'compose'
 
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -108,6 +108,13 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   overview: <path d="M4 5h7v6H4zM13 5h7v3h-7zM13 10h7v9h-7zM4 13h7v6H4z" />,
+  summary: (
+    <>
+      <circle cx="7" cy="6" r="2" />
+      <circle cx="7" cy="18" r="2" />
+      <path d="M12 6h8M12 18h8M5 12h15" />
+    </>
+  ),
   diff: <path d="M8 4v16m8-16v16M5 8h6m-3-3 3 3-3 3m5 5h6m-3-3-3 3 3 3" />,
   terminal: (
     <>
@@ -127,6 +134,13 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M15 4v16" />
     </>
   ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" />
+    </>
+  ),
+  plug: <path d="M8 4v5m8-5v5M6 9h12v2a6 6 0 0 1-6 6v4m-4 0h8" />,
   expand: <path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5" />,
   collapse: <path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5" />,
   trash: <path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6" />,

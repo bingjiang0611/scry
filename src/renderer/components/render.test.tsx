@@ -479,7 +479,10 @@ describe('ViewChrome 顶栏', () => {
         cwd={null}
         agent={undefined}
         agentScanning
+        showSummary
+        summaryPersistent={false}
         showPanel
+        onToggleSummary={() => {}}
         onTogglePanel={() => {}}
       />
     )
@@ -487,6 +490,8 @@ describe('ViewChrome 顶栏', () => {
     expect(html).not.toContain('未检测到 agent')
     expect(html).toContain('class="tb-thread"')
     expect(html).toContain('不绑定项目')
+    expect(html).toContain('aria-label="切换固定摘要"')
+    expect(html).toContain('title="收起固定摘要"')
     expect(html).toContain('title="右侧工作区"')
     expect(html).not.toContain('title="工作区文件"')
   })
@@ -496,12 +501,16 @@ describe('ViewChrome 顶栏', () => {
       <ViewChrome
         cwd="/tmp/sample-workspace"
         agent={undefined}
+        showSummary
+        summaryPersistent
         showPanel
+        onToggleSummary={() => {}}
         onTogglePanel={() => {}}
       />
     )
     expect(html).not.toContain('title="工作区文件"')
     expect(html).toContain('sample-workspace')
+    expect(html).toContain('title="固定摘要常驻"')
     expect(html).toContain('title="右侧工作区"')
     expect(html).toContain('aria-label="右侧工作区"')
     expect(html).not.toContain('title="Skills"')

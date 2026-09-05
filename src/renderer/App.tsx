@@ -21,6 +21,7 @@ import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { AgentsSurface } from './components/AgentsSurface'
+import { PinnedSummary } from './components/PinnedSummary'
 import {
   createRightSurfaceState,
   reduceRightSurfaceState,
@@ -457,6 +458,7 @@ export function App() {
     reduceRightSurfaceState,
     createRightSurfaceState({ visible: false })
   )
+  const [summaryOverlayOpen, setSummaryOverlayOpen] = useState(false)
   const hasSurfaceContext = Boolean(cwd || activeSessionId)
   const terminalOpen = rightSurface.openIds.includes('terminal')
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
@@ -1244,6 +1246,16 @@ export function App() {
   }
   const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen
   const panelVisible = rightPanelMounted && view === 'chat' && rightSurface.visible && !surfacePane.collapsed
+  const summaryPersistent = view === 'chat' && !panelVisible
+  const summaryVisible = summaryPersistent || (view === 'chat' && summaryOverlayOpen)
+  const dismissPinnedSummary = useCallback((): void => setSummaryOverlayOpen(false), [])
+  useEffect(() => {
+    if (!panelVisible || view !== 'chat') setSummaryOverlayOpen(false)
+  }, [panelVisible, view])
+  const togglePinnedSummary = (): void => {
+    if (view !== 'chat' || !panelVisible) return
+    setSummaryOverlayOpen((current) => !current)
+  }
   const panelRuntimeProvider = useMemo(
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
     [integrations.selectedId, session.turns]
@@ -1383,7 +1395,7 @@ export function App() {
 
   return (
     <div
-      className={`app app-shell${rightPanelMounted ? ` has-right-panel right-panel-surface${panelVisible && rightSurface.maximized ? ' right-panel-maximized' : ''}${!panelVisible ? ' right-panel-hidden' : ''}` : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
+      className={`app app-shell${rightPanelMounted ? ` has-right-panel right-panel-surface${panelVisible && rightSurface.maximized ? ' right-panel-maximized' : ''}${!panelVisible ? ' right-panel-hidden' : ''}` : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
       style={appStyle}
     >
       <Sidebar
@@ -1447,7 +1459,10 @@ export function App() {
               cwd={cwd}
               agent={integrations.selectedAgent}
               agentScanning={integrations.agentsScanning}
+              showSummary={summaryVisible}
+              summaryPersistent={summaryPersistent}
               showPanel={panelVisible}
+              onToggleSummary={togglePinnedSummary}
               onTogglePanel={toggleOverviewPanel}
             />
 
@@ -1519,6 +1534,31 @@ export function App() {
               onRescan={integrations.rescan}
             />
           </>
+        )}
+        {view === 'chat' && summaryVisible && (
+          <PinnedSummary
+            cwd={cwd}
+            gitDiff={integrations.gitDiff}
+            skills={integrations.skills}
+            skillCapability={integrations.skillCapability}
+            mcps={integrations.mcps}
+            mcpCapability={integrations.mcpCapability}
+            turns={session.turns}
+            busy={session.busy}
+            temporary={!summaryPersistent}
+            onDismiss={dismissPinnedSummary}
+            onOpenChanges={diffReview ? () => {
+              dismissPinnedSummary()
+              openSessionNetDiff()
+            } : undefined}
+            onOpenSkills={openSkills}
+            onOpenMcp={openMcp}
+            onOpenAgents={() => {
+              dismissPinnedSummary()
+              surfacePane.restore()
+              dispatchRightSurface({ type: 'open', kind: 'agents' })
+            }}
+          />
         )}
         </>
       </div>

@@ -5,7 +5,10 @@ interface ViewChromeProps {
   cwd: string | null
   agent: DetectedAgent | undefined
   agentScanning?: boolean
+  showSummary: boolean
+  summaryPersistent: boolean
   showPanel: boolean
+  onToggleSummary: () => void
   onTogglePanel: () => void
 }
 
@@ -13,7 +16,10 @@ export function ViewChrome({
   cwd,
   agent,
   agentScanning = false,
+  showSummary,
+  summaryPersistent,
   showPanel,
+  onToggleSummary,
   onTogglePanel
 }: ViewChromeProps) {
   const agentVersion = agent?.version?.replace(/\s+\(Claude Code\)\s*$/, '')
@@ -37,6 +43,18 @@ export function ViewChrome({
             <span className="agent-name">{agentScanning ? '正在检测 agent…' : '未检测到 agent'}</span>
           </div>
         )}
+        <button
+          type="button"
+          className={`tb-action panel-pill summary-pill ${showSummary ? 'on' : ''}`}
+          data-pinned-summary-toggle
+          onClick={onToggleSummary}
+          title={summaryPersistent ? '固定摘要常驻' : showSummary ? '收起固定摘要' : '显示固定摘要'}
+          aria-label="切换固定摘要"
+          aria-pressed={showSummary}
+        >
+          <Icon name="summary" />
+          <span className="tb-action-label">摘要</span>
+        </button>
         <button
           type="button"
           className={`tb-action panel-pill ${showPanel ? 'on' : ''}`}
