@@ -8,6 +8,7 @@ import {
   classifyRunTermination,
   normalizeAgentQuestionRequest,
   normalizeAgentQuestionResponse,
+  normalizeAgentForkSessionRequest,
   normalizeAgentStartRequest,
   providerIdForRuntime,
   runtimeProviderForAgentId,
@@ -111,6 +112,35 @@ describe('runtime frontdoor mapping', () => {
       providerId: 'codex',
       forkLastTurn: { replaceRunId: 'run-last', replaceProviderTurnId: 'turn-last', replaceForkTurnId: 'message-last' }
     })).toThrow('可信会话或轮次边界')
+  })
+
+  it('normalizes a selected-turn session fork and rejects unsupported providers', () => {
+    expect(normalizeAgentForkSessionRequest({
+      providerId: 'codex',
+      cwd: '/repo',
+      sourceSessionId: ' thread-source ',
+      sourceRunId: ' run-selected ',
+      sourceProviderTurnId: ' turn-selected ',
+      sourceForkTurnId: ' message-selected ',
+      model: { id: ' gpt-test ' },
+      permissionMode: 'full_access'
+    })).toEqual({
+      providerId: 'codex',
+      cwd: '/repo',
+      sourceSessionId: 'thread-source',
+      sourceRunId: 'run-selected',
+      sourceProviderTurnId: 'turn-selected',
+      sourceForkTurnId: 'message-selected',
+      model: { id: 'gpt-test' },
+      permissionMode: 'full_access'
+    })
+    expect(() => normalizeAgentForkSessionRequest({
+      providerId: 'qoder',
+      sourceSessionId: 'session',
+      sourceRunId: 'run',
+      sourceProviderTurnId: 'turn',
+      sourceForkTurnId: 'message'
+    })).toThrow('仅 Codex 支持')
   })
 
   it('normalizes a stopped first-turn restart without inventing native boundaries', () => {

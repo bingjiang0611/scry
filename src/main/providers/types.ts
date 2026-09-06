@@ -12,6 +12,7 @@ import type {
 import type {
   AgentForceKillScope,
   AgentForkLastTurn,
+  AgentForkSessionRequest,
   AgentInputAttachment,
   AgentModelRef,
   AgentPermissionMode,
@@ -111,6 +112,15 @@ export interface ForkLastTurnFacet {
   fork(request: ProviderForkLastTurnRequest): Promise<{ externalSessionId?: string }>
 }
 
+export interface ProviderForkSessionRequest extends AgentForkSessionRequest {
+  codexHookTrust?: CodexHookTrustGrant[]
+  mcpExecution?: AuthorizedMcpExecution
+}
+
+export interface ForkSessionFacet {
+  fork(request: ProviderForkSessionRequest): Promise<{ externalSessionId?: string }>
+}
+
 export interface SkillsFacet {
   list(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>>
 }
@@ -156,6 +166,7 @@ export interface ProviderAdapter {
   describe(): Promise<ProviderDescriptor>
   run(request: ProviderRunRequest): ProviderRunHandle
   readonly forkLastTurn?: ForkLastTurnFacet
+  readonly forkSession?: ForkSessionFacet
   readonly skills?: SkillsFacet
   readonly mcp?: McpFacet
   readonly commands?: CommandsFacet

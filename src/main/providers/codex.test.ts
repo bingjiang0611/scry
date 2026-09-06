@@ -87,6 +87,32 @@ describe('Codex provider adapter', () => {
     }))
   })
 
+  it('forks a new session at the selected native turn boundary', async () => {
+    appServer.request.mockImplementation(async (method: string) => {
+      if (method === 'thread/fork') return { thread: { id: 'thread-branched' } }
+      throw new Error(`unexpected ${method}`)
+    })
+    const adapter = createCodexAdapter()
+
+    await expect(adapter.forkSession!.fork({
+      providerId: 'codex',
+      sourceSessionId: 'thread-source',
+      sourceRunId: 'run-selected',
+      sourceProviderTurnId: 'turn-selected',
+      sourceForkTurnId: 'turn-selected',
+      cwd: '/repo',
+      model: { id: 'gpt-5.3-codex' },
+      permissionMode: 'full_access'
+    })).resolves.toEqual({ externalSessionId: 'thread-branched' })
+    expect(appServer.request).toHaveBeenCalledWith('thread/fork', expect.objectContaining({
+      threadId: 'thread-source',
+      lastTurnId: 'turn-selected',
+      cwd: '/repo',
+      excludeTurns: true,
+      model: 'gpt-5.3-codex'
+    }))
+  })
+
   it('clears implicit MCP and serializes only approved Codex configs', () => {
     expect(codexMcpConfigArgs()).toEqual(['-c', 'mcp_servers={}'])
     expect(codexMcpConfigArgs({

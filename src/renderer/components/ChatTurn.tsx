@@ -1234,6 +1234,7 @@ function AssistantTurnImpl({
   selectedId,
   onSelect,
   onOpenDiff,
+  onForkTurn,
   pendingQuestions = [],
   onAnswerQuestion
 }: {
@@ -1241,9 +1242,12 @@ function AssistantTurnImpl({
   selectedId: string | null
   onSelect: (ev: TraceEvent) => void
   onOpenDiff?: (turn: Turn, turnDiff: TurnDiffSnapshot, initialPath?: string) => void
+  onForkTurn?: (turn: Turn) => Promise<void>
   pendingQuestions?: AgentQuestionRequest[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
 }) {
+  const [forking, setForking] = useState(false)
+  const [forkError, setForkError] = useState<string | null>(null)
   // 长轮次流式期把「还在增长的尾部文本」与结构化事件分开：只有结构真的变了才重算
   // 下面这些 O(全部事件) 的投影，纯 token 增量只更新一个字符串。
   const projectionCache = useRef<TurnStreamProjectionCache>()
@@ -1266,6 +1270,21 @@ function AssistantTurnImpl({
   }, [structuralItems])
   const visibleItems = useMemo(() => logicalCallEventsForTurn(items), [items])
   const result = resultOf({ items })
+  const canFork = Boolean(
+    onForkTurn && turn.done && !turn.error && turn.providerTurnId && (turn.forkTurnId ?? turn.providerTurnId)
+  )
+  const forkAtTurn = async (): Promise<void> => {
+    if (!onForkTurn || forking) return
+    setForking(true)
+    setForkError(null)
+    try {
+      await onForkTurn(turn)
+    } catch (error) {
+      setForkError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setForking(false)
+    }
+  }
   const turnDiffView = turnDiffViewOf(items)
   const turnDiff = turnDiffView?.turnDiff
   const turnDiffPreview = turnDiffView?.preview === true
@@ -1588,6 +1607,22 @@ function AssistantTurnImpl({
         />
       )}
       {turn.done && <TurnFooter items={turn.items} />}
+      {canFork && (
+        <div className="turn-branch-row">
+          <button
+            type="button"
+            className="turn-branch-btn"
+            title="从此轮创建 Codex 分支会话"
+            aria-label="从此轮创建分支会话"
+            disabled={forking}
+            onClick={() => { void forkAtTurn() }}
+          >
+            <Icon name="branch" />
+            <span>{forking ? '正在创建分支…' : '在新会话中分支'}</span>
+          </button>
+          {forkError && <span className="turn-branch-error" role="alert">{forkError}</span>}
+        </div>
+      )}
     </div>
   )
 }
