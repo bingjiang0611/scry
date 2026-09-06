@@ -10137,6 +10137,72 @@ button.turn-id.turn-call-open:focus-visible {
   z-index: 90;
 }
 
+.session-hover-card {
+  position: fixed;
+  z-index: 85;
+  width: min(460px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border2);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: var(--shadow-pop);
+  font: 12px/1.5 var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.session-hover-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.session-hover-heading strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: pre-wrap;
+}
+
+.session-hover-age {
+  flex: none;
+  color: var(--dim3);
+  font-size: 12px;
+}
+
+.session-hover-project {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.session-hover-project .ico {
+  flex: none;
+  margin-top: 2px;
+  color: var(--dim2);
+}
+
+.session-hover-path {
+  margin: 3px 0 0 24px;
+  color: var(--dim2);
+  font-size: 11px;
+}
+
+.session-hover-details {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-top: 10px;
+  color: var(--dim2);
+  font-size: 11px;
+}
+
 .session-rename-dialog .session-rename-error {
   color: var(--bad);
   overflow-wrap: anywhere;

@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { build } from 'vite'
 import { expect, it } from 'vitest'
 
-it('renames via the real sidebar DOM, retains failures and supports cancel, retry and pinned profiles', async () => {
+it('shows bounded session hover cards and renames via the real sidebar DOM with cancel, retry and pinned profiles', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'scry-rename-ui-'))
   try {
     await build({
@@ -16,10 +16,10 @@ it('renames via the real sidebar DOM, retains failures and supports cancel, retr
       esbuild: { jsx: 'automatic', jsxDev: false },
       build: {
         outDir: join(dir, 'bundle'),
-        lib: { entry: resolve('src/renderer/components/fixtures/session-rename.tsx'), name: 'RenameTest', formats: ['iife'], fileName: () => 'fixture.js' }
+        lib: { entry: resolve('src/renderer/components/fixtures/session-rename.tsx'), name: 'RenameTest', formats: ['iife'], fileName: () => 'fixture.js', cssFileName: 'fixture' }
       }
     })
-    await writeFile(join(dir, 'index.html'), `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'"><div id="root"></div><script src="./bundle/fixture.js"></script>`)
+    await writeFile(join(dir, 'index.html'), `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="./bundle/fixture.css"><div id="root"></div><script src="./bundle/fixture.js"></script>`)
     const main = join(dir, 'main.cjs')
     await writeFile(main, `
       const { app, BrowserWindow } = require('electron')

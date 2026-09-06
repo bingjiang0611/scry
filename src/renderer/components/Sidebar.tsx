@@ -10,16 +10,7 @@ import type { CatalogHealth } from '@shared/provider'
 import type { McpLiveStatus } from '@shared/trace'
 import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
-
-const activeTimeTitle = (ms: number): string =>
-  `最近活动：${new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }).format(new Date(ms))}`
+import { useSessionHoverCard } from './SessionHoverCard'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -223,6 +214,7 @@ export function Sidebar({
                   session={session}
                   cwd={cwd}
                   projectName={name}
+                  showProjectName
                   active={isActive(cwd, session)}
                   running={Boolean(session.runId && runningRunIds.has(session.runId))}
                   onPick={onPick}
@@ -289,6 +281,7 @@ export function Sidebar({
                       key={sessionKey(p.cwd, s)}
                       session={s}
                       cwd={p.cwd}
+                      projectName={p.name}
                       active={isActive(p.cwd, s)}
                       running={Boolean(s.runId && runningRunIds.has(s.runId))}
                       onPick={onPick}
@@ -457,6 +450,7 @@ function SessionRow({
   session,
   cwd,
   projectName,
+  showProjectName = false,
   active,
   running,
   onPick,
@@ -467,6 +461,7 @@ function SessionRow({
   session: SessionMeta
   cwd: string
   projectName?: string
+  showProjectName?: boolean
   active: boolean
   running: boolean
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
@@ -475,30 +470,32 @@ function SessionRow({
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
 }) {
   const pinned = Boolean(session.pinnedAt)
+  const hover = useSessionHoverCard(session, cwd, projectName, running)
   return (
     <div className="sb-sess-row">
       <button
         type="button"
         className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
         data-provider={session.providerId}
-        title={`${session.preview}${session.preview ? '\n' : ''}${activeTimeTitle(session.mtime)}${running ? '\n正在运行' : ''}`}
+        {...hover.triggerProps}
         aria-current={active ? 'true' : undefined}
-        onContextMenu={onMenu ? (event) => onMenu(event, cwd, session) : undefined}
-        onClick={() => onPick(cwd, session.sessionId, session.providerId, session.externalSessionId, session.runId, session.agentProfileId)}
+        onContextMenu={onMenu ? (event) => { hover.dismiss(); onMenu(event, cwd, session) } : undefined}
+        onClick={() => { hover.dismiss(); onPick(cwd, session.sessionId, session.providerId, session.externalSessionId, session.runId, session.agentProfileId) }}
       >
         <span className="sb-session-main">
           <span className="sb-provider">{session.providerId === 'legacy_unknown' ? '历史?' : session.providerId}</span>
           <span className="sb-sesstext">{session.preview || '(无预览)'}</span>
         </span>
         <span className="sb-session-meta">
-          <span className="sb-sesstime" title={activeTimeTitle(session.mtime)}>
+          <span className="sb-sesstime">
             {relTime(session.mtime)}
           </span>
-          {projectName && <span className="sb-sess-proj">{projectName}</span>}
+          {showProjectName && projectName && <span className="sb-sess-proj">{projectName}</span>}
         </span>
         {running && <span className="sb-running" role="status" aria-label="正在运行" />}
       </button>
-      <span className="sb-sess-acts">
+      {hover.tooltip}
+      <span className="sb-sess-acts" onMouseEnter={hover.dismiss} onFocus={hover.dismiss}>
         {onMenu && <button type="button" className="sb-act" aria-haspopup="menu"
           title="会话操作" aria-label={`会话操作：${session.preview || '(无预览)'}`}
           onClick={(event) => onMenu(event, cwd, session)}>···</button>}
