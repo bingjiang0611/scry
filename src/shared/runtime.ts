@@ -463,15 +463,18 @@ export function normalizeAgentForkSessionRequest(payload: unknown): AgentForkSes
   const modelId = boundedControlValue(value.model?.id)
   const modelProviderId = boundedControlValue(value.model?.providerId)
   const permissionMode = value.permissionMode ?? 'default'
-  if (providerId !== 'codex') throw new Error('当前仅 Codex 支持从指定轮次创建分支')
+  if (!providerId || !['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(providerId)) {
+    throw new Error('当前 Provider 不支持从指定轮次创建分支')
+  }
   if (!sourceSessionId || !sourceRunId || !sourceProviderTurnId || !sourceForkTurnId) {
     throw new Error('创建分支缺少可信会话或轮次边界')
   }
   if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
     throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
   }
+  if (providerId === 'pi' && !agentProfileId) throw new Error('Pi 分支缺少 agentProfileId')
   return {
-    providerId,
+    providerId: providerId as ProviderId,
     ...(agentProfileId ? { agentProfileId } : {}),
     ...(typeof value.cwd === 'string' && value.cwd.trim() ? { cwd: value.cwd } : {}),
     sourceSessionId,

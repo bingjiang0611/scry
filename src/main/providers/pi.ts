@@ -33,6 +33,7 @@ import type { ParsedTurn } from '../normalize'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 import { effortOption } from './run-controls'
+import { completedPiTurnForkTarget } from './session-fork-boundary'
 import type { ProviderAdapter, ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
 
 type JsonRecord = Record<string, unknown>
@@ -1128,6 +1129,38 @@ export function createPiAdapter(options: {
               throw new Error('Pi 会话无法定位待替换的用户消息 entry')
             }
             const forked = await rpc.send({ type: 'fork', entryId: request.replaceForkTurnId })
+            if (record(forked.data).cancelled === true) throw new Error('Pi extension 取消了会话分支')
+            const state = record((await rpc.send({ type: 'get_state' })).data)
+            if (typeof state.sessionId !== 'string' || !state.sessionId) throw new Error('Pi fork 未返回新 sessionId')
+            return { externalSessionId: state.sessionId }
+          }
+        )
+      }
+    },
+    forkSession: {
+      async fork(request) {
+        if (!request.agentProfileId) throw new Error('Pi 分支缺少 agentProfileId')
+        const profile = await options.resolveProfile(request.agentProfileId)
+        if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
+        return withPiRpc(
+          profile,
+          request.cwd,
+          piRpcArgs({ session: request.sourceSessionId }),
+          async (rpc) => {
+            const snapshot = record((await rpc.send({ type: 'get_entries' })).data)
+            const rawEntries = Array.isArray(snapshot.entries) ? snapshot.entries.map(record) : []
+            if (typeof snapshot.leafId !== 'string' || !snapshot.leafId) {
+              throw new Error('Pi 会话缺少 active leaf，无法创建分支')
+            }
+            const target = completedPiTurnForkTarget(rawEntries.map((entry) => ({
+              id: typeof entry.id === 'string' ? entry.id : undefined,
+              parentId: typeof entry.parentId === 'string' || entry.parentId === null ? entry.parentId : undefined,
+              type: typeof entry.type === 'string' ? entry.type : undefined,
+              role: typeof record(entry.message).role === 'string' ? String(record(entry.message).role) : undefined
+            })), snapshot.leafId, request.sourceForkTurnId)
+            const forked = target.operation === 'fork_before'
+              ? await rpc.send({ type: 'fork', entryId: target.entryId })
+              : await rpc.send({ type: 'clone' })
             if (record(forked.data).cancelled === true) throw new Error('Pi extension 取消了会话分支')
             const state = record((await rpc.send({ type: 'get_state' })).data)
             if (typeof state.sessionId !== 'string' || !state.sessionId) throw new Error('Pi fork 未返回新 sessionId')

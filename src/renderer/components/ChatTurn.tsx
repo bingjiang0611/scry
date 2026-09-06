@@ -1612,7 +1612,7 @@ function AssistantTurnImpl({
           <button
             type="button"
             className="turn-branch-btn"
-            title="从此轮创建 Codex 分支会话"
+            title="从此轮创建分支会话"
             aria-label="从此轮创建分支会话"
             disabled={forking}
             onClick={() => { void forkAtTurn() }}

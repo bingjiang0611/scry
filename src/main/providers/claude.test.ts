@@ -185,6 +185,30 @@ describe('Claude provider adapter', () => {
     })
   })
 
+  it('forks Claude after the selected completed turn', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      { type: 'user', uuid: 'prompt-1' },
+      { type: 'assistant', uuid: 'assistant-1' },
+      { type: 'user', uuid: 'prompt-2' },
+      { type: 'assistant', uuid: 'assistant-2' }
+    ])
+    sdk.forkSession.mockResolvedValue({ sessionId: 'session-branched' })
+
+    await expect(createClaudeAdapter('/tmp/scry-home').forkSession!.fork({
+      providerId: 'claude',
+      sourceSessionId: 'session-source',
+      sourceRunId: 'run-1',
+      sourceProviderTurnId: 'prompt-1',
+      sourceForkTurnId: 'prompt-1',
+      cwd: '/repo'
+    })).resolves.toEqual({ externalSessionId: 'session-branched' })
+    expect(sdk.forkSession).toHaveBeenCalledWith('session-source', {
+      dir: '/repo',
+      upToMessageId: 'assistant-1',
+      title: 'Scry branch'
+    })
+  })
+
   it('lists native slash commands through the existing control transport without a model prompt', async () => {
     sdk.query.mockReturnValue({
       supportedModels: vi.fn().mockResolvedValue([]),

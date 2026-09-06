@@ -1215,16 +1215,16 @@ export function App() {
     }
   }
 
-  const forkCodexTurn = async (turn: Turn): Promise<void> => {
-    if (integrations.selectedProviderId !== 'codex') throw new Error('当前仅 Codex 支持从指定轮次创建分支')
+  const forkConversationTurn = async (turn: Turn): Promise<void> => {
+    const providerId = integrations.selectedProviderId
     const sourceSessionId = session.historyWindow?.sessionId ?? selectedProviderSessionId
     const sourceProviderTurnId = turn.providerTurnId
     const sourceForkTurnId = turn.forkTurnId ?? sourceProviderTurnId
     if (!sourceSessionId || !sourceProviderTurnId || !sourceForkTurnId) {
-      throw new Error('当前轮次缺少可验证的 Codex 会话边界')
+      throw new Error('当前轮次缺少可验证的 Provider 会话边界')
     }
     const forked = await window.scry.forkSession({
-      providerId: 'codex',
+      providerId,
       cwd: cwd ?? undefined,
       sourceSessionId,
       sourceRunId: turn.runId,
@@ -1237,7 +1237,7 @@ export function App() {
     await pickSession(
       cwd ?? '',
       forked.externalSessionId,
-      'codex',
+      providerId,
       forked.externalSessionId,
       undefined,
       integrations.providerContext.agentProfileId
@@ -1553,7 +1553,7 @@ export function App() {
               onTurnRef={setTurnRef}
               onSelect={session.setSelected}
               onOpenDiff={openTurnDiffReview}
-              onForkTurn={integrations.selectedProviderId === 'codex' ? forkCodexTurn : undefined}
+              onForkTurn={forkConversationTurn}
               onOpenFile={openWorkspaceFile}
               onAnswerQuestion={session.answerQuestion}
               onInput={(value) => {

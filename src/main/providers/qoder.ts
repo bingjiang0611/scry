@@ -22,6 +22,7 @@ import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, Provi
 import { effortOption, permissionOptions } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
+import { completedTranscriptTurnBoundary } from './session-fork-boundary'
 
 interface Cached<T> {
   data: T
@@ -884,6 +885,21 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           dir: request.cwd,
           upToMessageId: boundary,
           title: 'Edited branch'
+        })
+        return { externalSessionId: forked.sessionId }
+      }
+    },
+    forkSession: {
+      async fork(request) {
+        const messages = await getSessionMessages(request.sourceSessionId, {
+          dir: request.cwd,
+          includeSystemMessages: true
+        })
+        const boundary = completedTranscriptTurnBoundary(messages, request.sourceForkTurnId, 'Qoder')
+        const forked = await forkSession(request.sourceSessionId, {
+          dir: request.cwd,
+          upToMessageId: boundary,
+          title: 'Scry branch'
         })
         return { externalSessionId: forked.sessionId }
       }

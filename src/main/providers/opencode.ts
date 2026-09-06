@@ -44,6 +44,7 @@ import { effortOption, permissionOptions } from './run-controls'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
 import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
+import { completedOpenCodeTurnBoundary } from './session-fork-boundary'
 
 let counter = 0
 const OPEN_CODE_MCP_AUTH_TIMEOUT_MS = 120_000
@@ -1161,6 +1162,35 @@ export function createOpenCodeAdapter(
         const forked = await unwrap<{ id: string }>(server.client.session.fork({
           sessionID: request.sourceSessionId,
           messageID: parentID,
+          directory: request.cwd
+        }), 'session.fork')
+        return { externalSessionId: forked.id }
+      }
+    },
+    forkSession: {
+      async fork(request) {
+        if (!request.cwd) throw new Error('OpenCode 分支需要工作目录')
+        const server = await serverFor(
+          { providerId: 'opencode', cwd: request.cwd, externalSessionId: request.sourceSessionId },
+          request.mcpExecution,
+          request.openCodePluginTrust
+        )
+        if (typeof server.client.session.messages !== 'function') {
+          throw new Error('当前 OpenCode SDK 无法读取完整消息边界')
+        }
+        const rows = await unwrap<Array<{ info?: unknown }>>(server.client.session.messages({
+          sessionID: request.sourceSessionId,
+          directory: request.cwd,
+          limit: 1_000
+        }), 'session.messages')
+        if (rows.length >= 1_000) throw new Error('OpenCode 会话消息超过安全边界，无法证明分支位置')
+        const boundary = completedOpenCodeTurnBoundary(rows.map((row) => {
+          const info = record(row.info)
+          return { id: openCodeMessageId(info), role: openCodeMessageRole(info) }
+        }), request.sourceForkTurnId)
+        const forked = await unwrap<{ id: string }>(server.client.session.fork({
+          sessionID: request.sourceSessionId,
+          messageID: boundary,
           directory: request.cwd
         }), 'session.fork')
         return { externalSessionId: forked.id }
