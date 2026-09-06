@@ -14,6 +14,7 @@ import {
 import { getClaudeVersion, runAgent } from '../agent-runner'
 import { extractUserText } from '../normalize'
 import { resolveClaudeBin, runtimeCliEnv } from '../claude-locate'
+import { completedTranscriptTurnBoundary } from './session-fork-boundary'
 import {
   authorizedMcpRuntimeEnv,
   authorizedMcpServers,
@@ -335,6 +336,21 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           dir: request.cwd,
           upToMessageId: boundary,
           title: 'Edited branch'
+        })
+        return { externalSessionId: forked.sessionId }
+      }
+    },
+    forkSession: {
+      async fork(request) {
+        const messages = await getSessionMessages(request.sourceSessionId, {
+          dir: request.cwd,
+          includeSystemMessages: true
+        })
+        const boundary = completedTranscriptTurnBoundary(messages, request.sourceForkTurnId, 'Claude')
+        const forked = await forkSession(request.sourceSessionId, {
+          dir: request.cwd,
+          upToMessageId: boundary,
+          title: 'Scry branch'
         })
         return { externalSessionId: forked.sessionId }
       }

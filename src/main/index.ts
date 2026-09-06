@@ -1442,13 +1442,19 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
         sessionId: request.sourceSessionId
       })
       const { source, prefix } = verifyForkArchiveBoundary(archive, request)
-      const codexHookTrust = cwd ? await resolveCodexHookTrust(cwd) : []
-      const mcpExecutionSnapshot = await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
+      const codexHookTrust = providerId === 'codex' && cwd ? await resolveCodexHookTrust(cwd) : []
+      const openCodePluginTrust = providerId === 'opencode' && cwd
+        ? await resolveOpenCodePluginTrust(cwd)
+        : undefined
+      const mcpExecutionSnapshot = providerId === 'pi'
+        ? null
+        : await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
       const forked = await forkSession.fork({
         ...request,
         cwd,
         agentProfileId,
         codexHookTrust,
+        openCodePluginTrust,
         mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
       })
       if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')

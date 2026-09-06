@@ -30,7 +30,8 @@ let leafId = 'active-leaf'
 let sessionId = 'pi-session-1'
 let entrySeq = 0
 const entries = [
-  { type: 'message', id: 'active-leaf', parentId: null, timestamp: new Date().toISOString(), message: { role: 'assistant' } },
+  { type: 'message', id: 'active-user', parentId: null, timestamp: new Date().toISOString(), message: { role: 'user' } },
+  { type: 'message', id: 'active-leaf', parentId: 'active-user', timestamp: new Date().toISOString(), message: { role: 'assistant' } },
   { type: 'message', id: 'abandoned-user', parentId: 'active-leaf', timestamp: new Date().toISOString(), message: { role: 'user' } }
 ]
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
@@ -74,6 +75,10 @@ process.stdin.on('data', (chunk) => {
         leafId = target.parentId
         response({ text: target.message.content ?? '', cancelled: false })
       }
+    }
+    else if (command.type === 'clone') {
+      sessionId = 'pi-session-cloned'
+      response({ cancelled: false })
     }
     else if (command.type === 'get_entries') {
       const start = command.since == null ? 0 : entries.findIndex((entry) => entry.id === command.since) + 1
@@ -310,6 +315,21 @@ describe('Pi RPC Provider', () => {
         agentProfileId: profile.id,
         cwd
       })).resolves.toEqual({ externalSessionId: 'pi-session-forked' })
+    })
+  })
+
+  it('clones Pi at the active leaf after the selected final turn', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.forkSession!.fork({
+        providerId: 'pi',
+        sourceSessionId: 'pi-session-1',
+        sourceRunId: 'run-active',
+        sourceProviderTurnId: 'active-user',
+        sourceForkTurnId: 'active-user',
+        agentProfileId: profile.id,
+        cwd
+      })).resolves.toEqual({ externalSessionId: 'pi-session-cloned' })
     })
   })
 

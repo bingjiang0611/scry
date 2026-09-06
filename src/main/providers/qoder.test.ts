@@ -86,6 +86,30 @@ describe('Qoder provider adapter', () => {
     })
   })
 
+  it('forks Qoder after the selected completed turn', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      { type: 'user', uuid: 'prompt-1' },
+      { type: 'assistant', uuid: 'assistant-1' },
+      { type: 'user', uuid: 'prompt-2' },
+      { type: 'assistant', uuid: 'assistant-2' }
+    ])
+    sdk.forkSession.mockResolvedValue({ sessionId: 'session-branched' })
+
+    await expect(createQoderAdapter().forkSession!.fork({
+      providerId: 'qoder',
+      sourceSessionId: 'session-source',
+      sourceRunId: 'run-1',
+      sourceProviderTurnId: 'qoder-turn-1',
+      sourceForkTurnId: 'prompt-1',
+      cwd: '/repo'
+    })).resolves.toEqual({ externalSessionId: 'session-branched' })
+    expect(sdk.forkSession).toHaveBeenCalledWith('session-source', {
+      dir: '/repo',
+      upToMessageId: 'assistant-1',
+      title: 'Scry branch'
+    })
+  })
+
   it('用 transcript user content 回退定位旧 archive 中没有 forkTurnId 的 Qoder prompt', async () => {
     sdk.getSessionMessages.mockResolvedValue([
       { type: 'user', uuid: 'prompt-previous', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: 'first' }] } },

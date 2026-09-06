@@ -114,6 +114,7 @@ export interface ForkLastTurnFacet {
 
 export interface ProviderForkSessionRequest extends AgentForkSessionRequest {
   codexHookTrust?: CodexHookTrustGrant[]
+  openCodePluginTrust?: OpenCodeProjectPluginAuthorization
   mcpExecution?: AuthorizedMcpExecution
 }
 

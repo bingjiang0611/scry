@@ -114,7 +114,7 @@ describe('runtime frontdoor mapping', () => {
     })).toThrow('可信会话或轮次边界')
   })
 
-  it('normalizes a selected-turn session fork and rejects unsupported providers', () => {
+  it('normalizes selected-turn session forks for every Provider', () => {
     expect(normalizeAgentForkSessionRequest({
       providerId: 'codex',
       cwd: '/repo',
@@ -134,13 +134,30 @@ describe('runtime frontdoor mapping', () => {
       model: { id: 'gpt-test' },
       permissionMode: 'full_access'
     })
-    expect(() => normalizeAgentForkSessionRequest({
-      providerId: 'qoder',
+    for (const providerId of ['claude', 'codex', 'qoder', 'opencode'] as const) {
+      expect(normalizeAgentForkSessionRequest({
+        providerId,
+        sourceSessionId: 'session',
+        sourceRunId: 'run',
+        sourceProviderTurnId: 'turn',
+        sourceForkTurnId: 'message'
+      })).toMatchObject({ providerId, permissionMode: 'default' })
+    }
+    expect(normalizeAgentForkSessionRequest({
+      providerId: 'pi',
+      agentProfileId: 'pi:default',
       sourceSessionId: 'session',
       sourceRunId: 'run',
       sourceProviderTurnId: 'turn',
       sourceForkTurnId: 'message'
-    })).toThrow('仅 Codex 支持')
+    })).toMatchObject({ providerId: 'pi', agentProfileId: 'pi:default' })
+    expect(() => normalizeAgentForkSessionRequest({
+      providerId: 'pi',
+      sourceSessionId: 'session',
+      sourceRunId: 'run',
+      sourceProviderTurnId: 'turn',
+      sourceForkTurnId: 'message'
+    })).toThrow('agentProfileId')
   })
 
   it('normalizes a stopped first-turn restart without inventing native boundaries', () => {

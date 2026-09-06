@@ -1146,7 +1146,7 @@ describe('工作区文件面板', () => {
 describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
   const html = renderToStaticMarkup(<AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} />)
 
-  it('已完成且带原生轮次边界的 Codex 轮次提供分支入口', () => {
+  it('已完成且带原生轮次边界的 Provider 轮次提供分支入口', () => {
     const branchTurn: Turn = {
       runId: 'run-branch',
       userText: '保留到这里',
