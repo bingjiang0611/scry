@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { SessionMeta } from '../env'
 import { relTime } from '../format'
@@ -10,13 +10,25 @@ const providerNames = {
   claude: 'Claude Code', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi', legacy_unknown: '历史 Provider 未知'
 }
 
+// Focus and pointer hover may belong to different rows. Ownership is shared so
+// stale leave timers or a still-focused row can never render a second card.
+const HoverOwner = createContext<{ id: string | null; claim: (id: string) => void } | null>(null)
+
+export function SessionHoverProvider({ children }: { children: ReactNode }) {
+  const [id, claim] = useState<string | null>(null)
+  const value = useMemo(() => ({ id, claim }), [id])
+  return <HoverOwner.Provider value={value}>{children}</HoverOwner.Provider>
+}
+
 export function useSessionHoverCard(session: SessionMeta, cwd: string, projectName: string | undefined, running: boolean) {
+  const owner = useContext(HoverOwner)
   const id = useId()
   const anchor = useRef<HTMLButtonElement>(null)
   const card = useRef<HTMLDivElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const frame = useRef<number>()
-  const [open, setOpen] = useState(false)
+  const [visible, setOpen] = useState(false)
+  const open = visible && owner?.id === id
   const [position, setPosition] = useState({ left: 0, top: 0 })
   const clear = (): void => {
     clearTimeout(timer.current)
@@ -24,10 +36,17 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
   }
   const dismiss = (): void => { clear(); setOpen(false) }
   const show = (): void => { clear(); setOpen(true) }
-  const enter = (): void => { clear(); timer.current = setTimeout(show, 350) }
+  const enter = (): void => {
+    clear()
+    setOpen(false)
+    owner?.claim(id)
+    timer.current = setTimeout(show, 350)
+  }
   const leave = (): void => { clear(); timer.current = setTimeout(() => setOpen(false), 120) }
   const focus = (): void => {
     clear()
+    setOpen(false)
+    owner?.claim(id)
     // Let the browser scroll a keyboard-focused row into view before opening.
     frame.current = requestAnimationFrame(show)
   }
@@ -68,9 +87,6 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
     }
   }, [open])
   const validTime = Number.isFinite(session.mtime) && session.mtime > 0
-  const absoluteTime = validTime ? new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-  }).format(session.mtime) : '时间未知'
   return {
     dismiss,
     triggerProps: {
@@ -89,12 +105,8 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
           <span className="session-hover-age">{validTime ? relTime(session.mtime) : '时间未知'}</span>
         </div>
         <div className="session-hover-project"><Icon name="folder" />
-          <span>{cwd ? projectName || cwd.split('/').filter(Boolean).at(-1) || cwd : '未关联工作目录'}</span>
-        </div>
-        {cwd && <div className="session-hover-path">{cwd}</div>}
-        <div className="session-hover-details">
-          <span>{providerNames[session.providerId]}{running ? ' · 正在运行' : ''}</span>
-          <span>最近活动：{absoluteTime}</span>
+          <span className="session-hover-project-name">{cwd ? projectName || cwd.split('/').filter(Boolean).at(-1) || cwd : '未关联工作目录'}</span>
+          <span className="session-hover-provider">{providerNames[session.providerId]}{running ? ' · 正在运行' : ''}</span>
         </div>
       </div>, document.body
     ) : null

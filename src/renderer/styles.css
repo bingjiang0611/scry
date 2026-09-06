@@ -10140,12 +10140,13 @@ button.turn-id.turn-call-open:focus-visible {
 .session-hover-card {
   position: fixed;
   z-index: 85;
-  width: min(460px, calc(100vw - 16px));
+  width: max-content;
+  max-width: min(340px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   overflow: auto;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border: 1px solid var(--border2);
-  border-radius: 16px;
+  border-radius: 12px;
   background: var(--panel);
   color: var(--fg);
   box-shadow: var(--shadow-pop);
@@ -10156,15 +10157,15 @@ button.turn-id.turn-call-open:focus-visible {
 .session-hover-heading {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
+  gap: 12px;
 }
 
 .session-hover-heading strong {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
-  font-weight: 600;
-  white-space: pre-wrap;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: normal;
 }
 
 .session-hover-age {
@@ -10175,32 +10176,27 @@ button.turn-id.turn-call-open:focus-visible {
 
 .session-hover-project {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 10px;
-  font-size: 13px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
 }
 
 .session-hover-project .ico {
   flex: none;
-  margin-top: 2px;
+  width: 14px;
+  height: 14px;
   color: var(--dim2);
 }
 
-.session-hover-path {
-  margin: 3px 0 0 24px;
-  color: var(--dim2);
-  font-size: 11px;
+.session-hover-project-name {
+  flex: 1;
+  min-width: 0;
 }
 
-.session-hover-details {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 4px 16px;
-  margin-top: 10px;
-  color: var(--dim2);
-  font-size: 11px;
+.session-hover-provider {
+  color: var(--dim3);
+  font-size: 10px;
 }
 
 .session-rename-dialog .session-rename-error {

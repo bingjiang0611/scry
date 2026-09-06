@@ -10,7 +10,7 @@ import type { CatalogHealth } from '@shared/provider'
 import type { McpLiveStatus } from '@shared/trace'
 import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
-import { useSessionHoverCard } from './SessionHoverCard'
+import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -196,7 +196,7 @@ export function Sidebar({
         </nav>
       )}
 
-      <div className="sb-list">
+      <SessionHoverProvider><div className="sb-list">
         {catalogHealth && catalogHealth.status !== 'ready' && (
           <div className="sb-empty" role="status" title={catalogHealth.reason}>
             {catalogHealth.status === 'degraded'
@@ -298,7 +298,7 @@ export function Sidebar({
             </div>
           )
         })}
-      </div>
+      </div></SessionHoverProvider>
 
       {sessionMenu && onRenameSession && (
         <SessionRenameMenu target={sessionMenu} onRename={onRenameSession} onClose={() => {
