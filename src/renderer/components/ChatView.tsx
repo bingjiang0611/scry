@@ -59,6 +59,7 @@ interface ChatViewProps {
   onTurnRef?: (runId: string, el: HTMLDivElement | null) => void
   onSelect: (event: TraceEvent) => void
   onOpenDiff?: (turn: Turn, turnDiff: TurnDiffSnapshot, initialPath?: string) => void
+  onForkTurn?: (turn: Turn) => Promise<void>
   onOpenFile?: (target: WorkspaceFileTarget) => void
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onInput: (value: string) => void
@@ -168,6 +169,7 @@ export function ChatView({
   onTurnRef,
   onSelect,
   onOpenDiff,
+  onForkTurn,
   onOpenFile,
   onAnswerQuestion,
   onInput,
@@ -520,6 +522,9 @@ export function ChatView({
                 selectedId={selectedId}
                 onSelect={onSelect}
                 onOpenDiff={onOpenDiff}
+                onForkTurn={!busy && !sessionLoading && queuedPrompts.length === 0 && pendingQuestions.length === 0
+                  ? onForkTurn
+                  : undefined}
                 pendingQuestions={pendingQuestions}
                 onAnswerQuestion={onAnswerQuestion}
               />

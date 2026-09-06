@@ -29,7 +29,6 @@ import {
   resolveTranscriptPath,
   traceArchiveRunIds,
   upsertTraceArchiveTurn,
-  type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
 import {
@@ -55,10 +54,12 @@ import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot, type UsageAnalyticsRangeDays } from '../shared/trace'
 import {
+  normalizeAgentForkSessionRequest,
   normalizeAgentStartRequest,
   providerIdForAgentId,
   runTerminationHint,
   type AgentForceKillScope,
+  type AgentForkSessionResult,
   type AgentInputAttachment,
   type AgentStartRequest,
   type RuntimeProvider
@@ -73,6 +74,7 @@ import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile 
 import { composeProviderDetectionResults } from './provider-detection'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
 import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
+import { verifyForkArchiveBoundary } from './session-fork'
 import { appendCoalescedTrace, upsertTraceById } from './live-trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import {
@@ -823,6 +825,13 @@ function bumpSessionRevision(key: string): void {
   sessionRevisionByContext.set(key, (sessionRevisionByContext.get(key) ?? 0) + 1)
 }
 
+function resetSessionContext(key: string): void {
+  bumpSessionRevision(key)
+  sessionByContext.delete(key)
+  sessionAliasesByContext.delete(key)
+  discardSessionBaseline(key)
+}
+
 function setCurrentCwd(dir: string | undefined): void {
   if (dir !== currentCwd) {
     // 本机 Shell 不得在切换工作区后继续后台运行；Provider adapters 则各自按 cwd 管理 transport/cache。
@@ -861,8 +870,8 @@ interface ArchiveTraceTurnArgs {
   managedRecorderEnabled: boolean
 }
 
-function cloneForkArchivePrefix(args: {
-  archive: TraceArchive
+function cloneForkArchiveTurns(args: {
+  turns: TraceArchiveTurn[]
   targetSessionId: string
   providerId: ProviderId
   runtimeProvider: RuntimeProvider
@@ -871,7 +880,7 @@ function cloneForkArchivePrefix(args: {
   const userDataDir = app.getPath('userData')
   const clonedRunIds: string[] = []
   try {
-    for (const source of args.archive.turns.slice(0, -1)) {
+    for (const source of args.turns) {
       const runId = `fork-${createHash('sha256')
         .update(`${args.targetSessionId}\0${source.runId}`)
         .digest('hex')
@@ -1404,14 +1413,70 @@ handleTrusted('agent:newSession', async (_event, context: ProviderContext) => {
   const cwd = context?.cwd ?? currentCwd
   if (context?.providerId) {
     const normalizedContext = { ...context, cwd }
-    await providerRegistry.invalidateContext(normalizedContext)
     const key = providerContextKey(context.providerId, cwd ?? '', context.agentProfileId)
-    bumpSessionRevision(key)
-    sessionByContext.delete(key)
-    sessionAliasesByContext.delete(key)
-    discardSessionBaseline(key)
+    resetSessionContext(key)
+    await providerRegistry.invalidateContext(normalizedContext)
   }
   return true
+})
+
+handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<AgentForkSessionResult> => {
+  const request = normalizeAgentForkSessionRequest(payload)
+  const providerId = request.providerId
+  const cwd = request.cwd ? resolveKnownProjectDirectory(request.cwd) : currentCwd
+  const catalogCwd = cwd ?? ''
+  const agentProfileId = request.agentProfileId
+  const adapter = providerRegistry.get(providerId)
+  const forkSession = adapter.forkSession
+  if (!forkSession) throw new Error('当前 Provider 不支持从指定轮次创建分支')
+  const lifecycleKey = providerOperationKey(providerId, agentProfileId)
+  const lease = providerOperationGate.acquireOperation(lifecycleKey)
+  if (!lease.ok) throw new Error('当前 Provider 正在认证 MCP，已拒绝创建分支')
+  const contextKey = providerContextKey(providerId, catalogCwd, agentProfileId)
+  try {
+    return await contextAdmission.run(contextKey, async () => {
+      const archive = await readTraceArchiveAsync({
+        userDataDir: app.getPath('userData'),
+        providerId,
+        cwd: catalogCwd,
+        sessionId: request.sourceSessionId
+      })
+      const { source, prefix } = verifyForkArchiveBoundary(archive, request)
+      const codexHookTrust = cwd ? await resolveCodexHookTrust(cwd) : []
+      const mcpExecutionSnapshot = await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
+      const forked = await forkSession.fork({
+        ...request,
+        cwd,
+        agentProfileId,
+        codexHookTrust,
+        mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
+      })
+      if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')
+      cloneForkArchiveTurns({
+        turns: prefix,
+        targetSessionId: forked.externalSessionId,
+        providerId,
+        runtimeProvider: adapter.runtimeProvider,
+        cwd: catalogCwd
+      })
+      resetSessionContext(contextKey)
+      sessionByContext.set(contextKey, forked.externalSessionId)
+      loadSessionRevision++
+      sessionHistoryCache = null
+      appSessionStore().record({
+        providerId,
+        agentProfileId,
+        runtimeProvider: adapter.runtimeProvider,
+        externalSessionId: forked.externalSessionId,
+        cwd: catalogCwd,
+        prompt: source.userText
+      })
+      if (cwd) rememberProject(cwd)
+      return { externalSessionId: forked.externalSessionId }
+    })
+  } finally {
+    lease.release()
+  }
 })
 
 handleTrusted('agent:invalidateProviderContext', async (_event, context: ProviderContext) => {
@@ -2063,9 +2128,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     const contextKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
     const scopedSessionKey = (sessionId: string): string =>
       providerSessionKey(providerId, catalogCwd, sessionId, agentProfileId)
+    const expectedSessionId = request.expectedExternalSessionId
+    // expectedExternalSessionId=null 是 renderer 对“必须新建会话”的显式要求。
+    // 即使较早的 agent:newSession IPC 仍在路上，这里也先原子清空 main 的旧上下文，
+    // 再捕获 revision/resume，避免把新提示词误判为要投递到旧会话。
+    if (expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
+      resetSessionContext(contextKey)
+    }
     let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
     let resume = sessionByContext.get(contextKey)
-    const expectedSessionId = request.expectedExternalSessionId
     const forkSourceSessionId = request.forkLastTurn ? resume : undefined
     const restartSourceSessionId = request.restartLastTurn && typeof expectedSessionId === 'string'
       ? expectedSessionId
@@ -2292,8 +2363,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
       })
       if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')
-      cloneForkArchivePrefix({
-        archive,
+      cloneForkArchiveTurns({
+        turns: archive.turns.slice(0, -1),
         targetSessionId: forked.externalSessionId,
         providerId,
         runtimeProvider,

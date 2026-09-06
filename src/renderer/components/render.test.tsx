@@ -1146,6 +1146,29 @@ describe('工作区文件面板', () => {
 describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
   const html = renderToStaticMarkup(<AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} />)
 
+  it('已完成且带原生轮次边界的 Codex 轮次提供分支入口', () => {
+    const branchTurn: Turn = {
+      runId: 'run-branch',
+      userText: '保留到这里',
+      done: true,
+      providerTurnId: 'turn-selected',
+      forkTurnId: 'turn-selected',
+      items: [ev({
+        id: 'branch-result',
+        kind: 'harness',
+        stage: 'result',
+        providerId: 'codex',
+        runtimeProvider: 'codex_cli'
+      })]
+    }
+    const branchHtml = renderToStaticMarkup(
+      <AssistantTurn turn={branchTurn} selectedId={null} onSelect={() => {}} onForkTurn={async () => {}} />
+    )
+    expect(branchHtml).toContain('aria-label="从此轮创建分支会话"')
+    expect(branchHtml).toContain('在新会话中分支')
+    expect(html).not.toContain('从此轮创建分支会话')
+  })
+
   it('trace 树渲染出工具节点', () => {
     expect(html).toContain('Write')
     expect(html).toContain('Read')

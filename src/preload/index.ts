@@ -10,6 +10,8 @@ import type {
 } from '../shared/trace'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResult } from '../shared/billing'
 import type {
+  AgentForkSessionRequest,
+  AgentForkSessionResult,
   AgentInputAttachment,
   AgentQuestionRequest,
   AgentQuestionResponse,
@@ -132,6 +134,7 @@ const api = {
   terminalClose: (id: string): Promise<true> => ipcRenderer.invoke('terminal:close', { id }),
   setCwd: (dir: string | null): Promise<string | null> => ipcRenderer.invoke('agent:setCwd', dir),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
+  forkSession: (request: AgentForkSessionRequest): Promise<AgentForkSessionResult> => ipcRenderer.invoke('agent:forkSession', request),
   invalidateProviderContext: (context: ProviderContext): Promise<true> => ipcRenderer.invoke('agent:invalidateProviderContext', context),
   listSessions: (context: ProviderContext): Promise<SessionMeta[]> => ipcRenderer.invoke('agent:listSessions', context),
   listProjects: (): Promise<ProjectMeta[]> => ipcRenderer.invoke('agent:listProjects'),

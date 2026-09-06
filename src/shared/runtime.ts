@@ -174,6 +174,22 @@ export interface AgentRestartLastTurn {
   replaceRunId: string
 }
 
+export interface AgentForkSessionRequest {
+  providerId: ProviderId
+  agentProfileId?: string
+  cwd?: string
+  sourceSessionId: string
+  sourceRunId: string
+  sourceProviderTurnId: string
+  sourceForkTurnId: string
+  model?: AgentModelRef
+  permissionMode?: AgentPermissionMode
+}
+
+export interface AgentForkSessionResult {
+  externalSessionId: string
+}
+
 export interface AgentStartRequest {
   prompt: string
   cwd?: string
@@ -433,6 +449,38 @@ function boundedControlValue(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.trim()
   return text && text.length <= 240 ? text : undefined
+}
+
+export function normalizeAgentForkSessionRequest(payload: unknown): AgentForkSessionRequest {
+  if (!payload || typeof payload !== 'object') throw new Error('创建分支请求格式无效')
+  const value = payload as Partial<AgentForkSessionRequest>
+  const providerId = boundedControlValue(value.providerId)
+  const agentProfileId = boundedControlValue(value.agentProfileId)
+  const sourceSessionId = boundedControlValue(value.sourceSessionId)
+  const sourceRunId = boundedControlValue(value.sourceRunId)
+  const sourceProviderTurnId = boundedControlValue(value.sourceProviderTurnId)
+  const sourceForkTurnId = boundedControlValue(value.sourceForkTurnId)
+  const modelId = boundedControlValue(value.model?.id)
+  const modelProviderId = boundedControlValue(value.model?.providerId)
+  const permissionMode = value.permissionMode ?? 'default'
+  if (providerId !== 'codex') throw new Error('当前仅 Codex 支持从指定轮次创建分支')
+  if (!sourceSessionId || !sourceRunId || !sourceProviderTurnId || !sourceForkTurnId) {
+    throw new Error('创建分支缺少可信会话或轮次边界')
+  }
+  if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
+    throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
+  }
+  return {
+    providerId,
+    ...(agentProfileId ? { agentProfileId } : {}),
+    ...(typeof value.cwd === 'string' && value.cwd.trim() ? { cwd: value.cwd } : {}),
+    sourceSessionId,
+    sourceRunId,
+    sourceProviderTurnId,
+    sourceForkTurnId,
+    ...(modelId ? { model: { id: modelId, ...(modelProviderId ? { providerId: modelProviderId } : {}) } } : {}),
+    permissionMode
+  }
 }
 
 export type AgentPermissionDecision = 'once' | 'session' | 'reject'
