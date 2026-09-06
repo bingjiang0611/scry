@@ -38,7 +38,9 @@ interface ChatViewProps {
   runControlsReason?: string | null
   input: string
   sendBlockedReason?: string | null
+  composerError?: string | null
   submitting?: boolean
+  sessionLoading?: boolean
   busy: boolean
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
@@ -145,7 +147,9 @@ export function ChatView({
   runControlsReason = null,
   input,
   sendBlockedReason = null,
+  composerError = null,
   submitting = false,
+  sessionLoading = false,
   busy,
   draftAttachments,
   queuedPrompts,
@@ -277,6 +281,10 @@ export function ChatView({
     }))
   ]
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
+  const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
+  const composerStatus = composerError ?? (
+    sessionLoading ? '正在打开对话，草稿已保留' : hasDraft ? sendBlockedReason : null
+  )
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
@@ -307,15 +315,25 @@ export function ChatView({
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-        {turns.length > 0 && (
+        {turns.length > 0 && !sessionLoading && (
           <div className="chat-evidence-source" role="note" aria-label="会话证据来源">
             <span><i aria-hidden="true" />本机真实会话</span>
             <code title={cwd ?? '未绑定工作目录'}>{workspaceName ?? '不绑定项目'}</code>
             <b>{selectedAgentName} · runtime / local archive · 未捕获字段保持未知</b>
           </div>
         )}
-        <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线">
-          {turns.length === 0 && (
+        <div
+          className="chat chat-transcript"
+          ref={scrollRef}
+          aria-label="执行时间线"
+          aria-busy={sessionLoading}
+        >
+          {sessionLoading && (
+            <div className="chat-session-loading" role="status">
+              <span><Icon name="refresh" />正在打开对话…</span>
+            </div>
+          )}
+          {turns.length === 0 && !sessionLoading && (
             <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
               <header className="welcome-heading">
                 <div className="welcome-kicker"><span className="welcome-ready-dot" />新会话 · 本机证据</div>
@@ -452,7 +470,7 @@ export function ChatView({
               </section>
             </div>
           )}
-          {historyWindow?.hasOlder && (
+          {!sessionLoading && historyWindow?.hasOlder && (
             <div className="history-window-note" role="note" aria-label="历史轮次范围">
               <span>
                 仅挂载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·
@@ -468,7 +486,7 @@ export function ChatView({
               </button>
             </div>
           )}
-          {turns.map((turn, index) => {
+          {!sessionLoading && turns.map((turn, index) => {
             const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
             const previous = turns[index - 1]
             const currentBoundaryComplete = !!turn.providerTurnId && !!turn.forkTurnId
@@ -647,6 +665,7 @@ export function ChatView({
           ref={textareaRef}
           className="input"
           aria-label="描述任务"
+          aria-describedby={composerStatus ? 'composer-status' : undefined}
           value={input}
           onChange={(event) => onInput(event.target.value)}
           onPaste={(event) => {
@@ -692,11 +711,21 @@ export function ChatView({
             }
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault()
-              if (sendBlockedReason) return
+              if (sessionLoading || sendBlockedReason) return
               onSend()
             }
           }}
         />
+        {composerStatus && (
+          <div
+            id="composer-status"
+            className={`composer-status ${composerError ? 'is-error' : 'is-blocked'}`}
+            role={composerError ? 'alert' : 'status'}
+          >
+            <Icon name={composerError ? 'alert' : 'info'} />
+            <span>{composerStatus}</span>
+          </div>
+        )}
         <div className="composer-bottom">
           <div className="composer-controls" role="group" aria-label="运行配置">
             <div className="run-control-scroll">
@@ -737,9 +766,11 @@ export function ChatView({
             type="button"
             className="send"
             onClick={onSend}
-            disabled={submitting || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
+            disabled={submitting || sessionLoading || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
             aria-busy={submitting}
             aria-label={sendActionLabel}
+            aria-describedby={composerStatus ? 'composer-status' : undefined}
+            title={composerStatus ?? sendActionLabel}
           >
             <Icon name="arrowUp" />
             <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>

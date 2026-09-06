@@ -2212,25 +2212,41 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         models: [{ model: { id: 'pi-model' }, label: 'Pi', efforts: [] }],
         permissions: [{ id: 'full_access', label: '本机完全访问', description: '继承本机用户权限' }]
       },
-      sendBlockedReason: reason
+      sendBlockedReason: reason,
+      input: '准备发送'
     })
 
     expect(chatHtml).toMatch(/<option value="default"[^>]*disabled=""[^>]*selected="">请选择权限<\/option>/)
     expect(chatHtml).toMatch(/<option value="full_access"[^>]*>本机完全访问<\/option>/)
-    expect(chatHtml).not.toContain(reason)
+    expect(chatHtml).toContain(reason)
+    expect(chatHtml).toContain('id="composer-status"')
     expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
-  it('Composer 在阻塞状态下不展示任何提示', () => {
+  it('Composer 直接说明阻塞发送的原因，并关联输入与发送按钮', () => {
     const reason = '当前 Provider 不可发送'
-    const chatHtml = renderWelcome({ sendBlockedReason: reason })
+    const chatHtml = renderWelcome({ input: '保留这份草稿', sendBlockedReason: reason })
     const sendButton = chatHtml.match(/<button[^>]*class="send"[^>]*>/u)?.[0] ?? ''
-    expect(chatHtml).not.toContain('id="composer-status"')
-    expect(chatHtml).not.toContain('aria-describedby')
-    expect(chatHtml).not.toContain('placeholder=')
-    expect(chatHtml).not.toContain(reason)
-    expect(sendButton).not.toContain('title=')
-    expect(sendButton).toContain('aria-label="发送"')
+    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).toContain('role="status"')
+    expect(chatHtml).toContain(reason)
+    expect(chatHtml).toMatch(/aria-label="描述任务"[^>]*aria-describedby="composer-status"/)
+    expect(sendButton).toContain('aria-describedby="composer-status"')
+    expect(sendButton).toContain(`title="${reason}"`)
+    expect(sendButton).toContain('disabled=""')
+  })
+
+  it('发送失败后展示精确错误，不用静默吞掉点击结果', () => {
+    const chatHtml = renderWelcome({
+      input: '保留这份草稿',
+      composerError: 'Provider 启动失败：认证已过期'
+    })
+
+    expect(chatHtml).toContain('class="composer-status is-error"')
+    expect(chatHtml).toContain('role="alert"')
+    expect(chatHtml).toContain('Provider 启动失败：认证已过期')
+    expect(chatHtml).toMatch(/class="send"[^>]*aria-describedby="composer-status"/)
+    expect(chatHtml).not.toMatch(/class="send"[^>]*disabled=""/)
   })
 
   it('可选模型后台读取时保持自动模型语义，不把 composer 伪装成阻塞态', () => {
@@ -2255,16 +2271,16 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="发送"')
   })
 
-  it('缓存选择失效时静默禁用发送', () => {
+  it('缓存选择失效时说明原因并禁用发送', () => {
     const reason = '最后已知模型目录不包含当前模型、推理强度或权限，请重新选择'
-    const chatHtml = renderWelcome({ sendBlockedReason: reason })
+    const chatHtml = renderWelcome({ input: '准备发送', sendBlockedReason: reason })
 
-    expect(chatHtml).not.toContain('id="composer-status"')
-    expect(chatHtml).not.toContain(reason)
+    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).toContain(reason)
     expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
-  it('Provider 确认不可用时也不在 Composer 展示阻塞提示', () => {
+  it('Provider 确认不可用时在 Composer 展示探测错误', () => {
     const reason = '版本探测被信号 SIGKILL 终止'
     const chatHtml = renderWelcome({
       agents: [{
@@ -2272,11 +2288,28 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         health: { state: 'unavailable', transport: 'Agent SDK', lastError: 'CLI 不可用' }
       }],
       runControlsLoading: true,
-      sendBlockedReason: reason
+      sendBlockedReason: reason,
+      input: '准备发送'
     })
-    expect(chatHtml).not.toContain('id="composer-status"')
-    expect(chatHtml).not.toContain(reason)
+    expect(chatHtml).toContain('id="composer-status"')
+    expect(chatHtml).toContain(reason)
     expect(chatHtml).not.toContain('当前 Provider 不可发送；草稿会保留')
+  })
+
+  it('切换会话时展示轻量加载态，不闪过新会话引导页或旧 transcript', () => {
+    const chatHtml = renderWelcome({
+      sessionLoading: true,
+      turns: [{ ...turn, runId: 'old-run', userText: '旧会话内容' }],
+      input: '切换期间保留的草稿'
+    })
+
+    expect(chatHtml).toContain('aria-busy="true"')
+    expect(chatHtml).toContain('正在打开对话…')
+    expect(chatHtml).toContain('正在打开对话，草稿已保留')
+    expect(chatHtml).not.toContain('开始一次可追溯执行')
+    expect(chatHtml).not.toContain('旧会话内容')
+    expect(chatHtml).toContain('切换期间保留的草稿')
+    expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
   it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () => {

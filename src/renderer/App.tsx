@@ -430,8 +430,9 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
 export function App() {
   const [theme, setTheme] = useState<AppTheme>(() => readStoredTheme(browserThemeStorage()))
   const [input, setInput] = useState('')
-  const [, setComposerError] = useState<string | null>(null)
+  const [composerError, setComposerError] = useState<string | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
+  const [sessionLoading, setSessionLoading] = useState(false)
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachment[]>([])
   const draftStartPendingRef = useRef(false)
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([])
@@ -547,6 +548,7 @@ export function App() {
             integrations.runControlsLoading,
             integrations.runControls
           )
+  const sendBlockedReason = sessionLoading ? '正在打开对话，草稿已保留' : providerSendBlockedReason
   const session = useAgentSession({
     onTurnDone: (event) => {
       markRunFinished(event.runId)
@@ -665,6 +667,8 @@ export function App() {
             const isCurrent = (): boolean => !cancelled && seq === sessionSelectionSeqRef.current
             shouldStickToBottomRef.current = true
             markRunStarted(run.runId)
+            setComposerError(null)
+            setSessionLoading(true)
             void restoreFocusedRunSelection(run, {
               prepareRunFocus: session.prepareRunFocus,
               selectContext: ({ providerId, agentProfileId, cwd: nextCwd, sessionId }) => {
@@ -676,6 +680,10 @@ export function App() {
               loadSession: (context) => window.scry.loadSession(context),
               replaceWithParsedSession: session.replaceWithParsedSession,
               isCurrent
+            }).catch((error) => {
+              if (isCurrent()) setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
+            }).finally(() => {
+              if (isCurrent()) setSessionLoading(false)
             })
           })
         : () => {}
@@ -999,8 +1007,8 @@ export function App() {
     const attachments = inputAttachments(draftAttachments)
     if (!text && attachments.length === 0) return
     if (draftStartPendingRef.current) return
-    if (providerSendBlockedReason) {
-      setComposerError(providerSendBlockedReason)
+    if (sendBlockedReason) {
+      setComposerError(sendBlockedReason)
       return
     }
     await requestDockBadgePermission()
@@ -1044,6 +1052,7 @@ export function App() {
   // 结果“换项目”变成“被扔进一个旧对话”，绑定后的工作目录也没机会看清。
   const pickRecent = async (dir: string): Promise<void> => {
     if (dir === cwd) return
+    setSessionLoading(false)
     const cwdChanged = dir !== cwd
     if (cwdChanged && !confirmWorkspaceTransition()) return
     const seq = ++sessionSelectionSeqRef.current
@@ -1064,6 +1073,7 @@ export function App() {
 
   const unbindProject = async (skipConfirmation = false): Promise<void> => {
     if (!cwd || (!skipConfirmation && !confirmWorkspaceTransition())) return
+    setSessionLoading(false)
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     await window.scry.focusRun(null)
@@ -1083,6 +1093,7 @@ export function App() {
 
   const newConversation = async (): Promise<void> => {
     const seq = ++sessionSelectionSeqRef.current
+    setSessionLoading(false)
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     setQueuedPrompts([])
     clearDraftAttachments()
@@ -1150,50 +1161,58 @@ export function App() {
         agentProfileId
       }
     )
-    let runId = knownRunId
-    if (!runId) {
-      const activeRuns = await window.scry.activeRuns()
+    setComposerError(null)
+    setSessionLoading(switchingSession)
+    try {
+      let runId = knownRunId
+      if (!runId) {
+        const activeRuns = await window.scry.activeRuns()
+        if (!isCurrent()) return
+        runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId, agentProfileId)?.runId
+      }
+      await window.scry.setCwd(projectCwd || null)
       if (!isCurrent()) return
-      runId = activeRunForSession(activeRuns, projectCwd, sessionId, providerId, agentProfileId)?.runId
-    }
-    await window.scry.setCwd(projectCwd || null)
-    if (!isCurrent()) return
-    if (switchingSession) session.clearTurns()
-    setQueuedPrompts([])
-    clearDraftAttachments()
-    shouldStickToBottomRef.current = true
-    selectSessionId(sessionId)
-    setView('chat')
-    setCwd(projectCwd || null)
-    if (cwdChanged) setWorkspaceDirty(false)
-    integrations.setSelectedId(agentProfileId ?? providerId)
-    if (
-      await restoreActiveSessionSelection(
-        { runId, sessionId, externalSessionId, cwd: projectCwd, providerId, agentProfileId },
-        {
-          prepareRunFocus: session.prepareRunFocus,
-          adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
-          loadSession: (context) => window.scry.loadSession(context),
-          replaceWithParsedSession: session.replaceWithParsedSession,
-          isCurrent
-        }
-      )
-    ) {
-      return
-    }
-    if (!isCurrent()) return
-    if (runId) {
       if (switchingSession) session.clearTurns()
+      setQueuedPrompts([])
+      clearDraftAttachments()
+      shouldStickToBottomRef.current = true
+      selectSessionId(sessionId)
+      setView('chat')
+      setCwd(projectCwd || null)
+      if (cwdChanged) setWorkspaceDirty(false)
+      integrations.setSelectedId(agentProfileId ?? providerId)
+      if (
+        await restoreActiveSessionSelection(
+          { runId, sessionId, externalSessionId, cwd: projectCwd, providerId, agentProfileId },
+          {
+            prepareRunFocus: session.prepareRunFocus,
+            adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
+            loadSession: (context) => window.scry.loadSession(context),
+            replaceWithParsedSession: session.replaceWithParsedSession,
+            isCurrent
+          }
+        )
+      ) {
+        return
+      }
+      if (!isCurrent()) return
+      if (runId) {
+        if (switchingSession) session.clearTurns()
+      }
+      await window.scry.focusRun(null)
+      if (!isCurrent()) return
+      if (!externalSessionId) return
+      const page = await window.scry.loadSession({ providerId, agentProfileId, cwd: projectCwd, externalSessionId })
+      if (!isCurrent()) return
+      session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
+        activeRun: null,
+        page
+      })
+    } catch (error) {
+      if (isCurrent()) setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      if (isCurrent()) setSessionLoading(false)
     }
-    await window.scry.focusRun(null)
-    if (!isCurrent()) return
-    if (!externalSessionId) return
-    const page = await window.scry.loadSession({ providerId, agentProfileId, cwd: projectCwd, externalSessionId })
-    if (!isCurrent()) return
-    session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
-      activeRun: null,
-      page
-    })
   }
 
   const sessionRefOf = (cwd: string, session: SessionMeta): SessionRef => ({
@@ -1477,14 +1496,16 @@ export function App() {
               agents={integrations.agents}
               selectedAgentId={integrations.selectedId}
               agentScanning={integrations.agentsScanning}
-              agentLocked={activeSessionId != null || session.busy}
+              agentLocked={activeSessionId != null || session.busy || sessionLoading}
               runControls={integrations.runControls}
               runControlCatalog={integrations.runControlCatalog}
               runControlsLoading={integrations.runControlsLoading}
               runControlsReason={integrations.runControlCapability?.reason}
               input={input}
-              sendBlockedReason={providerSendBlockedReason}
+              sendBlockedReason={sendBlockedReason}
+              composerError={composerError}
               submitting={composerSubmitting}
+              sessionLoading={sessionLoading}
               busy={session.busy}
               draftAttachments={draftAttachments}
               queuedPrompts={queuedPrompts}
