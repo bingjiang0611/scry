@@ -1919,7 +1919,13 @@ function sessionRefFromRequest(p: unknown): AppSessionRef | null {
   }
 }
 
-// 置顶与存档只改 catalog 标记，不动 turn/usage/trace 数据。
+// 名称、置顶与存档只改 catalog，不动 Provider transcript 或 turn/usage/trace 数据。
+handleTrusted('agent:renameSession', (_e, p: unknown, title: unknown) => {
+  const ref = sessionRefFromRequest(p)
+  if (!ref || typeof (p as AppSessionRef).cwd !== 'string') throw new Error('无效的会话重命名请求')
+  return appSessionStore().rename(ref, title)
+})
+
 handleTrusted('agent:setSessionPinned', (_e, p: unknown, pinned: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof pinned !== 'boolean') throw new Error('无效的置顶请求')
