@@ -66,9 +66,11 @@ async function run(): Promise<void> {
   const tip = document.querySelector<HTMLElement>('[role="tooltip"]')!
   assert(tip.parentElement === document.body, 'tooltip must escape sidebar overflow')
   assert(tip.textContent!.includes(initial[0].sessions[0].preview), 'full title must remain available')
-  assert(tip.textContent!.includes('Fixture') && tip.textContent!.includes('/fixture') && tip.textContent!.includes('Qoder'), 'project and provider metadata')
+  assert(tip.textContent!.includes('Fixture') && tip.textContent!.includes('Qoder'), 'compact project and provider metadata')
+  assert(!tip.textContent!.includes('/fixture') && !tip.textContent!.includes('最近活动：'), 'omit verbose metadata')
   assert(row.getAttribute('aria-describedby') === tip.id, 'accessible tooltip association')
   const box = tip.getBoundingClientRect()
+  assert(box.width <= 340 && box.height < 180, 'long titles remain compact')
   assert(box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight, 'tooltip stays in viewport')
   row.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: tip }))
   tip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: row }))
@@ -81,6 +83,21 @@ async function run(): Promise<void> {
   const pinnedRow = document.querySelector<HTMLButtonElement>('.sb-sess[data-provider="pi"]')!
   focusRow(pinnedRow)
   await wait(() => document.querySelector('[role="tooltip"]')?.textContent?.includes('置顶标题') === true)
+  const shortBox = document.querySelector('[role="tooltip"]')!.getBoundingClientRect()
+  assert(shortBox.width < 260 && shortBox.height < 90, 'short titles should shrink to content')
+  // Repro: keep A focused (or pointer over its card) and hover B without a blur/leave on A.
+  // A must disappear immediately, and neither delayed close nor renewed hover may revive it.
+  let maxCards = 0
+  const observer = new MutationObserver(() => { maxCards = Math.max(maxCards, document.querySelectorAll('[role="tooltip"]').length) })
+  observer.observe(document.body, { childList: true, subtree: true })
+  row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+  await wait(() => !pinnedRow.hasAttribute('aria-describedby'), 'new hover relinquishes focused row')
+  await wait(() => document.querySelector('[role="tooltip"]')?.textContent?.includes(initial[0].sessions[0].preview) === true)
+  row.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: pinnedRow }))
+  pinnedRow.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: row }))
+  await wait(() => document.querySelector('[role="tooltip"]')?.textContent?.includes('置顶标题') === true)
+  assert(document.querySelectorAll('[role="tooltip"]').length === 1 && maxCards <= 1, 'only one card across focus/hover handoffs')
+  observer.disconnect()
   blurRow(pinnedRow)
   await wait(() => !document.querySelector('[role="tooltip"]'))
   row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
