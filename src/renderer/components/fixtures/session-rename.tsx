@@ -3,9 +3,10 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Sidebar } from '../Sidebar'
 import type { ProjectMeta } from '../../env'
+import '../../styles.css'
 
 const initial: ProjectMeta[] = [{ cwd: '/fixture', name: 'Fixture', mtime: 1, sessions: [
-  { sessionId: 'q1', externalSessionId: 'q1', providerId: 'qoder', preview: '旧标题', mtime: 1, count: 1 },
+  { sessionId: 'q1', externalSessionId: 'q1', providerId: 'qoder', preview: '完整的会话标题应该自动换行而不是再次省略，包含实现方案、验证结果以及后续计划。'.repeat(3), mtime: 1, count: 1 },
   { sessionId: 'p1', externalSessionId: 'p1', providerId: 'pi', agentProfileId: 'pi-a', preview: '置顶标题', mtime: 1, count: 1, pinnedAt: 1 }
 ] }]
 let picks = 0
@@ -26,10 +27,10 @@ function Fixture() {
     }} />
 }
 const assert = (ok: unknown, message: string): void => { if (!ok) throw new Error(message) }
-const wait = async (check: () => boolean): Promise<void> => {
+const wait = async (check: () => boolean, label = check.toString()): Promise<void> => {
   const deadline = performance.now() + 4000
   while (!check()) {
-    if (performance.now() > deadline) throw new Error('UI condition timed out')
+    if (performance.now() > deadline) throw new Error(`UI condition timed out: ${label}`)
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   }
 }
@@ -44,13 +45,53 @@ function type(value: string): void {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value)
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
+// A hidden Electron window updates activeElement but does not dispatch native focus events.
+const focusRow = (row: HTMLElement): void => {
+  row.focus()
+  row.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+}
+const blurRow = (row: HTMLElement): void => {
+  row.blur()
+  row.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+}
 const escape = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) }
 async function run(): Promise<void> {
   createRoot(document.getElementById('root')!).render(<Fixture />)
   await wait(() => !!document.querySelector('.sb-sess'))
   const row = document.querySelector<HTMLButtonElement>('.sb-sess[data-provider="qoder"]')!
+  // Hover must expose the full label outside the scroll-clipped sidebar, without a native title tooltip.
+  assert(!row.hasAttribute('title'), 'native tooltip must not compete with hover card')
+  row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+  await wait(() => !!document.querySelector('[role="tooltip"]'), 'initial hover')
+  const tip = document.querySelector<HTMLElement>('[role="tooltip"]')!
+  assert(tip.parentElement === document.body, 'tooltip must escape sidebar overflow')
+  assert(tip.textContent!.includes(initial[0].sessions[0].preview), 'full title must remain available')
+  assert(tip.textContent!.includes('Fixture') && tip.textContent!.includes('/fixture') && tip.textContent!.includes('Qoder'), 'project and provider metadata')
+  assert(row.getAttribute('aria-describedby') === tip.id, 'accessible tooltip association')
+  const box = tip.getBoundingClientRect()
+  assert(box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight, 'tooltip stays in viewport')
+  row.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: tip }))
+  tip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: row }))
+  escape()
+  await wait(() => !document.querySelector('[role="tooltip"]'))
+  focusRow(row)
+  await wait(() => !!document.querySelector('[role="tooltip"]'), 'keyboard focus after escape')
+  document.querySelector('.sb-list')!.dispatchEvent(new Event('scroll'))
+  await wait(() => !document.querySelector('[role="tooltip"]'))
+  const pinnedRow = document.querySelector<HTMLButtonElement>('.sb-sess[data-provider="pi"]')!
+  focusRow(pinnedRow)
+  await wait(() => document.querySelector('[role="tooltip"]')?.textContent?.includes('置顶标题') === true)
+  blurRow(pinnedRow)
+  await wait(() => !document.querySelector('[role="tooltip"]'))
+  row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+  await wait(() => !!document.querySelector('[role="tooltip"]'), 'reenter after pinned blur')
+  row.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))
+  await wait(() => !document.querySelector('[role="tooltip"]'))
+  focusRow(row)
+  await wait(() => !!document.querySelector('[role="tooltip"]'), 'focus before context menu')
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }))
   await wait(() => !!document.querySelector('[role="menu"]'))
+  assert(!document.querySelector('[role="tooltip"]'), 'context menu dismisses tooltip')
   button('重命名').click()
   await wait(() => document.activeElement === input())
   assert(input().selectionStart === 0 && input().selectionEnd === input().value.length, 'title should be selected')
