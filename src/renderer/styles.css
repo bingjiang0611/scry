@@ -10129,6 +10129,19 @@ button.turn-id.turn-call-open:focus-visible {
   z-index: 90;
 }
 
+.sb-session-menu {
+  position: fixed;
+  bottom: auto;
+  width: 200px;
+  min-width: 0;
+  z-index: 90;
+}
+
+.session-rename-dialog .session-rename-error {
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+
 .sb-project-menu-head {
   display: grid;
   gap: 3px;

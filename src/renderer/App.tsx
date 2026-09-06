@@ -1257,6 +1257,13 @@ export function App() {
     workspace.loadProjects()
   }
 
+  const renameSession = async (cwd: string, session: SessionMeta, title: string): Promise<void> => {
+    if (!window.scry.renameSession) throw new Error('请重启 Scry 以启用会话重命名')
+    const changed = await window.scry.renameSession(sessionRefOf(cwd, session), title)
+    if (!changed) throw new Error('会话已不存在或身份已变化，请刷新列表后重试')
+    workspace.loadProjects()
+  }
+
   const archiveSession = async (cwd: string, session: SessionMeta): Promise<void> => {
     const changed = await window.scry.setSessionArchived(sessionRefOf(cwd, session), true)
     if (!changed) return
@@ -1459,6 +1466,7 @@ export function App() {
           onPick={pickSession}
           onTogglePin={(cwd, session) => void togglePinSession(cwd, session)}
           onArchive={(cwd, session) => void archiveSession(cwd, session)}
+          onRenameSession={renameSession}
           onNewProjectChat={(projectCwd) => void newConversationInProject(projectCwd)}
           onToggleProjectPin={(project) => void toggleProjectPin(project)}
           onRenameProject={renameProject}

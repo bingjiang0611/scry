@@ -16,6 +16,7 @@ import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CatalogHealth, ProviderId, SessionProviderId } from '../shared/provider'
 import type { RuntimeProvider } from '../shared/runtime'
+import { normalizeSessionTitle } from '../shared/session-title'
 
 export interface AppSession {
   sessionId: string
@@ -26,6 +27,8 @@ export interface AppSession {
   runtimeProvider?: RuntimeProvider
   cwd: string
   preview: string
+  /** User-authored local label; record() may update preview, never this field. */
+  title?: string
   ts: number
   pinnedAt?: number
   archivedAt?: number
@@ -200,6 +203,7 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
     return identities.every((id) => id == null || typeof id === 'string') && hasIdentity &&
       typeof session.cwd === 'string' &&
       typeof session.preview === 'string' &&
+      (session.title == null || typeof session.title === 'string') &&
       typeof session.ts === 'number' && Number.isFinite(session.ts) &&
       (session.providerId == null || SESSION_PROVIDERS.has(session.providerId)) &&
       (session.agentProfileId == null || (typeof session.agentProfileId === 'string' && session.agentProfileId.length <= 240)) &&
@@ -446,7 +450,8 @@ export function createAppSessionStore(userDataDir: string) {
     agentProfileId: session.agentProfileId,
     runtimeProvider: session.runtimeProvider,
     mtime: session.ts,
-    preview: session.preview,
+    // SessionMeta.preview is the catalog display label, not transcript evidence.
+    preview: session.title ?? session.preview,
     count: 1,
     ...(session.pinnedAt ? { pinnedAt: session.pinnedAt } : {}),
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {})
@@ -501,6 +506,11 @@ export function createAppSessionStore(userDataDir: string) {
     return true
   }
 
+  const rename = (ref: AppSessionRef, value: unknown): boolean => {
+    const title = normalizeSessionTitle(value)
+    return patchSession(ref, (session) => { session.title = title })
+  }
+
   const setPinned = (ref: AppSessionRef, pinned: boolean): boolean =>
     patchSession(ref, (session) => {
       if (pinned) session.pinnedAt = Date.now()
@@ -534,6 +544,7 @@ export function createAppSessionStore(userDataDir: string) {
     listSessions,
     listProjects,
     listArchivedProjects,
+    rename,
     setPinned,
     setArchived,
     remove

@@ -176,6 +176,8 @@ const api = {
     ipcRenderer.invoke('agent:loadSessionOlder', context, request),
   deleteSession: (context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult> =>
     ipcRenderer.invoke('agent:deleteSession', context),
+  renameSession: (context: SessionRef, title: string): Promise<boolean> =>
+    ipcRenderer.invoke('agent:renameSession', context, title),
   setSessionPinned: (context: SessionRef, pinned: boolean): Promise<boolean> =>
     ipcRenderer.invoke('agent:setSessionPinned', context, pinned),
   setSessionArchived: (context: SessionRef, archived: boolean): Promise<boolean> =>

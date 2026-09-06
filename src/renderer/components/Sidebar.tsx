@@ -9,6 +9,7 @@ import type { McpMeta, SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
 import type { McpLiveStatus } from '@shared/trace'
 import { sessionMatchesSelection } from '../session-selection'
+import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 
 const activeTimeTitle = (ms: number): string =>
   `最近活动：${new Intl.DateTimeFormat('zh-CN', {
@@ -36,6 +37,7 @@ export function Sidebar({
   onPick,
   onTogglePin,
   onArchive,
+  onRenameSession,
   onNewProjectChat,
   onToggleProjectPin,
   onRenameProject,
@@ -65,6 +67,7 @@ export function Sidebar({
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
+  onRenameSession?: (cwd: string, session: SessionMeta, title: string) => Promise<void>
   onNewProjectChat?: (cwd: string) => void
   onToggleProjectPin?: (project: ProjectMeta) => void
   onRenameProject?: (project: ProjectMeta, name: string) => void | Promise<void>
@@ -82,6 +85,18 @@ export function Sidebar({
   catalogHealth?: CatalogHealth
   onSettings?: () => void
 }) {
+  const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)
+  const openSessionMenu = (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta): void => {
+    event.preventDefault()
+    setProjectMenu(null)
+    const rect = event.currentTarget.getBoundingClientRect()
+    const context = event.type === 'contextmenu' && (event.clientX !== 0 || event.clientY !== 0)
+    setSessionMenu({
+      cwd, session, trigger: event.currentTarget,
+      left: Math.max(8, Math.min(context ? event.clientX : rect.left, window.innerWidth - 208)),
+      top: Math.max(8, Math.min(context ? event.clientY : rect.bottom, window.innerHeight - 64))
+    })
+  }
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
@@ -213,6 +228,7 @@ export function Sidebar({
                   onPick={onPick}
                   onTogglePin={onTogglePin}
                   onArchive={onArchive}
+                  onMenu={onRenameSession ? openSessionMenu : undefined}
                 />
               ))}
             </div>
@@ -278,6 +294,7 @@ export function Sidebar({
                       onPick={onPick}
                       onTogglePin={onTogglePin}
                       onArchive={onArchive}
+                      onMenu={onRenameSession ? openSessionMenu : undefined}
                     />
                   ))}
                   {p.sessions.length === 0 && (
@@ -289,6 +306,14 @@ export function Sidebar({
           )
         })}
       </div>
+
+      {sessionMenu && onRenameSession && (
+        <SessionRenameMenu target={sessionMenu} onRename={onRenameSession} onClose={() => {
+          const trigger = sessionMenu.trigger
+          setSessionMenu(null)
+          window.requestAnimationFrame(() => { if (trigger.isConnected) trigger.focus() })
+        }} />
+      )}
 
       {projectMenu && (
         <div
@@ -436,7 +461,8 @@ function SessionRow({
   running,
   onPick,
   onTogglePin,
-  onArchive
+  onArchive,
+  onMenu
 }: {
   session: SessionMeta
   cwd: string
@@ -446,6 +472,7 @@ function SessionRow({
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
+  onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
 }) {
   const pinned = Boolean(session.pinnedAt)
   return (
@@ -456,6 +483,7 @@ function SessionRow({
         data-provider={session.providerId}
         title={`${session.preview}${session.preview ? '\n' : ''}${activeTimeTitle(session.mtime)}${running ? '\n正在运行' : ''}`}
         aria-current={active ? 'true' : undefined}
+        onContextMenu={onMenu ? (event) => onMenu(event, cwd, session) : undefined}
         onClick={() => onPick(cwd, session.sessionId, session.providerId, session.externalSessionId, session.runId, session.agentProfileId)}
       >
         <span className="sb-session-main">
@@ -471,6 +499,9 @@ function SessionRow({
         {running && <span className="sb-running" role="status" aria-label="正在运行" />}
       </button>
       <span className="sb-sess-acts">
+        {onMenu && <button type="button" className="sb-act" aria-haspopup="menu"
+          title="会话操作" aria-label={`会话操作：${session.preview || '(无预览)'}`}
+          onClick={(event) => onMenu(event, cwd, session)}>···</button>}
         <button
           type="button"
           className={`sb-act ${pinned ? 'on' : ''}`}

@@ -331,6 +331,45 @@ describe('app-store', () => {
     }
   })
 
+  it('重命名持久保存，后续发送、置顶、存档及重启不覆盖手动名称或原始预览', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      const request = { providerId: 'qoder' as const, runtimeProvider: 'qoder_cli' as const, externalSessionId: 's1', cwd: '/repo', prompt: 'first' }
+      store.record(request)
+      const before = store.load()[0].ts
+      expect(store.rename(request, '  我的会话  ')).toBe(true)
+      expect(store.load()[0]).toMatchObject({ title: '我的会话', preview: 'first', ts: before })
+      store.record({ ...request, prompt: 'next message' })
+      store.setPinned(request, true)
+      expect(store.listProjects()[0].sessions[0].preview).toBe('我的会话')
+      store.setArchived(request, true)
+      expect(createAppSessionStore(dir).listArchivedProjects()[0].sessions[0].preview).toBe('我的会话')
+      store.setArchived(request, false)
+      expect(createAppSessionStore(dir).listSessions('/repo')[0].preview).toBe('我的会话')
+      expect(store.load()[0].preview).toBe('next message')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('重命名严格按 provider/profile/cwd/session 定位，支持 pending 身份晋升', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      const request = { providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const, agentProfileId: 'pi-a', cwd: '/repo', runId: 'run-1', prompt: 'hello' }
+      store.recordPending(request)
+      const ref = { ...request, externalSessionId: 'run-1' }
+      for (const wrong of [{ providerId: 'qoder' as const }, { agentProfileId: 'pi-b' }, { cwd: '/else' }, { externalSessionId: 'missing' }]) {
+        expect(store.rename({ ...ref, ...wrong }, 'wrong')).toBe(false)
+      }
+      for (const invalid of ['', '  ', 'a'.repeat(121), 'a\nb', 42, null]) {
+        expect(() => store.rename(ref, invalid)).toThrow()
+      }
+      expect(store.rename(ref, '待建立会话')).toBe(true)
+      store.record({ ...request, externalSessionId: 'native-1', prompt: 'response' })
+      expect(store.listSessions('/repo', 'pi', 'pi-a')[0]).toMatchObject({ sessionId: 'native-1', preview: '待建立会话' })
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('置顶只标记会话，不影响它留在原项目分组里', () => {
     const dir = tempDir()
     try {
