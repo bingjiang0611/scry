@@ -22,7 +22,8 @@ import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, Provi
 import { effortOption, permissionOptions } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
-import { completedTranscriptTurnBoundary } from './session-fork-boundary'
+import { completedTranscriptTurnBoundary, isTranscriptUserPrompt } from './session-fork-boundary'
+import { resolveQoderForkUserId } from './qoder-fork-identity'
 
 interface Cached<T> {
   data: T
@@ -895,7 +896,22 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           dir: request.cwd,
           includeSystemMessages: true
         })
-        const boundary = completedTranscriptTurnBoundary(messages, request.sourceForkTurnId, 'Qoder')
+        const activeUserIds = new Set(messages.filter(isTranscriptUserPrompt).map((message) => message.uuid))
+        // Older Scry archives copied promptId into forkTurnId. Never treat it as a UUID
+        // or guess by prompt text; recover the exact native mapping when it is absent.
+        const sourceUserId = activeUserIds.has(request.sourceForkTurnId)
+          ? request.sourceForkTurnId
+          : request.sourceForkTurnId === request.sourceProviderTurnId
+            ? await resolveQoderForkUserId({
+                projectsDir: join(process.env.QODER_CONFIG_DIR ||
+                  join(process.env.QODER_CLI_HOME || homedir(), '.qoder'), 'projects'),
+                sessionId: request.sourceSessionId,
+                cwd: request.cwd,
+                promptId: request.sourceProviderTurnId,
+                activeUserIds
+              })
+            : request.sourceForkTurnId
+        const boundary = completedTranscriptTurnBoundary(messages, sourceUserId, 'Qoder')
         const forked = await forkSession(request.sourceSessionId, {
           dir: request.cwd,
           upToMessageId: boundary,
@@ -1293,7 +1309,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           try {
             const messages = await getSessionMessages(externalSessionId, { dir: request.cwd, includeSystemMessages: true })
             const candidates = messages.filter((message) =>
-              message.type === 'user' && message.parent_tool_use_id == null && !forkBaseline.has(message.uuid)
+              isTranscriptUserPrompt(message) && !forkBaseline.has(message.uuid)
             )
             if (candidates.length === 1) forkTurnId = candidates[0].uuid
           } catch {

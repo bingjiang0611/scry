@@ -2,6 +2,17 @@ interface TranscriptMessageBoundary {
   uuid?: unknown
   type?: unknown
   parent_tool_use_id?: unknown
+  message?: unknown
+}
+
+export function isTranscriptUserPrompt(message: TranscriptMessageBoundary): boolean {
+  if (message.type !== 'user' || message.parent_tool_use_id != null) return false
+  const body = message.message
+  const content = body && typeof body === 'object' && 'content' in body ? body.content : body
+  // SDKs expose tool_result as user messages too; they are not new user turns.
+  return !Array.isArray(content) || !content.some((part) =>
+    part && typeof part === 'object' && part.type === 'tool_result'
+  )
 }
 
 /** Locate the last native transcript message belonging to one completed top-level user turn. */
@@ -11,11 +22,11 @@ export function completedTranscriptTurnBoundary(
   providerLabel: string
 ): string {
   const sourceIndex = messages.findIndex((message) =>
-    message.uuid === sourceUserMessageId && message.type === 'user' && message.parent_tool_use_id == null
+    message.uuid === sourceUserMessageId && isTranscriptUserPrompt(message)
   )
   if (sourceIndex < 0) throw new Error(`${providerLabel} 会话无法定位所选用户消息`)
   const nextUserIndex = messages.findIndex((message, index) =>
-    index > sourceIndex && message.type === 'user' && message.parent_tool_use_id == null
+    index > sourceIndex && isTranscriptUserPrompt(message)
   )
   const endIndex = nextUserIndex >= 0 ? nextUserIndex - 1 : messages.length - 1
   for (let index = endIndex; index > sourceIndex; index--) {
