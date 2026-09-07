@@ -16,7 +16,7 @@ const CONTRACT = JSON.parse(readFileSync(join(SCRIPT_DIR, '..', 'references', 'c
 const RUN_ROOT_PARENT = resolve(CONTRACT.retention.runRootParent)
 const RUNTIME_RELATIVE = CONTRACT.recoveryPolicy.runtimeSnapshot.relativePath
 const STATE_VERSION = CONTRACT.recoveryPolicy.runtimeSnapshot.stateVersion
-const CANONICAL_SCRY_REPO = resolve(SCRIPT_DIR, '../../../..', 'scry')
+const CANONICAL_SCRY_REPO = resolve(SCRIPT_DIR, '../../../..')
 const PI_AGENT_NODE = '/Users/baobingjiang/.nvm/versions/node/v24.18.0/bin/node'
 const wait = (ms) => new Promise((done) => setTimeout(done, ms))
 
