@@ -1,7 +1,8 @@
-import { mkdtemp, mkdir, realpath, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { createReadOnlyRootsStore } from './app-store'
 import { HomeFileAccess, type ReadOnlyRootsStore } from './home-file-access'
 
 function memoryRoots(initial: string[] = []): ReadOnlyRootsStore {
@@ -49,6 +50,34 @@ describe('HomeFileAccess', () => {
       suggestedRoot: await realpath(papers)
     })
     expect(roots.load()).toEqual([await realpath(papers)])
+  })
+
+  it('reuses the persisted directory grant after an app restart', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'scry-home-file-persisted-'))
+    try {
+      const home = join(parent, 'home')
+      const papers = join(home, 'Papers')
+      const userData = join(parent, 'userData')
+      await mkdir(papers, { recursive: true })
+      await mkdir(userData)
+      await writeFile(join(papers, 'first.md'), 'first')
+      await writeFile(join(papers, 'second.md'), 'second')
+
+      const firstPicker = vi.fn(async () => papers)
+      await new HomeFileAccess(home, createReadOnlyRootsStore(userData), firstPicker)
+        .authorize({ cwd: '~', path: 'Papers/first.md' })
+
+      const restartedPicker = vi.fn(async () => null)
+      await expect(new HomeFileAccess(home, createReadOnlyRootsStore(userData), restartedPicker)
+        .authorize({ cwd: '~', path: 'Papers/second.md' })).resolves.toEqual({
+        cwd: await realpath(papers),
+        path: 'second.md'
+      })
+      expect(firstPicker).toHaveBeenCalledTimes(1)
+      expect(restartedPicker).not.toHaveBeenCalled()
+    } finally {
+      await rm(parent, { recursive: true, force: true })
+    }
   })
 
   it('fails closed when directory selection is cancelled or does not contain the file', async () => {
