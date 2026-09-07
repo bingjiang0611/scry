@@ -17,7 +17,8 @@ import {
 import { contextUsageEvidence, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
-import { extractUserText, normalizeSdkMessage, type NormalizeCtx, type ParsedTurn } from '../normalize'
+import { extractUserText, type NormalizeCtx, type ParsedTurn } from '../normalize'
+import { normalizeQoderMessage } from './qoder-messages'
 import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
@@ -237,22 +238,6 @@ function livePrompt(text: string): { stream: AsyncIterable<SDKUserMessage>; rele
     })(),
     release
   }
-}
-
-function qoderSdkMessage(message: unknown): unknown {
-  const raw = message as Record<string, unknown>
-  if (raw?.type !== 'assistant') return message
-  const assistant = raw.message as Record<string, unknown> | undefined
-  if (!Array.isArray(assistant?.content)) return message
-  let changed = false
-  const content = assistant.content.map((block) => {
-    if (!block || typeof block !== 'object' || Array.isArray(block)) return block
-    const item = block as Record<string, unknown>
-    if (item.type !== 'tool_use' || item.name !== 'local_agent') return block
-    changed = true
-    return { ...item, name: 'Agent' }
-  })
-  return changed ? { ...raw, message: { ...assistant, content } } : message
 }
 
 function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
@@ -959,7 +944,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 externalSessionId = raw.session_id
                 request.onExternalSessionId?.(raw.session_id)
               }
-              for (const event of normalizeSdkMessage(qoderSdkMessage(message), ctx)) request.emit(qoderTrace(event))
+              for (const event of normalizeQoderMessage(message, ctx)) request.emit(qoderTrace(event))
             }
           })()
           let providerResult: ProviderRunResult
@@ -1226,8 +1211,12 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                   if (raw.type === 'result' && activeAgentCalls.size === 0 && typeof q!.getContextUsage === 'function') {
                     contextEvidence = await qoderLiveContext(q!)
                   }
-                  for (const rawEvent of normalizeSdkMessage(qoderSdkMessage(message), ctx)) {
+                  for (const rawEvent of normalizeQoderMessage(message, ctx)) {
                     const event = qoderTrace(rawEvent, contextEvidence)
+                    // Qoder flushes queued progress and duplicate terminals at query
+                    // end. A settled Agent must not reopen in either host state or UI.
+                    if (event.tool === 'Agent' && event.toolUseId && terminalAgentCalls.has(event.toolUseId) &&
+                        (event.stage === 'agent_activity' || event.stage === 'tool_result')) continue
                     observeAgentEvent(event)
                     if (event.kind === 'harness' && event.stage === 'result' && event.isError) providerFailureSeen = true
                     if (event.kind === 'hook') sdkHooks.push(event)

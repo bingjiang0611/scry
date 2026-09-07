@@ -1097,6 +1097,81 @@ describe('Qoder provider adapter', () => {
     expect(events.filter((event) => event.tool === 'Agent' && event.stage === 'tool_result' && event.runtimeMetadata?.agentStatus === 'completed')).toHaveLength(1)
   })
 
+  it.each(['text', 'task_updated'] as const)('releases Qoder stdin after a %s terminal and ignores late Agent progress', async (wire) => {
+    sdk.query.mockImplementation(({ prompt }) => ({
+      async *[Symbol.asyncIterator]() {
+        const input = prompt[Symbol.asyncIterator]()
+        await input.next()
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'agent-1', name: 'Agent', input: { run_in_background: true } }] }
+        }
+        yield {
+          type: 'user',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'agent-1', content: 'launched' }] },
+          tool_use_result: { status: 'async_launched', agentId: 'explore-1' }
+        }
+        yield { type: 'system', subtype: 'task_started', task_id: 'task-1', tool_use_id: 'agent-1' }
+        // Qoder 1.1.41 sends completion as a synthetic user message, then flushes
+        // queued progress/task_updated messages just before the root result.
+        yield wire === 'text'
+          ? {
+              type: 'user', isSynthetic: true, parent_tool_use_id: null,
+              message: { role: 'user', content: [{ type: 'text', text: '<task-notification>\n<task-id>task-1</task-id>\n<tool-use-id>agent-1</tool-use-id>\n<output-file>/tmp/not-read.output</output-file>\n<status>completed</status>\n<summary>Agent "inspect" finished</summary>\n<result>Read-only findings</result>\n</task-notification>' }] }
+            }
+          : { type: 'system', subtype: 'task_updated', task_id: 'task-1', patch: { status: 'completed' } }
+        yield { type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1' }
+        yield { type: 'system', subtype: 'task_updated', task_id: 'task-1', patch: { status: 'completed' } }
+        yield { type: 'result', subtype: 'success', result: 'all done' }
+        // Model a live CLI: receiving result is not enough to end the iterator.
+        expect(await input.next()).toMatchObject({ done: true })
+        yield { type: 'system', subtype: 'task_notification', task_id: 'task-1', status: 'completed' }
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    }))
+    const events: TraceEvent[] = []
+    const result = await createQoderAdapter().run({
+      runId: 'run-qoder-wire', prompt: 'delegate', attachments: [], emit: (event) => events.push(event)
+    }).promise
+
+    expect(result.status).toBe('completed')
+    const terminals = events.filter((event) => event.tool === 'Agent' && event.runtimeMetadata?.agentStatus === 'completed')
+    expect(terminals).toHaveLength(1)
+    expect(terminals[0].runtimeMetadata?.source).toBe(wire === 'text' ? 'qoder_task_notification_text' : 'qoder_task_updated')
+    expect(events.slice(events.indexOf(terminals[0]) + 1).some((event) => event.stage === 'agent_activity')).toBe(false)
+  })
+
+  it('does not release stdin while another Qoder Agent is unresolved or before the next root result', async () => {
+    sdk.query.mockImplementation(({ prompt }) => ({
+      async *[Symbol.asyncIterator]() {
+        const input = prompt[Symbol.asyncIterator]()
+        await input.next()
+        let released = false
+        const done = input.next().then(() => { released = true })
+        for (const id of ['one', 'two']) {
+          yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', id, input: { run_in_background: true } }] } }
+          yield { type: 'system', subtype: 'task_started', task_id: `task-${id}`, tool_use_id: id }
+        }
+        yield { type: 'system', subtype: 'task_updated', task_id: 'task-one', patch: { status: 'completed' } }
+        yield { type: 'system', subtype: 'task_updated', task_id: 'task-two', patch: { status: 'future_status' } }
+        yield { type: 'system', subtype: 'task_updated', task_id: 'unrelated', patch: { status: 'completed' } }
+        yield { type: 'result', subtype: 'success', result: 'waiting for two' }
+        await Promise.resolve()
+        expect(released).toBe(false)
+        yield { type: 'system', subtype: 'task_updated', task_id: 'task-two', patch: { status: 'completed' } }
+        await Promise.resolve()
+        expect(released).toBe(false)
+        yield { type: 'result', subtype: 'success', result: 'all done' }
+        await done
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    }))
+    await expect(createQoderAdapter().run({ runId: 'two-agents', prompt: 'delegate', attachments: [], emit: () => {} }).promise)
+      .resolves.toMatchObject({ status: 'completed' })
+  })
+
   it('closes every tracked background Agent as stopped when Scry interrupts before notifications arrive', async () => {
     let rootSeen!: () => void
     const root = new Promise<void>((resolve) => { rootSeen = resolve })
