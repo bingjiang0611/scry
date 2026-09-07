@@ -55,15 +55,16 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('/repo/src/fenced.ts')
   })
 
-  it('keeps shell home paths as plain code instead of opening a fake workspace path', () => {
+  it('keeps shell home file paths clickable through the authorized home root', () => {
     const html = renderToStaticMarkup(
       <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
         <MarkdownImpl>{'`~/Papers/reading/report.md`'}</MarkdownImpl>
       </WorkspaceFileLinkProvider>
     )
 
+    expect(html).toContain('class="md-file-ref"')
+    expect(html).toContain('Papers/reading/report.md · 在右侧文件面板打开')
     expect(html).toContain('<code>~/Papers/reading/report.md</code>')
-    expect(html).not.toContain('md-file-ref')
   })
 
   it('keeps explicitly linked code as one HTTP link instead of nesting a file button', () => {

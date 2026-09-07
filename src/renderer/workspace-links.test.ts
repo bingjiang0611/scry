@@ -21,7 +21,7 @@ describe('workspace file references', () => {
     expect(resolveWorkspaceFileReference(cwd, 'example.com')).toBeNull()
   })
 
-  it('resolves absolute paths against the longest known workspace root', () => {
+  it('uses the longest known root for absolute paths and the current root for relative paths', () => {
     expect(resolveWorkspaceFileTarget(
       ['/Users/example', '/Users/example/project'],
       '/Users/example/project/docs/report.pdf'
@@ -30,6 +30,10 @@ describe('workspace file references', () => {
       ['/Users/example/current', '/Users/example/other'],
       '/Users/example/other/README.md'
     )).toEqual({ cwd: '/Users/example/other', path: 'README.md' })
+    expect(resolveWorkspaceFileTarget(
+      ['/Users/example/myNote', '/Users/example/a/much/longer/project/path'],
+      '待读清单.md'
+    )).toEqual({ cwd: '/Users/example/myNote', path: '待读清单.md' })
   })
 
   it('rejects paths outside cwd, traversal and remote file URLs', () => {
@@ -37,8 +41,19 @@ describe('workspace file references', () => {
     expect(resolveWorkspaceFileReference(cwd, '/Users/example/project-copy/secret.txt')).toBeNull()
     expect(resolveWorkspaceFileReference(cwd, '../secret.txt')).toBeNull()
     expect(resolveWorkspaceFileReference(cwd, '@../secret.txt')).toBeNull()
-    expect(resolveWorkspaceFileReference(cwd, '~/Papers/report.md')).toBeNull()
-    expect(resolveWorkspaceFileReference(cwd, '@~/Papers/report.md')).toBeNull()
+    expect(resolveWorkspaceFileReference(cwd, '~someone/Papers/report.md')).toBeNull()
     expect(resolveWorkspaceFileReference(cwd, 'file://server/share/report.pdf')).toBeNull()
+  })
+
+  it('keeps home-relative files clickable through the separately authorized home root', () => {
+    expect(resolveWorkspaceFileTarget([cwd], '~/Papers/report.md')).toEqual({
+      cwd: '~',
+      path: 'Papers/report.md'
+    })
+    expect(resolveWorkspaceFileTarget([cwd], '@~/Papers/report.md')).toEqual({
+      cwd: '~',
+      path: 'Papers/report.md'
+    })
+    expect(resolveWorkspaceFileTarget([cwd], '~/Papers/folder/')).toBeNull()
   })
 })
