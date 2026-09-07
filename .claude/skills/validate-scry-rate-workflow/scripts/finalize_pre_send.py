@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -826,43 +826,62 @@ def finalize(provider: str, run_root: Path, supplied_scry_bin: str | None) -> di
         return failure
 
     if not decision["eligible"]:
-        if lifecycle_path.is_symlink():
-            raise ValueError(f"lifecycle evidence is a symlink: {lifecycle_path}")
-        if lifecycle_path.is_file():
-            try:
-                existing = read_json(lifecycle_path)
-            except (OSError, json.JSONDecodeError):
-                existing = None
-            existing_state = (
-                existing.get("state") or existing.get("status")
-                if isinstance(existing, dict) else None
-            )
-            if (
-                isinstance(existing, dict)
-                and existing.get("provider") == provider
-                and existing.get("runRoot") == str(run_root)
-                and existing_state in {
-                    "RETAINED_FOR_REVIEW",
-                    "RETAINED_DRAFT",
-                    "RETAINED_LEGACY",
-                    "PRE_SEND_ARCHIVED",
-                    "CLEANUP_FAILED",
-                }
-            ):
-                return {**existing, "idempotent": True}
-        result = lifecycle_record(
-            decision["status"],
-            provider,
-            run_root,
-            decision,
-            ok=True,
-            mutationPerformed=False,
-            reason=decision["reason"],
-            preflightPath=str(preflight_path) if preflight_path else None,
-            browserLock=browser_lock,
+        retained_stage = (
+            decision["status"]
+            if decision["status"] in {"RETAINED_FOR_REVIEW", "RETAINED_DRAFT"}
+            else None
         )
-        write_json_atomic(lifecycle_path, result)
-        return result
+        gate = lifecycle_gate(current_contract) if retained_stage else nullcontext()
+        with gate:
+            owner_stage = None
+            if retained_stage:
+                lock_path, lock_value = require_slot_lock(provider, run_root, current_contract)
+                lock_value = update_slot_owner_locked(
+                    lock_path,
+                    lock_value,
+                    provider,
+                    run_root,
+                    retained_stage,
+                )
+                owner_stage = lock_value.get("ownerStage")
+            if lifecycle_path.is_symlink():
+                raise ValueError(f"lifecycle evidence is a symlink: {lifecycle_path}")
+            if lifecycle_path.is_file():
+                try:
+                    existing = read_json(lifecycle_path)
+                except (OSError, json.JSONDecodeError):
+                    existing = None
+                existing_state = (
+                    existing.get("state") or existing.get("status")
+                    if isinstance(existing, dict) else None
+                )
+                if (
+                    isinstance(existing, dict)
+                    and existing.get("provider") == provider
+                    and existing.get("runRoot") == str(run_root)
+                    and existing_state in {
+                        "RETAINED_FOR_REVIEW",
+                        "RETAINED_DRAFT",
+                        "RETAINED_LEGACY",
+                        "PRE_SEND_ARCHIVED",
+                        "CLEANUP_FAILED",
+                    }
+                ):
+                    return {**existing, "ownerStage": owner_stage, "idempotent": True}
+            result = lifecycle_record(
+                decision["status"],
+                provider,
+                run_root,
+                decision,
+                ok=True,
+                mutationPerformed=False,
+                reason=decision["reason"],
+                preflightPath=str(preflight_path) if preflight_path else None,
+                browserLock=browser_lock,
+                ownerStage=owner_stage,
+            )
+            write_json_atomic(lifecycle_path, result)
+            return result
 
     if not isinstance(frozen, dict):
         raise AssertionError("eligible cleanup must have a frozen preflight")
@@ -1456,19 +1475,34 @@ def self_test() -> int:
         assert draft_decision["eligible"] is False
         assert draft_decision["status"] == "RETAINED_DRAFT"
 
+        draft_lock = root / "draft-slot-lock.json"
+        draft_lock.write_text(json.dumps({
+            "schemaVersion": 2,
+            "scope": "slot:codex",
+            "provider": "codex",
+            "runRoot": str(draft_run),
+            "claimedAt": now(),
+            "ownerId": "fixture-owner",
+            "ownerState": "ACTIVE",
+            "ownerStage": "TURN1_DRAFT_PREPARED",
+            "heartbeatAt": now(),
+        }), encoding="utf-8")
+
         @contextmanager
         def draft_gate(contract: dict[str, Any]) -> Any:
             yield
 
         try:
             lifecycle_gate = draft_gate
-            slot_lock_path = lambda provider, contract: root / "draft-slot-lock.json"
+            slot_lock_path = lambda provider, contract: draft_lock
             retained_draft = finalize("codex", draft_run, None)
         finally:
             lifecycle_gate = original_gate
             slot_lock_path = original_slot_lock_path
         assert retained_draft["status"] == "RETAINED_DRAFT"
         assert retained_draft["mutationPerformed"] is False
+        assert retained_draft["ownerStage"] == "RETAINED_DRAFT"
+        assert read_json(draft_lock)["ownerStage"] == "RETAINED_DRAFT"
         assert read_json(draft_run / LIFECYCLE_NAME) == retained_draft
 
         draft_race_run = root / f"{RUN_PREFIX}draft-race"
