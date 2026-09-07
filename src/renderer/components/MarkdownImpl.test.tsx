@@ -80,6 +80,15 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).not.toContain('<a href="https://example.com"><button')
   })
 
+  it('keeps long GFM task-list text in the task item beside its checkbox', () => {
+    const label = '[[generated/后端转全栈 — 前端学习路线|AI-Native 全栈转型 — 前端新人指南与研发流程摘要]] — 2026-05-25 入库'
+    const html = renderToStaticMarkup(<MarkdownImpl>{`- [ ] ${label}`}</MarkdownImpl>)
+
+    expect(html).toContain('class="task-list-item"')
+    expect(html).toContain('<input type="checkbox" disabled=""/>')
+    expect(html).toContain(label)
+  })
+
   it('wraps GFM tables in a keyboard-scrollable region', () => {
     const html = renderToStaticMarkup(
       <MarkdownImpl>{'| 项目 | 状态 |\n| --- | --- |\n| Scry | ready |'}</MarkdownImpl>
