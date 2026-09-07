@@ -64,6 +64,43 @@ async function completeTurn(root: string, sessionId: string, prompt = 'implement
 }
 
 describe('turn recorder state machine', () => {
+  it('full-redacted protects first event writes, pins policy and preserves body through duplicate Stop', async () => {
+    const root = await workspace()
+    const configPath = join(root, 'scry.config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.capture.toolOutput = 'full-redacted'
+    await writeFile(configPath, JSON.stringify(config))
+    const base = { provider: 'claude' as const, workspace: root }
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('redacted', { prompt: 'test' }) })
+    // A recovery/config edit cannot change a started protected turn back to raw writes.
+    config.capture.toolOutput = 'summary'
+    await writeFile(configPath, JSON.stringify(config))
+    await handleRecorderHook({ ...base, event: 'PreToolUse', payload: payload('redacted', { tool_name: 'Bash', tool_use_id: 't', tool_input: { password: 'INPUT_SENTINEL', command: 'echo ok' } }) })
+    const output = `${'中😀'.repeat(300)}\nAuthorization: Bearer OUTPUT_SENTINEL\nfinished`
+    await handleRecorderHook({ ...base, event: 'PostToolUse', payload: payload('redacted', { tool_name: 'Bash', tool_use_id: 't', tool_response: output }) })
+    const scan = async (dir: string): Promise<string> => {
+      const entries = await readdir(dir, { withFileTypes: true })
+      return (await Promise.all(entries.map((entry) => entry.isDirectory() ? scan(join(dir, entry.name)) : readFile(join(dir, entry.name), 'utf8')))).join('\n')
+    }
+    const beforeCommit = await scan(join(root, '.scry'))
+    expect(beforeCommit).not.toContain('INPUT_SENTINEL')
+    expect(beforeCommit).not.toContain('OUTPUT_SENTINEL')
+    expect(beforeCommit).toContain('[REDACTED]')
+    const stop = { ...base, event: 'Stop', payload: payload('redacted', { timestamp: '2026-07-19T12:00:01.000Z' }) }
+    await handleRecorderHook(stop)
+    await handleRecorderHook(stop)
+    await recoverRecorder(root)
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    const call = records[0].tools.value![0]
+    expect(call.inputContent?.content).toContain('[REDACTED]')
+    expect(call.outputContent?.content).toContain('finished')
+    expect(call.outputContent!.savedBytes).toBeGreaterThan(500)
+    const afterCommit = await scan(join(root, '.scry'))
+    expect(afterCommit).not.toContain('INPUT_SENTINEL')
+    expect(afterCommit).not.toContain('OUTPUT_SENTINEL')
+  })
+
   it.each(['0.2.27', '0.2.30', '0.2.34'])('reads legacy unavailable timing from %s without rewriting records or blocking a new session', async (recorderVersion) => {
     const root = await workspace()
     const dataRoot = join(root, '.scry')

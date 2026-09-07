@@ -2,6 +2,8 @@
 // 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
 // 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
 import type Database from 'better-sqlite3'
+import { protectToolContent } from '../core/turn-recorder/content-policy.js'
+import type { ToolContentPolicy } from '../core/turn-recorder/tool-content.js'
 import { app } from 'electron'
 import { createRequire } from 'node:module'
 import { basename, join } from 'node:path'
@@ -119,6 +121,7 @@ function safeJson(v: unknown): string {
 }
 
 export interface RecordTurnArgs {
+  toolContentPolicy?: ToolContentPolicy
   runId: string
   sessionId?: string
   cwd?: string
@@ -313,6 +316,14 @@ export function resolveSessionRunIds(args: {
 }
 
 export function recordTurn(args: RecordTurnArgs, options: { queueOnFailure?: boolean } = {}): boolean {
+  try {
+    let previous: RecordTurnArgs | undefined
+    try { previous = JSON.parse(readFileSync(turnOutboxPath(args.runId), 'utf8')) as RecordTurnArgs } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false
+    }
+    const policy = previous?.runId === args.runId && previous.cwd === args.cwd ? previous.toolContentPolicy : undefined
+    args = protectToolContent({ ...args, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd ?? '')
+  } catch { return false }
   if (!db) {
     if (options.queueOnFailure !== false) queueTurnForDatabase(args)
     return false

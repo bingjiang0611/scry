@@ -1,4 +1,5 @@
 import type { ProviderId } from './provider.js'
+import { isToolContent } from './tool-content.js'
 import { normalizeTurnDiffSnapshot, type CompactionTrigger, type DangerLevel, type DiffFile, type TurnDiffCollection, type TurnDiffReason, type TurnDiffStatus } from './trace.js'
 import type { AgentIntervention } from './runtime.js'
 
@@ -25,6 +26,8 @@ export interface Evidence<T> {
 export type TurnCallStatus = 'started' | 'success' | 'failed' | 'cancelled' | 'unknown'
 
 export interface TurnCall {
+  inputContent?: import('./tool-content.js').ToolContent
+  outputContent?: import('./tool-content.js').ToolContent
   id?: string
   parentId?: string
   category?: 'tool' | 'skill' | 'agent' | 'mcp'
@@ -384,6 +387,8 @@ function isTurnCall(value: unknown): value is TurnCall {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   if (typeof raw.name !== 'string' || !raw.name || !['started', 'success', 'failed', 'cancelled', 'unknown'].includes(String(raw.status))) return false
+  if (raw.inputContent !== undefined && !isToolContent(raw.inputContent)) return false
+  if (raw.outputContent !== undefined && !isToolContent(raw.outputContent)) return false
   if (raw.category !== undefined && !['tool', 'skill', 'agent', 'mcp'].includes(String(raw.category))) return false
   for (const key of ['order', 'completedOrder']) if (raw[key] !== undefined && (!Number.isSafeInteger(raw[key]) || Number(raw[key]) < 0)) return false
   if (raw.durationMs !== undefined && !isNonNegativeNumber(raw.durationMs)) return false

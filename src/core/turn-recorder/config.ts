@@ -15,7 +15,9 @@ export interface RecorderConfig {
   capture: {
     prompt: boolean
     assistant: boolean
-    toolOutput: 'none' | 'summary'
+    toolOutput: 'none' | 'summary' | 'full-redacted'
+    toolContentFieldBytes?: number
+    toolContentTurnBytes?: number
     diff: boolean
     hooks: boolean
     patchExcludeBasenames?: string[]
@@ -44,7 +46,7 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && !!item.trim()) : []
 }
 
-function parseConfig(raw: unknown): RecorderConfig {
+export function parseRecorderConfig(raw: unknown): RecorderConfig {
   const root = record(raw)
   if (!root || root.schemaVersion !== 1) throw new Error('scry.config.json requires schemaVersion=1')
   if (typeof root.workspaceId !== 'string' || !root.workspaceId.trim()) throw new Error('workspaceId is required')
@@ -102,11 +104,23 @@ function resolveCapture(
   return {
     prompt: raw.prompt !== false,
     assistant: raw.assistant !== false,
-    toolOutput: raw.toolOutput === 'none' ? 'none' : 'summary',
+    toolOutput: raw.toolOutput === 'full-redacted' ? 'full-redacted' : raw.toolOutput === 'none' ? 'none' : 'summary',
+    ...(raw.toolOutput === 'full-redacted' ? {
+      toolContentFieldBytes: contentBudget(raw.toolContentFieldBytes, 8 * 1024, 64 * 1024),
+      toolContentTurnBytes: contentBudget(raw.toolContentTurnBytes, 128 * 1024, 1024 * 1024)
+    } : {}),
     diff: raw.diff !== false,
     hooks: raw.hooks !== false,
     patchExcludeBasenames
   }
+}
+
+function contentBudget(value: unknown, fallback: number, maximum: number): number {
+  if (value === undefined) return fallback
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum) {
+    throw new Error(`tool content budget must be an integer between 1 and ${maximum}`)
+  }
+  return Number(value)
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -142,7 +156,7 @@ export async function resolveRecorderLocation(workspace: string): Promise<Record
     return { valid: false, reason: 'missing_config' }
   }
   try {
-    const config = parseConfig(JSON.parse(source))
+    const config = parseRecorderConfig(JSON.parse(source))
     const dataRoot = resolve(workspaceRoot, config.dataDir)
     if (relative(workspaceRoot, dataRoot).startsWith('..')) {
       return { valid: false, reason: 'invalid_config', detail: 'dataDir escapes workspace' }

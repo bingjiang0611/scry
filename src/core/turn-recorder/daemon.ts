@@ -123,15 +123,16 @@ async function stopOwner(owner: DaemonOwner): Promise<void> {
 
 export function recorderSocketPath(workspace: string, env: NodeJS.ProcessEnv = process.env): string {
   const configured = env.SCRY_RECORDER_SOCKET?.trim()
-  if (configured) {
-    const socketPath = isAbsolute(configured) ? configured : resolve(workspace, configured)
-    if (Buffer.byteLength(socketPath) > MAX_SOCKET_BYTES) throw new Error(`recorder socket path is too long: ${socketPath}`)
-    return socketPath
-  }
-  const socketPath = join(resolve(workspace), '.scry', 'recorder-v1.sock')
+  const socketPath = configured
+    ? (isAbsolute(configured) ? configured : resolve(workspace, configured))
+    : join(resolve(workspace), '.scry', 'recorder-v1.sock')
   if (Buffer.byteLength(socketPath) <= MAX_SOCKET_BYTES) return socketPath
-  const digest = createHash('sha256').update(resolve(workspace)).digest('hex').slice(0, 16)
-  return join(tmpdir(), `scry-${process.getuid?.() ?? 'user'}-${digest}.sock`)
+  // Hash the requested endpoint, not just cwd: explicit endpoints in one workspace stay distinct.
+  // A long TMPDIR must not recreate the original sockaddr_un overflow.
+  const digest = createHash('sha256').update(`${resolve(workspace)}\0${socketPath}`).digest('hex').slice(0, 32)
+  const name = `scry-${process.getuid?.() ?? 'user'}-${digest}.sock`
+  const temporaryPath = join(tmpdir(), name)
+  return Buffer.byteLength(temporaryPath) <= MAX_SOCKET_BYTES ? temporaryPath : join('/tmp', name)
 }
 
 function writeJson(response: ServerResponse, statusCode: number, value: unknown): void {
@@ -377,7 +378,9 @@ export async function listenRecorderDaemon(args: {
   const env = args.env ?? process.env
   const enablement = await recorderEnablement(args.workspace, env)
   if (!enablement.enabled) throw new Error(`recorder is disabled: ${enablement.reason}`)
-  const socketPath = args.socketPath ?? recorderSocketPath(enablement.workspaceRoot, env)
+  const socketPath = recorderSocketPath(enablement.workspaceRoot, args.socketPath
+    ? { ...env, SCRY_RECORDER_SOCKET: args.socketPath }
+    : env)
   const instanceId = env[OWNER_TOKEN_ENV]?.trim() || randomUUID()
   const markerPath = ownerPath(socketPath)
   const idleMs = args.idleMs ?? positiveInt(env.SCRY_RECORDER_IDLE_MS, DEFAULT_IDLE_MS, 1_000, MAX_IDLE_MS)

@@ -1,4 +1,7 @@
 import { rm } from 'node:fs/promises'
+import { protectToolContent } from '../core/turn-recorder/content-policy.js'
+import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
+import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from '../core/turn-recorder/runtime-state.js'
 import { lstatSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { RuntimeProvider } from '../shared/runtime.js'
@@ -355,7 +358,7 @@ function assertManagedTraceInput(input: ManagedTraceTurnCommitInput): void {
 }
 
 function assertProgressIdentity(
-  existing: ManagedTurnProgress,
+  existing: Pick<ManagedTurnProgress, 'request'>,
   input: ManagedTraceTurnCommitInput
 ): void {
   const request = existing.request
@@ -369,6 +372,29 @@ function assertProgressIdentity(
   ) {
     throw new Error(`managed recorder progress collision for ${input.turn.runId}`)
   }
+}
+
+async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<ManagedTraceTurnCommitInput> {
+  const [progress, journal, location] = await Promise.all([
+    readJson<ManagedTurnProgress>(progressPath(input.userDataDir, input.turn.runId)),
+    readJson<ManagedTurnJournal>(journalPath(input.userDataDir, input.turn.runId)),
+    resolveRecorderLocation(input.cwd)
+  ])
+  if (progress) {
+    if (!validProgress(progress)) throw new Error('invalid managed content policy progress')
+    assertProgressIdentity(progress, input)
+  }
+  if (journal) {
+    if (!validJournal(journal)) throw new Error('invalid managed content policy journal')
+    assertProgressIdentity(journal, input)
+  }
+  const open = location.valid ? await readJson<RecorderOpenTurnState>(recorderOpenPath(
+    recorderSessionRoot(location.dataRoot, input.providerId, input.sessionId)
+  )) : undefined
+  const matchingOpen = open?.managedByScry && (open.managedRunId === input.turn.runId ||
+    (!!input.providerTurnId && open.providerTurnId === input.providerTurnId)) ? open : undefined
+  const toolContentPolicy = journal?.request.turn.toolContentPolicy ?? progress?.request.turn.toolContentPolicy ?? matchingArchiveTurn(input)?.toolContentPolicy ?? matchingOpen?.toolContentPolicy ?? input.turn.toolContentPolicy
+  return { ...input, turn: protectToolContent({ ...input.turn, ...(toolContentPolicy ? { toolContentPolicy } : {}) }, input.cwd) }
 }
 
 function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void {
@@ -422,7 +448,8 @@ async function prepareJournalRecord(
       timing: request.timing,
       status: request.status,
       archiveFingerprint: journal.archiveFingerprint,
-      expectedRecordId: journal.recordId
+      expectedRecordId: journal.recordId,
+      toolContentPolicy: request.turn.toolContentPolicy
     })
     if (prepared.status === 'disabled') {
       throw new Error(`managed recorder became disabled while a canonical journal was pending: ${prepared.reason}`)
@@ -531,6 +558,7 @@ export async function commitManagedTraceTurn(
     requireManaged?: boolean
   } = {}
 ): Promise<{ recorder: 'disabled' | 'committed'; recordId?: string }> {
+  input = await protectManagedInput(input)
   const mode = await managedRecorderMode(input.cwd, options.commitHookEnv)
   if (mode.status === 'disabled') {
     if (options.requireManaged === true) {
@@ -619,6 +647,7 @@ export async function commitManagedTraceTurn(
 export async function persistManagedTraceProgress(
   input: ManagedTraceTurnCommitInput
 ): Promise<void> {
+  input = await protectManagedInput(input)
   assertManagedTraceInput(input)
   const path = progressPath(input.userDataDir, input.turn.runId)
   const existing = await readJson<ManagedTurnProgress>(path)

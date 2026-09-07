@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { discoverRepositories, resolveRecorderEnablement, resolveRecorderLocation, type RecorderConfig } from './config'
+import { discoverRepositories, parseRecorderConfig, resolveRecorderEnablement, resolveRecorderLocation, type RecorderConfig } from './config'
 
 const config: RecorderConfig = {
   schemaVersion: 1,
@@ -34,6 +34,18 @@ describe('discoverRepositories', () => {
 })
 
 describe('recorder storage location', () => {
+  it('full-redacted is explicit and validates byte budgets without changing legacy config', () => {
+    expect(parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted' } }).capture).toMatchObject({
+      toolOutput: 'full-redacted', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072
+    })
+    for (const value of [0, -1, 1.5, 65537, '8192']) {
+      expect(() => parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted', toolContentFieldBytes: value } })).toThrow('budget')
+    }
+    expect(() => parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted', toolContentTurnBytes: 1048577 } })).toThrow('budget')
+    expect(parseRecorderConfig({ ...config, capture: {} }).capture.toolOutput).toBe('summary')
+    expect(parseRecorderConfig({ ...config, capture: { toolOutput: 'none' } }).capture).not.toHaveProperty('toolContentFieldBytes')
+  })
+
   it('采集熔断不阻塞只读定位，dataDir 符号链接则拒绝', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-location-'))
     const outside = await mkdtemp(join(tmpdir(), 'scry-location-outside-'))

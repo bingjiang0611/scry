@@ -21,6 +21,24 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 describe('database turn outbox', () => {
+  it('full-redacted sanitizes before the SQLite failure outbox and retains the pinned policy', () => {
+    writeFileSync(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'safe', capture: { toolOutput: 'full-redacted' } }))
+    const args = {
+      runId: 'safe-run', cwd: root, userText: 'test',
+      items: [{ id: 'tool', runId: 'safe-run', ts: new Date().toISOString(), kind: 'tool' as const, stage: 'tool:Bash', tool: 'Bash', toolUseId: 't', input: { token: 'DB_OUTBOX_SECRET' } }]
+    }
+    expect(recordTurn(args)).toBe(false)
+    const dir = join(root, 'db-turn-outbox')
+    const files = readdirSync(dir)
+    expect(files).toHaveLength(1)
+    const text = readFileSync(join(dir, files[0]), 'utf8')
+    expect(text).not.toContain('DB_OUTBOX_SECRET')
+    expect(JSON.parse(text)).toMatchObject({ toolContentPolicy: { toolOutput: 'full-redacted' } })
+    writeFileSync(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'safe', capture: { toolOutput: 'summary' } }))
+    expect(recordTurn(args)).toBe(false)
+    expect(readFileSync(join(dir, files[0]), 'utf8')).toBe(text)
+  })
+
   it('durably queues a complete turn when SQLite is unavailable', () => {
     const args = {
       runId: 'run-outbox',

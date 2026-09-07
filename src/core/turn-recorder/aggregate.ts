@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { captureToolContent, limitToolContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
 import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared/logical-calls.js'
 import { deriveModelTiming } from '../../shared/model-timing.js'
 import { providerDangerCoverage } from '../../shared/provider.js'
@@ -67,7 +68,10 @@ function callFromEvent(
     ...(completedAt ? { completedAt } : {}),
     ...(Number.isFinite(started) && Number.isFinite(completed) ? { durationMs: Math.max(0, completed - started) } : {}),
     status: callStatus(event, result),
-    ...(event.input !== undefined ? { input: event.input } : {}),
+    ...(event.inputContent ? {
+      inputContent: event.inputContent,
+      outputContent: result?.outputContent ?? captureToolContent(undefined, { source: event.inputContent.source })
+    } : event.input !== undefined ? { input: event.input } : {}),
     ...(result?.text || result?.output ? { outputSummary: outputSummary(result.output ?? result.text) } : {}),
     ...(result?.isError ? { error: outputSummary(result.output ?? result.text) ?? 'tool failed' } : {}),
     ...(event.fileOp && event.filePath ? { file: { operation: event.fileOp, path: event.filePath } } : {}),
@@ -407,6 +411,7 @@ export function aggregateTurnEvidence(args: {
   userText?: string
   events: TraceEvent[]
   source?: string
+  toolContentPolicy?: ToolContentPolicy
   observable?: {
     assistant?: boolean
     tools?: boolean
@@ -421,6 +426,9 @@ export function aggregateTurnEvidence(args: {
   }
 }): TurnEvidence {
   const source = args.source ?? 'trace_events'
+  if (args.toolContentPolicy?.toolOutput === 'full-redacted') {
+    args = { ...args, events: sanitizeToolEvents(args.events, args.toolContentPolicy, source) }
+  }
   const providerEvent = args.events.find((event) => event.providerId || event.runtimeProvider)
   const dangerCoverage = providerDangerCoverage(providerEvent?.providerId, providerEvent?.runtimeProvider)
   const observable = {
@@ -476,7 +484,24 @@ export function aggregateTurnEvidence(args: {
         section: 'mcps'
       }))
     })
-  const omittedCallSections = limitCallDetails([...toolCandidates, ...skillCandidates, ...mcpCandidates])
+  const candidates = [...toolCandidates, ...skillCandidates, ...mcpCandidates]
+  const omittedCallSections = limitCallDetails(candidates)
+  let remainingContentBytes = args.toolContentPolicy?.toolContentTurnBytes ?? 128 * 1024
+  // Stable source order across mutually exclusive sections; metadata survives exhausted body budgets.
+  for (const candidate of [...candidates].sort((a, b) => (a.call.order ?? 0) - (b.call.order ?? 0))) {
+    for (const key of ['inputContent', 'outputContent'] as const) {
+      const content = candidate.call[key]
+      if (!content) continue
+      const saved = limitToolContent(content, remainingContentBytes, 'turn_budget')
+      candidate.call[key] = saved
+      remainingContentBytes -= saved.savedBytes
+      if (saved.storage !== 'complete' || saved.sourceCompleteness === 'partial') omittedCallSections.add(candidate.section)
+    }
+    if (candidate.call.outputContent) {
+      candidate.call.outputSummary = outputSummary(candidate.call.outputContent.content)
+      if (candidate.call.error) candidate.call.error = candidate.call.outputSummary ?? 'tool failed'
+    }
+  }
   const tools = toolCandidates.map(({ call }) => call)
   const skills = skillCandidates.map(({ call }) => call)
   const mcps = mcpCandidates.map(({ call }) => call)
@@ -551,7 +576,7 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('provider tool events were not observable', [source])
       : omittedCallSections.has('tools') || (!!callCaptureReason && tools.length > 0)
         ? partial(tools, [source], joinOmissionReasons([
-            omittedCallSections.has('tools') ? 'one or more tool call payloads were omitted by the record byte budget' : undefined,
+            omittedCallSections.has('tools') ? (args.toolContentPolicy?.toolOutput === 'full-redacted' ? 'one or more tool call contents are missing, partial or limited; inspect content provenance' : 'one or more tool call payloads were omitted by the record byte budget') : undefined,
             callCaptureReason
           ])!, 'exact')
         : available(tools, [source]),
@@ -559,7 +584,7 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('provider skill events were not observable', [source])
       : omittedCallSections.has('skills') || (!!callCaptureReason && skills.length > 0)
         ? partial(skills, [source], joinOmissionReasons([
-            omittedCallSections.has('skills') ? 'one or more skill call payloads were omitted by the record byte budget' : undefined,
+            omittedCallSections.has('skills') ? (args.toolContentPolicy?.toolOutput === 'full-redacted' ? 'one or more skill call contents are missing, partial or limited; inspect content provenance' : 'one or more skill call payloads were omitted by the record byte budget') : undefined,
             callCaptureReason
           ])!, 'exact')
         : available(skills, [source]),
@@ -567,7 +592,7 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('provider MCP events were not observable', [source])
       : omittedCallSections.has('mcps') || (!!callCaptureReason && mcps.length > 0)
         ? partial(mcps, [source], joinOmissionReasons([
-            omittedCallSections.has('mcps') ? 'one or more MCP call payloads were omitted by the record byte budget' : undefined,
+            omittedCallSections.has('mcps') ? (args.toolContentPolicy?.toolOutput === 'full-redacted' ? 'one or more MCP call contents are missing, partial or limited; inspect content provenance' : 'one or more MCP call payloads were omitted by the record byte budget') : undefined,
             callCaptureReason
           ])!, 'exact')
         : available(mcps, [source]),
