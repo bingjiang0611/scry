@@ -2459,11 +2459,14 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       open.terminalAt = terminalAt
       open.terminalAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
       open.endReason ??= sessionEndEvent ? 'session_end' : 'provider_terminal'
+      // A session/process end is not a completion, and it fires while the Provider is shutting down
+      // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
+      // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
+      // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
+      if (sessionEndEvent) open.terminalFallbackStatus ??= 'interrupted'
       await writeJsonAtomic(openPath(root), open, { sync: false })
-      // A session/process end is not a completion: it closes the turn immediately and keeps the
-      // interrupted verdict unless the Provider's own terminal already arrived.
       if (sessionEndEvent) {
-        return finalizeOpenTurn(enablement, open, input.payload, 'interrupted', { allowUnstableTranscript: true })
+        return { status: 'pending' as const, reason: 'session end persisted; turn aggregation deferred to recovery' }
       }
       if (
         input.provider === 'claude' &&
@@ -2649,8 +2652,9 @@ export async function recoverRecorder(
           open,
           { timestamp: open.closingAt ?? new Date().toISOString() },
           // The terminal event did arrive - that is what put the turn in `closing` - so calling it
-          // interrupted would misreport the lifecycle. Only the evidence degrades.
-          'completed',
+          // interrupted would misreport the lifecycle. Only the evidence degrades. A deferred close
+          // already decided its own verdict (session end is not a completion) and keeps it.
+          open.terminalFallbackStatus ?? 'completed',
           {
             allowUnstableTranscript: true,
             ...(closingExpired ? { forcedReason: CLOSING_TURN_EXPIRED_REASON } : {})

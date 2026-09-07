@@ -49,6 +49,16 @@ describe('scry init', () => {
         const source = JSON.stringify(settings.hooks[event])
         expect(source.match(new RegExp(`${provider} ${event}`, 'g'))).toHaveLength(1)
       }
+      // Only Claude publishes SessionEnd; registering it elsewhere would fake capability parity.
+      const sessionEnd = settings.hooks.SessionEnd
+      if (provider === 'claude') {
+        expect(JSON.stringify(sessionEnd).match(/claude SessionEnd/g)).toHaveLength(1)
+        // Session end must persist and enqueue only, so it keeps a much tighter budget than Stop.
+        expect(sessionEnd[0].hooks[0].timeout).toBe(3)
+        expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(15)
+      } else {
+        expect(sessionEnd).toBeUndefined()
+      }
     }
     const openCodePlugin = join(root, '.opencode/plugins/scry-recorder.js')
     const openCodeSource = await readFile(openCodePlugin, 'utf8')

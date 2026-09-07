@@ -1,6 +1,7 @@
 import { access, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
+import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import type { GitTurnDiffCapture } from './git.js'
 import { listFiles, readJson } from './io.js'
 import { safeKey } from './store.js'
@@ -27,6 +28,8 @@ export interface RecorderOpenTurnState {
   /** Credible end of Agent work, set only by a real terminal observation. */
   terminalAt?: string
   terminalAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
+  /** Verdict pinned when closing was deferred, so background finalize cannot upgrade it. */
+  terminalFallbackStatus?: AgentTurnRecord['status']
   endReason?: import('../../shared/turn-record.js').TurnEndReason
   prompt?: string
   promptHash?: string

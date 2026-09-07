@@ -132,9 +132,16 @@ Agent、skill 与提示词不应主动调用这些命令。
 
 - `status !== 'available'` 时，`durationMs` 是下限而不是完整时长；turns summary 的 `wall` 同时给出 `exactEndTurns` / `boundedEndTurns` / `unknownEndEvidenceTurns`。看板的用户等待区间应从 `completedAt` 之后开始。
 - 超出轮次窗口的时间戳（早于 `startedAt`、或超出本地时钟 60s 以上）不被信任，会退到下一个可信来源。
-- 收到 `SessionEnd`/`session.end`/`session_end`/`session.exited`/`process.exit` 时立即收口为 `interrupted`（`reason: session_end`）；重复终止事件幂等，已提交轮次返回 `duplicate`。普通采集、managed 与 journal recovery 用同一套语义。
+## 会话结束（SessionEnd）
 
-> ⚠️ **当前 `scry init` 还没有注册任何 SessionEnd Hook。** 上面的事件名是采集端已支持的入口，需要各 Provider 真实支持并经验证后才会接入；Claude 以外的 Provider 是否提供会话结束 Hook 尚未核实，不假设 parity。在那之前，Connection reset 类中断依靠上述“不再借用下一次输入时间”修正而不是 SessionEnd。
+收到 `SessionEnd`、`session.end`、`session_end`、`session.exited`、`process.exit` 时，当前 open turn 立即定界为 `interrupted`（`reason: session_end`），**不会**因为会话结束而被当成完成。
+
+- Hook 只做两件事：写入生命周期事件、把终止时间与结论固定到 `open.json`，然后返回 `pending`。transcript 解析与 Git diff 由 daemon/`scry recorder recover` 在后台完成（daemon 在每次请求后重置为 1s 轮询）。结束时间已先固定，所以推迟聚合不会拉长时长；Hook 被杀也只是留下一个 closing turn，仍可恢复。
+- 重复 SessionEnd 幂等：未完成时反复返回 `pending` 而不改写边界，已提交后返回 `duplicate`。普通采集、managed 与 journal recovery 共用同一套语义。
+- `scry init` **只为 Claude 注册** `SessionEnd`，timeout **3 秒**（`Stop` 仍为 15 秒）：依据是 Claude SDK 的 `HOOK_EVENTS` 包含 `SessionEnd`。**Codex、Qoder 没有经过核实的会话结束 Hook，OpenCode 根本没有这类事件**，因此不注册，也不假装 parity；这些 Provider 仍靠上面的结束时间解析。已安装的工作区跑 `scry init` 或 `scry integrations repair` 才会补上。
+- 外部已有自己的 SessionEnd Hook（例如其他平台封装）时，也可以不让 Scry 注册，直接转发：`scry recorder hook --provider claude --event SessionEnd --workspace "$PWD" --stdin --quiet`。
+
+> ⚠️ **Connection reset 不会触发 SessionEnd。** 连接断开但会话仍在时，靠的是上一节“不再借用下一次输入时间”；SessionEnd 只能让真正结束的会话更早收口。
 
 **同时满足**「超过 24 小时」与「transcript 已停止增长」的轮次判定为不可能再收敛,由 `scry recorder recover`(daemon 空闲时自动跑)收敛为 `interrupted`。两个判据都必需:只看年龄会把跑了 30 小时的长任务误判为中断,而长任务会持续追加 transcript。
 
