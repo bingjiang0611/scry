@@ -37,7 +37,7 @@ TREEHOUSE_BIN = Path("/opt/homebrew/bin/treehouse")
 RECORDER_PACKAGE = str(RECORDER_RECOVERY["package"])
 RECORDER_REGISTRY = str(RECORDER_RECOVERY["registry"])
 RETENTION = CONTRACT["retention"]
-SCRY_REPO = (SKILL_DIR.parents[2] / "scry").resolve()
+SCRY_REPO = SKILL_DIR.parents[2].resolve()
 
 SLOT_OWNER_ACTIVE_STAGES = {
     "CLAIMED",
@@ -743,6 +743,57 @@ def valid_completed_watch(run_root: Path, provider: str, state: dict[str, Any]) 
         and isinstance(selected, dict)
         and selected.get("sessionId") == session.get("sessionId")
     )
+
+
+def completed_watch_abandonment_evidence(
+    run_root: Path,
+    provider: str,
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Prove a completed-but-unfinalized run has already lost its owned test App."""
+    status_path = run_root / "test-scry-status-before-cleanup.json"
+    if status_path.is_symlink() or not status_path.is_file():
+        return None
+    try:
+        status_stat = status_path.stat()
+        age_seconds = time.time() - status_stat.st_mtime
+        status = read_json(status_path)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    live = status.get("rendererOwnershipLive") if isinstance(status, dict) else None
+    snapshot = state.get("buildSnapshot") if isinstance(state.get("buildSnapshot"), dict) else {}
+    if not (
+        -5 <= age_seconds <= 300
+        and isinstance(status, dict)
+        and status.get("version") == state.get("version")
+        and status.get("mode") == "test"
+        and status.get("provider") == provider
+        and status.get("runRoot") == str(run_root)
+        and status.get("launchId") == state.get("launchId")
+        and status.get("pid") == state.get("pid")
+        and status.get("port") == state.get("port")
+        and status.get("statePath") == str(run_root / "test-scry-state.json")
+        and status.get("runtimeRoot") == state.get("runtimeRoot")
+        and status.get("userDataDir") == state.get("userDataDir")
+        and status.get("processAlive") is False
+        and status.get("commandMatches") is False
+        and status.get("cdpReachable") is False
+        and status.get("cdpReady") is False
+        and status.get("cdpClosed") is True
+        and status.get("ownedRendererReady") is False
+        and status.get("ownedRendererCount") == 0
+        and status.get("runtimeSnapshotReady") is True
+        and status.get("buildSnapshotLive") == snapshot.get("snapshotFingerprint")
+        and isinstance(live, dict)
+        and live.get("status") == "cdp_closed"
+    ):
+        return None
+    return {
+        "decision": "abandon_after_owned_app_exit",
+        "statusPath": str(status_path),
+        "statusSha256": "sha256:" + hashlib.sha256(status_path.read_bytes()).hexdigest(),
+        "observedAt": datetime.fromtimestamp(status_stat.st_mtime, timezone.utc).isoformat(),
+    }
 
 
 def retained_review_is_finalized(raw_run_root: str | None, require_build_snapshot: bool) -> bool:
@@ -2390,8 +2441,15 @@ def mark_post_send_abandoned(provider: str, run_root: Path, payload: dict[str, A
             and state.get("runRoot") == str(run_root)
         ):
             raise RuntimeError("post-send abandonment identity does not match the owned launch")
+        completed_abandonment = None
         if valid_completed_watch(run_root, provider, state):
-            raise RuntimeError("completed evidence must be retained and finalized, not abandoned")
+            if payload.get("completedEvidenceDisposition") != "abandon_after_owned_app_exit":
+                raise RuntimeError("completed evidence must be retained and finalized, not abandoned")
+            completed_abandonment = completed_watch_abandonment_evidence(run_root, provider, state)
+            if completed_abandonment is None:
+                raise RuntimeError(
+                    "completed evidence can only be abandoned after a fresh owned test App exit proof"
+                )
 
         lifecycle_path = run_root / "lifecycle.json"
         existing = None
@@ -2448,6 +2506,8 @@ def mark_post_send_abandoned(provider: str, run_root: Path, payload: dict[str, A
             "replacesProvisionalState": (existing.get("status") if isinstance(existing, dict) else None),
             "markedAt": now(),
         }
+        if completed_abandonment is not None:
+            lifecycle["completedEvidenceDisposition"] = completed_abandonment
         write_json_atomic(lifecycle_path, lifecycle)
         updated = refresh_slot_owner_locked(provider, run_root, "ABANDONED")
     return {
@@ -3329,10 +3389,20 @@ noise
             except RuntimeError as exc:
                 assert "already exists" in str(exc)
             test_state_path = run_root / "test-scry-state.json"
+            fixture_snapshot = {"files": 4, "sha256": "sha256:fixture-runtime"}
             test_state_path.write_text(json.dumps({
+                "version": 3,
+                "mode": "test",
                 "provider": "codex",
                 "runRoot": str(run_root),
                 "launchId": "fixture-launch",
+                "pid": 123,
+                "port": 4567,
+                "statePath": str(test_state_path),
+                "expectedWorkspace": str(fixture_workspace),
+                "runtimeRoot": str(run_root / "fixture-runtime"),
+                "userDataDir": str(run_root / "fixture-user-data"),
+                "buildSnapshot": {"snapshotFingerprint": fixture_snapshot},
             }), encoding="utf-8")
             authorization = {
                 "schemaVersion": 1,
@@ -3351,7 +3421,98 @@ noise
             assert classify_slot_run(str(run_root), abandoned_lock) == "WAITING_FOR_ABANDONED_CLEANUP"
             assert mark_post_send_abandoned("codex", run_root, authorization)["idempotent"] is True
             (run_root / "lifecycle.json").unlink()
-            test_state_path.unlink()
+            write_json_atomic(
+                slot_lock_path("codex"),
+                slot_owner_value("codex", run_root, "TURN1_INTENT_PREPARED", abandoned_lock),
+            )
+
+            session_id = "fixture-session"
+            write_json_atomic(run_root / "turn-session.json", {
+                "runRoot": str(run_root),
+                "provider": "codex",
+                "workspace": str(fixture_workspace),
+                "launchId": "fixture-launch",
+                "sessionId": session_id,
+            })
+            (run_root / "turn-watch.jsonl").write_text(json.dumps({
+                "state": "COMPLETED",
+                "provider": "codex",
+                "workspace": str(fixture_workspace),
+                "expectedTurns": 2,
+                "sessionId": session_id,
+                "providerTurnIds": ["fixture-turn-1", "fixture-turn-2"],
+                "renderer": {"identity": True, "busy": False, "turnCount": 2},
+                "persistence": {"state": "ready", "selected": {"sessionId": session_id}},
+            }) + "\n", encoding="utf-8")
+            completed_authorization = {
+                **authorization,
+                "completedEvidenceDisposition": "abandon_after_owned_app_exit",
+            }
+            try:
+                mark_post_send_abandoned("codex", run_root, authorization)
+                raise AssertionError("completed run was abandoned without an explicit disposition")
+            except RuntimeError as exc:
+                assert "must be retained and finalized" in str(exc)
+
+            before_cleanup_status = run_root / "test-scry-status-before-cleanup.json"
+            dead_status = {
+                "version": 3,
+                "mode": "test",
+                "provider": "codex",
+                "runRoot": str(run_root),
+                "launchId": "fixture-launch",
+                "pid": 123,
+                "port": 4567,
+                "statePath": str(test_state_path),
+                "runtimeRoot": str(run_root / "fixture-runtime"),
+                "userDataDir": str(run_root / "fixture-user-data"),
+                "processAlive": False,
+                "commandMatches": False,
+                "cdpReachable": False,
+                "cdpReady": False,
+                "cdpClosed": True,
+                "ownedRendererReady": False,
+                "ownedRendererCount": 0,
+                "runtimeSnapshotReady": True,
+                "buildSnapshotLive": fixture_snapshot,
+                "rendererOwnershipLive": {"status": "cdp_closed"},
+            }
+            write_json_atomic(before_cleanup_status, dead_status)
+            os.utime(before_cleanup_status, (0, 0))
+            try:
+                mark_post_send_abandoned("codex", run_root, completed_authorization)
+                raise AssertionError("completed run accepted stale test App exit evidence")
+            except RuntimeError as exc:
+                assert "fresh owned test App exit proof" in str(exc)
+
+            write_json_atomic(before_cleanup_status, {**dead_status, "processAlive": True})
+            try:
+                mark_post_send_abandoned("codex", run_root, completed_authorization)
+                raise AssertionError("completed run abandoned while its test App was live")
+            except RuntimeError as exc:
+                assert "fresh owned test App exit proof" in str(exc)
+
+            write_json_atomic(before_cleanup_status, dead_status)
+            completed_abandoned = mark_post_send_abandoned(
+                "codex", run_root, completed_authorization,
+            )
+            assert completed_abandoned["ok"] is True
+            disposition = completed_abandoned["lifecycle"]["completedEvidenceDisposition"]
+            assert disposition["decision"] == "abandon_after_owned_app_exit"
+            assert disposition["statusPath"] == str(before_cleanup_status)
+            assert disposition["statusSha256"].startswith("sha256:")
+            assert mark_post_send_abandoned(
+                "codex", run_root, completed_authorization,
+            )["idempotent"] is True
+
+            for fixture_path in (
+                run_root / "lifecycle.json",
+                run_root / "turn-session.json",
+                run_root / "turn-watch.jsonl",
+                before_cleanup_status,
+                test_state_path,
+            ):
+                fixture_path.unlink()
             write_json_atomic(
                 slot_lock_path("codex"),
                 slot_owner_value("codex", run_root, "TURN1_INTENT_PREPARED", abandoned_lock),

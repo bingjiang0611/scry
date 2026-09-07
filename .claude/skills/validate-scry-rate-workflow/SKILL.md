@@ -352,7 +352,7 @@ test "$run_root/test-scry-status-final.json" -nt "$run_root/turn1-draft.json"
 
 🛑 **CHECKPOINT 2 · 无授权禁止执行本步任何命令**：只有用户明确指定该 `run_root` 要清理/关闭，或开始同 Provider 新验收时才收尾；“验收结束”“完成”或看完结果都不构成授权。缺具体 `run_root` 时回去索要，不得自己挑一个。
 
-🔴 除授权外还须证明验收判定已终结（下面块内第一条 `jq -e`），否则 `--phase after` 会把 workspace 数据归档出 workspace，现场将无法人工查看。正常完成走 `RETAINED_*`；已经越过 send intent、但三轮无法完成的失败现场，必须先用 `mark-post-send-abandoned` 把用户原话、影响确认、provider/run/launch 一起写入 `POST_SEND_ABANDONED`。超时、Provider 异常或 Agent 自己的判断都不能代替这份授权。旧 schema 只有 frozen contract 的 schema+sha256 精确命中 `recoveryPolicy.legacyPostSendCleanupContracts` 时才能走同一动作；不允许把“legacy”泛化为可清理。`PRE_SEND_ARCHIVED` 时槽位已释放，本步无需执行。
+🔴 除授权外还须证明验收判定已终结（下面块内第一条 `jq -e`），否则 `--phase after` 会把 workspace 数据归档出 workspace，现场将无法人工查看。正常完成走 `RETAINED_*`；已经越过 send intent、但三轮无法完成的失败现场，必须先用 `mark-post-send-abandoned` 把用户原话、影响确认、provider/run/launch 一起写入 `POST_SEND_ABANDONED`。watcher 已完成但 lifecycle 尚未落盘时仍优先 `mark-retained`；只有本 run 的测试 App 已退出，且紧邻授权动作的固定 status 证明 `processAlive=false + cdpClosed=true`，才允许把 `completedEvidenceDisposition=abandon_after_owned_app_exit` 与用户授权一同写入 abandonment，避免形成既不能 retained 也不能 cleanup 的陈旧现场。超时、Provider 异常或 Agent 自己的判断都不能代替这份授权。旧 schema 只有 frozen contract 的 schema+sha256 精确命中 `recoveryPolicy.legacyPostSendCleanupContracts` 时才能走同一动作；不允许把“legacy”泛化为可清理。`PRE_SEND_ARCHIVED` 时槽位已释放，本步无需执行。
 
 清理常发生在另一个 shell，所以块内先把 `provider` 与冻结的 `scry_bin` 反查回来（`skill_dir` 固定、`run_root` 由用户给出），不得退回 PATH 裸命令；`scry_bin` 只作身份披露，`sanitize_workspace.py` 内部统一解析当前 stable prefix 最新 CLI 执行清理，recorder 已升级不影响旧现场清理：
 
@@ -366,9 +366,13 @@ state="$(jq -r '.state // .status // empty' "$run_root/lifecycle.json" 2>/dev/nu
 if test "$state" != "RETAINED_DRAFT" && test "$state" != "RETAINED_FOR_REVIEW"; then
   provider="$(jq -er '.provider' "$run_root/turn1-send-intent.json")"
   launch_id="$(jq -er '.launchId' "$run_root/test-scry-state.json")"
+  # completed-but-unfinalized 只允许在本 run App 已明确退出时走授权 abandonment；其他 run 幂等忽略此字段
+  node "$skill_dir/scripts/test_scry_app.mjs" status --run-root "$run_root" \
+    > "$run_root/test-scry-status-before-cleanup.json"
   jq -n --arg provider "$provider" --arg runRoot "$run_root" --arg launchId "$launch_id" \
     --arg userQuote '<用户明确授权清理该 run 的原话>' \
     '{schemaVersion:1,decision:"abandon",impactAcknowledged:true,
+      completedEvidenceDisposition:"abandon_after_owned_app_exit",
       provider:$provider,runRoot:$runRoot,launchId:$launchId,userQuote:$userQuote}' \
     | python3 "$skill_dir/scripts/fixed_workspace.py" mark-post-send-abandoned \
         --provider "$provider" --run-root "$run_root" \
