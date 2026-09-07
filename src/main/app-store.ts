@@ -169,6 +169,7 @@ function writeAtomic(file: string, value: unknown): void {
 export function cleanupAppStoreAtomicTemps(userDataDir: string): void {
   for (const name of [
     'recent-folders.json', 'recent-folders.json.bak',
+    'read-only-roots.json', 'read-only-roots.json.bak',
     'projects.json', 'projects.json.bak',
     'app-sessions.json', 'app-sessions.json.bak'
   ]) {
@@ -224,6 +225,13 @@ export function createRecentFoldersStore(userDataDir: string) {
     return next
   }
   return { load, push, remove }
+}
+
+export function createReadOnlyRootsStore(userDataDir: string) {
+  const file = join(userDataDir, 'read-only-roots.json')
+  const load = (): string[] => readJsonRecoverable<string[]>(file, [], isStringArray).value
+  const add = (root: string): void => writeJsonRecoverable(file, [root, ...load().filter((item) => item !== root)], isStringArray)
+  return { load, add }
 }
 
 function isProjectRecordArray(value: unknown): value is ProjectRecord[] {

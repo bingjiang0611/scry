@@ -44,6 +44,7 @@ import {
   cleanupAppStoreAtomicTemps,
   createAppSessionStore,
   createProjectStore,
+  createReadOnlyRootsStore,
   createRecentFoldersStore,
   isSessionProviderId,
   mergeProjectMetas,
@@ -328,18 +329,17 @@ function closeAllTerminals(discardOutput = false): void {
 }
 
 const homeDir = homedir()
-const homeFileAccess = new HomeFileAccess(homeDir, async (canonicalPath) => {
-  if (!win || win.isDestroyed()) return false
-  const result = await dialog.showMessageBox(win, {
-    type: 'question',
-    buttons: ['取消', '只读打开'],
-    defaultId: 0,
-    cancelId: 0,
-    message: '打开工作区外文件？',
-    detail: `Scry 将只读打开以下文件：\n${canonicalPath}`,
-    noLink: true
+const readOnlyRootsStore = () => createReadOnlyRootsStore(app.getPath('userData'))
+const homeFileAccess = new HomeFileAccess(homeDir, readOnlyRootsStore(), async ({ target, suggestedRoot }) => {
+  if (!win || win.isDestroyed()) return null
+  const result = await dialog.showOpenDialog(win, {
+    title: '授权只读目录',
+    message: `选择包含该文件的目录：${target}`,
+    buttonLabel: '授权并打开',
+    defaultPath: suggestedRoot,
+    properties: ['openDirectory']
   })
-  return result.response === 1
+  return result.canceled ? null : result.filePaths[0] ?? null
 })
 const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
 const projectStore = () => createProjectStore(app.getPath('userData'))
