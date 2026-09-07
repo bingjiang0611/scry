@@ -229,6 +229,33 @@ describe('managed trace turn coordinator', () => {
     expect(records[0].tools.value![0].outputContent!.savedBytes).toBeGreaterThan(500)
   })
 
+  it('managed 记录透出终止时间来源，并在缺 Provider result 时降级为观测边界', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await startManaged(workspace)
+    const request = input(workspace, userDataDir)
+    await commitManagedTraceTurn(request, { waitMs: 0 })
+    const [canonical] = await listRecords(join(workspace, '.scry'))
+    expect(canonical.termination).toMatchObject({
+      status: 'available',
+      quality: 'exact',
+      value: { reason: 'provider_terminal', completedAtSource: 'provider_terminal_event' }
+    })
+    // 重放同一轮必须给出同一份来源，否则崩溃恢复会改写既有证据。
+    await commitManagedTraceTurn(request, { waitMs: 0 })
+    expect((await listRecords(join(workspace, '.scry')))[0].termination).toEqual(canonical.termination)
+
+    const observed = await fixture()
+    await startManaged(observed.workspace)
+    const withoutResult = input(observed.workspace, observed.userDataDir)
+    withoutResult.turn.items = withoutResult.turn.items.filter((event) => event.stage !== 'result')
+    await commitManagedTraceTurn(withoutResult, { waitMs: 0 })
+    expect((await listRecords(join(observed.workspace, '.scry')))[0].termination).toMatchObject({
+      status: 'partial',
+      quality: 'estimated',
+      value: { reason: 'run_ended', completedAtSource: 'recorder_observed_terminal' }
+    })
+  })
+
   it('仅非 completed 轮次可在缺 Provider result 时使用 App 观测边界', () => {
     const observed = {
       startedAt: '2026-07-29T12:00:00.000Z',

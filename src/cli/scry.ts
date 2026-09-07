@@ -487,6 +487,8 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
       turnIndex: record.turnIndex,
       status: record.status,
       durationMs: record.durationMs,
+      endReason: record.termination?.value?.reason ?? null,
+      completedAtSource: record.termination?.value?.completedAtSource ?? null,
       compactions: record.compactions?.value?.length ?? null,
       modelTiming: compactModelTiming(record),
       startedAt: record.startedAt,

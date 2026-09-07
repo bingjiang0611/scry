@@ -5,7 +5,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.37'
+export const RECORDER_VERSION = '0.2.38'
 
 export interface RecorderHealth {
   schemaVersion: 1
