@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, cpSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, cpSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
@@ -16,7 +16,7 @@ const CONTRACT = JSON.parse(readFileSync(join(SCRIPT_DIR, '..', 'references', 'c
 const RUN_ROOT_PARENT = resolve(CONTRACT.retention.runRootParent)
 const RUNTIME_RELATIVE = CONTRACT.recoveryPolicy.runtimeSnapshot.relativePath
 const STATE_VERSION = CONTRACT.recoveryPolicy.runtimeSnapshot.stateVersion
-const CANONICAL_SCRY_REPO = resolve(SCRIPT_DIR, '../../../..')
+const CANONICAL_SCRY_REPO = resolve(process.env.SCRY_VALIDATION_SCRY_REPO ?? resolve(SCRIPT_DIR, '../../../..'))
 const PI_AGENT_NODE = '/Users/baobingjiang/.nvm/versions/node/v24.18.0/bin/node'
 const wait = (ms) => new Promise((done) => setTimeout(done, ms))
 
@@ -582,6 +582,17 @@ async function terminateOwnedState(statePath) {
 const [action, ...rawOptions] = process.argv.slice(2)
 if (action === 'self-test') {
   if (rawOptions.length) throw new Error('self-test does not accept options')
+  const makeTreeWritableForCleanup = (path) => {
+    if (!existsSync(path)) return
+    const stat = lstatSync(path)
+    if (stat.isSymbolicLink()) return
+    if (stat.isDirectory()) {
+      chmodSync(path, 0o700)
+      for (const entry of readdirSync(path)) makeTreeWritableForCleanup(join(path, entry))
+    } else {
+      chmodSync(path, 0o600)
+    }
+  }
   const codexIdentity = providerLaunchIdentity('codex')
   if (codexIdentity.slot !== 1 || !codexIdentity.workspace.endsWith('/1/rate-native')) {
     throw new Error(`Provider launch contract self-test drifted: ${JSON.stringify(codexIdentity)}`)
@@ -665,6 +676,11 @@ if (action === 'self-test') {
     mkdirSync(join(isolatedRun, 'scry-build-out', 'renderer'), { recursive: true })
     writeFileSync(join(isolatedRun, 'scry-build-out', 'main', 'index.js'), 'isolated\n')
     writeFileSync(join(isolatedRun, 'scry-build-out', 'renderer', 'index.html'), 'isolated\n')
+    chmodSync(join(isolatedRun, 'scry-build-out', 'main', 'index.js'), 0o400)
+    chmodSync(join(isolatedRun, 'scry-build-out', 'renderer', 'index.html'), 0o400)
+    chmodSync(join(isolatedRun, 'scry-build-out', 'main'), 0o500)
+    chmodSync(join(isolatedRun, 'scry-build-out', 'renderer'), 0o500)
+    chmodSync(join(isolatedRun, 'scry-build-out'), 0o500)
     const isolatedOut = resolveBuildOut(source, isolatedRun, join(isolatedRun, 'scry-build-out'))
     const isolatedSnapshot = createRuntimeSnapshot(source, isolatedRun, isolatedOut)
     if (isolatedSnapshot.sourceOut !== isolatedOut) throw new Error('isolated build output was not recorded')
@@ -683,6 +699,7 @@ if (action === 'self-test') {
       throw new Error('invalid launch state self-test was not quarantined')
     }
   } finally {
+    makeTreeWritableForCleanup(root)
     rmSync(root, { recursive: true, force: true })
   }
   process.stdout.write('self-test: PASS\n')

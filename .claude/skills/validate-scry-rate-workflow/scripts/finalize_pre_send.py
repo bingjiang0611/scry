@@ -21,7 +21,9 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 CONTRACT_PATH = SKILL_DIR / "references" / "contract.json"
-SCRY_REPO = (SCRIPT_DIR.parents[3] / "scry").resolve()
+SCRY_REPO = Path(
+    os.environ.get("SCRY_VALIDATION_SCRY_REPO", str(SKILL_DIR.parents[2]))
+).expanduser().resolve()
 RUN_PREFIX = "validate-scry-rate-workflow-"
 LIFECYCLE_NAME = "lifecycle.json"
 PREPARED_ARCHIVE_NAME = "pre-send-archive-prepared.json"

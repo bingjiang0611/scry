@@ -89,7 +89,7 @@ python3 "$skill_dir/scripts/compare_turn_evidence.py" \
 
 ## 4. 最终冻结与停手
 
-再次运行相同参数输出 `local-parity-final.json`，并要求它与 initial 逐字节相等；再做 final preflight、test app live ownership、runtime snapshot 和 frozen fingerprint 对账。最后调用：
+再次运行相同参数输出 `local-parity-final.json`，并要求它与 initial 逐字节相等；再用 `verify_frozen_run.py --phase final` 做 workflow/build/contract/recorder/workspace 定向复核，并检查 test app live ownership 与 runtime snapshot。canonical Scry 仓变化只作 audit。最后调用：
 
 ```bash
 set -euo pipefail
@@ -100,4 +100,4 @@ python3 "$skill_dir/scripts/fixed_workspace.py" mark-retained \
 
 只有 `mark-retained` 原子写出 `RETAINED_FOR_REVIEW` 且 `validationOutcome=PASS` 才报告 PASS。数据不一致写 `LOCAL_DATA_FAIL`；Provider/CDP/identity/人工问题/轮数未完成写真实失败状态。无论结果如何都停在技术方案之后，不继续写代码，不停止 Scry Test，不清 workspace/userData，不释放 Provider 槽位。
 
-显式清理仍只走主 `SKILL.md` Step 6。已经越过第一轮 send intent、但三轮无法完成的失败现场，只有在用户明确授权清理该 run 后才能调用 `mark-post-send-abandoned`；该终态必须绑定 provider、run root、launch id 和用户原话。没有授权就继续保留现场。
+当前完成现场继续保留；用户可按主 `SKILL.md` Step 6 提前清理，或在下一次同 Provider 验收开始时由 Step 0 自动 supersede。已经越过第一轮 send intent、但三轮无法完成的失败现场仍不属于默认清理，只有用户明确授权后才能调用 `mark-post-send-abandoned`。

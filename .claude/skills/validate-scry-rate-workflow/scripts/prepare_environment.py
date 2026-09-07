@@ -14,8 +14,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+import cleanup_retained
 import fixed_workspace as fixed
 import preflight
+import workflow_snapshot
 
 
 SOURCE_CONFIG_ONLY_FAILURES = {
@@ -127,6 +129,52 @@ def quarantine_partial_build(run_root: Path, build_out: Path) -> dict[str, Any] 
     return evidence
 
 
+def snapshot_canonical_build(
+    run_root: Path,
+    source_out: Path,
+    build_out: Path,
+    expected: dict[str, Any],
+) -> dict[str, Any]:
+    if build_out != run_root / "scry-build-out":
+        raise RuntimeError("canonical build snapshot must use the exact run-local child")
+    if source_out.is_symlink() or not source_out.is_dir():
+        raise RuntimeError(f"canonical build output is missing or unsafe: {source_out}")
+    if os.path.lexists(build_out):
+        recovered = quarantine_partial_build(run_root, build_out)
+    else:
+        recovered = None
+    temporary = run_root / f"scry-build-out.tmp-{os.getpid()}"
+    if os.path.lexists(temporary):
+        raise RuntimeError(f"canonical build snapshot temporary path already exists: {temporary}")
+    source_before = preflight.tree_fingerprint(source_out)
+    if source_before != expected:
+        raise RuntimeError(
+            f"canonical build output drifted from the frozen preflight: {source_before} != {expected}"
+        )
+    try:
+        shutil.copytree(source_out, temporary, symlinks=True)
+        copied = preflight.tree_fingerprint(temporary)
+        source_after = preflight.tree_fingerprint(source_out)
+        if copied != expected or source_after != expected:
+            raise RuntimeError(
+                "canonical build output changed while freezing: "
+                f"{json.dumps({'before': source_before, 'after': source_after, 'copied': copied})}"
+            )
+        temporary.replace(build_out)
+    except BaseException:
+        if temporary.exists():
+            shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    return {
+        "schemaVersion": 1,
+        "mode": "canonical_snapshot",
+        "sourceOut": str(source_out),
+        "buildOut": str(build_out),
+        "buildArtifacts": expected,
+        "recoveredPartialBuild": recovered,
+    }
+
+
 def reusable_isolated_build(
     run_root: Path,
     build_out: Path,
@@ -219,7 +267,6 @@ def materialize_head_snapshot(scry_repo: Path, snapshot_dir: Path) -> dict[str, 
         modules = snapshot_dir / "node_modules"
         if modules.exists() or modules.is_symlink():
             raise RuntimeError("committed Scry tree unexpectedly contains node_modules")
-        modules.symlink_to(scry_repo / "node_modules", target_is_directory=True)
     except BaseException:
         for item in sorted(snapshot_dir.iterdir(), reverse=True):
             if item.is_symlink() or item.is_file():
@@ -235,7 +282,38 @@ def materialize_head_snapshot(scry_repo: Path, snapshot_dir: Path) -> dict[str, 
         "treeHash": tree,
         "files": files,
         "verified": True,
-        "nodeModulesSymlink": str(scry_repo / "node_modules"),
+        "dependencies": "not_materialized",
+    }
+
+
+def materialize_snapshot_dependencies(snapshot_dir: Path, log_path: Path) -> dict[str, Any]:
+    """Install exactly the committed lockfile inside the disposable clean snapshot."""
+    before = preflight.scry_dependencies(snapshot_dir)
+    if before.get("lockfilePresent") is not True or before.get("modulesPresent") is True:
+        raise RuntimeError(f"clean build snapshot has invalid dependency inputs: {before}")
+    npm, env = preflight.npm_environment()
+    arguments = [str(value) for value in preflight.DEPENDENCY_RECOVERY["installArgs"]]
+    completed = fixed.run(
+        [npm, *arguments],
+        snapshot_dir,
+        timeout=int(preflight.DEPENDENCY_RECOVERY["timeoutSeconds"]),
+        env=env,
+    )
+    log_path.write_text((completed.stdout or "") + (completed.stderr or ""), encoding="utf-8")
+    log_path.chmod(0o600)
+    if completed.returncode != 0:
+        raise RuntimeError(f"clean snapshot dependency install failed; inspect {log_path}")
+    installers = preflight.install_dependency_binaries(snapshot_dir, env)
+    after = preflight.scry_dependencies(snapshot_dir)
+    if after.get("ready") is not True:
+        raise RuntimeError(f"clean snapshot dependencies are incomplete: {after}")
+    return {
+        "schemaVersion": 1,
+        "mode": "clean_head_npm_ci",
+        "snapshot": str(snapshot_dir),
+        "log": str(log_path),
+        "installers": installers,
+        "after": after,
     }
 
 
@@ -425,6 +503,85 @@ def recover_cleanup_cli(
     return manifest
 
 
+def run_retained_cleanup(
+    cleaner: Path,
+    provider: str,
+    old_run_root: str,
+    superseding_run_root: Path,
+    scry_repo: Path,
+) -> dict[str, Any]:
+    env = os.environ.copy()
+    env["SCRY_VALIDATION_SCRY_REPO"] = str(scry_repo)
+    completed = fixed.run(
+        [
+            sys.executable,
+            str(cleaner),
+            "--provider",
+            provider,
+            "--run-root",
+            old_run_root,
+            "--superseding-run-root",
+            str(superseding_run_root),
+        ],
+        timeout=1800,
+        env=env,
+    )
+    try:
+        cleaned = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"retained cleanup produced invalid evidence for {provider}: "
+            f"{(completed.stderr or completed.stdout).strip()[-2000:]}"
+        ) from exc
+    if completed.returncode != 0 or not isinstance(cleaned, dict) or cleaned.get("ok") is not True:
+        raise RuntimeError(f"retained cleanup failed for {provider}: {cleaned}")
+    return cleaned
+
+
+def reconcile_retained_slot(
+    provider: str,
+    recovery_run_root: Path,
+    scry_repo: Path,
+) -> list[dict[str, Any]]:
+    """Supersede only the requested Provider's strictly terminal retained site."""
+    lock_path = fixed.slot_lock_path(provider)
+    if not os.path.lexists(lock_path):
+        return [
+            {
+                "provider": provider,
+                "runRoot": item.get("runRoot"),
+                "classification": "SUPERSEDED_CLEANUP_RELEASE_PREPARED",
+                "action": "superseded_recovered_after_release",
+                "cleanup": item,
+            }
+            for item in cleanup_retained.recover_released_cleanups(provider, recovery_run_root)
+        ]
+    if lock_path.is_symlink() or not lock_path.is_file():
+        raise RuntimeError(f"Provider slot lock is unsafe: {lock_path}")
+    lock = fixed.read_json(lock_path)
+    if not isinstance(lock, dict) or not isinstance(lock.get("runRoot"), str):
+        raise RuntimeError(f"Provider slot lock is invalid: {lock_path}")
+    classification = fixed.classify_slot_run(lock["runRoot"], lock)
+    action: dict[str, Any] = {
+        "provider": provider,
+        "runRoot": lock["runRoot"],
+        "classification": classification,
+        "action": "preserved",
+    }
+    prepared_transaction = Path(lock["runRoot"]).expanduser().resolve() / "superseded-cleanup-prepared.json"
+    resumable = prepared_transaction.is_file() and not prepared_transaction.is_symlink()
+    if classification in {"WAITING_FOR_DRAFT_CLEANUP", "WAITING_FOR_REVIEW_CLEANUP"} or resumable:
+        cleaned = run_retained_cleanup(
+            Path(__file__).resolve().parent / "cleanup_retained.py",
+            provider,
+            lock["runRoot"],
+            recovery_run_root,
+            scry_repo,
+        )
+        action.update({"action": "superseded", "cleanup": cleaned})
+    return [action]
+
+
 def run_pre_send_finalizer(finalizer: Path, provider: str, old_run_root: str) -> tuple[int, dict[str, Any]]:
     completed = fixed.run(
         [
@@ -487,6 +644,10 @@ def reconcile_pre_send_slots(recovery_run_root: Path, scry_repo: Path) -> list[d
 
 
 def build_environment(provider: str, run_root: Path, scry_repo: Path, rate_native_repo: Path) -> dict[str, Any]:
+    workflow = workflow_snapshot.validate(run_root, scry_repo)
+    expected_entrypoint = Path(str(workflow["path"])) / "scripts" / Path(__file__).name
+    if Path(__file__).resolve() != expected_entrypoint:
+        raise RuntimeError(f"environment preparation must execute the frozen entrypoint: {expected_entrypoint}")
     recovery_path = run_root / "environment-recovery.json"
     preflight_path = run_root / "preflight.json"
     build_status_path = run_root / "build-status.json"
@@ -504,13 +665,25 @@ def build_environment(provider: str, run_root: Path, scry_repo: Path, rate_nativ
         "buildStatusPath": str(build_status_path),
         "buildPreflightPath": None,
         "baselinePreflight": None,
+        "baselinePreflightFingerprint": None,
+        "scryBin": None,
+        "scryBinFingerprint": None,
         "buildOut": None,
         "buildMode": None,
         "built": False,
         "dependencies": None,
+        "scryRepo": str(scry_repo),
+        "workflowSnapshot": workflow,
+        "retainedSlotReconciliation": [],
         "slotReconciliation": [],
     }
     try:
+        with mutation_lock("environment", run_root, require_mutation_clearance=False):
+            result["retainedSlotReconciliation"] = reconcile_retained_slot(
+                provider,
+                run_root,
+                scry_repo,
+            )
         result["slotReconciliation"] = reconcile_pre_send_slots(run_root, scry_repo)
         frozen = inspect_under_environment_lock(
             provider,
@@ -581,6 +754,12 @@ def build_environment(provider: str, run_root: Path, scry_repo: Path, rate_nativ
                     # changes can never change what gets validated.
                     snapshot = materialize_head_snapshot(scry_repo, run_root / "scry-build-src")
                     result["buildSnapshot"] = snapshot
+                    dependency_log = run_root / "scry-build-dependencies.log"
+                    snapshot_dependencies = materialize_snapshot_dependencies(
+                        Path(snapshot["path"]),
+                        dependency_log,
+                    )
+                    result["buildDependencies"] = snapshot_dependencies
                     npm, env = preflight.npm_environment()
                     try:
                         completed = fixed.run(
@@ -597,21 +776,26 @@ def build_environment(provider: str, run_root: Path, scry_repo: Path, rate_nativ
                     result["buildLog"] = str(build_log)
                     if completed.returncode != 0:
                         raise RuntimeError(f"Scry isolated build failed; inspect {build_log}")
-                    post_build = preflight.inspect(provider, scry_repo, rate_native_repo, isolated_build_out)
-                    write(build_preflight_path, post_build)
-                    if post_build.get("ok") is not True:
-                        raise RuntimeError(
-                            "post-build preflight failed: "
-                            + ", ".join(str(item.get("name")) for item in post_build.get("failures", []))
-                        )
-                    if scry_build_identity(post_build) != source_identity:
-                        raise RuntimeError("Scry commit identity changed during isolated build")
+                    if {
+                        "head": snapshot.get("head"),
+                        "treeHash": snapshot.get("treeHash"),
+                    } != source_identity:
+                        raise RuntimeError("clean Scry build snapshot does not match the frozen commit")
+                    build_artifacts = preflight.tree_fingerprint(isolated_build_out)
+                    derived_baseline = json.loads(json.dumps(frozen))
+                    derived_baseline.update({
+                        "buildOut": str(isolated_build_out),
+                        "buildArtifacts": build_artifacts,
+                        "derivedFrom": str(preflight_path),
+                        "verificationMode": "targeted_run_local_build",
+                    })
+                    write(build_preflight_path, derived_baseline)
                     fixed.require_complete_build(fixed.build_identity(build_preflight_path), isolated_build_out)
                     write(run_root / "isolated-build.json", {
                         "schemaVersion": 2,
                         "buildOut": str(isolated_build_out),
                         "sourceIdentity": source_identity,
-                        "buildArtifacts": post_build.get("buildArtifacts"),
+                        "buildArtifacts": build_artifacts,
                         "preflightPath": str(build_preflight_path),
                         "snapshot": {
                             "head": snapshot["head"],
@@ -624,16 +808,41 @@ def build_environment(provider: str, run_root: Path, scry_repo: Path, rate_nativ
             build_mode = "isolated_reuse" if reused else "isolated_build"
             result["built"] = not reused
             result["buildPreflightPath"] = str(build_preflight_path)
+        else:
+            expected_artifacts = frozen.get("buildArtifacts")
+            if not isinstance(expected_artifacts, dict):
+                raise RuntimeError("frozen preflight has no canonical build fingerprint")
+            with mutation_lock("build", run_root, require_mutation_clearance=False):
+                snapshot = snapshot_canonical_build(
+                    run_root,
+                    scry_repo / "out",
+                    isolated_build_out,
+                    expected_artifacts,
+                )
+            write(run_root / "isolated-build.json", snapshot)
+            build_out = isolated_build_out
+            build_mode = "canonical_snapshot"
+            result["buildSnapshot"] = snapshot
 
         final = json.loads(baseline.read_text(encoding="utf-8"))
         cli_path = final.get("versions", {}).get("rateNative", {}).get("cliPath")
         if not isinstance(cli_path, str) or not cli_path:
             raise RuntimeError(f"frozen baseline has no reconciled CLI path: {baseline}")
+        build_symlinks = workflow_snapshot.tree_symlinks(build_out)
+        if build_symlinks:
+            raise RuntimeError(f"run-local build contains symlinks: {build_symlinks[:10]}")
+        fixed.require_complete_build(fixed.build_identity(baseline), build_out)
+        baseline_fingerprint = workflow_snapshot.regular_file_fingerprint(baseline.resolve())
+        scry_bin_fingerprint = workflow_snapshot.executable_fingerprint(Path(cli_path))
+        workflow_snapshot.make_read_only(build_out)
+        baseline.chmod(0o400)
         result.update({
             "ok": True,
             "state": "FROZEN_READY",
             "baselinePreflight": str(baseline),
+            "baselinePreflightFingerprint": baseline_fingerprint,
             "scryBin": cli_path,
+            "scryBinFingerprint": scry_bin_fingerprint,
             "buildOut": str(build_out.resolve()),
             "buildMode": build_mode,
         })
@@ -644,7 +853,7 @@ def build_environment(provider: str, run_root: Path, scry_repo: Path, rate_nativ
 
 
 def self_test() -> int:
-    global mutation_lock
+    global mutation_lock, run_retained_cleanup
     state = {"held": False, "released": False}
 
     def claim() -> str:
@@ -723,6 +932,69 @@ def self_test() -> int:
         }]
         assert not os.path.lexists(environment_lock)
     with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw).resolve()
+        run_root = root / "run"
+        source_out = root / "out"
+        run_root.mkdir()
+        source_out.mkdir()
+        (source_out / "main.js").write_text("fixture\n", encoding="utf-8")
+        (source_out / "nested").mkdir()
+        (source_out / "nested/chunk.js").write_text("chunk\n", encoding="utf-8")
+        expected = preflight.tree_fingerprint(source_out)
+        snapshot = snapshot_canonical_build(
+            run_root,
+            source_out,
+            run_root / "scry-build-out",
+            expected,
+        )
+        assert snapshot["mode"] == "canonical_snapshot"
+        assert preflight.tree_fingerprint(run_root / "scry-build-out") == expected
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw).resolve()
+        old_run = root / "old-run"
+        new_run = root / "new-run"
+        scry_repo = root / "scry"
+        old_run.mkdir()
+        new_run.mkdir()
+        scry_repo.mkdir()
+        lock = root / "slot.json"
+        lock.write_text(json.dumps({"runRoot": str(old_run)}), encoding="utf-8")
+        original_slot_lock_path = fixed.slot_lock_path
+        original_classify_slot_run = fixed.classify_slot_run
+        original_retained_cleanup = run_retained_cleanup
+        cleanup_calls: list[dict[str, Any]] = []
+        try:
+            fixed.slot_lock_path = lambda provider: lock
+            fixed.classify_slot_run = lambda raw_run_root, owner: "WAITING_FOR_DRAFT_CLEANUP"
+            run_retained_cleanup = lambda cleaner, provider, raw_run_root, superseding, repo: (
+                cleanup_calls.append({
+                    "provider": provider,
+                    "runRoot": raw_run_root,
+                    "superseding": superseding,
+                    "repo": repo,
+                })
+                or {"ok": True, "state": "SUPERSEDED_CLEANUP"}
+            )
+            retained = reconcile_retained_slot("codex", new_run, scry_repo)
+            assert retained[0]["action"] == "superseded"
+            assert cleanup_calls == [{
+                "provider": "codex",
+                "runRoot": str(old_run),
+                "superseding": new_run,
+                "repo": scry_repo,
+            }]
+            cleanup_calls.clear()
+            fixed.classify_slot_run = lambda raw_run_root, owner: "PRE_SEND_ACTIVE"
+            preserved = reconcile_retained_slot("codex", new_run, scry_repo)
+            assert preserved[0]["action"] == "preserved" and cleanup_calls == []
+            (old_run / "superseded-cleanup-prepared.json").write_text("{}", encoding="utf-8")
+            resumed = reconcile_retained_slot("codex", new_run, scry_repo)
+            assert resumed[0]["action"] == "superseded" and len(cleanup_calls) == 1
+        finally:
+            fixed.slot_lock_path = original_slot_lock_path
+            fixed.classify_slot_run = original_classify_slot_run
+            run_retained_cleanup = original_retained_cleanup
+    with tempfile.TemporaryDirectory() as raw:
         run_root = Path(raw).resolve()
         partial = run_root / "scry-build-out"
         partial.mkdir()
@@ -763,14 +1035,47 @@ def self_test() -> int:
         assert (run_root / "scry-build-src/nested-link").is_symlink()
         assert os.readlink(run_root / "scry-build-src/nested-link") == "nested"
         assert git_blob_sha1(run_root / "scry-build-src/nested-link") == git_blob_sha1(repo / "nested-link")
-        assert (run_root / "scry-build-src/node_modules").is_symlink()
-        assert (run_root / "scry-build-src/node_modules/dep.js").read_text(encoding="utf-8") == "dep\n"
+        assert not (run_root / "scry-build-src/node_modules").exists()
+        assert snapshot["dependencies"] == "not_materialized"
         assert git_blob_sha1(run_root / "scry-build-src/nested/deep.txt") == git_blob_sha1(repo / "nested/deep.txt")
         try:
             materialize_head_snapshot(repo, run_root / "scry-build-src")
             raise AssertionError("existing snapshot dir was accepted")
         except RuntimeError as exc:
             assert "refusing to reuse" in str(exc)
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        snapshot = root / "snapshot"
+        snapshot.mkdir()
+        log = root / "dependencies.log"
+        original_run = fixed.run
+        original_dependencies = preflight.scry_dependencies
+        original_installers = preflight.install_dependency_binaries
+        dependency_probes = iter([
+            {"lockfilePresent": True, "modulesPresent": False},
+            {"ready": True},
+        ])
+        install_calls: list[dict[str, Any]] = []
+        try:
+            preflight.scry_dependencies = lambda repo: next(dependency_probes)
+            preflight.install_dependency_binaries = lambda repo, env: [{"action": "fixture"}]
+
+            def fake_run(command: list[str], cwd: Path, timeout: int, env: dict[str, str]) -> Any:
+                install_calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+                return type("Completed", (), {"returncode": 0, "stdout": "installed\n", "stderr": ""})()
+
+            fixed.run = fake_run
+            installed = materialize_snapshot_dependencies(snapshot, log)
+        finally:
+            fixed.run = original_run
+            preflight.scry_dependencies = original_dependencies
+            preflight.install_dependency_binaries = original_installers
+        assert installed["mode"] == "clean_head_npm_ci"
+        assert install_calls[0]["cwd"] == snapshot
+        assert install_calls[0]["command"][1:] == [
+            str(value) for value in preflight.DEPENDENCY_RECOVERY["installArgs"]
+        ]
+        assert log.read_text(encoding="utf-8") == "installed\n"
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
         failure = {
@@ -885,6 +1190,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-root")
     parser.add_argument("--scry-repo", default=str(preflight.DEFAULT_SCRY_REPO))
     parser.add_argument("--rate-native-repo", default=str(preflight.DEFAULT_RATE_NATIVE_REPO))
+    parser.add_argument("--workflow-snapshot-ready", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not args.self_test and (not args.provider or not args.run_root):
         parser.error("--provider and --run-root are required")
@@ -895,11 +1201,44 @@ def main() -> int:
     args = parse_args()
     if args.self_test:
         return self_test()
+    run_root = fixed.safe_run_root(args.run_root)
+    scry_repo = Path(args.scry_repo).expanduser().resolve()
+    rate_native_repo = Path(args.rate_native_repo).expanduser().resolve()
+    if not args.workflow_snapshot_ready:
+        workflow_path = run_root / workflow_snapshot.SNAPSHOT_NAME
+        manifest_path = run_root / workflow_snapshot.MANIFEST_NAME
+        if os.path.lexists(workflow_path) or os.path.lexists(manifest_path):
+            manifest = workflow_snapshot.validate(run_root, scry_repo)
+        else:
+            manifest = workflow_snapshot.materialize(
+                Path(__file__).resolve().parent.parent,
+                run_root,
+                scry_repo,
+            )
+        env = os.environ.copy()
+        env["SCRY_VALIDATION_SCRY_REPO"] = str(scry_repo)
+        os.execve(
+            sys.executable,
+            [
+                sys.executable,
+                str(Path(str(manifest["path"])) / "scripts" / Path(__file__).name),
+                "--provider",
+                args.provider,
+                "--run-root",
+                str(run_root),
+                "--scry-repo",
+                str(scry_repo),
+                "--rate-native-repo",
+                str(rate_native_repo),
+                "--workflow-snapshot-ready",
+            ],
+            env,
+        )
     result = build_environment(
         args.provider,
-        fixed.safe_run_root(args.run_root),
-        Path(args.scry_repo).expanduser().resolve(),
-        Path(args.rate_native_repo).expanduser().resolve(),
+        run_root,
+        scry_repo,
+        rate_native_repo,
     )
     emit(result)
     return 0 if result["ok"] else 1

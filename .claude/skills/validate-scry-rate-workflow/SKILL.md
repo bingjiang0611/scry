@@ -29,12 +29,12 @@ profile 一旦为某个 `run_root` 进入第一条消息阶段就冻结：`turn1
 
 - 必填 `provider`：`claude`、`codex`、`qoder`、`opencode`、`pi`。用户未指定时先问，禁止自选。
 - **Agent 永不克隆 Aone**（详见末尾红线 1、2）。用户要求执行只授权把契约固定的第一条消息放进输入框；未拿到用户给的新需求纯数字 ID 或 canonical URL 前不得继续。
-- 本 skill 只验收和诊断（红线 13）；源码提交、recorder 版本或构建产物一变，本次运行即失效，必须新跑。
+- 本 skill 只验收和诊断（红线 13）；Step 0 把 contract、完整脚本依赖和构建复制进本次 `run_root`，后续只执行冻结副本。冻结副本或 recorder 绝对身份漂移才使本次运行失效；canonical Scry 仓后续提交只作 audit，不再让已冻结运行作废。
 - 自动恢复仅限契约 allowlist：四个 hook 型 Provider 的 `settings.local.json` env key、`.mcp.json` 模板、Pi 的 tracked `.pi/settings.json`、缺失/错 origin/clean-stale 子仓、按 tracked lockfile 物化 `node_modules`、`init.sh`、固定池陈旧 worktree 注册项；逐项边界见 [恢复与保留规则](references/recovery.md)。
-- Scry 源码的本地未提交改动只作身份证据，不作闸门，也不进入构建产物：验收以最新 commit 为准；唯一例外是 registry 缺 recorder 精确版本、必须 publish 时仍要求干净 release input（发包不可逆）。
+- Scry 源码的本地未提交改动只作身份证据，不作闸门，也不进入构建产物：Step 0 以当时最新 commit 冻结构建；唯一例外是 registry 缺 recorder 精确版本、必须 publish 时仍要求干净 release input（发包不可逆）。
 - Provider ↔ 槽位一对一：Codex=`1`、Claude Code=`2`、Qoder=`3`、OpenCode=`4`、Pi=`5`。Pi 必须同时回读 `agentProfileId=pi:default`，且 MCP 门禁为 `not_applicable`；同 Provider 串行，跨 Provider 可并发。`environment` 与 `build` 共享锁互斥，正常验收不取 `browser` 锁。每条退出路径都释放本次持有的共享锁。
-- 固定槽位跨运行保留 lease，不做 `treehouse return`。**草稿记录一旦落盘就按保留处理**：保留 Scry Test、隔离 userData、workspace 数据和槽位锁，直到用户显式清理；草稿记录未落盘则走 `PRE_SEND_ARCHIVED` 自动归档并释放槽位。`run_root` 永不删除。
-- Step 0 不得追溯清理别人的现场：只接管 inactive owner/lifecycle 或 prepared journal 明确交出的事务；“无草稿记录”不等于 abandoned。
+- 固定槽位跨运行保留 lease，不做 `treehouse return`。**当前草稿记录一旦落盘就按保留处理**：保留 Scry Test、隔离 userData、workspace 数据和槽位锁供检查；草稿记录未落盘则走 `PRE_SEND_ARCHIVED` 自动归档并释放槽位。用户下一次明确启动同 Provider 验收时，该请求本身构成 supersession 授权：Step 0 自动停止并归档旧的严格终态 `RETAINED_DRAFT/RETAINED_FOR_REVIEW`，不再单独确认；`run_root` 和归档证据永不删除。
+- Step 0 只自动清理目标 Provider 的严格终态旧现场，以及既有规则允许接管的 inactive/prepared pre-send 事务；其他 Provider、active/incomplete、legacy 或 owner 不可证的现场一律保留。“无草稿记录”不等于 abandoned。
 - 停止边界由 profile 决定：draft 停在第一条消息入框；three-turn 依次发送三条契约消息，只在每轮 terminal 后推进，并在第三轮写完技术方案后停止。两者都不改业务代码。
 - Computer Use 白名单只有三项：只读观察、确认 Hook 信任与 MCP 执行授权、只读确认 `Scry Test` 输入框内容。启动、workspace/Provider 选择、权限落盘与 ownership 取证只能由契约脚本产出；其余弹窗一律停手报告。
 
@@ -45,45 +45,55 @@ profile 一旦为某个 `run_root` 进入第一条消息阶段就冻结：`turn1
 ```bash
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
-skill_dir=/Users/baobingjiang/IdeaProjects/vibecoding/scry/.claude/skills/validate-scry-rate-workflow
+bootstrap_skill_dir=/Users/baobingjiang/IdeaProjects/vibecoding/scry/.claude/skills/validate-scry-rate-workflow
 run_root="<上一 turn 最终回复里原样打印的绝对路径>"
 test -d "$run_root"
 test "$(jq -er '.state' "$run_root/environment-prepared.json")" = "FROZEN_READY"
+skill_dir="$(jq -er '.workflowSnapshot.path' "$run_root/environment-prepared.json")"
+scry_repo="$(jq -er '.scryRepo' "$run_root/environment-prepared.json")"
+export SCRY_VALIDATION_SCRY_REPO="$scry_repo"
+test -d "$skill_dir" && test -f "$skill_dir/references/contract.json"
 provider="$(jq -er '.provider' "$run_root/environment-prepared.json")"
 baseline_preflight="$(jq -er '.baselinePreflight' "$run_root/environment-prepared.json")"
 scry_bin="$(jq -er '.scryBin' "$run_root/environment-prepared.json")"
 build_out="$(jq -er '.buildOut' "$run_root/environment-prepared.json")"
 test "$(jq -er '.ok' "$baseline_preflight")" = "true" && test -x "$scry_bin"
+test "$build_out" = "$run_root/scry-build-out" && test -d "$build_out"
 # 以下两行按已到达的阶段自动跳过；跳过不算失败，但文件存在就必须解析成功
 if [ -f "$run_root/workitem-id.txt" ]; then workitem_id="$(cat "$run_root/workitem-id.txt")"; fi
 if [ -f "$run_root/fixed-workspace.json" ]; then workspace="$(jq -er '.workspace' "$run_root/fixed-workspace.json")"; fi
 ```
 
-`provider` 从 `environment-prepared.json` 回读，不靠记忆；**每个 turn 的最终回复都必须独立成行打印 `run_root=<绝对路径>`**，不只 CHECKPOINT 1。若该行丢失，**不得自己挑一个**：列出候选连同 provider/lifecycle 交用户指定——`run_parent="$(jq -er '.retention.runRootParent' "$skill_dir/references/contract.json")"`，再对 `ls -1dt "$run_parent"/validate-scry-rate-workflow-*` 的每一项打印 `environment-prepared.json` 的 `.provider` 与 `lifecycle.json` 的 `.state`。环境未冻结时 `.baselinePreflight`、`.scryBin`、`.buildOut` 都是 `null`，`jq -er` 会失败——这就是要的 fail closed，不得换成 `jq -r` 让空串流下去。`build_out` 更不能省：漏传会让 `preflight.py` 静默落回 canonical `scry/out`，把运行身份换成另一份构建。
+`provider` 从 `environment-prepared.json` 回读，不靠记忆；**每个 turn 的最终回复都必须独立成行打印 `run_root=<绝对路径>`**，不只 CHECKPOINT 1。若该行丢失，**不得自己挑一个**：用 canonical `$bootstrap_skill_dir/references/contract.json` 只定位 run parent，列出候选连同 provider/lifecycle 交用户指定；选定后再从该 run 的 `environment-prepared.json.workflowSnapshot.path` 恢复冻结 `$skill_dir`。环境未冻结时 `.workflowSnapshot/.baselinePreflight/.scryBin/.buildOut` 都是 `null`，`jq -er` 必须失败。`build_out` 必须精确为本 run 的 `scry-build-out`，不得回退 canonical `scry/out`。
 
-**非零退出分两类**：Step 0-4 的预检/启动/消息闸门非零即停手；`fixed_workspace.py status`（`ok=all(mappingReady)`，池未 lease 就为 false）、`lease-all`（ok 覆盖全部五个槽位）、`check_mcp_execution_prereq.py`、Step 5 的 `preflight.py`、`finalize_pre_send.py`、`scry doctor|turns verify` 非零只是**判定结论**（`ok=false` / 不健康），JSON 已落盘，必须接住退出码读文件继续分流，不得当成执行故障就地停手。所有代码块以 **bash** 执行（macOS 自带 3.2 即可，未使用 4+ 语法）。
+**非零退出分两类**：Step 0-4 的冻结身份/启动/消息闸门非零即停手；`fixed_workspace.py status`（`ok=all(mappingReady)`，池未 lease 就为 false）、`lease-all`（ok 覆盖全部五个槽位）、`check_mcp_execution_prereq.py`、`finalize_pre_send.py`、`scry doctor|turns verify` 非零只是**判定结论**（`ok=false` / 不健康），JSON 已落盘，必须接住退出码读文件继续分流，不得当成执行故障就地停手。所有代码块以 **bash** 执行（macOS 自带 3.2 即可，未使用 4+ 语法）。
 
 ## 0. 冻结版本与运行身份
 
 ```bash
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
-skill_dir=/Users/baobingjiang/IdeaProjects/vibecoding/scry/.claude/skills/validate-scry-rate-workflow
+bootstrap_skill_dir=/Users/baobingjiang/IdeaProjects/vibecoding/scry/.claude/skills/validate-scry-rate-workflow
 provider="<claude|codex|qoder|opencode|pi>"
-run_parent="$(jq -er '.retention.runRootParent' "$skill_dir/references/contract.json")"
+run_parent="$(jq -er '.retention.runRootParent' "$bootstrap_skill_dir/references/contract.json")"
 install -d -m 700 "$run_parent"
 run_root="$(mktemp -d "$run_parent/validate-scry-rate-workflow-XXXXXX")"
 chmod 700 "$run_root"
-node "$skill_dir/scripts/capture_permission.mjs" self-test
-python3 "$skill_dir/scripts/prepare_environment.py" \
+node "$bootstrap_skill_dir/scripts/capture_permission.mjs" self-test
+python3 "$bootstrap_skill_dir/scripts/prepare_environment.py" \
   --provider "$provider" --run-root "$run_root" \
   > "$run_root/prepare-environment-result.json"
 test "$(jq -er '.state' "$run_root/environment-prepared.json")" = "FROZEN_READY"
 test "$(jq -er '.status' "$run_root/environment-recovery.json")" = "FROZEN_READY"
+skill_dir="$(jq -er '.workflowSnapshot.path' "$run_root/environment-prepared.json")"
+scry_repo="$(jq -er '.scryRepo' "$run_root/environment-prepared.json")"
+export SCRY_VALIDATION_SCRY_REPO="$scry_repo"
+test -d "$skill_dir" && test -f "$skill_dir/references/contract.json"
 baseline_preflight="$(jq -er '.baselinePreflight' "$run_root/environment-prepared.json")"
 scry_bin="$(jq -er '.scryBin' "$run_root/environment-prepared.json")"
 build_out="$(jq -er '.buildOut' "$run_root/environment-prepared.json")"
 test "$(jq -er '.ok' "$baseline_preflight")" = "true" && test -x "$scry_bin"
+test "$build_out" = "$run_root/scry-build-out" && test -d "$build_out"
 # status 在池未 lease 时以 ok=false 退出，这是探测结论不是故障：接住退出码再读文件
 python3 "$skill_dir/scripts/fixed_workspace.py" status --provider "$provider" \
   > "$run_root/slot-status.json" || true
@@ -96,13 +106,13 @@ jq -er '.sourceWorkitem.url' "$skill_dir/references/contract.json"
 printf 'run_root=%s\nprovider=%s\n' "$run_root" "$provider"
 ```
 
-`prepare_environment.py` 是唯一的环境事务入口：它自己按顺序取/放 `environment`、`build` 锁，扫描五个 Provider 锁，做有界恢复（recorder 版本与 registry、四个 hook 型 Provider settings、tracked Pi settings、Scry 依赖），冻结契约/源码/版本/构建指纹，必要时在本 run 的 `scry-build-out` 里隔离构建。禁止把 `claim-shared → 裸命令 → release-shared` 手写成多进程序列。
+`prepare_environment.py` 是唯一的环境事务入口：canonical launcher 先把完整 skill 复制为只读 `run_root/workflow` 并 `exec` 冻结入口；它再做有界恢复与唯一完整 preflight。无论 cache 是否命中，最终构建都复制/生成到只读 `run_root/scry-build-out`；baseline、recorder binary 另存 path/size/SHA-256。禁止把共享锁事务拆成多进程序列。
 
 - `RECOVERING_ENVIRONMENT`、`needsBuild=true`、`needsInit=true`、`repair_required` 都是正常中间态，不得上报成 `BLOCKED`。
-- **Scry 源码有本地未提交改动不阻塞，也不影响构建与测试**：验收以最新 commit 为准。preflight 把 `git.scry` 的 `head/treeHash/dirty/worktreeHash` 冻结成本次运行身份并在报告里披露 dirty，但构建身份与缓存判定只用 `head/treeHash`；隔离构建在干净 HEAD 快照（`run_root/scry-build-src`：git archive + 逐文件 blob 校验 + 复用主仓 `node_modules` 符号链接）上进行，工作区改动不会进入构建产物，构建期间工作区漂移只作披露、不再作废。不要要求用户先 commit/stash，也不得代他 commit、stash 或 `git clean`。只有源码身份不可证（非 Git 仓库、`git` 失败）才失败。
+- **Scry 源码有本地未提交改动不阻塞，也不影响构建与测试**：验收以 Step 0 当时 HEAD 为准。preflight 冻结 `head/treeHash/dirty/worktreeHash`；cache miss 时用 git archive + 逐 blob 校验生成干净 `scry-build-src`，在其中按已提交 lockfile 单独 `npm ci` 后构建，绝不复用 mutable canonical `node_modules` 作为构建依赖。工作区后续漂移只作 audit。不要要求用户 commit/stash，也不得代他执行。
 - 只有 `environment-recovery.json.status` 与 `environment-prepared.json.state` 都是 `FROZEN_READY`、且 baseline preflight `ok == true` 才继续；两次不收敛的 `RECOVERY_FAILED` 或 `RECOVERY_NOT_APPLICABLE` 按真实失败项分类。
 - 后续验收命令用冻结的绝对 `$scry_bin`，PATH 里其他 `scry` 只作 audit；**清理/归档路径例外**：`sanitize_workspace.py`、`finalize_pre_send.py` 与 `recover_cleanup_cli` 统一解析当前 stable prefix 下最新安装的 recorder CLI 操作，冻结版本只作身份披露，recorder 升级不阻塞旧现场清理（身份边界仍在：必须位于该 prefix 的同名 package root 且可执行）。
-- `slot_class` 打印为字符串 `null`（即无 slotLock）才是可继续的空槽位；`.mappings[].treehouse` 为 `null` 只说明池尚未 lease，不是槽位被占用，留给 Step 2 自愈；非空 `slotLock` 一律不得强删：`WAITING_FOR_REVIEW_CLEANUP`、`WAITING_FOR_DRAFT_CLEANUP`、`WAITING_FOR_ABANDONED_CLEANUP`、`WAITING_FOR_LEGACY_CLEANUP`、`WAITING_FOR_ACTIVE_REVIEW_FINALIZATION`、`PRE_SEND_ACTIVE` 都要求停手报告并等用户清理。`PRE_SEND_RECOVERY_REQUIRED` 已由 Step 0 的 `prepare_environment.py` 在 environment 锁内自动调同一 finalizer 归档旧 run 并释放槽位（证据在 `environment-recovery.json` 的对应 action），Agent 不得手动拿别的 `run_root` 去调 Step 5 分流器——Step 5 只作用于本次 `$run_root`。
+- `prepare_environment.py` 会先在 environment 锁内检查目标 Provider：严格终态自动执行 stop → closed status → after archive → release。stop 前写 transaction，after 后写 release-prepared，release 再把全局锁原子移动为旧 run 的 `released-slot-lock.json`；任一阶段都可凭严格证据续跑，rename 后中断也由下次 Step 0 补写终态并报告。新 run 证据在 `.retainedSlotReconciliation`。最终 `slot_class` 必须为 `null`；active、abandoned、legacy 或不可证现场仍停手，禁止强删锁。
 
 ## 1. 到 Aone 克隆点交给用户并硬暂停
 
@@ -131,16 +141,17 @@ Step 0 通过、共享锁已释放后才进入人工接管；此时还没做 `le
   chmod 600 "$run_root/workitem-id.txt"
   ```
 
-两个继续分支都必须先重新预检，确认暂停期间环境没坏：
+两个继续分支都只复核本 run 冻结包，不再扫描 canonical Scry 仓或重复完整 preflight：
 
 ```bash
 set -euo pipefail
-python3 "$skill_dir/scripts/preflight.py" --provider "$provider" \
-  --build-out "$build_out" --output "$run_root/preflight-after-handoff.json"
-test "$(jq -er '.ok' "$run_root/preflight-after-handoff.json")" = "true"
+python3 "$skill_dir/scripts/verify_frozen_run.py" --provider "$provider" \
+  --run-root "$run_root" --phase handoff \
+  --output "$run_root/frozen-identity-after-handoff.json"
+test "$(jq -er '.ok' "$run_root/frozen-identity-after-handoff.json")" = "true"
 ```
 
-`ok != true` 就不得继续：保留旧 `run_root`，用新 `run_root` 从 Step 0 重跑，并复用用户已给的 `workitem_id`，不要求重复克隆。人工克隆的证据只有用户回传 + 后续只读核验 + 草稿的精确 prompt；Aone 详情不暴露来源字段时报告写 `cloneProvenance=user_attested`。
+`ok != true` 就不得继续：冻结包、run-local build、recorder 绝对身份任一漂移都保留旧 `run_root` 并从 Step 0 新跑；canonical Scry HEAD 变化只记录在 `.audit.canonicalScry.changedSinceFreeze`，不要求用户重复克隆。人工克隆的证据只有用户回传 + 后续只读核验 + 草稿的精确 prompt；Aone 详情不暴露来源字段时报告写 `cloneProvenance=user_attested`。
 
 ## 2. 取得固定预热 treehouse
 
@@ -235,11 +246,10 @@ Aone 只读核验只走 rate-workflow P0 的受信 `source_intake.py aone-metada
 
 ```bash
 set -euo pipefail
-scry_repo="$(cd "$skill_dir/../../.." && pwd)/scry"
-python3 "$skill_dir/scripts/preflight.py" --provider "$provider" \
-  --rate-native-repo "$workspace" --build-out "$build_out" \
-  --output "$run_root/preflight-post-build.json"
-test "$(jq -er '.ok' "$run_root/preflight-post-build.json")" = "true"
+python3 "$skill_dir/scripts/verify_frozen_run.py" --provider "$provider" \
+  --run-root "$run_root" --phase pre-launch --workspace "$workspace" \
+  --output "$run_root/frozen-identity-pre-launch.json"
+test "$(jq -er '.ok' "$run_root/frozen-identity-pre-launch.json")" = "true"
 python3 "$skill_dir/scripts/fixed_workspace.py" start-test-app \
   --run-root "$run_root" --provider "$provider" \
   --scry-repo "$scry_repo" \
@@ -314,11 +324,10 @@ echo "lifecycle: $lifecycle_state"
 
 ```bash
 set -euo pipefail
-python3 "$skill_dir/scripts/preflight.py" --provider "$provider" \
-  --rate-native-repo "$workspace" --build-out "$build_out" \
-  --output "$run_root/preflight-final.json" || true
-"$scry_bin" turns verify --workspace "$workspace" \
-  > "$run_root/turns-verify-final.txt" || true
+python3 "$skill_dir/scripts/verify_frozen_run.py" --provider "$provider" \
+  --run-root "$run_root" --phase final --workspace "$workspace" \
+  --output "$run_root/frozen-identity-final.json"
+test "$(jq -er '.ok' "$run_root/frozen-identity-final.json")" = "true"
 node "$skill_dir/scripts/test_scry_app.mjs" status --run-root "$run_root" \
   > "$run_root/test-scry-status-final.json"
 jq -e --arg rr "$run_root" '
@@ -337,30 +346,36 @@ jq -e --slurpfile d "$run_root/turn1-draft.json" \
 test "$run_root/test-scry-status-final.json" -nt "$run_root/turn1-draft.json"
 ```
 
-`preflight-final.json` 与最终 `turns verify` 只作身份证据，`ok=false` / 非零退出不阻断报告，但 `.failures` 必须逐项进报告；两者都不做前后指纹比对，因此**中途改了 Scry 提交（HEAD/treeHash 变化）或 recorder 版本不会被自动拦住**，发现变化就作废本次运行（未提交的工作区改动不影响：构建与运行以冻结的 HEAD 快照为准）。`lifecycle.json=RETAINED_DRAFT` 已由 finalizer 在草稿记录存在时原子写入，不复用 `mark-retained`（那是 post-send 会话路径）。
+`frozen-identity-final.json` 只校验冻结 workflow bundle、run-local build、baseline contract、recorder 绝对身份与 fixed workspace HEAD；任一失败都阻断 `DRAFT_PASS`。canonical Scry HEAD/treeHash 的后续变化只放在 audit，不替换本 run 的 contract、脚本或构建，也不触发重跑。`lifecycle.json=RETAINED_DRAFT` 已由 finalizer 在草稿记录存在时原子写入，不复用 `mark-retained`（那是 post-send 会话路径）。
 
 判定完成后释放本次仍持有的共享锁即停手；草稿路径不停测试 App、不动 workspace 现场与隔离 userData、不释放槽位锁。最终报告醒目给出：
 
 - `RETAINED_DRAFT` 与 `Scry Test` 仍在运行的 live ownership 结果；
 - `provider`、`run_root`、`workspace`、`scry-test-user-data`、槽位锁；
 - 用户可直接切到标题为 `Scry Test` 的窗口查看输入框里的第一条消息；
-- 同 Provider 的下次验收会等本次现场显式清理，不会自动覆盖。
+- 当前现场保持可查看；同 Provider 的下次验收会先受控归档并释放本现场，再创建新现场，不额外询问。
 
 只有验收契约「草稿判据」全部通过才写 `DRAFT_PASS`。报告逐项给出身份、版本、证据路径、失败字段、未覆盖范围和复盘入口。
 
-## 6. 显式清理保留现场
+## 6. 手动提前清理保留现场
 
-🛑 **CHECKPOINT 2 · 无授权禁止执行本步任何命令**：只有用户明确指定该 `run_root` 要清理/关闭，或开始同 Provider 新验收时才收尾；“验收结束”“完成”或看完结果都不构成授权。缺具体 `run_root` 时回去索要，不得自己挑一个。
+🛑 **CHECKPOINT 2 · 无授权禁止手动执行本步任何命令**：用户要在下一次同 Provider 验收之前提前关闭现场时，必须明确指定 `run_root`；“验收结束”“完成”或看完结果都不构成手动清理授权。开始同 Provider 新验收不走本节人工命令，而由 Step 0 的单一 supersession helper 自动收尾旧终态现场。
 
 🔴 除授权外还须证明验收判定已终结（下面块内第一条 `jq -e`），否则 `--phase after` 会把 workspace 数据归档出 workspace，现场将无法人工查看。正常完成走 `RETAINED_*`；已经越过 send intent、但三轮无法完成的失败现场，必须先用 `mark-post-send-abandoned` 把用户原话、影响确认、provider/run/launch 一起写入 `POST_SEND_ABANDONED`。watcher 已完成但 lifecycle 尚未落盘时仍优先 `mark-retained`；只有本 run 的测试 App 已退出，且紧邻授权动作的固定 status 证明 `processAlive=false + cdpClosed=true`，才允许把 `completedEvidenceDisposition=abandon_after_owned_app_exit` 与用户授权一同写入 abandonment，避免形成既不能 retained 也不能 cleanup 的陈旧现场。超时、Provider 异常或 Agent 自己的判断都不能代替这份授权。旧 schema 只有 frozen contract 的 schema+sha256 精确命中 `recoveryPolicy.legacyPostSendCleanupContracts` 时才能走同一动作；不允许把“legacy”泛化为可清理。`PRE_SEND_ARCHIVED` 时槽位已释放，本步无需执行。
 
-清理常发生在另一个 shell，所以块内先把 `provider` 与冻结的 `scry_bin` 反查回来（`skill_dir` 固定、`run_root` 由用户给出），不得退回 PATH 裸命令；`scry_bin` 只作身份披露，`sanitize_workspace.py` 内部统一解析当前 stable prefix 最新 CLI 执行清理，recorder 已升级不影响旧现场清理：
+清理常发生在另一个 shell，所以块内从旧 run 反查冻结 `$skill_dir`、canonical Scry repo 与 `scry_bin`，不得退回 PATH 裸命令或当前仓库脚本；`scry_bin` 只作身份披露，`sanitize_workspace.py` 内部统一解析 stable prefix 最新 CLI 执行清理：
 
 ```bash
 set -euo pipefail
-skill_dir=/Users/baobingjiang/IdeaProjects/vibecoding/scry/.claude/skills/validate-scry-rate-workflow
+bootstrap_skill_dir=/Users/baobingjiang/IdeaProjects/vibecoding/scry/.claude/skills/validate-scry-rate-workflow
 run_root="<用户明确指定的绝对路径>"
 test -d "$run_root"
+skill_dir="$(jq -er '.workflowSnapshot.path' "$run_root/environment-prepared.json" 2>/dev/null \
+  || printf '%s' "$bootstrap_skill_dir")"
+scry_repo="$(jq -er '.scryRepo' "$run_root/environment-prepared.json" 2>/dev/null \
+  || printf '%s' /Users/baobingjiang/IdeaProjects/vibecoding/scry)"
+export SCRY_VALIDATION_SCRY_REPO="$scry_repo"
+test -d "$skill_dir" && test -f "$skill_dir/references/contract.json"
 # 对不完整的 post-send 现场，先把本次用户授权严格绑定到唯一 launch；已完成现场跳过此块
 state="$(jq -r '.state // .status // empty' "$run_root/lifecycle.json" 2>/dev/null || true)"
 if test "$state" != "RETAINED_DRAFT" && test "$state" != "RETAINED_FOR_REVIEW"; then
@@ -421,11 +436,11 @@ python3 "$skill_dir/scripts/fixed_workspace.py" release \
 | 3 | 把用户的网络抱怨当成 `--local-equality-only` 授权 | 该 profile 要两个条件同时成立 | 回去让用户二选一后再跑 |
 | 4 | 绕过契约脚本手写等价逻辑（自己写 CDP 选择、手拼 `claim-shared → 裸命令 → release-shared`、直接跑 Node `start`、手打字） | 脚本是判据持有者，绕过后证据不成立 | 只走契约脚本 |
 | 5 | 用界面观感、截图或退出码代替字段断言 | 退出码不构成健康证明，`cdpReady=null` 不等于健康 | 跑各 Step 里的 `jq -e` 硬断言 |
-| 6 | 草稿落盘后点“发送”把草稿变成会话，或点“停止”/重启 App 来“收尾” | 等同毁掉草稿现场并破坏收尾语义，直接作废本次运行 | 草稿只打字不点击；停 App、清场只走 Step 5 分流器与 Step 6 显式清理 |
+| 6 | 草稿落盘后点“发送”把草稿变成会话，或随手点“停止”/重启 App 来“收尾” | 等同毁掉草稿现场并破坏收尾语义 | 草稿只打字不点击；停 App、清场只走 Step 5、Step 6 或下次同 Provider Step 0 的受控 supersession |
 | 7 | 为凑 PASS 改 tracked MCP/hook/Provider 配置、禁用/移动用户级 server、物化凭据 | 会影响其他并发项目，把冲突掩盖成继续 | 报 `BLOCKED` 列出 server/scope/path 交用户定 |
 | 8 | 要求用户先 commit/stash Scry 改动，或代他 commit/stash/`git clean` | dirty 只是身份证据，不是闸门 | 把 dirty 冻进指纹并在报告里披露 |
 | 9 | 手工 `rm -rf .scry` / `git clean` / 强删槽位锁 / `git reset --hard` 当回滚 | 会毁掉复盘现场与可追溯链 | 交给 `sanitize_workspace.py` / `finalize_pre_send.py`，失败报 `CLEANUP_FAIL` |
 | 10 | 碰 `/Applications/Scry.app` 及其 userData / 会话 | 不属于本次隔离测试 App，也不构成阻塞 | 只管 `$run_root/test-scry-state.json` 标识的测试 App |
 | 11 | 主动调 uploader / `flush.py` / 上传 API，或拿远端页面入判定 | Hook 是唯一上传入口，上传健康不进判定 | 只读本地 archive / records / CLI summary |
-| 12 | 把 `RECOVERING_ENVIRONMENT`、`needsBuild`、`needsInit`、`repair_required`、`WAITING_FOR_USER_CLONE`、`WAITING_FOR_DRAFT_CLEANUP` 写成 `BLOCKED` | 都是正常中间态或等用户清理的状态，误报让用户白跑 | 按各 Step 的分流继续或停手等待 |
+| 12 | 把 `RECOVERING_ENVIRONMENT`、`needsBuild`、`needsInit`、`repair_required`、`WAITING_FOR_USER_CLONE`、可自动 supersede 的旧终态写成 `BLOCKED` | 都是正常中间态，误报会制造无效等待 | 按各 Step 分流；目标 Provider 旧终态交给 Step 0 自动清理 |
 | 13 | 在未得授权时改 Scry / rate-native / 适配器 / 仪表盘 | 本 skill 只验收和诊断 | 发现产品问题就停下报告，等用户另行授权 |

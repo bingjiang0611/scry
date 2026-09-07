@@ -37,7 +37,9 @@ TREEHOUSE_BIN = Path("/opt/homebrew/bin/treehouse")
 RECORDER_PACKAGE = str(RECORDER_RECOVERY["package"])
 RECORDER_REGISTRY = str(RECORDER_RECOVERY["registry"])
 RETENTION = CONTRACT["retention"]
-SCRY_REPO = SKILL_DIR.parents[2].resolve()
+SCRY_REPO = Path(
+    os.environ.get("SCRY_VALIDATION_SCRY_REPO", str(SKILL_DIR.parents[2]))
+).expanduser().resolve()
 
 SLOT_OWNER_ACTIVE_STAGES = {
     "CLAIMED",
@@ -569,6 +571,27 @@ def release_lock(path: Path, run_root: Path) -> dict[str, Any]:
         raise RuntimeError(f"refusing to release lock owned by {existing.get('runRoot')}: {path}")
     path.unlink()
     return {"ok": True, "alreadyReleased": False, "path": str(path)}
+
+
+def release_slot_lock_with_evidence(path: Path, run_root: Path) -> dict[str, Any]:
+    """Atomically free one Provider slot while retaining its exact owner record."""
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"Provider slot lock is missing or unsafe: {path}")
+    existing = read_json(path)
+    if existing.get("runRoot") != str(run_root):
+        raise RuntimeError(f"refusing to release lock owned by {existing.get('runRoot')}: {path}")
+    evidence = run_root / "released-slot-lock.json"
+    if os.path.lexists(evidence):
+        raise RuntimeError(f"released Provider slot evidence already exists: {evidence}")
+    path.replace(evidence)
+    evidence.chmod(0o600)
+    return {
+        "ok": True,
+        "alreadyReleased": False,
+        "path": str(path),
+        "evidencePath": str(evidence),
+        "owner": existing,
+    }
 
 
 def tree_fingerprint(root: Path) -> dict[str, Any]:
@@ -2885,7 +2908,7 @@ def release_slot(provider: str, run_root: Path) -> dict[str, Any]:
             dirty.append(str(repo))
     if dirty:
         raise RuntimeError(f"refusing to release a slot with dirty repositories: {dirty}")
-    return release_lock(slot_lock_path(provider), run_root)
+    return release_slot_lock_with_evidence(slot_lock_path(provider), run_root)
 
 
 def prepare(provider: str, run_root: Path, expected_head: str) -> dict[str, Any]:
@@ -3635,6 +3658,11 @@ noise
             assert first["idempotent"] is False and second["idempotent"] is True
             assert release_lock(lock, run_root)["alreadyReleased"] is False
             assert release_lock(lock, run_root)["alreadyReleased"] is True
+            slot_fixture = Path(locks_raw) / "slot-fixture.json"
+            write_json_exclusive(slot_fixture, {"runRoot": str(run_root), "provider": "codex"})
+            released = release_slot_lock_with_evidence(slot_fixture, run_root)
+            assert not slot_fixture.exists()
+            assert read_json(Path(released["evidencePath"]))["runRoot"] == str(run_root)
             foreign_process_lock = Path(locks_raw) / "foreign-process-lock.json"
             write_json_exclusive(
                 foreign_process_lock,
