@@ -37,6 +37,8 @@ describe('workspace file references', () => {
     expect(resolveWorkspaceFileReference(cwd, '/Users/example/project-copy/secret.txt')).toBeNull()
     expect(resolveWorkspaceFileReference(cwd, '../secret.txt')).toBeNull()
     expect(resolveWorkspaceFileReference(cwd, '@../secret.txt')).toBeNull()
+    expect(resolveWorkspaceFileReference(cwd, '~/Papers/report.md')).toBeNull()
+    expect(resolveWorkspaceFileReference(cwd, '@~/Papers/report.md')).toBeNull()
     expect(resolveWorkspaceFileReference(cwd, 'file://server/share/report.pdf')).toBeNull()
   })
 })
