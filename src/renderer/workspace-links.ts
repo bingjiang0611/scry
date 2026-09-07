@@ -63,6 +63,10 @@ export function resolveWorkspaceFileTarget(
   const candidate = fromFileUrl ?? token
   const normalizedCandidate = candidate.replaceAll('\\', '/')
 
+  // Shell-style home paths are outside the renderer's known workspace roots.
+  // Treating them as relative would turn ~/docs/file.md into <cwd>/~/docs/file.md.
+  if (normalizedCandidate.startsWith('~')) return null
+
   if (normalizedCandidate.startsWith('/')) {
     const root = roots.find(({ normalized }) => normalizedCandidate.startsWith(`${normalized}/`))
     if (!root) return null
