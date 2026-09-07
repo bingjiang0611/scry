@@ -53,8 +53,9 @@ export function resolveWorkspaceFileTarget(
   if (!reference.trim() || reference.includes('\0') || reference.includes('\n')) return null
   const roots = [...new Set(workspaces.filter((cwd) => cwd.trim()))]
     .map((cwd) => ({ cwd, normalized: cwd.replaceAll('\\', '/').replace(/\/+$/, '') }))
-    .sort((left, right) => right.normalized.length - left.normalized.length)
   if (roots.length === 0) return null
+  const primaryRoot = roots[0]
+  const rootsBySpecificity = [...roots].sort((left, right) => right.normalized.length - left.normalized.length)
 
   const token = stripWorkspaceToken(reference)
   const fileUrl = token.startsWith('file:')
@@ -63,12 +64,15 @@ export function resolveWorkspaceFileTarget(
   const candidate = fromFileUrl ?? token
   const normalizedCandidate = candidate.replaceAll('\\', '/')
 
-  // Shell-style home paths are outside the renderer's known workspace roots.
-  // Treating them as relative would turn ~/docs/file.md into <cwd>/~/docs/file.md.
+  if (normalizedCandidate.startsWith('~/')) {
+    if (!reference.trim().startsWith('@') && !looksLikeRelativeFile(normalizedCandidate)) return null
+    const path = normalizeRelativePath(normalizedCandidate.slice(2))
+    return path ? { cwd: '~', path } : null
+  }
   if (normalizedCandidate.startsWith('~')) return null
 
   if (normalizedCandidate.startsWith('/')) {
-    const root = roots.find(({ normalized }) => normalizedCandidate.startsWith(`${normalized}/`))
+    const root = rootsBySpecificity.find(({ normalized }) => normalizedCandidate.startsWith(`${normalized}/`))
     if (!root) return null
     const path = normalizeRelativePath(normalizedCandidate.slice(root.normalized.length + 1))
     return path ? { cwd: root.cwd, path } : null
@@ -77,7 +81,7 @@ export function resolveWorkspaceFileTarget(
   const explicitWorkspaceToken = reference.trim().startsWith('@')
   if (!explicitWorkspaceToken && !looksLikeRelativeFile(candidate)) return null
   const path = normalizeRelativePath(candidate)
-  return path ? { cwd: roots[0].cwd, path } : null
+  return path ? { cwd: primaryRoot.cwd, path } : null
 }
 
 export function resolveWorkspaceFileReference(cwd: string, reference: string): string | null {

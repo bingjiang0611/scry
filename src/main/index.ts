@@ -122,6 +122,7 @@ import type {
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
 } from '../shared/workspace'
+import { HomeFileAccess } from './home-file-access'
 import { createTerminalManager, type TerminalManager } from './terminal-manager'
 import { TerminalOutputBridge } from './terminal-output'
 import { TraceOutputBridge } from './trace-output'
@@ -327,6 +328,19 @@ function closeAllTerminals(discardOutput = false): void {
 }
 
 const homeDir = homedir()
+const homeFileAccess = new HomeFileAccess(homeDir, async (canonicalPath) => {
+  if (!win || win.isDestroyed()) return false
+  const result = await dialog.showMessageBox(win, {
+    type: 'question',
+    buttons: ['取消', '只读打开'],
+    defaultId: 0,
+    cancelId: 0,
+    message: '打开工作区外文件？',
+    detail: `Scry 将只读打开以下文件：\n${canonicalPath}`,
+    noLink: true
+  })
+  return result.response === 1
+})
 const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
 const projectStore = () => createProjectStore(app.getPath('userData'))
 const rememberProject = (cwd: string): void => {
@@ -1336,16 +1350,20 @@ handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
   listWorkspace(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
   readWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
-handleTrusted('workspace:readKnown', (_event, request: WorkspacePathRequest) =>
-  readWorkspaceFile({ ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
+handleTrusted('workspace:readKnown', async (_event, request: WorkspacePathRequest) =>
+  readWorkspaceFile(request.cwd === '~'
+    ? await homeFileAccess.authorize(request)
+    : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
 handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>
   openWorkspaceFileExternally(
     authorizedWorkspaceRequest(currentCwd, request),
     (path) => shell.openExternal(pathToFileURL(path).href)
   ))
-handleTrusted('workspace:openKnownExternal', (_event, request: WorkspacePathRequest) =>
+handleTrusted('workspace:openKnownExternal', async (_event, request: WorkspacePathRequest) =>
   openWorkspaceFileExternally(
-    { ...request, cwd: resolveKnownProjectDirectory(request.cwd) },
+    request.cwd === '~'
+      ? await homeFileAccess.authorize(request)
+      : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) },
     (path) => shell.openExternal(pathToFileURL(path).href)
   ))
 handleTrusted('workspace:write', (_event, request: WorkspaceWriteRequest) =>
