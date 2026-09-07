@@ -590,9 +590,11 @@ export function aggregateTurnEvidence(args: {
     ...(modelTiming
       ? {
           modelTiming:
-            modelTiming.status === 'available' && !modelSegmentCaptureReason
-              ? available(modelTiming.value, [source], modelTiming.quality)
-              : partial(
+            modelTiming.status === 'unavailable'
+              ? { ...unavailable(modelTiming.omissionReason ?? 'model timing was unavailable', [source]), value: modelTiming.value }
+              : modelTiming.status === 'available' && !modelSegmentCaptureReason
+                ? available(modelTiming.value, [source], modelTiming.quality)
+                : partial(
                   modelTiming.value,
                   [source],
                   joinOmissionReasons([

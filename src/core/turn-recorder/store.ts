@@ -5,7 +5,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.34'
+export const RECORDER_VERSION = '0.2.35'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -192,9 +192,30 @@ export async function recordStoreStamp(dataRoot: string): Promise<{ count: numbe
   return { count: files.length, maxSequence: files.at(-1)?.sequence ?? 0 }
 }
 
+// Older aggregators wrapped an unavailable residual timing result as partial.
+// Normalize only that known writer defect in the read view; canonical bytes and
+// the strict commit validator stay untouched, and no timing value is invented.
+function legacyModelTimingReadView(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+  const record = raw as Record<string, unknown>
+  const version = typeof record.recorderVersion === 'string' ? /^0\.2\.(\d+)$/.exec(record.recorderVersion) : null
+  if (record.schemaVersion !== 1 || !version || Number(version[1]) < 27 || Number(version[1]) > 34) return raw
+  const timing = record.modelTiming
+  if (!timing || typeof timing !== 'object' || Array.isArray(timing)) return raw
+  const evidence = timing as Record<string, unknown>
+  if (evidence.status !== 'partial' || evidence.quality !== 'unavailable' ||
+      evidence.omissionReason !== 'turn wall-clock is inconsistent with observed activity intervals') return raw
+  const value = evidence.value
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return raw
+  const residual = value as Record<string, unknown>
+  if (residual.method !== 'non_call_residual' || !residual.activityCoverage ||
+      Object.keys(residual).some((key) => key !== 'method' && key !== 'activityCoverage')) return raw
+  return { ...record, modelTiming: { ...evidence, status: 'unavailable' } }
+}
+
 export async function readRecordFile(path: string): Promise<AgentTurnRecord> {
   const raw = JSON.parse(await readFile(path, 'utf8')) as unknown
-  const validation = validateAgentTurnRecord(raw)
+  const validation = validateAgentTurnRecord(legacyModelTimingReadView(raw))
   if (!validation.ok) {
     const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
     throw new Error(`invalid turn record: ${path}: ${detail}`)

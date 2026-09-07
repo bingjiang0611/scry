@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.34 \
+npm install -g scry-turn-recorder@0.2.35 \
   --registry=https://registry.npmjs.org
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -288,7 +288,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.34", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.35", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。
