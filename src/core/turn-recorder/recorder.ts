@@ -3,7 +3,17 @@ import { open as openFile, readdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { HOOK_DELIVERY_STAGE, classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
-import { disabled, partial, unavailable, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
+import {
+  available,
+  disabled,
+  partial,
+  unavailable,
+  type AgentTurnRecord,
+  type Evidence,
+  type TurnEndReason,
+  type TurnEvidence,
+  type TurnTermination
+} from '../../shared/turn-record.js'
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
@@ -98,6 +108,14 @@ interface TranscriptRead {
 
 const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
+/**
+ * The session or process ended, so an open turn stops here: it cannot converge, and waiting only
+ * lets a later prompt look like this turn's end. It is not a normal terminal — nothing proves the
+ * Agent finished its work — so the turn keeps its interrupted verdict.
+ */
+const SESSION_END_EVENTS = new Set(['SessionEnd', 'session.end', 'session_end', 'session.exited', 'process.exit'])
+/** A Provider clock ahead of ours is normal; minutes of "future" end time are not. */
+const TERMINAL_CLOCK_SKEW_MS = 60_000
 const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'])
 const STALE_TERMINAL_WINDOW_MS = 30_000
 const DEFERRED_TERMINAL_GRACE_MS = 180_000
@@ -1844,6 +1862,76 @@ async function beginOpenTurn(
   return open
 }
 
+/** A timestamp is usable as an end time only inside this turn's own window. */
+function credibleAt(value: string | undefined, startedMs: number, ceilingMs: number): string | undefined {
+  if (!value) return undefined
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms) || ms < startedMs || ms > ceilingMs) return undefined
+  return new Date(ms).toISOString()
+}
+
+/**
+ * `completedAt` may only come from this turn's own evidence. Without a terminal observation the last
+ * thing actually observed is a lower bound, reported as partial — the alternative used to be the
+ * next prompt's arrival, which silently billed the user's idle time to the Agent.
+ */
+function resolveTurnEnd(
+  open: OpenTurnState,
+  startedAt: string,
+  transcript: { completedAt?: string },
+  events: TraceEvent[],
+  forced?: 'expired'
+): { completedAt: string; termination: Evidence<TurnTermination> } {
+  const startedMs = Date.parse(startedAt)
+  const ceilingMs = Date.now() + TERMINAL_CLOCK_SKEW_MS
+  const reason: TurnEndReason = open.endReason ?? forced ?? 'provider_terminal'
+  const observedAt = open.closingAt ? { observedAt: open.closingAt } : {}
+  const transcriptEnd = credibleAt(transcript.completedAt, startedMs, ceilingMs)
+  if (transcriptEnd) {
+    return {
+      completedAt: transcriptEnd,
+      termination: available({ reason, completedAtSource: 'provider_transcript', ...observedAt }, ['provider_transcript'])
+    }
+  }
+  const terminalEnd = credibleAt(open.terminalAt, startedMs, ceilingMs)
+  if (terminalEnd) {
+    const completedAtSource = open.terminalAtSource ?? 'provider_terminal_event'
+    return {
+      completedAt: terminalEnd,
+      // A hook firing at the end is close to the real end, but it is our clock, not the Provider's.
+      termination: available(
+        { reason, completedAtSource, ...observedAt },
+        ['lifecycle_hooks'],
+        completedAtSource === 'provider_terminal_event' ? 'exact' : 'estimated'
+      )
+    }
+  }
+  const lastActivity = events
+    .map((event) => credibleAt(event.ts, startedMs, ceilingMs))
+    .filter((value): value is string => !!value)
+    .sort()
+    .at(-1)
+  if (lastActivity) {
+    return {
+      completedAt: lastActivity,
+      termination: partial(
+        { reason, completedAtSource: 'last_observed_activity', ...observedAt },
+        ['lifecycle_hooks'],
+        'no terminal event was observed; completedAt is the last observed activity and is a lower bound',
+        'estimated'
+      )
+    }
+  }
+  return {
+    completedAt: startedAt,
+    termination: partial(
+      { reason, completedAtSource: 'turn_start', ...observedAt },
+      ['recorder_open_turn'],
+      'no terminal event and no activity were observed, so this turn has no known end time or duration'
+    )
+  }
+}
+
 async function quarantineOpenTurn(
   dataRoot: string,
   root: string,
@@ -2007,8 +2095,9 @@ async function finalizeOpenTurn(
     stage: 'turn_diff',
     turnDiff
   }))
-  const completedAt = transcript.completedAt ?? open.closingAt ?? timestampOf(payload)
   const startedAt = transcript.startedAt ?? open.startedAt
+  const end = resolveTurnEnd(open, startedAt, transcript, mergedEvents, options.forcedReason ? 'expired' : undefined)
+  const completedAt = end.completedAt
   const startedMs = Date.parse(startedAt)
   const completedMs = Date.parse(completedAt)
   const wallDurationMs = Number.isFinite(startedMs) && Number.isFinite(completedMs) && completedMs >= startedMs
@@ -2098,10 +2187,11 @@ async function finalizeOpenTurn(
     turnIndex: open.turnIndex,
     startedAt,
     completedAt,
-    durationMs: transcript.durationMs ?? (
+    durationMs: (end.termination.value?.completedAtSource === 'provider_transcript' ? transcript.durationMs : undefined) ?? (
       Number.isFinite(startedMs) && Number.isFinite(completedMs) ? Math.max(0, completedMs - startedMs) : 0
     ),
     status: transcript.terminalStatus ?? terminalStatus(payload, fallbackStatus),
+    termination: end.termination,
     ...evidence
   }
   const committed = await commitRecord(enablement.dataRoot, draft)
@@ -2262,7 +2352,10 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
               !open.providerTurnId &&
               !providerTurnId
             open.status = 'closing'
+            // The new prompt only proves this turn stopped converging. Its timestamp is this turn's
+            // successor, not its end, so it may set neither terminalAt nor completedAt.
             open.closingAt ??= timestampOf(input.payload)
+            open.endReason ??= fallback === 'interrupted' ? 'superseded_by_next_turn' : 'provider_terminal'
             await writeJsonAtomic(openPath(root), open, { sync: false })
             const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
             if (finalized.status === 'pending') return finalized
@@ -2281,7 +2374,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         return { status: 'started' as const }
       }
       if (!open) {
-        if (END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
+        // Repeated Stop/SessionEnd for an already committed turn is normal shutdown noise.
+        if (END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
         if (input.managed) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
         const orphanId = stableHash({ event: input.event, payload: input.payload })
         await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
@@ -2292,9 +2386,10 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         return { status: 'orphan' as const }
       }
       if (open.managedByScry) {
-        if (!END_EVENTS.has(input.event)) return { status: 'recorded' as const }
+        if (!END_EVENTS.has(input.event) && !SESSION_END_EVENTS.has(input.event)) return { status: 'recorded' as const }
         open.status = 'closing'
         open.closingAt = timestampOf(input.payload)
+        open.endReason ??= SESSION_END_EVENTS.has(input.event) ? 'session_end' : 'provider_terminal'
         await writeJsonAtomic(openPath(root), open, { sync: false })
         return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
       }
@@ -2321,7 +2416,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         })
         return { status: 'orphan' as const }
       }
-      const endEvent = END_EVENTS.has(input.event)
+      const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
+      const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
       if (open.deferredTerminalEventId) {
         if (endEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
         await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
@@ -2333,16 +2429,22 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         await writeJsonAtomic(openPath(root), open, { sync: false })
       }
       const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
-      if (explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
+      // Stale-terminal protection weighs one Provider terminal against a possibly newer one. A session
+      // or process end has no such competitor: deferring or discarding it would leave the turn open
+      // for the next prompt to close, which is the inflation this path exists to prevent.
+      if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
         return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
       }
-      if (endEvent && !incomingProviderTurnId && !explicitTerminalAt && open.staleTerminalProtection) {
+      if (endEvent && !sessionEndEvent && !incomingProviderTurnId && !explicitTerminalAt && open.staleTerminalProtection) {
         const terminalAt = explicitTerminalAt ?? timestampOf(input.payload)
         const elapsed = Date.parse(terminalAt) - Date.parse(open.startedAt)
         if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS) {
           const eventId = await storeLifecycleEvent(enablement, open, input.event, input.payload)
           open.status = 'closing'
           open.closingAt = terminalAt
+          open.terminalAt = terminalAt
+          open.terminalAtSource = 'recorder_observed_terminal'
+          open.endReason ??= 'provider_terminal'
           open.deferredTerminalAt = new Date().toISOString()
           open.deferredTerminalEventId = eventId
           await writeJsonAtomic(openPath(root), open, { sync: false })
@@ -2351,9 +2453,18 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       }
       await storeLifecycleEvent(enablement, open, input.event, input.payload)
       if (!endEvent) return { status: 'recorded' as const }
+      const terminalAt = explicitTerminalAt ?? explicitTimestampOf(input.payload) ?? timestampOf(input.payload)
       open.status = 'closing'
       open.closingAt = timestampOf(input.payload)
+      open.terminalAt = terminalAt
+      open.terminalAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
+      open.endReason ??= sessionEndEvent ? 'session_end' : 'provider_terminal'
       await writeJsonAtomic(openPath(root), open, { sync: false })
+      // A session/process end is not a completion: it closes the turn immediately and keeps the
+      // interrupted verdict unless the Provider's own terminal already arrived.
+      if (sessionEndEvent) {
+        return finalizeOpenTurn(enablement, open, input.payload, 'interrupted', { allowUnstableTranscript: true })
+      }
       if (
         input.provider === 'claude' &&
         input.event === 'Stop' &&
@@ -2516,6 +2627,7 @@ export async function recoverRecorder(
           }
           open.status = 'closing'
           open.closingAt = transcript.completedAt
+          open.endReason ??= 'provider_terminal'
           await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
         }
         if (open.status !== 'closing') return { status: 'idle' as const }

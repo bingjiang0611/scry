@@ -64,6 +64,84 @@ async function completeTurn(root: string, sessionId: string, prompt = 'implement
 }
 
 describe('turn recorder state machine', () => {
+  it('interrupted turn ends at its last credible evidence, never at the next prompt', async () => {
+    const root = await workspace()
+    const base = { provider: 'claude' as const, workspace: root }
+    const now = Date.now()
+    const start = new Date(now - 60 * 60_000).toISOString()
+    const reset = new Date(now - 47 * 60_000).toISOString()
+    const nextPrompt = new Date(now - 24 * 60_000).toISOString()
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('reset', { prompt: 'go', timestamp: start }) })
+    await handleRecorderHook({
+      ...base,
+      event: 'PostToolUse',
+      payload: payload('reset', { tool_name: 'Bash', tool_use_id: 't', tool_response: 'ok', timestamp: reset })
+    })
+    // Connection reset: no Stop ever arrives, and the user types again 23 minutes later.
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('reset', { prompt: 'again', timestamp: nextPrompt }) })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ status: 'interrupted', completedAt: reset, durationMs: 13 * 60_000 })
+    expect(records[0].termination).toMatchObject({
+      status: 'partial',
+      quality: 'estimated',
+      value: { reason: 'superseded_by_next_turn', completedAtSource: 'last_observed_activity', observedAt: nextPrompt }
+    })
+  })
+
+  it.each(['SessionEnd', 'process.exit'])('%s closes the open turn at once and repeats stay idempotent', async (event) => {
+    const root = await workspace()
+    const base = { provider: 'claude' as const, workspace: root }
+    const now = Date.now()
+    const start = new Date(now - 60 * 60_000).toISOString()
+    const ended = new Date(now - 47 * 60_000).toISOString()
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('ended', { prompt: 'go', timestamp: start }) })
+    const terminal = { ...base, event, payload: payload('ended', { timestamp: ended }) }
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'committed' })
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'duplicate' })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ status: 'interrupted', completedAt: ended, durationMs: 13 * 60_000 })
+    expect(records[0].termination).toMatchObject({
+      status: 'available',
+      quality: 'exact',
+      value: { reason: 'session_end', completedAtSource: 'provider_terminal_event' }
+    })
+    // A later prompt opens a new turn instead of reviving the closed one.
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('ended', { prompt: 'again', timestamp: new Date().toISOString() }) })
+    expect((await listRecords(join(root, '.scry')))).toHaveLength(1)
+  })
+
+  it('a terminal timestamp from a skewed Provider clock is not trusted as the end time', async () => {
+    const root = await workspace()
+    const base = { provider: 'claude' as const, workspace: root }
+    const start = new Date(Date.now() - 10 * 60_000).toISOString()
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('skewed', { prompt: 'go', timestamp: start }) })
+    await handleRecorderHook({
+      ...base,
+      event: 'SessionEnd',
+      payload: payload('skewed', { timestamp: new Date(Date.now() + 6 * 60 * 60_000).toISOString() })
+    })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(Date.parse(record.completedAt)).toBeLessThanOrEqual(Date.now())
+    expect(record.termination?.status).toBe('partial')
+    expect(record.termination?.quality).not.toBe('exact')
+    expect(record.termination?.value?.reason).toBe('session_end')
+    expect(['last_observed_activity', 'turn_start']).toContain(record.termination?.value?.completedAtSource)
+  })
+
+  it('Stop without an explicit clock keeps the observed terminal honest', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'observed-stop')
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.status).toBe('completed')
+    expect(record.termination).toMatchObject({
+      status: 'available',
+      quality: 'exact',
+      value: { reason: 'provider_terminal', completedAtSource: 'provider_terminal_event' }
+    })
+  })
+
   it('default full-redacted protects first writes, pins policy and preserves body through duplicate Stop', async () => {
     const root = await workspace()
     const configPath = join(root, 'scry.config.json')

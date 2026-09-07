@@ -6,7 +6,7 @@ import { lstatSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { RuntimeProvider } from '../shared/runtime.js'
 import type { ProviderId } from '../shared/provider.js'
-import type { AgentTurnRecord } from '../shared/turn-record.js'
+import { available, partial, type AgentTurnRecord, type Evidence, type TurnTermination } from '../shared/turn-record.js'
 import { resultWallTiming } from '../shared/result-timing.js'
 import {
   commitManagedRecorderTurn,
@@ -428,6 +428,23 @@ function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void 
   if (!ok) throw new Error(`managed recorder could not persist Scry archive for ${request.turn.runId}`)
 }
 
+/**
+ * Managed turns never borrow a later event as their end: timing is either the Provider's own result
+ * boundary or the App's run boundary. Recomputed from the journal's own items so a replay after a
+ * crash reports the same provenance.
+ */
+function managedTermination(journal: ManagedTurnJournal): Evidence<TurnTermination> {
+  const observedAt = { observedAt: journal.request.timing.completedAt }
+  return canonicalTurnTiming(journal.request.turn.items)
+    ? available({ reason: 'provider_terminal', completedAtSource: 'provider_terminal_event', ...observedAt }, ['provider_result'])
+    : partial(
+        { reason: 'run_ended', completedAtSource: 'recorder_observed_terminal', ...observedAt },
+        ['scry_run_boundary'],
+        'the Provider gave no canonical result timing; completedAt is the observed Scry run boundary',
+        'estimated'
+      )
+}
+
 async function prepareJournalRecord(
   journal: ManagedTurnJournal,
   waitMs: number
@@ -449,6 +466,7 @@ async function prepareJournalRecord(
       status: request.status,
       archiveFingerprint: journal.archiveFingerprint,
       expectedRecordId: journal.recordId,
+      termination: managedTermination(journal),
       toolContentPolicy: request.turn.toolContentPolicy
     })
     if (prepared.status === 'disabled') {

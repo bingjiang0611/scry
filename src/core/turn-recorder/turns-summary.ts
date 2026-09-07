@@ -787,6 +787,8 @@ export function summarizeTurnRecords(
         turnIndex: record.turnIndex,
         status: record.status,
         durationMs: record.durationMs,
+        endReason: record.termination?.value?.reason ?? null,
+        completedAtSource: record.termination?.value?.completedAtSource ?? null,
         calls: turnCalls.total,
         callBreakdown: {
           ordinaryTools: turnCalls.ordinaryTools.total,
@@ -814,7 +816,12 @@ export function summarizeTurnRecords(
     wall: {
       cumulativeMs: sumKnown(selected.map((record) => record.durationMs)),
       knownTurns: selected.filter((record) => finite(record.durationMs)).length,
-      totalTurns: selected.length
+      totalTurns: selected.length,
+      // A turn without a trusted end contributes a lower bound, so the cumulative wall is one too.
+      // Legacy records carry no termination evidence and cannot be classified either way.
+      exactEndTurns: selected.filter((record) => record.termination?.status === 'available').length,
+      boundedEndTurns: selected.filter((record) => record.termination?.status === 'partial').length,
+      unknownEndEvidenceTurns: selected.filter((record) => !record.termination).length
     },
     modelTiming: {
       cumulativeMs: sumKnown(selected.map((record) => record.modelTiming?.value?.cumulativeMs)),

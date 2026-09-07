@@ -8,7 +8,8 @@ import {
   isAgentTurnRecord,
   type AgentTurnRecord,
   type Evidence,
-  type TurnEvidence
+  type TurnEvidence,
+  type TurnTermination
 } from '../../shared/turn-record.js'
 import {
   resolveRecorderEnablement, type RecorderEnablement } from './config.js'
@@ -68,6 +69,8 @@ export function isManagedProviderRuntimePair(provider: unknown, runtimeProvider:
 }
 
 export interface PrepareManagedTurnInput {
+  /** How the App established this turn's end. Omitted by pre-0.2.38 callers. */
+  termination?: Evidence<TurnTermination>
   toolContentPolicy?: ToolContentPolicy
   workspace: string
   provider: ManagedRecorderProviderId
@@ -417,6 +420,7 @@ function recordDraft(
     turnIndex: open.turnIndex,
     ...input.timing,
     status: input.status,
+    ...(input.termination ? { termination: input.termination } : {}),
     ...input.evidence
   }
 }

@@ -193,9 +193,46 @@ export interface AgentTurnRecord extends TurnEvidence {
   generation: number
   turnIndex: number
   startedAt: string
+  /** Best credible end of Agent work. Read `termination` before treating it, or `durationMs`, as exact. */
   completedAt: string
   durationMs: number
   status: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  /** Absent in records written before 0.2.38; absence is legacy, not proof of a trusted end time. */
+  termination?: Evidence<TurnTermination>
+}
+
+export type TurnEndReason =
+  | 'provider_terminal'
+  | 'session_end'
+  /** The App-driven run ended without a Provider terminal, e.g. a cancelled managed run. */
+  | 'run_ended'
+  | 'superseded_by_next_turn'
+  | 'expired'
+
+/**
+ * How `completedAt` was established. The arrival of a later unrelated event — notably the next
+ * turn's prompt — is never an end time: it would bill idle user time as Agent work.
+ */
+export type TurnCompletedAtSource =
+  | 'provider_transcript'
+  | 'provider_terminal_event'
+  | 'recorder_observed_terminal'
+  | 'last_observed_activity'
+  | 'turn_start'
+
+export interface TurnTermination {
+  reason: TurnEndReason
+  completedAtSource: TurnCompletedAtSource
+  /** When Scry observed the end. This is not the turn's end time. */
+  observedAt?: string
+}
+
+function isTurnTermination(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return ['provider_terminal', 'session_end', 'run_ended', 'superseded_by_next_turn', 'expired'].includes(String(raw.reason)) &&
+    ['provider_transcript', 'provider_terminal_event', 'recorder_observed_terminal', 'last_observed_activity', 'turn_start'].includes(String(raw.completedAtSource)) &&
+    (raw.observedAt === undefined || isDateString(raw.observedAt))
 }
 
 /** Sections every record must carry, followed by the optional ones. Single source of truth for
@@ -205,7 +242,7 @@ export const REQUIRED_EVIDENCE_SECTIONS = [
   'dangerousOperations', 'errors'
 ] as const
 
-export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelSegments', 'modelTiming'] as const
+export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelSegments', 'modelTiming', 'termination'] as const
 
 /** `status/quality` per section; a missing optional section reads as unavailable, never as empty. */
 export function evidenceStatusMap(record: AgentTurnRecord): Record<string, string> {
@@ -565,6 +602,7 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   if (raw.modelSegments !== undefined) require(isModelSegmentsEvidence(raw.modelSegments), '$.modelSegments', 'invalid model segment evidence')
   if (raw.modelTiming !== undefined) require(isModelTimingEvidence(raw.modelTiming), '$.modelTiming', 'invalid model timing evidence')
   if (raw.interventions !== undefined) require(isEvidencePayload(raw.interventions, (payload) => isArrayOf(payload, isIntervention)), '$.interventions', 'invalid intervention evidence')
+  if (raw.termination !== undefined) require(isEvidencePayload(raw.termination, isTurnTermination), '$.termination', 'invalid termination evidence')
   return issues.length > 0 ? { ok: false, issues } : { ok: true, record: raw as unknown as AgentTurnRecord }
 }
 

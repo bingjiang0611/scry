@@ -22,7 +22,12 @@ export interface RecorderOpenTurnState {
   turnIndex: number
   status: 'open' | 'closing'
   startedAt: string
+  /** When closing began. Bookkeeping for pending health only — never an end time. */
   closingAt?: string
+  /** Credible end of Agent work, set only by a real terminal observation. */
+  terminalAt?: string
+  terminalAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
+  endReason?: import('../../shared/turn-record.js').TurnEndReason
   prompt?: string
   promptHash?: string
   managedRunId?: string

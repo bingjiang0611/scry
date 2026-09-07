@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.37 \
+npm install -g scry-turn-recorder@0.2.38 \
   --registry=https://registry.npmjs.org
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -112,9 +112,29 @@ Agent、skill 与提示词不应主动调用这些命令。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
 
-## 未结束的轮次
+## 未结束的轮次与终止时间
 
 一轮从 `UserPromptSubmit` 开始、`Stop` 结束。Provider 被 `kill -9`、崩溃或终端被直接关闭时,结束事件永远不会到,这一轮会停在 `.scry/runtime/`。
+
+**`completedAt` 只能来自这一轮自己的证据。** 0.2.38 之前，未收到 `Stop` 的轮次会被下一次 `UserPromptSubmit` 的时间收口，把用户的空闲等待算成 Agent 执行时长（实例：17:26 真实中断被拉到 17:49，时长虚增至 ~36 分钟）。现在下一次输入只触发收口，**不再作为上一轮的结束时间**。
+
+每条记录新增 `termination` 证据，说明结束时间怎么来的：
+
+| `completedAtSource` | 含义 | envelope |
+|---|---|---|
+| `provider_transcript` | Provider transcript 的终态时间 | available/exact |
+| `provider_terminal_event` | 终止事件自带的显式时间 | available/exact |
+| `recorder_observed_terminal` | 终止事件到达时 Scry 自己的时铟 | available/estimated |
+| `last_observed_activity` | 无终止事件，取最后一次真实活动（**下限**） | partial/estimated |
+| `turn_start` | 既无终止事件也无活动，结束时间未知 | partial/inferred |
+
+`reason` 区分 `provider_terminal`、`session_end`、`run_ended`（managed 运行边界）、`superseded_by_next_turn`、`expired`。早于 0.2.38 的记录**没有**这个字段；缺失只代表 legacy，不能当作结束时间可信。
+
+- `status !== 'available'` 时，`durationMs` 是下限而不是完整时长；turns summary 的 `wall` 同时给出 `exactEndTurns` / `boundedEndTurns` / `unknownEndEvidenceTurns`。看板的用户等待区间应从 `completedAt` 之后开始。
+- 超出轮次窗口的时间戳（早于 `startedAt`、或超出本地时钟 60s 以上）不被信任，会退到下一个可信来源。
+- 收到 `SessionEnd`/`session.end`/`session_end`/`session.exited`/`process.exit` 时立即收口为 `interrupted`（`reason: session_end`）；重复终止事件幂等，已提交轮次返回 `duplicate`。普通采集、managed 与 journal recovery 用同一套语义。
+
+> ⚠️ **当前 `scry init` 还没有注册任何 SessionEnd Hook。** 上面的事件名是采集端已支持的入口，需要各 Provider 真实支持并经验证后才会接入；Claude 以外的 Provider 是否提供会话结束 Hook 尚未核实，不假设 parity。在那之前，Connection reset 类中断依靠上述“不再借用下一次输入时间”修正而不是 SessionEnd。
 
 **同时满足**「超过 24 小时」与「transcript 已停止增长」的轮次判定为不可能再收敛,由 `scry recorder recover`(daemon 空闲时自动跑)收敛为 `interrupted`。两个判据都必需:只看年龄会把跑了 30 小时的长任务误判为中断,而长任务会持续追加 transcript。
 
@@ -312,7 +332,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.37", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.38", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。
