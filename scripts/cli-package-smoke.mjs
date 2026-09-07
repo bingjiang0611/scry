@@ -98,6 +98,22 @@ try {
     const records = JSON.parse(run(bin, ['turns', 'list', '--workspace', workspace], { cwd: installRoot }))
     assert.equal(records.length, 1, 'initialized provider bridge should write one completed turn')
     assert.equal(records[0].status, 'completed')
+    assert.equal(records[0].endReason, 'provider_terminal')
+    // Claude lifecycle hooks carry no clock of their own, so the end time is Scry's observation of
+    // the terminal event. That is still this turn's own evidence, unlike the next prompt's arrival.
+    assert.equal(records[0].completedAtSource, 'recorder_observed_terminal')
+    const claudeHooks = JSON.parse(readFileSync(join(workspace, '.claude', 'settings.local.json'), 'utf8')).hooks
+    assert.equal(claudeHooks.SessionEnd[0].hooks[0].timeout, 3, 'Claude session end must keep the tight budget')
+    // A session end after the turn already committed is shutdown noise, not a second record.
+    run(hook, ['claude', 'SessionEnd'], {
+      cwd: workspace,
+      input: JSON.stringify({ session_id: 'package-smoke', reason: 'other', cwd: workspace })
+    })
+    assert.equal(
+      JSON.parse(run(bin, ['turns', 'list', '--workspace', workspace], { cwd: installRoot })).length,
+      1,
+      'session end must not create a second record'
+    )
     const record = JSON.parse(run(bin, ['turns', 'show', records[0].recordId, '--workspace', workspace], { cwd: installRoot }))
     const call = record.tools.value[0]
     assert.equal(call.inputContent.redaction, 'applied')

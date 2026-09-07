@@ -97,7 +97,10 @@ describe('turn recorder state machine', () => {
     const ended = new Date(now - 47 * 60_000).toISOString()
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('ended', { prompt: 'go', timestamp: start }) })
     const terminal = { ...base, event, payload: payload('ended', { timestamp: ended }) }
-    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'committed' })
+    // The hook only persists the boundary; aggregation belongs to recovery, not to the 3s budget.
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
+    await recoverRecorder(root)
     await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'duplicate' })
     const records = await listRecords(join(root, '.scry'))
     expect(records).toHaveLength(1)
@@ -122,6 +125,7 @@ describe('turn recorder state machine', () => {
       event: 'SessionEnd',
       payload: payload('skewed', { timestamp: new Date(Date.now() + 6 * 60 * 60_000).toISOString() })
     })
+    await recoverRecorder(root)
     const [record] = await listRecords(join(root, '.scry'))
     expect(Date.parse(record.completedAt)).toBeLessThanOrEqual(Date.now())
     expect(record.termination?.status).toBe('partial')

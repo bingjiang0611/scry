@@ -28,6 +28,27 @@ export interface WorkspaceInitResult {
 const execFileAsync = promisify(execFile)
 const PROVIDERS = ['claude', 'codex', 'qoder', 'opencode'] as const
 const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop'] as const
+/**
+ * Session-end hooks per Provider, registered only where the Provider really has the event. Claude
+ * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Codex and Qoder expose no verified session-end
+ * hook, and OpenCode has no session-end event at all, so they stay unregistered rather than pretend
+ * parity. Without it those Providers rely on turn-end resolution instead of an earlier close.
+ */
+const PROVIDER_SESSION_END_EVENTS: Record<Exclude<InitProvider, 'opencode'>, readonly string[]> = {
+  claude: ['SessionEnd'],
+  codex: [],
+  qoder: []
+}
+/** Session end must only persist and enqueue, so it gets a much tighter budget than a turn end. */
+const SESSION_END_HOOK_TIMEOUT_SECONDS = 3
+
+function providerEvents(provider: Exclude<InitProvider, 'opencode'>): readonly string[] {
+  return [...EVENTS, ...PROVIDER_SESSION_END_EVENTS[provider]]
+}
+
+function isSessionEndEvent(provider: Exclude<InitProvider, 'opencode'>, event: string): boolean {
+  return PROVIDER_SESSION_END_EVENTS[provider].includes(event)
+}
 const HANDLER_ID = 'turn-recorder-v1'
 const CONFIG_PATHS: Record<Exclude<InitProvider, 'opencode'>, string> = {
   claude: '.claude/settings.local.json',
@@ -197,7 +218,7 @@ exit 0
 `
 }
 
-function hookCommand(provider: Exclude<InitProvider, 'opencode'>, event: typeof EVENTS[number]): string {
+function hookCommand(provider: Exclude<InitProvider, 'opencode'>, event: string): string {
   const body = `root="\${${PROJECT_DIR_ENV[provider]}:-$PWD}"; exec "$root/.scry/provider-hook.sh" ${provider} ${event}`
   return `SCRY_HANDLER_ID=${HANDLER_ID} sh -c '${body}'`
 }
@@ -222,7 +243,7 @@ function mergeProviderSettings(
   if (settings.hooks === undefined) settings.hooks = {}
   const hooks = object(settings.hooks)
   if (!hooks) throw new Error(`${path}.hooks 必须是 JSON object`)
-  for (const event of EVENTS) {
+  for (const event of providerEvents(provider)) {
     const current = hooks[event] ?? []
     if (!Array.isArray(current)) throw new Error(`${path}.hooks.${event} 必须是 array`)
     const command = hookCommand(provider, event)
@@ -231,9 +252,10 @@ function mergeProviderSettings(
       return Array.isArray(record?.hooks) && record.hooks.some((entry) => object(entry)?.command === command)
     })
     if (!alreadyInstalled) {
-      current.push({
-        hooks: [{ type: 'command', command, timeout: event === 'UserPromptSubmit' || event === 'Stop' ? 15 : 10 }]
-      })
+      const timeout = isSessionEndEvent(provider, event)
+        ? SESSION_END_HOOK_TIMEOUT_SECONDS
+        : event === 'UserPromptSubmit' || event === 'Stop' ? 15 : 10
+      current.push({ hooks: [{ type: 'command', command, timeout }] })
     }
     hooks[event] = current
   }
@@ -516,7 +538,7 @@ async function providerDiff(workspace: string, provider: Exclude<InitProvider, '
       path,
       present: false,
       managedEvents: [],
-      missingEvents: [...EVENTS],
+      missingEvents: [...providerEvents(provider)],
       duplicateEvents: [],
       foreignEntries: 0
     }
@@ -530,7 +552,7 @@ async function providerDiff(workspace: string, provider: Exclude<InitProvider, '
       path,
       present: true,
       managedEvents: [],
-      missingEvents: [...EVENTS],
+      missingEvents: [...providerEvents(provider)],
       duplicateEvents: [],
       foreignEntries: 0,
       detail: `不是合法 JSON：${error instanceof Error ? error.message : String(error)}`
@@ -539,7 +561,7 @@ async function providerDiff(workspace: string, provider: Exclude<InitProvider, '
   const managedEvents: string[] = []
   const duplicateEvents: string[] = []
   let foreignEntries = 0
-  for (const event of EVENTS) {
+  for (const event of providerEvents(provider)) {
     const groups = hooks?.[event]
     if (!Array.isArray(groups)) continue
     let managed = 0
@@ -559,7 +581,7 @@ async function providerDiff(workspace: string, provider: Exclude<InitProvider, '
     path,
     present: true,
     managedEvents,
-    missingEvents: EVENTS.filter((event) => !managedEvents.includes(event)),
+    missingEvents: providerEvents(provider).filter((event) => !managedEvents.includes(event)),
     duplicateEvents,
     foreignEntries
   }
@@ -675,7 +697,7 @@ export async function integrationsUninstall(
     const hooks = object(settings?.hooks)
     if (!settings || !hooks) continue
     let changed = false
-    for (const event of EVENTS) {
+    for (const event of providerEvents(provider)) {
       const groups = hooks[event]
       if (!Array.isArray(groups)) continue
       const keptGroups: unknown[] = []
@@ -775,7 +797,7 @@ export async function integrationsRepair(options: {
       continue
     }
     const path = join(root, CONFIG_PATHS[provider])
-    const stripped = stripManagedHooks(await readOptional(path), path)
+    const stripped = stripManagedHooks(await readOptional(path), path, provider)
     planned.set(path, { source: mergeProviderSettings(stripped, path, provider) })
   }
   planned.set(join(root, '.scry/cli-path'), { source: `${cliPath}\n` })
@@ -793,7 +815,7 @@ export async function integrationsRepair(options: {
 }
 
 /** Drop every managed entry so the canonical merge cannot append a duplicate. */
-function stripManagedHooks(source: string | null, path: string): string | null {
+function stripManagedHooks(source: string | null, path: string, provider: Exclude<InitProvider, 'opencode'>): string | null {
   if (source == null) return null
   let parsed: unknown
   try {
@@ -804,7 +826,7 @@ function stripManagedHooks(source: string | null, path: string): string | null {
   const settings = object(parsed)
   const hooks = object(settings?.hooks)
   if (!settings || !hooks) return source
-  for (const event of EVENTS) {
+  for (const event of providerEvents(provider)) {
     const groups = hooks[event]
     if (!Array.isArray(groups)) continue
     const kept: unknown[] = []
