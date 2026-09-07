@@ -191,11 +191,11 @@ async function startManaged(workspace: string, provider: 'claude' | 'codex' = 'c
 }
 
 describe('managed trace turn coordinator', () => {
-  it('full-redacted progress, journal recovery, archive and canonical records share safe bodies', async () => {
+  it('default full-redacted progress, journal recovery, archive and canonical records share safe bodies', async () => {
     const { workspace, userDataDir } = await fixture()
     const path = join(workspace, 'scry.config.json')
     const config = JSON.parse(await readFile(path, 'utf8'))
-    config.capture.toolOutput = 'full-redacted'
+    delete config.capture.toolOutput
     await writeFile(path, JSON.stringify(config))
     await startManaged(workspace)
     const request = input(workspace, userDataDir)

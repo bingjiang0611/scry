@@ -67,6 +67,7 @@ try {
 
   const doctor = JSON.parse(run(bin, ['doctor', '--workspace', workspace], { cwd: installRoot }))
   assert.equal(doctor.healthy, true, 'fresh installed CLI should pass doctor')
+  assert.equal(doctor.capture.toolOutput, 'full-redacted', 'init must enable protected tool bodies without manual configuration')
 
   const hook = join(workspace, '.scry', 'provider-hook.sh')
   run(hook, ['claude', 'UserPromptSubmit'], {
@@ -82,6 +83,14 @@ try {
     } while (!daemon.running && Date.now() < deadline)
     assert.equal(daemon.running, true, 'first direct hook should start the workspace daemon')
 
+    run(hook, ['claude', 'PreToolUse'], {
+      cwd: workspace,
+      input: JSON.stringify({ session_id: 'package-smoke', tool_name: 'Bash', tool_use_id: 'smoke-tool', tool_input: { command: 'echo ok', token: 'SMOKE_INPUT_SECRET' }, cwd: workspace })
+    })
+    run(hook, ['claude', 'PostToolUse'], {
+      cwd: workspace,
+      input: JSON.stringify({ session_id: 'package-smoke', tool_name: 'Bash', tool_use_id: 'smoke-tool', tool_response: `${'正文😀'.repeat(300)}\npassword=SMOKE_OUTPUT_SECRET\nfinished`, cwd: workspace })
+    })
     run(hook, ['claude', 'Stop'], {
       cwd: workspace,
       input: JSON.stringify({ session_id: 'package-smoke', assistant_response: 'done', cwd: workspace })
@@ -89,6 +98,12 @@ try {
     const records = JSON.parse(run(bin, ['turns', 'list', '--workspace', workspace], { cwd: installRoot }))
     assert.equal(records.length, 1, 'initialized provider bridge should write one completed turn')
     assert.equal(records[0].status, 'completed')
+    const record = JSON.parse(run(bin, ['turns', 'show', records[0].recordId, '--workspace', workspace], { cwd: installRoot }))
+    const call = record.tools.value[0]
+    assert.equal(call.inputContent.redaction, 'applied')
+    assert.ok(call.outputContent.savedBytes > 500, 'default recording must retain more than a summary')
+    assert.match(call.outputContent.content, /finished$/)
+    assert.doesNotMatch(JSON.stringify(record), /SMOKE_(INPUT|OUTPUT)_SECRET/)
   } finally {
     run(bin, ['recorder', 'stop', '--workspace', workspace], { cwd: installRoot })
   }

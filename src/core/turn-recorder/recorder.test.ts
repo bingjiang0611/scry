@@ -64,11 +64,11 @@ async function completeTurn(root: string, sessionId: string, prompt = 'implement
 }
 
 describe('turn recorder state machine', () => {
-  it('full-redacted protects first event writes, pins policy and preserves body through duplicate Stop', async () => {
+  it('default full-redacted protects first writes, pins policy and preserves body through duplicate Stop', async () => {
     const root = await workspace()
     const configPath = join(root, 'scry.config.json')
     const config = JSON.parse(await readFile(configPath, 'utf8'))
-    config.capture.toolOutput = 'full-redacted'
+    delete config.capture.toolOutput
     await writeFile(configPath, JSON.stringify(config))
     const base = { provider: 'claude' as const, workspace: root }
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('redacted', { prompt: 'test' }) })
