@@ -1211,13 +1211,15 @@ body.pane-resizing * {
 .md li > ol { margin: 0.3em 0; }
 .md .contains-task-list { padding-left: 0.25em; list-style: none; }
 .md .task-list-item {
-  display: grid;
-  grid-template-columns: 1.1em minmax(0, 1fr);
-  align-items: baseline;
-  gap: 0.45em;
-  padding-left: 0;
+  position: relative;
+  display: block;
+  min-width: 0;
+  padding-left: 1.55em;
 }
 .md .task-list-item > input {
+  position: absolute;
+  top: 0.3em;
+  left: 0;
   width: 0.95em;
   height: 0.95em;
   margin: 0;
