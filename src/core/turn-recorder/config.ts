@@ -93,7 +93,7 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
 }
 
 /**
- * Every field defaults to on; only an explicit `false` (or `toolOutput: 'none'`) turns it off.
+ * Capture defaults to on with full-redacted tool bodies; explicit legacy modes remain supported.
  * A disabled section is recorded as `disabled` with a reason, so the record itself explains what
  * was captured — no separate policy field is needed to reconstruct that later.
  */
@@ -101,11 +101,15 @@ function resolveCapture(
   raw: Record<string, unknown>,
   patchExcludeBasenames: string[]
 ): RecorderConfig['capture'] {
+  const toolOutput = raw.toolOutput === undefined ? 'full-redacted' : raw.toolOutput
+  if (toolOutput !== 'none' && toolOutput !== 'summary' && toolOutput !== 'full-redacted') {
+    throw new Error('capture.toolOutput must be none, summary or full-redacted')
+  }
   return {
     prompt: raw.prompt !== false,
     assistant: raw.assistant !== false,
-    toolOutput: raw.toolOutput === 'full-redacted' ? 'full-redacted' : raw.toolOutput === 'none' ? 'none' : 'summary',
-    ...(raw.toolOutput === 'full-redacted' ? {
+    toolOutput,
+    ...(toolOutput === 'full-redacted' ? {
       toolContentFieldBytes: contentBudget(raw.toolContentFieldBytes, 8 * 1024, 64 * 1024),
       toolContentTurnBytes: contentBudget(raw.toolContentTurnBytes, 128 * 1024, 1024 * 1024)
     } : {}),

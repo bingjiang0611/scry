@@ -510,7 +510,7 @@ describe('capture 配置的生效值', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
     const report = JSON.parse(stdout.text()) as Record<string, any>
-    expect(report.capture).toMatchObject({ prompt: true, assistant: true, toolOutput: 'summary', diff: false, hooks: true })
+    expect(report.capture).toMatchObject({ prompt: true, assistant: true, toolOutput: 'full-redacted', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072, diff: false, hooks: true })
   })
 
   it('显式关闭正文后 record 以 disabled 解释缺失，而不是记成空', async () => {

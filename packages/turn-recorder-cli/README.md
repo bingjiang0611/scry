@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.36 \
+npm install -g scry-turn-recorder@0.2.37 \
   --registry=https://registry.npmjs.org
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -74,7 +74,7 @@ Agent、skill 与提示词不应主动调用这些命令。
   "capture": {
     "prompt": true,
     "assistant": true,
-    "toolOutput": "summary",
+    "toolOutput": "full-redacted",
     "diff": true,
     "hooks": true,
     "patchExcludeBasenames": []
@@ -88,9 +88,9 @@ Agent、skill 与提示词不应主动调用这些命令。
 
 > ⚠️ **关闭正文不等于脱敏。** 即使 `prompt`、`assistant` 关闭且 `toolOutput: "none"`,以下内容仍会落盘:**工具入参**(Bash 命令原文、Edit 的 old/new 字符串)、**文件路径**、**diff patch**(除非 `diff: false`)。当前没有单独关闭工具入参的开关。要求本地不留代码与命令的场景,应设 `diff: false` 并评估工具入参是否可接受,或者干脆不在该仓库启用。
 
-## 工具正文：显式 `full-redacted`
+## 工具正文：默认 `full-redacted`
 
-默认仍是 `summary`；旧 `none/summary` 的输入及输出行为不变。需要工具正文时，在**新一轮开始前**修改 `scry.config.json` 的 `capture`（其他配置保持不变）：
+从 0.2.37 起，`scry init` 创建的配置和省略 `capture.toolOutput` 的已有配置都默认使用 `full-redacted`，无需手动配置即可记录脱敏后的工具 input/output。以下是默认生效值，不需要用户填写：
 
 ```json
 {
@@ -100,6 +100,7 @@ Agent、skill 与提示词不应主动调用这些命令。
 }
 ```
 
+- 已有配置中**显式**设置的 `none/summary` 继续生效，重复 `init` 不覆盖；旧版自动生成的 `summary` 与用户选择无法可靠区分，不根据猜测迁移。无 `scry.config.json` 的工作区仍不自动启用 recorder。
 - 同时保存 `inputContent` / `outputContent`，不再把 `outputSummary` 当作全文。摘要从脱敏后的保留正文生成。正文可能是字符串、JSON 或截断的 JSON 文本片段；只有 `encoding: "json"` 可按完整 JSON 解析。
 - 单字段默认 8 KiB、最大 64 KiB；最终轮次记录新增正文合计默认 128 KiB、最大 1 MiB。按 UTF-8 字节裁剪，不截坏字符。预算按稳定调用顺序分配，input 在 output 之前；这不是整个 `.scry` 的磁盘配额，事件暂存、archive、队列有各自副本。
 - 每个字段包含 `content`（省略时不存在）、`encoding`、`savedBytes`、`source`、`sourceCompleteness`、`redaction`、`storage`、`reasons`。`sourceCompleteness: "unknown"` 表示上游没有完整性承诺；`storage: "complete"` 只表示完整保存了当前收到并脱敏的值，**不证明 Provider 原始输出完整**。
@@ -180,7 +181,7 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 | 只有 prompt,无工具无 diff | 2.6 KB |
 | 5 次 Edit + 5 文件 diff | 6.6–9.9 KB |
 
-按 8 KB/轮、100 轮/天估算约 20 MB/月。主要变量是 diff,已有硬上限(单文件 patch 32 KiB、单轮合计 128 KiB);工具输出只存摘要,单次 input 超 8 KiB 会省略并标 `partial`。
+存储量取决于工具正文和 diff，不能再按“只存摘要”估算。默认 `full-redacted` 的最终单轮新增工具正文预算为 128 KiB（可配置到 1 MiB）；diff patch 单文件 32 KiB、单轮合计 128 KiB。若两项默认预算都用满，100 轮/天的正文与 patch 约 750 MiB/30 天，另有元数据及恢复副本。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
 
 > ⚠️ **不要手动删除单个 record 文件。** 序号空洞会被 `turns verify` 与 `doctor` 判为 store 损坏(退出 4),而不是"已清理"。
 
@@ -208,7 +209,7 @@ scry commit-hook revoke --workspace "$PWD"
 
 授权记录写在仓库之外(默认 `~/.scry/grants/<workspace-hash>.json`,`0600`,可用 `SCRY_GRANT_DIR` 覆盖)。每次投递前重新校验 entry 与全部 `files` 的内容指纹:未授权、指纹不符或 bundle 非法一律 fail closed,不执行任何程序,record 照常保留待后续投递,原因写入 `.scry/logs/recorder.log`。改过 hook 后需重新 `trust`,并 `scry recorder restart` 让运行中的 daemon 生效。
 
-被授权的 entry 以你的权限运行,并能读取全部 record 正文 —— **授权是执行授权,不是脱敏机制**。团队汇总方案必须自己承担脱敏(例如只上报 `turns summary` 的聚合结果);CLI 不提供内建脱敏投影。
+被授权的 entry 以你的权限运行,并能读取全部 record 正文 —— **授权是执行授权,不是脱敏机制**。默认工具正文脱敏不覆盖整份 record；团队汇总方案仍需负责 prompt、diff 等其余字段的脱敏或仅上报 `turns summary` 聚合，不能把工具正文保护当作完整上传脱敏策略。
 
 **daemon 在响应 Provider 之后才投递**,所以回调耗时不占 hook 预算。没有 daemon 时(`SCRY_RECORDER_TRANSPORT=direct` 或冷启动)只能同步投递,此时每个事件最多 8 条、预算 1.5s(单条仍以 10s 熔断),剩余保持 pending。实测回调 350ms/条、积压 6 条时:同步 1688ms/事件,移出后 500ms/事件。
 
@@ -311,7 +312,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.36", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.37", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。

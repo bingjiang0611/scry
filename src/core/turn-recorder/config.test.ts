@@ -34,7 +34,7 @@ describe('discoverRepositories', () => {
 })
 
 describe('recorder storage location', () => {
-  it('full-redacted is explicit and validates byte budgets without changing legacy config', () => {
+  it('defaults to full-redacted with byte budgets while retaining explicit legacy modes', () => {
     expect(parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted' } }).capture).toMatchObject({
       toolOutput: 'full-redacted', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072
     })
@@ -42,8 +42,21 @@ describe('recorder storage location', () => {
       expect(() => parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted', toolContentFieldBytes: value } })).toThrow('budget')
     }
     expect(() => parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted', toolContentTurnBytes: 1048577 } })).toThrow('budget')
-    expect(parseRecorderConfig({ ...config, capture: {} }).capture.toolOutput).toBe('summary')
-    expect(parseRecorderConfig({ ...config, capture: { toolOutput: 'none' } }).capture).not.toHaveProperty('toolContentFieldBytes')
+    for (const capture of [undefined, {}, { diff: false }]) {
+      expect(parseRecorderConfig({ ...config, capture }).capture).toMatchObject({
+        toolOutput: 'full-redacted', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072
+      })
+    }
+    expect(parseRecorderConfig({ ...config, capture: { toolContentFieldBytes: 1024 } }).capture.toolContentFieldBytes).toBe(1024)
+    expect(() => parseRecorderConfig({ ...config, capture: { toolContentTurnBytes: 0 } })).toThrow('budget')
+    for (const toolOutput of ['none', 'summary']) {
+      const parsed = parseRecorderConfig({ ...config, capture: { toolOutput } }).capture
+      expect(parsed.toolOutput).toBe(toolOutput)
+      expect(parsed).not.toHaveProperty('toolContentFieldBytes')
+    }
+    for (const toolOutput of [null, false, 'ful-redacted']) {
+      expect(() => parseRecorderConfig({ ...config, capture: { toolOutput } })).toThrow('capture.toolOutput')
+    }
   })
 
   it('采集熔断不阻塞只读定位，dataDir 符号链接则拒绝', async () => {

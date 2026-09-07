@@ -37,6 +37,7 @@ describe('scry init', () => {
 
     expect(first.providers).toEqual(['claude', 'codex', 'qoder', 'opencode'])
     expect(second.changedFiles).toEqual([])
+    expect(JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')).capture.toolOutput).toBe('full-redacted')
     expect(JSON.parse(await readFile(join(root, '.claude/settings.local.json'), 'utf8'))).toMatchObject({ env: { KEEP: 'yes' } })
     for (const [provider, path] of [
       ['claude', '.claude/settings.local.json'],
@@ -67,6 +68,15 @@ describe('scry init', () => {
     // managed 模式不走 socket 快路径。
     expect(hookScript.indexOf('--managed')).toBeLessThan(hookScript.indexOf('payload="$(cat)"'))
   }, 60_000)
+
+  it.each(['none', 'summary'])('保留已有显式 %s 配置，不猜测用户意图', async (toolOutput) => {
+    const root = await gitWorkspace()
+    const configPath = join(root, 'scry.config.json')
+    const original = JSON.stringify({ schemaVersion: 1, workspaceId: 'existing', capture: { toolOutput } })
+    await writeFile(configPath, original)
+    await initWorkspace({ workspace: root, providers: 'claude', cliPath: process.execPath })
+    expect(await readFile(configPath, 'utf8')).toBe(original)
+  })
 
   it('拒绝在 Git 子目录初始化，并指出项目根目录', async () => {
     const root = await gitWorkspace()

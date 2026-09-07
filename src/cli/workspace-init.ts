@@ -144,7 +144,7 @@ function defaultConfig(workspace: string): string {
     workspaceId: workspaceId(workspace),
     dataDir: '.scry',
     repositories: { mode: 'discover-nested-git', maxDepth: 2 },
-    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+    capture: { prompt: true, assistant: true, toolOutput: 'full-redacted', diff: true, hooks: true }
   }, null, 2)}\n`
 }
 

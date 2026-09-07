@@ -6,7 +6,7 @@ import { parseRecorderConfig } from './config.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { captureToolContent, limitToolContent, redactToolText, sanitizeCapturedContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
 
-// Sync App sinks (archive/SQLite outbox) must resolve the same opt-in before their first write.
+// Sync App sinks (archive/SQLite outbox) must resolve the same capture policy before their first write.
 // Invalid/unreadable configuration must not silently fall back to persisting unredacted bodies.
 export function workspaceToolContentPolicy(workspace: string): ToolContentPolicy | undefined {
   if (!workspace) return undefined
