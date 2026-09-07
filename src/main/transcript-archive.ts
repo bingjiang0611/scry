@@ -15,6 +15,8 @@ import {
 } from 'node:fs'
 import { copyFile, lstat, open as openFile, readFile, readdir, rename, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { protectToolContent, workspaceToolContentPolicy } from '../core/turn-recorder/content-policy.js'
+import type { ToolContentPolicy } from '../core/turn-recorder/tool-content.js'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { isDiffSnapshotStage, normalizeTurnDiffSnapshot, type TraceEvent } from '../shared/trace'
@@ -63,6 +65,7 @@ export function archivedTranscriptPath(userDataDir: string, cwd: string, session
 }
 
 export interface TraceArchiveTurn {
+  toolContentPolicy?: ToolContentPolicy
   runId: string
   providerTurnId?: string
   forkTurnId?: string
@@ -764,7 +767,7 @@ export function upsertTraceArchiveTurn(args: {
 }): boolean {
   if (!args.sessionId) return false
   const providerId = args.providerId ?? 'claude'
-  const turn: TraceArchiveTurn = {
+  let turn: TraceArchiveTurn = {
     ...args.turn,
     attachments: args.turn.attachments?.map((attachment) =>
       'storage' in attachment
@@ -784,6 +787,10 @@ export function upsertTraceArchiveTurn(args: {
     (existing.archive.turns.length !== 1 ||
       traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, existing.archive.turns[0]) !== fp)
   ) return false
+  try {
+    const policy = existing.status === 'valid' ? existing.archive.turns[0]?.toolContentPolicy : undefined
+    turn = protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd)
+  } catch { return false }
   const archive: TraceArchive = {
     version: 3,
     cwd: args.cwd,
@@ -826,6 +833,9 @@ export function mirrorTranscript(args: {
   const dest = archivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
   const previous = transcriptMirrorTasks.get(dest) ?? Promise.resolve(true)
   const task = previous.then(async () => {
+    // Raw byte mirrors cannot honor field redaction; opt-in keeps only the protected trace archive.
+    // Historical mirrors and Provider-owned transcripts are not rewritten or deleted here.
+    try { if (workspaceToolContentPolicy(args.cwd)) return false } catch { return false }
     if (inspectTranscriptIdentity(source, args.cwd, args.sessionId).status !== 'match') return false
     try {
       await copyToOwnedFileAtomically(args.userDataDir, source, dest)

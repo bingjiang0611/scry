@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.35 \
+npm install -g scry-turn-recorder@0.2.36 \
   --registry=https://registry.npmjs.org
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -87,6 +87,29 @@ Agent、skill 与提示词不应主动调用这些命令。
 关闭某项后对应证据段记为 `disabled` 并带 `omissionReason: ... disabled by config`,与 Provider 不支持的 `unavailable`、以及"真的没发生"的空数组是三个不同状态 —— 记录自己就能解释当时采了什么。
 
 > ⚠️ **关闭正文不等于脱敏。** 即使 `prompt`、`assistant` 关闭且 `toolOutput: "none"`,以下内容仍会落盘:**工具入参**(Bash 命令原文、Edit 的 old/new 字符串)、**文件路径**、**diff patch**(除非 `diff: false`)。当前没有单独关闭工具入参的开关。要求本地不留代码与命令的场景,应设 `diff: false` 并评估工具入参是否可接受,或者干脆不在该仓库启用。
+
+## 工具正文：显式 `full-redacted`
+
+默认仍是 `summary`；旧 `none/summary` 的输入及输出行为不变。需要工具正文时，在**新一轮开始前**修改 `scry.config.json` 的 `capture`（其他配置保持不变）：
+
+```json
+{
+  "toolOutput": "full-redacted",
+  "toolContentFieldBytes": 8192,
+  "toolContentTurnBytes": 131072
+}
+```
+
+- 同时保存 `inputContent` / `outputContent`，不再把 `outputSummary` 当作全文。摘要从脱敏后的保留正文生成。正文可能是字符串、JSON 或截断的 JSON 文本片段；只有 `encoding: "json"` 可按完整 JSON 解析。
+- 单字段默认 8 KiB、最大 64 KiB；最终轮次记录新增正文合计默认 128 KiB、最大 1 MiB。按 UTF-8 字节裁剪，不截坏字符。预算按稳定调用顺序分配，input 在 output 之前；这不是整个 `.scry` 的磁盘配额，事件暂存、archive、队列有各自副本。
+- 每个字段包含 `content`（省略时不存在）、`encoding`、`savedBytes`、`source`、`sourceCompleteness`、`redaction`、`storage`、`reasons`。`sourceCompleteness: "unknown"` 表示上游没有完整性承诺；`storage: "complete"` 只表示完整保存了当前收到并脱敏的值，**不证明 Provider 原始输出完整**。
+- 原因区分 `provider_missing`、`source_truncated`、`field_budget`、`turn_budget`、`redaction_failed`、`not_collected`。上游集成声明的裁剪保留为 source partial；不能从旧摘要恢复全文。旧记录没有这些字段时按 legacy/unknown 处理，不推断完整。
+- 工具正文先经过已知模式脱敏，再裁剪和写入事件、managed progress/journal/canonical、App archive 和 SQLite 失败队列；脱敏/序列化失败时只保存安全元数据。覆盖敏感 JSON/form 键、Authorization/Cookie、URL query/URI 用户信息和 PEM 私钥。规则可能过度遮盖，也无法识别任意自由文本中的所有未知秘密，不是绝对防泄漏保证。
+- 新模式禁用 App 原始 transcript 字节镜像，改用保护后的 trace archive。Provider 自有 transcript、历史记录/镜像，以及独立的 prompt、assistant、diff、文件路径、附件不在这项工具正文脱敏保证内；不要把它理解为全工作区脱敏或历史清理。
+- 普通轮次及 managed 恢复工件保留工具正文策略；已保护的重试不会因后续修改配置回退为 raw。不要在活跃轮次中移动/删除配置或更换 dataDir。
+- 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
+
+深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
 
 ## 未结束的轮次
 
@@ -288,7 +311,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.35", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.36", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。

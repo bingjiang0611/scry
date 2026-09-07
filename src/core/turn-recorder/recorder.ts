@@ -7,6 +7,7 @@ import { disabled, partial, unavailable, type AgentTurnRecord, type TurnEvidence
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
+import { captureToolContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
 import { recordProviderActivity } from './provider-activity.js'
@@ -329,6 +330,7 @@ function lifecycleTraceEvents(args: {
   payload: Record<string, unknown>
   runId: string
   captureOutput: boolean
+  toolContentPolicy?: ToolContentPolicy
 }): TraceEvent[] {
   const at = timestampOf(args.payload)
   const toolName = toolNameOf(args.payload)
@@ -375,6 +377,12 @@ function lifecycleTraceEvents(args: {
         toolUseId,
         ...(agentId ? { agentId } : {}),
         input,
+        ...(args.toolContentPolicy?.toolOutput === 'full-redacted' ? {
+          inputContent: captureToolContent(args.payload[['tool_input', 'toolInput', 'input'].find((key) => key in args.payload) ?? 'tool_input'], {
+            source: 'lifecycle_hook', maxBytes: args.toolContentPolicy.toolContentFieldBytes,
+            ...(limitations.some((item) => item.field === 'tool_input') ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : {})
+          })
+        } : {}),
         ...mcp,
         ...file,
         ...(danger ? { danger } : {}),
@@ -385,7 +393,9 @@ function lifecycleTraceEvents(args: {
     }
   } else if (/^PostToolUse(?:Failure)?(?::|$)/.test(args.event) || args.event === 'tool.execute.after') {
     const failed = /Failure/.test(args.event) || args.payload.error != null || args.payload.is_error === true
-    const result = args.payload.tool_response ?? args.payload.toolResponse ?? args.payload.output ?? args.payload.result ?? args.payload.error
+    const result = args.toolContentPolicy?.toolOutput === 'full-redacted'
+      ? args.payload[['tool_response', 'toolResponse', 'output', 'result', 'error'].find((key) => key in args.payload) ?? 'tool_response']
+      : args.payload.tool_response ?? args.payload.toolResponse ?? args.payload.output ?? args.payload.result ?? args.payload.error
     out.push({
       id: `result-${toolUseId ?? stableHash([args.event, args.payload]).slice(0, 16)}`,
       ts: at,
@@ -395,7 +405,12 @@ function lifecycleTraceEvents(args: {
       tool: toolName,
       toolUseId,
       ...(agentId ? { agentId } : {}),
-      ...(args.captureOutput ? { text: summarize(result), output: summarize(result) } : {}),
+      ...(args.toolContentPolicy?.toolOutput === 'full-redacted'
+        ? { outputContent: captureToolContent(result, {
+            source: 'lifecycle_hook', maxBytes: args.toolContentPolicy.toolContentFieldBytes,
+            ...(limitations.some((item) => item.field === 'tool_response') ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : {})
+          }) }
+        : args.captureOutput ? { text: summarize(result), output: summarize(result) } : {}),
       isError: failed,
       ...(limitationMetadata(limitations.filter((item) => item.field === 'tool_response'))
         ? { runtimeMetadata: limitationMetadata(limitations.filter((item) => item.field === 'tool_response')) }
@@ -1791,6 +1806,11 @@ async function beginOpenTurn(
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
   const open: OpenTurnState = {
+    ...(enablement.config.capture.toolOutput === 'full-redacted' ? { toolContentPolicy: {
+      toolOutput: 'full-redacted' as const,
+      toolContentFieldBytes: enablement.config.capture.toolContentFieldBytes,
+      toolContentTurnBytes: enablement.config.capture.toolContentTurnBytes
+    } } : {}),
     schemaVersion: 1,
     provider,
     sessionId,
@@ -1847,18 +1867,20 @@ async function storeLifecycleEvent(
 ): Promise<string> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const id = stableHash({ event, sessionId: open.sessionId, generation: open.generation, payload })
+  const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
   const stored: StoredLifecycleEvent = {
     schemaVersion: 1,
     id,
     event,
     observedAt: new Date().toISOString(),
-    traceEvents: lifecycleTraceEvents({
+    traceEvents: sanitizeToolEvents(lifecycleTraceEvents({
       provider: open.provider,
       event,
       payload,
       runId: `${open.provider}:${open.sessionId}:${open.generation}`,
-      captureOutput: enablement.config.capture.toolOutput === 'summary'
-    }),
+      captureOutput: contentPolicy.toolOutput === 'summary',
+      toolContentPolicy: contentPolicy
+    }), contentPolicy, 'lifecycle_hook'),
     ...(transcriptPathOf(payload) ? { transcriptPath: transcriptPathOf(payload) } : {})
   }
   await writeJsonAtomic(join(turnRoot(root, open.generation), 'events', `${id}.json`), stored, { sync: false })
@@ -2013,6 +2035,7 @@ async function finalizeOpenTurn(
       : transcript.userText ?? open.prompt,
     events,
     source: transcript.observed ? 'provider_transcript+lifecycle_hooks' : 'lifecycle_hooks',
+    toolContentPolicy: open.toolContentPolicy ?? enablement.config.capture,
     observable: {
       assistant: transcript.observed || events.some((event) => event.kind === 'model' && event.stage === 'text'),
       tools: hasToolEvidence || transcript.observable.tools,

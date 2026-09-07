@@ -14,6 +14,7 @@ export interface RecorderSessionState {
 }
 
 export interface RecorderOpenTurnState {
+  toolContentPolicy?: import('./tool-content.js').ToolContentPolicy
   schemaVersion: 1
   provider: ProviderId
   sessionId: string

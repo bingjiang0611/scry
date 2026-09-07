@@ -43,6 +43,17 @@ afterEach(() => {
 })
 
 describe('transcript archive mirror', () => {
+  it('full-redacted disables new raw transcript mirrors without touching Provider originals', async () => {
+    const cwd = tempRoot()
+    const home = tempRoot()
+    const userDataDir = tempRoot()
+    writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'safe', capture: { toolOutput: 'full-redacted' } }))
+    const source = writeTranscript(home, cwd, 'safe-session', transcriptContent(cwd, 'safe-session'))
+    await expect(mirrorTranscript({ cwd, home, userDataDir, sessionId: 'safe-session' })).resolves.toBe(false)
+    expect(existsSync(archivedTranscriptPath(userDataDir, cwd, 'safe-session'))).toBe(false)
+    expect(readFileSync(source, 'utf8')).toBe(transcriptContent(cwd, 'safe-session'))
+  })
+
   it('不绑定项目使用独立受管目录写入和读取 trace archive', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')

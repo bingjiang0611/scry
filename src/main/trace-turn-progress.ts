@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import { protectToolContent } from '../core/turn-recorder/content-policy.js'
 import { basename, dirname, join } from 'node:path'
 import type { ProviderId } from '../shared/provider.js'
 import type { RuntimeProvider } from '../shared/runtime.js'
@@ -139,6 +140,8 @@ export async function persistTraceTurnProgress(args: {
 }): Promise<void> {
   const path = progressPath(args.userDataDir, args.turn.runId)
   const existing = await readJson<TraceTurnProgress>(path)
+  const policy = existing?.request.turn.toolContentPolicy
+  args = { ...args, turn: protectToolContent({ ...args.turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd) }
   const { userDataDir: _userDataDir, ...request } = args
   if (existing) {
     if (!validProgress(existing) || stableHash(existing.request) !== stableHash(request)) {
@@ -163,6 +166,8 @@ export async function persistUnresolvedTraceTurnProgress(args: {
 }): Promise<void> {
   const path = progressPath(args.userDataDir, args.turn.runId)
   const existing = await readJson<UnresolvedTraceTurnProgress>(path)
+  const policy = existing?.request.turn.toolContentPolicy
+  args = { ...args, turn: protectToolContent({ ...args.turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd) }
   const { userDataDir: _userDataDir, reason, ...request } = args
   const next: UnresolvedTraceTurnProgress = {
     schemaVersion: 1,

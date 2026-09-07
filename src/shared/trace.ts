@@ -419,6 +419,8 @@ export interface ContextCompaction {
 }
 
 export interface TraceEvent {
+  inputContent?: import('./tool-content.js').ToolContent
+  outputContent?: import('./tool-content.js').ToolContent
   id: string
   ts: string
   runId: string // 一次 query() = 一个 run（模式 A 下 app 自造 baggage）

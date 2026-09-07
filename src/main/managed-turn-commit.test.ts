@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -191,6 +191,44 @@ async function startManaged(workspace: string, provider: 'claude' | 'codex' = 'c
 }
 
 describe('managed trace turn coordinator', () => {
+  it('full-redacted progress, journal recovery, archive and canonical records share safe bodies', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const path = join(workspace, 'scry.config.json')
+    const config = JSON.parse(await readFile(path, 'utf8'))
+    config.capture.toolOutput = 'full-redacted'
+    await writeFile(path, JSON.stringify(config))
+    await startManaged(workspace)
+    const request = input(workspace, userDataDir)
+    request.turn.items.push(
+      { id: 'tool', runId: 'run-1', ts: '2026-07-29T12:00:01.000Z', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 't', input: { token: 'MANAGED_INPUT_SECRET', command: 'echo ok' } },
+      { id: 'output', runId: 'run-1', ts: '2026-07-29T12:00:02.000Z', kind: 'tool', stage: 'tool_result', toolUseId: 't', output: `${'正文'.repeat(400)}\npassword=MANAGED_OUTPUT_SECRET\nfinished` }
+    )
+    request.turn.turnEvidence = aggregateTurnEvidence({ userText: request.turn.userText, events: request.turn.items })
+    const scan = async (dir: string): Promise<string> => {
+      const entries = await readdir(dir, { withFileTypes: true })
+      return (await Promise.all(entries.map((entry) => entry.isDirectory() ? scan(join(dir, entry.name)) : readFile(join(dir, entry.name), 'utf8')))).join('\n')
+    }
+    await persistManagedTraceProgress(request)
+    expect(await scan(userDataDir)).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    config.capture.toolOutput = 'summary'
+    await writeFile(path, JSON.stringify(config))
+    await persistManagedTraceProgress(request)
+    expect(await scan(userDataDir)).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    await expect(commitManagedTraceTurn(request, { waitMs: 0, removeArtifact: async () => { throw new Error('simulated interruption') } })).rejects.toThrow('simulated interruption')
+    expect(await scan(userDataDir)).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    expect(await scan(join(workspace, '.scry'))).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    config.capture.toolOutput = 'full-redacted'
+    config.capture.toolContentFieldBytes = 10
+    config.capture.toolContentTurnBytes = 20
+    await writeFile(path, JSON.stringify(config))
+    await recoverManagedTraceTurns(userDataDir, { cwd: workspace, waitMs: 0 })
+    await commitManagedTraceTurn(request, { waitMs: 0 })
+    const records = await listRecords(join(workspace, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].tools.value![0].outputContent?.content).toContain('finished')
+    expect(records[0].tools.value![0].outputContent!.savedBytes).toBeGreaterThan(500)
+  })
+
   it('仅非 completed 轮次可在缺 Provider result 时使用 App 观测边界', () => {
     const observed = {
       startedAt: '2026-07-29T12:00:00.000Z',

@@ -3,7 +3,7 @@ import { createServer as createNetServer } from 'node:net'
 import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listenRecorderDaemon, recorderDaemonStatus, recorderSocketPath, sendRecorderDaemonHook } from './daemon'
 import { RECORDER_VERSION, listRecords } from './store'
 
@@ -11,6 +11,7 @@ const roots: string[] = []
 const socketDirs: string[] = []
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   await Promise.all([
     ...roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
     ...socketDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))
@@ -69,7 +70,33 @@ describe('turn recorder daemon', () => {
     const workspace = join(tmpdir(), 'nested', 'x'.repeat(120))
     const path = recorderSocketPath(workspace, { ...process.env, SCRY_RECORDER_SOCKET: '' })
     expect(Buffer.byteLength(path)).toBeLessThanOrEqual(100)
-    expect(path.startsWith(tmpdir())).toBe(true)
+    expect(recorderSocketPath(workspace, { SCRY_RECORDER_SOCKET: '' })).toBe(path)
+    expect(recorderSocketPath(`${workspace}-other`, {})).not.toBe(path)
+  })
+
+  it('显式长路径和超长 TMPDIR 仍返回稳定、不同且有界的 endpoint', () => {
+    vi.stubEnv('TMPDIR', `/tmp/${'深'.repeat(80)}`)
+    const workspace = `/tmp/${'workspace'.repeat(20)}`
+    const env = { SCRY_RECORDER_SOCKET: `${workspace}/custom.sock` }
+    const path = recorderSocketPath(workspace, env)
+    expect(Buffer.byteLength(path)).toBeLessThanOrEqual(100)
+    expect(path.startsWith('/tmp/scry-')).toBe(true)
+    expect(recorderSocketPath(workspace, env)).toBe(path)
+    expect(recorderSocketPath(workspace, { SCRY_RECORDER_SOCKET: `${workspace}/other.sock` })).not.toBe(path)
+    expect(recorderSocketPath(workspace, { SCRY_RECORDER_SOCKET: '/tmp/short.sock' })).toBe('/tmp/short.sock')
+  })
+
+  it('显式超长 socket 可真实监听并连接', async () => {
+    const root = await workspace()
+    const requested = join(root, 'x'.repeat(120), 'recorder.sock')
+    const env = { SCRY_RECORDER_SOCKET: requested }
+    const daemon = await listenRecorderDaemon({ workspace: root, socketPath: requested, env })
+    try {
+      expect(Buffer.byteLength(daemon.socketPath)).toBeLessThanOrEqual(100)
+      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: true })
+    } finally {
+      await daemon.close()
+    }
   })
 
   it('通过 workspace socket 复用 recorder core 并提交完整轮次', async () => {
