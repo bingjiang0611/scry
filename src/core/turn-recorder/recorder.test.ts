@@ -64,6 +64,39 @@ async function completeTurn(root: string, sessionId: string, prompt = 'implement
 }
 
 describe('turn recorder state machine', () => {
+  it.each(['0.2.27', '0.2.30', '0.2.34'])('reads legacy unavailable timing from %s without rewriting records or blocking a new session', async (recorderVersion) => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'legacy-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const path = join(dataRoot, 'records', name)
+    const legacy = JSON.parse(await readFile(path, 'utf8'))
+    legacy.recorderVersion = recorderVersion
+    legacy.modelTiming = {
+      status: 'partial', quality: 'unavailable', source: ['provider_transcript+lifecycle_hooks'],
+      value: { method: 'non_call_residual', activityCoverage: { timedCalls: 1, totalCalls: 2 } },
+      omissionReason: 'turn wall-clock is inconsistent with observed activity intervals'
+    }
+    const bytes = JSON.stringify(legacy)
+    await writeFile(path, bytes)
+    await completeTurn(root, 'new-session')
+    const records = await listRecords(dataRoot)
+    expect(records).toHaveLength(2)
+    expect(records[0].modelTiming).toEqual({ ...legacy.modelTiming, status: 'unavailable' })
+    expect(records[1]).toMatchObject({ sessionId: 'new-session', turnIndex: 1 })
+    expect(await readFile(path, 'utf8')).toBe(bytes)
+    expect((await exportRecords(dataRoot)).records[0].modelTiming?.status).toBe('unavailable')
+    await expect(commitRecord(dataRoot, { ...legacy, recordId: 'f'.repeat(32) })).rejects.toThrow('refusing to commit invalid turn record')
+    for (const invalid of [
+      { ...legacy, recorderVersion: '0.2.35' },
+      { ...legacy, modelTiming: { ...legacy.modelTiming, value: { ...legacy.modelTiming.value, cumulativeMs: 0 } } },
+      { ...legacy, modelTiming: { ...legacy.modelTiming, value: { method: 'non_call_residual', activityCoverage: { timedCalls: 3, totalCalls: 2 } } } }
+    ]) {
+      await writeFile(path, JSON.stringify(invalid))
+      await expect(listRecords(dataRoot)).rejects.toThrow('invalid turn record')
+    }
+  })
+
   it('recovery 对未变化 transcript 复用有界解析快照', async () => {
     const root = await workspace()
     const rollout = join(root, 'codex-cache.jsonl')

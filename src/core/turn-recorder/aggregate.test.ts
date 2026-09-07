@@ -4,6 +4,19 @@ import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 
 describe('aggregateTurnEvidence', () => {
+  it('preserves unavailable model timing when activity exceeds the turn wall clock', () => {
+    const evidence = aggregateTurnEvidence({ events: [
+      { id: 'call', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'tool', stage: 'tool_use', toolUseId: 'call', toolName: 'Read' },
+      { id: 'result', ts: '2026-01-01T00:00:02.000Z', runId: 'r', kind: 'tool', stage: 'tool_result', toolUseId: 'call', durationMs: 2_000 },
+      { id: 'wall', ts: '2026-01-01T00:00:02.000Z', runId: 'r', kind: 'harness', stage: 'turn_wall', durationMs: 1_000 }
+    ] })
+    expect(evidence.modelTiming).toEqual({
+      status: 'unavailable', quality: 'unavailable', source: ['trace_events'],
+      value: { method: 'non_call_residual', activityCoverage: { timedCalls: 1, totalCalls: 1 } },
+      omissionReason: 'turn wall-clock is inconsistent with observed activity intervals'
+    })
+  })
+
   it('把 compact 事件保留为逐轮结构化证据', () => {
     const evidence = aggregateTurnEvidence({ events: [{
       id: 'compact-1',
