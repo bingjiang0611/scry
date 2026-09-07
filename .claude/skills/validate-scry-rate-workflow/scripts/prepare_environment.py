@@ -160,6 +160,11 @@ def reusable_isolated_build(
 
 
 def git_blob_sha1(path: Path) -> str:
+    if path.is_symlink():
+        value = os.fsencode(os.readlink(path))
+        digest = hashlib.sha1(f"blob {len(value)}\0".encode())
+        digest.update(value)
+        return digest.hexdigest()
     digest = hashlib.sha1(f"blob {path.stat().st_size}\0".encode())
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -202,7 +207,9 @@ def materialize_head_snapshot(scry_repo: Path, snapshot_dir: Path) -> dict[str, 
         if not expected:
             raise RuntimeError("committed Scry tree has no blobs to snapshot")
         files = 0
-        for path in sorted(item for item in snapshot_dir.rglob("*") if item.is_file()):
+        for path in sorted(
+            item for item in snapshot_dir.rglob("*") if item.is_symlink() or item.is_file()
+        ):
             relative = str(path.relative_to(snapshot_dir))
             if git_blob_sha1(path) != expected.get(relative):
                 raise RuntimeError(f"build snapshot drifted from the committed tree: {relative}")
@@ -742,16 +749,20 @@ def self_test() -> int:
         (repo / "tracked.txt").write_text("committed\n", encoding="utf-8")
         (repo / "nested").mkdir()
         (repo / "nested/deep.txt").write_text("deep\n", encoding="utf-8")
-        assert preflight.command(["git", "add", "tracked.txt", "nested"], repo)[0] == 0
+        (repo / "nested-link").symlink_to("nested", target_is_directory=True)
+        assert preflight.command(["git", "add", "tracked.txt", "nested", "nested-link"], repo)[0] == 0
         assert preflight.command(["git", "commit", "-m", "fixture"], repo)[0] == 0
         (repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
         (repo / "untracked.txt").write_text("untracked\n", encoding="utf-8")
         (repo / "node_modules").mkdir()
         (repo / "node_modules/dep.js").write_text("dep\n", encoding="utf-8")
         snapshot = materialize_head_snapshot(repo, run_root / "scry-build-src")
-        assert snapshot["verified"] is True and snapshot["files"] == 2
+        assert snapshot["verified"] is True and snapshot["files"] == 3
         assert (run_root / "scry-build-src/tracked.txt").read_text(encoding="utf-8") == "committed\n"
         assert not (run_root / "scry-build-src/untracked.txt").exists()
+        assert (run_root / "scry-build-src/nested-link").is_symlink()
+        assert os.readlink(run_root / "scry-build-src/nested-link") == "nested"
+        assert git_blob_sha1(run_root / "scry-build-src/nested-link") == git_blob_sha1(repo / "nested-link")
         assert (run_root / "scry-build-src/node_modules").is_symlink()
         assert (run_root / "scry-build-src/node_modules/dep.js").read_text(encoding="utf-8") == "dep\n"
         assert git_blob_sha1(run_root / "scry-build-src/nested/deep.txt") == git_blob_sha1(repo / "nested/deep.txt")
