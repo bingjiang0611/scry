@@ -1851,45 +1851,69 @@ body.pane-resizing * {
   color: var(--mcp);
   flex: none;
 }
-/* 方案 C：思考是对话主线，直接以正文呈现，无卡片背景/边框；左侧栏沟一枚菱形做身份。 */
 .thinking {
   position: relative;
-  display: block;
+  width: 100%;
   margin: 0;
-  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border3);
+  border-radius: 10px;
   background: transparent;
-  color: var(--fg);
-  font-size: 14.5px;
-  line-height: 1.82;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+  text-align: left;
 }
-.thinking,
+.thinking[open] {
+  background: var(--surface-faint);
+}
 .si-head,
 .tool-row,
 .subhead {
   width: 100%;
+  border: 0;
+  background: transparent;
   font-family: inherit;
   text-align: left;
 }
-.thinking {
-  border: 0;
+.thinking .think-head {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  color: var(--dim2);
+  cursor: pointer;
+  font-size: var(--text-compact-size);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  list-style: none;
 }
-.si-head,
-.tool-row,
-.subhead {
-  border: 0;
-  background: transparent;
+.thinking .think-head::-webkit-details-marker {
+  display: none;
 }
-.thinking .think-mark {
-  position: absolute;
-  left: -25px;
-  top: 0.62em;
-  width: 8px;
-  height: 8px;
-  transform: rotate(45deg);
-  background: var(--skill);
-  border-radius: 1.5px;
+.thinking .think-head:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+}
+.thinking .think-bulb {
+  width: 13px;
+  height: 13px;
+  color: var(--dim2);
+}
+.thinking .think-chevron {
+  width: 13px;
+  height: 13px;
+  margin-left: auto;
+  color: var(--dim3);
+  transition: transform 120ms ease-out;
+}
+.thinking[open] .think-chevron {
+  transform: rotate(180deg);
 }
 .thinking .think-text {
+  padding: 0 14px 14px;
   color: inherit;
   white-space: pre-wrap;
   word-break: break-word;
@@ -8118,16 +8142,6 @@ textarea:focus-visible,
   gap: 3px;
 }
 
-/* 运行配置：宽度不够时先让模型名省略号收窄，再整块换行——绝不横向裁切。
-   （被切一半的「完全访问」既难看又看不出当前权限，违反反假状态原则。）
-   窄宽度来自窗口缩放和左右拖分栏两种路径，所以只能靠内在收缩/换行，
-   不能靠 viewport 断点：拖分栏时 viewport 根本没变。
-   display: contents 让三个下拉与 Agent 选择器在同一个 flex 流里换行，
-   换行后每排都左对齐，不会挂在 Agent 按钮右边缩进一格。 */
-.run-control-scroll {
-  display: contents;
-}
-
 /* 值宽度必须跟「当前选中项」一致：原生 select 的内在宽度由最长选项决定，
    选中短选项（如 GPT-5.6-Sol）时值和箭头之间会空出一大段。
    所以可见文本交给 .rc-value，select 透明覆盖在上层只负责交互与 a11y。 */
@@ -8216,22 +8230,6 @@ textarea:focus-visible,
 .clibtn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-.composer-controls .clibtn {
-  max-width: 190px;
-  height: 40px;
-  padding: 0 8px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--dim);
-  font-size: 12px;
-}
-
-.composer-controls .clibtn:hover:not(:disabled) {
-  border-color: var(--border2);
-  background: var(--panel3);
-  color: var(--fg);
 }
 
 .composer .send {

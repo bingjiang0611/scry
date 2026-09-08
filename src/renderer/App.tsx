@@ -21,7 +21,7 @@ import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { AgentsSurface } from './components/AgentsSurface'
-import { PinnedSummaryHost } from './components/PinnedSummary'
+import { PinnedSummaryHost, usePinnedSummaryVisibility } from './components/PinnedSummary'
 import {
   createRightSurfaceState,
   reduceRightSurfaceState,
@@ -65,6 +65,14 @@ export function hasSessionOverviewContext(
   busy: boolean
 ): boolean {
   return sessionId !== null || turnCount > 0 || busy
+}
+
+export function focusedRunNeedsLoading(
+  runId: string,
+  localStartPending: boolean,
+  localRunIds: ReadonlySet<string>
+): boolean {
+  return !localStartPending && !localRunIds.has(runId)
 }
 
 export interface SessionEvidenceGap {
@@ -529,7 +537,6 @@ export function App() {
     reduceRightSurfaceState,
     createRightSurfaceState({ visible: false })
   )
-  const [summaryOverlayOpen, setSummaryOverlayOpen] = useState(false)
   const hasSurfaceContext = Boolean(cwd || activeSessionId)
   const terminalOpen = rightSurface.openIds.includes('terminal')
   const [workspaceDirty, setWorkspaceDirty] = useState(false)
@@ -560,7 +567,8 @@ export function App() {
   }, [chooseFolderRaw, confirmWorkspaceTransition])
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const terminalRunIdsRef = useRef(new Set<string>())
-  // runId -> 发送时的会话身份：只用于采纳本视图发起那一轮新建的原生 session id。
+  const localRunIdsRef = useRef(new Set<string>())
+  // runId -> 发送时的会话身份：用于采纳本视图发起那一轮新建的原生 session id。
   const localStartsRef = useRef(new Map<string, string>())
   const markRunStarted = useCallback((runId: string): void => {
     terminalRunIdsRef.current.delete(runId)
@@ -572,6 +580,7 @@ export function App() {
     })
   }, [])
   const markRunFinished = useCallback((runId: string): void => {
+    localRunIdsRef.current.delete(runId)
     localStartsRef.current.delete(runId)
     terminalRunIdsRef.current.add(runId)
     while (terminalRunIdsRef.current.size > 512) {
@@ -738,10 +747,15 @@ export function App() {
         ? window.scry.onFocusedRun((run) => {
             const seq = ++sessionSelectionSeqRef.current
             const isCurrent = (): boolean => !cancelled && seq === sessionSelectionSeqRef.current
+            const showLoading = focusedRunNeedsLoading(
+              run.runId,
+              draftStartPendingRef.current,
+              localRunIdsRef.current
+            )
             shouldStickToBottomRef.current = true
             markRunStarted(run.runId)
             setComposerError(null)
-            setSessionLoading(true)
+            setSessionLoading(showLoading)
             void restoreFocusedRunSelection(run, {
               prepareRunFocus: session.prepareRunFocus,
               selectContext: ({ providerId, agentProfileId, cwd: nextCwd, sessionId }) => {
@@ -756,7 +770,7 @@ export function App() {
             }).catch((error) => {
               if (isCurrent()) setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
             }).finally(() => {
-              if (isCurrent()) setSessionLoading(false)
+              if (showLoading && isCurrent()) setSessionLoading(false)
             })
           })
         : () => {}
@@ -765,7 +779,6 @@ export function App() {
         ? window.scry.onSession((event) => {
             markRunStarted(event.runId)
             const adopted = adoptLocalStartSessionId(event, activeSessionIdRef.current, localStartsRef.current)
-            if (event.runId) localStartsRef.current.delete(event.runId)
             if (adopted) selectSessionId(adopted)
             applySessionCapturedEffects(event, {
               activeSessionId: adopted ?? activeSessionIdRef.current,
@@ -942,6 +955,12 @@ export function App() {
         attachments
       })
       if (!runId) return
+      localRunIdsRef.current.add(runId)
+      while (localRunIdsRef.current.size > 64) {
+        const oldest = localRunIdsRef.current.values().next().value
+        if (oldest === undefined) break
+        localRunIdsRef.current.delete(oldest)
+      }
       if (expectedSessionId == null) selectSessionId(runId)
       else {
         localStartsRef.current.set(runId, expectedSessionId)
@@ -1410,16 +1429,9 @@ export function App() {
   }
   const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen
   const panelVisible = rightPanelMounted && view === 'chat' && rightSurface.visible && !surfacePane.collapsed
-  const summaryPersistent = view === 'chat' && !panelVisible
-  const summaryVisible = summaryPersistent || (view === 'chat' && summaryOverlayOpen)
-  const dismissPinnedSummary = useCallback((): void => setSummaryOverlayOpen(false), [])
-  useEffect(() => {
-    if (!panelVisible || view !== 'chat') setSummaryOverlayOpen(false)
-  }, [panelVisible, view])
-  const togglePinnedSummary = (): void => {
-    if (view !== 'chat' || !panelVisible) return
-    setSummaryOverlayOpen((current) => !current)
-  }
+  const pinnedSummary = usePinnedSummaryVisibility(view === 'chat', panelVisible)
+  const summaryPersistent = pinnedSummary.persistent
+  const summaryVisible = pinnedSummary.visible
   const panelRuntimeProvider = useMemo(
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
     [integrations.selectedId, session.turns]
@@ -1564,7 +1576,7 @@ export function App() {
 
   return (
     <div
-      className={`app app-shell${rightPanelMounted ? ` has-right-panel right-panel-surface${panelVisible && rightSurface.maximized ? ' right-panel-maximized' : ''}${!panelVisible ? ' right-panel-hidden' : ''}` : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
+      className={`app app-shell${rightPanelMounted ? ` has-right-panel right-panel-surface${panelVisible && rightSurface.maximized ? ' right-panel-maximized' : ''}${!panelVisible ? ' right-panel-hidden' : ''}` : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
       style={appStyle}
     >
       <Sidebar
@@ -1630,9 +1642,8 @@ export function App() {
               agent={integrations.selectedAgent}
               agentScanning={integrations.agentsScanning}
               showSummary={summaryVisible}
-              summaryPersistent={summaryPersistent}
               showPanel={panelVisible}
-              onToggleSummary={togglePinnedSummary}
+              onToggleSummary={pinnedSummary.toggle}
               onTogglePanel={toggleOverviewPanel}
             />
 
@@ -1716,17 +1727,17 @@ export function App() {
           turns={session.turns}
           busy={session.busy}
           temporary={!summaryPersistent}
-          onDismiss={dismissPinnedSummary}
+          onDismiss={pinnedSummary.dismiss}
           onOpenChanges={diffReview ? () => {
-            dismissPinnedSummary()
+            pinnedSummary.dismiss()
             openSessionNetDiff()
           } : undefined}
           onOpenCall={(runId, event) => {
-            dismissPinnedSummary()
+            pinnedSummary.dismiss()
             openTurnInChat(runId, event, 'event')
           }}
           onOpenAgents={() => {
-            dismissPinnedSummary()
+            pinnedSummary.dismiss()
             surfacePane.restore()
             dispatchRightSurface({ type: 'open', kind: 'agents' })
           }}

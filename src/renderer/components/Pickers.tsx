@@ -294,6 +294,177 @@ export interface RunControlSelectOption {
   disabled?: boolean
 }
 
+export function ModelEffortPicker({
+  modelValue,
+  modelOptions,
+  effortValue,
+  effortOptions,
+  onModelChange,
+  onEffortChange,
+  loading = false
+}: {
+  modelValue: string
+  modelOptions: RunControlSelectOption[]
+  effortValue: string
+  effortOptions: RunControlSelectOption[]
+  onModelChange: (value: string) => void
+  onEffortChange: (value: string) => void
+  loading?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [modelsOpen, setModelsOpen] = useState(false)
+  const pickerRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const currentRef = useRef<HTMLButtonElement>(null)
+  const modelListRef = useRef<HTMLDivElement>(null)
+  const popoverId = useId()
+  const selectedModel = modelOptions.find((option) => option.value === modelValue) ?? modelOptions[0]
+  const selectedEffort = effortOptions.find((option) => option.value === effortValue) ?? effortOptions[0]
+
+  useEffect(() => {
+    if (!loading) return
+    setOpen(false)
+    setModelsOpen(false)
+  }, [loading])
+
+  useEffect(() => {
+    if (!open) return
+    const focusTimer = window.setTimeout(() => {
+      if (modelsOpen) {
+        const options = Array.from(modelListRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+        const selectedOption = options.find((option) => option.getAttribute('aria-selected') === 'true') ?? options[0]
+        selectedOption?.focus()
+      } else currentRef.current?.focus()
+    }, 0)
+    const dismissOnOutsidePointer = (event: PointerEvent): void => {
+      if (!(event.target instanceof Node) || pickerRef.current?.contains(event.target)) return
+      setOpen(false)
+      setModelsOpen(false)
+    }
+    const dismissOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+      setModelsOpen(false)
+      triggerRef.current?.focus()
+    }
+    document.addEventListener('pointerdown', dismissOnOutsidePointer, true)
+    document.addEventListener('keydown', dismissOnEscape)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('pointerdown', dismissOnOutsidePointer, true)
+      document.removeEventListener('keydown', dismissOnEscape)
+    }
+  }, [modelsOpen, open])
+
+  return (
+    <div className="model-effort-picker" ref={pickerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="model-effort-trigger"
+        disabled={loading}
+        aria-label="选择 Model 与 Effort"
+        aria-description={`当前 ${selectedModel?.label ?? '自动模型'}，${selectedEffort?.label ?? '默认'}`}
+        aria-busy={loading}
+        aria-expanded={open}
+        aria-controls={popoverId}
+        aria-haspopup="dialog"
+        title={[selectedModel?.description, selectedEffort?.description].filter(Boolean).join(' · ')}
+        onClick={() => setOpen((current) => {
+          if (current) setModelsOpen(false)
+          return !current
+        })}
+      >
+        <span className="model-effort-model">{selectedModel?.label ?? '自动模型'}</span>
+        <span className="model-effort-effort">{selectedEffort?.label ?? '默认'}</span>
+        <Icon name="chevronDown" className="chev" />
+      </button>
+      {open && (
+        <div id={popoverId} className="model-effort-popover" role="dialog" aria-label="Model 与 Effort">
+          {!modelsOpen ? (
+            <>
+              <button
+                ref={currentRef}
+                type="button"
+                className="model-effort-current"
+                aria-label={`选择 Model，当前 ${selectedModel?.label ?? '自动模型'}`}
+                aria-expanded={false}
+                onClick={() => setModelsOpen(true)}
+              >
+                <span>{selectedModel?.label ?? '自动模型'}</span>
+                <span className="model-effort-current-effort">{selectedEffort?.label ?? '默认'}</span>
+                <Icon name="chevronRight" className="chev" />
+              </button>
+              <div className="model-effort-scale" role="group" aria-label="推理强度">
+                {effortOptions.map((option) => (
+                  <button
+                    type="button"
+                    className={option.value === effortValue ? 'selected' : ''}
+                    aria-pressed={option.value === effortValue}
+                    disabled={option.disabled}
+                    title={option.description}
+                    key={option.value}
+                    onClick={() => {
+                      onEffortChange(option.value)
+                      setOpen(false)
+                      setModelsOpen(false)
+                      window.setTimeout(() => triggerRef.current?.focus(), 0)
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div
+              ref={modelListRef}
+              className="model-effort-list"
+              role="listbox"
+              aria-label="选择 Model"
+              onKeyDown={(event) => {
+                if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+                const options = Array.from(modelListRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+                if (options.length === 0) return
+                event.preventDefault()
+                const current = options.indexOf(document.activeElement as HTMLButtonElement)
+                const next = event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? options.length - 1
+                    : event.key === 'ArrowUp'
+                      ? (current <= 0 ? options.length - 1 : current - 1)
+                      : (current + 1) % options.length
+                options[next]?.focus()
+              }}
+            >
+              {modelOptions.map((option) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={option.value === modelValue}
+                  disabled={option.disabled}
+                  title={option.description}
+                  key={option.value}
+                  onClick={() => {
+                    if (option.value !== modelValue) onModelChange(option.value)
+                    setModelsOpen(false)
+                  }}
+                >
+                  <span>{option.label}</span>
+                  {option.value === modelValue && <Icon name="check" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function RunControlSelect({
   ariaLabel,
   prefix,

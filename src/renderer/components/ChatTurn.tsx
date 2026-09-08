@@ -257,15 +257,18 @@ function UserMessageImpl({
   )
 }
 
-// 方案 C：思考是对话主线，直接以正文呈现（左侧栏沟一枚菱形做身份）；
-// 工具调用退成脚注折叠（见 ToolGroup）。
 function ThinkingBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(true)
   if (!text.trim()) return null
   return (
-    <div className="thinking">
-      <span className="think-mark" aria-hidden="true" />
-      <div className="think-text md"><Markdown>{text}</Markdown></div>
-    </div>
+    <details className="thinking" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="think-head" aria-expanded={open}>
+        <Icon name="bulb" className="think-bulb" />
+        <span>思考过程</span>
+        <Icon name="chevronDown" className="think-chevron" />
+      </summary>
+      {open && <div className="think-text md"><Markdown>{text}</Markdown></div>}
+    </details>
   )
 }
 

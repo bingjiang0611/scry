@@ -13,7 +13,7 @@ import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
 import { AssistantTurn, UserMessage, type UserMessageEditMode } from './ChatTurn'
-import { WorkdirPicker, CliPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
+import { WorkdirPicker, CliPicker, ModelEffortPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import type { WorkspaceFileTarget } from '../workspace-links'
@@ -645,15 +645,6 @@ export function ChatView({
             onPick={onPickRecent}
             onRemove={onRemoveRecent}
           />
-          <CliPicker
-            agents={agents}
-            selectedId={selectedAgentId}
-            onSelect={onSelectAgent}
-            onAddPi={onAddPiAgent}
-            onRemovePi={onRemovePiAgent}
-            onRescan={onRescan}
-            disabled={agentLocked}
-          />
         </div>
         {busy && (
           <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone}>
@@ -748,54 +739,55 @@ export function ChatView({
           </div>
         )}
         <div className="composer-bottom">
-          <div className="composer-controls" role="group" aria-label="运行配置">
-            <div className="run-control-scroll">
-              <RunControlSelect
-                ariaLabel="模型"
-                prefix="模型"
-                value={modelValue}
-                options={modelOptions}
-                loading={runControlsLoading}
-                onChange={(value) => {
-                  const option = runControlCatalog.models.find(
-                    (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
-                  )
-                  onRunModel(option?.model)
-                }}
-              />
-              {selectedModel && selectedModel.efforts.length > 0 && (
-                <RunControlSelect
-                  ariaLabel="Effort"
-                  prefix="强度"
-                  value={runControls.effort ?? ''}
-                  options={effortOptions}
-                  onChange={(value) => onRunEffort(value || undefined)}
-                />
-              )}
-              <RunControlSelect
-                ariaLabel="权限"
-                prefix="权限"
-                value={runControls.permissionMode}
-                options={permissionOptions}
-                tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
-                onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
-              />
-            </div>
+          <div className="composer-controls" role="group" aria-label="权限配置">
+            <RunControlSelect
+              ariaLabel="权限"
+              prefix="权限"
+              value={runControls.permissionMode}
+              options={permissionOptions}
+              tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
+              onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
+            />
           </div>
           <div className="spacer" />
-          <button
-            type="button"
-            className="send"
-            onClick={onSend}
-            disabled={submitting || sessionLoading || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
-            aria-busy={submitting}
-            aria-label={sendActionLabel}
-            aria-describedby={composerStatus ? 'composer-status' : undefined}
-            title={composerStatus ?? sendActionLabel}
-          >
-            <Icon name="arrowUp" />
-            <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>
-          </button>
+          <div className="composer-action-controls" role="group" aria-label="Agent、Model 与 Effort">
+            <CliPicker
+              agents={agents}
+              selectedId={selectedAgentId}
+              onSelect={onSelectAgent}
+              onAddPi={onAddPiAgent}
+              onRemovePi={onRemovePiAgent}
+              onRescan={onRescan}
+              disabled={agentLocked}
+            />
+            <ModelEffortPicker
+              modelValue={modelValue}
+              modelOptions={modelOptions}
+              effortValue={runControls.effort ?? ''}
+              effortOptions={effortOptions}
+              loading={runControlsLoading}
+              onModelChange={(value) => {
+                const option = runControlCatalog.models.find(
+                  (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
+                )
+                onRunModel(option?.model)
+              }}
+              onEffortChange={(value) => onRunEffort(value || undefined)}
+            />
+            <button
+              type="button"
+              className="send"
+              onClick={onSend}
+              disabled={submitting || sessionLoading || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
+              aria-busy={submitting}
+              aria-label={sendActionLabel}
+              aria-describedby={composerStatus ? 'composer-status' : undefined}
+              title={composerStatus ?? sendActionLabel}
+            >
+              <Icon name="arrowUp" />
+              <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>
+            </button>
+          </div>
         </div>
         </div>
       </div>
