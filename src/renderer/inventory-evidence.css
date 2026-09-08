@@ -169,7 +169,7 @@
 
 .inventory-context__item > span {
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: 700 var(--text-compact-size)/1 var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -577,7 +577,7 @@
 .inventory-footnote > span {
   flex: none;
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: 700 var(--text-compact-size)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -585,7 +585,7 @@
 .inventory-footnote > p {
   margin: 0;
   color: var(--dim2);
-  font: 11.5px/1.45 var(--font-ui);
+  font: var(--text-supporting-size)/1.45 var(--font-ui);
 }
 
 .inventory-state-legend {
@@ -646,7 +646,7 @@
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: 700 var(--text-compact-size)/1 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }

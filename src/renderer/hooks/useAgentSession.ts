@@ -361,7 +361,12 @@ export function buildAgentStartRequest(text: string, options: Omit<AgentStartReq
   return { ...options, prompt, attachments: attachments.map((attachment) => ({ ...attachment })) as AgentInputAttachment[] }
 }
 
-export function visibleTurnsBeforeReplacement(turns: Turn[], replaceRunId: string | undefined): Turn[] {
+export function visibleTurnsBeforeReplacement(
+  turns: Turn[],
+  replaceRunId: string | undefined,
+  clearSession = false
+): Turn[] {
+  if (clearSession) return []
   if (!replaceRunId) return turns
   const index = turns.findIndex((turn) => turn.runId === replaceRunId)
   return index >= 0 ? turns.slice(0, index) : turns
@@ -520,7 +525,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     pendingStartLifecycleRef.current = null
     setTurns((prev) => {
       const replaceRunId = request.forkLastTurn?.replaceRunId ?? request.restartLastTurn?.replaceRunId
-      const visible = visibleTurnsBeforeReplacement(prev, replaceRunId)
+      const visible = visibleTurnsBeforeReplacement(prev, replaceRunId, !!request.restartLastTurn)
       const index = visible.findIndex((turn) => turn.runId === runId)
       if (index === -1) {
         return replayRunLifecycleDeltas(

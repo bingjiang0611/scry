@@ -1,0 +1,112 @@
+# scry · verification
+
+按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [CLAUDE.md](../../CLAUDE.md)。
+
+## 测试约定
+
+- 测试与实现 colocate 为 `*.test.ts` / `*.test.tsx`；Provider wire 差异使用 fixture/contract test，不用 shared mock 抹平。
+- Provider 发现链路同时覆盖 fast/full 两阶段探测、版本探测超时收敛和已保存的自定义 Profile；扫描中不展示中间卡片，完整结果一次展示。
+- trust、permission、path、IPC 和 deletion 逻辑同时测试 allow 与 deny/mismatch/stale 路径。
+- evidence 测试要覆盖真实空值、不可观测、partial、重复和乱序，不只测完整 happy path。
+- Recorder 测试覆盖 crash fence、原子写、lock recovery、duplicate event/Stop、cursor 与 corrupt record。
+- 不用固定 sleep 掩盖竞态；等待 receipt、事件、进程退出、文件原子出现或 queue drain。
+- 当前仓库没有 ESLint/Prettier 命令，不要发明不存在的门禁或做大范围无关格式化。
+
+迭代时运行最小相关检查：
+
+```bash
+npx vitest run src/main/providers/codex.test.ts
+npm run typecheck
+npm run build
+```
+
+## 验证与交付
+
+默认选择能证明本次改动的最小验证，不把 CLI 多版本兼容、Electron 打包和 security smoke 作为每次小改动的前置条件。非纯文档/Agent 配置任务完成改动并通过对应验证后，默认启动开发版本供用户检查；用户明确要求不启动时除外。为用户检查而启动开发版本时，默认直接使用正常用户数据和工作区，不注入临时 `HOME`、`userData`、Application Support 或其他隔离数据目录；只有自动化测试、破坏性验证或用户明确要求时才使用隔离数据。
+
+### 纯文档或 Agent 配置
+
+```bash
+git diff --check
+```
+
+同时核对 Markdown、引用路径、命令、Provider/安全边界与版本示例。纯文档不构建 App/CLI、不升版本。
+
+### 普通代码改动
+
+开发中运行受影响测试；普通 App 代码交付前至少运行：
+
+```bash
+npx vitest run <affected-test-files>
+npm run typecheck
+npm run build
+git diff --check
+```
+
+- 修改 workspace Hook 时追加 `npm run test:shell`。
+- 修改 recorder Core、CLI、integration 或 npm 包时追加 `npm run check:cli-release`。
+- 修改 packaging、preload、native dependency、resource allowlist 或 Electron security 时追加 `npm run pack:artifact`。
+- 本机 ignored 的 `.claude/`、`.agents/` 等 Agent 目录可能污染 Vitest 自动发现；应限定到项目自有 `src/`、`scripts/` 测试或在 clean checkout 运行，不要删除用户配置来让测试通过。
+
+### UI / 交互修复验收
+
+- 修改前明确用户原始操作步骤、预期结果和受影响的状态转换，不只修截图中的单一状态。按本次范围检查首次/连续多轮发送后立即停止、原生 turn ID 尚未建立/已建立，以及侧边栏开关、固定/悬浮摘要、滚动与焦点等相邻路径；保留 Provider 差异。
+- 把原始复现步骤和最容易回归的相邻操作补成少量针对性用例；涉及事件顺序或 UI 接线时，不能仅靠纯函数测试证明交互正确。再次收到“仍不行”时先补全遗漏的状态或时序，再修复并补回归用例。
+- 在包含当前改动且 main/preload/renderer 版本一致的 App 上重放原始操作，确认目标行为与相关反向操作；构建成功或 App 已启动不等于原问题已验收。
+- 交付分别说明编译/构建、自动测试、原问题真实交互验收的结果与实际范围。截图/观察失败、Provider 不可用或未执行时明确标注，不把前两项写成真实验收通过；这些 focused 用例不额外触发全量发布门禁。
+
+### 完整 CI / 发布门禁
+
+以下情况才运行完整套件：用户明确要求；改动跨越 Provider/trust/persistence/recorder/IPC/packaging 多个核心边界；准备高风险合入；或构建可安装/正式发布版本。
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run check:cli-release
+npm run pack:artifact
+git diff --check
+```
+
+完整 gate 对应 Node 22 App、Node 20/22/24 CLI compatibility 和 macOS packaged Electron security smoke。涉及真实 Provider、OAuth、账号、MCP server 或平台行为时另做 L3，并明确哪些未执行。
+
+## 版本、打包、安装与发布
+
+App 与独立 CLI **分别版本化**；不要默认每次 App 修改都升 CLI，也不要漏升实际改变的分发面。
+
+- 纯文档/Agent 配置不产生新 App/CLI 产物，不为此单独升版本。
+- 普通 App 源码提交不自动升版本；准备新的可安装版本或正式发布时，源码冻结后才升一次根 `package.json` version，并重新跑完整验证与打包。
+- 影响独立 recorder CLI 合同、命令、integration 或 npm 包内容：升 `packages/turn-recorder-cli/package.json` version，并同步 README/安装示例。
+- 如果同一改动同时影响两个分发面，分别判断并分别升版本；两者无需强行相同。
+- README 中的 CLI 安装版本必须与 CLI package 当前版本一致，避免复制陈旧命令。
+
+开发目录包：
+
+```bash
+npm run pack:artifact
+```
+
+准备桌面 App 可安装版本或正式发布时，必须安装并检查同一产物：
+
+```bash
+npm run install:mac:dev
+```
+
+正式签名/公证安装：
+
+```bash
+npm run install:mac
+```
+
+正式路径要求 Developer ID Application/`CSC_LINK`、Team ID 与 Apple notarization credentials；安装器会验证 bundle id、App/CLI version、签名、Gatekeeper、staple 和 Team ID 后再原子替换 `/Applications/Scry.app`。不要手工覆盖 App。
+
+独立 CLI 发布只使用：
+
+```bash
+npm run publish:cli
+```
+
+package lifecycle 会强制执行 `check:cli-release`，registry 固定为内网地址；不要从陈旧 `dist` 手工 `npm publish`。
+
+提交前检查 `git diff`，只提交本任务改动；除非用户明确要求，不推送。
+

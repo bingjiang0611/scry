@@ -45,14 +45,31 @@ async function exercise() {
   check(JSON.parse(text('#selection')).tool === 'mcp__browser__navigate', 'MCP navigation lost tool identity')
 
   const toggle = button('#pinned', 'Skills & MCP')
+  const controlledDetail = () => document.getElementById(toggle.getAttribute('aria-controls'))
   toggle.click()
   await waitFor(() => toggle.getAttribute('aria-expanded') === 'false')
-  check(!text('#pinned').includes('hsf-invoke'), 'Collapsed rows remained visible')
+  check(controlledDetail()?.hidden === true, 'Collapsed detail remained exposed')
+  check(getComputedStyle(controlledDetail()).display === 'none', 'Production CSS displayed a hidden detail')
   toggle.click()
-  await waitFor(() => text('#pinned').includes('hsf-invoke'))
+  await waitFor(() => toggle.getAttribute('aria-expanded') === 'true' && controlledDetail()?.hidden === false)
+  check(getComputedStyle(controlledDetail()).display === 'flex', 'Expanded detail remained visually hidden')
+  toggle.click()
+  await waitFor(() => toggle.getAttribute('aria-expanded') === 'false')
+  document.querySelector('#toggle-pinned').click()
+  await waitFor(() => document.querySelector('#pinned aside') == null)
+  document.querySelector('#toggle-pinned').click()
+  await waitFor(() => document.querySelector('#pinned aside') != null)
+  const remountedToggle = button('#pinned', 'Skills & MCP')
+  const remountedDetail = document.getElementById(remountedToggle.getAttribute('aria-controls'))
+  check(remountedToggle.getAttribute('aria-expanded') === 'false', 'Remount reset the collapsed disclosure')
+  check(remountedDetail?.hidden === true, 'Remounted detail became visible')
+  check(getComputedStyle(remountedDetail).display === 'none', 'Remounted collapsed detail is visually exposed')
+  remountedToggle.click()
+  await waitFor(() => remountedToggle.getAttribute('aria-expanded') === 'true')
   document.querySelector('#empty').click()
   await waitFor(() => text('#pinned').includes('尚未观测到'))
   check(!text('#pinned').includes('hsf-invoke') && !text('#pinned').includes('browser / navigate'), 'New session retained old rows')
+  check(!text('#pinned').includes('Web references'), 'Known-zero Web references row remained visible')
   check(document.querySelector('#pinned [data-evidence="unknown"]').textContent === '—', 'Missing evidence became fake zero')
 
   document.querySelector('#pending').click()
@@ -112,10 +129,16 @@ try {
     define: { 'process.env.NODE_ENV': '"production"' },
     build: {
       outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
-      lib: { entry: join(root, 'scripts/fixtures/session-capability-smoke.tsx'), formats: ['iife'], name: 'ScryRegression', fileName: () => 'fixture.js', cssFileName: 'fixture' }
+      lib: {
+        entry: join(root, 'scripts/fixtures/session-capability-smoke.tsx'),
+        formats: ['iife'],
+        name: 'ScryRegression',
+        fileName: () => 'fixture.js',
+        cssFileName: 'fixture'
+      }
     }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'"><div id="root"></div><script src="fixture.js"></script>')
+  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
     if (process.platform === 'darwin') app.setActivationPolicy('prohibited')

@@ -662,8 +662,11 @@ export function runtimeCliEnv(
         throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
       }
       if (!cached && actualVersion !== RECORDER_VERSION) {
+        // 版本不匹配最常见的原因是“运行中的 Scry 是旧构建，全局 CLI 已升级”，
+        // 所以把可执行的下一步写进错误本身，Provider 日志里看不出这个因果。
         throw new Error(
-          `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}`
+          `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}` +
+          `；重启/重建当前 Scry 构建，或把该 scry CLI 对齐到 ${RECORDER_VERSION}`
         )
       }
       if (!cached) verifiedRecorderCliVersions.add(verificationKey)

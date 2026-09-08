@@ -155,7 +155,7 @@ function UserMessageImpl({
             <span className="user-edit-note">
               {editMode === 'branch'
                 ? '将创建新对话分支，不会回滚工作区文件'
-                : '本轮尚未形成可分支边界；发送后将从此消息重新开始，不会回滚工作区文件'}
+                : '当前会话尚未形成可分支边界；发送后将从此消息重新开始，不会回滚工作区文件'}
             </span>
             <div className="user-edit-actions">
               <button type="button" disabled={saving} onClick={() => { setDraft(text); setEditError(null); setEditing(false) }}>取消</button>
