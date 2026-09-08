@@ -514,7 +514,9 @@ async function replayJournal(
       evidence,
       timing: archiveCommitted.request.timing,
       status: archiveCommitted.request.status,
-      env: commitHookEnv
+      env: commitHookEnv,
+      // record 已落盘；向仓库回调投递不能挡住轮次收口（App 常驻，剩余积压由后续投递补上）。
+      commitNotifications: 'detach'
     })
     if (committed.status === 'disabled' || committed.status === 'pending' || committed.status === 'prepared') {
       throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')
@@ -651,7 +653,8 @@ export async function commitManagedTraceTurn(
       evidence,
       timing: input.timing,
       status: input.status,
-      env: options.commitHookEnv
+      env: options.commitHookEnv,
+      commitNotifications: 'detach'
     })
     if (committed.status !== 'committed' && committed.status !== 'duplicate') {
       throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')

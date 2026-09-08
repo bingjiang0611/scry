@@ -71,10 +71,18 @@ function validProgress(value: TraceTurnProgress | null): value is TraceTurnProgr
     )
 }
 
-export function isFrontdoorFailureTurn(turn: Pick<TraceArchiveTurn, 'status' | 'items'>): boolean {
-  return turn.status === 'failed' && turn.items.some((item) =>
-    item.kind === 'harness' && item.stage === 'result' && item.runtimeFailureStage === 'frontdoor'
-  )
+// 终态失败/中止、且没有任何 Provider 证据（无 Provider turn 边界，只有 harness 自己的事件）
+// 的轮次，说明 Provider 在给出原生 session id 之前就没有任何产出：这个 id 永远不会到来，
+// 所以它不是“待恢复的 Provider 证据”，也没有可写入的 archive key。把它留成 unresolved 只会让
+// 该工作区+Provider 永久无法开始新一轮（agent:start 会 fail closed 在“仍有 N 轮待恢复”）。
+// 真正必须 fail closed 的是 Provider 已经产出过内容、却丢了 session id 的轮次：那种仍保留为 pending。
+// 失败本身的证据不会消失：它仍在 usage.jsonl、spans、会话 catalog 与当前轮的 trace 里。
+export function isProviderlessTerminalTurn(
+  turn: Pick<TraceArchiveTurn, 'status' | 'items' | 'providerTurnId' | 'forkTurnId'>
+): boolean {
+  if (turn.status !== 'failed' && turn.status !== 'cancelled' && turn.status !== 'interrupted') return false
+  if (turn.providerTurnId || turn.forkTurnId) return false
+  return turn.items.every((item) => item.kind === 'harness')
 }
 
 function validUnresolvedProgress(value: UnresolvedTraceTurnProgress | null): value is UnresolvedTraceTurnProgress {
@@ -202,9 +210,9 @@ export async function recoverTraceTurnProgress(
       if (filter.cwd != null && request.cwd !== filter.cwd) continue
       if (filter.sessionId) continue
       if (filter.providerId && request.providerId !== filter.providerId) continue
-      // Provider 启动前失败不可能产生原生 session id，也不是可恢复的 Provider turn。
-      // 旧版本曾把这类失败永久卡成 pending；保留它只会让修正参数后的下一次启动继续失败。
-      if (isFrontdoorFailureTurn(request.turn)) {
+      // Provider 产出任何内容之前就失败的轮次不可能再拿到原生 session id，也不是可恢复的 Provider turn。
+      // 旧版本曾把这类失败永久卡成 pending；保留它只会让修正环境后的下一次启动继续失败。
+      if (isProviderlessTerminalTurn(request.turn)) {
         await rm(path, { force: true })
         recovered++
         continue

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  commitHookTrustPolicy,
   createCommitHookTrustStore,
   inspectCommitHookBundle,
   resolveCommitHookCapability,
@@ -133,6 +134,68 @@ describe('commit hook bundle trust', () => {
 
     await writeFile(join(value.workspace, 'hooks', 'helper.txt'), 'dependency-v2\n')
     await expect(resolveGrantedCommitHookCapability(value.workspace, value.descriptor, value.userData)).resolves.toBeNull()
+  })
+
+  // 维护者决定：仓库 commit 回调默认统一放行，不再弹窗。但自动放行不得冒充成用户批准。
+  it('默认策略是 auto_grant，只有显式环境变量才恢复询问', () => {
+    expect(commitHookTrustPolicy({})).toBe('auto_grant')
+    expect(commitHookTrustPolicy({ SCRY_COMMIT_HOOK_TRUST: 'auto_grant' })).toBe('auto_grant')
+    expect(commitHookTrustPolicy({ SCRY_COMMIT_HOOK_TRUST: 'prompt' })).toBe('prompt')
+  })
+
+  it('autoGrant 下无需预先授权即可物化，且授权记录标注 source=auto', async () => {
+    const value = await fixture()
+    const inspection = await inspectCommitHookBundle(value.workspace, value.descriptor)
+
+    await expect(resolveGrantedCommitHookCapability(value.workspace, value.descriptor, value.userData))
+      .resolves.toBeNull()
+    await expect(resolveGrantedCommitHookCapability(
+      value.workspace,
+      value.descriptor,
+      value.userData,
+      undefined,
+      { autoGrant: true }
+    )).resolves.toMatchObject({ fingerprint: inspection.fingerprint })
+
+    const grants = JSON.parse(await readFile(join(value.userData, 'commit-hook-grants.json'), 'utf8'))
+    expect(grants.grants).toHaveLength(1)
+    expect(grants.grants[0]).toMatchObject({
+      workspace: inspection.workspace,
+      fingerprint: inspection.fingerprint,
+      source: 'auto'
+    })
+
+    // 指纹变了也不再阻断：自动换成新指纹的授权，依旧只执行冻结字节。
+    await writeFile(join(value.workspace, 'hooks', 'helper.txt'), 'dependency-v2\n')
+    const next = await inspectCommitHookBundle(value.workspace, value.descriptor)
+    await expect(resolveGrantedCommitHookCapability(
+      value.workspace,
+      value.descriptor,
+      value.userData,
+      undefined,
+      { autoGrant: true }
+    )).resolves.toMatchObject({ fingerprint: next.fingerprint })
+  })
+
+  it('用户批准与自动放行在授权记录里可区分，旧记录视为用户批准', async () => {
+    const value = await fixture()
+    const inspection = await inspectCommitHookBundle(value.workspace, value.descriptor)
+    const store = createCommitHookTrustStore(value.userData)
+
+    await store.grant(value.workspace, inspection.fingerprint)
+    let grants = JSON.parse(await readFile(join(value.userData, 'commit-hook-grants.json'), 'utf8'))
+    expect(grants.grants[0].source).toBe('user')
+
+    await store.grant(value.workspace, inspection.fingerprint, 'auto')
+    grants = JSON.parse(await readFile(join(value.userData, 'commit-hook-grants.json'), 'utf8'))
+    expect(grants.grants[0].source).toBe('auto')
+
+    await writeFile(
+      join(value.userData, 'commit-hook-grants.json'),
+      `${JSON.stringify({ version: 1, grants: [{ workspace: inspection.workspace, fingerprint: inspection.fingerprint, grantedAt: 1 }] })}\n`,
+      { mode: 0o600 }
+    )
+    await expect(store.isGranted(value.workspace, inspection.fingerprint)).resolves.toBe(true)
   })
 
   it('信任库只枚举去重后的已授权 workspace', async () => {
