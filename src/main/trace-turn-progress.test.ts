@@ -86,7 +86,17 @@ describe('trace turn progress', () => {
       cwd: '/repo',
       providerId: 'claude',
       runtimeProvider: 'claude_sdk',
-      turn: { runId: 'run-missing-session', userText: 'same prompt', items: [], done: true, status: 'failed', ts: 1 },
+      // Provider 已经产出过内容（有 provider turn 边界与 model 事件）却丢了 session id：
+      // 这是真正需要 fail closed 的 adapter 缺陷，证据必须保留为 pending。
+      turn: {
+        runId: 'run-missing-session',
+        providerTurnId: 'provider-turn-1',
+        userText: 'same prompt',
+        items: [{ id: 'model', ts: '2026-08-01T00:00:00.000Z', runId: 'run-missing-session', kind: 'model', stage: 'text_delta', text: 'partial' }],
+        done: true,
+        status: 'failed',
+        ts: 1
+      },
       reason: 'missing_provider_session_id'
     })
 
@@ -99,6 +109,42 @@ describe('trace turn progress', () => {
         errors: ['unresolved trace turn progress (missing_provider_session_id): run-missing-session']
       })
     expect(deleteTraceTurnProgressArtifacts(userDataDir, new Set(['run-missing-session']))).toEqual({ failed: [] })
+    await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
+  it('clears unresolved evidence for a runtime-stage failure that produced no Provider evidence', async () => {
+    const userDataDir = root()
+    // 真实现场：pinned recorder CLI 版本不符在 runtime 阶段报错，Provider 根本没启动，
+    // 只留下 harness 的 controls/result。旧行为会把它卡成永久 pending，该工作区再也发不出去。
+    await persistUnresolvedTraceTurnProgress({
+      userDataDir,
+      cwd: '/repo',
+      providerId: 'qoder',
+      runtimeProvider: 'qoder_cli',
+      turn: {
+        runId: 'run-version-gate',
+        userText: 'hello',
+        items: [
+          { id: 'controls', ts: '2026-08-01T00:00:00.000Z', runId: 'run-version-gate', kind: 'harness', stage: 'runtime:controls' },
+          {
+            id: 'result',
+            ts: '2026-08-01T00:00:01.000Z',
+            runId: 'run-version-gate',
+            kind: 'harness',
+            stage: 'result',
+            isError: true,
+            runtimeFailureStage: 'runtime'
+          }
+        ],
+        done: true,
+        status: 'failed',
+        ts: 1
+      },
+      reason: 'missing_provider_session_id'
+    })
+
+    await expect(recoverTraceTurnProgress(userDataDir, { cwd: '/repo', providerId: 'qoder' }))
+      .resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
     await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
   })
 

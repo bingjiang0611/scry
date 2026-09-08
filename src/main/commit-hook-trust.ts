@@ -38,9 +38,21 @@ export interface CommitHookCapability {
   env: Record<string, string>
 }
 
+export type CommitHookGrantSource = 'user' | 'auto'
+
 interface GrantFile {
   version: 1
-  grants: Array<{ workspace: string; fingerprint: string; grantedAt: number }>
+  grants: Array<{ workspace: string; fingerprint: string; grantedAt: number; source?: CommitHookGrantSource }>
+}
+
+export type CommitHookTrustPolicy = 'auto_grant' | 'prompt'
+
+// 维护者明确决定：仓库 commit 回调默认统一放行，不再每次指纹变化就弹窗打断发送。
+// 代价已知并被接受：被 Scry 打开的仓库只要声明了 commitHook，就会在每轮记录提交后
+// 以本机用户权限执行它自己的脚本，没有确认。授权仍然按 canonical cwd + 内容指纹记录，
+// 并标注 source=auto，不把自动放行冒充成用户批准。SCRY_COMMIT_HOOK_TRUST=prompt 可恢复询问。
+export function commitHookTrustPolicy(env: NodeJS.ProcessEnv = process.env): CommitHookTrustPolicy {
+  return env.SCRY_COMMIT_HOOK_TRUST === 'prompt' ? 'prompt' : 'auto_grant'
 }
 
 export const DEFAULT_COMMIT_HOOK_LIMITS: CommitHookLimits = {
@@ -166,10 +178,13 @@ function parseGrants(value: unknown): GrantFile {
   return {
     version: 1,
     grants: Array.isArray(grants)
-      ? grants.filter(
-          (grant): grant is GrantFile['grants'][number] =>
-            !!grant && typeof grant.workspace === 'string' && typeof grant.fingerprint === 'string' && typeof grant.grantedAt === 'number'
-        )
+      ? grants
+          .filter(
+            (grant): grant is GrantFile['grants'][number] =>
+              !!grant && typeof grant.workspace === 'string' && typeof grant.fingerprint === 'string' && typeof grant.grantedAt === 'number'
+          )
+          // 旧文件没有 source：那些确实是用户在弹窗里批准的。
+          .map((grant) => ({ ...grant, source: grant.source === 'auto' ? 'auto' as const : 'user' as const }))
       : []
   }
 }
@@ -206,14 +221,18 @@ export function createCommitHookTrustStore(userDataDir: string) {
   const grantedWorkspaces = async (): Promise<string[]> =>
     [...new Set((await readGrants()).grants.map((grant) => grant.workspace))]
 
-  const grant = async (workspacePath: string, fingerprint: string): Promise<void> => {
+  const grant = async (
+    workspacePath: string,
+    fingerprint: string,
+    source: CommitHookGrantSource = 'user'
+  ): Promise<void> => {
     const workspace = await realpath(workspacePath)
     const current = await readGrants()
     const next: GrantFile = {
       version: 1,
       grants: [
         ...current.grants.filter((item) => item.workspace !== workspace),
-        { workspace, fingerprint, grantedAt: Date.now() }
+        { workspace, fingerprint, grantedAt: Date.now(), source }
       ]
     }
     await mkdir(userDataDir, { recursive: true, mode: 0o700 })
@@ -339,11 +358,16 @@ export async function resolveGrantedCommitHookCapability(
   workspacePath: string,
   descriptor: CommitHookDescriptor,
   userDataDir: string,
-  limits?: CommitHookLimits
+  limits?: CommitHookLimits,
+  options: { autoGrant?: boolean } = {}
 ): Promise<CommitHookCapability | null> {
   const store = createCommitHookTrustStore(userDataDir)
-  if ((await store.grantedFingerprints(workspacePath)).length === 0) return null
+  const known = await store.grantedFingerprints(workspacePath)
+  if (known.length === 0 && !options.autoGrant) return null
   const inspection = await inspectCommitHookBundle(workspacePath, descriptor, limits)
-  if (!(await store.isGranted(inspection.workspace, inspection.fingerprint))) return null
+  if (!(await store.isGranted(inspection.workspace, inspection.fingerprint))) {
+    if (!options.autoGrant) return null
+    await store.grant(inspection.workspace, inspection.fingerprint, 'auto')
+  }
   return store.materialize(inspection)
 }

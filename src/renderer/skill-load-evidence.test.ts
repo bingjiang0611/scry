@@ -60,6 +60,49 @@ describe('user-requested Skill file loading evidence', () => {
     }
   })
 
+  it.each([
+    { label: 'another run', result: { ...response, runId: 'run-other' } },
+    { label: 'a subagent reusing the call id', result: { ...response, agentId: 'child-agent' } },
+    { label: 'another tool', result: { ...response, tool: 'Write' } },
+    { label: 'a non-tool event', result: { ...response, kind: 'model' as const } }
+  ])('does not borrow success from $label', ({ result }) => {
+    expect(count([read, result]).skillTotal).toBe(0)
+  })
+
+  it('keeps a successful result when a duplicate without outcome arrives later', () => {
+    const partial = { ...response, id: 'shadow-result', isError: undefined }
+    for (const results of [[response, partial], [partial, response]]) {
+      expect(count([read, ...results])).toMatchObject({ skillTotal: 1, totalCalls: 1 })
+    }
+  })
+
+  it('does not assert successful loading when correlated terminal outcomes conflict', () => {
+    const failed = { ...response, id: 'conflicting-result', isError: true }
+    for (const results of [[response, failed], [failed, response]]) {
+      expect(count([read, ...results]).skillTotal).toBe(0)
+    }
+  })
+
+  it('reprojects pending → success and session switches without retaining inferred events', () => {
+    const turn = { runId: read.runId, userText: prompt, items: [read], done: false }
+    expect(sessionCapabilityCalls([turn])).toEqual([])
+    expect(sessionCapabilityCalls([{ ...turn, items: [read, response] }])[0]).toMatchObject({ name: 'hsf-invoke', inferredCount: 1 })
+    expect(sessionCapabilityCalls([turn])).toEqual([])
+    expect(read.kind).toBe('tool')
+    expect(read.input).not.toHaveProperty('source')
+  })
+
+  it('matches reordered read/result evidence without depending on array position', () => {
+    expect(count([response, read])).toMatchObject({ skillTotal: 1, totalCalls: 1 })
+  })
+
+  it('keeps direct and inferred usage provenance separate across turns sharing tool ids', () => {
+    const loaded = { runId: read.runId, userText: prompt, items: [read, response], done: true }
+    const direct: TraceEvent = { ...read, id: 'native', runId: 'run-2', kind: 'skill', stage: 'tool:Skill', tool: 'Skill', name: 'hsf-invoke' }
+    const rows = sessionCapabilityCalls([loaded, { ...loaded, runId: 'run-2', items: [direct] }])
+    expect(rows[0]).toMatchObject({ count: 2, inferredCount: 1, event: read })
+  })
+
   it('counts loaded turns independently, labels inference and links back to the original Read', () => {
     const turn = { runId: read.runId, userText: prompt, items: [read, response], done: true }
     const rows = sessionCapabilityCalls([turn])

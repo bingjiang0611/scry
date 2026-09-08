@@ -27,6 +27,8 @@ import {
   type RecorderSessionState
 } from './runtime-state.js'
 import {
+  HOOK_DRAIN_BUDGET_MS,
+  HOOK_DRAIN_MAX_RECORDS,
   RECORDER_VERSION,
   clearRuntimeTurn,
   commitRecord,
@@ -623,6 +625,31 @@ async function commitHandoff(
   return { status: committed.status, recordId: committed.record.recordId, record: committed.record }
 }
 
+/**
+ * 提交通知的投递位置。`await` 用于 CLI/recover：进程随后就退出，必须先把这一批投递完。
+ * `detach` 用于常驻 App：record 已经落盘，向仓库回调投递只是下游观测，绝不能挂在用户看到
+ * 轮次收口之前——每条通知都要起一次仓库回调进程，积压时会把“运行中”拖到分钟级。剩余积压由
+ * 下一次 hook、`recorder recover` 或 `recorder notify-drain` 继续投递，ACK 游标是持久化的，
+ * 因此不会丢证据。
+ */
+export type CommitNotificationDelivery = 'await' | 'detach'
+
+async function deliverCommitNotifications(
+  dataRoot: string,
+  env: NodeJS.ProcessEnv | undefined,
+  delivery: CommitNotificationDelivery
+): Promise<void> {
+  const drain = (): Promise<unknown> => drainCommitNotifications(dataRoot, env, {
+    maxRecords: HOOK_DRAIN_MAX_RECORDS,
+    budgetMs: HOOK_DRAIN_BUDGET_MS
+  })
+  if (delivery === 'detach') {
+    void drain().catch(() => undefined)
+    return
+  }
+  await drain()
+}
+
 export async function commitManagedRecorderTurn(input: {
   workspace: string
   provider: ManagedRecorderProviderId
@@ -636,6 +663,7 @@ export async function commitManagedRecorderTurn(input: {
   timing: ManagedTurnTiming
   status: AgentTurnRecord['status']
   env?: NodeJS.ProcessEnv
+  commitNotifications?: CommitNotificationDelivery
 }): Promise<ManagedTurnResult> {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
@@ -657,14 +685,20 @@ export async function commitManagedRecorderTurn(input: {
     await writeJsonAtomic(existing.path, committedHandoff)
     return commitHandoff(enablement, root, committedHandoff)
   }, { waitMs: SESSION_LOCK_WAIT_MS })
-  await drainCommitNotifications(enablement.dataRoot, input.env)
+  // canonical record 此时已落盘；通知投递是下游观测，不参与本轮是否成功的判定。
+  await deliverCommitNotifications(enablement.dataRoot, input.env, input.commitNotifications ?? 'await')
   return result
 }
 
 export async function recoverManagedRecorderTurns(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env,
-  options: { sessionId?: string; provider?: ManagedRecorderProviderId } = {}
+  options: {
+    sessionId?: string
+    provider?: ManagedRecorderProviderId
+    // 常驻 App 走 'detach'：恢复检查在“发送前”跑，不能被仓库回调积压拖住发送。
+    commitNotifications?: CommitNotificationDelivery
+  } = {}
 ): Promise<{ recovered: number; pending: number }> {
   const mode = await managedRecorderMode(workspace, env)
   if (mode.status === 'disabled') return { recovered: 0, pending: 0 }
@@ -719,6 +753,7 @@ export async function recoverManagedRecorderTurns(
       }
     }
   }
-  await drainCommitNotifications(enablement.dataRoot, env)
+  // agent:start 每一轮都会跑到这里；同步投递会把发送卡在“正在启动”。
+  await deliverCommitNotifications(enablement.dataRoot, env, options.commitNotifications ?? 'await')
   return { recovered, pending }
 }

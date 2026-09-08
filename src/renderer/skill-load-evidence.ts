@@ -17,9 +17,14 @@ export function projectRequestedSkillLoads(items: TraceEvent[], userText?: strin
   const command = userText?.trimStart().match(/^\/(?:skill:)?([A-Za-z0-9][A-Za-z0-9._:-]*)(?=\s|$)/)?.[1]
   if (!command) return items
   const explicit = new Set(items.filter((event) => event.kind === 'skill' && event.stage !== 'tool_result').map((event) => event.name))
-  const results = new Map<string, TraceEvent>()
+  const identity = (event: TraceEvent) => JSON.stringify([event.runId, event.agentId ?? null, event.toolUseId])
+  const results = new Map<string, TraceEvent[]>()
   for (const event of items) {
-    if (event.stage === 'tool_result' && event.toolUseId) results.set(event.toolUseId, event)
+    if (event.kind !== 'tool' || event.stage !== 'tool_result' || !event.toolUseId) continue
+    const key = identity(event)
+    const group = results.get(key) ?? []
+    group.push(event)
+    results.set(key, group)
   }
   const loaded = new Set<string>()
   return items.map((event) => {
@@ -32,9 +37,13 @@ export function projectRequestedSkillLoads(items: TraceEvent[], userText?: strin
     const workspace = match?.groups?.workspace
     if (!name || (command !== name && command !== `${workspace}-${name}`)) return event
     if (explicit.has(name) || explicit.has(command) || loaded.has(name)) return event
-    const result = results.get(event.toolUseId)
-    if (result?.isError !== false) return event
-    if (result.filePath && result.filePath !== path) return event
+    const responses = results.get(identity(event)) ?? []
+    // A partial duplicate must not erase confirmed success. Conflicting outcomes or
+    // identities, however, cannot prove a successful load, regardless of arrival order.
+    if (!responses.some((result) => result.isError === false)) return event
+    if (responses.some((result) => result.isError === true ||
+      (result.tool != null && result.tool !== event.tool) ||
+      (result.filePath != null && result.filePath !== path))) return event
     loaded.add(name)
     // Reclassify the existing Read for the call breakdown, rather than adding a fake tool
     // call. Preserve id/runId/toolUseId so clicking still opens the original Read evidence.

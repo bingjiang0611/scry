@@ -30,6 +30,8 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test:unit": "vitest run",
+    "test:regressions": "vitest run src/renderer/skill-load-evidence.test.ts src/renderer/session-capability-contract.test.tsx src/renderer/session-capability-calls.test.ts src/renderer/components/PinnedSummary.test.tsx src/renderer/components/render.test.tsx src/renderer/dock-badge-permission.test.ts src/main/context-admission.test.ts src/main/trace-turn-progress.test.ts src/main/trace-turn-progress.regression.test.ts src/main/commit-hook-trust.test.ts src/main/commit-hook-trust.regression.test.ts src/main/managed-turn-notifications.test.ts && npm run test:renderer:ui",
+    "test:renderer:ui": "node scripts/session-capability-ui-smoke.mjs",
     "test:shell": "sh scripts/setup-scry-workspace.test.sh",
     "test": "npm run test:unit && npm run test:shell",
     "bench:git-diff": "node scripts/git-turn-diff-bench.mjs",
