@@ -19,7 +19,7 @@ async function exercise() {
     const observer = new MutationObserver(() => {
       if (predicate()) { clearTimeout(timer); observer.disconnect(); resolve() }
     })
-    const timer = setTimeout(() => { observer.disconnect(); reject(new Error('DOM condition timed out')) }, 5000)
+    const timer = setTimeout(() => { observer.disconnect(); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
   const button = (scope, fragment) => {
@@ -69,7 +69,38 @@ async function exercise() {
   check(button('#pinned', 'hsf-invoke').textContent.includes('×2'), 'Cross-turn Skill count lost')
   check(button('#pinned', 'browser / navigate').textContent.includes('×2'), 'Cross-turn MCP count lost')
   check(text('#overview').includes('Skill 2（含加载推断）'), 'Multi-turn consumers disagree')
-  return { normalizedWire: true, originalEvidenceClicks: 3, collapse: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true }
+  const archiveButton = (name) => document.querySelector(`#archive-sidebar [aria-label="存档会话：${name}"]`)
+  const sidebarRows = () => document.querySelectorAll('#archive-sidebar .sb-sess-row').length
+  await waitFor(() => sidebarRows() === 2)
+  archiveButton('归档目标').click()
+  await waitFor(() => document.querySelector('#archive-sidebar .sb-proj-row.active') != null)
+  await waitFor(() => archiveButton('归档目标') == null)
+  check(text('#archive-status') === 'pending', 'Fixture must still be waiting on Provider catalog refresh')
+  check(sidebarRows() === 1, 'Archive must remove only its target row')
+  button('#archive-sidebar', '撤销').click()
+  await waitFor(() => sidebarRows() === 2)
+  document.querySelector('#release-catalog').click()
+  await waitFor(() => text('#archive-status') === 'settled')
+  check(sidebarRows() === 2, 'Late reset completion undid archive reversal')
+
+  button('#archive-sidebar', '归档目标').click()
+  await waitFor(() => document.querySelector('#archive-sidebar .sb-sess[aria-current="true"]')?.textContent.includes('归档目标'))
+  archiveButton('归档目标').click()
+  await waitFor(() => archiveButton('归档目标') == null)
+  document.querySelector('#reject-catalog').click()
+  await waitFor(() => text('#archive-status') === 'reset-failed')
+  check(archiveButton('归档目标') == null, 'Provider catalog failure resurrected the archived row')
+  button('#archive-sidebar', '撤销').click()
+  await waitFor(() => sidebarRows() === 2)
+
+  button('#archive-sidebar', '归档目标').click()
+  await waitFor(() => document.querySelector('#archive-sidebar .sb-sess[aria-current="true"]')?.textContent.includes('归档目标'))
+  archiveButton('保留会话').click()
+  await waitFor(() => archiveButton('保留会话') == null)
+  check(document.querySelector('#archive-sidebar .sb-sess[aria-current="true"]')?.textContent.includes('归档目标'), 'Archiving a background session changed the selected conversation')
+  button('#archive-sidebar', '撤销').click()
+  await waitFor(() => sidebarRows() === 2)
+  return { normalizedWire: true, originalEvidenceClicks: 3, collapse: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
 }
 
 try {
@@ -81,7 +112,7 @@ try {
     define: { 'process.env.NODE_ENV': '"production"' },
     build: {
       outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
-      lib: { entry: join(root, 'scripts/fixtures/session-capability-smoke.tsx'), formats: ['iife'], name: 'ScryRegression', fileName: () => 'fixture.js' }
+      lib: { entry: join(root, 'scripts/fixtures/session-capability-smoke.tsx'), formats: ['iife'], name: 'ScryRegression', fileName: () => 'fixture.js', cssFileName: 'fixture' }
     }
   })
   await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'"><div id="root"></div><script src="fixture.js"></script>')

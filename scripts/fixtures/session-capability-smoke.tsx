@@ -5,6 +5,7 @@ import { OverviewPanel } from '../../src/renderer/components/OverviewPanel'
 import { qoderSkillSessionFixture } from '../../src/renderer/__fixtures__/session-capabilities'
 import type { Turn } from '../../src/renderer/format'
 import type { TraceEvent } from '../../src/shared/trace'
+import { SidebarArchiveFixture } from './sidebar-archive-smoke'
 
 function Fixture() {
   const [turns, setTurns] = useState<Turn[]>([qoderSkillSessionFixture()])
@@ -22,6 +23,7 @@ function Fixture() {
     <button id="multi" onClick={() => setTurns([qoderSkillSessionFixture('run-1'), qoderSkillSessionFixture('run-2')])}>两轮历史</button>
     <output id="selection" data-clicks={clicks}>{selection}</output>
     <section id="pinned"><PinnedSummary cwd={null} gitDiff={[]} turns={turns} busy={false} temporary={false} onDismiss={() => undefined} onOpenCall={(_runId, event) => select(event)} onOpenAgents={() => undefined} /></section>
+    <SidebarArchiveFixture />
     <section id="overview"><OverviewPanel turns={turns} sessionId={turns[0]?.runId ?? null} busy={turns.some((turn) => !turn.done)} selected={null} onSelect={select} usage={null} stats={null} /></section>
   </>
 }
