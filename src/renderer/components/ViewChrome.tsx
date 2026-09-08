@@ -6,7 +6,6 @@ interface ViewChromeProps {
   agent: DetectedAgent | undefined
   agentScanning?: boolean
   showSummary: boolean
-  summaryPersistent: boolean
   showPanel: boolean
   onToggleSummary: () => void
   onTogglePanel: () => void
@@ -17,7 +16,6 @@ export function ViewChrome({
   agent,
   agentScanning = false,
   showSummary,
-  summaryPersistent,
   showPanel,
   onToggleSummary,
   onTogglePanel
@@ -48,7 +46,7 @@ export function ViewChrome({
           className={`tb-action panel-pill summary-pill ${showSummary ? 'on' : ''}`}
           data-pinned-summary-toggle
           onClick={onToggleSummary}
-          title={summaryPersistent ? '固定摘要常驻' : showSummary ? '收起固定摘要' : '显示固定摘要'}
+          title={showSummary ? '收起摘要' : '显示摘要'}
           aria-label="切换固定摘要"
           aria-pressed={showSummary}
         >

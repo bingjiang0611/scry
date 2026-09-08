@@ -45,7 +45,7 @@ const render = (
 )
 
 describe('PinnedSummary', () => {
-  it('agrees with Overview on Qoder user-requested Skill loading and labels the inference', () => {
+  it('agrees with Overview on Qoder user-requested Skill loading without showing inference metadata in the compact row', () => {
     const read = {
       id: 'qoder-read', runId: 'run-1', ts: '', kind: 'tool' as const, stage: 'tool:Read',
       tool: 'Read', toolUseId: 'read-1', filePath: '/repo/rate-native/.claude/skills/hsf-invoke/SKILL.md'
@@ -56,7 +56,8 @@ describe('PinnedSummary', () => {
     }
     const pinned = render([loaded])
     expect(pinned).toContain('hsf-invoke')
-    expect(pinned).toContain('×1 · 加载推断')
+    expect(pinned).toContain('<em>×1</em>')
+    expect(pinned).not.toContain('<em>×1 · 加载推断</em>')
     expect(pinned).toContain('非原生 Skill 调用')
     const overview = renderToStaticMarkup(<OverviewPanel turns={[loaded]} selected={null} onSelect={() => undefined} usage={null} stats={null} />)
     expect(overview).toContain('hsf-invoke（含加载推断）')
@@ -91,7 +92,7 @@ describe('PinnedSummary', () => {
     }
   })
 
-  it('hides only an observed zero Web group and preserves unknown groups', () => {
+  it('hides Web references without actual URLs and preserves other unknown groups', () => {
     const empty = render([])
     expect(empty).not.toContain('Web references')
     expect(empty).toContain('Skills &amp; MCP · 本会话')
@@ -99,11 +100,7 @@ describe('PinnedSummary', () => {
     expect(empty.match(/>—<\/span>/g)).toHaveLength(2)
 
     const bounded = render([turn('x'.repeat(120_001))])
-    const boundedWebLabel = bounded.indexOf('Web references')
-    const boundedWebStart = bounded.lastIndexOf('<section', boundedWebLabel)
-    const boundedWebSection = bounded.slice(boundedWebStart, bounded.indexOf('</section>', boundedWebLabel))
-    expect(boundedWebSection).toContain('data-evidence="unknown"')
-    expect(boundedWebSection).toContain('>—</span>')
+    expect(bounded).not.toContain('Web references')
 
     const withWeb = render([session], new Set(['web']))
     const webLabel = withWeb.indexOf('Web references')

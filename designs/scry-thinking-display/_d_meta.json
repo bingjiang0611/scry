@@ -1,0 +1,24 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Thinking Display Options": {
+      "versions": [
+        {
+          "path": "Thinking Display Options.html",
+          "createdAt": "2026-09-08T12:46:10.814Z",
+          "status": "approved",
+          "subtitle": "已选方案 C：默认展开的可折叠思考过程",
+          "viewport": {
+            "width": 1440,
+            "height": 1040
+          },
+          "section": "对话证据"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-08T12:46:10.815Z",
+  "updatedAt": "2026-09-08T13:00:50.870Z"
+}

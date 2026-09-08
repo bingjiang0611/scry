@@ -613,22 +613,10 @@ select:focus-visible,
   background: var(--border3);
 }
 
-.chat-body .thinking .think-mark {
-  top: 0.68em;
-  left: -22px;
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--panel);
-  border-radius: 50%;
-  background: var(--dim2);
-  box-shadow: 0 0 0 1px var(--border2);
-  transform: none;
-}
-
 .chat-body .thinking {
-  color: var(--fg);
-  font-size: 14.5px;
-  line-height: 1.75;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .chat-body .tool-group-row .tg-label,
@@ -671,6 +659,8 @@ select:focus-visible,
 .runtime-composer {
   width: min(var(--evidence-column), 100%);
   padding: 8px var(--evidence-gutter) 12px;
+  container-name: composer-pane;
+  container-type: inline-size;
 }
 
 .runtime-composer .evidence-composer-shell {
@@ -689,50 +679,42 @@ select:focus-visible,
 
 .composer-context {
   min-width: 0;
-  min-height: 30px;
+  min-height: 48px;
   display: flex;
   align-items: center;
   gap: 3px;
   margin: -8px -12px 3px;
-  padding: 1px 10px 0;
+  padding: 5px 14px;
   border-bottom: 1px solid var(--border3);
   border-radius: 19px 19px 0 0;
-  background: var(--panel2);
+  background: transparent;
 }
 
 .composer-context .wdpick {
   min-width: 0;
-  max-width: 46%;
+  max-width: min(280px, 70%);
 }
 
-.composer-context .clipick {
-  min-width: 0;
-  max-width: 46%;
-}
-
-.composer-context .wdbtn,
-.composer-context .clibtn {
-  width: 100%;
-  min-width: 0;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 8px;
+.composer-context .wdbtn {
+  width: auto;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 0 14px;
   border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dim);
-  font-size: 11.5px;
+  border-radius: 11px;
+  background: var(--surface-muted);
+  color: var(--fg);
+  font-size: 13px;
 }
 
-.composer-context .wdbtn:hover,
-.composer-context .clibtn:hover:not(:disabled) {
+.composer-context .wdbtn:hover {
   border-color: transparent;
   background: var(--surface-strong);
   color: var(--fg);
 }
 
-.composer-context .workdir-label,
-.composer-context .clibtn > span:not(.agicon) {
+.composer-context .workdir-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -740,10 +722,10 @@ select:focus-visible,
 
 .runtime-composer .input,
 .runtime-composer textarea {
-  min-height: 44px;
-  padding: 8px 4px 6px;
+  min-height: 76px;
+  padding: 14px 8px 10px;
   color: var(--fg);
-  font-size: 14.5px;
+  font-size: 15px;
   line-height: 1.55;
 }
 
@@ -760,17 +742,6 @@ select:focus-visible,
 .runtime-composer .composer-controls {
   min-width: 0;
   overflow: hidden;
-}
-
-.runtime-composer .run-control-scroll {
-  min-width: 0;
-  gap: 1px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.runtime-composer .run-control-scroll::-webkit-scrollbar {
-  display: none;
 }
 
 .runtime-composer .run-control-select {
@@ -810,6 +781,229 @@ select:focus-visible,
 .runtime-composer .run-control-select.danger:focus-within {
   border-color: transparent;
   background: var(--warn-soft);
+}
+
+.runtime-composer .composer-action-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.runtime-composer .composer-action-controls .clipick,
+.runtime-composer .model-effort-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.runtime-composer .composer-action-controls .clibtn,
+.runtime-composer .model-effort-trigger {
+  min-width: 0;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  overflow: hidden;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.runtime-composer .composer-action-controls .clibtn {
+  max-width: 126px;
+}
+
+.runtime-composer .composer-action-controls .clibtn > span:not(.agicon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .composer-action-controls .clibtn:focus-visible,
+.runtime-composer .model-effort-trigger:focus-visible,
+.runtime-composer .model-effort-current:focus-visible,
+.runtime-composer .model-effort-scale button:focus-visible,
+.runtime-composer .model-effort-list button:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+.runtime-composer .composer-action-controls .clibtn:hover:not(:disabled),
+.runtime-composer .model-effort-trigger:hover:not(:disabled),
+.runtime-composer .model-effort-trigger[aria-expanded='true'] {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.runtime-composer .composer-action-controls .climenu {
+  right: 0;
+  left: auto;
+}
+
+.runtime-composer .model-effort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.runtime-composer .model-effort-trigger:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.runtime-composer .model-effort-model,
+.runtime-composer .model-effort-effort {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .model-effort-model {
+  max-width: min(150px, 24cqi);
+  color: var(--fg);
+}
+
+.runtime-composer .model-effort-effort {
+  max-width: 72px;
+  color: var(--dim2);
+}
+
+.runtime-composer .model-effort-trigger .chev {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--dim2);
+}
+
+.runtime-composer .model-effort-popover {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: min(330px, calc(100vw - 32px));
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border2);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(18px);
+}
+
+.runtime-composer .model-effort-current {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--surface-muted);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.runtime-composer .model-effort-current:hover,
+.runtime-composer .model-effort-current:focus-visible {
+  background: var(--surface-strong);
+}
+
+.runtime-composer .model-effort-current-effort {
+  color: var(--dim2);
+}
+
+.runtime-composer .model-effort-current .chev {
+  width: 13px;
+  height: 13px;
+  margin-left: auto;
+  color: var(--dim2);
+}
+
+.runtime-composer .model-effort-scale {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+  gap: 4px;
+  margin-top: 12px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.runtime-composer .model-effort-scale button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.runtime-composer .model-effort-scale button:hover:not(:disabled),
+.runtime-composer .model-effort-scale button:focus-visible {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.runtime-composer .model-effort-scale button.selected {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.runtime-composer .model-effort-list {
+  max-height: 300px;
+  display: grid;
+  overflow-y: auto;
+}
+
+.runtime-composer .model-effort-list button {
+  min-width: 0;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.runtime-composer .model-effort-list button:hover:not(:disabled),
+.runtime-composer .model-effort-list button:focus-visible {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.runtime-composer .model-effort-list button[aria-selected='true'] {
+  color: var(--fg);
+}
+
+.runtime-composer .model-effort-list button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .model-effort-list button .ico {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-left: auto;
+  color: var(--accent);
 }
 
 .runtime-composer .send {
@@ -1148,9 +1342,16 @@ select:focus-visible,
     display: none;
   }
 
-  .composer-context .wdpick,
-  .composer-context .clipick {
-    max-width: 50%;
+  .composer-context .wdpick {
+    max-width: 70%;
+  }
+
+  .runtime-composer .composer-action-controls .clibtn {
+    max-width: 96px;
+  }
+
+  .runtime-composer .model-effort-model {
+    max-width: 104px;
   }
 
 }
@@ -1170,11 +1371,58 @@ select:focus-visible,
   .chat-evidence-source {
     width: calc(100% - 32px);
   }
+}
 
-  .runtime-composer .run-control-select {
+@container composer-pane (max-width: 560px) {
+  .composer-bottom {
+    flex-wrap: wrap;
+  }
+
+  .composer-bottom > .spacer {
+    display: none;
+  }
+
+  .composer-action-controls {
+    width: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+
+  .composer-action-controls .clipick {
+    flex: 0 1 76px;
+  }
+
+  .composer-action-controls .clibtn {
+    width: 100%;
+    max-width: 76px;
+    padding-inline: 5px;
+  }
+
+  .model-effort-picker {
+    flex: 1 1 96px;
+  }
+
+  .model-effort-trigger {
+    width: 100%;
+    padding-inline: 6px;
+  }
+
+  .model-effort-model {
+    max-width: 60px;
+  }
+
+  .model-effort-effort {
+    max-width: 40px;
+  }
+
+  .run-control-select {
     padding-inline: 6px 20px;
   }
 
+  .model-effort-popover {
+    right: 0;
+    width: min(330px, calc(100cqi - 12px));
+  }
 }
 
 /* Pinned context summary ---------------------------------------------------- */

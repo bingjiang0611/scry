@@ -1,0 +1,57 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Composer Options": {
+      "versions": [
+        {
+          "path": "Scry Composer Options.html",
+          "createdAt": "2026-09-08T13:28:22.652Z",
+          "status": "changes-requested",
+          "subtitle": "初版 C 合并 Agent / Model / Effort，已被 C2 替代",
+          "viewport": {
+            "width": 1400,
+            "height": 1200
+          },
+          "section": "Composer"
+        },
+        {
+          "path": "Scry Composer Options v2.html",
+          "createdAt": "2026-09-08T14:25:32.189Z",
+          "status": "changes-requested",
+          "subtitle": "C2：工作目录仍在底部，已被 C3 替代",
+          "viewport": {
+            "width": 1400,
+            "height": 1200
+          },
+          "section": "Composer"
+        },
+        {
+          "path": "Scry Composer Options v3.html",
+          "createdAt": "2026-09-08T14:30:01.469Z",
+          "status": "changes-requested",
+          "subtitle": "C3：Model 与 Effort 独立，已被 C4 替代",
+          "viewport": {
+            "width": 1400,
+            "height": 1200
+          },
+          "section": "Composer"
+        },
+        {
+          "path": "Scry Composer Options v4.html",
+          "createdAt": "2026-09-08T14:35:32.826Z",
+          "status": "approved",
+          "subtitle": "C4：工作目录顶置，Agent 独立，Model / Effort 两级组合",
+          "viewport": {
+            "width": 1400,
+            "height": 1200
+          },
+          "section": "Composer"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-08T13:28:22.653Z",
+  "updatedAt": "2026-09-08T16:14:24.534Z"
+}

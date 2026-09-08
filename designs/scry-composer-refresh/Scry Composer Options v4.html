@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="icon" href="data:,">
+  <title>Scry Composer 设计方向 v4</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #ececea;
+      --paper: #ffffff;
+      --surface: #f8f8f6;
+      --surface-strong: #f0f0ed;
+      --line: #e2e2de;
+      --line-strong: #d4d5cf;
+      --text: #252623;
+      --muted: #777a75;
+      --quiet: #a0a39d;
+      --blue: #3478f6;
+      --blue-soft: #eaf1ff;
+      --warn: #bd531f;
+      --warn-soft: #fff1e9;
+      --shadow: 0 18px 54px rgb(25 27 24 / 10%);
+      --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: var(--font-ui);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--canvas); color: var(--text); }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+
+    .page {
+      width: min(1400px, 100%);
+      margin: 0 auto;
+      padding: 30px 26px 48px;
+    }
+
+    .brief {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) repeat(3, minmax(170px, .55fr));
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background: var(--line);
+      box-shadow: 0 8px 28px rgb(25 27 24 / 5%);
+    }
+
+    .brief > div { min-height: 90px; padding: 17px 20px; background: var(--paper); }
+    .brief h1 { margin: 0 0 7px; font-size: 20px; font-weight: 680; letter-spacing: -.025em; }
+    .brief p, .brief li { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .brief ul { margin: 5px 0 0; padding: 0; list-style: none; }
+    .brief-label { color: var(--quiet); font-size: 10px; font-weight: 750; letter-spacing: .1em; }
+
+    .reference-note {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 28px 2px 12px;
+    }
+    .reference-note h2 { margin: 0; font-size: 15px; font-weight: 680; }
+    .reference-note p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .reference-chip { padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+    .options { min-width: 0; display: grid; gap: 18px; }
+    .option {
+      width: 100%;
+      min-width: 0;
+      overflow: visible;
+      border: 1px solid var(--line-strong);
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .option.recommended { border-color: color-mix(in srgb, var(--blue) 52%, var(--line-strong)); }
+    .option-head {
+      min-height: 70px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .option-letter {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      background: var(--surface);
+      font: 750 12px/1 var(--font-mono);
+    }
+    .recommended .option-letter { border-color: #aec9ff; background: var(--blue-soft); color: var(--blue); }
+    .option-title strong { display: block; font-size: 13px; font-weight: 680; }
+    .option-title span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .badge { padding: 5px 9px; border-radius: 999px; background: var(--blue-soft); color: var(--blue); font-size: 10px; font-weight: 750; }
+
+    .stage {
+      position: relative;
+      min-height: 298px;
+      display: grid;
+      place-items: end center;
+      padding: 34px 48px 30px;
+      overflow: visible;
+      background:
+        linear-gradient(to bottom, rgb(255 255 255 / 35%), rgb(247 247 245 / 90%)),
+        repeating-linear-gradient(to bottom, transparent 0 47px, rgb(215 216 211 / 22%) 47px 48px);
+    }
+    .context-copy {
+      width: min(100%, 1040px);
+      margin: 0 auto auto;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .context-copy strong { color: var(--text); font-weight: 650; }
+
+    .composer {
+      position: relative;
+      width: min(100%, 1080px);
+      min-height: 158px;
+      border: 1px solid var(--line-strong);
+      border-radius: 24px;
+      background: var(--paper);
+      box-shadow: 0 10px 32px rgb(26 28 25 / 9%), 0 1px 2px rgb(26 28 25 / 5%);
+      transition: border-color 130ms ease, box-shadow 130ms ease;
+    }
+    .composer:focus-within { border-color: #b7c8e9; box-shadow: 0 12px 36px rgb(26 28 25 / 11%), 0 0 0 2px rgb(52 120 246 / 8%); }
+    .composer textarea {
+      width: 100%;
+      min-height: 96px;
+      display: block;
+      resize: none;
+      padding: 24px 28px 12px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .composer textarea::placeholder { color: #b8bab5; }
+    .composer-bottom { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 14px 13px; }
+    .control-group { min-width: 0; display: flex; align-items: center; gap: 3px; }
+    .composer button {
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .composer button:hover, .composer button:focus-visible { background: var(--surface-strong); color: var(--text); outline: none; }
+    .composer svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .danger { color: var(--warn) !important; }
+    .danger:hover { background: var(--warn-soft) !important; }
+    .mono { font-family: var(--font-mono); }
+    .chevron { width: 7px; height: 7px; margin-left: 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); }
+    .send {
+      width: 38px;
+      height: 38px;
+      min-height: 38px !important;
+      display: grid !important;
+      place-items: center;
+      padding: 0 !important;
+      border-radius: 50% !important;
+      background: #8c8f8a !important;
+      color: white !important;
+    }
+    .send.active { background: var(--text) !important; }
+    .send svg { width: 18px; height: 18px; }
+
+    .workspace { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+    .control-main { color: var(--text) !important; }
+
+    .option-a .composer-bottom { padding-left: 17px; }
+    .option-a .workspace { color: var(--muted); }
+    .option-a .combined-control { color: var(--text); }
+    .option-a .combined-control span + span::before { margin-inline: 4px; color: var(--quiet); content: "·"; }
+
+    .context-strip {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 14px 0;
+      border-bottom: 1px solid var(--line);
+      border-radius: 23px 23px 0 0;
+      background: var(--surface);
+    }
+    .context-strip button { min-height: 29px; font-size: 11.5px; }
+    .option-b .composer textarea { min-height: 84px; padding-top: 18px; }
+    .option-b .composer { min-height: 166px; }
+
+    .option-c .composer { min-height: 184px; overflow: visible; }
+    .option-c .context-strip { min-height: 48px; padding: 5px 14px; background: transparent; }
+    .option-c .context-strip .workspace {
+      max-width: 240px;
+      min-height: 38px;
+      padding-inline: 14px;
+      border-radius: 11px;
+      background: var(--surface-strong);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .option-c .composer textarea { min-height: 76px; padding-top: 16px; }
+    .option-c .agent-trigger,
+    .option-c .model-effort-trigger { color: var(--text); }
+    .option-c .agent-trigger { color: var(--muted); }
+    .option-c .model-effort-trigger { background: var(--surface); }
+    .model-effort-trigger .effort-label { color: var(--muted); }
+    .effort-popover {
+      position: absolute;
+      z-index: 3;
+      right: 38px;
+      bottom: 58px;
+      width: 330px;
+      padding: 12px 14px 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 22px;
+      background: rgb(255 255 255 / 96%);
+      box-shadow: 0 20px 55px rgb(25 27 24 / 16%);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(7px) scale(.98);
+      transform-origin: bottom right;
+      transition: opacity 130ms ease, transform 130ms ease;
+    }
+    .effort-popover.open { opacity: 1; pointer-events: auto; transform: none; }
+    .popover-model-row {
+      width: 100%;
+      min-height: 40px !important;
+      justify-content: flex-start;
+      padding: 0 12px !important;
+      border-radius: 12px !important;
+      background: var(--surface) !important;
+      color: var(--text) !important;
+      font-size: 13px;
+    }
+    .popover-model-row .effort-readout { margin-left: 2px; color: var(--muted); }
+    .popover-model-row .drill-chevron { margin-left: auto; transform: rotate(-45deg); }
+    .effort-scale { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 12px; padding: 4px; border-radius: 999px; background: var(--surface-strong); }
+    .effort-scale button { min-width: 0; min-height: 30px; justify-content: center; padding: 0 7px; border-radius: 999px; font-size: 11px; }
+    .effort-scale button.selected { background: var(--blue); color: white; }
+    .model-list { display: none; padding: 4px; }
+    .effort-popover.show-models .popover-model-row,
+    .effort-popover.show-models .effort-scale { display: none; }
+    .effort-popover.show-models .model-list { display: grid; }
+    .model-list button { min-height: 34px; justify-content: flex-start; padding-inline: 10px; font-size: 12px; }
+    .model-list button.selected::after { margin-left: auto; color: var(--blue); content: "✓"; }
+
+    .option-foot {
+      min-height: 72px;
+      display: grid;
+      grid-template-columns: auto 1fr auto 1fr;
+      gap: 8px 12px;
+      align-items: start;
+      padding: 14px 18px 16px;
+      border-top: 1px solid var(--line);
+    }
+    .option-foot b { font-size: 10px; }
+    .option-foot span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+    @media (max-width: 760px) {
+      .page { padding: 16px 10px 30px; }
+      .brief { grid-template-columns: 1fr; }
+      .reference-note { align-items: flex-start; flex-direction: column; }
+      .stage { min-height: 330px; padding: 30px 12px 20px; }
+      .composer { min-height: 178px; border-radius: 20px; }
+      .composer textarea { min-height: 105px; padding: 20px 18px 10px; font-size: 15px; }
+      .composer-bottom { align-items: flex-end; flex-wrap: wrap; }
+      .control-group { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+      .control-group:last-child { margin-left: auto; }
+      .workspace { max-width: 120px; }
+      .agent-trigger { max-width: 88px; overflow: hidden; text-overflow: ellipsis; }
+      .model-effort-trigger { max-width: 178px; overflow: hidden; text-overflow: ellipsis; }
+      .option-foot { grid-template-columns: auto 1fr; }
+      .effort-popover { right: 10px; width: min(330px, calc(100% - 20px)); }
+      .combined-control .provider-name { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="brief" aria-label="设计说明">
+      <div>
+        <h1>Scry Composer · Codex 结构借鉴</h1>
+        <p>把输入本身放回视觉中心，运行配置退到底栏。保留 Scry 的真实能力，不照搬语音或不存在的附件入口。</p>
+      </div>
+      <div><span class="brief-label">借鉴 Codex</span><ul><li>大圆角单容器</li><li>底栏左右分区</li><li>发送固定右下</li></ul></div>
+      <div><span class="brief-label">保留 Scry</span><ul><li>工作目录 / Provider</li><li>模型 / 强度 / 权限</li><li>排队、附件、运行状态</li></ul></div>
+      <div><span class="brief-label">明确不做</span><ul><li>不增加语音按钮</li><li>不伪造附件能力</li><li>不改变发送语义</li></ul></div>
+    </section>
+
+    <div class="reference-note">
+      <div><h2>三个结构方向 · C4 已按反馈修订</h2><p>工作目录在顶部；Agent 独立，Model 与 Effort 合并为一个 Codex 式入口。</p></div>
+      <span class="reference-chip">参考：Codex composer / effort popover</span>
+    </div>
+
+    <section class="options" aria-label="Composer 方案对照">
+      <article class="option option-a" data-screen-label="方案 A · 单行聚合">
+        <header class="option-head">
+          <span class="option-letter">A</span>
+          <div class="option-title"><strong>单行聚合</strong><span>最接近 Codex，所有控制集中到底栏</span></div>
+        </header>
+        <div class="stage">
+          <div class="context-copy"><strong>上一轮已完成</strong><br>可以继续追问，或输入新的任务。</div>
+          <div class="composer">
+            <textarea aria-label="方案 A 输入框" placeholder="给 Qoder 一个任务…"></textarea>
+            <div class="composer-bottom">
+              <div class="control-group">
+                <button class="workspace" type="button" title="工作目录：rate-native">
+                  <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+                  rate-native<span class="chevron"></span>
+                </button>
+                <button class="danger" type="button">
+                  <svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"></path><path d="M12 8v5M12 16h.01"></path></svg>
+                  完全访问<span class="chevron"></span>
+                </button>
+              </div>
+              <div class="control-group">
+                <button class="combined-control" type="button"><span class="provider-name">Qoder</span><span>Ultimate</span><span>默认</span><i class="chevron"></i></button>
+                <button class="send" type="button" aria-label="发送"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="option-foot"><b>优势</b><span>视觉最干净，输入区域最大。</span><b>代价</b><span>组合入口需要二级菜单承载三项设置。</span></footer>
+      </article>
+
+      <article class="option option-b" data-screen-label="方案 B · 上下文顶条">
+        <header class="option-head">
+          <span class="option-letter">B</span>
+          <div class="option-title"><strong>上下文顶条</strong><span>保留当前认知，底栏向 Codex 收敛</span></div>
+        </header>
+        <div class="stage">
+          <div class="context-copy"><strong>上一轮已完成</strong><br>当前会话绑定 rate-native，运行于 Qoder。</div>
+          <div class="composer">
+            <div class="context-strip">
+              <button class="workspace" type="button"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>rate-native<span class="chevron"></span></button>
+              <button type="button">Qoder<span class="chevron"></span></button>
+            </div>
+            <textarea aria-label="方案 B 输入框" placeholder="给 Qoder 一个任务…"></textarea>
+            <div class="composer-bottom">
+              <div class="control-group"><button class="danger" type="button"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"></path><path d="M12 8v5M12 16h.01"></path></svg>完全访问<span class="chevron"></span></button></div>
+              <div class="control-group"><button class="control-main" type="button">Ultimate<span class="chevron"></span></button><button type="button">默认<span class="chevron"></span></button><button class="send" type="button" aria-label="发送"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button></div>
+            </div>
+          </div>
+        </div>
+        <footer class="option-foot"><b>优势</b><span>对当前用户最熟悉，改造风险最低。</span><b>代价</b><span>比 Codex 多一条上下文带，容器层级仍略重。</span></footer>
+      </article>
+
+      <article class="option option-c recommended" data-screen-label="方案 C4 · Model Effort 合并">
+        <header class="option-head">
+          <span class="option-letter">C4</span>
+          <div class="option-title"><strong>Agent 独立，Model / Effort 合并</strong><span>工作目录在上；底栏呈现 Qoder 与 Ultimate 默认</span></div>
+          <span class="badge">按反馈修订</span>
+        </header>
+        <div class="stage">
+          <div class="context-copy"><strong>上一轮已完成</strong><br>输入区只保留当前任务所需的高频信息。</div>
+          <div class="composer">
+            <div class="effort-popover" id="effortPopover" role="dialog" aria-label="Model 与 Effort">
+              <button class="popover-model-row" type="button" aria-expanded="false"><span class="model-label">Ultimate</span><span class="effort-readout effort-label">默认</span><i class="chevron drill-chevron"></i></button>
+              <div class="effort-scale" role="group" aria-label="推理强度"><button type="button">低</button><button type="button" class="selected">默认</button><button type="button">高</button><button type="button">极高</button></div>
+              <div class="model-list" role="listbox" aria-label="选择 Model"><button type="button">自动模型</button><button type="button" class="selected">Ultimate</button><button type="button">Performance</button><button type="button">Efficient</button><button type="button">Lite</button></div>
+            </div>
+            <div class="context-strip">
+              <button class="workspace" type="button" title="工作目录：rate-native"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>rate-native<span class="chevron"></span></button>
+            </div>
+            <textarea aria-label="方案 C 输入框" placeholder="给 Qoder 一个任务…"></textarea>
+            <div class="composer-bottom">
+              <div class="control-group">
+                <button class="danger" type="button"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"></path><path d="M12 8v5M12 16h.01"></path></svg>完全访问<span class="chevron"></span></button>
+              </div>
+              <div class="control-group">
+                <button class="agent-trigger" type="button" aria-label="选择 Agent">Qoder<i class="chevron"></i></button>
+                <button class="model-effort-trigger" type="button" aria-expanded="false" aria-controls="effortPopover" aria-label="选择 Model 与 Effort"><span class="model-label">Ultimate</span><span class="effort-label">默认</span><i class="chevron"></i></button>
+                <button class="send" type="button" aria-label="发送"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="option-foot"><b>优势</b><span>初始浮层聚焦当前 Model 与 Effort；点击 Model 行后无重复项，直接进入模型列表。</span><b>代价</b><span>切换 Model 比调整 Effort 多一次点击。</span></footer>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const modelEffortTrigger = document.querySelector('.model-effort-trigger')
+    const effortPopover = document.querySelector('#effortPopover')
+    const modelRow = document.querySelector('.popover-model-row')
+    const effortButtons = [...document.querySelectorAll('.effort-scale button')]
+    const modelButtons = [...document.querySelectorAll('.model-list button')]
+    const effortLabels = [...document.querySelectorAll('.effort-label')]
+    const modelLabels = [...document.querySelectorAll('.model-label')]
+
+    function setModelList(open) {
+      effortPopover.classList.toggle('show-models', open)
+      modelRow.setAttribute('aria-expanded', String(open))
+    }
+
+    function setPopover(open) {
+      effortPopover.classList.toggle('open', open)
+      modelEffortTrigger.setAttribute('aria-expanded', String(open))
+      if (!open) setModelList(false)
+    }
+
+    modelEffortTrigger.addEventListener('click', () => setPopover(!effortPopover.classList.contains('open')))
+    modelRow.addEventListener('click', () => setModelList(true))
+    effortButtons.forEach((button) => button.addEventListener('click', () => {
+      effortButtons.forEach((candidate) => candidate.classList.toggle('selected', candidate === button))
+      effortLabels.forEach((label) => { label.textContent = button.textContent })
+      setPopover(false)
+    }))
+    modelButtons.forEach((button) => button.addEventListener('click', () => {
+      modelButtons.forEach((candidate) => candidate.classList.toggle('selected', candidate === button))
+      modelLabels.forEach((label) => { label.textContent = button.textContent })
+      setModelList(false)
+    }))
+    document.addEventListener('pointerdown', (event) => {
+      if (!effortPopover.classList.contains('open')) return
+      if (effortPopover.contains(event.target) || modelEffortTrigger.contains(event.target)) return
+      setPopover(false)
+    })
+  </script>
+</body>
+</html>

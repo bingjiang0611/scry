@@ -26,6 +26,7 @@ import {
   dequeueStartedPrompt,
   enqueuePrompt,
   failedSlashCatalog,
+  focusedRunNeedsLoading,
   hasSessionOverviewContext,
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
@@ -90,6 +91,12 @@ describe('Pi Profile renderer identity', () => {
     expect(html).toContain('发送第一条消息后')
     expect(html).not.toContain('累计 Token 用量')
     expect(html).not.toContain('工作区未提交改动')
+  })
+
+  it('本地发送触发 focusedRun 时不闪现历史会话加载态', () => {
+    expect(focusedRunNeedsLoading('run-1', true, new Set())).toBe(false)
+    expect(focusedRunNeedsLoading('run-1', false, new Set(['run-1']))).toBe(false)
+    expect(focusedRunNeedsLoading('run-1', false, new Set())).toBe(true)
   })
 
   it('removes rejected slash catalogs instead of leaving stale commands selectable', () => {
@@ -411,19 +418,20 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('加入队列')
   })
 
-  it('Composer 把会话上下文与运行配置分层，模型/权限保留前缀 label', () => {
+  it('Composer 按 C4 分层：目录顶置、权限左下、Agent 与 Model/Effort 右下', () => {
     const html = renderWelcome({ turns: [runningTurn], busy: true })
     expect(html).toContain('class="composer-context" role="group" aria-label="会话上下文"')
-    expect(html).toContain('class="composer-controls" role="group" aria-label="运行配置"')
+    expect(html).toContain('class="composer-controls" role="group" aria-label="权限配置"')
+    expect(html).toContain('class="composer-action-controls" role="group" aria-label="Agent、Model 与 Effort"')
     expect(html).not.toContain('run-group-sep')
-    expect(html).toContain('rc-prefix" aria-hidden="true">模型')
+    expect(html).not.toContain('rc-prefix" aria-hidden="true">模型')
     expect(html).toContain('rc-prefix" aria-hidden="true">权限')
   })
 
-  it('可见值单独渲染成 .rc-value，宽度贴合当前选中项而不是最长选项', () => {
+  it('Model 与 Effort 组合入口显示当前值，权限继续使用原生选择合同', () => {
     const html = renderWelcome({ turns: [runningTurn], busy: true })
-    // 目录/Provider 之后的两个下拉各有一个可见值节点
-    expect(html).toContain('rc-value" aria-hidden="true">自动模型')
+    expect(html).toContain('class="model-effort-model">自动模型')
+    expect(html).toContain('class="model-effort-effort">默认')
     expect(html).toContain('rc-value" aria-hidden="true">默认审批')
   })
 
@@ -508,8 +516,9 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).toContain('不绑定项目')
     expect(html).toContain('可直接发起任务')
     expect(html).toContain('aria-label="会话上下文"')
-    expect(html).toContain('aria-label="运行配置"')
-    expect(html).toContain('aria-label="模型"')
+    expect(html).toContain('aria-label="权限配置"')
+    expect(html).toContain('aria-label="Agent、Model 与 Effort"')
+    expect(html).toContain('aria-label="选择 Model 与 Effort"')
     expect(html).toContain('aria-label="权限"')
     expect(html).not.toContain('纵览面板')
     expect(html).not.toContain('class="logo"')
@@ -532,7 +541,6 @@ describe('ViewChrome 顶栏', () => {
         agent={undefined}
         agentScanning
         showSummary
-        summaryPersistent={false}
         showPanel
         onToggleSummary={() => {}}
         onTogglePanel={() => {}}
@@ -543,7 +551,7 @@ describe('ViewChrome 顶栏', () => {
     expect(html).toContain('class="tb-thread"')
     expect(html).toContain('不绑定项目')
     expect(html).toContain('aria-label="切换固定摘要"')
-    expect(html).toContain('title="收起固定摘要"')
+    expect(html).toContain('title="收起摘要"')
     expect(html).toContain('title="右侧工作区"')
     expect(html).not.toContain('title="工作区文件"')
   })
@@ -554,7 +562,6 @@ describe('ViewChrome 顶栏', () => {
         cwd="/tmp/sample-workspace"
         agent={undefined}
         showSummary
-        summaryPersistent
         showPanel
         onToggleSummary={() => {}}
         onTogglePanel={() => {}}
@@ -562,7 +569,7 @@ describe('ViewChrome 顶栏', () => {
     )
     expect(html).not.toContain('title="工作区文件"')
     expect(html).toContain('sample-workspace')
-    expect(html).toContain('title="固定摘要常驻"')
+    expect(html).toContain('title="收起摘要"')
     expect(html).toContain('title="右侧工作区"')
     expect(html).toContain('aria-label="右侧工作区"')
     expect(html).not.toContain('title="Skills"')
@@ -1228,14 +1235,16 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('data-trace-event-id="e2"')
   })
 
-  it('思考作为正文主线，连续工具退成默认折叠的脚注组', () => {
+  it('思考默认展开并以独立 disclosure 区别于最终回复', () => {
     expect(html).toContain('class="turn-flow"')
-    expect(html).toContain('class="thinking"')
+    expect(html).toContain('<details class="thinking" open="">')
+    expect(html).toContain('class="think-head" aria-expanded="true"')
+    expect(html).toContain('思考过程')
+    expect(html).toContain('class="ico think-bulb"')
+    expect(html).toContain('class="ico think-chevron"')
     expect(html).toContain('class="think-text md"><p><strong>先写文件再读回</strong></p>')
     expect(html).not.toContain('**先写文件再读回**')
-    expect(html).toContain('class="think-mark"')
-    expect(html.match(/class="think-mark"/g)).toHaveLength(1)
-    expect(html).not.toContain('查看完整思考')
+    expect(html).not.toContain('class="think-mark"')
     expect(html).toContain('class="tool-group"')
     expect(html).toContain('aria-expanded="false"')
     expect(html).toContain('class="tool-group-body" hidden=""')
@@ -2254,26 +2263,25 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     )
     expect(chatHtml).toContain('data-run-id="r1"')
     expect(chatHtml).toContain('turn-jump-target')
-    expect(chatHtml).toContain('aria-label="模型"')
-    expect(chatHtml).toContain('Test Model · test-model')
-    expect(chatHtml).toContain('Test Model · test-model-alias')
-    expect(chatHtml).toContain('aria-label="Effort"')
+    expect(chatHtml).toContain('aria-label="选择 Model 与 Effort"')
+    expect(chatHtml).toContain('class="model-effort-model">Test Model · test-model')
+    expect(chatHtml).toContain('class="model-effort-effort">高')
     expect(chatHtml).toContain('aria-label="权限"')
     const context = chatHtml.match(/<div class="composer-context"[\s\S]*?<textarea/u)?.[0] ?? ''
     const controls = chatHtml.match(/<div class="composer-controls"[\s\S]*?<div class="spacer"/u)?.[0] ?? ''
+    const actions = chatHtml.match(/<div class="composer-action-controls"[\s\S]*?<button type="button" class="send"/u)?.[0] ?? ''
     expect(chatHtml).not.toContain('class="composer-top"')
     expect(context).toContain('role="group"')
     expect(context).toContain('aria-label="会话上下文"')
     expect(context).toContain('class="wdpick"')
-    expect(context).toContain('class="clipick"')
-    expect(context.indexOf('工作目录：')).toBeLessThan(context.indexOf('Agent'))
+    expect(context).not.toContain('class="clipick"')
     expect(controls).toContain('role="group"')
-    expect(controls).toContain('aria-label="运行配置"')
-    expect(controls).toContain('class="run-control-scroll"')
+    expect(controls).toContain('aria-label="权限配置"')
     expect(controls).not.toContain('class="wdpick"')
     expect(controls).not.toContain('class="clipick"')
-    expect(controls.indexOf('aria-label="模型"')).toBeLessThan(controls.indexOf('aria-label="Effort"'))
-    expect(controls.indexOf('aria-label="Effort"')).toBeLessThan(controls.indexOf('aria-label="权限"'))
+    expect(actions).toContain('class="clipick"')
+    expect(actions).toContain('class="model-effort-picker"')
+    expect(actions.indexOf('class="clipick"')).toBeLessThan(actions.indexOf('class="model-effort-picker"'))
     expect(chatHtml).toContain('aria-label="发送"')
     expect(chatHtml).toContain('M12 19V5m-7 7 7-7 7 7')
   })
@@ -2337,7 +2345,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       }
     })
 
-    expect(chatHtml).toMatch(/aria-label="模型"[^>]*aria-busy="true"/)
+    expect(chatHtml).toMatch(/aria-label="选择 Model 与 Effort"[^>]*aria-busy="true"/)
     expect(chatHtml).toContain('自动模型')
     expect(chatHtml).toContain('正在后台读取可选模型；当前使用 Provider 默认模型')
     expect(chatHtml).not.toContain('读取模型…')
@@ -2621,7 +2629,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="移除队列第 1 条消息"')
     expect(chatHtml).toContain('title="同一会话不能切换 Agent；请新建会话后重新选择"')
     expect(chatHtml).toMatch(/class="clibtn"[^>]*disabled=""/)
-    expect(chatHtml).toMatch(/aria-label="模型"(?![^>]*disabled)/)
+    expect(chatHtml).toMatch(/aria-label="选择 Model 与 Effort"(?![^>]*disabled)/)
     expect(chatHtml).toMatch(/aria-label="权限"(?![^>]*disabled)/)
     expect(chatHtml).toContain('继续检查')
     expect(chatHtml).toContain('draft.png')

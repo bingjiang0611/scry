@@ -139,7 +139,7 @@ export function PinnedSummary({
   const inventoryExpanded = expandedSections.has('inventory')
   const webExpanded = expandedSections.has('web')
   const agentsExpanded = expandedSections.has('agents')
-  const showWebReferences = webSources.length > 0 || !webSourceScan.complete
+  const showWebReferences = webSources.length > 0
 
   useEffect(() => {
     if (!temporary) return
@@ -219,7 +219,7 @@ export function PinnedSummary({
                   >
                     <span className="pinned-summary-detail-icon"><Icon name={call.kind === 'skill' ? 'tool' : 'plug'} /></span>
                     <span>{call.name}</span>
-                    <em>×{call.count}{call.inferredCount ? ' · 加载推断' : ''}</em>
+                    <em>×{call.count}</em>
                   </button>
                 ))}
                 {capabilityCalls.length === 0 && (
@@ -260,11 +260,6 @@ export function PinnedSummary({
                       <span title={source.url}>{source.label}</span>
                     </div>
                   ))}
-                  {webSources.length === 0 && (
-                    <div className="pinned-summary-empty" data-evidence="unknown">
-                      当前已加载内容超出扫描范围，无法确认是否有网页引用
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -305,6 +300,36 @@ export function PinnedSummary({
       </aside>
     </div>
   )
+}
+
+export interface PinnedSummaryVisibility {
+  visible: boolean
+  persistent: boolean
+  dismiss: () => void
+  toggle: () => void
+}
+
+export function usePinnedSummaryVisibility(active: boolean, panelVisible: boolean): PinnedSummaryVisibility {
+  const [persistentOpen, setPersistentOpen] = useState(true)
+  const [overlayOpen, setOverlayOpen] = useState(false)
+
+  useEffect(() => {
+    if (!panelVisible || !active) setOverlayOpen(false)
+  }, [active, panelVisible])
+
+  const dismiss = useCallback((): void => setOverlayOpen(false), [])
+  const toggle = useCallback((): void => {
+    if (!active) return
+    if (panelVisible) setOverlayOpen((current) => !current)
+    else setPersistentOpen((current) => !current)
+  }, [active, panelVisible])
+
+  return {
+    persistent: active && !panelVisible,
+    visible: active && (panelVisible ? overlayOpen : persistentOpen),
+    dismiss,
+    toggle
+  }
 }
 
 export interface PinnedSummaryHostProps extends Omit<PinnedSummaryProps, 'expandedSections' | 'onToggleSection'> {
