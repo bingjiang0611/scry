@@ -228,9 +228,16 @@ function providerTurnIdOf(payload: Record<string, unknown>, provider?: ProviderI
 }
 
 function usageTrace(payload: Record<string, unknown>, runId: string, at: string): TraceEvent | null {
-  const usage = nestedRecord(payload, 'usage') ?? nestedRecord(nestedRecord(payload, 'result') ?? {}, 'usage')
+  const authoritative = nestedRecord(payload, 'usage') ?? nestedRecord(nestedRecord(payload, 'result') ?? {}, 'usage')
+  const partialUsage = nestedRecord(payload, 'usage_partial')
+  const usage = authoritative ?? partialUsage
   if (!usage) return null
-  const number = (key: string): number | undefined => typeof usage[key] === 'number' && Number.isFinite(usage[key]) ? usage[key] as number : undefined
+  const number = (key: string): number | undefined => typeof usage[key] === 'number' && Number.isFinite(usage[key]) && usage[key] >= 0 ? usage[key] as number : undefined
+  if (![
+    'input_tokens', 'inputTokens', 'output_tokens', 'outputTokens',
+    'cache_read_input_tokens', 'cacheReadTokens', 'cache_creation_input_tokens', 'cacheCreationTokens',
+    'reasoning_tokens', 'reasoningTokens', 'cost_usd', 'costUsd'
+  ].some((key) => number(key) !== undefined)) return null
   return {
     id: `usage-${stableHash(usage).slice(0, 16)}`,
     ts: at,
@@ -243,6 +250,7 @@ function usageTrace(payload: Record<string, unknown>, runId: string, at: string)
     cacheCreationTokens: number('cache_creation_input_tokens') ?? number('cacheCreationTokens'),
     reasoningTokens: number('reasoning_tokens') ?? number('reasoningTokens'),
     costUsd: number('cost_usd') ?? number('costUsd'),
+    ...(payload.usage_complete === false || (!authoritative && partialUsage) ? { runtimeMetadata: { usageComplete: false } } : {}),
     isError: payload.error != null
   }
 }
@@ -351,9 +359,14 @@ function lifecycleTraceEvents(args: {
   toolContentPolicy?: ToolContentPolicy
 }): TraceEvent[] {
   const at = timestampOf(args.payload)
-  const toolName = toolNameOf(args.payload)
+  const rawToolName = toolNameOf(args.payload)
   const toolUseId = toolUseIdOf(args.payload)
-  const input = toolInputOf(args.payload)
+  const rawInput = toolInputOf(args.payload)
+  const agentCall = args.provider === 'codex' && isCodexSpawnTool(rawToolName ?? '')
+    ? codexToolName(rawToolName!, rawInput)
+    : null
+  const toolName = agentCall?.tool ?? rawToolName
+  const input = agentCall?.input ?? rawInput
   const limitations = captureLimitations(args.payload)
   const agentId = stringAt(args.payload, 'agent_id', 'agentId')
   const out: TraceEvent[] = []
@@ -554,6 +567,11 @@ function literalArgument(value: string): Record<string, unknown> {
   return { raw: value }
 }
 
+function isCodexSpawnTool(name: string): boolean {
+  // Only the native namespace is an alias; MCP and unknown namespaces retain their identity.
+  return name === 'spawn_agent' || name === 'multi_agent_v1__spawn_agent'
+}
+
 function codexToolName(name: string, input: Record<string, unknown>): NormalizedCodexCall | null {
   if (name === 'wait' || name === 'write_stdin') return null
   if (['list_agents', 'send_message', 'followup_task', 'interrupt_agent'].includes(name)) return null
@@ -576,7 +594,7 @@ function codexToolName(name: string, input: Record<string, unknown>): Normalized
   if (name === 'apply_patch') {
     return { tool: 'Edit', input: { patch: input.raw ?? input.patch ?? input } }
   }
-  if (name === 'spawn_agent') {
+  if (isCodexSpawnTool(name)) {
     return {
       tool: 'Agent',
       input: {

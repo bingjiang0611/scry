@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it } from 'vitest'
 import { initWorkspace } from './workspace-init'
 
@@ -65,7 +66,7 @@ describe('scry init', () => {
     expect(openCodeSource).toContain('SCRY_HANDLER_ID=turn-recorder-v1')
     expect(openCodeSource).toContain("reason: 'byte_limit'")
     expect(openCodeSource).toContain('if (observed.length === 0) return undefined')
-    expect(openCodeSource).toContain('...(observedUsage ? { usage: observedUsage } : {})')
+    expect(openCodeSource).toContain('usage_complete: observedUsage.complete')
     execFileSync(process.execPath, ['--check', openCodePlugin])
     expect(await readFile(join(root, '.git/info/exclude'), 'utf8')).toContain('.scry/')
     execFileSync('sh', ['-n', join(root, '.scry/provider-hook.sh')])
@@ -78,6 +79,44 @@ describe('scry init', () => {
     // managed 模式不走 socket 快路径。
     expect(hookScript.indexOf('--managed')).toBeLessThan(hookScript.indexOf('payload="$(cat)"'))
   }, 60_000)
+
+  it('OpenCode 插件只累计终态已观测字段，保留真零、覆盖更新并标注缺失消息', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'opencode', cliPath: process.execPath })
+    const source = (await readFile(join(root, '.opencode/plugins/scry-recorder.js'), 'utf8'))
+      .replace(/^import .*$/gm, '')
+      .replace("const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')", `const root = ${JSON.stringify(root)}`)
+      .replace('export const ScryRecorder', 'const ScryRecorder')
+      .replace('export default ScryRecorder', 'ScryRecorder()')
+    const delivered: Record<string, unknown>[] = []
+    const hooks = await runInNewContext(source, {
+      resolve, Buffer, TextDecoder, process,
+      spawnSync: (_hook: string, _args: string[], options: { input: string }) => {
+        delivered.push(JSON.parse(options.input))
+        return {}
+      }
+    }) as Record<string, (input: unknown, output?: unknown) => Promise<void>>
+    const finished = { id: 'm1', role: 'assistant', time: { completed: 10 }, tokens: { input: 9, output: 3, cache: { read: 0 } }, cost: 0 }
+    const pending = { id: 'm1', role: 'assistant', tokens: { input: 0, output: 0 }, cost: 0 }
+    const cases = [
+      { rows: [], expected: undefined },
+      { rows: [{ ...finished, tokens: {}, cost: undefined }], expected: undefined },
+      { rows: [pending], expected: undefined },
+      { rows: [pending, finished, finished], expected: { input_tokens: 9, output_tokens: 3, cache_read_input_tokens: 0, cost_usd: 0 }, complete: true },
+      { rows: [{ ...pending, time: { completed: 10 } }], expected: { input_tokens: 0, output_tokens: 0, cost_usd: 0 }, complete: true },
+      { rows: [finished, { ...pending, id: 'm2' }], expected: { input_tokens: 9, output_tokens: 3, cache_read_input_tokens: 0, cost_usd: 0 }, complete: false },
+      { rows: [{ ...finished, tokens: { input: 4 }, cost: undefined }], expected: { input_tokens: 4 }, complete: false },
+      { rows: [{ ...finished, tokens: { input: -1, output: NaN, reasoning: Infinity }, cost: '0' }], expected: undefined }
+    ]
+    for (const scenario of cases) {
+      await hooks['chat.message']({ sessionID: 's1', prompt: 'fixture' })
+      for (const info of scenario.rows) await hooks.event({ event: { type: 'message.updated', properties: { info: { ...info, sessionID: 's1' } } } })
+      await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 's1' } } })
+      expect(delivered.at(-1)?.usage).toEqual(scenario.complete === false ? undefined : scenario.expected)
+      expect(delivered.at(-1)?.usage_partial).toEqual(scenario.complete === false ? scenario.expected : undefined)
+      expect(delivered.at(-1)?.usage_complete).toBe(scenario.complete)
+    }
+  })
 
   it.each(['none', 'summary'])('保留已有显式 %s 配置，不猜测用户意图', async (toolOutput) => {
     const root = await gitWorkspace()

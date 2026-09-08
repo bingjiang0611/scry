@@ -322,16 +322,26 @@ function tool(input, output = {}) {
 function usage(state) {
   const observed = [...(state?.usage?.values() ?? [])]
   if (observed.length === 0) return undefined
-  const totals = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0, cost_usd: 0 }
-  for (const info of observed) {
-    totals.input_tokens += Number(info.tokens?.input ?? 0)
-    totals.output_tokens += Number(info.tokens?.output ?? 0)
-    totals.cache_read_input_tokens += Number(info.tokens?.cache?.read ?? 0)
-    totals.cache_creation_input_tokens += Number(info.tokens?.cache?.write ?? 0)
-    totals.reasoning_tokens += Number(info.tokens?.reasoning ?? 0)
-    totals.cost_usd += Number(info.cost ?? 0)
+  const rows = observed.map((info) => {
+    // Streaming assistant messages contain initialized zero counters, not terminal usage.
+    if (typeof info.time?.completed !== 'number' || !Number.isFinite(info.time.completed)) return {}
+    return Object.fromEntries(Object.entries({
+      input_tokens: info.tokens?.input,
+      output_tokens: info.tokens?.output,
+      cache_read_input_tokens: info.tokens?.cache?.read,
+      cache_creation_input_tokens: info.tokens?.cache?.write,
+      reasoning_tokens: info.tokens?.reasoning,
+      cost_usd: info.cost
+    }).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value >= 0))
+  })
+  const totals = {}
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row)) totals[key] = (totals[key] ?? 0) + value
   }
-  return totals
+  if (!Object.keys(totals).length) return undefined
+  const required = new Set(['input_tokens', 'output_tokens', ...Object.keys(totals)])
+  const complete = rows.every((row) => [...required].every((key) => key in row))
+  return { totals, complete }
 }
 
 function deliver(event, payload) {
@@ -379,7 +389,7 @@ export const ScryRecorder = async () => ({
       const info = object(properties.info)
       if (info.role === 'assistant' && info.id) {
         state.assistantMessages.add(String(info.id))
-        if (info.tokens) state.usage.set(String(info.id), info)
+        state.usage.set(String(info.id), info)
       }
     }
     if (envelope.type === 'message.part.updated' && state) {
@@ -395,7 +405,11 @@ export const ScryRecorder = async () => ({
         ...payload('Stop', input),
         assistant_response: assistant.value,
         ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
-        ...(observedUsage ? { usage: observedUsage } : {})
+        ...(observedUsage ? {
+          // Older recorders must see unavailable, never an exact partial sum.
+          ...(observedUsage.complete ? { usage: observedUsage.totals } : { usage_partial: observedUsage.totals }),
+          usage_complete: observedUsage.complete
+        } : {})
       })
       turns.delete(id)
     }

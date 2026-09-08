@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.38 \
+npm install -g @ali/scry-turn-recorder@0.2.39 \
   --registry=https://registry.anpm.alibaba-inc.com
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -111,6 +111,14 @@ Agent、skill 与提示词不应主动调用这些命令。
 - 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
+
+## 0.2.39 用量与子 Agent 证据修复
+
+- Codex 的裸 `spawn_agent`、`multi_agent_v1__spawn_agent` 和分离的 namespace/name 在 rollout 与 hook-only 路径统一记为 Agent；不把未知 namespace 或 MCP 同名工具误判为子 Agent。
+- OpenCode 初始化零值不算终态用量；按 message ID 覆盖更新，只累计终态实际存在的有限非负数。合法的终态零值保留，缺字段不补零。
+- 完整计数仍走 `usage`；不完整的已观测计数走 `usage_partial`，新 recorder 保存为 `partial/exact`（数字是实测子集，不是整轮总量）。旧 recorder 不认识该字段时保持 unavailable，不会把子集误记为 exact 总量。`usage_complete:false` 也可显式标注既有 usage 输入不完整。
+- 修复只影响新记录。不会重写历史 category、补造 stop/耗时/token，或修改已安装 CLI/插件；源码版本、实际 hook 使用的 CLI 和生成插件需要分别核验。
+- `calls.total=null` 可能表示分类覆盖不足；`modelTiming=response_intervals/estimated` 不等同于精确 API 耗时，不能通过补零或升级 quality 消除。
 
 ## 未结束的轮次与终止时间
 
@@ -339,7 +347,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.38", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.39", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。
