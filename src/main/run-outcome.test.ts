@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import { spanRowsFromItems } from './span-ledger'
-import { ensureFailedTerminalResult } from './run-outcome'
+import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
 
 const context = {
   runId: 'run-1',
@@ -13,6 +13,13 @@ const context = {
 }
 
 describe('terminal run outcome', () => {
+  it('does not describe interrupted or failed runs as model completion', () => {
+    expect(terminalOutcomeLabel('completed')).toBe('模型已完成')
+    expect(terminalOutcomeLabel('failed')).toBe('运行已失败')
+    expect(terminalOutcomeLabel('interrupted')).toBe('运行已中断')
+    expect(terminalOutcomeLabel('cancelled')).toBe('运行已中断')
+  })
+
   it('synthesizes one failed result for an ordinary Error and makes the turn queryable', () => {
     const items: TraceEvent[] = []
     expect(ensureFailedTerminalResult(items, context).created).toBe(true)

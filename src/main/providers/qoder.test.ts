@@ -86,6 +86,19 @@ describe('Qoder provider adapter', () => {
     })
   })
 
+  it.each(['EPERM', 'EACCES'])('explains %s without retrying a potentially dispatched fork', async (code) => {
+    sdk.getSessionMessages.mockResolvedValue([
+      { type: 'user', uuid: 'user-1', message: { content: 'prompt' } },
+      { type: 'assistant', uuid: 'assistant-1', message: { content: 'answer' } }
+    ])
+    sdk.forkSession.mockRejectedValue(Object.assign(new Error('operation not permitted'), { code, path: '/qoder/session.jsonl' }))
+    await expect(createQoderAdapter().forkSession!.fork({
+      providerId: 'qoder', sourceSessionId: 'session-source', sourceRunId: 'run-1', sourceProviderTurnId: 'turn-1',
+      sourceForkTurnId: 'user-1', cwd: '/repo'
+    })).rejects.toThrow(`Qoder 会话文件访问被系统拒绝（${code}）`)
+    expect(sdk.forkSession).toHaveBeenCalledTimes(1)
+  })
+
   it('forks a legacy Qoder promptId through its exact UUID and all tool responses', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-qoder-fork-'))
     const previous = process.env.QODER_CONFIG_DIR

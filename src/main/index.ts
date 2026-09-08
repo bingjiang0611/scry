@@ -184,7 +184,7 @@ import {
   type PreparedAttachment
 } from './attachment-store'
 import { deleteOwnedSessionData } from './session-deletion'
-import { ensureFailedTerminalResult } from './run-outcome'
+import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
 import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
 import {
   ContextAdmission,
@@ -3015,7 +3015,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       } catch (error) {
         win?.webContents.send('agent:error', {
           runId,
-          message: `模型已完成，但会话 catalog 更新失败：${String((error as Error).message)}`,
+          message: `${terminalOutcomeLabel(completionStatus)}，但会话 catalog 更新失败：${String((error as Error).message)}`,
           category: 'catalog',
           hint: '保留 userData/app-sessions.json 与 .bak 后重试；本轮 trace 仍会继续归档'
         })
@@ -3050,7 +3050,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         // 恢复 archive/CLI；diff 会明确记为 unavailable，而不是伪造零值。
         await persistTerminalProgress(completionArchiveArgs)
       } catch (error) {
-        const message = `模型已完成，但 Scry 精确记录快照失败：${String((error as Error).message)}`
+        const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录快照失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
         recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
@@ -3081,7 +3081,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         terminalArchiveCommitted = true
         recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
       } catch (error) {
-        const message = `模型已完成，但 Scry 精确记录提交失败：${String((error as Error).message)}`
+        const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录提交失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
         recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
