@@ -37,7 +37,7 @@ import { useAgentSession } from './hooks/useAgentSession'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
-import { selectedExternalSessionId, sessionSelectionChanged } from './session-selection'
+import { selectedExternalSessionId, sessionMatchesSelection, sessionSelectionChanged } from './session-selection'
 import type { WorkspaceFileTarget } from './workspace-links'
 
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
@@ -414,6 +414,29 @@ interface NewConversationEffects {
   setView: (view: AppView) => void
   focusComposer: () => void
   isCurrent?: () => boolean
+}
+
+interface SessionArchiveEffects {
+  archive: () => Promise<boolean>
+  archivingActiveSession: boolean
+  // 归档一个正在跑的会话不能清视图：轮次还在 main 里跑，清掉以后时间线空白、
+  // “停止”拿不到 runId 失效，用户只能看到“运行中”却没任何反应。
+  activeSessionBusy: boolean
+  rememberUndo: () => void
+  resetConversation: () => Promise<void>
+  reloadProjects: () => void
+}
+
+// 归档只改 catalog，但归档的是当前打开的会话时，renderer 还钉着这条已经从侧栏消失的会话 id，
+// 之后每次发送都会被 main 的会话身份守卫拒绝（“发送前会话上下文已变化”）。所以这里必须
+// 回到一个明确的新会话；草稿文本不动。
+export async function applySessionArchiveEffects(effects: SessionArchiveEffects): Promise<void> {
+  if (!(await effects.archive())) return
+  effects.rememberUndo()
+  // Archive is already durable. Refresh the sidebar before resetting the conversation:
+  // reset also refreshes Provider catalogs, which may be slow or reject after selection clears.
+  effects.reloadProjects()
+  if (effects.archivingActiveSession && !effects.activeSessionBusy) await effects.resetConversation()
 }
 
 export async function applyNewConversationEffects(effects: NewConversationEffects): Promise<void> {
@@ -1264,11 +1287,22 @@ export function App() {
     workspace.loadProjects()
   }
 
-  const archiveSession = async (cwd: string, session: SessionMeta): Promise<void> => {
-    const changed = await window.scry.setSessionArchived(sessionRefOf(cwd, session), true)
-    if (!changed) return
-    setArchiveUndo({ ref: sessionRefOf(cwd, session), preview: session.preview })
-    workspace.loadProjects()
+  const archiveSession = async (cwd: string, meta: SessionMeta): Promise<void> => {
+    const ref = sessionRefOf(cwd, meta)
+    const archivingActiveSession = sessionMatchesSelection(cwd, meta, {
+      cwd: cwdRef.current,
+      sessionId: activeSessionIdRef.current,
+      providerId: integrations.selectedProviderId,
+      agentProfileId: integrations.providerContext.agentProfileId
+    })
+    await applySessionArchiveEffects({
+      archive: () => window.scry.setSessionArchived(ref, true),
+      archivingActiveSession,
+      activeSessionBusy: session.busy || queuedPrompts.length > 0 || composerSubmitting,
+      rememberUndo: () => setArchiveUndo({ ref, preview: meta.preview }),
+      resetConversation: newConversation,
+      reloadProjects: workspace.loadProjects
+    })
   }
 
   const undoArchive = async (): Promise<void> => {

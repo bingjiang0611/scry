@@ -28,6 +28,7 @@ MutationObserver conditions; timeouts are deadlock watchdogs, not speed assertio
 | autoGrant skips validation | `src/main/commit-hook-trust.regression.test.ts` | Traversal, symlink, unlisted entry and size violations reject before grants/bundles exist; tampered frozen content rejects rather than being silently replaced |
 | Provider is done but App completion waits for callback backlog | `src/main/managed-turn-notifications.test.ts` | With only downstream drain blocked, App live commit and journal replay must durably archive/record and clear their artifacts before release; subsequent delivery rejection cannot undo completion |
 | CLI/recovery accidentally adopts App detach semantics | `src/main/managed-turn-notifications.test.ts` | Core recovery defaults to awaiting delivery, explicit detach returns while blocked, bounded batch options propagate, and rejection semantics stay distinct |
+| Archive highlights the project but leaves the archived session row visible | `src/renderer/session-archive-effects.test.ts` + `scripts/fixtures/sidebar-archive-smoke.tsx` | After archive acknowledgment, refresh the sidebar before awaiting conversation/Provider reset; blocked or rejected catalog refresh cannot retain the row; undo restores it, including before reset finishes; background archive preserves selection |
 
 The focused command also reruns existing session admission, archive/view reset, empty-history,
 dock-permission and capability-call tests. These existing cases are not claimed as newly added.
@@ -48,3 +49,12 @@ delivery is mocked only for ordering tests; those tests do not prove remote deli
 migration or continuous queue draining. Stable notification receiver/cursor optimization remains
 outside this change. No installed App restart, real Provider request, real record/ACK modification,
 version bump or release is part of this test task.
+
+## Follow-up: archived row remains visible (2026-09-08)
+
+- Confirmed requirement: returning selection to the current project after archiving an idle current session is acceptable. The defect is the archived row remaining in the sidebar, not that selection change.
+- Root cause: `applySessionArchiveEffects` previously awaited `resetConversation` before `reloadProjects`; the former also waits for Provider catalogs after clearing selection. Archive metadata was already durable, while its sidebar refresh was blocked or skipped on rejection.
+- Fix: request project-list refresh immediately after successful archive/undo registration, before awaiting reset. No optimistic removal on a rejected/false archive result; busy/background sessions still avoid reset.
+- Added seven unit cases. Two failed before the fix. The real-component fixture also failed waiting for the archived row to disappear while catalog refresh was deliberately held open; it now passes that case, catalog rejection, undo and background archive.
+- Validation: current working-tree focused suite **308 passed**; independent staged snapshot **299 passed**. Both include the expanded hidden UI fixture; typecheck and build passed on both snapshots.
+- The fixture uses the production Sidebar, `useWorkspaceState` and archive coordinator with a fake typed catalog boundary. It does not click or modify real user sessions, and does not validate full installed-App IPC or pointer hit geometry.
