@@ -9,10 +9,13 @@ import {
   type ModelUsageRow
 } from '@shared/trace'
 import type { AgentInputAttachment } from '@shared/runtime'
-import { logicalCallEventsForTurn } from '@shared/logical-calls'
+import { logicalCallEventsForTurn as deduplicateCallEvents } from '@shared/logical-calls'
+import { projectRequestedSkillLoads } from './skill-load-evidence'
 import { resultWallTiming } from '@shared/result-timing'
 import { inferredReadPaths } from './file-evidence'
-export { logicalCallEventsForTurn }
+export function logicalCallEventsForTurn(items: TraceEvent[], userText?: string): TraceEvent[] {
+  return projectRequestedSkillLoads(deduplicateCallEvents(items), userText)
+}
 export { bashReadFiles } from './file-evidence'
 
 // 视觉升级：值改成 Icon 名（蓝本 SVG 图标），消费处用 <Icon name={...}>。
@@ -934,7 +937,7 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
   let skillSwitches = 0
   let subagents = 0
   const turnCtx: TurnCtx[] = turns.map((t) => {
-    const items = logicalCallEventsForTurn(t.items)
+    const items = logicalCallEventsForTurn(t.items, t.userText)
     const skillEv = items.find((e) => e.kind === 'skill')
     if (skillEv) {
       const nm = skillEv.name ?? 'skill'
@@ -982,7 +985,7 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
 
   const segments: RichSegment[] = groups.map((g) => {
     const segTurns = g.idx.map((i) => turns[i])
-    const items = segTurns.flatMap((t) => logicalCallEventsForTurn(t.items))
+    const items = segTurns.flatMap((t) => logicalCallEventsForTurn(t.items, t.userText))
     const segmentResults = segTurns.map((turn) => resultOf(turn))
     const cost = segmentResults.reduce((sum, result) => sum + (result?.costUsd ?? 0), 0)
     const tokenKnownTurnsForSegment = segmentResults.filter(hasTokenUsage).length
@@ -1241,7 +1244,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
     const promptTokens =
       (r?.tokensIn ?? 0) +
       (cacheAccounting === 'separate' ? (r?.cacheReadTokens ?? 0) + (r?.cacheCreationTokens ?? 0) : 0)
-    const toolCount = aggregateCalls(logicalCallEventsForTurn(t.items)).totalCalls
+    const toolCount = aggregateCalls(logicalCallEventsForTurn(t.items, t.userText)).totalCalls
     const errorCount = t.items.filter((e) => e.stage === 'tool_result' && e.isError).length
     return {
       turnNo: i + 1,
@@ -1355,7 +1358,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
 
   const repeatInTurn = turns
     .map((t, i) => {
-      const calls = aggregateCalls(logicalCallEventsForTurn(t.items))
+      const calls = aggregateCalls(logicalCallEventsForTurn(t.items, t.userText))
       const top = [
         ...calls.tools.map((tool) => [tool.name, tool.count] as const),
         ...calls.mcp.map((group) => [`mcp:${group.server}`, group.total] as const)
@@ -1395,7 +1398,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
 
   const subagent = turns
     .map((turn, index) => {
-      const logical = logicalCallEventsForTurn(turn.items).filter(
+      const logical = logicalCallEventsForTurn(turn.items, turn.userText).filter(
         (event) => event.stage !== 'tool_result' && (event.kind === 'tool' || event.kind === 'skill' || event.kind === 'agent')
       )
       const roots = logical.filter((event) => event.kind === 'agent')
@@ -1472,7 +1475,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
 export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts: { sessionId?: string | null } = {}): string {
   const billing = analyzeBilling(turns)
   const all = turns.flatMap((t) => t.items)
-  const calls = aggregateCalls(turns.flatMap((turn) => logicalCallEventsForTurn(turn.items)))
+  const calls = aggregateCalls(turns.flatMap((turn) => logicalCallEventsForTurn(turn.items, turn.userText)))
   const { structured } = aggregateFiles(all)
   const cov = fileWriteCoverage(all)
   const segs = aggregateSegments(all)

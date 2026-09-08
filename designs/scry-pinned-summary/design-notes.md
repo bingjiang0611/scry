@@ -8,7 +8,7 @@
 
 1. **Changes**：文件数量、增加行、删除行；点击进入 Diff / Workspace。
 2. **分支名称**：当前 Git branch；点击进入分支与工作区详情。
-3. **Skills & MCP**：汇总数量和可用状态；点击进入 Skills / MCP 详情。
+3. **Skills & MCP · 本会话**：只汇总当前会话已加载记录中的调用证据（Skill 调用/注入、MCP 工具调用），显示种类数与逐项调用次数；点击定位首次对应事件。不展示工作区配置清单或当前连接状态。
 4. **Web reading**：本轮已读取网页数量；点击查看有证据的网页来源。
 5. **Subagents**：总量与 done / running 状态；点击进入 Agents Surface。
 
@@ -39,9 +39,21 @@
 
 - Changes 必须来自真实 Git diff；采集失败时显示 `— / 不可用`，不能显示 `+0 −0`。
 - branch 必须来自当前 canonical workspace；无 Git 仓库时显示 `非 Git 工作区`。
-- Skills、MCP、Web reading、Subagents 必须基于各自真实可观测能力聚合。
+- Skills、MCP 必须基于当前会话已加载 TraceEvent 的逻辑调用聚合；不能用配置清单、名称提及或 Skill 文件路径引用冒充调用。Web reading、Subagents 沿用各自真实可观测证据。
 - Provider 不提供某项能力时明确显示 unavailable，不为对齐 UI 推断数量。
 - started / progress / response 仍按 logical call 去重后计数。
+
+## D-20260908-session-capability-calls
+
+- Scope / status：本摘要的信息口径 / confirmed（规则确认，产物验收待确认）。
+- Feedback：用户明确要求“这里应该展示这个会话调用的skill和mcp”。替代此前“配置数量/可用状态”的口径。
+- Preserve：卡片布局、图标、展开列表，以及 Changes / Web references / Subagents 保持不变；左侧能力配置入口不受影响。
+- Applied：`src/renderer/session-capability-calls.ts`、`src/renderer/components/PinnedSummary.tsx` 与 `App.tsx` 接线。复用 Overview 的逻辑调用去重规则；结果和进度不重复计数，失败调用仍计为调用而非成功。
+- Evidence：277 项 focused 测试、typecheck、build 通过。后台浏览器使用生产组件与样例会话验证展示、MCP 点击回调及切换空会话清除旧列表；未执行安装版真实会话重放。
+- Boundary：仅陈述已加载证据；空态用“尚未观测到”，不推断完整会话从未调用，也不推断 Provider 的实时 MCP 可用性。
+- Follow-up defect：Qoder 将显式 `/rate-native-hsf-invoke` 请求落实为成功的 `Read(.../hsf-invoke/SKILL.md)`，没有原生 Skill 事件。首次改动漏掉了此路径。`skill-load-evidence.ts` 现在要求轮首显式技能命令（含工作区前缀别名）与关联的读取成功结果，才把该 Read 在展示层归类为一次 Skill 加载，并标注“加载推断”。普通扫描、路径提及、失败/结果缺失不计入；已有原生调用/注入时不重复推断。原始 Read 保留为点击定位目标，canonical archive / recorder 不改写。
+- Follow-up evidence：292 项 focused 测试、typecheck、build 通过。只读重放该真实轮次：Skill 从 0 变为 `hsf-invoke ×1（加载推断）`，总调用数仍为 108。此项为原始归档的展示投影验证，不等同于安装版真实交互验收。
+- Revisit：会话分页、调用证据合同或摘要导航改变时复核。此规则不提升为跨项目视觉偏好。
 
 ## 已归档方向
 

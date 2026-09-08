@@ -12,6 +12,7 @@ import {
 import type { AgentIntervention, RuntimeProvider } from '@shared/runtime'
 import { providerDangerCoverage } from '@shared/provider'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
+import { isInferredSkillLoad } from '../skill-load-evidence'
 import { buildTurnTimingBreakdown, type TurnTimingBreakdown } from '../turn-timing'
 import {
   aggregateHooks,
@@ -412,7 +413,7 @@ function turnCallLabel(ev: TraceEvent, kind: TurnCallKind): string {
     const server = ev.mcpServer ?? 'mcp'
     return ev.mcpAction ? `${server}.${ev.mcpAction}` : server
   }
-  if (kind === 'skill') return ev.name ?? 'Skill'
+  if (kind === 'skill') return `${ev.name ?? 'Skill'}${isInferredSkillLoad(ev) ? '（加载推断）' : ''}`
   if (kind === 'agent') return ev.name ?? 'Task'
   return ev.tool ?? ev.name ?? ev.stage
 }
@@ -642,12 +643,12 @@ function OverviewPanelBody({
     }
     return null
   }, [results])
-  const logicalCallEvents = useMemo(() => turns.flatMap((turn) => logicalCallEventsForTurn(turn.items)), [turns])
+  const logicalCallEvents = useMemo(() => turns.flatMap((turn) => logicalCallEventsForTurn(turn.items, turn.userText)), [turns])
   const calls = useMemo(() => aggregateCalls(logicalCallEvents), [logicalCallEvents])
   const turnCallRows = useMemo<TurnCallRow[]>(() => {
     return turns
       .map((turn, index) => {
-        const logicalEvents = logicalCallEventsForTurn(turn.items)
+        const logicalEvents = logicalCallEventsForTurn(turn.items, turn.userText)
         const result = resultOf(turn) ?? null
         const turnDiffView = turnDiffViewOf(turn.items)
         const maps: Record<TurnCallKind, Map<string, number>> = {
@@ -660,7 +661,7 @@ function OverviewPanelBody({
         for (const ev of logicalEvents) {
           const kind = turnCallKind(ev)
           if (!kind) continue
-          firstEvent ??= ev
+          firstEvent ??= isInferredSkillLoad(ev) ? turn.items.find((item) => item.id === ev.id) ?? ev : ev
           if (kind === 'mcp') {
             for (const call of mcpCallsForEvent(ev)) {
               addTurnCall(maps.mcp, call.action ? `${call.server}.${call.action}` : call.server)
@@ -742,7 +743,7 @@ function OverviewPanelBody({
   const callSub = [
     `工具 ${calls.ordinaryToolTotal}`,
     `MCP ${calls.mcpTotal}`,
-    `Skill ${calls.skillTotal}`,
+    `Skill ${calls.skillTotal}${logicalCallEvents.some(isInferredSkillLoad) ? '（含加载推断）' : ''}`,
     `子Agent ${calls.agentTotal}`
   ].join(' · ')
   const diffAdd = gitDiff.reduce((s, d) => s + d.added, 0)
@@ -1110,7 +1111,7 @@ function OverviewPanelBody({
               )
             })}
           </div>
-          <div className="psrc">每轮展示结构化介入、MCP、Skill、子 Agent、Hook 与文件数量；介入仅统计结构化问答/权限请求，不对普通文本（如“请登录”）做 NLP 推断。</div>
+          <div className="psrc">每轮展示结构化介入、MCP、Skill、子 Agent、Hook 与文件数量；Skill 含用户明确指定且成功读取技能文件的加载推断，不等于 Provider 原生 Skill 调用。介入仅统计结构化问答/权限请求。</div>
         </div>
       )}
         </div>
@@ -1441,21 +1442,21 @@ function OverviewPanelBody({
 
           <div className="psub">Skill</div>
           {calls.skills.length === 0 ? (
-            <div className="dim pad2">本会话无 Skill 调用</div>
+            <div className="dim pad2">尚未观测到 Skill 调用或加载证据</div>
           ) : (
             calls.skills.map((s) => (
               <button
                 type="button"
                 className="callrow"
                 key={s.name}
-                onClick={() => jumpTo((e) => e.kind === 'skill' && e.name === s.name && e.stage !== 'tool_result')}
-                title="点查看这次 skill 调用的详情"
+                onClick={() => jumpTo((e) => logicalCallEvents.some((call) => call.kind === 'skill' && call.name === s.name && call.id === e.id && call.runId === e.runId))}
+                title="点查看原始 Skill 调用或文件加载证据；加载推断不等于原生 Skill 调用"
               >
                 <span className="ckind">
                   <Icon name="box" />
                 </span>
                 <span className="fname" title={s.name}>
-                  {s.name}
+                  {s.name}{logicalCallEvents.some((event) => event.name === s.name && isInferredSkillLoad(event)) ? '（含加载推断）' : ''}
                 </span>
                 <span className="dim">{s.count}×</span>
               </button>
