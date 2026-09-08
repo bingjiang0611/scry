@@ -284,7 +284,7 @@ select:focus-visible,
 
 .sidebar .sb-sess .sb-provider {
   color: var(--dim2);
-  font: 620 9px/1 var(--font-ui);
+  font: 620 var(--text-compact-size)/1 var(--font-ui);
   letter-spacing: 0.035em;
   text-transform: uppercase;
 }
@@ -294,7 +294,7 @@ select:focus-visible,
 .sb-count {
   color: var(--dim3);
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-compact-size);
 }
 
 .sb-footer {
@@ -377,7 +377,7 @@ select:focus-visible,
 .tb-agent-status .agent-version {
   color: var(--dim2);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--text-compact-size);
   font-weight: 550;
 }
 
@@ -425,8 +425,9 @@ select:focus-visible,
   background: transparent;
   color: var(--dim3);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-supporting-size);
   font-weight: 500;
+  line-height: 1.4;
 }
 
 .chat-evidence-source span,
@@ -434,9 +435,10 @@ select:focus-visible,
 .chat-evidence-source b {
   color: var(--dim2);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: inherit;
   font-weight: 500;
   letter-spacing: 0;
+  line-height: inherit;
   text-transform: none;
 }
 
@@ -591,7 +593,7 @@ select:focus-visible,
 .chat-body .who .mini,
 .chat-body .who .mini b {
   color: var(--dim3);
-  font-size: 10px;
+  font-size: var(--text-compact-size);
 }
 
 .chat-body .model-text {
@@ -1204,7 +1206,7 @@ select:focus-visible,
   z-index: 16;
   top: var(--window-titlebar-h, var(--topbar-h));
   right: 0;
-  width: 326px;
+  width: min(326px, 100%);
   height: calc(100% - var(--window-titlebar-h, var(--topbar-h)));
   padding: 16px 14px 0 8px;
   pointer-events: none;
@@ -1352,7 +1354,11 @@ select:focus-visible,
   margin: 2px 0 10px 39px;
 }
 
-.pinned-summary-detail-row {
+.pinned-summary-detail[hidden] {
+  display: none;
+}
+
+.pinned-summary-card .pinned-summary-detail-row {
   width: 100%;
   min-height: 39px;
   display: grid;
@@ -1364,7 +1370,7 @@ select:focus-visible,
   border-radius: 8px;
   background: transparent;
   color: var(--fg);
-  font-size: 11px;
+  font-size: var(--text-supporting-size);
   text-align: left;
 }
 
@@ -1400,7 +1406,7 @@ button.pinned-summary-detail-row:hover {
 
 .pinned-summary-detail-row em {
   color: var(--dim3);
-  font-size: 9px;
+  font-size: var(--text-compact-size);
   font-style: normal;
 }
 
@@ -1415,7 +1421,7 @@ button.pinned-summary-detail-row:hover {
 .pinned-summary-empty {
   padding: 8px 4px 8px 0;
   color: var(--dim3);
-  font-size: 10.5px;
+  font-size: var(--text-supporting-size);
   line-height: 1.5;
 }
 
@@ -1433,7 +1439,7 @@ button.pinned-summary-detail-row:hover {
   }
 
   .pinned-summary-layer {
-    width: 310px;
+    width: min(310px, 100%);
     padding-right: 10px;
     padding-left: 6px;
   }

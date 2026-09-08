@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { DiffFile, TraceEvent } from '@shared/trace'
 import { sessionCapabilityCalls } from '../session-capability-calls'
 import { deriveAgentRows, type AgentRowStatus } from '../agent-panel'
@@ -17,13 +17,17 @@ const AGENT_STATUS_LABEL: Record<AgentRowStatus, string> = {
   unknown: '状态未知'
 }
 
+export type PinnedSummarySection = 'inventory' | 'web' | 'agents'
+
 export interface PinnedSummaryProps {
   cwd: string | null
   gitDiff: DiffFile[]
   turns: Turn[]
   busy: boolean
   temporary: boolean
+  expandedSections: ReadonlySet<PinnedSummarySection>
   onDismiss: () => void
+  onToggleSection: (section: PinnedSummarySection) => void
   onOpenChanges?: () => void
   onOpenCall: (runId: string, event: TraceEvent) => void
   onOpenAgents: () => void
@@ -60,22 +64,36 @@ function webSourceLabel(url: string): string {
   return label.length > 48 ? `${label.slice(0, 45)}…` : label
 }
 
-export function webSourcesFromTurns(turns: readonly Turn[]): PinnedWebSource[] {
+interface PinnedWebSourceScan {
+  sources: PinnedWebSource[]
+  complete: boolean
+}
+
+function scanWebSourcesFromTurns(turns: readonly Turn[]): PinnedWebSourceScan {
   const sources: PinnedWebSource[] = []
   const seen = new Set<string>()
   let inspected = 0
+  let complete = true
 
   const inspect = (text: string | undefined): void => {
-    if (!text || inspected >= MAX_SOURCE_TEXT || sources.length >= MAX_WEB_SOURCES) return
+    if (!text || sources.length >= MAX_WEB_SOURCES) return
+    if (inspected >= MAX_SOURCE_TEXT) {
+      complete = false
+      return
+    }
     const remaining = MAX_SOURCE_TEXT - inspected
     const bounded = text.slice(0, remaining)
+    if (bounded.length < text.length) complete = false
     inspected += bounded.length
     for (const match of bounded.matchAll(URL_PATTERN)) {
       const url = normalizedUrl(match[0])
       if (!url || seen.has(url)) continue
       seen.add(url)
       sources.push({ url, label: webSourceLabel(url) })
-      if (sources.length >= MAX_WEB_SOURCES) return
+      if (sources.length >= MAX_WEB_SOURCES) {
+        complete = false
+        return
+      }
     }
   }
 
@@ -85,10 +103,14 @@ export function webSourcesFromTurns(turns: readonly Turn[]): PinnedWebSource[] {
       inspect(event.text)
       inspect(event.output)
       inspect(clippedJson(event.input))
-      if (sources.length >= MAX_WEB_SOURCES || inspected >= MAX_SOURCE_TEXT) return sources
+      if (sources.length >= MAX_WEB_SOURCES || inspected >= MAX_SOURCE_TEXT) return { sources, complete: false }
     }
   }
-  return sources
+  return { sources, complete }
+}
+
+export function webSourcesFromTurns(turns: readonly Turn[]): PinnedWebSource[] {
+  return scanWebSourcesFromTurns(turns).sources
 }
 
 export function PinnedSummary({
@@ -97,20 +119,27 @@ export function PinnedSummary({
   turns,
   busy,
   temporary,
+  expandedSections,
   onDismiss,
+  onToggleSection,
   onOpenChanges,
   onOpenCall,
   onOpenAgents
 }: PinnedSummaryProps) {
   const cardRef = useRef<HTMLElement>(null)
-  const [expanded, setExpanded] = useState({ inventory: true, web: false, agents: false })
-  const webSources = useMemo(() => webSourcesFromTurns(turns), [turns])
+  const detailsId = useId()
+  const webSourceScan = useMemo(() => scanWebSourcesFromTurns(turns), [turns])
+  const webSources = webSourceScan.sources
   const agentRows = useMemo(() => deriveAgentRows(turns, { busy }), [busy, turns])
   const additions = gitDiff.reduce((total, file) => total + file.added, 0)
   const deletions = gitDiff.reduce((total, file) => total + file.deleted, 0)
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? '未绑定工作区'
   const capabilityCalls = useMemo(() => sessionCapabilityCalls(turns), [turns])
   const callScope = '当前会话已加载记录中观测到的 Skill 调用/注入、明确请求后的技能文件加载推断与 MCP 工具调用；不代表完整调用清单，未观测到不等于未调用'
+  const inventoryExpanded = expandedSections.has('inventory')
+  const webExpanded = expandedSections.has('web')
+  const agentsExpanded = expandedSections.has('agents')
+  const showWebReferences = webSources.length > 0 || !webSourceScan.complete
 
   useEffect(() => {
     if (!temporary) return
@@ -130,10 +159,6 @@ export function PinnedSummary({
       document.removeEventListener('keydown', dismissOnEscape)
     }
   }, [onDismiss, temporary])
-
-  const toggleSection = (section: keyof typeof expanded): void => {
-    setExpanded((current) => ({ ...current, [section]: !current[section] }))
-  }
 
   return (
     <div className={`pinned-summary-layer ${temporary ? 'is-temporary' : 'is-persistent'}`}>
@@ -163,12 +188,13 @@ export function PinnedSummary({
         <div className="pinned-summary-divider" />
         <div className="pinned-summary-section-title">Context</div>
 
-        <section className={`pinned-summary-expandable ${expanded.inventory ? 'is-open' : ''}`}>
+        <section className={`pinned-summary-expandable ${inventoryExpanded ? 'is-open' : ''}`}>
           <button
             type="button"
             className="pinned-summary-row"
-            aria-expanded={expanded.inventory}
-            onClick={() => toggleSection('inventory')}
+            aria-expanded={inventoryExpanded}
+            aria-controls={`${detailsId}-inventory`}
+            onClick={() => onToggleSection('inventory')}
             title={callScope}
           >
             <span className="pinned-summary-row-icon"><Icon name="tool" /></span>
@@ -177,78 +203,133 @@ export function PinnedSummary({
               <span className="pinned-summary-count" data-evidence={capabilityCalls.length > 0 ? 'observed' : 'unknown'} title="已观测到的 Skill / MCP 工具种类数，非配置数量">
                 {capabilityCalls.length || '—'}
               </span>
-              <Icon name={expanded.inventory ? 'chevronUp' : 'chevronDown'} />
+              <Icon name={inventoryExpanded ? 'chevronUp' : 'chevronDown'} />
             </span>
           </button>
-          {expanded.inventory && (
-            <div className="pinned-summary-detail">
-              {capabilityCalls.map((call) => (
-                <button
-                  type="button"
-                  className="pinned-summary-detail-row"
-                  key={call.key}
-                  onClick={() => onOpenCall(call.runId, call.event)}
-                  title={`${call.name} · 已观测 ${call.count} 次${call.inferredCount ? `（其中 ${call.inferredCount} 次为明确请求并成功读取技能文件后的加载推断，非原生 Skill 调用）` : ''} · 点击定位会话证据`}
-                >
-                  <span className="pinned-summary-detail-icon"><Icon name={call.kind === 'skill' ? 'tool' : 'plug'} /></span>
-                  <span>{call.name}</span>
-                  <em>×{call.count}{call.inferredCount ? ' · 加载推断' : ''}</em>
-                </button>
-              ))}
-              {capabilityCalls.length === 0 && (
-                <div className="pinned-summary-empty" data-evidence="unknown" title={callScope}>
-                  尚未观测到 Skill 或 MCP 调用
-                </div>
+          <div id={`${detailsId}-inventory`} className="pinned-summary-detail" hidden={!inventoryExpanded}>
+            {inventoryExpanded && (
+              <>
+                {capabilityCalls.map((call) => (
+                  <button
+                    type="button"
+                    className="pinned-summary-detail-row"
+                    key={call.key}
+                    onClick={() => onOpenCall(call.runId, call.event)}
+                    title={`${call.name} · 已观测 ${call.count} 次${call.inferredCount ? `（其中 ${call.inferredCount} 次为明确请求并成功读取技能文件后的加载推断，非原生 Skill 调用）` : ''} · 点击定位会话证据`}
+                  >
+                    <span className="pinned-summary-detail-icon"><Icon name={call.kind === 'skill' ? 'tool' : 'plug'} /></span>
+                    <span>{call.name}</span>
+                    <em>×{call.count}{call.inferredCount ? ' · 加载推断' : ''}</em>
+                  </button>
+                ))}
+                {capabilityCalls.length === 0 && (
+                  <div className="pinned-summary-empty" data-evidence="unknown" title={callScope}>
+                    尚未观测到 Skill 或 MCP 调用
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+
+        {showWebReferences && (
+          <section className={`pinned-summary-expandable ${webExpanded ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="pinned-summary-row"
+              aria-expanded={webExpanded}
+              aria-controls={`${detailsId}-web`}
+              onClick={() => onToggleSection('web')}
+              title="仅统计当前已加载 transcript 中出现的 http(s) 引用，不代表已成功读取"
+            >
+              <span className="pinned-summary-row-icon"><Icon name="globe" /></span>
+              <span className="pinned-summary-row-main">Web references</span>
+              <span className="pinned-summary-row-value">
+                <span className="pinned-summary-count" data-evidence={webSources.length > 0 ? 'observed' : 'unknown'}>
+                  {webSources.length > 0 ? `${webSources.length}${webSourceScan.complete ? '' : '+'}` : '—'}
+                </span>
+                <Icon name={webExpanded ? 'chevronUp' : 'chevronDown'} />
+              </span>
+            </button>
+            <div id={`${detailsId}-web`} className="pinned-summary-detail" hidden={!webExpanded}>
+              {webExpanded && (
+                <>
+                  {webSources.map((source) => (
+                    <div className="pinned-summary-detail-row is-static" key={source.url}>
+                      <span className="pinned-summary-detail-icon"><Icon name="globe" /></span>
+                      <span title={source.url}>{source.label}</span>
+                    </div>
+                  ))}
+                  {webSources.length === 0 && (
+                    <div className="pinned-summary-empty" data-evidence="unknown">
+                      当前已加载内容超出扫描范围，无法确认是否有网页引用
+                    </div>
+                  )}
+                </>
               )}
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
-        <section className={`pinned-summary-expandable ${expanded.web ? 'is-open' : ''}`}>
-          <button type="button" className="pinned-summary-row" aria-expanded={expanded.web} onClick={() => toggleSection('web')} title="仅统计当前已加载 transcript 中出现的 http(s) 引用，不代表已成功读取">
-            <span className="pinned-summary-row-icon"><Icon name="globe" /></span>
-            <span className="pinned-summary-row-main">Web references</span>
-            <span className="pinned-summary-row-value">
-              <span className="pinned-summary-count">{webSources.length}</span>
-              <Icon name={expanded.web ? 'chevronUp' : 'chevronDown'} />
-            </span>
-          </button>
-          {expanded.web && (
-            <div className="pinned-summary-detail">
-              {webSources.map((source) => (
-                <div className="pinned-summary-detail-row is-static" key={source.url}>
-                  <span className="pinned-summary-detail-icon"><Icon name="globe" /></span>
-                  <span title={source.url}>{source.label}</span>
-                </div>
-              ))}
-              {webSources.length === 0 && <div className="pinned-summary-empty">当前已加载轮次未出现网页引用</div>}
-            </div>
-          )}
-        </section>
-
-        <section className={`pinned-summary-expandable ${expanded.agents ? 'is-open' : ''}`}>
-          <button type="button" className="pinned-summary-row" aria-expanded={expanded.agents} onClick={() => toggleSection('agents')} title="仅展示当前已加载 TraceEvent 中可证明的子 Agent">
+        <section className={`pinned-summary-expandable ${agentsExpanded ? 'is-open' : ''}`}>
+          <button
+            type="button"
+            className="pinned-summary-row"
+            aria-expanded={agentsExpanded}
+            aria-controls={`${detailsId}-agents`}
+            onClick={() => onToggleSection('agents')}
+            title="仅展示当前已加载 TraceEvent 中可证明的子 Agent"
+          >
             <span className="pinned-summary-row-icon"><Icon name="agents" /></span>
             <span className="pinned-summary-row-main">Subagents</span>
             <span className="pinned-summary-row-value">
               <span className="pinned-summary-count" data-evidence={agentRows.length > 0 ? 'available' : 'unknown'}>{agentRows.length || '—'}</span>
-              <Icon name={expanded.agents ? 'chevronUp' : 'chevronDown'} />
+              <Icon name={agentsExpanded ? 'chevronUp' : 'chevronDown'} />
             </span>
           </button>
-          {expanded.agents && (
-            <div className="pinned-summary-detail">
-              {agentRows.map((agent) => (
-                <button type="button" className="pinned-summary-detail-row" key={agent.id} onClick={onOpenAgents}>
-                  <span className="pinned-summary-detail-icon"><Icon name="agents" /></span>
-                  <span>{agent.name}</span>
-                  <em data-status={agent.status}>{AGENT_STATUS_LABEL[agent.status]}</em>
-                </button>
-              ))}
-              {agentRows.length === 0 && <div className="pinned-summary-empty" data-evidence="unknown">未观测到子 Agent</div>}
-            </div>
-          )}
+          <div id={`${detailsId}-agents`} className="pinned-summary-detail" hidden={!agentsExpanded}>
+            {agentsExpanded && (
+              <>
+                {agentRows.map((agent) => (
+                  <button type="button" className="pinned-summary-detail-row" key={agent.id} onClick={onOpenAgents}>
+                    <span className="pinned-summary-detail-icon"><Icon name="agents" /></span>
+                    <span>{agent.name}</span>
+                    <em data-status={agent.status}>{AGENT_STATUS_LABEL[agent.status]}</em>
+                  </button>
+                ))}
+                {agentRows.length === 0 && <div className="pinned-summary-empty" data-evidence="unknown">未观测到子 Agent</div>}
+              </>
+            )}
+          </div>
         </section>
       </aside>
     </div>
+  )
+}
+
+export interface PinnedSummaryHostProps extends Omit<PinnedSummaryProps, 'expandedSections' | 'onToggleSection'> {
+  visible: boolean
+}
+
+export function PinnedSummaryHost({ visible, ...props }: PinnedSummaryHostProps) {
+  const [expandedSections, setExpandedSections] = useState<Set<PinnedSummarySection>>(
+    () => new Set(['inventory'])
+  )
+  const toggleSection = useCallback((section: PinnedSummarySection): void => {
+    setExpandedSections((current) => {
+      const next = new Set(current)
+      if (next.has(section)) next.delete(section)
+      else next.add(section)
+      return next
+    })
+  }, [])
+
+  if (!visible) return null
+  return (
+    <PinnedSummary
+      {...props}
+      expandedSections={expandedSections}
+      onToggleSection={toggleSection}
+    />
   )
 }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -223,6 +223,67 @@ describe('managed canonical recorder', () => {
     })
 
     await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 1 })
+  })
+
+  // 真实故障：Provider 进程早已消失，open/quarantined 轮次没有 providerTurnId 也没有 canonical handoff，
+  // 永远不会自己收口，却让 agent:start 永久报“精确记录仍有 N 轮待恢复”。
+  it('主已不在的 provisional 轮次在授权后被弃掉，不再永久阻断', async () => {
+    const root = await workspace()
+    const prompt = '孤儿 provisional 轮次'
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: 'pi-session-orphan', prompt, timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: 'run-pi-orphan',
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update(prompt).digest('hex')
+      }
+    })
+
+    // 默认保守：不知道 run 存活情况时继续 pending，不得删掉可能正在跑的轮次。
+    await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 1 })
+    // run 还活着时即使开了开关也不能弃掉。
+    await expect(recoverManagedRecorderTurns(root, process.env, {
+      abandonProvisional: true,
+      isLiveManagedRun: (candidate) => candidate === 'run-pi-orphan'
+    })).resolves.toEqual({ recovered: 0, pending: 1 })
+    // 主已不在：弃掉并计入 recovered，再扫一次已经干净。
+    await expect(recoverManagedRecorderTurns(root, process.env, {
+      abandonProvisional: true,
+      isLiveManagedRun: () => false
+    })).resolves.toEqual({ recovered: 1, pending: 0 })
+    await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 0 })
+    await expect(recorderHasOpenTurn(join(root, '.scry'))).resolves.toBe(false)
+  })
+
+  it('已观测到 Provider turn 证据的轮次不会被弃掉，仍然 fail closed', async () => {
+    const root = await workspace()
+    const prompt = '已有 Provider 证据的轮次'
+    const sessionId = 'pi-session-evidence'
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: sessionId, prompt, timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: 'run-pi-evidence',
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update(prompt).digest('hex')
+      }
+    })
+    const openPath = join(root, '.scry', 'runtime', 'pi', safeKey(sessionId), 'open.json')
+    const open = JSON.parse(await readFile(openPath, 'utf8'))
+    await writeFile(openPath, JSON.stringify({ ...open, providerTurnId: 'pi-user-entry-evidence' }))
+
+    await expect(recoverManagedRecorderTurns(root, process.env, {
+      abandonProvisional: true,
+      isLiveManagedRun: () => false
+    })).resolves.toEqual({ recovered: 0, pending: 1 })
+    await expect(recorderHasOpenTurn(join(root, '.scry'))).resolves.toBe(true)
   })
 
   it('Pi prompt preflight rejection cancels only the exact provisional managed lifecycle', async () => {
@@ -1270,5 +1331,113 @@ describe('managed provider turn index', () => {
     expect(JSON.parse(await readFile(indexPath(root), 'utf8'))).toMatchObject({
       providerTurnRecordIds: { 'turn-1': recordId }
     })
+  })
+})
+
+describe('提交通知投递位置', () => {
+  const timing = {
+    startedAt: '2026-07-29T12:00:00.000Z',
+    completedAt: '2026-07-29T12:00:10.000Z',
+    durationMs: 10_000
+  }
+
+  // 每条通知都要起一次仓库回调进程；这里用 sleep 模拟真实回调的秒级开销。
+  async function slowCommitHook(root: string): Promise<{ path: string; capture: string }> {
+    const path = join(root, 'slow-commit-hook.sh')
+    const capture = join(root, 'slow-commit-hook.jsonl')
+    await writeFile(path, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\nsleep 1.5\nexit 0\n`)
+    await chmod(path, 0o700)
+    return { path, capture }
+  }
+
+  async function ackedThrough(root: string): Promise<number | null> {
+    try {
+      const state = JSON.parse(
+        await readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8')
+      ) as { ackedThrough?: number }
+      return state.ackedThrough ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async function commitOnce(
+    root: string,
+    runId: string,
+    env: NodeJS.ProcessEnv,
+    commitNotifications?: 'await' | 'detach'
+  ): Promise<void> {
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'session-notify',
+        turn_id: runId,
+        prompt: '/rate-workflow 1',
+        timestamp: timing.startedAt
+      },
+      // hook 路径自己也会投递；这里只测 managed commit 的投递位置。
+      deferDelivery: true
+    })
+    const evidence = canonicalEvidence()
+    const archiveFingerprint = stableHash({ runId, evidence, timing })
+    const prepared = await prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'codex',
+      sessionId: 'session-notify',
+      runId,
+      providerTurnId: runId,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint
+    })
+    if (prepared.status !== 'prepared') throw new Error(`unexpected prepare status: ${prepared.status}`)
+    const committed = await commitManagedRecorderTurn({
+      workspace: root,
+      provider: 'codex',
+      sessionId: 'session-notify',
+      runId,
+      recordId: prepared.recordId,
+      archiveFingerprint,
+      providerTurnId: runId,
+      userText: '/rate-workflow 1',
+      evidence,
+      timing,
+      status: 'completed',
+      env,
+      ...(commitNotifications ? { commitNotifications } : {})
+    })
+    expect(committed).toMatchObject({ status: 'committed' })
+  }
+
+  it('默认 await：CLI/recover 语义下投递完成后才返回', async () => {
+    const root = await workspace()
+    const hook = await slowCommitHook(root)
+    const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
+
+    await commitOnce(root, 'run-await', env)
+    await expect(ackedThrough(root)).resolves.toBe(1)
+  })
+
+  it('detach：轮次收口不等仓库回调，投递仍会发生', async () => {
+    const root = await workspace()
+    const hook = await slowCommitHook(root)
+    const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
+
+    const startedAt = Date.now()
+    await commitOnce(root, 'run-detach', env, 'detach')
+    const settleMs = Date.now() - startedAt
+    // 返回时慢回调还没跑完：这正是“7 秒的轮次显示成分钟级运行中”的修复点。
+    await expect(ackedThrough(root)).resolves.toBeNull()
+    expect(settleMs).toBeLessThan(1_500)
+
+    for (let i = 0; i < 60 && (await ackedThrough(root)) === null; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    await expect(ackedThrough(root)).resolves.toBe(1)
   })
 })

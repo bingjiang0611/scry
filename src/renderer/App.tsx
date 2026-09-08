@@ -21,7 +21,7 @@ import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { AgentsSurface } from './components/AgentsSurface'
-import { PinnedSummary } from './components/PinnedSummary'
+import { PinnedSummaryHost } from './components/PinnedSummary'
 import {
   createRightSurfaceState,
   reduceRightSurfaceState,
@@ -65,6 +65,36 @@ export function hasSessionOverviewContext(
   busy: boolean
 ): boolean {
   return sessionId !== null || turnCount > 0 || busy
+}
+
+export interface SessionEvidenceGap {
+  sessionId: string
+  status: 'unavailable' | 'empty'
+  detail: string
+}
+
+// 选中一条已存在的会话却读不到任何轮次，不能渲染成“新会话”：那是在说谎。
+// page === null 是 main 连可读证据都没命中（Provider transcript 与 Scry 归档都没有）；
+// page.turns 为空则是归档存在但里面没有轮次。两者必须分开报。
+export function sessionEvidenceGapAfterLoad(
+  sessionId: string,
+  page: { turns: ParsedTurn[] } | null | undefined
+): SessionEvidenceGap | null {
+  if (!page) {
+    return {
+      sessionId,
+      status: 'unavailable',
+      detail: '本机没有命中这条会话的可读证据：Provider transcript 与 Scry 归档都没有记录。'
+    }
+  }
+  if (page.turns.length === 0) {
+    return {
+      sessionId,
+      status: 'empty',
+      detail: '归档已命中，但里面没有任何已收口的轮次。'
+    }
+  }
+  return null
 }
 
 export function EmptySessionOverview() {
@@ -281,6 +311,21 @@ export function applySessionCapturedEffects(
   effects.loadProjects()
 }
 
+// 在“首轮失败后只剩本地壳”的会话里重新发送时，main 会新建一个原生 session，
+// 但事件里的 runId/previousSessionId 都属于新那一轮，renderer 靠现有条件认不出来，
+// 会一直钉着旧的本地壳 id，下一轮又被会话身份守卫拒绝。这里只采纳由本视图发起、
+// 且当前会话身份自发送以来没改过的那一轮，避免后台会话的 session 事件劫持当前视图。
+export function adoptLocalStartSessionId(
+  event: { runId?: string; sessionId?: string },
+  activeSessionId: string | null | undefined,
+  localStarts: Map<string, string>
+): string | null {
+  if (!event.runId || !event.sessionId) return null
+  const expected = localStarts.get(event.runId)
+  if (expected === undefined || expected !== activeSessionId) return null
+  return event.sessionId === activeSessionId ? null : event.sessionId
+}
+
 export function activeRunForSession(
   activeRuns: ActiveRun[] | ActiveRun | null,
   cwd: string,
@@ -456,6 +501,8 @@ export function App() {
   const [composerError, setComposerError] = useState<string | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [sessionLoading, setSessionLoading] = useState(false)
+  // 选中的历史会话读不到证据时保留原因；新会话、切会话与新轮次都会清空它。
+  const [sessionEvidenceGap, setSessionEvidenceGap] = useState<SessionEvidenceGap | null>(null)
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachment[]>([])
   const draftStartPendingRef = useRef(false)
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([])
@@ -513,6 +560,8 @@ export function App() {
   }, [chooseFolderRaw, confirmWorkspaceTransition])
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const terminalRunIdsRef = useRef(new Set<string>())
+  // runId -> 发送时的会话身份：只用于采纳本视图发起那一轮新建的原生 session id。
+  const localStartsRef = useRef(new Map<string, string>())
   const markRunStarted = useCallback((runId: string): void => {
     terminalRunIdsRef.current.delete(runId)
     setRunningRunIds((prev) => {
@@ -523,6 +572,7 @@ export function App() {
     })
   }, [])
   const markRunFinished = useCallback((runId: string): void => {
+    localStartsRef.current.delete(runId)
     terminalRunIdsRef.current.add(runId)
     while (terminalRunIdsRef.current.size > 512) {
       const oldest = terminalRunIdsRef.current.values().next().value
@@ -714,8 +764,11 @@ export function App() {
       typeof window.scry.onSession === 'function'
         ? window.scry.onSession((event) => {
             markRunStarted(event.runId)
+            const adopted = adoptLocalStartSessionId(event, activeSessionIdRef.current, localStartsRef.current)
+            if (event.runId) localStartsRef.current.delete(event.runId)
+            if (adopted) selectSessionId(adopted)
             applySessionCapturedEffects(event, {
-              activeSessionId: activeSessionIdRef.current,
+              activeSessionId: adopted ?? activeSessionIdRef.current,
               setActiveSessionId: selectSessionId,
               loadProjects
             })
@@ -883,11 +936,21 @@ export function App() {
       request = currentRunRequest()
     ): Promise<void> => {
       shouldStickToBottomRef.current = true
+      const expectedSessionId = activeSessionIdRef.current
       const runId = await session.send(text, {
         ...request,
         attachments
       })
-      if (runId && activeSessionIdRef.current == null) selectSessionId(runId)
+      if (!runId) return
+      if (expectedSessionId == null) selectSessionId(runId)
+      else {
+        localStartsRef.current.set(runId, expectedSessionId)
+        while (localStartsRef.current.size > 64) {
+          const oldest = localStartsRef.current.keys().next().value
+          if (oldest === undefined) break
+          localStartsRef.current.delete(oldest)
+        }
+      }
     },
     [currentRunRequest, selectSessionId, session.send]
   )
@@ -906,7 +969,11 @@ export function App() {
     const previousProviderTurnId = session.turns.at(-2)?.providerTurnId
     const previousForkTurnId = session.turns.at(-2)?.forkTurnId
     const previousBoundaryComplete = !!previousProviderTurnId && !!previousForkTurnId
-    const isFirstSessionTurn = session.turns.length === 1 && (session.historyWindow?.offset ?? 0) === 0
+    const completeHistoryLoaded = (session.historyWindow?.offset ?? 0) === 0
+    const isFirstSessionTurn = session.turns.length === 1 && completeHistoryLoaded
+    const localOnlyStoppedSession = completeHistoryLoaded && session.turns.every((candidate) =>
+      candidate.done && !candidate.error && !candidate.providerTurnId && !candidate.forkTurnId
+    )
     const base = {
       ...currentRunRequest(),
       expectedExternalSessionId: sourceSessionId,
@@ -924,7 +991,7 @@ export function App() {
           ...(previousForkTurnId ? { previousForkTurnId } : {})
         }
       })
-    } else if (isFirstSessionTurn && currentBoundaryAbsent) {
+    } else if (currentBoundaryAbsent && localOnlyStoppedSession) {
       runId = await session.send(text, { ...base, restartLastTurn: { replaceRunId: turn.runId } })
     } else {
       throw new Error('该轮缺少可验证的 Provider 分支边界，无法安全编辑')
@@ -1034,7 +1101,10 @@ export function App() {
       setComposerError(sendBlockedReason)
       return
     }
-    await requestDockBadgePermission()
+    // Dock badge 权限是可选装饰，而 macOS 的系统弹窗可能很久不返回（新安装的 bundle 就是
+    // permission=default）。曾经在这里 await 它：一旦弹窗不返回，send() 就卡在进入 submitting 之前，
+    // 按钮既不禁用也不报错，点击完全没反应。发送不能等它。
+    void requestDockBadgePermission()
     if (shouldQueuePrompt(session.busy, queuedPrompts.length, queuedStartPendingRef.current)) {
       const request = currentRunRequest()
       setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments, request))
@@ -1185,6 +1255,7 @@ export function App() {
       }
     )
     setComposerError(null)
+    setSessionEvidenceGap(null)
     setSessionLoading(switchingSession)
     try {
       let runId = knownRunId
@@ -1224,13 +1295,17 @@ export function App() {
       }
       await window.scry.focusRun(null)
       if (!isCurrent()) return
-      if (!externalSessionId) return
+      if (!externalSessionId) {
+        setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, null))
+        return
+      }
       const page = await window.scry.loadSession({ providerId, agentProfileId, cwd: projectCwd, externalSessionId })
       if (!isCurrent()) return
       session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
         activeRun: null,
         page
       })
+      setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
     } catch (error) {
       if (isCurrent()) setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
     } finally {
@@ -1349,6 +1424,11 @@ export function App() {
     () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
     [integrations.selectedId, session.turns]
   )
+  // 只对当前选中且真的没有轮次的会话报证据缺失：新轮次一开始或切回新会话就自动消失。
+  const activeEvidenceGap = session.turns.length === 0 && !session.busy &&
+    activeSessionId != null && sessionEvidenceGap?.sessionId === activeSessionId
+    ? sessionEvidenceGap
+    : null
   const showSessionOverview = hasSessionOverviewContext(
     selectedProviderSessionId,
     session.turns.length,
@@ -1577,6 +1657,7 @@ export function App() {
               composerError={composerError}
               submitting={composerSubmitting}
               sessionLoading={sessionLoading}
+              sessionEvidenceGap={activeEvidenceGap}
               busy={session.busy}
               draftAttachments={draftAttachments}
               queuedPrompts={queuedPrompts}
@@ -1628,29 +1709,28 @@ export function App() {
             />
           </>
         )}
-        {view === 'chat' && summaryVisible && (
-          <PinnedSummary
-            cwd={cwd}
-            gitDiff={integrations.gitDiff}
-            turns={session.turns}
-            busy={session.busy}
-            temporary={!summaryPersistent}
-            onDismiss={dismissPinnedSummary}
-            onOpenChanges={diffReview ? () => {
-              dismissPinnedSummary()
-              openSessionNetDiff()
-            } : undefined}
-            onOpenCall={(runId, event) => {
-              dismissPinnedSummary()
-              openTurnInChat(runId, event, 'event')
-            }}
-            onOpenAgents={() => {
-              dismissPinnedSummary()
-              surfacePane.restore()
-              dispatchRightSurface({ type: 'open', kind: 'agents' })
-            }}
-          />
-        )}
+        <PinnedSummaryHost
+          visible={view === 'chat' && summaryVisible}
+          cwd={cwd}
+          gitDiff={integrations.gitDiff}
+          turns={session.turns}
+          busy={session.busy}
+          temporary={!summaryPersistent}
+          onDismiss={dismissPinnedSummary}
+          onOpenChanges={diffReview ? () => {
+            dismissPinnedSummary()
+            openSessionNetDiff()
+          } : undefined}
+          onOpenCall={(runId, event) => {
+            dismissPinnedSummary()
+            openTurnInChat(runId, event, 'event')
+          }}
+          onOpenAgents={() => {
+            dismissPinnedSummary()
+            surfacePane.restore()
+            dispatchRightSurface({ type: 'open', kind: 'agents' })
+          }}
+        />
         </>
       </div>
       {rightPanelMounted && (

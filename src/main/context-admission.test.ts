@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ContextAdmission, canRestartInterruptedFirstTurn, expectedRestartSourceMatches, expectedSessionMatches, waitForCompletedRuns } from './context-admission'
+import { ContextAdmission, canRestartInterruptedLocalOnlySession, expectedRestartSourceMatches, expectedSessionMatches, waitForCompletedRuns } from './context-admission'
 
 describe('context admission', () => {
   it('serializes the same provider workspace while allowing another context through', async () => {
@@ -53,6 +53,19 @@ describe('context admission', () => {
     expect(expectedSessionMatches(null, 'session-b', draining)).toBe(false)
   })
 
+  it('仍然允许向首轮失败后只剩本地壳的会话重新发送', () => {
+    // 首轮失败后 catalog 里只剩 externalSessionId === runId 的本地壳，main 也没有原生 session。
+    const localOnly = [{ runId: 'run-failed', externalSessionId: 'run-failed', sessionId: 'run-failed' }]
+    const pending = [{ runId: 'run-pending', sessionId: 'run-pending' }]
+    expect(expectedSessionMatches('run-failed', undefined, localOnly)).toBe(true)
+    expect(expectedSessionMatches('run-pending', undefined, pending)).toBe(true)
+    // 可 resume 的会话丢了 main 侧边界时仍然必须拒绝，不能静默新建 session。
+    expect(expectedSessionMatches('run-a', undefined, [{ runId: 'run-a', externalSessionId: 'session-a' }])).toBe(false)
+    // 本地壳也不能被当成其他会话的投递目标。
+    expect(expectedSessionMatches('run-failed', 'session-b', localOnly)).toBe(false)
+    expect(expectedSessionMatches('run-other', undefined, localOnly)).toBe(false)
+  })
+
   it('只把无原生 session 的 provisional run 视为 restart 来源', () => {
     expect(expectedRestartSourceMatches('run-stopped', undefined, 'run-stopped')).toBe(true)
     expect(expectedRestartSourceMatches('other-run', undefined, 'run-stopped')).toBe(false)
@@ -62,12 +75,12 @@ describe('context admission', () => {
 
   it('只允许没有原生边界的 interrupted 首轮重新编辑', () => {
     const turn = { runId: 'run-stopped', status: 'interrupted' }
-    expect(canRestartInterruptedFirstTurn({ turns: [turn] }, 'run-stopped')).toBe(true)
-    expect(canRestartInterruptedFirstTurn(null, 'run-stopped')).toBe(false)
-    expect(canRestartInterruptedFirstTurn({ turns: [turn, { ...turn, runId: 'run-2' }] }, 'run-stopped')).toBe(false)
-    expect(canRestartInterruptedFirstTurn({ turns: [{ ...turn, status: 'failed' }] }, 'run-stopped')).toBe(false)
-    expect(canRestartInterruptedFirstTurn({ turns: [{ ...turn, providerTurnId: 'provider-turn' }] }, 'run-stopped')).toBe(false)
-    expect(canRestartInterruptedFirstTurn({ turns: [{ ...turn, forkTurnId: 'fork-turn' }] }, 'run-stopped')).toBe(false)
-    expect(canRestartInterruptedFirstTurn({ turns: [turn] }, 'other-run')).toBe(false)
+    expect(canRestartInterruptedLocalOnlySession({ turns: [turn] }, 'run-stopped')).toBe(true)
+    expect(canRestartInterruptedLocalOnlySession(null, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedLocalOnlySession({ turns: [turn, { ...turn, runId: 'run-2' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedLocalOnlySession({ turns: [{ ...turn, status: 'failed' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedLocalOnlySession({ turns: [{ ...turn, providerTurnId: 'provider-turn' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedLocalOnlySession({ turns: [{ ...turn, forkTurnId: 'fork-turn' }] }, 'run-stopped')).toBe(false)
+    expect(canRestartInterruptedLocalOnlySession({ turns: [turn] }, 'other-run')).toBe(false)
   })
 })

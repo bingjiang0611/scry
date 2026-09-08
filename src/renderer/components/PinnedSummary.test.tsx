@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Turn } from '../format'
-import { PinnedSummary, webSourcesFromTurns } from './PinnedSummary'
+import { PinnedSummary, webSourcesFromTurns, type PinnedSummarySection } from './PinnedSummary'
 import { OverviewPanel } from './OverviewPanel'
 
 const turn = (userText: string, input?: unknown): Turn => ({
@@ -15,6 +15,7 @@ const turn = (userText: string, input?: unknown): Turn => ({
 
 const callbacks = {
   onDismiss: () => undefined,
+  onToggleSection: () => undefined,
   onOpenChanges: () => undefined,
   onOpenCall: () => undefined,
   onOpenAgents: () => undefined
@@ -28,13 +29,17 @@ const session: Turn = {
   ]
 }
 
-const render = (turns: Turn[]) => renderToStaticMarkup(
+const render = (
+  turns: Turn[],
+  expandedSections: ReadonlySet<PinnedSummarySection> = new Set(['inventory'])
+) => renderToStaticMarkup(
   <PinnedSummary
     cwd="/repo/scry"
     gitDiff={[{ path: '/repo/scry/a.ts', added: 12, deleted: 3 }]}
     turns={turns}
     busy={false}
     temporary={false}
+    expandedSections={expandedSections}
     {...callbacks}
   />
 )
@@ -84,6 +89,36 @@ describe('PinnedSummary', () => {
       expect(callsSection).not.toContain('>0<')
       expect(html).not.toContain('当前清单为空')
     }
+  })
+
+  it('hides only an observed zero Web group and preserves unknown groups', () => {
+    const empty = render([])
+    expect(empty).not.toContain('Web references')
+    expect(empty).toContain('Skills &amp; MCP · 本会话')
+    expect(empty).toContain('Subagents')
+    expect(empty.match(/>—<\/span>/g)).toHaveLength(2)
+
+    const bounded = render([turn('x'.repeat(120_001))])
+    const boundedWebLabel = bounded.indexOf('Web references')
+    const boundedWebStart = bounded.lastIndexOf('<section', boundedWebLabel)
+    const boundedWebSection = bounded.slice(boundedWebStart, bounded.indexOf('</section>', boundedWebLabel))
+    expect(boundedWebSection).toContain('data-evidence="unknown"')
+    expect(boundedWebSection).toContain('>—</span>')
+
+    const withWeb = render([session], new Set(['web']))
+    const webLabel = withWeb.indexOf('Web references')
+    const webStart = withWeb.lastIndexOf('<section', webLabel)
+    const webSection = withWeb.slice(webStart, withWeb.indexOf('</section>', webLabel))
+    expect(webSection).toContain('>1</span>')
+    expect(webSection).toContain('aria-expanded="true"')
+  })
+
+  it('links each disclosure button to a stable detail region', () => {
+    const html = render([session])
+    const controls = [...html.matchAll(/aria-controls="([^"]+)"/g)].map((match) => match[1])
+    expect(controls).toHaveLength(3)
+    for (const id of controls) expect(html).toContain(`id="${id}"`)
+    expect(html).toContain('hidden=""')
   })
 
   it('deduplicates rows and labels observed kinds separately from invocation counts', () => {

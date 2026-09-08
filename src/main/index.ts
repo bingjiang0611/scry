@@ -152,6 +152,7 @@ import {
   managedSessionRunIds
 } from './managed-turn-commit'
 import {
+  commitHookTrustPolicy,
   createCommitHookTrustStore,
   inspectCommitHookBundle,
   resolveGrantedCommitHookCapability
@@ -188,7 +189,7 @@ import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
 import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
 import {
   ContextAdmission,
-  canRestartInterruptedFirstTurn,
+  canRestartInterruptedLocalOnlySession,
   expectedRestartSourceMatches,
   expectedSessionMatches,
   waitForCompletedRuns
@@ -688,7 +689,10 @@ async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessE
     }
   }
   if (!granted) {
-    if (!autoApproveTestTrust) {
+    // 默认策略是 auto_grant：不弹窗、不阻断发送，直接按 cwd+指纹登记一条 source=auto 的授权。
+    // SCRY_COMMIT_HOOK_TRUST=prompt 才恢复原来的逐指纹确认弹窗。
+    const policy = commitHookTrustPolicy()
+    if (policy === 'prompt' && !autoApproveTestTrust) {
       const options = {
         type: 'warning' as const,
         title: '授权 Recorder 提交回调',
@@ -713,7 +717,7 @@ async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessE
       if (result.response !== 1) return baseEnv
     }
     try {
-      await store.grant(inspection.workspace, inspection.fingerprint)
+      await store.grant(inspection.workspace, inspection.fingerprint, policy === 'auto_grant' ? 'auto' : 'user')
     } catch (error) {
       console.warn('[scry] recorder commit hook grant failed:', cwd, error)
       return baseEnv
@@ -743,7 +747,9 @@ async function resolveGrantedManagedCommitHookEnv(cwd: string): Promise<NodeJS.P
     const capability = await resolveGrantedCommitHookCapability(
       cwd,
       enablement.config.commitHook,
-      app.getPath('userData')
+      app.getPath('userData'),
+      undefined,
+      { autoGrant: commitHookTrustPolicy() === 'auto_grant' }
     )
     if (!capability) return baseEnv
     const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
@@ -2298,9 +2304,19 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       waitMs: 250,
       commitHookEnv: managedCommitHookEnv
     })
+    // 本进程知道哪些 run 还活着，所以可以安全地弃掉“没有 Provider 证据且主已不在”的 provisional 轮次，
+    // 不再把这个工作区永久卡在“仍有 N 轮待恢复”。真有证据的轮次仍然 fail closed。
+    const abandonProvisionalOptions = {
+      provider: providerId,
+      abandonProvisional: true,
+      // 发送前的恢复检查不能同步排仓库回调积压，否则会卡在“正在启动”。
+      commitNotifications: 'detach' as const,
+      isLiveManagedRun: (candidate: string | undefined): boolean =>
+        !!candidate && runs.unsettledStates().some((run) => run.runId === candidate)
+    }
     const recorderRecovery = resume
-      ? await recoverManagedRecorderTurns(cwd, managedCommitHookEnv, { sessionId: resume, provider: providerId })
-      : await recoverManagedRecorderTurns(cwd, managedCommitHookEnv, { provider: providerId })
+      ? await recoverManagedRecorderTurns(cwd, managedCommitHookEnv, { ...abandonProvisionalOptions, sessionId: resume })
+      : await recoverManagedRecorderTurns(cwd, managedCommitHookEnv, abandonProvisionalOptions)
     // 同一轮可能同时留下 progress、journal 与 recorder open；三层计数不能相加，
     // 否则会把一个待恢复 turn 报成三轮。这里只需要 fail closed。
     const pending = Math.max(progressRecovery.pending, journalRecovery.pending, recorderRecovery.pending)
@@ -2425,12 +2441,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       providerId,
       userDataDir: app.getPath('userData')
     })
-    if (!canRestartInterruptedFirstTurn(archive, request.restartLastTurn.replaceRunId)) {
+    if (!canRestartInterruptedLocalOnlySession(archive, request.restartLastTurn.replaceRunId)) {
       throw new AgentRuntimeError('停止轮次已变化或已形成 Provider 边界，已拒绝重新开始', {
         provider: runtimeProvider,
         stage: 'frontdoor',
         cwd,
-        nextAction: '重新打开当前会话；只有首轮在停止前未形成原生边界时才能直接编辑重发'
+        nextAction: '重新打开当前会话；只有全部轮次都已停止且未形成原生边界时才能直接编辑重发'
       })
     }
     resume = undefined

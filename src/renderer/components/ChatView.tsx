@@ -41,6 +41,7 @@ interface ChatViewProps {
   composerError?: string | null
   submitting?: boolean
   sessionLoading?: boolean
+  sessionEvidenceGap?: { status: 'unavailable' | 'empty'; detail: string } | null
   busy: boolean
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
@@ -151,6 +152,7 @@ export function ChatView({
   composerError = null,
   submitting = false,
   sessionLoading = false,
+  sessionEvidenceGap = null,
   busy,
   draftAttachments,
   queuedPrompts,
@@ -313,6 +315,11 @@ export function ChatView({
     return () => document.removeEventListener('pointerdown', dismissOnOutsidePointer, true)
   }, [onHideSlash, slashOpen, textareaRef])
 
+  const completeHistoryLoaded = (historyWindow?.offset ?? 0) === 0
+  const localOnlyStoppedSession = completeHistoryLoaded && turns.every((candidate) =>
+    candidate.done && !candidate.error && !candidate.providerTurnId && !candidate.forkTurnId
+  )
+
   return (
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
@@ -335,7 +342,15 @@ export function ChatView({
               <span><Icon name="refresh" />正在打开对话…</span>
             </div>
           )}
-          {turns.length === 0 && !sessionLoading && (
+          {/* 选中的历史会话读不到证据时必须说实话，不能假装成“新会话”。 */}
+          {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
+            <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
+              <b>{sessionEvidenceGap.status === 'unavailable' ? '这条会话没有可读的本机证据' : '这条会话的归档里没有轮次'}</b>
+              <span>{sessionEvidenceGap.detail}</span>
+              <span>会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。</span>
+            </div>
+          )}
+          {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && (
             <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
               <header className="welcome-heading">
                 <div className="welcome-kicker"><span className="welcome-ready-dot" />新会话 · 本机证据</div>
@@ -494,12 +509,13 @@ export function ChatView({
             const currentBoundaryComplete = !!turn.providerTurnId && !!turn.forkTurnId
             const currentBoundaryAbsent = !turn.providerTurnId && !turn.forkTurnId
             const previousBoundaryComplete = !!previous?.providerTurnId && !!previous.forkTurnId
-            const isFirstSessionTurn = index === 0 && (historyWindow?.offset ?? 0) === 0
-            const editMode: UserMessageEditMode | null = isFirstSessionTurn && (currentBoundaryComplete || currentBoundaryAbsent)
-              ? 'restart'
-              : currentBoundaryComplete && previousBoundaryComplete
-                ? 'branch'
-                : null
+            const isFirstSessionTurn = index === 0 && completeHistoryLoaded
+            const editMode: UserMessageEditMode | null =
+              (isFirstSessionTurn && currentBoundaryComplete) || (currentBoundaryAbsent && localOnlyStoppedSession)
+                ? 'restart'
+                : currentBoundaryComplete && previousBoundaryComplete
+                  ? 'branch'
+                  : null
             const editable = index === turns.length - 1 && turn.done && !busy && queuedPrompts.length === 0 &&
               pendingQuestions.length === 0 && editMode != null && !!onEditLastTurn
             return (

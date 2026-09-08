@@ -24,6 +24,14 @@ export async function waitForCompletedRuns(
   return true
 }
 
+// 首轮失败/停止后 catalog 只剩一个以 runId 命名的本地会话壳（appSessionCanResume=false）：
+// 它没有原生 session 边界，但 renderer 仍然把它当作当前会话展示。
+export function localOnlySessionShell(
+  candidate: { runId: string; externalSessionId?: string; sessionId?: string }
+): boolean {
+  return (candidate.externalSessionId ?? candidate.sessionId ?? candidate.runId) === candidate.runId
+}
+
 export function expectedSessionMatches(
   expected: string | null | undefined,
   actual: string | undefined,
@@ -32,9 +40,14 @@ export function expectedSessionMatches(
   if (expected === undefined) return true
   if (expected === null) return actual === undefined
   if (expected === actual) return true
-  return candidates.some((run) =>
-    run.runId === expected && (run.externalSessionId ?? run.sessionId) === actual
-  )
+  return candidates.some((run) => {
+    if (run.runId !== expected) return false
+    if ((run.externalSessionId ?? run.sessionId) === actual) return true
+    // main 侧没有任何原生 session（actual === undefined）时，这一轮必然新建 session，
+    // 不可能把提示词投递到别的会话；拒绝只会把用户永久卡在这条本地会话壳里。
+    // expected 指向可 resume 的会话而 actual 为空仍然拒绝：那才是真的丢了续接边界。
+    return actual === undefined && localOnlySessionShell(run)
+  })
 }
 
 export function expectedRestartSourceMatches(
@@ -45,12 +58,12 @@ export function expectedRestartSourceMatches(
   return actual === undefined && expected === replaceRunId
 }
 
-export function canRestartInterruptedFirstTurn(
+export function canRestartInterruptedLocalOnlySession(
   archive: { turns: Array<{ runId: string; status?: string; providerTurnId?: string; forkTurnId?: string }> } | null,
   replaceRunId: string
 ): boolean {
-  if (!archive || archive.turns.length !== 1) return false
-  const head = archive.turns[0]
-  return head.runId === replaceRunId && head.status === 'interrupted' &&
-    head.providerTurnId == null && head.forkTurnId == null
+  if (!archive || archive.turns.length === 0 || archive.turns.at(-1)?.runId !== replaceRunId) return false
+  return archive.turns.every((turn) =>
+    turn.status === 'interrupted' && turn.providerTurnId == null && turn.forkTurnId == null
+  )
 }

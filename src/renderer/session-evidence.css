@@ -686,7 +686,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   margin-left: 0;
   overflow: hidden;
   color: var(--dim3);
-  font-size: 10px;
+  font-size: var(--text-compact-size);
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -696,7 +696,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   flex: none;
   gap: 7px;
   color: var(--dim3);
-  font-size: 10px;
+  font-size: var(--text-compact-size);
 }
 
 .chat-body .who .mini .m {
@@ -707,7 +707,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   background: transparent;
 }
 
-.chat-body .who .mini b { color: var(--dim); font-size: 10px; }
+.chat-body .who .mini b { color: var(--dim); font-size: var(--text-compact-size); }
 .chat-body .who .mini .cost b { color: var(--dim); }
 
 .chat-body .files-summary,
@@ -785,7 +785,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .chat-body .tool-row .kindtag { width: 5px; height: 5px; }
 .chat-body .tool-row .op { width: 22px; height: 20px; font-size: 10px; line-height: 20px; }
 .chat-body .tool-row .arg { max-width: none; color: var(--dim3); font-size: 11.5px; line-height: 1.4; }
-.chat-body .tool-row .meta { min-width: 0; flex: 0 1 auto; gap: 6px; font-size: 10px; }
+.chat-body .tool-row .meta { min-width: 0; flex: 0 1 auto; gap: 6px; font-size: var(--text-compact-size); }
 .chat-body .tool-row .meta .dur { flex-basis: auto; }
 .chat-body .tool-row .meta .bar { flex-basis: 42px; height: 2px; }
 .chat-body .tool-row .meta .tok { max-width: 72px; }
@@ -834,7 +834,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   border-radius: 0;
   background: transparent;
   color: var(--dim3);
-  font-size: 10px;
+  font-size: var(--text-compact-size);
 }
 
 .chat-body .turn-footer .stat {
@@ -846,7 +846,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 .chat-body .turn-footer .stat .lbl,
-.chat-body .turn-footer .stat b { color: var(--dim3); font-size: 10px; letter-spacing: 0; text-transform: lowercase; }
+.chat-body .turn-footer .stat b { color: var(--dim3); font-size: var(--text-compact-size); letter-spacing: 0; text-transform: lowercase; }
 .chat-body .turn-footer .stat b { color: var(--dim); }
 .chat-body .turn-footer .sep { display: none; }
 

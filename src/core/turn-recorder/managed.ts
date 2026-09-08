@@ -715,12 +715,36 @@ export async function commitManagedRecorderTurn(input: {
   return result
 }
 
+// 已开的轮次只有在“还有人能把它收口”时才值得阻断下一轮。没有 providerTurnId、没有 canonical handoff，
+// 并且它的 managedRunId 已不是本进程里活的 run（进程早没了），这种 provisional 状态永远不会自己
+// 收口，留着只会把该工作区+Provider 永久卡在“仍有 N 轮待恢复”。这里按与
+// cancelManagedRecorderTurn 相同的证据标准弃掉它；一旦出现真的 Provider 证据（providerTurnId
+// 或已备好的 canonical handoff），仍然 fail closed。
+async function abandonProvisionalOpenTurn(
+  root: string,
+  dataRoot: string,
+  state: RecorderOpenTurnState,
+  statePath: string,
+  isLiveManagedRun: (runId: string | undefined) => boolean
+): Promise<boolean> {
+  if (state.providerTurnId) return false
+  if (isLiveManagedRun(state.managedRunId)) return false
+  if (await readJson<ManagedTurnHandoff>(canonicalPath(root, state.generation))) return false
+  await rm(statePath, { force: true })
+  await clearRuntimeTurn(dataRoot, recorderTurnRoot(root, state.generation))
+  return true
+}
+
 export async function recoverManagedRecorderTurns(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env,
   options: {
     sessionId?: string
     provider?: ManagedRecorderProviderId
+    // 默认保守：不知道哪些 run 还活着时，不弃掉任何 open 状态（否则可能删掉正在跑的轮次）。
+    // 调用方（main）知道 run 存活情况时传入 abandonProvisional，才会清理不可恢复的 provisional 轮次。
+    abandonProvisional?: boolean
+    isLiveManagedRun?: (runId: string | undefined) => boolean
     // 常驻 App 走 'detach'：恢复检查在“发送前”跑，不能被仓库回调积压拖住发送。
     commitNotifications?: CommitNotificationDelivery
   } = {}
@@ -760,20 +784,41 @@ export async function recoverManagedRecorderTurns(
         )
         if (result.status === 'committed' || result.status === 'duplicate') recovered++
       }
+      const isLiveManagedRun = options.abandonProvisional
+        ? options.isLiveManagedRun ?? ((): boolean => false)
+        : ((): boolean => true)
       if (
         open &&
         (open.managedByScry || open.status === 'closing') &&
         (!options.sessionId || open.sessionId === options.sessionId) &&
         !items.some((item) => item.handoff.record.generation === open.generation)
       ) {
-        pending++
+        const abandoned = await withDirectoryLock(
+          recorderSessionLock(enablement.dataRoot, provider, open.sessionId),
+          () => abandonProvisionalOpenTurn(root, enablement.dataRoot, open, recorderOpenPath(root), isLiveManagedRun),
+          { waitMs: SESSION_LOCK_WAIT_MS }
+        ).catch(() => false)
+        if (abandoned) recovered++
+        else pending++
       }
       for (const pendingOpen of quarantined) {
         if (
           (!options.sessionId || pendingOpen.sessionId === options.sessionId) &&
           !items.some((item) => item.handoff.record.generation === pendingOpen.generation)
         ) {
-          pending++
+          const abandoned = await withDirectoryLock(
+            recorderSessionLock(enablement.dataRoot, provider, pendingOpen.sessionId),
+            () => abandonProvisionalOpenTurn(
+              root,
+              enablement.dataRoot,
+              pendingOpen,
+              join(recorderTurnRoot(root, pendingOpen.generation), 'pending-open.json'),
+              isLiveManagedRun
+            ),
+            { waitMs: SESSION_LOCK_WAIT_MS }
+          ).catch(() => false)
+          if (abandoned) recovered++
+          else pending++
         }
       }
     }

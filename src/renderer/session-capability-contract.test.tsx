@@ -22,7 +22,7 @@ describe('normalized historical session capability contract', () => {
       expect(skill).toMatchObject({ name: 'hsf-invoke', count: 1, inferredCount: 1, event: { kind: 'tool', tool: 'Read', toolUseId: 'read-1' } })
       expect(skill?.event.input).not.toHaveProperty('source')
     } else expect(skill).toBeUndefined()
-    const pinned = renderToStaticMarkup(<PinnedSummary cwd={null} gitDiff={[]} turns={[reloaded]} busy={false} temporary={false} onDismiss={() => undefined} onOpenCall={() => undefined} onOpenAgents={() => undefined} />)
+    const pinned = renderToStaticMarkup(<PinnedSummary cwd={null} gitDiff={[]} turns={[reloaded]} busy={false} temporary={false} expandedSections={new Set(['inventory'])} onDismiss={() => undefined} onToggleSection={() => undefined} onOpenCall={() => undefined} onOpenAgents={() => undefined} />)
     const overview = renderToStaticMarkup(<OverviewPanel turns={[reloaded]} selected={null} onSelect={() => undefined} usage={null} stats={null} />)
     expect(pinned.includes('×1 · 加载推断')).toBe(outcome === 'success')
     expect(overview.includes('Skill 1（含加载推断）')).toBe(outcome === 'success')

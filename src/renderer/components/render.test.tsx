@@ -12,10 +12,13 @@ import {
   App,
   EmptySessionOverview,
   activeRunForSession,
+  adoptLocalStartSessionId,
   attachmentsAfterSuccessfulSubmit,
   appendWorkspaceReference,
   applyNewConversationEffects,
   applyProviderCatalogRefresh,
+  applySessionArchiveEffects,
+  sessionEvidenceGapAfterLoad,
   applySessionCapturedEffects,
   applyTurnDoneEffects,
   chatBottomDistance,
@@ -428,6 +431,55 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     const html = renderWelcome({ turns: [runningTurn], busy: true })
     expect(html).toContain('aria-label="加入队列"')
     expect(html).toContain('send-label')
+  })
+})
+
+describe('选中的历史会话读不到证据时不假装成新会话', () => {
+  it('page 为 null 与归档空轮次分开定义，有轮次时不报缺失', () => {
+    expect(sessionEvidenceGapAfterLoad('s1', null)).toEqual({
+      sessionId: 's1',
+      status: 'unavailable',
+      detail: '本机没有命中这条会话的可读证据：Provider transcript 与 Scry 归档都没有记录。'
+    })
+    expect(sessionEvidenceGapAfterLoad('s1', { turns: [] })).toMatchObject({ status: 'empty' })
+    expect(sessionEvidenceGapAfterLoad('s1', {
+      turns: [{ runId: 'run-1', userText: 'hi', done: true, items: [] } as unknown as ParsedTurn]
+    })).toBeNull()
+  })
+
+  it('证据缺失时渲染说实话的空态，而不是“开始一次可追溯执行” hero', () => {
+    const html = renderWelcome({
+      cwd: '/tmp/project',
+      sessionEvidenceGap: {
+        status: 'unavailable',
+        detail: '本机没有命中这条会话的可读证据：Provider transcript 与 Scry 归档都没有记录。'
+      }
+    })
+
+    expect(html).toContain('chat-session-evidence-gap')
+    expect(html).toContain('data-status="unavailable"')
+    expect(html).toContain('这条会话没有可读的本机证据')
+    expect(html).toContain('Provider transcript 与 Scry 归档都没有记录')
+    expect(html).not.toContain('开始一次可追溯执行')
+    expect(html).not.toContain('新会话 · 本机证据')
+  })
+
+  it('归档命中但没有轮次时用另一句文案，仍不渲染 hero', () => {
+    const html = renderWelcome({
+      cwd: '/tmp/project',
+      sessionEvidenceGap: { status: 'empty', detail: '归档已命中，但里面没有任何已收口的轮次。' }
+    })
+
+    expect(html).toContain('data-status="empty"')
+    expect(html).toContain('这条会话的归档里没有轮次')
+    expect(html).not.toContain('开始一次可追溯执行')
+  })
+
+  it('真正的新会话（无证据缺失）仍然渲染 hero', () => {
+    const html = renderWelcome({ cwd: '/tmp/project' })
+
+    expect(html).toContain('开始一次可追溯执行')
+    expect(html).not.toContain('chat-session-evidence-gap')
   })
 })
 
@@ -2706,6 +2758,71 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     })
 
     expect(calls).toEqual(['clear:undefined', 'newSession', 'active:null', 'view:chat', 'focus', 'refreshCatalogs'])
+  })
+
+  it('只采纳本视图发起那一轮新建的原生 session id', () => {
+    const starts = new Map([['run-2', 'run-1']])
+    // 本地壳 run-1 上重新发送：run-2 拿到原生 session 后必须把当前会话身份换过去。
+    expect(adoptLocalStartSessionId({ runId: 'run-2', sessionId: 'native-1' }, 'run-1', starts)).toBe('native-1')
+    // 发送后用户已经切到其他会话：不能劫持当前视图。
+    expect(adoptLocalStartSessionId({ runId: 'run-2', sessionId: 'native-1' }, 'other', starts)).toBeNull()
+    // 不是本视图发起的轮次，或者身份本来就一致：不动。
+    expect(adoptLocalStartSessionId({ runId: 'run-9', sessionId: 'native-9' }, 'run-1', starts)).toBeNull()
+    expect(adoptLocalStartSessionId({ runId: 'run-2', sessionId: 'run-1' }, 'run-1', starts)).toBeNull()
+    expect(adoptLocalStartSessionId({ runId: 'run-2' }, 'run-1', starts)).toBeNull()
+  })
+
+  it('归档当前打开的会话后会回到新会话，避免后续发送被会话身份守卫拒绝', async () => {
+    const calls: string[] = []
+
+    await applySessionArchiveEffects({
+      archive: async () => { calls.push('archive'); return true },
+      archivingActiveSession: true,
+      activeSessionBusy: false,
+      rememberUndo: () => calls.push('undo'),
+      resetConversation: async () => { calls.push('reset') },
+      reloadProjects: () => calls.push('reload')
+    })
+    expect(calls).toEqual(['archive', 'undo', 'reload', 'reset'])
+
+    calls.length = 0
+    await applySessionArchiveEffects({
+      archive: async () => { calls.push('archive'); return true },
+      archivingActiveSession: false,
+      activeSessionBusy: false,
+      rememberUndo: () => calls.push('undo'),
+      resetConversation: async () => { calls.push('reset') },
+      reloadProjects: () => calls.push('reload')
+    })
+    expect(calls).toEqual(['archive', 'undo', 'reload'])
+
+    calls.length = 0
+    await applySessionArchiveEffects({
+      archive: async () => { calls.push('archive'); return false },
+      archivingActiveSession: true,
+      activeSessionBusy: false,
+      rememberUndo: () => calls.push('undo'),
+      resetConversation: async () => { calls.push('reset') },
+      reloadProjects: () => calls.push('reload')
+    })
+    expect(calls).toEqual(['archive'])
+  })
+
+  // 真实回归：归档一个正在跑的当前会话曾经会 clearTurns + 新会话，把还在跑的轮次从视图里抹掉，
+  // 用户看到“运行中”但时间线空白、停止按钮失效。
+  it('归档正在跑的当前会话只改 catalog，不重置视图', async () => {
+    const calls: string[] = []
+
+    await applySessionArchiveEffects({
+      archive: async () => { calls.push('archive'); return true },
+      archivingActiveSession: true,
+      activeSessionBusy: true,
+      rememberUndo: () => calls.push('undo'),
+      resetConversation: async () => { calls.push('reset') },
+      reloadProjects: () => calls.push('reload')
+    })
+
+    expect(calls).toEqual(['archive', 'undo', 'reload'])
   })
 
   it('剪贴板图片提取会去重 files/items 里的同一张图', () => {
