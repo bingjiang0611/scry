@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
-import type { DiffFile } from '@shared/trace'
-import type { McpMeta, SkillMeta } from '../env'
+import type { DiffFile, TraceEvent } from '@shared/trace'
+import { sessionCapabilityCalls } from '../session-capability-calls'
 import { deriveAgentRows, type AgentRowStatus } from '../agent-panel'
 import type { Turn } from '../format'
 import { Icon } from './primitives/Icon'
@@ -21,17 +20,12 @@ const AGENT_STATUS_LABEL: Record<AgentRowStatus, string> = {
 export interface PinnedSummaryProps {
   cwd: string | null
   gitDiff: DiffFile[]
-  skills: SkillMeta[]
-  skillCapability: CapabilityEnvelope<SkillMeta[]> | null
-  mcps: McpMeta[]
-  mcpCapability: CapabilityEnvelope<McpSnapshot> | null
   turns: Turn[]
   busy: boolean
   temporary: boolean
   onDismiss: () => void
   onOpenChanges?: () => void
-  onOpenSkills: () => void
-  onOpenMcp: () => void
+  onOpenCall: (runId: string, event: TraceEvent) => void
   onOpenAgents: () => void
 }
 
@@ -97,31 +91,15 @@ export function webSourcesFromTurns(turns: readonly Turn[]): PinnedWebSource[] {
   return sources
 }
 
-function capabilityReason(
-  skillCapability: CapabilityEnvelope<SkillMeta[]> | null,
-  mcpCapability: CapabilityEnvelope<McpSnapshot> | null
-): string {
-  const reasons = [
-    skillCapability?.data == null ? skillCapability?.reason ?? 'Skill 清单尚未可用' : null,
-    mcpCapability?.data == null ? mcpCapability?.reason ?? 'MCP 清单尚未可用' : null
-  ].filter((reason): reason is string => !!reason)
-  return reasons.join('；')
-}
-
 export function PinnedSummary({
   cwd,
   gitDiff,
-  skills,
-  skillCapability,
-  mcps,
-  mcpCapability,
   turns,
   busy,
   temporary,
   onDismiss,
   onOpenChanges,
-  onOpenSkills,
-  onOpenMcp,
+  onOpenCall,
   onOpenAgents
 }: PinnedSummaryProps) {
   const cardRef = useRef<HTMLElement>(null)
@@ -131,9 +109,8 @@ export function PinnedSummary({
   const additions = gitDiff.reduce((total, file) => total + file.added, 0)
   const deletions = gitDiff.reduce((total, file) => total + file.deleted, 0)
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? '未绑定工作区'
-  const inventoryKnown = skillCapability?.data != null && mcpCapability?.data != null
-  const inventoryCount = inventoryKnown ? skills.length + mcps.length : null
-  const inventoryReason = capabilityReason(skillCapability, mcpCapability)
+  const capabilityCalls = useMemo(() => sessionCapabilityCalls(turns), [turns])
+  const callScope = '当前会话已加载记录中观测到的 Skill 调用/注入、明确请求后的技能文件加载推断与 MCP 工具调用；不代表完整调用清单，未观测到不等于未调用'
 
   useEffect(() => {
     if (!temporary) return
@@ -192,36 +169,35 @@ export function PinnedSummary({
             className="pinned-summary-row"
             aria-expanded={expanded.inventory}
             onClick={() => toggleSection('inventory')}
-            title={inventoryKnown ? `${skills.length} Skills · ${mcps.length} MCP` : inventoryReason}
+            title={callScope}
           >
             <span className="pinned-summary-row-icon"><Icon name="tool" /></span>
-            <span className="pinned-summary-row-main">Skills &amp; MCP</span>
+            <span className="pinned-summary-row-main">Skills &amp; MCP · 本会话</span>
             <span className="pinned-summary-row-value">
-              <span className="pinned-summary-count" data-evidence={inventoryKnown ? 'available' : 'unavailable'}>
-                {inventoryCount ?? '—'}
+              <span className="pinned-summary-count" data-evidence={capabilityCalls.length > 0 ? 'observed' : 'unknown'} title="已观测到的 Skill / MCP 工具种类数，非配置数量">
+                {capabilityCalls.length || '—'}
               </span>
               <Icon name={expanded.inventory ? 'chevronUp' : 'chevronDown'} />
             </span>
           </button>
           {expanded.inventory && (
             <div className="pinned-summary-detail">
-              {skills.map((skill) => (
-                <button type="button" className="pinned-summary-detail-row" key={`skill:${skill.dir}`} onClick={onOpenSkills}>
-                  <span className="pinned-summary-detail-icon"><Icon name="tool" /></span>
-                  <span title={skill.description}>{skill.name}</span>
-                  {!skill.enabled && <em>disabled</em>}
+              {capabilityCalls.map((call) => (
+                <button
+                  type="button"
+                  className="pinned-summary-detail-row"
+                  key={call.key}
+                  onClick={() => onOpenCall(call.runId, call.event)}
+                  title={`${call.name} · 已观测 ${call.count} 次${call.inferredCount ? `（其中 ${call.inferredCount} 次为明确请求并成功读取技能文件后的加载推断，非原生 Skill 调用）` : ''} · 点击定位会话证据`}
+                >
+                  <span className="pinned-summary-detail-icon"><Icon name={call.kind === 'skill' ? 'tool' : 'plug'} /></span>
+                  <span>{call.name}</span>
+                  <em>×{call.count}{call.inferredCount ? ' · 加载推断' : ''}</em>
                 </button>
               ))}
-              {mcps.map((mcp) => (
-                <button type="button" className="pinned-summary-detail-row" key={`mcp:${mcp.targetId ?? `${mcp.scope}:${mcp.name}`}`} onClick={onOpenMcp}>
-                  <span className="pinned-summary-detail-icon"><Icon name="plug" /></span>
-                  <span title={mcp.detail}>{mcp.name}</span>
-                  {!mcp.enabled && <em>disabled</em>}
-                </button>
-              ))}
-              {skills.length === 0 && mcps.length === 0 && (
-                <div className="pinned-summary-empty" data-evidence={inventoryKnown ? 'available' : 'unavailable'}>
-                  {inventoryKnown ? '当前清单为空' : inventoryReason}
+              {capabilityCalls.length === 0 && (
+                <div className="pinned-summary-empty" data-evidence="unknown" title={callScope}>
+                  尚未观测到 Skill 或 MCP 调用
                 </div>
               )}
             </div>

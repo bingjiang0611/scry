@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { CapabilityEnvelope, McpSnapshot, SkillMeta } from '@shared/provider'
 import type { Turn } from '../format'
 import { PinnedSummary, webSourcesFromTurns } from './PinnedSummary'
+import { OverviewPanel } from './OverviewPanel'
 
 const turn = (userText: string, input?: unknown): Turn => ({
   runId: 'run-1',
@@ -13,92 +13,85 @@ const turn = (userText: string, input?: unknown): Turn => ({
     : [{ id: 'event-1', runId: 'run-1', ts: '', kind: 'tool', stage: 'tool:Bash', input }]
 })
 
-const skillCapability: CapabilityEnvelope<SkillMeta[]> = {
-  providerId: 'claude',
-  mode: 'read',
-  state: 'ready',
-  data: [{ name: 'baoyu-design', dir: '/skills/baoyu-design', scope: 'user', description: 'Design', enabled: true }]
-}
-
-const mcpCapability: CapabilityEnvelope<McpSnapshot> = {
-  providerId: 'claude',
-  mode: 'read',
-  state: 'ready',
-  data: {
-    configured: [{ name: 'browser', scope: 'user', transport: 'stdio', detail: 'browser server', enabled: true }],
-    runtime: []
-  }
-}
-
 const callbacks = {
   onDismiss: () => undefined,
   onOpenChanges: () => undefined,
-  onOpenSkills: () => undefined,
-  onOpenMcp: () => undefined,
+  onOpenCall: () => undefined,
   onOpenAgents: () => undefined
 }
 
-describe('PinnedSummary', () => {
-  it('renders only evidence-backed counts and the current workspace inventory', () => {
-    const html = renderToStaticMarkup(
-      <PinnedSummary
-        cwd="/repo/scry"
-        gitDiff={[{ path: '/repo/scry/a.ts', added: 12, deleted: 3 }]}
-        skills={skillCapability.data ?? []}
-        skillCapability={skillCapability}
-        mcps={mcpCapability.data?.configured ?? []}
-        mcpCapability={mcpCapability}
-        turns={[turn('参考 https://example.com/docs。')]}
-        busy={false}
-        temporary={false}
-        {...callbacks}
-      />
-    )
+const session: Turn = {
+  ...turn('参考 https://example.com/docs。'),
+  items: [
+    { id: 'skill', runId: 'run-1', ts: '', kind: 'skill', stage: 'skill:used-workflow', name: 'used-workflow', toolUseId: 's1' },
+    { id: 'mcp', runId: 'run-1', ts: '', kind: 'tool', stage: 'tool:mcp__browser__navigate', tool: 'mcp__browser__navigate', isMcp: true, toolUseId: 'm1' }
+  ]
+}
 
+const render = (turns: Turn[]) => renderToStaticMarkup(
+  <PinnedSummary
+    cwd="/repo/scry"
+    gitDiff={[{ path: '/repo/scry/a.ts', added: 12, deleted: 3 }]}
+    turns={turns}
+    busy={false}
+    temporary={false}
+    {...callbacks}
+  />
+)
+
+describe('PinnedSummary', () => {
+  it('agrees with Overview on Qoder user-requested Skill loading and labels the inference', () => {
+    const read = {
+      id: 'qoder-read', runId: 'run-1', ts: '', kind: 'tool' as const, stage: 'tool:Read',
+      tool: 'Read', toolUseId: 'read-1', filePath: '/repo/rate-native/.claude/skills/hsf-invoke/SKILL.md'
+    }
+    const loaded: Turn = {
+      ...turn('/rate-native-hsf-invoke 查询接口'),
+      items: [read, { ...read, id: 'qoder-result', stage: 'tool_result', isError: false }]
+    }
+    const pinned = render([loaded])
+    expect(pinned).toContain('hsf-invoke')
+    expect(pinned).toContain('×1 · 加载推断')
+    expect(pinned).toContain('非原生 Skill 调用')
+    const overview = renderToStaticMarkup(<OverviewPanel turns={[loaded]} selected={null} onSelect={() => undefined} usage={null} stats={null} />)
+    expect(overview).toContain('hsf-invoke（含加载推断）')
+    expect(overview).not.toContain('尚未观测到 Skill 调用或加载证据')
+  })
+
+  it('shows observed calls in this session, not the workspace inventory or connection status', () => {
+    const html = render([session])
     expect(html).toContain('aria-label="固定摘要"')
     expect(html).toContain('+12')
     expect(html).toContain('−3')
-    expect(html).toContain('scry')
-    expect(html).toContain('baoyu-design')
-    expect(html).toContain('browser')
+    expect(html).toContain('Skills &amp; MCP · 本会话')
+    expect(html).toContain('used-workflow')
+    expect(html).toContain('browser / navigate')
     expect(html).toContain('>2<')
+    expect(html).toContain('×1')
+    expect(html).toContain('点击定位会话证据')
+    expect(html).not.toContain('disabled')
+    expect(html).not.toContain('已连接')
   })
 
-  it('keeps unavailable inventory and unobserved agents distinct from real zero', () => {
-    const unavailableSkills: CapabilityEnvelope<SkillMeta[]> = {
-      providerId: 'pi',
-      mode: 'none',
-      state: 'unsupported',
-      data: null,
-      reason: 'Pi 未提供 Skill 清单'
+  it('labels missing call evidence as unknown instead of showing a fake zero', () => {
+    for (const turns of [[], [turn('提到 used-workflow 不等于调用')]]) {
+      const html = render(turns)
+      expect(html).toContain('尚未观测到 Skill 或 MCP 调用')
+      expect(html).toContain('未观测到不等于未调用')
+      expect(html).toContain('data-evidence="unknown"')
+      const callsSection = html.slice(html.indexOf('Skills &amp; MCP · 本会话'), html.indexOf('</section>'))
+      expect(callsSection).toContain('>—</span>')
+      expect(callsSection).not.toContain('>0<')
+      expect(html).not.toContain('当前清单为空')
     }
-    const unavailableMcp: CapabilityEnvelope<McpSnapshot> = {
-      providerId: 'pi',
-      mode: 'none',
-      state: 'unsupported',
-      data: null,
-      reason: 'Pi 未提供 MCP 状态 API'
-    }
-    const html = renderToStaticMarkup(
-      <PinnedSummary
-        cwd={null}
-        gitDiff={[]}
-        skills={[]}
-        skillCapability={unavailableSkills}
-        mcps={[]}
-        mcpCapability={unavailableMcp}
-        turns={[]}
-        busy={false}
-        temporary
-        {...callbacks}
-      />
-    )
+  })
 
-    expect(html).toContain('Pi 未提供 Skill 清单')
-    expect(html).toContain('Pi 未提供 MCP 状态 API')
-    expect(html).toContain('data-evidence="unavailable">—')
-    expect(html).toContain('data-evidence="unknown">—')
-    expect(html).not.toContain('Subagents</span><span class="pinned-summary-row-value"><span class="pinned-summary-count" data-evidence="unknown">0')
+  it('deduplicates rows and labels observed kinds separately from invocation counts', () => {
+    const html = render([session, { ...session, runId: 'run-2' }])
+    expect(html).toContain('种类数，非配置数量')
+    expect(html).toContain('×2')
+    expect(html.match(/<span>used-workflow<\/span>/g)).toHaveLength(1)
+    expect(html.match(/<span>browser \/ navigate<\/span>/g)).toHaveLength(1)
   })
 
   it('deduplicates and bounds web references from loaded transcript evidence', () => {
@@ -106,7 +99,6 @@ describe('PinnedSummary', () => {
       turn('https://example.com/a), https://example.com/a', { command: 'curl https://docs.example.com/path?q=1' }),
       turn('https://third.example.test/read')
     ])
-
     expect(sources).toEqual([
       { url: 'https://example.com/a', label: 'example.com/a' },
       { url: 'https://docs.example.com/path?q=1', label: 'docs.example.com/path' },

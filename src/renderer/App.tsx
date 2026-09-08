@@ -1598,10 +1598,6 @@ export function App() {
           <PinnedSummary
             cwd={cwd}
             gitDiff={integrations.gitDiff}
-            skills={integrations.skills}
-            skillCapability={integrations.skillCapability}
-            mcps={integrations.mcps}
-            mcpCapability={integrations.mcpCapability}
             turns={session.turns}
             busy={session.busy}
             temporary={!summaryPersistent}
@@ -1610,8 +1606,10 @@ export function App() {
               dismissPinnedSummary()
               openSessionNetDiff()
             } : undefined}
-            onOpenSkills={openSkills}
-            onOpenMcp={openMcp}
+            onOpenCall={(runId, event) => {
+              dismissPinnedSummary()
+              openTurnInChat(runId, event, 'event')
+            }}
             onOpenAgents={() => {
               dismissPinnedSummary()
               surfacePane.restore()

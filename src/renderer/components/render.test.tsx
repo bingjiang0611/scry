@@ -3793,8 +3793,8 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
 
   it('调用明细：drill-down 保留 + 空态如实标注（反假数据：区分零与缺失）', () => {
     expect(html).toContain('调用明细')
-    // 本例无 skill / mcp：必须显式标「无」而不是静默隐藏
-    expect(html).toContain('本会话无 Skill 调用')
+    // Skill 无结构化证据时不能声称整段会话从未使用，也不应静默隐藏。
+    expect(html).toContain('尚未观测到 Skill 调用或加载证据')
     expect(html).toContain('本会话无 MCP 调用')
   })
 
