@@ -2334,7 +2334,43 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
     ])
   })
 
-  it('还原 slash prompt、展开 Codex exec，并把子 agent 调用并入父轮但不重复 usage', async () => {
+  it.each([
+    ['spawn_agent', 'agent'],
+    ['multi_agent_v1__spawn_agent', 'agent'],
+    ['unrelated__spawn_agent', 'tool'],
+    ['multi_agent_v1__close_agent', 'tool']
+  ])('Codex hook-only 分类保持窄别名且 start/result 不双计: %s', async (name, category) => {
+    const root = await workspace()
+    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) {
+      await handleRecorderHook({ provider: 'codex', event, workspace: root, payload: payload('hook-alias', {
+        turn_id: 'alias-turn', prompt: 'inspect', tool_name: name, tool_use_id: 'one-call',
+        tool_input: { task_name: 'review' }, tool_response: 'done'
+      }) })
+    }
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.tools.value).toHaveLength(1)
+    expect(record.tools.value?.[0].category).toBe(category)
+  })
+
+  it.each([
+    [{ input_tokens: 4, output_tokens: 0 }, false, 'partial'],
+    [{ input_tokens: 0, output_tokens: 0 }, true, 'available'],
+    [{}, false, 'unavailable'],
+    [{ input_tokens: -1, output_tokens: NaN, cost_usd: Infinity }, true, 'unavailable']
+  ] as const)('usage 完整性从 hook 保留到持久化记录: %j', async (usage, complete, status) => {
+    const root = await workspace()
+    await handleRecorderHook({ provider: 'opencode', event: 'UserPromptSubmit', workspace: root, payload: payload('usage-session', { prompt: 'inspect' }) })
+    await handleRecorderHook({ provider: 'opencode', event: 'Stop', workspace: root, payload: payload('usage-session', { ...(complete ? { usage } : { usage_partial: usage }), usage_complete: complete }) })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.usage.status).toBe(status)
+    if (status !== 'unavailable') expect(record.usage.value?.outputTokens).toBe(0)
+  })
+
+  it.each([
+    { name: 'spawn_agent' },
+    { name: 'multi_agent_v1__spawn_agent' },
+    { namespace: 'multi_agent_v1', name: 'spawn_agent' }
+  ])('还原 slash prompt、展开 Codex exec，并把子 agent 调用并入父轮但不重复 usage: %j', async (spawnName) => {
     const root = await workspace()
     const parent = join(root, 'rollout-parent.jsonl')
     const childId = '019fa774-618b-75b3-aed1-7f1dd8eb02f2'
@@ -2361,7 +2397,7 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
       }),
       row('2026-07-19T12:00:00.250Z', 'response_item', {
         type: 'function_call',
-        name: 'spawn_agent',
+        ...spawnName,
         call_id: 'agent-1',
         arguments: JSON.stringify({ task_name: 'review', message: 'review it' })
       }),
@@ -2463,6 +2499,7 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
 
     const [record] = await listRecords(join(root, '.scry'))
     expect(record.user.value?.text).toBe('/rate-workflow 84441877')
+    expect(record.tools.value?.filter((call) => call.category === 'agent')).toHaveLength(1)
     expect(record.tools.value?.map((call) => [call.name, call.id])).toEqual([
       ['Bash', 'exec-1:1'],
       ['review', 'agent-1'],

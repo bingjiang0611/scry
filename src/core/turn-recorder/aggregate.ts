@@ -609,7 +609,9 @@ export function aggregateTurnEvidence(args: {
     usage: !observable.usage
       ? unavailable('provider usage was not observable', [source])
       : usage
-        ? available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
+        ? providerUsageResultEvents(args.events).some((event) => event.runtimeMetadata?.usageComplete === false)
+          ? partial(usage, [source], 'usage is missing for one or more assistant messages or counters', usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
+          : available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
         : unavailable('no authoritative usage event was captured', [source]),
     compactions: available(compactions, [source]),
     ...(modelTiming
