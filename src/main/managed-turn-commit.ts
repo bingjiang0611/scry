@@ -466,6 +466,14 @@ async function prepareJournalRecord(
       status: request.status,
       archiveFingerprint: journal.archiveFingerprint,
       expectedRecordId: journal.recordId,
+      // A resumed Qoder run may stop before UserPromptSubmit. The previous session
+      // ID is still known, but there is no native lifecycle to wait for. Preserve
+      // the interrupted attempt in both stores using explicit host provenance.
+      // Unknown/result/hook/model events never qualify for this recovery path.
+      allowObservedInterruption: request.providerId === 'qoder' && request.status === 'interrupted' &&
+        !request.providerTurnId && !request.turn.providerTurnId && !request.turn.forkTurnId &&
+        request.turn.items.every((event) => event.kind === 'harness' &&
+          (event.stage === 'runtime:controls' || event.stage === 'turn_diff' || event.stage === 'session_diff')),
       termination: managedTermination(journal),
       toolContentPolicy: request.turn.toolContentPolicy
     })

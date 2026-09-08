@@ -9,6 +9,12 @@ export class AgentRuntimeError extends Error {
   }
 }
 
+export function terminalOutcomeLabel(status: 'completed' | 'failed' | 'cancelled' | 'interrupted'): string {
+  if (status === 'completed') return '模型已完成'
+  if (status === 'failed') return '运行已失败'
+  return '运行已中断'
+}
+
 export function ensureFailedTerminalResult(
   items: TraceEvent[],
   args: {

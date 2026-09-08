@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { observedInterruptionRecordId, reserveObservedInterruption } from './managed-interruption.js'
 import { isToolContent } from '../../shared/tool-content.js'
 import { captureToolContent, redactToolText, type ToolContentPolicy } from './tool-content.js'
 import { rm } from 'node:fs/promises'
@@ -71,6 +72,8 @@ export function isManagedProviderRuntimePair(provider: unknown, runtimeProvider:
 }
 
 export interface PrepareManagedTurnInput {
+  /** Main proved the durable Qoder interruption trace contains only local launch/diff events. */
+  allowObservedInterruption?: boolean
   /** How the App established this turn's end. Omitted by pre-0.2.38 callers. */
   termination?: Evidence<TurnTermination>
   toolContentPolicy?: ToolContentPolicy
@@ -496,6 +499,13 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
       }
     }
+    if (input.allowObservedInterruption) {
+      const duplicate = await recordById(enablement.dataRoot, observedInterruptionRecordId(enablement.config.workspaceId, input))
+      if (duplicate) {
+        assertDuplicateMatchesInput(duplicate, input)
+        return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
+      }
+    }
     const sessionRoot = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
     const providerDuplicate = input.providerTurnId
       ? await recordByProviderTurnId(
@@ -561,6 +571,14 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
       }
       matches = matchingProvisional
     }
+    let observedInterruption = false
+    if (matches.length === 0 && candidates.length === 0) {
+      const reserved = await reserveObservedInterruption(enablement.dataRoot, root, input)
+      if (reserved) {
+        matches = [reserved]
+        observedInterruption = true
+      }
+    }
     if (matches.length === 0) {
       if (candidates.length === 0) {
         return { status: 'pending' as const, reason: 'managed recorder open identity is not available yet' }
@@ -573,6 +591,13 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     const open = matches[0]
 
     const draft = recordDraft(enablement, open, input)
+    if (observedInterruption && draft.termination) {
+      draft.recordId = observedInterruptionRecordId(enablement.config.workspaceId, input)
+      draft.termination = {
+        ...draft.termination,
+        omissionReason: 'no Provider lifecycle start was captured; this interrupted attempt uses the durable Scry run boundary, not a Provider turn identity'
+      }
+    }
     if (!isAgentTurnRecord({ ...draft, sequence: 1 })) throw new Error('managed recorder produced an invalid canonical record')
     const handoff: ManagedTurnHandoff = {
       schemaVersion: 1,

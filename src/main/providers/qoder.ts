@@ -26,6 +26,17 @@ import { sanitizeMcpAuthError } from './mcp-auth-security'
 import { completedTranscriptTurnBoundary, isTranscriptUserPrompt } from './session-fork-boundary'
 import { resolveQoderForkUserId } from './qoder-fork-identity'
 
+function explainQoderSessionAccessError(error: unknown): never {
+  const failure = error as NodeJS.ErrnoException | null
+  if (failure?.code !== 'EPERM' && failure?.code !== 'EACCES') throw error
+  throw new Error(
+    `Qoder 会话文件访问被系统拒绝（${failure.code}）${failure.path ? `：${failure.path}` : ''}。` +
+    '请检查该文件及父目录权限；macOS 下同时检查 Scry 的文件访问授权，确认后重试。' +
+    'Scry 未自动更改权限或重试创建分支。',
+    { cause: error }
+  )
+}
+
 interface Cached<T> {
   data: T
   observedAt: number
@@ -852,7 +863,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         const messages = await getSessionMessages(request.sourceSessionId, {
           dir: request.cwd,
           includeSystemMessages: true
-        })
+        }).catch(explainQoderSessionAccessError)
         const nativeIndex = messages.findIndex((message) =>
           typeof (message as { uuid?: unknown }).uuid === 'string' &&
           (message as { uuid: string }).uuid === request.replaceForkTurnId
@@ -871,7 +882,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           dir: request.cwd,
           upToMessageId: boundary,
           title: 'Edited branch'
-        })
+        }).catch(explainQoderSessionAccessError)
         return { externalSessionId: forked.sessionId }
       }
     },
@@ -880,7 +891,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         const messages = await getSessionMessages(request.sourceSessionId, {
           dir: request.cwd,
           includeSystemMessages: true
-        })
+        }).catch(explainQoderSessionAccessError)
         const activeUserIds = new Set(messages.filter(isTranscriptUserPrompt).map((message) => message.uuid))
         // Older Scry archives copied promptId into forkTurnId. Never treat it as a UUID
         // or guess by prompt text; recover the exact native mapping when it is absent.
@@ -894,14 +905,14 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 cwd: request.cwd,
                 promptId: request.sourceProviderTurnId,
                 activeUserIds
-              })
+              }).catch(explainQoderSessionAccessError)
             : request.sourceForkTurnId
         const boundary = completedTranscriptTurnBoundary(messages, sourceUserId, 'Qoder')
         const forked = await forkSession(request.sourceSessionId, {
           dir: request.cwd,
           upToMessageId: boundary,
           title: 'Scry branch'
-        })
+        }).catch(explainQoderSessionAccessError)
         return { externalSessionId: forked.sessionId }
       }
     },
