@@ -41,7 +41,8 @@ describe('TurnTimingDetails', () => {
     ]
     expect(buildTurnTimingBreakdown(items, []).turnWall).toEqual({ durationMs: 14318, source: 'estimated' })
     const html = render(items)
-    expect(html).toContain('整轮耗时（估算）</span><b>14s</b>')
+    expect(html).toContain('整轮耗时</span><b>14s</b>')
+    expect(html).not.toContain('整轮耗时（估算）')
     expect(html).not.toContain('<b>~14s</b>')
     expect(html).toContain('title="历史记录估算')
     expect(html).not.toContain('<b>1.1s</b>')

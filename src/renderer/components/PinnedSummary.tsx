@@ -310,7 +310,7 @@ export interface PinnedSummaryVisibility {
 }
 
 export function usePinnedSummaryVisibility(active: boolean, panelVisible: boolean): PinnedSummaryVisibility {
-  const [persistentOpen, setPersistentOpen] = useState(true)
+  const [persistentOpen, setPersistentOpen] = useState(false)
   const [overlayOpen, setOverlayOpen] = useState(false)
 
   useEffect(() => {

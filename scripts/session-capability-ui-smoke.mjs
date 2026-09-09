@@ -27,7 +27,7 @@ async function exercise() {
     check(node, `Missing button ${fragment}`)
     return node
   }
-  await waitFor(() => text('#pinned').includes('hsf-invoke'))
+  await waitFor(() => document.querySelector('#chrome [data-pinned-summary-toggle]') != null)
   const thinking = document.querySelector('#thinking details.thinking')
   const finalText = document.querySelector('#thinking .model-text')
   check(thinking?.open === true, 'Thinking disclosure must be expanded by default')
@@ -75,6 +75,11 @@ async function exercise() {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   await waitFor(() => document.querySelector('#model-effort [aria-label="Model 与 Effort"]') == null)
 
+  check(document.querySelector('#pinned aside') == null, 'Summary should be hidden by default')
+  const initialSummaryToggle = document.querySelector('#chrome [data-pinned-summary-toggle]')
+  check(initialSummaryToggle.getAttribute('aria-pressed') === 'false', 'Summary toggle should start unpressed')
+  initialSummaryToggle.click()
+  await waitFor(() => document.querySelector('#pinned aside') != null)
   check(button('#pinned', 'hsf-invoke').textContent.includes('×1'), 'Pinned call count missing')
   check(!text('#pinned').includes('加载推断'), 'Pinned inference suffix should stay out of the compact row')
   check(text('#overview').includes('Skill 1（含加载推断）'), 'Overview disagrees with pinned count')
@@ -123,6 +128,21 @@ async function exercise() {
   check(getComputedStyle(remountedDetail).display === 'none', 'Remounted collapsed detail is visually exposed')
   remountedToggle.click()
   await waitFor(() => remountedToggle.getAttribute('aria-expanded') === 'true')
+  document.querySelector('#hooks').click()
+  await waitFor(() => text('#overview').includes('检查 Hook 展开'))
+  const hooksToggle = button('#overview .turn-call-groups', 'Hooks')
+  hooksToggle.click()
+  await waitFor(() => document.querySelector('#overview .turn-hook-item')?.open === true)
+  const hookPhase = document.querySelector('#overview .turn-hook-phase')
+  check(hookPhase.open === true, 'Opening Hooks should expand its phases')
+  hookPhase.querySelector('summary').click()
+  await waitFor(() => hookPhase.open === false)
+  hooksToggle.click()
+  await waitFor(() => document.querySelector('#overview .turn-hook-phase') == null)
+  hooksToggle.click()
+  await waitFor(() => document.querySelector('#overview .turn-hook-phase')?.open === true)
+  check(document.querySelector('#overview .turn-hook-item').open === true, 'Reopening Hooks should expand handler details')
+
   document.querySelector('#empty').click()
   await waitFor(() => text('#pinned').includes('尚未观测到'))
   check(!text('#pinned').includes('hsf-invoke') && !text('#pinned').includes('browser / navigate'), 'New session retained old rows')
@@ -174,7 +194,7 @@ async function exercise() {
   check(document.querySelector('#archive-sidebar .sb-sess[aria-current="true"]')?.textContent.includes('归档目标'), 'Archiving a background session changed the selected conversation')
   button('#archive-sidebar', '撤销').click()
   await waitFor(() => sidebarRows() === 2)
-  return { normalizedWire: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
+  return { normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
 }
 
 try {

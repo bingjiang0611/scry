@@ -52,6 +52,13 @@ function Fixture() {
     setSelection(JSON.stringify({ id: event.id, kind: event.kind, tool: event.tool, source: (event.input as { source?: string } | undefined)?.source ?? null }))
   }
   return <>
+    <button id="hooks" onClick={() => setTurns([{
+      runId: 'hook-run', userText: '检查 Hook 展开', done: true,
+      items: [
+        { id: 'hook-start', runId: 'hook-run', ts: '2026-09-09T00:00:00.000Z', kind: 'hook', stage: 'hook_started', hookId: 'h1', hookEvent: 'Stop', hookCommand: 'test-hook' },
+        { id: 'hook-end', runId: 'hook-run', ts: '2026-09-09T00:00:01.000Z', kind: 'hook', stage: 'hook_response', hookId: 'h1', hookEvent: 'Stop', hookCommand: 'test-hook', hookOutcome: 'success' }
+      ]
+    }])}>Hook 明细</button>
     <button id="empty" onClick={() => setTurns([])}>新会话</button>
     <button id="pending" onClick={() => setTurns([qoderSkillSessionFixture('pending-run', 'pending')])}>读取中</button>
     <button id="success" onClick={() => setTurns([qoderSkillSessionFixture('pending-run', 'success')])}>收到成功结果</button>
