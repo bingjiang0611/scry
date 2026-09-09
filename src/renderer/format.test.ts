@@ -11,6 +11,7 @@ import {
   bashReadFiles,
   buildSessionReport,
   fileWriteCoverage,
+  fmtTok,
   hookCancellationDetail,
   hookCommandLabel,
   logicalCallEventsForTurn,
@@ -22,6 +23,23 @@ import {
 } from './format'
 import type { Turn } from './format'
 import type { TraceEvent } from '@shared/trace'
+
+describe('fmtTok', () => {
+  it.each([
+    [undefined, '—'],
+    [null, '—'],
+    [0, '0'],
+    [999, '999'],
+    [1_000, '1.0k'],
+    [43_900, '43.9k'],
+    [999_900, '999.9k'],
+    [1_000_000, '1.0M'],
+    [10_597_700, '10.6M'],
+    [19_680_400, '19.7M']
+  ])('formats %s as %s', (value, expected) => {
+    expect(fmtTok(value)).toBe(expected)
+  })
+})
 
 describe('parseUserMessage', () => {
   it('抽出斜杠命令标签为干净命令，正文清空', () => {
