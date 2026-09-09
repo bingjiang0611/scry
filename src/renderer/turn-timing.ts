@@ -41,6 +41,7 @@ export interface ModelResponsePhase {
 }
 
 export interface TurnTimingBreakdown {
+  turnWall?: { durationMs: number; source: 'observed' | 'estimated' }
   // Provider 结果计时投影（resultOf 可能已聚合），不保证覆盖启动/收尾 Hook，
   // 也不保证 API 是区间并集。与活动区间不一致时仍保留结果值供独立展示。
   providerTiming?: { totalMs?: number; apiMs?: number }
@@ -75,6 +76,25 @@ function timestampMs(value?: string): number | undefined {
 
 function finiteDuration(value?: number): number | undefined {
   return value != null && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function turnWallTiming(items: TraceEvent[], result?: TraceEvent): TurnTimingBreakdown['turnWall'] {
+  const terminal = [...items].reverse().find((event) =>
+    event.kind === 'harness' && event.stage === 'runtime:turn_wall'
+  )
+  const durationMs = finiteDuration(terminal?.durationMs)
+  if (durationMs != null) return { durationMs, source: 'observed' }
+  // 老记录没有 Scry terminal 边界，只能展示已知活动跨度；不拿 SDK duration 倒推起点。
+  // 不计 diff/归档/usage 等异步观测，也不把运行中尚未闭合的片段当成已完成整轮。
+  if (!result) return undefined
+  const times = [...items, result].filter((event) =>
+    ['hook', 'model', 'tool', 'skill', 'agent'].includes(event.kind) ||
+    (event.kind === 'harness' && ['runtime:controls', 'result'].includes(event.stage))
+  ).map((event) => timestampMs(event.ts)).filter((value): value is number => value != null)
+  if (times.length < 2) return undefined
+  const span = times.reduce((latest, time) => Math.max(latest, time), -Infinity) -
+    times.reduce((earliest, time) => Math.min(earliest, time), Infinity)
+  return span > 0 ? { durationMs: span, source: 'estimated' } : undefined
 }
 
 function callCategory(event: TraceEvent): string {
@@ -453,6 +473,7 @@ export function buildTurnTimingBreakdown(
   const timedApiPhases = responseTiming?.timedCalls ?? phaseTimedApiPhases.length
   const totalApiPhases = responseTiming?.totalCalls ?? apiPhases.length
   return {
+    turnWall: turnWallTiming(items, resultEvent),
     providerTiming: { totalMs: wallMs, apiMs: providerApiMs },
     wallMs,
     wallConsistency: wallMs == null ? undefined : wallConsistencyInvalid ? 'invalid' : 'valid',

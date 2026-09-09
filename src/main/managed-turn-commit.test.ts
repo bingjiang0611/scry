@@ -674,9 +674,9 @@ describe('managed trace turn coordinator', () => {
     expect(record.assistant).toEqual(archive?.turns[0].turnEvidence?.assistant)
   })
 
-  it('Qoder 极早中断无 Provider turn id 时可持久化 progress 并提交 archive 与 canonical record', async () => {
+  it.each([false, true])('Qoder 极早中断与 Scry 墙钟可持久化（已有 prompt hook=%s）', async (hasHook) => {
     const { workspace, userDataDir } = await fixture()
-    await handleRecorderHook({
+    if (hasHook) await handleRecorderHook({
       provider: 'qoder',
       event: 'UserPromptSubmit',
       workspace,
@@ -697,7 +697,11 @@ describe('managed trace turn coordinator', () => {
       ...request.turn,
       providerTurnId: undefined,
       status: 'interrupted',
-      items: []
+      items: [{
+        id: 'turn-wall:run-1', runId: 'run-1', kind: 'harness', stage: 'runtime:turn_wall',
+        ts: '2026-07-29T12:00:10.000Z', durationMs: 10000,
+        input: { startedAt: '2026-07-29T12:00:00.000Z', boundary: 'provider_settled' }
+      }]
     }
     request.turn.turnEvidence = aggregateTurnEvidence({
       userText: request.turn.userText,
@@ -719,6 +723,7 @@ describe('managed trace turn coordinator', () => {
     expect(record.providerTurnId).toBeUndefined()
     expect(turn).toMatchObject({ runId: 'run-1', status: 'interrupted' })
     expect(turn.providerTurnId).toBeUndefined()
+    expect(turn.items).toContainEqual(request.turn.items[0])
   })
 
   it('recorder disabled 时 Qoder failure 无 Provider turn id 仍写入 Scry archive', async () => {
