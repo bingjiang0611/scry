@@ -983,7 +983,10 @@ function OverviewPanelBody({
               const skillCount = row.groups.skill.reduce((sum, item) => sum + item.count, 0)
               const agentCount = row.groups.agent.reduce((sum, item) => sum + item.count, 0)
               const hooksCount = row.hooks.logicalRuns
-              const timingAvailable = Boolean(row.timing.apiMs != null || row.timing.totalCalls > 0)
+              const timingAvailable = Boolean(
+                row.timing.providerTiming?.totalMs != null || row.timing.providerTiming?.apiMs != null ||
+                row.timing.apiMs != null || row.timing.totalCalls > 0
+              )
               const mcpExpanded = mcpCount > 0 && expandedTurnCallGroups.has(mcpKey)
               const skillExpanded = skillCount > 0 && expandedTurnCallGroups.has(skillKey)
               const hooksExpanded = hooksCount > 0 && expandedTurnCallGroups.has(hooksKey)
@@ -1027,7 +1030,7 @@ function OverviewPanelBody({
                         <button
                           type="button"
                           className="turn-call-group turn-call-toggle timing"
-                          title={timingExpanded ? '收起耗时明细' : '查看模型响应耗时与非模型耗时'}
+                          title={timingExpanded ? '收起耗时明细' : '查看耗时来源与统计范围'}
                           aria-label={timingToggleLabel}
                           aria-expanded={timingExpanded}
                           aria-controls={`turn-timing-${row.turnNo}`}
@@ -1035,7 +1038,7 @@ function OverviewPanelBody({
                           onKeyDown={(event) => event.stopPropagation()}
                         >
                           <span className="turn-call-kind">耗时</span>
-                          <span className="turn-call-count">2 项</span>
+                          <span className="turn-call-count">3 项</span>
                           <span className="turn-call-toggle-icon">
                             <Icon name={timingExpanded ? 'chevronDown' : 'chevronRight'} />
                           </span>
