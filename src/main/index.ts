@@ -17,7 +17,7 @@ import {
 import { AgentRuntimeError } from './run-outcome'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
-import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsQuery } from './db'
+import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import {
@@ -3413,7 +3413,7 @@ handleTrusted('agent:answerQuestion', (event, response: unknown) => {
 handleTrusted('agent:stats', () => statsQuery())
 handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => {
   if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
-  return usageAnalyticsQuery(rangeDays as UsageAnalyticsRangeDays)
+  return usageAnalyticsWithCreditsQuery(rangeDays as UsageAnalyticsRangeDays)
 })
 handleTrusted('agent:billingState', async () => {
   await warmShellEnv()

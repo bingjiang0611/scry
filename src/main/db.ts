@@ -7,6 +7,8 @@ import type { ToolContentPolicy } from '../core/turn-recorder/tool-content.js'
 import { app } from 'electron'
 import { createRequire } from 'node:module'
 import { basename, join } from 'node:path'
+import { homedir } from 'node:os'
+import { readQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   chmodSync,
@@ -979,6 +981,30 @@ export function statsQuery(): DbStats {
   const value = computeStats()
   statsCache = { revision: dataRevision, observedAt: now, value }
   return value
+}
+
+export async function usageAnalyticsWithCreditsQuery(rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> {
+  const analytics = usageAnalyticsQuery(rangeDays)
+  if (!db || analytics.status !== 'ready') return analytics
+  const revision = dataRevision
+  try {
+    const bounds = usageAnalyticsBounds(analytics.observedAt, rangeDays)
+    const scopes = db.prepare(`SELECT u.run_id runId, r.external_session_id sessionId, r.cwd,
+      MIN(u.bucket_start) tsStart FROM usage_ledger u
+      JOIN session_refs r ON r.scry_session_id=u.session_id
+      WHERE u.provider='qoder' AND r.provider_id='qoder' AND u.run_id IS NOT NULL
+        AND u.bucket_start>=? AND u.bucket_start<?
+      GROUP BY u.run_id, r.external_session_id, r.cwd ORDER BY tsStart DESC`).all(bounds.from, bounds.to) as QoderCreditScope[]
+    const credits = await readQoderCreditRows({
+      scopes,
+      userDataDir: app.getPath('userData'),
+      projectsDir: join(process.env.QODER_CONFIG_DIR || join(process.env.QODER_CLI_HOME || homedir(), '.qoder'), 'projects')
+    })
+    // A delete/new result during the read invalidates the captured scope, too.
+    return revision === dataRevision ? withQoderCredits(analytics, credits) : usageAnalyticsQuery(rangeDays)
+  } catch {
+    return analytics
+  }
 }
 
 export function usageAnalyticsQuery(rangeDays: UsageAnalyticsRangeDays): UsageAnalytics {
