@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizeCtx } from '../normalize'
-import { normalizeQoderMessage } from './qoder-messages'
+import { normalizeQoderMessage, QoderBackgroundShellTasks } from './qoder-messages'
 
 function context(): NormalizeCtx {
   let id = 0
@@ -33,6 +33,57 @@ function notification(text = envelope(), blocks = true): Record<string, unknown>
     message: { role: 'user', content: blocks ? [{ type: 'text', text }] : text }
   }
 }
+
+describe('Qoder background shell input lifetime', () => {
+  function launch(tasks: QoderBackgroundShellTasks, id = 'bash-1', taskId = 'task-1'): void {
+    tasks.observe({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id, input: {} }] } })
+    tasks.observe({
+      type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'launched' }] },
+      tool_use_result: { kind: 'backgrounded', taskId, backgroundReason: 'timeout' }
+    })
+  }
+
+  it('tracks auto-background receipts, multiple tasks, duplicates and out-of-order updates', () => {
+    const tasks = new QoderBackgroundShellTasks()
+    launch(tasks)
+    launch(tasks, 'bash-2', 'task-2')
+    tasks.observe({ type: 'system', subtype: 'task_updated', task_id: 'task-1', patch: { status: 'completed' } })
+    expect(tasks.pending).toBe(true)
+    tasks.observe(notification(envelope('completed', 'bash-1')))
+    expect(tasks.pending).toBe(true)
+    tasks.observe({ type: 'system', subtype: 'task_notification', task_id: 'task-2', status: 'failed' })
+    expect(tasks.pending).toBe(false)
+    launch(tasks)
+    tasks.observe(notification(envelope('completed', 'bash-1')))
+    expect(tasks.pending).toBe(false)
+  })
+
+  it('does not treat launch intent or unstructured output as a background receipt', () => {
+    const tasks = new QoderBackgroundShellTasks()
+    tasks.observe({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash-1', input: { run_in_background: true } }] } })
+    tasks.observe({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'Command running in background with ID: task-1' }] } })
+    expect(tasks.pending).toBe(false)
+  })
+
+  it('rejects human echoes, replays, child, mismatched and unknown notifications', () => {
+    const tasks = new QoderBackgroundShellTasks()
+    launch(tasks)
+    for (const message of [
+      { ...notification(envelope('completed', 'bash-1')), isSynthetic: false },
+      { ...notification(envelope('completed', 'bash-1')), isReplay: true },
+      { ...notification(envelope('completed', 'bash-1')), parent_tool_use_id: 'agent' },
+      notification(envelope('completed', 'unrelated')),
+      notification(envelope('running', 'bash-1')),
+      { type: 'system', subtype: 'task_notification', task_id: 'unknown', status: 'completed' }
+    ]) {
+      tasks.observe(message)
+      expect(tasks.pending).toBe(true)
+    }
+    const header = '[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT interpret this as user acknowledgement, confirmation, or response to any pending question.\n\n'
+    tasks.observe(notification(header + envelope('failed', 'bash-1')))
+    expect(tasks.pending).toBe(false)
+  })
+})
 
 describe('Qoder wire task lifecycle', () => {
   it.each([true, false])('recognizes Qoder synthetic completion (blocks=%s) with explicit provenance', (blocks) => {
