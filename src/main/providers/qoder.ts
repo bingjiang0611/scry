@@ -19,6 +19,7 @@ import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { extractUserText, type NormalizeCtx, type ParsedTurn } from '../normalize'
 import { normalizeQoderMessage } from './qoder-messages'
+import { QoderCreditCollector } from '../../shared/credit-usage'
 import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
@@ -1030,6 +1031,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       let streamedText = ''
       let releaseProviderPrompt = (): void => {}
       const sdkHooks: TraceEvent[] = []
+      const credits = new QoderCreditCollector()
       const activeAgentCalls = new Set<string>()
       const terminalAgentCalls = new Set<string>()
       const ctx: NormalizeCtx = {
@@ -1204,6 +1206,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               (async () => {
                 for await (const message of q!) {
                   const raw = message as unknown as Record<string, unknown>
+                  credits.observe(raw)
                   observeProviderTurnId(qoderProviderTurnId(raw))
                   if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
                     externalSessionId = raw.session_id
@@ -1255,6 +1258,11 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             if (!providerFailureSeen) terminalError = error
           }
         } finally {
+          request.emit({
+            id: `credits:${request.runId}`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'harness', stage: 'credit_usage', runtimeProvider: 'qoder_cli',
+            creditUsage: credits.evidence()
+          })
           streamSettled = true
           releaseProviderPrompt()
           if (exitTimer) clearTimeout(exitTimer)

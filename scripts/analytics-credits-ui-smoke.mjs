@@ -49,7 +49,7 @@ async function exercise() {
 try {
   await Promise.all(['home', 'userData', 'sessionData', 'workspace', 'qoder/projects/project'].map((name) => mkdir(join(temp, name), { recursive: true })))
   await symlink(join(root, 'node_modules'), join(temp, 'node_modules'), 'dir')
-  await bundle({ entryPoints: [join(root, 'src/main/db.ts'), join(root, 'src/main/transcript-archive.ts')], outdir: temp, outExtension: { '.js': '.mjs' }, bundle: true, platform: 'node', format: 'esm', packages: 'external' })
+  await bundle({ entryPoints: [join(root, 'src/main/db.ts'), join(root, 'src/main/transcript-archive.ts'), join(root, 'src/core/turn-recorder/aggregate.ts'), join(root, 'src/shared/credit-usage.ts')], outdir: temp, entryNames: '[name]', outExtension: { '.js': '.mjs' }, bundle: true, platform: 'node', format: 'esm', packages: 'external' })
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } }, define: { 'process.env.NODE_ENV': '"production"' },
@@ -70,6 +70,8 @@ try {
       app.dock?.hide()
       const { initDb, recordTurn, usageAnalyticsWithCreditsQuery } = await import('./db.mjs')
       const { upsertTraceArchiveTurn } = await import('./transcript-archive.mjs')
+      const { aggregateTurnEvidence } = await import('./aggregate.mjs')
+      const { creditUsageEvidence } = await import('./credit-usage.mjs')
       const cwd = join(root, 'workspace')
       const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
       initDb()
@@ -86,10 +88,21 @@ try {
         { type: 'assistant', uuid: 'assistant-1', parentUuid: 'user-1', sessionId, cwd, message: { id: 'message-1', usage: { credits, billable: true, request_id: 'request-1' } } }
       ].map(row => JSON.stringify(row)).join('\\n')
       writeFileSync(file, native(12.5))
-      const analytics = await usageAnalyticsWithCreditsQuery(7)
+      let analytics = await usageAnalyticsWithCreditsQuery(7)
       if (analytics.totals.qoderCredits?.credits !== 12.5) throw new Error('DB scope/native integration failed')
       writeFileSync(file, native(13.5))
       if ((await usageAnalyticsWithCreditsQuery(7)).totals.qoderCredits?.credits !== 13.5) throw new Error('Refresh reused stale native credits')
+      // Recorded evidence supersedes the native shadow, including a credits-only interrupted turn.
+      for (const runId of ['qoder', 'interrupted']) {
+        const items = [{ id: 'credits:' + runId, runId, ts: new Date().toISOString(), kind: 'harness', stage: 'credit_usage',
+          creditUsage: creditUsageEvidence([{ id: runId, runId, credits: runId === 'qoder' ? 12.5 : 0 }], 'qoder_sdk') }]
+        if (!recordTurn({ runId, sessionId, cwd, userText: 'fixture', providerId: 'qoder', runtimeProvider: 'qoder_cli', billingProvider: 'qoder', items })) throw new Error('Credits ledger write failed')
+        if (!upsertTraceArchiveTurn({ cwd, sessionId, userDataDir: app.getPath('userData'), providerId: 'qoder',
+          turn: { runId, forkTurnId: runId === 'qoder' ? 'user-1' : 'user-2', userText: 'fixture', items, done: true, turnEvidence: aggregateTurnEvidence({ events: items }) } })) throw new Error('Recorded credits archive failed')
+      }
+      analytics = await usageAnalyticsWithCreditsQuery(7)
+      if (analytics.totals.qoderCredits?.credits !== 12.5 || analytics.totals.qoderCredits?.source !== 'qoder_recorded_usage') throw new Error('Recorded/native evidence was double counted')
+      if (analytics.totals.usageRows !== 3 || analytics.totals.inputTokens !== 2000) throw new Error('Credits rows duplicated token counters or lost the result-less turn')
       const win = new BrowserWindow({ width: 1100, height: 850, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { evidenceStatusMap, isAgentTurnRecord, validateAgentTurnRecord } from './turn-record'
+import { creditUsageEvidence } from './credit-usage'
 
 const availableEmpty = () => ({
   status: 'available',
@@ -39,6 +40,19 @@ function record(): Record<string, unknown> {
 }
 
 describe('AgentTurnRecord strict schema-v1 validation', () => {
+  it('keeps legacy records valid and validates independent credits without accepting USD/unit/provider confusion', () => {
+    expect(isAgentTurnRecord(record())).toBe(true)
+    const valid = record()
+    valid.provider = { id: 'qoder' }
+    const credits = creditUsageEvidence([{ id: 'request', runId: 'run', credits: 1.25 }], 'qoder_sdk')
+    valid.usage = { status: 'partial', quality: 'exact', source: ['qoder_sdk'], value: { credits }, omissionReason: 'main requests only' }
+    expect(isAgentTurnRecord(valid)).toBe(true)
+    for (const value of [{ ...credits.value, unit: 'usd' }, { ...credits.value, amount: -1 }, { ...credits.value, amount: Infinity }]) {
+      expect(isAgentTurnRecord({ ...valid, usage: { ...valid.usage as object, value: { credits: { ...credits, value } } } })).toBe(false)
+    }
+    expect(isAgentTurnRecord({ ...valid, provider: { id: 'codex' } })).toBe(false)
+  })
+
   it.each([
     ['durationMs', Number.NaN],
     ['status', 'unknown'],

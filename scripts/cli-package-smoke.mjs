@@ -120,6 +120,25 @@ try {
     assert.ok(call.outputContent.savedBytes > 500, 'default recording must retain more than a summary')
     assert.match(call.outputContent.content, /finished$/)
     assert.doesNotMatch(JSON.stringify(record), /SMOKE_(INPUT|OUTPUT)_SECRET/)
+
+    // The installed tarball must record native Qoder metering without importing an SDK.
+    const transcript = join(workspace, 'qoder-native.jsonl')
+    writeFileSync(transcript, '')
+    const qoderPayload = { session_id: 'qoder-package-smoke', promptId: 'qoder-turn', cwd: workspace, transcript_path: transcript }
+    run(hook, ['qoder', 'UserPromptSubmit'], { cwd: workspace, input: JSON.stringify({ ...qoderPayload, prompt: 'credits fixture' }) })
+    const native = [
+      { type: 'user', uuid: 'qoder-user', promptId: 'qoder-turn', sessionId: qoderPayload.session_id, cwd: workspace, message: { content: 'credits fixture' } },
+      { type: 'assistant', uuid: 'qoder-assistant', parentUuid: 'qoder-user', sessionId: qoderPayload.session_id, cwd: workspace,
+        message: { id: 'qoder-message', content: [{ type: 'text', text: 'done' }], usage: { input_tokens: 4, output_tokens: 1, request_id: 'request', credits: 1.5, original_credits: 9, billable: true } } }
+    ]
+    writeFileSync(transcript, native.map((row) => JSON.stringify(row)).join('\n') + '\n')
+    run(hook, ['qoder', 'Stop'], { cwd: workspace, input: JSON.stringify(qoderPayload) })
+    const summary = JSON.parse(run(bin, ['turns', 'summary', qoderPayload.session_id, '--workspace', workspace], { cwd: installRoot }))
+    assert.equal(summary.usage.credits.amount, 1.5)
+    assert.equal(summary.usage.credits.unit, 'credits')
+    assert.equal(summary.usage.credits.status, 'partial')
+    assert.equal(summary.usage.costUsd, null, 'Qoder Credits must not become USD')
+    assert.equal(JSON.parse(run(bin, ['turns', 'verify', '--workspace', workspace], { cwd: installRoot })).ok, true)
   } finally {
     run(bin, ['recorder', 'stop', '--workspace', workspace], { cwd: installRoot })
   }

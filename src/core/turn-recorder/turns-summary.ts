@@ -12,6 +12,7 @@ import {
 } from '../../shared/turn-record.js'
 import type { AgentIntervention } from '../../shared/runtime.js'
 import { providerDangerCoverage } from '../../shared/provider.js'
+import { isCreditUsageEvidence } from '../../shared/credit-usage.js'
 
 export interface CompactModelTiming {
   status: EvidenceStatus
@@ -556,6 +557,30 @@ function summarizeSegments(selected: AgentTurnRecord[], timeline: ReturnType<typ
   return { rows: coverage.knownTurns > 0 ? segments : null, coverage }
 }
 
+function summarizeCredits(selected: AgentTurnRecord[]) {
+  const turns = selected.filter((record) => record.provider.id === 'qoder')
+  if (!turns.length) return undefined
+  const evidence = turns.flatMap((record) => {
+    const credits = record.usage.value?.credits
+    return isCreditUsageEvidence(credits) ? [credits] : []
+  })
+  const known = evidence.filter((item) => item.status === 'partial' && item.value?.amount != null)
+  const total = known.reduce((sum, item) => sum + item.value!.amount!, 0)
+  const amount = known.length > 0 && Number.isFinite(total) ? total : null
+  return {
+    provider: 'qoder' as const, unit: 'credits' as const, scope: 'main' as const,
+    amount,
+    status: amount == null ? 'unavailable' as const : 'partial' as const,
+    source: [...new Set(evidence.flatMap((item) => item.source))],
+    knownRequests: evidence.reduce((sum, item) => sum + item.value!.knownRequests, 0),
+    missingRequests: evidence.reduce((sum, item) => sum + item.value!.missingRequests, 0),
+    coverage: {
+      knownTurns: known.length, totalTurns: turns.length, complete: false,
+      quality: amount == null ? 'unavailable' : 'exact'
+    } satisfies SummaryCoverage
+  }
+}
+
 function summarizeUsage(selected: AgentTurnRecord[]) {
   const known = selected.filter((record) => record.usage.value !== undefined && ['available', 'partial'].includes(record.usage.status))
   const values = known.map((record) => record.usage.value).filter((value): value is NonNullable<typeof value> => !!value)
@@ -607,6 +632,7 @@ function summarizeUsage(selected: AgentTurnRecord[]) {
     cacheCreationTokens,
     reasoningTokens,
     costUsd,
+    credits: summarizeCredits(selected),
     apiDurationMs,
     models,
     context,

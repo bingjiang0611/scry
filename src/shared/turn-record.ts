@@ -1,4 +1,5 @@
 import type { ProviderId } from './provider.js'
+import { isCreditUsageEvidence, type CreditUsageEvidence } from './credit-usage.js'
 import { isToolContent } from './tool-content.js'
 import { normalizeTurnDiffSnapshot, type CompactionTrigger, type DangerLevel, type DiffFile, type TurnDiffCollection, type TurnDiffReason, type TurnDiffStatus } from './trace.js'
 import type { AgentIntervention } from './runtime.js'
@@ -60,6 +61,8 @@ export interface TurnHookCall {
 }
 
 export interface TurnUsage {
+  /** Independent unit and coverage; never included in costUsd. */
+  credits?: CreditUsageEvidence
   inputTokens?: number
   outputTokens?: number
   cacheReadTokens?: number
@@ -462,6 +465,7 @@ function isTurnUsage(value: unknown): value is TurnUsage {
   for (const key of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'reasoningTokens', 'apiDurationMs', 'contextTokens', 'contextWindow']) {
     if (raw[key] !== undefined && !isNonNegativeNumber(raw[key])) return false
   }
+  if (raw.credits !== undefined && !isCreditUsageEvidence(raw.credits)) return false
   if (raw.costUsd !== undefined && canonicalCostUsd(raw.costUsd as number) !== raw.costUsd) return false
   if (raw.contextUsageQuality !== undefined && !['exact', 'inferred'].includes(String(raw.contextUsageQuality))) return false
   return ['contextModel', 'contextProvider', 'contextUsageSource', 'model'].every((key) => isOptionalString(raw[key]))
@@ -598,6 +602,8 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   for (const [section, validate, allowUnavailableValue] of sections) {
     require(isEvidencePayload(raw[section], validate, allowUnavailableValue), `$.${section}`, 'invalid evidence envelope or payload')
   }
+  const usage = raw.usage as Evidence<TurnUsage> | undefined
+  if (usage?.value?.credits !== undefined) require(provider?.id === 'qoder', '$.usage.value.credits', 'Qoder credits require Qoder provider identity')
   if (raw.compactions !== undefined) require(isCompactionsEvidence(raw.compactions), '$.compactions', 'invalid compaction evidence')
   if (raw.modelSegments !== undefined) require(isModelSegmentsEvidence(raw.modelSegments), '$.modelSegments', 'invalid model segment evidence')
   if (raw.modelTiming !== undefined) require(isModelTimingEvidence(raw.modelTiming), '$.modelTiming', 'invalid model timing evidence')
