@@ -3124,6 +3124,33 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('overview-metric-foot') // cache·r/cache·w/reason/api foot
   })
 
+  it('百万级 token 总量、输入及缓存使用 M，小数值和缺失证据保持原样', () => {
+    const largeTokenTurn: Turn = {
+      runId: 'large-token-usage',
+      userText: 'probe',
+      done: true,
+      items: [ev({
+        id: 'large-token-result',
+        kind: 'harness',
+        stage: 'result',
+        providerId: 'claude',
+        tokensIn: 10_597_700,
+        tokensOut: 43_900,
+        cacheReadTokens: 9_038_700,
+        cacheCreationTokens: 0
+      })]
+    }
+    const largeTokenHtml = renderToStaticMarkup(
+      <OverviewPanel turns={[largeTokenTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
+    )
+
+    expect(largeTokenHtml).toContain('<strong>19.7M tok</strong>')
+    expect(largeTokenHtml).toContain('<strong>10.6M / 43.9k</strong>')
+    expect(largeTokenHtml).toContain('<b>cache·r</b>9.0M')
+    expect(largeTokenHtml).toContain('<b>cache·w</b>0')
+    expect(largeTokenHtml).toContain('<b>reason</b>—')
+  })
+
   it('Codex 缓存已包含在 input 时展示真实 Token 加总口径', () => {
     const codexTurn: Turn = {
       runId: 'codex-token-label',
@@ -3213,7 +3240,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       <OverviewPanel turns={[inferred]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(inferredHtml).toContain('103.2k / 1000.0k')
+    expect(inferredHtml).toContain('103.2k / 1.0M')
     expect(inferredHtml).toContain('推断：Provider usage 比例换算')
   })
 
