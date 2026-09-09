@@ -3335,7 +3335,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('创建并读回文件')
     expect(html).toContain('turn-call-group turn-call-toggle timing')
     expect(html).toContain('title="查看耗时来源与统计范围"')
-    expect(html).toContain('<span class="turn-call-count">3 项</span>')
+    expect(html).toContain('<span class="turn-call-count">2 项</span>')
     expect(html).toContain('aria-label="展开第 1 轮耗时明细"')
     expect(html).toContain('aria-controls="turn-timing-1"')
     expect(html).toContain('aria-label="MCP 0，无明细"')

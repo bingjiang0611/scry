@@ -21,7 +21,7 @@ describe('TurnTimingDetails', () => {
     expect(buildTurnTimingBreakdown(items, []).turnWall).toEqual({ durationMs: 13500, source: 'observed' })
     const html = render(items)
     expect(html).toContain('整轮耗时</span><b>14s</b>')
-    expect(html).toContain('Provider 结果时长</span><b>7.9s</b>')
+    expect(html).not.toContain('Provider 结果时长')
     expect(html).toContain('Provider API 耗时</span><b>6.8s</b>')
     expect(html).not.toContain('Provider 计时余量')
     expect(html).not.toContain('turn-timing-note')
@@ -41,7 +41,8 @@ describe('TurnTimingDetails', () => {
     ]
     expect(buildTurnTimingBreakdown(items, []).turnWall).toEqual({ durationMs: 14318, source: 'estimated' })
     const html = render(items)
-    expect(html).toContain('整轮耗时</span><b>~14s</b>')
+    expect(html).toContain('整轮耗时（估算）</span><b>14s</b>')
+    expect(html).not.toContain('<b>~14s</b>')
     expect(html).toContain('title="历史记录估算')
     expect(html).not.toContain('<b>1.1s</b>')
   })
@@ -60,7 +61,7 @@ describe('TurnTimingDetails', () => {
   it('retains the settled boundary for interrupted runs without a Provider result', () => {
     const html = render([event({ id: 'wall', kind: 'harness', stage: 'runtime:turn_wall', durationMs: 2500 })])
     expect(html).toContain('整轮耗时</span><b>2.5s</b>')
-    expect(html).toContain('Provider 结果时长</span><b>—</b>')
+    expect(html).not.toContain('Provider 结果时长')
     expect(html).not.toContain('<b>0ms</b>')
   })
 
