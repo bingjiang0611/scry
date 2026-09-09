@@ -18,7 +18,7 @@ import { contextUsageEvidence, type McpLiveStatus, type TraceEvent } from '../..
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { extractUserText, type NormalizeCtx, type ParsedTurn } from '../normalize'
-import { normalizeQoderMessage } from './qoder-messages'
+import { normalizeQoderMessage, QoderBackgroundShellTasks } from './qoder-messages'
 import { QoderCreditCollector } from '../../shared/credit-usage'
 import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
@@ -1034,6 +1034,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       const credits = new QoderCreditCollector()
       const activeAgentCalls = new Set<string>()
       const terminalAgentCalls = new Set<string>()
+      const backgroundShellTasks = new QoderBackgroundShellTasks()
+      const hasPendingBackgroundWork = (): boolean => activeAgentCalls.size > 0 || backgroundShellTasks.pending
       const ctx: NormalizeCtx = {
         runId: request.runId,
         cwd: request.cwd,
@@ -1092,9 +1094,8 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         const prompt = livePrompt(providerPrompt)
         releaseProviderPrompt = prompt.release
         q = query({
-          // Keep stdin open after the root result while Qoder-owned background Agents
-          // are active. Otherwise qodercli enters its bounded print-mode drain and can
-          // abandon a long-running child before its task_notification reaches Scry.
+          // Keep control-response stdin open while Qoder-owned Agents or Bash
+          // tasks are active, including model-policy requests on notification turns.
           prompt: prompt.stream,
           options: {
             ...qoderOptions(
@@ -1207,6 +1208,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 for await (const message of q!) {
                   const raw = message as unknown as Record<string, unknown>
                   credits.observe(raw)
+                  backgroundShellTasks.observe(raw)
                   observeProviderTurnId(qoderProviderTurnId(raw))
                   if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
                     externalSessionId = raw.session_id
@@ -1222,7 +1224,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                     providerStatus = 'failed'
                   }
                   let contextEvidence: QoderContextEvidence | undefined
-                  if (raw.type === 'result' && activeAgentCalls.size === 0 && typeof q!.getContextUsage === 'function') {
+                  if (raw.type === 'result' && !hasPendingBackgroundWork() && typeof q!.getContextUsage === 'function') {
                     contextEvidence = await qoderLiveContext(q!)
                   }
                   for (const rawEvent of normalizeQoderMessage(message, ctx)) {
@@ -1246,10 +1248,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                       request.emit(event)
                     }
                   }
-                  // A root result is terminal only when every observed async Agent has
-                  // a terminal notification. The next root result after the last child
-                  // notification releases the live input stream.
-                  if (raw.type === 'result' && activeAgentCalls.size === 0) releaseProviderPrompt()
+                  // A launch result is not terminal while background work remains.
+                  // Release only on the root result following the last notification.
+                  if (raw.type === 'result' && !hasPendingBackgroundWork()) releaseProviderPrompt()
                 }
               })(),
               unexpectedExit

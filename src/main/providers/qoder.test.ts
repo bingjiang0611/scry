@@ -1093,6 +1093,45 @@ describe('Qoder provider adapter', () => {
     })
   })
 
+  it.each(['completed', 'failed', 'stopped'])('keeps control stdin open across a background Bash %s notification turn', async (status) => {
+    const getContextUsage = vi.fn().mockResolvedValue(undefined)
+    sdk.query.mockImplementation(({ prompt, options }) => ({
+      async *[Symbol.asyncIterator]() {
+        const input = prompt[Symbol.asyncIterator]()
+        await input.next()
+        let released = false
+        const done = input.next().then(() => { released = true })
+        yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash-1', input: { run_in_background: true } }] } }
+        yield {
+          type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'Command running in background' }] },
+          tool_use_result: { kind: 'backgrounded', taskId: 'shell-1', backgroundReason: 'model' }
+        }
+        yield { type: 'result', subtype: 'success', result: 'started' }
+        await Promise.resolve()
+        expect(released).toBe(false)
+        expect(getContextUsage).not.toHaveBeenCalled()
+        yield {
+          type: 'user', isSynthetic: true,
+          message: { content: [{ type: 'text', text: `<task-notification>\n<task-id>shell-1</task-id>\n<tool-use-id>bash-1</tool-use-id>\n<status>${status}</status>\n<summary>Background command ended</summary>\n</task-notification>` }] }
+        }
+        await Promise.resolve()
+        // Qoder requests model policy here before producing the follow-up result.
+        expect(released).toBe(false)
+        expect(options.resolveModel()).toMatchObject({ model: 'ultimate' })
+        yield { type: 'result', subtype: 'success', result: 'notification handled' }
+        await done
+        expect(released).toBe(true)
+      },
+      getContextUsage,
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    }))
+    await expect(createQoderAdapter().run({
+      runId: 'background-shell', prompt: 'run', attachments: [], emit: () => {},
+      model: { id: 'ultimate' }, effort: 'high'
+    }).promise).resolves.toMatchObject({ status: 'completed' })
+  })
+
   it('keeps the Qoder input stream open until background Agents settle and the root responds again', async () => {
     let inputReleasedBeforeTerminal = false
     sdk.query.mockImplementation(({ prompt }) => ({
