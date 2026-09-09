@@ -349,7 +349,19 @@ export interface DbStats {
 
 export type UsageAnalyticsRangeDays = 7 | 30 | 90
 
+export interface QoderCreditEvidence {
+  credits: number | null
+  knownRequests: number
+  missingRequests: number
+  matchedTurns: number
+  totalTurns: number
+  source: 'qoder_native_transcript'
+  // Only matched main-transcript requests; never a complete account bill.
+  completeness: 'partial'
+}
+
 export interface UsageAnalyticsAggregate {
+  qoderCredits?: QoderCreditEvidence
   inputTokens: number | null
   outputTokens: number | null
   cacheReadTokens: number | null
