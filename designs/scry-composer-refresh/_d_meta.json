@@ -41,8 +41,8 @@
         {
           "path": "Scry Composer Options v4.html",
           "createdAt": "2026-09-08T14:35:32.826Z",
-          "status": "approved",
-          "subtitle": "C4：工作目录顶置，Agent 独立，Model / Effort 两级组合",
+          "status": "needs-review",
+          "subtitle": "C4：6 项 Effort 单行等宽",
           "viewport": {
             "width": 1400,
             "height": 1200
@@ -53,5 +53,5 @@
     }
   },
   "createdAt": "2026-09-08T13:28:22.653Z",
-  "updatedAt": "2026-09-08T16:14:24.534Z"
+  "updatedAt": "2026-09-08T16:36:31.745Z"
 }

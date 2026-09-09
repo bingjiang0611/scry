@@ -250,8 +250,8 @@
     }
     .popover-model-row .effort-readout { margin-left: 2px; color: var(--muted); }
     .popover-model-row .drill-chevron { margin-left: auto; transform: rotate(-45deg); }
-    .effort-scale { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 12px; padding: 4px; border-radius: 999px; background: var(--surface-strong); }
-    .effort-scale button { min-width: 0; min-height: 30px; justify-content: center; padding: 0 7px; border-radius: 999px; font-size: 11px; }
+    .effort-scale { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 4px; margin-top: 12px; padding: 4px; border-radius: 999px; background: var(--surface-strong); }
+    .effort-scale button { min-width: 0; min-height: 30px; justify-content: center; padding: 0 3px; overflow: hidden; border-radius: 999px; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
     .effort-scale button.selected { background: var(--blue); color: white; }
     .model-list { display: none; padding: 4px; }
     .effort-popover.show-models .popover-model-row,
@@ -372,7 +372,7 @@
           <div class="composer">
             <div class="effort-popover" id="effortPopover" role="dialog" aria-label="Model 与 Effort">
               <button class="popover-model-row" type="button" aria-expanded="false"><span class="model-label">Ultimate</span><span class="effort-readout effort-label">默认</span><i class="chevron drill-chevron"></i></button>
-              <div class="effort-scale" role="group" aria-label="推理强度"><button type="button">低</button><button type="button" class="selected">默认</button><button type="button">高</button><button type="button">极高</button></div>
+              <div class="effort-scale" role="group" aria-label="推理强度"><button type="button" class="selected">默认</button><button type="button">极高</button><button type="button">高</button><button type="button">低</button><button type="button">最大</button><button type="button">中</button></div>
               <div class="model-list" role="listbox" aria-label="选择 Model"><button type="button">自动模型</button><button type="button" class="selected">Ultimate</button><button type="button">Performance</button><button type="button">Efficient</button><button type="button">Lite</button></div>
             </div>
             <div class="context-strip">
