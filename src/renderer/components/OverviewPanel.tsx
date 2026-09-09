@@ -1097,7 +1097,7 @@ function OverviewPanelBody({
                         <div id={`turn-skill-${row.turnNo}`}>{renderTurnCallDetail('skill', row.groups.skill)}</div>
                       )}
                       {hooksExpanded && (
-                        <div id={`turn-hooks-${row.turnNo}`}><HooksSummary summary={row.hooks} title="Hooks 明细" /></div>
+                        <div id={`turn-hooks-${row.turnNo}`}><HooksSummary summary={row.hooks} title="Hooks 明细" defaultExpanded /></div>
                       )}
                       {fileExpanded && (
                         <div id={`turn-files-${row.turnNo}`}>

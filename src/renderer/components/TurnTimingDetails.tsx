@@ -37,7 +37,7 @@ export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
       <div className="turn-timing-title"><span>耗时明细</span></div>
       <div className="turn-timing-summary">
         {metric(
-          wall?.source === 'estimated' ? '整轮耗时（估算）' : '整轮耗时',
+          '整轮耗时',
           durationText(wall?.durationMs),
           wall?.source === 'estimated'
             ? '历史记录估算：已知活动的时间跨度，包含已记录的 Hook；缺少完整起止边界，不保证覆盖全部等待。'

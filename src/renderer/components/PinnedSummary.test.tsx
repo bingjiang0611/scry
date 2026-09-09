@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Turn } from '../format'
-import { PinnedSummary, webSourcesFromTurns, type PinnedSummarySection } from './PinnedSummary'
+import { PinnedSummary, usePinnedSummaryVisibility, webSourcesFromTurns, type PinnedSummarySection } from './PinnedSummary'
 import { OverviewPanel } from './OverviewPanel'
 
 const turn = (userText: string, input?: unknown): Turn => ({
@@ -45,6 +45,14 @@ const render = (
 )
 
 describe('PinnedSummary', () => {
+  it.each([false, true])('defaults to hidden regardless of panel visibility (%s)', (panelVisible) => {
+    function InitialVisibility() {
+      const state = usePinnedSummaryVisibility(true, panelVisible)
+      return <span data-visible={state.visible} />
+    }
+    expect(renderToStaticMarkup(<InitialVisibility />)).toContain('data-visible="false"')
+  })
+
   it('agrees with Overview on Qoder user-requested Skill loading without showing inference metadata in the compact row', () => {
     const read = {
       id: 'qoder-read', runId: 'run-1', ts: '', kind: 'tool' as const, stage: 'tool:Read',

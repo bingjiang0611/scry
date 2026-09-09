@@ -985,10 +985,12 @@ function hookPhaseTiming(phase: TurnHookPhase): HookPhaseTiming | undefined {
 
 export function HooksSummary({
   summary,
-  title = '本轮 Hook'
+  title = '本轮 Hook',
+  defaultExpanded = false
 }: {
   summary: HookSummary
   title?: string
+  defaultExpanded?: boolean
 }) {
   const phases = aggregateTurnHookPhases(summary)
   const detailValue = (value: unknown): string | undefined =>
@@ -997,7 +999,7 @@ export function HooksSummary({
     source === 'user' ? '用户' : source === 'project' ? '项目' : source === 'local' ? '本地' : '插件'
 
   return (
-    <details className="turn-hooks-summary">
+    <details className="turn-hooks-summary" open={defaultExpanded}>
       <summary>
         <Icon name="tool" /> {title}
         <span className="hook-total">{phases.length} 个周期 · {summary.logicalRuns} 个处理器实例</span>
@@ -1011,7 +1013,7 @@ export function HooksSummary({
             ? `周期占用墙钟约 ${formatHookPhaseDuration(timing.durationMs)}；按 ${timing.timedInstances}/${timing.totalInstances} 个处理器实例的运行区间合并去重，并行实例不重复计时。`
             : '未获得可配对的 Hook 开始与结束时间，无法可靠计算周期耗时。'
           return (
-            <details className="turn-hook-phase" key={phase.event}>
+            <details className="turn-hook-phase" key={phase.event} open={defaultExpanded}>
               <summary className="turn-hook-phase-row">
                 <span className="hook-phase-order">{String(phaseIndex + 1).padStart(2, '0')}</span>
                 <span className={`sdot ${phaseTone}`} />
@@ -1089,7 +1091,7 @@ export function HooksSummary({
               .filter(Boolean)
               .join(' · ')
             return (
-              <details className="turn-hook-item" key={script.key}>
+              <details className="turn-hook-item" key={script.key} open={defaultExpanded}>
                 <summary className="turn-hook-row" title={`${phase.event} · ${triggerSubjects.join('、')}`}>
                   <span className={`sdot ${tone}`} />
                   <span className="hook-script-name">{script.label}</span>
