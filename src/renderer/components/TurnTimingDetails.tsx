@@ -21,39 +21,22 @@ function metric(label: string, value: string, source: string, title: string): Re
   )
 }
 
-function modelWallMs(timing: TurnTimingBreakdown): number | undefined {
-  if (timing.wallConsistency === 'invalid') return undefined
-  const measured = timing.apiObservation === 'response' && timing.occupiedApiMs != null
-    ? timing.occupiedApiMs
-    : timing.apiMs
-  if (measured == null) return undefined
-  return timing.wallMs == null ? measured : Math.min(measured, timing.wallMs)
-}
-
-function modelSource(timing: TurnTimingBreakdown): string {
-  if (timing.wallConsistency === 'invalid') return '数据异常'
-  if (timing.apiSource === 'provider') return 'SDK 原值'
-  if (timing.apiSource === 'observed' && timing.apiObservation === 'residual') return '~估算'
-  if (timing.apiSource === 'observed') return '~观测'
-  return '未采集'
-}
-
 export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
-  const modelMs = modelWallMs(timing)
-  const nonModelMs = timing.wallConsistency === 'invalid'
-    ? undefined
-    : timing.wallMs != null && modelMs != null
-    ? Math.max(0, timing.wallMs - modelMs)
-    : timing.occupiedCallMs
-  const nonModelSource = timing.wallConsistency === 'invalid'
-    ? '数据异常'
-    : timing.wallMs != null && modelMs != null
-    ? '整轮剩余'
-    : timing.occupiedCallMs != null
-      ? '~工具事件观测'
-      : timing.totalCalls === 0
-        ? '本轮无工具调用'
-        : '未计时'
+  const totalMs = timing.providerTiming?.totalMs
+  const apiMs = timing.providerTiming?.apiMs
+  const incompatible = totalMs != null && apiMs != null && apiMs > totalMs
+  // 只展示结果计时投影的算术差，不混入响应阶段估算，也不声称这是非模型墙钟。
+  // resultOf 可能已聚合多个 result，适配器也可能从原生时间戳计算时长，不能一概标 SDK 原值。
+  const remainderMs = totalMs != null && apiMs != null && !incompatible ? totalMs - apiMs : undefined
+  const observedModelMs = timing.apiSource === 'observed'
+    ? timing.apiObservation === 'response' ? timing.occupiedApiMs ?? timing.apiMs : timing.apiMs
+    : undefined
+  const modelMs = apiMs ?? observedModelMs
+  const modelSource = apiMs != null
+    ? '结果上报 / 聚合'
+    : observedModelMs != null
+      ? timing.apiObservation === 'response' ? '~响应区间观测' : '~估算'
+      : '未采集可靠计时'
 
   return (
     <div
@@ -63,28 +46,34 @@ export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
     >
       <div className="turn-timing-title">
         <span>耗时明细</span>
-        <span className="turn-timing-caption">两类墙钟</span>
+        <span className="turn-timing-caption">独立计时口径</span>
       </div>
       <div className="turn-timing-summary">
         {metric(
-          '模型响应耗时',
-          modelMs == null ? '—' : `${timing.apiSource === 'observed' ? '~' : ''}${durationText(modelMs)}`,
-          modelSource(timing),
-          '根 Agent 与子 Agent 的模型响应区间合并去重；同一时段只计算一次。'
+          'Provider 结果时长',
+          durationText(totalMs),
+          totalMs == null ? '未采集' : '结果计时',
+          '结果中的 durationMs；可能由适配器观测或多个 result 聚合，不保证覆盖 Scry 从发送到收尾完成的整轮墙钟。'
         )}
         {metric(
-          '非模型耗时',
-          nonModelMs == null && timing.wallConsistency !== 'invalid'
-            ? (timing.totalCalls === 0 ? '0ms' : '—')
-            : durationText(nonModelMs),
-          nonModelSource,
-          '整轮墙钟扣除模型响应后的剩余时间，包括 Tool、MCP、Skill、子 Agent 调度、Hook、IPC 与等待；模型与其他活动重叠时优先归入模型响应。'
+          apiMs != null ? 'Provider API 耗时' : '模型耗时观测 / 估算',
+          modelMs == null ? '—' : `${apiMs == null ? '~' : ''}${durationText(modelMs)}`,
+          modelSource,
+          apiMs != null
+            ? '结果中的 durationApiMs，可能聚合多个 result；请求累计、并发及计时边界由 Provider 定义，不保证是模型占用墙钟。'
+            : '来自响应事件区间或阶段余量估算，不与 Provider 结果时长直接相减。'
+        )}
+        {metric(
+          'Provider 计时余量',
+          durationText(remainderMs),
+          incompatible ? '不可相减' : remainderMs == null ? '缺少结果计时' : '结果时长 − API',
+          '仅为结果计时投影中两个数值的算术差，不代表整轮非模型耗时，也不是所有 Hook 的耗时预算。'
         )}
       </div>
       <div className="turn-timing-note">
-        {timing.wallConsistency === 'invalid'
-          ? '数据异常：整轮墙钟与活动时间不一致，无法可靠划分模型响应与非模型耗时。'
-          : '口径：以整轮墙钟划分。模型响应区间优先归入模型；其余时间统一计入非模型耗时，包括 Tool、MCP、Skill、子 Agent 调度、Hook、IPC 与等待。两项可相加；“~”表示事件时间戳观测或估算，缺少可靠数据时显示“—”。'}
+        {incompatible && 'API 耗时超过结果时长，可能存在累计或计时口径差异；保留结果值，不截断或生成负余量。'}
+        Provider 内部计时不保证覆盖前置、收尾 Hook。Hook 明细按各周期的运行区间合并去重，与这里的计时范围不同，不能直接相加对账。
+        缺少统一的起止边界，暂不划分整轮模型 / 非模型墙钟；“~”表示观测或估算，“—”表示缺少可靠数据。
       </div>
     </div>
   )

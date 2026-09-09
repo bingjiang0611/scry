@@ -41,6 +41,9 @@ export interface ModelResponsePhase {
 }
 
 export interface TurnTimingBreakdown {
+  // Provider 结果计时投影（resultOf 可能已聚合），不保证覆盖启动/收尾 Hook，
+  // 也不保证 API 是区间并集。与活动区间不一致时仍保留结果值供独立展示。
+  providerTiming?: { totalMs?: number; apiMs?: number }
   wallMs?: number
   wallConsistency?: 'valid' | 'invalid'
   apiMs?: number
@@ -450,6 +453,7 @@ export function buildTurnTimingBreakdown(
   const timedApiPhases = responseTiming?.timedCalls ?? phaseTimedApiPhases.length
   const totalApiPhases = responseTiming?.totalCalls ?? apiPhases.length
   return {
+    providerTiming: { totalMs: wallMs, apiMs: providerApiMs },
     wallMs,
     wallConsistency: wallMs == null ? undefined : wallConsistencyInvalid ? 'invalid' : 'valid',
     apiMs: wallConsistencyInvalid ? undefined : providerApiMs ?? observedApiMs,
