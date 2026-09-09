@@ -228,6 +228,28 @@ const renderWelcome = (overrides: Partial<ComponentProps<typeof ChatView>> = {})
   return renderToStaticMarkup(<ChatView {...props} {...overrides} />)
 }
 
+describe('ChatView 项目选择条', () => {
+  const hasPicker = (overrides: Partial<ComponentProps<typeof ChatView>> = {}) =>
+    renderWelcome({ cwd: '/repo/rate-native', ...overrides }).includes('class="composer-context"')
+
+  it('新建草稿即使已选项目仍可选择；未绑定项目保留入口', () => {
+    expect(hasPicker()).toBe(true)
+    expect(hasPicker({ cwd: null, agentLocked: true })).toBe(true)
+  })
+
+  it.each([
+    { submitting: true },
+    { busy: true },
+    { agentLocked: true },
+    { sessionLoading: true },
+    { sessionEvidenceGap: { status: 'unavailable' as const, detail: '历史不可用' } },
+    { turns: [{ runId: 'started', userText: '你好', done: false, items: [] }] },
+    { turns: [{ runId: 'finished', userText: '你好', done: true, items: [] }] }
+  ])('已绑定会话的启动/运行/恢复/完成状态不重复显示项目：%j', (state) => {
+    expect(hasPicker(state)).toBe(false)
+  })
+})
+
 describe('ChatView 改动摘要', () => {
   const sessionTurn: Turn = {
     runId: 'run-1',
@@ -2267,14 +2289,11 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('class="model-effort-model">Test Model · test-model')
     expect(chatHtml).toContain('class="model-effort-effort">高')
     expect(chatHtml).toContain('aria-label="权限"')
-    const context = chatHtml.match(/<div class="composer-context"[\s\S]*?<textarea/u)?.[0] ?? ''
     const controls = chatHtml.match(/<div class="composer-controls"[\s\S]*?<div class="spacer"/u)?.[0] ?? ''
     const actions = chatHtml.match(/<div class="composer-action-controls"[\s\S]*?<button type="button" class="send"/u)?.[0] ?? ''
     expect(chatHtml).not.toContain('class="composer-top"')
-    expect(context).toContain('role="group"')
-    expect(context).toContain('aria-label="会话上下文"')
-    expect(context).toContain('class="wdpick"')
-    expect(context).not.toContain('class="clipick"')
+    expect(chatHtml).not.toContain('class="composer-context"')
+    expect(chatHtml).not.toContain('class="wdpick"')
     expect(controls).toContain('role="group"')
     expect(controls).toContain('aria-label="权限配置"')
     expect(controls).not.toContain('class="wdpick"')
