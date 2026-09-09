@@ -94,8 +94,11 @@ function Fixture() {
           effortValue={effort}
           effortOptions={[
             { value: 'default', label: '默认' },
+            { value: 'xhigh', label: '极高' },
             { value: 'high', label: '高' },
-            { value: 'xhigh', label: '极高' }
+            { value: 'low', label: '低' },
+            { value: 'max', label: '最大' },
+            { value: 'medium', label: '中' }
           ]}
           onModelChange={(value) => {
             setModel(value)

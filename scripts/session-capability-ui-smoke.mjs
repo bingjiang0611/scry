@@ -43,6 +43,12 @@ async function exercise() {
   modelEffortTrigger.click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="Model 与 Effort"]') != null)
   check(text('#model-effort').includes('Ultimate') && text('#model-effort').includes('极高'), 'Initial Model/Effort view is incomplete')
+  const effortChoices = [...document.querySelectorAll('#model-effort .model-effort-scale button')]
+  check(effortChoices.length === 6, 'Six-option Effort fixture is incomplete')
+  const effortTop = effortChoices[0].getBoundingClientRect().top
+  check(effortChoices.every((choice) => Math.abs(choice.getBoundingClientRect().top - effortTop) < 1), 'Effort choices wrapped onto multiple rows')
+  const effortScale = document.querySelector('#model-effort .model-effort-scale')
+  check(effortScale.scrollWidth <= effortScale.clientWidth + 1, 'Effort choices overflowed their segmented track')
   check(document.querySelector('#model-effort [aria-label="选择 Model"]') == null, 'Model list opened before drill-in')
   document.querySelector('#model-effort .model-effort-current').click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="选择 Model"]') != null)
@@ -54,7 +60,9 @@ async function exercise() {
   check(document.activeElement?.textContent.includes('Performance'), 'ArrowDown did not move focus to the next Model')
   document.activeElement.click()
   await waitFor(() => modelEffortTrigger.textContent.includes('Performance') && modelEffortTrigger.textContent.includes('默认'))
-  button('#model-effort', '高').click()
+  const highEffort = [...document.querySelectorAll('#model-effort .model-effort-scale button')].find((choice) => choice.textContent.trim() === '高')
+  check(highEffort, 'Exact high Effort choice missing')
+  highEffort.click()
   await waitFor(() => modelEffortTrigger.textContent.includes('Performance') && modelEffortTrigger.textContent.includes('高'))
   modelEffortTrigger.click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="Model 与 Effort"]') != null)
