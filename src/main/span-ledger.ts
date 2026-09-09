@@ -565,8 +565,12 @@ export const USAGE_ANALYTICS_TOKENS_SQL = `SELECT
   input_tokens inputTokens, output_tokens outputTokens,
   cache_read_tokens cacheReadTokens, cache_write_tokens cacheWriteTokens,
   reasoning_tokens reasoningTokens, run_id runId
-  FROM usage_ledger
-  WHERE session_id IS NOT NULL AND bucket_start>=? AND bucket_start<?`
+  FROM usage_ledger u
+  WHERE session_id IS NOT NULL AND bucket_start>=? AND bucket_start<?
+    AND (u.usage_kind!='credits' OR NOT EXISTS (
+      SELECT 1 FROM usage_ledger b WHERE b.session_id=u.session_id AND b.run_id=u.run_id
+        AND b.provider=u.provider AND b.usage_kind!='credits'
+    ))`
 export const USAGE_ANALYTICS_COSTS_SQL = `SELECT
   u.bucket_start tsStart, u.provider, u.model,
   u.cost costUsd, u.cost_source costSource, u.confidence confidence

@@ -9,6 +9,7 @@ import type {
 } from '../shared/billing'
 import { maskSecrets, type TraceEvent } from '../shared/trace'
 import { providerUsageResultEvents } from '../shared/result-timing'
+import { isCreditUsageEvidence } from '../shared/credit-usage'
 import type { RuntimeProvider } from '../shared/runtime'
 import { createHash } from 'node:crypto'
 
@@ -624,7 +625,22 @@ export function billingRowsFromItems(args: {
   gateway?: { provider: 'anthropic'; accountLabel: string } | null
   priceVersions?: LocalModelPriceVersion[]
 }): BillingLedgerRows {
-  return { providerRawUsage: [], usageLedger: sdkUsageLedgerRowsFromItems(args).map(usageLedgerObjectToRow) }
+  const rows = sdkUsageLedgerRowsFromItems(args)
+  const snapshot = [...args.items].reverse().find((event) => event.kind === 'harness' && event.stage === 'credit_usage' &&
+    !event.agentId && isCreditUsageEvidence(event.creditUsage))
+  if (snapshot) {
+    const evidence = snapshot.creditUsage!
+    const ts = Date.parse(snapshot.ts)
+    rows.push({
+      id: `qoder:credits:${args.runId}`, provider: 'qoder', source: evidence.source.join('+'),
+      sourceKind: 'provider_reported', sessionId: args.sessionId, runId: args.runId,
+      projectKey: args.cwd, bucketStart: Number.isFinite(ts) ? ts : args.nowMs,
+      usageKind: 'credits', cost: evidence.value!.amount ?? null, costUnit: 'credits',
+      costSource: 'provider_reported', confidence: 'provider_reported', attributionMethod: 'direct',
+      metadata: { creditUsage: evidence }, createdTs: args.nowMs
+    })
+  }
+  return { providerRawUsage: [], usageLedger: rows.map(usageLedgerObjectToRow) }
 }
 
 export function reconcileUsageLedger(rows: UsageLedgerObject[]): BillingReconciliationRow[] {

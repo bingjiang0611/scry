@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.39 \
+npm install -g scry-turn-recorder@0.2.40 \
   --registry=https://registry.npmjs.org
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -111,6 +111,15 @@ Agent、skill 与提示词不应主动调用这些命令。
 - 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
+
+## 0.2.40 Qoder Credits 采集
+
+- 新记录的 `usage.value.credits` 独立保存 `status`、`quality`、`source` 与 `value: { provider: "qoder", unit: "credits", scope: "main", amount?, knownRequests, missingRequests }`，不进入 `costUsd`。
+- 独立 CLI 从本轮原生日志按用户身份/parent 链关联请求；App managed 模式从本轮 SDK 主会话消息采集。按 request/message ID 去重，只使用折后 `credits` 和明确的 `billable`；忽略会话累计 `total_credits`、折前 `original_credits` 和 replay/fork 副本。
+- 数字为实测子集：有已知请求时为 `partial/exact`，子代理、缺失/冲突计量不猜测；没有已知金额时 `unavailable` 并省略 `amount`。明确非计费请求可以是 0，不等同于整轮免费。
+- `scry turns summary [sessionId|--all]` 输出 `usage.credits`，包含独立金额、单位、来源与覆盖轮次；旧 Qoder 记录没有此字段时算覆盖缺失，不补零、不自动重写历史。
+- App 用量页优先使用与 managed record 同源的已保存证据，旧 archive 缺字段时才读取原生日志补充，同一轮不会将两份 Credits 相加。无终态 result 的已观测用量也保留；Credits ledger 不重复计入已有 Token 行。
+- 升级需要安装实际 hook 使用的 CLI；App 私有 CLI 随 App 打包更新。仅修改源码不代表 npm 已发布或本机安装已升级。
 
 ## 0.2.39 用量与子 Agent 证据修复
 
@@ -347,7 +356,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.39", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.40", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。

@@ -9,6 +9,7 @@ import type {
 } from './runtime.js'
 import type { ProviderId } from './provider.js'
 import type { BillingProvider } from './billing.js'
+import type { CreditUsageEvidence } from './credit-usage.js'
 
 // 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，
 // 让 SDK stream 和未来 codex adapter 都归一化到同一格式（一份数据多处用）。
@@ -355,7 +356,7 @@ export interface QoderCreditEvidence {
   missingRequests: number
   matchedTurns: number
   totalTurns: number
-  source: 'qoder_native_transcript'
+  source: 'qoder_native_transcript' | 'qoder_recorded_usage' | 'qoder_mixed_usage'
   // Only matched main-transcript requests; never a complete account bill.
   completeness: 'partial'
 }
@@ -431,6 +432,8 @@ export interface ContextCompaction {
 }
 
 export interface TraceEvent {
+  /** One run-scoped metering snapshot, separate from result USD/token counters. */
+  creditUsage?: CreditUsageEvidence
   inputContent?: import('./tool-content.js').ToolContent
   outputContent?: import('./tool-content.js').ToolContent
   id: string

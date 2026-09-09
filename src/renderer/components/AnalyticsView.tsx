@@ -53,7 +53,9 @@ function formatCredits(value: number): string {
 function creditEvidence(row: UsageAnalyticsAggregate): string {
   const evidence = row.qoderCredits
   if (!evidence) return ''
-  return `原生 Credits · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量，不折算美元`
+  const source = evidence.source === 'qoder_recorded_usage' ? '已记录 Credits'
+    : evidence.source === 'qoder_mixed_usage' ? '已记录 + 原生日志 Credits' : '原生 Credits'
+  return `${source} · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量，不折算美元`
 }
 
 function displayCost(row: UsageAnalyticsAggregate): string {

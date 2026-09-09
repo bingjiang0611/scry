@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { qoderCreditRequests, readQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
 import { upsertTraceArchiveTurn } from './transcript-archive'
 import { buildUsageAnalytics } from './span-ledger'
+import { creditUsageEvidence } from '../shared/credit-usage'
+import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 
 const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const tsStart = new Date(2026, 8, 9, 12).getTime()
@@ -49,6 +51,7 @@ describe('Qoder native Credits projection', () => {
       assistant('a3', 'a1', { credits: 3, billable: true, request_id: 'r3' }),
       assistant('foreign', 'u1', { credits: 100, billable: true }, { cwd: '/foreign' }),
       assistant('side', 'u1', { credits: 100, billable: true }, { isSidechain: true }),
+      assistant('child', 'u1', { credits: 100, billable: true }, { parent_tool_use_id: 'agent' }),
       assistant('fork', 'u1', { credits: 100, billable: true }, { forkedFrom: { sessionId: 'source' } })
     ]), [{ ...scope, forkTurnId: 'u1' }])
     expect(parsed.matched).toEqual(new Set(['run-1']))
@@ -121,6 +124,22 @@ describe('Qoder native Credits projection', () => {
     expect((await readQoderCreditRows(args))[0].evidence.credits).toBeNull()
     symlinkSync(join(args.root, 'absent'), args.file)
     expect((await readQoderCreditRows(args))[0].evidence.matchedTurns).toBe(0)
+  })
+
+  it('prefers recorded credits without adding the native shadow, even if native files disappear', async () => {
+    const args = fixture([user(), assistant('a1', 'u1', { credits: 99, billable: true })])
+    const persist = (amount: number | null) => upsertTraceArchiveTurn({
+      ...args.scopes[0], userDataDir: args.userDataDir, providerId: 'qoder',
+      turn: { runId: 'run-1', forkTurnId: 'u1', userText: 'hello', done: true, items: [],
+        turnEvidence: aggregateTurnEvidence({ events: [{ id: 'credits', runId: 'run-1', ts: new Date(tsStart).toISOString(),
+          kind: 'harness', stage: 'credit_usage', creditUsage: creditUsageEvidence([{ id: 'r', runId: 'run-1', credits: amount }], 'qoder_sdk') }] }) }
+    })
+    expect(persist(3)).toBe(true)
+    expect((await readQoderCreditRows(args))[0].evidence).toMatchObject({ credits: 3, source: 'qoder_recorded_usage', knownRequests: 1 })
+    rmSync(args.projectsDir, { recursive: true })
+    expect((await readQoderCreditRows(args))[0].evidence.credits).toBe(3)
+    expect(persist(null)).toBe(true)
+    expect((await readQoderCreditRows(args))[0].evidence).toMatchObject({ credits: null, source: 'qoder_recorded_usage' })
   })
 
   it('does not choose between duplicate transcript locations or traverse an unsafe session ID', async () => {

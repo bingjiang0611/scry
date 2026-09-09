@@ -17,6 +17,8 @@ import {
 import { classifyDanger } from '../../main/danger.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
+import { creditUsageEvidence } from '../../shared/credit-usage.js'
+import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
 import { captureToolContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
@@ -1582,7 +1584,21 @@ async function parseTranscriptSnapshot(args: {
       ? matching
       : turns.at(-1)
   const identityMatched = !args.providerTurnId && !args.promptHash ? undefined : !!turn
-  const events = turn?.items ?? []
+  const events = [...turn?.items ?? []]
+  if (args.provider === 'qoder' && turn) {
+    // Prompt text can recover display content, but is not billing identity.
+    // Only the hook's authoritative ID may select a root; let the native parser
+    // reject duplicate prompt IDs instead of promoting the first parsed UUID.
+    const parsed = qoderCreditRequests(snapshot.content, args.providerTurnId ? [{
+      runId: args.runId, providerTurnId: args.providerTurnId
+    }] : [])
+    events.push({
+      id: `credits:${args.runId}`, runId: args.runId,
+      ts: events.at(-1)?.ts ?? new Date().toISOString(),
+      kind: 'harness', stage: 'credit_usage', runtimeProvider: 'qoder_cli',
+      creditUsage: creditUsageEvidence(parsed.requests, 'qoder_native_transcript')
+    })
+  }
   return {
     stable,
     observed: turns.length > 0,
@@ -1595,7 +1611,7 @@ async function parseTranscriptSnapshot(args: {
       skills: turns.length > 0,
       mcps: turns.length > 0,
       hooks: events.some((event) => event.kind === 'hook'),
-      usage: events.some((event) => event.kind === 'harness' && event.stage === 'result'),
+      usage: events.some((event) => event.kind === 'harness' && (event.stage === 'result' || event.stage === 'credit_usage')),
       files: events.some((event) => !!event.filePath && !!event.fileOp),
       errors: turns.length > 0
     }
@@ -2131,7 +2147,7 @@ async function finalizeOpenTurn(
     runtimeMetadata: { source: 'recorder_observed_wall' }
   }]
   const events = dedupeTraceEvents([...mergedEvents, ...wallEvents, ...diffEvents])
-  const hasUsage = events.some((event) => event.kind === 'harness' && event.stage === 'result')
+  const hasUsage = events.some((event) => event.kind === 'harness' && (event.stage === 'result' || event.stage === 'credit_usage'))
   const hasToolEvidence = events.some((event) =>
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
   )

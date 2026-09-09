@@ -4,6 +4,7 @@ import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared
 import { deriveModelTiming } from '../../shared/model-timing.js'
 import { providerDangerCoverage } from '../../shared/provider.js'
 import { providerUsageResultEvents } from '../../shared/result-timing.js'
+import { isCreditUsageEvidence } from '../../shared/credit-usage.js'
 import { contextUsageEvidence, HOOK_DELIVERY_STAGE, mcpCallsForEvent, type McpCallRef, type TraceEvent } from '../../shared/trace.js'
 import { limitTurnDiffPatchBytes } from './git.js'
 import {
@@ -174,7 +175,11 @@ function sumCostUsd(events: TraceEvent[]): number | undefined {
 
 function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   const results = providerUsageResultEvents(events)
-  if (!results.length) return undefined
+  // Credits are one run-scoped snapshot, not incremental result counters. Replayed
+  // snapshots replace each other and must never be summed with USD or with a shadow.
+  const credits = [...events].reverse().find((event) => event.kind === 'harness' && event.stage === 'credit_usage' &&
+    !event.agentId && isCreditUsageEvidence(event.creditUsage))?.creditUsage
+  if (!results.length && !credits) return undefined
   const models = new Set(results.flatMap((event) => event.modelUsage ?? []).map((row) => row.model).filter(Boolean))
   const contextResult = [...results].reverse().find((event) => event.contextTokens != null)
   const context = contextResult ? contextUsageEvidence(contextResult) : null
@@ -185,6 +190,7 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
     cacheCreationTokens: sumObserved(results, (event) => event.cacheCreationTokens),
     reasoningTokens: sumObserved(results, (event) => event.reasoningTokens),
     costUsd: sumCostUsd(results),
+    ...(credits ? { credits } : {}),
     apiDurationMs: sumObserved(results, (event) => event.durationApiMs),
     ...(contextResult ? {
       contextTokens: contextResult.contextTokens,
@@ -609,8 +615,8 @@ export function aggregateTurnEvidence(args: {
     usage: !observable.usage
       ? unavailable('provider usage was not observable', [source])
       : usage
-        ? providerUsageResultEvents(args.events).some((event) => event.runtimeMetadata?.usageComplete === false)
-          ? partial(usage, [source], 'usage is missing for one or more assistant messages or counters', usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
+        ? usage.credits || providerUsageResultEvents(args.events).some((event) => event.runtimeMetadata?.usageComplete === false)
+          ? partial(usage, [source], 'one or more usage counters have partial coverage; inspect credits and context provenance', usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
           : available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
         : unavailable('no authoritative usage event was captured', [source]),
     compactions: available(compactions, [source]),

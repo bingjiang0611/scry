@@ -854,6 +854,38 @@ describe('Qoder provider adapter', () => {
     })
   })
 
+  it('emits one independent credit snapshot per run/resume, ignoring cumulative result amounts', async () => {
+    sdk.query.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'assistant', message: { id: 'm1', content: [], usage: { request_id: 'r1', credits: 2, original_credits: 10, billable: true } } }
+        yield { type: 'assistant', message: { id: 'm1', content: [], usage: { request_id: 'r1', credits: 2, billable: true } } }
+        yield { type: 'result', subtype: 'success', total_credits: 1000, total_cost_usd: 999, usage: { input_tokens: 4, output_tokens: 1 } }
+      },
+      close: vi.fn().mockResolvedValue(undefined), interrupt: vi.fn().mockResolvedValue(undefined)
+    }))
+    for (const resume of [undefined, 'session']) {
+      const events: TraceEvent[] = []
+      await createQoderAdapter().run({ runId: resume ?? 'new', resume, prompt: 'work', attachments: [], emit: (event) => events.push(event) }).promise
+      expect(events.filter((event) => event.stage === 'credit_usage')).toMatchObject([{ creditUsage: {
+        status: 'partial', source: ['qoder_sdk'], value: { amount: 2, unit: 'credits', knownRequests: 1 }
+      } }])
+      expect(events.find((event) => event.stage === 'result')?.costUsd).toBeUndefined()
+    }
+  })
+
+  it('retains observed credits even when the provider stream fails before a result', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'assistant', message: { id: 'm1', content: [], usage: { request_id: 'r1', credits: 3, billable: true } } }
+        throw new Error('stream failed')
+      },
+      close: vi.fn().mockResolvedValue(undefined), interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const events: TraceEvent[] = []
+    await createQoderAdapter().run({ runId: 'failed', prompt: 'work', attachments: [], emit: (event) => events.push(event) }).promise.catch(() => {})
+    expect(events.find((event) => event.stage === 'credit_usage')?.creditUsage?.value?.amount).toBe(3)
+  })
+
   it('uses Qoder control context usage instead of the zero SDK model window', async () => {
     const getContextUsage = vi.fn().mockResolvedValue({
       totalTokens: 103_176,
