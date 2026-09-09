@@ -201,6 +201,11 @@ export function ChatView({
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
   const selectedAgentName = selectedAgent?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
+  // Keep project selection for new drafts; an established bound conversation already
+  // identifies its project in the shell. Include pre-turn submission and archive loading.
+  const showWorkdirPicker = !cwd || (
+    turns.length === 0 && !agentLocked && !busy && !submitting && !sessionLoading && !sessionEvidenceGap
+  )
   // PATH 快速探测与完整版本/descriptor 探测会先后返回。扫描期间不渲染中间结果，
   // 避免 Provider 卡片在冷启动或重新扫描时先出现、随后整组刷新。
   const providerAgents = agentScanning ? [] : agents
@@ -636,7 +641,7 @@ export function ChatView({
             ))}
           </div>
         )}
-        <div className="composer-context" role="group" aria-label="会话上下文">
+        {showWorkdirPicker && <div className="composer-context" role="group" aria-label="会话上下文">
           <WorkdirPicker
             cwd={cwd}
             recent={recent}
@@ -645,7 +650,7 @@ export function ChatView({
             onPick={onPickRecent}
             onRemove={onRemoveRecent}
           />
-        </div>
+        </div>}
         {busy && (
           <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone}>
             <span className="run-status-left">

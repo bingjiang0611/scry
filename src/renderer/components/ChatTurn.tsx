@@ -1,5 +1,6 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -62,21 +63,45 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
   const [zoom, setZoom] = useState(1)
-  return (
+  const stageRef = useRef<HTMLDivElement>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
+  const [fit, setFit] = useState<{ width: number; height: number } | null>(null)
+  useEffect(() => {
+    const stage = stageRef.current
+    const image = imageRef.current
+    if (!stage || !image) return
+    const resize = (): void => {
+      if (!image.naturalWidth || !image.naturalHeight) return
+      const ratio = Math.min(1, stage.clientWidth / image.naturalWidth, stage.clientHeight / image.naturalHeight)
+      setFit({ width: image.naturalWidth * ratio, height: image.naturalHeight * ratio })
+    }
+    const observer = new ResizeObserver(resize)
+    observer.observe(stage)
+    image.addEventListener('load', resize)
+    resize()
+    return () => {
+      observer.disconnect()
+      image.removeEventListener('load', resize)
+    }
+  }, [])
+  // Transcript turns use content-visibility containment: fixed overlays must escape
+  // their clipping/stacking context without disabling long-history rendering optimizations.
+  return createPortal(
     <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} className="image-lightbox" onClose={onClose}>
       <h2 id={titleId} className="visually-hidden">{attachment.name}</h2>
       <button ref={closeRef} type="button" className="image-lightbox-close" onClick={onClose} aria-label="关闭图片预览">
         <Icon name="x" />
       </button>
-      <div className="image-lightbox-stage">
+      <div ref={stageRef} className="image-lightbox-stage" tabIndex={0} aria-label="图片内容，可滚动查看">
         <img
+          ref={imageRef}
           src={attachmentSrc(attachment)}
           alt={attachment.name}
           decoding="async"
-          style={{ transform: `scale(${zoom})` }}
+          style={{ width: fit ? fit.width * zoom : undefined, height: fit ? fit.height * zoom : undefined, visibility: fit ? 'visible' : 'hidden' }}
         />
       </div>
-      <div className="image-lightbox-zoom" aria-label="图片缩放">
+      <div className="image-lightbox-zoom" aria-label="图片缩放（相对于适应窗口）">
         <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))} disabled={zoom <= 0.5} aria-label="缩小图片">
           <Icon name="minus" />
         </button>
@@ -85,7 +110,8 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
           <Icon name="plus" />
         </button>
       </div>
-    </ModalFrame>
+    </ModalFrame>,
+    document.body
   )
 }
 

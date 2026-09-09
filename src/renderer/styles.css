@@ -4447,10 +4447,14 @@ button.turn-call-group:focus-visible {
   white-space: nowrap;
   border: 0;
 }
+.modal-overlay:has(.image-lightbox) {
+  padding: 16px;
+}
 .image-lightbox.modal {
   position: relative;
-  width: min(1200px, calc(100vw - 112px));
-  height: min(860px, calc(100vh - 96px));
+  width: min(1200px, calc(100vw - 32px));
+  height: calc(100dvh - 32px);
+  padding: 52px 0 58px;
   max-width: none;
   max-height: none;
   overflow: hidden;
@@ -4462,17 +4466,19 @@ button.turn-call-group:focus-visible {
 .image-lightbox-stage {
   width: 100%;
   height: 100%;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .image-lightbox-stage img {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  flex: none;
+  margin: auto;
+  max-width: none;
+  max-height: none;
   object-fit: contain;
-  transform-origin: center;
-  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .image-lightbox-close,
 .image-lightbox-zoom button {
@@ -4529,11 +4535,6 @@ button.turn-call-group:focus-visible {
 .image-lightbox-close:not(:disabled):active,
 .image-lightbox-zoom button:not(:disabled):active {
   transform: scale(0.96);
-}
-@media (prefers-reduced-motion: reduce) {
-  .image-lightbox-stage img {
-    transition: none;
-  }
 }
 .who {
   display: flex;
