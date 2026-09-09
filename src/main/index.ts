@@ -77,6 +77,7 @@ import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopb
 import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
 import { verifyForkArchiveBoundary } from './session-fork'
 import { appendCoalescedTrace, upsertTraceById } from './live-trace'
+import { createTurnWallTimer } from './turn-wall-timing'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import {
   isManagedRecorderProvider,
@@ -2483,6 +2484,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
   }
   const runId = `run-${Date.now().toString(36)}-${runSeq++}`
+  const finishTurnWallTiming = createTurnWallTimer(runId)
   const hookConfig =
     providerId === 'claude' && cwd
       ? loadClaudeHookConfig(cwd, homeDir)
@@ -2987,6 +2989,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const runtimePromise = Promise.all([turnDiffCapture, sessionBaselineReady]).then(runProvider)
   runtimePromise
     .then(async (r) => {
+      emit(finishTurnWallTiming())
       const turnDiffDone = finalizeTurnDiff()
       const observedTiming = observedTurnTiming(observedProviderStartedAt, new Date().toISOString())
       const nativeSessionId = r.externalSessionId ?? observedSessionId ?? resume
@@ -3126,6 +3129,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         markTerminalAttention(storageSessionId, completionNeedsAttention)
       }
     }, async (err) => {
+      emit(finishTurnWallTiming())
       const turnDiffDone = finalizeTurnDiff()
       const observedTiming = observedTurnTiming(observedProviderStartedAt, new Date().toISOString())
       const alreadyDone = runState.done

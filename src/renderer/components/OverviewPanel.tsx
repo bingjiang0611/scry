@@ -984,7 +984,7 @@ function OverviewPanelBody({
               const agentCount = row.groups.agent.reduce((sum, item) => sum + item.count, 0)
               const hooksCount = row.hooks.logicalRuns
               const timingAvailable = Boolean(
-                row.timing.providerTiming?.totalMs != null || row.timing.providerTiming?.apiMs != null ||
+                row.timing.turnWall != null || row.timing.providerTiming?.totalMs != null || row.timing.providerTiming?.apiMs != null ||
                 row.timing.apiMs != null || row.timing.totalCalls > 0
               )
               const mcpExpanded = mcpCount > 0 && expandedTurnCallGroups.has(mcpKey)
