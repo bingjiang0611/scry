@@ -535,6 +535,7 @@ function uniqueId(ids: Set<string>): string | undefined {
 export function qoderProviderTurnIdFromLog(text: string, sessionId?: string): string | undefined {
   const sdkPromptIds = new Set<string>()
   const rootTurnIds = new Set<string>()
+  const notificationTurnIds = new Set<string>()
   for (const line of text.split('\n')) {
     const match = line.match(/^\S+\s+\S+\s+\[([^\]]+)\]\s+(input\.prompt\.received|input\.prompt\.submitted|turn\.started)\s+(.+)$/)
     if (!match) continue
@@ -542,11 +543,20 @@ export function qoderProviderTurnIdFromLog(text: string, sessionId?: string): st
     const detail = fields(match[3])
     if (sessionId && context.session !== sessionId) continue
     if (!context.turn || context.turn === context.session) continue
-    if (match[2] === 'input.prompt.received' && detail.query_source === 'sdk') {
+    if (match[2] === 'input.prompt.received' && detail.command_mode === 'task-notification') {
+      notificationTurnIds.add(context.turn)
+    } else if (match[2] === 'input.prompt.received' && detail.query_source === 'sdk') {
       sdkPromptIds.add(context.turn)
     } else if (detail.is_subagent === 'false') {
       rootTurnIds.add(context.turn)
     }
+  }
+  // Qoder 后台任务通知也标 query_source=sdk / is_subagent=false，但属于原请求的
+  // 后续处理，不是新的用户轮次。全量收集后排除它的生命周期 ID，避免 fallback 再引入。
+  // 仍要求用户请求 ID 唯一，不能用“取第一个”掩盖真正的多请求歧义。
+  for (const id of notificationTurnIds) {
+    sdkPromptIds.delete(id)
+    rootTurnIds.delete(id)
   }
   return sdkPromptIds.size > 0 ? uniqueId(sdkPromptIds) : uniqueId(rootTurnIds)
 }

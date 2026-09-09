@@ -1924,13 +1924,16 @@ describe('Qoder provider adapter', () => {
     }))
   })
 
-  it('SDK 流抛错时仍从 root log 绑定 managed native turn ID', async () => {
+  it.each([false, true])('后台通知不覆盖 managed native turn ID（stream aborted=%s）', async (aborted) => {
     const configDir = await mkdtemp(join(tmpdir(), 'scry-qoder-log-test-'))
     const runLogDir = join(configDir, 'logs', 'runs', 'run-p125')
     await mkdir(runLogDir, { recursive: true })
     await writeFile(join(runLogDir, 'qodercli.log'), [
       '2026-07-31T16:28:19.807+08:00 INFO  [session=qoder-session turn=native-prompt] input.prompt.received text_preview="work" query_source="sdk"',
-      '2026-07-31T16:28:38.706+08:00 INFO  [session=qoder-session turn=native-prompt] turn.started is_subagent=false'
+      '2026-07-31T16:28:38.706+08:00 INFO  [session=qoder-session turn=native-prompt] turn.started is_subagent=false',
+      '2026-07-31T16:29:00.000+08:00 INFO  [session=qoder-session turn=notification] input.prompt.received command_mode="task-notification" query_source="sdk"',
+      '2026-07-31T16:29:00.001+08:00 INFO  [session=qoder-session turn=notification] input.prompt.submitted is_subagent=false',
+      '2026-07-31T16:29:00.002+08:00 INFO  [session=qoder-session turn=notification] turn.started is_subagent=false'
     ].join('\n'))
     const previousConfigDir = process.env.QODER_CONFIG_DIR
     const previousLogHooks = process.env.SCRY_QODER_LOG_HOOKS
@@ -1950,7 +1953,8 @@ describe('Qoder provider adapter', () => {
         return {
           async *[Symbol.asyncIterator]() {
             yield { type: 'system', subtype: 'init', session_id: 'qoder-session', mcp_servers: [] }
-            throw new Error('stream aborted')
+            if (aborted) throw new Error('stream aborted')
+            yield { type: 'result', subtype: 'success', session_id: 'qoder-session', result: 'done' }
           },
           close: vi.fn().mockResolvedValue(undefined),
           interrupt: vi.fn().mockResolvedValue(undefined)
@@ -1966,7 +1970,8 @@ describe('Qoder provider adapter', () => {
         emit: vi.fn()
       })
 
-      await expect(handle.promise).rejects.toThrow('stream aborted')
+      if (aborted) await expect(handle.promise).rejects.toThrow('stream aborted')
+      else await expect(handle.promise).resolves.toMatchObject({ providerTurnId: 'native-prompt', status: 'completed' })
       expect(handle.getProviderTurnId?.()).toBe('native-prompt')
     } finally {
       if (previousConfigDir == null) delete process.env.QODER_CONFIG_DIR
@@ -2099,6 +2104,28 @@ describe('Qoder provider adapter', () => {
     ].join('\n')
 
     expect(qoderProviderTurnIdFromLog(log, 's1')).toBe('prompt-1')
+  })
+
+  it.each([false, true])('排除后台通知的全部 lifecycle ID（SDK root=%s）', (sdkRoot) => {
+    const log = [
+      '2026-09-09T19:06:42.073+08:00 INFO  [session=s1 turn=root] input.prompt.received command_mode="prompt"' + (sdkRoot ? ' query_source="sdk"' : ''),
+      '2026-09-09T19:06:45.186+08:00 INFO  [session=s1 turn=root] turn.started is_subagent=false',
+      // Lifecycle lines can be repeated or encountered before the received line.
+      '2026-09-09T19:12:17.776+08:00 INFO  [session=s1 turn=notification] turn.started is_subagent=false',
+      '2026-09-09T19:12:15.079+08:00 INFO  [session=s1 turn=notification] input.prompt.received command_mode="task-notification" query_source="sdk"',
+      '2026-09-09T19:12:17.776+08:00 INFO  [session=s1 turn=notification] input.prompt.submitted is_subagent=false',
+      '2026-09-09T19:12:17.777+08:00 INFO  [session=s1 turn=notification] turn.started is_subagent=false',
+      '2026-09-09T19:12:18.000+08:00 INFO  [session=other turn=root] input.prompt.received command_mode="task-notification" query_source="sdk"'
+    ].join('\n')
+    expect(qoderProviderTurnIdFromLog(log, 's1')).toBe('root')
+  })
+
+  it('仅有后台通知不能充当用户请求的 turn identity', () => {
+    const log = [
+      '2026-09-09T19:12:15.079+08:00 INFO  [session=s1 turn=notification] input.prompt.received command_mode="task-notification" query_source="sdk"',
+      '2026-09-09T19:12:17.776+08:00 INFO  [session=s1 turn=notification] turn.started is_subagent=false'
+    ].join('\n')
+    expect(qoderProviderTurnIdFromLog(log, 's1')).toBeUndefined()
   })
 
   it('Qoder 日志出现多个 SDK root prompt 时不猜 turn identity', () => {
