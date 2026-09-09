@@ -1038,7 +1038,7 @@ function OverviewPanelBody({
                           onKeyDown={(event) => event.stopPropagation()}
                         >
                           <span className="turn-call-kind">耗时</span>
-                          <span className="turn-call-count">3 项</span>
+                          <span className="turn-call-count">2 项</span>
                           <span className="turn-call-toggle-icon">
                             <Icon name={timingExpanded ? 'chevronDown' : 'chevronRight'} />
                           </span>

@@ -21,7 +21,6 @@ function metric(label: string, value: string, title: string): ReactNode {
 }
 
 export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
-  const totalMs = timing.providerTiming?.totalMs
   const apiMs = timing.providerTiming?.apiMs
   const observedModelMs = timing.apiSource === 'observed'
     ? timing.apiObservation === 'response' ? timing.occupiedApiMs ?? timing.apiMs : timing.apiMs
@@ -38,8 +37,8 @@ export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
       <div className="turn-timing-title"><span>耗时明细</span></div>
       <div className="turn-timing-summary">
         {metric(
-          '整轮耗时',
-          wall ? `${wall.source === 'estimated' ? '~' : ''}${durationText(wall.durationMs)}` : '—',
+          wall?.source === 'estimated' ? '整轮耗时（估算）' : '整轮耗时',
+          durationText(wall?.durationMs),
           wall?.source === 'estimated'
             ? '历史记录估算：已知活动的时间跨度，包含已记录的 Hook；缺少完整起止边界，不保证覆盖全部等待。'
             : 'Scry 接受本轮执行至 Provider 及本轮同步 Hook 收尾结束的观测墙钟；并行活动不重复累加，不含 detached 后台任务、异步上传或归档。缺少可靠计时时显示 —。'
@@ -50,11 +49,6 @@ export function TurnTimingDetails({ timing }: { timing: TurnTimingBreakdown }) {
           apiMs != null
             ? 'Provider 结果中的 API 计时，可能累计多个请求；不是整轮墙钟，不与其他指标直接相加或相减。'
             : '来自响应事件区间或阶段余量估算，不与整轮耗时直接相减。'
-        )}
-        {metric(
-          'Provider 结果时长',
-          durationText(totalMs),
-          '辅助指标：结果中的 durationMs，可能由适配器观测或多个 result 聚合，不保证覆盖前置、收尾 Hook。'
         )}
       </div>
     </div>
