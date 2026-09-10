@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.40 \
+npm install -g @ali/scry-turn-recorder@0.2.41 \
   --registry=https://registry.anpm.alibaba-inc.com
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -111,6 +111,16 @@ Agent、skill 与提示词不应主动调用这些命令。
 - 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
+
+## 0.2.41 原生模型与显式任务关联
+
+独立 CLI 的 lifecycle 输入新增两组可选元数据；只作用于之后生成的新记录，不改历史文件、recordId 或 outbox：
+
+- `model_ids: string[]` 与 `model_ids_complete: boolean`：由集成层从本轮真实模型消息取得，最多 64 个 ID。全部观察完整且去重后只有一个模型时才写 `provider.model`；缺失、非法或多模型不选择默认/最后一个模型。不依赖 token/cost 是否可见，也不从 CLI 配置推测。
+- `task_context: { task_id, task_generation, session_id, turn_id }`：由受信调用方在事件发生时核验其工作流状态，冻结到原事件；Scry 不读取任何调用方私有工作流目录，也不从 prompt/业务工单推断。session 必须与该生命周期事件一致，子代理上下文不归入主轮。一轮只有同一个 task/generation 时写根 `linkedTaskId`、`linkedTaskGeneration` 与 `taskLinkStatus=bound`；冲突/非法上下文写 `linkedTaskId:null, taskLinkStatus:conflict`，没有上下文为 `unbound`。数值 `generation` 仍是 Scry 自身轮次代号，不被工作流字符串覆盖。
+- 调用方负责真实身份与发送时刻；这些字段不是签名或执行授权。异步重试必须发送原快照，不能在 worker 中查最新绑定。managed canonical 提交路径不从 standalone hook 推断关联，需由对应生产方另行对接。
+- 消费端必须区分根字段**缺失**与**显式 null**：后者禁止正文猜测及历史回填；不支持此契约的服务端应先升级，再启用新客户端。不能用空白 user 文本或伪任务哨兵绕过。服务端按整个 session 展开指标的既有规则不因新增工作流 generation 字段自动改变。
+- 安装示例对应待交付源码版本，不代表已经发布或升级本机 CLI；App 私有 CLI 与全局 CLI 仍是独立分发面。
 
 ## 0.2.40 Qoder Credits 采集
 
@@ -356,7 +366,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.40", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.41", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。

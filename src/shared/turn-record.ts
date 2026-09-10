@@ -193,6 +193,10 @@ export interface AgentTurnRecord extends TurnEvidence {
   provider: { id: ProviderId; version?: string; model?: string }
   sessionId: string
   providerTurnId?: string
+  /** Explicit caller association; null means no association, never infer it from prompt text. */
+  linkedTaskId?: string | null
+  linkedTaskGeneration?: string
+  taskLinkStatus?: 'bound' | 'unbound' | 'conflict'
   generation: number
   turnIndex: number
   startedAt: string
@@ -575,6 +579,16 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   require(typeof raw.recorderVersion === 'string' && raw.recorderVersion.length > 0, '$.recorderVersion', 'must be a non-empty string')
   require(typeof raw.sessionId === 'string' && raw.sessionId.length > 0, '$.sessionId', 'must be a non-empty string')
   require(isOptionalString(raw.providerTurnId), '$.providerTurnId', 'must be a string when present')
+  require(raw.linkedTaskId === undefined || raw.linkedTaskId === null ||
+    (typeof raw.linkedTaskId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(raw.linkedTaskId)),
+  '$.linkedTaskId', 'must be a bounded task ID or explicit null')
+  require(raw.linkedTaskGeneration === undefined || (typeof raw.linkedTaskGeneration === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$/.test(raw.linkedTaskGeneration) && typeof raw.linkedTaskId === 'string'),
+  '$.linkedTaskGeneration', 'requires a bound task and bounded generation')
+  if (raw.taskLinkStatus !== undefined) require(
+    (raw.taskLinkStatus === 'bound' && typeof raw.linkedTaskId === 'string' && typeof raw.linkedTaskGeneration === 'string') ||
+    (['unbound', 'conflict'].includes(String(raw.taskLinkStatus)) && raw.linkedTaskId === null && raw.linkedTaskGeneration === undefined),
+  '$.taskLinkStatus', 'must match the explicit task association')
   require(Number.isSafeInteger(raw.generation) && Number(raw.generation) >= 1, '$.generation', 'must be a positive safe integer')
   require(Number.isSafeInteger(raw.turnIndex) && Number(raw.turnIndex) >= 1, '$.turnIndex', 'must be a positive safe integer')
   require(isDateString(raw.startedAt), '$.startedAt', 'must be a valid timestamp')
