@@ -1,0 +1,18 @@
+.background-work-panel {
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 12px;
+  font-size: 13px;
+}
+.background-work-heading { display: flex; align-items: center; gap: 8px; }
+.background-work-heading > span, .background-work-panel p, .background-work-task small { color: var(--text-muted, #737373); }
+.background-work-panel p { margin: 8px 0 0; line-height: 1.6; }
+.background-work-task { display: flex; align-items: start; gap: 12px; margin-top: 12px; }
+.background-work-task > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.background-work-task small { display: block; margin-top: 4px; }
+.background-work-task button { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 5px 8px; border: 1px solid var(--line, #ddd); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.background-work-task button:disabled { opacity: .6; cursor: default; }
+.background-work-panel[data-quiet] { border-color: #b98b36; }
+.run-status[data-background-waiting] .run-status-dot { animation: none; background: #b98b36; }
+.sb-running[data-background-waiting] { animation: none; border: 0; background: #b98b36; border-radius: 50%; }

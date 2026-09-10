@@ -53,6 +53,8 @@ import {
 } from './app-store'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
+import { stopObservedBackgroundTask } from './background-task-control'
+import type { BackgroundTaskStopResult } from '../shared/background-work'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot, type UsageAnalyticsRangeDays } from '../shared/trace'
 import {
   normalizeAgentForkSessionRequest,
@@ -2024,6 +2026,7 @@ interface RunControl {
   providerId: ProviderId
   interrupt: () => void
   forceKill: () => void
+  stopBackgroundTask: (taskId: string) => Promise<BackgroundTaskStopResult>
   /**
    * 硬杀当下的真实作用范围，直接来自 Provider handle。handle 还没创建时返回 undefined：
    * 没有可调用对象就不能声称已经发出 run-scoped 强制终止。
@@ -2546,6 +2549,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       )
     }
     appendCoalescedTrace(runState.items, ev)
+    if (ev.backgroundWork && rendererCanReceive()) win?.webContents.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
     if (runs.isFocused(runId)) queueTrace(ev) // 后台 run 继续归档，只把当前会话 trace 推给 UI。
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
@@ -2867,6 +2871,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     interrupt: () => void
     forceKill: () => void
     forceKillScope: AgentForceKillScope
+    stopBackgroundTask?: (taskId: string) => Promise<BackgroundTaskStopResult>
     getExternalSessionId: () => string | undefined
     getProviderTurnId?: () => string | undefined
     getForkTurnId?: () => string | undefined
@@ -2940,6 +2945,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       h?.forceKill()
     },
     forceKillScope: () => h?.forceKillScope,
+    stopBackgroundTask: (taskId) => h?.stopBackgroundTask?.(taskId) ?? Promise.resolve({ status: 'unavailable', message: '当前 Provider 不支持单任务停止。' }),
     cwd,
     resume,
     getExternalSessionId: () => h?.getExternalSessionId(),
@@ -3446,6 +3452,8 @@ handleTrusted('agent:traceResynchronized', () => {
   traceOutput.resynchronized()
   return true as const
 })
+
+handleTrusted('agent:stopBackgroundTask', (_event, payload: unknown) => stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
 
 handleTrusted('agent:stop', (_event, runId: string) => {
   const entry = runs.get(runId)

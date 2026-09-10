@@ -96,11 +96,13 @@ const invokeChannels = {
   adoptActiveRun: 'agent:adoptActiveRun',
   answerQuestion: 'agent:answerQuestion',
   stop: 'agent:stop',
+  stopBackgroundTask: 'agent:stopBackgroundTask',
   traceResynchronized: 'agent:traceResynchronized'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const listenerChannels = {
   onTrace: 'agent:trace',
+  onBackgroundWork: 'agent:backgroundWork',
   onTraceHealth: 'agent:traceHealth',
   onTerminalData: 'terminal:data',
   onTerminalExit: 'terminal:exit',

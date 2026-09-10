@@ -20,7 +20,7 @@ export function SessionHoverProvider({ children }: { children: ReactNode }) {
   return <HoverOwner.Provider value={value}>{children}</HoverOwner.Provider>
 }
 
-export function useSessionHoverCard(session: SessionMeta, cwd: string, projectName: string | undefined, running: boolean) {
+export function useSessionHoverCard(session: SessionMeta, cwd: string, projectName: string | undefined, running: boolean, runLabel = '正在运行') {
   const owner = useContext(HoverOwner)
   const id = useId()
   const anchor = useRef<HTMLButtonElement>(null)
@@ -106,7 +106,7 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
         </div>
         <div className="session-hover-project"><Icon name="folder" />
           <span className="session-hover-project-name">{cwd ? projectName || cwd.split('/').filter(Boolean).at(-1) || cwd : '未关联工作目录'}</span>
-          <span className="session-hover-provider">{providerNames[session.providerId]}{running ? ' · 正在运行' : ''}</span>
+          <span className="session-hover-provider">{providerNames[session.providerId]}{running ? ` · ${runLabel}` : ''}</span>
         </div>
       </div>, document.body
     ) : null

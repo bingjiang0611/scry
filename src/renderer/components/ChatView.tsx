@@ -18,6 +18,8 @@ import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import type { WorkspaceFileTarget } from '../workspace-links'
 import { runStopStatus } from '../run-stop-status'
+import { latestBackgroundWork } from '@shared/background-work'
+import { backgroundWorkStatus } from '../background-work-status'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../hooks/useAgentSession'
 
 interface ChatViewProps {
@@ -299,6 +301,8 @@ export function ChatView({
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
   const stopStatus = runStopStatus(inFlightTurn ? stopStates[inFlightTurn.runId] : undefined)
   const busyTurn = busy ? inFlightTurn : undefined
+  const backgroundStatus = stopStatus.tone === 'running' && busyTurn && pendingQuestions.length === 0
+    ? backgroundWorkStatus(latestBackgroundWork(busyTurn.items)) : undefined
   const runStartedAt = busyTurn?.items[0]?.ts != null ? Date.parse(busyTurn.items[0].ts) : Number.NaN
   const [, setNowTick] = useState(0)
   useEffect(() => {
@@ -652,11 +656,11 @@ export function ChatView({
           />
         </div>}
         {busy && (
-          <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone}>
+          <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone} data-background-waiting={backgroundStatus?.waiting || undefined}>
             <span className="run-status-left">
               <i className="run-status-dot" aria-hidden="true" />
-              <b>{stopStatus.label}</b>
-              <span className="run-status-hint">{stopStatus.hint}</span>
+              <b>{backgroundStatus?.label ?? stopStatus.label}</b>
+              <span className="run-status-hint">{backgroundStatus?.hint ?? stopStatus.hint}</span>
             </span>
             <span className="run-status-meta">
               {traceHealth?.degraded && (
@@ -673,7 +677,7 @@ export function ChatView({
                 </span>
               )}
               <button type="button" className="stop run-status-stop" onClick={onStop}>
-                <Icon name="square" /> 停止
+                <Icon name="square" /> 停止本轮
               </button>
             </span>
           </div>

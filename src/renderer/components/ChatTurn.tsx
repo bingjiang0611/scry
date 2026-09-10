@@ -1,6 +1,9 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { latestBackgroundWork } from '@shared/background-work'
+import { backgroundWorkStatus } from '../background-work-status'
+import { BackgroundWorkPanel } from './BackgroundWorkPanel'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -1283,7 +1286,9 @@ function AssistantTurnImpl({
   // 下面这些 O(全部事件) 的投影，纯 token 增量只更新一个字符串。
   const projectionCache = useRef<TurnStreamProjectionCache>()
   if (!projectionCache.current) projectionCache.current = new TurnStreamProjectionCache()
-  const terminal = turn.done || !!turn.error
+  const backgroundWork = !turn.done && !turn.error ? latestBackgroundWork(turn.items) : undefined
+  const backgroundStatus = backgroundWorkStatus(backgroundWork)
+  const terminal = turn.done || !!turn.error || backgroundStatus?.waiting === true
   const projection = projectionCache.current.project(turn.items)
   const structuralItems = projection.structuralItems as TraceEvent[]
   // 把 tool_result 合并进对应 tool_use（加 output），并从流里过滤掉单独的 tool_result 事件
@@ -1518,7 +1523,7 @@ function AssistantTurnImpl({
           )
         })
       }
-    flushLive(!turn.done)
+    flushLive(!terminal)
     flushTools()
     return out
   }, [
@@ -1536,7 +1541,8 @@ function AssistantTurnImpl({
     projection.liveParentToolUseId,
     projection.liveText,
     selectedId,
-    turn.done
+    turn.done,
+    terminal
   ])
 
   return (
@@ -1546,8 +1552,8 @@ function AssistantTurnImpl({
         <span className="runid">run · {turn.runId}</span>
         {!turn.done && !turn.error ? (
           <span className="running">
-            <span className="spin" />
-            运行中
+            {backgroundStatus?.waiting ? <Icon name="clock" /> : <span className="spin" />}
+            {backgroundStatus?.label ?? '运行中'}
           </span>
         ) : (
           <span className="mini">
@@ -1622,7 +1628,8 @@ function AssistantTurnImpl({
           {turn.errorHint && <div className="errhint">→ {turn.errorHint}</div>}
         </div>
       )}
-      {!turn.done && !turn.error && (
+      {backgroundWork && <BackgroundWorkPanel key={turn.runId} runId={turn.runId} work={backgroundWork} />}
+      {!terminal && (
         <div className="skeleton" aria-label="运行中">
           <div className="sk-line" style={{ width: '70%' }} />
           <div className="sk-line" style={{ width: '92%' }} />

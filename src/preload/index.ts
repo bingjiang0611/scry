@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { BackgroundTaskStopResult, BackgroundWork } from '../shared/background-work'
 import type {
   TraceEvent,
   ActiveRun,
@@ -192,6 +193,12 @@ const api = {
   adoptActiveRun: (runId: string): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:adoptActiveRun', runId),
   answerQuestion: (response: AgentQuestionResponse): Promise<boolean> => ipcRenderer.invoke('agent:answerQuestion', response),
   stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('agent:stop', runId),
+  stopBackgroundTask: (request: { runId: string; taskId: string }): Promise<BackgroundTaskStopResult> => ipcRenderer.invoke('agent:stopBackgroundTask', request),
+  onBackgroundWork: (cb: (event: { runId: string; work: BackgroundWork }) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: { runId: string; work: BackgroundWork }): void => cb(value)
+    ipcRenderer.on('agent:backgroundWork', listener)
+    return () => ipcRenderer.removeListener('agent:backgroundWork', listener)
+  },
   onTrace: (cb: (ev: TraceEvent) => void): (() => void) => {
     // main 合批发数组（性能）→ 这里拆回逐条 cb，渲染侧契约不变（仍是「每事件一次 cb」）。
     // 分发完成后回 ACK：main 用它做有界背压，绝不因此丢弃或重排事件。

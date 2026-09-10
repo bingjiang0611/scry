@@ -23,6 +23,7 @@ import type {
 } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
 import type { ParsedTurn } from '../normalize'
+import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { CodexHookInspection, CodexHookTrustGrant } from '../codex-hook-trust'
 import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 
@@ -40,6 +41,7 @@ export interface ProviderRunHandle {
   promise: Promise<ProviderRunResult>
   interrupt: () => void
   forceKill: () => void
+  stopBackgroundTask?: (taskId: string) => Promise<BackgroundTaskStopResult>
   /**
    * forceKill 实际会杀掉什么。必填：只有 adapter 能证明硬杀仅限于本 run 时
    * 才能写 run_scoped；复用 client/server 的 transport 必须写 shared_transport，
