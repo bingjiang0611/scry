@@ -1,4 +1,4 @@
-import { normalizeSdkMessage, type NormalizeCtx } from '../normalize'
+import { normalizeAgentTaskStatus, normalizeSdkMessage, type NormalizeCtx } from '../normalize'
 import type { TraceEvent } from '../../shared/trace'
 import type { BackgroundTask } from '../../shared/background-work'
 
@@ -55,6 +55,15 @@ export class QoderBackgroundTasks {
     if (task) task.stopState = stopState
   }
 
+  /** A correlated Provider terminal settles every observed alias, never a host cancellation receipt. */
+  settleCall(toolUseId: string, tool: BackgroundTask['tool']): void {
+    if (this.calls.get(toolUseId)?.tool !== tool) return
+    for (const task of this.active.values()) {
+      if (task.tool === tool && task.toolUseId === toolUseId) this.active.delete(task.taskId)
+    }
+    this.terminalCalls.add(toolUseId)
+  }
+
   private launch(taskId: string, toolUseId: string): void {
     const call = this.calls.get(toolUseId)
     if (!call || this.terminalCalls.has(toolUseId) || this.active.has(taskId)) return
@@ -101,7 +110,8 @@ export class QoderBackgroundTasks {
     if (!terminal || typeof terminal.task_id !== 'string') return
     const task = this.active.get(terminal.task_id)
     if (!task || (terminal.tool_use_id !== undefined && terminal.tool_use_id !== task.toolUseId)) return
-    if (!['completed', 'failed', 'stopped'].includes(String(terminal.status))) return
+    const terminalStatus = task.tool === 'Agent' ? normalizeAgentTaskStatus(terminal.status) : terminal.status
+    if (!['completed', 'failed', 'stopped'].includes(String(terminalStatus))) return
     this.active.delete(terminal.task_id)
     this.terminalCalls.add(task.toolUseId)
   }

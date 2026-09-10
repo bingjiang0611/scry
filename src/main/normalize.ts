@@ -154,6 +154,14 @@ function agentTaskToolUseId(
   return { toolUseId, ...(taskId ? { taskId } : {}) }
 }
 
+export function normalizeAgentTaskStatus(value: unknown): 'completed' | 'failed' | 'stopped' | undefined {
+  const status = stringValue(value)
+  if (status === 'completed') return 'completed'
+  if (status === 'failed' || status === 'error') return 'failed'
+  if (status && ['stopped', 'cancelled', 'canceled', 'interrupted', 'killed'].includes(status)) return 'stopped'
+  return undefined
+}
+
 function normalizeAgentTaskMessage(
   message: Record<string, unknown>,
   ctx: NormalizeCtx,
@@ -164,14 +172,7 @@ function normalizeAgentTaskMessage(
   const source = `provider_${subtype}`
   if (subtype === 'task_notification') {
     const providerStatus = stringValue(message.status)
-    const status = providerStatus === 'completed'
-      ? 'completed'
-      : providerStatus === 'failed' || providerStatus === 'error'
-        ? 'failed'
-        : providerStatus === 'stopped' || providerStatus === 'cancelled' || providerStatus === 'canceled' ||
-            providerStatus === 'interrupted' || providerStatus === 'killed'
-          ? 'stopped'
-          : undefined
+    const status = normalizeAgentTaskStatus(providerStatus)
     if (!status) return []
     const summary = stringValue(message.summary)
     return [base(ctx, {

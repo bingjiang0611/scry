@@ -63,6 +63,45 @@ it('does not borrow a child or replayed runtime version for task-stop capability
   await reader.return()
 })
 
+it('revokes control at stdin EOF even while stdout is still ready', async () => {
+  const f = fixture()
+  const reader = f.transport.readMessages()
+  await reader.next()
+  const pending = f.transport.stopTask('task-1')
+  f.transport.endInput()
+  expect(f.transport.canStopTask).toBe(false)
+  expect(await pending).toMatchObject({ status: 'unknown' })
+  expect(await f.transport.stopTask('task-2')).toMatchObject({ status: 'unavailable' })
+  expect(f.write).toHaveBeenCalledOnce()
+  f.transport.close()
+  await reader.return()
+})
+
+it('does not treat a malformed correlated reply as an explicit rejection permitting retry', async () => {
+  const f = fixture()
+  const reader = f.transport.readMessages()
+  await reader.next()
+  const pending = f.transport.stopTask('task-1')
+  const request = JSON.parse(f.write.mock.calls[0][0])
+  f.send({ type: 'control_response', response: { request_id: request.request_id, subtype: 'unexpected' } })
+  f.send({ type: 'system', subtype: 'heartbeat' })
+  await reader.next()
+  expect(await pending).toMatchObject({ status: 'unknown' })
+  f.transport.close()
+  await reader.return()
+})
+
+it('does not retain a verified version across a new root initialization without version evidence', async () => {
+  const f = fixture()
+  const reader = f.transport.readMessages()
+  await reader.next()
+  f.send({ type: 'system', subtype: 'init' })
+  await reader.next()
+  expect(f.transport.canStopTask).toBe(false)
+  f.transport.close()
+  await reader.return()
+})
+
 it('reports missing acknowledgments as unknown without replay and closes pending requests', async () => {
   vi.useFakeTimers()
   const f = fixture()

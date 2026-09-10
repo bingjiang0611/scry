@@ -48,6 +48,20 @@ export function mergeActiveRun(prev: Turn[], run: Turn): Turn[] {
   return next
 }
 
+/** Recovery can fill evidence gaps, but an older active snapshot cannot undo a live terminal. */
+export function mergeRecoveredRun(prev: Turn[], run: Turn): Turn[] {
+  const local = prev.find((turn) => turn.runId === run.runId)
+  const merged = mergeActiveRun(prev, run)
+  if (!local || (!local.done && !local.error)) return merged
+  return merged.map((turn) => turn.runId === run.runId ? {
+    ...turn, done: true,
+    error: local.error ?? turn.error,
+    errorHint: local.errorHint ?? turn.errorHint,
+    providerTurnId: local.providerTurnId ?? turn.providerTurnId,
+    forkTurnId: local.forkTurnId ?? turn.forkTurnId
+  } : turn)
+}
+
 export const markTurnDone = (prev: Turn[], runId: string, providerTurnId?: string, forkTurnId?: string): Turn[] =>
   prev.map((turn) => (turn.runId === runId ? {
     ...turn,
@@ -385,6 +399,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const historyWindowRef = useRef<SessionHistoryWindow | null>(null)
   const clearedRuns = useRef<Set<string>>(new Set())
   const focusedRunIdRef = useRef<string | null>(null)
+  const resyncGeneration = useRef(0)
   const focusLifecycleDeltasRef = useRef<{ runId: string; deltas: RunLifecycleDelta[] } | null>(null)
   const focusQuestionDeltasRef = useRef<{ runId: string; deltas: PendingQuestionDelta[] } | null>(null)
   const pendingStartLifecycleRef = useRef<RunLifecycleDelta[] | null>(null)
@@ -410,6 +425,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   }, [])
 
   const prepareRunFocus = useCallback((runId: string): void => {
+    resyncGeneration.current++
     focusedRunIdRef.current = runId
     clearedRuns.current.delete(runId)
     focusLifecycleDeltasRef.current = { runId, deltas: [] }
@@ -417,6 +433,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   }, [])
 
   const clearTurns = useCallback((_options: { preserveRunning?: boolean } = {}): void => {
+    resyncGeneration.current++
     setTurns((prev) => clearSessionTurns(prev, clearedRuns.current))
     focusedRunIdRef.current = null
     focusLifecycleDeltasRef.current = null
@@ -455,6 +472,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       } = {}
     ): void => {
       const activeRun = options.activeRun && !options.activeRun.done ? options.activeRun : null
+      resyncGeneration.current++
       focusedRunIdRef.current = activeRun?.runId ?? null
       if (activeRun) clearedRuns.current.delete(activeRun.runId)
       const lifecycleDeltas =
@@ -509,6 +527,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   ): Promise<string | null> => {
     const request = buildAgentStartRequest(text, options)
     if (!request) return null
+    resyncGeneration.current++
     focusedRunIdRef.current = null
     pendingStartLifecycleRef.current = []
     setRunning(true)
@@ -615,10 +634,12 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
         ? window.scry.onTraceHealth((state) => {
             setTraceHealth(traceLiveHealthOf(state))
             if (!state.resyncRequired) return
+            const generation = ++resyncGeneration.current
             void resynchronizeLiveTrace(
               rendererTraceResyncBridge(),
-              (run) => setTurns((prev) => mergeActiveRun(prev, run)),
-              (runId) => clearedRuns.current.has(runId)
+              (run) => setTurns((prev) => mergeRecoveredRun(prev, run)),
+              (runId) => generation !== resyncGeneration.current || clearedRuns.current.has(runId) ||
+                (focusedRunIdRef.current !== null && focusedRunIdRef.current !== runId)
             )
           })
         : () => {}
@@ -688,6 +709,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     })
 
     return () => {
+      resyncGeneration.current++
       offTrace()
       offStopState()
       offTraceHealth()

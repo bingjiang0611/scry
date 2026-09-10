@@ -63,6 +63,56 @@ describe('Qoder background state, not a task deadline', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('does not let stream pings or unrelated stream envelopes hide a quiet task', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.send({ type: 'result', subtype: 'success' })
+    vi.advanceTimersByTime(14 * 60_000)
+    f.send({ type: 'stream_event', event: { type: 'ping' } })
+    f.send({ type: 'stream_event', event: {} })
+    vi.advanceTimersByTime(60_000)
+    expect(f.states.at(-1)?.quiet).toBe(true)
+    f.monitor.dispose()
+  })
+
+  it('does not reopen completed background state on a late assistant frame', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.send({ type: 'system', subtype: 'task_notification', task_id: 'task-1', status: 'completed' })
+    f.send({ type: 'result', subtype: 'success' })
+    f.send({ type: 'assistant', message: { content: [{ type: 'text', text: 'late final answer' }] } })
+    expect(f.states.at(-1)?.phase).toBe('inactive')
+    expect(vi.getTimerCount()).toBe(0)
+    f.monitor.dispose()
+  })
+
+  it('keeps the last Provider event timestamp honest across an approval wait', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.send({ type: 'result', subtype: 'success' })
+    const lastEventAt = f.states.at(-1)!.lastEventAt
+    f.monitor.pause()
+    vi.advanceTimersByTime(60 * 60_000)
+    f.monitor.resume()
+    vi.advanceTimersByTime(15 * 60_000)
+    expect(f.states.at(-1)).toMatchObject({ quiet: true, lastEventAt })
+    f.monitor.dispose()
+  })
+
+  it('versions state changes even at the same clock time without publishing duplicate snapshots', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.send({ type: 'result', subtype: 'success' })
+    f.monitor.refresh()
+    expect(f.states.map((state) => state.revision)).toEqual([1, 2])
+    f.tasks.markStop('task-1', 'requested')
+    f.monitor.refresh()
+    f.monitor.dispose()
+    expect(f.states.map((state) => state.revision)).toEqual([1, 2, 3, 4])
+    expect(new Set(f.states.map((state) => state.lastEventAt)).size).toBe(1)
+    expect(f.states.at(-1)).toMatchObject({ phase: 'inactive', taskStop: 'unavailable', tasks: [{ status: 'unconfirmed', stopState: 'requested' }] })
+  })
+
   it('associates Agent receipts and preserves stop-request evidence until a matching terminal', () => {
     vi.useFakeTimers()
     const f = fixture()

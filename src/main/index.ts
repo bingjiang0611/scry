@@ -2921,7 +2921,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if (result.status === 'failed') {
       const providerMessage = [...runState.items].reverse().find(
         (event) => event.kind === 'harness' && event.stage === 'result' && event.isError
-      )?.text
+      )?.text ?? [...runState.items].reverse().find((event) => event.stage === 'runtime:background_unresolved')?.text
       throw new AgentRuntimeError(providerMessage || `${providerId} Provider 返回失败终态`, {
         provider: runtimeProvider,
         stage: 'runtime',

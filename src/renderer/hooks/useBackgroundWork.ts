@@ -8,7 +8,13 @@ export function useBackgroundWork(): Readonly<Record<string, BackgroundWork>> {
     let disposed = false
     const changed = new Set<string>()
     const terminal = new Set<string>()
+    const revisions = new Map<string, number>()
     const update = (runId: string, work?: BackgroundWork): void => {
+      const revision = revisions.get(runId)
+      if (work?.revision !== undefined) {
+        if (revision !== undefined && work.revision < revision) return
+        revisions.set(runId, work.revision)
+      }
       changed.add(runId)
       setWorkByRun((previous) => {
         const next = { ...previous }
@@ -24,7 +30,8 @@ export function useBackgroundWork(): Readonly<Record<string, BackgroundWork>> {
     void window.scry.activeRuns().then((runs) => {
       if (disposed) return
       for (const run of runs) {
-        if (!run.done && !changed.has(run.runId)) update(run.runId, latestBackgroundWork(run.items))
+        const work = latestBackgroundWork(run.items)
+        if (!run.done && !terminal.has(run.runId) && (!changed.has(run.runId) || work?.revision !== undefined)) update(run.runId, work)
       }
     }).catch(() => { /* Missing snapshots remain unknown, never a guessed waiting state. */ })
     return () => { disposed = true; off?.(); offDone(); offError() }

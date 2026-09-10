@@ -5,6 +5,7 @@ import { latestBackgroundWork } from '@shared/background-work'
 import type { Turn } from '../format'
 import { AssistantTurn } from './ChatTurn'
 import { Sidebar } from './Sidebar'
+import { addRunningRunId } from '../App'
 
 const work: BackgroundWork = {
   providerId: 'qoder', phase: 'waiting', quiet: false, coverage: 'partial', taskStop: 'available', lastEventAt: 0,
@@ -14,6 +15,17 @@ const turn: Turn = { runId: 'run-1', userText: 'work', done: false, items: [
   { runId: 'run-1', id: 'text', ts: '', kind: 'model', stage: 'text', text: 'Model response' },
   { runId: 'run-1', id: 'work', ts: '', kind: 'harness', stage: 'runtime:background_work', backgroundWork: work }
 ] }
+
+it('does not resurrect terminal membership from delayed session or focus announcements', () => {
+  const terminal = new Set<string>()
+  let running = addRunningRunId(new Set(), 'run', terminal)
+  expect(running.has('run')).toBe(true)
+  terminal.add('run')
+  running = new Set()
+  expect(addRunningRunId(running, 'run', terminal)).toBe(running)
+  expect(terminal.has('run')).toBe(true)
+  expect(addRunningRunId(running, 'new-run', terminal).has('new-run')).toBe(true)
+})
 
 it('does not conflate model waiting with generation, failure, or a completed turn', () => {
   const html = renderToStaticMarkup(<AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} />)
@@ -29,6 +41,14 @@ it('does not conflate model waiting with generation, failure, or a completed tur
 it('uses the latest inactive snapshot instead of reopening an earlier waiting phase', () => {
   const items = [...turn.items, { backgroundWork: { ...work, phase: 'inactive' as const } }]
   expect(latestBackgroundWork(items)?.phase).toBe('inactive')
+})
+
+it('selects revision evidence rather than array position after trimmed snapshot recovery', () => {
+  const old = { ...work, revision: 1 }
+  const recent = { ...work, phase: 'working' as const, revision: 2 }
+  const ended = { ...work, phase: 'inactive' as const, revision: 3 }
+  expect(latestBackgroundWork([{ backgroundWork: recent }, { backgroundWork: old }])).toBe(recent)
+  expect(latestBackgroundWork([{ backgroundWork: ended }, { backgroundWork: recent }])).toBe(ended)
 })
 
 it('projects waiting/quiet states only onto the corresponding live sidebar run', () => {

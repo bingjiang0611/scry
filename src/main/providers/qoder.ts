@@ -17,7 +17,7 @@ import {
 import { contextUsageEvidence, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
-import { extractUserText, type NormalizeCtx, type ParsedTurn } from '../normalize'
+import { extractUserText, normalizeAgentTaskStatus, type NormalizeCtx, type ParsedTurn } from '../normalize'
 import { normalizeQoderMessage, QoderBackgroundTasks } from './qoder-messages'
 import { QoderCreditCollector } from '../../shared/credit-usage'
 import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
@@ -502,8 +502,7 @@ function isAgentLaunchStatus(status: string | undefined): boolean {
 }
 
 function isAgentTerminalStatus(status: string | undefined): boolean {
-  return status === 'completed' || status === 'failed' || status === 'error' || status === 'stopped' ||
-    status === 'cancelled' || status === 'canceled' || status === 'interrupted' || status === 'killed'
+  return normalizeAgentTaskStatus(status) !== undefined
 }
 
 function hookFingerprint(event: TraceEvent): string {
@@ -1049,7 +1048,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       const terminalAgentCalls = new Set<string>()
       const backgroundTasks = new QoderBackgroundTasks()
       let taskControl: QoderTaskControlTransport | undefined
-      const backgroundMonitor = new QoderBackgroundMonitor(backgroundTasks, () => taskControl?.canStopTask === true, (backgroundWork) => {
+      const backgroundMonitor = new QoderBackgroundMonitor(backgroundTasks, () => !stopped && !streamSettled && taskControl?.canStopTask === true, (backgroundWork) => {
         request.emit({
           id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
           stage: 'runtime:background_work', backgroundWork,
@@ -1068,7 +1067,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         now: () => new Date().toISOString(),
         contextTokensFromUsage: qoderContextTokensFromUsage
       }
-      const observeAgentEvent = (event: TraceEvent): void => {
+      const observeAgentEvent = (event: TraceEvent, hasTerminalEvidence = true): void => {
         if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
         const status = observedAgentStatus(event)
         if (event.stage === 'agent_activity' || isAgentLaunchStatus(status)) {
@@ -1078,11 +1077,12 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         if (event.tool === 'Agent' && event.stage === 'tool_result' && isAgentTerminalStatus(status)) {
           activeAgentCalls.delete(event.toolUseId)
           terminalAgentCalls.add(event.toolUseId)
+          if (hasTerminalEvidence) backgroundTasks.settleCall(event.toolUseId, 'Agent')
         }
       }
-      const emitAgentFallback = (event: TraceEvent): void => {
+      const emitAgentFallback = (event: TraceEvent, hasTerminalEvidence: boolean): void => {
         if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
-        observeAgentEvent(event)
+        observeAgentEvent(event, hasTerminalEvidence)
         request.emit(event)
       }
       const settleUnreportedAgents = (agentStatus: 'failed' | 'stopped', source: string): void => {
@@ -1099,7 +1099,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             output: agentStatus === 'stopped' ? '后台 Agent 已停止' : '后台 Agent 在 Qoder 结束前未返回终态',
             isError: agentStatus === 'failed',
             runtimeMetadata: { source, agentStatus }
-          })
+          }, false)
         }
       }
       const promise: Promise<ProviderRunResult> = (async () => {
@@ -1297,7 +1297,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             creditUsage: credits.evidence()
           })
           streamSettled = true
-          backgroundMonitor.dispose()
+          // Stop diagnostics/controls now, but converge native log terminals before
+          // publishing the final snapshot. Host interruption is not task evidence.
+          backgroundMonitor.pause()
           releaseProviderPrompt()
           if (exitTimer) clearTimeout(exitTimer)
           try {
@@ -1312,13 +1314,16 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             const log = await qoderHookLog(qoderPid)
             observeProviderTurnId(qoderProviderTurnIdFromLog(log, externalSessionId))
             const backgroundFailures = parseQoderBackgroundTaskFailures(request.runId, log, externalSessionId)
-            for (const event of backgroundFailures) request.emit(event)
+            for (const event of backgroundFailures) {
+              if (event.toolUseId) backgroundTasks.settleCall(event.toolUseId, 'Bash')
+              request.emit(event)
+            }
             if (backgroundFailures.length > 0) providerStatus = 'failed'
             const subagentTerminals = parseQoderSubagentTerminals(request.runId, log, externalSessionId)
             const missingSubagentTerminals = subagentTerminals.filter(
               (event) => event.toolUseId && !terminalAgentCalls.has(event.toolUseId)
             )
-            for (const event of missingSubagentTerminals) emitAgentFallback(event)
+            for (const event of missingSubagentTerminals) emitAgentFallback(event, true)
             if (!stopped && missingSubagentTerminals.some((event) => observedAgentStatus(event) !== 'completed')) {
               providerStatus = 'failed'
             }
@@ -1339,6 +1344,15 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         } else if ((request.managedRecorder === true || logHooksEnabled) && !qoderPid) {
           lastHookFallbackError = 'Qoder log fallback could not identify the current CLI process'
         }
+        if (backgroundTasks.pending && !stopped) {
+          providerStatus = 'failed'
+          request.emit({
+            id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
+            stage: 'runtime:background_unresolved',
+            text: 'Qoder 连接已结束，但后台任务未返回终态；任务完成情况未知，请先核验文件，勿直接重试写入。',
+            runtimeMetadata: { source: 'qoder_transport_ended', pendingTaskIds: backgroundTasks.tasks.map((task) => task.taskId) }
+          })
+        }
         if (activeAgentCalls.size > 0) {
           if (stopped) {
             settleUnreportedAgents('stopped', 'qoder_host_interruption')
@@ -1347,6 +1361,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             providerStatus = 'failed'
           }
         }
+        backgroundMonitor.dispose()
         if (externalSessionId) {
           try {
             const messages = await getSessionMessages(externalSessionId, { dir: request.cwd, includeSystemMessages: true })
@@ -1370,7 +1385,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       })()
       const interrupt = (): void => {
         stopped = true
-        backgroundMonitor.dispose()
+        backgroundMonitor.pause()
         releaseProviderPrompt()
         controller.abort()
         void q?.interrupt().catch(() => {})
