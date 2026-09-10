@@ -452,6 +452,30 @@ function lifecycleTraceEvents(args: {
   }
   const usage = usageTrace(args.payload, args.runId, at)
   if (usage) out.push(usage)
+  if (!subagentScopedPayload(args.payload) && 'model_ids' in args.payload) {
+    const ids = args.payload.model_ids
+    const valid = Array.isArray(ids) && ids.length <= 64 && ids.every((id) =>
+      typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}$/.test(id))
+    out.push({
+      id: `provider-model-${stableHash([ids, args.payload.model_ids_complete]).slice(0, 16)}`,
+      ts: at, runId: args.runId, kind: 'harness', stage: 'provider_model',
+      runtimeMetadata: { modelIds: valid ? [...new Set(ids)] : [], complete: valid && args.payload.model_ids_complete === true }
+    })
+  }
+  if (!subagentScopedPayload(args.payload) && 'task_context' in args.payload) {
+    const context = nestedRecord(args.payload, 'task_context')
+    const valid = context && context.session_id === sessionIdOf(args.payload) &&
+      typeof context.task_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(context.task_id) &&
+      typeof context.task_generation === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$/.test(context.task_generation) &&
+      typeof context.turn_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$/.test(context.turn_id)
+    out.push({
+      id: `task-context-${stableHash(valid ? context : 'invalid').slice(0, 16)}`,
+      ts: at, runId: args.runId, kind: 'harness', stage: 'task_context',
+      runtimeMetadata: valid ? {
+        taskId: context.task_id, taskGeneration: context.task_generation, taskTurnId: context.turn_id
+      } : { invalid: true }
+    })
+  }
   const assistant = stringAt(args.payload, 'assistant_response', 'assistantResponse', 'result_text')
   if (assistant) out.push({
     id: `assistant-${stableHash(assistant).slice(0, 16)}`,
@@ -2205,6 +2229,23 @@ async function finalizeOpenTurn(
     generation: open.generation,
     startedAt: open.startedAt
   }).slice(0, 32)
+  // Only explicit, turn-scoped lifecycle evidence can associate a workflow.
+  // The numeric recorder generation is independent of the caller's generation.
+  const taskEvents = storedEvents.filter((event) => event.stage === 'task_context' && event.kind === 'harness')
+  const taskContexts = new Map(taskEvents.map((event) => [stableHash([
+    event.runtimeMetadata?.invalid, event.runtimeMetadata?.taskId, event.runtimeMetadata?.taskGeneration
+  ]), event.runtimeMetadata]))
+  const taskContext = taskContexts.size === 1 ? [...taskContexts.values()][0] : undefined
+  const boundTask = taskContext && taskContext.invalid !== true && typeof taskContext.taskId === 'string' &&
+    typeof taskContext.taskGeneration === 'string' ? taskContext : undefined
+  const modelEvents = storedEvents.filter((event) => event.stage === 'provider_model' && event.kind === 'harness')
+  const models = new Set(modelEvents.flatMap((event) => {
+    const ids = event.runtimeMetadata?.modelIds
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
+  }))
+  const model = modelEvents.length
+    ? modelEvents.every((event) => event.runtimeMetadata?.complete === true) && models.size === 1 ? [...models][0] : undefined
+    : evidence.usage.value?.model
   const draft: Omit<AgentTurnRecord, 'sequence'> = {
     schemaVersion: 1,
     recordKind: 'agent_turn',
@@ -2213,8 +2254,11 @@ async function finalizeOpenTurn(
     workspace: { id: enablement.config.workspaceId, root: enablement.workspaceRoot },
     provider: {
       id: open.provider,
-      ...(evidence.usage.value?.model ? { model: evidence.usage.value.model } : {})
+      ...(model ? { model } : {})
     },
+    linkedTaskId: boundTask ? String(boundTask.taskId) : null,
+    ...(boundTask ? { linkedTaskGeneration: String(boundTask.taskGeneration) } : {}),
+    taskLinkStatus: boundTask ? 'bound' : taskEvents.length ? 'conflict' : 'unbound',
     sessionId: open.sessionId,
     ...(open.providerTurnId ? { providerTurnId: open.providerTurnId } : {}),
     generation: open.generation,
