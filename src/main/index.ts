@@ -352,11 +352,12 @@ const rememberProject = (cwd: string): void => {
   recentStore().push(canonical)
   projectStore().remember(canonical)
 }
-const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirectory(cwd, new Set([
+const knownProjectDirectories = (): Set<string> => new Set([
   ...recentStore().load(),
   ...projectStore().load().filter((project) => !project.removedAt).map((project) => project.cwd),
   ...appSessionStore().load().map((session) => session.cwd).filter(Boolean)
-]))
+])
+const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirectory(cwd, knownProjectDirectories())
 let traceCatalogRecoveryDone = false
 const recoverTraceCatalogOnce = (): void => {
   if (traceCatalogRecoveryDone) return
@@ -1367,7 +1368,30 @@ handleTrusted('workspace:readKnown', async (_event, request: WorkspacePathReques
 handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>
   openWorkspaceFileExternally(
     authorizedWorkspaceRequest(currentCwd, request),
-    (path) => shell.openExternal(pathToFileURL(path).href)
+    (path) => shell.openExternal(pathToFileURL(path).href),
+    {
+      roots: [...knownProjectDirectories()],
+      choose: async (candidates) => {
+        const selectable = candidates.length > 0 && candidates.length <= 5
+        const options = {
+          type: 'question' as const,
+          message: selectable ? '文件在其他项目中，是否打开？' : '当前会话目录中未找到文件',
+          detail: `相对路径：${request.path}\n会话目录：${request.cwd}\n\n` + (selectable
+            ? candidates.map((candidate, i) => `${i + 1}. ${join(candidate.cwd, candidate.path)}`).join('\n')
+            : candidates.length > 5 ? '多个已知项目包含此路径，请切换到目标项目再打开。'
+              : '未在已知项目中找到可打开的同路径文件。请确认文件是否已移动，或让 Agent 提供完整路径。'),
+          buttons: selectable ? ['取消', ...candidates.map((candidate, i) => `打开 ${i + 1} · ${basename(candidate.cwd)}`)] : ['关闭'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        }
+        const result = win && !win.isDestroyed()
+          ? await dialog.showMessageBox(win, options)
+          : await dialog.showMessageBox(options)
+        const selected = selectable ? candidates[result.response - 1] : undefined
+        return selected ? { ...selected, cwd: resolveKnownProjectDirectory(selected.cwd) } : null
+      }
+    }
   ))
 handleTrusted('workspace:openKnownExternal', async (_event, request: WorkspacePathRequest) =>
   openWorkspaceFileExternally(
