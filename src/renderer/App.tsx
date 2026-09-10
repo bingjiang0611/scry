@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useBackgroundWork } from './hooks/useBackgroundWork'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import {
   isSupportedImageMimeType,
@@ -565,6 +566,7 @@ export function App() {
     }
     return dir
   }, [chooseFolderRaw, confirmWorkspaceTransition])
+  const backgroundWorkByRun = useBackgroundWork()
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const terminalRunIdsRef = useRef(new Set<string>())
   const localRunIdsRef = useRef(new Set<string>())
@@ -1588,6 +1590,7 @@ export function App() {
           activeProviderId={integrations.selectedProviderId}
           activeAgentProfileId={integrations.providerContext.agentProfileId}
           runningRunIds={runningRunIds}
+          backgroundWorkByRun={backgroundWorkByRun}
           onNewChat={newConversation}
           onPick={pickSession}
           onTogglePin={(cwd, session) => void togglePinSession(cwd, session)}

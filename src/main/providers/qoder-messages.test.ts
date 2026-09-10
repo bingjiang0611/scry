@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizeCtx } from '../normalize'
-import { normalizeQoderMessage, QoderBackgroundShellTasks } from './qoder-messages'
+import { normalizeQoderMessage, QoderBackgroundTasks as QoderBackgroundShellTasks } from './qoder-messages'
 
 function context(): NormalizeCtx {
   let id = 0

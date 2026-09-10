@@ -2,6 +2,8 @@
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
+import type { BackgroundWork } from '@shared/background-work'
+import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
 import { ModalFrame } from './Modals'
 import type { ProjectMeta, SessionMeta } from '../env'
@@ -23,6 +25,7 @@ export function Sidebar({
   activeProviderId,
   activeAgentProfileId,
   runningRunIds = new Set<string>(),
+  backgroundWorkByRun = {},
   version = '0.1.0',
   onNewChat,
   onPick,
@@ -53,6 +56,7 @@ export function Sidebar({
   activeProviderId?: SessionProviderId
   activeAgentProfileId?: string
   runningRunIds?: ReadonlySet<string>
+  backgroundWorkByRun?: Readonly<Record<string, BackgroundWork>>
   version?: string
   onNewChat: () => void
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
@@ -217,6 +221,7 @@ export function Sidebar({
                   showProjectName
                   active={isActive(cwd, session)}
                   running={Boolean(session.runId && runningRunIds.has(session.runId))}
+                  backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
                   onPick={onPick}
                   onTogglePin={onTogglePin}
                   onArchive={onArchive}
@@ -284,6 +289,7 @@ export function Sidebar({
                       projectName={p.name}
                       active={isActive(p.cwd, s)}
                       running={Boolean(s.runId && runningRunIds.has(s.runId))}
+                      backgroundWork={s.runId ? backgroundWorkByRun[s.runId] : undefined}
                       onPick={onPick}
                       onTogglePin={onTogglePin}
                       onArchive={onArchive}
@@ -453,6 +459,7 @@ function SessionRow({
   showProjectName = false,
   active,
   running,
+  backgroundWork,
   onPick,
   onTogglePin,
   onArchive,
@@ -464,13 +471,15 @@ function SessionRow({
   showProjectName?: boolean
   active: boolean
   running: boolean
+  backgroundWork?: BackgroundWork
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
 }) {
   const pinned = Boolean(session.pinnedAt)
-  const hover = useSessionHoverCard(session, cwd, projectName, running)
+  const status = running ? backgroundWorkStatus(backgroundWork) : undefined
+  const hover = useSessionHoverCard(session, cwd, projectName, running, status?.label)
   return (
     <div className="sb-sess-row">
       <button
@@ -492,7 +501,7 @@ function SessionRow({
           </span>
           {showProjectName && projectName && <span className="sb-sess-proj">{projectName}</span>}
         </span>
-        {running && <span className="sb-running" role="status" aria-label="正在运行" />}
+        {running && <span className="sb-running" role="status" data-background-waiting={status?.waiting || undefined} aria-label={status?.label ?? '正在运行'} title={status?.label ?? '正在运行'} />}
       </button>
       {hover.tooltip}
       <span className="sb-sess-acts" onMouseEnter={hover.dismiss} onFocus={hover.dismiss}>

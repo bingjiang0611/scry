@@ -1132,163 +1132,37 @@ describe('Qoder provider adapter', () => {
     }).promise).resolves.toMatchObject({ status: 'completed' })
   })
 
-  it.each([
-    { hungClose: false, initialResult: false },
-    { hungClose: false, initialResult: true },
-    { hungClose: true, initialResult: false }
-  ])('fails a silent background wait without trusting success output ($hungClose / $initialResult)', async ({ hungClose, initialResult }) => {
+  it('reports a silent background wait without aborting, then honours explicit whole-run stop', async () => {
     vi.useFakeTimers()
     let controller: AbortController | undefined
-    let inputReleased = false
-    const close = vi.fn(() => hungClose ? new Promise<void>(() => {}) : Promise.resolve())
+    let released = false
+    const events: TraceEvent[] = []
     sdk.query.mockImplementation(({ prompt, options }) => {
       controller = options.abortController
       return {
         async *[Symbol.asyncIterator]() {
           const input = prompt[Symbol.asyncIterator]()
           await input.next()
-          void input.next().then(() => { inputReleased = true })
-          yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash-1', input: {} }] } }
-          yield {
-            type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'Appended to: log.md' }] },
-            tool_use_result: { kind: 'backgrounded', taskId: 'shell-1', backgroundReason: 'timeout' }
-          }
-          if (initialResult) yield { type: 'result', subtype: 'success', result: 'waiting' }
-          await new Promise<void>(() => {})
+          void input.next().then(() => { released = true })
+          yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash', input: { command: 'obsidian append' } }] } }
+          yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash', content: 'Appended to log.md' }] }, tool_use_result: { kind: 'backgrounded', taskId: 'task' } }
+          yield { type: 'assistant', message: { stop_reason: 'end_turn', content: [] } }
+          await new Promise<void>((resolve) => controller!.signal.addEventListener('abort', () => resolve(), { once: true }))
         },
-        close
+        close: vi.fn().mockResolvedValue(undefined), interrupt: vi.fn().mockResolvedValue(undefined)
       }
     })
     try {
-      const handle = createQoderAdapter().run({ runId: 'hung-shell', prompt: 'append', attachments: [], emit: () => {} })
-      const failed = expect(handle.promise).rejects.toThrow('任务是否完成未知')
-      await vi.advanceTimersByTimeAsync(15 * 60_000 - 1)
-      expect(controller!.signal.aborted).toBe(false)
-      expect(inputReleased).toBe(false)
-      await vi.advanceTimersByTimeAsync(1)
-      expect(controller!.signal.aborted).toBe(true)
-      expect(inputReleased).toBe(true)
-      expect(close).toHaveBeenCalledOnce()
-      await vi.advanceTimersByTimeAsync(5_000)
-      await failed
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it.each([false, true])('bounds watchdog cleanup without signalling an exited CLI (exited: %s)', async (exited) => {
-    vi.useFakeTimers()
-    const kill = vi.spyOn(process, 'kill').mockReturnValue(true)
-    const child = Object.assign(new EventEmitter(), { pid: 45678 })
-    sdk.spawn.mockReturnValue(child)
-    sdk.query.mockImplementation(({ options }) => {
-      options.spawnQoderCLIProcess({ command: '/bin/qodercli', args: [], env: {}, signal: new AbortController().signal })
-      return {
-        async *[Symbol.asyncIterator]() {
-          yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash-1', input: {} }] } }
-          yield {
-            type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'started' }] },
-            tool_use_result: { kind: 'backgrounded', taskId: 'shell-1' }
-          }
-          await new Promise<void>(() => {})
-        },
-        close: () => new Promise<void>(() => {})
-      }
-    })
-    try {
-      const handle = createQoderAdapter().run({ runId: 'watchdog-cleanup', prompt: 'work', attachments: [], emit: () => {} })
-      const failed = expect(handle.promise).rejects.toThrow('后台任务等待超时')
-      await vi.advanceTimersByTimeAsync(15 * 60_000)
-      if (exited) child.emit('exit', 0, null)
-      await vi.advanceTimersByTimeAsync(5_000)
-      await failed
-      if (exited) expect(kill).not.toHaveBeenCalled()
-      else expect(kill).toHaveBeenCalledWith(process.platform === 'win32' ? 45678 : -45678, 'SIGKILL')
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      kill.mockRestore()
-      vi.useRealTimers()
-    }
-  })
-
-  it.each(['answer', 'stop'])('does not time out user permission waits and handles %s', async (action) => {
-    vi.useFakeTimers()
-    let answer!: (value: { runId: string; questionId: string; behavior: 'cancelled' }) => void
-    let controller: AbortController | undefined
-    const requestUserInput = vi.fn(() => new Promise<{ runId: string; questionId: string; behavior: 'cancelled' }>((resolve) => { answer = resolve }))
-    sdk.query.mockImplementation(({ options }) => {
-      controller = options.abortController
-      return {
-        async *[Symbol.asyncIterator]() {
-          yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash-1', input: {} }] } }
-          yield {
-            type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'started' }] },
-            tool_use_result: { kind: 'backgrounded', taskId: 'shell-1' }
-          }
-          await options.canUseTool('Bash', {}, { signal: controller!.signal, toolUseID: 'permission-1' })
-          await new Promise<void>((resolve) => {
-            if (controller!.signal.aborted) resolve()
-            else controller!.signal.addEventListener('abort', () => resolve(), { once: true })
-          })
-        },
-        close: vi.fn().mockResolvedValue(undefined),
-        interrupt: vi.fn().mockResolvedValue(undefined)
-      }
-    })
-    try {
-      const handle = createQoderAdapter().run({ runId: 'permission-wait', prompt: 'work', attachments: [], emit: () => {}, requestUserInput })
-      const outcome = action === 'answer'
-        ? expect(handle.promise).rejects.toThrow('后台任务等待超时')
-        : expect(handle.promise).resolves.toMatchObject({ status: 'interrupted' })
+      const handle = createQoderAdapter().run({ runId: 'silent-task', prompt: 'fixture', attachments: [], emit: (event) => events.push(event) })
       await vi.advanceTimersByTimeAsync(60 * 60_000)
-      expect(requestUserInput).toHaveBeenCalledOnce()
+      expect(events.filter((event) => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({ phase: 'waiting', quiet: true })
       expect(controller!.signal.aborted).toBe(false)
-      if (action === 'stop') handle.interrupt()
-      answer({ runId: 'permission-wait', questionId: 'permission-1', behavior: 'cancelled' })
-      await vi.advanceTimersByTimeAsync(15 * 60_000)
-      await outcome
+      expect(released).toBe(false)
+      handle.interrupt()
+      await expect(handle.promise).resolves.toMatchObject({ status: 'interrupted' })
+      expect(released).toBe(true)
       expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('renews the background inactivity budget on progress and clears it after the follow-up result', async () => {
-    vi.useFakeTimers()
-    let controller: AbortController | undefined
-    sdk.query.mockImplementation(({ prompt, options }) => {
-      controller = options.abortController
-      return {
-        async *[Symbol.asyncIterator]() {
-          const input = prompt[Symbol.asyncIterator]()
-          await input.next()
-          yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash-1', input: {} }] } }
-          yield {
-            type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'started' }] },
-            tool_use_result: { kind: 'backgrounded', taskId: 'shell-1' }
-          }
-          yield { type: 'result', subtype: 'success' }
-          await new Promise((resolve) => setTimeout(resolve, 14 * 60_000))
-          yield { type: 'system', subtype: 'task_progress', task_id: 'shell-1' }
-          await new Promise((resolve) => setTimeout(resolve, 14 * 60_000))
-          yield { type: 'system', subtype: 'task_notification', task_id: 'shell-1', tool_use_id: 'bash-1', status: 'completed' }
-          yield { type: 'result', subtype: 'success' }
-          await input.next()
-        },
-        close: vi.fn().mockResolvedValue(undefined)
-      }
-    })
-    try {
-      const handle = createQoderAdapter().run({ runId: 'active-shell', prompt: 'work', attachments: [], emit: () => {} })
-      const completed = expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
-      await vi.advanceTimersByTimeAsync(28 * 60_000)
-      await completed
-      expect(controller!.signal.aborted).toBe(false)
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      vi.useRealTimers()
-    }
+    } finally { vi.useRealTimers() }
   })
 
   it('keeps the Qoder input stream open until background Agents settle and the root responds again', async () => {

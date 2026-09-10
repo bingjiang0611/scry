@@ -1,4 +1,4 @@
-import { forkSession, getSessionMessages, qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SDKUserMessage, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
+import { ProcessTransport, forkSession, getSessionMessages, qodercliAuth, query, type McpServerStatus, type PermissionUpdate, type Query, type SDKUserMessage, type SlashCommand } from '@qoder-ai/qoder-agent-sdk'
 import { spawn } from 'node:child_process'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
@@ -18,7 +18,7 @@ import { contextUsageEvidence, type McpLiveStatus, type TraceEvent } from '../..
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { extractUserText, type NormalizeCtx, type ParsedTurn } from '../normalize'
-import { normalizeQoderMessage, QoderBackgroundShellTasks } from './qoder-messages'
+import { normalizeQoderMessage, QoderBackgroundTasks } from './qoder-messages'
 import { QoderCreditCollector } from '../../shared/credit-usage'
 import type { AuthorizedMcpExecution, McpAuthInteraction, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import { effortOption, permissionOptions } from './run-controls'
@@ -26,6 +26,9 @@ import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 import { completedTranscriptTurnBoundary, isTranscriptUserPrompt } from './session-fork-boundary'
 import { resolveQoderForkUserId } from './qoder-fork-identity'
+import { QoderBackgroundMonitor } from './qoder-background-work'
+import { QoderTaskControlTransport } from './qoder-task-control'
+import type { QueryTransportCreateOptions } from '@qoder-ai/qoder-agent-sdk'
 
 function explainQoderSessionAccessError(error: unknown): never {
   const failure = error as NodeJS.ErrnoException | null
@@ -306,9 +309,8 @@ function qoderOptions(
         SCRY_MANAGED_RUN_ID: managedIdentity.runId,
         SCRY_MANAGED_PROMPT_HASH: managedIdentity.promptHash
       } : {}),
-      // Keep Qoder's overall ceiling disabled so active long-running tasks can
-      // continue. Scry bounds silent background waits below, rather than treating
-      // a launch result or command output as proof of task completion.
+      // Waiting is visible in Scry, with explicit user-controlled cancellation.
+      // Silence must not trigger the CLI's destructive background wait ceiling.
       QODERCLI_PRINT_BG_WAIT_CEILING_MS: '0'
     },
     ...permissions,
@@ -1033,11 +1035,6 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       let q: Query | undefined
       let qoderPid: number | undefined
       let streamSettled = false
-      let qoderExited = false
-      let backgroundWaitTimer: ReturnType<typeof setTimeout> | undefined
-      let backgroundWaitError: Error | undefined
-      let waitingForBackground = false
-      let pendingQuestions = 0
       let exitTimer: ReturnType<typeof setTimeout> | undefined
       let rejectUnexpectedExit: (error: Error) => void = () => {}
       const unexpectedExit = new Promise<never>((_resolve, reject) => {
@@ -1050,38 +1047,26 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       const credits = new QoderCreditCollector()
       const activeAgentCalls = new Set<string>()
       const terminalAgentCalls = new Set<string>()
-      const backgroundShellTasks = new QoderBackgroundShellTasks()
-      const hasPendingBackgroundWork = (): boolean => activeAgentCalls.size > 0 || backgroundShellTasks.pending
-      // This is an inactivity bound, not a task execution deadline. No output
-      // string (including “Appended to”) can establish successful completion.
-      const backgroundWaitMs = 15 * 60_000
-      const refreshBackgroundWait = (): void => {
-        if (backgroundWaitTimer) clearTimeout(backgroundWaitTimer)
-        backgroundWaitTimer = undefined
-        if (!waitingForBackground || pendingQuestions > 0 || stopped || streamSettled || backgroundWaitError) return
-        backgroundWaitTimer = setTimeout(() => {
-          backgroundWaitError = new Error('Qoder 后台任务等待超时：连续 15 分钟未收到新的执行事件。已请求取消本轮；任务是否完成未知，文件可能已写入，请先核验，不要直接重试写操作。')
-          rejectUnexpectedExit(backgroundWaitError)
-          releaseProviderPrompt()
-          controller.abort()
-        }, backgroundWaitMs)
+      const backgroundTasks = new QoderBackgroundTasks()
+      let taskControl: QoderTaskControlTransport | undefined
+      const backgroundMonitor = new QoderBackgroundMonitor(backgroundTasks, () => taskControl?.canStopTask === true, (backgroundWork) => {
+        request.emit({
+          id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
+          stage: 'runtime:background_work', backgroundWork,
+          runtimeMetadata: { source: 'qoder_background_observation' }
+        })
+      })
+      const waitForUser = async <T>(action: () => Promise<T>): Promise<T> => {
+        backgroundMonitor.pause()
+        try { return await action() } finally { backgroundMonitor.resume() }
       }
+      const hasPendingBackgroundWork = (): boolean => activeAgentCalls.size > 0 || backgroundTasks.pending
       const ctx: NormalizeCtx = {
         runId: request.runId,
         cwd: request.cwd,
         newId,
         now: () => new Date().toISOString(),
         contextTokensFromUsage: qoderContextTokensFromUsage
-      }
-      const waitForUser = async <T>(action: () => Promise<T>): Promise<T> => {
-        pendingQuestions++
-        refreshBackgroundWait()
-        try {
-          return await action()
-        } finally {
-          pendingQuestions--
-          refreshBackgroundWait()
-        }
       }
       const observeAgentEvent = (event: TraceEvent): void => {
         if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
@@ -1138,13 +1123,18 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           // tasks are active, including model-policy requests on notification turns.
           prompt: prompt.stream,
           options: {
+            transport: {
+              create(options: QueryTransportCreateOptions) {
+                taskControl = new QoderTaskControlTransport(new ProcessTransport(options))
+                return taskControl
+              }
+            },
             ...qoderOptions(
               request.cwd,
               request.resume,
               (pid) => { qoderPid = pid },
               (code, signal) => {
-                qoderExited = true
-                if (stopped || streamSettled || backgroundWaitError) return
+                if (stopped || streamSettled) return
                 exitTimer = setTimeout(() => {
                   rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
                 }, 1000)
@@ -1247,10 +1237,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             await Promise.race([
               (async () => {
                 for await (const message of q!) {
-                  if (backgroundWaitError || streamSettled) break
                   const raw = message as unknown as Record<string, unknown>
                   credits.observe(raw)
-                  backgroundShellTasks.observe(raw)
+                  backgroundTasks.observe(raw)
                   observeProviderTurnId(qoderProviderTurnId(raw))
                   if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
                     externalSessionId = raw.session_id
@@ -1292,24 +1281,14 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                   }
                   // A launch result is not terminal while background work remains.
                   // Release only on the root result following the last notification.
-                  // Some CLI versions withhold even the first result until all
-                  // background tasks finish. Arm on the launch receipt, not result.
-                  if (hasPendingBackgroundWork()) waitingForBackground = true
-                  else if (raw.type === 'result') {
-                    waitingForBackground = false
-                    releaseProviderPrompt()
-                  }
-                  // Replays/keepalives cannot keep a dead task alive indefinitely.
-                  if (raw.isReplay !== true && (raw.type === 'assistant' || raw.type === 'stream_event' || raw.type === 'user' || raw.type === 'result' ||
-                      (raw.type === 'system' && ['task_started', 'task_progress', 'task_updated', 'task_notification'].includes(String(raw.subtype))))) {
-                    refreshBackgroundWait()
-                  }
+                  backgroundMonitor.observe(raw, hasPendingBackgroundWork())
+                  if (raw.type === 'result' && !hasPendingBackgroundWork()) releaseProviderPrompt()
                 }
               })(),
               unexpectedExit
             ])
           } catch (error) {
-            if (backgroundWaitError || !providerFailureSeen) terminalError = backgroundWaitError ?? error
+            if (!providerFailureSeen) terminalError = error
           }
         } finally {
           request.emit({
@@ -1318,28 +1297,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             creditUsage: credits.evidence()
           })
           streamSettled = true
+          backgroundMonitor.dispose()
           releaseProviderPrompt()
           if (exitTimer) clearTimeout(exitTimer)
-          if (backgroundWaitTimer) clearTimeout(backgroundWaitTimer)
-          let closeTimer: ReturnType<typeof setTimeout> | undefined
           try {
-            if (backgroundWaitError) {
-              // A broken transport must not turn watchdog cleanup into another
-              // unbounded wait. Only the still-live, run-owned process is signalled.
-              await Promise.race([
-                q.close(),
-                new Promise<void>((resolve) => {
-                  closeTimer = setTimeout(() => {
-                    if (!qoderExited) signalProcessTree(qoderPid, 'SIGKILL')
-                    resolve()
-                  }, 5_000)
-                })
-              ])
-            } else await q.close()
+            await q.close()
           } catch (error) {
             if (!providerFailureSeen && terminalError == null) terminalError = error
-          } finally {
-            if (closeTimer) clearTimeout(closeTimer)
           }
         }
         const logHooksEnabled = process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0'
@@ -1406,13 +1370,26 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       })()
       const interrupt = (): void => {
         stopped = true
-        refreshBackgroundWait()
+        backgroundMonitor.dispose()
         releaseProviderPrompt()
         controller.abort()
         void q?.interrupt().catch(() => {})
       }
       return {
         promise,
+        stopBackgroundTask: async (taskId) => {
+          const task = backgroundTasks.tasks.find((task) => task.taskId === taskId)
+          if (stopped || streamSettled || !task || task.stopState) {
+            return { status: 'rejected', message: '该任务不属于当前活动轮次、已结束或已请求停止。' }
+          }
+          if (!taskControl?.canStopTask) return { status: 'unavailable', message: '当前 Qoder 版本不支持已验证的单任务停止，请使用停止本轮。' }
+          backgroundTasks.markStop(taskId, 'requested')
+          backgroundMonitor.refresh()
+          const result = await taskControl.stopTask(taskId)
+          backgroundTasks.markStop(taskId, result.status === 'unknown' ? 'unconfirmed' : result.status === 'requested' ? 'requested' : undefined)
+          backgroundMonitor.refresh()
+          return result
+        },
         interrupt,
         forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
         // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。

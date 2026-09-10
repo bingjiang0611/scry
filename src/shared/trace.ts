@@ -10,6 +10,7 @@ import type {
 import type { ProviderId } from './provider.js'
 import type { BillingProvider } from './billing.js'
 import type { CreditUsageEvidence } from './credit-usage.js'
+import type { BackgroundWork } from './background-work.js'
 
 // 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，
 // 让 SDK stream 和未来 codex adapter 都归一化到同一格式（一份数据多处用）。
@@ -499,6 +500,7 @@ export interface TraceEvent {
   terminationReason?: RunTerminationReason
   providerStopReason?: string
   runtimeMetadata?: Record<string, unknown>
+  backgroundWork?: BackgroundWork
   intervention?: AgentIntervention
   compaction?: ContextCompaction
 }
