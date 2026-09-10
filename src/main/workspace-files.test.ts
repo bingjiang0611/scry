@@ -98,6 +98,94 @@ describe('workspace files', () => {
     await expect(openWorkspaceFileExternally({ cwd: root, path: 'linked.pdf' }, open)).rejects.toThrow('符号链接')
   })
 
+  it('asks before opening an exact relative path in another known project', async () => {
+    const root = await fixture()
+    const other = await fixture()
+    await mkdir(join(other, 'docs'))
+    await writeFile(join(other, 'docs', 'report.pdf'), '%PDF fixture')
+    const open = vi.fn(async () => {})
+    const choose = vi.fn(async (candidates: readonly { cwd: string; path: string }[]) => candidates[0] ?? null)
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'docs/report.pdf' }, open, { roots: [root, other], choose })).resolves.toBe(true)
+    expect(choose).toHaveBeenCalledWith([{ cwd: await realpath(other), path: 'docs/report.pdf' }])
+    expect(open).toHaveBeenCalledExactlyOnceWith(join(await realpath(other), 'docs', 'report.pdf'))
+  })
+
+  it('does not pick an ambiguous candidate or open anything after cancellation', async () => {
+    const root = await fixture()
+    const a = await fixture()
+    const b = await fixture()
+    for (const cwd of [a, b]) await writeFile(join(cwd, 'report.pdf'), '%PDF fixture')
+    const open = vi.fn(async () => {})
+    const choose = vi.fn(async () => null)
+    expect(await openWorkspaceFileExternally({ cwd: root, path: 'report.pdf' }, open, { roots: [a, b], choose })).toBe(false)
+    expect(choose).toHaveBeenCalledWith([
+      { cwd: await realpath(a), path: 'report.pdf' },
+      { cwd: await realpath(b), path: 'report.pdf' }
+    ])
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unoffered selection and excludes symlink candidates', async () => {
+    const root = await fixture()
+    const other = await fixture()
+    await writeFile(join(other, 'real.pdf'), '%PDF fixture')
+    await symlink(join(other, 'real.pdf'), join(other, 'report.pdf'))
+    const open = vi.fn(async () => {})
+    const choose = vi.fn(async () => ({ cwd: other, path: 'real.pdf' }))
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'report.pdf' }, open, { roots: [other], choose })).rejects.toThrow('未提供')
+    expect(choose).toHaveBeenCalledWith([])
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('prefers the current workspace and reports no eligible matches without dispatch', async () => {
+    const root = await fixture()
+    await writeFile(join(root, 'report.pdf'), '%PDF fixture')
+    const open = vi.fn(async () => {})
+    const choose = vi.fn(async () => null)
+    expect(await openWorkspaceFileExternally({ cwd: root, path: 'report.pdf' }, open, { roots: [], choose })).toBe(true)
+    expect(choose).not.toHaveBeenCalled()
+    open.mockClear()
+    expect(await openWorkspaceFileExternally({ cwd: root, path: 'missing.pdf' }, open, { roots: [], choose })).toBe(false)
+    expect(choose).toHaveBeenCalledWith([])
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('rechecks the selected file after confirmation rather than following a replacement symlink', async () => {
+    const root = await fixture()
+    const other = await fixture()
+    await writeFile(join(other, 'report.pdf'), '%PDF fixture')
+    const open = vi.fn(async () => {})
+    const choose = async (candidates: readonly { cwd: string; path: string }[]) => {
+      await rm(join(other, 'report.pdf'))
+      await symlink(join(root, 'README.md'), join(other, 'report.pdf'))
+      return candidates[0] ?? null
+    }
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'report.pdf' }, open, { roots: [other], choose })).rejects.toThrow('符号链接')
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('does not retry an external dispatch failure through another project', async () => {
+    const root = await fixture()
+    await writeFile(join(root, 'report.pdf'), '%PDF fixture')
+    const open = vi.fn(async () => { throw Object.assign(new Error('dispatch unknown'), { code: 'ENOENT' }) })
+    const choose = vi.fn(async () => null)
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'report.pdf' }, open, { roots: [root], choose })).rejects.toThrow('dispatch unknown')
+    expect(open).toHaveBeenCalledOnce()
+    expect(choose).not.toHaveBeenCalled()
+  })
+
+  it('does not use fallback to bypass protected paths or a symlink in the requested path', async () => {
+    const root = await fixture()
+    await symlink(join(root, 'README.md'), join(root, 'report.pdf'))
+    const choose = vi.fn(async () => null)
+    const open = vi.fn(async () => {})
+    for (const path of ['report.pdf', '../report.pdf', 'node_modules/report.pdf']) {
+      await expect(openWorkspaceFileExternally({ cwd: root, path }, open, { roots: [root], choose })).rejects.toThrow()
+    }
+    expect(choose).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
+  })
+
   it('新建、保存和重命名均拒绝覆盖同名目标', async () => {
     const root = await fixture()
     const created = await createWorkspaceEntry({ cwd: root, parentPath: 'src', name: 'note.md', kind: 'file' })

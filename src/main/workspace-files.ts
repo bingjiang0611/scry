@@ -151,16 +151,49 @@ export async function readWorkspaceFile(request: WorkspacePathRequest): Promise<
   }
 }
 
+async function externalFileTarget(request: WorkspacePathRequest) {
+  const target = await checkedPath(request.cwd, request.path)
+  if (!(await lstat(target.path)).isFile()) throw new Error('目标不是文件')
+  return target
+}
+
 export async function openWorkspaceFileExternally(
   request: WorkspacePathRequest,
-  open: (path: string) => Promise<void>
-): Promise<true> {
+  open: (path: string) => Promise<void>,
+  fallback?: {
+    /** Supplied by main's existing known-project authority, never renderer payloads. */
+    roots: readonly string[]
+    choose: (candidates: readonly WorkspacePathRequest[]) => Promise<WorkspacePathRequest | null>
+  }
+): Promise<boolean> {
   if (!canOpenWorkspaceFileExternally(request.path)) {
     throw new Error('该文件类型不允许从 Scry 打开到外部应用')
   }
-  const target = await checkedPath(request.cwd, request.path)
-  const info = await lstat(target.path)
-  if (!info.isFile()) throw new Error('目标不是文件')
+  pathParts(request.path)
+  let target: Awaited<ReturnType<typeof externalFileTarget>>
+  try {
+    target = await externalFileTarget(request)
+  } catch (error) {
+    if (!fallback || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    const candidates = new Map<string, WorkspacePathRequest>()
+    // Exact relative paths only: no basename search, recursion, symlink traversal,
+    // or speculative opening. Even a unique cross-project match needs consent.
+    for (const cwd of new Set(fallback.roots)) {
+      try {
+        const candidate = await externalFileTarget({ cwd, path: request.path })
+        candidates.set(candidate.path, { cwd: candidate.root, path: candidate.portable })
+      } catch { /* Missing, protected, unreadable and symlink targets are not offered. */ }
+    }
+    const offered = [...candidates.values()]
+    const selected = await fallback.choose(offered.map((candidate) => ({ ...candidate })))
+    if (!selected) return false
+    if (!offered.some((candidate) => candidate.cwd === selected.cwd && candidate.path === selected.path)) {
+      throw new Error('不能打开未提供的候选文件')
+    }
+    // Revalidate after the dialog; a removed/replaced target must not trigger another search.
+    target = await externalFileTarget(selected)
+  }
+  // Dispatch errors may occur after an external app has received the request. Never retry them.
   await open(target.path)
   return true
 }
