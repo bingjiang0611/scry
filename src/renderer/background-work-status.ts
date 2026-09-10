@@ -9,8 +9,8 @@ export function backgroundWorkStatus(work: BackgroundWork | undefined): { label:
   }
   if (work.phase === 'waiting') return {
     label: '等待后台任务',
-    hint: '模型已回复；任务完成后会继续处理，新消息仍加入队列',
+    hint: '新消息将排队等待',
     waiting: true
   }
-  return { label: '运行中', hint: `已观测 ${work.tasks.length} 个后台任务；新消息将加入队列`, waiting: false }
+  return { label: '运行中', hint: '新消息将排队等待', waiting: false }
 }

@@ -38,3 +38,12 @@
 - 回归：新增 **24 个单元用例**；最终 focused **226 通过**，`npm test` **1880 通过 / 3 外部用例跳过**，shell、typecheck、build、diff check 通过。
 - `npm run test:background-ui` 保留宽/窄交互，并新增 **7 条实际挂载 hook 的 Electron 时序场景**：done/error 与恢复竞态、逆序恢复、切换焦点、侧栏 done/error/增量与迟到 hydration。入口新增 `scripts/fixtures/background-recovery-smoke.tsx`；这不是完整 App 的真实 Provider 验收。
 - 本轮未改 preload、IPC 入参或 packaging，未重新打包/安装；先前打包结果不作为本轮产物验证。没有重放真实 Qoder/Obsidian 写入，也没有重启仍在运行的旧预览，避免中断未知的活动会话。
+
+## 紧凑任务行 · 2026-09-10
+
+- Feedback / scope：用户针对 0.2.147 后台大卡片提供终端任务树截图，要求“简洁，只展示有用信息”。需求已确认，成品待审；仅 Scry 后台任务区域，不升级为全局视觉偏好。
+- 借鉴信息密度与层级，不复制终端皮肤。默认展示任务名称、类型、状态、回执距今时长；只有能力已验证时才显示停止按钮。移除常驻大卡片标题、计数和长说明，窄屏允许两行。
+- 原生 details 按需展开完整任务名称、ID、回执时间、partial 覆盖及能力限制。无可靠证据的工具次数、模型、进度不展示；时长不冒充精确进程运行时间。
+- quiet 与停止结果未知仍直接可见；不把停止回执写成任务已停止。保留整轮停止、排队、终态和恢复协议，composer 仅缩短重复提示。
+- 复用 `BackgroundWorkPanel.tsx`、既有 Icon、`background-work.css`；展示/回归继续使用 `scripts/background-work-ui-smoke.mjs`。验收包括宽/窄、长名称、折叠/展开、停止隔离、quiet、空列表与归档；没有真实 Provider 写入验收。
+- 本次验证：246 个受影响测试、typecheck、build 通过；隔离 Electron 宽/窄紧凑布局、详情展开与原有 7 条恢复时序通过。检查了自动化 fixture 的实际渲染截图（`SCRY_BACKGROUND_UI_SCREENSHOT` 可导出）；成品仍待用户确认，尚未覆盖已安装的 0.2.147。

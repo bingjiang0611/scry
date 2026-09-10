@@ -27,6 +27,15 @@ async function exercise() {
   check(!document.querySelector('.skeleton'), 'Background wait still shows generation skeleton')
   check(!document.querySelector('.model-text.streaming'), 'Background wait still shows streaming cursor')
   check(document.querySelectorAll('.background-work-task').length === 2, 'Missing observed tasks')
+  const panel = document.querySelector('.background-work-panel')
+  check(panel.getBoundingClientRect().height <= (innerWidth > 700 ? 80 : 140), 'Task list is not compact')
+  check(!panel.innerText.includes('启动回执') && !panel.innerText.includes('清单'), 'Technical evidence is visible by default')
+  const details = panel.querySelector('details')
+  details.querySelector('summary').click()
+  await wait(() => details.open)
+  check(details.innerText.includes('清单可能不完整'), 'Expanded evidence lost partial coverage')
+  details.querySelector('summary').click()
+  await wait(() => !details.open)
   const input = document.querySelector('textarea')
   const taskStop = document.querySelector('[aria-label="停止任务 a"]')
   taskStop.scrollIntoView({ block: 'center' })
@@ -61,8 +70,14 @@ async function exercise() {
   check(!document.querySelector('[aria-label="停止任务 a"]').disabled, 'New run inherited stale stop state')
   click('#unsupported')
   await wait(() => !document.querySelector('[aria-label="停止任务 a"]'))
-  check(document.querySelector('.background-work-panel').textContent.includes('单任务停止未验证'), 'Unknown version advertised unsupported control')
-  return { viewport: [innerWidth, innerHeight], waitingWithoutSkeleton: true, stopAcknowledgmentNotTerminal: true, targetedStop: true, quietNotFailure: true, resumeAndArchive: true, unknownVersion: true }
+  const unsupported = document.querySelector('.background-work-panel')
+  check(!unsupported.innerText.includes('未验证'), 'Unavailable-control explanation is still permanently visible')
+  unsupported.querySelector('summary').click()
+  await wait(() => unsupported.querySelector('details').open)
+  check(unsupported.innerText.includes('单任务停止未验证'), 'Capability evidence is missing from details')
+  unsupported.querySelector('summary').click()
+  await wait(() => !unsupported.querySelector('details').open)
+  return { compactDisclosure: true, viewport: [innerWidth, innerHeight], waitingWithoutSkeleton: true, stopAcknowledgmentNotTerminal: true, targetedStop: true, quietNotFailure: true, resumeAndArchive: true, unknownVersion: true }
 }
 
 async function exerciseRecovery(scenario) {
@@ -145,6 +160,12 @@ try {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         const wide = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
+        if (${JSON.stringify(process.env.SCRY_BACKGROUND_UI_SCREENSHOT ?? '')}) {
+          const bounds = await win.webContents.executeJavaScript('JSON.stringify(document.querySelector(".background-work-panel").getBoundingClientRect().toJSON())')
+          const rect = JSON.parse(bounds)
+          const image = await win.webContents.capturePage({ x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) })
+          require('node:fs').writeFileSync(${JSON.stringify(process.env.SCRY_BACKGROUND_UI_SCREENSHOT ?? '')}, image.toPNG())
+        }
         win.setSize(640, 700)
         const narrow = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
         const recovery = []

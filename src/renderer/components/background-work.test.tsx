@@ -6,6 +6,7 @@ import type { Turn } from '../format'
 import { AssistantTurn } from './ChatTurn'
 import { Sidebar } from './Sidebar'
 import { addRunningRunId } from '../App'
+import { BackgroundWorkPanel, backgroundTaskAge } from './BackgroundWorkPanel'
 
 const work: BackgroundWork = {
   providerId: 'qoder', phase: 'waiting', quiet: false, coverage: 'partial', taskStop: 'available', lastEventAt: 0,
@@ -49,6 +50,43 @@ it('selects revision evidence rather than array position after trimmed snapshot 
   const ended = { ...work, phase: 'inactive' as const, revision: 3 }
   expect(latestBackgroundWork([{ backgroundWork: recent }, { backgroundWork: old }])).toBe(recent)
   expect(latestBackgroundWork([{ backgroundWork: ended }, { backgroundWork: recent }])).toBe(ended)
+})
+
+it('keeps technical evidence behind a collapsed task disclosure and exposes only supported actions', () => {
+  const html = renderToStaticMarkup(<BackgroundWorkPanel runId="run" work={{ ...work, taskStop: 'unavailable' }} />)
+  const summary = html.match(/<summary[^>]*>(.*?)<\/summary>/)?.[1] ?? ''
+  expect(summary).toContain('append journal')
+  expect(summary).toContain('执行中')
+  expect(summary).not.toContain('task-1')
+  expect(summary).not.toContain('未验证')
+  expect(html).toContain('<details class="background-work-details">')
+  expect(html).toContain('清单可能不完整')
+  expect(html).not.toContain('<button')
+})
+
+it('keeps quiet warnings and unconfirmed stop evidence visible without claiming termination', () => {
+  const html = renderToStaticMarkup(<BackgroundWorkPanel runId="run" work={{ ...work, quiet: true,
+    tasks: [{ ...work.tasks[0], stopState: 'unconfirmed' }] }} />)
+  expect(html).toContain('停止待确认')
+  expect(html).toContain('重试前请先核验')
+  expect(html).not.toContain('已停止')
+  expect(html).toContain('disabled=""')
+})
+
+it('keeps an unassociated wait honest without inventing task details or controls', () => {
+  const html = renderToStaticMarkup(<BackgroundWorkPanel runId="run" work={{ ...work, tasks: [] }} />)
+  expect(html).toContain('等待后续结果')
+  expect(html).not.toContain('<button')
+  expect(html).not.toContain('<details')
+  expect(html).not.toContain('已完成')
+})
+
+it('formats observation age without inventing a process start time or invalid duration', () => {
+  expect(backgroundTaskAge(0, 30_000)).toBe('<1m')
+  expect(backgroundTaskAge(0, 240_000)).toBe('4m')
+  expect(backgroundTaskAge(0, 3_900_000)).toBe('1h 5m')
+  expect(backgroundTaskAge(NaN, 100)).toBeUndefined()
+  expect(backgroundTaskAge(200, 100)).toBeUndefined()
 })
 
 it('projects waiting/quiet states only onto the corresponding live sidebar run', () => {
