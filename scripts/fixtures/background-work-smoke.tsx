@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { BackgroundWork } from '../../src/shared/background-work'
 import { ChatView } from '../../src/renderer/components/ChatView'
+import { BackgroundRecoveryFixture, installRecoveryBridge } from './background-recovery-smoke'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
@@ -55,4 +56,6 @@ function Fixture() {
     />
   </div>
 }
-createRoot(document.getElementById('root')!).render(<Fixture />)
+const recovery = new URLSearchParams(location.search).get('mode') === 'recovery'
+if (recovery) installRecoveryBridge()
+createRoot(document.getElementById('root')!).render(recovery ? <BackgroundRecoveryFixture /> : <Fixture />)

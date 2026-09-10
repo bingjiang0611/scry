@@ -14,6 +14,7 @@ import {
   markTurnDone,
   markTurnError,
   mergeActiveRun,
+  mergeRecoveredRun,
   parsedSessionTurns,
   prependOlderSessionTurns,
   removePendingQuestion,
@@ -457,6 +458,28 @@ describe('live trace health projection', () => {
   })
 })
 
+
+describe('late live trace recovery', () => {
+  it.each(['done', 'error'])('preserves %s delivered while the snapshot request was in flight', async (terminal) => {
+    const snapshot: ActiveRun = { runId: 'r1', userText: 'fixture', done: false, items: [ev('old')] }
+    let resolve!: (run: ActiveRun) => void
+    let turns: Turn[] = [{ ...snapshot, items: [...snapshot.items, ev('new')] }]
+    let acks = 0
+    const recovery = resynchronizeLiveTrace({
+      activeRun: () => new Promise<ActiveRun>((done) => { resolve = done }),
+      traceResynchronized: async () => { acks++ }
+    }, (run) => { turns = mergeRecoveredRun(turns, run) })
+    turns = terminal === 'done' ? markTurnDone(turns, 'r1', 'native-turn', 'fork-turn')
+      : markTurnError(turns, { runId: 'r1', message: 'transport lost', hint: 'inspect first' })
+    resolve(snapshot)
+    expect(await recovery).toEqual({ aligned: true, acknowledged: true })
+    expect(turns[0].done).toBe(true)
+    expect(turns[0].items.map((item) => item.id)).toEqual(['old', 'new'])
+    if (terminal === 'error') expect(turns[0]).toMatchObject({ error: 'transport lost', errorHint: 'inspect first' })
+    else expect(turns[0]).toMatchObject({ providerTurnId: 'native-turn', forkTurnId: 'fork-turn' })
+    expect(acks).toBe(1)
+  })
+})
 
 describe('live trace resync acknowledgement', () => {
   const snapshot = (overrides: Partial<ActiveRun> = {}): ActiveRun => ({

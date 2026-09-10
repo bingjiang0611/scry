@@ -504,6 +504,11 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
   await effects.refreshProviderCatalogs?.()
 }
 
+export function addRunningRunId(previous: ReadonlySet<string>, runId: string, terminal: ReadonlySet<string>): ReadonlySet<string> {
+  if (terminal.has(runId) || previous.has(runId)) return previous
+  return new Set(previous).add(runId)
+}
+
 export function App() {
   const [theme, setTheme] = useState<AppTheme>(() => readStoredTheme(browserThemeStorage()))
   const [input, setInput] = useState('')
@@ -573,13 +578,9 @@ export function App() {
   // runId -> 发送时的会话身份：用于采纳本视图发起那一轮新建的原生 session id。
   const localStartsRef = useRef(new Map<string, string>())
   const markRunStarted = useCallback((runId: string): void => {
-    terminalRunIdsRef.current.delete(runId)
-    setRunningRunIds((prev) => {
-      if (prev.has(runId)) return prev
-      const next = new Set(prev)
-      next.add(runId)
-      return next
-    })
+    // Session capture/focus callbacks may arrive after terminal delivery. Run IDs
+    // are never reused: a late announcement must not erase terminal evidence.
+    setRunningRunIds((prev) => addRunningRunId(prev, runId, terminalRunIdsRef.current))
   }, [])
   const markRunFinished = useCallback((runId: string): void => {
     localRunIdsRef.current.delete(runId)

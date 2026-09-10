@@ -65,6 +65,64 @@ async function exercise() {
   return { viewport: [innerWidth, innerHeight], waitingWithoutSkeleton: true, stopAcknowledgmentNotTerminal: true, targetedStop: true, quietNotFailure: true, resumeAndArchive: true, unknownVersion: true }
 }
 
+async function exerciseRecovery(scenario) {
+  const check = (ok, message) => { if (!ok) throw new Error(`${scenario}: ${message}`) }
+  const tick = () => new Promise((resolve) => requestAnimationFrame(resolve))
+  const state = () => document.querySelector('#recovery')?.dataset
+  const wait = async (predicate) => {
+    const deadline = performance.now() + 5000
+    while (!predicate()) {
+      if (performance.now() > deadline) throw new Error(`${scenario}: timed out: ${predicate}`)
+      await tick()
+    }
+  }
+  const click = (selector) => document.querySelector(selector).click()
+  await wait(() => state()?.restoring === 'false' && state().run === 'recovery')
+  if (scenario.startsWith('sidebar-')) {
+    click('#sidebar-event')
+    await wait(() => state().sidebarPhase === 'working')
+    if (scenario !== 'sidebar-delta') {
+      click(scenario === 'sidebar-done' ? '#finish-done' : '#finish-error')
+      await wait(() => state().sidebarPhase === 'none')
+    }
+    click('#sidebar-hydrate')
+    click('#sidebar-old')
+    await tick()
+    check(state().sidebarPhase === (scenario === 'sidebar-delta' ? 'working' : 'none'), 'Stale hydration/event overwrote live state')
+    click('#sidebar-inactive')
+    await wait(() => state().sidebarPhase === 'none')
+    click('#sidebar-old')
+    click('#sidebar-event')
+    await tick()
+    check(state().sidebarPhase === 'none', 'Late snapshot reopened inactive/terminal state')
+  } else {
+    click('#begin-recovery')
+    if (scenario === 'done' || scenario === 'error') {
+      click(scenario === 'done' ? '#finish-done' : '#finish-error')
+      await wait(() => state().done === 'true')
+      click('#resolve-first')
+      await wait(() => state().acks === '1')
+      check(state().done === 'true' && state().busy === 'false', 'Snapshot reopened completed turn/composer')
+      if (scenario === 'error') check(state().error === 'transport lost', 'Snapshot erased terminal error')
+    } else if (scenario === 'reverse') {
+      click('#server-new')
+      click('#begin-recovery')
+      click('#resolve-last')
+      await wait(() => state().phase === 'working' && state().acks === '1')
+      click('#resolve-first')
+      await tick()
+      check(state().phase === 'working' && state().acks === '1', 'Older recovery overwrote or acknowledged newer state')
+    } else {
+      click('#switch-focus')
+      await wait(() => state().run === 'other')
+      click('#resolve-first')
+      await tick()
+      check(state().run === 'other' && !state().acks, 'Previous focus recovery was applied/acknowledged')
+    }
+  }
+  return { scenario, passed: true }
+}
+
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
   await build({
@@ -89,7 +147,12 @@ try {
         const wide = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
         win.setSize(640, 700)
         const narrow = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
-        console.log('SCRY_BACKGROUND_UI_RESULT=' + JSON.stringify({ wide, narrow }))
+        const recovery = []
+        for (const scenario of ['done', 'error', 'reverse', 'focus', 'sidebar-done', 'sidebar-error', 'sidebar-delta']) {
+          await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, { query: { mode: 'recovery' } })
+          recovery.push(await win.webContents.executeJavaScript('(' + ${JSON.stringify(exerciseRecovery.toString())} + ')(' + JSON.stringify(scenario) + ')'))
+        }
+        console.log('SCRY_BACKGROUND_UI_RESULT=' + JSON.stringify({ wide, narrow, recovery }))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
     })

@@ -1259,6 +1259,52 @@ describe('Qoder provider adapter', () => {
     expect(events.slice(events.indexOf(terminals[0]) + 1).some((event) => event.stage === 'agent_activity')).toBe(false)
   })
 
+  it.each(['error', 'cancelled', 'canceled', 'interrupted', 'killed', ' cancelled '].flatMap((status) =>
+    ['task_updated', 'direct_notification'].map((wire) => [status, wire])
+  ))('settles Agent terminal %s via %s and all task-ID aliases before closing stdin', async (status, wire) => {
+    const events: TraceEvent[] = []
+    sdk.query.mockImplementation(({ prompt }) => ({
+      async *[Symbol.asyncIterator]() {
+        const input = prompt[Symbol.asyncIterator]()
+        await input.next()
+        let released = false
+        const closed = input.next().then(() => { released = true })
+        yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', id: 'agent', input: {} }] } }
+        yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'agent' }] }, tool_use_result: { status: 'async_launched', taskId: 'task' } }
+        yield { type: 'system', subtype: 'task_started', task_id: 'task-alias', tool_use_id: 'agent' }
+        yield wire === 'task_updated'
+          ? { type: 'system', subtype: 'task_updated', task_id: 'task-alias', patch: { status } }
+          : { type: 'system', subtype: 'task_notification', tool_use_id: 'agent', status }
+        yield { type: 'result', subtype: 'success' }
+        // Flush the async generator's EOF and its consumer's promise chain.
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        expect(released).toBe(true)
+        await closed
+      },
+      close: vi.fn().mockResolvedValue(undefined)
+    }))
+    await expect(createQoderAdapter().run({ runId: 'alias', prompt: 'fixture', attachments: [], emit: (event) => events.push(event) }).promise)
+      .resolves.toMatchObject({ status: 'completed' })
+    expect(events.filter((event) => event.backgroundWork).at(-1)?.backgroundWork?.tasks).toEqual([])
+  })
+
+  it('does not report success when transport ends with an unresolved Bash task', async () => {
+    const events: TraceEvent[] = []
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash', input: {} }] } }
+        yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash', content: 'Appended' }] }, tool_use_result: { kind: 'backgrounded', taskId: 'shell' } }
+        yield { type: 'result', subtype: 'success' }
+      },
+      close: vi.fn().mockResolvedValue(undefined)
+    })
+    const result = await createQoderAdapter().run({ runId: 'lost-shell', prompt: 'fixture', attachments: [], emit: (event) => events.push(event) }).promise
+    expect(result.status).toBe('failed')
+    expect(events.filter((event) => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+      phase: 'inactive', tasks: [{ taskId: 'shell', status: 'unconfirmed' }]
+    })
+  })
+
   it('does not release stdin while another Qoder Agent is unresolved or before the next root result', async () => {
     sdk.query.mockImplementation(({ prompt }) => ({
       async *[Symbol.asyncIterator]() {
@@ -1324,6 +1370,9 @@ describe('Qoder provider adapter', () => {
     expect(handle.forceKillScope).toBe('run_scoped')
     handle.interrupt()
     await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
+    expect(events.filter((event) => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+      phase: 'inactive', taskStop: 'unavailable', tasks: [{ taskId: 'task-stop', status: 'unconfirmed' }]
+    })
     expect(events.filter((event) => event.tool === 'Agent' && event.stage === 'tool_result')).toContainEqual(expect.objectContaining({
       toolUseId: 'agent-stop',
       isError: false,
@@ -1352,6 +1401,9 @@ describe('Qoder provider adapter', () => {
     }).promise
 
     expect(result.status).toBe('failed')
+    expect(events.filter((event) => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+      phase: 'inactive', taskStop: 'unavailable', tasks: [{ taskId: 'task-lost', status: 'unconfirmed' }]
+    })
     expect(events).toContainEqual(expect.objectContaining({
       tool: 'Agent', stage: 'tool_result', toolUseId: 'agent-lost', isError: true,
       runtimeMetadata: expect.objectContaining({ source: 'qoder_transport_ended', agentStatus: 'failed' })
@@ -1490,6 +1542,8 @@ describe('Qoder provider adapter', () => {
         return {
           async *[Symbol.asyncIterator]() {
             yield { type: 'system', subtype: 'init', session_id: 'qoder-session', mcp_servers: [] }
+            yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'tool-1', input: {} }] } }
+            yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1' }] }, tool_use_result: { kind: 'backgrounded', taskId: 'shell-task' } }
             yield { type: 'result', subtype: 'success', session_id: 'qoder-session', result: 'backgrounded' }
           },
           close: vi.fn().mockResolvedValue(undefined),
@@ -1514,6 +1568,8 @@ describe('Qoder provider adapter', () => {
         isError: true,
         runtimeMetadata: expect.objectContaining({ backgroundTask: true, exitCode: 143 })
       }))
+      expect(events.filter((event) => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({ phase: 'inactive', tasks: [] })
+      expect(events.some((event) => event.stage === 'runtime:background_unresolved')).toBe(false)
     } finally {
       if (previousConfigDir == null) delete process.env.QODER_CONFIG_DIR
       else process.env.QODER_CONFIG_DIR = previousConfigDir
@@ -1578,6 +1634,8 @@ describe('Qoder provider adapter', () => {
         'provider_task_notification', 'qoder_cli_log', 'qoder_cli_log', 'qoder_cli_log'
       ])
       expect(terminals.every((event) => event.isError === false)).toBe(true)
+      expect(events.filter((event) => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({ phase: 'inactive', tasks: [] })
+      expect(events.some((event) => event.stage === 'runtime:background_unresolved')).toBe(false)
     } finally {
       if (previousConfigDir == null) delete process.env.QODER_CONFIG_DIR
       else process.env.QODER_CONFIG_DIR = previousConfigDir
