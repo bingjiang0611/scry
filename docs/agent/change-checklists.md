@@ -33,6 +33,9 @@
 - canonical result 与 transcript shadow 是否去重？
 - exact/estimated/inferred/unavailable 是否从 main 一直保留到 renderer？
 - 真实空值与不可观测是否区分？
+- 字段缺失是否带上原因与来源？`provider.modelStatus`（observed / unobserved / incomplete / conflict）和 `turnRoleStatus` 是这类字段的基准：缺值必须有 `modelOmissionReason`，多个候选只能报 conflict，不得挑一个或反推请求模型。
+- 覆盖率是否带分母？数组里只要还有 `status: 'unknown'` 的项，整段就不能宣称 available/exact（否则下游会把 `failed=0` 读成「全部成功」）。
+- 身份与角色是否只来自定长的结构化入参？固定文案前缀、正则和 prompt 文本不是身份边界。
 - live trace、history archive、turn record、SQLite projection 是否不会互相冒充权威？
 
 ### MCP / Hook / plugin / Skill 改动

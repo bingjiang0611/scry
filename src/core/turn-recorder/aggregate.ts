@@ -516,6 +516,13 @@ export function aggregateTurnEvidence(args: {
   const hookRunsObserved = args.events.some((event) =>
     event.kind === 'hook' && event.stage !== HOOK_DELIVERY_STAGE && !isRecorderHook(event)
   )
+  // 覆盖率必须带分母：混合证据（部分 hook 有结果、部分只有投递）以前整段判 available，
+  // 于是下游把派生的 failed=0 读成「Hook 成功率 100%」。未观测到结果的运行数单独算出来。
+  const hookRunTotal = hooks.reduce((sum, hook) => sum + (hook.runs ?? 1), 0)
+  const hookRunOutcomeUnknown = hooks.reduce(
+    (sum, hook) => sum + (hook.status === 'unknown' ? hook.runs ?? 1 : 0),
+    0
+  )
   const modelSegments = modelSegmentsFrom(args.events)
   const assistantText = modelSegments.filter((segment) => segment.kind === 'text').map((segment) => segment.text).join('')
   const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
@@ -611,7 +618,15 @@ export function aggregateTurnEvidence(args: {
             'provider only delivered hook lifecycle events; per-hook command, outcome and exit code were not observable',
             'inferred'
           )
-        : available(hooks, [source]),
+        : hookRunOutcomeUnknown > 0
+          ? partial(
+              hooks,
+              [source],
+              `${hookRunOutcomeUnknown} of ${hookRunTotal} hook runs have no observed outcome; ` +
+                'a zero failure count over this section is not proof that every hook succeeded',
+              'inferred'
+            )
+          : available(hooks, [source]),
     usage: !observable.usage
       ? unavailable('provider usage was not observable', [source])
       : usage
