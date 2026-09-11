@@ -135,18 +135,36 @@ describe('aggregateTurnEvidence', () => {
     ])
   })
 
-  it('同一轮里既有真实 hook 运行又有投递事件时，运行证据保持 exact', () => {
+  it('同一轮里既有真实 hook 运行又有投递事件时，整段按未观测运行数判 partial', () => {
     const events: TraceEvent[] = [
       { id: 'run', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'hook', stage: 'hook_response', hookId: 'h1', hookName: 'audit.py', hookEvent: 'Stop', hookOutcome: 'success', hookExitCode: 0 },
       { id: 'd1', ts: '2026-01-01T00:00:01.000Z', runId: 'r', kind: 'hook', stage: 'hook_delivery', name: 'Stop', hookEvent: 'Stop' }
     ]
     const evidence = aggregateTurnEvidence({ events })
 
-    expect(evidence.hooks).toMatchObject({ status: 'available', quality: 'exact' })
+    // 混合证据不能整段宣称 available/exact：数组里还有 status=unknown 的运行，
+    // 否则下游会把派生的 failed=0 当成「Hook 全部成功」。分母写进 omissionReason。
+    expect(evidence.hooks).toMatchObject({
+      status: 'partial',
+      quality: 'inferred',
+      omissionReason: '1 of 2 hook runs have no observed outcome; ' +
+        'a zero failure count over this section is not proof that every hook succeeded'
+    })
     expect(evidence.hooks.value).toEqual([
       expect.objectContaining({ name: 'audit.py', status: 'success' }),
       expect.objectContaining({ event: 'Stop', status: 'unknown', lifecycleEvents: 1 })
     ])
+  })
+
+  it('全部 hook 运行都有观测结果时仍然是 available/exact', () => {
+    const events: TraceEvent[] = [
+      { id: 'run1', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'hook', stage: 'hook_response', hookId: 'h1', hookName: 'audit.py', hookEvent: 'Stop', hookOutcome: 'success', hookExitCode: 0 },
+      { id: 'run2', ts: '2026-01-01T00:00:01.000Z', runId: 'r', kind: 'hook', stage: 'hook_response', hookId: 'h2', hookName: 'flush.py', hookEvent: 'Stop', hookOutcome: 'failure', hookExitCode: 1 }
+    ]
+    const evidence = aggregateTurnEvidence({ events })
+
+    expect(evidence.hooks).toMatchObject({ status: 'available', quality: 'exact' })
+    expect(evidence.hooks.value).toHaveLength(2)
   })
 
   it('整轮 Usage 求和，并在原生聚合结果存在时忽略 transcript 影子值', () => {

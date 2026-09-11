@@ -66,6 +66,70 @@ describe('AgentTurnRecord strict schema-v1 validation', () => {
     if (!result.ok) expect(result.issues.some((issue) => issue.path === `$.${field}`)).toBe(true)
   })
 
+  it('binds provider.modelStatus to the observed model instead of allowing silent absence', () => {
+    const observed = record()
+    observed.provider = { id: 'codex', model: 'gpt-6-astra', modelStatus: 'observed', modelSource: 'provider_model_event' }
+    expect(isAgentTurnRecord(observed)).toBe(true)
+
+    const billed = record()
+    billed.provider = { id: 'codex', model: 'gpt-6-astra', modelStatus: 'observed', modelSource: 'usage_event' }
+    expect(isAgentTurnRecord(billed)).toBe(true)
+
+    for (const status of ['unobserved', 'incomplete', 'conflict']) {
+      const gap = record()
+      gap.provider = { id: 'codex', modelStatus: status, modelOmissionReason: 'provider exposed no model id' }
+      expect(isAgentTurnRecord(gap)).toBe(true)
+
+      // A gap may never carry a model, a source, or an empty reason: each of
+      // those is how "unknown" used to be laundered into a usable value.
+      const withModel = record()
+      withModel.provider = { id: 'codex', model: 'gpt-6-astra', modelStatus: status, modelOmissionReason: 'x' }
+      expect(isAgentTurnRecord(withModel)).toBe(false)
+      const withSource = record()
+      withSource.provider = { id: 'codex', modelStatus: status, modelSource: 'usage_event', modelOmissionReason: 'x' }
+      expect(isAgentTurnRecord(withSource)).toBe(false)
+      const withoutReason = record()
+      withoutReason.provider = { id: 'codex', modelStatus: status }
+      expect(isAgentTurnRecord(withoutReason)).toBe(false)
+    }
+
+    const observedWithoutModel = record()
+    observedWithoutModel.provider = { id: 'codex', modelStatus: 'observed', modelSource: 'usage_event' }
+    expect(isAgentTurnRecord(observedWithoutModel)).toBe(false)
+    const sourceWithoutStatus = record()
+    sourceWithoutStatus.provider = { id: 'codex', model: 'gpt-6-astra', modelSource: 'usage_event' }
+    expect(isAgentTurnRecord(sourceWithoutStatus)).toBe(false)
+    // Legacy records that never had the field stay valid; absence is not a claim.
+    expect(isAgentTurnRecord(record())).toBe(true)
+  })
+
+  it('only accepts a structural turn role, never a role without observation', () => {
+    const observed = record()
+    observed.turnRoleStatus = 'observed'
+    observed.turnRole = { role: 'approval', source: 'codex-guardian', parentId: 'turn-1', reviewedSessionId: 'session-9' }
+    expect(isAgentTurnRecord(observed)).toBe(true)
+
+    for (const status of ['unobserved', 'conflict']) {
+      const gap = record()
+      gap.turnRoleStatus = status
+      expect(isAgentTurnRecord(gap)).toBe(true)
+      const withRole = record()
+      withRole.turnRoleStatus = status
+      withRole.turnRole = { role: 'main', source: 'host' }
+      expect(isAgentTurnRecord(withRole)).toBe(false)
+    }
+
+    const roleWithoutStatus = record()
+    roleWithoutStatus.turnRole = { role: 'main', source: 'host' }
+    expect(isAgentTurnRecord(roleWithoutStatus)).toBe(false)
+
+    // Free-form prose is not a role: identity cannot come from prompt text.
+    const prose = record()
+    prose.turnRoleStatus = 'observed'
+    prose.turnRole = { role: 'approval history for command ...', source: 'text-regex' }
+    expect(isAgentTurnRecord(prose)).toBe(false)
+  })
+
   it('rejects impossible evidence state/value combinations and malformed nested calls', () => {
     const missingValue = record()
     missingValue.tools = { status: 'available', quality: 'exact', source: ['fixture'] }

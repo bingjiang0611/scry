@@ -190,13 +190,40 @@ export interface AgentTurnRecord extends TurnEvidence {
   recordId: string
   recorderVersion: string
   workspace: { id: string; root: string }
-  provider: { id: ProviderId; version?: string; model?: string }
+  provider: {
+    id: ProviderId
+    version?: string
+    model?: string
+    /**
+     * Why `model` reads the way it does. A missing model has several distinct
+     * causes and they are not interchangeable: the provider may never expose
+     * one, may expose an incomplete observation, or may report several in one
+     * turn. Absence of this field is legacy, not a claim that the model was
+     * observed, and no status ever licenses inferring a requested model.
+     */
+    modelStatus?: TurnModelStatus
+    /** Where an observed model came from. Absent unless `modelStatus` is `observed`. */
+    modelSource?: TurnModelSource
+    /** Required whenever the model is not `observed`; never a guess at the real model. */
+    modelOmissionReason?: string
+  }
   sessionId: string
   providerTurnId?: string
   /** Explicit caller association; null means no association, never infer it from prompt text. */
   linkedTaskId?: string | null
   linkedTaskGeneration?: string
   taskLinkStatus?: 'bound' | 'unbound' | 'conflict'
+  /**
+   * Whether this turn's role in the session was structurally observed.
+   *
+   * `unobserved` is the honest default: a provider that reports no role gives
+   * no basis for calling a record a main-agent user turn, and prompt text is
+   * never a role boundary. A consumer must not build a main-turn denominator
+   * out of `unobserved` records.
+   */
+  turnRoleStatus?: TurnRoleStatus
+  /** Structural role supplied by the host; only present when `turnRoleStatus` is `observed`. */
+  turnRole?: TurnRole
   generation: number
   turnIndex: number
   startedAt: string
@@ -206,6 +233,25 @@ export interface AgentTurnRecord extends TurnEvidence {
   status: 'completed' | 'failed' | 'cancelled' | 'interrupted'
   /** Absent in records written before 0.2.38; absence is legacy, not proof of a trusted end time. */
   termination?: Evidence<TurnTermination>
+}
+
+/** `observed` is the only status that permits reading `provider.model` as fact. */
+export type TurnModelStatus = 'observed' | 'unobserved' | 'incomplete' | 'conflict'
+
+/** Provenance of an observed model id. `usage_event` is a billed model, not a requested one. */
+export type TurnModelSource = 'provider_model_event' | 'usage_event'
+
+export type TurnRoleStatus = 'observed' | 'unobserved' | 'conflict'
+
+export interface TurnRole {
+  /** Structural role of this turn, e.g. `main`, `approval`, `guardian`, `subagent`. */
+  role: string
+  /** What supplied the role, e.g. the integration or host component name. */
+  source: string
+  /** Parent turn or run identity when the host knows it. */
+  parentId?: string
+  /** Session this turn reviewed, for review/approval roles. */
+  reviewedSessionId?: string
 }
 
 export type TurnEndReason =
@@ -495,6 +541,16 @@ function isTurnDanger(value: unknown): value is TurnDanger {
     isOptionalString(raw.tool) && isOptionalString(raw.toolUseId)
 }
 
+/** Roles are bounded identifiers, never free-form prose lifted from a prompt. */
+function isTurnRole(value: unknown): value is TurnRole {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  const bounded = (input: unknown) => typeof input === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$/.test(input)
+  return bounded(raw.role) && bounded(raw.source) &&
+    (raw.parentId === undefined || bounded(raw.parentId)) &&
+    (raw.reviewedSessionId === undefined || bounded(raw.reviewedSessionId))
+}
+
 function isTurnError(value: unknown): value is TurnError {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
@@ -600,6 +656,22 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   require(!!workspace && typeof workspace.id === 'string' && workspace.id.length > 0 && typeof workspace.root === 'string' && workspace.root.length > 0, '$.workspace', 'invalid workspace identity')
   const provider = raw.provider as Record<string, unknown> | undefined
   require(!!provider && ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id)) && isOptionalString(provider.version) && isOptionalString(provider.model), '$.provider', 'invalid provider identity')
+  if (provider?.modelStatus !== undefined) require(
+    (provider.modelStatus === 'observed' && typeof provider.model === 'string' && provider.model.length > 0 &&
+      ['provider_model_event', 'usage_event'].includes(String(provider.modelSource)) &&
+      provider.modelOmissionReason === undefined) ||
+    (['unobserved', 'incomplete', 'conflict'].includes(String(provider.modelStatus)) &&
+      provider.model === undefined && provider.modelSource === undefined &&
+      typeof provider.modelOmissionReason === 'string' && provider.modelOmissionReason.length > 0),
+  '$.provider.modelStatus', 'must match the observed model and carry a reason when absent')
+  require(provider?.modelSource === undefined || provider.modelStatus !== undefined,
+    '$.provider.modelSource', 'requires an explicit model status')
+  if (raw.turnRoleStatus !== undefined) require(
+    (raw.turnRoleStatus === 'observed' && isTurnRole(raw.turnRole)) ||
+    (['unobserved', 'conflict'].includes(String(raw.turnRoleStatus)) && raw.turnRole === undefined),
+  '$.turnRoleStatus', 'must match the structurally observed turn role')
+  require(raw.turnRole === undefined || raw.turnRoleStatus === 'observed',
+    '$.turnRole', 'requires an observed turn role status')
 
   const sections: Array<[string, (payload: unknown) => boolean, boolean?]> = [
     ['user', isTextPayload], ['assistant', isTextPayload],

@@ -12,6 +12,8 @@ import {
   type Evidence,
   type TurnEndReason,
   type TurnEvidence,
+  type TurnModelSource,
+  type TurnModelStatus,
   type TurnTermination
 } from '../../shared/turn-record.js'
 import { classifyDanger } from '../../main/danger.js'
@@ -140,6 +142,56 @@ function stringAt(payload: Record<string, unknown>, ...keys: string[]): string |
 function nestedRecord(payload: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
   const value = payload[key]
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+interface ModelIdentity {
+  model?: string
+  status: TurnModelStatus
+  source?: TurnModelSource
+  omissionReason?: string
+}
+
+/**
+ * Decide what the record may claim about the model.
+ *
+ * The rules are deliberately narrow: a single complete provider observation is
+ * fact, a billed usage model is fact with weaker provenance, and everything
+ * else is an explicit gap. Reporting several ids in one turn is a conflict to
+ * surface, not something to resolve by picking one.
+ */
+export function resolveModelIdentity(
+  modelEvents: TraceEvent[],
+  models: Set<string>,
+  usageModel: string | undefined
+): ModelIdentity {
+  if (modelEvents.length > 0) {
+    const complete = modelEvents.every((event) => event.runtimeMetadata?.complete === true)
+    if (models.size > 1) {
+      return {
+        status: 'conflict',
+        omissionReason: `provider reported ${models.size} distinct model ids in one turn ` +
+          `(${[...models].sort().slice(0, 3).map((id) => id.slice(0, 64)).join(', ')})`
+      }
+    }
+    if (complete && models.size === 1) {
+      return { model: [...models][0], status: 'observed', source: 'provider_model_event' }
+    }
+    return {
+      status: 'incomplete',
+      omissionReason: models.size === 0
+        ? 'provider model observation carried no usable model id'
+        : 'provider model observation was marked incomplete'
+    }
+  }
+  if (typeof usageModel === 'string' && usageModel.length > 0) {
+    // A usage counter names the model that was billed. That is an observation,
+    // but not the same provenance as a provider model event, so it is labelled.
+    return { model: usageModel, status: 'observed', source: 'usage_event' }
+  }
+  return {
+    status: 'unobserved',
+    omissionReason: 'provider exposed no model id to lifecycle hooks or usage events'
+  }
 }
 
 function sessionIdOf(payload: Record<string, unknown>): string | undefined {
@@ -352,7 +404,8 @@ function limitationMetadata(limitations: CaptureLimitation[]): { scryCaptureLimi
   return limitations.length > 0 ? { scryCaptureLimitations: limitations } : undefined
 }
 
-function lifecycleTraceEvents(args: {
+/** Exported for contract tests: payload -> trace events must stay a pure mapping. */
+export function lifecycleTraceEvents(args: {
   provider: ProviderId
   event: string
   payload: Record<string, unknown>
@@ -460,6 +513,27 @@ function lifecycleTraceEvents(args: {
       id: `provider-model-${stableHash([ids, args.payload.model_ids_complete]).slice(0, 16)}`,
       ts: at, runId: args.runId, kind: 'harness', stage: 'provider_model',
       runtimeMetadata: { modelIds: valid ? [...new Set(ids)] : [], complete: valid && args.payload.model_ids_complete === true }
+    })
+  }
+  if (!subagentScopedPayload(args.payload) && 'turn_role' in args.payload) {
+    // Same contract shape as `task_context`: an explicit, bounded, host-supplied
+    // structure or nothing. There is deliberately no text heuristic here — a
+    // fixed approval-history prefix is a diagnostic, not an identity.
+    const role = nestedRecord(args.payload, 'turn_role')
+    const bounded = (value: unknown, max: number) =>
+      typeof value === 'string' && new RegExp(`^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,${max}}$`).test(value)
+    const valid = !!role && role.session_id === sessionIdOf(args.payload) &&
+      bounded(role.role, 127) && bounded(role.source, 127) &&
+      (role.parent_id === undefined || bounded(role.parent_id, 127)) &&
+      (role.reviewed_session_id === undefined || bounded(role.reviewed_session_id, 127))
+    out.push({
+      id: `turn-role-${stableHash(valid ? role : 'invalid').slice(0, 16)}`,
+      ts: at, runId: args.runId, kind: 'harness', stage: 'turn_role',
+      runtimeMetadata: valid && role ? {
+        role: role.role, roleSource: role.source,
+        ...(role.parent_id !== undefined ? { roleParentId: role.parent_id } : {}),
+        ...(role.reviewed_session_id !== undefined ? { reviewedSessionId: role.reviewed_session_id } : {})
+      } : { invalid: true }
     })
   }
   if (!subagentScopedPayload(args.payload) && 'task_context' in args.payload) {
@@ -2243,9 +2317,29 @@ async function finalizeOpenTurn(
     const ids = event.runtimeMetadata?.modelIds
     return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
   }))
-  const model = modelEvents.length
-    ? modelEvents.every((event) => event.runtimeMetadata?.complete === true) && models.size === 1 ? [...models][0] : undefined
-    : evidence.usage.value?.model
+  // A dropped model used to be indistinguishable from a provider that never
+  // reports one, which pushed consumers toward inferring the requested model.
+  // Each cause now gets its own status and reason, and none of them permits a
+  // guess.
+  const modelIdentity = resolveModelIdentity(modelEvents, models, evidence.usage.value?.model)
+  const model = modelIdentity.model
+  const turnRoleEvents = storedEvents.filter((event) => event.stage === 'turn_role' && event.kind === 'harness')
+  const turnRoles = new Map(turnRoleEvents.map((event) => [stableHash([
+    event.runtimeMetadata?.invalid, event.runtimeMetadata?.role, event.runtimeMetadata?.roleSource,
+    event.runtimeMetadata?.roleParentId, event.runtimeMetadata?.reviewedSessionId
+  ]), event.runtimeMetadata]))
+  const turnRoleMetadata = turnRoles.size === 1 ? [...turnRoles.values()][0] : undefined
+  const observedTurnRole = turnRoleMetadata && turnRoleMetadata.invalid !== true &&
+    typeof turnRoleMetadata.role === 'string' && typeof turnRoleMetadata.roleSource === 'string'
+    ? {
+        role: String(turnRoleMetadata.role),
+        source: String(turnRoleMetadata.roleSource),
+        ...(typeof turnRoleMetadata.roleParentId === 'string' ? { parentId: String(turnRoleMetadata.roleParentId) } : {}),
+        ...(typeof turnRoleMetadata.reviewedSessionId === 'string'
+          ? { reviewedSessionId: String(turnRoleMetadata.reviewedSessionId) }
+          : {})
+      }
+    : undefined
   const draft: Omit<AgentTurnRecord, 'sequence'> = {
     schemaVersion: 1,
     recordKind: 'agent_turn',
@@ -2254,11 +2348,18 @@ async function finalizeOpenTurn(
     workspace: { id: enablement.config.workspaceId, root: enablement.workspaceRoot },
     provider: {
       id: open.provider,
-      ...(model ? { model } : {})
+      ...(model ? { model } : {}),
+      modelStatus: modelIdentity.status,
+      ...(modelIdentity.source ? { modelSource: modelIdentity.source } : {}),
+      ...(modelIdentity.omissionReason ? { modelOmissionReason: modelIdentity.omissionReason } : {})
     },
     linkedTaskId: boundTask ? String(boundTask.taskId) : null,
     ...(boundTask ? { linkedTaskGeneration: String(boundTask.taskGeneration) } : {}),
     taskLinkStatus: boundTask ? 'bound' : taskEvents.length ? 'conflict' : 'unbound',
+    // Absence of a host-supplied role is reported as `unobserved`, never as a
+    // main-agent turn: text prefixes are not an identity boundary.
+    turnRoleStatus: observedTurnRole ? 'observed' : turnRoleEvents.length ? 'conflict' : 'unobserved',
+    ...(observedTurnRole ? { turnRole: observedTurnRole } : {}),
     sessionId: open.sessionId,
     ...(open.providerTurnId ? { providerTurnId: open.providerTurnId } : {}),
     generation: open.generation,
