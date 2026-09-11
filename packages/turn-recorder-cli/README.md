@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.41 \
+npm install -g scry-turn-recorder@0.2.42 \
   --registry=https://registry.npmjs.org
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -111,6 +111,17 @@ Agent、skill 与提示词不应主动调用这些命令。
 - 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
+
+## 0.2.42 模型可观测性、Hook 覆盖率与回合角色
+
+新记录显式说明「为什么这里是空的」，只作用于之后生成的记录，不改历史文件、recordId 或 outbox：
+
+- `provider.modelStatus`：`observed` / `unobserved` / `incomplete` / `conflict`，配 `modelSource`（`provider_model_event` 或 `usage_event`）与 `modelOmissionReason`。旧行为是三种不同原因都静默省略 `provider.model`，消费端只能去猜请求模型。现在 `observed` 才允许把 `model` 当事实且必须带 source；其余状态一定没有 `model`/`modelSource` 且必须有原因。一轮里报了多个模型只报 `conflict`，不挑一个、也不回落到 usage 模型。`usage_event` 表示这是**被计费**的模型，不是被请求的模型。
+- `hooks` 证据段：只要数组里还有 `status: "unknown"` 的运行（宿主只投递了生命周期事件、没有逐 hook 结果），整段就是 `partial + inferred`，`omissionReason` 写明「N of M 个运行没有观测到结果」。旧实现在“部分有结果、部分只有投递”时整段判 `available/exact`，于是下游把派生的 `failed=0` 读成「Hook 成功率 100%」。**`hookFailedCount=0` 不是成功率分母**，除非整段是 `available`。
+- `turnRoleStatus` 与 `turn_role` 入参：`{ session_id, role, source, parent_id?, reviewed_session_id? }`，由**驱动该会话的进程**在事件发生时声明，session 必须与该生命周期事件一致，子代理上下文不归入主轮，所有值限定长标识符字符集。合法时写 `turnRoleStatus=observed` + `turnRole`；显式非法写 `conflict`；未声明写 `unobserved`。
+- **未声明就是 `unobserved`，不是主 Agent 回合。** 同一 sessionId 下的轮次可能是人发起的，也可能是编排器注入的，Scry 不区分也不猜。固定文案前缀（例如把审批历史抄进 prompt）是诊断信息，不是身份边界，不得用正则反推角色；消费端不得拿 `turnCount` 当真实用户回合数或人工介入次数。
+- 这些字段不是签名或执行授权，调用方负责真实身份与发送时刻；异步重试必须发送原快照。`turn_role` 与 `task_context` 一样属于保留字段，集成层应确保它来自可验证来源而不是宿主/用户 payload。
+- 安装示例对应待交付源码版本，不代表已经发布或升级本机 CLI。
 
 ## 0.2.41 原生模型与显式任务关联
 
@@ -366,7 +377,7 @@ scry upgrade            # 前台升级到 registry latest（不受 major 边界�
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json
-{ "recorderVersions": { "thisCli": "0.2.41", "lastRecord": "0.2.30" } }
+{ "recorderVersions": { "thisCli": "0.2.42", "lastRecord": "0.2.30" } }
 ```
 
 对应的 `recorder.version` 检查在两者不一致时报 `warn`(不改变退出码 —— 刚升级完还没记新轮次时本来就会不一致)。看到它就去确认 hook 用的是哪一份,并升级那一份。
