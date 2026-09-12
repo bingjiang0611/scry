@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { basename, dirname, isAbsolute, join } from 'node:path'
-import { realpathSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
@@ -94,7 +94,9 @@ import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
 import { RunStopLifecycle } from './run-stop-lifecycle'
-import { RemoteHostService } from './remote/remote-host-service'
+import { RemoteHostService, type RemoteHostServiceDependencies } from './remote/remote-host-service'
+import { ReverseTunnelTransport } from './remote/relay-client'
+import { createRelayConnect } from './remote/relay-connect'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { archiveSessionId } from './session-id'
@@ -3517,6 +3519,28 @@ handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
 // outbound relay leg is opened and no device can reach it yet. Binding startRun
 // to the live agent:start path and opening a relay transport are the next steps.
 let remoteHostService: RemoteHostService | null = null
+// Optional relay wiring from env. SCRY_REMOTE_RELAY is JSON:
+//   { "host": "relay.example", "port": 443, "token": "...", "tls": true, "caPath": "..." }
+// When absent the subsystem stays dormant (no outbound leg). The token is a
+// per-host bearer provisioned out of band and is never logged.
+function resolveRemoteRelayTransport(): RemoteHostServiceDependencies['createTransport'] {
+  const raw = process.env.SCRY_REMOTE_RELAY
+  if (!raw) return undefined
+  let cfg: { host?: unknown; port?: unknown; token?: unknown; tls?: unknown; caPath?: unknown }
+  try { cfg = JSON.parse(raw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY is not valid JSON; remote relay disabled'); return undefined }
+  if (typeof cfg.host !== 'string' || typeof cfg.port !== 'number' || typeof cfg.token !== 'string') {
+    console.warn('[scry] SCRY_REMOTE_RELAY missing host/port/token; remote relay disabled')
+    return undefined
+  }
+  const host = cfg.host, port = cfg.port, token = cfg.token
+  const tls = cfg.tls === true
+    ? { ca: typeof cfg.caPath === 'string' ? readFileSync(cfg.caPath, 'utf8') : undefined, servername: host }
+    : undefined
+  return (ctx: { hostId: string }) => {
+    const { connect, readyEvent } = createRelayConnect({ host, port, hostId: ctx.hostId, token, tls })
+    return new ReverseTunnelTransport({ connect, readyEvent })
+  }
+}
 async function startRemoteHostIfEnabled(): Promise<void> {
   if (remoteHostService || process.env.SCRY_REMOTE_HOST !== '1') return
   try {
@@ -3526,6 +3550,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // through Scry's own project picker.
       authorizeWorkspace: (cwd) => resolveKnownProjectDirectory(cwd),
       gate: providerOperationGate,
+      createTransport: resolveRemoteRelayTransport(),
       startRun: async ({ routing, progress }) => {
         // TODO(remote-live): delegate to the live run-start path (RunRegistry +
         // Provider adapter) under the existing workspace authorization + gate.

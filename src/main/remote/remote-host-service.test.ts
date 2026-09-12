@@ -10,7 +10,6 @@ import { randomUUID, webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { RemoteHostService } from './remote-host-service'
 import { ReverseTunnelTransport, type OutboundLeg } from './relay-client'
-import type { InnerMtlsHost } from './inner-mtls-host'
 import type { PairingAuthority } from './pairing'
 import { ProviderOperationGate } from '../provider-operation-gate'
 
@@ -98,7 +97,7 @@ describe('RemoteHostService (lifecycle facade)', () => {
       authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
       startRun: async ({ routing }) => { seen.push(routing.cwd) },
       gate: new ProviderOperationGate(),
-      createTransport: (_host: InnerMtlsHost) => new ReverseTunnelTransport({ connect: () => netConnect({ port: relay.hostPort, host: '127.0.0.1' }) as unknown as OutboundLeg, poolSize: 2 })
+      createTransport: () => new ReverseTunnelTransport({ connect: () => netConnect({ port: relay.hostPort, host: '127.0.0.1' }) as unknown as OutboundLeg, poolSize: 2 })
     })
     cleanups.push(() => service.dispose())
     expect(service.relayConfigured).toBe(true)

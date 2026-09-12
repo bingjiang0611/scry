@@ -10,7 +10,8 @@
     "smoke": "node smoke.mjs",
     "smoke:enrollment": "node enrollment-smoke.mjs",
     "smoke:pair": "node pair-smoke.mjs",
-    "smoke:g1": "node --import ./ts-relative-resolve.mjs g1-smoke.mjs"
+    "smoke:g1": "node --import ./ts-relative-resolve.mjs g1-smoke.mjs",
+    "smoke:relay": "node --import ./ts-relative-resolve.mjs relay-e2e.mjs"
   },
   "dependencies": {
     "@peculiar/x509": "2.1.0",
