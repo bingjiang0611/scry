@@ -73,18 +73,25 @@ describe('PairingTransport (device-facing pairing prove/status)', () => {
     const expected = await verifyCSR(device.csrPEM)
     const pair = await controller.authority.begin()
 
-    const proved = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'My iPhone' })
-    expect(proved.receipt.state).toBe('awaiting_local_confirmation')
+    const rid = 'req-1'
+    const proved = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: rid, operation: 'pair.prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'My iPhone' })
+    expect(proved.kind).toBe('pair.pending')
+    expect(proved.requestId).toBe(rid)
     // The fingerprint came from the verified TLS peer cert, matching the CSR key.
-    expect(proved.receipt.publicKeySHA256).toBe(expected.publicKeySHA256)
+    expect(proved.publicKeySHA256).toBe(expected.publicKeySHA256)
 
     // Status over a fresh connection reflects the same pending state.
-    const status = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'status', pairingId: pair.pairingId, secret: pair.secret })
-    expect(status.receipt.state).toBe('awaiting_local_confirmation')
+    const status = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: 'req-2', operation: 'pair.status', pairingId: pair.pairingId, secret: pair.secret })
+    expect(status.kind).toBe('pair.pending')
 
-    // Local confirmation (Mac UI) grants the device.
-    const grant = await controller.authority.confirmLocal(pair.pairingId, proved.receipt.publicKeySHA256)
+    // Local confirmation (Mac UI) grants the device; a re-prove then returns the
+    // granted certificate over the same wire.
+    const grant = await controller.authority.confirmLocal(pair.pairingId, proved.publicKeySHA256)
     expect(grant.deviceId).toMatch(/[0-9a-f-]{36}/)
+    const granted = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: 'req-3', operation: 'pair.prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'My iPhone' })
+    expect(granted.kind).toBe('pair.granted')
+    expect(granted.deviceId).toBe(grant.deviceId)
+    expect(granted.certificatePEM).toContain('BEGIN CERTIFICATE')
     void identity
   })
 
@@ -94,9 +101,9 @@ describe('PairingTransport (device-facing pairing prove/status)', () => {
     const other = await deviceMaterials() // different keypair -> different cert
     const pair = await controller.authority.begin()
     // Present `other`'s cert (TLS proves the OTHER key) but send `device`'s CSR.
-    const reply = await call(addr, caPEM, other.certPEM, other.keyPEM, { op: 'prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'x' })
-    expect(reply.receipt).toBeUndefined()
-    expect(typeof reply.error).toBe('string')
+    const reply = await call(addr, caPEM, other.certPEM, other.keyPEM, { protocolMajor: 1, requestId: 'req-1', operation: 'pair.prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'x' })
+    expect(reply.kind).toBe('pair.denied')
+    expect(typeof reply.code).toBe('string')
   })
 
   it('refuses a wrong pairing secret with a truthful error, not a receipt', async () => {
@@ -104,8 +111,8 @@ describe('PairingTransport (device-facing pairing prove/status)', () => {
     const device = await deviceMaterials()
     const pair = await controller.authority.begin()
     void pair
-    const reply = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'prove', pairingId: pair.pairingId, secret: 'A'.repeat(43), csrPEM: device.csrPEM, deviceLabel: 'x' })
-    expect(reply.receipt).toBeUndefined()
-    expect(typeof reply.error).toBe('string')
+    const reply = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: 'req-1', operation: 'pair.prove', pairingId: pair.pairingId, secret: 'A'.repeat(43), csrPEM: device.csrPEM, deviceLabel: 'x' })
+    expect(reply.kind).toBe('pair.denied')
+    expect(typeof reply.code).toBe('string')
   })
 })

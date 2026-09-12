@@ -156,6 +156,37 @@ public enum G0Transport {
     return try decodePair(await exchange(port: port, identity: identity, request: JSONEncoder().encode(request), route: "/pair"), requestId: requestId)
   }
 
+  // Relay endpoint: outer WS(S) hop to a public relay that byte-shuttles to the
+  // NAT-bound host's reverse tunnel. Routing is `/?host=<hostId>&mode=pair`; the
+  // relay never sees inner keys. The device pins the host anchor (from the QR
+  // code) for the inner TLS 1.3 mTLS and skips leaf hostname verification
+  // because the per-launch host server cert carries no SAN (chain-to-anchor is
+  // the only trust decision). Outer TLS is used only when a relay CA is given.
+  public struct RelayEndpoint: Sendable {
+    public let host: String
+    public let port: Int
+    public let hostId: String
+    public let relayServerName: String?
+    public init(host: String, port: Int, hostId: String, relayServerName: String? = nil) {
+      self.host = host
+      self.port = port
+      self.hostId = hostId
+      self.relayServerName = relayServerName
+    }
+  }
+
+  public static func relayPairProve(endpoint: RelayEndpoint, identity: G0ProbeIdentity, pairingId: String, secret: String, csrPEM: String, deviceLabel: String) async throws -> PairOutcome {
+    let requestId = UUID().uuidString
+    let request = try PairProofRequest(protocolMajor: 1, requestId: requestId, operation: "pair.prove", pairingId: pairingId, secret: secret, csrPEM: csrPEM, deviceLabel: deviceLabel)
+    return try decodePair(await exchangeRelay(endpoint: endpoint, mode: "pair", identity: identity, request: JSONEncoder().encode(request)), requestId: requestId)
+  }
+
+  public static func relayPairStatus(endpoint: RelayEndpoint, identity: G0ProbeIdentity, pairingId: String, secret: String) async throws -> PairOutcome {
+    let requestId = UUID().uuidString
+    let request = try PairStatusRequest(protocolMajor: 1, requestId: requestId, operation: "pair.status", pairingId: pairingId, secret: secret)
+    return try decodePair(await exchangeRelay(endpoint: endpoint, mode: "pair", identity: identity, request: JSONEncoder().encode(request)), requestId: requestId)
+  }
+
   private static func decodePair(_ bytes: Data, requestId: String) throws -> PairOutcome {
     // Correlate the response to our own request id before trusting any field.
     if let granted = try? JSONDecoder().decode(PairGrantedResponse.self, from: bytes), granted.requestId == requestId {
@@ -228,6 +259,82 @@ public enum G0Transport {
       // its immediate ClientHello cannot be silently rejected by HTTP state.
       try await channel.eventLoop.submit {
         try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: "scry-host.test"))
+        try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
+      }.get()
+      let reply = try await result.futureResult.get()
+      try await group.shutdownGracefully()
+      return reply
+    } catch {
+      try? await group.shutdownGracefully()
+      throw error
+    }
+  }
+
+  // Relay variant of `exchange`. Mirrors the loopback security decisions but
+  // dials a public relay and routes by hostId+mode instead of a fixed port, and
+  // pins the inner server to the host anchor without leaf-hostname verification.
+  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data) async throws -> Data {
+    guard (1...65535).contains(endpoint.port), request.count < 65_536, ["pair", "run"].contains(mode),
+          !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
+    let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    do {
+      // Outer TLS only when a relay CA is supplied; the local smoke relay is ws://.
+      let outerContext: NIOSSLContext?
+      if !identity.outerCA.isEmpty {
+        var outer = TLSConfiguration.makeClientConfiguration()
+        outer.minimumTLSVersion = .tlsv13
+        outer.maximumTLSVersion = .tlsv13
+        outer.trustRoots = .certificates(try NIOSSLCertificate.fromPEMBytes(Array(identity.outerCA)))
+        outer.certificateVerification = .fullVerification
+        outerContext = try NIOSSLContext(configuration: outer)
+      } else {
+        outerContext = nil
+      }
+      var inner = TLSConfiguration.makeClientConfiguration()
+      inner.minimumTLSVersion = .tlsv13
+      inner.maximumTLSVersion = .tlsv13
+      inner.trustRoots = .certificates(try NIOSSLCertificate.fromPEMBytes(Array(identity.innerCA)))
+      // Chain-to-anchor is the trust decision; the per-launch host leaf has no SAN.
+      inner.certificateVerification = .noHostnameVerification
+      if let certificate = identity.certificate, let privateKey = identity.privateKey {
+        inner.certificateChain = try NIOSSLCertificate.fromPEMBytes(Array(certificate)).map { .certificate($0) }
+        inner.privateKey = .privateKey(try NIOSSLPrivateKey(bytes: Array(privateKey), format: .pem))
+      } else if mode != "pair" {
+        // Only the pairing bootstrap may omit the client certificate.
+        throw ProbeError.invalidArguments
+      }
+      let innerContext = try NIOSSLContext(configuration: inner)
+      let uri = "/?host=\(endpoint.hostId)&mode=\(mode)"
+      let hostHeader = endpoint.relayServerName ?? endpoint.host
+      let result = group.next().makePromise(of: Data.self)
+      let upgrade: EventLoopFuture<Channel> = try await ClientBootstrap(group: group)
+        .connectTimeout(.seconds(10))
+        .channelOption(ChannelOptions.writeBufferWaterMark, value: ChannelOptions.Types.WriteBufferWaterMark(low: 262_144, high: 524_288))
+        .connect(host: endpoint.host, port: endpoint.port) { channel in
+          channel.eventLoop.makeCompletedFuture {
+            let pipeline = channel.pipeline.syncOperations
+            if let outerContext {
+              try pipeline.addHandler(NIOSSLClientHandler(context: outerContext, serverHostname: endpoint.relayServerName ?? endpoint.host))
+            }
+            let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 262_144, upgradePipelineHandler: { channel, _ in
+              channel.eventLoop.makeCompletedFuture {
+                try channel.pipeline.syncOperations.addHandler(TunnelCodec())
+                return channel
+              }
+            })
+            let headers = HTTPHeaders([("Host", hostHeader), ("Content-Length", "0")])
+            let head = HTTPRequestHead(version: .http1_1, method: .GET, uri: uri, headers: headers)
+            let configuration = NIOTypedHTTPClientUpgradeConfiguration(upgradeRequestHead: head, upgraders: [upgrader], notUpgradingCompletionHandler: { channel in
+              channel.eventLoop.makeFailedFuture(ProbeError.invalidFrame)
+            })
+            channel.eventLoop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
+            return try pipeline.configureUpgradableHTTPClientPipeline(configuration: .init(upgradeConfiguration: configuration))
+          }
+        }
+      let channel = try await upgrade.get()
+      try await channel.eventLoop.submit {
+        // Inner server hostname is nil: chain-to-anchor is the only check.
+        try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
         try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
       }.get()
       let reply = try await result.futureResult.get()
