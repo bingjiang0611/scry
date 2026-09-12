@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import RemoteProbe
+@testable import RemoteTransport
 
 final class WireTests: XCTestCase {
   func testSharedCorpus() throws {

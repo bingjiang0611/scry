@@ -48,7 +48,7 @@ const swift = `// Generated from wire.schema.json. Do not edit.\nimport Foundati
   return `struct ${name}: Codable, Sendable {\n${fields.map(([key, rule]) => `  let ${key}: ${swiftType(rule)}`).join('\n')}\n  private enum CodingKeys: String, CodingKey { case ${fields.map(([key]) => key).join(', ')} }\n  init(${fields.map(([key, rule]) => `${key}: ${swiftType(rule)}`).join(', ')}) throws {\n${fields.map(([key]) => `    self.${key} = ${key}`).join('\n')}\n    try validate()\n  }\n  init(from decoder: Decoder) throws {\n    let all = try decoder.container(keyedBy: WireKey.self)\n    guard Set(all.allKeys.map(\\.stringValue)) == Set([${fields.map(([key]) => JSON.stringify(key)).join(', ')}]) else { throw WireError.invalidFields }\n    let values = try decoder.container(keyedBy: CodingKeys.self)\n${fields.map(([key, rule]) => `    ${key} = try values.decode(${swiftType(rule)}.self, forKey: .${key})`).join('\n')}\n    try validate()\n  }\n  private func validate() throws {\n${fields.map(([key, rule]) => swiftChecks(key, rule)).join('\n')}\n  }\n}`
 }).join('\n\n') + '\n'
 for (const [path, content] of [
-  ['generated/wire.mjs', js], ['generated/wire.ts', ts], ['swift/Sources/RemoteProbe/Wire.swift', swift]
+  ['generated/wire.mjs', js], ['generated/wire.ts', ts], ['swift/Sources/RemoteTransport/Wire.swift', swift]
 ]) {
   const destination = new URL(path, root)
   if (process.argv.includes('--check')) {

@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'experiments/remote-g0/**'
+      - 'apps/ios/**'
       - '.github/workflows/remote-g0.yml'
   push:
     branches: [main]
     paths:
       - 'experiments/remote-g0/**'
+      - 'apps/ios/**'
       - '.github/workflows/remote-g0.yml'
 
 permissions:
@@ -18,6 +20,10 @@ jobs:
   transport:
     runs-on: macos-15
     timeout-minutes: 20
+    env:
+      # macos-15's default Xcode 16.4 is too old for locked swift-collections.
+      # This installed path was checked against the runner image manifest.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,3 +41,10 @@ jobs:
       - run: swift test --package-path experiments/remote-g0/swift -j 4
       - run: swift build --package-path experiments/remote-g0/swift -j 4
       - run: node experiments/remote-g0/smoke.mjs
+      - name: Compile native iOS app and tests (not a device gate)
+        run: >-
+          xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj
+          -scheme ScryRemoteG0 -configuration Debug -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/scry-g0-ios"
+          CODE_SIGNING_ALLOWED=NO build-for-testing

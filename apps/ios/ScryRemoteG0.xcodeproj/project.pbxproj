@@ -1,0 +1,89 @@
+// !$*UTF8*$!
+{
+  archiveVersion = 1;
+  classes = {};
+  objectVersion = 56;
+  objects = {
+    100000000000000000000001 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScryRemoteG0App.swift; sourceTree = "<group>"; };
+    100000000000000000000002 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G0Fixture.swift; sourceTree = "<group>"; };
+    100000000000000000000003 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G0Keychain.swift; sourceTree = "<group>"; };
+    100000000000000000000004 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G0Model.swift; sourceTree = "<group>"; };
+    100000000000000000000005 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+    100000000000000000000009 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G0Service.swift; sourceTree = "<group>"; };
+    100000000000000000000006 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G0Tests.swift; sourceTree = "<group>"; };
+    100000000000000000000007 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = ScryRemoteG0.app; sourceTree = BUILT_PRODUCTS_DIR; };
+    100000000000000000000008 = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ScryRemoteG0Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+    200000000000000000000001 = { isa = PBXGroup; children = (200000000000000000000002, 200000000000000000000003, 200000000000000000000004); sourceTree = "<group>"; };
+    200000000000000000000002 = { isa = PBXGroup; children = (100000000000000000000001, 100000000000000000000002, 100000000000000000000003, 100000000000000000000004, 100000000000000000000009, 100000000000000000000005); path = ScryRemoteG0; sourceTree = "<group>"; };
+    200000000000000000000003 = { isa = PBXGroup; children = (100000000000000000000006); path = ScryRemoteG0Tests; sourceTree = "<group>"; };
+    200000000000000000000004 = { isa = PBXGroup; children = (100000000000000000000007, 100000000000000000000008); name = Products; sourceTree = "<group>"; };
+    300000000000000000000001 = { isa = PBXBuildFile; fileRef = 100000000000000000000001; };
+    300000000000000000000002 = { isa = PBXBuildFile; fileRef = 100000000000000000000002; };
+    300000000000000000000003 = { isa = PBXBuildFile; fileRef = 100000000000000000000004; };
+    300000000000000000000004 = { isa = PBXBuildFile; fileRef = 100000000000000000000003; };
+    300000000000000000000005 = { isa = PBXBuildFile; productRef = 800000000000000000000002; };
+    300000000000000000000007 = { isa = PBXBuildFile; fileRef = 100000000000000000000009; };
+    300000000000000000000006 = { isa = PBXBuildFile; fileRef = 100000000000000000000006; };
+    400000000000000000000001 = {
+      isa = PBXNativeTarget; buildConfigurationList = 700000000000000000000002;
+      buildPhases = (500000000000000000000001, 500000000000000000000002, 500000000000000000000003);
+      buildRules = (); dependencies = (); name = ScryRemoteG0; productName = ScryRemoteG0;
+      productReference = 100000000000000000000007; productType = "com.apple.product-type.application";
+      packageProductDependencies = (800000000000000000000002);
+    };
+    400000000000000000000002 = {
+      isa = PBXNativeTarget; buildConfigurationList = 700000000000000000000003;
+      buildPhases = (500000000000000000000004, 500000000000000000000005, 500000000000000000000006);
+      buildRules = (); dependencies = (900000000000000000000002); name = ScryRemoteG0Tests; productName = ScryRemoteG0Tests;
+      productReference = 100000000000000000000008; productType = "com.apple.product-type.bundle.unit-test";
+    };
+    500000000000000000000001 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000001, 300000000000000000000002, 300000000000000000000003, 300000000000000000000004, 300000000000000000000007); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000002 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000005); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000003 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000004 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000006); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000005 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000006 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+    600000000000000000000001 = {
+      isa = XCBuildConfiguration; name = Debug;
+      buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = dwarf; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)"); SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; ENABLE_TESTABILITY = YES; ONLY_ACTIVE_ARCH = YES; };
+    };
+    600000000000000000000002 = {
+      isa = XCBuildConfiguration; name = Release;
+      buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; };
+    };
+    600000000000000000000003 = {
+      isa = XCBuildConfiguration; name = Debug;
+      buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.g0; INFOPLIST_FILE = ScryRemoteG0/Info.plist; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 1; SUPPORTS_MACCATALYST = NO; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); };
+    };
+    600000000000000000000004 = {
+      isa = XCBuildConfiguration; name = Release;
+      buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.g0; INFOPLIST_FILE = ScryRemoteG0/Info.plist; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 1; SUPPORTS_MACCATALYST = NO; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); };
+    };
+    600000000000000000000005 = {
+      isa = XCBuildConfiguration; name = Debug;
+      buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.g0.tests; GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 1; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ScryRemoteG0.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ScryRemoteG0"; BUNDLE_LOADER = "$(TEST_HOST)"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks"); };
+    };
+    600000000000000000000006 = {
+      isa = XCBuildConfiguration; name = Release;
+      buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.g0.tests; GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 1; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ScryRemoteG0.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ScryRemoteG0"; BUNDLE_LOADER = "$(TEST_HOST)"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks"); };
+    };
+    700000000000000000000001 = { isa = XCConfigurationList; buildConfigurations = (600000000000000000000001, 600000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+    700000000000000000000002 = { isa = XCConfigurationList; buildConfigurations = (600000000000000000000003, 600000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+    700000000000000000000003 = { isa = XCConfigurationList; buildConfigurations = (600000000000000000000005, 600000000000000000000006); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+    800000000000000000000001 = { isa = XCLocalSwiftPackageReference; relativePath = "../../experiments/remote-g0/swift"; };
+    800000000000000000000002 = { isa = XCSwiftPackageProductDependency; productName = ScryG0Transport; };
+    900000000000000000000001 = { isa = PBXContainerItemProxy; containerPortal = A00000000000000000000001; proxyType = 1; remoteGlobalIDString = 400000000000000000000001; remoteInfo = ScryRemoteG0; };
+    900000000000000000000002 = { isa = PBXTargetDependency; target = 400000000000000000000001; targetProxy = 900000000000000000000001; };
+    A00000000000000000000001 = {
+      isa = PBXProject;
+      attributes = { BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 1600; TargetAttributes = { 400000000000000000000001 = { CreatedOnToolsVersion = 16.0; }; 400000000000000000000002 = { CreatedOnToolsVersion = 16.0; TestTargetID = 400000000000000000000001; }; }; };
+      buildConfigurationList = 700000000000000000000001; compatibilityVersion = "Xcode 14.0";
+      developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base, "zh-Hans");
+      mainGroup = 200000000000000000000001; productRefGroup = 200000000000000000000004;
+      projectDirPath = ""; projectRoot = "";
+      targets = (400000000000000000000001, 400000000000000000000002);
+      packageReferences = (800000000000000000000001);
+    };
+  };
+  rootObject = A00000000000000000000001;
+}
