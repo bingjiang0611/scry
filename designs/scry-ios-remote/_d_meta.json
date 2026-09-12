@@ -8,8 +8,19 @@
         {
           "path": "Scry iOS Remote.html",
           "createdAt": "2026-09-12T04:14:11.842Z",
+          "status": "changes-requested",
+          "subtitle": "v1 历史稿 · 用户要求改为 Codex iOS 结构",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "section": "iOS Remote"
+        },
+        {
+          "path": "Scry iOS Remote v2.html",
+          "createdAt": "2026-09-12T04:52:17.521Z",
           "status": "needs-review",
-          "subtitle": "A/B task-first and machine-first · simulated interactions · visual review pending",
+          "subtitle": "v2 · Codex iOS 对齐 · 首页 / 新会话 / 会话 · 视觉待审",
           "viewport": {
             "width": 390,
             "height": 844
@@ -20,5 +31,5 @@
     }
   },
   "createdAt": "2026-09-12T04:14:11.844Z",
-  "updatedAt": "2026-09-12T04:28:02.751Z"
+  "updatedAt": "2026-09-12T04:52:17.522Z"
 }

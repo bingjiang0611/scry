@@ -1,6 +1,34 @@
 # Scry iOS Remote · Design notes
 
-## 设计判断
+## 当前方向：v2 · Codex 结构对齐
+
+用户要求“UI与codex对齐”，指定三张移动端截图。此要求替代 v1 A/B 卡片结构，不再推荐旧 A；不代表用户已经验收 v2。
+
+- 入口：`Scry iOS Remote v2.html`，`#home` / `#new` / `#chat` 直达三个对照画面。
+- 首页采用纯白背景、约 17px 会话正文、51px 无边框列表行、项目内缩；底部悬浮搜索＋蓝色新建按钮，去掉四栏底部导航。
+- 新会话采用贴近 composer 的四行上下文，上方保留留白；输入框下排附件、权限、Provider/model 与发送。真实键盘交由系统，不制作伪键盘/状态栏。
+- 会话采用紧凑圆形返回、标题副标题、编辑/更多胶囊；正文与淡灰代码块为主，文件和 Agent 胶囊置于底部输入条上方。
+- 不照搬尚未支持的语音输入。文件、终端、停止与权限迁到“更多”及次级页面；离线、审批待处理、停止待确认仍在相关画面显示，不为视觉一致删除证据语义。
+- 三张截图的借鉴范围与来源 ID：`R-CODEX-IOS-NEW`、`R-CODEX-IOS-HOME`、`R-CODEX-IOS-CHAT`，见 `research.md`。原图含私人信息，不进入原型/Git。
+
+### v2 模拟交互
+
+首页搜索、置顶/项目折叠、新建任务与上下文选择、会话后续消息、文件切换/冲突示例、终端控制权接管、设备撤销、配对步骤、通知开关、下一轮 Provider/model/权限选择。现有会话不会被下一轮设置重命名；未知文件证据不显示为零，离线主机不借用另一台电脑的会话列表。
+
+审批是项目 Hook trust，不是 Full access 下假造的普通命令询问。指纹变化经过离线/恢复后仍保留新指纹，需重新复核；stop/reply/message/terminal 只到 pending，不伪造主机确认。撤销后切换在线状态或走完配对示意都不会重新授权；刷新页面才能重置原型数据。
+
+### v2 实际验证 / 缺口
+
+- `node --test designs/scry-ios-remote/prototype.test.cjs designs/scry-ios-remote/prototype-v2.test.cjs`：**24 项通过（v2 14 + v1 10）**。测试执行实际 inline script，但 document/event 是最小替身，不是浏览器 DOM 或布局引擎。
+- 本机 HTTP 入口返回 200；静态依赖为本目录 icon 和 v1 历史链接，无 CDN。`git diff --check` 通过。
+- 本轮 `browser_inspect tabs` 返回 browser relay 不可用。未执行浏览器截图、实际点击、console 或 390/430px 目视对比；不能声称完成像素级对齐。
+- 未验证 iPhone safe-area、系统键盘遮挡、横竖屏、动态字体、VoiceOver、原生 SwiftUI/APNs；未构建产品 App 或连接实际 Provider。文件编辑器/附件/语音/隔离 worktree 均未接入。
+- SHA-256：`17f62b0b94fbcad1ea9d0d2f8d17210cbccdf4409b47b67a3ff965e175b399bb`；needs-review。
+- 预览：`http://127.0.0.1:54396/Scry%20iOS%20Remote%20v2.html`（仅当前 Mac 的临时 loopback 服务）。
+
+以下内容为 v1 历史记录；其方向与交互缺口不能代替上面的 v2 说明。
+
+## v1 历史设计判断
 
 **推荐方向 A · Tasks first。** 首页先回答“接下来需要我做什么”：`Needs attention` 将待审批压到首屏，其下是运行中、完成和缓存任务；Machines 是独立主导航，不把主机管理吞掉任务路径。点任务进入同一份详情交互，详情内以 Session / Changes / Terminal 分段切换。
 

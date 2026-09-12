@@ -66,7 +66,7 @@
 
 本文件为本任务项目需求与后续验收的权威入口，完成后注册到 design-loop 本机索引。不新增全局审美规则，不宣称产物 approved。
 
-## 当前交付回执 · 2026-09-12
+## v1 交付回执 · 2026-09-12
 
 - 子 agent 已交付 `Scry iOS Remote.html`，主会话完成事件路由、离线/停止/审批、终端控制权与设备撤销等源码修正。
 - 合成事件/状态测试 `node --test designs/scry-ios-remote/prototype.test.cjs`：10 项通过；本地 HTML 返回 HTTP 200；资源与 JS 语法检查通过。
@@ -74,3 +74,18 @@
 - 当前 SHA-256：`4d6a4a8cc00fd5384592f3b960c20fca0e6b6d1eaecf7932fcf91cc54dd0bf4b`。成品 needs-review，未获用户视觉认可。
 - 详情与明确未完成的搜索/完整编辑器/Provider 选择等交互见 `design-notes.md`，不把模拟原型称为实际产品。
 - 下一步：用户查看本机预览，恢复 browser relay 后做目视/点击检查，再根据选定方向修订；不直接接入生产。
+
+## D-20260912-scry-ios-codex-alignment · v2
+
+- Feedback：用户明确要求“UI与codex对齐”，提供新会话、远程首页、会话正文三张 iPhone 截图。
+- Status：project confirmed（对齐方向）；v2 成品仍待审。v1 A/B 卡片结构 superseded，文件保留作历史对照，不再默认推荐 A。
+- H/S 变化：原 H1 英文文案是助手默认；本次按截图用中文模拟文案，海外优先产品范围不变。原 S2 四 tab 的假设被替代；新方向为顶部导航＋底部悬浮搜索/输入条，不再提供同一轮 A/B 审美选择。
+- 首页：顶部居中“远程”＋主机副标题；无边框置顶会话和项目内缩列表；底部搜索胶囊和蓝色新建圆按钮。
+- 新会话：纵向主机/项目/工作位置/分支选择，靠近底部大圆角 composer，保留大面积留白；不画假系统键盘或假状态栏。
+- 会话：紧凑顶部返回/标题/编辑/更多；正文、浅灰代码块、反应行；底部文件变更/Agent 胶囊＋输入条。不再常驻 Session/Changes/Terminal 标签或四项底栏。
+- 保留：Scry Provider/model/permission、文件/终端/审批/配对入口；模拟数据、offline 禁写、stale 重新复核、stop pending、撤销独立于终止等语义。没有真实语音能力，因此不照搬 Codex 的麦克风/声波按钮。
+- Privacy：只借结构、尺寸关系、字体与留白，不复制截图内主机名、业务会话、项目地址或业务代码；原图不进入 Git/交付静态资源。
+- Applied：新增 `Scry iOS Remote v2.html` 与独立状态测试，v1 文件/测试不覆盖。本次由主会话直接收敛已明确的方向，不启动重复设计 writer。
+- Evidence：v2 14 项 / v1 10 项合成事件与模板检查通过；入口 HTTP 200；browser relay 不可用，目视/真实点击/真机未验证。详见 `design-notes.md`。
+- Artifact：`Scry iOS Remote v2.html`，SHA-256 `17f62b0b94fbcad1ea9d0d2f8d17210cbccdf4409b47b67a3ff965e175b399bb`；`#home` / `#new` / `#chat` 可直接查看三个主画面。元数据 needs-review，不代表像素或用户验收。
+- Revisit：用户检查 v2 的三个核心画面后再做局部修订；缺浏览器/实机条件时明确未验证，不以源码检查宣称像素对齐。
