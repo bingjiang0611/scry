@@ -82,9 +82,9 @@ async function main() {
   // client cert on the PAIR endpoint, then the Mac confirms locally.
   const { keyPEM, csrPEM, selfSignedPEM } = await deviceKeyAndCSR()
   const pair = await controller.authority.begin()
-  const proved = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, selfSignedPEM, keyPEM, { op: 'prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, 'pair')
-  assert.equal(proved.receipt.state, 'awaiting_local_confirmation')
-  const grant = await controller.authority.confirmLocal(pair.pairingId, proved.receipt.publicKeySHA256)
+  const proved = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, selfSignedPEM, keyPEM, { protocolMajor: 1, requestId: 'rid-prove', operation: 'pair.prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, 'pair')
+  assert.equal(proved.kind, 'pair.pending')
+  const grant = await controller.authority.confirmLocal(pair.pairingId, proved.publicKeySHA256)
 
   // Device submits an intent through the real relay + WSS + inner mTLS.
   const submit = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, grant.certificatePEM, keyPEM, { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', prompt: 'go' }) })

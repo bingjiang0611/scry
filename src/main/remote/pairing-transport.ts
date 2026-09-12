@@ -23,7 +23,13 @@ import type { PairingAuthority } from './pairing'
 //     handed to PairingAuthority.prove/status. The device can never assert its
 //     own key fingerprint in the request body.
 //
-// One line-delimited JSON request/response per connection.
+// One line-delimited JSON request/response per connection. The wire is the
+// canonical pairing protocol (versioned + requestId-correlated) that the iOS
+// device client speaks: request { protocolMajor, requestId, operation:
+// 'pair.prove'|'pair.status', pairingId, secret, csrPEM?, deviceLabel? };
+// response { protocolMajor, requestId, kind: 'pair.pending'|'pair.granted'|
+// 'pair.revoked'|'pair.denied', ... }. The device correlates requestId before
+// trusting any field.
 
 export interface PairingTransportOptions {
   authority: PairingAuthority
@@ -91,26 +97,51 @@ export class PairingTransport {
   }
 
   async #dispatch(authority: PairingAuthority, publicKeySHA256: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; pairingId?: string; secret?: string; csrPEM?: string; deviceLabel?: string }
+    let request: { protocolMajor?: number; requestId?: string; operation?: string; pairingId?: string; secret?: string; csrPEM?: string; deviceLabel?: string }
     try { request = JSON.parse(line.toString('utf8')) }
-    catch { return { error: 'invalid_request' } }
+    catch { return { protocolMajor: 1, requestId: '', kind: 'pair.denied', code: 'invalid_request' } }
+    const requestId = typeof request.requestId === 'string' ? request.requestId : ''
+    const deny = (code: string) => ({ protocolMajor: 1, requestId, kind: 'pair.denied', code: code.slice(0, 64) })
+    if (request.protocolMajor !== 1 || !requestId) return deny('invalid_request')
     try {
-      if (request.op === 'prove') {
+      if (request.operation === 'pair.prove') {
         if (typeof request.pairingId !== 'string' || typeof request.secret !== 'string' || typeof request.csrPEM !== 'string' || typeof request.deviceLabel !== 'string') {
-          return { error: 'invalid_request' }
+          return deny('invalid_request')
         }
-        return { receipt: await authority.prove({ pairingId: request.pairingId, secret: request.secret, csrPEM: request.csrPEM, deviceLabel: request.deviceLabel }, publicKeySHA256) }
+        const receipt = await authority.prove({ pairingId: request.pairingId, secret: request.secret, csrPEM: request.csrPEM, deviceLabel: request.deviceLabel }, publicKeySHA256)
+        return this.#encodeReceipt(requestId, request.pairingId, receipt)
       }
-      if (request.op === 'status') {
-        if (typeof request.pairingId !== 'string' || typeof request.secret !== 'string') return { error: 'invalid_request' }
-        return { receipt: await authority.status(request.pairingId, request.secret, publicKeySHA256) }
+      if (request.operation === 'pair.status') {
+        if (typeof request.pairingId !== 'string' || typeof request.secret !== 'string') return deny('invalid_request')
+        const receipt = await authority.status(request.pairingId, request.secret, publicKeySHA256)
+        return this.#encodeReceipt(requestId, request.pairingId, receipt)
       }
-      return { error: 'unknown_op' }
+      return deny('unknown_op')
     } catch (error) {
       // Pairing failures (bad secret, expired, key mismatch) surface as truthful
-      // bounded codes, never as success.
-      return { error: String((error as { code?: string })?.code ?? (error as Error)?.message ?? 'error').slice(0, 64) }
+      // bounded denial codes, never as a success shape.
+      return deny(String((error as { code?: string })?.code ?? (error as Error)?.message ?? 'error'))
     }
+  }
+
+  // Map a PairingAuthority receipt to the canonical wire response. A pending
+  // receipt NEVER carries a certificate; only a locally-confirmed grant does.
+  #encodeReceipt(requestId: string, pairingId: string, receipt: {
+    state: string
+    publicKeySHA256?: string
+    deviceId?: string
+    grant?: { deviceId: string; certificatePEM: string; certificateSHA256: string; expiresAt: number }
+  }): unknown {
+    if (receipt.state === 'awaiting_local_confirmation') {
+      return { protocolMajor: 1, requestId, kind: 'pair.pending', pairingId, publicKeySHA256: receipt.publicKeySHA256 }
+    }
+    if (receipt.state === 'paired' && receipt.grant) {
+      return { protocolMajor: 1, requestId, kind: 'pair.granted', pairingId, deviceId: receipt.grant.deviceId, certificatePEM: receipt.grant.certificatePEM, certificateSHA256: receipt.grant.certificateSHA256, expiresAt: receipt.grant.expiresAt, scope: 'g0_echo_only' }
+    }
+    if (receipt.state === 'revoked') {
+      return { protocolMajor: 1, requestId, kind: 'pair.revoked', pairingId, deviceId: receipt.deviceId }
+    }
+    return { protocolMajor: 1, requestId, kind: 'pair.denied', code: receipt.state.slice(0, 64) }
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<{ port: number; host: string }> {
