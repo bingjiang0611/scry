@@ -17,7 +17,7 @@
 | G1 应用服务 / 账本 / 订阅 | 尚未实现 | 保留桌面焦点/IPC/工作区授权、durable intent fence、崩溃恢复与多端 cursor |
 | G2 任务 / Provider / trust | 尚未实现 | Claude/Codex 真实 new/resume/stop、独立 trust、auth 互斥、远程 actor 与双端竞态 |
 | G3 文件 / PTY | 尚未实现 | 相对路径与修订冲突、owner-aware cleanup、writer generation、禁止输入重放 |
-| SwiftUI Codex 对齐 | v2 HTML 为结构参考，不是原生实现 | 原生首页/新会话/会话及功能入口，连到真实协议与状态，不注入假成功 |
+| SwiftUI Codex 对齐 | 已接受 v2；新增产品 App `apps/ios/ScryRemote`（`com.scry.remote`，iOS 17+）忠实实现 SignIn/Home/New/Chat/Pair 五屏。Simulator 与真机（Personal Team 签名）均构建成功；专用 Simulator 实际启动并截图四屏。Sign in with Apple 用官方 `SignInWithAppleButton`；状态真实（无虚构会话、无假 connected 点、未配对就真实展现未连接） | Sign in with Apple entitlement 需付费 Apple Developer 账号（Personal Team 无法供置，真机登录会失败）；会话/文件/终端需 G1+ 真实主机协议才能有真实内容 |
 | G4 日常可用 / APNs | 尚未实现 | 锁屏/电源/睡眠/撤销与版本兼容；通知服务/APNs/真机后台提醒 |
 | G5 公开发行 | 未创建账号/云服务/签名资产，未部署或发布 | 登录/预算/隐私删除、付费 Apple 开发者账号、签名与上架、独立安全评审、海外实际网络矩阵 |
 

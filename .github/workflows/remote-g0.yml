@@ -50,3 +50,10 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/scry-g0-ios"
           CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Compile ScryRemote product UI (design v2, unsigned)
+        run: >-
+          xcodebuild -project apps/ios/ScryRemote.xcodeproj
+          -scheme ScryRemote -configuration Debug -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/scry-remote-ui"
+          CODE_SIGNING_ALLOWED=NO build
