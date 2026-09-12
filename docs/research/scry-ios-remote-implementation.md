@@ -40,6 +40,7 @@
 - 原生 App：`apps/ios/ScryRemoteG0.xcodeproj`，SwiftUI 诊断页 + `G0Service` actor + Keychain；不是完整 v2 产品 UI，也不开放业务操作。
 - `node experiments/remote-g0/ios-smoke.mjs <专用 Simulator UUID>`：当前版本 4 个原生 XCTest 全部通过、0 跳过；覆盖实际 Keychain、生成设备密钥的跨 actor insert-only、格式边界、TLS/model；并发 intent 只形成 1 个主机请求，TLS 1.3、无 session reuse。当前 `.xcresult`/日志/报告目录为 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-g0-ios-result-P22q8O/`；`xcresulttool` 读回确认 4 pass / 0 skip。不提交私有测试材料。
 - `RemoteProbe` 与 App 共用 `RemoteTransport` library；生成器路径和测试 import 随 Wire.swift 迁移更新。CI 显式选用 runner 已安装的 Xcode 26.3（默认 16.4 不满足锁定的 swift-collections 6.2 工具链要求），原生 build-for-testing 已加入，但远端 CI 仍未运行。
+- 真机（2026-09-12，用户连接后）：以 Personal Team `7USHN8Q8JL` 自动签名、`-allowProvisioningUpdates` 自动创建 `com.scry.remote.g0` profile，`iphoneos` 构建成功；`devicectl device install` 安装到 `鲍炋江的iPhone`（UDID 00008150-001A29A926D8401C，开发者模式 enabled）；`xcodebuild test -destination platform=iOS,id=...` 在真机上执行 3 个 XCTest 全部通过（fixture 边界、生成设备密钥 insert-only 持久、Keychain round-trip + 失败导入保留），真实验证 `AfterFirstUnlockThisDeviceOnly` 非同步 Keychain 策略在设备上生效。`testSimulatorTLSFromKeychain` 在真机上正确跳过：它需要一个从设备可达的 Mac 侧活跃 relay（host/device 绑定），而已鉴权的 LAN/公网 relay 尚未实现——这是真实缺口，不当作已通过。结果 bundle `/tmp/scry-g0-device-tests.xcresult`；签名/安装产物未入库。
 
 发现并修复 HTTP upgrade callback 内安装 inner TLS 会使 ClientHello 被 HTTP 升级状态拒绝的问题；改为升级完成后再进入内层握手。所有应用消息等待内层握手完成，没有 0-RTT 写入或失败自动重发。
 
@@ -47,12 +48,12 @@
 
 ## 下一步（仍属于完整目标）
 
-1. 继续完成 G0 的首次配对/本机确认/持久授权。原生验证 App 和 Simulator Keychain 已有证据，但不能替代真机或首次 enrollment。
-2. 经用户授权使用测试 iPhone/Personal Team 与外部测试入口，完成蜂窝/锁屏 G0-device。没有该证据不越过技术方案的高权限 gate。
-3. G0 通过后按 G1→G3 接入既有应用服务，落地 SwiftUI v2；再完成 G4/G5，不把实验性本地成功当作首发完成。
+1. 真机安装与设备 Keychain 已有真实证据（见上）。仍需：从设备可达的已鉴权 relay（ticket + host/device 绑定 + 重放/过期/限速/缓冲 + 日志脱敏）后，在真机完成 TLS-from-Keychain 与锁屏/蜂窝 G0-device；持久 grant 的真机回放与续期。
+2. 登录/身份已定为 Sign in with Apple，最低 iOS 17+；把设备身份绑定到 `PairingAuthority` 的 grant（设备证书 + Apple 身份）。
+3. 已接受设计 v2：按其实现原生 SwiftUI home/new/chat，绑真实协议/状态，真实展现未登录/未配对/未连接/空态，不注入假成功；再按 G1→G5 接入应用服务。
 
 已有九个无关 WIP 文件未被本任务修改；不复制 runner，不放宽 renderer sandbox/trust，不修改 commitHook auto_grant 策略，不自动购买、部署或推送。
 
 ## 用户外部授权增量
 
-用户明确允许在其 iPhone 安装隔离 G0 测试 App，需要其完成连接/信任/开发者模式；系统有开发签名身份但物理设备仍 unavailable。允许评估付费公网资源，**未批准创建或扣费**。Render 候选价格、风险及后续确认边界见 [公网测试评估](./scry-ios-remote-test-deployment.md)。
+用户已连接并信任其 iPhone（开发者模式 enabled），隔离 G0 测试 App 已以 Personal Team `7USHN8Q8JL` 签名安装并在真机跑通设备 Keychain XCTest（见上）。允许评估付费公网资源，**未批准创建或扣费**；仍未部署任何公网 relay。Render 候选价格、风险及后续确认边界见 [公网测试评估](./scry-ios-remote-test-deployment.md)。
