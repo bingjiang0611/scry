@@ -51,13 +51,13 @@ final class TunnelCodec: ChannelDuplexHandler {
 final class ProbeHandler: ChannelInboundHandler {
   typealias InboundIn = ByteBuffer
   typealias OutboundOut = ByteBuffer
-  private let request: ProbeRequest
-  private let result: EventLoopPromise<ProbeResponse>
+  private let request: Data
+  private let result: EventLoopPromise<Data>
   private var received = Data()
   private var sent = false
   private var settled = false
 
-  init(request: ProbeRequest, result: EventLoopPromise<ProbeResponse>) {
+  init(request: Data, result: EventLoopPromise<Data>) {
     self.request = request
     self.result = result
   }
@@ -66,11 +66,9 @@ final class ProbeHandler: ChannelInboundHandler {
     if let tlsEvent = event as? TLSUserEvent, case .handshakeCompleted = tlsEvent, !sent {
       // No 0-RTT or writes before the inner host-authenticated handshake.
       sent = true
-      do {
-        var bytes = try JSONEncoder().encode(request)
-        bytes.append(10)
-        context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
-      } catch { fail(error, context: context) }
+      var bytes = request
+      bytes.append(10)
+      context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
     }
     context.fireUserInboundEventTriggered(event)
   }
@@ -82,8 +80,7 @@ final class ProbeHandler: ChannelInboundHandler {
     guard let newline = received.firstIndex(of: 10) else { return }
     do {
       guard newline == received.count - 1 else { throw ProbeError.unexpectedReply }
-      let reply = try JSONDecoder().decode(ProbeResponse.self, from: received.prefix(upTo: newline))
-      guard reply.requestId == request.requestId, reply.payload == request.payload else { throw ProbeError.unexpectedReply }
+      let reply = Data(received.prefix(upTo: newline))
       if !settled { settled = true; result.succeed(reply) }
       context.close(promise: nil)
     } catch { fail(error, context: context) }
@@ -103,14 +100,25 @@ final class ProbeHandler: ChannelInboundHandler {
 public struct G0ProbeIdentity: Sendable {
   let outerCA: Data
   let innerCA: Data
-  let certificate: Data
-  let privateKey: Data
+  let certificate: Data?
+  let privateKey: Data?
 
+  // Full mTLS identity for post-pairing business channels.
   public init(outerCA: Data, innerCA: Data, certificate: Data, privateKey: Data) {
     self.outerCA = outerCA
     self.innerCA = innerCA
     self.certificate = certificate
     self.privateKey = privateKey
+  }
+
+  // Pairing bootstrap: the device only verifies the host anchor from the QR
+  // code and proves key possession via the in-channel CSR signature. It must
+  // NOT present an owner-device client certificate it does not yet have.
+  public init(outerCA: Data, hostAnchor: Data) {
+    self.outerCA = outerCA
+    self.innerCA = hostAnchor
+    self.certificate = nil
+    self.privateKey = nil
   }
 }
 
@@ -118,7 +126,57 @@ public enum G0Transport {
   // Intentionally loopback-only until a separate public test endpoint is
   // authorized and authenticated routing exists. This is not a business API.
   public static func echo(port: Int, identity: G0ProbeIdentity, payload: String) async throws -> Data {
-    guard (1...65535).contains(port) else { throw ProbeError.invalidArguments }
+    let request = try ProbeRequest(protocolMajor: 1, requestId: UUID().uuidString, operation: "probe.echo", payload: payload)
+    let bytes = try await exchange(port: port, identity: identity, request: JSONEncoder().encode(request))
+    let reply = try JSONDecoder().decode(ProbeResponse.self, from: bytes)
+    guard reply.requestId == request.requestId, reply.payload == request.payload else { throw ProbeError.unexpectedReply }
+    return try JSONEncoder().encode(reply)
+  }
+
+  // Pairing bootstrap over a host-authenticated channel. Returns the raw JSON
+  // response line; the caller decides local UI meaning. This does not itself
+  // establish trust: the device must have verified the host anchor from the QR
+  // code, and a granted certificate still needs the host user's confirmation.
+  public enum PairOutcome: Sendable, Equatable {
+    case pending(publicKeySHA256: String)
+    case granted(certificatePEM: String, deviceId: String, expiresAt: Int)
+    case revoked(deviceId: String)
+    case denied(code: String)
+  }
+
+  public static func pairProve(port: Int, identity: G0ProbeIdentity, pairingId: String, secret: String, csrPEM: String, deviceLabel: String) async throws -> PairOutcome {
+    let requestId = UUID().uuidString
+    let request = try PairProofRequest(protocolMajor: 1, requestId: requestId, operation: "pair.prove", pairingId: pairingId, secret: secret, csrPEM: csrPEM, deviceLabel: deviceLabel)
+    return try decodePair(await exchange(port: port, identity: identity, request: JSONEncoder().encode(request), route: "/pair"), requestId: requestId)
+  }
+
+  public static func pairStatus(port: Int, identity: G0ProbeIdentity, pairingId: String, secret: String) async throws -> PairOutcome {
+    let requestId = UUID().uuidString
+    let request = try PairStatusRequest(protocolMajor: 1, requestId: requestId, operation: "pair.status", pairingId: pairingId, secret: secret)
+    return try decodePair(await exchange(port: port, identity: identity, request: JSONEncoder().encode(request), route: "/pair"), requestId: requestId)
+  }
+
+  private static func decodePair(_ bytes: Data, requestId: String) throws -> PairOutcome {
+    // Correlate the response to our own request id before trusting any field.
+    if let granted = try? JSONDecoder().decode(PairGrantedResponse.self, from: bytes), granted.requestId == requestId {
+      return .granted(certificatePEM: granted.certificatePEM, deviceId: granted.deviceId, expiresAt: granted.expiresAt)
+    }
+    if let pending = try? JSONDecoder().decode(PairPendingResponse.self, from: bytes), pending.requestId == requestId {
+      return .pending(publicKeySHA256: pending.publicKeySHA256)
+    }
+    if let revoked = try? JSONDecoder().decode(PairRevokedResponse.self, from: bytes), revoked.requestId == requestId {
+      return .revoked(deviceId: revoked.deviceId)
+    }
+    if let denied = try? JSONDecoder().decode(PairDeniedResponse.self, from: bytes), denied.requestId == requestId {
+      return .denied(code: denied.code)
+    }
+    throw ProbeError.unexpectedReply
+  }
+
+  // Internal framed transport; public entry points must construct generated
+  // request DTOs and validate/correlate the generated response before returning.
+  static func exchange(port: Int, identity: G0ProbeIdentity, request: Data, route: String = "/device") async throws -> Data {
+    guard (1...65535).contains(port), request.count < 65_536, ["/device", "/pair"].contains(route) else { throw ProbeError.invalidArguments }
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     do {
       var outer = TLSConfiguration.makeClientConfiguration()
@@ -132,11 +190,15 @@ public enum G0Transport {
       inner.maximumTLSVersion = .tlsv13
       inner.trustRoots = .certificates(try NIOSSLCertificate.fromPEMBytes(Array(identity.innerCA)))
       inner.certificateVerification = .fullVerification
-      inner.certificateChain = try NIOSSLCertificate.fromPEMBytes(Array(identity.certificate)).map { .certificate($0) }
-      inner.privateKey = .privateKey(try NIOSSLPrivateKey(bytes: Array(identity.privateKey), format: .pem))
+      if let certificate = identity.certificate, let privateKey = identity.privateKey {
+        inner.certificateChain = try NIOSSLCertificate.fromPEMBytes(Array(certificate)).map { .certificate($0) }
+        inner.privateKey = .privateKey(try NIOSSLPrivateKey(bytes: Array(privateKey), format: .pem))
+      } else if route != "/pair" {
+        // Only the pairing bootstrap route may omit the client certificate.
+        throw ProbeError.invalidArguments
+      }
       let innerContext = try NIOSSLContext(configuration: inner)
-      let request = try ProbeRequest(protocolMajor: 1, requestId: UUID().uuidString, operation: "probe.echo", payload: payload)
-      let result = group.next().makePromise(of: ProbeResponse.self)
+      let result = group.next().makePromise(of: Data.self)
       let upgrade: EventLoopFuture<Channel> = try await ClientBootstrap(group: group)
         .connectTimeout(.seconds(10))
         .channelOption(ChannelOptions.writeBufferWaterMark, value: ChannelOptions.Types.WriteBufferWaterMark(low: 262_144, high: 524_288))
@@ -151,7 +213,7 @@ public enum G0Transport {
               }
             })
             let headers = HTTPHeaders([("Host", "localhost:\(port)"), ("Content-Length", "0")])
-            let head = HTTPRequestHead(version: .http1_1, method: .GET, uri: "/device", headers: headers)
+            let head = HTTPRequestHead(version: .http1_1, method: .GET, uri: route, headers: headers)
             let configuration = NIOTypedHTTPClientUpgradeConfiguration(upgradeRequestHead: head, upgraders: [upgrader], notUpgradingCompletionHandler: { channel in
               channel.eventLoop.makeFailedFuture(ProbeError.invalidFrame)
             })
@@ -169,9 +231,8 @@ public enum G0Transport {
         try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
       }.get()
       let reply = try await result.futureResult.get()
-      let encoded = try JSONEncoder().encode(reply)
       try await group.shutdownGracefully()
-      return encoded
+      return reply
     } catch {
       try? await group.shutdownGracefully()
       throw error

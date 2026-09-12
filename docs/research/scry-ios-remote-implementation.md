@@ -11,9 +11,9 @@
 | 需求 / Gate | 当前证据 | 仍需完成 |
 |---|---|---|
 | G0 标准双层加密传输 | macOS 7 个真实传输场景；新增真实 iOS Simulator App → Keychain → 共享 NIOSSL → WSS → Node TLS，通过并发单次请求检查 | 真机 / 证书配对 / 蜂窝 / 锁屏 |
-| G0 单一 schema | 有限 JSON Schema → JS 验证器、TS DTO、Swift Codable；共享 13-case corpus；14 Node tests、2 XCTest methods，通过漂移检查 | 完整业务 operation registry 与跨版本合同 |
+| G0 单一 schema | 有限 JSON Schema → JS 验证器、TS DTO、Swift Codable；共享 23-case corpus（含 7 类配对消息）；30 Node tests、2 XCTest methods，通过漂移检查 | 完整业务 operation registry 与跨版本合同 |
 | G0 打包 | macOS 可执行文件；原生 App 的 arm64/x86_64 Simulator bundle 构建、实际启动/测试成功；Xcode 使用正确 SDK，消除早期 CLI cross-link 警告的运行不确定性 | iPhone 签名/安装、真实锁屏与发布打包 |
-| G0 配对 / 密钥 | P-256 软件密钥/CSR → Node 验签签发 → NIOSSL 真实互操作；自签 bootstrap 被业务通道拒绝；Simulator Keychain insert-only 生成/保存、公有 proof 读回及既有 fixture TLS 均通过 | 短时秘密/活跃通道证明、Mac 人类确认、持久 grant、重放/过期/失败注入、撤销/续期、真机；不能把库互操作称为完成配对 |
+| G0 配对 / 密钥 | P-256 软件密钥/CSR → Node 验签签发 → NIOSSL 真实互操作；自签 bootstrap 被业务通道拒绝；Simulator Keychain insert-only 生成/保存、公有 proof 读回及既有 fixture TLS 均通过。新增 `PairingAuthority` 状态机：短时秘密（base64url 验证器 + timingSafe + 5 次上限）、CSR 通道密钥绑定、单事务消费秘密+签发、`await`-串行化、写失败/未知回执 fence（不重复签发）、私有 0700/0600 原子文件 + 排它租约 store、崩溃后按观测快照对账；`pair-smoke.mjs` 经真实 host-authenticated bootstrap 通道（Swift CLI → WSS → Node `/pair` 主机 → 真实 `PairingAuthority`）完成 prove→本机确认→签发→用签发证书跑真实 mTLS echo→撤销全链；13 Vitest + 30 Node + 4 Swift + 4 Simulator XCTest 通过 | Mac 上真实人类确认 UI（当前 confirmLocal 由测试直接驱动，非真人）、续期、真机 Keychain/锁屏/蜂窝；不能把状态机与合成确认称为完成配对 |
 | G1 应用服务 / 账本 / 订阅 | 尚未实现 | 保留桌面焦点/IPC/工作区授权、durable intent fence、崩溃恢复与多端 cursor |
 | G2 任务 / Provider / trust | 尚未实现 | Claude/Codex 真实 new/resume/stop、独立 trust、auth 互斥、远程 actor 与双端竞态 |
 | G3 文件 / PTY | 尚未实现 | 相对路径与修订冲突、owner-aware cleanup、writer generation、禁止输入重放 |
@@ -26,11 +26,13 @@
 详细命令、依赖锁定与可复现范围见 [G0 README](../../experiments/remote-g0/README.md)。当前测试只使用 OS 临时证书、loopback 网络和 read-only `probe.echo`；不读取或写入真实项目 `.scry`、Provider transcript、DB 或用户凭证。
 
 - `generate-wire.mjs --check`：生成一致。
-- `npm --prefix experiments/remote-g0 test`：19 项通过（14 wire + 5 CSR/签发）。
+- `npm --prefix experiments/remote-g0 test`：30 项通过（23-case wire corpus + 5 CSR/签发 + 2 边界）。
+- `node_modules/.bin/vitest run src/main/remote/pairing.test.ts`：13 项通过，覆盖仅存 verifier、密钥/CSR 通道绑定、5 次上限、候选不可替换、单次消费+签发、时钟回拨与重启不复活、写失败/未知回执 fence、签名中取消、撤销即时+持久、私有原子文件 + 排它租约 + 符号链接/损坏/陌生锁拒绝。
 - `swift test --package-path experiments/remote-g0/swift -j 4`：4 个 XCTest methods，通过 wire 语料/边界和设备密钥/CSR 测试。
 - `swift build --package-path experiments/remote-g0/swift -j 4`：macOS 编译通过。
 - `node experiments/remote-g0/smoke.mjs`：7 个真实传输场景；错误证书/篡改/断线时 0 application requests，非 harness 超时。
 - `node experiments/remote-g0/enrollment-smoke.mjs`：2 个真实场景通过，Swift CSR / Node 签发 / NIOSSL 密钥互操作及自签 bootstrap 拒绝；不是完整配对或人工确认。详见 [互操作证据与缺口](./scry-ios-remote-enrollment-interop.md)。
+- `node experiments/remote-g0/pair-smoke.mjs`：1 个全链场景通过，经真实 host-authenticated bootstrap 通道（Swift `pair prove` CLI → 外层 WSS → Node `/pair` 主机 → 真实 `PairingAuthority`），完成「错误秘密拒绝→pending→合成本机确认→granted→用签发证书跑真实 mTLS echo→撤销后拒绝」；`proves=4`、`issued=1`（只签发一次）。本机确认由 harness 直接调用，非真人。
 - 生成 TS DTO strict typecheck 通过。
 - 因独立 `node:test` / SwiftPM 依赖不能被 App Vitest 重复收集，显式排除 designs/experiments；对应实验在独立 runner 和新增 `.github/workflows/remote-g0.yml` 执行。CI workflow 已配置但未推送/未取得远端运行结果。
 - 当前工作区 App 回归：140 个 test files / 1908 个 tests 通过，3 个既有真实集成用例跳过；`npm run typecheck`、`npm run build` 通过。包含用户 WIP 的编译/自动测试结果，不代表远程业务或真实交互验收。

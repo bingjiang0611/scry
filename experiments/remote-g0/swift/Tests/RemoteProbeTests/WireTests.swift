@@ -15,10 +15,18 @@ final class WireTests: XCTestCase {
       let valid = try XCTUnwrap(fixture["valid"] as? Bool)
       let packet = try XCTUnwrap(fixture["packet"])
       let bytes = try JSONSerialization.data(withJSONObject: packet, options: .fragmentsAllowed)
-      let decode = {
-        if type == "ProbeRequest" { _ = try JSONDecoder().decode(ProbeRequest.self, from: bytes) }
-        else { _ = try JSONDecoder().decode(ProbeResponse.self, from: bytes) }
-      }
+      let decoders: [String: (Data) throws -> Void] = [
+        "ProbeRequest": { _ = try JSONDecoder().decode(ProbeRequest.self, from: $0) },
+        "ProbeResponse": { _ = try JSONDecoder().decode(ProbeResponse.self, from: $0) },
+        "PairProofRequest": { _ = try JSONDecoder().decode(PairProofRequest.self, from: $0) },
+        "PairStatusRequest": { _ = try JSONDecoder().decode(PairStatusRequest.self, from: $0) },
+        "PairPendingResponse": { _ = try JSONDecoder().decode(PairPendingResponse.self, from: $0) },
+        "PairGrantedResponse": { _ = try JSONDecoder().decode(PairGrantedResponse.self, from: $0) },
+        "PairRevokedResponse": { _ = try JSONDecoder().decode(PairRevokedResponse.self, from: $0) },
+        "PairDeniedResponse": { _ = try JSONDecoder().decode(PairDeniedResponse.self, from: $0) }
+      ]
+      let decoder = try XCTUnwrap(decoders[type], type)
+      let decode = { try decoder(bytes) }
       if valid { XCTAssertNoThrow(try decode(), name) }
       else { XCTAssertThrowsError(try decode(), name) }
     }

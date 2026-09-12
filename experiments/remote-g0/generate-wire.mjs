@@ -12,7 +12,7 @@ for (const [name, model] of models) {
       !/^[A-Z][A-Za-z]+$/.test(name) || model.type !== 'object' || model.additionalProperties !== false ||
       JSON.stringify(Object.keys(model.properties).sort()) !== JSON.stringify([...model.required].sort())) throw new Error('unsupported object schema')
   for (const [key, field] of Object.entries(model.properties)) {
-    if (!/^[a-z][A-Za-z]+$/.test(key) || !['string', 'integer'].includes(field.type)) throw new Error('unsupported field')
+    if (!/^[a-z][A-Za-z0-9]+$/.test(key) || !['string', 'integer'].includes(field.type)) throw new Error('unsupported field')
     if (Object.keys(field).some(key => !['type', 'enum', 'minLength', 'maxLength', 'minimum', 'maximum'].includes(key))) throw new Error('unsupported constraint')
   }
 }
