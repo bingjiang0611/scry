@@ -14,9 +14,13 @@
     100000000000000000000008 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
     100000000000000000000009 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
     10000000000000000000000A = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+    100000000000000000000010 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCode.swift; sourceTree = "<group>"; };
+    100000000000000000000011 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeychain.swift; sourceTree = "<group>"; };
+    100000000000000000000012 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePairingClient.swift; sourceTree = "<group>"; };
+    100000000000000000000013 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSelfTest.swift; sourceTree = "<group>"; };
     10000000000000000000000B = { isa = PBXFileReference; explicitFileType = wrapper.application; path = ScryRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
     200000000000000000000001 = { isa = PBXGroup; children = (200000000000000000000002, 200000000000000000000004); sourceTree = "<group>"; };
-    200000000000000000000002 = { isa = PBXGroup; children = (100000000000000000000001, 100000000000000000000002, 100000000000000000000003, 100000000000000000000004, 100000000000000000000005, 100000000000000000000006, 100000000000000000000007, 100000000000000000000008, 100000000000000000000009, 10000000000000000000000A); path = ScryRemote; sourceTree = "<group>"; };
+    200000000000000000000002 = { isa = PBXGroup; children = (100000000000000000000001, 100000000000000000000002, 100000000000000000000003, 100000000000000000000004, 100000000000000000000005, 100000000000000000000006, 100000000000000000000007, 100000000000000000000008, 100000000000000000000009, 100000000000000000000010, 100000000000000000000011, 100000000000000000000012, 100000000000000000000013, 10000000000000000000000A); path = ScryRemote; sourceTree = "<group>"; };
     200000000000000000000004 = { isa = PBXGroup; children = (10000000000000000000000B); name = Products; sourceTree = "<group>"; };
     300000000000000000000001 = { isa = PBXBuildFile; fileRef = 100000000000000000000001; };
     300000000000000000000002 = { isa = PBXBuildFile; fileRef = 100000000000000000000002; };
@@ -27,14 +31,22 @@
     300000000000000000000007 = { isa = PBXBuildFile; fileRef = 100000000000000000000007; };
     300000000000000000000008 = { isa = PBXBuildFile; fileRef = 100000000000000000000008; };
     300000000000000000000009 = { isa = PBXBuildFile; fileRef = 100000000000000000000009; };
+    300000000000000000000010 = { isa = PBXBuildFile; fileRef = 100000000000000000000010; };
+    300000000000000000000011 = { isa = PBXBuildFile; fileRef = 100000000000000000000011; };
+    300000000000000000000012 = { isa = PBXBuildFile; fileRef = 100000000000000000000012; };
+    300000000000000000000013 = { isa = PBXBuildFile; fileRef = 100000000000000000000013; };
+    300000000000000000000020 = { isa = PBXBuildFile; productRef = 800000000000000000000002; };
+    800000000000000000000001 = { isa = XCLocalSwiftPackageReference; relativePath = "../../experiments/remote-g0/swift"; };
+    800000000000000000000002 = { isa = XCSwiftPackageProductDependency; productName = ScryG0Transport; };
     400000000000000000000001 = {
       isa = PBXNativeTarget; buildConfigurationList = 700000000000000000000002;
       buildPhases = (500000000000000000000001, 500000000000000000000002, 500000000000000000000003);
       buildRules = (); dependencies = (); name = ScryRemote; productName = ScryRemote;
+      packageProductDependencies = (800000000000000000000002);
       productReference = 10000000000000000000000B; productType = "com.apple.product-type.application";
     };
-    500000000000000000000001 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000001, 300000000000000000000002, 300000000000000000000003, 300000000000000000000004, 300000000000000000000005, 300000000000000000000006, 300000000000000000000007, 300000000000000000000008, 300000000000000000000009); runOnlyForDeploymentPostprocessing = 0; };
-    500000000000000000000002 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000001 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000001, 300000000000000000000002, 300000000000000000000003, 300000000000000000000004, 300000000000000000000005, 300000000000000000000006, 300000000000000000000007, 300000000000000000000008, 300000000000000000000009, 300000000000000000000010, 300000000000000000000011, 300000000000000000000012, 300000000000000000000013); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000002 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000020); runOnlyForDeploymentPostprocessing = 0; };
     500000000000000000000003 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
     600000000000000000000001 = {
       isa = XCBuildConfiguration; name = Debug;
@@ -60,6 +72,7 @@
       buildConfigurationList = 700000000000000000000001; compatibilityVersion = "Xcode 14.0";
       developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base, "zh-Hans");
       mainGroup = 200000000000000000000001; productRefGroup = 200000000000000000000004;
+      packageReferences = (800000000000000000000001);
       projectDirPath = ""; projectRoot = "";
       targets = (400000000000000000000001);
     };

@@ -92,3 +92,33 @@ The harness retains `.xcresult`, logs and a non-secret report in an OS temporary
 - No manual visual/VoiceOver, physical iPhone, phone-lock, cellular, APNs, first-pairing/CSR/grant/revocation or public deployment acceptance yet. This diagnostic screen only borrows the compact header style; it is not the three v2 product screens.
 - Swift → Node CSR → issued certificate → NIOSSL interoperability and bootstrap rejection passed separately on macOS; see [enrollment evidence](../../docs/research/scry-ios-remote-enrollment-interop.md). This is not a pairing or real-device grant test.
 - No paid cloud resources created; proposed costs/conditions are in [the deployment assessment](../../docs/research/scry-ios-remote-test-deployment.md).
+
+## Product app device-side client (2026-09-12)
+
+The product app `ScryRemote` now consumes the proven `ScryG0Transport` package
+for real pairing, not UI-only:
+
+- `PairingCode.swift` — parses the Mac's out-of-band code (`scry1:` +
+  base64url(JSON)) carrying the relay endpoint, hostId, pairingId, single-use
+  secret and the full host anchor PEM the device pins. Fails closed per field.
+- `RemoteKeychain.swift` — device private key (insert-only) + granted cert
+  (upsertable on renewal); device-only, after-first-unlock, never synchronized.
+- `RemotePairingClient.swift` — generates/restores the device keypair, presents
+  its self-signed bootstrap cert for TLS possession proof, pins the host anchor,
+  and drives `relayPairProve` → (Mac confirms) → re-prove → granted, storing the
+  issued cert. Never fabricates a paired state.
+- `RemoteSelfTest.swift` — DEBUG `-selfTest` launch-argument harness.
+
+Verified: `xcodebuild ... -sdk iphonesimulator ... build` SUCCEEDED (links
+swift-nio/NIOSSL via the local package). Running the app with `-selfTest` on the
+dedicated simulator prints, and this session observed:
+`enrollment.csr/bootstrap/fingerprint/restore PASS`, `code.parse PASS`,
+`code.badPrefix/badBase64/badSecret PASS`, `keychain SKIP
+env=unsigned-simulator-missing-entitlement` (errSecMissingEntitlement -34018 on
+an unsigned simulator app; the same pattern passes on the signed G0 on-device
+build), `DONE failures=0`.
+
+Gaps: the live pairing UI is not wired into `PairView` yet, and full on-device
+pairing needs a reachable relay + running host (and, for a public wss relay, the
+outer relay CA which the code does not yet carry — an outer-TLS deployment
+follow-up, not new crypto). Keychain is exercised only on a signed build.

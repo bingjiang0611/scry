@@ -3,6 +3,11 @@ import SwiftUI
 @main
 struct ScryRemoteApp: App {
   @StateObject private var model = AppModel()
+  init() {
+    #if DEBUG
+    RemoteSelfTest.runIfRequested()
+    #endif
+  }
   var body: some Scene {
     WindowGroup {
       RootView().environmentObject(model)
