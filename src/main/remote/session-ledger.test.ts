@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, rmSync, chmodSync, writeFileSync, appendFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { SessionLedger, SessionLedgerError, type LedgerEvent, type LedgerStore } from './session-ledger'
+import { SessionLedgerFileStore } from './session-ledger-file'
+
+function privateDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'scry-ledger-'))
+  chmodSync(dir, 0o700)
+  return dir
+}
 
 class MemoryLedgerStore implements LedgerStore {
   log: LedgerEvent[]
@@ -159,5 +169,78 @@ describe('SessionLedger', () => {
     expectCode(() => ledger.recordIntent({ intentId: 'x', runId: randomUUID() }), 'invalid_intent_id')
     expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId: 'x' }), 'invalid_run_id')
     expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId: randomUUID(), detail: 'z'.repeat(4097) }), 'invalid_detail')
+  })
+})
+
+describe('SessionLedgerFileStore', () => {
+  it('durably persists the log and recovers exact state across a restart', () => {
+    const dir = privateDir()
+    try {
+      const store = new SessionLedgerFileStore(dir)
+      const ledger = new SessionLedger({ store })
+      const runId = randomUUID()
+      const intentId = randomUUID()
+      ledger.recordIntent({ intentId, runId })
+      ledger.markDispatched(runId)
+      ledger.markSettled(runId)
+      store.close()
+
+      // A brand-new store + ledger over the same directory rebuilds state.
+      const revivedStore = new SessionLedgerFileStore(dir)
+      const revived = new SessionLedger({ store: revivedStore })
+      expect(revived.describe()).toEqual({ runs: 1, events: 3, lastSeq: 3 })
+      expect(revived.runState(runId)).toBe('settled')
+      // Fence survives real persistence: replaying the intent is a duplicate.
+      expect(revived.recordIntent({ intentId, runId }).status).toBe('duplicate')
+      revivedStore.close()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('drops a torn trailing append but keeps committed records', () => {
+    const dir = privateDir()
+    try {
+      const store = new SessionLedgerFileStore(dir)
+      const runId = randomUUID()
+      new SessionLedger({ store }).recordIntent({ intentId: randomUUID(), runId })
+      store.close()
+      // Simulate a crash mid-append: a partial line with no trailing newline.
+      appendFileSync(join(dir, 'session-ledger.log'), '{"seq":2,"at":1,"ru')
+      const revived = new SessionLedger({ store: new SessionLedgerFileStore(dir) })
+      expect(revived.describe()).toEqual({ runs: 1, events: 1, lastSeq: 1 })
+      expect(revived.runState(runId)).toBe('recorded')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('fails closed on a corrupt non-final line and on a non-private directory', () => {
+    const dir = privateDir()
+    try {
+      // A complete but non-parseable middle line is real corruption.
+      writeFileSync(join(dir, 'session-ledger.log'), 'not-json\n{"seq":2}\n', { mode: 0o600 })
+      expect(() => new SessionLedgerFileStore(dir).loadAll()).toThrow('ledger_file_corrupt')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+
+    const open = mkdtempSync(join(tmpdir(), 'scry-ledger-open-'))
+    chmodSync(open, 0o755)
+    try { expect(() => new SessionLedgerFileStore(open)).toThrow('ledger_directory_not_private') }
+    finally { rmSync(open, { recursive: true, force: true }) }
+  })
+
+  it('never allows two live leases on the same directory', () => {
+    const dir = privateDir()
+    let first: SessionLedgerFileStore | undefined
+    try {
+      first = new SessionLedgerFileStore(dir)
+      expect(() => new SessionLedgerFileStore(dir)).toThrow()
+    } finally { first?.close(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('rejects use after close', () => {
+    const dir = privateDir()
+    try {
+      const store = new SessionLedgerFileStore(dir)
+      store.close()
+      expect(() => store.append({ seq: 1, at: 1, runId: randomUUID(), kind: 'intent_recorded', intentId: randomUUID() })).toThrow('ledger_store_closed')
+      expect(() => store.loadAll()).toThrow('ledger_store_closed')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })
