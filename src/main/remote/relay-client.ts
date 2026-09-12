@@ -67,13 +67,18 @@ export type OutboundLeg = Duplex
 export class ReverseTunnelTransport implements RelayTransport {
   #connect: () => OutboundLeg
   #poolSize: number
+  #readyEvent: string
   #closed = false
   #legs = new Set<OutboundLeg>()
   #onSession: ((stream: Duplex) => void) | null = null
 
-  constructor(deps: { connect: () => OutboundLeg; poolSize?: number }) {
+  // readyEvent is the event that signals the outer leg is up and safe to serve
+  // inner mTLS over: 'connect' for a plain TCP leg, 'secureConnect' for an outer
+  // TLS leg (TLS-in-TLS: inner mTLS runs inside the host<->relay outer TLS).
+  constructor(deps: { connect: () => OutboundLeg; poolSize?: number; readyEvent?: string }) {
     this.#connect = deps.connect
     this.#poolSize = Math.max(1, deps.poolSize ?? 2)
+    this.#readyEvent = deps.readyEvent ?? 'connect'
   }
 
   async start(onSession: (stream: Duplex) => void): Promise<void> {
@@ -89,7 +94,7 @@ export class ReverseTunnelTransport implements RelayTransport {
     leg.on('error', () => { /* the bridge/host handles teardown */ })
     // Hand the leg to the host once the outer connection is up. The inner TLS
     // server buffers until the device's client hello arrives through the relay.
-    leg.once('connect', () => { this.#onSession?.(leg) })
+    leg.once(this.#readyEvent, () => { this.#onSession?.(leg) })
     // Keep the pool warm: replace a consumed/closed leg.
     leg.once('close', () => {
       this.#legs.delete(leg)

@@ -32,8 +32,9 @@ export interface RemoteHostServiceDependencies {
   startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
-  // How to reach the relay (deployed ws/net connector). Absent => dormant.
-  createTransport?: (host: InnerMtlsHost) => RelayTransport
+  // How to reach the relay (deployed ws/net connector). Absent => dormant. The
+  // context carries the stable hostId + anchor the relay routes/authenticates by.
+  createTransport?: (ctx: { host: InnerMtlsHost; hostId: string; anchorSHA256: string }) => RelayTransport
 }
 
 export class RemoteHostService {
@@ -88,7 +89,9 @@ export class RemoteHostService {
       binding.close()
       throw error
     }
-    const client = deps.createTransport ? new RelayClient({ host, transport: deps.createTransport(host) }) : null
+    const client = deps.createTransport
+      ? new RelayClient({ host, transport: deps.createTransport({ host, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256 }) })
+      : null
     return new RemoteHostService({
       binding, host, client,
       anchorSHA256: identity.anchorSHA256,
