@@ -1,0 +1,24 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry iOS Remote": {
+      "versions": [
+        {
+          "path": "Scry iOS Remote.html",
+          "createdAt": "2026-09-12T04:14:11.842Z",
+          "status": "needs-review",
+          "subtitle": "A/B task-first and machine-first · simulated interactions · visual review pending",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "section": "iOS Remote"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-12T04:14:11.844Z",
+  "updatedAt": "2026-09-12T04:28:02.751Z"
+}

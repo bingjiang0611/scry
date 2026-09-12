@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Scry Remote">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="icon" href="icon.png">
+  <title>Scry iOS Remote · Interactive prototype</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --surface: #fff;
+      --surface-subtle: #f1f3f5;
+      --surface-tint: #f3f6fb;
+      --line: #e3e6ea;
+      --line-strong: #d4d9df;
+      --ink: #18202b;
+      --muted: #65707d;
+      --faint: #8e98a4;
+      --blue: #2878d5;
+      --blue-dark: #175eaf;
+      --blue-soft: #e9f2ff;
+      --green: #1d875b;
+      --green-soft: #e8f6ef;
+      --amber: #a46610;
+      --amber-soft: #fff2db;
+      --red: #ba4b4a;
+      --red-soft: #fdeceb;
+      --shadow: 0 18px 44px rgba(24, 39, 58, .10);
+      --radius: 18px;
+      --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #dfe4ea; }
+    body { color: var(--ink); font: 15px/1.42 var(--ui); -webkit-font-smoothing: antialiased; }
+    button, input, textarea { font: inherit; color: inherit; }
+    button { border: 0; background: none; cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid rgba(40,120,213,.32); outline-offset: 2px; }
+    .prototype-tools { position: fixed; z-index: 30; left: 16px; top: 12px; max-width: calc(100vw - 32px); }
+    .prototype-tools > summary { cursor: pointer; width: fit-content; padding: 8px 12px; border-radius: 10px; background: #fff; font-size: 12px; box-shadow: var(--shadow); }
+    .prototype-controls {
+      position: relative; margin-top: 8px; max-width: min(680px, calc(100vw - 32px)); flex-wrap: wrap;
+      display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+      color: #43505f; background: rgba(247,249,251,.88); border: 1px solid rgba(255,255,255,.9);
+      border-radius: 14px; box-shadow: 0 8px 24px rgba(45,60,78,.12); backdrop-filter: blur(14px);
+      font-size: 12px; white-space: nowrap;
+    }
+    .prototype-controls strong { color: var(--ink); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .control-label { padding: 5px 7px; border-radius: 9px; }
+    .control-label.active { color: var(--blue-dark); background: var(--blue-soft); font-weight: 700; }
+    .control-button { color: var(--muted); padding: 5px 7px; border-radius: 8px; }
+    .control-button:hover { background: #e9edf2; color: var(--ink); }
+    @media (max-width: 699px) { .prototype-tools { display: none; } }
+    .task-row .task-title, .task-row .task-meta, .machine-status { display: block; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+    #app { width: 100vw; height: 100vh; height: 100dvh; background: var(--bg); padding-top: env(safe-area-inset-top); }
+    @media (min-width: 700px) {
+      body { display: grid; place-items: center; }
+      #app { width: 390px; height: min(844px, calc(100dvh - 32px)); border-radius: 42px; overflow: hidden; box-shadow: 0 30px 80px rgba(26,39,55,.26), 0 0 0 8px rgba(255,255,255,.34); }
+    }
+    .app-shell { height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+    .app-content { flex: 1; min-height: 0; overflow: hidden; }
+    .screen { height: 100%; overflow-y: auto; padding: 22px 18px 112px; scrollbar-width: none; animation: appear .25s ease-out; }
+    .screen::-webkit-scrollbar { display: none; }
+    @keyframes appear { from { opacity: .25; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin: 4px 1px 22px; }
+    .eyebrow { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 29px; line-height: 1.12; letter-spacing: -.04em; }
+    h2 { font-size: 21px; line-height: 1.2; letter-spacing: -.025em; }
+    h3 { font-size: 16px; line-height: 1.25; }
+    .subhead { margin-top: 7px; color: var(--muted); font-size: 14px; }
+    .icon { width: 20px; height: 20px; display: inline-block; vertical-align: middle; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .icon.sm { width: 16px; height: 16px; }
+    .icon.lg { width: 24px; height: 24px; }
+    .icon-button { display: grid; place-items: center; width: 40px; height: 40px; color: var(--muted); border-radius: 12px; }
+    .icon-button:hover { background: var(--surface-subtle); color: var(--ink); }
+    .primary-button, .secondary-button { min-height: 44px; border-radius: 12px; padding: 0 15px; font-weight: 700; display: inline-flex; gap: 7px; align-items: center; justify-content: center; }
+    .primary-button { color: #fff; background: var(--blue); box-shadow: 0 4px 10px rgba(40,120,213,.18); }
+    .primary-button:hover { background: var(--blue-dark); }
+    .secondary-button { color: var(--blue-dark); background: var(--blue-soft); }
+    .text-button { color: var(--blue); font-weight: 700; padding: 8px 0; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .status-dot.amber { color: var(--amber); }
+    .status-dot.green { color: var(--green); }
+    .status-dot.gray { color: #9aa4ad; }
+    .status-dot.red { color: var(--red); }
+    .pill { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 9px; border-radius: 99px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .pill.amber { color: var(--amber); background: var(--amber-soft); }
+    .pill.green { color: var(--green); background: var(--green-soft); }
+    .pill.blue { color: var(--blue-dark); background: var(--blue-soft); }
+    .pill.gray { color: var(--muted); background: var(--surface-subtle); }
+    .offline-banner { margin: -5px 0 16px; padding: 11px 12px; border: 1px solid #f0d5a7; border-radius: 13px; color: #805315; background: #fff8ec; display: flex; align-items: center; gap: 9px; font-size: 13px; }
+    .offline-banner strong { color: #6e450b; }
+    .attention { margin-bottom: 23px; }
+    .attention-header, .section-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+    .attention-header h2, .section-header h2 { font-size: 17px; letter-spacing: -.015em; }
+    .section-link { color: var(--blue); font-size: 13px; font-weight: 700; }
+    .attention-card { width: 100%; padding: 16px; text-align: left; border: 1px solid #efd8ad; border-radius: 17px; background: linear-gradient(135deg,#fffdf8,#fff8eb); box-shadow: 0 5px 16px rgba(153,103,22,.06); }
+    .attention-card:hover { border-color: #dcbb7a; transform: translateY(-1px); }
+    .card-top, .row-between { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .task-title { font-size: 16px; font-weight: 750; letter-spacing: -.015em; }
+    .task-meta { margin-top: 5px; color: var(--muted); font-size: 13px; }
+    .task-meta .mono, .mono { font-family: var(--mono); font-size: .92em; }
+    .attention-footer { display: flex; align-items: center; gap: 8px; margin-top: 15px; padding-top: 12px; border-top: 1px solid rgba(164,102,16,.16); color: #855614; font-size: 12px; }
+    .section { margin-bottom: 22px; }
+    .task-list { display: grid; gap: 9px; }
+    .task-row { width: 100%; text-align: left; display: flex; align-items: center; gap: 12px; padding: 14px 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
+    .task-row:hover { border-color: #b9cde5; box-shadow: 0 4px 14px rgba(26,54,88,.06); }
+    .task-row .task-main { min-width: 0; flex: 1; }
+    .task-row .task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-row .task-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chevron { color: #a6afb9; font-size: 23px; line-height: 1; }
+    .state-icon { flex: 0 0 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; }
+    .state-icon.running { color: var(--blue); background: var(--blue-soft); }
+    .state-icon.done { color: var(--green); background: var(--green-soft); }
+    .state-icon.offline { color: var(--muted); background: var(--surface-subtle); }
+    .empty { text-align: center; padding: 37px 20px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 16px; background: rgba(255,255,255,.45); }
+    .empty .icon { color: var(--faint); margin-bottom: 9px; }
+    .empty h3 { color: var(--ink); margin-bottom: 5px; }
+    .nav { flex: 0 0 78px; display: grid; grid-template-columns: repeat(4,1fr); padding: 8px 10px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: rgba(255,255,255,.92); backdrop-filter: blur(18px); }
+    .nav-item { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--faint); border-radius: 12px; font-size: 11px; font-weight: 650; }
+    .nav-item.active { color: var(--blue); }
+    .nav-item:hover { background: var(--surface-subtle); }
+    .nav-item .icon { width: 21px; height: 21px; }
+    .nav-badge { position: absolute; margin: -18px 0 0 18px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 99px; color: white; background: var(--amber); font-size: 10px; line-height: 15px; text-align: center; }
+    .backbar { display: flex; align-items: center; gap: 5px; margin: -5px 0 19px -9px; }
+    .backbar .icon-button { width: 38px; }
+    .backbar strong { font-size: 15px; }
+    .session-head { margin-bottom: 17px; }
+    .session-project { color: var(--muted); font: 12px var(--mono); margin-top: 6px; }
+    .run-config { width: 100%; margin-top: 11px; justify-content: flex-start; font-size: 13px; }
+    .run-strip { display: flex; align-items: center; gap: 8px; padding: 11px 12px; margin: 0 -2px 18px; border: 1px solid #cfe1f6; background: var(--surface-tint); border-radius: 13px; color: var(--blue-dark); font-size: 13px; }
+    .run-strip .grow { flex: 1; }
+    .run-strip button { color: var(--blue); font-weight: 700; }
+    .message { margin: 0 0 17px; }
+    .message .author { color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 5px; }
+    .message.user { display: flex; justify-content: flex-end; }
+    .message.user .bubble { max-width: 84%; color: #fff; background: var(--blue); border-radius: 17px 17px 5px 17px; padding: 11px 13px; }
+    .message.assistant .bubble { padding: 0 1px; }
+    .message.assistant p { margin-bottom: 8px; }
+    .message.assistant strong { font-weight: 750; }
+    .code-inline { padding: 2px 5px; color: #47576b; background: var(--surface-subtle); border-radius: 5px; font: 12px var(--mono); }
+    .activity { margin: 12px 0 18px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
+    .activity summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 9px; padding: 12px; font-size: 13px; font-weight: 700; }
+    .activity summary::-webkit-details-marker { display: none; }
+    .activity summary .chevron { margin-left: auto; font-size: 18px; transition: transform .2s; }
+    .activity[open] summary .chevron { transform: rotate(90deg); }
+    .activity-body { padding: 0 12px 12px 39px; color: var(--muted); font-size: 12px; }
+    .activity-body code { display: block; color: #4c5f73; font: 11px/1.6 var(--mono); white-space: pre-wrap; }
+    .change-summary { margin: 9px 0 17px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
+    .change-summary .summary-stat { color: var(--green); font-weight: 700; font-size: 13px; }
+    .summary-files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .file-chip { padding: 5px 8px; color: var(--muted); background: var(--surface-subtle); border-radius: 7px; font: 11px var(--mono); }
+    .compose { position: relative; margin-top: 17px; }
+    .compose textarea { width: 100%; min-height: 80px; resize: none; padding: 12px 45px 12px 13px; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--surface); font-size: 14px; }
+    .compose textarea::placeholder { color: #a0a9b4; }
+    .send { position: absolute; right: 8px; bottom: 8px; width: 33px; height: 33px; display: grid; place-items: center; color: #fff; background: var(--blue); border-radius: 10px; }
+    .send:disabled { opacity: .4; }
+    .session-tabs { display: flex; gap: 20px; margin: -1px 0 18px; border-bottom: 1px solid var(--line); }
+    .session-tab { padding: 0 0 10px; color: var(--muted); font-size: 14px; font-weight: 700; border-bottom: 2px solid transparent; }
+    .session-tab.active { color: var(--blue); border-color: var(--blue); }
+    .approval-card { padding: 15px; border: 1px solid #ecd29f; border-radius: 16px; background: #fffaf1; }
+    .approval-card h3 { margin-top: 9px; }
+    .approval-target { margin: 12px 0; padding: 11px; border: 1px solid #efdcb8; border-radius: 10px; background: rgba(255,255,255,.72); }
+    .approval-target .target-label { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .approval-target code { display: block; margin-top: 4px; color: #56411e; font: 12px/1.5 var(--mono); word-break: break-word; }
+    .approval-actions { display: flex; gap: 8px; margin-top: 13px; }
+    .approval-actions button { flex: 1; }
+    .danger-button { min-height: 44px; border-radius: 12px; color: var(--red); background: var(--red-soft); font-weight: 700; }
+    .changes-hero { margin-bottom: 16px; }
+    .diff-card { border: 1px solid var(--line); border-radius: 15px; overflow: hidden; background: var(--surface); }
+    .file-row { width: 100%; text-align: left; display: flex; align-items: center; gap: 10px; padding: 13px; border-bottom: 1px solid var(--line); }
+    .file-row:last-child { border-bottom: 0; }
+    .file-row.selected { background: var(--surface-tint); }
+    .file-icon { color: var(--blue); }
+    .file-row .grow { flex: 1; min-width: 0; }
+    .file-name { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-dir { color: var(--faint); font: 11px var(--mono); margin-top: 3px; }
+    .diff-view { margin-top: 13px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: #fbfcfd; }
+    .diff-head { padding: 10px 12px; color: var(--muted); font: 11px var(--mono); border-bottom: 1px solid var(--line); }
+    .diff-line { padding: 4px 11px; font: 11px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
+    .diff-line.add { color: #17643f; background: #eef9f2; }
+    .diff-line.remove { color: #9f3f3d; background: #fff1f0; }
+    .edit-button { width: 100%; margin-top: 13px; }
+    .terminal-card { overflow: hidden; border: 1px solid #263444; border-radius: 16px; background: #162230; box-shadow: 0 7px 18px rgba(20,35,52,.12); }
+    .terminal-head { display: flex; align-items: center; gap: 8px; padding: 11px 13px; color: #d7e1ed; border-bottom: 1px solid #304153; font-size: 12px; }
+    .terminal-head .grow { flex: 1; }
+    .terminal-body { min-height: 202px; padding: 13px; color: #d6e2ee; font: 11px/1.7 var(--mono); }
+    .terminal-body .prompt { color: #78bbff; }
+    .terminal-body .ok { color: #79d69f; }
+    .terminal-input { display: flex; gap: 8px; padding: 9px; border-top: 1px solid #304153; }
+    .terminal-input input { min-width: 0; flex: 1; padding: 8px 9px; border: 1px solid #3a4d60; border-radius: 8px; color: #d6e2ee; background: #1d2b3a; font: 11px var(--mono); }
+    .terminal-input button { padding: 0 9px; border-radius: 8px; color: #fff; background: #2d75c5; font-size: 12px; font-weight: 700; }
+    .terminal-note { margin-top: 13px; padding: 12px; color: var(--muted); background: var(--surface-subtle); border-radius: 12px; font-size: 13px; }
+    .terminal-note strong { color: var(--ink); }
+    .machine-list { display: grid; gap: 9px; }
+    .machine-card { width: 100%; text-align: left; padding: 15px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+    .machine-card:hover { border-color: #b9cde5; }
+    .machine-icon { width: 38px; height: 38px; display: grid; place-items: center; color: #536f91; background: var(--blue-soft); border-radius: 12px; }
+    .machine-name { font-weight: 750; }
+    .machine-status { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .machine-details { display: flex; gap: 15px; margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .machine-details span { display: flex; align-items: center; gap: 5px; }
+    .pair-card { margin: 19px 0; padding: 16px; border: 1px solid #cfe1f6; border-radius: 16px; background: var(--surface-tint); }
+    .pair-card p { color: var(--muted); margin: 5px 0 13px; font-size: 13px; }
+    .pair-card button { width: 100%; }
+    .permission { margin-top: 17px; padding: 15px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
+    .permission h3 { margin-bottom: 11px; }
+    .permission-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    .permission-row .icon { color: var(--green); flex: none; }
+    .settings-group { margin-bottom: 22px; }
+    .settings-label { padding: 0 12px 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .settings-list { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
+    .setting-row { width: 100%; min-height: 53px; display: flex; align-items: center; gap: 11px; padding: 10px 13px; text-align: left; border-bottom: 1px solid var(--line); }
+    .setting-row:last-child { border-bottom: 0; }
+    .setting-row .icon { color: var(--muted); flex: none; }
+    .setting-copy { flex: 1; min-width: 0; }
+    .setting-copy strong { display: block; font-size: 14px; }
+    .setting-copy span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .toggle { width: 43px; height: 26px; padding: 2px; border-radius: 99px; background: #cbd1d8; transition: background .2s; }
+    .toggle::after { content: ""; display: block; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.16); transition: transform .2s; }
+    .toggle.on { background: var(--blue); }
+    .toggle.on::after { transform: translateX(17px); }
+    .sheet-scrim { position: absolute; z-index: 10; inset: 0; display: flex; align-items: flex-end; background: rgba(16,25,35,.28); animation: fade .2s; }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    .sheet { width: 100%; max-height: 89%; overflow-y: auto; padding: 11px 18px calc(22px + env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; background: var(--surface); box-shadow: 0 -15px 40px rgba(20,35,52,.14); animation: sheetUp .28s cubic-bezier(.23,1,.32,1); }
+    @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .grabber { width: 35px; height: 4px; margin: 0 auto 16px; border-radius: 99px; background: #d2d6dc; }
+    .sheet-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; }
+    .sheet-head h2 { font-size: 20px; }
+    .sheet-sub { margin-top: 5px; color: var(--muted); font-size: 13px; }
+    .choice-list { display: grid; gap: 8px; }
+    .choice { width: 100%; display: flex; align-items: center; gap: 11px; padding: 13px; text-align: left; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .choice.selected { border-color: #9fc4ed; background: var(--surface-tint); }
+    .choice .choice-copy { flex: 1; }
+    .choice .choice-copy strong { display: block; font-size: 14px; }
+    .choice .choice-copy span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .radio { width: 18px; height: 18px; border: 1.5px solid #abb5c0; border-radius: 50%; }
+    .choice.selected .radio { border: 5px solid var(--blue); }
+    .sheet-footer { display: flex; gap: 9px; margin-top: 17px; }
+    .sheet-footer button { flex: 1; }
+    .pair-steps { display: grid; gap: 12px; margin: 8px 0 18px; }
+    .pair-step { display: flex; gap: 11px; align-items: flex-start; }
+    .step-num { flex: none; width: 27px; height: 27px; display: grid; place-items: center; color: var(--blue-dark); background: var(--blue-soft); border-radius: 9px; font-size: 12px; font-weight: 800; }
+    .pair-step strong { display: block; font-size: 14px; }
+    .pair-step span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .qr-placeholder { width: 142px; height: 142px; margin: 6px auto 18px; display: grid; place-items: center; border: 10px solid #172331; border-radius: 6px; background: repeating-linear-gradient(45deg,#fff 0 5px,#172331 5px 9px), repeating-linear-gradient(-45deg,transparent 0 7px,#fff 7px 11px); background-blend-mode: screen; }
+    .qr-placeholder span { padding: 5px; color: #172331; background: #fff; font: 700 10px var(--mono); }
+    .toast { position: absolute; z-index: 20; left: 18px; right: 18px; bottom: 91px; padding: 12px 14px; border-radius: 13px; color: #fff; background: #243443; box-shadow: 0 8px 25px rgba(12,23,34,.22); font-size: 13px; animation: toastIn .25s ease-out; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .sample-mark { margin-top: 22px; color: var(--faint); text-align: center; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <details class="prototype-tools">
+  <summary>Design controls · sample data</summary>
+  <div class="prototype-controls" aria-label="Prototype direction controls">
+    <strong>Structure</strong>
+    <button class="control-label active" data-mode="tasks">A · Tasks first</button>
+    <button class="control-label" data-mode="machine">B · Machine first</button>
+    <span style="width:1px;height:17px;background:#d7dce2"></span>
+    <button class="control-button" data-state="offline">Offline</button>
+    <button class="control-button" data-state="stale">Stale approval</button>
+    <button class="control-button" data-state="empty">Empty</button>
+    <button class="control-button" data-state="terminal-owner">Desktop controls terminal</button>
+  </div>
+  </details>
+  <div id="app"></div>
+  <script>
+    (() => {
+      const $ = (s, root = document) => root.querySelector(s);
+      const app = $('#app');
+      let mode = 'tasks';
+      let screen = 'tasks';
+      let modal = null;
+      let offline = false;
+      let revoked = false;
+      let selectedMachine = 'Studio Mac';
+      let state = 'default';
+      let toastTimer;
+      let draft = '';
+      let terminalInput = '';
+      let stopRequested = false;
+      let approvalReviewed = false;
+      let approvalReply = '';
+      let terminalOwner = 'phone';
+      let notificationsEnabled = true;
+      let selectedTask = 'checkout';
+      let newTaskTitle = '';
+      let selectedFile = 0;
+      let messageSent = '';
+      const taskDetails = {
+        checkout: { title: 'Add checkout loading state', provider: 'Claude Code', model: 'Opus', running: true },
+        copy: { title: 'Update empty cart copy', provider: 'Codex', model: 'Configured on Mac', running: false },
+        totals: { title: 'Refactor cart totals', provider: 'Claude Code', model: 'Opus', running: false }
+      };
+      const esc = (value) => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+      const svg = (name, cls = '') => {
+        const paths = {
+          back:'<path d="m15 18-6-6 6-6"/><path d="M9 12h10"/>', plus:'<path d="M12 5v14M5 12h14"/>', bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>', check:'<path d="m5 12 4 4L19 6"/>', arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>', task:'<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8 12 2.5 2.5L16 9"/>', machine:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 22h8M12 19v3M7 9h10M7 13h5"/>', activity:'<path d="M4 12h3l2-7 4 14 2-7h5"/>', settings:'<path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/>', play:'<path d="m9 6 10 6-10 6z"/>', stop:'<rect x="7" y="7" width="10" height="10" rx="2"/>', file:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>', terminal:'<path d="m5 7 5 5-5 5M12 17h7"/>', shield:'<path d="M12 3 19 6v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/>', close:'<path d="M6 6l12 12M18 6 6 18"/>', chevron:'<path d="m9 18 6-6-6-6"/>', link:'<path d="M10 13a5 5 0 0 0 7.1.1l1.5-1.5a5 5 0 0 0-7.1-7.1L10.6 5.4M14 11a5 5 0 0 0-7.1-.1l-1.5 1.5a5 5 0 0 0 7.1 7.1l.9-.9"/>', lock:'<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>', edit:'<path d="M4 20h4L19 9l-4-4L4 16zM13 6l4 4"/>', info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>', wifi:'<path d="M3 8.5a14 14 0 0 1 18 0M6 12a9 9 0 0 1 12 0M9 15.5a5 5 0 0 1 6 0M12 19h.01"/>', search:'<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4 4"/>'
+        };
+        return `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.info}</svg>`;
+      };
+      const button = (label, action, cls = '') => `<button class="${cls}" data-action="${action}">${label}</button>`;
+      const nav = () => `<nav class="nav" aria-label="Main navigation">
+        <button class="nav-item ${screen === 'tasks' || screen === 'session' || screen === 'changes' || screen === 'terminal' ? 'active' : ''}" data-screen="tasks">${svg('task')}<span>Tasks</span>${state === 'empty' ? '' : '<span class="nav-badge">1</span>'}</button>
+        <button class="nav-item ${screen === 'machines' || screen === 'pair' ? 'active' : ''}" data-screen="machines">${svg('machine')}<span>Machines</span></button>
+        <button class="nav-item ${screen === 'activity' ? 'active' : ''}" data-screen="activity">${svg('activity')}<span>Activity</span></button>
+        <button class="nav-item ${screen === 'settings' ? 'active' : ''}" data-screen="settings">${svg('settings')}<span>Settings</span></button>
+      </nav>`;
+      const top = (title, sub = '', action = '') => `<header class="topbar"><div><div class="eyebrow">${sub || 'Scry Remote'}</div><h1>${title}</h1></div>${action}</header>`;
+      const offlineBanner = () => offline ? `<div class="offline-banner">${svg(revoked ? 'shield' : 'wifi')}<span><strong>${revoked ? 'Access revoked' : 'Offline'}</strong> · ${revoked ? 'Control is disabled. A new pairing must be confirmed on Mac.' : 'Cached data is readable. Sending and approvals are disabled.'}</span></div>` : '';
+      const tasksScreen = () => {
+        const isEmpty = state === 'empty';
+        const machineFirst = mode === 'machine';
+        return `<section class="screen" data-screen-label="${machineFirst ? 'Machine first — host context' : 'Tasks first — task inbox'}">
+          ${top(machineFirst ? 'Studio Mac' : 'Tasks', machineFirst ? 'Machine first · 1 project' : 'Studio Mac · owner device', `<button class="icon-button" data-action="notifications" aria-label="Notifications">${svg('bell')}</button>`)}
+          ${offlineBanner()}
+          ${machineFirst ? `<section class="section" style="margin-bottom:20px"><div class="machine-card" style="padding:13px"><div class="row-between"><div style="display:flex;gap:10px;align-items:center"><span class="machine-icon">${svg('machine','sm')}</span><span><span class="machine-name">Studio Mac</span><span class="machine-status"><span class="status-dot ${offline ? 'gray' : 'green'}"></span> ${offline ? 'Last known: locked · awake' : 'Locked · awake'}</span></span></div><span class="pill ${offline ? 'gray' : 'green'}">${offline ? 'Offline' : 'Connected'}</span></div><div class="machine-details"><span>${svg('file','sm')} storefront</span><span>${svg('task','sm')} 2 active</span></div></div></section>` : ''}
+          ${!isEmpty ? `<section class="attention"><div class="attention-header"><h2>Needs attention</h2><span class="pill amber"><span class="status-dot"></span>1 waiting</span></div><button class="attention-card" data-action="open-approval"><div class="card-top"><div><div class="task-title">${approvalReply ? 'Reply sent · confirmation pending' : 'Review a project hook before it runs'}</div><div class="task-meta"><span class="mono">storefront</span> · Claude Code</div></div>${svg('chevron','sm')}</div><div class="attention-footer">${svg('shield','sm')}<span>${approvalReply ? 'Waiting for host confirmation' : state === 'stale' ? 'Request changed · review required' : offline ? 'Expiry must be rechecked online' : 'Approval expires in 8 min'}</span><span style="margin-left:auto">${approvalReply ? 'View reply' : 'Review now'}</span></div></button></section>` : ''}
+          <section class="section"><div class="section-header"><h2>${isEmpty ? 'Your tasks' : machineFirst ? 'storefront tasks' : 'Recent tasks'}</h2>${button('New task', 'new-task', 'section-link')}</div>
+            ${isEmpty ? `<div class="empty">${svg('task','lg')}<h3>Nothing running</h3><p>Start a task from your paired Mac when you’re ready.</p></div>` : `<div class="task-list">
+              <button class="task-row" data-screen="session" data-task="checkout"><span class="state-icon running">${svg('play','sm')}</span><span class="task-main"><span class="task-title">Add checkout loading state</span><span class="task-meta"><span class="mono">storefront</span> · Claude Code · just now</span></span><span class="pill blue">Running</span><span class="chevron">›</span></button>
+              <button class="task-row" data-screen="changes" data-task="copy"><span class="state-icon done">${svg('check','sm')}</span><span class="task-main"><span class="task-title">Update empty cart copy</span><span class="task-meta"><span class="mono">storefront</span> · Codex · 18 min ago</span></span><span class="pill green">Done</span><span class="chevron">›</span></button>
+              <button class="task-row" data-screen="session" data-task="totals"><span class="state-icon offline">${svg('lock','sm')}</span><span class="task-main"><span class="task-title">Refactor cart totals</span><span class="task-meta"><span class="mono">Studio Mac</span> · Claude Code · yesterday</span></span><span class="pill gray">Cached</span><span class="chevron">›</span></button>
+            </div>`}
+          </section>
+          <p class="sample-mark">Interactive prototype · sample data</p>
+        </section>`;
+      };
+      const sessionScreen = (tab = 'session') => `<section class="screen" data-screen-label="Session detail">
+        <div class="backbar">${button(svg('back'), 'back', 'icon-button')}<strong>Tasks</strong></div>
+        ${offlineBanner()}
+        <header class="session-head"><div class="eyebrow">${offline || selectedTask === 'totals' ? 'CACHED' : stopRequested && selectedTask === 'checkout' ? 'STOP REQUESTED' : taskDetails[selectedTask].running ? 'RUNNING' : 'COMPLETED'} · ${taskDetails[selectedTask].provider.toUpperCase()}</div><h1>${taskDetails[selectedTask].title}</h1><div class="session-project">storefront · Studio Mac</div><button class="secondary-button run-config" data-action="provider">${svg('settings','sm')} ${taskDetails[selectedTask].provider} · ${taskDetails[selectedTask].model} · Full access</button></header>
+        <div class="session-tabs"><button class="session-tab ${tab === 'session' ? 'active' : ''}" data-screen="session">Session</button><button class="session-tab ${tab === 'changes' ? 'active' : ''}" data-screen="changes">Changes <span class="pill blue" style="margin-left:4px;min-height:20px;padding:0 6px">${filesForTask().length || '—'}</span></button><button class="session-tab ${tab === 'terminal' ? 'active' : ''}" data-screen="terminal">Terminal</button></div>
+        ${tab === 'session' ? `<div class="run-strip"><span class="status-dot" style="color:var(--blue)"></span><span class="grow"><strong>${offline || selectedTask === 'totals' ? 'Cached state · reconnect to verify' : stopRequested && selectedTask === 'checkout' ? 'Stop requested · confirmation pending' : taskDetails[selectedTask].running ? 'Running · 2m 14s' : 'Completed · last recorded result'}</strong></span>${taskDetails[selectedTask].running ? `<button class="text-button" data-action="stop-run" ${offline || stopRequested ? 'disabled' : ''}>${stopRequested ? 'Pending' : 'Stop'}</button>` : ''}</div>
+          <article class="message user"><div class="bubble">${selectedTask === 'checkout' ? 'Add a loading state to the checkout button and cover it with a test.' : taskDetails[selectedTask].title}</div></article>
+          <article class="message assistant"><div class="author">${taskDetails[selectedTask].provider}</div><div class="bubble"><p>${selectedTask === 'checkout' ? 'I’m adding the pending state now, then I’ll check the diff.' : selectedTask === 'copy' ? 'The empty cart copy is updated. Review the changed text below.' : 'Cached conversation available. Reconnect to verify the latest run state.'}</p>${selectedTask === 'checkout' ? `<details class="activity" open><summary>${svg('terminal','sm')}Tool activity<span class="chevron">›</span></summary><div class="activity-body"><code>$ pnpm test checkout
+PASS checkout/loading-state.test.tsx
+1 test passed · 0.8s</code></div></details>` : ''}</div></article>
+          <div class="change-summary"><strong>${filesForTask().length ? 'Changed files · sample snapshot' : 'Diff not cached'}</strong><div class="summary-files">${filesForTask().map(file => `<span class="file-chip">${esc(file.path.split('/').pop())}</span>`).join('')}</div></div>
+          ${messageSent ? `<article class="message user"><div class="bubble">${esc(messageSent)}<div style="font-size:11px;opacity:.8;margin-top:5px">Sample · delivery pending</div></div></article>` : ''}<div class="compose"><textarea id="draft" placeholder="Reply to ${taskDetails[selectedTask].provider}…">${esc(draft)}</textarea><button class="send" data-action="send" aria-label="Send" ${offline ? 'disabled' : ''}>${svg('arrow','sm')}</button></div>` : tab === 'changes' ? changesBody() : terminalBody()}
+        <p class="sample-mark">Interactive prototype · sample data</p>
+      </section>`;
+      const filesForTask = () => selectedTask === 'copy' ? [
+        { path: 'src/cart/EmptyCart.tsx', before: '<p>Cart empty</p>', after: '<p>Your next favorite is waiting.</p>' }
+      ] : selectedTask === 'totals' ? [] : [
+        { path: 'src/checkout/checkout.tsx', before: '<Button>Pay now</Button>', after: '<Button loading={isSubmitting}>Pay now</Button>' },
+        { path: 'src/checkout/loading-state.test.tsx', before: '', after: "expect(button).toHaveAttribute('aria-busy', 'true')" },
+        { path: 'src/components/Button.tsx', before: '<button {...props} />', after: '<button aria-busy={loading} {...props} />' }
+      ];
+      const changesBody = () => `<div class="changes-hero"><h2>${filesForTask().length ? `${filesForTask().length} files changed` : 'Diff not cached'}</h2><p class="subhead">${offline ? 'Cached snapshot · reconnect to verify' : 'Sample workspace diff · not committed'}</p></div>${diffBody()}`;
+      const diffBody = () => {
+        const files = filesForTask();
+        if (!files.length) return '<div class="empty">Diff evidence is unavailable in this cached example.</div>';
+        const file = files[selectedFile] || files[0];
+        return `<div class="diff-card">${files.map((item, index) => `<button class="file-row ${file === item ? 'selected' : ''}" data-action="select-file" data-file="${index}"><span class="file-icon">${svg('file','sm')}</span><span class="grow"><span class="file-name">${esc(item.path)}</span><span class="file-dir">Sample change</span></span>${svg('chevron','sm')}</button>`).join('')}</div><div class="diff-view"><div class="diff-head">${esc(file.path)} · read-only preview</div>${file.before ? `<div class="diff-line remove">− ${esc(file.before)}</div>` : ''}<div class="diff-line add">+ ${esc(file.after)}</div></div><button class="secondary-button edit-button" data-action="edit-file" ${offline ? 'disabled' : ''}>${svg('edit','sm')}Preview edit conflict</button>`;
+      };
+      const terminalBody = () => `<div class="terminal-card"><div class="terminal-head">${svg('terminal','sm')}<span class="grow">checkout · managed terminal</span><span class="pill ${offline || terminalOwner === 'desktop' ? 'gray' : 'green'}" style="min-height:21px;padding:0 7px;font-size:10px">${offline ? 'Disconnected' : terminalOwner === 'desktop' ? 'Desktop controls' : 'You control'}</span></div><div class="terminal-body"><div><span class="prompt">~/storefront $</span> git status --short</div><div> M src/checkout/checkout.tsx</div><div> M src/components/Button.tsx</div><div class="ok">✓ tests passing</div><br><div><span class="prompt">~/storefront $</span> <span style="color:#aab8c6">awaiting input</span></div></div><div class="terminal-input"><input id="terminal-input" value="${esc(terminalInput)}" placeholder="Type to send to terminal…" ${offline || terminalOwner !== 'phone' ? 'disabled' : ''}><button data-action="terminal-send" ${offline || terminalOwner !== 'phone' ? 'disabled' : ''}>Send</button></div></div><div class="terminal-note">${svg('info','sm')} <strong>Managed shell</strong> · input is sent only while you hold control. No real commands run in this prototype.${terminalOwner === 'desktop' ? `<button class="secondary-button" data-action="take-control" style="margin-top:10px" ${offline ? 'disabled' : ''}>Take control</button>` : ''}</div>`;
+      const approvalScreen = () => `<section class="screen" data-screen-label="Approval request"><div class="backbar">${button(svg('back'), 'back', 'icon-button')}<strong>Needs attention</strong></div>${offlineBanner()}<h1>Review request</h1><p class="subhead" style="margin-bottom:17px">A repository-defined hook needs fingerprint approval.</p><div class="approval-card"><div class="row-between"><span class="pill amber">${svg('shield','sm')}Approval</span><span class="eyebrow">${state === 'stale' ? 'CHANGED' : '8 min left'}</span></div><h3>${state === 'stale' ? 'The request changed' : 'Run checkout tests'}</h3><div class="approval-target"><div class="target-label">Command</div><code>${state === 'stale' ? 'pnpm test checkout --updateSnapshot' : 'pnpm test checkout'}</code><div class="target-label" style="margin-top:10px">On</div><code>Studio Mac · storefront</code></div><p class="task-meta">${state === 'stale' ? 'The command fingerprint changed after this request was created. Review the new scope before deciding.' : 'This authorizes the project hook fingerprint, independently of the Provider’s Full access mode.'}</p><div class="approval-actions"><button class="danger-button" data-action="reject" ${offline ? 'disabled' : ''}>Reject</button><button class="primary-button" data-action="approve" ${offline ? 'disabled' : ''}>${approvalReply ? 'Reply pending' : state === 'stale' && !approvalReviewed ? 'Review again' : 'Approve once'}</button></div></div><div class="permission"><h3>What this does</h3><div class="permission-row">${svg('check','sm')}<span>One command, on this paired Mac</span></div><div class="permission-row">${svg('check','sm')}<span>Does not change your Full access or trust settings</span></div><div class="permission-row">${svg('lock','sm')}<span>Approval is recorded with this device and fingerprint</span></div></div><p class="sample-mark">Synthetic host, command and permission evidence</p></section>`;
+      const machinesScreen = () => `<section class="screen" data-screen-label="Managed machines"><header class="topbar"><div><div class="eyebrow">OWNER DEVICES</div><h1>Machines</h1></div>${button(svg('plus'), 'pair', 'icon-button')}</header>${offlineBanner()}<div class="machine-list"><button class="machine-card" data-action="machine-detail"><div class="row-between"><div style="display:flex;gap:11px;align-items:center"><span class="machine-icon">${svg('machine')}</span><span><span class="machine-name">Studio Mac</span><span class="machine-status"><span class="status-dot ${offline ? 'gray' : 'green'}"></span> ${offline ? 'Last known: locked · awake' : 'Locked · awake'}</span></span></div>${svg('chevron','sm')}</div><div class="machine-details"><span>${svg('link','sm')} Paired today</span><span>${svg('task','sm')} 2 active</span></div></button><button class="machine-card" data-action="machine-detail"><div class="row-between"><div style="display:flex;gap:11px;align-items:center"><span class="machine-icon" style="color:var(--muted);background:var(--surface-subtle)">${svg('machine')}</span><span><span class="machine-name">Travel MacBook</span><span class="machine-status"><span class="status-dot gray"></span> Offline · last seen 2d ago</span></span></div>${svg('chevron','sm')}</div><div class="machine-details"><span>${svg('link','sm')} Paired 3 weeks ago</span><span>${svg('lock','sm')} Read-only cache</span></div></button></div><div class="pair-card"><h3>Pair another Mac</h3><p>Use the Mac app to show a one-time QR code. No VPN or port forwarding.</p><button class="secondary-button" data-action="pair">${svg('link','sm')}Pair with QR code</button></div><div class="permission"><h3>${revoked ? 'Previous access · revoked' : 'Owner-device access'}</h3><div class="permission-row">${svg('check','sm')}<span>Tasks, files, managed terminals and Provider controls</span></div><div class="permission-row">${svg('shield','sm')}<span>Trust approvals still show scope and fingerprint</span></div><div class="permission-row">${svg('info','sm')}<span>Full access is not root and does not bypass macOS permissions</span></div></div><p class="sample-mark">Synthetic machines and pairing state</p></section>`;
+      const settingsScreen = () => `<section class="screen" data-screen-label="Settings"><header class="topbar"><div><div class="eyebrow">SCRY REMOTE</div><h1>Settings</h1></div></header>${offlineBanner()}<div class="settings-group"><div class="settings-label">Notifications</div><div class="settings-list"><button class="setting-row" data-action="toggle-notifications">${svg('bell')}<span class="setting-copy"><strong>Task updates</strong><span>Finish, failure and approval reminders</span></span><span class="toggle ${notificationsEnabled ? 'on' : ''}" aria-label="${notificationsEnabled ? 'On' : 'Off'}"></span></button><button class="setting-row" data-action="quiet-hours">${svg('activity')}<span class="setting-copy"><strong>Quiet hours</strong><span>Off · notifications can arrive anytime</span></span>${svg('chevron','sm')}</button></div></div><div class="settings-group"><div class="settings-label">Studio Mac</div><div class="settings-list"><button class="setting-row" data-action="wake-sheet">${svg('machine')}<span class="setting-copy"><strong>Keep Mac available</strong><span>Allow screen off while Scry stays awake</span></span><span class="toggle on"></span></button><button class="setting-row" data-action="machine-detail">${svg('shield')}<span class="setting-copy"><strong>Remote access</strong><span>${revoked ? 'This iPhone · access revoked' : 'Owner device · 1 iPhone paired'}</span></span>${svg('chevron','sm')}</button></div></div><div class="settings-group"><div class="settings-label">About</div><div class="settings-list"><button class="setting-row" data-action="about"><span class="setting-copy"><strong>Interactive prototype</strong><span>Sample data · no real commands or accounts</span></span>${svg('info','sm')}</button></div></div><p class="sample-mark">Mac sleep and network availability are separate states.</p></section>`;
+      const activityScreen = () => `<section class="screen" data-screen-label="Activity"><header class="topbar"><div><div class="eyebrow">EVIDENCE FEED</div><h1>Activity</h1></div>${button(svg('bell'), 'notifications', 'icon-button')}</header>${offlineBanner()}<section class="section"><div class="section-header"><h2>Today</h2></div><div class="task-list"><div class="task-row"><span class="state-icon amber" style="color:var(--amber);background:var(--amber-soft)">${svg('shield','sm')}</span><span class="task-main"><span class="task-title">Approval waiting</span><span class="task-meta"><span class="mono">storefront</span> · command fingerprint changed</span></span><span class="task-meta">2m</span></div><div class="task-row"><span class="state-icon done">${svg('check','sm')}</span><span class="task-main"><span class="task-title">Tests passed</span><span class="task-meta"><span class="mono">storefront</span> · 1 test · exact result</span></span><span class="task-meta">18m</span></div></div></section><p class="sample-mark">Notifications are an entry point, not proof of completion.</p></section>`;
+      const pairSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><div class="grabber"></div><div class="sheet-head"><div><h2>Pair a Mac</h2><p class="sheet-sub">On your Mac, open Scry → Remote access → Pair device.</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><div class="qr-placeholder"><span>SCAN<br>ON MAC</span></div><div class="pair-steps"><div class="pair-step"><span class="step-num">1</span><span><strong>Scan the one-time code</strong><span>It expires after 2 minutes and can be used once.</span></span></div><div class="pair-step"><span class="step-num">2</span><span><strong>Confirm on your Mac</strong><span>Your Mac will show this iPhone and its new key fingerprint.</span></span></div><div class="pair-step"><span class="step-num">3</span><span><strong>Grant owner-device access</strong><span>Revoke it anytime from Machines.</span></span></div></div><button class="primary-button" data-action="pair-simulate">Simulate scanned code</button></div></div>`;
+      const approvalSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><div class="grabber"></div><div class="sheet-head"><div><h2>Review request</h2><p class="sheet-sub">Claude Code · storefront · Studio Mac</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><div class="approval-card"><div class="row-between"><span class="pill amber">${svg('shield','sm')}Approval</span><span class="eyebrow">${state === 'stale' ? 'CHANGED' : '8 min left'}</span></div><h3>${state === 'stale' ? 'The request changed' : 'Run checkout tests'}</h3><div class="approval-target"><div class="target-label">Command</div><code>${state === 'stale' ? 'pnpm test checkout --updateSnapshot' : 'pnpm test checkout'}</code><div class="target-label" style="margin-top:10px">Scope</div><code>Project hook · /Projects/storefront · Studio Mac</code></div><p class="task-meta">${state === 'stale' ? 'Fingerprint changed. Review again before deciding.' : 'Project hook trust is separate from Full access. Approval binds this device and fingerprint.'}</p><div class="approval-actions"><button class="danger-button" data-action="reject" ${offline ? 'disabled' : ''}>Reject</button><button class="primary-button" data-action="approve" ${offline ? 'disabled' : ''}>${approvalReply ? 'Reply pending' : state === 'stale' && !approvalReviewed ? 'Review again' : 'Approve once'}</button></div></div></div></div>`;
+      const newTaskSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><div class="grabber"></div><div class="sheet-head"><div><h2>New task</h2><p class="sheet-sub">Start work on a paired Mac</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><textarea id="new-task-draft" style="width:100%;min-height:105px;padding:12px;border:1px solid var(--line-strong);border-radius:13px;resize:none" placeholder="What should Scry work on?">${esc(newTaskTitle)}</textarea><div class="choice-list" style="margin-top:12px"><button class="choice selected"><span class="choice-copy"><strong>Studio Mac · storefront</strong><span>Claude Code · Opus · Full access</span></span>${svg('check','sm')}</button></div><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Cancel</button><button class="primary-button" data-action="new-task-submit" ${offline ? 'disabled' : ''}>Start task</button></div></div></div>`;
+      const providerSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><div class="grabber"></div><div class="sheet-head"><div><h2>Run controls</h2><p class="sheet-sub">${taskDetails[selectedTask].provider} · ${taskDetails[selectedTask].model}<br>Settings layout preview · choices are not editable in this draft.</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><div class="choice-list"><button class="choice selected"><span class="state-icon" style="color:var(--blue);background:var(--blue-soft)">${svg('activity','sm')}</span><span class="choice-copy"><strong>${taskDetails[selectedTask].provider}</strong><span>Provider · capability reported by host</span></span>${svg('check','sm')}</button><button class="choice"><span class="state-icon" style="color:var(--muted);background:var(--surface-subtle)">${svg('activity','sm')}</span><span class="choice-copy"><strong>${taskDetails[selectedTask].model}</strong><span>Model · selected for this run</span></span>${svg('chevron','sm')}</button><button class="choice selected"><span class="state-icon" style="color:var(--amber);background:var(--amber-soft)">${svg('shield','sm')}</span><span class="choice-copy"><strong>Full access</strong><span>Provider-specific mode · trust checks still apply</span></span>${svg('check','sm')}</button><button class="choice"><span class="state-icon" style="color:var(--muted);background:var(--surface-subtle)">${svg('activity','sm')}</span><span class="choice-copy"><strong>${taskDetails[selectedTask].provider === 'Codex' ? 'Claude Code' : 'Codex'}</strong><span>Alternative · approval semantics may differ</span></span>${svg('chevron','sm')}</button></div><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Cancel</button><button class="primary-button" data-action="close-modal">Done</button></div></div></div>`;
+      const wakeSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><div class="grabber"></div><div class="sheet-head"><div><h2>Keep Mac available</h2><p class="sheet-sub">Screen off is supported while Scry stays running.</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><div class="permission"><div class="permission-row" style="border-top:0;padding-top:0">${svg('check','sm')}<span>Runs can continue while Studio Mac is locked</span></div><div class="permission-row">${svg('info','sm')}<span>This may use more battery. System sleep, logout or quitting Scry will show offline.</span></div><div class="permission-row">${svg('lock','sm')}<span>It does not bypass macOS permissions or trust checks.</span></div></div><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Not now</button><button class="primary-button" data-action="close-modal">Keep available</button></div></div></div>`;
+      const stopSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><div class="grabber"></div><div class="sheet-head"><div><h2>Stop this task?</h2><p class="sheet-sub">Scry will request a stop from Studio Mac. It may take a moment to confirm.</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><div class="approval-target"><div class="target-label">After you confirm</div><code>Stop requested · confirmation pending</code></div><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Keep running</button><button class="danger-button" data-action="confirm-stop" ${offline || stopRequested ? 'disabled' : ''}>Request stop</button></div></div></div>`;
+      const machineSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true"><div class="grabber"></div><div class="sheet-head"><div><h2>${selectedMachine}</h2><p class="sheet-sub">${selectedMachine !== 'Studio Mac' ? 'Offline · last seen 2 days ago' : revoked ? 'Access revoked' : offline ? 'Disconnected · current state unknown' : 'Locked · awake · connected'}</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><div class="permission"><h3>This iPhone</h3><p class="subhead">${revoked ? 'No active control grant' : 'Owner-device access'} · sample identity</p><p class="subhead">Tasks, authorized files, managed terminals and trust approvals. Not root access.</p></div><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Done</button><button class="danger-button" data-action="revoke-device" ${offline || selectedMachine !== 'Studio Mac' ? 'disabled' : ''}>Revoke this iPhone</button></div></div></div>`;
+      const revokeSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true"><div class="grabber"></div><h2>Revoke this iPhone?</h2><p class="subhead">New control requests will be blocked. Existing tasks are not automatically stopped. This action only changes sample data.</p><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Cancel</button><button class="danger-button" data-action="confirm-revoke" ${offline ? 'disabled' : ''}>Revoke access</button></div></div></div>`;
+      const controlSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true"><div class="grabber"></div><h2>Take terminal control?</h2><p class="subhead">Desktop input will be disabled. Existing shell work continues. This is a simulated transfer.</p><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Cancel</button><button class="primary-button" data-action="confirm-control" ${offline ? 'disabled' : ''}>Take control</button></div></div></div>`;
+      const conflictSheet = () => `<div class="sheet-scrim" data-action="close-modal"><div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><div class="grabber"></div><div class="sheet-head"><div><h2>File changed on Mac</h2><p class="sheet-sub">Your cached edit is out of date. Nothing was overwritten.</p></div>${button(svg('close'), 'close-modal', 'icon-button')}</div><div class="approval-target"><div class="target-label">Conflict</div><code>${esc((filesForTask()[selectedFile] || filesForTask()[0])?.path || 'Example file')} · expected revision 18 · current revision 19</code></div><div class="permission"><div class="permission-row" style="border-top:0;padding-top:0">${svg('lock','sm')}<span>Reload the latest file to review both versions before saving.</span></div></div><div class="sheet-footer"><button class="secondary-button" data-action="close-modal">Keep cached edit</button><button class="primary-button" data-action="close-modal">Reload file</button></div></div></div>`;
+      const render = () => {
+        let content = screen === 'tasks' ? tasksScreen() : screen === 'session' ? sessionScreen('session') : screen === 'changes' ? sessionScreen('changes') : screen === 'terminal' ? sessionScreen('terminal') : screen === 'approval' ? approvalScreen() : screen === 'machines' ? machinesScreen() : screen === 'settings' ? settingsScreen() : activityScreen();
+        const overlay = modal === 'pair' ? pairSheet() : modal === 'provider' ? providerSheet() : modal === 'new-task' ? newTaskSheet() : modal === 'approval' ? approvalSheet() : modal === 'wake' ? wakeSheet() : modal === 'stop' ? stopSheet() : modal === 'conflict' ? conflictSheet() : modal === 'control' ? controlSheet() : modal === 'machine' ? machineSheet() : modal === 'revoke' ? revokeSheet() : '';
+        app.innerHTML = `<div class="app-shell"><main class="app-content">${content}</main>${nav()}${overlay}${toastTimer ? '<div class="toast">' + esc(toastTimer) + '</div>' : ''}</div>`;
+      };
+      const setScreen = (next) => { screen = next; modal = null; render(); };
+      const toast = (message) => { toastTimer = message; render(); window.clearTimeout(toast._t); toast._t = window.setTimeout(() => { toastTimer = ''; render(); }, 2800); };
+      document.addEventListener('click', (event) => {
+        const target = event.target.closest('[data-screen], [data-action], [data-mode], [data-state]');
+        if (!target || target.disabled) return;
+        if (target.classList.contains('sheet-scrim') && event.target !== target) return;
+        if (target.dataset.mode) { mode = target.dataset.mode; document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === mode)); render(); toast(mode === 'tasks' ? 'A · Tasks first — attention is one tap away' : 'B · Machine first — host context comes before tasks'); return; }
+        if (target.dataset.state) { const s = target.dataset.state; if (s === 'offline') { if (revoked) { toast('Access revoked · reconnecting does not restore control'); return; } offline = !offline; } else if (s === 'terminal-owner') terminalOwner = terminalOwner === 'phone' ? 'desktop' : 'phone'; else { state = state === s ? 'default' : s; approvalReviewed = false; approvalReply = ''; } document.querySelectorAll('[data-state]').forEach(b => b.classList.toggle('active', (b.dataset.state === 'offline' ? offline : b.dataset.state === 'terminal-owner' ? terminalOwner === 'desktop' : state === b.dataset.state))); render(); return; }
+        if (target.dataset.screen) { if (target.dataset.task) { selectedTask = target.dataset.task; selectedFile = 0; messageSent = ''; } setScreen(target.dataset.screen); return; }
+        const action = target.dataset.action;
+        if (action === 'select-file') { selectedFile = Number(target.dataset.file); render(); }
+        else if (action === 'back') setScreen('tasks');
+        else if (action === 'close-modal') { modal = null; render(); }
+        else if (action === 'pair') { modal = 'pair'; render(); }
+        else if (action === 'pair-simulate') { modal = null; toast('Pairing request sent · confirm owner access on Studio Mac'); }
+        else if (action === 'notifications') toast('Notifications are sample-only · approval still needs an in-app check');
+        else if (action === 'new-task') { modal = 'new-task'; render(); }
+        else if (action === 'open-approval') { modal = 'approval'; render(); }
+        else if (action === 'new-task-submit') { if (offline) toast('Offline · task not started'); else if (!newTaskTitle.trim()) toast('Describe a task before starting'); else { modal = null; toast('Sample task submitted · awaiting host receipt'); } }
+        else if (action === 'provider') { modal = 'provider'; render(); }
+        else if (action === 'approve') { if (offline) toast('Offline · approval not sent'); else if (approvalReply) toast('Reply already submitted · confirmation pending'); else if (state === 'stale' && !approvalReviewed) { approvalReviewed = true; toast('Changed scope displayed · confirm with Approve once'); } else { approvalReply = 'approved'; modal = null; toast('Approval requested · waiting for Mac confirmation'); } }
+        else if (action === 'reject') { if (offline) toast('Offline · rejection not sent'); else if (approvalReply) toast('Reply already submitted · confirmation pending'); else { approvalReply = 'rejected'; modal = null; toast('Rejection submitted · waiting for Mac confirmation'); } }
+        else if (action === 'stop-run') { modal = 'stop'; render(); }
+        else if (action === 'confirm-stop') { if (offline || stopRequested) return; stopRequested = true; modal = null; toast('Stop requested · confirmation pending'); }
+        else if (action === 'edit-file') { if (offline) toast('Offline · editing is disabled'); else { modal = 'conflict'; render(); } }
+        else if (action === 'terminal-send') { if (offline || terminalOwner !== 'phone') return; if (terminalInput.trim()) { terminalInput = ''; toast('Sample input submitted · execution not confirmed'); } }
+        else if (action === 'take-control') { if (!offline) { modal = 'control'; render(); } }
+        else if (action === 'confirm-control') { if (offline) return; terminalOwner = 'phone'; modal = null; toast('Sample control transferred · desktop input disabled'); }
+        else if (action === 'machine-detail') { selectedMachine = target.textContent?.includes('Travel MacBook') ? 'Travel MacBook' : 'Studio Mac'; modal = 'machine'; render(); }
+        else if (action === 'revoke-device') { modal = 'revoke'; render(); }
+        else if (action === 'confirm-revoke') { if (offline) return; revoked = true; offline = true; modal = null; toast('Sample access revoked · existing tasks were not stopped'); }
+        else if (action === 'wake-sheet') { modal = 'wake'; render(); }
+        else if (action === 'about') toast('Interactive prototype · all host, task and command data is synthetic');
+        else if (action === 'toggle-notifications') { notificationsEnabled = !notificationsEnabled; toast(`Sample task updates ${notificationsEnabled ? 'on' : 'off'}`); }
+        else if (action === 'quiet-hours') toast('Quiet hours · not explored in this draft');
+        else if (action === 'send') { if (offline) toast('Offline · message not sent'); else if (!draft.trim()) toast('Write a message first'); else { messageSent = draft; draft = ''; toast('Sample message submitted · delivery pending'); } }
+      }, true);
+      document.addEventListener('input', (event) => { if (event.target.id === 'draft') draft = event.target.value; if (event.target.id === 'terminal-input') terminalInput = event.target.value; if (event.target.id === 'new-task-draft') newTaskTitle = event.target.value; });
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && modal) { modal = null; render(); } });
+      document.querySelectorAll('[data-mode], [data-state]').forEach(el => el.classList.toggle('active', el.dataset.mode === mode || (el.dataset.state === 'offline' ? offline : state === el.dataset.state)));
+      render();
+    })();
+  </script>
+</body>
+</html>
