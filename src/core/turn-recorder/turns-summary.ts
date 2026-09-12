@@ -727,6 +727,43 @@ function summarizeInterventions(selected: AgentTurnRecord[]) {
   }
 }
 
+/**
+ * Coverage of the explicit identity statuses that 0.2.42 made first-class: model observation,
+ * structural turn role, and task association. This is the surface a consumer needs to avoid
+ * treating an unobserved model as "no model", an unobserved role as a main-agent turn, or an
+ * explicitly unbound turn as a task turn. `legacy_unset` counts records written before the
+ * status field existed — absence is legacy, never an observed fact.
+ */
+function summarizeIdentity(selected: AgentTurnRecord[]) {
+  const modelStatus: Record<string, number> = {}
+  const modelSource: Record<string, number> = {}
+  const roleStatus: Record<string, number> = {}
+  const roleKinds: Record<string, number> = {}
+  const taskLinkStatus: Record<string, number> = {}
+  for (const record of selected) {
+    increment(modelStatus, record.provider.modelStatus ?? 'legacy_unset')
+    if (record.provider.modelStatus === 'observed' && record.provider.modelSource) {
+      increment(modelSource, record.provider.modelSource)
+    }
+    increment(roleStatus, record.turnRoleStatus ?? 'legacy_unset')
+    if (record.turnRoleStatus === 'observed' && record.turnRole?.role) increment(roleKinds, record.turnRole.role)
+    increment(taskLinkStatus, record.taskLinkStatus ?? 'legacy_unset')
+  }
+  const observedCoverage = (observed: number): SummaryCoverage => ({
+    knownTurns: observed,
+    totalTurns: selected.length,
+    complete: selected.length > 0 && observed === selected.length,
+    quality: selected.length === 0 ? 'unavailable' : observed === selected.length ? 'exact' : 'inferred'
+  })
+  return {
+    model: { statusCounts: modelStatus, sourceCounts: modelSource, coverage: observedCoverage(modelStatus.observed ?? 0) },
+    role: { statusCounts: roleStatus, roleCounts: roleKinds, coverage: observedCoverage(roleStatus.observed ?? 0) },
+    // `bound` is the observed-fact analogue for a task link; `unbound`/`conflict` are explicit
+    // decisions, not missing evidence, and a consumer must not fold them into a task denominator.
+    taskLink: { statusCounts: taskLinkStatus, coverage: observedCoverage(taskLinkStatus.bound ?? 0) }
+  }
+}
+
 export function summarizeTurnRecords(
   records: AgentTurnRecord[],
   sessionId?: string,
@@ -800,6 +837,7 @@ export function summarizeTurnRecords(
       dangerousOperations: dangers.total
     },
     usage: summarizeUsage(selected),
+    identity: summarizeIdentity(selected),
     calls,
     perTurn: selected.map((record) => {
       const turnCalls = summarizeCalls([record])

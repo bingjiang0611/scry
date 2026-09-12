@@ -537,7 +537,26 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
   }
   if (action === 'verify') {
     const result = await verifyStore(dataRoot)
-    print(result)
+    // Integrity (sequence/dedup/readability) alone decides `ok` and the exit code — that contract
+    // is frozen for team CI. Identity coverage and unsettled open turns are advisory: `turns verify`
+    // used to answer only "are the record files internally consistent?", which stays silent about
+    // records that are intact yet carry unobserved model/role/task identity, and about a turn that
+    // was interrupted before it sealed. Those are surfaced without changing the pass/fail contract.
+    const [records, health] = await Promise.all([
+      listRecords(dataRoot).catch(() => []),
+      readHealth(dataRoot).catch(() => null)
+    ])
+    const identity = records.length > 0
+      ? summarizeTurnRecords(records, undefined, { scope: 'workspace' }).identity
+      : null
+    const advisories: string[] = []
+    if (identity) {
+      if (!identity.model.coverage.complete) advisories.push(`model identity incomplete: ${JSON.stringify(identity.model.statusCounts)}`)
+      if (!identity.role.coverage.complete) advisories.push(`turn role incomplete: ${JSON.stringify(identity.role.statusCounts)}`)
+      if (!identity.taskLink.coverage.complete) advisories.push(`task link incomplete: ${JSON.stringify(identity.taskLink.statusCounts)}`)
+    }
+    if (health && health.pendingCount > 0) advisories.push(`open turns pending recovery: ${health.pendingCount}`)
+    print({ ...result, openTurnsPending: health?.pendingCount ?? null, identity, advisories })
     return result.ok ? 0 : 4
   }
   throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|verify ...')
