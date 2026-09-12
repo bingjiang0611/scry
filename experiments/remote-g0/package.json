@@ -1,0 +1,16 @@
+{
+  "name": "scry-remote-g0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate-wire.mjs",
+    "check:generated": "node generate-wire.mjs --check",
+    "test": "node --test *.test.mjs",
+    "build:swift": "swift build --package-path swift -j 4",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  },
+  "engines": { "node": ">=22" }
+}

@@ -1,0 +1,37 @@
+name: Remote G0 local contracts
+
+on:
+  pull_request:
+    paths:
+      - 'experiments/remote-g0/**'
+      - '.github/workflows/remote-g0.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/remote-g0/**'
+      - '.github/workflows/remote-g0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  transport:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: experiments/remote-g0/package-lock.json
+      - name: Toolchain and OpenSSL 3
+        run: |
+          swift --version
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - run: npm --prefix experiments/remote-g0 ci --ignore-scripts
+      - run: node experiments/remote-g0/generate-wire.mjs --check
+      - run: npm --prefix experiments/remote-g0 test
+      - run: swift test --package-path experiments/remote-g0/swift -j 4
+      - run: swift build --package-path experiments/remote-g0/swift -j 4
+      - run: node experiments/remote-g0/smoke.mjs
