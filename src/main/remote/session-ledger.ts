@@ -91,7 +91,10 @@ export class SessionLedgerError extends Error {
 // run cannot be settled/failed before it is dispatched.
 const NEXT: Record<RunLifecycle, RunLifecycle[]> = {
   recorded: ['dispatched', 'cancelled'],
-  dispatched: ['dispatched', 'settled', 'failed', 'cancelled'],
+  // Dispatch is strictly once: a second markDispatched is illegal, so the
+  // dispatcher can rely on the durable recorded->dispatched transition as its
+  // one-probe-per-intent fence. Progress is a separate, non-mutating event.
+  dispatched: ['settled', 'failed', 'cancelled'],
   settled: [],
   failed: [],
   cancelled: []
@@ -255,6 +258,20 @@ export class SessionLedger {
 
   runState(runId: string): RunLifecycle | undefined {
     return this.#runs.get(runId)?.lifecycle
+  }
+
+  // Runs still awaiting their first dispatch, with the intent detail, so a
+  // trusted dispatcher can drive exactly-once execution (including after a
+  // restart). A run already past 'recorded' is intentionally not returned: an
+  // interrupted dispatched run is ambiguous and must never be silently re-run.
+  recordedIntents(): Array<{ runId: string; detail?: string }> {
+    const pending: Array<{ runId: string; detail?: string }> = []
+    for (const entry of this.#runs.values()) {
+      if (entry.lifecycle !== 'recorded') continue
+      const first = this.#store.loadAll().find((event) => event.intentId === entry.intentId)
+      pending.push({ runId: entry.runId, detail: first?.detail })
+    }
+    return pending
   }
 
   describe(): { runs: number; events: number; lastSeq: number } {
