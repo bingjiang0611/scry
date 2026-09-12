@@ -61,3 +61,14 @@
 ## 用户外部授权增量
 
 用户已连接并信任其 iPhone（开发者模式 enabled），隔离 G0 测试 App 已以 Personal Team `7USHN8Q8JL` 签名安装并在真机跑通设备 Keychain XCTest（见上）。允许评估付费公网资源，**未批准创建或扣费**；仍未部署任何公网 relay。Render 候选价格、风险及后续确认边界见 [公网测试评估](./scry-ios-remote-test-deployment.md)。
+
+## 增量（2026-09-12，四项推进）
+
+按用户"把前四项都完成"的要求，在可诚实验证的最大范围内推进 #1–#4：
+
+- **#3 外层 relay 传输（完成并验证）**：`experiments/remote-g0/relay-server.mjs`（可部署云端 relay：设备走 WSS，NAT 后主机以 per-host bearer token 拨出反向隧道，按 `(hostId, mode)` 分 run/pair warm 池，只裸转发字节、不持内层密钥）；`src/main/remote/relay-connect.ts`（生产零新依赖外层 leg 工厂，Electron 不引入 `ws`）。`relay-e2e` 冒烟：先经 relay 配对（自签证明）再经 relay 运行（mTLS）打通生产 `HostController`。云端实际部署仍等用户提供 provider/账号/region/凭据。
+- **#4 iOS 设备客户端（传输已真机级别跨栈验证 + 产品 App 接入）**：共享 `ScryG0Transport` 包新增 `relayPairProve/relayPairStatus`（WS + 内层 TLS 1.3 mTLS，pin 主机 anchor、跳过 leaf hostname，设备用自签 bootstrap 证书证明私钥占有）。`relay-pair-smoke.mjs` 用**真实 Swift relay 传输**经生产 relay + `PairingTransport` + `PairingAuthority` 跑通 deny→pending→grant。产品 App `ScryRemote` 接入该包：`PairingCode`（解析 Mac 出示的 `scry1:` 码，含 relay 端点/hostId/pairingId/单次 secret/主机 anchor PEM，逐字段 fail-closed）、`RemoteKeychain`（设备私钥 insert-only + 授权证书可续期）、`RemotePairingClient`（生成/恢复密钥→prove→（Mac 确认）→再 prove→存证书，从不伪造已配对）、DEBUG `-selfTest`。`xcodebuild -sdk iphonesimulator build` 成功；模拟器 `-selfTest` 观测 enrollment/CSR/restore、pairing-code 解析（有效 + 3 类篡改拒绝）全 PASS，keychain 因未签名模拟器缺 entitlement（-34018）诚实 SKIP（签名真机才执行）。配对 UI 未接入 `PairView`、真机端到端仍需可达 relay + 运行中主机（公网 wss 还需外层 relay CA，码里尚未携带——属外层 TLS 部署后续，非新密码学）。
+- **#2 renderer 配对确认屏（逻辑测试 + 组件编译）**：`src/renderer/remote-pairing.ts` 纯投影（disabled 为真实"未启用"态；relayConfigured=false 诚实显示 dormant；pending 仅在 awaiting_local_confirmation 且暴露已证明指纹时可确认；revoked 仍显示不丢弃；确认必须回传该行已证明的 publicKeySHA256，fail-closed）；`RemotePairing.tsx` 走窄 `window.scry.remote*` 桥。6 个投影单测通过、typecheck node+web 通过、build 干净。未接入 `App.tsx`、无真实 App 视觉回放（renderer 有无关 WIP，视觉验收需运行中 App）。
+- **#1 `startRun` 绑活跃 agent（未做，诚实边界）**：`agent:start` 约 870 行，runId 在闭包深处生成（`run-<base36>-<seq>`）与账本预分配 UUID 不一致；真绑定需 runId 关联方案 + 会话/recorder/diff/catalog/renderer 全套，且**只能在运行中 App + 真实 Provider 验证**。盲改这条主路径会威胁本地运行主功能或产出缺证据的 remote run（违反 CLAUDE.md），故留待可运行 App 时按选定 runId 方案落地。当前仍是 fail-closed stub（`remote_run_binding_pending`，dormant 下不可达）。
+
+提交（新→旧）：`6c0e397`（renderer 配对屏 + 投影）、`565757c`（pin ScryRemote Package.resolved）、`71da14b`（产品 App 设备侧配对客户端）、`b3bfb34`（iOS relay 传输 + Swift↔Node relay 配对冒烟 + 统一配对 wire）、`351a38c`（设备侧 pairing-prove 传输 + relay run/pair 路由）、`280d4ad`（可部署外层 relay + 零依赖 host leg + 全 WSS e2e）。全量：remote 套件 81、experiments 45 node 测试、app 全量 1995 pass / 3 skip、typecheck、electron-vite build、git diff --check 全干净；Swift 包 build 干净；模拟器 self-test failures=0。
