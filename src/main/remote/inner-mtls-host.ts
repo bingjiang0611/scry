@@ -1,5 +1,6 @@
-import { createServer, type Server, type TLSSocket } from 'node:tls'
+import { createServer, type TLSSocket, type Server } from 'node:tls'
 import { constants, createHash } from 'node:crypto'
+import type { Duplex } from 'node:stream'
 import type { HostController } from './host-controller'
 
 // Production inner-mTLS host: the TLS 1.3 mutually-authenticated endpoint that a
@@ -47,6 +48,14 @@ export class InnerMtlsHost {
       secureOptions: constants.SSL_OP_NO_TICKET
     }, (socket) => this.#onConnection(socket as TLSSocket, options.controller))
     this.#server.on('tlsClientError', () => { /* rejected handshakes are not host errors */ })
+  }
+
+  // Serve inner-mTLS over an already-established byte stream (e.g. one leg of the
+  // outer WSS relay). The stream is handed to the same configured TLS server as
+  // listen(), so it inherits the identical credentials, TLS 1.3 pinning,
+  // requestCert/rejectUnauthorized policy and per-connection authorization.
+  serve(stream: Duplex): void {
+    this.#server.emit('connection', stream)
   }
 
   #onConnection(socket: TLSSocket, controller: HostController): void {
