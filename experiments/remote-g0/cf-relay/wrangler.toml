@@ -15,6 +15,7 @@ class_name = "RelayRoom"
 tag = "v1"
 new_sqlite_classes = ["RelayRoom"]
 
-# For local `wrangler dev` only; production uses `wrangler secret put RELAY_TOKEN`.
-[vars]
-RELAY_TOKEN = "local-dev-token"
+# RELAY_TOKEN is provided as a SECRET in production (`wrangler secret put
+# RELAY_TOKEN`) and via .dev.vars / an explicit `vars` for local `wrangler dev`.
+# It is intentionally NOT declared here so a deploy never clobbers the secret
+# with a plaintext value.

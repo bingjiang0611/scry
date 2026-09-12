@@ -32,6 +32,7 @@ function nextClose(ws) {
 
 const worker = await unstable_dev(cfDir + 'src/worker.js', {
   config: cfDir + 'wrangler.toml',
+  vars: { RELAY_TOKEN: 'local-dev-token' },
   experimental: { disableExperimentalWarning: true }
 })
 const base = `ws://127.0.0.1:${worker.port}`
