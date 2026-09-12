@@ -21,6 +21,7 @@ npm --prefix experiments/remote-g0 test
 swift test --package-path experiments/remote-g0/swift -j 4
 swift build --package-path experiments/remote-g0/swift -j 4
 node experiments/remote-g0/smoke.mjs
+node experiments/remote-g0/enrollment-smoke.mjs
 ```
 
 Changes to `wire.schema.json` require `node experiments/remote-g0/generate-wire.mjs`; do not hand-edit generated TS/Swift validators. Only required flat scalar objects are supported so far. This is not a claim that the entire product operation registry has been generated.
@@ -38,8 +39,8 @@ The macOS smoke resolves SwiftPM's host binary path explicitly: a simulator buil
 
 ## Evidence on 2026-09-12
 
-- macOS Swift build and 2 XCTest methods passed (shared 13-case schema corpus plus bounds/construction tests).
-- 14 Node wire tests passed; generated JS/TS/Swift matched the schema; generated TS passed strict typecheck.
+- macOS Swift build and 4 XCTest methods passed (wire corpus/bounds plus enrollment key/CSR/PEM tests).
+- 19 Node tests passed (14 wire + 5 CSR/issuance); generated JS/TS/Swift matched the schema; generated TS passed strict typecheck.
 - Seven actual Swift ↔ Node transport scenarios passed: normal mTLS, bad outer CA, replaced inner host anchor, untrusted device certificate, encrypted-record tamper, forced disconnection, fresh authenticated connection after failure. Negative cases accept zero application requests and are not runner timeouts.
 - Relay byte inspection did not find the probe's plaintext marker. This is supporting observation, not an independent cryptographic security audit.
 - Initial standalone arm64 iOS Simulator cross-build linked but emitted a clang incompatible-sysroot warning. The later native Xcode app built with the actual simulator SDK and successfully executed the shared transport plus Keychain on iOS Simulator. See [native evidence](../../apps/ios/README.md). **Physical iPhone, IPA and signing/provisioning acceptance are still missing.**
@@ -47,7 +48,7 @@ The macOS smoke resolves SwiftPM's host binary path explicitly: a simulator buil
 
 ## Still required before G0 completion
 
-Actual first-device proof/CSR/certificate enrollment and local human confirmation; one-time pairing replay/expiry and durable grant failure tests; real-device Keychain/installation/lock behavior; real device over an authorized public relay and cellular network while Mac is locked; reconnect/revocation/renewal semantics; packaging/licensing/security review. A native test app bundle and Simulator Keychain-to-TLS execution now exist, but are not real-device proof. The preissued client certificate in this fixture is **not** proof that onboarding works.
+Complete first-device secret/live-channel proof and certificate enrollment with local human confirmation; one-time pairing replay/expiry and durable grant failure tests; real-device Keychain/installation/lock behavior; real device over an authorized public relay and cellular network while Mac is locked; reconnect/revocation/renewal semantics; packaging/licensing/security review. A native test app bundle and Simulator Keychain-to-TLS execution now exist, but are not real-device proof. The preissued client certificate in this fixture is **not** proof that onboarding works.
 
 No cloud accounts, route tickets, user authentication, paid resources or deployed endpoints are created. The loopback relay is intentionally **not safe to expose on a public interface**. Keep the technical plan's high-privilege development gate closed until required G0 evidence is obtained.
 
@@ -57,8 +58,15 @@ No cloud accounts, route tickets, user authentication, paid resources or deploye
 
 The isolated native app and Keychain/TLS regression are in `apps/ios/`. Once its dedicated simulator is installed, `node experiments/remote-g0/ios-smoke.mjs <UUID>` executes the real native model through Keychain and the same relay. This is not a production UI or onboarding substitute.
 
+## Enrollment interoperability (still not pairing)
+
+The shared library can generate a software P-256 key, standard CSR and short-lived self-signed bootstrap certificate. `enrollment.mjs` verifies CSR signatures with bounded parsing and issues a host-controlled clientAuth certificate only for a matching expected fingerprint. It is an internal crypto adapter, not a remote signing endpoint. The bootstrap certificate is rejected by the authenticated echo host.
+
+`enrollment-smoke.mjs` proves Swift-generated key/CSR → Node certificate → the same key in real NIOSSL mTLS. Native tests additionally prove the generated key is stored/read from an insert-only Keychain account before public proof leaves the service actor. No one-time pairing secret, host user confirmation or durable grant transaction is claimed. See [versions, tests and gaps](../../docs/research/scry-ios-remote-enrollment-interop.md).
+
 ## Dependencies
 
 - SwiftNIO 2.90.1 / SwiftNIO SSL 2.36.1: Apache-2.0; SwiftNIO SSL bundles BoringSSL with its own license notices. SwiftNIO's published client/upgrade APIs were consulted for the pipeline design. Transitive versions are in `swift/Package.resolved`.
 - ws 8.21.3: MIT; exact npm integrity in `package-lock.json`.
+- X509 1.20.0 / Crypto 4.5.2 (Apache-2.0), @peculiar/x509 2.1.0 (MIT), reflect-metadata 0.2.2 (Apache-2.0): pinned in the Node / Swift lockfiles.
 - Build caches retain upstream license files. Distribution notices and dependency/security review remain a release requirement, not satisfied by this README.

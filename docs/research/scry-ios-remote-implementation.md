@@ -13,7 +13,7 @@
 | G0 标准双层加密传输 | macOS 7 个真实传输场景；新增真实 iOS Simulator App → Keychain → 共享 NIOSSL → WSS → Node TLS，通过并发单次请求检查 | 真机 / 证书配对 / 蜂窝 / 锁屏 |
 | G0 单一 schema | 有限 JSON Schema → JS 验证器、TS DTO、Swift Codable；共享 13-case corpus；14 Node tests、2 XCTest methods，通过漂移检查 | 完整业务 operation registry 与跨版本合同 |
 | G0 打包 | macOS 可执行文件；原生 App 的 arm64/x86_64 Simulator bundle 构建、实际启动/测试成功；Xcode 使用正确 SDK，消除早期 CLI cross-link 警告的运行不确定性 | iPhone 签名/安装、真实锁屏与发布打包 |
-| G0 配对 / 密钥 | 临时预签发证书，错误 CA/客户端被拒绝；Simulator 实际 Keychain 存取/失败保留与从 Keychain 建立 TLS，通过；私钥只进入 service actor/transport | 首次 proof/CSR、Mac 人类确认、持久 grant、重放/过期/失败注入、真机 Keychain；不能把 fixture 称为完成配对 |
+| G0 配对 / 密钥 | P-256 软件密钥/CSR → Node 验签签发 → NIOSSL 真实互操作；自签 bootstrap 被业务通道拒绝；Simulator Keychain insert-only 生成/保存、公有 proof 读回及既有 fixture TLS 均通过 | 短时秘密/活跃通道证明、Mac 人类确认、持久 grant、重放/过期/失败注入、撤销/续期、真机；不能把库互操作称为完成配对 |
 | G1 应用服务 / 账本 / 订阅 | 尚未实现 | 保留桌面焦点/IPC/工作区授权、durable intent fence、崩溃恢复与多端 cursor |
 | G2 任务 / Provider / trust | 尚未实现 | Claude/Codex 真实 new/resume/stop、独立 trust、auth 互斥、远程 actor 与双端竞态 |
 | G3 文件 / PTY | 尚未实现 | 相对路径与修订冲突、owner-aware cleanup、writer generation、禁止输入重放 |
@@ -26,16 +26,17 @@
 详细命令、依赖锁定与可复现范围见 [G0 README](../../experiments/remote-g0/README.md)。当前测试只使用 OS 临时证书、loopback 网络和 read-only `probe.echo`；不读取或写入真实项目 `.scry`、Provider transcript、DB 或用户凭证。
 
 - `generate-wire.mjs --check`：生成一致。
-- `npm --prefix experiments/remote-g0 test`：14 项通过。
-- `swift test --package-path experiments/remote-g0/swift -j 4`：2 个 XCTest methods，通过同一 13-case 语料及边界用例。
+- `npm --prefix experiments/remote-g0 test`：19 项通过（14 wire + 5 CSR/签发）。
+- `swift test --package-path experiments/remote-g0/swift -j 4`：4 个 XCTest methods，通过 wire 语料/边界和设备密钥/CSR 测试。
 - `swift build --package-path experiments/remote-g0/swift -j 4`：macOS 编译通过。
 - `node experiments/remote-g0/smoke.mjs`：7 个真实传输场景；错误证书/篡改/断线时 0 application requests，非 harness 超时。
+- `node experiments/remote-g0/enrollment-smoke.mjs`：2 个真实场景通过，Swift CSR / Node 签发 / NIOSSL 密钥互操作及自签 bootstrap 拒绝；不是完整配对或人工确认。详见 [互操作证据与缺口](./scry-ios-remote-enrollment-interop.md)。
 - 生成 TS DTO strict typecheck 通过。
 - 因独立 `node:test` / SwiftPM 依赖不能被 App Vitest 重复收集，显式排除 designs/experiments；对应实验在独立 runner 和新增 `.github/workflows/remote-g0.yml` 执行。CI workflow 已配置但未推送/未取得远端运行结果。
 - 当前工作区 App 回归：140 个 test files / 1908 个 tests 通过，3 个既有真实集成用例跳过；`npm run typecheck`、`npm run build` 通过。包含用户 WIP 的编译/自动测试结果，不代表远程业务或真实交互验收。
 - 早期 iOS CLI cross-build 有 sysroot warning；后续原生 Xcode App bundle 使用正确 SDK、Simulator 实际运行通过；IPA/真机验收仍缺失。
 - 原生 App：`apps/ios/ScryRemoteG0.xcodeproj`，SwiftUI 诊断页 + `G0Service` actor + Keychain；不是完整 v2 产品 UI，也不开放业务操作。
-- `node experiments/remote-g0/ios-smoke.mjs <专用 Simulator UUID>`：当前版本 3 个原生 XCTest 全部通过、0 跳过；覆盖实际 Keychain、格式边界、TLS/model，并发 intent 只形成 1 个主机请求，TLS 1.3、无 session reuse。命令输出的 evidence 目录含完整 `.xcresult`、日志与非秘密报告；本机最近目录为 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-g0-ios-result-0R691m/`。`xcresulttool` 读回确认 3 pass / 0 skip；测试锁已移除。不提交私有测试材料。
+- `node experiments/remote-g0/ios-smoke.mjs <专用 Simulator UUID>`：当前版本 4 个原生 XCTest 全部通过、0 跳过；覆盖实际 Keychain、生成设备密钥的跨 actor insert-only、格式边界、TLS/model；并发 intent 只形成 1 个主机请求，TLS 1.3、无 session reuse。当前 `.xcresult`/日志/报告目录为 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-g0-ios-result-P22q8O/`；`xcresulttool` 读回确认 4 pass / 0 skip。不提交私有测试材料。
 - `RemoteProbe` 与 App 共用 `RemoteTransport` library；生成器路径和测试 import 随 Wire.swift 迁移更新。CI 显式选用 runner 已安装的 Xcode 26.3（默认 16.4 不满足锁定的 swift-collections 6.2 工具链要求），原生 build-for-testing 已加入，但远端 CI 仍未运行。
 
 发现并修复 HTTP upgrade callback 内安装 inner TLS 会使 ClientHello 被 HTTP 升级状态拒绝的问题；改为升级完成后再进入内层握手。所有应用消息等待内层握手完成，没有 0-RTT 写入或失败自动重发。
