@@ -28,6 +28,7 @@ import { WebSocketServer } from 'ws'
 // produced by src/main/remote/relay-connect.ts.
 
 const HOST_ID = /^[0-9a-f-]{36}$/i
+const MODES = new Set(['run', 'pair'])
 const MAX_AUTH_LINE = 4096
 
 function tokenEqual(a, b) {
@@ -47,22 +48,24 @@ export function createRelayServer({ authorizeHost, tls, maxLegsPerHost = 8, legI
   const warm = new Map()
   const openStreams = new Set()
 
-  const pushLeg = (hostId, stream) => {
-    const legs = warm.get(hostId) ?? []
+  const key = (hostId, mode) => `${hostId}:${mode}`
+  const pushLeg = (hostId, mode, stream) => {
+    const k = key(hostId, mode)
+    const legs = warm.get(k) ?? []
     if (legs.length >= maxLegsPerHost) { stream.destroy(); return }
     const timer = setTimeout(() => {
-      const list = warm.get(hostId)
+      const list = warm.get(k)
       if (!list) return
       const i = list.findIndex((l) => l.stream === stream)
       if (i >= 0) { list.splice(i, 1); stream.destroy() }
     }, legIdleMs)
     if (typeof timer.unref === 'function') timer.unref()
     legs.push({ stream, timer })
-    warm.set(hostId, legs)
+    warm.set(k, legs)
   }
 
-  const popLeg = (hostId) => {
-    const legs = warm.get(hostId)
+  const popLeg = (hostId, mode) => {
+    const legs = warm.get(key(hostId, mode))
     while (legs && legs.length > 0) {
       const leg = legs.shift()
       clearTimeout(leg.timer)
@@ -89,7 +92,8 @@ export function createRelayServer({ authorizeHost, tls, maxLegsPerHost = 8, legI
       const rest = buffer.slice(nl + 1)
       let creds
       try { creds = JSON.parse(line) } catch { stream.destroy(); return }
-      if (!creds || typeof creds.hostId !== 'string' || !HOST_ID.test(creds.hostId) || typeof creds.token !== 'string') { stream.destroy(); return }
+      const mode = creds && typeof creds.mode === 'string' ? creds.mode : 'run'
+      if (!creds || typeof creds.hostId !== 'string' || !HOST_ID.test(creds.hostId) || typeof creds.token !== 'string' || !MODES.has(mode)) { stream.destroy(); return }
       let ok = false
       try { ok = authorizeHost({ hostId: creds.hostId, token: creds.token }) === true } catch { ok = false }
       if (!ok) { try { stream.write('{"error":"host_unauthorized"}\n') } catch { /* closing */ } stream.destroy(); return }
@@ -97,7 +101,7 @@ export function createRelayServer({ authorizeHost, tls, maxLegsPerHost = 8, legI
       stream.removeListener('data', onData)
       // Any bytes after the auth line belong to the inner stream; do not drop them.
       if (rest.length > 0) stream.unshift(Buffer.from(rest, 'utf8'))
-      pushLeg(creds.hostId, stream)
+      pushLeg(creds.hostId, mode, stream)
     }
     stream.on('data', onData)
   }
@@ -111,9 +115,14 @@ export function createRelayServer({ authorizeHost, tls, maxLegsPerHost = 8, legI
   const wss = new WebSocketServer({ server: http })
   wss.on('connection', (ws, req) => {
     let hostId = null
-    try { hostId = new URL(req.url, 'http://relay').searchParams.get('host') } catch { hostId = null }
-    if (!hostId || !HOST_ID.test(hostId)) { ws.close(1008, 'bad_host'); return }
-    const leg = popLeg(hostId)
+    let mode = 'run'
+    try {
+      const params = new URL(req.url, 'http://relay').searchParams
+      hostId = params.get('host')
+      mode = params.get('mode') ?? 'run'
+    } catch { hostId = null }
+    if (!hostId || !HOST_ID.test(hostId) || !MODES.has(mode)) { ws.close(1008, 'bad_host'); return }
+    const leg = popLeg(hostId, mode)
     if (!leg) { ws.close(1013, 'no_host_leg'); return }
     // Bridge WS binary <-> host leg raw bytes. No inner parsing.
     ws.on('message', (data, isBinary) => {

@@ -24,25 +24,33 @@ afterEach(async () => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-function loopbackRelay(): Promise<{ hostPort: number; devicePort: number; close: () => Promise<void> }> {
-  const hostLegs: Socket[] = []
+// Mode-aware loopback: run legs and pair legs land in separate queues so a run
+// device is never bridged to the pairing endpoint. This test exercises the run
+// path; pair legs sit idle.
+function loopbackRelay(): Promise<{ runHostPort: number; pairHostPort: number; devicePort: number; close: () => Promise<void> }> {
+  const runLegs: Socket[] = []
+  const pairLegs: Socket[] = []
   const devices: Socket[] = []
   const pair = () => {
-    while (hostLegs.length && devices.length) {
-      const h = hostLegs.shift()!; const d = devices.shift()!
+    while (runLegs.length && devices.length) {
+      const h = runLegs.shift()!; const d = devices.shift()!
       h.on('error', () => {}); d.on('error', () => {}); h.pipe(d); d.pipe(h)
     }
   }
-  const hostServer: Server = netServer((s) => { s.on('error', () => {}); hostLegs.push(s); pair() })
+  const runHostServer: Server = netServer((s) => { s.on('error', () => {}); runLegs.push(s); pair() })
+  const pairHostServer: Server = netServer((s) => { s.on('error', () => {}); pairLegs.push(s) })
   const deviceServer: Server = netServer((s) => { s.on('error', () => {}); devices.push(s); pair() })
   return Promise.all([
-    new Promise<void>((r) => hostServer.listen(0, '127.0.0.1', r)),
+    new Promise<void>((r) => runHostServer.listen(0, '127.0.0.1', r)),
+    new Promise<void>((r) => pairHostServer.listen(0, '127.0.0.1', r)),
     new Promise<void>((r) => deviceServer.listen(0, '127.0.0.1', r))
   ]).then(() => ({
-    hostPort: (hostServer.address() as { port: number }).port,
+    runHostPort: (runHostServer.address() as { port: number }).port,
+    pairHostPort: (pairHostServer.address() as { port: number }).port,
     devicePort: (deviceServer.address() as { port: number }).port,
     close: () => Promise.all([
-      new Promise<void>((r) => hostServer.close(() => r())),
+      new Promise<void>((r) => runHostServer.close(() => r())),
+      new Promise<void>((r) => pairHostServer.close(() => r())),
       new Promise<void>((r) => deviceServer.close(() => r()))
     ]).then(() => {})
   }))
@@ -97,7 +105,7 @@ describe('RemoteHostService (lifecycle facade)', () => {
       authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
       startRun: async ({ routing }) => { seen.push(routing.cwd) },
       gate: new ProviderOperationGate(),
-      createTransport: () => new ReverseTunnelTransport({ connect: () => netConnect({ port: relay.hostPort, host: '127.0.0.1' }) as unknown as OutboundLeg, poolSize: 2 })
+      createTransport: (ctx) => new ReverseTunnelTransport({ connect: () => netConnect({ port: ctx.mode === 'run' ? relay.runHostPort : relay.pairHostPort, host: '127.0.0.1' }) as unknown as OutboundLeg, poolSize: 2 })
     })
     cleanups.push(() => service.dispose())
     expect(service.relayConfigured).toBe(true)

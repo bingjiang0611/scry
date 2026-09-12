@@ -3,6 +3,7 @@ import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
 import { HostController, type RemoteIntentRouting } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
+import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
 import type { PairingAuthority } from './pairing'
 import type { ProviderOperationGate } from '../provider-operation-gate'
@@ -32,15 +33,18 @@ export interface RemoteHostServiceDependencies {
   startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
-  // How to reach the relay (deployed ws/net connector). Absent => dormant. The
+  // How to reach the relay (deployed ws/net connector). Absent => dormant. Called
+  // once per mode ('run' for the granted-device mTLS host, 'pair' for the pairing
+  // prove endpoint), so the relay keeps a separate warm pool per mode. The
   // context carries the stable hostId + anchor the relay routes/authenticates by.
-  createTransport?: (ctx: { host: InnerMtlsHost; hostId: string; anchorSHA256: string }) => RelayTransport
+  createTransport?: (ctx: { hostId: string; anchorSHA256: string; mode: 'run' | 'pair' }) => RelayTransport
 }
 
 export class RemoteHostService {
   #binding: HostControllerBinding
   #host: InnerMtlsHost
-  #client: RelayClient | null
+  #pairing: PairingTransport
+  #clients: RelayClient[]
   #started = false
   #disposed = false
   readonly anchorSHA256: string
@@ -50,14 +54,16 @@ export class RemoteHostService {
   private constructor(init: {
     binding: HostControllerBinding
     host: InnerMtlsHost
-    client: RelayClient | null
+    pairing: PairingTransport
+    clients: RelayClient[]
     anchorSHA256: string
     caCertificatePEM: string
     hostId: string
   }) {
     this.#binding = init.binding
     this.#host = init.host
-    this.#client = init.client
+    this.#pairing = init.pairing
+    this.#clients = init.clients
     this.anchorSHA256 = init.anchorSHA256
     this.caCertificatePEM = init.caCertificatePEM
     this.hostId = init.hostId
@@ -76,6 +82,7 @@ export class RemoteHostService {
       gate: deps.gate
     })
     let host: InnerMtlsHost
+    let pairing: PairingTransport
     try {
       const server = await identity.issueHostServer()
       host = new InnerMtlsHost({
@@ -84,16 +91,24 @@ export class RemoteHostService {
         serverKeyPEM: server.privateKeyPEM,
         caPEM: identity.caCertificatePEM
       })
+      pairing = new PairingTransport({
+        authority: binding.controller.authority,
+        serverCertPEM: server.certificatePEM,
+        serverKeyPEM: server.privateKeyPEM
+      })
     } catch (error) {
       // Never leak the durable leases if host assembly fails.
       binding.close()
       throw error
     }
-    const client = deps.createTransport
-      ? new RelayClient({ host, transport: deps.createTransport({ host, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256 }) })
-      : null
+    const clients: RelayClient[] = []
+    if (deps.createTransport) {
+      const ctx = { hostId: identity.hostId, anchorSHA256: identity.anchorSHA256 }
+      clients.push(new RelayClient({ host, transport: deps.createTransport({ ...ctx, mode: 'run' }) }))
+      clients.push(new RelayClient({ host: pairing, transport: deps.createTransport({ ...ctx, mode: 'pair' }) }))
+    }
     return new RemoteHostService({
-      binding, host, client,
+      binding, host, pairing, clients,
       anchorSHA256: identity.anchorSHA256,
       caCertificatePEM: identity.caCertificatePEM,
       hostId: identity.hostId
@@ -107,7 +122,8 @@ export class RemoteHostService {
   get authority(): PairingAuthority { return this.#binding.controller.authority }
   get controller(): HostController { return this.#binding.controller }
   get host(): InnerMtlsHost { return this.#host }
-  get relayConfigured(): boolean { return this.#client !== null }
+  get pairingTransport(): PairingTransport { return this.#pairing }
+  get relayConfigured(): boolean { return this.#clients.length > 0 }
 
   // --- Trusted-LOCAL pairing UI operations (sanitized; renderer-facing) -------
   // These project only display-safe fields; the pairing secret verifier, private
@@ -152,14 +168,16 @@ export class RemoteHostService {
     if (this.#disposed) throw new Error('remote_host_service_disposed')
     if (this.#started) return
     this.#started = true
-    if (this.#client) await this.#client.start()
+    for (const client of this.#clients) await client.start()
   }
 
   async dispose(): Promise<void> {
     if (this.#disposed) return
     this.#disposed = true
-    try { if (this.#client) await this.#client.close() } finally {
-      try { await this.#host.close() } finally { this.#binding.close() }
+    try { for (const client of this.#clients) await client.close() } finally {
+      try { await this.#host.close() } finally {
+        try { await this.#pairing.close() } finally { this.#binding.close() }
+      }
     }
   }
 }

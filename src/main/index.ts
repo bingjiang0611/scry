@@ -3536,8 +3536,8 @@ function resolveRemoteRelayTransport(): RemoteHostServiceDependencies['createTra
   const tls = cfg.tls === true
     ? { ca: typeof cfg.caPath === 'string' ? readFileSync(cfg.caPath, 'utf8') : undefined, servername: host }
     : undefined
-  return (ctx: { hostId: string }) => {
-    const { connect, readyEvent } = createRelayConnect({ host, port, hostId: ctx.hostId, token, tls })
+  return (ctx: { hostId: string; mode: 'run' | 'pair' }) => {
+    const { connect, readyEvent } = createRelayConnect({ host, port, hostId: ctx.hostId, token, mode: ctx.mode, tls })
     return new ReverseTunnelTransport({ connect, readyEvent })
   }
 }

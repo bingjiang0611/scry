@@ -7,10 +7,11 @@ import { once } from 'node:events'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { connect as tlsConnect } from 'node:tls'
 import { WebSocket, createWebSocketStream } from 'ws'
-import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
+import { Pkcs10CertificateRequestGenerator, X509CertificateGenerator, cryptoProvider } from '@peculiar/x509'
 import { ensureHostIdentity } from '../../src/main/remote/host-identity.ts'
 import { createHostController } from '../../src/main/remote/host-controller-factory.ts'
 import { InnerMtlsHost } from '../../src/main/remote/inner-mtls-host.ts'
+import { PairingTransport } from '../../src/main/remote/pairing-transport.ts'
 import { RelayClient, ReverseTunnelTransport } from '../../src/main/remote/relay-client.ts'
 import { createRelayConnect } from '../../src/main/remote/relay-connect.ts'
 import { ProviderOperationGate } from '../../src/main/provider-operation-gate.ts'
@@ -33,11 +34,12 @@ async function deviceKeyAndCSR() {
   const b64 = Buffer.from(pkcs8).toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n$/, '')
   const keyPEM = `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`
   const csr = await Pkcs10CertificateRequestGenerator.create({ name: 'CN=device', keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
-  return { keyPEM, csrPEM: csr.toString('pem') }
+  const selfSigned = await X509CertificateGenerator.createSelfSigned({ serialNumber: '01', name: 'CN=device', notBefore: new Date(Date.now() - 1000), notAfter: new Date(Date.now() + 3_600_000), keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
+  return { keyPEM, csrPEM: csr.toString('pem'), selfSignedPEM: selfSigned.toString('pem') }
 }
 
-async function deviceCall(devicePort, hostId, caPEM, certPEM, keyPEM, request) {
-  const ws = new WebSocket(`ws://127.0.0.1:${devicePort}/?host=${hostId}`)
+async function deviceCall(devicePort, hostId, caPEM, certPEM, keyPEM, request, mode = 'run') {
+  const ws = new WebSocket(`ws://127.0.0.1:${devicePort}/?host=${hostId}&mode=${mode}`)
   await once(ws, 'open')
   const duplex = createWebSocketStream(ws)
   const socket = tlsConnect({ socket: duplex, ca: caPEM, cert: certPEM, key: keyPEM, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
@@ -62,22 +64,27 @@ async function main() {
   const controller = binding.controller
   const server = await identity.issueHostServer()
   const innerHost = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM })
+  const pairingTransport = new PairingTransport({ authority: controller.authority, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM })
 
   // Deployable relay (local instance). Only THIS host token is admitted.
   const relay = createRelayServer({ authorizeHost: ({ hostId, token }) => hostId === identity.hostId && token === HOST_TOKEN })
   const { hostPort, devicePort } = await relay.listen({})
 
-  // Mac host dials out to the relay with the dependency-free TLS/TCP leg factory.
-  const { connect, readyEvent } = createRelayConnect({ host: '127.0.0.1', port: hostPort, hostId: identity.hostId, token: HOST_TOKEN })
-  const client = new RelayClient({ host: innerHost, transport: new ReverseTunnelTransport({ connect, readyEvent, poolSize: 3 }) })
-  await client.start()
+  // Mac host dials out to the relay with the dependency-free TLS/TCP leg factory,
+  // one reverse tunnel per mode (run + pair).
+  const runConn = createRelayConnect({ host: '127.0.0.1', port: hostPort, hostId: identity.hostId, token: HOST_TOKEN, mode: 'run' })
+  const pairConn = createRelayConnect({ host: '127.0.0.1', port: hostPort, hostId: identity.hostId, token: HOST_TOKEN, mode: 'pair' })
+  const runClient = new RelayClient({ host: innerHost, transport: new ReverseTunnelTransport({ connect: runConn.connect, readyEvent: runConn.readyEvent, poolSize: 3 }) })
+  const pairClient = new RelayClient({ host: pairingTransport, transport: new ReverseTunnelTransport({ connect: pairConn.connect, readyEvent: pairConn.readyEvent, poolSize: 2 }) })
+  await runClient.start(); await pairClient.start()
 
-  // Pair a device (verifyCSR -> begin -> prove -> confirmLocal).
-  const { keyPEM, csrPEM } = await deviceKeyAndCSR()
-  const verified = await identity.verifyCSR(csrPEM)
+  // Pair a device over the relay: the device proves possession with a self-signed
+  // client cert on the PAIR endpoint, then the Mac confirms locally.
+  const { keyPEM, csrPEM, selfSignedPEM } = await deviceKeyAndCSR()
   const pair = await controller.authority.begin()
-  await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
-  const grant = await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)
+  const proved = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, selfSignedPEM, keyPEM, { op: 'prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, 'pair')
+  assert.equal(proved.receipt.state, 'awaiting_local_confirmation')
+  const grant = await controller.authority.confirmLocal(pair.pairingId, proved.receipt.publicKeySHA256)
 
   // Device submits an intent through the real relay + WSS + inner mTLS.
   const submit = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, grant.certificatePEM, keyPEM, { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', prompt: 'go' }) })
@@ -96,9 +103,9 @@ async function main() {
   const refused = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, strangerCert.certificatePEM, stranger.keyPEM, { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude' }) })
   assert.equal(refused.error, 'device_not_authorized')
 
-  await client.close(); await relay.close(); binding.close()
+  await runClient.close(); await pairClient.close(); await relay.close(); binding.close()
   rmSync(dir, { recursive: true, force: true })
-  console.log('relay-e2e OK: device -> WSS relay -> host reverse tunnel -> inner mTLS -> HostController (routed run, warm-pool reuse, unpaired refused)')
+  console.log('relay-e2e OK: pair over relay (self-signed prove) + run over relay (mTLS) -> HostController (routed run, warm-pool reuse, unpaired refused)')
 }
 
 main().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) })
