@@ -22,6 +22,8 @@ swift test --package-path experiments/remote-g0/swift -j 4
 swift build --package-path experiments/remote-g0/swift -j 4
 node experiments/remote-g0/smoke.mjs
 node experiments/remote-g0/enrollment-smoke.mjs
+node experiments/remote-g0/pair-smoke.mjs
+node_modules/.bin/vitest run src/main/remote/pairing.test.ts   # run from repository root
 ```
 
 Changes to `wire.schema.json` require `node experiments/remote-g0/generate-wire.mjs`; do not hand-edit generated TS/Swift validators. Only required flat scalar objects are supported so far. This is not a claim that the entire product operation registry has been generated.
@@ -40,7 +42,8 @@ The macOS smoke resolves SwiftPM's host binary path explicitly: a simulator buil
 ## Evidence on 2026-09-12
 
 - macOS Swift build and 4 XCTest methods passed (wire corpus/bounds plus enrollment key/CSR/PEM tests).
-- 19 Node tests passed (14 wire + 5 CSR/issuance); generated JS/TS/Swift matched the schema; generated TS passed strict typecheck.
+- 30 Node tests passed (23-case wire corpus + 5 CSR/issuance + 2 bounds); generated JS/TS/Swift matched the schema; generated TS passed strict typecheck.
+- 13 Vitest cases for `src/main/remote/pairing.ts` + `pairing-file.ts` passed (verifier-only secret, CSR channel-key binding, attempt cap, candidate immutability, single-transaction consume+issue, clock-rollback expiry and restart non-revival, write-failure/unknown-receipt fencing, cancel-during-signing, immediate+durable revocation, private atomic file with an exclusive lease, symlink/corruption/stale-lock refusal).
 - Seven actual Swift ↔ Node transport scenarios passed: normal mTLS, bad outer CA, replaced inner host anchor, untrusted device certificate, encrypted-record tamper, forced disconnection, fresh authenticated connection after failure. Negative cases accept zero application requests and are not runner timeouts.
 - Relay byte inspection did not find the probe's plaintext marker. This is supporting observation, not an independent cryptographic security audit.
 - Initial standalone arm64 iOS Simulator cross-build linked but emitted a clang incompatible-sysroot warning. The later native Xcode app built with the actual simulator SDK and successfully executed the shared transport plus Keychain on iOS Simulator. See [native evidence](../../apps/ios/README.md). **Physical iPhone, IPA and signing/provisioning acceptance are still missing.**
@@ -57,6 +60,12 @@ No cloud accounts, route tickets, user authentication, paid resources or deploye
 `swift/Sources/RemoteTransport/` is the shared `ScryG0Transport` library; `RemoteProbe` is only the CLI wrapper. Generated Swift wire models moved with the library and the generator/test imports were updated. Private keys enter TLS from memory, allowing the native app's service actor to load from Keychain rather than creating PEM key files.
 
 The isolated native app and Keychain/TLS regression are in `apps/ios/`. Once its dedicated simulator is installed, `node experiments/remote-g0/ios-smoke.mjs <UUID>` executes the real native model through Keychain and the same relay. This is not a production UI or onboarding substitute.
+
+## Pairing state machine (still not completed device pairing)
+
+`src/main/remote/pairing.ts` implements `PairingAuthority`: a short-lived base64url secret (SHA-256 verifier + `timingSafeEqual`, 5-attempt cap), CSR-proven channel key binding, a single fsynced transaction that both issues the certificate and consumes the secret, `await`-serialized operations, monotonic-clock expiry independent of wall-clock rollback, and a fail-closed fence on any write failure or unknown commit receipt so no certificate leaves on an unproven durable write. `pairing-file.ts` is a private `0700`/`0600` atomic file store with an exclusive `O_EXCL`/`O_NOFOLLOW` lease, directory fsync, and refusal of symlinked data, corrupt snapshots and unknown stale locks (no backup resurrection). It has no IPC, network, Provider or workspace-path surface; only a trusted local controller may call `begin`/`confirmLocal`/`cancel`/`revoke`.
+
+`pair-smoke.mjs` drives the real thing end to end: the Swift `pair prove` CLI dials a host-authenticated (server-auth-only) bootstrap channel through the outer WSS relay into a Node `/pair` host wired to a live `PairingAuthority`. It exercises wrong-secret denial, pending-before-confirmation, a synthetic local confirmation, a granted certificate that then completes a real mTLS `probe.echo`, and revocation refusal (`proves=4`, `issued=1`). The local confirmation is called directly against the authority to represent the Mac user pressing approve; there is no real human, no persistent product UI and no iPhone. Passing this smoke is **not** completed device pairing.
 
 ## Enrollment interoperability (still not pairing)
 
