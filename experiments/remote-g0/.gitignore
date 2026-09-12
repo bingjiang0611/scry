@@ -2,3 +2,4 @@ swift/.build/
 swift/.swiftpm/
 .wrangler/
 cf-relay/.wrangler/
+cf-relay/.dev.vars
