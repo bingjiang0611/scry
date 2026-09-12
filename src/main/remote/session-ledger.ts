@@ -206,9 +206,10 @@ export class SessionLedger {
     if (!UUID.test(input.intentId ?? '')) throw new SessionLedgerError('invalid_intent_id')
     if (!UUID.test(input.runId ?? '')) throw new SessionLedgerError('invalid_run_id')
     if (input.detail !== undefined && (typeof input.detail !== 'string' || input.detail.length > MAX_DETAIL)) throw new SessionLedgerError('invalid_detail')
-    const existingRunId = this.#byIntent.get(input.intentId)
-    if (existingRunId) {
-      if (existingRunId !== input.runId) throw new SessionLedgerError('intent_run_mismatch')
+    // The intentId is the idempotency key: the first recording binds the runId,
+    // and any retry returns that original binding. The candidate runId passed on
+    // a retry is an artifact of a stateless caller and is intentionally ignored.
+    if (this.#byIntent.has(input.intentId)) {
       return { status: 'duplicate', event: this.#firstEventFor(input.intentId) }
     }
     if (this.#runs.has(input.runId)) throw new SessionLedgerError('run_already_exists')
