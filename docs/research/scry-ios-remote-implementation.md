@@ -32,6 +32,7 @@
 - `swift build --package-path experiments/remote-g0/swift -j 4`：macOS 编译通过。
 - `node experiments/remote-g0/smoke.mjs`：7 个真实传输场景；错误证书/篡改/断线时 0 application requests，非 harness 超时。
 - `node experiments/remote-g0/enrollment-smoke.mjs`：2 个真实场景通过，Swift CSR / Node 签发 / NIOSSL 密钥互操作及自签 bootstrap 拒绝；不是完整配对或人工确认。详见 [互操作证据与缺口](./scry-ios-remote-enrollment-interop.md)。
+- `node --test experiments/remote-g0/relay-admission.test.mjs`：11 项通过。纯 `RelayAdmission` 覆盖单次票据、host/device 角色绑定、重放拒绝、时钟（墙钟或单调任一）过期、会话容量、滑窗限速、共享票据/格式校验与日志脱敏；网络集成用鉴权 relay 证明「持正确 device 票据的对端完成真实内层 TLS1.3 mTLS echo；错误票据 401 且 0 内层请求、不建桥；已消费票据重放 401；日志不泄露明文票据」。这是 loopback 鉴权 relay 证据，尚未部署公网/局域网可达 relay。
 - `node experiments/remote-g0/pair-smoke.mjs`：1 个全链场景通过，经真实 host-authenticated bootstrap 通道（Swift `pair prove` CLI → 外层 WSS → Node `/pair` 主机 → 真实 `PairingAuthority`），完成「错误秘密拒绝→pending→合成本机确认→granted→用签发证书跑真实 mTLS echo→撤销后拒绝」；`proves=4`、`issued=1`（只签发一次）。本机确认由 harness 直接调用，非真人。
 - 生成 TS DTO strict typecheck 通过。
 - 因独立 `node:test` / SwiftPM 依赖不能被 App Vitest 重复收集，显式排除 designs/experiments；对应实验在独立 runner 和新增 `.github/workflows/remote-g0.yml` 执行。CI workflow 已配置但未推送/未取得远端运行结果。
@@ -48,7 +49,7 @@
 
 ## 下一步（仍属于完整目标）
 
-1. 真机安装与设备 Keychain 已有真实证据（见上）。仍需：从设备可达的已鉴权 relay（ticket + host/device 绑定 + 重放/过期/限速/缓冲 + 日志脱敏）后，在真机完成 TLS-from-Keychain 与锁屏/蜂窝 G0-device；持久 grant 的真机回放与续期。
+1. 真机安装与设备 Keychain 已有真实证据（见上）。已鉴权 relay 的 admission 层（ticket + host/device 绑定 + 重放/过期/限速/缓冲 + 日志脱敏）已在 `relay-admission.mjs`/`authenticated-relay.mjs` 实现并通过 loopback 真实 mTLS 集成测试。仍需：把该 admission 接到从设备可达的 LAN/公网 relay（票据签发与 host 控制通道自身鉴权），再在真机完成 TLS-from-Keychain 与锁屏/蜂窝 G0-device；持久 grant 的真机回放与续期。
 2. 登录/身份已定为 Sign in with Apple，最低 iOS 17+；把设备身份绑定到 `PairingAuthority` 的 grant（设备证书 + Apple 身份）。
 3. 已接受设计 v2：按其实现原生 SwiftUI home/new/chat，绑真实协议/状态，真实展现未登录/未配对/未连接/空态，不注入假成功；再按 G1→G5 接入应用服务。
 
