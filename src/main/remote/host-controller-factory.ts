@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { HostController, type HostControllerDependencies, type RemoteIntentRouting } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
+import { ensureHostIdentity } from './host-identity'
 import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import type { ProviderOperationGate } from '../provider-operation-gate'
@@ -52,6 +53,30 @@ function privateDir(path: string): string {
   mkdirSync(path, { recursive: true, mode: 0o700 })
   chmodSync(path, 0o700)
   return path
+}
+
+// Higher-level production entry point: derive the persisted host identity (inner
+// CA + stable hostId + verifyCSR/issue) from disk, then bind everything. This is
+// what index.ts calls; only the live-app seams (workspace authorization,
+// startRun, gate) remain to be supplied.
+export async function createHostControllerFromDisk(deps: {
+  stateDirectory: string
+  authorizeWorkspace(cwd: string): string
+  startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
+  gate: ProviderOperationGate
+}): Promise<HostControllerBinding & { anchorSHA256: string; caCertificatePEM: string }> {
+  const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))
+  const binding = createHostController({
+    stateDirectory: deps.stateDirectory,
+    hostId: identity.hostId,
+    anchorSHA256: identity.anchorSHA256,
+    verifyCSR: identity.verifyCSR,
+    issue: identity.issue,
+    authorizeWorkspace: deps.authorizeWorkspace,
+    startRun: deps.startRun,
+    gate: deps.gate
+  })
+  return Object.assign(binding, { anchorSHA256: identity.anchorSHA256, caCertificatePEM: identity.caCertificatePEM })
 }
 
 export function createHostController(deps: HostControllerFactoryDependencies): HostControllerBinding {
