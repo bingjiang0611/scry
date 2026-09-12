@@ -97,6 +97,7 @@ import { RunStopLifecycle } from './run-stop-lifecycle'
 import { RemoteHostService, type RemoteHostServiceDependencies } from './remote/remote-host-service'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
+import { createRelayConnectWS } from './remote/relay-connect-ws'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { archiveSessionId } from './session-id'
@@ -3524,6 +3525,24 @@ let remoteHostService: RemoteHostService | null = null
 // When absent the subsystem stays dormant (no outbound leg). The token is a
 // per-host bearer provisioned out of band and is never logged.
 function resolveRemoteRelayTransport(): RemoteHostServiceDependencies['createTransport'] {
+  // Cloudflare Worker relay (WSS) takes precedence when configured.
+  //   SCRY_REMOTE_RELAY_WS = { "url": "wss://scry-relay.example.workers.dev", "token": "..." }
+  // The Worker speaks WebSocket both sides; the Mac dials each warm leg over WSS
+  // with the Node/Electron global WebSocket (no `ws` dependency).
+  const wsRaw = process.env.SCRY_REMOTE_RELAY_WS
+  if (wsRaw) {
+    let wsCfg: { url?: unknown; token?: unknown }
+    try { wsCfg = JSON.parse(wsRaw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY_WS is not valid JSON; remote relay disabled'); return undefined }
+    if (typeof wsCfg.url !== 'string' || typeof wsCfg.token !== 'string') {
+      console.warn('[scry] SCRY_REMOTE_RELAY_WS missing url/token; remote relay disabled')
+      return undefined
+    }
+    const url = wsCfg.url, wsToken = wsCfg.token
+    return (ctx: { hostId: string; mode: 'run' | 'pair' }) => {
+      const { connect, readyEvent } = createRelayConnectWS({ url, hostId: ctx.hostId, token: wsToken, mode: ctx.mode })
+      return new ReverseTunnelTransport({ connect, readyEvent })
+    }
+  }
   const raw = process.env.SCRY_REMOTE_RELAY
   if (!raw) return undefined
   let cfg: { host?: unknown; port?: unknown; token?: unknown; tls?: unknown; caPath?: unknown }
