@@ -1,0 +1,15 @@
+[
+  { "name": "request", "type": "ProbeRequest", "valid": true, "packet": { "protocolMajor": 1, "requestId": "request-1", "operation": "probe.echo", "payload": "中文 🧭" } },
+  { "name": "response", "type": "ProbeResponse", "valid": true, "packet": { "protocolMajor": 1, "requestId": "request-1", "kind": "result", "payload": "" } },
+  { "name": "missing field", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": 1, "requestId": "request-1", "operation": "probe.echo" } },
+  { "name": "self reported actor", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": 1, "requestId": "request-1", "operation": "probe.echo", "payload": "", "actor": "owner" } },
+  { "name": "unsupported protocol", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": 2, "requestId": "request-1", "operation": "probe.echo", "payload": "" } },
+  { "name": "fractional protocol", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": 1.5, "requestId": "request-1", "operation": "probe.echo", "payload": "" } },
+  { "name": "boolean protocol", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": true, "requestId": "request-1", "operation": "probe.echo", "payload": "" } },
+  { "name": "unknown operation", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": 1, "requestId": "request-1", "operation": "run.start", "payload": "" } },
+  { "name": "empty request id", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": 1, "requestId": "", "operation": "probe.echo", "payload": "" } },
+  { "name": "wrong payload type", "type": "ProbeRequest", "valid": false, "packet": { "protocolMajor": 1, "requestId": "request-1", "operation": "probe.echo", "payload": {} } },
+  { "name": "unknown receipt kind", "type": "ProbeResponse", "valid": false, "packet": { "protocolMajor": 1, "requestId": "request-1", "kind": "ok", "payload": "" } },
+  { "name": "null root", "type": "ProbeResponse", "valid": false, "packet": null },
+  { "name": "array root", "type": "ProbeResponse", "valid": false, "packet": [] }
+]

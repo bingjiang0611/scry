@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scry:remote:g0:wire",
+  "$defs": {
+    "ProbeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolMajor", "requestId", "operation", "payload"],
+      "properties": {
+        "protocolMajor": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "operation": { "type": "string", "enum": ["probe.echo"] },
+        "payload": { "type": "string", "maxLength": 4096 }
+      }
+    },
+    "ProbeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolMajor", "requestId", "kind", "payload"],
+      "properties": {
+        "protocolMajor": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "requestId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "kind": { "type": "string", "enum": ["result"] },
+        "payload": { "type": "string", "maxLength": 4096 }
+      }
+    }
+  }
+}
