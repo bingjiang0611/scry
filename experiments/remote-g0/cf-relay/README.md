@@ -22,6 +22,20 @@ pairing device (`mode=pair`, self-signed prove) can never land on the strict-mTL
 `run` pool and vice versa. Unknown host id / bad mode → close 1008; no warm leg →
 close 1013.
 
+The relay **stores nothing** and only ever sees encrypted inner-TLS bytes. It
+uses the **WebSocket Hibernation API** (`state.acceptWebSocket` + `webSocket*`
+handlers), so idle warm legs incur no compute-duration charges.
+
+## Cost: runs on the Workers **Free** plan
+
+SQLite-backed Durable Objects are available on the Workers Free plan (per
+Cloudflare's pricing docs), and hibernation keeps idle connections free. A
+personal always-on relay fits comfortably inside the free daily allowances
+(100,000 requests/day; 13,000 GB-s/day compute duration — hibernating warm legs
+consume duration only while actually forwarding frames). No paid plan required.
+Protocol pings and outgoing WebSocket messages are not billed; incoming
+WebSocket messages bill at a 20:1 ratio.
+
 ## Local verification (no account, no deploy, no spend)
 
 ```
@@ -35,7 +49,7 @@ first-frame token auth (1008), pool separation, and no-leg rejection (1013).
 `smoke:cf-host` wires the production `createRelayConnectWS` →
 `ReverseTunnelTransport` → `RelayClient` and round-trips bytes through the Worker.
 
-## Deploy (requires the maintainer's Cloudflare account + domain)
+## Deploy (needs the maintainer's Cloudflare account; free plan is enough)
 
 Nothing here creates paid resources. To deploy once credentials are provided:
 
@@ -43,7 +57,7 @@ Nothing here creates paid resources. To deploy once credentials are provided:
 cd experiments/remote-g0/cf-relay
 wrangler login                       # or CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
 wrangler secret put RELAY_TOKEN      # same value provisioned to the Mac host
-wrangler deploy
+wrangler deploy                      # publishes to <name>.<subdomain>.workers.dev
 ```
 
 Then point the Mac host at it:
@@ -54,7 +68,7 @@ SCRY_REMOTE_RELAY_WS='{"url":"wss://scry-relay.<subdomain>.workers.dev","token":
   <launch Scry>
 ```
 
-`SCRY_REMOTE_RELAY_WS` takes precedence over the raw-TCP `SCRY_REMOTE_RELAY`.
-Durable Objects require a paid Workers plan (Workers Paid, ~US$5/mo). Confirm
-account id, `workers.dev` subdomain or custom domain, and the plan before
-`wrangler deploy`.
+`SCRY_REMOTE_RELAY_WS` takes precedence over the raw-TCP `SCRY_REMOTE_RELAY`. The
+free `workers.dev` subdomain works out of the box; a custom domain additionally
+needs the zone in the same account plus a Workers route. No Workers Paid plan is
+required for SQLite-backed Durable Objects.
