@@ -22,7 +22,19 @@ xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj \
   -derivedDataPath /tmp/scry-g0-xcode-build CODE_SIGNING_ALLOWED=NO build
 ```
 
-No team, account, key, phone identifier or provisioning profile is stored in the project. Real-device installation was authorized by the user, but still requires an available trusted phone and actual provisioning. Do not enable automatic provisioning against an unrelated team or claim a simulator build is an IPA.
+No team, account, key, phone identifier or provisioning profile is stored in the project. Do not enable automatic provisioning against an unrelated team or claim a simulator build is an IPA.
+
+### Real-device verification (2026-09-12, after the user connected and trusted the phone)
+
+With the user's phone connected, trusted and in developer mode, a signed device build and on-device tests were run with the user's Personal Team (pass the team at invocation; it is never committed):
+
+```sh
+xcodebuild test -project apps/ios/ScryRemoteG0.xcodeproj -scheme ScryRemoteG0 \
+  -destination 'platform=iOS,id=<device-udid>' -derivedDataPath /tmp/scry-g0-device-build \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM=<personal-team-id> CODE_SIGN_STYLE=Automatic
+```
+
+Three XCTests passed on the physical iPhone (fixture bounds, insert-only generated-key persistence, Keychain round-trip + failed-import preservation), proving the non-synchronizing `AfterFirstUnlockThisDeviceOnly` policy on real hardware. `testSimulatorTLSFromKeychain` correctly **skips on device**: it needs a Mac-side live relay reachable from the phone, and `127.0.0.1` on the phone is the phone itself, so real TLS-from-Keychain still awaits an authorized LAN/public relay. This is real-device Keychain evidence, **not** completed device pairing, TLS, lock-screen or cellular proof.
 
 ## Isolated simulator verification
 
