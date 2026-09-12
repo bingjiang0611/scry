@@ -95,6 +95,7 @@ import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
 import { RunStopLifecycle } from './run-stop-lifecycle'
 import { RemoteHostService } from './remote/remote-host-service'
+import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { archiveSessionId } from './session-id'
 import {
@@ -3542,6 +3543,29 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     remoteHostService = null
   }
 }
+
+function requireRemoteHost(): RemoteHostService {
+  if (!remoteHostService) throw new Error('远程访问未启用')
+  return remoteHostService
+}
+
+// Trusted-LOCAL pairing surface. These are only ever driven by the Mac's own
+// renderer (assertTrustedIpcEvent), never by a device; a device reaches only the
+// prove/status transport path, never confirm/cancel/revoke.
+handleTrusted('remote:status', (): RemoteStatus => remoteHostService ? remoteHostService.status() : { enabled: false })
+handleTrusted('remote:pairing:begin', () => requireRemoteHost().beginPairing())
+handleTrusted('remote:pairing:confirm', (_event, pairingId: unknown, expectedPublicKeySHA256: unknown) => {
+  if (typeof pairingId !== 'string' || typeof expectedPublicKeySHA256 !== 'string') throw new Error('无效的配对确认参数')
+  return requireRemoteHost().confirmPairing(pairingId, expectedPublicKeySHA256)
+})
+handleTrusted('remote:pairing:cancel', (_event, pairingId: unknown) => {
+  if (typeof pairingId !== 'string') throw new Error('无效的配对标识')
+  return requireRemoteHost().cancelPairing(pairingId)
+})
+handleTrusted('remote:device:revoke', (_event, deviceId: unknown) => {
+  if (typeof deviceId !== 'string') throw new Error('无效的设备标识')
+  return requireRemoteHost().revokeDevice(deviceId)
+})
 
 app.whenReady().then(() => {
   if (!primaryInstance) return

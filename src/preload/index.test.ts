@@ -97,7 +97,12 @@ const invokeChannels = {
   answerQuestion: 'agent:answerQuestion',
   stop: 'agent:stop',
   stopBackgroundTask: 'agent:stopBackgroundTask',
-  traceResynchronized: 'agent:traceResynchronized'
+  traceResynchronized: 'agent:traceResynchronized',
+  remoteStatus: 'remote:status',
+  remoteBeginPairing: 'remote:pairing:begin',
+  remoteConfirmPairing: 'remote:pairing:confirm',
+  remoteCancelPairing: 'remote:pairing:cancel',
+  remoteRevokeDevice: 'remote:device:revoke'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const listenerChannels = {

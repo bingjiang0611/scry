@@ -128,6 +128,58 @@ describe('RemoteHostService (lifecycle facade)', () => {
     expect(service.anchorSHA256).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('exposes a sanitized pairing status + confirm/revoke without leaking secrets', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-svc-')); dirs.push(dir)
+    const service = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate() })
+    cleanups.push(() => service.dispose())
+
+    // Empty host: honest enabled state, no pending, no devices.
+    let status = service.status()
+    expect(status.enabled).toBe(true)
+    if (!status.enabled) throw new Error('unreachable')
+    expect(status.relayConfigured).toBe(false)
+    expect(status.pending).toEqual([])
+    expect(status.devices).toEqual([])
+
+    // Begin a pairing; the code carries the one-time secret + anchor for the device.
+    const code = await service.beginPairing()
+    expect(code.secret).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(code.anchorSHA256).toBe(status.anchorSHA256)
+
+    // A device proves possession over the (simulated) verified transport.
+    const { csrPEM } = await deviceKeyAndCSR()
+    const publicKeySHA256 = await hashPublicKey(csrPEM)
+    await service.authority.prove({ pairingId: code.pairingId, secret: code.secret, csrPEM, deviceLabel: 'My iPhone' }, publicKeySHA256)
+
+    // Status now shows the pending pairing awaiting local confirmation, with the
+    // key fingerprint but NO secret verifier or PEM anywhere.
+    status = service.status()
+    if (!status.enabled) throw new Error('unreachable')
+    expect(status.pending).toHaveLength(1)
+    expect(status.pending[0]).toMatchObject({ pairingId: code.pairingId, state: 'awaiting_local_confirmation', deviceLabel: 'My iPhone', publicKeySHA256 })
+    expect(JSON.stringify(status)).not.toContain('BEGIN')
+    expect(JSON.stringify(status)).not.toContain(code.secret)
+
+    // Confirming with a WRONG expected fingerprint fails closed.
+    await expect(service.confirmPairing(code.pairingId, 'f'.repeat(64))).rejects.toThrow()
+
+    // Confirming with the displayed fingerprint grants the device.
+    const device = await service.confirmPairing(code.pairingId, publicKeySHA256)
+    expect(device.deviceLabel).toBe('My iPhone')
+    expect(device.revoked).toBe(false)
+    status = service.status()
+    if (!status.enabled) throw new Error('unreachable')
+    expect(status.pending).toEqual([])
+    expect(status.devices).toHaveLength(1)
+    expect(status.devices[0].deviceId).toBe(device.deviceId)
+
+    // Revocation is durable and shown, never silently dropped.
+    await service.revokeDevice(device.deviceId)
+    status = service.status()
+    if (!status.enabled) throw new Error('unreachable')
+    expect(status.devices[0].revoked).toBe(true)
+  })
+
   it('dispose releases the durable leases so a fresh service can be created in the same directory', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-svc-')); dirs.push(dir)
     const first = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate() })

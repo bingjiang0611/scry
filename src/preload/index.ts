@@ -53,6 +53,7 @@ import type {
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
 } from '../shared/workspace'
+import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
 import type { ScanReport } from '../cli/mcpguard-core'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import type {
@@ -271,7 +272,14 @@ const api = {
     const l = (_: unknown, e: { runId: string; message: string; category?: string; hint?: string }): void => cb(e)
     ipcRenderer.on('agent:error', l)
     return () => ipcRenderer.removeListener('agent:error', l)
-  }
+  },
+  // Trusted-LOCAL remote-access pairing (Mac's own UI only).
+  remoteStatus: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:status'),
+  remoteBeginPairing: (): Promise<RemotePairingCode> => ipcRenderer.invoke('remote:pairing:begin'),
+  remoteConfirmPairing: (pairingId: string, expectedPublicKeySHA256: string): Promise<RemoteDevice> =>
+    ipcRenderer.invoke('remote:pairing:confirm', pairingId, expectedPublicKeySHA256),
+  remoteCancelPairing: (pairingId: string): Promise<void> => ipcRenderer.invoke('remote:pairing:cancel', pairingId),
+  remoteRevokeDevice: (deviceId: string): Promise<void> => ipcRenderer.invoke('remote:device:revoke', deviceId)
 }
 
 contextBridge.exposeInMainWorld('scry', api)

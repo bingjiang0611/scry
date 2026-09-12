@@ -6,6 +6,7 @@ import { InnerMtlsHost } from './inner-mtls-host'
 import { RelayClient, type RelayTransport } from './relay-client'
 import type { PairingAuthority } from './pairing'
 import type { ProviderOperationGate } from '../provider-operation-gate'
+import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteStatus } from '../../shared/remote'
 
 // The single object Electron main owns for the remote-access subsystem. It
 // composes the already-proven pieces (persisted host identity + inner CA,
@@ -104,6 +105,43 @@ export class RemoteHostService {
   get controller(): HostController { return this.#binding.controller }
   get host(): InnerMtlsHost { return this.#host }
   get relayConfigured(): boolean { return this.#client !== null }
+
+  // --- Trusted-LOCAL pairing UI operations (sanitized; renderer-facing) -------
+  // These project only display-safe fields; the pairing secret verifier, private
+  // keys, and certificate PEMs never cross to the renderer.
+
+  beginPairing(): Promise<RemotePairingCode> {
+    return this.authority.begin()
+  }
+
+  // Confirm a proved pairing. The operator passes back the exact key fingerprint
+  // shown on the Mac (and compared against the device), so a racing device that
+  // proved a different key cannot be confirmed by accident - confirmLocal fails
+  // closed unless the pairing's proven key matches.
+  async confirmPairing(pairingId: string, expectedPublicKeySHA256: string): Promise<RemoteDevice> {
+    const grant = await this.authority.confirmLocal(pairingId, expectedPublicKeySHA256)
+    return { deviceId: grant.deviceId, deviceLabel: grant.deviceLabel, expiresAt: grant.expiresAt, confirmedAt: grant.confirmedAt, revoked: grant.revokedAt !== null }
+  }
+
+  cancelPairing(pairingId: string): Promise<void> {
+    return this.authority.cancel(pairingId)
+  }
+
+  revokeDevice(deviceId: string): Promise<void> {
+    return this.authority.revoke(deviceId)
+  }
+
+  // Display-safe snapshot for the pairing screen.
+  status(): RemoteStatus {
+    const state = this.authority.inspectLocal()
+    const pending: RemotePendingPairing[] = state.pairings
+      .filter((p): p is typeof p & { state: 'created' | 'awaiting_local_confirmation' } => p.state === 'created' || p.state === 'awaiting_local_confirmation')
+      .map((p) => p.state === 'awaiting_local_confirmation'
+        ? { pairingId: p.pairingId, state: p.state, expiresAt: p.expiresAt, deviceLabel: p.proof.deviceLabel, publicKeySHA256: p.proof.publicKeySHA256 }
+        : { pairingId: p.pairingId, state: p.state, expiresAt: p.expiresAt })
+    const devices: RemoteDevice[] = state.grants.map((g) => ({ deviceId: g.deviceId, deviceLabel: g.deviceLabel, expiresAt: g.expiresAt, confirmedAt: g.confirmedAt, revoked: g.revokedAt !== null }))
+    return { enabled: true, hostId: this.hostId, anchorSHA256: this.anchorSHA256, relayConfigured: this.relayConfigured, pending, devices }
+  }
 
   // Open the outbound relay leg(s), if a transport was configured. Idempotent;
   // a no-op when dormant.
