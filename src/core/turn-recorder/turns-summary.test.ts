@@ -478,3 +478,43 @@ describe('turn CLI model timing summaries', () => {
     expect(summary.segments.rows).toEqual(uiSegments)
   })
 })
+
+describe('turn CLI identity coverage', () => {
+  it('reports explicit model, role and task-link status without folding unobserved into observed', () => {
+    const summary = summarizeTurnRecords([
+      record(1, undefined, {
+        provider: { id: 'codex', modelStatus: 'unobserved', modelOmissionReason: 'provider exposes no model' },
+        turnRoleStatus: 'observed', turnRole: { role: 'main', source: 'integration' },
+        taskLinkStatus: 'bound', linkedTaskId: 'REQ-1', linkedTaskGeneration: 'g1'
+      }),
+      record(2, undefined, {
+        provider: { id: 'codex', modelStatus: 'unobserved', modelOmissionReason: 'provider exposes no model' },
+        turnRoleStatus: 'unobserved',
+        taskLinkStatus: 'unbound', linkedTaskId: null
+      })
+    ], 'session-1', { scope: 'workspace' })
+
+    expect(summary.identity.model.statusCounts).toEqual({ unobserved: 2 })
+    expect(summary.identity.model.coverage).toMatchObject({ knownTurns: 0, totalTurns: 2, complete: false })
+    expect(summary.identity.role.statusCounts).toEqual({ observed: 1, unobserved: 1 })
+    expect(summary.identity.role.roleCounts).toEqual({ main: 1 })
+    // An explicitly unbound turn must never be counted as a bound (task) turn.
+    expect(summary.identity.taskLink.statusCounts).toEqual({ bound: 1, unbound: 1 })
+    expect(summary.identity.taskLink.coverage).toMatchObject({ knownTurns: 1, totalTurns: 2, complete: false })
+  })
+
+  it('marks identity complete only when every turn is observed/bound', () => {
+    const summary = summarizeTurnRecords([
+      record(1, undefined, {
+        provider: { id: 'qoder', model: 'ultimate', modelStatus: 'observed', modelSource: 'provider_model_event' },
+        turnRoleStatus: 'observed', turnRole: { role: 'main', source: 'qoder' },
+        taskLinkStatus: 'bound', linkedTaskId: 'REQ-2', linkedTaskGeneration: 'g2'
+      })
+    ], 'session-1')
+
+    expect(summary.identity.model.coverage.complete).toBe(true)
+    expect(summary.identity.model.sourceCounts).toEqual({ provider_model_event: 1 })
+    expect(summary.identity.role.coverage.complete).toBe(true)
+    expect(summary.identity.taskLink.coverage.complete).toBe(true)
+  })
+})

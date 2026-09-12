@@ -59,9 +59,13 @@ export interface WorkspaceStatusReport {
 }
 
 function stateOf(row: Omit<ProviderStatusRow, 'state'>): ProviderStatusRow['state'] {
-  if (row.configured === 'no') return 'not-configured'
-  if (!row.hookSeen) return 'configured-no-events'
-  return row.recordSeen ? 'capturing' : 'events-without-record'
+  // Observed capture evidence outranks the workspace config probe. A provider can be driven
+  // by a hook installed outside this workspace's settings (e.g. a user-level integration), so
+  // reporting 'not-configured' while hook events or committed records exist would deny observed
+  // facts. 'not-configured' is only honest when there is no capture evidence at all.
+  if (row.recordSeen) return 'capturing'
+  if (row.hookSeen) return 'events-without-record'
+  return row.configured === 'no' ? 'not-configured' : 'configured-no-events'
 }
 
 async function configuredOf(
@@ -149,7 +153,7 @@ export async function workspaceStatus(
       notifyBacklog: activated ? notifications.notifyBacklog : null,
       backlogEvidence: activated
         ? 'available'
-        : 'unavailable: no activated commit hook, records are retained and never delivered'
+        : 'unavailable: no activated commit hook; Scry itself will not deliver these records, though they are retained on disk and an external consumer may still read them directly'
     }
   }
 }
