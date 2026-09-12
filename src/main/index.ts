@@ -94,6 +94,7 @@ import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
 import { RunStopLifecycle } from './run-stop-lifecycle'
+import { RemoteHostService } from './remote/remote-host-service'
 import { DockBadgeState } from './dock-badge'
 import { archiveSessionId } from './session-id'
 import {
@@ -3507,6 +3508,41 @@ handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
   } : {})
 )
 
+// Remote-access subsystem (iOS control client). Gated OFF by default: it is
+// constructed only when SCRY_REMOTE_HOST=1 so default app behaviour is unchanged
+// and regression-proven. With no relay transport configured it stays DORMANT -
+// the host identity/CA, durable pairing + ledger stores, and inner-mTLS host are
+// assembled (so the trusted-local pairing UI can drive the authority), but no
+// outbound relay leg is opened and no device can reach it yet. Binding startRun
+// to the live agent:start path and opening a relay transport are the next steps.
+let remoteHostService: RemoteHostService | null = null
+async function startRemoteHostIfEnabled(): Promise<void> {
+  if (remoteHostService || process.env.SCRY_REMOTE_HOST !== '1') return
+  try {
+    remoteHostService = await RemoteHostService.create({
+      stateDirectory: join(app.getPath('userData'), 'remote'),
+      // Fail closed: a device may only target a directory already authorized
+      // through Scry's own project picker.
+      authorizeWorkspace: (cwd) => resolveKnownProjectDirectory(cwd),
+      gate: providerOperationGate,
+      startRun: async ({ routing, progress }) => {
+        // TODO(remote-live): delegate to the live run-start path (RunRegistry +
+        // Provider adapter) under the existing workspace authorization + gate.
+        // Until then no relay transport is configured above, so this seam is
+        // unreachable; if ever reached it must fail closed and truthfully rather
+        // than silently claim a run started.
+        void routing; void progress
+        throw new Error('remote_run_binding_pending')
+      }
+    })
+    await remoteHostService.start()
+    console.warn('[scry] remote host subsystem constructed (dormant: no relay transport configured)')
+  } catch (error) {
+    console.warn('[scry] remote host subsystem failed to start:', error)
+    remoteHostService = null
+  }
+}
+
 app.whenReady().then(() => {
   if (!primaryInstance) return
   void warmShellEnv()
@@ -3514,6 +3550,7 @@ app.whenReady().then(() => {
   // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
   initDb()
   createWindow()
+  void startRemoteHostIfEnabled()
   startupManagedRecovery = (async () => {
     // Let the first window render before touching historical recovery trees.
     await new Promise((resolve) => setTimeout(resolve, 250))
@@ -3564,6 +3601,9 @@ app.on('before-quit', (event) => {
   if (quitCleanupStarted) return
   isShuttingDown = true
   quitCleanupStarted = true
+  // Release the remote subsystem's durable leases; a restart re-acquires and
+  // replays any recorded-but-undispatched intents.
+  void remoteHostService?.dispose()
   closeAllTerminals(true)
   runStopLifecycle.close()
   traceOutput.close()
