@@ -1,0 +1,20 @@
+# Scry relay Worker. Deploy target chosen by the maintainer (Cloudflare account +
+# domain to be supplied). RELAY_TOKEN is a secret, set out of band:
+#   wrangler secret put RELAY_TOKEN
+# and the SAME value is provisioned to the Mac host (SCRY_REMOTE_RELAY token).
+name = "scry-relay"
+main = "src/worker.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "RelayRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]
+
+# For local `wrangler dev` only; production uses `wrangler secret put RELAY_TOKEN`.
+[vars]
+RELAY_TOKEN = "local-dev-token"
