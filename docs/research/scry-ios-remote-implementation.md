@@ -72,3 +72,16 @@
 - **#1 `startRun` 绑活跃 agent（未做，诚实边界）**：`agent:start` 约 870 行，runId 在闭包深处生成（`run-<base36>-<seq>`）与账本预分配 UUID 不一致；真绑定需 runId 关联方案 + 会话/recorder/diff/catalog/renderer 全套，且**只能在运行中 App + 真实 Provider 验证**。盲改这条主路径会威胁本地运行主功能或产出缺证据的 remote run（违反 CLAUDE.md），故留待可运行 App 时按选定 runId 方案落地。当前仍是 fail-closed stub（`remote_run_binding_pending`，dormant 下不可达）。
 
 提交（新→旧）：`6c0e397`（renderer 配对屏 + 投影）、`565757c`（pin ScryRemote Package.resolved）、`71da14b`（产品 App 设备侧配对客户端）、`b3bfb34`（iOS relay 传输 + Swift↔Node relay 配对冒烟 + 统一配对 wire）、`351a38c`（设备侧 pairing-prove 传输 + relay run/pair 路由）、`280d4ad`（可部署外层 relay + 零依赖 host leg + 全 WSS e2e）。全量：remote 套件 81、experiments 45 node 测试、app 全量 1995 pass / 3 skip、typecheck、electron-vite build、git diff --check 全干净；Swift 包 build 干净；模拟器 self-test failures=0。
+
+## 增量（2026-09-12，Cloudflare relay 目标）
+
+用户选定把外层 relay 部署到自有 Cloudflare 账号 + 域名（凭据另行提供）。新增可部署的 Cloudflare Workers + Durable Objects relay，并在无账号/无部署/无扣费下用本地 workerd 验证：
+
+- `experiments/remote-g0/cf-relay/{src/worker.js,wrangler.toml,README.md}`：Worker + `RelayRoom` Durable Object。Workers 不能接受任意入站 TCP，故两侧都走 WebSocket：Mac 主机在 `/host?host=&mode=` 开 warm leg 池、首帧 `{token}` 鉴权；设备连 `/?host=&mode=`。DO 按 `(hostId, mode)` 分别维护 warm 池，把一台设备 1:1 粘到一条 host leg 裸转发二进制。坏 host/mode→1008，无 warm leg→1013。`RELAY_TOKEN` 为 per-deploy secret（`wrangler secret put`），不入 URL、不记日志、常量时间比较。relay 仍是不可信字节汇聚点，绝不持内层密钥、绝非安全根。
+- `src/main/remote/relay-connect-ws.ts`：生产主机侧 WSS leg 工厂，用 Node/Electron 全局 `WebSocket`（不引入 `ws` 依赖）拨每条 warm leg 并适配成 `InnerMtlsHost`/`PairingTransport` 所服务的 Duplex；不加任何安全，首帧是 `{token}`，其余是不透明内层 TLS 密文。
+- `src/main/index.ts`：`SCRY_REMOTE_RELAY_WS = {url, token}` 选中该 Worker relay，优先于裸 TCP 的 `SCRY_REMOTE_RELAY`；缺省即 dormant。
+- 本地验证（无账号/无部署/无扣费）：`smoke:cf` 在本地 workerd（wrangler dev）跑真 Worker，覆盖双向字节转发、首帧 token 鉴权（1008）、run/pair 池隔离、无 leg 拒绝（1013）；`smoke:cf-host` 串起生产 `createRelayConnectWS → ReverseTunnelTransport → RelayClient` 经 Worker 往返字节。`wrangler` 作为 experiments 专用 devDependency，`​.wrangler/` 运行时目录已 gitignore。
+
+验证：`smoke:cf` 4/4、`smoke:cf-host` 1/1（均本地 workerd）；typecheck node+web；remote vitest 81/81；electron-vite build；diff --check 干净。提交 `7361348`。
+
+仍需用户外部输入：实际 `wrangler deploy` 需其 Cloudflare 账号 + 域名 + Workers Paid 计划（Durable Objects）；此处不创建任何付费资源。设备侧经公网 wss 拨 CF 时的外层 TLS 信任（CF 公信证书链）是接线后续，不涉新密码学。
