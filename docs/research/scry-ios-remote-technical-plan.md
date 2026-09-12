@@ -8,6 +8,8 @@
 
 用户已确认：**仅 iOS、面向普通用户、Mac 锁屏运行、退出桌面 App 后不用继续、手机最大权限。**
 
+后续补充：**大陆与海外都希望支持，海外优先；有 iPhone，暂无付费 Apple 开发者账号；首发包含后台提醒。** 大陆网络体验须单独验证，不能为了同时覆盖而阻塞海外首发，也不能未测即标记支持。
+
 | 项目 | 本方案选择 | 状态 |
 | --- | --- | --- |
 | 手机 | SwiftUI 为主，复杂 diff/终端可用专用原生组件；共享协议而非桌面视图 | 推荐，须 G0 验证 |
@@ -17,7 +19,7 @@
 | 执行宿主 | 现有 Electron 主进程 + 抽取的应用服务 | 不新建 daemon |
 | 最大权限 | owner-device，可操作任务、项目文件、受管理终端、Provider 权限、可远程 trust 审批 | 不等于 root、关闭认证或绕过系统权限 |
 | 锁屏 | 已登录、App 运行、系统保持唤醒时，CLI/SDK 工作与远程服务继续 | 首发实机 gate |
-| 推送 | APNs 完成/失败/待处理提醒；默认不带项目/代码/命令 | 首发建议，尚未由用户单独确认 |
+| 推送 | APNs 完成/失败/待处理提醒；默认不带项目/代码/命令 | 已确认首发；等待付费开发者账号与真实验证 |
 | 不做 | Android、团队 RBAC、屏幕远控、任意进程接管、退出 App 后常驻、跨主机迁移 | 当前范围外 |
 
 目标体验：电脑登录 Scry → 启用远程并确认权限/电源说明 → 手机登录扫码 → Mac 确认手机 → 手机选择电脑/项目操作。首次配对允许在 Mac 前完成；日常 CLI 操作、普通审批和仓库指纹授权不应要求反复走回电脑。
@@ -292,18 +294,27 @@ PTY 输入不是可持久幂等的业务事务。每个 writer generation 使用
 
 无需再次确认：仅 iOS、公开发布、Mac 锁屏继续、退出 App 不管、最大功能权限。
 
-进入外部服务选择/真实 G0 前需要：
+已确认的外部约束：
 
-1. 发布地区与主要网络环境（中国大陆/海外/两者），决定路由、账号可达性和数据部署。
-2. Apple Developer/测试设备是否可用，以及最低 iOS 版本。
-3. 云预算与账号登录方式、APNs 首发优先级。
-4. G0 中选定具体 TLS/证书/codegen/终端库，并核查许可证、iOS 支持、CVE 与打包成本。
+- 海外优先，尽量兼顾大陆；先验证海外托管路径，大陆另列网络矩阵，不预先承诺双区部署或大陆可用。
+- 有 iPhone、暂无付费 Apple 开发者账号。可先做本地 Swift/Node 协议和模拟转发；Personal Team 可评估开发真机安装，受签名/能力限制，不能代替 TestFlight、正式 APNs 和上架准备。[S3]
+- 首发必须包含 APNs 完成/失败/待处理提醒；Live Activities 不在本次确认范围。
 
-下一项建议工作：先澄清以上外部约束，再实施 **G0 最小加密连接与 Mac 锁屏验证**。G0 不包含任意命令、文件写入、真实 Provider 执行或生产部署；通过后才开始 G1/G2。当前“继续”用于收敛方案，不视为购买云服务、创建付费资源、远程开放真实电脑或开始生产高权限运行的授权。
+本机只读预检（2026-09-12）：`xcode-select -p` 指向 `/Applications/Xcode.app/Contents/Developer`；`xcodebuild -version` 返回 Xcode 26.6 / 17F113；`swift --version` 返回 Swift 6.3.3；`node --version` 返回 v24.18.0。仅证明工具可调用，未确认 Apple 账号登录、Personal Team provisioning、手机信任/Developer Mode、iOS 部署目标或实际编译。
+
+仍需在对应步骤决定：云预算、账号登录方式、最低 iOS 版本，以及 G0 的 TLS/证书/codegen/终端库、许可证和打包成本。无需因此阻塞不涉及外部服务的本地验证。
+
+下一项建议工作分两层：
+
+1. **G0-local**：隔离目录和临时证书，Swift↔Node 内层 TLS、模拟不可信转发、错误证书/重放/断线测试。仅 loopback，不访问真实项目或执行 Provider，不需要付费账号。
+2. **G0-device**：用户配合 Personal Team/手机信任后验证真机；公开测试转发入口的部署另经授权。验证海外蜂窝网络和 Mac 锁屏；缺少真实网络/设备结果则 G0 保持未完成。
+
+付费开发者账号/APNs 是 G4/G5 的外部前置条件，不应以此停掉所有协议开发，也不能用本地通知冒充远程推送验收。当前“继续”不视为购买云服务、创建付费资源、远程开放真实电脑或开始生产高权限运行的授权。
 
 ## 来源与本轮验证
 
 - 当前仓库 main/shared 源码，路径见第 10 节；[前置研究](./scry-ios-remote-research.md) 汇总竞品及 Apple/Electron 资料。
 - [S1] [SwiftNIO SSL README](https://github.com/apple/swift-nio-ssl)（2026-09-12 获取）：BoringSSL-backed TLS 与 ChannelHandler；并非本方案跨隧道可用性证明。
 - [S2] [RFC 8446 / TLS 1.3](https://www.rfc-editor.org/rfc/rfc8446)（尤其 early data/replay 风险）：采用标准协议，不自行发明加密算法。
-- 本轮仅文档：核对本地引用、合同边界、diff；不构建、不启动 App、不创建云资源，不宣称 G0 已完成。
+- [S3] [Apple 开发者账号与 Personal Team](https://developer.apple.com/support/compare-memberships/)（2026-09-12 获取）：免费账号可在 Xcode 进行受限个人设备测试，provisioning profile 到期需重新安装；高级能力与分发另需开发者计划。
+- 本轮文档与只读工具链预检：核对本地引用、合同边界、diff；不构建、不启动 App、不创建云资源，不宣称 G0 已完成。
