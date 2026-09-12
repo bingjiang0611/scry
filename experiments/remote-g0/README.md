@@ -12,7 +12,7 @@ Local implementation evidence for [the technical plan](../../docs/research/scry-
 
 ## Run (from repository root)
 
-Requires macOS, Xcode/Swift 6, Node 22+, OpenSSL 3. Dependency versions are locked. iOS 17 is a **probe deployment target**, not a finalized public product minimum.
+Requires macOS, Xcode/Swift 6.2+, Node 22+, OpenSSL 3. Dependency versions are locked. iOS 17 is a **probe deployment target**, not a finalized public product minimum.
 
 ```sh
 npm --prefix experiments/remote-g0 ci --ignore-scripts
@@ -42,14 +42,20 @@ The macOS smoke resolves SwiftPM's host binary path explicitly: a simulator buil
 - 14 Node wire tests passed; generated JS/TS/Swift matched the schema; generated TS passed strict typecheck.
 - Seven actual Swift ↔ Node transport scenarios passed: normal mTLS, bad outer CA, replaced inner host anchor, untrusted device certificate, encrypted-record tamper, forced disconnection, fresh authenticated connection after failure. Negative cases accept zero application requests and are not runner timeouts.
 - Relay byte inspection did not find the probe's plaintext marker. This is supporting observation, not an independent cryptographic security audit.
-- arm64 iOS Simulator cross-build linked; `vtool` reports `IOSSIMULATOR`, minimum 17.0, SDK 26.5. SwiftPM emitted a clang incompatible-sysroot warning at link time despite its `swiftc -sdk` pointing at the simulator SDK. **Simulator runtime/IPA/real-device linkage is not yet verified**; do not silently treat the warning as a device gate pass.
+- Initial standalone arm64 iOS Simulator cross-build linked but emitted a clang incompatible-sysroot warning. The later native Xcode app built with the actual simulator SDK and successfully executed the shared transport plus Keychain on iOS Simulator. See [native evidence](../../apps/ios/README.md). **Physical iPhone, IPA and signing/provisioning acceptance are still missing.**
 - Found and fixed a real integration ordering bug: adding inner NIOSSL inside the HTTP upgrade callback causes the HTTP upgrader to reject its immediate ClientHello. Inner TLS is now installed on the event loop after upgrade completion.
 
 ## Still required before G0 completion
 
-Actual first-device proof/CSR/certificate enrollment and local human confirmation; one-time pairing replay/expiry and durable grant failure tests; Keychain private-key use; an iOS app bundle and real-device installation; real device over an authorized public relay and cellular network while Mac is locked; reconnect/revocation/renewal semantics; packaging/licensing/security review. The preissued client certificate in this fixture is **not** proof that onboarding works.
+Actual first-device proof/CSR/certificate enrollment and local human confirmation; one-time pairing replay/expiry and durable grant failure tests; real-device Keychain/installation/lock behavior; real device over an authorized public relay and cellular network while Mac is locked; reconnect/revocation/renewal semantics; packaging/licensing/security review. A native test app bundle and Simulator Keychain-to-TLS execution now exist, but are not real-device proof. The preissued client certificate in this fixture is **not** proof that onboarding works.
 
 No cloud accounts, route tickets, user authentication, paid resources or deployed endpoints are created. The loopback relay is intentionally **not safe to expose on a public interface**. Keep the technical plan's high-privilege development gate closed until required G0 evidence is obtained.
+
+## Native client reuse
+
+`swift/Sources/RemoteTransport/` is the shared `ScryG0Transport` library; `RemoteProbe` is only the CLI wrapper. Generated Swift wire models moved with the library and the generator/test imports were updated. Private keys enter TLS from memory, allowing the native app's service actor to load from Keychain rather than creating PEM key files.
+
+The isolated native app and Keychain/TLS regression are in `apps/ios/`. Once its dedicated simulator is installed, `node experiments/remote-g0/ios-smoke.mjs <UUID>` executes the real native model through Keychain and the same relay. This is not a production UI or onboarding substitute.
 
 ## Dependencies
 
