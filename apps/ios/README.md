@@ -1,6 +1,36 @@
 # Scry iOS workspace
 
-Current target: **ScryRemoteG0** (`com.scry.remote.g0`), an isolated native SwiftUI transport/Keychain verification app. It is **not** the completed Codex-aligned Scry mobile product and cannot start Providers, write project files or operate terminals. Production UI and G1–G5 remain in [the implementation ledger](../../docs/research/scry-ios-remote-implementation.md).
+Two targets live here:
+
+- **ScryRemoteG0** (`com.scry.remote.g0`) — isolated native SwiftUI transport/Keychain verification app. **Not** the product; it cannot start Providers, write files or operate terminals.
+- **ScryRemote** (`com.scry.remote`) — the product UI shell (`ScryRemote.xcodeproj`), a faithful native SwiftUI implementation of the accepted Codex-aligned design v2 (home/new/chat + pairing + Sign in with Apple), iOS 17+. See below.
+
+G1–G5 and the real host protocol remain in [the implementation ledger](../../docs/research/scry-ios-remote-implementation.md).
+
+## ScryRemote product UI (design v2)
+
+`apps/ios/ScryRemote/` transcribes the accepted `designs/scry-ios-remote/Scry iOS Remote v2.html`: design tokens (`Theme.swift`), truthful state model (`AppModel.swift`), reusable glass components (`Components.swift`), and the four screens `SignInView`/`HomeView`/`NewSessionView`/`ChatView` plus `PairView`.
+
+Honesty invariants (enforced by the model, not decoration):
+
+- No fabricated sessions, tasks, assistant replies or diffs. `sessions` is empty until a real host feed exists, so Home/Chat show truthful empty states with the same “任务提交≠开始执行” / “文件证据未缓存” semantics as v2.
+- No green “connected” dot unless a real live grant exists (not yet wired), so the honest current maximum is signed-in + not-paired.
+- Sign in with Apple uses the first-party `SignInWithAppleButton`; there is no custom auth. The `com.apple.developer.applesignin` entitlement needs a **paid** Apple Developer Program membership, so on a free Personal Team the on-device flow fails and the app reports that truthfully rather than faking a signed-in user.
+- `PairView` explains the real Mac-side confirmation steps and states plainly that scanning/live pairing is not wired into this build — it never claims a connection was created.
+
+Build (Simulator, unsigned) and signed device build:
+
+```sh
+xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug \
+  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/scry-remote-build CODE_SIGNING_ALLOWED=NO build
+# Signed device build (pass the team at invocation; never committed):
+xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug \
+  -sdk iphoneos -destination 'generic/platform=iOS' -allowProvisioningUpdates \
+  DEVELOPMENT_TEAM=<personal-team-id> CODE_SIGN_STYLE=Automatic build
+```
+
+Visual verification (2026-09-12): built for Simulator and the physical iPhone, launched in the dedicated simulator, and screenshotted all four screens. Because Sign in with Apple cannot complete without the paid entitlement, a **DEBUG-only** launch-argument harness (`-uiPreview [-connected] -route home|new|chat|pair` in `AppModel.applyUIPreviewArguments()`) forces view state for screenshots. It is a dev verification harness, not real authentication, and injects no fabricated business data.
 
 ## Architecture
 
