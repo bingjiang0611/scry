@@ -24,6 +24,7 @@ swift build --package-path experiments/remote-g0/swift -j 4
 node experiments/remote-g0/smoke.mjs
 node experiments/remote-g0/enrollment-smoke.mjs
 node experiments/remote-g0/pair-smoke.mjs
+node --import ./experiments/remote-g0/ts-relative-resolve.mjs experiments/remote-g0/g1-smoke.mjs
 node --test experiments/remote-g0/relay-admission.test.mjs
 node_modules/.bin/vitest run src/main/remote/pairing.test.ts   # run from repository root
 ```

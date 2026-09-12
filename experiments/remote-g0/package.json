@@ -9,7 +9,8 @@
     "build:swift": "swift build --package-path swift -j 4",
     "smoke": "node smoke.mjs",
     "smoke:enrollment": "node enrollment-smoke.mjs",
-    "smoke:pair": "node pair-smoke.mjs"
+    "smoke:pair": "node pair-smoke.mjs",
+    "smoke:g1": "node --import ./ts-relative-resolve.mjs g1-smoke.mjs"
   },
   "dependencies": {
     "@peculiar/x509": "2.1.0",
