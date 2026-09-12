@@ -57,8 +57,12 @@ describe('SessionLedger', () => {
     expect(retry.status).toBe('duplicate')
     expect(retry.event.seq).toBe(first.event.seq)
     expect(ledger.describe().events).toBe(1)
-    // Same intent id can never be re-pointed at a different run.
-    expectCode(() => ledger.recordIntent({ intentId, runId: randomUUID() }), 'intent_run_mismatch')
+    // The intentId is the idempotency key: a retry with a different candidate
+    // runId still returns the original binding and creates no second run.
+    const rebound = ledger.recordIntent({ intentId, runId: randomUUID() })
+    expect(rebound.status).toBe('duplicate')
+    expect(rebound.event.runId).toBe(runId)
+    expect(ledger.describe().events).toBe(1)
     // A fresh intent may not reuse an existing run id.
     expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId }), 'run_already_exists')
   })
