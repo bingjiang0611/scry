@@ -1,5 +1,10 @@
 import type { Duplex } from 'node:stream'
-import type { InnerMtlsHost } from './inner-mtls-host'
+
+// Anything that can run a protocol server over a relay-delivered byte stream
+// (InnerMtlsHost for granted devices, PairingTransport for pairing devices).
+export interface StreamServer {
+  serve(stream: Duplex): void
+}
 
 // Mac relay client: the Scry host is typically behind NAT, so it dials OUT to
 // the public relay and the relay glues each arriving device to one of the
@@ -19,11 +24,11 @@ export interface RelayTransport {
 }
 
 export class RelayClient {
-  #host: InnerMtlsHost
+  #host: StreamServer
   #transport: RelayTransport
   #started = false
 
-  constructor(deps: { host: InnerMtlsHost; transport: RelayTransport }) {
+  constructor(deps: { host: StreamServer; transport: RelayTransport }) {
     this.#host = deps.host
     this.#transport = deps.transport
   }

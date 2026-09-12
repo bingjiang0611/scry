@@ -21,6 +21,10 @@ export interface RelayConnectOptions {
   hostId: string
   // Per-host bearer token provisioned out of band; NEVER logged.
   token: string
+  // Which host endpoint the relay should bridge this leg to: 'run' (granted
+  // devices, strict mTLS) or 'pair' (pairing devices, self-signed prove). The
+  // relay keeps a separate warm pool per mode.
+  mode: 'run' | 'pair'
   // Outer TLS to the relay. Omit for a plain TCP leg (inner mTLS still protects
   // all content end-to-end; outer TLS only adds path confidentiality + relay
   // endpoint auth).
@@ -35,7 +39,7 @@ export interface RelayConnectFactory {
 }
 
 export function createRelayConnect(opts: RelayConnectOptions): RelayConnectFactory {
-  const authLine = JSON.stringify({ hostId: opts.hostId, token: opts.token }) + '\n'
+  const authLine = JSON.stringify({ hostId: opts.hostId, token: opts.token, mode: opts.mode }) + '\n'
   const useTls = Boolean(opts.tls)
   const readyEvent = useTls ? 'secureConnect' : 'connect'
   const connect = (): OutboundLeg => {

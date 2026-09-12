@@ -13,11 +13,11 @@ function authorizeHost({ hostId, token }) {
   return hostId === HOST_ID && token === GOOD
 }
 
-async function warmLeg(hostPort, { hostId = HOST_ID, token = GOOD } = {}) {
+async function warmLeg(hostPort, { hostId = HOST_ID, token = GOOD, mode = 'run' } = {}) {
   const leg = netConnect({ port: hostPort, host: '127.0.0.1' })
   leg.on('error', () => {})
   await once(leg, 'connect')
-  leg.write(JSON.stringify({ hostId, token }) + '\n')
+  leg.write(JSON.stringify({ hostId, token, mode }) + '\n')
   return leg
 }
 
@@ -28,7 +28,7 @@ test('relay bridges an authenticated host leg to a device over WSS, raw-shuttlin
     const leg = await warmLeg(hostPort)
     await delay(50) // let the relay register the warm leg
 
-    const ws = new WebSocket(`ws://127.0.0.1:${devicePort}/?host=${HOST_ID}`)
+    const ws = new WebSocket(`ws://127.0.0.1:${devicePort}/?host=${HOST_ID}&mode=run`)
     await once(ws, 'open')
 
     // device -> host
@@ -57,7 +57,7 @@ test('relay refuses a host leg with a bad token and never registers it as a warm
     const leg = netConnect({ port: hostPort, host: '127.0.0.1' })
     leg.on('error', () => {})
     await once(leg, 'connect')
-    leg.write(JSON.stringify({ hostId: HOST_ID, token: 'wrong' }) + '\n')
+    leg.write(JSON.stringify({ hostId: HOST_ID, token: 'wrong', mode: 'run' }) + '\n')
     await delay(100) // let the relay evaluate + reject the auth line
 
     // The unauthorized leg was never registered, so a device for that host has
@@ -78,6 +78,21 @@ test('relay refuses a device for an unknown host id', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${devicePort}/?host=not-a-uuid`)
     const [code] = await once(ws, 'close')
     assert.equal(code, 1008)
+  } finally {
+    await server.close()
+  }
+})
+
+test('relay keeps run and pair legs in separate pools (a run device never gets a pair leg)', async () => {
+  const server = createRelayServer({ authorizeHost })
+  const { hostPort, devicePort } = await server.listen({})
+  try {
+    // Only a PAIR leg is warm; a RUN device must not be bridged to it.
+    await warmLeg(hostPort, { mode: 'pair' })
+    await delay(50)
+    const ws = new WebSocket(`ws://127.0.0.1:${devicePort}/?host=${HOST_ID}&mode=run`)
+    const [code] = await once(ws, 'close')
+    assert.equal(code, 1013)
   } finally {
     await server.close()
   }
