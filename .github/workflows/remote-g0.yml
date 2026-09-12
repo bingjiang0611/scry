@@ -41,6 +41,7 @@ jobs:
       - run: swift test --package-path experiments/remote-g0/swift -j 4
       - run: swift build --package-path experiments/remote-g0/swift -j 4
       - run: node experiments/remote-g0/smoke.mjs
+      - run: node experiments/remote-g0/enrollment-smoke.mjs
       - name: Compile native iOS app and tests (not a device gate)
         run: >-
           xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj

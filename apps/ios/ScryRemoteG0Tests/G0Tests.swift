@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import RemoteTransport
 @testable import ScryRemoteG0
 
 final class G0Tests: XCTestCase {
@@ -30,6 +31,27 @@ final class G0Tests: XCTestCase {
     XCTAssertEqual(try vault.load(), original)
     try vault.remove()
     XCTAssertNil(try vault.load())
+  }
+
+  func testGeneratedDeviceKeyPersistsBeforePublicProofAndCannotBeReplaced() async throws {
+    let vault = G0Keychain(service: "com.scry.remote.g0.test." + UUID().uuidString)
+    let keyVault = G0Keychain(service: vault.service, kind: .deviceKey)
+    defer { try? vault.remove(); try? keyVault.remove() }
+    let first = G0Service(keychain: vault)
+    let second = G0Service(keychain: vault)
+    async let firstProof = first.prepareEnrollment()
+    async let secondProof = second.prepareEnrollment()
+    let (a, b) = try await (firstProof, secondProof)
+    XCTAssertEqual(a.publicKeySHA256, b.publicKeySHA256)
+    let stored = try XCTUnwrap(keyVault.load())
+    XCTAssertEqual(try G0EnrollmentMaterial.restore(privateKeyPEM: stored).publicKeySHA256, a.publicKeySHA256)
+    let replacement = try G0EnrollmentMaterial.generate()
+    XCTAssertThrowsError(try keyVault.save(replacement.privateKeyPEM)) { error in
+      XCTAssertTrue((error as? G0Keychain.Failure)?.isDuplicate == true)
+    }
+    XCTAssertEqual(try keyVault.load(), stored)
+    try await first.remove()
+    XCTAssertNil(try keyVault.load())
   }
 
   @MainActor
