@@ -40,6 +40,10 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var chosen: G0Transport.RunProjectRef?
   @Published private(set) var lifecycle: Lifecycle = .unknown
   @Published private(set) var output: [OutputLine] = []
+  // The user's own submitted message, echoed immediately as a chat bubble
+  // (ChatGPT/Codex style) so the person sees exactly what they sent. This is the
+  // literal local input, not host-derived, and is labeled as the user turn.
+  @Published private(set) var prompt: String?
   @Published private(set) var runId: String?
   @Published private(set) var submitError: String?
   @Published private(set) var truncated = false
@@ -88,6 +92,7 @@ final class RemoteRunStore: ObservableObject {
     guard let client = makeClient() else { submitError = "尚未配对"; return }
     submitError = nil
     resetRun()
+    self.prompt = trimmed
     lifecycle = .recorded
     Task { [weak self] in
       do {
@@ -171,6 +176,7 @@ final class RemoteRunStore: ObservableObject {
     pollTask?.cancel(); pollTask = nil
     lifecycle = .unknown
     output = []
+    prompt = nil
     runId = nil
     truncated = false
     resultSummary = nil

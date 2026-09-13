@@ -1,42 +1,47 @@
 import SwiftUI
 
-// v2 会话, now rendering ONE real remote run driven by RemoteRunStore. It shows:
-//   - the durable lifecycle (recorded/dispatched/running/settled/failed/cancelled),
-//   - the assistant's REAL streamed output content (a live cache, labeled as such
-//     and possibly truncated), and
-//   - Provider-canonical result usage verbatim when the host reports it.
-// It never fabricates a reply, a token/cost number or a file diff. With no active
-// run it shows a truthful empty state; recorded != executed.
+// A conversation view aligned with ChatGPT / Codex mobile: the user's message
+// appears immediately as a right-aligned bubble, and the assistant's turn streams
+// in below it. It stays honest (CLAUDE.md 证据不能说谎): the assistant turn shows
+// the REAL lifecycle (recorded/dispatched/running/settled/failed/cancelled) and
+// only the host's REAL streamed output content (a live cache, possibly
+// incomplete/truncated). Token/cost come only from the ledger `result` marker.
+// Nothing is fabricated; with no active run it shows a truthful empty state.
 struct ChatView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var draft = ""
 
   private var paired: Bool { run.hasConnection }
+  private var hasTurn: Bool { run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
 
   var body: some View {
     VStack(spacing: 0) {
       header
       if !paired { Notice(text: "尚未连接 Mac · 发送已停用。") }
       if let error = run.submitError { Notice(text: error, warning: true) }
-      ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
-          lifecycleChip
-          if run.runId == nil && run.lifecycle == .unknown {
-            EmptyState(title: "还没有可显示的回执",
-                       detail: "任务提交不代表 Agent 已开始执行；结果需从主机读取，不沿用其他会话。")
-          } else {
-            outputSection
+      ScrollViewReader { proxy in
+        ScrollView {
+          VStack(alignment: .leading, spacing: 16) {
+            if !hasTurn {
+              EmptyState(title: "开始一段新会话",
+                         detail: "你发送的消息会在这里显示；Agent 的执行状态与输出从主机实时读取，不沿用其他会话。")
+            } else {
+              if let prompt = run.prompt { userBubble(prompt) }
+              assistantTurn
+            }
+            Color.clear.frame(height: 1).id("bottom")
           }
+          .padding(.horizontal, 16)
+          .padding(.top, 10)
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 8)
+        .scrollIndicators(.hidden)
+        .onChange(of: run.output.count) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+        .onChange(of: run.lifecycle) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
       }
-      .scrollIndicators(.hidden)
       footer
     }
     .background(Palette.surface)
-    .onDisappear { /* keep the run polling; do not fabricate a stop */ }
   }
 
   private var header: some View {
@@ -60,57 +65,78 @@ struct ChatView: View {
     .frame(minHeight: 66)
   }
 
-  private var lifecycleChip: some View {
-    HStack(spacing: 8) {
-      Circle().fill(stateColor).frame(width: 7, height: 7)
-      Text(stateLabel).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.ink)
-      if let runId = run.runId {
-        Text(runId.prefix(8) + "…").font(.system(size: 11).monospaced()).foregroundStyle(Palette.muted)
-      }
-      Spacer()
+  // The user's own message — right-aligned filled bubble, ChatGPT/Codex style.
+  private func userBubble(_ text: String) -> some View {
+    HStack {
+      Spacer(minLength: 40)
+      Text(text)
+        .font(.system(size: 16))
+        .foregroundStyle(Color.white)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background(Palette.blue, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
-    .padding(.vertical, 8)
-    .padding(.horizontal, 12)
-    .glass(cornerRadius: 20)
   }
 
-  @ViewBuilder private var outputSection: some View {
-    // The output is a live host cache of the assistant's real trace content.
-    Text("以下为主机实时输出的缓存" + (run.truncated ? " · 已达缓存上限，内容被截断" : "，可能不完整"))
-      .font(.system(size: 11)).foregroundStyle(Palette.muted)
+  // The assistant turn: a small state chip, the streamed content, and honest
+  // provenance. Left-aligned like an assistant message.
+  @ViewBuilder private var assistantTurn: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        Circle().fill(stateColor).frame(width: 7, height: 7)
+        Text(stateLabel).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
+        if run.lifecycle == .running {
+          ProgressView().controlSize(.mini)
+        }
+      }
 
-    if run.output.isEmpty {
-      Text(run.lifecycle == .running ? "运行中 · 尚无输出内容" : "主机未缓存此运行的输出内容")
-        .font(.system(size: 13)).foregroundStyle(Palette.muted)
-    } else {
-      ForEach(run.output) { line in outputLine(line) }
-    }
+      if run.output.isEmpty {
+        Text(placeholderForState)
+          .font(.system(size: 15)).foregroundStyle(Palette.muted)
+      } else {
+        ForEach(run.output) { line in outputLine(line) }
+      }
 
-    if let result = run.resultSummary {
-      EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)")
+      if let result = run.resultSummary {
+        EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)")
+      }
+
+      if !run.output.isEmpty || run.lifecycle == .settled {
+        Text("以上为主机实时输出的缓存" + (run.truncated ? " · 已达上限，内容被截断" : "，可能不完整；文件 diff 需在主机查看"))
+          .font(.system(size: 10)).foregroundStyle(Palette.muted)
+      }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private func outputLine(_ line: RemoteRunStore.OutputLine) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
+    Group {
       switch line.kind {
       case "reasoning":
-        Text("思考").font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
-        Text(line.text).font(.system(size: 14)).foregroundStyle(Palette.muted).italic()
+        HStack(alignment: .top, spacing: 6) {
+          Image(systemName: "brain").font(.system(size: 11)).foregroundStyle(Palette.muted)
+          Text(line.text).font(.system(size: 14)).foregroundStyle(Palette.muted).italic()
+        }
       case "tool":
-        Label(line.text, systemImage: Symbol.agent).font(.system(size: 13)).foregroundStyle(Color(hex: 0x67676A))
+        Label(line.text, systemImage: Symbol.agent)
+          .font(.system(size: 13)).foregroundStyle(Color(hex: 0x67676A))
+          .padding(.vertical, 5).padding(.horizontal, 10)
+          .glass(cornerRadius: 12)
       case "tool_result":
-        Text("工具结果").font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
-        Text(line.text).font(.system(size: 13).monospaced()).foregroundStyle(Color(hex: 0x424244))
+        Text(line.text)
+          .font(.system(size: 12).monospaced()).foregroundStyle(Color(hex: 0x424244))
+          .padding(.vertical, 6).padding(.horizontal, 10)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(Color(hex: 0xF3F3F3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
       default:
-        Text(line.text).font(.system(size: 15)).foregroundStyle(Palette.ink)
+        Text(line.text).font(.system(size: 16)).foregroundStyle(Palette.ink)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var footer: some View {
-    VStack(spacing: 12) {
+    VStack(spacing: 8) {
       HStack(spacing: 4) {
         PlainIcon(symbol: Symbol.plus, label: "附件") {}
         TextField(paired ? "在 \(run.hostLabel ?? "Mac") 上发起新任务…" : "连接后可输入", text: $draft, axis: .vertical)
@@ -132,6 +158,10 @@ struct ChatView: View {
         Text("发送前请在“新建会话”里选择一个主机已授权的项目。")
           .font(.system(size: 11)).foregroundStyle(Palette.muted)
           .frame(maxWidth: .infinity, alignment: .leading)
+      } else {
+        Text("项目 · \(run.chosen?.label ?? "")")
+          .font(.system(size: 11)).foregroundStyle(Palette.muted)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
     .padding(.horizontal, 16)
@@ -140,6 +170,15 @@ struct ChatView: View {
     .background(Color(hex: 0xFAFAFA))
   }
 
+  private var placeholderForState: String {
+    switch run.lifecycle {
+    case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
+    case .dispatched: return "主机已派发，准备执行…"
+    case .running: return "运行中 · 尚无输出内容"
+    case .failed, .cancelled: return "主机未缓存此运行的输出内容"
+    default: return "等待主机…"
+    }
+  }
   private var stateLabel: String {
     switch run.lifecycle {
     case .unknown: return "等待主机"
