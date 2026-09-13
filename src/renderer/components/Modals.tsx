@@ -14,6 +14,7 @@ import type { SkillMeta, McpMeta, ProjectMeta, SessionMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, DeleteArchivedSessionsResult, McpSnapshot } from '@shared/provider'
 import { Icon } from './primitives/Icon'
+import { RemotePairing } from './RemotePairing'
 import type { AppTheme } from '../theme'
 
 export function ModalFrame({
@@ -98,7 +99,7 @@ export function ModalFrame({
   )
 }
 
-type SettingsTab = 'appearance' | 'archived'
+type SettingsTab = 'appearance' | 'archived' | 'remote'
 
 export function SettingsModal({
   theme,
@@ -155,6 +156,14 @@ export function SettingsModal({
             <Icon name="archive" /> 已存档会话
             {archivedCount != null && <span className="cnt">{archivedCount}</span>}
           </button>
+          <button
+            type="button"
+            className={`settings-tab ${tab === 'remote' ? 'active' : ''}`}
+            aria-current={tab === 'remote' ? 'page' : undefined}
+            onClick={() => setTab('remote')}
+          >
+            <Icon name="globe" /> 远程访问
+          </button>
         </nav>
         <div className="settings-pane">
           {tab === 'appearance' ? (
@@ -200,19 +209,23 @@ export function SettingsModal({
                 </button>
               </div>
             </div>
-          ) : (
+          ) : tab === 'archived' ? (
             <ArchivedChatsPanel
               projects={archived}
               onRefresh={refreshArchived}
               onSessionsChanged={onSessionsChanged}
             />
+          ) : (
+            <div className="settings-body"><RemotePairing /></div>
           )}
         </div>
       </div>
       <div className="modal-foot dim">
         {tab === 'appearance'
           ? '选择会保存在此设备，并立即应用到全部视图。'
-          : '取消存档会把会话放回原项目分组；删除会同时移除 Scry 的 catalog、archive、附件、SQLite 与 usage 记录，不可恢复。'}
+          : tab === 'archived'
+            ? '取消存档会把会话放回原项目分组；删除会同时移除 Scry 的 catalog、archive、附件、SQLite 与 usage 记录，不可恢复。'
+            : '配对只在这台 Mac 本地进行；设备已配对前不会显示为已授权，请务必核对手机上与此处一致的主机指纹。'}
       </div>
     </ModalFrame>
   )

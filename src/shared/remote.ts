@@ -7,12 +7,18 @@
 // secret is short-lived (single-use, ~2 min TTL) and is the whole point of the
 // code, so it is surfaced here for display; anchorSHA256 lets the device pin the
 // host's inner CA.
+//
+// `deviceCode` is the scannable `scry1:` string the phone actually consumes: it
+// embeds the relay coordinates, hostId, pairingId, the single-use secret, and
+// the full host anchor (CA) PEM the device pins. It is present only when a relay
+// is configured (otherwise the device has no way to reach the host yet).
 export interface RemotePairingCode {
   pairingId: string
   secret: string
   hostId: string
   anchorSHA256: string
   expiresAt: number
+  deviceCode: string | null
 }
 
 // A pairing in progress. 'awaiting_local_confirmation' means a device proved

@@ -3524,7 +3524,8 @@ let remoteHostService: RemoteHostService | null = null
 //   { "host": "relay.example", "port": 443, "token": "...", "tls": true, "caPath": "..." }
 // When absent the subsystem stays dormant (no outbound leg). The token is a
 // per-host bearer provisioned out of band and is never logged.
-function resolveRemoteRelayTransport(): RemoteHostServiceDependencies['createTransport'] {
+type RemoteRelayResolution = Pick<RemoteHostServiceDependencies, 'createTransport' | 'relayAdvertisement'>
+function resolveRemoteRelay(): RemoteRelayResolution {
   // Cloudflare Worker relay (WSS) takes precedence when configured.
   //   SCRY_REMOTE_RELAY_WS = { "url": "wss://scry-relay.example.workers.dev", "token": "..." }
   // The Worker speaks WebSocket both sides; the Mac dials each warm leg over WSS
@@ -3532,44 +3533,64 @@ function resolveRemoteRelayTransport(): RemoteHostServiceDependencies['createTra
   const wsRaw = process.env.SCRY_REMOTE_RELAY_WS
   if (wsRaw) {
     let wsCfg: { url?: unknown; token?: unknown }
-    try { wsCfg = JSON.parse(wsRaw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY_WS is not valid JSON; remote relay disabled'); return undefined }
+    try { wsCfg = JSON.parse(wsRaw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY_WS is not valid JSON; remote relay disabled'); return {} }
     if (typeof wsCfg.url !== 'string' || typeof wsCfg.token !== 'string') {
       console.warn('[scry] SCRY_REMOTE_RELAY_WS missing url/token; remote relay disabled')
-      return undefined
+      return {}
     }
-    const url = wsCfg.url, wsToken = wsCfg.token
-    return (ctx: { hostId: string; mode: 'run' | 'pair' }) => {
+    let endpoint: URL
+    try { endpoint = new URL(wsCfg.url) } catch { console.warn('[scry] SCRY_REMOTE_RELAY_WS url is invalid; remote relay disabled'); return {} }
+    if (!['wss:', 'ws:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.pathname !== '/' || endpoint.search || endpoint.hash) {
+      console.warn('[scry] SCRY_REMOTE_RELAY_WS url must be a root ws/wss origin without credentials; remote relay disabled')
+      return {}
+    }
+    const url = endpoint.origin, wsToken = wsCfg.token
+    const createTransport: RemoteHostServiceDependencies['createTransport'] = (ctx) => {
       const { connect, readyEvent } = createRelayConnectWS({ url, hostId: ctx.hostId, token: wsToken, mode: ctx.mode })
       return new ReverseTunnelTransport({ connect, readyEvent })
     }
+    return {
+      createTransport,
+      relayAdvertisement: {
+        host: endpoint.hostname,
+        port: endpoint.port ? Number(endpoint.port) : endpoint.protocol === 'wss:' ? 443 : 80,
+        tls: endpoint.protocol === 'wss:' ? 'system' : 'plaintext'
+      }
+    }
   }
   const raw = process.env.SCRY_REMOTE_RELAY
-  if (!raw) return undefined
+  if (!raw) return {}
   let cfg: { host?: unknown; port?: unknown; token?: unknown; tls?: unknown; caPath?: unknown }
-  try { cfg = JSON.parse(raw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY is not valid JSON; remote relay disabled'); return undefined }
+  try { cfg = JSON.parse(raw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY is not valid JSON; remote relay disabled'); return {} }
   if (typeof cfg.host !== 'string' || typeof cfg.port !== 'number' || typeof cfg.token !== 'string') {
     console.warn('[scry] SCRY_REMOTE_RELAY missing host/port/token; remote relay disabled')
-    return undefined
+    return {}
   }
   const host = cfg.host, port = cfg.port, token = cfg.token
   const tls = cfg.tls === true
     ? { ca: typeof cfg.caPath === 'string' ? readFileSync(cfg.caPath, 'utf8') : undefined, servername: host }
     : undefined
-  return (ctx: { hostId: string; mode: 'run' | 'pair' }) => {
-    const { connect, readyEvent } = createRelayConnect({ host, port, hostId: ctx.hostId, token, mode: ctx.mode, tls })
-    return new ReverseTunnelTransport({ connect, readyEvent })
+  return {
+    createTransport: (ctx) => {
+      const { connect, readyEvent } = createRelayConnect({ host, port, hostId: ctx.hostId, token, mode: ctx.mode, tls })
+      return new ReverseTunnelTransport({ connect, readyEvent })
+    }
+    // The legacy raw-TCP config does not declare its separate device-facing WSS
+    // endpoint, so no scannable device code is emitted for it.
   }
 }
 async function startRemoteHostIfEnabled(): Promise<void> {
   if (remoteHostService || process.env.SCRY_REMOTE_HOST !== '1') return
   try {
+    const relay = resolveRemoteRelay()
     remoteHostService = await RemoteHostService.create({
       stateDirectory: join(app.getPath('userData'), 'remote'),
       // Fail closed: a device may only target a directory already authorized
       // through Scry's own project picker.
       authorizeWorkspace: (cwd) => resolveKnownProjectDirectory(cwd),
       gate: providerOperationGate,
-      createTransport: resolveRemoteRelayTransport(),
+      createTransport: relay.createTransport,
+      relayAdvertisement: relay.relayAdvertisement,
       startRun: async ({ routing, progress }) => {
         // TODO(remote-live): delegate to the live run-start path (RunRegistry +
         // Provider adapter) under the existing workspace authorization + gate.

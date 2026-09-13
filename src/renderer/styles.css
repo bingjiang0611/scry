@@ -11379,3 +11379,45 @@ button.turn-id.turn-call-open:focus-visible {
   content-visibility: auto;
   contain-intrinsic-size: auto 600px;
 }
+
+/* Remote-access pairing (trusted-LOCAL) tab inside Settings. Minimal, token-based
+   layout; the honest disabled/dormant/revoked states carry their own emphasis. */
+.remote-pairing { display: flex; flex-direction: column; gap: 12px; }
+.remote-pairing h2 { margin: 0; font-size: 15px; }
+.remote-pairing h3 { margin: 8px 0 0; font-size: 13px; color: var(--dim); }
+.remote-pairing p { margin: 0; color: var(--dim); font-size: 13px; }
+.remote-pairing__disabled { color: var(--dim2); }
+.remote-pairing__relay { color: var(--ok); }
+.remote-pairing__relay--dormant { color: var(--warn); }
+.remote-pairing__error { color: var(--bad); }
+.remote-pairing__empty { color: var(--dim2); }
+.remote-pairing__actions button {
+  align-self: flex-start; padding: 6px 12px; border-radius: var(--r-md);
+  border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--fg); cursor: pointer;
+}
+.remote-pairing__actions button:disabled { opacity: 0.5; cursor: default; }
+.remote-pairing__code {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px;
+  border: 1px solid var(--border2); border-radius: var(--r-md); background: var(--panel2);
+}
+.remote-pairing__code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  word-break: break-all; color: var(--fg); background: var(--panel3);
+  padding: 8px; border-radius: var(--r-sm);
+}
+.remote-pairing__devicecode { line-height: 1.5; }
+.remote-pairing__anchor { color: var(--dim2); font-size: 12px; }
+.remote-pairing__pending { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.remote-pairing__pending li, .remote-pairing__devices li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px; border: 1px solid var(--border2); border-radius: var(--r-md);
+}
+.remote-pairing__pending button, .remote-pairing__devices button {
+  padding: 4px 10px; border-radius: var(--r-sm); border: 1px solid var(--border2);
+  background: var(--panel3); color: var(--fg); cursor: pointer; font-size: 12px;
+}
+.remote-pairing__label { font-weight: 600; }
+.remote-pairing__status, .remote-pairing__fp { color: var(--dim); font-size: 12px; }
+.remote-pairing__devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.remote-pairing__device--revoked { opacity: 0.7; }
+.remote-pairing__device--revoked .remote-pairing__status { color: var(--bad); }

@@ -64,8 +64,20 @@ export function RemotePairing(): JSX.Element {
       </div>
       {code && (
         <div className="remote-pairing__code">
-          <p>在手机上输入或扫描此配对码（约 2 分钟内有效）：</p>
-          <code>{code.secret}</code>
+          {code.deviceCode ? (
+            <>
+              <p>用手机扫描此配对码（约 2 分钟内有效）：</p>
+              <code className="remote-pairing__devicecode">{code.deviceCode}</code>
+            </>
+          ) : (
+            // No relay dialed yet: there is nothing for the phone to reach, so we
+            // only show the one-time secret and say so plainly rather than
+            // implying the device can connect.
+            <>
+              <p>尚未连接中继，手机暂时无法接入。一次性配对口令（约 2 分钟内有效）：</p>
+              <code>{code.secret}</code>
+            </>
+          )}
           <p className="remote-pairing__anchor">主机指纹 {code.anchorSHA256.slice(0, 16).toUpperCase()}…</p>
         </div>
       )}
