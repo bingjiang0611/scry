@@ -143,10 +143,14 @@ struct ChatView: View {
           .font(.system(size: 17))
           .lineLimit(1...5)
           .disabled(!paired)
-        PlainIcon(symbol: Symbol.gauge, label: "Provider 和模型") {}
         CircleButton(symbol: Symbol.send, label: "发送新任务", filled: true,
-                     disabled: !paired || run.chosen == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-          run.submit(prompt: draft, providerId: "claude")
+                     disabled: !paired || run.chosen == nil || run.chosenProvider == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+          // Follow-ups MUST use the Provider the user chose for this session, not a
+          // hardcoded one. Sending to a different Provider than chosen was the
+          // "auto-switch to claude" bug (and, when that Provider crashed, looked
+          // like the connection dropped).
+          guard let providerId = run.chosenProvider?.id else { return }
+          run.submit(prompt: draft, providerId: providerId)
           draft = ""
         }
       }
@@ -154,12 +158,12 @@ struct ChatView: View {
       .padding(.vertical, 2)
       .frame(minHeight: 49)
       .glass(cornerRadius: 32)
-      if run.chosen == nil {
-        Text("发送前请在“新建会话”里选择一个主机已授权的项目。")
+      if run.chosen == nil || run.chosenProvider == nil {
+        Text("发送前请在“新建会话”里选择项目与 Provider。")
           .font(.system(size: 11)).foregroundStyle(Palette.muted)
           .frame(maxWidth: .infinity, alignment: .leading)
       } else {
-        Text("项目 · \(run.chosen?.label ?? "")")
+        Text("项目 · \(run.chosen?.label ?? "") · \(run.chosenProvider?.label ?? "")")
           .font(.system(size: 11)).foregroundStyle(Palette.muted)
           .frame(maxWidth: .infinity, alignment: .leading)
       }

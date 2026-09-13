@@ -29,6 +29,7 @@ type OptionalBridgeMethod =
   | 'catalogHealth'
   | 'runControls'
   | 'onFocusedRun'
+  | 'onRemoteSessionRecorded'
   | 'onDataUpdated'
   | 'onStopState'
   | 'loadSessionOlder'

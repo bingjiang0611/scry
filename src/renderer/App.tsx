@@ -790,6 +790,14 @@ export function App() {
             })
           })
         : () => {}
+    // A device-initiated (remote) run recorded a session in the catalog. Refresh
+    // the project/session list so the phone's conversation appears on the Mac
+    // live. This is a refresh hint only - it does NOT mark a run started or
+    // adopt a session, so it never disturbs the local active-run UI state.
+    const offRemoteSession =
+      typeof window.scry.onRemoteSessionRecorded === 'function'
+        ? window.scry.onRemoteSessionRecorded(() => { loadProjects() })
+        : () => {}
     window.scry
       .activeRuns()
       .then((runs) => {
@@ -826,6 +834,7 @@ export function App() {
       cancelled = true
       offFocusedRun()
       offSession()
+      offRemoteSession()
     }
   }, [
     integrations.setSelectedId,
