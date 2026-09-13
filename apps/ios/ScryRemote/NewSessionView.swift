@@ -1,13 +1,21 @@
 import SwiftUI
 
-// v2 新会话: back header, context rows (host/project/workspace/branch), and the
-// bottom composer. The composer is disabled while not connected — there is no
-// real host to accept a task, and we never queue a fake "submitted" task.
+// v2 新会话: back header, context rows, bottom composer. The project row is a
+// picker over the HOST-AUTHORIZED directories only (the phone can never
+// authorize a new one; the host re-checks the cwd on submit). Sending records a
+// durable intent through RemoteRunClient and routes to the chat view, which
+// then renders the real lifecycle + output. Nothing is faked: with no live
+// connection the composer is disabled, and a submit error is surfaced verbatim.
 struct NewSessionView: View {
   @EnvironmentObject var model: AppModel
+  @EnvironmentObject var run: RemoteRunStore
   @State private var draft = ""
+  @State private var showProjects = false
 
-  private var connected: Bool { model.link.isConnected }
+  private var paired: Bool { run.hasConnection }
+  private var canSend: Bool {
+    paired && run.chosen != nil && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -20,14 +28,14 @@ struct NewSessionView: View {
       .padding(.bottom, 10)
       .frame(minHeight: 62)
 
-      if !connected { Notice(text: "尚未连接 Mac · 无法创建会话。") }
+      if !paired { Notice(text: "尚未连接 Mac · 无法创建会话。") }
+      if let error = run.submitError { Notice(text: error, warning: true) }
 
       ScrollView {
         VStack(spacing: 0) {
-          contextRow(Symbol.laptop, model.link.host ?? "选择电脑")
-          contextRow(Symbol.folder, "选择项目")
-          contextRow(Symbol.laptop, "在本地工作")
-          contextRow(Symbol.branch, "main")
+          contextRow(Symbol.laptop, run.hostLabel ?? model.link.host ?? "选择电脑", action: nil)
+          contextRow(Symbol.folder, run.chosen?.label ?? "选择项目", action: paired ? { showProjects = true } : nil)
+          contextRow(Symbol.branch, "main", action: nil)
         }
         .padding(.top, 56)
         .padding(.horizontal, 24)
@@ -37,31 +45,76 @@ struct NewSessionView: View {
       composer
     }
     .background(Palette.surface)
+    .onAppear { if paired { run.loadProjects() } }
+    .sheet(isPresented: $showProjects) { projectPicker }
   }
 
-  private func contextRow(_ symbol: String, _ text: String) -> some View {
-    HStack(spacing: 13) {
-      Image(systemName: symbol).font(.system(size: 18)).foregroundStyle(Color(hex: 0x909193)).frame(width: 21)
-      Text(text).font(.system(size: 17)).foregroundStyle(Color(hex: 0x626264))
-      Spacer()
-      Image(systemName: Symbol.chevrons).font(.system(size: 12)).foregroundStyle(Color(hex: 0xC4C4C6))
+  private func contextRow(_ symbol: String, _ text: String, action: (() -> Void)?) -> some View {
+    Button { action?() } label: {
+      HStack(spacing: 13) {
+        Image(systemName: symbol).font(.system(size: 18)).foregroundStyle(Color(hex: 0x909193)).frame(width: 21)
+        Text(text).font(.system(size: 17)).foregroundStyle(Color(hex: 0x626264)).lineLimit(1)
+        Spacer()
+        if action != nil {
+          Image(systemName: Symbol.chevrons).font(.system(size: 12)).foregroundStyle(Color(hex: 0xC4C4C6))
+        }
+      }
+      .frame(minHeight: 47)
     }
-    .frame(minHeight: 47)
+    .disabled(action == nil)
+  }
+
+  // Host-authorized project directories only. Three honest states: reading,
+  // list, and empty ("手机不能自行授权新目录").
+  private var projectPicker: some View {
+    NavigationStack {
+      Group {
+        switch run.projects {
+        case .idle, .loading:
+          ProgressView("读取主机已授权的项目…").padding()
+        case let .loaded(list):
+          List(list, id: \.path) { ref in
+            Button {
+              run.chooseProject(ref); showProjects = false
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(ref.label).font(.system(size: 16)).foregroundStyle(Palette.ink)
+                Text(ref.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
+              }
+            }
+          }
+        case .empty:
+          EmptyState(title: "主机上没有已授权的项目",
+                     detail: "在 Mac 的 Scry 里用目录选择器授权项目后再试；手机不能自行授权新目录。")
+        case let .failed(reason):
+          EmptyState(title: "无法读取项目", detail: reason)
+        }
+      }
+      .navigationTitle("选择项目")
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("取消") { showProjects = false } }
+        ToolbarItem(placement: .primaryAction) { Button("刷新") { run.loadProjects() } }
+      }
+    }
+    .presentationDetents([.medium, .large])
   }
 
   private var composer: some View {
     VStack(spacing: 7) {
-      TextField(connected ? "在 \(model.link.host ?? "Mac") 上工作" : "连接后可输入", text: $draft, axis: .vertical)
+      TextField(paired ? "在 \(run.hostLabel ?? "Mac") 上工作" : "连接后可输入", text: $draft, axis: .vertical)
         .font(.system(size: 17))
         .lineLimit(1...6)
-        .disabled(!connected)
+        .disabled(!paired)
       HStack(spacing: 3) {
         PlainIcon(symbol: Symbol.plus, label: "附件") {}
         PlainIcon(symbol: Symbol.shield, label: "权限模式", tint: Palette.amber) {}
         Spacer()
         PlainIcon(symbol: Symbol.gauge, label: "Provider 和模型") {}
-        CircleButton(symbol: Symbol.send, label: "发送新任务", filled: true,
-                     disabled: !connected || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {}
+        CircleButton(symbol: Symbol.send, label: "发送新任务", filled: true, disabled: !canSend) {
+          run.submit(prompt: draft, providerId: "claude")
+          draft = ""
+          model.route = .chat
+        }
       }
     }
     .padding(.horizontal, 13)
