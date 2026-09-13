@@ -5,7 +5,7 @@ description: Create or refine HTML design prototypes, wireframes, decks and visu
 
 # Design
 
-Deliver the requested HTML artifact and verified assets, not a new product implementation stack. In Nib, native Rust/GPUI implementation follows the repository rules; an HTML prototype is only produced when actually requested.
+Deliver the requested HTML artifact and verified assets, not a new product implementation stack. Native product implementation follows the current repository's rules; an HTML prototype is only produced when actually requested.
 
 ## Scope and decisions
 

@@ -22,7 +22,7 @@ npm run build
 
 ## 验证与交付
 
-默认选择能证明本次改动的最小验证，不把 CLI 多版本兼容、Electron 打包和 security smoke 作为每次小改动的前置条件。非纯文档/Agent 配置任务完成改动并通过对应验证后，默认启动开发版本供用户检查；用户明确要求不启动时除外。为用户检查而启动开发版本时，默认直接使用正常用户数据和工作区，不注入临时 `HOME`、`userData`、Application Support 或其他隔离数据目录；只有自动化测试、破坏性验证或用户明确要求时才使用隔离数据。
+默认选择能证明本次改动的最小验证，不把完整发布门禁作为每次小改动的前置条件。仅当用户要求预览、改动涉及 UI/交互或需要真实 App 验证时，启动包含当前改动的开发版本；CLI、脚本和非界面逻辑改动不默认启动。用户明确要求不启动时遵循请求。供用户检查时使用正常用户数据和工作区；自动化测试、破坏性验证或用户明确要求隔离时才使用临时数据。
 
 ### 纯文档或 Agent 配置
 
@@ -44,7 +44,7 @@ git diff --check
 ```
 
 - 修改 workspace Hook 时追加 `npm run test:shell`。
-- 修改 recorder Core、CLI、integration 或 npm 包时追加 `npm run check:cli-release`。
+- recorder Core、CLI、integration 或 npm 包的普通改动先运行受影响合同测试及必要的 `npm run build:cli`；跨公开合同的高风险改动或准备 CLI 分发时才运行 `npm run check:cli-release`。
 - 修改 packaging、preload、native dependency、resource allowlist 或 Electron security 时追加 `npm run pack:artifact`。
 - 本机 ignored 的 `.claude/`、`.agents/` 等 Agent 目录可能污染 Vitest 自动发现；应限定到项目自有 `src/`、`scripts/` 测试或在 clean checkout 运行，不要删除用户配置来让测试通过。
 
@@ -76,7 +76,7 @@ App 与独立 CLI **分别版本化**；不要默认每次 App 修改都升 CLI�
 
 - 纯文档/Agent 配置不产生新 App/CLI 产物，不为此单独升版本。
 - 普通 App 源码提交不自动升版本；准备新的可安装版本或正式发布时，源码冻结后才升一次根 `package.json` version，并重新跑完整验证与打包。
-- 影响独立 recorder CLI 合同、命令、integration 或 npm 包内容：升 `packages/turn-recorder-cli/package.json` version，并同步 README/安装示例。
+- 普通 CLI 源码提交不自动升版本；准备分发包含 CLI 合同、命令、integration 或 npm 包内容变化的新版本时，源码冻结后统一升一次 `packages/turn-recorder-cli/package.json` version，同步 README/安装示例并执行 `check:cli-release`。
 - 如果同一改动同时影响两个分发面，分别判断并分别升版本；两者无需强行相同。
 - README 中的 CLI 安装版本必须与 CLI package 当前版本一致，避免复制陈旧命令。
 
@@ -109,4 +109,3 @@ npm run publish:cli
 package lifecycle 会强制执行 `check:cli-release`，registry 固定为内网地址；不要从陈旧 `dist` 手工 `npm publish`。
 
 提交前检查 `git diff`，只提交本任务改动；除非用户明确要求，不推送。
-
