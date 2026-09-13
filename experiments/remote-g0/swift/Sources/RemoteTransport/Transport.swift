@@ -225,6 +225,10 @@ public enum G0Transport {
   public struct RunSessionRef: Sendable, Equatable, Codable {
     public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let cwd: String; public let label: String; public let ts: Double
   }
+  // One content chunk of a replayed session turn (same kinds a live run streams).
+  public struct RunHistoryChunk: Sendable, Equatable, Codable { public let kind: String; public let text: String }
+  // One turn of a session's real conversation: the prompt + assistant content.
+  public struct RunHistoryTurn: Sendable, Equatable, Codable { public let userText: String; public let items: [RunHistoryChunk] }
   // A single chunk of the assistant's REAL streamed output content (masked +
   // bounded host-side). kind ∈ output|reasoning|tool|tool_result|truncated.
   // This is trace-derived CONTENT, not canonical usage; tokens/cost stay on the
@@ -240,6 +244,7 @@ public enum G0Transport {
   private struct RunProjectsRequest: Encodable { let op = "projects" }
   private struct RunProvidersRequest: Encodable { let op = "providers" }
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
+  private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunResponse: Decodable {
     let runId: String?
@@ -249,6 +254,7 @@ public enum G0Transport {
     let projects: [RunProjectRef]?
     let providers: [RunProviderRef]?
     let sessions: [RunSessionRef]?
+    let history: [RunHistoryTurn]?
     let output: RunOutputBody?
     let error: String?
   }
@@ -315,6 +321,15 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let sessions = response.sessions else { throw ProbeError.unexpectedReply }
     return sessions
+  }
+
+  // The REAL conversation content of one session so the device can OPEN it.
+  // Same owner-device authorization; an unknown/unauthorized session returns [].
+  public static func relayRunHistory(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> [RunHistoryTurn] {
+    let request = try JSONEncoder().encode(RunHistoryRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let history = response.history else { throw ProbeError.unexpectedReply }
+    return history
   }
 
   // The assistant's real streamed output content for one run, strictly after

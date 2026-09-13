@@ -36,6 +36,7 @@ struct RootView: View {
         case .newSession: NewSessionView()
         case .chat: ChatView()
         case .pair: PairView()
+        case .transcript: SessionTranscriptView()
         }
       }
     }

@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef } from './host-controller'
+import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
 import { ensureHostIdentity } from './host-identity'
@@ -54,6 +54,7 @@ export interface HostControllerFactoryDependencies {
   listProjects?(): RemoteProjectRef[]
   listProviders?(): RemoteProviderRef[]
   listSessions?(): RemoteSessionRef[]
+  readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
 }
 
 // The file stores require a pre-existing private (0700) directory; create it
@@ -120,7 +121,8 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
     runProvider: deps.startRun,
     ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
-    ...(deps.listSessions ? { listSessions: deps.listSessions } : {})
+    ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
+    ...(deps.readHistory ? { readHistory: deps.readHistory } : {})
   }
 
   const controller = new HostController(controllerDeps)

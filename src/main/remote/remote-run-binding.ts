@@ -1,6 +1,7 @@
 import type { ProviderRunHandle, ProviderRunRequest } from '../providers/types'
 import type { RemoteIntentRouting } from './host-controller'
 import type { TraceEvent } from '../../shared/trace'
+import { traceEventToOutputChunk } from './trace-output'
 
 // The LIVE binding for the remote run seam (previously a fail-closed stub). It
 // turns a routed device intent into a REAL Provider run through the same
@@ -104,18 +105,10 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       //                secret-masked + byte-bounded by RunOutputLog, so the device
       //                renders the actual run output. This is trace-derived content,
       //                NOT canonical usage; token/cost stay on the ledger `result`.
-      if (ev.stage === 'text' && typeof ev.text === 'string' && ev.text.length > 0) {
-        sawAssistantText = true
-        output({ kind: 'output', text: ev.text })
-      } else if (ev.stage === 'thinking' && typeof ev.thinking === 'string' && ev.thinking.length > 0) {
-        output({ kind: 'reasoning', text: ev.thinking })
-      } else if (ev.kind === 'tool' && ev.toolUseId && typeof ev.output === 'string' && ev.output.length > 0) {
-        // A tool_result carries observable output text for its tool_use.
-        output({ kind: 'tool_result', text: ev.output })
-      } else if (ev.kind === 'tool' && ev.tool && ev.output === undefined) {
-        // A tool_use: surface the tool name (+ a short input hint) as activity.
-        const hint = ev.filePath ? ` ${ev.filePath}` : ''
-        output({ kind: 'tool', text: `${ev.tool}${hint}` })
+      const chunk = traceEventToOutputChunk(ev)
+      if (chunk) {
+        if (chunk.kind === 'output') sawAssistantText = true
+        output(chunk)
       }
       // Only honest, opaque lifecycle markers cross to the ledger; no transcript
       // bytes, no secrets. Provider-canonical usage on the result event is

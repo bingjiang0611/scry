@@ -35,7 +35,17 @@ enum HostLink: Equatable {
   var isConnected: Bool { if case .connected = self { return true }; return false }
 }
 
-enum Route: Hashable { case home, newSession, chat, pair }
+enum Route: Hashable { case home, newSession, chat, pair, transcript }
+
+// The session the owner opened to READ its past conversation (read-only replay).
+// Plain identity fields (no transport coupling); externalSessionId is required -
+// a session with none is not yet resumable/readable and is not opened.
+struct OpenedSession: Equatable {
+  let providerId: String
+  let cwd: String
+  let externalSessionId: String
+  let label: String
+}
 
 // Honest pairing UI state. A fingerprint means the device PROVED possession and
 // is waiting for the Mac operator to confirm; it is NOT paired yet. Only a
@@ -57,6 +67,8 @@ final class AppModel: ObservableObject {
   @Published var route: Route = .home
   @Published var query: String = ""
   @Published var pairing: PairingUIState = .idle
+  // The session currently opened for read-only transcript replay (nil = none).
+  @Published var openedSession: OpenedSession?
   private var pairingTask: Task<Void, Never>?
   private let connections = RemoteConnectionStore()
 

@@ -137,6 +137,7 @@ import { HomeFileAccess } from './home-file-access'
 import { createTerminalManager, type TerminalManager } from './terminal-manager'
 import { TerminalOutputBridge } from './terminal-output'
 import { TraceOutputBridge } from './trace-output'
+import { flattenTraceItems } from './remote/trace-output'
 import {
   authorizedWorkspaceRequest,
   canonicalExistingDirectory,
@@ -3724,6 +3725,37 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         }
         out.sort((a, b) => b.ts - a.ts)
         return out
+      },
+      // Read one session's REAL conversation content so the phone can OPEN it,
+      // not just list it. Side-effect-free (no dock badge / cwd / baseline like
+      // agent:loadSession): resolve+authorize the cwd to a device-visible project,
+      // read the SAME trace archive (+ claude transcript) a local load uses, merge,
+      // and flatten each turn to the device content shape. Unknown/unauthorized/
+      // unreadable => empty (honest: no content, never a fabricated transcript).
+      readHistory: async ({ providerId, cwd, externalSessionId }) => {
+        if (!providerId || !externalSessionId) return []
+        let canonical: string
+        try { canonical = cwd ? resolveKnownProjectDirectory(cwd) : '' } catch { return [] }
+        if (canonical) {
+          const authorized = new Set<string>()
+          for (const dir of knownProjectDirectories()) { try { authorized.add(resolveKnownProjectDirectory(dir)) } catch { /* skip */ } }
+          if (!authorized.has(canonical)) return []
+        }
+        const userDataDir = app.getPath('userData')
+        const archived = await readTraceArchiveAsync({ cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId, userDataDir })
+        let turns: ParsedTurn[] = []
+        if (providerId === 'claude' && canonical) {
+          const fp = resolveTranscriptPath({ cwd: canonical, sessionId: externalSessionId, userDataDir })
+          if (fp) {
+            try {
+              const content = await readFile(fp, 'utf8')
+              turns = parseTranscriptToTurns(content, { runId: externalSessionId, newId: () => mainEventId('history', externalSessionId), now: () => new Date().toISOString() })
+            } catch { /* transcript unreadable; fall back to archive */ }
+          }
+        }
+        if (turns.length === 0 && !archived) return []
+        const merged = mergeSessionTurns(turns, archived, { userDataDir })
+        return merged.map((turn) => ({ userText: turn.userText, items: flattenTraceItems(turn.items) }))
       }
     })
     await remoteHostService.start()

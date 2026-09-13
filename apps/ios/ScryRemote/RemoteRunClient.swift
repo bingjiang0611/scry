@@ -85,6 +85,11 @@ struct RemoteRunClient {
     try await G0Transport.relayRunSessions(endpoint: endpoint(), identity: try identity())
   }
 
+  // The REAL conversation content of one listed session so the phone can OPEN it.
+  func history(providerId: String, cwd: String, externalSessionId: String) async throws -> [G0Transport.RunHistoryTurn] {
+    try await G0Transport.relayRunHistory(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  }
+
   // The assistant's real streamed output content for one run, strictly after
   // `cursor`. This is the trace-derived CONTENT the chat view renders; tokens/
   // cost still come only from the ledger `result` event, never from here.

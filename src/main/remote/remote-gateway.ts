@@ -78,6 +78,28 @@ export interface RemoteSessionSource {
   list(): RemoteSessionRef[]
 }
 
+// One turn of a session's REAL conversation content, replayed for the device.
+// `userText` is the owner/device prompt; `items` are the assistant's ordered
+// content chunks (text/reasoning/tool/tool_result), the SAME shape a live run
+// streams. This is trace-derived content, never fabricated.
+export interface RemoteHistoryTurn {
+  userText: string
+  items: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }[]
+}
+
+export interface RemoteHistoryQuery {
+  providerId: string
+  cwd: string
+  externalSessionId: string
+}
+
+export interface RemoteHistorySource {
+  // Read one session's turns. The host re-authorizes the cwd and only serves
+  // sessions in device-visible authorized projects; an unknown/unauthorized/
+  // unreadable session yields an empty list (honest: no content, not an error).
+  read(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
+}
+
 export interface RemoteOutputReader {
   // Chunks strictly after `cursor` for a run (bounded page) + the next cursor.
   since(runId: string, cursor: number): RunOutputPage
@@ -92,6 +114,8 @@ export interface RemoteGatewayDependencies {
   providers?: RemoteProviderSource
   // Absent => the device sees an empty (honest) session catalog.
   sessions?: RemoteSessionSource
+  // Absent => opening any session yields an empty (honest) transcript.
+  history?: RemoteHistorySource
   // Absent => the device sees an empty (honest) output page.
   output?: RemoteOutputReader
 }
@@ -122,6 +146,9 @@ const MAX_PROJECTS = 200
 const MAX_PATH = 4_096
 const MAX_PROVIDERS = 32
 const MAX_SESSIONS = 300
+const MAX_HISTORY_TURNS = 400
+const MAX_HISTORY_ITEMS_PER_TURN = 500
+const MAX_HISTORY_TEXT = 20_000
 
 export class RemoteGateway {
   #authority: DeviceAuthorizer
@@ -129,6 +156,7 @@ export class RemoteGateway {
   #projects?: RemoteProjectSource
   #providers?: RemoteProviderSource
   #sessions?: RemoteSessionSource
+  #history?: RemoteHistorySource
   #output?: RemoteOutputReader
 
   constructor(deps: RemoteGatewayDependencies) {
@@ -137,6 +165,7 @@ export class RemoteGateway {
     this.#projects = deps.projects
     this.#providers = deps.providers
     this.#sessions = deps.sessions
+    this.#history = deps.history
     this.#output = deps.output
   }
 
@@ -230,6 +259,32 @@ export class RemoteGateway {
         ts: Number.isFinite(entry.ts) ? entry.ts : 0
       })
       if (out.length >= MAX_SESSIONS) break
+    }
+    return out
+  }
+
+  // The REAL conversation content of one session so the device can OPEN it,
+  // authorized by the same owner-device check as every method. Bounded (turns,
+  // items/turn, text length); an unknown/unauthorized/unreadable session returns
+  // an empty list (honest: no content, never a fake transcript).
+  async readHistory(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]> {
+    this.#authorize(peerCertSHA256)
+    if (!query || typeof query.providerId !== 'string' || typeof query.externalSessionId !== 'string') return []
+    const raw = (await this.#history?.read({
+      providerId: query.providerId.slice(0, 64),
+      cwd: typeof query.cwd === 'string' ? query.cwd.slice(0, MAX_PATH) : '',
+      externalSessionId: query.externalSessionId.slice(0, 128)
+    })) ?? []
+    const out: RemoteHistoryTurn[] = []
+    for (const turn of raw.slice(0, MAX_HISTORY_TURNS)) {
+      if (!turn) continue
+      const items: RemoteHistoryTurn['items'] = []
+      for (const item of (turn.items ?? []).slice(0, MAX_HISTORY_ITEMS_PER_TURN)) {
+        if (!item || typeof item.text !== 'string') continue
+        if (item.kind !== 'output' && item.kind !== 'reasoning' && item.kind !== 'tool' && item.kind !== 'tool_result') continue
+        items.push({ kind: item.kind, text: item.text.slice(0, MAX_HISTORY_TEXT) })
+      }
+      out.push({ userText: (typeof turn.userText === 'string' ? turn.userText : '').slice(0, MAX_HISTORY_TEXT), items })
     }
     return out
   }
