@@ -62,6 +62,14 @@ try {
   console.log(`[syn]   providers -> ${stdout.trim().replace(/\n/g, ' | ')}`)
 } catch (e) { console.log(`[syn]   (providers op error: ${e.message})`) }
 
+// Session catalog op: the device learns the SAME conversations the Mac lists
+// (fixes the always-empty phone session list).
+console.log('[syn] relay-run sessions...')
+try {
+  const { stdout } = await exec(probe, ['relay-run', 'sessions', p.relayHost, String(p.relayPort), p.hostId, anchor, grantedCertPem, key, ''], { timeout: 30_000, maxBuffer: 1 << 20 })
+  console.log(`[syn]   sessions -> ${stdout.trim().replace(/\n/g, ' | ')}`)
+} catch (e) { console.log(`[syn]   (sessions op error: ${e.message})`) }
+
 // THE REAL E2E: submit a qoder task, poll the ledger to a terminal state, then
 // drain the streamed output. providerId is 'qoder' (the fix the phone needs too).
 const prompt = process.env.SCRY_PROMPT || '读取 greet.js 后用一句话说明它做什么，不要修改任何文件。'

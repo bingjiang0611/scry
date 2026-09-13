@@ -107,6 +107,10 @@ export class InnerMtlsHost {
         // chosen providerId, so this is a display-only chooser snapshot.
         return { providers: controller.listProviders(fingerprint) }
       }
+      if (request.op === 'sessions') {
+        // Same owner-device authorization; display-only catalog metadata.
+        return { sessions: controller.listSessions(fingerprint) }
+      }
       if (request.op === 'output') {
         // The assistant's real streamed output content for one run, after cursor.
         if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor)) return { error: 'invalid_request' }

@@ -49,10 +49,11 @@ function gateway(
   authority: { authorizesCertificate(fp: string): boolean },
   projects?: { list(): { path: string; label: string }[] },
   output?: RunOutputLog,
-  providers?: { list(): { id: string; label: string; available: boolean }[] }
+  providers?: { list(): { id: string; label: string; available: boolean }[] },
+  sessions?: { list(): { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number }[] }
 ) {
   const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
-  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}), ...(output ? { output } : {}), ...(providers ? { providers } : {}) }), ledger }
+  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}), ...(output ? { output } : {}), ...(providers ? { providers } : {}), ...(sessions ? { sessions } : {}) }), ledger }
 }
 
 const expectCode = (fn: () => unknown, code: string) => {
@@ -190,6 +191,29 @@ describe('RemoteGateway', () => {
     const { authority } = await grantedAuthority()
     const { gw } = gateway(authority)
     expect(gw.listProviders(CERT)).toEqual([])
+  })
+
+  it('lists the host session catalog only for an authorized device, deduped/bounded, resumable id preserved', async () => {
+    const { authority } = await grantedAuthority()
+    const list = vi.fn(() => [
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20 },
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'dup', ts: 21 }, // dup id dropped
+      { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }, // no externalSessionId
+      { sessionId: '', providerId: 'qoder', cwd: '/w', label: 'empty-id', ts: 5 }
+    ])
+    const { gw } = gateway(authority, undefined, undefined, undefined, { list })
+    expectCode(() => gw.listSessions('f'.repeat(64)), 'device_not_authorized')
+    const sessions = gw.listSessions(CERT)
+    expect(sessions).toEqual([
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20 },
+      { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }
+    ])
+  })
+
+  it('returns an honest empty session catalog when no source is configured', async () => {
+    const { authority } = await grantedAuthority()
+    const { gw } = gateway(authority)
+    expect(gw.listSessions(CERT)).toEqual([])
   })
 
   it('stops offering projects to a device the instant its grant is revoked', async () => {

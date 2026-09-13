@@ -1,8 +1,8 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteProviderRef } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage } from './run-output-log'
-export type { RemoteProjectRef, RemoteProviderRef } from './remote-gateway'
+export type { RemoteProjectRef, RemoteProviderRef, RemoteSessionRef } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -50,6 +50,8 @@ export interface HostControllerDependencies {
   listProjects?(): RemoteProjectRef[]
   // Snapshot of the host's Providers a device may target. Absent => honest empty.
   listProviders?(): RemoteProviderRef[]
+  // Snapshot of the host session catalog a device may browse. Absent => empty.
+  listSessions?(): RemoteSessionRef[]
   // Optional shared operation gate (auth vs run mutual exclusion). A fresh one
   // is created when omitted; production passes the app-wide gate.
   gate?: ProviderOperationGate
@@ -86,7 +88,8 @@ export class HostController {
       ledger: this.#ledger,
       output: this.#output,
       ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
-      ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {})
+      ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
+      ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {})
     })
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
@@ -130,6 +133,12 @@ export class HostController {
   // verified peer certificate as every method.
   listProviders(peerCertSHA256: string): RemoteProviderRef[] {
     return this.#gateway.listProviders(peerCertSHA256)
+  }
+
+  // Device-facing: the host session catalog this device may browse, authorized
+  // by the same verified peer certificate as every method.
+  listSessions(peerCertSHA256: string): RemoteSessionRef[] {
+    return this.#gateway.listSessions(peerCertSHA256)
   }
 
   // Device-facing: the assistant's real streamed output CONTENT for one run,

@@ -45,6 +45,12 @@ const relayUrl = `ws://${relayHost}:${relayPort}`
 // qoder's cwd (macOS /tmp -> /private/tmp).
 const PROJECT = realpathSync(process.env.SCRY_LIVE_PROJECT || '/tmp/scry-live-project')
 const PROJECTS = [{ path: PROJECT, label: 'scry-live-project' }]
+// Stand-in host session catalog so the device-visible `sessions` op can be
+// exercised end-to-end (real app maps this from appSessionStore).
+const SESSIONS = [
+  { sessionId: 'sess-live-1', externalSessionId: 'ext-live-1', providerId: 'qoder', cwd: PROJECT, label: 'greet.js 说明', ts: Date.now() - 60_000 },
+  { sessionId: 'sess-live-2', providerId: 'claude', cwd: PROJECT, label: 'pending 会话', ts: Date.now() - 300_000 }
+]
 
 // The REAL provider registry, built exactly like index.ts (paths only, no
 // Electron). qoder resolves its auth under the real home (~/.qoder).
@@ -102,7 +108,8 @@ const binding = createHostController({
   },
   gate: new ProviderOperationGate(),
   listProjects: () => { console.log(`[host] ← listProjects requested (returning ${PROJECTS.length})`); return PROJECTS },
-  listProviders: () => { console.log(`[host] ← listProviders requested (${providerSnapshot.length})`); return providerSnapshot }
+  listProviders: () => { console.log(`[host] ← listProviders requested (${providerSnapshot.length})`); return providerSnapshot },
+  listSessions: () => { console.log(`[host] ← listSessions requested (${SESSIONS.length})`); return SESSIONS }
 })
 process.on('unhandledRejection', (e) => console.log(`[host] ⚠ unhandledRejection: ${e?.message || e}`))
 process.on('uncaughtException', (e) => console.log(`[host] ⚠ uncaughtException: ${e?.message || e}`))

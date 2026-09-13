@@ -58,6 +58,26 @@ export interface RemoteProviderSource {
   list(): RemoteProviderRef[]
 }
 
+// A session in the host's catalog the device may browse. `externalSessionId` is
+// the Provider's own resumable id (absent => still pending/unresumable). This is
+// display metadata only; it exposes nothing the device could not learn by
+// listing projects + submitting, and the host re-authorizes any later read.
+export interface RemoteSessionRef {
+  sessionId: string
+  externalSessionId?: string
+  providerId: string
+  cwd: string
+  label: string
+  ts: number
+}
+
+export interface RemoteSessionSource {
+  // Snapshot of the host's session catalog (already filtered to device-visible
+  // authorized projects host-side). Called per request so a new/removed session
+  // is reflected immediately.
+  list(): RemoteSessionRef[]
+}
+
 export interface RemoteOutputReader {
   // Chunks strictly after `cursor` for a run (bounded page) + the next cursor.
   since(runId: string, cursor: number): RunOutputPage
@@ -70,6 +90,8 @@ export interface RemoteGatewayDependencies {
   projects?: RemoteProjectSource
   // Absent => the device sees an empty (honest) provider list.
   providers?: RemoteProviderSource
+  // Absent => the device sees an empty (honest) session catalog.
+  sessions?: RemoteSessionSource
   // Absent => the device sees an empty (honest) output page.
   output?: RemoteOutputReader
 }
@@ -99,12 +121,14 @@ export class RemoteGatewayError extends Error {
 const MAX_PROJECTS = 200
 const MAX_PATH = 4_096
 const MAX_PROVIDERS = 32
+const MAX_SESSIONS = 300
 
 export class RemoteGateway {
   #authority: DeviceAuthorizer
   #ledger: SessionLedger
   #projects?: RemoteProjectSource
   #providers?: RemoteProviderSource
+  #sessions?: RemoteSessionSource
   #output?: RemoteOutputReader
 
   constructor(deps: RemoteGatewayDependencies) {
@@ -112,6 +136,7 @@ export class RemoteGateway {
     this.#ledger = deps.ledger
     this.#projects = deps.projects
     this.#providers = deps.providers
+    this.#sessions = deps.sessions
     this.#output = deps.output
   }
 
@@ -179,6 +204,32 @@ export class RemoteGateway {
       seen.add(entry.id)
       out.push({ id: entry.id, label: entry.label.slice(0, 128), available: entry.available === true })
       if (out.length >= MAX_PROVIDERS) break
+    }
+    return out
+  }
+
+  // The host's session catalog this device may browse, authorized by the same
+  // owner-device check as every method. Display-only metadata, deduped and
+  // bounded; opening a session's content is a separate re-authorized read.
+  listSessions(peerCertSHA256: string): RemoteSessionRef[] {
+    this.#authorize(peerCertSHA256)
+    const raw = this.#sessions?.list() ?? []
+    const seen = new Set<string>()
+    const out: RemoteSessionRef[] = []
+    for (const entry of raw) {
+      if (!entry || typeof entry.sessionId !== 'string' || typeof entry.providerId !== 'string') continue
+      if (entry.sessionId.length === 0 || entry.sessionId.length > 128) continue
+      if (seen.has(entry.sessionId)) continue
+      seen.add(entry.sessionId)
+      out.push({
+        sessionId: entry.sessionId,
+        ...(typeof entry.externalSessionId === 'string' && entry.externalSessionId.length > 0 ? { externalSessionId: entry.externalSessionId } : {}),
+        providerId: entry.providerId.slice(0, 64),
+        cwd: typeof entry.cwd === 'string' ? entry.cwd.slice(0, MAX_PATH) : '',
+        label: typeof entry.label === 'string' ? entry.label.slice(0, 256) : '',
+        ts: Number.isFinite(entry.ts) ? entry.ts : 0
+      })
+      if (out.length >= MAX_SESSIONS) break
     }
     return out
   }

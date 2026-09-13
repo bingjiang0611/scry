@@ -3695,7 +3695,36 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       },
       // The Providers the device may pick for a new session. Snapshot mirrors the
       // real registry describe() (id/label/available); the run path re-validates.
-      listProviders: () => remoteProviderSnapshot
+      listProviders: () => remoteProviderSnapshot,
+      // The host session catalog the device may browse, so the phone shows the
+      // SAME conversations the Mac lists. Filtered to device-visible authorized
+      // projects (a session whose cwd is not an authorized project dir is not
+      // offered), non-archived, most-recent-first. Display metadata only; opening
+      // a session's content is re-authorized separately.
+      listSessions: () => {
+        const authorized = new Set<string>()
+        for (const cwd of knownProjectDirectories()) {
+          try { authorized.add(resolveKnownProjectDirectory(cwd)) } catch { /* skip unresolved */ }
+        }
+        const out: { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number }[] = []
+        for (const s of appSessionStore().load()) {
+          if (s.archivedAt) continue
+          if (!s.cwd) continue
+          let canonical: string
+          try { canonical = resolveKnownProjectDirectory(s.cwd) } catch { continue }
+          if (!authorized.has(canonical)) continue
+          out.push({
+            sessionId: s.sessionId,
+            ...(s.externalSessionId ? { externalSessionId: s.externalSessionId } : {}),
+            providerId: s.providerId ?? 'legacy_unknown',
+            cwd: canonical,
+            label: (s.title ?? s.preview ?? '').slice(0, 256),
+            ts: s.ts
+          })
+        }
+        out.sort((a, b) => b.ts - a.ts)
+        return out
+      }
     })
     await remoteHostService.start()
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)

@@ -76,7 +76,9 @@ struct SignInView: View {
         // unpaired device lands on the pairing screen.
         if model.hasConnection {
           if let host = model.connectionHost { model.link = .offline(host: host) }
-          model.route = .newSession
+          // Land on home so the paired device immediately shows the Mac's
+          // session list (the user's ask); compose is one tap away.
+          model.route = .home
         } else {
           model.link = .notPaired
           model.route = .pair

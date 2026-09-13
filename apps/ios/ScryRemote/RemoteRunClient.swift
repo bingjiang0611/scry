@@ -79,6 +79,12 @@ struct RemoteRunClient {
     try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity())
   }
 
+  // The host session catalog (the SAME conversations the Mac lists) this device
+  // may browse. Display metadata only; the host re-authorizes any content read.
+  func sessions() async throws -> [G0Transport.RunSessionRef] {
+    try await G0Transport.relayRunSessions(endpoint: endpoint(), identity: try identity())
+  }
+
   // The assistant's real streamed output content for one run, strictly after
   // `cursor`. This is the trace-derived CONTENT the chat view renders; tokens/
   // cost still come only from the ledger `result` event, never from here.

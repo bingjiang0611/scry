@@ -126,6 +126,10 @@ struct RemoteProbe {
       let providers = try await G0Transport.relayRunProviders(endpoint: endpoint, identity: identity)
       for p in providers { print("provider \(p.id) \(p.available ? "available" : "unavailable") \(p.label)") }
       print("providers-count \(providers.count)")
+    case "sessions":
+      let sessions = try await G0Transport.relayRunSessions(endpoint: endpoint, identity: identity)
+      for s in sessions { print("session \(s.providerId) \(s.externalSessionId ?? "-") \(s.label)") }
+      print("sessions-count \(sessions.count)")
     case "output":
       guard args.count == 9, let cursor = Int(args[8]) else { throw CLIError.invalidArguments }
       let page = try await G0Transport.relayRunOutput(endpoint: endpoint, identity: identity, runId: args[7], cursor: cursor)

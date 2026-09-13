@@ -220,6 +220,11 @@ public enum G0Transport {
   // A Provider the device may target for a new session. `available` mirrors the
   // host's real describe() result; the run path still validates `id` on submit.
   public struct RunProviderRef: Sendable, Equatable, Codable { public let id: String; public let label: String; public let available: Bool }
+  // A session in the host catalog the device may browse. `externalSessionId` is
+  // the Provider's resumable id (nil => pending/unresumable). Display metadata.
+  public struct RunSessionRef: Sendable, Equatable, Codable {
+    public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let cwd: String; public let label: String; public let ts: Double
+  }
   // A single chunk of the assistant's REAL streamed output content (masked +
   // bounded host-side). kind ∈ output|reasoning|tool|tool_result|truncated.
   // This is trace-derived CONTENT, not canonical usage; tokens/cost stay on the
@@ -234,6 +239,7 @@ public enum G0Transport {
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
   private struct RunProjectsRequest: Encodable { let op = "projects" }
   private struct RunProvidersRequest: Encodable { let op = "providers" }
+  private struct RunSessionsRequest: Encodable { let op = "sessions" }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunResponse: Decodable {
     let runId: String?
@@ -242,6 +248,7 @@ public enum G0Transport {
     let state: String?
     let projects: [RunProjectRef]?
     let providers: [RunProviderRef]?
+    let sessions: [RunSessionRef]?
     let output: RunOutputBody?
     let error: String?
   }
@@ -299,6 +306,15 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let providers = response.providers else { throw ProbeError.unexpectedReply }
     return providers
+  }
+
+  // The host session catalog this device may browse. Authorized exactly like
+  // every run op; a revoked device gets device_not_authorized.
+  public static func relayRunSessions(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunSessionRef] {
+    let request = try JSONEncoder().encode(RunSessionsRequest())
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let sessions = response.sessions else { throw ProbeError.unexpectedReply }
+    return sessions
   }
 
   // The assistant's real streamed output content for one run, strictly after
