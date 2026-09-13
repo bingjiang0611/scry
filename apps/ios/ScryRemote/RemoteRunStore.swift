@@ -50,6 +50,18 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var chosen: G0Transport.RunProjectRef?
   @Published private(set) var providers: ProvidersState = .idle
   @Published private(set) var chosenProvider: G0Transport.RunProviderRef?
+
+  // The host's session catalog (the SAME conversations the Mac lists). Loaded
+  // from the host over the granted-cert channel; never fabricated. Opening a
+  // session's full transcript on the phone is a separate host read.
+  enum CatalogState: Equatable {
+    case idle
+    case loading
+    case loaded([G0Transport.RunSessionRef])
+    case empty
+    case failed(String)
+  }
+  @Published private(set) var catalog: CatalogState = .idle
   // Whether the host was actually reached on the LAST attempt. Paired != reachable:
   // a persisted grant only means we MAY reach the host; only a real successful
   // exchange proves it. nil = not tried yet. This is the honest source of the
@@ -83,6 +95,24 @@ final class RemoteRunStore: ObservableObject {
 
   func chooseProject(_ ref: G0Transport.RunProjectRef) { chosen = ref }
   func chooseProvider(_ ref: G0Transport.RunProviderRef) { chosenProvider = ref }
+
+  // Load the host session catalog so the phone's session list shows the SAME
+  // conversations the Mac has (fixes an always-empty list). Honest states only.
+  func loadSessions() {
+    guard let client = makeClient() else { catalog = .failed("尚未配对"); return }
+    catalog = .loading
+    Task { [weak self] in
+      do {
+        let list = try await client.sessions()
+        await MainActor.run {
+          self?.reachable = true
+          self?.catalog = list.isEmpty ? .empty : .loaded(list)
+        }
+      } catch {
+        await MainActor.run { self?.reachable = false; self?.catalog = .failed(Self.describe(error)) }
+      }
+    }
+  }
 
   // Load the Providers the host offers. Only available ones are selectable (an
   // unavailable Provider cannot run). We deliberately do NOT auto-select a
