@@ -213,15 +213,21 @@ public enum G0Transport {
     public let detail: String?
   }
   public struct RunPollOutcome: Sendable, Equatable { public let events: [RunLedgerEvent]; public let cursor: Int }
+  // One host-authorized project directory the device may target. The device can
+  // never authorize a new one; it only chooses among these, and the host
+  // re-checks the cwd on submit regardless.
+  public struct RunProjectRef: Sendable, Equatable, Codable { public let path: String; public let label: String }
 
   private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
+  private struct RunProjectsRequest: Encodable { let op = "projects" }
   private struct RunResponse: Decodable {
     let runId: String?
     let status: String?
     let poll: RunPollBody?
     let state: String?
+    let projects: [RunProjectRef]?
     let error: String?
   }
   private struct RunPollBody: Decodable { let events: [RunLedgerEvent]; let cursor: Int }
@@ -258,6 +264,16 @@ public enum G0Transport {
     let request = try JSONEncoder().encode(RunStateRequest(runId: runId))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     return response.state
+  }
+
+  // The host-authorized project directories this device may target. Authorized
+  // by the granted cert + anchor-pinned inner TLS, exactly like every run op; a
+  // revoked device gets RunError.host(code: "device_not_authorized").
+  public static func relayRunProjects(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunProjectRef] {
+    let request = try JSONEncoder().encode(RunProjectsRequest())
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let projects = response.projects else { throw ProbeError.unexpectedReply }
+    return projects
   }
 
   private static func decodePair(_ bytes: Data, requestId: String) throws -> PairOutcome {

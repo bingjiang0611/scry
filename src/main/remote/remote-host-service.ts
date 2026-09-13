@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
-import { HostController, type RemoteIntentRouting } from './host-controller'
+import { HostController, type RemoteIntentRouting, type RemoteProjectRef } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
@@ -31,6 +31,10 @@ export interface RemoteHostServiceDependencies {
   authorizeWorkspace(cwd: string): string
   // Delegates a fully-authorized remote intent to the live run-start path.
   startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
+  // Snapshot of the host's already directory-picker-authorized project dirs, so
+  // the phone's new-session picker chooses only among real authorized targets.
+  // Absent => the device sees an honest empty list.
+  listProjects?(): RemoteProjectRef[]
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
   // How to reach the relay (deployed ws/net connector). Absent => dormant. Called
@@ -87,7 +91,8 @@ export class RemoteHostService {
       issue: identity.issue,
       authorizeWorkspace: deps.authorizeWorkspace,
       startRun: deps.startRun,
-      gate: deps.gate
+      gate: deps.gate,
+      ...(deps.listProjects ? { listProjects: deps.listProjects } : {})
     })
     let host: InnerMtlsHost
     let pairing: PairingTransport

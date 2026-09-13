@@ -93,6 +93,11 @@ export class InnerMtlsHost {
         if (typeof request.runId !== 'string') return { error: 'invalid_request' }
         return { state: controller.runState(fingerprint, { runId: request.runId }) ?? null }
       }
+      if (request.op === 'projects') {
+        // Authorized by the verified peer cert inside the controller/gateway; a
+        // revoked device gets device_not_authorized, never a stale list.
+        return { projects: controller.listProjects(fingerprint) }
+      }
       return { error: 'unknown_op' }
     } catch (error) {
       // Authorization and ledger failures surface as truthful codes, never as

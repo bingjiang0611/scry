@@ -44,9 +44,9 @@ async function grantedAuthority() {
   return { authority, deviceId: grant.deviceId }
 }
 
-function gateway(authority: { authorizesCertificate(fp: string): boolean }) {
+function gateway(authority: { authorizesCertificate(fp: string): boolean }, projects?: { list(): { path: string; label: string }[] }) {
   const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
-  return { gw: new RemoteGateway({ authority, ledger }), ledger }
+  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}) }), ledger }
 }
 
 const expectCode = (fn: () => unknown, code: string) => {
@@ -103,6 +103,41 @@ describe('RemoteGateway', () => {
     const kinds = gw.poll(CERT, { cursor: 0 }).events.map((e) => e.kind)
     expect(kinds).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
     expect(gw.runState(CERT, { runId: submit.runId })).toBe('settled')
+  })
+
+  it('lists host-authorized projects only for an authorized device, deduped and bounded', async () => {
+    const { authority } = await grantedAuthority()
+    const list = vi.fn(() => [
+      { path: '/Projects/storefront', label: 'storefront' },
+      { path: '/Projects/storefront', label: 'storefront' }, // duplicate path dropped
+      { path: '/Work/scry', label: 'scry' },
+      { path: '', label: 'empty-path-dropped' },
+      ...Array.from({ length: 300 }, (_, i) => ({ path: `/p/${i}`, label: `p${i}` }))
+    ])
+    const { gw } = gateway(authority, { list })
+    const stranger = 'f'.repeat(64)
+    expectCode(() => gw.listProjects(stranger), 'device_not_authorized')
+    const projects = gw.listProjects(CERT)
+    expect(projects.length).toBe(200) // MAX_PROJECTS bound
+    expect(projects.slice(0, 2)).toEqual([
+      { path: '/Projects/storefront', label: 'storefront' },
+      { path: '/Work/scry', label: 'scry' }
+    ])
+    expect(projects.some((p) => p.path === '')).toBe(false)
+  })
+
+  it('returns an honest empty project list when no source is configured', async () => {
+    const { authority } = await grantedAuthority()
+    const { gw } = gateway(authority)
+    expect(gw.listProjects(CERT)).toEqual([])
+  })
+
+  it('stops offering projects to a device the instant its grant is revoked', async () => {
+    const { authority, deviceId } = await grantedAuthority()
+    const { gw } = gateway(authority, { list: () => [{ path: '/Projects/x', label: 'x' }] })
+    expect(gw.listProjects(CERT)).toHaveLength(1)
+    await authority.revoke(deviceId)
+    expectCode(() => gw.listProjects(CERT), 'device_not_authorized')
   })
 
   it('denies the device immediately after its grant is revoked, keeping prior events', async () => {

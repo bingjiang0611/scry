@@ -90,10 +90,11 @@ struct RemoteProbe {
   //   submit: <arg> = path to routing-detail JSON; prints "submit <runId> <status>"
   //   poll:   <arg> = cursor;                       prints "event <kind> <runId>" per event, then "poll-cursor <n>"
   //   state:  <arg> = runId;                        prints "state <lifecycle|none>"
+  //   projects: no <arg>;                            prints "project <path>" per authorized dir
   // Drives the POST-PAIRING run channel with the CA-granted device cert (full
   // inner mTLS), exactly as the product RemoteRunClient does.
   static func relayRun(_ args: [String]) async throws {
-    guard args.count == 8, let port = Int(args[2]) else { throw CLIError.invalidArguments }
+    guard args.count >= 7, let port = Int(args[2]) else { throw CLIError.invalidArguments }
     let identity = try G0ProbeIdentity(
       outerCA: Data(),
       innerCA: Data(contentsOf: URL(fileURLWithPath: args[4])),
@@ -103,17 +104,23 @@ struct RemoteProbe {
     let endpoint = G0Transport.RelayEndpoint(host: args[1], port: port, hostId: args[3])
     switch args[0] {
     case "submit":
+      guard args.count == 8 else { throw CLIError.invalidArguments }
       let detail = try String(contentsOf: URL(fileURLWithPath: args[7]), encoding: .utf8)
       let outcome = try await G0Transport.relayRunSubmit(endpoint: endpoint, identity: identity, intentId: UUID().uuidString.lowercased(), detail: detail)
       print("submit \(outcome.runId) \(outcome.status)")
     case "poll":
-      guard let cursor = Int(args[7]) else { throw CLIError.invalidArguments }
+      guard args.count == 8, let cursor = Int(args[7]) else { throw CLIError.invalidArguments }
       let outcome = try await G0Transport.relayRunPoll(endpoint: endpoint, identity: identity, cursor: cursor)
       for e in outcome.events { print("event \(e.kind) \(e.runId)") }
       print("poll-cursor \(outcome.cursor)")
     case "state":
+      guard args.count == 8 else { throw CLIError.invalidArguments }
       let state = try await G0Transport.relayRunState(endpoint: endpoint, identity: identity, runId: args[7])
       print("state \(state ?? "none")")
+    case "projects":
+      let projects = try await G0Transport.relayRunProjects(endpoint: endpoint, identity: identity)
+      for p in projects { print("project \(p.path)") }
+      print("projects-count \(projects.count)")
     default: throw CLIError.invalidArguments
     }
   }

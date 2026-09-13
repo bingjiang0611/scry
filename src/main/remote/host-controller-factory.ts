@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { HostController, type HostControllerDependencies, type RemoteIntentRouting } from './host-controller'
+import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
 import { ensureHostIdentity } from './host-identity'
@@ -45,6 +45,8 @@ export interface HostControllerFactoryDependencies {
   authorizeWorkspace(cwd: string): string
   startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
   gate: ProviderOperationGate
+  // Snapshot of host-authorized project directories offered to devices.
+  listProjects?(): RemoteProjectRef[]
 }
 
 // The file stores require a pre-existing private (0700) directory; create it
@@ -103,7 +105,8 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
     ledgerStore,
     workspace,
     gate: deps.gate,
-    runProvider: deps.startRun
+    runProvider: deps.startRun,
+    ...(deps.listProjects ? { listProjects: deps.listProjects } : {})
   }
 
   const controller = new HostController(controllerDeps)
