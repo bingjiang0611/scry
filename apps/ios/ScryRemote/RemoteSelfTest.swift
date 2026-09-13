@@ -92,5 +92,29 @@ enum RemoteSelfTest {
     print("SELFTEST DONE failures=\(failures)")
     exit(failures == 0 ? 0 : 1)
   }
+
+  // Opt-in NETWORK probe (`-relayTLSProbe <host>`): verifies that this device's
+  // system trust store validates the relay's PUBLIC certificate via the `.system`
+  // outer-TLS mode. Kept separate from the offline self-test because it needs
+  // real internet and only exercises the outer hop (no host leg, no pairing).
+  static func runRelayTLSProbeIfRequested() {
+    let args = ProcessInfo.processInfo.arguments
+    guard let i = args.firstIndex(of: "-relayTLSProbe"), i + 1 < args.count else { return }
+    let host = args[i + 1]
+    Task {
+      do {
+        let negotiated = try await G0Transport.probeSystemTLS(host: host)
+        print("SELFTEST relayTLS.systemTrust PASS host=\(host) negotiated=\(negotiated)")
+        print("SELFTEST DONE failures=0")
+        exit(0)
+      } catch {
+        print("SELFTEST relayTLS.systemTrust FAIL host=\(host) error=\(error)")
+        print("SELFTEST DONE failures=1")
+        exit(1)
+      }
+    }
+    // Dedicated probe launch: keep the process alive until the Task exits.
+    RunLoop.current.run()
+  }
 }
 #endif

@@ -367,4 +367,87 @@ public enum G0Transport {
       throw error
     }
   }
+
+  // Verify ONLY the outer/system TLS trust used by `.system`: open a NIOSSL
+  // client with the platform's public trust roots (.default) + full verification
+  // to host:port and wait for the TLS handshake to complete. Success proves THIS
+  // device trusts the relay's PUBLICLY-signed certificate (e.g. Cloudflare) via
+  // the system store. No inner TLS, no WebSocket, no token; throws on any
+  // trust/handshake failure. Used by the on-device self-test's -relayTLSProbe.
+  public static func probeSystemTLS(host: String, port: Int = 443) async throws -> String {
+    guard (1...65535).contains(port), !host.isEmpty else { throw ProbeError.invalidArguments }
+    let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    do {
+      var outer = TLSConfiguration.makeClientConfiguration()
+      outer.minimumTLSVersion = .tlsv12
+      outer.maximumTLSVersion = .tlsv13
+      outer.trustRoots = .default
+      outer.certificateVerification = .fullVerification
+      let context = try NIOSSLContext(configuration: outer)
+      let done = group.next().makePromise(of: String.self)
+      let bootstrap = ClientBootstrap(group: group)
+        .connectTimeout(.seconds(10))
+        .channelInitializer { channel in
+          do {
+            try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: context, serverHostname: host))
+            try channel.pipeline.syncOperations.addHandler(TLSHandshakeReporter(promise: done))
+            return channel.eventLoop.makeSucceededFuture(())
+          } catch {
+            return channel.eventLoop.makeFailedFuture(error)
+          }
+        }
+      let channel: Channel
+      do {
+        channel = try await bootstrap.connect(host: host, port: port).get()
+      } catch {
+        // Resolve the promise so it never leaks, and surface the real connect
+        // error (DNS/TCP/timeout) instead of NIO's leaked-promise fatalError.
+        done.fail(error)
+        try? await group.shutdownGracefully()
+        throw error
+      }
+      // The reporter resolves `done` on handshake completion (trust OK) or on the
+      // first error / early close (trust or transport failure). connectTimeout
+      // bounds the TCP connect; the caller bounds the overall run.
+      let negotiated: String
+      do {
+        negotiated = try await done.futureResult.get()
+      } catch {
+        try? await channel.close()
+        try? await group.shutdownGracefully()
+        throw error
+      }
+      try? await channel.close()
+      try await group.shutdownGracefully()
+      return negotiated
+    } catch {
+      try? await group.shutdownGracefully()
+      throw error
+    }
+  }
+}
+
+// Fulfils on TLS handshake completion (trust validated) or fails on the first
+// error / early close. This isolates the outer-TLS trust decision from any HTTP,
+// WebSocket or inner-TLS behaviour.
+private final class TLSHandshakeReporter: ChannelInboundHandler {
+  typealias InboundIn = ByteBuffer
+  private let promise: EventLoopPromise<String>
+  private var settled = false
+  init(promise: EventLoopPromise<String>) { self.promise = promise }
+  func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+    if let tls = event as? TLSUserEvent, case .handshakeCompleted(let negotiated) = tls, !settled {
+      settled = true
+      promise.succeed(negotiated ?? "tls")
+    }
+    context.fireUserInboundEventTriggered(event)
+  }
+  func errorCaught(context: ChannelHandlerContext, error: Error) {
+    if !settled { settled = true; promise.fail(error) }
+    context.close(promise: nil)
+  }
+  func channelInactive(context: ChannelHandlerContext) {
+    if !settled { settled = true; promise.fail(ProbeError.disconnected) }
+    context.fireChannelInactive()
+  }
 }
