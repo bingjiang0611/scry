@@ -116,6 +116,7 @@ const listenerChannels = {
   onDataUpdated: 'agent:dataUpdated',
   onSession: 'agent:session',
   onFocusedRun: 'agent:focusedRun',
+  onRemoteSessionRecorded: 'remote:sessionRecorded',
   onQuestion: 'agent:userQuestion',
   onQuestionClosed: 'agent:userQuestionClosed',
   onError: 'agent:error'

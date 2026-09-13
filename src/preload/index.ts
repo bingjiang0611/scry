@@ -258,6 +258,14 @@ const api = {
     ipcRenderer.on('agent:focusedRun', l)
     return () => ipcRenderer.removeListener('agent:focusedRun', l)
   },
+  // A device-initiated (remote) run just wrote an AppSession into the catalog.
+  // This is a refresh hint only (no active-run semantics), so the Mac session
+  // list shows the phone's conversation live without corrupting local run state.
+  onRemoteSessionRecorded: (cb: (e: { cwd: string }) => void): (() => void) => {
+    const l = (_: unknown, e: { cwd: string }): void => cb(e)
+    ipcRenderer.on('remote:sessionRecorded', l)
+    return () => ipcRenderer.removeListener('remote:sessionRecorded', l)
+  },
   onQuestion: (cb: (request: AgentQuestionRequest) => void): (() => void) => {
     const l = (_: unknown, request: AgentQuestionRequest): void => cb(request)
     ipcRenderer.on('agent:userQuestion', l)

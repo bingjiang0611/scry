@@ -3644,12 +3644,18 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         onRunStarted: ({ providerId, cwd, prompt, scryRunId, agentProfileId }) => {
           const runtimeProvider = remoteProviderRuntime.get(providerId)
           if (!runtimeProvider) return
-          try { appSessionStore().recordPending({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, cwd, prompt }) } catch { /* catalog visibility is best-effort */ }
+          try {
+            appSessionStore().recordPending({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, cwd, prompt })
+            win?.webContents.send('remote:sessionRecorded', { cwd })
+          } catch { /* catalog visibility is best-effort */ }
         },
         onRunSession: ({ providerId, cwd, prompt, scryRunId, externalSessionId, agentProfileId }) => {
           const runtimeProvider = remoteProviderRuntime.get(providerId)
           if (!runtimeProvider) return
-          try { appSessionStore().record({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, externalSessionId, cwd, prompt }) } catch { /* catalog visibility is best-effort */ }
+          try {
+            appSessionStore().record({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, externalSessionId, cwd, prompt })
+            win?.webContents.send('remote:sessionRecorded', { cwd })
+          } catch { /* catalog visibility is best-effort */ }
         }
       }),
       // The phone's new-session picker chooses only among the host's already
