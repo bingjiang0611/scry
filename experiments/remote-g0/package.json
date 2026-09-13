@@ -14,7 +14,8 @@
     "smoke:relay": "node --import ./ts-relative-resolve.mjs relay-e2e.mjs",
     "smoke:relay-pair": "node --import ./ts-relative-resolve.mjs relay-pair-smoke.mjs",
     "smoke:cf": "node cf-relay-smoke.mjs",
-    "smoke:cf-host": "node --import ./ts-relative-resolve.mjs cf-relay-host-smoke.mjs"
+    "smoke:cf-host": "node --import ./ts-relative-resolve.mjs cf-relay-host-smoke.mjs",
+    "smoke:cf-pair": "node --import ./ts-relative-resolve.mjs cf-relay-pair-smoke.mjs"
   },
   "dependencies": {
     "@peculiar/x509": "2.1.0",
