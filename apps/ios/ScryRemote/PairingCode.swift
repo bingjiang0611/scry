@@ -11,8 +11,14 @@ import Foundation
 // It intentionally carries the anchor PEM (not just its SHA-256) so the device
 // has a concrete trust root without a second fetch.
 struct PairingCode: Equatable {
+  // Outer transport TLS to the relay, declared by the Mac. `.system` is a public
+  // wss relay (e.g. Cloudflare, publicly-trusted cert); `.plaintext` is a local
+  // ws dev relay. This is not the trust root — the inner mTLS pins the anchor.
+  enum RelayTLS: String, Equatable { case system, plaintext }
+
   let relayHost: String
   let relayPort: Int
+  let relayTLS: RelayTLS
   let hostId: String
   let pairingId: String
   let secret: String
@@ -26,6 +32,7 @@ struct PairingCode: Equatable {
   private struct Payload: Decodable {
     let relayHost: String
     let relayPort: Int
+    let relayTLS: String?
     let hostId: String
     let pairingId: String
     let secret: String
@@ -44,7 +51,10 @@ struct PairingCode: Equatable {
     try validate(field: "pairingId", matches(uuid, payload.pairingId))
     try validate(field: "secret", matches(secretPattern, payload.secret))
     try validate(field: "anchorPEM", payload.anchorPEM.contains("BEGIN CERTIFICATE") && payload.anchorPEM.contains("END CERTIFICATE"))
-    return PairingCode(relayHost: payload.relayHost, relayPort: payload.relayPort, hostId: payload.hostId,
+    // Default to the secure public-wss mode when the field is absent; a local
+    // dev relay must explicitly opt into plaintext.
+    guard let relayTLS = RelayTLS(rawValue: payload.relayTLS ?? "system") else { throw ParseError.invalidField("relayTLS") }
+    return PairingCode(relayHost: payload.relayHost, relayPort: payload.relayPort, relayTLS: relayTLS, hostId: payload.hostId,
                        pairingId: payload.pairingId, secret: payload.secret, anchorPEM: payload.anchorPEM)
   }
 

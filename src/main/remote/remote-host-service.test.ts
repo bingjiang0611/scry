@@ -105,11 +105,22 @@ describe('RemoteHostService (lifecycle facade)', () => {
       authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
       startRun: async ({ routing }) => { seen.push(routing.cwd) },
       gate: new ProviderOperationGate(),
-      createTransport: (ctx) => new ReverseTunnelTransport({ connect: () => netConnect({ port: ctx.mode === 'run' ? relay.runHostPort : relay.pairHostPort, host: '127.0.0.1' }) as unknown as OutboundLeg, poolSize: 2 })
+      createTransport: (ctx) => new ReverseTunnelTransport({ connect: () => netConnect({ port: ctx.mode === 'run' ? relay.runHostPort : relay.pairHostPort, host: '127.0.0.1' }) as unknown as OutboundLeg, poolSize: 2 }),
+      relayAdvertisement: { host: 'scry-relay.example.workers.dev', port: 443, tls: 'system' }
     })
     cleanups.push(() => service.dispose())
     expect(service.relayConfigured).toBe(true)
     await service.start()
+
+    // The scannable code decodes to exactly the fields the Swift PairingCode
+    // parser expects, so device<->host is a real cross-language contract.
+    const emitted = await service.beginPairing()
+    expect(emitted.deviceCode).toMatch(/^scry1:/)
+    const decoded = JSON.parse(Buffer.from(emitted.deviceCode!.slice('scry1:'.length), 'base64url').toString('utf8'))
+    expect(decoded).toMatchObject({ relayHost: 'scry-relay.example.workers.dev', relayPort: 443, relayTLS: 'system', hostId: service.hostId, pairingId: emitted.pairingId, secret: emitted.secret })
+    expect(decoded.anchorPEM).toContain('BEGIN CERTIFICATE')
+    expect(decoded.anchorPEM).toBe(service.caCertificatePEM)
+    await service.cancelPairing(emitted.pairingId)
 
     const device = await pairDevice(service)
     const submit = await deviceCall(relay.devicePort, service.caCertificatePEM, device.certPEM, device.keyPEM, { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude' }) })
@@ -133,6 +144,10 @@ describe('RemoteHostService (lifecycle facade)', () => {
     const pair = await service.authority.begin()
     expect(pair.pairingId).toMatch(/[0-9a-f-]{36}/)
     expect(service.anchorSHA256).toMatch(/^[0-9a-f]{64}$/)
+    // Dormant: no relay dialed, so no scannable device code is emitted (honest
+    // 'not reachable yet' rather than a code the phone could never use).
+    const dormantCode = await service.beginPairing()
+    expect(dormantCode.deviceCode).toBeNull()
   })
 
   it('exposes a sanitized pairing status + confirm/revoke without leaking secrets', async () => {

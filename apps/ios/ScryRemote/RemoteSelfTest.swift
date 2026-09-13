@@ -41,11 +41,21 @@ enum RemoteSelfTest {
       let code = "scry1:" + PairingCode.base64urlEncode(data)
       let parsed = try PairingCode.parse(code)
       check("code.parse", parsed.relayHost == "relay.example.com" && parsed.relayPort == 443 && parsed.anchorPEM.contains("BEGIN CERTIFICATE"))
+      // Absent relayTLS defaults to the secure public-wss mode (fail-safe).
+      check("code.tlsDefaultSystem", parsed.relayTLS == .system)
       check("code.badPrefix", (try? PairingCode.parse("nope:" + PairingCode.base64urlEncode(data))) == nil)
       check("code.badBase64", (try? PairingCode.parse("scry1:!!!not-base64!!!")) == nil)
       var bad = json; bad["secret"] = "too-short"
       let badData = try JSONSerialization.data(withJSONObject: bad)
       check("code.badSecret", (try? PairingCode.parse("scry1:" + PairingCode.base64urlEncode(badData))) == nil)
+      // A local dev relay must explicitly opt into plaintext ws.
+      var plain = json; plain["relayTLS"] = "plaintext"
+      let plainData = try JSONSerialization.data(withJSONObject: plain)
+      check("code.tlsPlaintext", (try PairingCode.parse("scry1:" + PairingCode.base64urlEncode(plainData))).relayTLS == .plaintext)
+      // An unknown relayTLS value is rejected, never silently downgraded.
+      var badTLS = json; badTLS["relayTLS"] = "weird"
+      let badTLSData = try JSONSerialization.data(withJSONObject: badTLS)
+      check("code.badTLS", (try? PairingCode.parse("scry1:" + PairingCode.base64urlEncode(badTLSData))) == nil)
     } catch { check("code", false); print("  error: \(error)") }
 
     // 3. Keychain: insert-only device key + upsertable grant round-trip in an

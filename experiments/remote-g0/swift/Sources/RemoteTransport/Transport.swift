@@ -163,15 +163,25 @@ public enum G0Transport {
   // because the per-launch host server cert carries no SAN (chain-to-anchor is
   // the only trust decision). Outer TLS is used only when a relay CA is given.
   public struct RelayEndpoint: Sendable {
+    // Outer transport TLS to the relay. This is NOT the security root: the inner
+    // TLS 1.3 mTLS to the host (pinned to the anchor) is. Outer TLS only stops a
+    // passive network from reading the already-encrypted relay hop.
+    public enum OuterTLS: Sendable {
+      case plaintext   // ws:// — a local dev relay
+      case system      // wss:// with a publicly-trusted cert (e.g. Cloudflare): default trust roots + hostname verification
+      case pinned      // wss:// pinned to identity.outerCA (a private relay CA)
+    }
     public let host: String
     public let port: Int
     public let hostId: String
     public let relayServerName: String?
-    public init(host: String, port: Int, hostId: String, relayServerName: String? = nil) {
+    public let outerTLS: OuterTLS
+    public init(host: String, port: Int, hostId: String, relayServerName: String? = nil, outerTLS: OuterTLS = .plaintext) {
       self.host = host
       self.port = port
       self.hostId = hostId
       self.relayServerName = relayServerName
+      self.outerTLS = outerTLS
     }
   }
 
@@ -278,17 +288,29 @@ public enum G0Transport {
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     do {
-      // Outer TLS only when a relay CA is supplied; the local smoke relay is ws://.
+      // Outer TLS mode is decided by the endpoint (from the pairing code), not by
+      // whether a CA happens to be present. `.system` trusts the platform's
+      // public roots for a wss relay like Cloudflare; `.pinned` trusts only the
+      // supplied private relay CA; `.plaintext` is ws:// for the local dev relay.
       let outerContext: NIOSSLContext?
-      if !identity.outerCA.isEmpty {
+      switch endpoint.outerTLS {
+      case .plaintext:
+        outerContext = nil
+      case .system:
+        var outer = TLSConfiguration.makeClientConfiguration()
+        outer.minimumTLSVersion = .tlsv12
+        outer.maximumTLSVersion = .tlsv13
+        outer.trustRoots = .default
+        outer.certificateVerification = .fullVerification
+        outerContext = try NIOSSLContext(configuration: outer)
+      case .pinned:
+        guard !identity.outerCA.isEmpty else { throw ProbeError.invalidArguments }
         var outer = TLSConfiguration.makeClientConfiguration()
         outer.minimumTLSVersion = .tlsv13
         outer.maximumTLSVersion = .tlsv13
         outer.trustRoots = .certificates(try NIOSSLCertificate.fromPEMBytes(Array(identity.outerCA)))
         outer.certificateVerification = .fullVerification
         outerContext = try NIOSSLContext(configuration: outer)
-      } else {
-        outerContext = nil
       }
       var inner = TLSConfiguration.makeClientConfiguration()
       inner.minimumTLSVersion = .tlsv13

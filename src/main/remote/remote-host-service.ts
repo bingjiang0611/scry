@@ -38,6 +38,11 @@ export interface RemoteHostServiceDependencies {
   // prove endpoint), so the relay keeps a separate warm pool per mode. The
   // context carries the stable hostId + anchor the relay routes/authenticates by.
   createTransport?: (ctx: { hostId: string; anchorSHA256: string; mode: 'run' | 'pair' }) => RelayTransport
+  // The device-facing coordinates of the SAME relay, embedded in the scannable
+  // pairing code so the phone can reach this host. For a public wss relay
+  // (Cloudflare) this is { host: '<name>.workers.dev', port: 443, tls: 'system' };
+  // a local dev relay uses tls: 'plaintext'. Absent => no device code is emitted.
+  relayAdvertisement?: { host: string; port: number; tls: 'system' | 'plaintext' }
 }
 
 export class RemoteHostService {
@@ -45,6 +50,7 @@ export class RemoteHostService {
   #host: InnerMtlsHost
   #pairing: PairingTransport
   #clients: RelayClient[]
+  #relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
   #started = false
   #disposed = false
   readonly anchorSHA256: string
@@ -59,6 +65,7 @@ export class RemoteHostService {
     anchorSHA256: string
     caCertificatePEM: string
     hostId: string
+    relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
   }) {
     this.#binding = init.binding
     this.#host = init.host
@@ -67,6 +74,7 @@ export class RemoteHostService {
     this.anchorSHA256 = init.anchorSHA256
     this.caCertificatePEM = init.caCertificatePEM
     this.hostId = init.hostId
+    this.#relayAdvertisement = init.relayAdvertisement ?? null
   }
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
@@ -111,7 +119,8 @@ export class RemoteHostService {
       binding, host, pairing, clients,
       anchorSHA256: identity.anchorSHA256,
       caCertificatePEM: identity.caCertificatePEM,
-      hostId: identity.hostId
+      hostId: identity.hostId,
+      relayAdvertisement: deps.relayAdvertisement ?? null
     })
   }
 
@@ -129,8 +138,32 @@ export class RemoteHostService {
   // These project only display-safe fields; the pairing secret verifier, private
   // keys, and certificate PEMs never cross to the renderer.
 
-  beginPairing(): Promise<RemotePairingCode> {
-    return this.authority.begin()
+  async beginPairing(): Promise<RemotePairingCode> {
+    const code = await this.authority.begin()
+    return { ...code, deviceCode: this.#encodeDeviceCode(code) }
+  }
+
+  // Build the scannable `scry1:` code the phone consumes. It embeds the relay
+  // coordinates + the full host anchor PEM so the device can reach this host and
+  // pin its inner CA. Only emitted when a relay is advertised; the anchor PEM is
+  // a public certificate, and the secret is the same single-use value already in
+  // the code, so nothing extra is leaked.
+  #encodeDeviceCode(code: { pairingId: string; secret: string }): string | null {
+    const relay = this.#relayAdvertisement
+    // Only emit a scannable code when the host is actually dialing a relay; a
+    // code the device could never reach would be a dishonest 'ready' signal.
+    if (!relay || !this.relayConfigured) return null
+    const payload = {
+      relayHost: relay.host,
+      relayPort: relay.port,
+      relayTLS: relay.tls,
+      hostId: this.hostId,
+      pairingId: code.pairingId,
+      secret: code.secret,
+      anchorPEM: this.caCertificatePEM
+    }
+    const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
+    return `scry1:${b64}`
   }
 
   // Confirm a proved pairing. The operator passes back the exact key fingerprint

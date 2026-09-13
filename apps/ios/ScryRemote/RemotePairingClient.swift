@@ -42,12 +42,16 @@ struct RemotePairingClient {
   }
 
   private func endpoint(_ code: PairingCode) -> G0Transport.RelayEndpoint {
-    G0Transport.RelayEndpoint(host: code.relayHost, port: code.relayPort, hostId: code.hostId)
+    // A public wss relay (Cloudflare) trusts the platform's public roots; a local
+    // dev relay is plain ws. The inner mTLS still pins the host anchor either way.
+    let outerTLS: G0Transport.RelayEndpoint.OuterTLS = code.relayTLS == .system ? .system : .plaintext
+    return G0Transport.RelayEndpoint(host: code.relayHost, port: code.relayPort, hostId: code.hostId, outerTLS: outerTLS)
   }
 
   private func identity(_ code: PairingCode, _ material: G0EnrollmentMaterial) throws -> G0ProbeIdentity {
-    // outerCA empty => plain ws to the local relay; inner mTLS pins the host
-    // anchor and presents the self-signed bootstrap cert for possession proof.
+    // outerCA empty: the outer TLS trust decision is the endpoint's OuterTLS mode
+    // (system roots for public wss), not a code-carried CA. Inner mTLS pins the
+    // host anchor and presents the self-signed bootstrap cert for possession proof.
     try G0ProbeIdentity(outerCA: Data(), innerCA: Data(code.anchorPEM.utf8),
                         certificate: material.bootstrapPEM, privateKey: material.privateKeyPEM)
   }
