@@ -58,12 +58,29 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     })
     const onRunStarted = vi.fn()
     const onRunSession = vi.fn()
-    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-cat', onRunStarted, onRunSession })
+    const onRunArchive = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-cat', onRunStarted, onRunSession, onRunArchive })
     await start({ runId: 'ledger-cat', routing: { cwd: '/w', providerId: 'qoder', agentProfileId: 'p', prompt: '  hi  ' }, progress: () => {}, output: () => {} })
     // Pending catalog entry at bind (visible on the Mac before the session id).
     expect(onRunStarted).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', agentProfileId: 'p' })
     // Resolved to the Provider's REAL resumable session id.
     expect(onRunSession).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', externalSessionId: 'ext-abc', agentProfileId: 'p' })
+    // Durable archive on terminal: real accumulated events + status, keyed by the
+    // Provider session id so the Mac can OPEN the transcript.
+    expect(onRunArchive).toHaveBeenCalledTimes(1)
+    const archive = onRunArchive.mock.calls[0][0]
+    expect(archive).toMatchObject({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', externalSessionId: 'ext-abc', status: 'completed' })
+    expect(Array.isArray(archive.items)).toBe(true)
+    expect(archive.items.length).toBeGreaterThan(0)
+  })
+
+  it('does NOT archive when the run never got a Provider session id (nothing to key or resume)', async () => {
+    const { run } = fakeRun(async (req) => { req.emit(controls()); req.emit({ ...result(true), text: 'died' }); return { status: 'failed' } })
+    const onRunArchive = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-x', onRunArchive })
+    await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' }, progress: () => {}, output: () => {} }))
+      .rejects.toThrow('provider_run_failed')
+    expect(onRunArchive).not.toHaveBeenCalled()
   })
 
   it('rejects (ledger markFailed) when the provider result is a failure, surfacing its message', async () => {

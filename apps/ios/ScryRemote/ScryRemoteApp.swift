@@ -24,6 +24,7 @@ struct ScryRemoteApp: App {
 // honest current maximum is the signed-in, not-paired experience.
 struct RootView: View {
   @EnvironmentObject var model: AppModel
+  @EnvironmentObject var run: RemoteRunStore
 
   var body: some View {
     Group {
@@ -41,6 +42,10 @@ struct RootView: View {
     .tint(Palette.blue)
     .animation(.easeInOut(duration: 0.2), value: model.route)
     .animation(.easeInOut(duration: 0.2), value: model.signedIn)
+    // The run channel is the honest source of reachability: reflect a real
+    // successful/failed host exchange into the paired link status so the UI never
+    // shows "offline" while sending actually works.
+    .onChange(of: run.reachable) { if let ok = run.reachable { model.markReachable(ok) } }
     .onAppear {
       #if DEBUG
       model.applyUIPreviewArguments()

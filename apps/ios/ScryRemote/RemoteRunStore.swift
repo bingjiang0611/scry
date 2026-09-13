@@ -50,6 +50,11 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var chosen: G0Transport.RunProjectRef?
   @Published private(set) var providers: ProvidersState = .idle
   @Published private(set) var chosenProvider: G0Transport.RunProviderRef?
+  // Whether the host was actually reached on the LAST attempt. Paired != reachable:
+  // a persisted grant only means we MAY reach the host; only a real successful
+  // exchange proves it. nil = not tried yet. This is the honest source of the
+  // connection status (fixes "shows offline while sending works").
+  @Published private(set) var reachable: Bool?
   @Published private(set) var lifecycle: Lifecycle = .unknown
   @Published private(set) var output: [OutputLine] = []
   // The user's own submitted message, echoed immediately as a chat bubble
@@ -95,6 +100,7 @@ final class RemoteRunStore: ObservableObject {
         let list = try await client.providers()
         await MainActor.run {
           guard let self else { return }
+          self.reachable = true
           let usable = list.filter { $0.available }
           self.providers = usable.isEmpty ? .empty : .loaded(usable)
           if let chosen = self.chosenProvider, !usable.contains(where: { $0.id == chosen.id }) {
@@ -102,7 +108,7 @@ final class RemoteRunStore: ObservableObject {
           }
         }
       } catch {
-        await MainActor.run { self?.providers = .failed(Self.describe(error)) }
+        await MainActor.run { self?.reachable = false; self?.providers = .failed(Self.describe(error)) }
       }
     }
   }
@@ -116,10 +122,11 @@ final class RemoteRunStore: ObservableObject {
       do {
         let list = try await client.projects()
         await MainActor.run {
+          self?.reachable = true
           self?.projects = list.isEmpty ? .empty : .loaded(list)
         }
       } catch {
-        await MainActor.run { self?.projects = .failed(Self.describe(error)) }
+        await MainActor.run { self?.reachable = false; self?.projects = .failed(Self.describe(error)) }
       }
     }
   }
@@ -140,11 +147,13 @@ final class RemoteRunStore: ObservableObject {
         let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed)
         let outcome = try await client.submit(routing: routing)
         await MainActor.run {
+          self?.reachable = true
           self?.runId = outcome.runId
           self?.startPolling(runId: outcome.runId, client: client)
         }
       } catch {
         await MainActor.run {
+          self?.reachable = false
           self?.lifecycle = .unknown
           self?.submitError = "提交失败：\(Self.describe(error))"
         }
@@ -168,10 +177,11 @@ final class RemoteRunStore: ObservableObject {
           let out = try await client.output(runId: runId, cursor: outputCursor)
           outputCursor = out.cursor
           for chunk in out.chunks { await self?.append(chunk: chunk) }
+          await MainActor.run { self?.reachable = true }
         } catch {
           // A transient transport error is not a run failure; surface it as a
           // non-terminal note and keep polling. We never invent a settlement.
-          await MainActor.run { self?.submitError = "连接主机时出错：\(Self.describe(error))" }
+          await MainActor.run { self?.reachable = false; self?.submitError = "连接主机时出错：\(Self.describe(error))" }
         }
         if await self?.isTerminal() == true {
           // Final output drain.
