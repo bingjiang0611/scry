@@ -25,9 +25,27 @@ export interface DeviceAuthorizer {
   authorizesCertificate(certificateSHA256: string): boolean
 }
 
+// One host-authorized project directory the device may target. `path` is a
+// canonical directory already authorized locally through Scry's directory
+// picker; `label` is a display-only basename. The device can never authorize a
+// new directory - it only chooses among these, and the workspace authorizer
+// re-checks the cwd on submit regardless.
+export interface RemoteProjectRef {
+  path: string
+  label: string
+}
+
+export interface RemoteProjectSource {
+  // Snapshot of the currently host-authorized project directories. Called per
+  // request so a directory removed locally stops being offered immediately.
+  list(): RemoteProjectRef[]
+}
+
 export interface RemoteGatewayDependencies {
   authority: DeviceAuthorizer
   ledger: SessionLedger
+  // Absent => the device sees an empty (honest) authorized-project list.
+  projects?: RemoteProjectSource
 }
 
 export interface SubmitIntentInput {
@@ -50,13 +68,20 @@ export class RemoteGatewayError extends Error {
   }
 }
 
+// Bound the list so a pathological local project catalog can never turn a poll
+// into an unbounded frame. The device UI only needs a chooser, not the world.
+const MAX_PROJECTS = 200
+const MAX_PATH = 4_096
+
 export class RemoteGateway {
   #authority: DeviceAuthorizer
   #ledger: SessionLedger
+  #projects?: RemoteProjectSource
 
   constructor(deps: RemoteGatewayDependencies) {
     this.#authority = deps.authority
     this.#ledger = deps.ledger
+    this.#projects = deps.projects
   }
 
   // Fail closed on anything that is not a currently-authorized owner device.
@@ -84,5 +109,26 @@ export class RemoteGateway {
   runState(peerCertSHA256: string, input: { runId: string }): RunLifecycle | undefined {
     this.#authorize(peerCertSHA256)
     return this.#ledger.runState(input.runId)
+  }
+
+  // The host-authorized project directories a device may target. Authorization
+  // is the SAME owner-device check as every other method (a revoked device gets
+  // nothing), and the list is a display-only snapshot - selecting one still
+  // passes through the workspace authorizer on submit, so this leaks no path the
+  // device could not already discover by submitting.
+  listProjects(peerCertSHA256: string): RemoteProjectRef[] {
+    this.#authorize(peerCertSHA256)
+    const raw = this.#projects?.list() ?? []
+    const seen = new Set<string>()
+    const out: RemoteProjectRef[] = []
+    for (const entry of raw) {
+      if (!entry || typeof entry.path !== 'string' || typeof entry.label !== 'string') continue
+      if (entry.path.length === 0 || entry.path.length > MAX_PATH) continue
+      if (seen.has(entry.path)) continue
+      seen.add(entry.path)
+      out.push({ path: entry.path, label: entry.label.slice(0, 256) })
+      if (out.length >= MAX_PROJECTS) break
+    }
+    return out
   }
 }

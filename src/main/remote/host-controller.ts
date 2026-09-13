@@ -1,6 +1,7 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef } from './remote-gateway'
+export type { RemoteProjectRef } from './remote-gateway'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
@@ -35,6 +36,9 @@ export interface HostControllerDependencies {
   workspace: WorkspaceAuthorizer
   // The only injected leaf: performs the real Provider run for a routed intent.
   runProvider(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
+  // Snapshot of host-authorized project directories a device may target. Absent
+  // => the device sees an honest empty list (never a fabricated one).
+  listProjects?(): RemoteProjectRef[]
   // Optional shared operation gate (auth vs run mutual exclusion). A fresh one
   // is created when omitted; production passes the app-wide gate.
   gate?: ProviderOperationGate
@@ -65,7 +69,11 @@ export class HostController {
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
     this.#ledger = new SessionLedger({ store: deps.ledgerStore })
-    this.#gateway = new RemoteGateway({ authority: this.authority, ledger: this.#ledger })
+    this.#gateway = new RemoteGateway({
+      authority: this.authority,
+      ledger: this.#ledger,
+      ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {})
+    })
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
     const base: RemoteExecutor = {
@@ -96,6 +104,12 @@ export class HostController {
 
   runState(peerCertSHA256: string, input: { runId: string }): RunLifecycle | undefined {
     return this.#gateway.runState(peerCertSHA256, input)
+  }
+
+  // Device-facing: the host-authorized project directories this device may
+  // target, authorized by the same verified peer certificate as every method.
+  listProjects(peerCertSHA256: string): RemoteProjectRef[] {
+    return this.#gateway.listProjects(peerCertSHA256)
   }
 
   // Test/shutdown aid: wait for in-flight executor work to settle.

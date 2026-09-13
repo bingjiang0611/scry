@@ -64,4 +64,11 @@ struct RemoteRunClient {
   func runState(runId: String) async throws -> String? {
     try await G0Transport.relayRunState(endpoint: endpoint(), identity: try identity(), runId: runId)
   }
+
+  // The host-authorized project directories this device may target, for the
+  // new-session picker. The phone cannot authorize a new directory; it only
+  // chooses among these, and the host re-checks the cwd on submit.
+  func projects() async throws -> [G0Transport.RunProjectRef] {
+    try await G0Transport.relayRunProjects(endpoint: endpoint(), identity: try identity())
+  }
 }

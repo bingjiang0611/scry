@@ -62,7 +62,13 @@ try {
       const error = new Error('invalid_target'); error.code = 'invalid_target'; throw error
     },
     startRun: async ({ runId, routing, progress }) => { started.push({ runId, cwd: routing.cwd }); progress('smoke:ack') },
-    gate: new ProviderOperationGate()
+    gate: new ProviderOperationGate(),
+    // Host-authorized project directories the device may target. In production
+    // this is knownProjectDirectories(); here a fixed pair proves the wire.
+    listProjects: () => [
+      { path: authorizedCwd, label: 'authorized-project' },
+      { path: '/Projects/storefront', label: 'storefront' }
+    ]
   })
   cleanups.push(() => binding.close())
 
@@ -143,6 +149,17 @@ try {
   assert.equal(await pollTerminal(badRunId, 'run_failed'), true, 'unauthorized run must fail closed')
   assert.ok(!started.some(s => s.runId === badRunId), 'executor never ran the unauthorized run')
   cases.push({ name: 'Swift run client -> unauthorized cwd fails closed at workspace authorizer (no executor)', passed: true })
+
+  // 3. Authorized-project picker: the granted device reads the host-authorized
+  //    project directories over the SAME granted-cert inner mTLS. The phone can
+  //    never authorize a new directory; it only chooses among these, and the
+  //    workspace authorizer re-checks the cwd on submit regardless.
+  const projectArgs = ['projects', '127.0.0.1', String(devicePort), identity.hostId, anchorPath, grantedCertPath, keyPath]
+  const projectLines = (await runProbe(projectArgs)).trim().split('\n')
+  assert.ok(projectLines.includes(`project ${authorizedCwd}`), projectLines.join('|'))
+  assert.ok(projectLines.includes('project /Projects/storefront'), projectLines.join('|'))
+  assert.ok(projectLines.includes('projects-count 2'), projectLines.join('|'))
+  cases.push({ name: 'Swift run client -> host-authorized project list over granted-cert inner mTLS', passed: true })
 
   console.log(JSON.stringify({ scope: 'REAL Swift iOS run client against production relay + InnerMtlsHost + HostController; synthetic confirmation, stub executor, no iPhone/human/Provider', cases }, null, 2))
 } finally {

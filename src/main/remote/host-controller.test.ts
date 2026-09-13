@@ -43,9 +43,10 @@ function pairingDeps(): PairingDependencies {
 
 type RunProvider = (input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }) => Promise<void>
 
-async function grantedController(runProvider: RunProvider) {
+async function grantedController(runProvider: RunProvider, listProjects?: () => { path: string; label: string }[]) {
   const controller = new HostController({
-    pairing: pairingDeps(), ledgerStore: new MemoryLedgerStore(), workspace, runProvider
+    pairing: pairingDeps(), ledgerStore: new MemoryLedgerStore(), workspace, runProvider,
+    ...(listProjects ? { listProjects } : {})
   })
   const pair = await controller.authority.begin()
   await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM: 'CSR', deviceLabel: 'iPhone' }, KEY)
@@ -101,6 +102,20 @@ describe('HostController (composition root)', () => {
     await controller.idle()
     expect(retry).toEqual({ runId: first.runId, status: 'duplicate' })
     expect(runProvider).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes host-authorized projects only to the granted device (delegates to the gateway)', async () => {
+    const runProvider = vi.fn(async () => {})
+    const { controller, deviceId } = await grantedController(runProvider, () => [{ path: AUTHORIZED, label: 'project' }])
+    expect(controller.listProjects(CERT)).toEqual([{ path: AUTHORIZED, label: 'project' }])
+    expect(() => controller.listProjects('f'.repeat(64))).toThrowError(/device_not_authorized/)
+    await controller.authority.revoke(deviceId)
+    expect(() => controller.listProjects(CERT)).toThrowError(/device_not_authorized/)
+  })
+
+  it('returns an honest empty project list when no source is injected', async () => {
+    const { controller } = await grantedController(vi.fn(async () => {}))
+    expect(controller.listProjects(CERT)).toEqual([])
   })
 
   it('denies a stranger certificate and a revoked device', async () => {

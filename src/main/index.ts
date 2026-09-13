@@ -3600,7 +3600,21 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // the interactive path's concern (see remote-run-binding.ts).
       // routing.providerId is a validated non-empty string; the registry itself
       // rejects an unknown provider, so the ProviderId narrowing is safe here.
-      startRun: createRemoteRunBinding({ run: (providerId, request) => providerRegistry.run(providerId as ProviderId, request) })
+      startRun: createRemoteRunBinding({ run: (providerId, request) => providerRegistry.run(providerId as ProviderId, request) }),
+      // The phone's new-session picker chooses only among the host's already
+      // directory-picker-authorized project dirs; it can never authorize a new
+      // one. Snapshot per call so a locally-removed directory stops being
+      // offered immediately, filter to still-existing dirs, and label by
+      // basename. The workspace authorizer re-checks the cwd on submit anyway.
+      listProjects: () => {
+        const out: { path: string; label: string }[] = []
+        for (const cwd of knownProjectDirectories()) {
+          let canonical: string
+          try { canonical = resolveKnownProjectDirectory(cwd) } catch { continue }
+          out.push({ path: canonical, label: basename(canonical) || canonical })
+        }
+        return out
+      }
     })
     await remoteHostService.start()
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)
