@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct ScryRemoteApp: App {
   @StateObject private var model = AppModel()
+  @StateObject private var runStore = RemoteRunStore()
   init() {
     #if DEBUG
     RemoteSelfTest.runIfRequested()
@@ -12,7 +13,7 @@ struct ScryRemoteApp: App {
   }
   var body: some Scene {
     WindowGroup {
-      RootView().environmentObject(model)
+      RootView().environmentObject(model).environmentObject(runStore)
     }
   }
 }

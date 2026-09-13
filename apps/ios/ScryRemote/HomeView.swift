@@ -4,6 +4,7 @@ import SwiftUI
 // session list (truthfully empty today), and the bottom search + compose dock.
 struct HomeView: View {
   @EnvironmentObject var model: AppModel
+  @EnvironmentObject var run: RemoteRunStore
 
   var body: some View {
     VStack(spacing: 0) {
@@ -83,7 +84,9 @@ struct HomeView: View {
       .frame(height: 48)
       .glass(cornerRadius: 30)
 
-      CircleButton(symbol: Symbol.compose, label: "新建会话", filled: true, disabled: !model.link.isConnected) {
+      // Enabled once paired (a persisted connection exists); reachability of the
+      // host is only learned by attempting a run, never faked here.
+      CircleButton(symbol: Symbol.compose, label: "新建会话", filled: true, disabled: !run.hasConnection) {
         model.route = .newSession
       }
     }
