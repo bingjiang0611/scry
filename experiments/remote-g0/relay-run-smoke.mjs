@@ -61,7 +61,14 @@ try {
       if (cwd === authorizedCwd) return cwd
       const error = new Error('invalid_target'); error.code = 'invalid_target'; throw error
     },
-    startRun: async ({ runId, routing, progress }) => { started.push({ runId, cwd: routing.cwd }); progress('smoke:ack') },
+    startRun: async ({ runId, routing, progress, output }) => {
+      started.push({ runId, cwd: routing.cwd })
+      progress('smoke:ack')
+      // Stream real output CONTENT on the separate channel (a Provider would
+      // emit trace events here). Distinct from the opaque lifecycle marker above.
+      output({ kind: 'output', text: 'stub says hello' })
+      output({ kind: 'tool', text: 'Edit /w/file.ts' })
+    },
     gate: new ProviderOperationGate(),
     // Host-authorized project directories the device may target. In production
     // this is knownProjectDirectories(); here a fixed pair proves the wire.
@@ -160,6 +167,22 @@ try {
   assert.ok(projectLines.includes('project /Projects/storefront'), projectLines.join('|'))
   assert.ok(projectLines.includes('projects-count 2'), projectLines.join('|'))
   cases.push({ name: 'Swift run client -> host-authorized project list over granted-cert inner mTLS', passed: true })
+
+  // 4. Output streaming: the granted device reads the assistant's real streamed
+  //    output CONTENT for the settled run over the SAME granted-cert inner mTLS,
+  //    strictly after a cursor. This is trace-derived content, distinct from the
+  //    ledger lifecycle; the phone renders it as the actual run output.
+  const outputArgs = ['output', '127.0.0.1', String(devicePort), identity.hostId, anchorPath, grantedCertPath, keyPath, okRunId, '0']
+  const outputLines = (await runProbe(outputArgs)).trim().split('\n')
+  assert.ok(outputLines.includes('output output stub says hello'), outputLines.join('|'))
+  assert.ok(outputLines.includes('output tool Edit /w/file.ts'), outputLines.join('|'))
+  assert.ok(outputLines.some(l => /^output-cursor [1-9]/.test(l)), outputLines.join('|'))
+  // Strictly-after-cursor: re-polling at the last cursor yields no duplicate content.
+  const lastCursor = outputLines.find(l => l.startsWith('output-cursor ')).slice('output-cursor '.length)
+  const outputArgs2 = ['output', '127.0.0.1', String(devicePort), identity.hostId, anchorPath, grantedCertPath, keyPath, okRunId, lastCursor]
+  const outputLines2 = (await runProbe(outputArgs2)).trim().split('\n')
+  assert.ok(!outputLines2.some(l => l.startsWith('output output') || l.startsWith('output tool')), outputLines2.join('|'))
+  cases.push({ name: 'Swift run client -> real streamed output content over granted-cert inner mTLS (cursor-based)', passed: true })
 
   console.log(JSON.stringify({ scope: 'REAL Swift iOS run client against production relay + InnerMtlsHost + HostController; synthetic confirmation, stub executor, no iPhone/human/Provider', cases }, null, 2))
 } finally {

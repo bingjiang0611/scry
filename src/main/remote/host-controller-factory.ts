@@ -43,7 +43,12 @@ export interface HostControllerFactoryDependencies {
   verifyCSR(csrPEM: string): Promise<VerifiedPairingCSR>
   issue(input: VerifiedPairingCSR & { deviceId: string }): Promise<IssuedPairingCertificate>
   authorizeWorkspace(cwd: string): string
-  startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
+  startRun(input: {
+    runId: string
+    routing: RemoteIntentRouting
+    progress(detail?: string): void
+    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+  }): Promise<void>
   gate: ProviderOperationGate
   // Snapshot of host-authorized project directories offered to devices.
   listProjects?(): RemoteProjectRef[]
@@ -64,7 +69,12 @@ function privateDir(path: string): string {
 export async function createHostControllerFromDisk(deps: {
   stateDirectory: string
   authorizeWorkspace(cwd: string): string
-  startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
+  startRun(input: {
+    runId: string
+    routing: RemoteIntentRouting
+    progress(detail?: string): void
+    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+  }): Promise<void>
   gate: ProviderOperationGate
 }): Promise<HostControllerBinding & { anchorSHA256: string; caCertificatePEM: string }> {
   const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))

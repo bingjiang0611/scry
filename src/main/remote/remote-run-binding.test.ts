@@ -26,13 +26,17 @@ const result = (isError: boolean): TraceEvent => ({
   tokensIn: 11, tokensOut: 22, costUsd: 0.5
 })
 const controls = (): TraceEvent => ({ id: 'c', ts: '2020', runId: 'x', kind: 'harness', stage: 'runtime:controls' })
+const textEvent = (text: string): TraceEvent => ({ id: 't', ts: '2020', runId: 'x', kind: 'model', stage: 'text', text })
+const thinkingEvent = (thinking: string): TraceEvent => ({ id: 'k', ts: '2020', runId: 'x', kind: 'model', stage: 'thinking', thinking })
+const toolUse = (tool: string, filePath?: string): TraceEvent => ({ id: 'u', ts: '2020', runId: 'x', kind: 'tool', stage: `tool:${tool}`, tool, toolUseId: 'tu1', ...(filePath ? { filePath } : {}) })
+const toolResult = (output: string): TraceEvent => ({ id: 'o', ts: '2020', runId: 'x', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu1', output })
 
 describe('remote run binding (live seam; no Provider process is spawned)', () => {
   it('runs the routed provider once and reports a truthful settled lifecycle', async () => {
     const { run, calls } = fakeRun(async (req) => { req.emit(controls()); req.emit(result(false)); return { status: 'completed' } })
     const progress = vi.fn()
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-1' })
-    await start({ runId: 'ledger-1', routing: { cwd: '/w', providerId: 'claude', agentProfileId: 'p', prompt: '  hi  ' }, progress })
+    await start({ runId: 'ledger-1', routing: { cwd: '/w', providerId: 'claude', agentProfileId: 'p', prompt: '  hi  ' }, progress, output: () => {} })
 
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({ runId: 'scry-1', prompt: 'hi', cwd: '/w', agentProfileId: 'p', attachments: [] })
@@ -52,14 +56,14 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       req.emit({ ...result(true), text: 'boom detail' }); return { status: 'failed' }
     })
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-2' })
-    await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'codex', prompt: 'go' }, progress: () => {} }))
+    await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'codex', prompt: 'go' }, progress: () => {}, output: () => {} }))
       .rejects.toThrow('provider_run_failed: boom detail')
   })
 
   it('fails closed on an empty prompt without ever invoking the provider', async () => {
     const { run, calls } = fakeRun(async () => ({ status: 'completed' }))
     const start = createRemoteRunBinding({ run })
-    await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: '   ' }, progress: () => {} }))
+    await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: '   ' }, progress: () => {}, output: () => {} }))
       .rejects.toThrow('remote_run_missing_prompt')
     expect(calls).toHaveLength(0)
   })
@@ -71,7 +75,31 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       return { status: 'completed' }
     })
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-3' })
-    await start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: 'q' }, progress: () => {} })
+    await start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: 'q' }, progress: () => {}, output: () => {} })
     expect((thrown as Error).message).toBe('remote_interactive_input_unsupported')
+  })
+
+  it('streams real trace content to the output sink (text/reasoning/tool/tool_result), separate from lifecycle', async () => {
+    const { run } = fakeRun(async (req) => {
+      req.emit(textEvent('Hello from the agent'))
+      req.emit(thinkingEvent('let me think'))
+      req.emit(toolUse('Edit', '/w/file.ts'))
+      req.emit(toolResult('edit applied'))
+      req.emit(controls()); req.emit(result(false)); return { status: 'completed' }
+    })
+    const progress = vi.fn()
+    const output = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-4' })
+    await start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' }, progress, output })
+
+    expect(output.mock.calls.map(c => c[0])).toEqual([
+      { kind: 'output', text: 'Hello from the agent' },
+      { kind: 'reasoning', text: 'let me think' },
+      { kind: 'tool', text: 'Edit /w/file.ts' },
+      { kind: 'tool_result', text: 'edit applied' }
+    ])
+    // Content never leaks into the opaque lifecycle markers.
+    const markers = progress.mock.calls.map(c => JSON.parse(c[0] as string))
+    expect(markers.some(m => JSON.stringify(m).includes('Hello from the agent'))).toBe(false)
   })
 })

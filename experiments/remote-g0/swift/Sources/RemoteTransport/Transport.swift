@@ -217,20 +217,31 @@ public enum G0Transport {
   // never authorize a new one; it only chooses among these, and the host
   // re-checks the cwd on submit regardless.
   public struct RunProjectRef: Sendable, Equatable, Codable { public let path: String; public let label: String }
+  // A single chunk of the assistant's REAL streamed output content (masked +
+  // bounded host-side). kind ∈ output|reasoning|tool|tool_result|truncated.
+  // This is trace-derived CONTENT, not canonical usage; tokens/cost stay on the
+  // ledger `result` event, never re-derived from here.
+  public struct RunOutputChunk: Sendable, Equatable, Codable {
+    public let seq: Int; public let at: Int; public let runId: String; public let kind: String; public let text: String
+  }
+  public struct RunOutputPage: Sendable, Equatable { public let chunks: [RunOutputChunk]; public let cursor: Int }
 
   private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
   private struct RunProjectsRequest: Encodable { let op = "projects" }
+  private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunResponse: Decodable {
     let runId: String?
     let status: String?
     let poll: RunPollBody?
     let state: String?
     let projects: [RunProjectRef]?
+    let output: RunOutputBody?
     let error: String?
   }
   private struct RunPollBody: Decodable { let events: [RunLedgerEvent]; let cursor: Int }
+  private struct RunOutputBody: Decodable { let chunks: [RunOutputChunk]; let cursor: Int }
 
   private static func decodeRun(_ bytes: Data) throws -> RunResponse {
     let response = try JSONDecoder().decode(RunResponse.self, from: bytes)
@@ -274,6 +285,16 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let projects = response.projects else { throw ProbeError.unexpectedReply }
     return projects
+  }
+
+  // The assistant's real streamed output content for one run, strictly after
+  // `cursor` (server-authoritative per-run sequence). Authorized exactly like
+  // every run op; an unknown/evicted run yields an honest empty page.
+  public static func relayRunOutput(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String, cursor: Int) async throws -> RunOutputPage {
+    let request = try JSONEncoder().encode(RunOutputRequest(runId: runId, cursor: cursor))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let output = response.output else { throw ProbeError.unexpectedReply }
+    return RunOutputPage(chunks: output.chunks, cursor: output.cursor)
   }
 
   private static func decodePair(_ bytes: Data, requestId: String) throws -> PairOutcome {

@@ -30,7 +30,12 @@ export interface RemoteHostServiceDependencies {
   // workspace, or throws. A device can never smuggle an unlisted path.
   authorizeWorkspace(cwd: string): string
   // Delegates a fully-authorized remote intent to the live run-start path.
-  startRun(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
+  startRun(input: {
+    runId: string
+    routing: RemoteIntentRouting
+    progress(detail?: string): void
+    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+  }): Promise<void>
   // Snapshot of the host's already directory-picker-authorized project dirs, so
   // the phone's new-session picker chooses only among real authorized targets.
   // Absent => the device sees an honest empty list.

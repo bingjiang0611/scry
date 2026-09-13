@@ -15,11 +15,22 @@ import { SessionLedger } from './session-ledger'
 //     never silently re-run or marked settled — unknown is not success.
 //   - The executor's observed outcome, not the client, drives settled/failed.
 
+// The content channel: the assistant's REAL trace output (masked, bounded) is
+// streamed here for the device to render, distinct from the opaque lifecycle
+// `progress` markers on the ledger. 'truncated' is appended by the log itself,
+// never by an executor, so it is not part of the sink's input union.
+export interface RemoteOutputSink {
+  append(runId: string, chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+}
+
 export interface RemoteExecutorInput {
   runId: string
   detail?: string
   // Report an intermediate, non-terminal progress marker (opaque, non-secret).
   progress(detail?: string): void
+  // Stream real output content for the device. Always defined; a no-op when no
+  // output sink is configured.
+  output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
 }
 
 export interface RemoteExecutor {
@@ -31,16 +42,20 @@ export interface RemoteExecutor {
 export interface RemoteDispatcherDependencies {
   ledger: SessionLedger
   executor: RemoteExecutor
+  // Absent => the output callback is a no-op and only the lifecycle is observable.
+  outputSink?: RemoteOutputSink
 }
 
 export class RemoteDispatcher {
   #ledger: SessionLedger
   #executor: RemoteExecutor
+  #outputSink?: RemoteOutputSink
   #inflight = new Set<string>()
 
   constructor(deps: RemoteDispatcherDependencies) {
     this.#ledger = deps.ledger
     this.#executor = deps.executor
+    this.#outputSink = deps.outputSink
   }
 
   // Dispatch every intent still awaiting its first dispatch, exactly once.
@@ -70,11 +85,15 @@ export class RemoteDispatcher {
       // be recorded, but never fabricate one either.
       try { this.#ledger.markProgress(runId, mark) } catch { /* run already terminal */ }
     }
+    const output = (chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void => {
+      // Best-effort content streaming: caching output must never fail the run.
+      try { this.#outputSink?.append(runId, chunk) } catch { /* cache unavailable */ }
+    }
     // Invoke synchronously so the dispatch is observably in flight when pump()
     // returns; a synchronous throw is mapped to failure like a rejection.
     let pending: Promise<void>
     try {
-      pending = this.#executor.execute({ runId, detail, progress })
+      pending = this.#executor.execute({ runId, detail, progress, output })
     } catch (error) {
       this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096))
       return

@@ -1,4 +1,5 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
+import type { RunOutputPage } from './run-output-log'
 
 // G1 application service: the device-facing surface that a verified remote peer
 // reaches once its inner-mTLS identity is established. It composes the two host
@@ -41,11 +42,18 @@ export interface RemoteProjectSource {
   list(): RemoteProjectRef[]
 }
 
+export interface RemoteOutputReader {
+  // Chunks strictly after `cursor` for a run (bounded page) + the next cursor.
+  since(runId: string, cursor: number): RunOutputPage
+}
+
 export interface RemoteGatewayDependencies {
   authority: DeviceAuthorizer
   ledger: SessionLedger
   // Absent => the device sees an empty (honest) authorized-project list.
   projects?: RemoteProjectSource
+  // Absent => the device sees an empty (honest) output page.
+  output?: RemoteOutputReader
 }
 
 export interface SubmitIntentInput {
@@ -77,11 +85,13 @@ export class RemoteGateway {
   #authority: DeviceAuthorizer
   #ledger: SessionLedger
   #projects?: RemoteProjectSource
+  #output?: RemoteOutputReader
 
   constructor(deps: RemoteGatewayDependencies) {
     this.#authority = deps.authority
     this.#ledger = deps.ledger
     this.#projects = deps.projects
+    this.#output = deps.output
   }
 
   // Fail closed on anything that is not a currently-authorized owner device.
@@ -130,5 +140,15 @@ export class RemoteGateway {
       if (out.length >= MAX_PROJECTS) break
     }
     return out
+  }
+
+  // The assistant's real streamed output CONTENT for one run, strictly after the
+  // caller's cursor. Authorized by the same verified owner-device check as poll;
+  // an unknown/evicted run yields an honest empty page (never fabricated).
+  pollOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): RunOutputPage {
+    this.#authorize(peerCertSHA256)
+    const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
+    if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { chunks: [], cursor }
+    return this.#output?.since(input.runId, cursor) ?? { chunks: [], cursor }
   }
 }

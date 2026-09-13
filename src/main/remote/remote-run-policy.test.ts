@@ -11,7 +11,7 @@ const workspace: WorkspaceAuthorizer = {
 const target = (over: Partial<{ cwd: string; providerId: string; agentProfileId?: string }> = {}) =>
   ({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
-const input = (): RemoteExecutorInput => ({ runId: randomUUID(), detail: undefined, progress() {} })
+const input = (): RemoteExecutorInput => ({ runId: randomUUID(), detail: undefined, progress() {}, output() {} })
 
 describe('RemoteRunPolicy', () => {
   it('authorizes a known workspace and leases the provider operation', () => {
