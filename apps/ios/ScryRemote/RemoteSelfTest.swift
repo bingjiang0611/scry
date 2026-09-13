@@ -116,5 +116,49 @@ enum RemoteSelfTest {
     // Dedicated probe launch: keep the process alive until the Task exits.
     RunLoop.current.run()
   }
+
+  // Opt-in RUN-CHANNEL probe (`-runProbe`): using the persisted connection +
+  // Keychain grant, submit an intent whose cwd is deliberately UNAUTHORIZED. The
+  // host policy denies it BEFORE any Provider is spawned, so this exercises the
+  // full device -> relay -> InnerMtlsHost -> HostController -> ledger loop with
+  // the CA-granted device cert and NO Provider token cost. A run that fails
+  // closed (run_failed) is the PASS condition; a settled run would be wrong.
+  static func runRunProbeIfRequested() {
+    guard ProcessInfo.processInfo.arguments.contains("-runProbe") else { return }
+    Task {
+      guard let connection = RemoteConnectionStore().load() else {
+        print("RUNPROBE SKIP reason=no-persisted-connection (pair on this build first)")
+        print("RUNPROBE DONE failures=0")
+        exit(0)
+      }
+      let client = RemoteRunClient(connection: connection)
+      do {
+        let routing = RemoteRunClient.Routing(cwd: "/scry-run-probe-unauthorized", providerId: "claude", agentProfileId: nil, prompt: "probe")
+        let submit = try await client.submit(routing: routing)
+        print("RUNPROBE submit runId=\(submit.runId) status=\(submit.status)")
+        var cursor = 0
+        var terminal: String? = nil
+        for _ in 0..<20 {
+          let page = try await client.poll(cursor: cursor)
+          cursor = page.cursor
+          for e in page.events where e.runId == submit.runId {
+            print("RUNPROBE event kind=\(e.kind) detail=\(e.detail ?? "")")
+            if ["run_settled", "run_failed", "run_cancelled"].contains(e.kind) { terminal = e.kind }
+          }
+          if terminal != nil { break }
+          try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        let ok = terminal == "run_failed"
+        print("RUNPROBE terminal=\(terminal ?? "none") expected=run_failed \(ok ? "PASS" : "FAIL")")
+        print("RUNPROBE DONE failures=\(ok ? 0 : 1)")
+        exit(ok ? 0 : 1)
+      } catch {
+        print("RUNPROBE FAIL error=\(error)")
+        print("RUNPROBE DONE failures=1")
+        exit(1)
+      }
+    }
+    RunLoop.current.run()
+  }
 }
 #endif

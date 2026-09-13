@@ -58,6 +58,7 @@ final class AppModel: ObservableObject {
   @Published var query: String = ""
   @Published var pairing: PairingUIState = .idle
   private var pairingTask: Task<Void, Never>?
+  private let connections = RemoteConnectionStore()
 
   // No fabricated sessions. Until a real host feed exists this stays empty and
   // the UI shows a truthful empty state rather than mock rows.
@@ -122,7 +123,11 @@ final class AppModel: ObservableObject {
             try await Task.sleep(nanoseconds: 2_000_000_000)
             progress = try await client.refresh(code: code, deviceLabel: label)
           case let .paired(deviceId, _):
-            await self?.setPaired(deviceId: deviceId, host: code.relayHost)
+            // Persist the PUBLIC connection descriptor so run operations can reach
+            // the same host again without a fresh QR (key + cert stay in Keychain).
+            let connection = RemoteConnection(relayHost: code.relayHost, relayPort: code.relayPort,
+              relayTLS: code.relayTLS.rawValue, hostId: code.hostId, anchorPEM: code.anchorPEM, deviceId: deviceId)
+            await self?.setPaired(deviceId: deviceId, host: code.relayHost, connection: connection)
             return
           case let .denied(reason):
             await self?.setPairing(.failed("Mac 拒绝了配对：\(reason)"))
@@ -141,10 +146,12 @@ final class AppModel: ObservableObject {
   }
 
   private func setPairing(_ state: PairingUIState) { pairing = state }
-  private func setPaired(deviceId: String, host: String) {
+  private func setPaired(deviceId: String, host: String, connection: RemoteConnection) {
+    connections.save(connection)
     pairing = .paired(deviceId: deviceId)
-    // A live grant now exists. The task/chat/file transport is still not wired,
-    // so we show an honest offline-but-paired link, never a fabricated feed.
+    // A live grant now exists. The run channel is wired (RemoteRunClient), but the
+    // task/chat UI feed is not yet, so we show an honest offline-but-paired link
+    // rather than a fabricated feed.
     link = .offline(host: host)
   }
 
@@ -172,6 +179,7 @@ final class AppModel: ObservableObject {
     route = .home
     query = ""
     sessions = []
+    connections.clear()
   }
 }
 

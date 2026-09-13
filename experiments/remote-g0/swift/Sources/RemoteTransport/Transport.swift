@@ -197,6 +197,69 @@ public enum G0Transport {
     return try decodePair(await exchangeRelay(endpoint: endpoint, mode: "pair", identity: identity, request: JSONEncoder().encode(request)), requestId: requestId)
   }
 
+  // --- Post-pairing RUN channel (relay mode "run", strict inner TLS 1.3 mTLS
+  // presenting the CA-GRANTED device certificate). The host side is InnerMtlsHost
+  // -> HostController; its op-based JSON wire is: request { op, intentId?, detail?,
+  // cursor?, runId? }; response { runId, status } | { poll: { events, cursor } } |
+  // { state } | { error }. These methods carry no trust of their own: the granted
+  // cert on `identity` + the anchor-pinned inner TLS are the authorization.
+  public struct RunSubmitOutcome: Sendable, Equatable { public let runId: String; public let status: String }
+  public struct RunLedgerEvent: Sendable, Equatable, Codable {
+    public let seq: Int
+    public let at: Int
+    public let runId: String
+    public let kind: String
+    public let intentId: String?
+    public let detail: String?
+  }
+  public struct RunPollOutcome: Sendable, Equatable { public let events: [RunLedgerEvent]; public let cursor: Int }
+
+  private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
+  private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
+  private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
+  private struct RunResponse: Decodable {
+    let runId: String?
+    let status: String?
+    let poll: RunPollBody?
+    let state: String?
+    let error: String?
+  }
+  private struct RunPollBody: Decodable { let events: [RunLedgerEvent]; let cursor: Int }
+
+  private static func decodeRun(_ bytes: Data) throws -> RunResponse {
+    let response = try JSONDecoder().decode(RunResponse.self, from: bytes)
+    if let error = response.error { throw RunError.host(code: error) }
+    return response
+  }
+
+  public enum RunError: Error, Equatable { case host(code: String) }
+
+  // Submit a durable run intent (recorded != executed). `detail` is the routing
+  // JSON { cwd, providerId, agentProfileId?, prompt }. Returns the host-assigned
+  // runId; the device polls the ledger for the real lifecycle.
+  public static func relayRunSubmit(endpoint: RelayEndpoint, identity: G0ProbeIdentity, intentId: String, detail: String) async throws -> RunSubmitOutcome {
+    let request = try JSONEncoder().encode(RunSubmitRequest(intentId: intentId, detail: detail))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let runId = response.runId, let status = response.status else { throw ProbeError.unexpectedReply }
+    return RunSubmitOutcome(runId: runId, status: status)
+  }
+
+  // Poll ledger events strictly after `cursor` (server-authoritative sequence).
+  public static func relayRunPoll(endpoint: RelayEndpoint, identity: G0ProbeIdentity, cursor: Int) async throws -> RunPollOutcome {
+    let request = try JSONEncoder().encode(RunPollRequest(cursor: cursor))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let poll = response.poll else { throw ProbeError.unexpectedReply }
+    return RunPollOutcome(events: poll.events, cursor: poll.cursor)
+  }
+
+  // Query a single run's current lifecycle; nil means the host has no such run
+  // for this device.
+  public static func relayRunState(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> String? {
+    let request = try JSONEncoder().encode(RunStateRequest(runId: runId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    return response.state
+  }
+
   private static func decodePair(_ bytes: Data, requestId: String) throws -> PairOutcome {
     // Correlate the response to our own request id before trusting any field.
     if let granted = try? JSONDecoder().decode(PairGrantedResponse.self, from: bytes), granted.requestId == requestId {

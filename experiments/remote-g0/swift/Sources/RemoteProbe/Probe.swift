@@ -12,6 +12,8 @@ struct RemoteProbe {
         try await pair(Array(args.dropFirst()))
       } else if args.first == "relay-pair" {
         try await relayPair(Array(args.dropFirst()))
+      } else if args.first == "relay-run" {
+        try await relayRun(Array(args.dropFirst()))
       } else {
         try await echo(args)
       }
@@ -82,6 +84,38 @@ struct RemoteProbe {
     default: throw CLIError.invalidArguments
     }
     printOutcome(outcome)
+  }
+
+  // relay-run <submit|poll|state> <relayHost> <relayPort> <hostId> <host-anchor> <grantedCertPem> <deviceKey> <arg>
+  //   submit: <arg> = path to routing-detail JSON; prints "submit <runId> <status>"
+  //   poll:   <arg> = cursor;                       prints "event <kind> <runId>" per event, then "poll-cursor <n>"
+  //   state:  <arg> = runId;                        prints "state <lifecycle|none>"
+  // Drives the POST-PAIRING run channel with the CA-granted device cert (full
+  // inner mTLS), exactly as the product RemoteRunClient does.
+  static func relayRun(_ args: [String]) async throws {
+    guard args.count == 8, let port = Int(args[2]) else { throw CLIError.invalidArguments }
+    let identity = try G0ProbeIdentity(
+      outerCA: Data(),
+      innerCA: Data(contentsOf: URL(fileURLWithPath: args[4])),
+      certificate: Data(contentsOf: URL(fileURLWithPath: args[5])),
+      privateKey: Data(contentsOf: URL(fileURLWithPath: args[6]))
+    )
+    let endpoint = G0Transport.RelayEndpoint(host: args[1], port: port, hostId: args[3])
+    switch args[0] {
+    case "submit":
+      let detail = try String(contentsOf: URL(fileURLWithPath: args[7]), encoding: .utf8)
+      let outcome = try await G0Transport.relayRunSubmit(endpoint: endpoint, identity: identity, intentId: UUID().uuidString.lowercased(), detail: detail)
+      print("submit \(outcome.runId) \(outcome.status)")
+    case "poll":
+      guard let cursor = Int(args[7]) else { throw CLIError.invalidArguments }
+      let outcome = try await G0Transport.relayRunPoll(endpoint: endpoint, identity: identity, cursor: cursor)
+      for e in outcome.events { print("event \(e.kind) \(e.runId)") }
+      print("poll-cursor \(outcome.cursor)")
+    case "state":
+      let state = try await G0Transport.relayRunState(endpoint: endpoint, identity: identity, runId: args[7])
+      print("state \(state ?? "none")")
+    default: throw CLIError.invalidArguments
+    }
   }
 
   static func printOutcome(_ outcome: G0Transport.PairOutcome) {
