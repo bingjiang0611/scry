@@ -62,6 +62,16 @@ final class RemoteRunStore: ObservableObject {
     case failed(String)
   }
   @Published private(set) var catalog: CatalogState = .idle
+
+  // The REAL conversation content of the opened session (read-only replay).
+  enum HistoryState: Equatable {
+    case idle
+    case loading
+    case loaded([G0Transport.RunHistoryTurn])
+    case empty
+    case failed(String)
+  }
+  @Published private(set) var history: HistoryState = .idle
   // Whether the host was actually reached on the LAST attempt. Paired != reachable:
   // a persisted grant only means we MAY reach the host; only a real successful
   // exchange proves it. nil = not tried yet. This is the honest source of the
@@ -110,6 +120,24 @@ final class RemoteRunStore: ObservableObject {
         }
       } catch {
         await MainActor.run { self?.reachable = false; self?.catalog = .failed(Self.describe(error)) }
+      }
+    }
+  }
+
+  // Load one session's real conversation content so the phone can OPEN it.
+  // Honest states only; never fabricates turns.
+  func loadHistory(providerId: String, cwd: String, externalSessionId: String) {
+    guard let client = makeClient() else { history = .failed("尚未配对"); return }
+    history = .loading
+    Task { [weak self] in
+      do {
+        let turns = try await client.history(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+        await MainActor.run {
+          self?.reachable = true
+          self?.history = turns.isEmpty ? .empty : .loaded(turns)
+        }
+      } catch {
+        await MainActor.run { self?.reachable = false; self?.history = .failed(Self.describe(error)) }
       }
     }
   }

@@ -54,11 +54,17 @@ struct HomeView: View {
           ProgressView("正在读取主机会话…").padding(.top, 40)
         }
       case let .loaded(list):
-        LazyVStack(alignment: .leading, spacing: 0) {
-          ForEach(list, id: \.sessionId) { s in sessionRow(s) }
+        LazyVStack(alignment: .leading, spacing: 4) {
+          Text("项目").font(.system(size: 17, weight: .semibold)).foregroundStyle(Palette.ink)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 6)
+          ForEach(groupedByProject(list), id: \.cwd) { group in
+            projectHeader(group.cwd)
+            ForEach(group.sessions, id: \.sessionId) { s in sessionRow(s) }
+          }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 6)
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
       case .empty:
         VStack(spacing: 14) {
           EmptyState(title: model.query.isEmpty ? "主机还没有会话" : "没有匹配的会话",
@@ -85,25 +91,54 @@ struct HomeView: View {
     }.padding(.top, 30)
   }
 
-  // One catalog row: provider badge + label + project + relative time. This is
-  // the SAME session metadata the Mac lists. Opening the full transcript on the
-  // phone is a host read that is not wired yet, so rows are display-only for now.
-  private func sessionRow(_ s: G0Transport.RunSessionRef) -> some View {
-    HStack(spacing: 10) {
-      Text(s.providerId.uppercased())
-        .font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted)
-        .padding(.vertical, 3).padding(.horizontal, 7)
-        .background(Color(hex: 0xEFEFEF), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-      VStack(alignment: .leading, spacing: 2) {
-        Text(s.label.isEmpty ? "(无预览)" : s.label)
-          .font(.system(size: 16)).foregroundStyle(Palette.ink).lineLimit(1)
-        Text(projectName(s.cwd)).font(.system(size: 12)).foregroundStyle(Palette.muted).lineLimit(1)
-      }
-      Spacer(minLength: 8)
-      Text(Self.relativeTime(s.ts)).font(.system(size: 12)).foregroundStyle(Palette.muted)
+  // Group the flat catalog by project (cwd), most-recently-active project first,
+  // so the phone list mirrors the Mac's project-grouped session list.
+  private struct ProjectGroup { let cwd: String; let sessions: [G0Transport.RunSessionRef] }
+  private func groupedByProject(_ list: [G0Transport.RunSessionRef]) -> [ProjectGroup] {
+    var order: [String] = []
+    var byCwd: [String: [G0Transport.RunSessionRef]] = [:]
+    for s in list {
+      if byCwd[s.cwd] == nil { byCwd[s.cwd] = []; order.append(s.cwd) }
+      byCwd[s.cwd]?.append(s)
     }
-    .padding(.vertical, 10)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    return order.map { ProjectGroup(cwd: $0, sessions: byCwd[$0] ?? []) }
+  }
+
+  // Project row: folder glyph + project name (matches the Mac's “项目” list).
+  private func projectHeader(_ cwd: String) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: "folder").font(.system(size: 15)).foregroundStyle(Palette.ink)
+      Text(projectName(cwd)).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink).lineLimit(1)
+      Spacer()
+    }
+    .padding(.top, 12).padding(.bottom, 2)
+  }
+
+  // One session row, indented under its project. Tapping OPENS the real
+  // conversation (read-only replay) when the session is resumable (has a
+  // Provider session id); a pending session is shown dimmed and is not tappable.
+  @ViewBuilder private func sessionRow(_ s: G0Transport.RunSessionRef) -> some View {
+    let openable = (s.externalSessionId?.isEmpty == false)
+    Button {
+      guard openable, let ext = s.externalSessionId else { return }
+      model.openedSession = OpenedSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: ext, label: s.label)
+      model.route = .transcript
+    } label: {
+      HStack(spacing: 8) {
+        Text(s.label.isEmpty ? "(无预览)" : s.label)
+          .font(.system(size: 15)).foregroundStyle(openable ? Palette.ink : Palette.muted)
+          .lineLimit(1).multilineTextAlignment(.leading)
+        Spacer(minLength: 8)
+        if !openable { Text("进行中").font(.system(size: 11)).foregroundStyle(Palette.muted) }
+        Text(Self.relativeTime(s.ts)).font(.system(size: 11)).foregroundStyle(Palette.muted)
+      }
+      .padding(.vertical, 9)
+      .padding(.leading, 26)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(!openable)
   }
 
   private func projectName(_ cwd: String) -> String {

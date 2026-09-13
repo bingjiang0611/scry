@@ -1,8 +1,8 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistorySource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage } from './run-output-log'
-export type { RemoteProjectRef, RemoteProviderRef, RemoteSessionRef } from './remote-gateway'
+export type { RemoteProjectRef, RemoteProviderRef, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -52,6 +52,8 @@ export interface HostControllerDependencies {
   listProviders?(): RemoteProviderRef[]
   // Snapshot of the host session catalog a device may browse. Absent => empty.
   listSessions?(): RemoteSessionRef[]
+  // Read one session's real conversation content. Absent => empty transcript.
+  readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   // Optional shared operation gate (auth vs run mutual exclusion). A fresh one
   // is created when omitted; production passes the app-wide gate.
   gate?: ProviderOperationGate
@@ -89,7 +91,8 @@ export class HostController {
       output: this.#output,
       ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
       ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
-      ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {})
+      ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {}),
+      ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {})
     })
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
@@ -139,6 +142,12 @@ export class HostController {
   // by the same verified peer certificate as every method.
   listSessions(peerCertSHA256: string): RemoteSessionRef[] {
     return this.#gateway.listSessions(peerCertSHA256)
+  }
+
+  // Device-facing: one session's real conversation content, authorized by the
+  // same verified peer certificate. Async (reads the trace archive/transcript).
+  readHistory(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]> {
+    return this.#gateway.readHistory(peerCertSHA256, query)
   }
 
   // Device-facing: the assistant's real streamed output CONTENT for one run,

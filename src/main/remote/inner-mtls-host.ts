@@ -75,13 +75,16 @@ export class InnerMtlsHost {
       const end = buffer.indexOf(10)
       if (end < 0) return
       used = true
-      socket.end(JSON.stringify(this.#dispatch(controller, fingerprint, buffer.subarray(0, end))) + '\n')
+      const frame = buffer.subarray(0, end)
+      void this.#dispatch(controller, fingerprint, frame)
+        .then((res) => socket.end(JSON.stringify(res) + '\n'))
+        .catch(() => socket.destroy())
     })
     socket.on('error', () => { /* peer reset; nothing to report */ })
   }
 
-  #dispatch(controller: HostController, fingerprint: string, line: Buffer): unknown {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; runId?: string }
+  async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; runId?: string; providerId?: string; cwd?: string; externalSessionId?: string }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -110,6 +113,13 @@ export class InnerMtlsHost {
       if (request.op === 'sessions') {
         // Same owner-device authorization; display-only catalog metadata.
         return { sessions: controller.listSessions(fingerprint) }
+      }
+      if (request.op === 'history') {
+        // The REAL conversation content for one session, so the phone can OPEN it.
+        // Same owner-device authorization; the host re-authorizes the cwd and only
+        // reads sessions in device-visible authorized projects.
+        if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
+        return { history: await controller.readHistory(fingerprint, { providerId: request.providerId, cwd: typeof request.cwd === 'string' ? request.cwd : '', externalSessionId: request.externalSessionId }) }
       }
       if (request.op === 'output') {
         // The assistant's real streamed output content for one run, after cursor.

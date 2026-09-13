@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
-import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef } from './host-controller'
+import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
@@ -42,6 +42,7 @@ export interface RemoteHostServiceDependencies {
   listProjects?(): RemoteProjectRef[]
   listProviders?(): RemoteProviderRef[]
   listSessions?(): RemoteSessionRef[]
+  readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
   // How to reach the relay (deployed ws/net connector). Absent => dormant. Called
@@ -101,7 +102,8 @@ export class RemoteHostService {
       gate: deps.gate,
       ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
-      ...(deps.listSessions ? { listSessions: deps.listSessions } : {})
+      ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
+      ...(deps.readHistory ? { readHistory: deps.readHistory } : {})
     })
     let host: InnerMtlsHost
     let pairing: PairingTransport

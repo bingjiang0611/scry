@@ -216,6 +216,31 @@ describe('RemoteGateway', () => {
     expect(gw.listSessions(CERT)).toEqual([])
   })
 
+  it('reads one session\'s content for an authorized device, bounded and kind-filtered', async () => {
+    const { authority } = await grantedAuthority()
+    const read = vi.fn(async () => [
+      { userText: 'hi', items: [
+        { kind: 'output' as const, text: 'hello' },
+        { kind: 'tool' as const, text: 'Read greet.js' },
+        { kind: 'bogus' as unknown as 'output', text: 'dropped' },
+        { kind: 'reasoning' as const, text: 5 as unknown as string }
+      ] }
+    ])
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const gw = new RemoteGateway({ authority, ledger, history: { read } })
+    await expect(gw.readHistory('f'.repeat(64), { providerId: 'qoder', cwd: '/w', externalSessionId: 'ext1' }))
+      .rejects.toThrow(/device_not_authorized/)
+    const turns = await gw.readHistory(CERT, { providerId: 'qoder', cwd: '/w', externalSessionId: 'ext1' })
+    expect(turns).toEqual([{ userText: 'hi', items: [{ kind: 'output', text: 'hello' }, { kind: 'tool', text: 'Read greet.js' }] }])
+    expect(read).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', externalSessionId: 'ext1' })
+  })
+
+  it('returns an honest empty transcript when no history source is configured', async () => {
+    const { authority } = await grantedAuthority()
+    const { gw } = gateway(authority)
+    await expect(gw.readHistory(CERT, { providerId: 'qoder', cwd: '/w', externalSessionId: 'x' })).resolves.toEqual([])
+  })
+
   it('stops offering projects to a device the instant its grant is revoked', async () => {
     const { authority, deviceId } = await grantedAuthority()
     const { gw } = gateway(authority, { list: () => [{ path: '/Projects/x', label: 'x' }] })
