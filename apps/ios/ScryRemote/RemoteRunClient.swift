@@ -71,4 +71,11 @@ struct RemoteRunClient {
   func projects() async throws -> [G0Transport.RunProjectRef] {
     try await G0Transport.relayRunProjects(endpoint: endpoint(), identity: try identity())
   }
+
+  // The assistant's real streamed output content for one run, strictly after
+  // `cursor`. This is the trace-derived CONTENT the chat view renders; tokens/
+  // cost still come only from the ledger `result` event, never from here.
+  func output(runId: String, cursor: Int) async throws -> G0Transport.RunOutputPage {
+    try await G0Transport.relayRunOutput(endpoint: endpoint(), identity: try identity(), runId: runId, cursor: cursor)
+  }
 }

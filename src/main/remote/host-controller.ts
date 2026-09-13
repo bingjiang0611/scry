@@ -1,7 +1,9 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
 import { RemoteGateway, type RemoteProjectRef } from './remote-gateway'
+import { RunOutputLog, type RunOutputPage } from './run-output-log'
 export type { RemoteProjectRef } from './remote-gateway'
+export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
@@ -35,7 +37,14 @@ export interface HostControllerDependencies {
   // Resolves and authorizes a workspace against the known-project authority.
   workspace: WorkspaceAuthorizer
   // The only injected leaf: performs the real Provider run for a routed intent.
-  runProvider(input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }): Promise<void>
+  // `output` streams the assistant's real trace CONTENT (masked, bounded) to the
+  // device; distinct from the opaque lifecycle `progress` markers.
+  runProvider(input: {
+    runId: string
+    routing: RemoteIntentRouting
+    progress(detail?: string): void
+    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+  }): Promise<void>
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]
@@ -65,6 +74,7 @@ export class HostController {
   #ledger: SessionLedger
   #gateway: RemoteGateway
   #dispatcher: RemoteDispatcher
+  #output = new RunOutputLog()
 
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
@@ -72,16 +82,17 @@ export class HostController {
     this.#gateway = new RemoteGateway({
       authority: this.authority,
       ledger: this.#ledger,
+      output: this.#output,
       ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {})
     })
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
     const base: RemoteExecutor = {
       execute: (input: RemoteExecutorInput) =>
-        deps.runProvider({ runId: input.runId, routing: parseRouting(input.detail), progress: input.progress })
+        deps.runProvider({ runId: input.runId, routing: parseRouting(input.detail), progress: input.progress, output: input.output })
     }
     const gated = new GatedExecutor({ policy, resolveTarget: (input) => parseRouting(input.detail), base })
-    this.#dispatcher = new RemoteDispatcher({ ledger: this.#ledger, executor: gated })
+    this.#dispatcher = new RemoteDispatcher({ ledger: this.#ledger, executor: gated, outputSink: this.#output })
   }
 
   // On startup, dispatch any intent that was durably recorded but never
@@ -110,6 +121,12 @@ export class HostController {
   // target, authorized by the same verified peer certificate as every method.
   listProjects(peerCertSHA256: string): RemoteProjectRef[] {
     return this.#gateway.listProjects(peerCertSHA256)
+  }
+
+  // Device-facing: the assistant's real streamed output CONTENT for one run,
+  // strictly after the caller's cursor, authorized by the verified peer cert.
+  runOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): RunOutputPage {
+    return this.#gateway.pollOutput(peerCertSHA256, input)
   }
 
   // Test/shutdown aid: wait for in-flight executor work to settle.

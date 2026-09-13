@@ -42,6 +42,9 @@ export interface RemoteRunInput {
   routing: RemoteIntentRouting
   // Opaque, non-secret, non-terminal progress marker sink (ledger.markProgress).
   progress(detail?: string): void
+  // The assistant's REAL trace CONTENT sink (masked + bounded by the log). This
+  // is what lets the device render the actual output, not just the lifecycle.
+  output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
 }
 
 const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
@@ -49,7 +52,7 @@ const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
 export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (input: RemoteRunInput) => Promise<void> {
   let seq = 0
   const nextScryRunId = deps.nextScryRunId ?? (() => `remote-run-${Date.now().toString(36)}-${(seq++).toString(36)}`)
-  return async function startRemoteRun({ runId: ledgerRunId, routing, progress }: RemoteRunInput): Promise<void> {
+  return async function startRemoteRun({ runId: ledgerRunId, routing, progress, output }: RemoteRunInput): Promise<void> {
     const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
     // A run with no prompt is not a Provider run; fail closed and truthfully
     // rather than launch an empty turn.
@@ -60,7 +63,25 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd: routing.cwd }))
     let lastErrorText: string | undefined
     const emit = (ev: TraceEvent): void => {
-      // Only honest, opaque lifecycle markers cross to the device; no transcript
+      // Two distinct channels:
+      //  - `progress`: opaque, non-secret lifecycle markers on the durable ledger.
+      //  - `output`:   the assistant's REAL trace CONTENT (text/reasoning/tool),
+      //                secret-masked + byte-bounded by RunOutputLog, so the device
+      //                renders the actual run output. This is trace-derived content,
+      //                NOT canonical usage; token/cost stay on the ledger `result`.
+      if (ev.stage === 'text' && typeof ev.text === 'string' && ev.text.length > 0) {
+        output({ kind: 'output', text: ev.text })
+      } else if (ev.stage === 'thinking' && typeof ev.thinking === 'string' && ev.thinking.length > 0) {
+        output({ kind: 'reasoning', text: ev.thinking })
+      } else if (ev.kind === 'tool' && ev.toolUseId && typeof ev.output === 'string' && ev.output.length > 0) {
+        // A tool_result carries observable output text for its tool_use.
+        output({ kind: 'tool_result', text: ev.output })
+      } else if (ev.kind === 'tool' && ev.tool && ev.output === undefined) {
+        // A tool_use: surface the tool name (+ a short input hint) as activity.
+        const hint = ev.filePath ? ` ${ev.filePath}` : ''
+        output({ kind: 'tool', text: `${ev.tool}${hint}` })
+      }
+      // Only honest, opaque lifecycle markers cross to the ledger; no transcript
       // bytes, no secrets. Provider-canonical usage on the result event is
       // surfaced verbatim (exact evidence), never synthesized.
       if (ev.stage === 'runtime:controls') { progress(marker({ event: 'started' })); return }

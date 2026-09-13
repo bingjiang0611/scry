@@ -91,6 +91,7 @@ struct RemoteProbe {
   //   poll:   <arg> = cursor;                       prints "event <kind> <runId>" per event, then "poll-cursor <n>"
   //   state:  <arg> = runId;                        prints "state <lifecycle|none>"
   //   projects: no <arg>;                            prints "project <path>" per authorized dir
+  //   output: <runId> <cursor>;                      prints "output <kind> <text>" per chunk, then "output-cursor <n>"
   // Drives the POST-PAIRING run channel with the CA-granted device cert (full
   // inner mTLS), exactly as the product RemoteRunClient does.
   static func relayRun(_ args: [String]) async throws {
@@ -121,6 +122,11 @@ struct RemoteProbe {
       let projects = try await G0Transport.relayRunProjects(endpoint: endpoint, identity: identity)
       for p in projects { print("project \(p.path)") }
       print("projects-count \(projects.count)")
+    case "output":
+      guard args.count == 9, let cursor = Int(args[8]) else { throw CLIError.invalidArguments }
+      let page = try await G0Transport.relayRunOutput(endpoint: endpoint, identity: identity, runId: args[7], cursor: cursor)
+      for c in page.chunks { print("output \(c.kind) \(c.text)") }
+      print("output-cursor \(page.cursor)")
     default: throw CLIError.invalidArguments
     }
   }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { PairingAuthority, type IssuedPairingCertificate, type PairingDependencies, type PairingPersistence, type PairingState } from './pairing'
 import { SessionLedger, type LedgerEvent, type LedgerStore } from './session-ledger'
 import { RemoteGateway, RemoteGatewayError } from './remote-gateway'
+import { RunOutputLog } from './run-output-log'
 
 const KEY = 'a'.repeat(64)
 const CSR = 'b'.repeat(64)
@@ -44,9 +45,13 @@ async function grantedAuthority() {
   return { authority, deviceId: grant.deviceId }
 }
 
-function gateway(authority: { authorizesCertificate(fp: string): boolean }, projects?: { list(): { path: string; label: string }[] }) {
+function gateway(
+  authority: { authorizesCertificate(fp: string): boolean },
+  projects?: { list(): { path: string; label: string }[] },
+  output?: RunOutputLog
+) {
   const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
-  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}) }), ledger }
+  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}), ...(output ? { output } : {}) }), ledger }
 }
 
 const expectCode = (fn: () => unknown, code: string) => {
@@ -65,8 +70,36 @@ describe('RemoteGateway', () => {
     expectCode(() => gw.submitIntent(stranger, { intentId: randomUUID() }), 'device_not_authorized')
     expectCode(() => gw.poll(stranger, { cursor: 0 }), 'device_not_authorized')
     expectCode(() => gw.runState(stranger, { runId: randomUUID() }), 'device_not_authorized')
+    expectCode(() => gw.pollOutput(stranger, { runId: randomUUID(), cursor: 0 }), 'device_not_authorized')
     expectCode(() => gw.submitIntent('not-a-hash', { intentId: randomUUID() }), 'device_not_authorized')
     expect(ledger.describe().events).toBe(0)
+  })
+
+  it('serves streamed output content only to an authorized device, honest-empty otherwise', async () => {
+    const { authority, deviceId } = await grantedAuthority()
+    const runId = randomUUID()
+    const src = new RunOutputLog()
+    src.append(runId, { kind: 'output', text: 'Hello from the agent' })
+    src.append(runId, { kind: 'tool', text: 'Edit /w/file.ts' })
+    const { gw } = gateway(authority, undefined, src)
+
+    const page = gw.pollOutput(CERT, { runId, cursor: 0 })
+    expect(page.chunks.map((c) => c.kind)).toEqual(['output', 'tool'])
+    expect(page.chunks[0].text).toBe('Hello from the agent')
+    // Strictly-after-cursor paging.
+    const after = gw.pollOutput(CERT, { runId, cursor: page.chunks[0].seq })
+    expect(after.chunks.map((c) => c.kind)).toEqual(['tool'])
+    // Unknown run => honest empty page at the same cursor, never fabricated.
+    expect(gw.pollOutput(CERT, { runId: randomUUID(), cursor: 0 })).toEqual({ chunks: [], cursor: 0 })
+    // Revoked device loses output access like every other op.
+    await authority.revoke(deviceId)
+    expectCode(() => gw.pollOutput(CERT, { runId, cursor: 0 }), 'device_not_authorized')
+  })
+
+  it('returns an honest empty output page when no output source is configured', async () => {
+    const { authority } = await grantedAuthority()
+    const { gw } = gateway(authority)
+    expect(gw.pollOutput(CERT, { runId: randomUUID(), cursor: 0 })).toEqual({ chunks: [], cursor: 0 })
   })
 
   it('lets an authorized owner device submit a durable intent and poll it', async () => {

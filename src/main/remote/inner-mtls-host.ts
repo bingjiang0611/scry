@@ -98,6 +98,11 @@ export class InnerMtlsHost {
         // revoked device gets device_not_authorized, never a stale list.
         return { projects: controller.listProjects(fingerprint) }
       }
+      if (request.op === 'output') {
+        // The assistant's real streamed output content for one run, after cursor.
+        if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor)) return { error: 'invalid_request' }
+        return { output: controller.runOutput(fingerprint, { runId: request.runId, cursor: request.cursor as number }) }
+      }
       return { error: 'unknown_op' }
     } catch (error) {
       // Authorization and ledger failures surface as truthful codes, never as
