@@ -21,10 +21,12 @@ const registry = new ProviderRegistry(adapters, { disabledProviders: new Set(), 
 // AppSession so the run shows up in the Mac session history.
 let catalogStarted = null
 let catalogSession = null
+let catalogArchive = null
 const start = createRemoteRunBinding({
   run: (providerId, request) => registry.run(providerId, { ...request, permissionMode: 'full_access' }),
   onRunStarted: (info) => { catalogStarted = info; console.log(`[catalog] onRunStarted scryRunId=${info.scryRunId} provider=${info.providerId}`) },
-  onRunSession: (info) => { catalogSession = info; console.log(`[catalog] onRunSession externalSessionId=${info.externalSessionId}`) }
+  onRunSession: (info) => { catalogSession = info; console.log(`[catalog] onRunSession externalSessionId=${info.externalSessionId}`) },
+  onRunArchive: (info) => { catalogArchive = info; console.log(`[catalog] onRunArchive status=${info.status} items=${info.items.length} (real trace events for the Mac transcript archive)`) }
 })
 
 const progress = []
@@ -43,6 +45,8 @@ try {
   if (!catalogStarted) { console.log('[check] ✗ onRunStarted never fired (Mac catalog would miss the run)'); process.exit(1) }
   if (!catalogSession || !catalogSession.externalSessionId) { console.log('[check] ✗ onRunSession/externalSessionId missing (not resumable on Mac)'); process.exit(1) }
   console.log(`[check] ✅ Mac-catalog bridge OK: pending recorded + real externalSessionId=${catalogSession.externalSessionId}`)
+  if (!catalogArchive || !Array.isArray(catalogArchive.items) || catalogArchive.items.length === 0) { console.log('[check] ✗ onRunArchive missing real trace items (Mac could not open the transcript)'); process.exit(1) }
+  console.log(`[check] ✅ Trace-archive bridge OK: ${catalogArchive.items.length} real events + status=${catalogArchive.status} keyed by ${catalogArchive.externalSessionId}`)
 } catch (e) {
   console.log(`\n[check] ✗ failed: ${e?.message || e}`)
   process.exit(1)

@@ -3656,6 +3656,27 @@ async function startRemoteHostIfEnabled(): Promise<void> {
             appSessionStore().record({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, externalSessionId, cwd, prompt })
             win?.webContents.send('remote:sessionRecorded', { cwd })
           } catch { /* catalog visibility is best-effort */ }
+        },
+        // Persist the run as a REAL Scry trace archive (same path a local,
+        // non-managed run uses) so the owner can OPEN the transcript on the Mac,
+        // not just see it listed. Managed recorder stays OFF for remote runs.
+        onRunArchive: ({ providerId, cwd, prompt, scryRunId, externalSessionId, items, status }) => {
+          const runtimeProvider = remoteProviderRuntime.get(providerId)
+          if (!runtimeProvider) return
+          void archiveTraceTurn({
+            providerId: providerId as ProviderId,
+            runtimeProvider,
+            cwd,
+            sessionId: externalSessionId,
+            runId: scryRunId,
+            userText: prompt,
+            items,
+            done: true,
+            status,
+            managedRecorderEnabled: false
+          })
+            .then(() => { win?.webContents.send('remote:sessionRecorded', { cwd }) })
+            .catch((error) => console.warn('[scry] remote trace archive write failed:', error))
         }
       }),
       // The phone's new-session picker chooses only among the host's already

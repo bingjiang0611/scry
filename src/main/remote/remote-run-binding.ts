@@ -42,6 +42,14 @@ export interface RemoteRunBindingDependencies {
   // Provider's own externalSessionId); nothing is fabricated.
   onRunStarted?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; agentProfileId?: string }): void
   onRunSession?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; externalSessionId: string; agentProfileId?: string }): void
+  // Persist the run as a REAL Scry trace archive so the owner can OPEN the
+  // conversation transcript on the Mac (not just see it listed). The binding
+  // hands over the REAL accumulated trace events + the Provider's own session id;
+  // index.ts builds the same trace archive a local run would (managed recorder
+  // OFF). Called once on a terminal run that produced a session id. Best-effort:
+  // a failed archive write never fails the run. Nothing is fabricated - these are
+  // the Provider's real streamed events.
+  onRunArchive?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; externalSessionId: string; agentProfileId?: string; items: TraceEvent[]; status: 'completed' | 'failed' | 'cancelled' | 'interrupted' }): void
 }
 
 export interface RemoteRunInput {
@@ -75,6 +83,12 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     // resumable session once the Provider reports its externalSessionId below.
     try { deps.onRunStarted?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, agentProfileId: routing.agentProfileId }) } catch { /* catalog visibility is best-effort; never fail the run */ }
     let lastErrorText: string | undefined
+    // Every REAL trace event, accumulated so the run can be written to the Scry
+    // trace archive (same evidence a local run produces), making it openable on
+    // the Mac. Separate from the `output` forwarding above (which is a bounded
+    // live view); this is the full turn content for the durable archive.
+    const items: TraceEvent[] = []
+    let capturedExternalSessionId: string | undefined
     // Whether the Provider streamed any assistant TEXT during the run. Some
     // Providers (e.g. qoder for a short turn) deliver the final answer only on
     // the terminal result event; without this we would drop the answer entirely
@@ -83,6 +97,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     // incrementally is never double-emitted.
     let sawAssistantText = false
     const emit = (ev: TraceEvent): void => {
+      items.push(ev)
       // Two distinct channels:
       //  - `progress`: opaque, non-secret lifecycle markers on the durable ledger.
       //  - `output`:   the assistant's REAL trace CONTENT (text/reasoning/tool),
@@ -133,6 +148,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       // approval mode; mapping a device-chosen mode is a later, explicit step.
       emit,
       onExternalSessionId: (externalSessionId) => {
+        capturedExternalSessionId = externalSessionId
         progress(marker({ event: 'session', externalSessionId }))
         // Bind the Provider's REAL session id into the Mac catalog so the owner
         // can open/resume the exact conversation on their Mac. Best-effort.
@@ -143,11 +159,19 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       requestUserInput: async () => { throw new Error('remote_interactive_input_unsupported') }
     })
     const result = await handle.promise
+    const status = result.status ?? 'completed'
+    // Write the durable trace archive from the REAL events so the Mac can open
+    // the transcript. Only when the Provider gave us its session id (the archive
+    // is keyed by it); a run that died before a session has nothing to key or
+    // resume. Best-effort - never let a catalog/archive write mask the run result.
+    if (capturedExternalSessionId) {
+      try { deps.onRunArchive?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId: capturedExternalSessionId, agentProfileId: routing.agentProfileId, items, status }) } catch { /* archive is best-effort */ }
+    }
     if (result.status === 'failed') {
       throw new Error(lastErrorText ? `provider_run_failed: ${lastErrorText}` : 'provider_run_failed')
     }
     // completed / interrupted / cancelled / stopped are all non-error terminals:
     // resolve so the dispatcher records an honest settlement (not a failure).
-    progress(marker({ event: 'settled', status: result.status ?? 'completed' }))
+    progress(marker({ event: 'settled', status }))
   }
 }

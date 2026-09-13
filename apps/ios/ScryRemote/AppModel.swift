@@ -66,12 +66,32 @@ final class AppModel: ObservableObject {
 
   var signedIn: Bool { if case .signedIn = auth { return true }; return false }
 
+  // A persisted PUBLIC connection descriptor means this device already paired
+  // (key + granted cert live in the Keychain); it does NOT need to scan a new QR.
+  var hasConnection: Bool { connections.load() != nil }
+  var connectionHost: String? { connections.load()?.relayHost }
+
+  init() {
+    // Restore the paired state on launch so an already-paired device is never
+    // forced to re-scan. Paired != reachable: we show .offline(host) until a real
+    // exchange proves the host is reachable (markReachable), never a fake dot.
+    if let host = connections.load()?.relayHost { link = .offline(host: host) }
+  }
+
+  // Honest connection status from the run channel: a real successful exchange
+  // proves reachability (.connected); a transport failure demotes to .offline.
+  // Only meaningful when a grant exists; never fabricates a connected dot.
+  func markReachable(_ ok: Bool) {
+    guard let host = connectionHost else { return }
+    link = ok ? .connected(host: host) : .offline(host: host)
+  }
+
   func statusText() -> String {
     switch link {
     case .notPaired: return "未连接 · 请在 Mac 上配对"
     case .pairing: return "配对中 · 等待 Mac 确认"
-    case .offline: return "离线 · 显示缓存"
-    case .connected: return "锁屏 · 系统醒着"
+    case .offline: return "已配对 · 尚未验证可达"
+    case .connected: return "已连接 · 主机可达"
     }
   }
 

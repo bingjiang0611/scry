@@ -71,10 +71,18 @@ struct SignInView: View {
       // from a Mac-issued device grant after scanning the QR.
       Button {
         model.auth = .signedIn(name: "本地调试")
-        model.link = .notPaired
-        model.route = .pair
+        // Already paired (persisted grant + Keychain creds)? Go straight to the
+        // new-session flow - do NOT force a redundant QR re-scan. Only an
+        // unpaired device lands on the pairing screen.
+        if model.hasConnection {
+          if let host = model.connectionHost { model.link = .offline(host: host) }
+          model.route = .newSession
+        } else {
+          model.link = .notPaired
+          model.route = .pair
+        }
       } label: {
-        Text("本地调试：跳过登录，去扫码配对")
+        Text(model.hasConnection ? "本地调试：进入（已配对）" : "本地调试：跳过登录，去扫码配对")
           .font(.system(size: 14, weight: .medium))
           .frame(maxWidth: .infinity, minHeight: 44)
           .foregroundStyle(Color.white)

@@ -99,7 +99,7 @@ struct HomeView: View {
     switch model.link {
     case .notPaired: return "尚未连接 Mac · 只能浏览界面，发送与审批已停用。"
     case .pairing: return "配对中 · 等待 Mac 上确认，尚未授予权限。"
-    case .offline: return "离线 · 可以阅读缓存，发送与审批已停用。"
+    case .offline: return "已配对 · 尚未验证与主机的连接；发送任务即会尝试连接。"
     case .connected: return ""
     }
   }
