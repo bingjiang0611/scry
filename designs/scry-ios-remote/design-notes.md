@@ -1,5 +1,44 @@
 # Scry iOS Remote · Design notes
 
+## v4 · 对齐 Codex 手机端 + 真实生命周期（needs-review · 当前方向）
+
+用户补充三张**真实 Codex 手机端**截图（首页“远程” / 会话 / 新会话）要求“参考 codex 手机端”。v3 的诚实生命周期没错，但把 Codex 的“会话”降级成了“状态页”，视觉偏离参考。v4 在 v2（本就照这三张做的 Codex 结构）基础上，**恢复三张 Codex 屏的外观**，同时把 v3 的诚实语义织回去：
+
+- 入口：`Scry iOS Remote v4.html`；`#home` / `#chat` / `#new` / `#run` 四个直达画面；design-tools 可切运行状态、项目来源、连接场景。
+- **首页**：沿用 Codex 极简结构（`已置顶` / `项目` 分组、无边框标题行、底部搜索 + 蓝色新建），**不加逐行状态芯片**——状态在会话/运行详情里表达。
+- **会话**：Codex 布局（圆形返回 + 标题副标题 + 编辑/更多胶囊、正文、Plain text 代码块、操作行、底部证据 chip + 输入条）。但正文**按真实 ledger 生命周期切换**：recorded/dispatched 显示诚实空态；running 显示实时进度条 + session；failed 显示主机原因码 + “启动 Provider 前 fail-closed，执行器从未运行”；settled 用 Codex 正文样式，但**顶部横幅明确“真实 Agent 正文与文件 diff 需接入输出流式通道，本页不编造”**。证据 chip 为 `运行详情` / `文件证据·需流式通道` / Provider 名，不再伪造 `24 个文件 +1308 −2`。
+- **运行详情（次级页，收纳 v3 时间线）**：provenance（ledgerRunId↔scryRunId、token/费用/文件“未提供不显示为 0”）+ 只由 ledger 事件构成的时间线（bound/started/session/result）。
+- **新会话**：Codex 步进器四行（主机/项目/本地/分支）+ 输入条（+、橙色盾牌、gauge、发送）。项目行/选择器来源为**主机已授权目录**，三态 读取中/列表/空；空态明确“手机不能自行授权新目录”。提交需已选授权项目，提交只到 `recorded`，toast 说明 recorded≠已执行。
+
+### v4 关键设计决策（需用户确认）
+
+1. **诚实冲突已显式化**：Codex 会话页渲染完整 Agent 正文 + 真实文件证据（`24 个文件 +1308 −2`）。Scry 当前远程通道**只同步 ledger 生命周期，不含正文/diff**。要“视觉+行为都像 Codex”，必须**新增运行输出/trace 的流式传输通道**（比已做的 ledger 轮询更大的一块）。v4 用 Codex 布局 + 诚实横幅呈现这一目标态，绝不编造正文。**待确认：是否投入做输出流式通道。**
+2. 首页保持 Codex 极简、无逐行状态芯片（与截图②一致）。
+3. 项目选择器强约束在主机已授权目录，手机不能新授权。
+
+### v4 实际验证 / 缺口
+- Node `vm.Script` 语法编译通过；`git diff --check` 干净；loopback HTTP 200。
+- headless Chrome 桌面画框视图截取 首页 / 会话(settled) / 运行详情(running) / 新会话 渲染正确，与三张 Codex 参考屏对齐。**未**做真机 Safari、safe-area、系统键盘、动态字体、VoiceOver、横竖屏、深浅色、390px full-bleed 像素核对。
+- 设计-实现对齐证据：设备侧 run 客户端 + `relay-run-smoke.mjs` 已实测 授权 cwd→settled、未授权 cwd→failed(执行器不运行)；v4 的失败态/时间线与实测逐字一致。
+- **未接入**：真实 APNs、主机 `projects` 列表 op（设计假设其存在，实现尚未提供）、**运行输出/trace 流式传输通道**（会话正文正文所需）、SwiftUI 生产接线。**needs-review：方向待用户确认后再接生产。**
+- 参考来源：真实 Codex iOS 首页/会话/新会话三张截图（含私人信息，不入库/Git）。
+
+## v3 · 真实运行生命周期（needs-review · 已被 v4 收纳）
+
+v2 对齐了 Codex 的结构，但它渲染的是**编造的运行结果**（假 diff、"16:24 示例"回复、mock "运行中/completed"）。v3 的唯一目的：把界面接到**真实协议**——设备侧 run 客户端只能 `submit` 意图 + `poll` 主机 ledger，得到的状态严格是 `recorded → dispatched → run_progress* → settled/failed/cancelled`。这不是换色，是让 UI 只呈现能证明的事实。
+
+- 入口：`Scry iOS Remote v3.html`，`#home` / `#run` / `#new` 三屏；design-tools 可切运行状态与项目来源。
+- **任务列表**：每行的状态芯片直接映射 ledger lifecycle，文案区分 "已记录·未执行 / 已派发 / 运行中 / 已完成 / 失败 / 已取消"，不把 recorded 显示成成功。
+- **运行详情（核心新屏）**：垂直时间线**只由 ledger 事件构成**，逐条显示 seq/时间/kind/detail；progress 步显示主机绑定发出的真实非机密标记（correlation / bound / started / session / result），并把 ledgerRunId↔scryRunId 关联作为 provenance。token/费用/文件证据**未提供时不显示为 0**。失败态显示主机原因码（如 `invalid_target`）并说明"启动 Provider 前 fail-closed，执行器从未运行"——与 `relay-run-smoke` 实测行为逐字一致。
+- **新建任务**：项目选择器来源为**主机已授权目录**，有 读取中 / 列表 / 空 三态；空态明确"手机不能自行授权新目录，请在 Mac 授权"，反映真实信任边界。提交只到 `recorded`，toast 明说 "recorded ≠ 已执行"。
+- 停止是**请求**，需主机确认，不伪造 "已结束"。
+
+### v3 实际验证 / 缺口
+- Node `vm.Script` 对抽出的 inline script 语法编译通过；`git diff --check` 干净；本机 loopback HTTP 入口 200。
+- 用本机 headless Chrome（`--window-size=920,900`）截取任务列表 / 运行详情(running) / 运行详情(failed) / 新建任务 / 项目选择器(空) 五张，桌面画框视图渲染正确。**未**做真机 Safari、safe-area、系统键盘、动态字体、VoiceOver、横竖屏或 390px full-bleed 的像素核对（2x 窄窗截图出现水平溢出裁切，桌面画框视图正常，待真机复核）。
+- 设计与实现对齐证据：设备侧 run 客户端 + `relay-run-smoke.mjs` 已实测 授权 cwd→settled、未授权 cwd→failed(执行器不运行)；v3 的状态词表与时间线严格对应该实测。
+- 未接入：真实 APNs、主机 `projects` 列表操作（设计假设其存在，实现尚未提供该 op）、真实提交所需的 SwiftUI 接线。**needs-review：方向待用户确认后再接生产。**
+
 ## 当前方向：v2 · Codex 结构对齐
 
 用户要求“UI与codex对齐”，指定三张移动端截图。此要求替代 v1 A/B 卡片结构，不再推荐旧 A；不代表用户已经验收 v2。

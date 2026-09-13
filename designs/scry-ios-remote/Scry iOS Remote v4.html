@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Scry Remote · Codex 对齐原型 v2</title>
+  <link rel="icon" href="icon.png">
+  <style>
+    :root { color-scheme: light; --ink: #101112; --muted: #929395; --line: #e5e5e7; --blue: #3884f4; --green: #54b583; --amber: #b76d30; --glass: rgba(250,250,250,.89); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { color: var(--ink); background: #ededee; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif; -webkit-font-smoothing: antialiased; }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    button:disabled { opacity: .36; cursor: not-allowed; }
+    button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+    button, a { touch-action: manipulation; }
+    svg { width: 24px; height: 24px; flex: 0 0 auto; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    p, h1, h2, h3 { margin: 0; }
+    .stage { display: grid; place-items: center; min-height: 100dvh; padding: 16px; }
+    #app { position: relative; width: 390px; height: min(844px, calc(100dvh - 32px)); min-height: 450px; overflow: hidden; background: #fff; border-radius: 38px; border: 1px solid #dedee0; box-shadow: 0 18px 64px #0000000a; padding: 24px 0 12px; }
+    .screen { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+    .header { display: flex; align-items: center; gap: 12px; flex-shrink: 0; min-height: 66px; padding: 6px 14px 10px; background: #fff; z-index: 2; }
+    .circle, .capsule, .search-bar, .composer, .evidence-chip { border: 1px solid #e1e1e3; background: var(--glass); box-shadow: inset 0 1px 2px #fff, 0 5px 16px #00000004; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+    .circle { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex: 0 0 44px; padding: 0; border-radius: 50%; }
+    .circle svg { width: 26px; height: 26px; }
+    .plain-icon { min-width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0; flex-shrink: 0; }
+    .header-title { min-width: 0; flex: 1; }
+    .header-title h1 { font-size: 17px; line-height: 24px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    .home-title { text-align: center; }
+    .host-caption, .subtitle { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 12px; line-height: 19px; }
+    .host-caption { margin: auto; max-width: 100%; padding: 0; justify-content: center; }
+    .host-caption span:last-child, .subtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .host-caption svg { width: 15px; height: 15px; }
+    .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+    .dot.offline { background: #aaa; }
+    .dot.attention { background: var(--amber); }
+    .capsule { display: flex; border-radius: 28px; padding: 0 3px; }
+    .scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; min-height: 0; scrollbar-width: none; }
+    .scroll::-webkit-scrollbar { display: none; }
+    .home-list { padding: 7px 19px 100px; }
+    .section-label { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 620; min-height: 40px; padding: 0; }
+    .section-label svg { width: 13px; height: 13px; color: var(--muted); }
+    .thread-row { width: 100%; min-height: 51px; padding: 11px 0; display: flex; align-items: center; gap: 9px; text-align: left; font-size: 17px; letter-spacing: -.25px; line-height: 26px; }
+    .thread-row .thread-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .thread-row:hover, .context-row:hover { color: #555; }
+    .projects { margin-top: 20px; }
+    .project-heading { display: flex; align-items: center; gap: 12px; margin-top: 15px; }
+    .project-toggle { padding: 0; min-height: 48px; display: flex; align-items: center; gap: 12px; font-size: 17px; font-weight: 550; flex: 1; text-align: left; }
+    .project-heading .plain-icon { color: var(--muted); }
+    .project-threads { padding-left: 35px; }
+    .home-dock { position: absolute; inset: auto 0 0; display: flex; align-items: center; gap: 10px; padding: 14px 20px max(22px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, #ffffffee 28%); z-index: 3; }
+    .search-bar { display: flex; align-items: center; flex: 1; min-width: 0; height: 48px; border-radius: 30px; padding: 0 13px; gap: 9px; }
+    .search-bar input { background: none; border: 0; min-width: 0; width: 100%; outline: none; font-size: 17px; }
+    input::placeholder, textarea::placeholder { color: #a8a8ad; }
+    .blue-circle { background: var(--blue); border-color: #5798f7; box-shadow: inset 0 1px 2px #ffffff55; color: white; width: 48px; height: 48px; flex-basis: 48px; }
+    .notice { margin: 0 16px 9px; padding: 9px 11px; font-size: 12px; line-height: 19px; border-radius: 12px; background: #f5f5f5; color: #626264; flex-shrink: 0; }
+    .notice.warning { background: #fcf6ed; color: #996126; }
+    .notice button { padding: 0; text-decoration: underline; font-size: inherit; color: inherit; min-height: 28px; }
+    .new-header { min-height: 62px; }
+    .new-body { display: flex; flex-direction: column; padding: 0 24px 10px; }
+    .context-list { margin-top: auto; padding-top: 56px; }
+    .context-row { display: flex; align-items: center; gap: 13px; min-height: 47px; width: 100%; text-align: left; padding: 0; font-size: 17px; color: #626264; }
+    .context-row > svg { width: 21px; height: 21px; color: #909193; }
+    .context-row .chevrons { color: #c4c4c6; width: 12px; height: 16px; margin-left: -7px; }
+    .compose-footer { padding: 10px 11px max(14px, env(safe-area-inset-bottom)); flex-shrink: 0; }
+    .composer { border-radius: 28px; padding: 12px 13px 7px; background: #fcfcfce8; box-shadow: inset 0 3px 7px #ffffff, 0 8px 22px #00000005; }
+    .composer textarea { width: 100%; background: transparent; border: 0; outline: none; resize: none; padding: 2px 1px 4px; font-size: 17px; line-height: 25px; min-height: 40px; max-height: 150px; }
+    .compose-actions { display: flex; align-items: center; gap: 3px; margin: 0 -4px; }
+    .spacer { flex: 1; }
+    .shield { color: #bc672e; }
+    .send { background: var(--blue); color: #fff; border: 0; width: 36px; height: 36px; flex-basis: 36px; box-shadow: none; }
+    .send:disabled { background: #dedee0; color: white; opacity: 1; }
+    .send svg { width: 24px; height: 24px; stroke-width: 2.4; }
+    .chat-scroll { padding: 6px 16px 24px; font-size: 17px; line-height: 1.65; overflow-wrap: anywhere; }
+    .chat-scroll p { margin: 0 0 19px; }
+    .chat-scroll h2 { margin: 24px 0 9px; font-size: 17px; font-weight: 650; }
+    .chat-scroll ul { margin: 0 0 24px; padding-left: 23px; }
+    .chat-scroll li { margin: 4px 0; }
+    .inline-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #8c8c92; font-size: .94em; }
+    .code-block { background: #f8f8f8; border: 1px solid #e9e9e9; border-radius: 23px; margin: 16px 0 26px; padding: 3px 14px 17px; }
+    .code-label { display: flex; align-items: center; justify-content: space-between; min-height: 42px; font-size: 13px; font-weight: 550; }
+    .code-block pre { margin: 3px 0 0; white-space: pre-wrap; font-size: 13px; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .response-actions { display: flex; align-items: center; gap: 2px; color: #67676a; margin: 8px -6px 0; }
+    .response-actions .plain-icon { min-width: 29px; width: 29px; }
+    .response-actions svg { width: 18px; height: 18px; }
+    .response-actions time { font-size: 12px; margin-left: 9px; }
+    .response-actions [aria-pressed="true"] { color: var(--blue); }
+    .thread-footer { flex-shrink: 0; padding: 8px 20px max(20px, env(safe-area-inset-bottom)); background: #fafafa; box-shadow: 0 -16px 26px #fafafa; z-index: 1; }
+    .evidence { display: flex; gap: 7px; justify-content: center; margin: 0 0 15px; }
+    .evidence-chip { display: inline-flex; gap: 7px; align-items: center; min-height: 32px; padding: 4px 12px; border-radius: 22px; font-size: 12px; color: #67676a; }
+    .evidence-chip svg { width: 16px; height: 16px; }
+    .positive { color: #527f3c; }
+    .negative { color: #b95d60; }
+    .compact-composer { display: flex; align-items: center; padding: 2px 7px; border-radius: 32px; min-height: 49px; gap: 4px; }
+    .compact-composer textarea { flex: 1; min-width: 0; width: auto; min-height: 31px; height: 31px; padding: 3px 0; line-height: 25px; }
+    .compact-composer .plain-icon { min-width: 36px; width: 36px; }
+    .user-message { margin: 24px 0 10px 34px; padding: 12px 17px; border-radius: 22px; background: #f0f0f0; white-space: pre-wrap; }
+    .receipt { text-align: right; font-size: 12px; color: #8a8a8c; margin: 0 3px 20px; }
+    .empty { padding: 60px 20px; text-align: center; color: #919194; font-size: 15px; line-height: 1.6; }
+    .simple-body { padding: 14px 20px 35px; }
+    .list-button { min-height: 54px; display: flex; align-items: center; gap: 13px; width: 100%; text-align: left; padding: 9px 0; font-size: 16px; border-bottom: 1px solid #f0f0f0; }
+    .list-button .detail { color: var(--muted); font-size: 13px; margin-left: auto; }
+    .list-button small { color: #8a8a8c; font-size: 12px; display: block; margin-top: 3px; }
+    .list-button.selected { color: var(--blue); }
+    .muted { color: #8b8b8e; font-size: 13px; line-height: 1.6; }
+    .fine { font-size: 12px; color: #919194; }
+    .group-title { margin: 24px 0 6px; font-weight: 600; font-size: 14px; }
+    .diff { background: #f8f8f8; border: 1px solid var(--line); border-radius: 15px; overflow: hidden; margin-top: 20px; font-size: 12px; }
+    .diff-title { padding: 13px 12px; word-break: break-all; border-bottom: 1px solid var(--line); }
+    .diff pre { margin: 0; padding: 11px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .diff .removed { color: #986067; background: #fceff0; }
+    .diff .added { color: #557645; background: #eef5e9; }
+    .terminal { padding: 18px; margin-top: 15px; background: #f7f7f8; border-radius: 18px; color: #39393b; font: 12px/1.9 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    .terminal-form { display: flex; gap: 8px; margin-top: 16px; }
+    .terminal-form input { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; }
+    .text-button { min-height: 44px; padding: 7px 0; color: var(--blue); font-size: 14px; }
+    .danger { color: #be4a43; }
+    /* --- Honest run lifecycle (chip / status strip / timeline) --- */
+    .run-status { margin: 2px 0 14px; }
+    .state-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 20px; font-size: 12px; font-weight: 550; white-space: nowrap; background: #f2f2f4; color: #6a6a6d; }
+    .state-chip .dot { width: 7px; height: 7px; }
+    .state-recorded { background: #f0f0f2; color: #6a6a6d; } .state-recorded .dot { background: #b6b6bb; }
+    .state-dispatched { background: #eef4fe; color: #3a6fbf; } .state-dispatched .dot { background: var(--blue); }
+    .state-running { background: #eef4fe; color: #2f6bd0; } .state-running .dot { background: var(--blue); animation: pulse 1.4s ease-in-out infinite; }
+    .state-settled { background: #edf5ea; color: #4d7a3a; } .state-settled .dot { background: var(--green); }
+    .state-failed { background: #fceff0; color: #ab5157; } .state-failed .dot { background: var(--red, #b95d60); }
+    .state-cancelled { background: #f0f0f2; color: #77777b; } .state-cancelled .dot { background: #9a9a9e; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .28; } }
+    @media (prefers-reduced-motion: reduce) { .state-running .dot { animation: none; } }
+    .lifestrip { margin: 12px 0 4px; padding: 10px 12px; background: #f7f7f8; border-radius: 12px; font-size: 13px; color: #5a5a5e; }
+    .lifestrip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #57575a; }
+    .provenance { margin: 4px 20px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 15px; background: #fafafa; font-size: 12px; line-height: 1.65; color: #6c6c70; }
+    .provenance b { color: #48484b; font-weight: 600; } .provenance code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; color: #57575a; }
+    .timeline { list-style: none; margin: 16px 0 0; padding: 0 20px 30px; } .timeline.scroll { flex: 1; }
+    .step { position: relative; padding: 0 0 22px 26px; }
+    .step::before { content: ''; position: absolute; left: 4px; top: 16px; bottom: -4px; width: 2px; background: #ececee; } .step:last-child::before { display: none; }
+    .step .marker { position: absolute; left: 0; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: #cfcfd3; box-shadow: 0 0 0 3px #fff; }
+    .step.done .marker { background: var(--blue); } .step.settled .marker { background: var(--green); } .step.failed .marker { background: var(--red, #b95d60); } .step.current .marker { background: var(--blue); animation: pulse 1.4s ease-in-out infinite; }
+    .step .kind { font-size: 15px; font-weight: 570; letter-spacing: -.2px; } .step .when { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .step .detail { margin-top: 7px; padding: 8px 11px; background: #f7f7f8; border-radius: 11px; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: #55555a; white-space: pre-wrap; overflow-wrap: anywhere; } .step .detail .k { color: #9a9a9e; }
+    .scrim { position: absolute; inset: 0; background: #00000030; z-index: 20; display: flex; align-items: flex-end; }
+    .sheet { width: 100%; max-height: calc(100% - 45px); overflow-y: auto; overscroll-behavior: contain; background: #fff; border-radius: 29px 29px 0 0; padding: 10px 22px max(24px, env(safe-area-inset-bottom)); box-shadow: 0 -8px 35px #0000000b; }
+    .grabber { width: 34px; height: 4px; margin: 0 auto 12px; border-radius: 5px; background: #d4d4d6; }
+    .sheet-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 13px; }
+    .sheet h2 { flex: 1; font-size: 20px; font-weight: 620; }
+    .sheet .close-sheet { width: 30px; height: 30px; flex-basis: 30px; background: #f3f3f4; border: 0; }
+    .close-sheet svg { width: 17px; height: 17px; }
+    .sheet .muted { margin: 10px 0 18px; }
+    .sheet code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+    .command { padding: 15px; background: #f6f6f7; border-radius: 14px; margin: 12px 0; }
+    .sheet-actions { display: flex; gap: 10px; margin-top: 24px; }
+    .sheet-actions button { flex: 1; min-height: 46px; border-radius: 24px; background: #f0f0f1; font-size: 15px; font-weight: 550; }
+    .sheet-actions .primary { background: #161719; color: #fff; }
+    .sheet-actions .danger-fill { background: #b84e45; color: #fff; }
+    .toast { position: absolute; z-index: 30; top: 90px; left: 22px; right: 22px; border-radius: 16px; background: #27282cee; color: white; padding: 12px 15px; font-size: 13px; line-height: 1.5; box-shadow: 0 5px 16px #0002; pointer-events: none; }
+    .design-tools { position: fixed; top: 20px; left: 20px; z-index: 40; width: 235px; font-size: 12px; color: #6c6c71; }
+    .design-tools summary { cursor: pointer; min-height: 30px; }
+    .design-tools .panel { margin-top: 10px; padding: 14px; border: 1px solid #ddd; border-radius: 16px; background: #fafafa; }
+    .design-tools .routes { display: flex; flex-wrap: wrap; gap: 5px; margin: 12px 0; }
+    .design-tools button { border: 1px solid #ddd; background: white; border-radius: 7px; padding: 7px; font-size: 11px; }
+    .design-tools label { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+    .design-tools select { width: 135px; font-size: 11px; padding: 6px; }
+    .design-tools a { color: inherit; }
+    .design-caption { position: fixed; bottom: 18px; left: 20px; font-size: 11px; color: #9b9ba0; line-height: 1.7; }
+    @media (max-width: 850px) { .design-tools { width: 170px; top: 8px; left: 8px; } .design-tools:not([open]) { width: auto; background: #f8f8f8dd; border-radius: 8px; padding: 3px 6px; } .design-caption { display: none; } }
+    @media (max-width: 520px) {
+      body { background: #fff; }
+      .stage { padding: 0; }
+      #app { width: 100vw; height: 100dvh; min-height: 0; border: 0; border-radius: 0; box-shadow: none; padding: env(safe-area-inset-top) 0 0; }
+      .design-tools { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <details class="design-tools">
+    <summary>Scry iOS · Codex 对齐 + 真实生命周期 v4</summary>
+    <div class="panel">交互原型 · 模拟数据，状态严格对齐真实 ledger
+      <div class="routes"><button data-page="home">首页</button><button data-page="new">新会话</button><button data-page="chat">会话</button><button data-page="run">运行详情</button></div>
+      <label>运行状态 <select id="runlife"><option value="settled">已完成</option><option value="running">运行中</option><option value="recorded">仅已记录</option><option value="dispatched">已派发</option><option value="failed">失败（未授权 cwd）</option><option value="cancelled">已取消</option></select></label>
+      <label>项目来源 <select id="projsrc"><option value="loaded">主机已授权项目</option><option value="loading">读取中</option><option value="empty">无已授权项目</option></select></label>
+      <label>连接 <select id="scenario"><option value="online">已连接 · 锁屏醒着</option><option value="offline">离线</option><option value="stale">Hook 指纹变化</option><option value="revoked">设备已撤销</option><option value="empty">空列表</option><option value="long">长标题</option></select></label>
+      <p>会话正文按 Codex 布局呈现，但真实 Agent 正文/文件 diff 需接入输出流式通道，本稿不编造。运行状态、provenance、项目选择器均对齐真实协议。</p>
+      <p><a href="Scry%20iOS%20Remote%20v2.html">← v2 结构对齐稿</a> · <a href="Scry%20iOS%20Remote%20v3.html">v3 生命周期稿</a></p>
+    </div>
+  </details>
+  <div class="stage"><div id="app" aria-label="Scry iOS 交互原型，模拟数据"></div></div>
+  <div class="design-caption">390 × 844 · 中文示例 · needs-review<br>Codex 结构对齐 / 真实 ledger 生命周期 / 诚实证据语义</div>
+  <script>
+    (() => {
+      'use strict'
+      const paths = {
+        back: '<path d="m14 5-7 7 7 7"/>', menu: '<path d="M4 7h16M4 16h11"/>',
+        more: '<circle cx="5" cy="12" r="1.1" fill="currentColor"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/><circle cx="19" cy="12" r="1.1" fill="currentColor"/>',
+        laptop: '<rect x="4" y="4" width="16" height="13" rx="1.5"/><path d="M2 19h20l-1 1H3z"/>',
+        folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v1M3 7h16a2 2 0 0 1 2 2l-2 10H3L2 9a2 2 0 0 1 1-2z"/>',
+        branch: '<circle cx="7" cy="5" r="2"/><circle cx="17" cy="5" r="2"/><circle cx="7" cy="19" r="2"/><path d="M7 7v10M17 7c0 6-10 2-10 7"/>',
+        chevrons: '<path d="m7 8 5-5 5 5M7 16l5 5 5-5"/>', down: '<path d="m6 9 6 6 6-6"/>',
+        compose: '<path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6M14 5l4-4 4 4-11 11-5 1 1-5z"/>',
+        search: '<circle cx="10.5" cy="10.5" r="7.5"/><path d="m16 16 5 5"/>', plus: '<path d="M12 4v16M4 12h16"/>',
+        shield: '<path d="m12 2 8 4v6c0 5-8 9-8 9s-8-4-8-9V6zM12 7v5M12 16v.1"/>',
+        gauge: '<path d="M3 19a10 10 0 1 1 18 0"/><path d="m13 12 4-6"/><circle cx="11" cy="15" r="2.5"/>',
+        send: '<path d="M12 20V4m-7 7 7-7 7 7"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>',
+        copy: '<rect x="3" y="7" width="13" height="15" rx="3"/><path d="M8 7V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-3"/>',
+        like: '<path d="M8 10v11H3V10zM8 10l5-8c3 1 1 7 1 7h5c3 0 2 4 1 6l-2 6H8"/>',
+        dislike: '<path d="M8 14V3H3v11zM8 14l5 8c3-1 1-7 1-7h5c3 0 2-4 1-6l-2-6H8"/>',
+        agent: '<rect x="3" y="8" width="18" height="12" rx="5"/><path d="M12 4v4M8 12v3M16 12v3"/><circle cx="12" cy="3" r="1"/>',
+        terminal: '<rect x="2" y="4" width="20" height="16" rx="3"/><path d="m6 9 3 3-3 3M12 15h5"/>',
+        file: '<path d="M14 2H5v20h14V7zm0 0v5h5M8 12h8M8 16h5"/>',
+        bell: '<path d="M6 9a6 6 0 0 1 12 0v6l2 3H4l2-3zM10 21h4"/>',
+        check: '<path d="m5 12 4 4L19 6"/>', stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+        link: '<path d="m9 15 6-6M8 16l-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 8l2-2a4 4 0 1 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(2 0) scale(.85)"/>'
+      }
+      const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.file}</svg>`
+      const esc = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+      const btn = (name, action, label, cls = 'plain-icon', disabled = false) => `<button class="${cls}" data-action="${action}" aria-label="${label}" ${disabled ? 'disabled' : ''}>${icon(name)}</button>`
+      const tasks = [
+        { id: 'checkout', title: '优化结算页加载状态', provider: 'Claude Code', model: 'Opus', status: 'running' },
+        { id: 'approval', title: '补充结算页回归测试', provider: 'Claude Code', model: 'Opus', status: 'attention' },
+        { id: 'copy', title: '调整空购物车文案', provider: 'Codex', model: 'Mac 上配置的模型', status: 'completed' },
+        { id: 'review', title: '审阅组件边界与依赖', provider: 'Codex', model: 'Mac 上配置的模型', status: 'completed' },
+        { id: 'mobile', title: '修复移动端页面布局', provider: 'Claude Code', model: 'Opus', status: 'completed' },
+        { id: 'notes', title: '整理本周的更新说明', provider: 'Claude Code', model: 'Opus', status: 'completed' }
+      ]
+      // Project picker source = the host's AUTHORIZED project directories. The
+      // phone cannot authorize a new directory; only the Mac can. Three honest
+      // states: loading / list / empty.
+      const projectsData = { loaded: [{ path: '/Projects/storefront', label: 'storefront' }, { path: '/Projects/docs-site', label: 'docs-site' }, { path: '/Work/scry', label: 'scry' }], loading: null, empty: [] }
+      const authorizedProjects = () => projectsData[s.projsrc]
+      const chosenProject = () => { const src = authorizedProjects(); return src && src.find(p => p.path === s.chosenProject) }
+      const s = { page: 'home', modal: null, task: 'checkout', host: 'Studio Mac', project: 'storefront', branch: 'main', online: true, revoked: false, approvalChanged: false,
+        scenario: 'online', query: '', pinned: true, expanded: true, draft: '', terminalDraft: '', terminalOwner: 'desktop', terminalPending: false,
+        stopRequests: {}, replies: {}, reviewed: false, messages: {}, pending: {}, notifications: true, reaction: null, file: 0,
+        nextProvider: 'Claude Code', nextModel: 'Opus', fullAccess: true, toast: '',
+        runlife: 'settled', projsrc: 'loaded', chosenProject: '/Projects/storefront' }
+      const app = document.querySelector('#app')
+      let toastTimer
+      let lastModal = null
+      let returnFocusAction = null
+      const connected = () => s.online && !s.revoked && s.host === 'Studio Mac'
+      const task = () => tasks.find(item => item.id === s.task) || tasks[0]
+      const title = item => s.scenario === 'long' && item.id === 'checkout' ? '优化结算页加载状态，并检查较长标题在小屏幕和大字号下的截断表现' : item.title
+      const statusText = () => s.revoked ? '设备授权已撤销' : connected() ? '锁屏 · 系统醒着' : '离线 · 显示缓存'
+      const notice = () => !connected() ? `<div class="notice">${s.revoked ? '设备授权已撤销。重新连接不会恢复权限。' : '离线 · 可以阅读缓存，发送与审批已停用。'}</div>` : ''
+      const backHeader = (heading, sub = '') => `<header class="header">${btn('back', 'back', '返回', 'circle')}<div class="header-title"><h1>${esc(heading)}</h1>${sub ? `<div class="subtitle">${esc(sub)}</div>` : ''}</div></header>`
+      const row = item => `<button class="thread-row" data-action="thread" data-id="${item.id}"><span class="thread-name">${esc(title(item))}</span>${item.status === 'attention' && !s.replies[item.id] ? '<span class="dot attention" aria-label="项目 Hook 待审批"></span>' : ''}</button>`
+      function home() {
+        const matches = tasks.filter(item => (item.host || 'Studio Mac') === s.host && (item.project || 'storefront') === s.project && title(item).includes(s.query.trim()))
+        const visible = s.scenario === 'empty' ? [] : matches
+        return `<div class="screen"><header class="header">${btn('menu', 'navigation', '打开导航', 'circle')}<div class="header-title home-title"><h1>远程</h1><button class="host-caption" data-action="hosts"><span class="dot ${connected() ? '' : 'offline'}"></span>${icon('laptop')}<span>${esc(s.host)}</span></button></div>${btn('more', 'home-menu', '更多选项', 'circle')}</header>${notice()}
+          <main class="scroll home-list">${visible.length ? `<button class="section-label" data-action="toggle-pinned" aria-expanded="${s.pinned}">已置顶 ${icon('down')}</button>${s.pinned ? visible.map(row).join('') : ''}<section class="projects"><h2 class="section-label">项目</h2><div class="project-heading"><button class="project-toggle" data-action="toggle-project" aria-expanded="${s.expanded}">${icon('folder')}<span>${esc(s.project)}</span></button>${btn('compose', 'new', '在此项目中新建会话')}</div>${s.expanded ? `<div class="project-threads">${visible.slice(0, 3).map(row).join('')}</div>` : ''}</section>` : `<div class="empty">${s.host !== 'Studio Mac' ? '这台电脑的会话未缓存' : s.query ? '没有匹配的聊天' : '还没有会话'}<br><span class="fine">${s.host !== 'Studio Mac' ? '连接后才能读取，不能视为没有会话' : s.query ? '试试其他关键词' : '从右下角开始一项新任务'}</span></div>`}</main>
+          <footer class="home-dock"><label class="search-bar">${icon('search')}<input id="search" aria-label="搜索聊天" placeholder="搜索聊天" value="${esc(s.query)}" autocomplete="off"></label>${btn('compose', 'new', '新建会话', 'circle blue-circle', !connected())}</footer></div>`
+      }
+      const contextRow = (name, text, action) => `<button class="context-row" data-action="${action}">${icon(name)}<span>${esc(text)}</span>${icon('chevrons', 'chevrons')}</button>`
+      function newThread() {
+        return `<div class="screen"><header class="header new-header">${btn('back', 'home', '返回会话列表', 'circle')}</header>${notice()}<main class="scroll new-body"><div class="context-list">
+          ${contextRow('laptop', s.host, 'hosts')}${contextRow('folder', s.projsrc === 'loading' ? '项目·读取中…' : chosenProject() ? chosenProject().label : '项目·需选择', 'projects')}${contextRow('laptop', '在本地工作', 'workspace')}${contextRow('branch', s.branch, 'branches')}
+          </div></main><footer class="compose-footer"><div class="composer"><textarea id="composer" rows="2" aria-label="新任务内容" placeholder="在 ${esc(s.host)} 上工作" ${!connected() ? 'disabled' : ''}>${esc(s.draft)}</textarea><div class="compose-actions">${btn('plus', 'attachments', '附件')}${btn('shield', 'permissions', '权限模式', 'plain-icon shield')}<span class="spacer"></span>${btn('gauge', 'controls', 'Provider 和模型')}${btn('send', 'send-new', '发送新任务', 'circle send', !connected() || !s.draft.trim() || !chosenProject())}</div></div></footer></div>`
+      }
+      const replyPending = () => Boolean(s.replies[s.task])
+      function approvalNotice() {
+        if (task().status !== 'attention') return ''
+        return `<div class="notice warning">${replyPending() ? '审批回复已提交 · 等待主机确认' : '项目 Hook 需要授权'} · <button data-action="approval">${replyPending() ? '查看' : '审阅'}</button></div>`
+      }
+      // Honest run lifecycle, switched by design-tools. Mirrors the real ledger:
+      // recorded -> dispatched -> run_progress* -> settled/failed/cancelled.
+      const STATE = { recorded: { cls: 'state-recorded', label: '已记录 · 未执行' }, dispatched: { cls: 'state-dispatched', label: '已派发' }, running: { cls: 'state-running', label: '运行中' }, settled: { cls: 'state-settled', label: '已完成' }, failed: { cls: 'state-failed', label: '失败' }, cancelled: { cls: 'state-cancelled', label: '已取消' } }
+      const chip = life => `<span class="state-chip ${STATE[life].cls}"><span class="dot"></span>${STATE[life].label}</span>`
+      const lifecycleEvents = life => {
+        const base = [{ kind: '意图已记录', at: '16:24:02', body: null }]
+        if (life === 'recorded') return base
+        const d = [...base, { kind: '主机已派发', at: '16:24:02', body: null }]
+        if (life === 'dispatched') return d
+        if (life === 'failed') return [...d, { kind: '失败', at: '16:24:03', body: { code: 'invalid_target' } }]
+        const p = [...d, { kind: '进度 · bound', at: '16:24:03', body: { scryRunId: '5f3a…c1d' } }, { kind: '进度 · started', at: '16:24:04', body: null }, { kind: '进度 · session', at: '16:24:06', body: { externalSessionId: 'sess_9b2f' } }]
+        if (life === 'running') return p
+        if (life === 'cancelled') return [...p, { kind: '已取消', at: '16:24:40', body: null }]
+        return [...p, { kind: '进度 · result', at: '16:25:11', body: { isError: false } }, { kind: '已完成', at: '16:25:11', body: null }]
+      }
+      // The remote channel today syncs the ledger LIFECYCLE, not the assistant's
+      // output text or real diffs. The body reflects the true state and never
+      // fabricates an answer; streaming the run output/trace is separate transport
+      // work, and the settled body says so and links to 运行详情 for the evidence.
+      function response() {
+        if (task().id.startsWith('new-')) return '<div class="empty">意图已记录，等待主机派发。<br><span class="fine">recorded ≠ Agent 已开始执行</span></div>'
+        const life = s.runlife
+        const head = `<div class="run-status">${chip(life)}</div>`
+        if (life === 'recorded') return head + '<div class="empty">意图已记录 · 未执行<br><span class="fine">等待主机派发到执行器</span></div>'
+        if (life === 'dispatched') return head + '<div class="empty">已派发 · 主机已接受<br><span class="fine">等待执行器开始，尚无输出</span></div>'
+        if (life === 'failed') return head + `<p class="muted">主机在启动 Provider 前 fail-closed 拒绝（未授权工作区），执行器从未运行。</p><div class="code-block"><div class="code-label">主机原因码</div><pre>invalid_target</pre></div><button class="text-button" data-action="run">查看运行详情</button>`
+        if (life === 'cancelled') return head + '<p class="muted">运行已取消（停止请求经主机确认）。</p><button class="text-button" data-action="run">查看运行详情</button>'
+        if (life === 'running') return head + `<p class="muted">运行中 · 逐轮轮询主机 ledger 游标之后的事件。</p><div class="lifestrip">已派发 → 运行中 → session <code>sess_9b2f</code></div><button class="text-button" data-action="run">查看运行详情</button>`
+        return head + `<div class="notice">已完成。以下正文为 Codex 目标样式示意；真实 Agent 正文与文件 diff 需接入输出流式通道，本页不编造。 <button data-action="run">运行详情</button></div><p>已为结算按钮补上加载状态：</p><div class="code-block"><div class="code-label">Plain text ${btn('copy', 'copy', '复制示例')}</div><pre>提交订单\n  └─ 显示加载状态，避免重复提交</pre></div><div class="response-actions">${btn('copy', 'copy', '复制回复')}<button class="plain-icon" data-action="like" aria-label="赞" aria-pressed="${s.reaction === 'like'}">${icon('like')}</button><button class="plain-icon" data-action="dislike" aria-label="踩" aria-pressed="${s.reaction === 'dislike'}">${icon('dislike')}</button><time>示例</time></div>`
+      }
+      function runDetail() {
+        const events = lifecycleEvents(s.runlife)
+        const terminal = ['settled', 'failed', 'cancelled'].includes(s.runlife)
+        const last = events.length - 1
+        const steps = events.map((e, i) => {
+          let cls = 'done'
+          if (e.kind === '已完成') cls = 'settled'; else if (e.kind === '失败') cls = 'failed'; else if (i === last && !terminal) cls = 'current'
+          const detail = e.body ? `<div class="detail">${Object.entries(e.body).map(([k, v]) => `<span class="k">${esc(k)}:</span> ${esc(String(v))}`).join('\n')}</div>` : ''
+          return `<li class="step ${cls}"><span class="marker"></span><div class="kind">${esc(e.kind)}</div><div class="when">seq ${i + 1} · ${esc(e.at)}</div>${detail}</li>`
+        }).join('')
+        return `<div class="screen"><header class="header">${btn('back', 'chat', '返回会话', 'circle')}<div class="header-title"><h1>运行详情</h1><div class="subtitle">${esc(title(task()))}</div></div></header>
+          <div class="run-status" style="padding:0 20px">${chip(s.runlife)}</div>
+          <div class="provenance"><b>关联</b> ledgerRunId <code>b3ee…499e</code> ↔ scryRunId <code>5f3a…c1d</code><br>由主机首个进度标记给出。token / 费用 / 文件证据未提供，${terminal ? '不显示为 0' : '运行结束前不显示'}。</div>
+          <ul class="scroll timeline">${steps}</ul></div>`
+      }
+      const files = () => task().id === 'copy' ? [{ path: 'src/cart/EmptyCart.tsx', before: '<p>购物车为空</p>', after: '<p>去发现你的下一件心仪好物。</p>' }] : ['checkout', 'approval'].includes(task().id) ? [
+        { path: 'src/checkout/checkout.tsx', before: '<Button>提交订单</Button>', after: '<Button loading={isSubmitting}>提交订单</Button>' },
+        { path: 'src/checkout/loading-state.test.tsx', before: '', after: "expect(button).toHaveAttribute('aria-busy', 'true')" },
+        { path: 'src/components/Button.tsx', before: '<button {...props} />', after: '<button aria-busy={loading} {...props} />' }
+      ] : []
+      function chat() {
+        const pending = Boolean(s.pending[s.task])
+        const stopPending = Boolean(s.stopRequests[s.task])
+        const snippets = (s.messages[s.task] || []).map(text => `<div class="user-message">${esc(text)}</div><div class="receipt">已提交 · 等待主机确认</div>`).join('')
+        return `<div class="screen"><header class="header">${btn('back', 'home', '返回会话列表', 'circle')}<div class="header-title"><h1>${esc(title(task()))}</h1><div class="subtitle">${esc(s.project)} · ${esc(s.host)}</div></div><div class="capsule">${btn('compose', 'new', '新建会话')}${btn('more', 'thread-menu', '会话选项')}</div></header>${notice()}${stopPending ? '<div class="notice warning">停止已请求 · 等待主机确认，不代表执行已结束。</div>' : ''}${approvalNotice()}
+          <main class="scroll chat-scroll">${response()}${snippets}</main><footer class="thread-footer"><div class="evidence"><button class="evidence-chip" data-action="run">${icon('clock')}运行详情</button><button class="evidence-chip" data-action="files">文件证据·需流式通道</button><button class="evidence-chip" data-action="agents">${icon('agent')}${esc(task().provider)}</button></div><div class="composer compact-composer">${btn('plus', 'attachments', '附件')}<textarea id="composer" rows="1" aria-label="继续会话" placeholder="在 ${esc(s.host)} 上工作…" ${!connected() || pending ? 'disabled' : ''}>${esc(s.draft)}</textarea>${btn('gauge', 'controls', 'Provider 和模型')}${btn('send', 'send', '发送消息', 'circle send', !connected() || pending || !s.draft.trim())}</div></footer></div>`
+      }
+      function filesScreen() {
+        const evidence = files()
+        const selected = evidence[s.file] || evidence[0]
+        return `<div class="screen">${backHeader('文件改动', task().title)}${notice()}<main class="scroll simple-body">${!selected ? '<div class="empty">文件证据未缓存，不能视为没有改动。</div>' : `<p class="muted">工作区快照 · 未提交 · 模拟数据</p>${evidence.map((file, index) => `<button class="list-button ${file === selected ? 'selected' : ''}" data-action="select-file" data-index="${index}">${icon('file')}<span style="min-width:0;overflow-wrap:anywhere">${esc(file.path)}</span></button>`).join('')}<div class="diff"><div class="diff-title">${esc(selected.path)}</div>${selected.before ? `<pre class="removed">− ${esc(selected.before)}</pre>` : ''}<pre class="added">+ ${esc(selected.after)}</pre></div><button class="text-button" data-action="conflict" ${!connected() ? 'disabled' : ''}>查看编辑冲突示例</button>`}</main></div>`
+      }
+      function terminalScreen() {
+        if (s.host !== 'Studio Mac' || s.project !== 'storefront') return `<div class="screen">${backHeader('终端', `${s.project} · ${s.host}`)}${notice()}<div class="empty">此工作区的终端证据未缓存。</div></div>`
+        const editable = connected() && s.terminalOwner === 'phone' && !s.terminalPending
+        return `<div class="screen">${backHeader('终端', `${s.project} · ${s.host}`)}${notice()}<main class="scroll simple-body"><p class="muted">${!connected() ? '控制权未知 · 缓存输出' : s.terminalOwner === 'desktop' ? '桌面正在控制 · 手机只读' : '此 iPhone 控制 · 桌面输入已禁用'}</p>${s.terminalOwner === 'desktop' ? `<button class="text-button" data-action="take-control" ${!connected() ? 'disabled' : ''}>接管输入</button>` : ''}<pre class="terminal">$ pnpm test checkout\n\nPASS loading-state.test.tsx\n1 test passed · 示例输出\n\n$</pre>${s.terminalPending ? '<div class="notice">输入已提交，执行结果未确认。不会自动重发。</div>' : ''}<div class="terminal-form"><input id="terminal-input" aria-label="终端输入（模拟）" placeholder="输入命令…" value="${esc(s.terminalDraft)}" ${!editable ? 'disabled' : ''}>${btn('send', 'terminal-send', '发送终端输入', 'circle', !editable || !s.terminalDraft.trim())}</div></main></div>`
+      }
+      function machinesScreen() {
+        return `<div class="screen">${backHeader('电脑与设备')}${notice()}<main class="scroll simple-body"><button class="list-button" data-action="machine">${icon('laptop')}<span>${esc(s.host)}<small>${statusText()}</small></span><span class="detail">管理</span></button><button class="list-button" data-action="pair">${icon('plus')}连接另一台 Mac</button><h3 class="group-title">此 iPhone</h3><p class="muted">${s.revoked ? '设备授权已撤销' : 'Owner device · 最大功能权限'}<br>不等于 root，不绕过仓库指纹授权。</p><button class="text-button danger" data-action="revoke" ${!connected() ? 'disabled' : ''}>撤销此 iPhone 的访问权</button></main></div>`
+      }
+      function settings() {
+        return `<div class="screen">${backHeader('设置')}<main class="scroll simple-body"><button class="list-button" data-action="notifications">${icon('bell')}任务提醒<span class="detail">${s.notifications ? '开启' : '关闭'}</span></button><p class="muted" style="margin:12px 0 24px">完成、失败或需要处理时提醒。这里只切换示例设置，不注册 APNs。</p><button class="list-button" data-action="machines">${icon('laptop')}电脑与设备</button><h3 class="group-title">Mac 保持可用</h3><p class="muted">锁屏或熄屏不影响醒着的 Mac。睡眠、退出 Scry 或网络中断会离线；不保证合盖后继续运行。</p><h3 class="group-title">关于此稿</h3><p class="muted">Scry iOS v2 · Codex 结构对齐<br>交互原型，全部是模拟数据。语音、文件编辑器与真实远程执行尚未接入。</p></main></div>`
+      }
+      const option = (label, action, detail = '', disabled = false, extra = '') => `<button class="list-button" data-action="${action}" ${disabled ? 'disabled' : ''} ${extra}><span>${label}</span>${detail ? `<span class="detail">${detail}</span>` : ''}</button>`
+      const actions = (label, action, disabled = false, danger = false) => `<div class="sheet-actions"><button data-action="close-modal">取消</button><button class="${danger ? 'danger-fill' : 'primary'}" data-action="${action}" ${disabled ? 'disabled' : ''}>${label}</button></div>`
+      function modalContent() {
+        switch (s.modal) {
+          case 'navigation': return ['Scry', option('会话', 'home') + option('电脑与设备', 'machines') + option('设置', 'settings') + '<p class="muted">设计原型 · 模拟数据</p>']
+          case 'home-menu': return ['更多', option('新建会话', 'new', '', !connected()) + option('电脑与设备', 'machines') + option('设置', 'settings')]
+          case 'thread-menu': return ['会话选项', option('运行详情', 'run') + option('文件改动', 'files') + option('终端', 'terminal') + option('Provider 与模型', 'controls', task().provider) + option('权限模式', 'permissions') + option('停止本轮', 'stop', s.stopRequests[s.task] ? '等待确认' : '', !connected() || task().status === 'completed' || Boolean(s.stopRequests[s.task]))]
+          case 'hosts': return ['选择电脑', option('Studio Mac', 'choose-host', s.online && !s.revoked ? '锁屏 · 醒着' : s.revoked ? '授权已撤销' : '离线', false, 'data-host="Studio Mac"') + option('Travel MacBook', 'choose-host', '离线 · 上次 2 天前', false, 'data-host="Travel MacBook"') + option('连接另一台 Mac', 'pair')]
+          case 'projects': {
+            const src = authorizedProjects()
+            if (src === null) return ['选择项目', `<div class="muted" style="padding:16px 0">正在从主机读取已授权项目…</div><p class="muted">仅列出 Mac 上已授权的项目目录。</p>`]
+            if (src.length === 0) return ['选择项目', `<div class="empty">该设备没有可用的已授权项目<br><span class="fine">请先在 Mac 的 Scry 里授权项目目录。手机不能自行授权新目录。</span></div>`]
+            return ['选择项目', src.map(p => option(`${p.label}`, 'choose-project', p.path === s.chosenProject ? '✓' : '', !connected(), `data-path="${esc(p.path)}"`)).join('') + '<p class="muted" style="margin-top:14px">只能选主机已授权的目录；提交到未授权目录会被主机 fail-closed 拒绝。</p>']
+          }
+          case 'branches': return ['工作分支', ['main', 'feature/loading-state'].map(branch => option(branch, 'choose-branch', s.branch === branch ? '✓' : '', !connected(), `data-branch="${branch}"`)).join('') + '<p class="muted">仅选择示例新任务上下文，不执行 Git checkout。</p>']
+          case 'workspace': return ['工作位置', option('在本地工作', 'close-modal', '✓') + option('创建隔离工作区', 'close-modal', '此稿未接入', true) + '<p class="muted">“本地”指目标 Mac 的授权工作区，不是 iPhone。</p>']
+          case 'attachments': return ['添加内容', option('文件附件', 'close-modal', '此稿未接入', true) + option('查看文件改动', 'files') + option('打开终端', 'terminal')]
+          case 'controls': return ['下一轮设置', '<p class="muted">当前会话：' + esc(task().provider) + '。以下只改变下一轮的模拟配置，不修改已有运行。</p>' + ['Claude Code', 'Codex'].map(provider => option(provider, 'choose-provider', provider === s.nextProvider ? '✓' : '', !connected(), `data-provider="${provider}"`)).join('') + option('模型', 'models', esc(s.nextModel), !connected()) + option('权限模式', 'permissions', s.fullAccess ? '完全访问' : '默认审批')]
+          case 'models': return ['下一轮模型', (s.nextProvider === 'Claude Code' ? ['Opus', 'Sonnet'] : ['Mac 上配置的模型']).map(model => option(model, 'choose-model', model === s.nextModel ? '✓' : '', !connected(), `data-model="${model}"`)).join('')]
+          case 'permissions': return ['权限模式', `<p class="muted">下一轮 Provider：${s.nextProvider}。完全访问使用本机用户权限，${s.nextProvider === 'Claude Code' ? '跳过 Claude 原生命令权限询问' : '不使用 Codex 沙箱及命令审批'}；不是 root，也不绕过独立的仓库 MCP / Hook / plugin 指纹授权。</p>` + option('默认审批', 'permission-default', !s.fullAccess ? '✓' : '', !connected()) + option('完全访问', 'permission-full', s.fullAccess ? '✓' : '', !connected())]
+          case 'agents': return ['1 个 Agent', `<button class="list-button" data-action="controls">${icon('agent')}<span>${task().provider}<small>${task().model}</small></span></button><p class="muted">${s.stopRequests[s.task] ? '停止已请求 · 待确认' : !connected() ? '当前运行状态未知' : task().status === 'completed' ? '已完成 · 示例回执' : task().status === 'pending' ? '任务已提交 · 等待主机确认' : task().status === 'attention' ? replyPending() ? '等待审批回执' : '等待项目 Hook 授权' : '运行中 · 示例主机状态'}<br>用量证据未提供，不显示为 0。</p>`]
+          case 'stop': return ['停止本轮？', '<p class="muted">发送停止请求后，需要等主机确认。请求提交不等于运行已结束。</p>' + actions('请求停止', 'confirm-stop', !connected() || Boolean(s.stopRequests[s.task]), true)]
+          case 'approval': return ['项目 Hook 授权', `<p class="muted">独立于 Provider 的完全访问模式。绑定主机、canonical 工作区与 Hook 指纹。</p><div class="command"><code>pnpm test checkout${s.approvalChanged ? ' --updateSnapshot' : ''}</code></div><p class="muted">Studio Mac · /Projects/storefront<br>指纹：${s.approvalChanged ? 'sample-b72e（已变更）' : 'sample-a91c'}<br>${replyPending() ? '回复已提交 · 等待主机确认' : s.approvalChanged && !s.reviewed ? '请求已变化，请先复核新内容。' : '只授权本次请求，不自动信任未来变化。'}</p><div class="sheet-actions"><button data-action="reject" ${!connected() || replyPending() ? 'disabled' : ''}>拒绝</button><button class="primary" data-action="approve" ${!connected() || replyPending() ? 'disabled' : ''}>${replyPending() ? '等待确认' : s.approvalChanged && !s.reviewed ? '复核新请求' : '批准一次'}</button></div>`]
+          case 'take-control': return ['接管终端输入？', '<p class="muted">桌面输入将停用，正在执行的 shell 工作不受影响。此稿只模拟控制权转移。</p>' + actions('接管输入', 'confirm-control', !connected())]
+          case 'conflict': return ['文件已发生变化', '<p class="muted">示例修订 18 与当前修订 19 不一致。不能覆盖未读取的新内容。</p>' + option('重新查看 diff', 'files') + option('强制覆盖', 'close-modal', '不可用', true)]
+          case 'machine': return [s.host, `<p class="muted">${statusText()}<br>${s.revoked ? '此 iPhone 授权已撤销' : 'Owner device · 最大功能权限'}</p>` + option('撤销此 iPhone', 'revoke', '', !connected())]
+          case 'revoke': return ['撤销此 iPhone？', '<p class="muted">将阻止新的控制请求，但不会自动停止已经运行的任务。恢复访问需要重新在 Mac 确认配对。</p>' + actions('撤销访问', 'confirm-revoke', !connected(), true)]
+          case 'pair': return ['连接你的 Mac', '<p class="muted">1. 在 Mac 上打开 Scry → 连接 iPhone。<br>2. 扫描短时配对码。<br>3. 在 Mac 核对设备与最大功能权限。</p><div class="command"><strong>配对码示意 · 不是真实二维码</strong></div>' + actions('查看确认步骤', 'pair-confirm')]
+          case 'pair-confirm': return ['在 Mac 上确认', '<p class="muted">此 iPhone 将能管理任务、授权文件、受管理终端和审批。只有 Mac 确认后才会授予权限。</p><div class="notice">演示到此结束，未创建连接或授予访问权。</div>' + option('完成演示', 'close-modal')]
+          default: return ['', '']
+        }
+      }
+      function render() {
+        const focused = document.activeElement
+        const selection = focused?.selectionStart
+        const oldScroll = app.querySelector?.('.scroll')?.scrollTop || 0
+        const screens = { home, new: newThread, chat, run: runDetail, files: filesScreen, terminal: terminalScreen, machines: machinesScreen, settings }
+        let output = screens[s.page]()
+        if (s.modal) {
+          const [heading, body] = modalContent()
+          output += `<div class="scrim" data-action="close-modal"><section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(heading)}"><div class="grabber"></div><div class="sheet-heading"><h2>${esc(heading)}</h2>${btn('close', 'close-modal', '关闭', 'circle close-sheet')}</div>${body}</section></div>`
+        }
+        if (s.toast) output += `<div class="toast" role="status">${esc(s.toast)}</div>`
+        app.innerHTML = output
+        const scroll = app.querySelector?.('.scroll')
+        if (scroll) scroll.scrollTop = oldScroll
+        if (s.modal !== lastModal) {
+          if (s.modal) {
+            if (!lastModal) returnFocusAction = focused?.dataset?.action
+            app.querySelector?.('.sheet button:not(:disabled)')?.focus()
+          } else if (returnFocusAction) app.querySelector?.(`[data-action="${returnFocusAction}"]`)?.focus()
+        } else if (focused?.id) {
+          const replacement = document.getElementById(focused.id)
+          replacement?.focus()
+          if (typeof selection === 'number') replacement?.setSelectionRange(selection, selection)
+        }
+        lastModal = s.modal
+      }
+      function toast(text) {
+        s.toast = text
+        window.clearTimeout(toastTimer)
+        toastTimer = window.setTimeout(() => { s.toast = ''; render() }, 2600)
+      }
+      function go(page) {
+        if (!['home', 'new', 'chat', 'run', 'files', 'terminal', 'machines', 'settings'].includes(page)) return
+        s.page = page; s.modal = null; s.draft = ''; s.toast = ''
+        if (['chat', 'files'].includes(page)) { s.host = task().host || 'Studio Mac'; s.project = task().project || 'storefront' }
+        const scroll = app.querySelector?.('.scroll')
+        if (scroll) scroll.scrollTop = 0
+      }
+      document.addEventListener('click', event => {
+        const target = event.target.closest('[data-action], [data-page]')
+        if (!target || target.disabled) return
+        if (target.classList.contains('scrim') && event.target !== target) return
+        if (target.dataset.page) { go(target.dataset.page); render(); return }
+        const action = target.dataset.action
+        switch (action) {
+          case 'home': case 'new': case 'files': case 'terminal': case 'machines': case 'settings': case 'run': go(action); break
+          case 'back': go(['files', 'terminal', 'run'].includes(s.page) ? 'chat' : 'home'); break
+          case 'thread': s.task = target.dataset.id; s.file = 0; s.reaction = null; go('chat'); break
+          case 'toggle-pinned': s.pinned = !s.pinned; break
+          case 'toggle-project': s.expanded = !s.expanded; break
+          case 'close-modal': s.modal = null; break
+          case 'choose-host': s.host = target.dataset.host; s.modal = null; break
+          case 'choose-project': if (connected()) { s.chosenProject = target.dataset.path; const c = chosenProject(); if (c) s.project = c.label; s.modal = null }; break
+          case 'choose-branch': if (connected()) { s.branch = target.dataset.branch; s.modal = null }; break
+          case 'choose-provider': if (connected()) { s.nextProvider = target.dataset.provider; s.nextModel = s.nextProvider === 'Claude Code' ? 'Opus' : 'Mac 上配置的模型' }; break
+          case 'choose-model': if (connected()) { s.nextModel = target.dataset.model; s.modal = 'controls' }; break
+          case 'permission-default': if (connected()) { s.fullAccess = false; s.modal = 'controls' }; break
+          case 'permission-full': if (connected()) { s.fullAccess = true; s.modal = 'controls' }; break
+          case 'send-new': {
+            if (!connected() || !s.draft.trim() || !chosenProject()) break
+            const message = s.draft.trim(); const id = `new-${tasks.length}`
+            tasks.push({ id, title: message, provider: s.nextProvider, model: s.nextModel, status: 'pending', host: s.host, project: chosenProject().label })
+            s.messages[id] = [message]; s.pending[id] = true; s.task = id; s.runlife = 'recorded'; go('chat'); toast('意图已记录 · 等待主机派发（recorded ≠ 已执行）'); break
+          }
+          case 'send': if (connected() && s.draft.trim() && !s.pending[s.task]) { (s.messages[s.task] ||= []).push(s.draft.trim()); s.pending[s.task] = true; s.draft = ''; toast('示例消息已提交，等待主机确认') }; break
+          case 'confirm-stop': if (connected() && !s.stopRequests[s.task] && task().status !== 'completed') { s.stopRequests[s.task] = true; s.modal = null }; break
+          case 'approve': if (connected() && task().status === 'attention' && !replyPending()) { if (s.approvalChanged && !s.reviewed) s.reviewed = true; else { s.replies[s.task] = 'approve'; s.modal = null } }; break
+          case 'reject': if (connected() && task().status === 'attention' && !replyPending()) { s.replies[s.task] = 'reject'; s.modal = null }; break
+          case 'select-file': s.file = Number(target.dataset.index); break
+          case 'confirm-control': if (connected()) { s.terminalOwner = 'phone'; s.modal = null }; break
+          case 'terminal-send': if (connected() && s.terminalOwner === 'phone' && s.terminalDraft.trim() && !s.terminalPending) { s.terminalPending = true; s.terminalDraft = '' }; break
+          case 'confirm-revoke': if (connected()) { s.revoked = true; s.modal = null }; break
+          case 'notifications': s.notifications = !s.notifications; break
+          case 'like': case 'dislike': s.reaction = s.reaction === action ? null : action; break
+          case 'copy': toast('复制入口示意 · 原型未访问剪贴板'); break
+          default: if (['navigation', 'home-menu', 'thread-menu', 'hosts', 'projects', 'branches', 'workspace', 'attachments', 'controls', 'models', 'permissions', 'agents', 'stop', 'approval', 'take-control', 'conflict', 'machine', 'revoke', 'pair', 'pair-confirm'].includes(action)) s.modal = action
+        }
+        render()
+      })
+      document.addEventListener('input', event => {
+        const { id, value } = event.target
+        if (id === 'search') {
+          const start = event.target.selectionStart
+          s.query = value; render()
+          const input = document.querySelector('#search'); input?.focus(); input?.setSelectionRange(start, start)
+        } else if (id === 'composer') {
+          s.draft = value
+          const send = document.querySelector(s.page === 'new' ? '[data-action="send-new"]' : '[data-action="send"]')
+          if (send) send.disabled = !connected() || !value.trim() || (s.page !== 'new' && Boolean(s.pending[s.task]))
+        } else if (id === 'terminal-input') {
+          s.terminalDraft = value
+          const send = document.querySelector('[data-action="terminal-send"]')
+          if (send) send.disabled = !connected() || s.terminalOwner !== 'phone' || s.terminalPending || !value.trim()
+        }
+      })
+      document.addEventListener('change', event => {
+        if (event.target.id === 'runlife') { s.runlife = event.target.value; if (s.page !== 'chat' && s.page !== 'run') go('chat'); render(); return }
+        if (event.target.id === 'projsrc') { s.projsrc = event.target.value; if (s.projsrc === 'empty') s.chosenProject = ''; else if (s.projsrc === 'loaded') s.chosenProject = s.chosenProject || '/Projects/storefront'; render(); return }
+        if (event.target.id !== 'scenario') return
+        s.scenario = event.target.value; s.online = !['offline', 'revoked'].includes(s.scenario)
+        if (s.scenario === 'revoked') s.revoked = true
+        if (s.scenario === 'stale') { s.approvalChanged = true; s.task = 'approval'; s.reviewed = false; delete s.replies.approval; go('chat'); s.modal = 'approval' }
+        render()
+      })
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && s.modal) { s.modal = null; render() }
+        if (event.key === 'Tab' && s.modal) {
+          const elements = [...(app.querySelectorAll?.('.sheet button:not(:disabled), .sheet input:not(:disabled)') || [])]
+          if (!elements.length) return
+          const first = elements[0]; const last = elements[elements.length - 1]
+          if (event.shiftKey && (document.activeElement === first || !elements.includes(document.activeElement))) { event.preventDefault(); last.focus() }
+          else if (!event.shiftKey && (document.activeElement === last || !elements.includes(document.activeElement))) { event.preventDefault(); first.focus() }
+        }
+      })
+      const initialPage = window.location?.hash?.slice(1)
+      if (['home', 'new', 'chat', 'run'].includes(initialPage)) go(initialPage)
+      render()
+    })()
+  </script>
+</body>
+</html>

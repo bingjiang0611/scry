@@ -26,10 +26,32 @@
             "height": 844
           },
           "section": "iOS Remote"
+        },
+        {
+          "path": "Scry iOS Remote v3.html",
+          "createdAt": "2026-09-13T09:08:24.529Z",
+          "status": "needs-review",
+          "subtitle": "v3 · 真实运行生命周期 · 任务列表/运行详情时间线/新建任务(主机授权项目选择器) · 视觉待审",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "section": "iOS Remote"
+        },
+        {
+          "path": "Scry iOS Remote v4.html",
+          "createdAt": "2026-09-13T09:20:32.395Z",
+          "status": "needs-review",
+          "subtitle": "v4 · 严格对齐 Codex 手机端(首页/会话/新会话) + 真实 ledger 生命周期收进运行详情 + 主机授权项目选择器 · 诚实标注正文需流式通道 · 视觉待审",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "section": "iOS Remote"
         }
       ]
     }
   },
   "createdAt": "2026-09-12T04:14:11.844Z",
-  "updatedAt": "2026-09-12T04:52:17.522Z"
+  "updatedAt": "2026-09-13T09:20:32.396Z"
 }
