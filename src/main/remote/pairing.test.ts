@@ -165,6 +165,30 @@ describe('pairing authority (synthetic crypto adapter; no human or Provider exec
     await expect(restored.confirmLocal(pairing.pairingId, KEY)).rejects.toThrow('device_revoked')
   })
 
+  it('lets a revoked device re-pair after fresh operator confirmation', async () => {
+    const { authority, dependencies, time } = setup()
+    const first = await pending(authority)
+    const grant = await authority.confirmLocal(first.pairing.pairingId, KEY)
+    await authority.revoke(grant.deviceId)
+    expect(authority.authorizesCertificate(CERT)).toBe(false)
+    // A revoked device's key must not permanently ban it: a brand-new pairing
+    // with the same key proves and reaches awaiting_local_confirmation again,
+    // then a fresh operator confirmation issues a DISTINCT grant (real issuance
+    // mints a new certificate, so certificateSHA256 differs from the revoked one).
+    const NEWCERT = 'e'.repeat(64)
+    dependencies.issue = vi.fn(async ({ deviceId }: { deviceId: string }) => ({
+      deviceId, certificatePEM: 're-issued synthetic certificate', certificateSHA256: NEWCERT,
+      publicKeySHA256: KEY, expiresAt: time.wall + 3_600_000
+    }))
+    const second = await authority.begin()
+    const input = { pairingId: second.pairingId, secret: second.secret, csrPEM: 'synthetic CSR', deviceLabel: 'Test iPhone' }
+    expect(await authority.prove(input, KEY)).toEqual({ state: 'awaiting_local_confirmation', pairingId: second.pairingId, publicKeySHA256: KEY })
+    const regrant = await authority.confirmLocal(second.pairingId, KEY)
+    expect(regrant.deviceId).not.toEqual(grant.deviceId)
+    expect(authority.authorizesCertificate(NEWCERT)).toBe(true)
+    expect(authority.authorizesCertificate(CERT)).toBe(false)
+  })
+
   it('rejects changed host identity and nonlocal or inconsistent stored grant claims', async () => {
     const { authority, dependencies } = setup()
     const { pairing } = await pending(authority)

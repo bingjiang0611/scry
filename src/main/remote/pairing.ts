@@ -138,7 +138,11 @@ export class PairingAuthority {
       if (pairing.state === 'awaiting_local_confirmation') {
         if (pairing.proof.csrSHA256 !== proof.csrSHA256 || pairing.proof.publicKeySHA256 !== proof.publicKeySHA256) fail('pairing_candidate_changed')
       } else {
-        if (this.data.grants.some(g => g.publicKeySHA256 === proof.publicKeySHA256)) fail('device_key_already_registered')
+        // Only an ACTIVE grant blocks a fresh pairing. A revoked device may
+        // re-pair, since revocation means "removed, requires re-approval" and a
+        // new pairing still needs the operator to re-scan and re-confirm; a
+        // revoked grant's key must not permanently ban the device.
+        if (this.data.grants.some(g => g.publicKeySHA256 === proof.publicKeySHA256 && g.revokedAt === null)) fail('device_key_already_registered')
         pairing = { ...base(pairing), state: 'awaiting_local_confirmation', proof: { ...proof, deviceLabel: input.deviceLabel } }
         this.replace(pairing)
       }
@@ -311,8 +315,13 @@ export function validatePairingState(value: unknown): PairingState {
     }
     return fail('invalid_pairing_state')
   })
+  // publicKeySHA256 uniqueness applies only to ACTIVE grants: a revoked grant is
+  // retained for audit history and may share a device key with a new active grant
+  // issued after the same device re-pairs. deviceId and certificateSHA256 stay
+  // globally unique (each issuance mints a distinct cert).
+  const activeKeys = grants.filter(g => g.revokedAt === null).map(g => g.publicKeySHA256)
   if (new Set(pairings.map(p => p.pairingId)).size !== pairings.length || new Set(grants.map(g => g.deviceId)).size !== grants.length ||
-      new Set(grants.map(g => g.publicKeySHA256)).size !== grants.length || new Set(grants.map(g => g.certificateSHA256)).size !== grants.length ||
+      new Set(activeKeys).size !== activeKeys.length || new Set(grants.map(g => g.certificateSHA256)).size !== grants.length ||
       grants.some(g => !pairings.some(p => p.state === 'paired' && p.deviceId === g.deviceId && p.pairingId === g.pairingId))) fail('invalid_pairing_state')
   return { version: 1, hostId: value.hostId, anchorSHA256: value.anchorSHA256, pairings, grants }
 }

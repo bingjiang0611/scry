@@ -239,7 +239,6 @@ public enum G0Transport {
         throw ProbeError.invalidArguments
       }
       let innerContext = try NIOSSLContext(configuration: inner)
-      let result = group.next().makePromise(of: Data.self)
       let upgrade: EventLoopFuture<Channel> = try await ClientBootstrap(group: group)
         .connectTimeout(.seconds(10))
         .channelOption(ChannelOptions.writeBufferWaterMark, value: ChannelOptions.Types.WriteBufferWaterMark(low: 262_144, high: 524_288))
@@ -264,13 +263,23 @@ public enum G0Transport {
           }
         }
       let channel = try await upgrade.get()
+      // Create the reply promise only after the channel exists so a failed
+      // connect/upgrade above can never leave an unfulfilled promise to leak
+      // (NIO fatalErrors on a leaked promise in debug builds).
+      let result = group.next().makePromise(of: Data.self)
       // The HTTP upgrader rejects outbound writes while its callback is active.
       // Install inner TLS only after upgrade completion, on the event loop, so
       // its immediate ClientHello cannot be silently rejected by HTTP state.
-      try await channel.eventLoop.submit {
-        try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: "scry-host.test"))
-        try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
-      }.get()
+      do {
+        try await channel.eventLoop.submit {
+          try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: "scry-host.test"))
+          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
+        }.get()
+      } catch {
+        // Handler install failed before ProbeHandler could complete the promise.
+        result.fail(error)
+        throw error
+      }
       let reply = try await result.futureResult.get()
       try await group.shutdownGracefully()
       return reply
@@ -328,7 +337,6 @@ public enum G0Transport {
       let innerContext = try NIOSSLContext(configuration: inner)
       let uri = "/?host=\(endpoint.hostId)&mode=\(mode)"
       let hostHeader = endpoint.relayServerName ?? endpoint.host
-      let result = group.next().makePromise(of: Data.self)
       let upgrade: EventLoopFuture<Channel> = try await ClientBootstrap(group: group)
         .connectTimeout(.seconds(10))
         .channelOption(ChannelOptions.writeBufferWaterMark, value: ChannelOptions.Types.WriteBufferWaterMark(low: 262_144, high: 524_288))
@@ -354,11 +362,21 @@ public enum G0Transport {
           }
         }
       let channel = try await upgrade.get()
-      try await channel.eventLoop.submit {
-        // Inner server hostname is nil: chain-to-anchor is the only check.
-        try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
-        try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
-      }.get()
+      // Create the reply promise only after the channel exists so a failed
+      // connect/upgrade above can never leave an unfulfilled promise to leak
+      // (NIO fatalErrors on a leaked promise in debug builds).
+      let result = group.next().makePromise(of: Data.self)
+      do {
+        try await channel.eventLoop.submit {
+          // Inner server hostname is nil: chain-to-anchor is the only check.
+          try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
+          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
+        }.get()
+      } catch {
+        // Handler install failed before ProbeHandler could complete the promise.
+        result.fail(error)
+        throw error
+      }
       let reply = try await result.futureResult.get()
       try await group.shutdownGracefully()
       return reply

@@ -6,7 +6,7 @@ import RemoteTransport
 // only in Keychain, insert-only), presents its self-signed bootstrap cert so the
 // host derives the possession-proving key fingerprint from the TLS peer cert,
 // pins the host anchor from the pairing code, and drives prove -> (Mac user
-// confirms) -> re-prove -> granted. It NEVER fabricates a paired state: a pending
+// confirms) -> status poll -> granted. It NEVER fabricates a paired state: a pending
 // receipt carries no certificate; only a host-issued grant does.
 //
 // Honesty on the outer hop: a publicly deployed relay is wss:// and the device
@@ -79,9 +79,18 @@ struct RemotePairingClient {
     return try map(outcome)
   }
 
-  // Re-prove after the operator confirms on the Mac: the host returns the granted
-  // certificate to the device that still holds the proving key.
+  // Poll pairing STATUS after the operator confirms on the Mac. This must NOT
+  // re-prove: `make()` mints a fresh CSR on every call (randomized ECDSA), so a
+  // second prove would carry a different csrSHA256 than the one the host already
+  // pinned when it entered awaiting_local_confirmation, tripping the host's
+  // `pairing_candidate_changed` guard. The status hop proves possession purely
+  // through the stable device key on the inner mTLS channel (no CSR), and returns
+  // the issued grant once the Mac user confirms.
   func refresh(code: PairingCode, deviceLabel: String) async throws -> PairingProgress {
-    try await prove(code: code, deviceLabel: deviceLabel)
+    let material = try ensureDeviceMaterial()
+    let outcome = try await G0Transport.relayPairStatus(
+      endpoint: endpoint(code), identity: try identity(code, material),
+      pairingId: code.pairingId, secret: code.secret)
+    return try map(outcome)
   }
 }
