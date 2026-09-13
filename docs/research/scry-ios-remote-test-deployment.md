@@ -33,15 +33,22 @@
 
 中继已上线（`wss://scry-relay.<...>.workers.dev`），设备侧已实现公网 wss 的 `.system` 外层 TLS 信任（系统根 + 主机名校验；内层 TLS 1.3 mTLS 仍固定 host anchor，是唯一信任根）。
 
+### 真机已验证（物理 iPhone，真实网络）
+
+物理 iPhone `00008150-001A29A926D8401C`（iOS 27，Personal Team `7USHN8Q8JL` 签名安装 `com.scry.remote`）：
+
+- **On-device self-test 15/15 PASS**（`-selfTest`）：enrollment（真实 P-256 CSR + 自签 bootstrap + 指纹 + 恢复）、PairingCode 解析（含新增 `code.tlsDefaultSystem` / `code.tlsPlaintext` / `code.badTLS`）、以及**真实 Keychain 往返**（`keychain.deviceKey/insertOnly/grant/grantRenew`）。Keychain 这几项在未签名模拟器上是 SKIP，只有真机签名能测——真机上全部 PASS。
+- **`.system` 外层 TLS 对真实 Cloudflare 证书 PASS**（`-relayTLSProbe scry-relay.<...>.workers.dev`）：`SELFTEST relayTLS.systemTrust PASS negotiated=tls`。设备用 NIOSSL `.default`（系统信任库）+ 完整校验，经手机真实网络对线上部署的中继完成 TLS 握手。这就是本次实现的公网 wss 信任能力，在真机 + 真实网络 + 真实 CF 边缘上得到验证。
+  - 注：免费 Personal Team 单设备最多 3 个 App，为腾出名额移除了旧的 `com.scry.remote.g0` 诊断 App（可重装）。每次重签安装后系统可能要求重新信任开发者描述文件。
+
 ### 沙箱内已验证（`smoke:cf-pair`）
 
 `experiments/remote-g0/cf-relay-pair-smoke.mjs`：**真实 Swift iOS relay transport** 对 **实际 relay Worker + Durable Object 代码**（本地 `workerd`，与已部署构件字节一致）完成完整 **deny/pending/grant** 配对对话——经 reverse tunnel → 生产 `PairingTransport` → `PairingAuthority`，内层 TLS 1.3 mTLS 端到端，含 warm-pool 交会。回环无需代理，故这是沙箱内可达的最强证据。稳定通过（复跑两次）。
 
 ### 仍未验证（诚实边界，需真机 + 真实网络）
 
-- **已部署公网边缘**：沙箱出网被强制走代理，生产 `createRelayConnectWS` 用全局 `WebSocket` 不穿代理，故无法从沙箱跑生产栈打到线上 CF。真机直连公网不受此限。
-- 设备 `.system` 外层 TLS 对 Cloudflare 公共根的真实握手（已编译 + 解析自测，未对线上握手）。
-- 物理 iPhone 上的人工扫码 / 确认；蜂窝、锁屏、APNs。
+- **已部署公网边缘的完整配对**：需要 Mac 端同时跑着 Scry 并向中继拨出 warm leg，设备连上后才不会收到 1013，再走内层 mTLS 配对 + 人工确认。沙箱出网被强制走代理，生产 `createRelayConnectWS` 用全局 `WebSocket` 不穿代理，故无法从沙箱跑宿主栈打到线上 CF；真机直连公网不受此限。
+- 物理 iPhone 上的人工扫码 / 确认；蜂窝、锁屏、APNs。（设备侧 `.system` 外层 TLS 对 CF 公共证书的真实握手已在真机验证，见上。）
 - 签名与 keychain entitlement 的真机形态（Personal Team 受限；完整路径需付费账号）。
 
 ### 真机 Runbook（在你自己的 Mac + iPhone 上，脱离本沙箱代理）

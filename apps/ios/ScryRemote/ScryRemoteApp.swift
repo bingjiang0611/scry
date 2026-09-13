@@ -6,6 +6,7 @@ struct ScryRemoteApp: App {
   init() {
     #if DEBUG
     RemoteSelfTest.runIfRequested()
+    RemoteSelfTest.runRelayTLSProbeIfRequested()
     #endif
   }
   var body: some Scene {
