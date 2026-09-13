@@ -89,6 +89,9 @@ final class RemoteRunStore: ObservableObject {
   // Provider-canonical result evidence, surfaced verbatim from the ledger
   // `result` marker only. nil until the host reports it; never a fabricated 0.
   @Published private(set) var resultSummary: String?
+  // The Provider session id the live run reported (from the ledger `session`
+  // marker). Lets a follow-up into an opened session resume the LATEST id.
+  @Published private(set) var liveExternalSessionId: String?
 
   private let connections = RemoteConnectionStore()
   private var pollTask: Task<Void, Never>?
@@ -267,6 +270,9 @@ final class RemoteRunStore: ObservableObject {
       if let detail = ev.detail, let marker = Self.marker(detail) {
         if marker["event"] == "started", lifecycle == .dispatched || lifecycle == .recorded { lifecycle = .running }
         if marker["event"] == "result" { resultSummary = Self.resultLine(marker) }
+        // The Provider's own session id for THIS run. Captured so a chained
+        // follow-up resumes the latest session (continuous memory), not a stale id.
+        if marker["event"] == "session", let ext = marker["externalSessionId"], !ext.isEmpty { liveExternalSessionId = ext }
       }
     case "run_settled": lifecycle = .settled
     case "run_failed": lifecycle = .failed; if let d = ev.detail, submitError == nil { submitError = "主机报告失败：\(d)" }
@@ -290,6 +296,40 @@ final class RemoteRunStore: ObservableObject {
     truncated = false
     resultSummary = nil
     submitError = nil
+    liveExternalSessionId = nil
+  }
+
+  // Send a follow-up that CONTINUES an opened session (same Provider + cwd +
+  // session id) so the conversation keeps its context. Unlike submit(), the
+  // target is explicit (from the opened session), not the new-session pickers.
+  // Chained follow-ups resume the LATEST reported session id when available.
+  func submitFollowUp(prompt: String, providerId: String, cwd: String, resume: String) {
+    let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    guard let client = makeClient() else { submitError = "尚未配对"; return }
+    let resumeId = liveExternalSessionId ?? resume
+    submitError = nil
+    resetRun()
+    self.prompt = trimmed
+    lifecycle = .recorded
+    liveExternalSessionId = resumeId
+    Task { [weak self] in
+      do {
+        let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed, resume: resumeId)
+        let outcome = try await client.submit(routing: routing)
+        await MainActor.run {
+          self?.reachable = true
+          self?.runId = outcome.runId
+          self?.startPolling(runId: outcome.runId, client: client)
+        }
+      } catch {
+        await MainActor.run {
+          self?.reachable = false
+          self?.lifecycle = .unknown
+          self?.submitError = "发送失败：\(Self.describe(error))"
+        }
+      }
+    }
   }
 
   func stop() { pollTask?.cancel(); pollTask = nil }

@@ -43,12 +43,21 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     // Native defaults preserved: no silent approval-mode escalation.
     expect(calls[0].permissionMode).toBeUndefined()
     expect(calls[0].model).toBeUndefined()
+    // A brand-new session does not resume anything.
+    expect(calls[0].resume).toBeUndefined()
 
     const markers = progress.mock.calls.map(c => JSON.parse(c[0] as string))
     expect(markers[0]).toEqual({ event: 'bound', ledgerRunId: 'ledger-1', scryRunId: 'scry-1', providerId: 'claude', cwd: '/w' })
     expect(markers).toContainEqual({ event: 'started' })
     expect(markers).toContainEqual({ event: 'result', isError: false, tokensIn: 11, tokensOut: 22, costUsd: 0.5 })
     expect(markers.at(-1)).toEqual({ event: 'settled', status: 'completed' })
+  })
+
+  it('resumes the SAME provider session when routing.resume is present (follow-up into an opened session)', async () => {
+    const { run, calls } = fakeRun(async (req) => { req.emit(controls()); req.emit(result(false)); return { status: 'completed' } })
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-r' })
+    await start({ runId: 'ledger-r', routing: { cwd: '/w', providerId: 'qoder', prompt: 'more', resume: 'ext-existing' }, progress: () => {}, output: () => {} })
+    expect(calls[0]).toMatchObject({ prompt: 'more', cwd: '/w', resume: 'ext-existing' })
   })
 
   it('surfaces the run to the Mac catalog: onRunStarted at bind, onRunSession with the real externalSessionId', async () => {

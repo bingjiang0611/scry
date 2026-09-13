@@ -135,6 +135,10 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       prompt,
       cwd: routing.cwd,
       agentProfileId: routing.agentProfileId,
+      // Continue the SAME conversation when the device opened a session and sent a
+      // follow-up (routing.resume = that session's Provider id); a new session
+      // omits it. This gives the resumed run the prior context/memory.
+      ...(routing.resume ? { resume: routing.resume } : {}),
       attachments: [],
       // model / effort / permissionMode intentionally omitted: the adapter's
       // native defaults apply. Remote access must not silently escalate the
