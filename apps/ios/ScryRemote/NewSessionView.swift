@@ -11,10 +11,11 @@ struct NewSessionView: View {
   @EnvironmentObject var run: RemoteRunStore
   @State private var draft = ""
   @State private var showProjects = false
+  @State private var showProviders = false
 
   private var paired: Bool { run.hasConnection }
   private var canSend: Bool {
-    paired && run.chosen != nil && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    paired && run.chosen != nil && run.chosenProvider != nil && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   var body: some View {
@@ -35,7 +36,7 @@ struct NewSessionView: View {
         VStack(spacing: 0) {
           contextRow(Symbol.laptop, run.hostLabel ?? model.link.host ?? "选择电脑", action: nil)
           contextRow(Symbol.folder, run.chosen?.label ?? "选择项目", action: paired ? { showProjects = true } : nil)
-          contextRow(Symbol.branch, "main", action: nil)
+          contextRow(Symbol.gauge, run.chosenProvider?.label ?? "选择 Provider", action: paired ? { showProviders = true } : nil)
         }
         .padding(.top, 56)
         .padding(.horizontal, 24)
@@ -45,8 +46,9 @@ struct NewSessionView: View {
       composer
     }
     .background(Palette.surface)
-    .onAppear { if paired { run.loadProjects() } }
+    .onAppear { if paired { run.loadProjects(); run.loadProviders() } }
     .sheet(isPresented: $showProjects) { projectPicker }
+    .sheet(isPresented: $showProviders) { providerPicker }
   }
 
   private func contextRow(_ symbol: String, _ text: String, action: (() -> Void)?) -> some View {
@@ -99,6 +101,44 @@ struct NewSessionView: View {
     .presentationDetents([.medium, .large])
   }
 
+  // Host-advertised Providers only (available ones). The phone can never invent a
+  // Provider; the host re-validates the chosen id on submit. Honest states.
+  private var providerPicker: some View {
+    NavigationStack {
+      Group {
+        switch run.providers {
+        case .idle, .loading:
+          ProgressView("读取主机可用的 Provider…").padding()
+        case let .loaded(list):
+          List(list, id: \.id) { ref in
+            Button {
+              run.chooseProvider(ref); showProviders = false
+            } label: {
+              HStack {
+                Text(ref.label).font(.system(size: 16)).foregroundStyle(Palette.ink)
+                Spacer()
+                if run.chosenProvider?.id == ref.id {
+                  Image(systemName: "checkmark").foregroundStyle(Palette.blue)
+                }
+              }
+            }
+          }
+        case .empty:
+          EmptyState(title: "主机没有可用的 Provider",
+                     detail: "在 Mac 的 Scry 里登录/配置一个 Provider（如 qoder、claude）后再试。")
+        case let .failed(reason):
+          EmptyState(title: "无法读取 Provider", detail: reason)
+        }
+      }
+      .navigationTitle("选择 Provider")
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("取消") { showProviders = false } }
+        ToolbarItem(placement: .primaryAction) { Button("刷新") { run.loadProviders() } }
+      }
+    }
+    .presentationDetents([.medium, .large])
+  }
+
   private var composer: some View {
     VStack(spacing: 7) {
       TextField(paired ? "在 \(run.hostLabel ?? "Mac") 上工作" : "连接后可输入", text: $draft, axis: .vertical)
@@ -109,9 +149,10 @@ struct NewSessionView: View {
         PlainIcon(symbol: Symbol.plus, label: "附件") {}
         PlainIcon(symbol: Symbol.shield, label: "权限模式", tint: Palette.amber) {}
         Spacer()
-        PlainIcon(symbol: Symbol.gauge, label: "Provider 和模型") {}
+        PlainIcon(symbol: Symbol.gauge, label: "Provider 和模型") { if paired { showProviders = true } }
         CircleButton(symbol: Symbol.send, label: "发送新任务", filled: true, disabled: !canSend) {
-          run.submit(prompt: draft, providerId: "claude")
+          guard let providerId = run.chosenProvider?.id else { return }
+          run.submit(prompt: draft, providerId: providerId)
           draft = ""
           model.route = .chat
         }

@@ -92,7 +92,7 @@ struct PairView: View {
     case let .awaitingConfirmation(fingerprint):
       statusCard("已证明，等待 Mac 确认。请核对指纹与 Mac 上一致：\n\(fingerprint.prefix(16).uppercased())…", Palette.blue)
     case let .paired(deviceId):
-      statusCard("已配对。设备 \(deviceId.prefix(8))… 已获授权（任务/终端通道尚未接入，不会伪造会话）。", Palette.blue)
+      statusCard("已配对。设备 \(deviceId.prefix(8))… 已获授权，正在进入新建会话…", Palette.blue)
     case let .failed(message):
       statusCard(message, Palette.ink)
     }

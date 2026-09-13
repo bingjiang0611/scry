@@ -63,6 +63,7 @@ import {
   runTerminationHint,
   type AgentForceKillScope,
   type AgentForkSessionResult,
+  type AgentPermissionMode,
   type AgentInputAttachment,
   type AgentStartRequest,
   type RuntimeProvider
@@ -3580,10 +3581,38 @@ function resolveRemoteRelay(): RemoteRelayResolution {
     // endpoint, so no scannable device code is emitted for it.
   }
 }
+// Cached snapshot of the host's Providers for the device new-session picker.
+// providerRegistry.describe() is async but the device op reads synchronously, so
+// we keep a periodically-refreshed snapshot (id/label/available). Availability
+// mirrors the real describe() result; nothing is fabricated, and the run path
+// still validates the chosen providerId on submit.
+let remoteProviderSnapshot: { id: string; label: string; available: boolean }[] = []
+let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
+async function refreshRemoteProviderSnapshot(): Promise<void> {
+  try {
+    const descriptors = await providerRegistry.describe()
+    remoteProviderSnapshot = descriptors.map((d) => ({ id: d.id, label: d.label, available: d.available }))
+  } catch { /* keep the last good snapshot rather than fabricate */ }
+}
+
 async function startRemoteHostIfEnabled(): Promise<void> {
   if (remoteHostService || process.env.SCRY_REMOTE_HOST !== '1') return
   try {
     const relay = resolveRemoteRelay()
+    await refreshRemoteProviderSnapshot()
+    if (!remoteProviderRefresh) remoteProviderRefresh = setInterval(() => { void refreshRemoteProviderSnapshot() }, 15_000)
+    // Owner-explicit permission mode for remote runs. Default remote behaviour is
+    // unchanged (interactive approval fails closed in remote-run-binding). Only
+    // when the Mac owner sets SCRY_REMOTE_PERMISSION_MODE to a known mode do
+    // routed device runs adopt it — e.g. 'full_access' so the owner's chosen
+    // Provider runs without blocking on an approval the remote path cannot route.
+    // This is an explicit owner opt-in on their own machine, not a silent escalation.
+    const remotePermissionRaw = process.env.SCRY_REMOTE_PERMISSION_MODE
+    const remotePermissionMode: AgentPermissionMode | undefined =
+      remotePermissionRaw === 'full_access' || remotePermissionRaw === 'auto_review' || remotePermissionRaw === 'default'
+        ? remotePermissionRaw : undefined
+    if (remotePermissionRaw && !remotePermissionMode) console.warn(`[scry] ignoring invalid SCRY_REMOTE_PERMISSION_MODE=${remotePermissionRaw}`)
+    else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
     remoteHostService = await RemoteHostService.create({
       stateDirectory: join(app.getPath('userData'), 'remote'),
       // Fail closed: a device may only target a directory already authorized
@@ -3600,7 +3629,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // the interactive path's concern (see remote-run-binding.ts).
       // routing.providerId is a validated non-empty string; the registry itself
       // rejects an unknown provider, so the ProviderId narrowing is safe here.
-      startRun: createRemoteRunBinding({ run: (providerId, request) => providerRegistry.run(providerId as ProviderId, request) }),
+      startRun: createRemoteRunBinding({ run: (providerId, request) => providerRegistry.run(providerId as ProviderId, remotePermissionMode ? { ...request, permissionMode: remotePermissionMode } : request) }),
       // The phone's new-session picker chooses only among the host's already
       // directory-picker-authorized project dirs; it can never authorize a new
       // one. Snapshot per call so a locally-removed directory stops being
@@ -3614,7 +3643,10 @@ async function startRemoteHostIfEnabled(): Promise<void> {
           out.push({ path: canonical, label: basename(canonical) || canonical })
         }
         return out
-      }
+      },
+      // The Providers the device may pick for a new session. Snapshot mirrors the
+      // real registry describe() (id/label/available); the run path re-validates.
+      listProviders: () => remoteProviderSnapshot
     })
     await remoteHostService.start()
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)

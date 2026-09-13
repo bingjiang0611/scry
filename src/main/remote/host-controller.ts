@@ -1,8 +1,8 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteProviderRef } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage } from './run-output-log'
-export type { RemoteProjectRef } from './remote-gateway'
+export type { RemoteProjectRef, RemoteProviderRef } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -48,6 +48,8 @@ export interface HostControllerDependencies {
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]
+  // Snapshot of the host's Providers a device may target. Absent => honest empty.
+  listProviders?(): RemoteProviderRef[]
   // Optional shared operation gate (auth vs run mutual exclusion). A fresh one
   // is created when omitted; production passes the app-wide gate.
   gate?: ProviderOperationGate
@@ -83,7 +85,8 @@ export class HostController {
       authority: this.authority,
       ledger: this.#ledger,
       output: this.#output,
-      ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {})
+      ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
+      ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {})
     })
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
@@ -121,6 +124,12 @@ export class HostController {
   // target, authorized by the same verified peer certificate as every method.
   listProjects(peerCertSHA256: string): RemoteProjectRef[] {
     return this.#gateway.listProjects(peerCertSHA256)
+  }
+
+  // Device-facing: the Providers this device may target, authorized by the same
+  // verified peer certificate as every method.
+  listProviders(peerCertSHA256: string): RemoteProviderRef[] {
+    return this.#gateway.listProviders(peerCertSHA256)
   }
 
   // Device-facing: the assistant's real streamed output CONTENT for one run,

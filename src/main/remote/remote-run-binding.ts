@@ -62,6 +62,13 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     // uses to map its intent to Scry's own run identity.
     progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd: routing.cwd }))
     let lastErrorText: string | undefined
+    // Whether the Provider streamed any assistant TEXT during the run. Some
+    // Providers (e.g. qoder for a short turn) deliver the final answer only on
+    // the terminal result event; without this we would drop the answer entirely
+    // and the device would see tools but no reply. We forward the result text as
+    // the final output ONLY when nothing was streamed, so a Provider that streams
+    // incrementally is never double-emitted.
+    let sawAssistantText = false
     const emit = (ev: TraceEvent): void => {
       // Two distinct channels:
       //  - `progress`: opaque, non-secret lifecycle markers on the durable ledger.
@@ -70,6 +77,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       //                renders the actual run output. This is trace-derived content,
       //                NOT canonical usage; token/cost stay on the ledger `result`.
       if (ev.stage === 'text' && typeof ev.text === 'string' && ev.text.length > 0) {
+        sawAssistantText = true
         output({ kind: 'output', text: ev.text })
       } else if (ev.stage === 'thinking' && typeof ev.thinking === 'string' && ev.thinking.length > 0) {
         output({ kind: 'reasoning', text: ev.thinking })
@@ -87,6 +95,12 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       if (ev.stage === 'runtime:controls') { progress(marker({ event: 'started' })); return }
       if (ev.kind === 'harness' && ev.stage === 'result') {
         if (ev.isError && typeof ev.text === 'string') lastErrorText = ev.text.slice(0, 512)
+        // Fallback: surface the final answer if it only ever arrived on the
+        // result event (never streamed as stage:'text'). Non-error only.
+        else if (!sawAssistantText && typeof ev.text === 'string' && ev.text.length > 0) {
+          sawAssistantText = true
+          output({ kind: 'output', text: ev.text })
+        }
         progress(marker({
           event: 'result', isError: Boolean(ev.isError),
           ...(typeof ev.tokensIn === 'number' ? { tokensIn: ev.tokensIn } : {}),
