@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // Truthful UI state. This app renders the accepted v2 chrome, but the remote
 // host protocol (tasks, chat, files, terminal) is NOT implemented yet, so the
@@ -34,12 +37,27 @@ enum HostLink: Equatable {
 
 enum Route: Hashable { case home, newSession, chat, pair }
 
+// Honest pairing UI state. A fingerprint means the device PROVED possession and
+// is waiting for the Mac operator to confirm; it is NOT paired yet. Only a
+// host-issued grant flips to .paired. Failures surface verbatim, never as a
+// fake success.
+enum PairingUIState: Equatable {
+  case idle
+  case scanning
+  case proving
+  case awaitingConfirmation(fingerprint: String)
+  case paired(deviceId: String)
+  case failed(String)
+}
+
 @MainActor
 final class AppModel: ObservableObject {
   @Published var auth: AuthState = .signedOut
   @Published var link: HostLink = .notPaired
   @Published var route: Route = .home
   @Published var query: String = ""
+  @Published var pairing: PairingUIState = .idle
+  private var pairingTask: Task<Void, Never>?
 
   // No fabricated sessions. Until a real host feed exists this stays empty and
   // the UI shows a truthful empty state rather than mock rows.
@@ -78,7 +96,77 @@ final class AppModel: ObservableObject {
   }
   #endif
 
+  // Drive the real device-side pairing: parse the scanned scry1: code, prove key
+  // possession over the relay (inner TLS 1.3 mTLS to the host), then poll until
+  // the Mac operator confirms and a grant is issued. Runs the PROVEN
+  // RemotePairingClient; no state is faked.
+  func beginPair(scanned: String) {
+    pairingTask?.cancel()
+    let code: PairingCode
+    do { code = try PairingCode.parse(scanned) }
+    catch { pairing = .failed("配对码无法识别：\(error)"); return }
+    pairing = .proving
+    link = .pairing
+    let label = deviceLabel()
+    pairingTask = Task { [weak self] in
+      let client = RemotePairingClient()
+      do {
+        var progress = try await client.prove(code: code, deviceLabel: label)
+        // Poll across the operator's confirmation window; the pairing code TTL
+        // (~2 min) bounds this, and prove() is idempotent for the same key.
+        for _ in 0..<90 {
+          if Task.isCancelled { return }
+          switch progress {
+          case let .awaitingConfirmation(fingerprint):
+            await self?.setPairing(.awaitingConfirmation(fingerprint: fingerprint))
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            progress = try await client.refresh(code: code, deviceLabel: label)
+          case let .paired(deviceId, _):
+            await self?.setPaired(deviceId: deviceId, host: code.relayHost)
+            return
+          case let .denied(reason):
+            await self?.setPairing(.failed("Mac 拒绝了配对：\(reason)"))
+            return
+          case let .revoked(deviceId):
+            await self?.setPairing(.failed("该设备已被吊销：\(deviceId)"))
+            return
+          }
+        }
+        await self?.setPairing(.failed("等待 Mac 确认超时，请重试。"))
+      } catch {
+        if Task.isCancelled { return }
+        await self?.setPairing(.failed("配对失败：\(error)"))
+      }
+    }
+  }
+
+  private func setPairing(_ state: PairingUIState) { pairing = state }
+  private func setPaired(deviceId: String, host: String) {
+    pairing = .paired(deviceId: deviceId)
+    // A live grant now exists. The task/chat/file transport is still not wired,
+    // so we show an honest offline-but-paired link, never a fabricated feed.
+    link = .offline(host: host)
+  }
+
+  private func deviceLabel() -> String {
+#if canImport(UIKit)
+    return UIDevice.current.name
+#else
+    return "iPhone"
+#endif
+  }
+
+  func cancelPairing() {
+    pairingTask?.cancel()
+    pairingTask = nil
+    pairing = .idle
+    if case .pairing = link { link = .notPaired }
+  }
+
   func reset() {
+    pairingTask?.cancel()
+    pairingTask = nil
+    pairing = .idle
     auth = .signedOut
     link = .notPaired
     route = .home

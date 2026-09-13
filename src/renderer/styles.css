@@ -11406,6 +11406,13 @@ button.turn-id.turn-call-open:focus-visible {
   padding: 8px; border-radius: var(--r-sm);
 }
 .remote-pairing__devicecode { line-height: 1.5; }
+.remote-pairing__qr {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px; background: #fff; border-radius: var(--r-md); align-self: flex-start;
+}
+.remote-pairing__qr canvas { display: block; width: 240px; height: 240px; image-rendering: pixelated; }
+.remote-pairing__codetext { margin-top: 4px; }
+.remote-pairing__codetext summary { cursor: pointer; color: var(--dim2); font-size: 12px; }
 .remote-pairing__anchor { color: var(--dim2); font-size: 12px; }
 .remote-pairing__pending { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .remote-pairing__pending li, .remote-pairing__devices li {
