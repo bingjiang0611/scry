@@ -1,6 +1,32 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import QRCode from 'qrcode'
 import type { RemotePairingCode } from '../../shared/remote'
 import { projectRemote, confirmArguments, type PendingRow, type RemotePairingViewModel } from '../remote-pairing'
+
+// Draw the scannable scry1: device code as a QR onto a canvas (CSP-safe: no
+// data: URL, no innerHTML). The QR encodes only what the code already contains
+// (relay coords + hostId + one-time secret + public anchor cert); it is not a
+// second source of truth. If encoding fails we surface it and the raw code stays
+// visible below as a fallback.
+function DeviceCodeQR({ code }: { code: string }): JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    let cancelled = false
+    QRCode.toCanvas(canvas, code, { margin: 2, width: 240, errorCorrectionLevel: 'M' })
+      .then(() => { if (!cancelled) setFailed(false) })
+      .catch(() => { if (!cancelled) setFailed(true) })
+    return () => { cancelled = true }
+  }, [code])
+  return (
+    <div className="remote-pairing__qr">
+      <canvas ref={canvasRef} width={240} height={240} aria-label="配对二维码" />
+      {failed && <p className="remote-pairing__error" role="alert">二维码生成失败，请使用下方文本码。</p>}
+    </div>
+  )
+}
 
 // Trusted-LOCAL remote-access pairing screen (Mac's own renderer only). It drives
 // the narrow window.scry.remote* bridge and renders the honest projection: it
@@ -66,8 +92,12 @@ export function RemotePairing(): JSX.Element {
         <div className="remote-pairing__code">
           {code.deviceCode ? (
             <>
-              <p>用手机扫描此配对码（约 2 分钟内有效）：</p>
-              <code className="remote-pairing__devicecode">{code.deviceCode}</code>
+              <p>用 Scry 手机 App 扫描此二维码（约 2 分钟内有效）：</p>
+              <DeviceCodeQR code={code.deviceCode} />
+              <details className="remote-pairing__codetext">
+                <summary>无法扫描？展开文本码</summary>
+                <code className="remote-pairing__devicecode">{code.deviceCode}</code>
+              </details>
             </>
           ) : (
             // No relay dialed yet: there is nothing for the phone to reach, so we
