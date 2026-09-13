@@ -61,6 +61,28 @@ struct SignInView: View {
         .multilineTextAlignment(.center)
         .padding(.horizontal, 22)
         .padding(.bottom, 24)
+
+      #if DEBUG
+      // Sign in with Apple needs a paid Developer entitlement the tester does not
+      // have, so on a free Personal Team the button above fails at runtime. This
+      // DEBUG-only bypass unlocks the LOCAL UI exactly like a successful sign-in
+      // would (same semantics as the copy above) so pairing/run can be tested. It
+      // fabricates no host grant and no session; real access still comes only
+      // from a Mac-issued device grant after scanning the QR.
+      Button {
+        model.auth = .signedIn(name: "本地调试")
+        model.link = .notPaired
+        model.route = .pair
+      } label: {
+        Text("本地调试：跳过登录，去扫码配对")
+          .font(.system(size: 14, weight: .medium))
+          .frame(maxWidth: .infinity, minHeight: 44)
+          .foregroundStyle(Color.white)
+          .background(Palette.ink, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+      }
+      .padding(.horizontal, 22)
+      .padding(.bottom, 24)
+      #endif
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Palette.surface)

@@ -16,8 +16,15 @@ const scratch = mkdtempSync(join(tmpdir(), 'scry-qoder-check-'))
 const adapters = createBuiltInProviderAdapters(homedir(), join(scratch, 'codex'), join(scratch, 'oca'), join(scratch, 'ocs'))
 const registry = new ProviderRegistry(adapters, { disabledProviders: new Set(), runControlsEnabled: true })
 
+// Capture the Mac-catalog bridge callbacks: onRunStarted (pending) + onRunSession
+// (the Provider's REAL resumable session id). In the real app these write an
+// AppSession so the run shows up in the Mac session history.
+let catalogStarted = null
+let catalogSession = null
 const start = createRemoteRunBinding({
-  run: (providerId, request) => registry.run(providerId, { ...request, permissionMode: 'full_access' })
+  run: (providerId, request) => registry.run(providerId, { ...request, permissionMode: 'full_access' }),
+  onRunStarted: (info) => { catalogStarted = info; console.log(`[catalog] onRunStarted scryRunId=${info.scryRunId} provider=${info.providerId}`) },
+  onRunSession: (info) => { catalogSession = info; console.log(`[catalog] onRunSession externalSessionId=${info.externalSessionId}`) }
 })
 
 const progress = []
@@ -33,6 +40,9 @@ try {
   })
   console.log(`\n[check] ✅ settled. lifecycle markers=${progress.length} output chunks=${output.length}`)
   console.log(`[check] output kinds: ${JSON.stringify(output.reduce((a, c) => { a[c.kind] = (a[c.kind] || 0) + 1; return a }, {}))}`)
+  if (!catalogStarted) { console.log('[check] ✗ onRunStarted never fired (Mac catalog would miss the run)'); process.exit(1) }
+  if (!catalogSession || !catalogSession.externalSessionId) { console.log('[check] ✗ onRunSession/externalSessionId missing (not resumable on Mac)'); process.exit(1) }
+  console.log(`[check] ✅ Mac-catalog bridge OK: pending recorded + real externalSessionId=${catalogSession.externalSessionId}`)
 } catch (e) {
   console.log(`\n[check] ✗ failed: ${e?.message || e}`)
   process.exit(1)

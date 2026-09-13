@@ -51,6 +51,21 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     expect(markers.at(-1)).toEqual({ event: 'settled', status: 'completed' })
   })
 
+  it('surfaces the run to the Mac catalog: onRunStarted at bind, onRunSession with the real externalSessionId', async () => {
+    const { run } = fakeRun(async (req) => {
+      req.onExternalSessionId?.('ext-abc')
+      req.emit(controls()); req.emit(result(false)); return { status: 'completed' }
+    })
+    const onRunStarted = vi.fn()
+    const onRunSession = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-cat', onRunStarted, onRunSession })
+    await start({ runId: 'ledger-cat', routing: { cwd: '/w', providerId: 'qoder', agentProfileId: 'p', prompt: '  hi  ' }, progress: () => {}, output: () => {} })
+    // Pending catalog entry at bind (visible on the Mac before the session id).
+    expect(onRunStarted).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', agentProfileId: 'p' })
+    // Resolved to the Provider's REAL resumable session id.
+    expect(onRunSession).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', externalSessionId: 'ext-abc', agentProfileId: 'p' })
+  })
+
   it('rejects (ledger markFailed) when the provider result is a failure, surfacing its message', async () => {
     const { run } = fakeRun(async (req) => {
       req.emit({ ...result(true), text: 'boom detail' }); return { status: 'failed' }

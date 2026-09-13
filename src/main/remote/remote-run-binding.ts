@@ -33,6 +33,15 @@ export interface RemoteRunBindingDependencies {
   run(providerId: string, request: ProviderRunRequest): ProviderRunHandle
   // scry runId minting; overridable for deterministic tests.
   nextScryRunId?: () => string
+  // Optional Mac-catalog side effects so a device-initiated run is VISIBLE in the
+  // owner's Scry session history exactly like a local run (the user's expectation:
+  // "see the conversation on the Mac"). The binding stays pure - it does not know
+  // runtimeProvider or where the catalog lives; index.ts resolves that and writes
+  // an AppSession. Absent (tests) => no catalog side effect, run behaviour
+  // unchanged. These record REAL identities only (minted scryRunId, the
+  // Provider's own externalSessionId); nothing is fabricated.
+  onRunStarted?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; agentProfileId?: string }): void
+  onRunSession?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; externalSessionId: string; agentProfileId?: string }): void
 }
 
 export interface RemoteRunInput {
@@ -61,6 +70,10 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     // First marker: the durable ledgerRunId <-> scryRunId correlation the device
     // uses to map its intent to Scry's own run identity.
     progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd: routing.cwd }))
+    // Make the run appear in the Mac session catalog immediately (as pending),
+    // so the owner sees the conversation start on their Mac; it resolves to a
+    // resumable session once the Provider reports its externalSessionId below.
+    try { deps.onRunStarted?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, agentProfileId: routing.agentProfileId }) } catch { /* catalog visibility is best-effort; never fail the run */ }
     let lastErrorText: string | undefined
     // Whether the Provider streamed any assistant TEXT during the run. Some
     // Providers (e.g. qoder for a short turn) deliver the final answer only on
@@ -119,7 +132,12 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       // native defaults apply. Remote access must not silently escalate the
       // approval mode; mapping a device-chosen mode is a later, explicit step.
       emit,
-      onExternalSessionId: (externalSessionId) => progress(marker({ event: 'session', externalSessionId })),
+      onExternalSessionId: (externalSessionId) => {
+        progress(marker({ event: 'session', externalSessionId }))
+        // Bind the Provider's REAL session id into the Mac catalog so the owner
+        // can open/resume the exact conversation on their Mac. Best-effort.
+        try { deps.onRunSession?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId, agentProfileId: routing.agentProfileId }) } catch { /* never fail the run for a catalog write */ }
+      },
       // Fail closed: remote interactive approval is not wired. Throwing surfaces
       // the run as failed with a clear reason instead of hanging or auto-approving.
       requestUserInput: async () => { throw new Error('remote_interactive_input_unsupported') }

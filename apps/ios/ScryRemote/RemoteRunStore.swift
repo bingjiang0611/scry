@@ -80,9 +80,13 @@ final class RemoteRunStore: ObservableObject {
   func chooseProvider(_ ref: G0Transport.RunProviderRef) { chosenProvider = ref }
 
   // Load the Providers the host offers. Only available ones are selectable (an
-  // unavailable Provider cannot run). Auto-select the first available so the
-  // composer is usable immediately; the user can switch (this is what fixes the
-  // old hardcoded-provider bug where a run went to the wrong Provider).
+  // unavailable Provider cannot run). We deliberately do NOT auto-select a
+  // default: describe() reports a Provider as available from CLI presence/auth,
+  // which does not guarantee a run succeeds (e.g. a Provider whose CLI crashes on
+  // launch). Auto-picking the first would silently send the first turn to a
+  // Provider the user never chose - exactly the failure the owner hit. Requiring
+  // an explicit pick (canSend gates on chosenProvider) keeps the choice honest.
+  // If a previously-chosen Provider is no longer available, clear it.
   func loadProviders() {
     guard let client = makeClient() else { providers = .failed("尚未配对"); return }
     providers = .loading
@@ -93,8 +97,8 @@ final class RemoteRunStore: ObservableObject {
           guard let self else { return }
           let usable = list.filter { $0.available }
           self.providers = usable.isEmpty ? .empty : .loaded(usable)
-          if self.chosenProvider == nil || !usable.contains(where: { $0.id == self.chosenProvider?.id }) {
-            self.chosenProvider = usable.first
+          if let chosen = self.chosenProvider, !usable.contains(where: { $0.id == chosen.id }) {
+            self.chosenProvider = nil
           }
         }
       } catch {
