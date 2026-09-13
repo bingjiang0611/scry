@@ -30,6 +30,9 @@ struct RemoteRunClient {
     let providerId: String
     let agentProfileId: String?
     let prompt: String
+    // The Provider session id to CONTINUE (resume) instead of starting fresh.
+    // nil for a new session; set when sending a follow-up into an opened session.
+    var resume: String? = nil
   }
 
   private func identity() throws -> G0ProbeIdentity {

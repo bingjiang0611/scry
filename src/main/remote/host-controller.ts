@@ -27,6 +27,11 @@ import { ProviderOperationGate } from '../provider-operation-gate'
 // run. Carried in the intent detail as JSON; malformed detail is denied.
 export interface RemoteIntentRouting extends RemoteRunTarget {
   prompt?: string
+  // The Provider's own session id to CONTINUE (resume) instead of starting a
+  // fresh conversation. Present when the device sends a follow-up into an opened
+  // session; absent for a brand-new session. Authorization is unchanged (still by
+  // cwd + provider); resume only selects which conversation the run continues.
+  resume?: string
 }
 
 export interface HostControllerDependencies {
@@ -70,7 +75,8 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
     cwd: routing.cwd,
     providerId: routing.providerId,
     ...(typeof routing.agentProfileId === 'string' ? { agentProfileId: routing.agentProfileId } : {}),
-    ...(typeof routing.prompt === 'string' ? { prompt: routing.prompt } : {})
+    ...(typeof routing.prompt === 'string' ? { prompt: routing.prompt } : {}),
+    ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {})
   }
 }
 
