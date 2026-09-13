@@ -110,7 +110,7 @@
       "package": "@ali/scry-turn-recorder",
       "registry": "https://registry.anpm.alibaba-inc.com",
       "installPrefix": "/Users/baobingjiang/.local",
-      "publishIfMissing": true,
+      "publishIfMissing": false,
       "nodeBinDir": "/Users/baobingjiang/.nvm/versions/node/v22.22.1/bin"
     },
     "config": {

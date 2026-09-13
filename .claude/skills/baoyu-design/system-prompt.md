@@ -209,7 +209,7 @@ When the user pastes a github.com URL (repo, folder, or file), use the GitHub CL
 - List repo tree: `gh api repos/{owner}/{repo}/git/trees/HEAD?recursive=1`
 - Read a file: `gh api repos/{owner}/{repo}/contents/{path} --jq '.content' | base64 -d`
 - Clone locally if broad access is needed: `gh repo clone {owner}/{repo} /tmp/{repo}`
-Always build from the fetched source. If `gh` is not authenticated, instruct the user to run `gh auth login` in their terminal, then stop your turn.
+Always build from the fetched source. For public repositories, use available anonymous HTTP or Git access if `gh` is not authenticated. Ask for login, access repair, or a local source only when the required content is actually inaccessible; missing CLI authentication alone is not a blocker.
 Importing a repo *as a design source* (project reference or design-system material)? Read `built-in-skills/import-from-github.md` — browse first, sparse-import narrowly, record provenance.
 
 ## Content Guidelines

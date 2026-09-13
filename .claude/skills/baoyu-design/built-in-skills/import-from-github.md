@@ -33,6 +33,6 @@ Then `cp` just the files you actually use (text, images, fonts) into the project
 ## Provenance and auth
 
 - Record the repo URLs you used in the project's / design system's `readme.md`, and suggest the reader explore those repos further.
-- If a repo is private or unreachable, check `gh auth status` — then **stop and ask the user** to run `gh auth login`, fix access, or supply a local clone path. Don't build half-blind.
+- For public repositories, use available anonymous HTTP or Git access when `gh` is not authenticated. If the required source remains inaccessible, diagnose access/network failure and ask for the missing login, access repair, or a local clone. Do not treat missing CLI authentication alone as a blocker, or substitute guesses for source.
 
 Building a full design system from the imported material? Continue with [design-system-authoring-guide.md](design-system-authoring-guide.md).

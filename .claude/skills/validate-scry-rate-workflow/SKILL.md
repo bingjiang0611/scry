@@ -31,7 +31,7 @@ profile 一旦为某个 `run_root` 进入第一条消息阶段就冻结：`turn1
 - **Agent 永不克隆 Aone**（详见末尾红线 1、2）。用户要求执行只授权把契约固定的第一条消息放进输入框；未拿到用户给的新需求纯数字 ID 或 canonical URL 前不得继续。
 - 本 skill 只验收和诊断（红线 13）；Step 0 把 contract、完整脚本依赖和构建复制进本次 `run_root`，后续只执行冻结副本。冻结副本或 recorder 绝对身份漂移才使本次运行失效；canonical Scry 仓后续提交只作 audit，不再让已冻结运行作废。
 - 自动恢复仅限契约 allowlist：四个 hook 型 Provider 的 `settings.local.json` env key、`.mcp.json` 模板、Pi 的 tracked `.pi/settings.json`、缺失/错 origin/clean-stale 子仓、按 tracked lockfile 物化 `node_modules`、`init.sh`、固定池陈旧 worktree 注册项；逐项边界见 [恢复与保留规则](references/recovery.md)。
-- Scry 源码的本地未提交改动只作身份证据，不作闸门，也不进入构建产物：Step 0 以当时最新 commit 冻结构建；唯一例外是 registry 缺 recorder 精确版本、必须 publish 时仍要求干净 release input（发包不可逆）。
+- Scry 源码的本地未提交改动只作身份证据，不作闸门，也不进入构建产物：Step 0 以当时最新 commit 冻结构建；registry 缺 recorder 精确版本时停止对应恢复并报告发布准备项。预检不 publish 或推进 dist-tag；发布须在当前请求或已核对的既有明确授权范围内单独执行，且要求干净、稳定的 release input 和发布检查通过。
 - Provider ↔ 槽位一对一：Codex=`1`、Claude Code=`2`、Qoder=`3`、OpenCode=`4`、Pi=`5`。Pi 必须同时回读 `agentProfileId=pi:default`，且 MCP 门禁为 `not_applicable`；同 Provider 串行，跨 Provider 可并发。`environment` 与 `build` 共享锁互斥，正常验收不取 `browser` 锁。每条退出路径都释放本次持有的共享锁。
 - 固定槽位跨运行保留 lease，不做 `treehouse return`。**当前草稿记录一旦落盘就按保留处理**：保留 Scry Test、隔离 userData、workspace 数据和槽位锁供检查；草稿记录未落盘则走 `PRE_SEND_ARCHIVED` 自动归档并释放槽位。用户下一次明确启动同 Provider 验收时，该请求本身构成 supersession 授权：Step 0 自动停止并归档旧的严格终态 `RETAINED_DRAFT/RETAINED_FOR_REVIEW`，不再单独确认；`run_root` 和归档证据永不删除。
 - Step 0 只自动清理目标 Provider 的严格终态旧现场，以及既有规则允许接管的 inactive/prepared pre-send 事务；其他 Provider、active/incomplete、legacy 或 owner 不可证的现场一律保留。“无草稿记录”不等于 abandoned。

@@ -131,7 +131,7 @@ EXPECTED_RECOVERY_CONTRACT = {
         "package": "@ali/scry-turn-recorder",
         "registry": "https://registry.anpm.alibaba-inc.com",
         "installPrefix": "/Users/baobingjiang/.local",
-        "publishIfMissing": True,
+        "publishIfMissing": False,
         "nodeBinDir": "/Users/baobingjiang/.nvm/versions/node/v22.22.1/bin",
     },
     "config": {
@@ -663,94 +663,38 @@ def ensure_scry_dependencies(scry_repo: Path, log_path: Path | None = None) -> d
     }
 
 
+class RegistryPublicationRequired(RuntimeError):
+    """The requested version needs a separately authorized release."""
+
+
 def ensure_registry_version(scry_repo: Path, expected: str) -> dict[str, Any]:
+    """Verify the exact registry version without publishing or moving tags."""
     package = str(RECORDER_RECOVERY["package"])
     exact_status, exact = npm_view_version(f"{package}@{expected}")
     latest_status, latest = npm_view_version(f"{package}@latest")
     before = {"exactStatus": exact_status, "exact": exact, "latestStatus": latest_status, "latest": latest}
-    if latest_status != "published":
-        raise RuntimeError("recorder registry latest is unknown; refusing to publish or run init.sh")
-    expected_semver = semantic_version(expected)
-    latest_semver = semantic_version(latest)
-    if expected_semver is None or latest_semver is None:
-        raise RuntimeError(f"invalid recorder version state: source={expected!r}, latest={latest!r}")
-    if latest_semver > expected_semver:
-        raise RuntimeError(f"registry latest {latest} is newer than frozen Scry source {expected}")
-
-    action = "already-current"
-    release_gate = None
+    if semantic_version(expected) is None:
+        raise RuntimeError(f"invalid recorder source version: {expected!r}")
     if exact_status == "absent":
-        if RECORDER_RECOVERY.get("publishIfMissing") is not True:
-            raise RuntimeError(f"recorder {package}@{expected} is not published")
-        safe, source_before = source_release_safe(scry_repo)
-        if not safe:
-            raise RuntimeError(
-                f"recorder {package}@{expected} is absent from the registry and publishing needs a clean "
-                f"Scry release input; local modifications are otherwise accepted: {source_before}"
-            )
-        npm, env = npm_environment()
-        check_code, _ = command([npm, "run", "check:cli-release"], scry_repo, timeout=1800, env=env)
-        if check_code != 0:
-            raise RuntimeError(f"release checks failed for {package}@{expected}")
-        safe_after, source_after = source_release_safe(scry_repo)
-        if not safe_after or source_after != source_before:
-            raise RuntimeError(
-                f"Scry release input drifted while building {package}@{expected}: "
-                f"before={source_before}, after={source_after}"
-            )
-        cli_entry = scry_repo / "packages" / "turn-recorder-cli" / "dist" / "cli" / "scry.js"
-        node = Path(str(RECORDER_RECOVERY["nodeBinDir"])).expanduser().resolve() / "node"
-        cli_code, cli_output = command([str(node), str(cli_entry), "--version"], scry_repo, timeout=60, env=env)
-        built_version = cli_output.splitlines()[-1].strip() if cli_code == 0 and cli_output else None
-        if built_version != expected:
-            raise RuntimeError(f"built recorder artifact version mismatch: expected={expected}, actual={built_version}")
-        release_gate = {
-            "command": "npm run check:cli-release",
-            "sourceBefore": source_before,
-            "sourceAfter": source_after,
-            "builtVersion": built_version,
-        }
-        code, _ = command([npm, "run", "publish:cli"], scry_repo, timeout=1800, env=env)
-        if code != 0:
-            raced_status, raced = npm_view_version(f"{package}@{expected}")
-            if raced_status != "published" or raced != expected:
-                raise RuntimeError(f"publishing {package}@{expected} failed and the exact version is still absent")
-            action = "publish-race-won-elsewhere"
-        else:
-            action = "published"
-        safe_published, source_published = source_release_safe(scry_repo)
-        if not safe_published or source_published != source_before:
-            raise RuntimeError(
-                f"Scry release input drifted while publishing {package}@{expected}: "
-                f"before={source_before}, after={source_published}"
-            )
-        release_gate["sourceAfterPublish"] = source_published
-    elif exact_status != "published" or exact != expected:
+        raise RegistryPublicationRequired(
+            f"recorder {package}@{expected} is absent from {RECORDER_RECOVERY['registry']}. "
+            f"No release or dist-tag write was attempted. In {scry_repo}, prepare the exact "
+            "release input and check:cli-release result; execute publish:cli only within "
+            "the user's explicit release authorization, then resume this preflight."
+        )
+    if exact_status != "published" or exact != expected:
         raise RuntimeError(f"cannot prove registry package {package}@{expected}: {before}")
-
-    if latest != expected:
-        npm, env = npm_environment()
-        code, _ = command(
-            [npm, "dist-tag", "add", f"{package}@{expected}", "latest", f"--registry={RECORDER_RECOVERY['registry']}"],
-            timeout=120,
-            env=env,
-        )
-        if code != 0:
-            raise RuntimeError(f"cannot advance {package} latest from {latest} to {expected}")
-        action = "advanced-latest" if action == "already-current" else f"{action}+advanced-latest"
-
-    final_exact_status, final_exact = npm_view_version(f"{package}@{expected}")
-    final_latest_status, final_latest = npm_view_version(f"{package}@latest")
-    if final_exact_status != "published" or final_exact != expected or final_latest_status != "published" or final_latest != expected:
-        raise RuntimeError(
-            f"recorder registry did not converge to {expected}: exact={final_exact!r}, latest={final_latest!r}"
-        )
+    if latest_status != "published" or semantic_version(latest) is None:
+        raise RuntimeError("recorder registry latest is unknown; refusing installation")
+    if semantic_version(latest) > semantic_version(expected):
+        raise RuntimeError(f"registry latest {latest} is newer than frozen Scry source {expected}")
+    # A lagging tag does not prevent installing an already published exact version.
     return {
-        "action": action,
+        "action": "already-current" if latest == expected else "exact-available",
         "before": before,
-        "releaseGate": release_gate,
-        "exact": final_exact,
-        "latest": final_latest,
+        "releaseGate": None,
+        "exact": exact,
+        "latest": latest,
     }
 
 
@@ -1127,8 +1071,8 @@ def inspect(
     # Uncommitted Scry changes are audit-only evidence, not a gate: the run is
     # pinned to whatever worktree it froze, and drift during the run still
     # fails.  Only an unprovable source identity (no Git repo, failing git)
-    # blocks, because then nothing can be frozen.  Publishing a missing
-    # recorder version keeps its own clean-input gate.
+    # blocks, because then nothing can be frozen. Missing recorder versions
+    # require a separately authorized release, outside this preflight.
     add_check(
         checks,
         "scry.source.identity_provable",
@@ -1315,8 +1259,14 @@ def reconcile_environment(
             action_error = exc
             last_error = recovery_error(exc)
 
-        # Inspect after every attempt, including every exception. This turns a
-        # publish/install race that actually converged into success, and gives
+        if isinstance(action_error, RegistryPublicationRequired):
+            attempt["status"] = "REQUIRES_AUTHORIZED_RELEASE"
+            attempt.pop("currentStep", None)
+            write_json_atomic(recovery_output, manifest)
+            break
+
+        # Inspect after recoverable attempts, including exceptions. This turns an
+        # install race that actually converged into success, and gives
         # the next retry a fresh view of partially completed idempotent steps.
         try:
             current = inspect(provider, scry_repo, rate_native_repo)
