@@ -3587,11 +3587,15 @@ function resolveRemoteRelay(): RemoteRelayResolution {
 // mirrors the real describe() result; nothing is fabricated, and the run path
 // still validates the chosen providerId on submit.
 let remoteProviderSnapshot: { id: string; label: string; available: boolean }[] = []
+// providerId -> runtimeProvider, so a device-initiated run can be written into
+// the Mac session catalog with the correct runtime (recordSession below).
+let remoteProviderRuntime = new Map<string, RuntimeProvider>()
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 async function refreshRemoteProviderSnapshot(): Promise<void> {
   try {
     const descriptors = await providerRegistry.describe()
     remoteProviderSnapshot = descriptors.map((d) => ({ id: d.id, label: d.label, available: d.available }))
+    remoteProviderRuntime = new Map(descriptors.map((d) => [d.id, d.runtimeProvider]))
   } catch { /* keep the last good snapshot rather than fabricate */ }
 }
 
@@ -3629,7 +3633,25 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // the interactive path's concern (see remote-run-binding.ts).
       // routing.providerId is a validated non-empty string; the registry itself
       // rejects an unknown provider, so the ProviderId narrowing is safe here.
-      startRun: createRemoteRunBinding({ run: (providerId, request) => providerRegistry.run(providerId as ProviderId, remotePermissionMode ? { ...request, permissionMode: remotePermissionMode } : request) }),
+      // onRunStarted/onRunSession make the device-initiated run VISIBLE in the
+      // owner's Mac session catalog (the user's expectation: see the conversation
+      // on the Mac). We record a pending AppSession at start and bind the
+      // Provider's REAL externalSessionId when reported, so the owner can open and
+      // resume the exact conversation on their Mac. Best-effort: a catalog write
+      // never fails the run, and only real ids are recorded (nothing fabricated).
+      startRun: createRemoteRunBinding({
+        run: (providerId, request) => providerRegistry.run(providerId as ProviderId, remotePermissionMode ? { ...request, permissionMode: remotePermissionMode } : request),
+        onRunStarted: ({ providerId, cwd, prompt, scryRunId, agentProfileId }) => {
+          const runtimeProvider = remoteProviderRuntime.get(providerId)
+          if (!runtimeProvider) return
+          try { appSessionStore().recordPending({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, cwd, prompt }) } catch { /* catalog visibility is best-effort */ }
+        },
+        onRunSession: ({ providerId, cwd, prompt, scryRunId, externalSessionId, agentProfileId }) => {
+          const runtimeProvider = remoteProviderRuntime.get(providerId)
+          if (!runtimeProvider) return
+          try { appSessionStore().record({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, externalSessionId, cwd, prompt }) } catch { /* catalog visibility is best-effort */ }
+        }
+      }),
       // The phone's new-session picker chooses only among the host's already
       // directory-picker-authorized project dirs; it can never authorize a new
       // one. Snapshot per call so a locally-removed directory stops being
