@@ -95,6 +95,7 @@ import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
 import { RunStopLifecycle } from './run-stop-lifecycle'
 import { RemoteHostService, type RemoteHostServiceDependencies } from './remote/remote-host-service'
+import { createRemoteRunBinding } from './remote/remote-run-binding'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
 import { createRelayConnectWS } from './remote/relay-connect-ws'
@@ -3591,18 +3592,18 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       gate: providerOperationGate,
       createTransport: relay.createTransport,
       relayAdvertisement: relay.relayAdvertisement,
-      startRun: async ({ routing, progress }) => {
-        // TODO(remote-live): delegate to the live run-start path (RunRegistry +
-        // Provider adapter) under the existing workspace authorization + gate.
-        // Until then no relay transport is configured above, so this seam is
-        // unreachable; if ever reached it must fail closed and truthfully rather
-        // than silently claim a run started.
-        void routing; void progress
-        throw new Error('remote_run_binding_pending')
-      }
+      // LIVE run seam: a routed device intent becomes a REAL Provider run via the
+      // same registry the local UI uses. Workspace authorization + provider gate
+      // are already enforced upstream (RemoteRunPolicy/GatedExecutor) before this
+      // runs; interactive approval is not yet wired and fails closed. Mac-side
+      // RunRegistry/UI visibility, attachments, hooks and managed recorder remain
+      // the interactive path's concern (see remote-run-binding.ts).
+      // routing.providerId is a validated non-empty string; the registry itself
+      // rejects an unknown provider, so the ProviderId narrowing is safe here.
+      startRun: createRemoteRunBinding({ run: (providerId, request) => providerRegistry.run(providerId as ProviderId, request) })
     })
     await remoteHostService.start()
-    console.warn('[scry] remote host subsystem constructed (dormant: no relay transport configured)')
+    console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)
   } catch (error) {
     console.warn('[scry] remote host subsystem failed to start:', error)
     remoteHostService = null
