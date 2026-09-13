@@ -47,7 +47,10 @@ export class InnerMtlsHost {
       maxVersion: 'TLSv1.3',
       secureOptions: constants.SSL_OP_NO_TICKET
     }, (socket) => this.#onConnection(socket as TLSSocket, options.controller))
-    this.#server.on('tlsClientError', () => { /* rejected handshakes are not host errors */ })
+    this.#server.on('tlsClientError', (err) => {
+      // Rejected handshakes are not host errors. Optional diagnostics only.
+      if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] tlsClientError: ${(err as Error)?.message}`)
+    })
   }
 
   // Serve inner-mTLS over an already-established byte stream (e.g. one leg of the
@@ -60,6 +63,7 @@ export class InnerMtlsHost {
 
   #onConnection(socket: TLSSocket, controller: HostController): void {
     // Fail closed on anything but a fresh, fully-verified TLS 1.3 session.
+    if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] onConnection authorized=${socket.authorized} authErr=${socket.authorizationError} proto=${socket.getProtocol()} reused=${socket.isSessionReused()}`)
     if (!socket.authorized || socket.getProtocol() !== 'TLSv1.3' || socket.isSessionReused()) { socket.destroy(); return }
     const peer = socket.getPeerCertificate()
     const fingerprint = peer && peer.raw ? digest(peer.raw) : ''
@@ -97,6 +101,11 @@ export class InnerMtlsHost {
         // Authorized by the verified peer cert inside the controller/gateway; a
         // revoked device gets device_not_authorized, never a stale list.
         return { projects: controller.listProjects(fingerprint) }
+      }
+      if (request.op === 'providers') {
+        // Same owner-device authorization; the run path still validates the
+        // chosen providerId, so this is a display-only chooser snapshot.
+        return { providers: controller.listProviders(fingerprint) }
       }
       if (request.op === 'output') {
         // The assistant's real streamed output content for one run, after cursor.

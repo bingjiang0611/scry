@@ -3,3 +3,5 @@ swift/.swiftpm/
 .wrangler/
 cf-relay/.wrangler/
 cf-relay/.dev.vars
+# Generated esbuild bundles of the live-provider host harness (regenerated via build-live-host.mjs).
+*.bundle.mjs

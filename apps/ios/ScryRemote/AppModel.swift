@@ -149,10 +149,22 @@ final class AppModel: ObservableObject {
   private func setPaired(deviceId: String, host: String, connection: RemoteConnection) {
     connections.save(connection)
     pairing = .paired(deviceId: deviceId)
-    // A live grant now exists. The run channel is wired (RemoteRunClient), but the
-    // task/chat UI feed is not yet, so we show an honest offline-but-paired link
-    // rather than a fabricated feed.
+    // A live grant now exists and the run channel is wired (RemoteRunClient). We
+    // show an honest offline-but-paired link (reachability is only learned by an
+    // actual run, never faked) and, critically, LEAVE the pairing screen: a
+    // successful grant must not be a dead end. Briefly hold on "已配对" so the
+    // success is visible, then land on the new-session picker.
     link = .offline(host: host)
+    Task { [weak self] in
+      try? await Task.sleep(nanoseconds: 1_200_000_000)
+      guard let self else { return }
+      await MainActor.run {
+        if case .paired = self.pairing {
+          self.pairing = .idle
+          self.route = .newSession
+        }
+      }
+    }
   }
 
   private func deviceLabel() -> String {

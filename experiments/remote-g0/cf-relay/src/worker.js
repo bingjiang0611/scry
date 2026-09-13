@@ -62,6 +62,7 @@ export class RelayRoom {
 
     // Device: glue to one warm, authenticated, unpaired host leg for this mode.
     const host = this.#popWarmHost(mode)
+    try { const legs = this.state.getWebSockets('host').map((w) => w.deserializeAttachment()).filter(Boolean); console.log(`[relay] device mode=${mode} hostLeg=${host ? 'FOUND' : 'MISSING'} warm{run:${legs.filter((a) => a.mode === 'run' && a.authed && !a.deviceId).length},pair:${legs.filter((a) => a.mode === 'pair' && a.authed && !a.deviceId).length}} total=${legs.length}`) } catch {}
     this.state.acceptWebSocket(server, ['device'])
     if (!host) {
       try { server.close(1013, 'no_host_leg') } catch { /* closing */ }
@@ -108,6 +109,7 @@ export class RelayRoom {
         if (!ok) { try { ws.close(1008, 'host_unauthorized') } catch { /* closing */ } return }
         att.authed = true
         ws.serializeAttachment(att)
+        console.log(`[relay] host leg authed mode=${att.mode}`)
         return
       }
       // Post-pairing: forward inner-TLS bytes to the glued device.

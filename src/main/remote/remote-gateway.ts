@@ -42,6 +42,22 @@ export interface RemoteProjectSource {
   list(): RemoteProjectRef[]
 }
 
+// A Provider the device may target for a new session. `id` is the canonical
+// ProviderId the run routing carries; `label` is display-only; `available`
+// reflects whether the host currently has that Provider authenticated/usable.
+// The device still cannot invent a provider - the run path validates it.
+export interface RemoteProviderRef {
+  id: string
+  label: string
+  available: boolean
+}
+
+export interface RemoteProviderSource {
+  // Snapshot of the host's Providers. Called per request so a newly
+  // authenticated (or disabled) Provider is reflected without a reconnect.
+  list(): RemoteProviderRef[]
+}
+
 export interface RemoteOutputReader {
   // Chunks strictly after `cursor` for a run (bounded page) + the next cursor.
   since(runId: string, cursor: number): RunOutputPage
@@ -52,6 +68,8 @@ export interface RemoteGatewayDependencies {
   ledger: SessionLedger
   // Absent => the device sees an empty (honest) authorized-project list.
   projects?: RemoteProjectSource
+  // Absent => the device sees an empty (honest) provider list.
+  providers?: RemoteProviderSource
   // Absent => the device sees an empty (honest) output page.
   output?: RemoteOutputReader
 }
@@ -80,17 +98,20 @@ export class RemoteGatewayError extends Error {
 // into an unbounded frame. The device UI only needs a chooser, not the world.
 const MAX_PROJECTS = 200
 const MAX_PATH = 4_096
+const MAX_PROVIDERS = 32
 
 export class RemoteGateway {
   #authority: DeviceAuthorizer
   #ledger: SessionLedger
   #projects?: RemoteProjectSource
+  #providers?: RemoteProviderSource
   #output?: RemoteOutputReader
 
   constructor(deps: RemoteGatewayDependencies) {
     this.#authority = deps.authority
     this.#ledger = deps.ledger
     this.#projects = deps.projects
+    this.#providers = deps.providers
     this.#output = deps.output
   }
 
@@ -138,6 +159,26 @@ export class RemoteGateway {
       seen.add(entry.path)
       out.push({ path: entry.path, label: entry.label.slice(0, 256) })
       if (out.length >= MAX_PROJECTS) break
+    }
+    return out
+  }
+
+  // The Providers this device may target for a new session, authorized by the
+  // same owner-device check as every method. Display-only snapshot; the run path
+  // still validates the chosen providerId, so this leaks nothing a submit could
+  // not already discover. Deduped and bounded.
+  listProviders(peerCertSHA256: string): RemoteProviderRef[] {
+    this.#authorize(peerCertSHA256)
+    const raw = this.#providers?.list() ?? []
+    const seen = new Set<string>()
+    const out: RemoteProviderRef[] = []
+    for (const entry of raw) {
+      if (!entry || typeof entry.id !== 'string' || typeof entry.label !== 'string') continue
+      if (entry.id.length === 0 || entry.id.length > 64) continue
+      if (seen.has(entry.id)) continue
+      seen.add(entry.id)
+      out.push({ id: entry.id, label: entry.label.slice(0, 128), available: entry.available === true })
+      if (out.length >= MAX_PROVIDERS) break
     }
     return out
   }

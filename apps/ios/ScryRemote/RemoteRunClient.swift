@@ -72,6 +72,13 @@ struct RemoteRunClient {
     try await G0Transport.relayRunProjects(endpoint: endpoint(), identity: try identity())
   }
 
+  // The Providers the host currently offers for a new session (id/label/available).
+  // The phone picks among these; the host re-validates the chosen providerId on
+  // submit. It can never invent a provider the host does not have.
+  func providers() async throws -> [G0Transport.RunProviderRef] {
+    try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity())
+  }
+
   // The assistant's real streamed output content for one run, strictly after
   // `cursor`. This is the trace-derived CONTENT the chat view renders; tokens/
   // cost still come only from the ledger `result` event, never from here.

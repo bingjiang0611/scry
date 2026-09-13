@@ -217,6 +217,9 @@ public enum G0Transport {
   // never authorize a new one; it only chooses among these, and the host
   // re-checks the cwd on submit regardless.
   public struct RunProjectRef: Sendable, Equatable, Codable { public let path: String; public let label: String }
+  // A Provider the device may target for a new session. `available` mirrors the
+  // host's real describe() result; the run path still validates `id` on submit.
+  public struct RunProviderRef: Sendable, Equatable, Codable { public let id: String; public let label: String; public let available: Bool }
   // A single chunk of the assistant's REAL streamed output content (masked +
   // bounded host-side). kind ∈ output|reasoning|tool|tool_result|truncated.
   // This is trace-derived CONTENT, not canonical usage; tokens/cost stay on the
@@ -230,6 +233,7 @@ public enum G0Transport {
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
   private struct RunProjectsRequest: Encodable { let op = "projects" }
+  private struct RunProvidersRequest: Encodable { let op = "providers" }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunResponse: Decodable {
     let runId: String?
@@ -237,6 +241,7 @@ public enum G0Transport {
     let poll: RunPollBody?
     let state: String?
     let projects: [RunProjectRef]?
+    let providers: [RunProviderRef]?
     let output: RunOutputBody?
     let error: String?
   }
@@ -285,6 +290,15 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let projects = response.projects else { throw ProbeError.unexpectedReply }
     return projects
+  }
+
+  // The Providers this device may target for a new session. Authorized exactly
+  // like every run op; a revoked device gets device_not_authorized.
+  public static func relayRunProviders(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunProviderRef] {
+    let request = try JSONEncoder().encode(RunProvidersRequest())
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let providers = response.providers else { throw ProbeError.unexpectedReply }
+    return providers
   }
 
   // The assistant's real streamed output content for one run, strictly after

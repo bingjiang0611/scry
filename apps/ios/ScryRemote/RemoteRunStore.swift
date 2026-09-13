@@ -24,6 +24,16 @@ final class RemoteRunStore: ObservableObject {
     case failed(String)
   }
 
+  // Host-advertised Providers for the new-session picker. Mirrors the host's real
+  // describe(); we never invent a provider or fake availability.
+  enum ProvidersState: Equatable {
+    case idle
+    case loading
+    case loaded([G0Transport.RunProviderRef])
+    case empty
+    case failed(String)
+  }
+
   // The device-observable lifecycle. `.unknown` = we have not learned a state
   // yet (e.g. before any poll), never shown as success.
   enum Lifecycle: String, Equatable {
@@ -38,6 +48,8 @@ final class RemoteRunStore: ObservableObject {
 
   @Published private(set) var projects: ProjectsState = .idle
   @Published private(set) var chosen: G0Transport.RunProjectRef?
+  @Published private(set) var providers: ProvidersState = .idle
+  @Published private(set) var chosenProvider: G0Transport.RunProviderRef?
   @Published private(set) var lifecycle: Lifecycle = .unknown
   @Published private(set) var output: [OutputLine] = []
   // The user's own submitted message, echoed immediately as a chat bubble
@@ -65,6 +77,31 @@ final class RemoteRunStore: ObservableObject {
   }
 
   func chooseProject(_ ref: G0Transport.RunProjectRef) { chosen = ref }
+  func chooseProvider(_ ref: G0Transport.RunProviderRef) { chosenProvider = ref }
+
+  // Load the Providers the host offers. Only available ones are selectable (an
+  // unavailable Provider cannot run). Auto-select the first available so the
+  // composer is usable immediately; the user can switch (this is what fixes the
+  // old hardcoded-provider bug where a run went to the wrong Provider).
+  func loadProviders() {
+    guard let client = makeClient() else { providers = .failed("尚未配对"); return }
+    providers = .loading
+    Task { [weak self] in
+      do {
+        let list = try await client.providers()
+        await MainActor.run {
+          guard let self else { return }
+          let usable = list.filter { $0.available }
+          self.providers = usable.isEmpty ? .empty : .loaded(usable)
+          if self.chosenProvider == nil || !usable.contains(where: { $0.id == self.chosenProvider?.id }) {
+            self.chosenProvider = usable.first
+          }
+        }
+      } catch {
+        await MainActor.run { self?.providers = .failed(Self.describe(error)) }
+      }
+    }
+  }
 
   // Load the host-authorized project directories. The phone can never authorize
   // a new one; it only chooses among these, and the host re-checks on submit.
