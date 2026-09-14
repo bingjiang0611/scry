@@ -10,6 +10,8 @@ struct ScryRemoteApp: App {
     RemoteSelfTest.runRelayTLSProbeIfRequested()
     RemoteSelfTest.runRunProbeIfRequested()
     RemoteSelfTest.runLiveProviderProbeIfRequested()
+    RemoteSelfTest.runDirectoryAttachmentProbeIfRequested()
+    RemoteSelfTest.runSessionReadProbeIfRequested()
     #endif
   }
   var body: some Scene {

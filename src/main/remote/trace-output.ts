@@ -15,7 +15,10 @@ export interface RemoteOutputChunk {
 // so the phone never sees two divergent renderings of the same provider output.
 // It derives NOTHING it cannot read off the event; nothing is fabricated.
 export function traceEventToOutputChunk(ev: TraceEvent): RemoteOutputChunk | null {
-  if (ev.stage === 'text' && typeof ev.text === 'string' && ev.text.length > 0) {
+  // Modern streaming adapters (Codex, Pi, and Qoder) emit assistant content as
+  // text_delta chunks. Treat both snapshot text and deltas as real output; the
+  // adapters already suppress duplicate snapshot prefixes before emitting.
+  if ((ev.stage === 'text' || ev.stage === 'text_delta') && typeof ev.text === 'string' && ev.text.length > 0) {
     return { kind: 'output', text: ev.text }
   }
   if (ev.stage === 'thinking' && typeof ev.thinking === 'string' && ev.thinking.length > 0) {
@@ -41,17 +44,28 @@ export function traceEventToOutputChunk(ev: TraceEvent): RemoteOutputChunk | nul
 // but no answer. A Provider that streamed text is never double-emitted.
 export function flattenTraceItems(items: readonly TraceEvent[]): RemoteOutputChunk[] {
   const out: RemoteOutputChunk[] = []
+  const append = (chunk: RemoteOutputChunk): void => {
+    const previous = out[out.length - 1]
+    // Archived streaming adapters often persist one text_delta per token. Merge
+    // adjacent text/reasoning deltas into readable blocks while preserving the
+    // exact bytes and keeping tool boundaries intact.
+    if (previous && previous.kind === chunk.kind && (chunk.kind === 'output' || chunk.kind === 'reasoning')) {
+      previous.text += chunk.text
+    } else {
+      out.push(chunk)
+    }
+  }
   let sawText = false
   for (const ev of items) {
     const chunk = traceEventToOutputChunk(ev)
     if (chunk) {
       if (chunk.kind === 'output') sawText = true
-      out.push(chunk)
+      append(chunk)
       continue
     }
     if (ev.kind === 'harness' && ev.stage === 'result' && !ev.isError && !sawText && typeof ev.text === 'string' && ev.text.length > 0) {
       sawText = true
-      out.push({ kind: 'output', text: ev.text })
+      append({ kind: 'output', text: ev.text })
     }
   }
   return out
