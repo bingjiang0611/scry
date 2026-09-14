@@ -142,7 +142,8 @@ export class PairingAuthority {
         // re-pair, since revocation means "removed, requires re-approval" and a
         // new pairing still needs the operator to re-scan and re-confirm; a
         // revoked grant's key must not permanently ban the device.
-        if (this.data.grants.some(g => g.publicKeySHA256 === proof.publicKeySHA256 && g.revokedAt === null)) fail('device_key_already_registered')
+        const now = this.now()
+        if (this.data.grants.some(g => g.publicKeySHA256 === proof.publicKeySHA256 && g.revokedAt === null && g.expiresAt > now)) fail('device_key_already_registered')
         pairing = { ...base(pairing), state: 'awaiting_local_confirmation', proof: { ...proof, deviceLabel: input.deviceLabel } }
         this.replace(pairing)
       }
@@ -179,11 +180,18 @@ export class PairingAuthority {
       if (certificate.deviceId !== deviceId || certificate.publicKeySHA256 !== proof.publicKeySHA256 ||
           !HASH.test(certificate.certificateSHA256) || !text(certificate.certificatePEM, 16_384) ||
           !isTime(certificate.expiresAt) || certificate.expiresAt <= this.now()) fail('invalid_issued_identity')
+      const confirmedAt = this.now()
       const grant: DeviceGrant = { ...certificate, pairingId, deviceLabel: proof.deviceLabel, authority: 'owner-device',
-        source: 'local_confirmation', confirmedAt: this.now(), revokedAt: null }
+        source: 'local_confirmation', confirmedAt, revokedAt: null }
+      // Retire an expired grant for this same key in the SAME transaction. State
+      // validation intentionally forbids two unrevoked grants for one key; an
+      // expired certificate must be renewable without weakening that invariant.
+      const prior = this.data.grants.map(g =>
+        g.publicKeySHA256 === proof.publicKeySHA256 && g.revokedAt === null && g.expiresAt <= confirmedAt
+          ? { ...g, revokedAt: confirmedAt } : g)
       // One fsynced transaction creates the grant AND consumes the secret. The
       // certificate cannot leave this method on a failed/unknown commit.
-      this.persist({ ...this.data, grants: [...this.data.grants, grant], pairings: this.data.pairings.map(p =>
+      this.persist({ ...this.data, grants: [...prior, grant], pairings: this.data.pairings.map(p =>
         p.pairingId === pairingId ? { ...base(p), state: 'paired', deviceId } : p) })
       return structuredClone(grant)
     })

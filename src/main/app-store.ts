@@ -419,13 +419,21 @@ export function createAppSessionStore(userDataDir: string) {
   }): void => {
     if (!args.externalSessionId) return
     const list = load()
-    const ex = list.find(
-      (session) =>
-        session.providerId === args.providerId &&
-        session.agentProfileId === args.agentProfileId &&
-        session.cwd === args.cwd &&
-        ((args.runId && session.runId === args.runId) || session.externalSessionId === args.externalSessionId)
-    )
+    const sameScope = (session: AppSession): boolean =>
+      session.providerId === args.providerId &&
+      session.agentProfileId === args.agentProfileId &&
+      session.cwd === args.cwd
+    const runMatch = args.runId ? list.find((session) => sameScope(session) && session.runId === args.runId) : undefined
+    const externalMatch = list.find((session) => sameScope(session) && session.externalSessionId === args.externalSessionId)
+    // A resumed remote run used to create a fresh pending row even though it
+    // already had an external session id. If both identities are present, keep
+    // the canonical external-session row (and its title/pin/archive metadata)
+    // and remove the orphan pending duplicate while linking the latest run.
+    const ex = externalMatch ?? runMatch
+    if (runMatch && externalMatch && runMatch !== externalMatch) {
+      const duplicateIndex = list.indexOf(runMatch)
+      if (duplicateIndex >= 0) list.splice(duplicateIndex, 1)
+    }
     const now = Date.now()
     if (ex) {
       ex.sessionId = args.externalSessionId

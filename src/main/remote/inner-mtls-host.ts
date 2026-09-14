@@ -25,7 +25,10 @@ export interface InnerMtlsHostOptions {
   maxFrameBytes?: number
 }
 
-const DEFAULT_MAX_FRAME = 64 * 1024
+// Remote prompts may carry a small, explicitly bounded image/text attachment.
+// The relay still sees only inner-TLS ciphertext; 1.25 MiB is enough for the
+// mobile attachment budget while preventing unbounded buffering.
+const DEFAULT_MAX_FRAME = 1_310_720
 
 function digest(bytes: Uint8Array): string {
   return createHash('sha256').update(Buffer.from(bytes)).digest('hex')
@@ -84,7 +87,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; runId?: string; providerId?: string; cwd?: string; externalSessionId?: string }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; runId?: string; providerId?: string; cwd?: string; path?: string; externalSessionId?: string }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -104,6 +107,10 @@ export class InnerMtlsHost {
         // Authorized by the verified peer cert inside the controller/gateway; a
         // revoked device gets device_not_authorized, never a stale list.
         return { projects: controller.listProjects(fingerprint) }
+      }
+      if (request.op === 'directories') {
+        if (request.path !== undefined && typeof request.path !== 'string') return { error: 'invalid_request' }
+        return { directories: controller.listDirectories(fingerprint, { ...(request.path !== undefined ? { path: request.path } : {}) }) }
       }
       if (request.op === 'providers') {
         // Same owner-device authorization; the run path still validates the

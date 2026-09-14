@@ -23,6 +23,19 @@ struct RemoteRunClient {
 
   enum ClientError: Error, Equatable { case missingCredentials }
 
+  // A bounded attachment carried inside the existing inner-mTLS request. Images
+  // become native Provider image inputs on the Mac; UTF-8 text/code files are
+  // appended to Provider context with their real filename. Unsupported binary
+  // files never masquerade as uploaded content.
+  struct Attachment: Encodable, Equatable {
+    enum Kind: String, Encodable, Equatable { case image, text }
+    let kind: Kind
+    let name: String
+    let mimeType: String
+    let dataBase64: String
+    let size: Int
+  }
+
   // The routing an intent resolves to on the host. `cwd` must already be an
   // authorized Scry project directory; the host fails closed otherwise.
   struct Routing: Encodable, Equatable {
@@ -30,9 +43,13 @@ struct RemoteRunClient {
     let providerId: String
     let agentProfileId: String?
     let prompt: String
+    var modelId: String? = nil
+    var effort: String? = nil
+    var permissionMode: String? = nil
     // The Provider session id to CONTINUE (resume) instead of starting fresh.
     // nil for a new session; set when sending a follow-up into an opened session.
     var resume: String? = nil
+    var attachments: [Attachment] = []
   }
 
   private func identity() throws -> G0ProbeIdentity {
@@ -73,6 +90,13 @@ struct RemoteRunClient {
   // chooses among these, and the host re-checks the cwd on submit.
   func projects() async throws -> [G0Transport.RunProjectRef] {
     try await G0Transport.relayRunProjects(endpoint: endpoint(), identity: try identity())
+  }
+
+  // Browse one folder level inside a Mac-authorized project. nil lists the
+  // authorized roots; every non-nil path is canonicalized and re-authorized by
+  // the host before any directory names are returned.
+  func directories(path: String?) async throws -> G0Transport.RunDirectoryListing {
+    try await G0Transport.relayRunDirectories(endpoint: endpoint(), identity: try identity(), path: path)
   }
 
   // The Providers the host currently offers for a new session (id/label/available).

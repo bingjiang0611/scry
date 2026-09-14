@@ -5,14 +5,14 @@
 // the production Duplex adapter. No account/deploy/spend; global WebSocket only.
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { unstable_dev } from 'wrangler'
 import { createRelayConnectWS } from '../../src/main/remote/relay-connect-ws.ts'
 import { ReverseTunnelTransport, RelayClient } from '../../src/main/remote/relay-client.ts'
 
 const cfDir = fileURLToPath(new URL('cf-relay/', import.meta.url))
-const TOKEN = 'local-dev-token'
+const TOKEN = randomBytes(32).toString('base64url')
 
 // Trivial StreamServer: echo every chunk back, upper-cased, proving the host
 // Duplex both receives device bytes and writes bytes back through the Worker.
@@ -32,7 +32,7 @@ const hostId = randomUUID()
 const cases = []
 let client
 try {
-  const { connect, readyEvent } = createRelayConnectWS({ url: base, hostId, token: TOKEN, mode: 'run' })
+  const { connect, readyEvent } = createRelayConnectWS({ url: base, hostId, token: TOKEN, enroll: true, mode: 'run' })
   const transport = new ReverseTunnelTransport({ connect, poolSize: 2, readyEvent })
   client = new RelayClient({ host: echoServer, transport })
   await client.start()
@@ -58,7 +58,7 @@ try {
     await new Promise((r) => setTimeout(r, 300))
   }
   assert.equal(echoed, 'HELLO RELAY')
-  cases.push({ name: 'production host leg (createRelayConnectWS -> RelayClient) echoes device bytes through the Worker', passed: true })
+  cases.push({ name: 'production host leg self-enrolls and echoes device bytes through the Worker', passed: true })
 
   console.log(JSON.stringify({ scope: 'production Cloudflare host leg vs relay Worker under local workerd; no account/deploy/spend', cases }, null, 2))
 } finally {

@@ -165,6 +165,25 @@ describe('pairing authority (synthetic crypto adapter; no human or Provider exec
     await expect(restored.confirmLocal(pairing.pairingId, KEY)).rejects.toThrow('device_revoked')
   })
 
+  it('lets an expired device certificate re-pair with the same key', async () => {
+    const { authority, dependencies, time } = setup()
+    const first = await pending(authority)
+    const firstGrant = await authority.confirmLocal(first.pairing.pairingId, KEY)
+    time.wall += 3_600_001
+    const second = await authority.begin()
+    const input = { pairingId: second.pairingId, secret: second.secret, csrPEM: 'synthetic CSR', deviceLabel: 'Test iPhone' }
+    expect(await authority.prove(input, KEY)).toEqual({ state: 'awaiting_local_confirmation', pairingId: second.pairingId, publicKeySHA256: KEY })
+    dependencies.issue = vi.fn(async ({ deviceId }: { deviceId: string }) => ({
+      deviceId, certificatePEM: 'renewed synthetic certificate', certificateSHA256: 'e'.repeat(64),
+      publicKeySHA256: KEY, expiresAt: time.wall + 3_600_000
+    }))
+    const renewed = await authority.confirmLocal(second.pairingId, KEY)
+    expect(renewed.deviceId).not.toBe(firstGrant.deviceId)
+    const matching = authority.inspectLocal().grants.filter(g => g.publicKeySHA256 === KEY)
+    expect(matching).toHaveLength(2)
+    expect(matching.filter(g => g.revokedAt === null)).toHaveLength(1)
+  })
+
   it('lets a revoked device re-pair after fresh operator confirmation', async () => {
     const { authority, dependencies, time } = setup()
     const first = await pending(authority)

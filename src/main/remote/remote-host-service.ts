@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
-import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
+import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
@@ -18,8 +18,9 @@ import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteStatu
 //
 // The relay transport is INJECTED. When it is absent the host is fully
 // constructed and can pair and serve locally, but no outbound relay leg is
-// opened - so the subsystem is dormant until a relay endpoint is configured,
-// and default app behaviour is unchanged. The human-in-the-loop pairing
+// opened, so the subsystem is dormant until its owner supplies a relay. The
+// app composition layer decides whether to inject the official default or a
+// private override. The human-in-the-loop pairing
 // confirmation (begin/confirmLocal/cancel/revoke) is exposed for the trusted
 // LOCAL Scry UI only; it is never reachable from a device.
 
@@ -40,6 +41,7 @@ export interface RemoteHostServiceDependencies {
   // the phone's new-session picker chooses only among real authorized targets.
   // Absent => the device sees an honest empty list.
   listProjects?(): RemoteProjectRef[]
+  listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]
   listSessions?(): RemoteSessionRef[]
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
@@ -101,6 +103,7 @@ export class RemoteHostService {
       startRun: deps.startRun,
       gate: deps.gate,
       ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
+      ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
       ...(deps.readHistory ? { readHistory: deps.readHistory } : {})

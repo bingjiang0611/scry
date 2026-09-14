@@ -207,6 +207,38 @@ describe('app-store', () => {
     }
   })
 
+  it('合并已存在 Provider 会话与旧版远程续聊留下的 pending 重复项', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      store.record({
+        providerId: 'qoder', runtimeProvider: 'qoder_cli', externalSessionId: 'session-1',
+        cwd: '/repo', prompt: 'old prompt'
+      })
+      store.recordPending({
+        providerId: 'qoder', runtimeProvider: 'qoder_cli', runId: 'remote-run-1',
+        cwd: '/repo', prompt: 'mobile follow-up'
+      })
+      expect(store.listSessions('/repo', 'qoder')).toHaveLength(2)
+
+      store.record({
+        providerId: 'qoder', runtimeProvider: 'qoder_cli', runId: 'remote-run-1',
+        externalSessionId: 'session-1', cwd: '/repo', prompt: 'mobile follow-up'
+      })
+
+      const sessions = store.listSessions('/repo', 'qoder')
+      expect(sessions).toEqual([
+        expect.objectContaining({
+          sessionId: 'session-1', externalSessionId: 'session-1', runId: 'remote-run-1',
+          preview: 'mobile follow-up'
+        })
+      ])
+      expect(sessions[0]).not.toHaveProperty('pending')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('隔离相同 external session id，并把无证据老数据标成 legacy_unknown', () => {
     const dir = tempDir()
     try {

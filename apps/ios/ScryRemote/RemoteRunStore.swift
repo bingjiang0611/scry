@@ -24,6 +24,13 @@ final class RemoteRunStore: ObservableObject {
     case failed(String)
   }
 
+  enum DirectoriesState: Equatable {
+    case idle
+    case loading
+    case loaded(G0Transport.RunDirectoryListing)
+    case failed(String)
+  }
+
   // Host-advertised Providers for the new-session picker. Mirrors the host's real
   // describe(); we never invent a provider or fake availability.
   enum ProvidersState: Equatable {
@@ -45,11 +52,20 @@ final class RemoteRunStore: ObservableObject {
     let kind: String // output | reasoning | tool | tool_result | truncated
     let text: String
   }
+  struct SentAttachment: Identifiable, Equatable {
+    let id = UUID()
+    let name: String
+    let kind: RemoteRunClient.Attachment.Kind
+    let size: Int
+  }
 
   @Published private(set) var projects: ProjectsState = .idle
+  @Published private(set) var directories: DirectoriesState = .idle
   @Published private(set) var chosen: G0Transport.RunProjectRef?
   @Published private(set) var providers: ProvidersState = .idle
   @Published private(set) var chosenProvider: G0Transport.RunProviderRef?
+  @Published private(set) var chosenEffort: String?
+  @Published private(set) var permissionMode: String = "default"
 
   // The host's session catalog (the SAME conversations the Mac lists). Loaded
   // from the host over the granted-cert channel; never fabricated. Opening a
@@ -83,6 +99,7 @@ final class RemoteRunStore: ObservableObject {
   // (ChatGPT/Codex style) so the person sees exactly what they sent. This is the
   // literal local input, not host-derived, and is labeled as the user turn.
   @Published private(set) var prompt: String?
+  @Published private(set) var sentAttachments: [SentAttachment] = []
   @Published private(set) var runId: String?
   @Published private(set) var submitError: String?
   @Published private(set) var truncated = false
@@ -107,7 +124,19 @@ final class RemoteRunStore: ObservableObject {
   }
 
   func chooseProject(_ ref: G0Transport.RunProjectRef) { chosen = ref }
-  func chooseProvider(_ ref: G0Transport.RunProviderRef) { chosenProvider = ref }
+  func chooseProvider(_ ref: G0Transport.RunProviderRef) {
+    chosenProvider = ref
+    chosenEffort = ref.efforts?.first(where: { $0.isDefault == true })?.id ?? ref.efforts?.first?.id
+    permissionMode = ref.permissions?.first(where: { $0.id == "default" })?.id ?? ref.permissions?.first?.id ?? "default"
+  }
+  func chooseEffort(_ id: String) {
+    guard chosenProvider?.efforts?.contains(where: { $0.id == id }) == true else { return }
+    chosenEffort = id
+  }
+  func choosePermission(_ id: String) {
+    guard chosenProvider?.permissions?.contains(where: { $0.id == id }) == true else { return }
+    permissionMode = id
+  }
 
   // Load the host session catalog so the phone's session list shows the SAME
   // conversations the Mac has (fixes an always-empty list). Honest states only.
@@ -153,7 +182,7 @@ final class RemoteRunStore: ObservableObject {
   // Provider the user never chose - exactly the failure the owner hit. Requiring
   // an explicit pick (canSend gates on chosenProvider) keeps the choice honest.
   // If a previously-chosen Provider is no longer available, clear it.
-  func loadProviders() {
+  func loadProviders(preferredId: String? = nil) {
     guard let client = makeClient() else { providers = .failed("尚未配对"); return }
     providers = .loading
     Task { [weak self] in
@@ -166,6 +195,11 @@ final class RemoteRunStore: ObservableObject {
           self.providers = usable.isEmpty ? .empty : .loaded(usable)
           if let chosen = self.chosenProvider, !usable.contains(where: { $0.id == chosen.id }) {
             self.chosenProvider = nil
+            self.chosenEffort = nil
+            self.permissionMode = "default"
+          }
+          if let preferredId, let preferred = usable.first(where: { $0.id == preferredId }), self.chosenProvider?.id != preferredId {
+            self.chooseProvider(preferred)
           }
         }
       } catch {
@@ -192,20 +226,44 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
+  // Browse exactly one hierarchy level. A nil path requests authorized roots;
+  // the host rejects every path outside those roots before reading the folder.
+  func loadDirectories(path: String? = nil) {
+    guard let client = makeClient() else { directories = .failed("尚未配对，无法读取文件夹"); return }
+    directories = .loading
+    Task { [weak self] in
+      do {
+        let listing = try await client.directories(path: path)
+        await MainActor.run {
+          self?.reachable = true
+          self?.directories = .loaded(listing)
+        }
+      } catch {
+        await MainActor.run { self?.reachable = false; self?.directories = .failed(Self.describe(error)) }
+      }
+    }
+  }
+
   // Submit a durable intent and begin polling. Recorded != executed: the button
   // records intent; the host drives the real lifecycle we then observe.
-  func submit(prompt: String, providerId: String) {
+  func submit(prompt: String, providerId: String, attachments: [RemoteRunClient.Attachment] = []) {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
     guard let cwd = chosen?.path else { submitError = "请先选择一个主机已授权的项目"; return }
     guard let client = makeClient() else { submitError = "尚未配对"; return }
+    let modelId = chosenProvider?.modelId
+    let effort = chosenEffort
+    let permission = permissionMode
     submitError = nil
     resetRun()
     self.prompt = trimmed
+    sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
     lifecycle = .recorded
     Task { [weak self] in
       do {
-        let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed)
+        let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
+                                              modelId: modelId, effort: effort, permissionMode: permission,
+                                              attachments: attachments)
         let outcome = try await client.submit(routing: routing)
         await MainActor.run {
           self?.reachable = true
@@ -292,6 +350,7 @@ final class RemoteRunStore: ObservableObject {
     lifecycle = .unknown
     output = []
     prompt = nil
+    sentAttachments = []
     runId = nil
     truncated = false
     resultSummary = nil
@@ -303,19 +362,25 @@ final class RemoteRunStore: ObservableObject {
   // session id) so the conversation keeps its context. Unlike submit(), the
   // target is explicit (from the opened session), not the new-session pickers.
   // Chained follow-ups resume the LATEST reported session id when available.
-  func submitFollowUp(prompt: String, providerId: String, cwd: String, resume: String) {
+  func submitFollowUp(prompt: String, providerId: String, cwd: String, resume: String, attachments: [RemoteRunClient.Attachment] = []) {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
     guard let client = makeClient() else { submitError = "尚未配对"; return }
     let resumeId = liveExternalSessionId ?? resume
+    let modelId = chosenProvider?.id == providerId ? chosenProvider?.modelId : nil
+    let effort = chosenProvider?.id == providerId ? chosenEffort : nil
+    let permission = chosenProvider?.id == providerId ? permissionMode : "default"
     submitError = nil
     resetRun()
     self.prompt = trimmed
+    sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
     lifecycle = .recorded
     liveExternalSessionId = resumeId
     Task { [weak self] in
       do {
-        let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed, resume: resumeId)
+        let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
+                                              modelId: modelId, effort: effort, permissionMode: permission,
+                                              resume: resumeId, attachments: attachments)
         let outcome = try await client.submit(routing: routing)
         await MainActor.run {
           self?.reachable = true

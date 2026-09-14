@@ -53,11 +53,57 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     expect(markers.at(-1)).toEqual({ event: 'settled', status: 'completed' })
   })
 
-  it('resumes the SAME provider session when routing.resume is present (follow-up into an opened session)', async () => {
-    const { run, calls } = fakeRun(async (req) => { req.emit(controls()); req.emit(result(false)); return { status: 'completed' } })
-    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-r' })
-    await start({ runId: 'ledger-r', routing: { cwd: '/w', providerId: 'qoder', prompt: 'more', resume: 'ext-existing' }, progress: () => {}, output: () => {} })
+  it('forwards only explicitly selected model, effort and permission controls', async () => {
+    const { run, calls } = fakeRun(async () => ({ status: 'completed' }))
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-controls' })
+    await start({ runId: 'ledger-controls', routing: {
+      cwd: '/w', providerId: 'codex', prompt: 'go', modelId: 'gpt-5.4', effort: 'high', permissionMode: 'full_access'
+    }, progress: () => {}, output: () => {} })
+
+    expect(calls[0]).toMatchObject({
+      model: { id: 'gpt-5.4' }, effort: 'high', permissionMode: 'full_access'
+    })
+  })
+
+  it('forwards real image attachments and injects UTF-8 files into Provider context without changing the catalog prompt', async () => {
+    const image = { kind: 'image' as const, name: 'screen.jpg', mimeType: 'image/jpeg', dataBase64: '/9j/', size: 3 }
+    const text = { kind: 'text' as const, name: 'error.log', mimeType: 'text/plain', dataBase64: Buffer.from('boom').toString('base64'), size: 4 }
+    const { run, calls } = fakeRun(async (req) => {
+      req.onExternalSessionId?.('ext-files')
+      req.emit(result(false))
+      return { status: 'completed' }
+    })
+    const onRunStarted = vi.fn()
+    const onRunArchive = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-files', onRunStarted, onRunArchive })
+    await start({ runId: 'ledger-files', routing: { cwd: '/w', providerId: 'qoder', prompt: 'inspect', attachments: [image, text] }, progress: () => {}, output: () => {} })
+
+    expect(calls[0].prompt).toContain('inspect')
+    expect(calls[0].prompt).toContain('<scry_attached_file name="error.log" mime="text/plain">\nboom')
+    expect(calls[0].attachments).toEqual([image])
+    expect(onRunStarted).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'inspect' }))
+    expect(onRunArchive).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'inspect', attachments: [image] }))
+  })
+
+  it('resumes and archives the SAME provider session even when the Provider does not re-emit its session id', async () => {
+    // Qoder resumes successfully but does not call onExternalSessionId again.
+    // routing.resume must therefore be the catalog/archive identity.
+    const { run, calls } = fakeRun(async (req) => { req.emit(textEvent('continued')); req.emit(controls()); req.emit(result(false)); return { status: 'completed' } })
+    const onRunStarted = vi.fn()
+    const onRunSession = vi.fn()
+    const onRunArchive = vi.fn()
+    const progress = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-r', onRunStarted, onRunSession, onRunArchive })
+    await start({ runId: 'ledger-r', routing: { cwd: '/w', providerId: 'qoder', prompt: 'more', resume: ' ext-existing ' }, progress, output: () => {} })
+
     expect(calls[0]).toMatchObject({ prompt: 'more', cwd: '/w', resume: 'ext-existing' })
+    // Never create an unopenable pending catalog row for a resumed conversation.
+    expect(onRunStarted).not.toHaveBeenCalled()
+    expect(onRunSession).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'more', scryRunId: 'scry-r', externalSessionId: 'ext-existing', agentProfileId: undefined })
+    expect(onRunArchive).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'qoder', scryRunId: 'scry-r', externalSessionId: 'ext-existing', status: 'completed'
+    }))
+    expect(progress.mock.calls.map(c => JSON.parse(c[0] as string))).toContainEqual({ event: 'session', externalSessionId: 'ext-existing', resumed: true })
   })
 
   it('surfaces the run to the Mac catalog: onRunStarted at bind, onRunSession with the real externalSessionId', async () => {

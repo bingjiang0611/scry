@@ -1,77 +1,78 @@
 import SwiftUI
 
-// Pairing entry. The pairing authority and its human confirmation live on the
-// Mac (src/main/remote/pairing.ts); this phone screen explains the real steps
-// and never claims a connection was created. It stays truthful: scanning and
-// live bootstrap transport are not wired into this build yet.
+// v5 pairing keeps one clear action and makes the trust boundary explicit. A
+// fingerprint means proof succeeded but is never rendered as paired until the
+// Mac issues a real grant.
 struct PairView: View {
   @EnvironmentObject var model: AppModel
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack {
-        Text("连接你的 Mac").font(.system(size: 20, weight: .semibold))
-        Spacer()
+      RemoteHeader(title: "连接 Mac", backAction: { model.cancelPairing(); model.route = .home }) {
+        Color.clear.frame(width: 44, height: 44)
       }
-      .padding(.horizontal, 22)
-      .padding(.top, 18)
-      .padding(.bottom, 8)
-
       ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          step(1, "在 Mac 上打开 Scry，选择「连接 iPhone」。")
-          step(2, "用此 iPhone 扫描 Mac 显示的短时配对码。")
-          step(3, "在 Mac 上核对设备与「最大功能权限」，确认后才会授予访问。")
+        VStack(spacing: 0) {
+          pairMark.padding(.top, 34).padding(.bottom, 25)
+          Text("让 iPhone 安全连接 Scry")
+            .font(.system(size: 25, weight: .bold)).tracking(-0.6).multilineTextAlignment(.center)
+          Text("在 Mac 的 Scry 中打开“连接 iPhone”，然后扫描一次性配对码。")
+            .font(.system(size: 14)).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+            .padding(.top, 9).padding(.horizontal, 22)
 
-          Text("此 iPhone 将能管理任务、授权文件、受管理终端与审批；这不等于 root，也不绕过仓库指纹授权。凭据与执行始终留在 Mac。")
-            .font(.system(size: 13))
-            .foregroundStyle(Palette.muted)
-            .padding(.top, 4)
+          VStack(spacing: 0) {
+            step(1, "扫描 Mac 上显示的二维码")
+            step(2, "核对两端显示的设备指纹")
+            step(3, "在 Mac 上确认访问权限")
+          }
+          .padding(.top, 26)
 
-          pairingStatus
+          pairingStatus.padding(.top, 18)
+
+          HStack(alignment: .top, spacing: 9) {
+            Image(systemName: Symbol.shield).font(.system(size: 16)).foregroundStyle(Palette.positive)
+            Text("中继只传输端到端加密字节。设备私钥、Provider 凭据与执行都留在你的设备上。")
+              .font(.system(size: 11)).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .padding(13).background(Palette.noticeBg, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+          .padding(.top, 18)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 8)
+        .padding(.horizontal, 24).padding(.bottom, 20)
       }
       .scrollIndicators(.hidden)
 
-      VStack(spacing: 10) {
-        Button {
-          model.pairing = .scanning
-        } label: {
-          Text("扫描配对码")
-            .font(.system(size: 15, weight: .semibold))
-            .frame(maxWidth: .infinity, minHeight: 46)
-            .foregroundStyle(Color.white)
-            .background(Palette.blue, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+      VStack(spacing: 8) {
+        Button { model.pairing = .scanning } label: {
+          Label("扫描配对码", systemImage: "qrcode.viewfinder")
+            .font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 48)
+            .foregroundStyle(.white).background(Palette.blue, in: Capsule())
         }
-        Button {
-          model.cancelPairing()
-          model.route = .home
-        } label: {
-          Text("稍后连接")
-            .font(.system(size: 15, weight: .medium))
-            .frame(maxWidth: .infinity, minHeight: 46)
-            .foregroundStyle(Color.white)
-            .background(Palette.ink, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .buttonStyle(.plain)
+        Button { model.cancelPairing(); model.route = .home } label: {
+          Text("稍后连接").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
         }
+        .buttonStyle(.plain).foregroundStyle(Palette.muted)
       }
-      .padding(.horizontal, 22)
-      .padding(.bottom, 24)
+      .padding(.horizontal, 20).padding(.bottom, 18)
     }
-    .background(Palette.surface)
+    .background(Color(hex: 0xFAFAF9))
     .fullScreenCover(isPresented: scanning) {
       ZStack(alignment: .topTrailing) {
-        QRScanner { code in
-          model.pairing = .idle
-          model.beginPair(scanned: code)
-        }
-        .ignoresSafeArea()
+        QRScanner { code in model.pairing = .idle; model.beginPair(scanned: code) }.ignoresSafeArea()
         Button("取消") { model.pairing = .idle }
-          .font(.system(size: 15, weight: .semibold))
-          .foregroundStyle(Color.white)
-          .padding(12)
+          .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).padding(16)
       }
+    }
+  }
+
+  private var pairMark: some View {
+    ZStack(alignment: .bottomTrailing) {
+      Image(systemName: Symbol.laptop).font(.system(size: 35, weight: .light)).foregroundStyle(Palette.ink)
+        .frame(width: 88, height: 88).background(.white, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(Palette.line))
+        .shadow(color: .black.opacity(0.07), radius: 18, y: 10)
+      Image(systemName: "iphone").font(.system(size: 20, weight: .medium)).foregroundStyle(.white)
+        .frame(width: 40, height: 40).background(Palette.blue, in: Circle()).offset(x: 8, y: 8)
     }
   }
 
@@ -79,43 +80,38 @@ struct PairView: View {
     Binding(get: { model.pairing == .scanning }, set: { if !$0 && model.pairing == .scanning { model.pairing = .idle } })
   }
 
-  // Honest live status. A fingerprint = proved possession, NOT paired; the user
-  // compares it against the Mac before the operator confirms. Only a grant reads
-  // as paired; failures are shown verbatim.
   @ViewBuilder private var pairingStatus: some View {
     switch model.pairing {
     case .idle, .scanning:
-      Notice(text: "扫描 Mac 上显示的配对码开始连接；在 Mac 确认前不会授予访问。", warning: false)
-        .padding(.horizontal, -16)
+      EmptyView()
     case .proving:
-      statusCard("正在向 Mac 证明密钥…", Palette.muted)
+      statusCard("正在验证设备密钥…", tint: Palette.blue, progress: true)
     case let .awaitingConfirmation(fingerprint):
-      statusCard("已证明，等待 Mac 确认。请核对指纹与 Mac 上一致：\n\(fingerprint.prefix(16).uppercased())…", Palette.blue)
+      statusCard("等待 Mac 确认\n指纹 \(fingerprint.prefix(16).uppercased())…", tint: Palette.amber)
     case let .paired(deviceId):
-      statusCard("已配对。设备 \(deviceId.prefix(8))… 已获授权，正在进入新建会话…", Palette.blue)
+      statusCard("已配对 · 设备 \(deviceId.prefix(8))…", tint: Palette.green)
     case let .failed(message):
-      statusCard(message, Palette.ink)
+      statusCard(message, tint: Palette.negative)
     }
   }
 
-  private func statusCard(_ text: String, _ tint: Color) -> some View {
-    Text(text)
-      .font(.system(size: 14))
-      .foregroundStyle(Palette.ink)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(14)
-      .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+  private func statusCard(_ text: String, tint: Color, progress: Bool = false) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      if progress { ProgressView().controlSize(.small) }
+      else { Circle().fill(tint).frame(width: 8, height: 8).padding(.top, 5) }
+      Text(text).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .foregroundStyle(Palette.ink).padding(13)
+    .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
   }
 
-  private func step(_ n: Int, _ text: String) -> some View {
-    HStack(alignment: .top, spacing: 12) {
-      Text("\(n)")
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(Color.white)
-        .frame(width: 26, height: 26)
-        .background(Palette.blue, in: Circle())
-      Text(text).font(.system(size: 15)).foregroundStyle(Palette.ink)
-      Spacer(minLength: 0)
+  private func step(_ number: Int, _ text: String) -> some View {
+    HStack(spacing: 12) {
+      Text("\(number)").font(.system(size: 11, weight: .bold)).foregroundStyle(Palette.ink)
+        .frame(width: 27, height: 27).background(Palette.canvas, in: Circle())
+      Text(text).font(.system(size: 14.5)).foregroundStyle(Palette.ink)
+      Spacer()
     }
+    .frame(minHeight: 48)
   }
 }

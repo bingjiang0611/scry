@@ -3,12 +3,10 @@ import SwiftUI
 import UIKit
 #endif
 
-// Truthful UI state. This app renders the accepted v2 chrome, but the remote
-// host protocol (tasks, chat, files, terminal) is NOT implemented yet, so the
-// model never fabricates sessions or "connected" state. Empty/unpaired/offline
-// are real states with honest copy, matching v2's own offline/empty semantics.
-// It must never display invented tasks, a green "connected" dot, or fake
-// approvals to look complete.
+// Truthful UI state for the v5 Codex Refined interface. Connection, catalog,
+// history and run state come only from the paired host; empty/unpaired/offline
+// remain first-class UI states. The app must never display invented tasks, a
+// green connected dot, Agent output or approvals merely to look complete.
 
 enum AuthState: Equatable {
   case signedOut
@@ -18,8 +16,8 @@ enum AuthState: Equatable {
 }
 
 // A host binding is only "connected" when a real, currently-live owner-device
-// grant + transport exists. None of that is wired here, so the honest maximum
-// this app can represent today is signedIn + notPaired.
+// grant and successful transport exchange exist. A persisted grant alone is
+// represented as offline until a request proves reachability.
 enum HostLink: Equatable {
   case notPaired
   case pairing
@@ -35,7 +33,7 @@ enum HostLink: Equatable {
   var isConnected: Bool { if case .connected = self { return true }; return false }
 }
 
-enum Route: Hashable { case home, newSession, chat, pair, transcript }
+enum Route: Hashable { case home, newSession, chat, pair, transcript, settings }
 
 // The session the owner opened to READ its past conversation (read-only replay).
 // Plain identity fields (no transport coupling); externalSessionId is required -
@@ -123,8 +121,16 @@ final class AppModel: ObservableObject {
       case "new": route = .newSession
       case "chat": route = .chat
       case "pair": route = .pair
+      case "settings": route = .settings
       default: break
       }
+    }
+    // DEBUG-only real-transport harness for an attached physical device. This
+    // bypasses only the camera gesture; PairingCode parsing, key possession,
+    // relay WSS, inner mTLS and Mac confirmation all remain production paths.
+    if let index = args.firstIndex(of: "-pairCode"), index + 1 < args.count {
+      route = .pair
+      beginPair(scanned: args[index + 1])
     }
   }
   #endif
@@ -162,6 +168,20 @@ final class AppModel: ObservableObject {
             await self?.setPaired(deviceId: deviceId, host: code.relayHost, connection: connection)
             return
           case let .denied(reason):
+            // A host may already know this device key while its public relay
+            // coordinates changed (for example, LAN -> official WSS). If the
+            // existing grant pins the exact same host identity and CA, retain
+            // that grant and update routing only; no secret/key material changes.
+            if reason == "device_key_already_registered",
+               let existing = self?.connections.load(),
+               existing.hostId == code.hostId,
+               existing.anchorPEM == code.anchorPEM {
+              let migrated = RemoteConnection(relayHost: code.relayHost, relayPort: code.relayPort,
+                relayTLS: code.relayTLS.rawValue, hostId: existing.hostId,
+                anchorPEM: existing.anchorPEM, deviceId: existing.deviceId)
+              await self?.setPaired(deviceId: existing.deviceId, host: code.relayHost, connection: migrated)
+              return
+            }
             await self?.setPairing(.failed("Mac 拒绝了配对：\(reason)"))
             return
           case let .revoked(deviceId):

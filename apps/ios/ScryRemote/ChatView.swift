@@ -11,9 +11,11 @@ struct ChatView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var draft = ""
+  @State private var attachments: [DraftAttachment] = []
 
   private var paired: Bool { run.hasConnection }
   private var hasTurn: Bool { run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
+  private var runBusy: Bool { run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -45,36 +47,37 @@ struct ChatView: View {
   }
 
   private var header: some View {
-    HStack(spacing: 12) {
-      CircleButton(symbol: Symbol.back, label: "返回会话列表") { model.route = .home }
-      VStack(alignment: .leading, spacing: 2) {
-        Text("会话").font(.system(size: 17, weight: .semibold)).lineLimit(1)
-        Text(run.hostLabel ?? model.link.host ?? "未连接").font(.system(size: 12)).foregroundStyle(Palette.muted).lineLimit(1)
+    RemoteHeader(title: "会话", subtitle: sessionContext, link: model.link,
+                 backAction: { model.route = .home }) {
+      Menu {
+        Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
+        Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
+      } label: {
+        Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
       }
-      Spacer()
-      HStack(spacing: 3) {
-        PlainIcon(symbol: Symbol.compose, label: "新建会话") { run.resetRun(); model.route = .newSession }
-        PlainIcon(symbol: Symbol.more, label: "会话选项") {}
-      }
-      .padding(.horizontal, 3)
-      .glass(cornerRadius: 28)
     }
-    .padding(.horizontal, 14)
-    .padding(.top, 6)
-    .padding(.bottom, 10)
-    .frame(minHeight: 66)
+  }
+
+  private var sessionContext: String {
+    let value = [run.chosen?.label, run.chosenProvider?.label].compactMap { $0 }.joined(separator: " · ")
+    if !value.isEmpty { return value }
+    return run.hasConnection ? "已配对的 Mac" : "未连接"
   }
 
   // The user's own message — right-aligned filled bubble, ChatGPT/Codex style.
   private func userBubble(_ text: String) -> some View {
     HStack {
       Spacer(minLength: 40)
-      Text(text)
-        .font(.system(size: 16))
-        .foregroundStyle(Color.white)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 14)
-        .background(Palette.blue, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(run.sentAttachments) { item in
+          Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
+            .font(.system(size: 11, weight: .medium)).lineLimit(1)
+        }
+        Text(text).font(.system(size: 16))
+      }
+      .foregroundStyle(Palette.ink)
+      .padding(.vertical, 10).padding(.horizontal, 14)
+      .background(Color(hex: 0xF0F0F2), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
   }
 
@@ -136,42 +139,35 @@ struct ChatView: View {
   }
 
   private var footer: some View {
-    VStack(spacing: 8) {
-      HStack(spacing: 4) {
-        PlainIcon(symbol: Symbol.plus, label: "附件") {}
-        TextField(paired ? "在 \(run.hostLabel ?? "Mac") 上发起新任务…" : "连接后可输入", text: $draft, axis: .vertical)
-          .font(.system(size: 17))
-          .lineLimit(1...5)
-          .disabled(!paired)
-        CircleButton(symbol: Symbol.send, label: "发送新任务", filled: true,
-                     disabled: !paired || run.chosen == nil || run.chosenProvider == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-          // Follow-ups MUST use the Provider the user chose for this session, not a
-          // hardcoded one. Sending to a different Provider than chosen was the
-          // "auto-switch to claude" bug (and, when that Provider crashed, looked
-          // like the connection dropped).
-          guard let providerId = run.chosenProvider?.id else { return }
-          run.submit(prompt: draft, providerId: providerId)
-          draft = ""
+    VStack(alignment: .leading, spacing: 6) {
+      MessageComposer(text: $draft, attachments: $attachments,
+                      placeholder: paired ? "继续这段对话…" : "连接后可输入",
+                      disabled: !paired,
+                      sendDisabled: runBusy || run.chosen == nil || run.chosenProvider == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      contextLabel: run.chosenProvider?.label,
+                      effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
+                      onEffort: { run.chooseEffort($0) },
+                      permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
+                      onPermission: { run.choosePermission($0) }) {
+        guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
+        let payload = attachments.map(\.wireValue)
+        if let resume = run.liveExternalSessionId {
+          run.submitFollowUp(prompt: draft, providerId: providerId, cwd: project.path, resume: resume, attachments: payload)
+        } else {
+          run.submit(prompt: draft, providerId: providerId, attachments: payload)
         }
+        draft = ""; attachments = []
       }
-      .padding(.horizontal, 7)
-      .padding(.vertical, 2)
-      .frame(minHeight: 49)
-      .glass(cornerRadius: 32)
-      if run.chosen == nil || run.chosenProvider == nil {
-        Text("发送前请在“新建会话”里选择项目与 Provider。")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      } else {
-        Text("项目 · \(run.chosen?.label ?? "") · \(run.chosenProvider?.label ?? "")")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted)
-          .frame(maxWidth: .infinity, alignment: .leading)
+      if runBusy {
+        Text("当前任务结束后才能继续发送。")
+          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
+      } else if run.chosen == nil || run.chosenProvider == nil {
+        Text("发送前请在“新任务”中选择项目与 Provider。")
+          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
       }
     }
-    .padding(.horizontal, 16)
-    .padding(.top, 8)
-    .padding(.bottom, 20)
-    .background(Color(hex: 0xFAFAFA))
+    .padding(.horizontal, 13).padding(.top, 8).padding(.bottom, 12)
+    .background(Palette.surface)
   }
 
   private var placeholderForState: String {

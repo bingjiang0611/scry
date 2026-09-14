@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { authorizedWorkspaceRequest, canonicalExistingDirectory, knownProjectDirectory } from './workspace-authorization'
+import { authorizedWorkspaceRequest, canonicalExistingDirectory, knownProjectDescendantDirectory, knownProjectDirectory } from './workspace-authorization'
 
 describe('workspace authorization', () => {
   it('accepts only canonical directories previously selected by main', () => {
@@ -12,10 +12,13 @@ describe('workspace authorization', () => {
     const alias = join(root, 'alias')
     try {
       mkdirSync(selected)
+      mkdirSync(join(selected, 'nested'))
       mkdirSync(other)
       symlinkSync(selected, alias)
       expect(knownProjectDirectory(alias, [selected])).toBe(canonicalExistingDirectory(selected))
       expect(() => knownProjectDirectory(other, [selected])).toThrow('尚未')
+      expect(knownProjectDescendantDirectory(join(selected, 'nested'), [selected])).toBe(canonicalExistingDirectory(join(selected, 'nested')))
+      expect(() => knownProjectDescendantDirectory(other, [selected])).toThrow('不在')
       expect(authorizedWorkspaceRequest(selected, { cwd: alias, path: 'README.md' })).toEqual({
         cwd: canonicalExistingDirectory(selected),
         path: 'README.md'

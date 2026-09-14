@@ -5,7 +5,7 @@
 // auth, run/pair pool separation, and no-leg rejection.
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { unstable_dev } from 'wrangler'
 
@@ -58,7 +58,7 @@ try {
     cases.push({ name: 'authenticated host leg <-> device raw byte shuttle both ways', passed: true })
   }
 
-  // A wrong token is rejected and the leg never registers.
+  // A wrong legacy token is rejected and the leg never registers.
   {
     const hostId = randomUUID()
     const host = openWS(`${base}/host?host=${hostId}&mode=run`)
@@ -66,6 +66,36 @@ try {
     host.send(JSON.stringify({ token: 'wrong' }))
     assert.equal(await nextClose(host), 1008)
     cases.push({ name: 'wrong token -> 1008, no warm leg', passed: true })
+  }
+
+  // An official client can atomically claim its random UUID room with a local
+  // per-host token. That same token works after reconnect; a different token
+  // cannot take over the claimed room.
+  {
+    const hostId = randomUUID()
+    const token = randomBytes(32).toString('base64url')
+    const first = openWS(`${base}/host?host=${hostId}&mode=run`)
+    await once(first, 'open')
+    first.send(JSON.stringify({ token, enroll: true }))
+    await new Promise((r) => setTimeout(r, 150))
+    first.close()
+
+    const attacker = openWS(`${base}/host?host=${hostId}&mode=run`)
+    await once(attacker, 'open')
+    attacker.send(JSON.stringify({ token: randomBytes(32).toString('base64url'), enroll: true }))
+    assert.equal(await nextClose(attacker), 1008)
+
+    const restored = openWS(`${base}/host?host=${hostId}&mode=run`)
+    await once(restored, 'open')
+    restored.send(JSON.stringify({ token, enroll: true }))
+    await new Promise((r) => setTimeout(r, 150))
+    const device = openWS(`${base}/?host=${hostId}&mode=run`)
+    await once(device, 'open')
+    const gotAtHost = nextBinary(restored)
+    device.send(new Uint8Array([4, 2]))
+    assert.deepEqual(await gotAtHost, Buffer.from([4, 2]))
+    restored.close(); device.close()
+    cases.push({ name: 'per-host room enrollment is stable and rejects takeover', passed: true })
   }
 
   // No warm leg -> device is rejected 1013 (not left hanging).

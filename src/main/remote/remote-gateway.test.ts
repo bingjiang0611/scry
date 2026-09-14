@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { PairingAuthority, type IssuedPairingCertificate, type PairingDependencies, type PairingPersistence, type PairingState } from './pairing'
 import { SessionLedger, type LedgerEvent, type LedgerStore } from './session-ledger'
-import { RemoteGateway, RemoteGatewayError } from './remote-gateway'
+import { RemoteGateway, RemoteGatewayError, type RemoteDirectoryListing, type RemoteProviderRef } from './remote-gateway'
 import { RunOutputLog } from './run-output-log'
 
 const KEY = 'a'.repeat(64)
@@ -49,11 +49,12 @@ function gateway(
   authority: { authorizesCertificate(fp: string): boolean },
   projects?: { list(): { path: string; label: string }[] },
   output?: RunOutputLog,
-  providers?: { list(): { id: string; label: string; available: boolean }[] },
-  sessions?: { list(): { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number }[] }
+  providers?: { list(): RemoteProviderRef[] },
+  sessions?: { list(): { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number; pinnedAt?: number }[] },
+  directories?: { list(path?: string): RemoteDirectoryListing }
 ) {
   const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
-  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}), ...(output ? { output } : {}), ...(providers ? { providers } : {}), ...(sessions ? { sessions } : {}) }), ledger }
+  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}), ...(output ? { output } : {}), ...(providers ? { providers } : {}), ...(sessions ? { sessions } : {}), ...(directories ? { directories } : {}) }), ledger }
 }
 
 const expectCode = (fn: () => unknown, code: string) => {
@@ -167,10 +168,35 @@ describe('RemoteGateway', () => {
     expect(gw.listProjects(CERT)).toEqual([])
   })
 
+  it('authorizes and bounds each folder-hierarchy level returned by the host source', async () => {
+    const { authority } = await grantedAuthority()
+    const list = vi.fn((path?: string): RemoteDirectoryListing => path ? {
+      current: { path, label: 'src' },
+      parent: { path: '/Projects/scry', label: 'scry' },
+      directories: [
+        { path: `${path}/main`, label: 'main' },
+        { path: `${path}/main`, label: 'duplicate' },
+        { path: '', label: 'invalid' }
+      ]
+    } : { directories: [{ path: '/Projects/scry', label: 'scry' }] })
+    const { gw } = gateway(authority, undefined, undefined, undefined, undefined, { list })
+
+    expectCode(() => gw.listDirectories('f'.repeat(64), {}), 'device_not_authorized')
+    expect(gw.listDirectories(CERT, {})).toEqual({ directories: [{ path: '/Projects/scry', label: 'scry' }] })
+    expect(gw.listDirectories(CERT, { path: '/Projects/scry/src' })).toEqual({
+      current: { path: '/Projects/scry/src', label: 'src' },
+      parent: { path: '/Projects/scry', label: 'scry' },
+      directories: [{ path: '/Projects/scry/src/main', label: 'main' }]
+    })
+    expectCode(() => gw.listDirectories(CERT, { path: '' }), 'invalid_target')
+  })
+
   it('lists host Providers only for an authorized device, deduped/bounded, availability preserved', async () => {
     const { authority } = await grantedAuthority()
     const list = vi.fn(() => [
-      { id: 'qoder', label: 'Qoder', available: true },
+      { id: 'qoder', label: 'Qoder', available: true, modelId: 'qoder-default',
+        efforts: [{ id: 'high', label: '高', isDefault: true }],
+        permissions: [{ id: 'default', label: '默认审批', description: '由 Provider 决定' }] },
       { id: 'qoder', label: 'Qoder dup', available: true }, // duplicate id dropped
       { id: 'claude', label: 'Claude', available: false },
       { id: '', label: 'empty-id-dropped', available: true },
@@ -181,7 +207,9 @@ describe('RemoteGateway', () => {
     const providers = gw.listProviders(CERT)
     expect(providers.length).toBe(32) // MAX_PROVIDERS bound
     expect(providers.slice(0, 2)).toEqual([
-      { id: 'qoder', label: 'Qoder', available: true },
+      { id: 'qoder', label: 'Qoder', available: true, modelId: 'qoder-default',
+        efforts: [{ id: 'high', label: '高', isDefault: true }],
+        permissions: [{ id: 'default', label: '默认审批', description: '由 Provider 决定' }] },
       { id: 'claude', label: 'Claude', available: false }
     ])
     expect(providers.some((p) => p.id === '')).toBe(false)
@@ -196,7 +224,7 @@ describe('RemoteGateway', () => {
   it('lists the host session catalog only for an authorized device, deduped/bounded, resumable id preserved', async () => {
     const { authority } = await grantedAuthority()
     const list = vi.fn(() => [
-      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20 },
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30 },
       { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'dup', ts: 21 }, // dup id dropped
       { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }, // no externalSessionId
       { sessionId: '', providerId: 'qoder', cwd: '/w', label: 'empty-id', ts: 5 }
@@ -205,7 +233,7 @@ describe('RemoteGateway', () => {
     expectCode(() => gw.listSessions('f'.repeat(64)), 'device_not_authorized')
     const sessions = gw.listSessions(CERT)
     expect(sessions).toEqual([
-      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20 },
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30 },
       { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }
     ])
   })

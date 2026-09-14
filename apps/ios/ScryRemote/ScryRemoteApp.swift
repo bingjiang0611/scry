@@ -9,6 +9,7 @@ struct ScryRemoteApp: App {
     RemoteSelfTest.runIfRequested()
     RemoteSelfTest.runRelayTLSProbeIfRequested()
     RemoteSelfTest.runRunProbeIfRequested()
+    RemoteSelfTest.runLiveProviderProbeIfRequested()
     #endif
   }
   var body: some Scene {
@@ -18,10 +19,8 @@ struct ScryRemoteApp: App {
   }
 }
 
-// Routes by real state: signed out -> Sign in with Apple; signed in but not
-// paired -> pairing steps; otherwise the v2 home/new/chat chrome. No screen is
-// shown as "connected" unless a real live grant exists (not yet wired), so the
-// honest current maximum is the signed-in, not-paired experience.
+// Routes by real state through the v5 Codex Refined flow. No screen is shown as
+// connected unless a real paired transport exchange has proved reachability.
 struct RootView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
@@ -37,6 +36,7 @@ struct RootView: View {
         case .chat: ChatView()
         case .pair: PairView()
         case .transcript: SessionTranscriptView()
+        case .settings: SettingsView()
         }
       }
     }

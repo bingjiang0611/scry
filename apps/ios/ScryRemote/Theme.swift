@@ -1,25 +1,24 @@
 import SwiftUI
 
-// Design tokens transcribed from designs/scry-ios-remote/Scry iOS Remote v2.html.
-// Kept in one place so the native UI matches the accepted Codex-aligned v2 and
-// does not drift into ad-hoc colors. This is presentation only; it carries no
-// state or evidence semantics.
+// v5 · Codex Refined. Neutral chrome keeps the conversation dominant; semantic
+// colors are reserved for real connection/run evidence rather than decoration.
 enum Palette {
-  static let ink = Color(hex: 0x101112)
-  static let muted = Color(hex: 0x929395)
-  static let line = Color(hex: 0xE5E5E7)
-  static let blue = Color(hex: 0x3884F4)
-  static let green = Color(hex: 0x54B583)
-  static let amber = Color(hex: 0xB76D30)
-  static let canvas = Color(hex: 0xEDEDEE)
+  static let ink = Color(hex: 0x17181A)
+  static let muted = Color(hex: 0x77787C)
+  static let faint = Color(hex: 0xA6A7AA)
+  static let line = Color(hex: 0xE8E8EB)
+  static let blue = Color(hex: 0x2867E8)
+  static let green = Color(hex: 0x3EAA72)
+  static let amber = Color(hex: 0xB96F2D)
+  static let canvas = Color(hex: 0xF4F4F5)
   static let surface = Color.white
-  static let glass = Color(hex: 0xFAFAFA).opacity(0.92)
-  static let noticeBg = Color(hex: 0xF5F5F5)
-  static let noticeInk = Color(hex: 0x626264)
-  static let warnBg = Color(hex: 0xFCF6ED)
-  static let warnInk = Color(hex: 0x996126)
-  static let positive = Color(hex: 0x527F3C)
-  static let negative = Color(hex: 0xB95D60)
+  static let glass = Color(hex: 0xFBFBFC).opacity(0.96)
+  static let noticeBg = Color(hex: 0xF5F5F6)
+  static let noticeInk = Color(hex: 0x626367)
+  static let warnBg = Color(hex: 0xFFF7ED)
+  static let warnInk = Color(hex: 0x995B22)
+  static let positive = Color(hex: 0x32825B)
+  static let negative = Color(hex: 0xB84F55)
 }
 
 extension Color {
@@ -32,7 +31,6 @@ extension Color {
   }
 }
 
-// The glassy capsule/card look from v2 (.circle/.capsule/.search-bar/.composer).
 struct GlassBackground: ViewModifier {
   var cornerRadius: CGFloat
   func body(content: Content) -> some View {
@@ -40,7 +38,7 @@ struct GlassBackground: ViewModifier {
       .background(Palette.glass, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
       .overlay(
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-          .strokeBorder(Color(hex: 0xE1E1E3), lineWidth: 1)
+          .strokeBorder(Color(hex: 0xDEDFE3), lineWidth: 1)
       )
   }
 }
