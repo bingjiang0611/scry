@@ -52,6 +52,7 @@ struct RootView: View {
     .onAppear {
       #if DEBUG
       model.applyUIPreviewArguments()
+      run.applyUIPreviewArguments()
       #endif
     }
   }

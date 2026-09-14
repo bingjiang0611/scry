@@ -51,7 +51,7 @@ struct SessionTranscriptView: View {
   @ViewBuilder private var historyBody: some View {
     switch run.history {
     case .idle, .loading:
-      ProgressView("正在读取会话内容…").padding(.top, 32)
+      transcriptLoadingState
     case let .loaded(turns):
       ForEach(Array(turns.enumerated()), id: \.offset) { _, turn in turnView(turn) }
       Text("以上为主机读取的历史记录，可能不完整；文件 diff 需在 Mac 上查看。")
@@ -64,6 +64,46 @@ struct SessionTranscriptView: View {
     case let .failed(reason):
       EmptyState(title: "无法读取历史记录", detail: reason).padding(.top, 24)
     }
+  }
+
+  private var transcriptLoadingState: some View {
+    VStack(alignment: .leading, spacing: 22) {
+      HStack(spacing: 12) {
+        ZStack {
+          Circle().fill(Palette.blue.opacity(0.08)).frame(width: 34, height: 34)
+          ProgressView().controlSize(.small).tint(Palette.blue)
+        }
+        VStack(alignment: .leading, spacing: 3) {
+          Text("正在同步会话")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Palette.ink)
+          Text("从已配对的 Mac 安全读取历史记录")
+            .font(.system(size: 11.5))
+            .foregroundStyle(Palette.muted)
+        }
+      }
+      .padding(.vertical, 12).padding(.horizontal, 13)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Palette.canvas.opacity(0.82), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+      VStack(alignment: .leading, spacing: 18) {
+        HStack {
+          Spacer(minLength: 72)
+          RoundedRectangle(cornerRadius: 17, style: .continuous)
+            .fill(Palette.canvas)
+            .frame(height: 58)
+        }
+        VStack(alignment: .leading, spacing: 10) {
+          RoundedRectangle(cornerRadius: 4).fill(Palette.line).frame(width: 174, height: 10)
+          RoundedRectangle(cornerRadius: 4).fill(Palette.line).frame(maxWidth: .infinity).frame(height: 10)
+          RoundedRectangle(cornerRadius: 4).fill(Palette.line).frame(width: 236, height: 10)
+        }
+      }
+      .accessibilityHidden(true)
+      .opacity(0.72)
+    }
+    .padding(.top, 8)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var header: some View {
