@@ -106,10 +106,10 @@ final class AppModel: ObservableObject {
   }
 
   #if DEBUG
-  // DEBUG-only visual verification harness driven by launch arguments. It only
-  // forces view state so screens can be screenshotted without a paid Sign in
-  // with Apple entitlement. It is NOT real authentication and NOT a real host
-  // grant, and it never injects fabricated sessions.
+  // DEBUG-only visual verification harness driven by launch arguments. It can
+  // pair with `RemoteRunStore`'s explicit `-uiMockData` fixtures for UI review.
+  // It is NOT real authentication or a real host grant and is compiled out of
+  // Release builds.
   func applyUIPreviewArguments() {
     let args = ProcessInfo.processInfo.arguments
     guard args.contains("-uiPreview") else { return }
@@ -122,8 +122,14 @@ final class AppModel: ObservableObject {
       case "chat": route = .chat
       case "pair": route = .pair
       case "settings": route = .settings
+      case "transcript": route = .transcript
       default: break
       }
+    }
+    if args.contains("-uiMockData") {
+      openedSession = OpenedSession(providerId: "codex", cwd: "/Users/demo/Projects/scry",
+                                    externalSessionId: "codex-pinned-1",
+                                    label: "重构远程会话列表并统一信息层级")
     }
     // DEBUG-only real-transport harness for an attached physical device. This
     // bypasses only the camera gesture; PairingCode parsing, key possession,

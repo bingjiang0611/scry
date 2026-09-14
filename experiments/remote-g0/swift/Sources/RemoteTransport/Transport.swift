@@ -218,28 +218,53 @@ public enum G0Transport {
   // One host-authorized project directory the device may target. The device can
   // never authorize a new one; it only chooses among these, and the host
   // re-checks the cwd on submit regardless.
-  public struct RunProjectRef: Sendable, Equatable, Codable { public let path: String; public let label: String }
+  public struct RunProjectRef: Sendable, Equatable, Codable {
+    public let path: String; public let label: String
+    public init(path: String, label: String) { self.path = path; self.label = label }
+  }
   public struct RunDirectoryListing: Sendable, Equatable, Codable {
     public let current: RunProjectRef?; public let parent: RunProjectRef?; public let directories: [RunProjectRef]
+    public init(current: RunProjectRef? = nil, parent: RunProjectRef? = nil, directories: [RunProjectRef]) {
+      self.current = current; self.parent = parent; self.directories = directories
+    }
   }
   public struct RunControlOption: Sendable, Equatable, Codable {
     public let id: String; public let label: String; public let description: String?; public let isDefault: Bool?
+    public init(id: String, label: String, description: String? = nil, isDefault: Bool? = nil) {
+      self.id = id; self.label = label; self.description = description; self.isDefault = isDefault
+    }
   }
   // A Provider the device may target for a new session. Controls describe only
   // what the host's real adapter advertises; absent means unsupported/unavailable.
   public struct RunProviderRef: Sendable, Equatable, Codable {
     public let id: String; public let label: String; public let available: Bool
     public let modelId: String?; public let efforts: [RunControlOption]?; public let permissions: [RunControlOption]?
+    public init(id: String, label: String, available: Bool, modelId: String? = nil,
+                efforts: [RunControlOption]? = nil, permissions: [RunControlOption]? = nil) {
+      self.id = id; self.label = label; self.available = available; self.modelId = modelId
+      self.efforts = efforts; self.permissions = permissions
+    }
   }
   // A session in the host catalog the device may browse. `externalSessionId` is
   // the Provider's resumable id (nil => pending/unresumable). Display metadata.
   public struct RunSessionRef: Sendable, Equatable, Codable {
     public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let cwd: String; public let label: String; public let ts: Double; public let pinnedAt: Double?
+    public init(sessionId: String, externalSessionId: String? = nil, providerId: String, cwd: String,
+                label: String, ts: Double, pinnedAt: Double? = nil) {
+      self.sessionId = sessionId; self.externalSessionId = externalSessionId; self.providerId = providerId
+      self.cwd = cwd; self.label = label; self.ts = ts; self.pinnedAt = pinnedAt
+    }
   }
   // One content chunk of a replayed session turn (same kinds a live run streams).
-  public struct RunHistoryChunk: Sendable, Equatable, Codable { public let kind: String; public let text: String }
+  public struct RunHistoryChunk: Sendable, Equatable, Codable {
+    public let kind: String; public let text: String
+    public init(kind: String, text: String) { self.kind = kind; self.text = text }
+  }
   // One turn of a session's real conversation: the prompt + assistant content.
-  public struct RunHistoryTurn: Sendable, Equatable, Codable { public let userText: String; public let items: [RunHistoryChunk] }
+  public struct RunHistoryTurn: Sendable, Equatable, Codable {
+    public let userText: String; public let items: [RunHistoryChunk]
+    public init(userText: String, items: [RunHistoryChunk]) { self.userText = userText; self.items = items }
+  }
   // A single chunk of the assistant's REAL streamed output content (masked +
   // bounded host-side). kind ∈ output|reasoning|tool|tool_result|truncated.
   // This is trace-derived CONTENT, not canonical usage; tokens/cost stay on the

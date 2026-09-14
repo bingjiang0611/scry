@@ -112,11 +112,24 @@ final class RemoteRunStore: ObservableObject {
 
   private let connections = RemoteConnectionStore()
   private var pollTask: Task<Void, Never>?
+  #if DEBUG
+  private var mockMode = false
+  #endif
 
   // A persisted PUBLIC connection descriptor means this device is paired and may
   // attempt a run; reachability of the host is only known by trying.
-  var hasConnection: Bool { connections.load() != nil }
-  var hostLabel: String? { connections.load()?.relayHost }
+  var hasConnection: Bool {
+    #if DEBUG
+    if mockMode { return true }
+    #endif
+    return connections.load() != nil
+  }
+  var hostLabel: String? {
+    #if DEBUG
+    if mockMode { return "Studio Mac" }
+    #endif
+    return connections.load()?.relayHost
+  }
 
   private func makeClient() -> RemoteRunClient? {
     guard let connection = connections.load() else { return nil }
@@ -141,6 +154,9 @@ final class RemoteRunStore: ObservableObject {
   // Load the host session catalog so the phone's session list shows the SAME
   // conversations the Mac has (fixes an always-empty list). Honest states only.
   func loadSessions() {
+    #if DEBUG
+    if mockMode { return }
+    #endif
     guard let client = makeClient() else { catalog = .failed("尚未配对"); return }
     catalog = .loading
     Task { [weak self] in
@@ -159,6 +175,9 @@ final class RemoteRunStore: ObservableObject {
   // Load one session's real conversation content so the phone can OPEN it.
   // Honest states only; never fabricates turns.
   func loadHistory(providerId: String, cwd: String, externalSessionId: String) {
+    #if DEBUG
+    if mockMode { return }
+    #endif
     guard let client = makeClient() else { history = .failed("尚未配对"); return }
     history = .loading
     Task { [weak self] in
@@ -183,6 +202,13 @@ final class RemoteRunStore: ObservableObject {
   // an explicit pick (canSend gates on chosenProvider) keeps the choice honest.
   // If a previously-chosen Provider is no longer available, clear it.
   func loadProviders(preferredId: String? = nil) {
+    #if DEBUG
+    if mockMode {
+      if let preferredId, case let .loaded(items) = providers,
+         let preferred = items.first(where: { $0.id == preferredId }) { chooseProvider(preferred) }
+      return
+    }
+    #endif
     guard let client = makeClient() else { providers = .failed("尚未配对"); return }
     providers = .loading
     Task { [weak self] in
@@ -211,6 +237,9 @@ final class RemoteRunStore: ObservableObject {
   // Load the host-authorized project directories. The phone can never authorize
   // a new one; it only chooses among these, and the host re-checks on submit.
   func loadProjects() {
+    #if DEBUG
+    if mockMode { return }
+    #endif
     guard let client = makeClient() else { projects = .failed("尚未配对，无法读取项目"); return }
     projects = .loading
     Task { [weak self] in
@@ -229,6 +258,9 @@ final class RemoteRunStore: ObservableObject {
   // Browse exactly one hierarchy level. A nil path requests authorized roots;
   // the host rejects every path outside those roots before reading the folder.
   func loadDirectories(path: String? = nil) {
+    #if DEBUG
+    if mockMode { loadMockDirectories(path: path); return }
+    #endif
     guard let client = makeClient() else { directories = .failed("尚未配对，无法读取文件夹"); return }
     directories = .loading
     Task { [weak self] in
@@ -250,6 +282,9 @@ final class RemoteRunStore: ObservableObject {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
     guard let cwd = chosen?.path else { submitError = "请先选择一个主机已授权的项目"; return }
+    #if DEBUG
+    if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); return }
+    #endif
     guard let client = makeClient() else { submitError = "尚未配对"; return }
     let modelId = chosenProvider?.modelId
     let effort = chosenEffort
@@ -372,6 +407,9 @@ final class RemoteRunStore: ObservableObject {
   func submitFollowUp(prompt: String, providerId: String, cwd: String, resume: String, attachments: [RemoteRunClient.Attachment] = []) {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
+    #if DEBUG
+    if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); liveExternalSessionId = resume; return }
+    #endif
     guard let client = makeClient() else { submitError = "尚未配对"; return }
     let resumeId = liveExternalSessionId ?? resume
     let modelId = chosenProvider?.id == providerId ? chosenProvider?.modelId : nil
@@ -403,6 +441,130 @@ final class RemoteRunStore: ObservableObject {
       }
     }
   }
+
+  #if DEBUG
+  // Visual-only fixtures for `-uiPreview -uiMockData`. They deliberately never
+  // touch Keychain, relay, Provider, ledger, or Release execution paths.
+  func applyUIPreviewArguments() {
+    guard ProcessInfo.processInfo.arguments.contains("-uiMockData") else { return }
+    mockMode = true
+    reachable = true
+
+    let roots = [
+      G0Transport.RunProjectRef(path: "/Users/demo/Projects/scry", label: "scry"),
+      G0Transport.RunProjectRef(path: "/Users/demo/Projects/rate-native", label: "rate-native"),
+      G0Transport.RunProjectRef(path: "/Users/demo/Work/atlas-web", label: "atlas-web")
+    ]
+    projects = .loaded(roots)
+    chosen = G0Transport.RunProjectRef(path: "/Users/demo/Projects/scry/apps/ios", label: "ios")
+
+    let efforts = [
+      G0Transport.RunControlOption(id: "low", label: "低", description: "更快响应", isDefault: true),
+      G0Transport.RunControlOption(id: "medium", label: "中", description: "平衡速度与推理"),
+      G0Transport.RunControlOption(id: "high", label: "高", description: "更深入推理"),
+      G0Transport.RunControlOption(id: "xhigh", label: "极高", description: "复杂任务")
+    ]
+    let permissions = [
+      G0Transport.RunControlOption(id: "default", label: "默认审批", description: "危险操作前询问", isDefault: true),
+      G0Transport.RunControlOption(id: "auto_review", label: "自动审查", description: "按策略自动处理"),
+      G0Transport.RunControlOption(id: "full_access", label: "完全访问", description: "仅由设备所有者显式选择")
+    ]
+    let availableProviders = [
+      G0Transport.RunProviderRef(id: "codex", label: "Codex", available: true, modelId: "gpt-5.6-sol", efforts: efforts, permissions: permissions),
+      G0Transport.RunProviderRef(id: "qoder", label: "Qoder", available: true, modelId: "ultimate", efforts: nil, permissions: permissions),
+      G0Transport.RunProviderRef(id: "opencode", label: "OpenCode", available: true, modelId: nil, efforts: nil, permissions: [permissions[0], permissions[2]])
+    ]
+    providers = .loaded(availableProviders)
+    chooseProvider(availableProviders[0])
+
+    let now = Date().timeIntervalSince1970 * 1_000
+    catalog = .loaded([
+      G0Transport.RunSessionRef(sessionId: "mock-pinned-1", externalSessionId: "codex-pinned-1", providerId: "codex", cwd: roots[0].path,
+        label: "重构远程会话列表并统一信息层级", ts: now - 8 * 60_000, pinnedAt: now - 60_000),
+      G0Transport.RunSessionRef(sessionId: "mock-pinned-2", externalSessionId: "qoder-pinned-2", providerId: "qoder", cwd: roots[1].path,
+        label: "排查支付页偶发白屏与恢复流程", ts: now - 36 * 60_000, pinnedAt: now - 120_000),
+      G0Transport.RunSessionRef(sessionId: "mock-scry-1", externalSessionId: "codex-scry-1", providerId: "codex", cwd: roots[0].path,
+        label: "完成 iOS 工作目录选择器和附件发送", ts: now - 2 * 3_600_000),
+      G0Transport.RunSessionRef(sessionId: "mock-scry-2", externalSessionId: "qoder-scry-2", providerId: "qoder", cwd: roots[0].path,
+        label: "修复手机续聊在 Mac 端不可见的问题", ts: now - 5 * 3_600_000),
+      G0Transport.RunSessionRef(sessionId: "mock-scry-running", providerId: "codex", cwd: roots[0].path,
+        label: "正在分析大规模测试失败…", ts: now - 4 * 60_000),
+      G0Transport.RunSessionRef(sessionId: "mock-rate-1", externalSessionId: "codex-rate-1", providerId: "codex", cwd: roots[1].path,
+        label: "优化首页滚动性能并补充回归测试", ts: now - 24 * 3_600_000),
+      G0Transport.RunSessionRef(sessionId: "mock-atlas-1", externalSessionId: "opencode-atlas-1", providerId: "opencode", cwd: roots[2].path,
+        label: "实现登录错误态与离线重试体验", ts: now - 3 * 86_400_000)
+    ])
+
+    history = .loaded([
+      G0Transport.RunHistoryTurn(userText: "请检查 iOS 远程首页的信息层级，并给出可以直接落地的修改。", items: [
+        G0Transport.RunHistoryChunk(kind: "reasoning", text: "我会先检查会话分组、状态信息和底部操作区。"),
+        G0Transport.RunHistoryChunk(kind: "tool", text: "读取 HomeView.swift"),
+        G0Transport.RunHistoryChunk(kind: "tool_result", text: "已读取 281 行 · 未修改文件"),
+        G0Transport.RunHistoryChunk(kind: "output", text: "发现三个主要问题：项目与会话的视觉层级接近、运行状态缺少时间语境、底部搜索和新建操作抢占了过多空间。建议先压缩标题区，再把 Provider 与时间放入会话元信息。")
+      ]),
+      G0Transport.RunHistoryTurn(userText: "按 Codex Refined 的方向继续，先不要加入底栏。", items: [
+        G0Transport.RunHistoryChunk(kind: "output", text: "已保留无底栏结构，并将导航、内容与证据层分开。下一步可以重点比较列表密度和 Composer 的控制层级。")
+      ])
+    ])
+
+    runId = "mock-run-visual-only"
+    prompt = "把首页改成更紧凑的项目分组，同时保留真实运行证据。"
+    sentAttachments = [
+      SentAttachment(name: "home-reference.png", kind: .image, size: 184_320),
+      SentAttachment(name: "notes.md", kind: .text, size: 4_812)
+    ]
+    lifecycle = .settled
+    output = [
+      OutputLine(id: 1, kind: "reasoning", text: "先对齐信息架构，再调整视觉密度。"),
+      OutputLine(id: 2, kind: "tool", text: "编辑 HomeView.swift"),
+      OutputLine(id: 3, kind: "tool_result", text: "3 个区块已更新 · 0 个错误"),
+      OutputLine(id: 4, kind: "output", text: "首页已按“置顶 + 项目”重新组织。会话标题成为主信息，Provider、更新时间和运行状态降为轻量元信息；底部仅保留搜索与新建入口。")
+    ]
+    resultSummary = "输入 18,420 · 输出 1,286 · $0.084"
+    liveExternalSessionId = "codex-mock-session"
+    loadMockDirectories(path: chosen?.path)
+    if ProcessInfo.processInfo.arguments.contains("-uiMockLoading") { history = .loading }
+  }
+
+  private func loadMockDirectories(path: String?) {
+    let scry = G0Transport.RunProjectRef(path: "/Users/demo/Projects/scry", label: "scry")
+    let ios = G0Transport.RunProjectRef(path: "\(scry.path)/apps/ios", label: "ios")
+    switch path {
+    case nil:
+      directories = .loaded(G0Transport.RunDirectoryListing(directories: [scry,
+        G0Transport.RunProjectRef(path: "/Users/demo/Projects/rate-native", label: "rate-native"),
+        G0Transport.RunProjectRef(path: "/Users/demo/Work/atlas-web", label: "atlas-web")]))
+    case scry.path:
+      directories = .loaded(G0Transport.RunDirectoryListing(current: scry, directories: [
+        G0Transport.RunProjectRef(path: "\(scry.path)/apps", label: "apps"),
+        G0Transport.RunProjectRef(path: "\(scry.path)/docs", label: "docs"),
+        G0Transport.RunProjectRef(path: "\(scry.path)/src", label: "src")
+      ]))
+    case "\(scry.path)/apps":
+      directories = .loaded(G0Transport.RunDirectoryListing(
+        current: G0Transport.RunProjectRef(path: "\(scry.path)/apps", label: "apps"), parent: scry,
+        directories: [ios, G0Transport.RunProjectRef(path: "\(scry.path)/apps/desktop", label: "desktop")]))
+    case ios.path:
+      directories = .loaded(G0Transport.RunDirectoryListing(current: ios,
+        parent: G0Transport.RunProjectRef(path: "\(scry.path)/apps", label: "apps"), directories: [
+          G0Transport.RunProjectRef(path: "\(ios.path)/ScryRemote", label: "ScryRemote")
+        ]))
+    default:
+      let current = G0Transport.RunProjectRef(path: path ?? scry.path, label: (path ?? scry.path).split(separator: "/").last.map(String.init) ?? "文件夹")
+      directories = .loaded(G0Transport.RunDirectoryListing(current: current, parent: scry, directories: []))
+    }
+  }
+
+  private func applyMockRun(prompt: String, attachments: [RemoteRunClient.Attachment]) {
+    resetRun()
+    self.prompt = prompt
+    sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
+    runId = "mock-run-visual-only"
+    lifecycle = .settled
+    output = [OutputLine(id: 1, kind: "output", text: "这是 DEBUG 视觉预览回复；没有连接 Provider，也没有写入真实 ledger。")]
+    resultSummary = "Mock 数据 · 不代表真实用量"
+  }
+  #endif
 
   func stop() { pollTask?.cancel(); pollTask = nil }
 
