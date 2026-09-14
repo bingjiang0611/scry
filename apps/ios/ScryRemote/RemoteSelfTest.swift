@@ -123,6 +123,57 @@ enum RemoteSelfTest {
   // full device -> relay -> InnerMtlsHost -> HostController -> ledger loop with
   // the CA-granted device cert and NO Provider token cost. A run that fails
   // closed (run_failed) is the PASS condition; a settled run would be wrong.
+  // Opt-in LIVE PROVIDER probe (`-liveProviderProbe`): selects a real
+  // host-authorized project and available Provider, asks for a fixed response
+  // without file changes, then requires a host-reported settled lifecycle.
+  static func runLiveProviderProbeIfRequested() {
+    guard ProcessInfo.processInfo.arguments.contains("-liveProviderProbe") else { return }
+    Task {
+      guard let connection = RemoteConnectionStore().load() else {
+        print("LIVEPROBE FAIL reason=no-persisted-connection")
+        exit(1)
+      }
+      let client = RemoteRunClient(connection: connection)
+      do {
+        let projects = try await client.projects()
+        let providers = try await client.providers()
+        let preferred = ["codex", "qoder", "opencode"]
+        let provider = preferred.compactMap { id in providers.first(where: { $0.id == id && $0.available }) }.first
+          ?? providers.first(where: { $0.available })
+        guard let project = projects.first, let provider else {
+          print("LIVEPROBE FAIL reason=no-authorized-project-or-provider projects=\(projects.count) providers=\(providers.count)")
+          exit(1)
+        }
+        print("LIVEPROBE selected cwd=\(project.path) provider=\(provider.id)")
+        let routing = RemoteRunClient.Routing(cwd: project.path, providerId: provider.id, agentProfileId: nil,
+          prompt: "只回复 SCRY_REMOTE_OK，不要调用工具，不要修改任何文件。")
+        let submit = try await client.submit(routing: routing)
+        print("LIVEPROBE submit runId=\(submit.runId) status=\(submit.status)")
+        var cursor = 0
+        var terminal: String? = nil
+        for _ in 0..<120 {
+          let page = try await client.poll(cursor: cursor)
+          cursor = page.cursor
+          for event in page.events where event.runId == submit.runId {
+            print("LIVEPROBE event kind=\(event.kind) detail=\(event.detail ?? "")")
+            if ["run_settled", "run_failed", "run_cancelled"].contains(event.kind) { terminal = event.kind }
+          }
+          if terminal != nil { break }
+          try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        let ok = terminal == "run_settled"
+        print("LIVEPROBE terminal=\(terminal ?? "none") expected=run_settled \(ok ? "PASS" : "FAIL")")
+        print("LIVEPROBE DONE failures=\(ok ? 0 : 1)")
+        exit(ok ? 0 : 1)
+      } catch {
+        print("LIVEPROBE FAIL error=\(error)")
+        print("LIVEPROBE DONE failures=1")
+        exit(1)
+      }
+    }
+    RunLoop.current.run()
+  }
+
   static func runRunProbeIfRequested() {
     guard ProcessInfo.processInfo.arguments.contains("-runProbe") else { return }
     Task {

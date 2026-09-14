@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
+import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
 import { ensureHostIdentity } from './host-identity'
@@ -52,6 +52,7 @@ export interface HostControllerFactoryDependencies {
   gate: ProviderOperationGate
   // Snapshot of host-authorized project directories offered to devices.
   listProjects?(): RemoteProjectRef[]
+  listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]
   listSessions?(): RemoteSessionRef[]
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
@@ -120,6 +121,7 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
     gate: deps.gate,
     runProvider: deps.startRun,
     ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
+    ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
     ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
     ...(deps.readHistory ? { readHistory: deps.readHistory } : {})

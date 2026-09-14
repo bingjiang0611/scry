@@ -1,6 +1,7 @@
 import type { ProviderRunHandle, ProviderRunRequest } from '../providers/types'
 import type { RemoteIntentRouting } from './host-controller'
 import type { TraceEvent } from '../../shared/trace'
+import type { AgentInputAttachment } from '../../shared/runtime'
 import { traceEventToOutputChunk } from './trace-output'
 
 // The LIVE binding for the remote run seam (previously a fail-closed stub). It
@@ -50,7 +51,7 @@ export interface RemoteRunBindingDependencies {
   // OFF). Called once on a terminal run that produced a session id. Best-effort:
   // a failed archive write never fails the run. Nothing is fabricated - these are
   // the Provider's real streamed events.
-  onRunArchive?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; externalSessionId: string; agentProfileId?: string; items: TraceEvent[]; status: 'completed' | 'failed' | 'cancelled' | 'interrupted' }): void
+  onRunArchive?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; externalSessionId: string; agentProfileId?: string; attachments: AgentInputAttachment[]; items: TraceEvent[]; status: 'completed' | 'failed' | 'cancelled' | 'interrupted' }): void
 }
 
 export interface RemoteRunInput {
@@ -76,20 +77,37 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     // rather than launch an empty turn.
     if (prompt.length === 0) throw new Error('remote_run_missing_prompt')
     const scryRunId = nextScryRunId()
+    const resume = typeof routing.resume === 'string' ? routing.resume.trim() : ''
+    const routedAttachments = routing.attachments ?? []
+    const attachments: AgentInputAttachment[] = routedAttachments
+      .filter((item) => item.kind === 'image')
+      .map((item) => ({ kind: 'image', name: item.name, mimeType: item.mimeType as AgentInputAttachment['mimeType'], dataBase64: item.dataBase64, size: item.size }))
+    const textFiles = routedAttachments.filter((item) => item.kind === 'text')
+    const providerPrompt = textFiles.length === 0 ? prompt : [prompt, textFiles.map((file) => {
+      const content = Buffer.from(file.dataBase64, 'base64').toString('utf8')
+      return `<scry_attached_file name=${JSON.stringify(file.name)} mime=${JSON.stringify(file.mimeType)}>\n${content}\n</scry_attached_file>`
+    }).join('\n\n')].join('\n\n')
+    // A resumed run already has a real Provider session id. Some Providers do
+    // not emit onExternalSessionId again when resuming, so treat routing.resume
+    // as the authoritative archive/catalog key from the start instead of
+    // creating an orphan pending row that can never be opened on the Mac.
+    let capturedExternalSessionId = resume || undefined
     // First marker: the durable ledgerRunId <-> scryRunId correlation the device
     // uses to map its intent to Scry's own run identity.
     progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd: routing.cwd }))
-    // Make the run appear in the Mac session catalog immediately (as pending),
-    // so the owner sees the conversation start on their Mac; it resolves to a
-    // resumable session once the Provider reports its externalSessionId below.
-    try { deps.onRunStarted?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, agentProfileId: routing.agentProfileId }) } catch { /* catalog visibility is best-effort; never fail the run */ }
+    if (capturedExternalSessionId) {
+      progress(marker({ event: 'session', externalSessionId: capturedExternalSessionId, resumed: true }))
+      try { deps.onRunSession?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId: capturedExternalSessionId, agentProfileId: routing.agentProfileId }) } catch { /* catalog visibility is best-effort; never fail the run */ }
+    } else {
+      // A new run is pending only until the Provider reports its session id.
+      try { deps.onRunStarted?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, agentProfileId: routing.agentProfileId }) } catch { /* catalog visibility is best-effort; never fail the run */ }
+    }
     let lastErrorText: string | undefined
     // Every REAL trace event, accumulated so the run can be written to the Scry
     // trace archive (same evidence a local run produces), making it openable on
     // the Mac. Separate from the `output` forwarding above (which is a bounded
     // live view); this is the full turn content for the durable archive.
     const items: TraceEvent[] = []
-    let capturedExternalSessionId: string | undefined
     // Whether the Provider streamed any assistant TEXT during the run. Some
     // Providers (e.g. qoder for a short turn) deliver the final answer only on
     // the terminal result event; without this we would drop the answer entirely
@@ -132,17 +150,20 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     }
     const handle = deps.run(routing.providerId, {
       runId: scryRunId,
-      prompt,
+      prompt: providerPrompt,
       cwd: routing.cwd,
       agentProfileId: routing.agentProfileId,
       // Continue the SAME conversation when the device opened a session and sent a
       // follow-up (routing.resume = that session's Provider id); a new session
       // omits it. This gives the resumed run the prior context/memory.
-      ...(routing.resume ? { resume: routing.resume } : {}),
-      attachments: [],
-      // model / effort / permissionMode intentionally omitted: the adapter's
-      // native defaults apply. Remote access must not silently escalate the
-      // approval mode; mapping a device-chosen mode is a later, explicit step.
+      ...(resume ? { resume } : {}),
+      attachments,
+      ...(routing.modelId ? { model: { id: routing.modelId } } : {}),
+      ...(routing.effort ? { effort: routing.effort } : {}),
+      // A paired owner device may make the same explicit run-control choice as
+      // the trusted desktop UI. Missing means Provider default; full_access is
+      // never inferred or silently escalated.
+      ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {}),
       emit,
       onExternalSessionId: (externalSessionId) => {
         capturedExternalSessionId = externalSessionId
@@ -162,7 +183,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     // is keyed by it); a run that died before a session has nothing to key or
     // resume. Best-effort - never let a catalog/archive write mask the run result.
     if (capturedExternalSessionId) {
-      try { deps.onRunArchive?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId: capturedExternalSessionId, agentProfileId: routing.agentProfileId, items, status }) } catch { /* archive is best-effort */ }
+      try { deps.onRunArchive?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId: capturedExternalSessionId, agentProfileId: routing.agentProfileId, attachments, items, status }) } catch { /* archive is best-effort */ }
     }
     if (result.status === 'failed') {
       throw new Error(lastErrorText ? `provider_run_failed: ${lastErrorText}` : 'provider_run_failed')

@@ -3,20 +3,22 @@
 Two targets live here:
 
 - **ScryRemoteG0** (`com.scry.remote.g0`) — isolated native SwiftUI transport/Keychain verification app. **Not** the product; it cannot start Providers, write files or operate terminals.
-- **ScryRemote** (`com.scry.remote`) — the product UI shell (`ScryRemote.xcodeproj`), a faithful native SwiftUI implementation of the accepted Codex-aligned design v2 (home/new/chat + pairing + Sign in with Apple), iOS 17+. See below.
+- **ScryRemote** (`com.scry.remote`) — the product SwiftUI app (`ScryRemote.xcodeproj`), implementing the selected **v5 · Codex Refined** direction: sign-in, live pairing, flat session catalog, transcript continuation, new task, project/Provider pickers, attachment composer and settings. iOS 17+.
 
-G1–G5 and the real host protocol remain in [the implementation ledger](../../docs/research/scry-ios-remote-implementation.md).
+The remote implementation and evidence boundaries are documented in [the implementation ledger](../../docs/research/scry-ios-remote-implementation.md).
 
-## ScryRemote product UI (design v2)
+## ScryRemote product UI (design v5)
 
-`apps/ios/ScryRemote/` transcribes the accepted `designs/scry-ios-remote/Scry iOS Remote v2.html`: design tokens (`Theme.swift`), truthful state model (`AppModel.swift`), reusable glass components (`Components.swift`), and the four screens `SignInView`/`HomeView`/`NewSessionView`/`ChatView` plus `PairView`.
+The selected direction and interaction decisions live in `designs/scry-ios-remote/brief-v5.md` and `design-notes-v5.md`; the three-way comparison is `Scry iOS Remote v5 Directions.html`.
 
-Honesty invariants (enforced by the model, not decoration):
+Honesty invariants (enforced by the model and host, not decoration):
 
-- No fabricated sessions, tasks, assistant replies or diffs. `sessions` is empty until a real host feed exists, so Home/Chat show truthful empty states with the same “任务提交≠开始执行” / “文件证据未缓存” semantics as v2.
-- No green “connected” dot unless a real live grant exists (not yet wired), so the honest current maximum is signed-in + not-paired.
-- Sign in with Apple uses the first-party `SignInWithAppleButton`; there is no custom auth. The `com.apple.developer.applesignin` entitlement needs a **paid** Apple Developer Program membership, so on a free Personal Team the on-device flow fails and the app reports that truthfully rather than faking a signed-in user.
-- `PairView` explains the real Mac-side confirmation steps and states plainly that scanning/live pairing is not wired into this build — it never claims a connection was created.
+- No fabricated sessions, tasks, assistant replies, lifecycle, token/cost values or diffs. Home/history/run output come from the paired host.
+- A persisted grant is only “已配对”; the UI shows green “已连接” only after a real host exchange proves reachability.
+- The working-directory picker can move up and down inside Mac-authorized project roots and select any canonical descendant; `..`, symlink escapes and paths outside those roots fail closed. The Provider picker lists only host-available values, and the host re-validates both targets on submit.
+- The composer accepts up to four bounded image or UTF-8 text/code attachments. Images become native Provider attachments; text files become explicit Provider context blocks. Unsupported or oversized files fail visibly instead of being shown as uploaded.
+- Sign in with Apple uses the first-party `SignInWithAppleButton`. A DEBUG-only local entry remains compile-time isolated for Personal Team testing and never creates a host grant.
+- Pairing scans a real short-lived code, proves device-key possession over inner TLS 1.3/mTLS, waits for Mac confirmation, and only then stores the public connection descriptor.
 
 Build (Simulator, unsigned) and signed device build:
 
@@ -30,7 +32,7 @@ xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configurat
   DEVELOPMENT_TEAM=<personal-team-id> CODE_SIGN_STYLE=Automatic build
 ```
 
-Visual verification (2026-09-12): built for Simulator and the physical iPhone, launched in the dedicated simulator, and screenshotted all four screens. Because Sign in with Apple cannot complete without the paid entitlement, a **DEBUG-only** launch-argument harness (`-uiPreview [-connected] -route home|new|chat|pair` in `AppModel.applyUIPreviewArguments()`) forces view state for screenshots. It is a dev verification harness, not real authentication, and injects no fabricated business data.
+Visual verification (2026-09-14): v5 was built and launched on the iPhone 17 Pro / iOS 27 simulator; the unpaired home, pairing and new-task layouts were captured from the native app. The **DEBUG-only** launch-argument harness (`-uiPreview [-connected] -route home|new|chat|pair|settings`) changes view state for screenshots only; it is not authentication and injects no fabricated sessions or Agent output.
 
 ## Architecture
 

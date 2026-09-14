@@ -39,7 +39,7 @@ final class TunnelCodec: ChannelDuplexHandler {
 
   func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
     let bytes = unwrapOutboundIn(data)
-    guard bytes.readableBytes <= 262_144, context.channel.isWritable else {
+    guard bytes.readableBytes <= 1_572_864, context.channel.isWritable else {
       promise?.fail(ProbeError.oversized)
       context.close(promise: nil)
       return
@@ -217,13 +217,22 @@ public enum G0Transport {
   // never authorize a new one; it only chooses among these, and the host
   // re-checks the cwd on submit regardless.
   public struct RunProjectRef: Sendable, Equatable, Codable { public let path: String; public let label: String }
-  // A Provider the device may target for a new session. `available` mirrors the
-  // host's real describe() result; the run path still validates `id` on submit.
-  public struct RunProviderRef: Sendable, Equatable, Codable { public let id: String; public let label: String; public let available: Bool }
+  public struct RunDirectoryListing: Sendable, Equatable, Codable {
+    public let current: RunProjectRef?; public let parent: RunProjectRef?; public let directories: [RunProjectRef]
+  }
+  public struct RunControlOption: Sendable, Equatable, Codable {
+    public let id: String; public let label: String; public let description: String?; public let isDefault: Bool?
+  }
+  // A Provider the device may target for a new session. Controls describe only
+  // what the host's real adapter advertises; absent means unsupported/unavailable.
+  public struct RunProviderRef: Sendable, Equatable, Codable {
+    public let id: String; public let label: String; public let available: Bool
+    public let modelId: String?; public let efforts: [RunControlOption]?; public let permissions: [RunControlOption]?
+  }
   // A session in the host catalog the device may browse. `externalSessionId` is
   // the Provider's resumable id (nil => pending/unresumable). Display metadata.
   public struct RunSessionRef: Sendable, Equatable, Codable {
-    public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let cwd: String; public let label: String; public let ts: Double
+    public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let cwd: String; public let label: String; public let ts: Double; public let pinnedAt: Double?
   }
   // One content chunk of a replayed session turn (same kinds a live run streams).
   public struct RunHistoryChunk: Sendable, Equatable, Codable { public let kind: String; public let text: String }
@@ -242,6 +251,7 @@ public enum G0Transport {
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
   private struct RunProjectsRequest: Encodable { let op = "projects" }
+  private struct RunDirectoriesRequest: Encodable { let op = "directories"; let path: String? }
   private struct RunProvidersRequest: Encodable { let op = "providers" }
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
@@ -252,6 +262,7 @@ public enum G0Transport {
     let poll: RunPollBody?
     let state: String?
     let projects: [RunProjectRef]?
+    let directories: RunDirectoryListing?
     let providers: [RunProviderRef]?
     let sessions: [RunSessionRef]?
     let history: [RunHistoryTurn]?
@@ -303,6 +314,15 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let projects = response.projects else { throw ProbeError.unexpectedReply }
     return projects
+  }
+
+  // Browse one hierarchy level. A nil path lists only Mac-authorized roots; a
+  // supplied path is re-authorized by the host and cannot escape those roots.
+  public static func relayRunDirectories(endpoint: RelayEndpoint, identity: G0ProbeIdentity, path: String?) async throws -> RunDirectoryListing {
+    let request = try JSONEncoder().encode(RunDirectoriesRequest(path: path))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let directories = response.directories else { throw ProbeError.unexpectedReply }
+    return directories
   }
 
   // The Providers this device may target for a new session. Authorized exactly
@@ -391,7 +411,7 @@ public enum G0Transport {
           channel.eventLoop.makeCompletedFuture {
             let pipeline = channel.pipeline.syncOperations
             try pipeline.addHandler(NIOSSLClientHandler(context: outerContext, serverHostname: "localhost"))
-            let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 262_144, upgradePipelineHandler: { channel, _ in
+            let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 1_572_864, upgradePipelineHandler: { channel, _ in
               channel.eventLoop.makeCompletedFuture {
                 try channel.pipeline.syncOperations.addHandler(TunnelCodec())
                 return channel
@@ -438,7 +458,7 @@ public enum G0Transport {
   // dials a public relay and routes by hostId+mode instead of a fixed port, and
   // pins the inner server to the host anchor without leaf-hostname verification.
   static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data) async throws -> Data {
-    guard (1...65535).contains(endpoint.port), request.count < 65_536, ["pair", "run"].contains(mode),
+    guard (1...65535).contains(endpoint.port), request.count < 1_250_000, ["pair", "run"].contains(mode),
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     do {
@@ -491,7 +511,7 @@ public enum G0Transport {
             if let outerContext {
               try pipeline.addHandler(NIOSSLClientHandler(context: outerContext, serverHostname: endpoint.relayServerName ?? endpoint.host))
             }
-            let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 262_144, upgradePipelineHandler: { channel, _ in
+            let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 1_572_864, upgradePipelineHandler: { channel, _ in
               channel.eventLoop.makeCompletedFuture {
                 try channel.pipeline.syncOperations.addHandler(TunnelCodec())
                 return channel
@@ -523,6 +543,10 @@ public enum G0Transport {
         throw error
       }
       let reply = try await result.futureResult.get()
+      // The relay consumes one warm host leg per exchange. Close our side before
+      // shutting down the event loop so NIOSSL does not report the peer's normal
+      // WebSocket teardown as an unclean TLS shutdown after a valid reply.
+      try? await channel.close()
       try await group.shutdownGracefully()
       return reply
     } catch {

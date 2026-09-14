@@ -100,6 +100,9 @@ import { createRemoteRunBinding } from './remote/remote-run-binding'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
 import { createRelayConnectWS } from './remote/relay-connect-ws'
+import { ensureHostIdentity } from './remote/host-identity'
+import { ensureRelayCredential } from './remote/relay-credential'
+import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { archiveSessionId } from './session-id'
@@ -144,6 +147,7 @@ import {
   knownProjectDirectory
 } from './workspace-authorization'
 import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
+import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
 import type {
   TerminalCloseRequest,
   TerminalResizeRequest,
@@ -366,6 +370,8 @@ const knownProjectDirectories = (): Set<string> => new Set([
   ...appSessionStore().load().map((session) => session.cwd).filter(Boolean)
 ])
 const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirectory(cwd, knownProjectDirectories())
+const remoteProjectRoots = (): string[] => canonicalRemoteProjectRoots(knownProjectDirectories())
+const resolveRemoteProjectDirectory = (cwd: string): string => resolveRemoteDescendant(cwd, knownProjectDirectories())
 let traceCatalogRecoveryDone = false
 const recoverTraceCatalogOnce = (): void => {
   if (traceCatalogRecoveryDone) return
@@ -3515,29 +3521,38 @@ handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
   } : {})
 )
 
-// Remote-access subsystem (iOS control client). Gated OFF by default: it is
-// constructed only when SCRY_REMOTE_HOST=1 so default app behaviour is unchanged
-// and regression-proven. With no relay transport configured it stays DORMANT -
-// the host identity/CA, durable pairing + ledger stores, and inner-mTLS host are
-// assembled (so the trusted-local pairing UI can drive the authority), but no
-// outbound relay leg is opened and no device can reach it yet. Binding startRun
-// to the live agent:start path and opening a relay transport are the next steps.
+// Remote-access subsystem (iOS control client). Packaged builds start it against
+// the official public relay; development remains opt-in and SCRY_REMOTE_HOST=0
+// is an explicit kill switch. The relay only sees opaque inner-mTLS bytes.
 let remoteHostService: RemoteHostService | null = null
-// Optional relay wiring from env. SCRY_REMOTE_RELAY is JSON:
-//   { "host": "relay.example", "port": 443, "token": "...", "tls": true, "caPath": "..." }
-// When absent the subsystem stays dormant (no outbound leg). The token is a
-// per-host bearer provisioned out of band and is never logged.
+// Explicit relay wiring remains available for private deployments. Without an
+// override, packaged builds use the official public WSS relay with a generated
+// per-host room credential; no app-wide bearer is embedded in the artifact.
 type RemoteRelayResolution = Pick<RemoteHostServiceDependencies, 'createTransport' | 'relayAdvertisement'>
-function resolveRemoteRelay(): RemoteRelayResolution {
-  // Cloudflare Worker relay (WSS) takes precedence when configured.
-  //   SCRY_REMOTE_RELAY_WS = { "url": "wss://scry-relay.example.workers.dev", "token": "..." }
-  // The Worker speaks WebSocket both sides; the Mac dials each warm leg over WSS
-  // with the Node/Electron global WebSocket (no `ws` dependency).
+function createRemoteWssResolution(endpoint: URL, token: string, enroll: boolean): RemoteRelayResolution {
+  const url = endpoint.origin
+  const createTransport: RemoteHostServiceDependencies['createTransport'] = (ctx) => {
+    const { connect, readyEvent } = createRelayConnectWS({ url, hostId: ctx.hostId, token, enroll, mode: ctx.mode })
+    return new ReverseTunnelTransport({ connect, readyEvent })
+  }
+  return {
+    createTransport,
+    relayAdvertisement: {
+      host: endpoint.hostname,
+      port: endpoint.port ? Number(endpoint.port) : endpoint.protocol === 'wss:' ? 443 : 80,
+      tls: endpoint.protocol === 'wss:' ? 'system' : 'plaintext'
+    }
+  }
+}
+
+async function resolveRemoteRelay(stateDirectory: string): Promise<RemoteRelayResolution> {
+  // An explicit Cloudflare-compatible relay takes precedence.
+  //   SCRY_REMOTE_RELAY_WS = { "url": "wss://relay.example", "token": "..." }
   const wsRaw = process.env.SCRY_REMOTE_RELAY_WS
   if (wsRaw) {
     let wsCfg: { url?: unknown; token?: unknown }
     try { wsCfg = JSON.parse(wsRaw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY_WS is not valid JSON; remote relay disabled'); return {} }
-    if (typeof wsCfg.url !== 'string' || typeof wsCfg.token !== 'string') {
+    if (typeof wsCfg.url !== 'string' || typeof wsCfg.token !== 'string' || wsCfg.token.length === 0) {
       console.warn('[scry] SCRY_REMOTE_RELAY_WS missing url/token; remote relay disabled')
       return {}
     }
@@ -3547,47 +3562,50 @@ function resolveRemoteRelay(): RemoteRelayResolution {
       console.warn('[scry] SCRY_REMOTE_RELAY_WS url must be a root ws/wss origin without credentials; remote relay disabled')
       return {}
     }
-    const url = endpoint.origin, wsToken = wsCfg.token
-    const createTransport: RemoteHostServiceDependencies['createTransport'] = (ctx) => {
-      const { connect, readyEvent } = createRelayConnectWS({ url, hostId: ctx.hostId, token: wsToken, mode: ctx.mode })
-      return new ReverseTunnelTransport({ connect, readyEvent })
+    return createRemoteWssResolution(endpoint, wsCfg.token, false)
+  }
+
+  // Legacy raw TCP remains explicit-only because it has no device-facing WSS
+  // advertisement. A malformed explicit override fails closed instead of
+  // silently falling back to Scry's public infrastructure.
+  const raw = process.env.SCRY_REMOTE_RELAY
+  if (raw) {
+    let cfg: { host?: unknown; port?: unknown; token?: unknown; tls?: unknown; caPath?: unknown }
+    try { cfg = JSON.parse(raw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY is not valid JSON; remote relay disabled'); return {} }
+    if (typeof cfg.host !== 'string' || typeof cfg.port !== 'number' || typeof cfg.token !== 'string') {
+      console.warn('[scry] SCRY_REMOTE_RELAY missing host/port/token; remote relay disabled')
+      return {}
     }
+    const host = cfg.host, port = cfg.port, token = cfg.token
+    const tls = cfg.tls === true
+      ? { ca: typeof cfg.caPath === 'string' ? readFileSync(cfg.caPath, 'utf8') : undefined, servername: host }
+      : undefined
     return {
-      createTransport,
-      relayAdvertisement: {
-        host: endpoint.hostname,
-        port: endpoint.port ? Number(endpoint.port) : endpoint.protocol === 'wss:' ? 443 : 80,
-        tls: endpoint.protocol === 'wss:' ? 'system' : 'plaintext'
+      createTransport: (ctx) => {
+        const { connect, readyEvent } = createRelayConnect({ host, port, hostId: ctx.hostId, token, mode: ctx.mode, tls })
+        return new ReverseTunnelTransport({ connect, readyEvent })
       }
     }
   }
-  const raw = process.env.SCRY_REMOTE_RELAY
-  if (!raw) return {}
-  let cfg: { host?: unknown; port?: unknown; token?: unknown; tls?: unknown; caPath?: unknown }
-  try { cfg = JSON.parse(raw) } catch { console.warn('[scry] SCRY_REMOTE_RELAY is not valid JSON; remote relay disabled'); return {} }
-  if (typeof cfg.host !== 'string' || typeof cfg.port !== 'number' || typeof cfg.token !== 'string') {
-    console.warn('[scry] SCRY_REMOTE_RELAY missing host/port/token; remote relay disabled')
-    return {}
-  }
-  const host = cfg.host, port = cfg.port, token = cfg.token
-  const tls = cfg.tls === true
-    ? { ca: typeof cfg.caPath === 'string' ? readFileSync(cfg.caPath, 'utf8') : undefined, servername: host }
-    : undefined
-  return {
-    createTransport: (ctx) => {
-      const { connect, readyEvent } = createRelayConnect({ host, port, hostId: ctx.hostId, token, mode: ctx.mode, tls })
-      return new ReverseTunnelTransport({ connect, readyEvent })
-    }
-    // The legacy raw-TCP config does not declare its separate device-facing WSS
-    // endpoint, so no scannable device code is emitted for it.
-  }
+
+  const endpoint = new URL(DEFAULT_PUBLIC_RELAY_WS)
+  const identity = await ensureHostIdentity(join(stateDirectory, 'identity'))
+  const token = ensureRelayCredential(join(stateDirectory, 'relay'), identity.hostId)
+  return createRemoteWssResolution(endpoint, token, true)
 }
 // Cached snapshot of the host's Providers for the device new-session picker.
 // providerRegistry.describe() is async but the device op reads synchronously, so
 // we keep a periodically-refreshed snapshot (id/label/available). Availability
 // mirrors the real describe() result; nothing is fabricated, and the run path
 // still validates the chosen providerId on submit.
-let remoteProviderSnapshot: { id: string; label: string; available: boolean }[] = []
+let remoteProviderSnapshot: {
+  id: string
+  label: string
+  available: boolean
+  modelId?: string
+  efforts?: { id: string; label: string; description?: string; isDefault?: boolean }[]
+  permissions?: { id: string; label: string; description?: string; isDefault?: boolean }[]
+}[] = []
 // providerId -> runtimeProvider, so a device-initiated run can be written into
 // the Mac session catalog with the correct runtime (recordSession below).
 let remoteProviderRuntime = new Map<string, RuntimeProvider>()
@@ -3595,15 +3613,33 @@ let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 async function refreshRemoteProviderSnapshot(): Promise<void> {
   try {
     const descriptors = await providerRegistry.describe()
-    remoteProviderSnapshot = descriptors.map((d) => ({ id: d.id, label: d.label, available: d.available }))
+    remoteProviderSnapshot = await Promise.all(descriptors.map(async (descriptor) => {
+      if (!descriptor.available) return { id: descriptor.id, label: descriptor.label, available: false }
+      const controls = await providerRegistry.runControls({ providerId: descriptor.id })
+      const model = controls.data?.models.find((option) => option.isDefault) ?? controls.data?.models[0]
+      return {
+        id: descriptor.id,
+        label: descriptor.label,
+        available: true,
+        ...(model?.model.id ? { modelId: model.model.id } : {}),
+        ...(model?.efforts.length ? { efforts: model.efforts } : {}),
+        ...(controls.data?.permissions.length ? {
+          permissions: controls.data.permissions.map((option) => ({
+            ...option,
+            ...(option.id === 'default' ? { isDefault: true } : {})
+          }))
+        } : {})
+      }
+    }))
     remoteProviderRuntime = new Map(descriptors.map((d) => [d.id, d.runtimeProvider]))
   } catch { /* keep the last good snapshot rather than fabricate */ }
 }
 
 async function startRemoteHostIfEnabled(): Promise<void> {
-  if (remoteHostService || process.env.SCRY_REMOTE_HOST !== '1') return
+  if (remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
   try {
-    const relay = resolveRemoteRelay()
+    const stateDirectory = join(app.getPath('userData'), 'remote')
+    const relay = await resolveRemoteRelay(stateDirectory)
     await refreshRemoteProviderSnapshot()
     if (!remoteProviderRefresh) remoteProviderRefresh = setInterval(() => { void refreshRemoteProviderSnapshot() }, 15_000)
     // Owner-explicit permission mode for remote runs. Default remote behaviour is
@@ -3619,10 +3655,10 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     if (remotePermissionRaw && !remotePermissionMode) console.warn(`[scry] ignoring invalid SCRY_REMOTE_PERMISSION_MODE=${remotePermissionRaw}`)
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
     remoteHostService = await RemoteHostService.create({
-      stateDirectory: join(app.getPath('userData'), 'remote'),
+      stateDirectory,
       // Fail closed: a device may only target a directory already authorized
       // through Scry's own project picker.
-      authorizeWorkspace: (cwd) => resolveKnownProjectDirectory(cwd),
+      authorizeWorkspace: (cwd) => resolveRemoteProjectDirectory(cwd),
       gate: providerOperationGate,
       createTransport: relay.createTransport,
       relayAdvertisement: relay.relayAdvertisement,
@@ -3661,7 +3697,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         // Persist the run as a REAL Scry trace archive (same path a local,
         // non-managed run uses) so the owner can OPEN the transcript on the Mac,
         // not just see it listed. Managed recorder stays OFF for remote runs.
-        onRunArchive: ({ providerId, cwd, prompt, scryRunId, externalSessionId, items, status }) => {
+        onRunArchive: ({ providerId, cwd, prompt, scryRunId, externalSessionId, attachments, items, status }) => {
           const runtimeProvider = remoteProviderRuntime.get(providerId)
           if (!runtimeProvider) return
           void archiveTraceTurn({
@@ -3671,6 +3707,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
             sessionId: externalSessionId,
             runId: scryRunId,
             userText: prompt,
+            attachments,
             items,
             done: true,
             status,
@@ -3685,15 +3722,10 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // one. Snapshot per call so a locally-removed directory stops being
       // offered immediately, filter to still-existing dirs, and label by
       // basename. The workspace authorizer re-checks the cwd on submit anyway.
-      listProjects: () => {
-        const out: { path: string; label: string }[] = []
-        for (const cwd of knownProjectDirectories()) {
-          let canonical: string
-          try { canonical = resolveKnownProjectDirectory(cwd) } catch { continue }
-          out.push({ path: canonical, label: basename(canonical) || canonical })
-        }
-        return out
-      },
+      listProjects: () => remoteProjectRoots().map((path) => ({ path, label: basename(path) || path })),
+      // The paired phone may choose a narrower cwd, but cannot navigate to or
+      // submit a parent/sibling outside the Mac's existing canonical grants.
+      listDirectories: (path) => listRemoteDirectories(path, knownProjectDirectories()),
       // The Providers the device may pick for a new session. Snapshot mirrors the
       // real registry describe() (id/label/available); the run path re-validates.
       listProviders: () => remoteProviderSnapshot,
@@ -3707,7 +3739,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         for (const cwd of knownProjectDirectories()) {
           try { authorized.add(resolveKnownProjectDirectory(cwd)) } catch { /* skip unresolved */ }
         }
-        const out: { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number }[] = []
+        const out: { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number; pinnedAt?: number }[] = []
         for (const s of appSessionStore().load()) {
           if (s.archivedAt) continue
           if (!s.cwd) continue
@@ -3720,7 +3752,8 @@ async function startRemoteHostIfEnabled(): Promise<void> {
             providerId: s.providerId ?? 'legacy_unknown',
             cwd: canonical,
             label: (s.title ?? s.preview ?? '').slice(0, 256),
-            ts: s.ts
+            ts: s.ts,
+            ...(s.pinnedAt ? { pinnedAt: s.pinnedAt } : {})
           })
         }
         out.sort((a, b) => b.ts - a.ts)

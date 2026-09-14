@@ -1,13 +1,14 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistorySource } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistorySource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage } from './run-output-log'
-export type { RemoteProjectRef, RemoteProviderRef, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
+export type { RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
 import { ProviderOperationGate } from '../provider-operation-gate'
+import { decodedBase64ByteLength, isSupportedImageMimeType } from '../../shared/runtime'
 
 // Trusted-local composition root for the remote subsystem. It wires the six
 // modules proven in isolation (PairingAuthority, SessionLedger, RemoteGateway,
@@ -25,8 +26,24 @@ import { ProviderOperationGate } from '../provider-operation-gate'
 
 // The structured routing a device intent must resolve to before any Provider
 // run. Carried in the intent detail as JSON; malformed detail is denied.
+export interface RemoteIntentAttachment {
+  kind: 'image' | 'text'
+  name: string
+  mimeType: string
+  dataBase64: string
+  size: number
+}
+
 export interface RemoteIntentRouting extends RemoteRunTarget {
   prompt?: string
+  modelId?: string
+  effort?: string
+  permissionMode?: 'default' | 'auto_review' | 'full_access'
+  // Bounded, encrypted attachment payloads from the paired device. Images are
+  // forwarded as native Provider attachments; UTF-8 text/code files become
+  // explicit context blocks. The parser below validates every byte before the
+  // Provider can see it.
+  attachments?: RemoteIntentAttachment[]
   // The Provider's own session id to CONTINUE (resume) instead of starting a
   // fresh conversation. Present when the device sends a follow-up into an opened
   // session; absent for a brand-new session. Authorization is unchanged (still by
@@ -53,6 +70,9 @@ export interface HostControllerDependencies {
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]
+  // Immediate child folders under an authorized project path. The source must
+  // canonicalize and reject paths outside the original host grant.
+  listDirectories?(path?: string): RemoteDirectoryListing
   // Snapshot of the host's Providers a device may target. Absent => honest empty.
   listProviders?(): RemoteProviderRef[]
   // Snapshot of the host session catalog a device may browse. Absent => empty.
@@ -64,18 +84,71 @@ export interface HostControllerDependencies {
   gate?: ProviderOperationGate
 }
 
+const MAX_REMOTE_DETAIL_CHARS = 1_200_000
+const MAX_REMOTE_PROMPT_CHARS = 128_000
+const MAX_REMOTE_ATTACHMENTS = 4
+const MAX_REMOTE_ATTACHMENT_BYTES = 512 * 1024
+const MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES = 700 * 1024
+
+function parseRemoteAttachments(value: unknown): RemoteIntentAttachment[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > MAX_REMOTE_ATTACHMENTS) throw new RemoteRunDenied('invalid_target')
+  let total = 0
+  return value.map((raw) => {
+    if (!raw || typeof raw !== 'object') throw new RemoteRunDenied('invalid_target')
+    const item = raw as Record<string, unknown>
+    if (item.kind !== 'image' && item.kind !== 'text') throw new RemoteRunDenied('invalid_target')
+    if (typeof item.name !== 'string' || item.name.length === 0 || item.name.length > 160 || /[\u0000-\u001f]/.test(item.name)) {
+      throw new RemoteRunDenied('invalid_target')
+    }
+    if (typeof item.mimeType !== 'string' || item.mimeType.length === 0 || item.mimeType.length > 100 || typeof item.dataBase64 !== 'string') {
+      throw new RemoteRunDenied('invalid_target')
+    }
+    const bytes = decodedBase64ByteLength(item.dataBase64)
+    if (bytes == null || bytes > MAX_REMOTE_ATTACHMENT_BYTES || item.size !== bytes) throw new RemoteRunDenied('invalid_target')
+    if (item.kind === 'image' && !isSupportedImageMimeType(item.mimeType)) throw new RemoteRunDenied('invalid_target')
+    if (item.kind === 'text') {
+      if (!item.mimeType.startsWith('text/') && item.mimeType !== 'application/json' && item.mimeType !== 'application/xml') {
+        throw new RemoteRunDenied('invalid_target')
+      }
+      try { new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(item.dataBase64, 'base64')) }
+      catch { throw new RemoteRunDenied('invalid_target') }
+    }
+    total += bytes
+    if (total > MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES) throw new RemoteRunDenied('invalid_target')
+    return { kind: item.kind, name: item.name, mimeType: item.mimeType, dataBase64: item.dataBase64, size: bytes }
+  })
+}
+
 function parseRouting(detail: string | undefined): RemoteIntentRouting {
-  if (typeof detail !== 'string' || detail.length === 0 || detail.length > 4096) throw new RemoteRunDenied('invalid_target')
+  if (typeof detail !== 'string' || detail.length === 0 || detail.length > MAX_REMOTE_DETAIL_CHARS) throw new RemoteRunDenied('invalid_target')
   let parsed: unknown
   try { parsed = JSON.parse(detail) } catch { throw new RemoteRunDenied('invalid_target') }
   if (!parsed || typeof parsed !== 'object') throw new RemoteRunDenied('invalid_target')
   const routing = parsed as Record<string, unknown>
   if (typeof routing.cwd !== 'string' || typeof routing.providerId !== 'string') throw new RemoteRunDenied('invalid_target')
+  if (routing.prompt !== undefined && (typeof routing.prompt !== 'string' || routing.prompt.length > MAX_REMOTE_PROMPT_CHARS)) {
+    throw new RemoteRunDenied('invalid_target')
+  }
+  if (routing.modelId !== undefined && (typeof routing.modelId !== 'string' || routing.modelId.length === 0 || routing.modelId.length > 128)) {
+    throw new RemoteRunDenied('invalid_target')
+  }
+  if (routing.effort !== undefined && (typeof routing.effort !== 'string' || routing.effort.length === 0 || routing.effort.length > 64)) {
+    throw new RemoteRunDenied('invalid_target')
+  }
+  if (routing.permissionMode !== undefined && !['default', 'auto_review', 'full_access'].includes(String(routing.permissionMode))) {
+    throw new RemoteRunDenied('invalid_target')
+  }
+  const attachments = parseRemoteAttachments(routing.attachments)
   return {
     cwd: routing.cwd,
     providerId: routing.providerId,
     ...(typeof routing.agentProfileId === 'string' ? { agentProfileId: routing.agentProfileId } : {}),
     ...(typeof routing.prompt === 'string' ? { prompt: routing.prompt } : {}),
+    ...(typeof routing.modelId === 'string' ? { modelId: routing.modelId } : {}),
+    ...(typeof routing.effort === 'string' ? { effort: routing.effort } : {}),
+    ...(routing.permissionMode === 'default' || routing.permissionMode === 'auto_review' || routing.permissionMode === 'full_access' ? { permissionMode: routing.permissionMode } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
     ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {})
   }
 }
@@ -96,6 +169,7 @@ export class HostController {
       ledger: this.#ledger,
       output: this.#output,
       ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
+      ...(deps.listDirectories ? { directories: { list: deps.listDirectories } } : {}),
       ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
       ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {}),
       ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {})
@@ -136,6 +210,12 @@ export class HostController {
   // target, authorized by the same verified peer certificate as every method.
   listProjects(peerCertSHA256: string): RemoteProjectRef[] {
     return this.#gateway.listProjects(peerCertSHA256)
+  }
+
+  // Device-facing: browse within a host-authorized project without granting the
+  // phone access to any parent or sibling outside that project's canonical root.
+  listDirectories(peerCertSHA256: string, input: { path?: string }): RemoteDirectoryListing {
+    return this.#gateway.listDirectories(peerCertSHA256, input)
   }
 
   // Device-facing: the Providers this device may target, authorized by the same

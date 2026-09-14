@@ -1,5 +1,5 @@
 import { statSync, realpathSync } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, relative, sep } from 'node:path'
 
 export function canonicalExistingDirectory(cwd: string): string {
   if (!isAbsolute(cwd) || cwd.length > 4_096) throw new Error('无效的工作目录')
@@ -14,6 +14,22 @@ export function knownProjectDirectory(cwd: string, candidates: Iterable<string>)
     try { return canonicalExistingDirectory(candidate) === canonical } catch { return false }
   })
   if (!known) throw new Error('工作目录尚未通过 Scry 目录选择器授权')
+  return canonical
+}
+
+// Remote folder browsing may narrow an already authorized project to any real
+// descendant directory. Canonicalizing both sides before the relative-path
+// check prevents `..` and symlink escapes from widening the original grant.
+export function knownProjectDescendantDirectory(cwd: string, candidates: Iterable<string>): string {
+  const canonical = canonicalExistingDirectory(cwd)
+  const authorized = [...candidates].some((candidate) => {
+    try {
+      const root = canonicalExistingDirectory(candidate)
+      const child = relative(root, canonical)
+      return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child))
+    } catch { return false }
+  })
+  if (!authorized) throw new Error('工作目录不在 Scry 已授权项目内')
   return canonical
 }
 

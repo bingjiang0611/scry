@@ -1,200 +1,281 @@
 import SwiftUI
 import RemoteTransport
 
-// v2 首页 chrome: menu / centered host caption / more, optional offline notice,
-// session list (truthfully empty today), and the bottom search + compose dock.
+// v5 · Codex Refined home. A flat, searchable conversation list avoids the old
+// project-header duplication; project + Provider remain visible as metadata.
 struct HomeView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @State private var pinnedExpanded = true
 
   var body: some View {
     VStack(spacing: 0) {
-      header
+      RemoteHeader(title: "远程", subtitle: hostCaption, link: model.link,
+                   menuAction: { model.route = .settings }) {
+        Menu {
+          Button { run.loadSessions() } label: { Label("刷新会话", systemImage: "arrow.clockwise") }
+          Button { model.route = .pair } label: { Label("连接 Mac", systemImage: Symbol.link) }
+          Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
+        } label: {
+          Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("更多选项")
+      }
       if !model.link.isConnected { Notice(text: offlineText) }
       content
       dock
     }
     .background(Palette.surface)
-    .onAppear { if run.hasConnection { run.loadSessions() } }
-  }
-
-  private var header: some View {
-    HStack(spacing: 12) {
-      CircleButton(symbol: Symbol.menu, label: "打开导航") {}
-      VStack(spacing: 2) {
-        Text("远程").font(.system(size: 17, weight: .semibold))
-        Button {
-          model.route = .home
-        } label: {
-          HStack(spacing: 5) {
-            StatusDot(link: model.link)
-            Image(systemName: Symbol.laptop).font(.system(size: 12))
-            Text(model.link.host ?? "未连接").lineLimit(1)
-          }
-          .font(.system(size: 12))
-          .foregroundStyle(Palette.muted)
-        }
-      }
-      .frame(maxWidth: .infinity)
-      CircleButton(symbol: Symbol.more, label: "更多选项") {}
+    .onAppear {
+      if run.hasConnection { run.loadSessions(); run.loadProjects() }
     }
-    .padding(.horizontal, 14)
-    .padding(.top, 6)
-    .padding(.bottom, 10)
-    .frame(minHeight: 66)
   }
 
   @ViewBuilder private var content: some View {
     ScrollView {
       switch run.catalog {
       case .idle, .loading:
-        if !run.hasConnection {
-          notPairedEmpty
-        } else {
-          ProgressView("正在读取主机会话…").padding(.top, 40)
-        }
+        if !run.hasConnection { notPairedEmpty }
+        else { ProgressView("正在读取会话…").frame(maxWidth: .infinity).padding(.top, 52) }
       case let .loaded(list):
-        LazyVStack(alignment: .leading, spacing: 4) {
-          Text("项目").font(.system(size: 17, weight: .semibold)).foregroundStyle(Palette.ink)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 6)
-          ForEach(groupedByProject(list), id: \.cwd) { group in
-            projectHeader(group.cwd)
-            ForEach(group.sessions, id: \.sessionId) { s in sessionRow(s) }
+        let filtered = filteredSessions(list)
+        if filtered.isEmpty {
+          EmptyState(title: "没有匹配的会话", detail: "试试其他关键词。", symbol: Symbol.search).padding(.top, 24)
+        } else if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          sessionSections(filtered)
+        } else {
+          VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("搜索结果")
+            ForEach(filtered, id: \.sessionId) { sessionRow($0, showsMetadata: true) }
           }
+          .padding(.horizontal, 19)
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 10)
       case .empty:
-        VStack(spacing: 14) {
-          EmptyState(title: model.query.isEmpty ? "主机还没有会话" : "没有匹配的会话",
-                     detail: "在 Mac 的 Scry 里（或从手机新建）发起会话后会出现在这里。")
-        }.padding(.top, 30)
+        EmptyState(title: "主机还没有会话", detail: "点击右下角，从 iPhone 发起第一项任务。")
+          .padding(.top, 24)
       case let .failed(reason):
-        VStack(spacing: 14) { EmptyState(title: "无法读取会话", detail: reason) }.padding(.top, 30)
+        VStack(spacing: 4) {
+          EmptyState(title: "无法读取会话", detail: reason, symbol: "exclamationmark.triangle")
+          Button("重新读取") { run.loadSessions() }.font(.system(size: 14, weight: .medium))
+        }.padding(.top, 18)
       }
     }
     .scrollIndicators(.hidden)
   }
 
   private var notPairedEmpty: some View {
-    VStack(spacing: 18) {
-      EmptyState(title: emptyTitle, detail: emptyDetail)
+    VStack(spacing: 0) {
+      EmptyState(title: "还没有连接 Mac", detail: "在 Mac 的 Scry 中打开“连接 iPhone”，然后扫描配对码。", symbol: Symbol.laptop)
       Button { model.route = .pair } label: {
-        Text("连接 Mac")
-          .font(.system(size: 15, weight: .medium))
-          .foregroundStyle(Color.white)
-          .padding(.horizontal, 22)
-          .frame(minHeight: 44)
-          .background(Palette.ink, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        Text("连接 Mac").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+          .padding(.horizontal, 22).frame(minHeight: 46)
+          .background(Palette.ink, in: Capsule())
       }
-    }.padding(.top, 30)
+    }.padding(.top, 24)
   }
 
-  // Group the flat catalog by project (cwd), most-recently-active project first,
-  // so the phone list mirrors the Mac's project-grouped session list.
+  private func filteredSessions(_ list: [G0Transport.RunSessionRef]) -> [G0Transport.RunSessionRef] {
+    let needle = model.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !needle.isEmpty else { return list }
+    return list.filter {
+      $0.label.lowercased().contains(needle) || $0.cwd.lowercased().contains(needle) || $0.providerId.lowercased().contains(needle)
+    }
+  }
+
   private struct ProjectGroup { let cwd: String; let sessions: [G0Transport.RunSessionRef] }
+
+  private func sessionSections(_ list: [G0Transport.RunSessionRef]) -> some View {
+    let pinned = list.filter { $0.pinnedAt != nil }
+    let regular = list.filter { $0.pinnedAt == nil }
+    return LazyVStack(alignment: .leading, spacing: 0) {
+      if !pinned.isEmpty {
+        Button { withAnimation(.easeInOut(duration: 0.18)) { pinnedExpanded.toggle() } } label: {
+          HStack(spacing: 7) {
+            Text("已置顶").font(.system(size: 18, weight: .semibold))
+            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+              .rotationEffect(.degrees(pinnedExpanded ? 0 : -90)).foregroundStyle(Palette.muted)
+            Spacer()
+          }
+          .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        if pinnedExpanded {
+          ForEach(pinned.sorted { ($0.pinnedAt ?? 0) > ($1.pinnedAt ?? 0) }, id: \.sessionId) {
+            sessionRow($0, showsMetadata: false)
+          }
+        }
+      }
+
+      if !regular.isEmpty {
+        sectionTitle("项目").padding(.top, pinned.isEmpty ? 4 : 20)
+        ForEach(groupedByProject(regular), id: \.cwd) { group in
+          projectHeader(group.cwd)
+          ForEach(group.sessions, id: \.sessionId) { sessionRow($0, showsMetadata: false, indent: 26) }
+        }
+      }
+    }
+    .padding(.horizontal, 19).padding(.bottom, 24)
+  }
+
+  private func sectionTitle(_ title: String) -> some View {
+    Text(title).font(.system(size: 18, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.top, 17).padding(.bottom, 7)
+  }
+
   private func groupedByProject(_ list: [G0Transport.RunSessionRef]) -> [ProjectGroup] {
     var order: [String] = []
-    var byCwd: [String: [G0Transport.RunSessionRef]] = [:]
-    for s in list {
-      if byCwd[s.cwd] == nil { byCwd[s.cwd] = []; order.append(s.cwd) }
-      byCwd[s.cwd]?.append(s)
+    var groups: [String: [G0Transport.RunSessionRef]] = [:]
+    for session in list {
+      if groups[session.cwd] == nil { order.append(session.cwd); groups[session.cwd] = [] }
+      groups[session.cwd]?.append(session)
     }
-    return order.map { ProjectGroup(cwd: $0, sessions: byCwd[$0] ?? []) }
+    return order.map { ProjectGroup(cwd: $0, sessions: groups[$0] ?? []) }
   }
 
-  // Project row: folder glyph + project name (matches the Mac's “项目” list).
   private func projectHeader(_ cwd: String) -> some View {
-    HStack(spacing: 10) {
-      Image(systemName: "folder").font(.system(size: 15)).foregroundStyle(Palette.ink)
-      Text(projectName(cwd)).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink).lineLimit(1)
+    HStack(spacing: 11) {
+      Image(systemName: Symbol.folder).font(.system(size: 19, weight: .medium)).frame(width: 25)
+      Text(projectName(cwd)).font(.system(size: 16, weight: .semibold)).lineLimit(1)
       Spacer()
+      Button {
+        if case let .loaded(projects) = run.projects, let project = projects.first(where: { $0.path == cwd }) {
+          run.chooseProject(project)
+        }
+        model.route = .newSession
+      } label: {
+        Image(systemName: Symbol.compose).font(.system(size: 17, weight: .medium)).foregroundStyle(Palette.muted)
+          .frame(width: 44, height: 44)
+      }
+      .buttonStyle(.plain).accessibilityLabel("在 \(projectName(cwd)) 中新建任务")
     }
-    .padding(.top, 12).padding(.bottom, 2)
+    .frame(minHeight: 52)
   }
 
-  // One session row, indented under its project. Tapping OPENS the real
-  // conversation (read-only replay) when the session is resumable (has a
-  // Provider session id); a pending session is shown dimmed and is not tappable.
-  @ViewBuilder private func sessionRow(_ s: G0Transport.RunSessionRef) -> some View {
-    let openable = (s.externalSessionId?.isEmpty == false)
+  @ViewBuilder private func sessionRow(_ session: G0Transport.RunSessionRef, showsMetadata: Bool, indent: CGFloat = 0) -> some View {
+    let openable = session.externalSessionId?.isEmpty == false
     Button {
-      guard openable, let ext = s.externalSessionId else { return }
-      model.openedSession = OpenedSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: ext, label: s.label)
+      guard openable, let external = session.externalSessionId else { return }
+      model.openedSession = OpenedSession(providerId: session.providerId, cwd: session.cwd,
+                                          externalSessionId: external, label: session.label)
       model.route = .transcript
     } label: {
-      HStack(spacing: 8) {
-        Text(s.label.isEmpty ? "(无预览)" : s.label)
-          .font(.system(size: 15)).foregroundStyle(openable ? Palette.ink : Palette.muted)
-          .lineLimit(1).multilineTextAlignment(.leading)
+      HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text(session.label.isEmpty ? "(无预览)" : session.label)
+            .font(.system(size: 15.5, weight: .regular)).foregroundStyle(openable ? Palette.ink : Palette.muted)
+            .lineLimit(1)
+          if showsMetadata {
+            Text("\(projectName(session.cwd)) · \(session.providerId.uppercased())")
+              .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
+          }
+        }
         Spacer(minLength: 8)
-        if !openable { Text("进行中").font(.system(size: 11)).foregroundStyle(Palette.muted) }
-        Text(Self.relativeTime(s.ts)).font(.system(size: 11)).foregroundStyle(Palette.muted)
+        if !openable { Text("进行中").font(.system(size: 10)).foregroundStyle(Palette.amber) }
       }
-      .padding(.vertical, 9)
-      .padding(.leading, 26)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .contentShape(Rectangle())
+      .padding(.leading, indent).padding(.vertical, showsMetadata ? 12 : 13)
+      .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
-    .disabled(!openable)
-  }
-
-  private func projectName(_ cwd: String) -> String {
-    cwd.split(separator: "/").last.map(String.init) ?? cwd
-  }
-
-  private static func relativeTime(_ ms: Double) -> String {
-    let secs = Date().timeIntervalSince1970 - ms / 1000
-    if secs < 60 { return "刚刚" }
-    if secs < 3600 { return "\(Int(secs / 60))m" }
-    if secs < 86400 { return "\(Int(secs / 3600))h" }
-    return "\(Int(secs / 86400))d"
+    .buttonStyle(.plain).disabled(!openable)
   }
 
   private var dock: some View {
-    HStack(spacing: 10) {
+    HStack(spacing: 9) {
       HStack(spacing: 9) {
         Image(systemName: Symbol.search).font(.system(size: 15)).foregroundStyle(Palette.muted)
-        TextField("搜索聊天", text: $model.query)
-          .textInputAutocapitalization(.never)
-          .autocorrectionDisabled()
-          .font(.system(size: 17))
+        TextField("搜索会话", text: $model.query).font(.system(size: 15))
+          .textInputAutocapitalization(.never).autocorrectionDisabled()
       }
-      .padding(.horizontal, 13)
-      .frame(height: 48)
-      .glass(cornerRadius: 30)
-
-      // Enabled once paired (a persisted connection exists); reachability of the
-      // host is only learned by attempting a run, never faked here.
-      CircleButton(symbol: Symbol.compose, label: "新建会话", filled: true, disabled: !run.hasConnection) {
+      .padding(.horizontal, 15).frame(height: 48).glass(cornerRadius: 24)
+      CircleButton(symbol: Symbol.plus, label: "新任务", filled: true, disabled: !run.hasConnection) {
         model.route = .newSession
       }
     }
-    .padding(.horizontal, 20)
-    .padding(.top, 14)
-    .padding(.bottom, 22)
+    .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 16)
+    .background(Palette.surface)
   }
 
+  private var hostCaption: String {
+    switch model.link {
+    case .notPaired: return "未连接"
+    case .pairing: return "正在配对"
+    case .offline: return "已配对 · 尚未验证可达"
+    case .connected: return "Mac 已连接"
+    }
+  }
   private var offlineText: String {
     switch model.link {
-    case .notPaired: return "尚未连接 Mac · 只能浏览界面，发送与审批已停用。"
-    case .pairing: return "配对中 · 等待 Mac 上确认，尚未授予权限。"
-    case .offline: return "已配对 · 尚未验证与主机的连接；发送任务即会尝试连接。"
+    case .notPaired: return "尚未连接 Mac；浏览可用，但发送和审批已停用。"
+    case .pairing: return "正在等待 Mac 确认，尚未授予权限。"
+    case .offline: return "已配对，但尚未验证主机可达；刷新或发送时会尝试连接。"
     case .connected: return ""
     }
   }
-  private var emptyTitle: String {
-    switch model.link {
-    case .notPaired, .pairing: return "还没有连接 Mac"
-    default: return model.query.isEmpty ? "还没有会话" : "没有匹配的聊天"
+  private func projectName(_ cwd: String) -> String { cwd.split(separator: "/").last.map(String.init) ?? cwd }
+  private static func relativeTime(_ ms: Double) -> String {
+    let seconds = Date().timeIntervalSince1970 - ms / 1000
+    if seconds < 60 { return "刚刚" }
+    if seconds < 3600 { return "\(Int(seconds / 60))m" }
+    if seconds < 86400 { return "\(Int(seconds / 3600))h" }
+    return "\(Int(seconds / 86400))d"
+  }
+}
+
+struct SettingsView: View {
+  @EnvironmentObject var model: AppModel
+  @EnvironmentObject var run: RemoteRunStore
+
+  var body: some View {
+    VStack(spacing: 0) {
+      RemoteHeader(title: "设置", backAction: { model.route = .home }) {
+        Color.clear.frame(width: 44, height: 44)
+      }
+      ScrollView {
+        VStack(spacing: 24) {
+          settingsSection("连接") {
+            settingRow(Symbol.laptop, "已配对的 Mac", model.statusText(), trailing: model.link.isConnected ? Palette.green : Palette.faint) {
+              model.route = .pair
+            }
+          }
+          settingsSection("远程体验") {
+            settingRow(Symbol.shield, "默认权限", "完全访问 · 仍受 Mac 项目授权限制") {}
+            settingRow(Symbol.bell, "运行通知", "仅在系统允许时送达") {}
+          }
+          settingsSection("安全") {
+            settingRow(Symbol.link, "重新配对", "替换此设备的远程授权") { model.route = .pair }
+          }
+          Button(role: .destructive) { run.stop(); model.reset() } label: {
+            Text("退出并清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
+          }
+          .buttonStyle(.plain).foregroundStyle(Palette.negative)
+        }
+        .padding(16)
+      }
+    }
+    .background(Palette.surface)
+  }
+
+  private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted).padding(.leading, 5)
+      VStack(spacing: 0) { content() }.background(Palette.canvas, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
   }
-  private var emptyDetail: String {
-    switch model.link {
-    case .notPaired, .pairing: return "在 Mac 上打开 Scry → 连接 iPhone 后开始"
-    default: return model.query.isEmpty ? "从右下角开始一项新任务" : "试试其他关键词"
+
+  private func settingRow(_ symbol: String, _ title: String, _ detail: String, trailing: Color? = nil,
+                          action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: 12) {
+        Image(systemName: symbol).font(.system(size: 17)).frame(width: 22)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title).font(.system(size: 14.5, weight: .medium))
+          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
+        }
+        Spacer()
+        if let trailing { Circle().fill(trailing).frame(width: 7, height: 7) }
+        Image(systemName: Symbol.chevron).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.faint)
+      }
+      .padding(.horizontal, 13).frame(minHeight: 61).contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
   }
 }

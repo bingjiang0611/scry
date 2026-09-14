@@ -73,6 +73,42 @@ describe('HostController (composition root)', () => {
     expect(feed.events.map((e) => e.kind)).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
   })
 
+  it('accepts bounded explicit run controls and rejects invalid permission modes', async () => {
+    const seen: RemoteIntentRouting[] = []
+    const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })
+    const { controller } = await grantedController(runProvider)
+    const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({
+      prompt: 'go', modelId: 'gpt-5.4', effort: 'high', permissionMode: 'full_access'
+    }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(seen[0]).toMatchObject({ modelId: 'gpt-5.4', effort: 'high', permissionMode: 'full_access' })
+
+    const rejected = controller.submitIntent(CERT, { intentId: randomUUID(), detail: JSON.stringify({
+      cwd: AUTHORIZED, providerId: 'claude', prompt: 'go', permissionMode: 'invented'
+    }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: rejected.runId })).toBe('failed')
+    expect(runProvider).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts bounded encrypted image/text attachments and rejects malformed payloads before Provider execution', async () => {
+    const seen: RemoteIntentRouting[] = []
+    const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })
+    const { controller } = await grantedController(runProvider)
+    const image = { kind: 'image' as const, name: 'screen.jpg', mimeType: 'image/jpeg', dataBase64: '/9j/', size: 3 }
+    const text = { kind: 'text' as const, name: 'error.log', mimeType: 'text/plain', dataBase64: 'Ym9vbQ==', size: 4 }
+    const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'inspect', attachments: [image, text] }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(seen[0].attachments).toEqual([image, text])
+
+    const malformed = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ attachments: [{ ...image, size: 99 }] }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: malformed.runId })).toBe('failed')
+    expect(runProvider).toHaveBeenCalledTimes(1)
+  })
+
   it('records the intent but fails the run for an unauthorized workspace (never reaching the provider)', async () => {
     const runProvider = vi.fn(async () => {})
     const { controller } = await grantedController(runProvider)

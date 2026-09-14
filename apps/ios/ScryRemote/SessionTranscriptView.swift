@@ -12,9 +12,11 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var draft = ""
+  @State private var attachments: [DraftAttachment] = []
 
   private var session: OpenedSession? { model.openedSession }
   private var hasLiveTurn: Bool { run.prompt != nil }
+  private var runBusy: Bool { run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -41,6 +43,7 @@ struct SessionTranscriptView: View {
       guard let s = session else { return }
       // Fresh view of this session: drop any prior live turn, then replay history.
       run.resetRun()
+      run.loadProviders(preferredId: s.providerId)
       run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
     }
   }
@@ -64,17 +67,21 @@ struct SessionTranscriptView: View {
   }
 
   private var header: some View {
-    HStack(spacing: 12) {
-      CircleButton(symbol: Symbol.back, label: "返回会话列表") { model.route = .home }
-      VStack(alignment: .leading, spacing: 2) {
-        Text(session?.label.isEmpty == false ? session!.label : "会话")
-          .font(.system(size: 17, weight: .semibold)).lineLimit(1)
-        Text("续聊 · \(session?.providerId.uppercased() ?? "")")
-          .font(.system(size: 12)).foregroundStyle(Palette.muted).lineLimit(1)
+    RemoteHeader(title: session?.label.isEmpty == false ? session!.label : "会话",
+                 subtitle: "\(projectName(session?.cwd)) · \(session?.providerId.uppercased() ?? "")",
+                 link: model.link, backAction: { model.route = .home }) {
+      Menu {
+        Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
+        Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
+      } label: {
+        Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
       }
-      Spacer()
     }
-    .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 10).frame(minHeight: 66)
+  }
+
+  private func projectName(_ cwd: String?) -> String {
+    guard let cwd else { return "" }
+    return cwd.split(separator: "/").last.map(String.init) ?? cwd
   }
 
   private func turnView(_ turn: G0Transport.RunHistoryTurn) -> some View {
@@ -88,7 +95,7 @@ struct SessionTranscriptView: View {
   // The in-progress follow-up: user bubble + honest lifecycle + streamed output.
   private var liveTurn: some View {
     VStack(alignment: .leading, spacing: 10) {
-      if let prompt = run.prompt { userBubble(prompt) }
+      if let prompt = run.prompt { userBubble(prompt, attachments: run.sentAttachments) }
       HStack(spacing: 8) {
         Circle().fill(stateColor).frame(width: 7, height: 7)
         Text(stateLabel).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
@@ -105,29 +112,38 @@ struct SessionTranscriptView: View {
   }
 
   private var footer: some View {
-    HStack(spacing: 4) {
-      TextField("继续这段对话…", text: $draft, axis: .vertical)
-        .font(.system(size: 17)).lineLimit(1...5)
-        .disabled(!run.hasConnection)
-      CircleButton(symbol: Symbol.send, label: "发送", filled: true,
-                   disabled: !run.hasConnection || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+    VStack(alignment: .leading, spacing: 5) {
+      MessageComposer(text: $draft, attachments: $attachments,
+                      placeholder: "继续这段对话…", disabled: !run.hasConnection,
+                      sendDisabled: runBusy || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      contextLabel: session?.providerId.uppercased(),
+                      effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
+                      onEffort: { run.chooseEffort($0) },
+                      permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
+                      onPermission: { run.choosePermission($0) }) {
         guard let s = session else { return }
-        run.submitFollowUp(prompt: draft, providerId: s.providerId, cwd: s.cwd, resume: s.externalSessionId)
-        draft = ""
+        run.submitFollowUp(prompt: draft, providerId: s.providerId, cwd: s.cwd,
+                           resume: s.externalSessionId, attachments: attachments.map(\.wireValue))
+        draft = ""; attachments = []
       }
+      if runBusy { Text("当前任务结束后才能继续发送。").font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5) }
     }
-    .padding(.horizontal, 7).padding(.vertical, 2).frame(minHeight: 49)
-    .glass(cornerRadius: 32)
-    .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 20)
-    .background(Color(hex: 0xFAFAFA))
+    .padding(.horizontal, 13).padding(.top, 8).padding(.bottom, 12).background(Palette.surface)
   }
 
-  private func userBubble(_ text: String) -> some View {
+  private func userBubble(_ text: String, attachments: [RemoteRunStore.SentAttachment] = []) -> some View {
     HStack {
       Spacer(minLength: 40)
-      Text(text).font(.system(size: 16)).foregroundStyle(Color.white)
-        .padding(.vertical, 10).padding(.horizontal, 14)
-        .background(Palette.blue, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(attachments) { item in
+          Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
+            .font(.system(size: 11, weight: .medium)).lineLimit(1)
+        }
+        Text(text).font(.system(size: 16))
+      }
+      .foregroundStyle(Palette.ink)
+      .padding(.vertical, 10).padding(.horizontal, 14)
+      .background(Color(hex: 0xF0F0F2), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
   }
 

@@ -1,15 +1,18 @@
 // Scry relay on Cloudflare Workers + Durable Objects (SQLite backend).
 //
 // Same role as experiments/remote-g0/relay-server.mjs: an UNTRUSTED byte
-// rendezvous. It never sees inner keys and stores NOTHING; the inner TLS 1.3
-// mTLS between device and Mac host is the only security root. (Contrast Etch,
+// rendezvous. It never sees inner keys or stores payloads; the inner TLS 1.3
+// mTLS between device and Mac host is the only security root. It retains only
+// the SHA-256 digest of an enrolled room credential. (Contrast Etch,
 // whose relay stores messages in plaintext R2 for 30 days.) On Cloudflare,
 // Workers cannot accept arbitrary inbound TCP, so BOTH sides connect over
 // WebSocket:
 //
 //   - The NAT-bound Mac host opens a warm pool of legs to
 //     `/host?host=<hostId>&mode=<run|pair>` and authenticates with a first-frame
-//     JSON { token } (per-deploy bearer secret; never in the URL, never logged).
+//     JSON credential (never in the URL or logs). Official clients atomically
+//     claim their unguessable room with a random per-host token; private legacy
+//     deployments may keep using the per-deploy RELAY_TOKEN.
 //   - The iOS device opens `/?host=<hostId>&mode=<run|pair>`.
 //
 // A Durable Object keyed by hostId keeps a separate warm pool per mode and glues
@@ -17,9 +20,10 @@
 // device (mode=pair) can never land on the strict-mTLS run pool and vice versa.
 //
 // It uses the WebSocket Hibernation API (state.acceptWebSocket + webSocket*
-// handlers) so idle warm legs incur NO duration charges. This keeps a personal
-// always-on relay comfortably inside the Workers Free plan (SQLite-backed
-// Durable Objects are free-tier eligible); no paid plan required.
+// handlers) so idle warm legs incur NO duration charges. The only durable value
+// is the SHA-256 digest of each room's admission token; relay payload bytes are
+// never persisted. This keeps a personal always-on relay comfortably inside the
+// Workers Free plan (SQLite-backed Durable Objects are free-tier eligible).
 
 const HOST_ID = /^[0-9a-f-]{36}$/i
 const MODES = new Set(['run', 'pair'])
@@ -95,7 +99,7 @@ export class RelayRoom {
     return null
   }
 
-  webSocketMessage(ws, message) {
+  async webSocketMessage(ws, message) {
     const att = ws.deserializeAttachment()
     if (!att) { try { ws.close(1011, 'no_state') } catch { /* closing */ } return }
     if (att.role === 'host') {
@@ -104,7 +108,8 @@ export class RelayRoom {
         try {
           const text = typeof message === 'string' ? message : new TextDecoder().decode(message)
           const creds = JSON.parse(text)
-          ok = creds && typeof creds.token === 'string' && this.#tokenOk(creds.token)
+          ok = creds && typeof creds.token === 'string' &&
+            await this.#tokenOk(creds.token, creds.enroll === true)
         } catch { ok = false }
         if (!ok) { try { ws.close(1008, 'host_unauthorized') } catch { /* closing */ } return }
         att.authed = true
@@ -135,15 +140,37 @@ export class RelayRoom {
     try { ws.close() } catch { /* closing */ }
   }
 
-  // Constant-ish comparison of the per-deploy bearer secret. Cloudflare secrets
-  // are set with `wrangler secret put RELAY_TOKEN`.
-  #tokenOk(candidate) {
-    const expected = this.env.RELAY_TOKEN || ''
-    if (typeof candidate !== 'string' || candidate.length !== expected.length || expected.length === 0) return false
-    let diff = 0
-    for (let i = 0; i < expected.length; i++) diff |= candidate.charCodeAt(i) ^ expected.charCodeAt(i)
-    return diff === 0
+  async #tokenOk(candidate, enroll) {
+    // Preserve private/legacy deployments and existing manually provisioned
+    // hosts. This is an administrator credential, not shipped in the app.
+    if (constantTimeEqual(candidate, this.env.RELAY_TOKEN || '')) return true
+
+    // Official clients generate a 256-bit token locally. The first connection
+    // atomically claims the UUID-addressed room; later connections must prove the
+    // same token. A leaked/guessed hostId alone therefore cannot impersonate its
+    // host, and a single extractable app-wide bearer is never distributed.
+    if (!/^[A-Za-z0-9_-]{43}$/.test(candidate)) return false
+    const digest = await sha256Hex(candidate)
+    return this.state.storage.transaction(async (txn) => {
+      const stored = await txn.get('hostTokenSHA256')
+      if (typeof stored === 'string') return constantTimeEqual(digest, stored)
+      if (!enroll) return false
+      await txn.put('hostTokenSHA256', digest)
+      return true
+    })
   }
+}
+
+function constantTimeEqual(candidate, expected) {
+  if (typeof candidate !== 'string' || candidate.length !== expected.length || expected.length === 0) return false
+  let diff = 0
+  for (let i = 0; i < expected.length; i++) diff |= candidate.charCodeAt(i) ^ expected.charCodeAt(i)
+  return diff === 0
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function newId() {

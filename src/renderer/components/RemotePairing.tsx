@@ -74,7 +74,7 @@ export function RemotePairing(): JSX.Element {
     return (
       <section className="remote-pairing">
         <h2>远程访问</h2>
-        <p className="remote-pairing__disabled">远程访问未启用（SCRY_REMOTE_HOST 未设置）。</p>
+        <p className="remote-pairing__disabled">远程访问未启用。开发环境可设置 SCRY_REMOTE_HOST=1；正式版可用 SCRY_REMOTE_HOST=0 关闭。</p>
       </section>
     )
   }

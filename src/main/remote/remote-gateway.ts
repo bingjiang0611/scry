@@ -42,14 +42,37 @@ export interface RemoteProjectSource {
   list(): RemoteProjectRef[]
 }
 
+export interface RemoteDirectoryListing {
+  current?: RemoteProjectRef
+  parent?: RemoteProjectRef
+  directories: RemoteProjectRef[]
+}
+
+export interface RemoteDirectorySource {
+  // `path` is absent for the authorized-root list. A supplied path must resolve
+  // inside one of those roots; authorization belongs to the host source because
+  // only it owns the canonical filesystem grants.
+  list(path?: string): RemoteDirectoryListing
+}
+
 // A Provider the device may target for a new session. `id` is the canonical
 // ProviderId the run routing carries; `label` is display-only; `available`
 // reflects whether the host currently has that Provider authenticated/usable.
 // The device still cannot invent a provider - the run path validates it.
+export interface RemoteControlOption {
+  id: string
+  label: string
+  description?: string
+  isDefault?: boolean
+}
+
 export interface RemoteProviderRef {
   id: string
   label: string
   available: boolean
+  modelId?: string
+  efforts?: RemoteControlOption[]
+  permissions?: RemoteControlOption[]
 }
 
 export interface RemoteProviderSource {
@@ -69,6 +92,7 @@ export interface RemoteSessionRef {
   cwd: string
   label: string
   ts: number
+  pinnedAt?: number
 }
 
 export interface RemoteSessionSource {
@@ -110,6 +134,8 @@ export interface RemoteGatewayDependencies {
   ledger: SessionLedger
   // Absent => the device sees an empty (honest) authorized-project list.
   projects?: RemoteProjectSource
+  // Absent => hierarchical browsing is unavailable (honest empty root list).
+  directories?: RemoteDirectorySource
   // Absent => the device sees an empty (honest) provider list.
   providers?: RemoteProviderSource
   // Absent => the device sees an empty (honest) session catalog.
@@ -154,6 +180,7 @@ export class RemoteGateway {
   #authority: DeviceAuthorizer
   #ledger: SessionLedger
   #projects?: RemoteProjectSource
+  #directories?: RemoteDirectorySource
   #providers?: RemoteProviderSource
   #sessions?: RemoteSessionSource
   #history?: RemoteHistorySource
@@ -163,6 +190,7 @@ export class RemoteGateway {
     this.#authority = deps.authority
     this.#ledger = deps.ledger
     this.#projects = deps.projects
+    this.#directories = deps.directories
     this.#providers = deps.providers
     this.#sessions = deps.sessions
     this.#history = deps.history
@@ -196,23 +224,63 @@ export class RemoteGateway {
     return this.#ledger.runState(input.runId)
   }
 
-  // The host-authorized project directories a device may target. Authorization
-  // is the SAME owner-device check as every other method (a revoked device gets
-  // nothing), and the list is a display-only snapshot - selecting one still
-  // passes through the workspace authorizer on submit, so this leaks no path the
-  // device could not already discover by submitting.
-  listProjects(peerCertSHA256: string): RemoteProjectRef[] {
-    this.#authorize(peerCertSHA256)
-    const raw = this.#projects?.list() ?? []
+  private projectRefs(raw: RemoteProjectRef[]): RemoteProjectRef[] {
     const seen = new Set<string>()
     const out: RemoteProjectRef[] = []
     for (const entry of raw) {
       if (!entry || typeof entry.path !== 'string' || typeof entry.label !== 'string') continue
-      if (entry.path.length === 0 || entry.path.length > MAX_PATH) continue
-      if (seen.has(entry.path)) continue
+      if (entry.path.length === 0 || entry.path.length > MAX_PATH || seen.has(entry.path)) continue
       seen.add(entry.path)
       out.push({ path: entry.path, label: entry.label.slice(0, 256) })
       if (out.length >= MAX_PROJECTS) break
+    }
+    return out
+  }
+
+  // The host-authorized project directories a device may target. Authorization
+  // is the SAME owner-device check as every other method (a revoked device gets
+  // nothing), and the list is a display-only snapshot - selecting one still
+  // passes through the workspace authorizer on submit.
+  listProjects(peerCertSHA256: string): RemoteProjectRef[] {
+    this.#authorize(peerCertSHA256)
+    return this.projectRefs(this.#projects?.list() ?? [])
+  }
+
+  // Browse immediate folders without widening the Mac's original project grant.
+  // The host source canonicalizes and authorizes the requested path; this layer
+  // authorizes the device and bounds every path returned over the wire.
+  listDirectories(peerCertSHA256: string, input: { path?: string }): RemoteDirectoryListing {
+    this.#authorize(peerCertSHA256)
+    if (input.path !== undefined && (typeof input.path !== 'string' || input.path.length === 0 || input.path.length > MAX_PATH)) {
+      throw new RemoteGatewayError('invalid_target')
+    }
+    const listing = this.#directories?.list(input.path) ?? { directories: [] }
+    const current = listing.current ? this.projectRefs([listing.current])[0] : undefined
+    const parent = listing.parent ? this.projectRefs([listing.parent])[0] : undefined
+    return {
+      ...(current ? { current } : {}),
+      ...(parent ? { parent } : {}),
+      directories: this.projectRefs(listing.directories)
+    }
+  }
+
+  private controlOptions(value: unknown): RemoteControlOption[] {
+    if (!Array.isArray(value)) return []
+    const out: RemoteControlOption[] = []
+    const seen = new Set<string>()
+    for (const raw of value) {
+      if (!raw || typeof raw !== 'object') continue
+      const option = raw as Record<string, unknown>
+      if (typeof option.id !== 'string' || option.id.length === 0 || option.id.length > 64 || seen.has(option.id)) continue
+      if (typeof option.label !== 'string' || option.label.length === 0) continue
+      seen.add(option.id)
+      out.push({
+        id: option.id,
+        label: option.label.slice(0, 64),
+        ...(typeof option.description === 'string' ? { description: option.description.slice(0, 256) } : {}),
+        ...(option.isDefault === true ? { isDefault: true } : {})
+      })
+      if (out.length >= 16) break
     }
     return out
   }
@@ -231,7 +299,16 @@ export class RemoteGateway {
       if (entry.id.length === 0 || entry.id.length > 64) continue
       if (seen.has(entry.id)) continue
       seen.add(entry.id)
-      out.push({ id: entry.id, label: entry.label.slice(0, 128), available: entry.available === true })
+      const efforts = this.controlOptions(entry.efforts)
+      const permissions = this.controlOptions(entry.permissions)
+      out.push({
+        id: entry.id,
+        label: entry.label.slice(0, 128),
+        available: entry.available === true,
+        ...(typeof entry.modelId === 'string' && entry.modelId.length > 0 && entry.modelId.length <= 128 ? { modelId: entry.modelId } : {}),
+        ...(efforts.length > 0 ? { efforts } : {}),
+        ...(permissions.length > 0 ? { permissions } : {})
+      })
       if (out.length >= MAX_PROVIDERS) break
     }
     return out
@@ -256,7 +333,8 @@ export class RemoteGateway {
         providerId: entry.providerId.slice(0, 64),
         cwd: typeof entry.cwd === 'string' ? entry.cwd.slice(0, MAX_PATH) : '',
         label: typeof entry.label === 'string' ? entry.label.slice(0, 256) : '',
-        ts: Number.isFinite(entry.ts) ? entry.ts : 0
+        ts: Number.isFinite(entry.ts) ? entry.ts : 0,
+        ...(typeof entry.pinnedAt === 'number' && Number.isFinite(entry.pinnedAt) && entry.pinnedAt > 0 ? { pinnedAt: entry.pinnedAt } : {})
       })
       if (out.length >= MAX_SESSIONS) break
     }

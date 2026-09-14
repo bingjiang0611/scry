@@ -1,36 +1,29 @@
 import SwiftUI
 import AuthenticationServices
 
-// Sign in with Apple entry (chosen by the owner). Uses the first-party SwiftUI
-// button so there is no custom crypto or invented auth.
-//
-// Honesty gate: the `com.apple.developer.applesignin` entitlement requires a
-// paid Apple Developer Program membership. With only a free Personal Team this
-// flow will fail at runtime, so a failure is surfaced truthfully instead of
-// pretending the user is signed in. Identity here only unlocks the local UI; it
-// is not yet bound to a real owner-device pairing grant on the Mac.
+// Identity unlocks the local UI; Mac access still requires a separate owner-
+// confirmed device grant. The DEBUG bypass remains compile-time isolated.
 struct SignInView: View {
   @EnvironmentObject var model: AppModel
 
   var body: some View {
     VStack(spacing: 0) {
-      Spacer()
-      VStack(spacing: 14) {
-        Image(systemName: Symbol.laptop)
-          .font(.system(size: 42, weight: .regular))
-          .foregroundStyle(Palette.ink)
-        Text("Scry Remote")
-          .font(.system(size: 24, weight: .semibold))
-        Text("控制你自己的 Mac 上的 AI 编码会话。\niPhone 是控制端，凭据与执行仍留在 Mac。")
-          .font(.system(size: 14))
-          .foregroundStyle(Palette.muted)
-          .multilineTextAlignment(.center)
+      Spacer(minLength: 52)
+      VStack(spacing: 18) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 25, style: .continuous).fill(Palette.ink)
+            .frame(width: 82, height: 82)
+          Image(systemName: "sparkles").font(.system(size: 31, weight: .medium)).foregroundStyle(.white)
+        }
+        Text("Scry").font(.system(size: 32, weight: .bold)).tracking(-1)
+        Text("从 iPhone 继续你 Mac 上的\nAI 编码会话")
+          .font(.system(size: 17, weight: .medium)).multilineTextAlignment(.center).lineSpacing(3)
+        Text("执行、代码与凭据始终留在 Mac。")
+          .font(.system(size: 13)).foregroundStyle(Palette.muted)
       }
       Spacer()
 
-      if case let .failed(message) = model.auth {
-        Notice(text: message, warning: true)
-      }
+      if case let .failed(message) = model.auth { Notice(text: message, warning: true) }
 
       SignInWithAppleButton(.signIn) { request in
         request.requestedScopes = [.fullName]
@@ -38,63 +31,40 @@ struct SignInView: View {
         switch result {
         case let .success(auth):
           if let credential = auth.credential as? ASAuthorizationAppleIDCredential {
-            let name = credential.fullName?.givenName ?? "Apple 用户"
-            model.auth = .signedIn(name: name)
+            model.auth = .signedIn(name: credential.fullName?.givenName ?? "Apple 用户")
             model.link = .notPaired
-          } else {
-            model.auth = .failed("登录返回了意外的凭据类型")
-          }
+          } else { model.auth = .failed("登录返回了意外的凭据类型") }
         case let .failure(error):
-          // Most commonly: entitlement missing on a free Personal Team.
-          model.auth = .failed("登录未完成：\(error.localizedDescription)。Sign in with Apple 需要付费 Apple Developer 账号的 entitlement。")
+          model.auth = .failed("登录未完成：\(error.localizedDescription)。Sign in with Apple 需要有效 entitlement。")
         }
       }
-      .signInWithAppleButtonStyle(.black)
-      .frame(height: 50)
-      .padding(.horizontal, 22)
-      .padding(.bottom, 10)
-      .onTapGesture { model.auth = .signingIn }
+      .signInWithAppleButtonStyle(.black).frame(height: 50)
+      .padding(.horizontal, 22).onTapGesture { model.auth = .signingIn }
 
-      Text("登录仅解锁本机界面，尚未绑定到 Mac 上的设备授权。")
-        .font(.system(size: 12))
-        .foregroundStyle(Color(hex: 0x919194))
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 22)
-        .padding(.bottom, 24)
+      HStack(alignment: .top, spacing: 7) {
+        Image(systemName: Symbol.shield).font(.system(size: 12)).padding(.top, 1)
+        Text("登录只验证此 iPhone 的本地身份；连接 Mac 仍需扫描配对码并在 Mac 上确认。")
+      }
+      .font(.system(size: 11)).foregroundStyle(Palette.muted)
+      .padding(.horizontal, 26).padding(.top, 12).padding(.bottom, 22)
 
       #if DEBUG
-      // Sign in with Apple needs a paid Developer entitlement the tester does not
-      // have, so on a free Personal Team the button above fails at runtime. This
-      // DEBUG-only bypass unlocks the LOCAL UI exactly like a successful sign-in
-      // would (same semantics as the copy above) so pairing/run can be tested. It
-      // fabricates no host grant and no session; real access still comes only
-      // from a Mac-issued device grant after scanning the QR.
       Button {
         model.auth = .signedIn(name: "本地调试")
-        // Already paired (persisted grant + Keychain creds)? Go straight to the
-        // new-session flow - do NOT force a redundant QR re-scan. Only an
-        // unpaired device lands on the pairing screen.
         if model.hasConnection {
           if let host = model.connectionHost { model.link = .offline(host: host) }
-          // Land on home so the paired device immediately shows the Mac's
-          // session list (the user's ask); compose is one tap away.
           model.route = .home
         } else {
-          model.link = .notPaired
-          model.route = .pair
+          model.link = .notPaired; model.route = .pair
         }
       } label: {
         Text(model.hasConnection ? "本地调试：进入（已配对）" : "本地调试：跳过登录，去扫码配对")
-          .font(.system(size: 14, weight: .medium))
-          .frame(maxWidth: .infinity, minHeight: 44)
-          .foregroundStyle(Color.white)
-          .background(Palette.ink, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+          .font(.system(size: 13, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+          .foregroundStyle(Palette.ink).background(Palette.canvas, in: Capsule())
       }
-      .padding(.horizontal, 22)
-      .padding(.bottom, 24)
+      .buttonStyle(.plain).padding(.horizontal, 22).padding(.bottom, 20)
       #endif
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Palette.surface)
+    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.surface)
   }
 }
