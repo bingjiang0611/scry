@@ -53,13 +53,15 @@ final class ProbeHandler: ChannelInboundHandler {
   typealias OutboundOut = ByteBuffer
   private let request: Data
   private let result: EventLoopPromise<Data>
+  private let maxResponseBytes: Int
   private var received = Data()
   private var sent = false
   private var settled = false
 
-  init(request: Data, result: EventLoopPromise<Data>) {
+  init(request: Data, result: EventLoopPromise<Data>, maxResponseBytes: Int = 65_536) {
     self.request = request
     self.result = result
+    self.maxResponseBytes = maxResponseBytes
   }
 
   func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
@@ -75,7 +77,7 @@ final class ProbeHandler: ChannelInboundHandler {
 
   func channelRead(context: ChannelHandlerContext, data: NIOAny) {
     let bytes = unwrapInboundIn(data)
-    guard received.count + bytes.readableBytes <= 65_536 else { fail(ProbeError.oversized, context: context); return }
+    guard received.count + bytes.readableBytes <= maxResponseBytes else { fail(ProbeError.oversized, context: context); return }
     received.append(contentsOf: bytes.readableBytesView)
     guard let newline = received.firstIndex(of: 10) else { return }
     do {
@@ -535,7 +537,11 @@ public enum G0Transport {
         try await channel.eventLoop.submit {
           // Inner server hostname is nil: chain-to-anchor is the only check.
           try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
-          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
+          // Pairing replies remain tiny. Run replies may contain a bounded real
+          // session history; keep an explicit 8 MiB ceiling instead of the old
+          // 64 KiB probe-era cap that rejected legitimate conversations.
+          let maxResponseBytes = mode == "run" ? 8 * 1_024 * 1_024 : 65_536
+          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result, maxResponseBytes: maxResponseBytes))
         }.get()
       } catch {
         // Handler install failed before ProbeHandler could complete the promise.

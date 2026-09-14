@@ -342,7 +342,14 @@ final class RemoteRunStore: ObservableObject {
   private func append(chunk: G0Transport.RunOutputChunk) {
     if chunk.kind == "truncated" { truncated = true; return }
     if output.contains(where: { $0.id == chunk.seq }) { return }
-    output.append(OutputLine(id: chunk.seq, kind: chunk.kind, text: chunk.text))
+    // Providers stream text/reasoning in small deltas. Keep those deltas as one
+    // readable block instead of rendering one SwiftUI Text row per token.
+    if let last = output.last, last.kind == chunk.kind,
+       chunk.kind == "output" || chunk.kind == "reasoning" {
+      output[output.count - 1] = OutputLine(id: chunk.seq, kind: chunk.kind, text: last.text + chunk.text)
+    } else {
+      output.append(OutputLine(id: chunk.seq, kind: chunk.kind, text: chunk.text))
+    }
   }
 
   func resetRun() {
