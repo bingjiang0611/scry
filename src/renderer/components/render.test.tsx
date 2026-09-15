@@ -1073,7 +1073,7 @@ describe('Sidebar 项目分组', () => {
     expect(html).not.toContain('class="ppath"')
     expect(html).toContain('class="sb-sess active"')
     expect(html).toContain('class="sb-session-main"')
-    expect(html).toContain('<span class="sb-provider">qoder</span>')
+    expect(html).toContain('<span class="sb-provider" data-provider="qoder" role="img" aria-label="Qoder"')
     expect(html).toContain('<span class="sb-sesstext">无工作目录任务</span>')
     expect(html).toContain('class="sb-session-meta"')
     expect(html).toContain('无工作目录任务')

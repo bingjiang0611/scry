@@ -40,6 +40,7 @@
   --provider-codex: #6aa8ff;
   --provider-qoder: #efa84f;
   --provider-opencode: #70ca93;
+  --provider-pi: #ab9cf2;
   --surface-faint: rgba(255, 255, 255, 0.018);
   --surface-subtle: rgba(255, 255, 255, 0.025);
   --surface-muted: rgba(255, 255, 255, 0.03);
@@ -117,6 +118,7 @@
   --provider-codex: #3f72b7;
   --provider-qoder: #9b6206;
   --provider-opencode: #28744a;
+  --provider-pi: #6a5fae;
   --surface-faint: rgba(29, 34, 41, 0.018);
   --surface-subtle: rgba(29, 34, 41, 0.028);
   --surface-muted: rgba(29, 34, 41, 0.036);
