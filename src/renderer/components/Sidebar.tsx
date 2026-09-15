@@ -17,6 +17,17 @@ import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
 
+// 会话行的 Provider 身份用真实品牌字形呈现（见 codex-alignment.css 的 .sb-provider mask）；
+// 这里保留可访问名，legacy_unknown 无品牌，仍用「历史?」文字。
+const providerDisplayName: Record<SessionProviderId, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  qoder: 'Qoder',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+  legacy_unknown: '历史会话'
+}
+
 export function Sidebar({
   id,
   projects,
@@ -492,7 +503,17 @@ function SessionRow({
         onClick={() => { hover.dismiss(); onPick(cwd, session.sessionId, session.providerId, session.externalSessionId, session.runId, session.agentProfileId) }}
       >
         <span className="sb-session-main">
-          <span className="sb-provider">{session.providerId === 'legacy_unknown' ? '历史?' : session.providerId}</span>
+          {session.providerId === 'legacy_unknown' ? (
+            <span className="sb-provider" data-provider="legacy_unknown">历史?</span>
+          ) : (
+            <span
+              className="sb-provider"
+              data-provider={session.providerId}
+              role="img"
+              aria-label={providerDisplayName[session.providerId]}
+              title={providerDisplayName[session.providerId]}
+            />
+          )}
           <span className="sb-sesstext">{session.preview || '(无预览)'}</span>
         </span>
         <span className="sb-session-meta">
