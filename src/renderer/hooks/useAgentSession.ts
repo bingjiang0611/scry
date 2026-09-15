@@ -33,17 +33,41 @@ interface AgentSessionCallbacks {
   onError?: (event: TurnErrorEvent) => void
 }
 
+function mergeProgressiveTrace(snapshot: TraceEvent, local: TraceEvent): TraceEvent {
+  // main coalesces text/thinking deltas in place while retaining the first
+  // event id. A snapshot captured before loadSession may therefore contain a
+  // strict prefix of the renderer's newer local event with the same id. Keep
+  // whichever prefix is longer; divergent values still defer to the snapshot.
+  const longerPrefix = (remote: string | undefined, current: string | undefined): string | undefined => {
+    if (remote === undefined) return current
+    if (current === undefined) return remote
+    if (current.startsWith(remote)) return current
+    return remote
+  }
+  return {
+    ...local,
+    ...snapshot,
+    text: longerPrefix(snapshot.text, local.text),
+    thinking: longerPrefix(snapshot.thinking, local.thinking)
+  }
+}
+
 export function mergeActiveRun(prev: Turn[], run: Turn): Turn[] {
   const index = prev.findIndex((turn) => turn.runId === run.runId)
   if (index === -1) return [...prev, run]
+  const localById = new Map(prev[index].items.map((event) => [event.id, event]))
   const ids = new Set(run.items.map((event) => event.id))
+  const restored = run.items.map((event) => {
+    const local = localById.get(event.id)
+    return local ? mergeProgressiveTrace(event, local) : event
+  })
   const extra = prev[index].items.filter((event) => !ids.has(event.id))
   const next = [...prev]
   next[index] = {
     ...prev[index],
     ...run,
     attachments: run.attachments ?? prev[index].attachments,
-    items: [...run.items, ...extra]
+    items: [...restored, ...extra]
   }
   return next
 }
@@ -610,11 +634,17 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       setRunning(false)
     }
 
-    const offTrace = window.scry.onTrace((event) => {
-      if (clearedRuns.current.has(event.runId)) return
-      if (focusedRunIdRef.current == null) focusedRunIdRef.current = event.runId
-      if (focusedRunIdRef.current !== event.runId) return
-      traceBuf.current.push(event)
+    const offTrace = window.scry.onTrace((events) => {
+      let accepted = 0
+      for (const event of events) {
+        if (clearedRuns.current.has(event.runId)) continue
+        if (focusedRunIdRef.current == null) focusedRunIdRef.current = event.runId
+        if (focusedRunIdRef.current !== event.runId) continue
+        traceBuf.current.push(event)
+        accepted += 1
+      }
+      if (accepted === 0) return
+      // 一批 trace 最多安排一次帧提交和一个兜底定时器；FIFO 顺序沿用 main 批次。
       if (rafId.current == null) rafId.current = requestAnimationFrame(flushTrace)
       if (flushTimeoutId.current == null) flushTimeoutId.current = window.setTimeout(flushTrace, 250)
     })

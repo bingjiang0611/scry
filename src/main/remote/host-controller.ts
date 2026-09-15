@@ -1,8 +1,8 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistorySource } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistorySource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage } from './run-output-log'
-export type { RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
+export type { RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -75,6 +75,8 @@ export interface HostControllerDependencies {
   listDirectories?(path?: string): RemoteDirectoryListing
   // Snapshot of the host's Providers a device may target. Absent => honest empty.
   listProviders?(): RemoteProviderRef[]
+  // Provider-native slash commands for one authorized workspace context.
+  listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   // Snapshot of the host session catalog a device may browse. Absent => empty.
   listSessions?(): RemoteSessionRef[]
   // Read one session's real conversation content. Absent => empty transcript.
@@ -171,6 +173,7 @@ export class HostController {
       ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
       ...(deps.listDirectories ? { directories: { list: deps.listDirectories } } : {}),
       ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
+      ...(deps.listCommands ? { commands: { list: deps.listCommands } as RemoteCommandSource } : {}),
       ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {}),
       ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {})
     })
@@ -222,6 +225,11 @@ export class HostController {
   // verified peer certificate as every method.
   listProviders(peerCertSHA256: string): RemoteProviderRef[] {
     return this.#gateway.listProviders(peerCertSHA256)
+  }
+
+  // Device-facing: Provider-native slash commands for this exact workspace.
+  listCommands(peerCertSHA256: string, query: RemoteCommandQuery): Promise<RemoteCommandCatalog> {
+    return this.#gateway.listCommands(peerCertSHA256, query)
   }
 
   // Device-facing: the host session catalog this device may browse, authorized

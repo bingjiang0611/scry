@@ -32,7 +32,9 @@ xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configurat
   DEVELOPMENT_TEAM=<personal-team-id> CODE_SIGN_STYLE=Automatic build
 ```
 
-Visual verification (2026-09-14): v5 was built and launched on the iPhone 17 Pro / iOS 27 simulator; the unpaired home, pairing and new-task layouts were captured from the native app. The **DEBUG-only** launch-argument harness (`-uiPreview [-connected] -route home|new|chat|pair|settings`) changes view state for screenshots only; it is not authentication and injects no fabricated sessions or Agent output.
+Visual verification (2026-09-15): v5 was built and launched on the iPhone 17 Pro simulator. Home/pair/new-task plus live-chat and transcript layouts were replayed from the **DEBUG-only** harness. Chat verification covers rendered Markdown, collapsed/expanded reasoning, collapsed/expanded long tool output, compact short tool results, attachment bubbles and the Composer. The launch arguments (`-uiPreview [-connected] -route home|new|chat|pair|settings|transcript [-uiMockData] [-uiMockSlash]`) affect screenshots only; they are not authentication, and mock conversation data is compiled out of Release builds.
+
+Slash commands: the Composer shows a native slash-command menu when the draft starts with `/`. Commands are fetched from the paired Mac over the authorized inner-mTLS channel (`op: 'commands'` → `RemoteGateway.listCommands` → `providerRegistry.listCommands`), scoped by the selected provider and authorized project cwd, deduplicated and bounded. Tapping a command inserts `/name ` (plus its argument hint context); the list filters as you type and refreshes via the menu's refresh control. `-uiMockSlash` seeds a `/` draft so the menu can be captured in the DEBUG harness; it is compiled out of Release builds.
 
 ## Architecture
 

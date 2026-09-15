@@ -3,7 +3,7 @@
 import { execFile } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, open, realpath, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { promisify } from 'node:util'
 import type {
@@ -154,6 +154,8 @@ export interface GitTurnDiffCapture {
   filterOverrides?: string[]
   pathspec?: string[]
   excludedPaths?: string[]
+  /** clone 之间共享的只读 baseline object store；引用归零后才删除 owner 根目录。 */
+  sharedStorage?: { rootDir: string; objectDir: string; alternateObjectDirs?: string; refs: number }
   finishPromise?: Promise<TurnDiffSnapshot>
   /**
    * 同一个 capture 上所有重算的串行链。运行中预览与终态都用 capture.tempDir 下同名的
@@ -166,6 +168,53 @@ export interface GitTurnDiffFinishOptions {
   structuredPaths?: string[]
   forceFull?: boolean
   patchExcludeBasenames?: string[]
+}
+
+/**
+ * 复制一个已经完成的启动快照，生成清理与操作队列完全独立的 capture。
+ *
+ * 新会话首轮的 turn baseline 与 session baseline 描述的是同一个时刻；重新扫描工作树既浪费
+ * 启动时间，也可能因外部写入得到两个不同锚点。clone 只新建独立 scratch/index/object 目录，
+ * 并通过 alternates 只读原 baseline object store；引用计数保证 turn 清理不会破坏跨轮基线。
+ */
+export async function cloneGitTurnDiffCapture(capture: GitTurnDiffCapture): Promise<GitTurnDiffCapture> {
+  if (capture.status !== 'ready') {
+    return { ...capture, finishPromise: undefined, opChain: undefined }
+  }
+  if (!capture.tempDir || !capture.objectDir) throw new Error('ready Git capture is missing isolated storage')
+
+  const started = Date.now()
+  const sourceTempDir = capture.tempDir
+  const clonedTempDir = await mkdtemp(join(dirname(sourceTempDir), 'scry-turn-diff-clone-'))
+  try {
+    const clonedObjectDir = join(clonedTempDir, 'objects')
+    await mkdir(clonedObjectDir)
+    const sharedStorage = capture.sharedStorage ?? {
+      rootDir: sourceTempDir,
+      objectDir: capture.objectDir,
+      alternateObjectDirs: capture.alternateObjectDirs,
+      refs: 1
+    }
+    capture.sharedStorage = sharedStorage
+    sharedStorage.refs += 1
+    const clonedHooksPath = `core.hooksPath=${join(clonedTempDir, 'hooks-disabled')}`
+    return {
+      ...capture,
+      captureMs: capture.captureMs + (Date.now() - started),
+      tempDir: clonedTempDir,
+      objectDir: clonedObjectDir,
+      alternateObjectDirs: [sharedStorage.objectDir, sharedStorage.alternateObjectDirs]
+        .filter((value): value is string => !!value)
+        .join(delimiter),
+      filterOverrides: capture.filterOverrides?.map((value) => value.startsWith('core.hooksPath=') ? clonedHooksPath : value),
+      sharedStorage,
+      finishPromise: undefined,
+      opChain: undefined
+    }
+  } catch (error) {
+    await rm(clonedTempDir, { recursive: true, force: true }).catch(() => undefined)
+    throw error
+  }
 }
 
 function capturePathspec(repoRoot: string, scope: string, excludedPaths: string[]): string[] {
@@ -219,9 +268,19 @@ function terminalSnapshot(
 async function cleanupCapture(capture: GitTurnDiffCapture): Promise<TurnDiffSnapshot['cleanup']> {
   if (!capture.tempDir) return 'ok'
   const dir = capture.tempDir
+  const sharedStorage = capture.sharedStorage
   capture.tempDir = undefined
+  capture.sharedStorage = undefined
+  const remove = new Set<string>()
+  if (!sharedStorage) {
+    remove.add(dir)
+  } else {
+    if (dir !== sharedStorage.rootDir) remove.add(dir)
+    sharedStorage.refs = Math.max(0, sharedStorage.refs - 1)
+    if (sharedStorage.refs === 0) remove.add(sharedStorage.rootDir)
+  }
   try {
-    await rm(dir, { recursive: true, force: true })
+    await Promise.all([...remove].map((path) => rm(path, { recursive: true, force: true })))
     return 'ok'
   } catch {
     return 'failed'
@@ -241,32 +300,37 @@ export async function beginGitTurnDiff(
   let tempDir: string | undefined
   try {
     const canonicalCwd = await realpath(cwd)
-    // One `rev-parse` answers every layout question at once. Each git spawn costs ~75ms on macOS,
-    // and this runs on the Provider's turn-start hook, so the four separate calls this replaces
-    // were the largest avoidable cost in the capture path.
-    let layout: string[]
-    try {
-      layout = (await gitCommand(
+    // Layout 与 status 都只读同一仓库且彼此无依赖，并行启动。porcelain v2 的 branch.oid
+    // 同时给出 HEAD；没有显式排除路径时，它还直接给出 baselineClean。这样常见路径只需
+    // 一轮并行 Git 进程，不再串行执行 HEAD 与 status 两轮探测。
+    const [layoutResult, statusResult] = await Promise.allSettled([
+      gitCommand(
         ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--git-path', 'index'],
         { cwd: canonicalCwd, deadline }
-      )).split('\n').map((line) => line.trim())
-    } catch (error) {
+      ),
+      gitCommand(snapshotGitArgs([], ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--', '.']), {
+        cwd: canonicalCwd,
+        deadline
+      })
+    ])
+    if (layoutResult.status === 'rejected') {
       // Bare repositories exit 128 on `--show-toplevel`, and non-repositories exit 128 immediately;
       // both meant `not_git` when the work-tree probe was a separate call.
-      if (error instanceof GitDeadlineError) throw error
+      if (layoutResult.reason instanceof GitDeadlineError) throw layoutResult.reason
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
-    const [inside, repoRoot, commonDirRaw, indexPathRaw] = layout
+    const [inside, repoRoot, commonDirRaw, indexPathRaw] = layoutResult.value
+      .split('\n').map((line) => line.trim())
     if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw) {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
-    let head = ''
-    try {
-      head = (await gitCommand(['rev-parse', '--verify', 'HEAD'], { cwd: canonicalCwd, deadline })).trim()
-    } catch (error) {
-      if (error instanceof GitDeadlineError) throw error
+    if (statusResult.status === 'rejected') throw statusResult.reason
+    const statusRecords = statusResult.value.split('\0').filter(Boolean)
+    const headRecord = statusRecords.find((record) => record.startsWith('# branch.oid '))
+    const head = headRecord?.slice('# branch.oid '.length).trim() ?? ''
+    if (!head || head === '(initial)') {
+      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
     }
-    if (!head) return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
     const commonDir = isAbsolute(commonDirRaw) ? commonDirRaw : resolve(canonicalCwd, commonDirRaw)
     const indexPath = isAbsolute(indexPathRaw) ? indexPathRaw : resolve(canonicalCwd, indexPathRaw)
     const scope = relative(repoRoot, canonicalCwd) || '.'
@@ -282,17 +346,18 @@ export async function beginGitTurnDiff(
     // even though the positive pathspec alone would naturally skip it. Keep an
     // explicit exclusion only for visible/tracked paths; ignored dataDir paths
     // are already absent from the temporary snapshot index.
-    const explicitExcludedPaths: string[] = []
-    for (const path of canonicalExcludedPaths) {
+    const explicitExcludedPaths = (await Promise.all(canonicalExcludedPaths.map(async (path) => {
       const fromRepo = relative(repoRoot, path)
-      if (fromRepo.startsWith('..') || isAbsolute(fromRepo)) continue
-      if (!await ignoredByGit(repoRoot, path, deadline)) explicitExcludedPaths.push(path)
-    }
+      if (fromRepo.startsWith('..') || isAbsolute(fromRepo)) return undefined
+      return await ignoredByGit(repoRoot, path, deadline) ? undefined : path
+    }))).filter((path): path is string => path != null)
     const pathspec = capturePathspec(repoRoot, scope, explicitExcludedPaths)
-    const baselineClean = !(await gitCommand(
-      snapshotGitArgs([], ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...pathspec]),
-      { cwd: repoRoot, deadline }
-    ))
+    const baselineClean = explicitExcludedPaths.length === 0
+      ? statusRecords.every((record) => record.startsWith('# '))
+      : !(await gitCommand(
+          snapshotGitArgs([], ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...pathspec]),
+          { cwd: repoRoot, deadline }
+        ))
     if (captureRoot) await mkdir(captureRoot, { recursive: true, mode: 0o700 })
     tempDir = await mkdtemp(join(captureRoot ?? tmpdir(), 'scry-turn-diff-'))
     const objectDir = join(tempDir, 'objects')

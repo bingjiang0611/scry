@@ -200,12 +200,12 @@ const api = {
     ipcRenderer.on('agent:backgroundWork', listener)
     return () => ipcRenderer.removeListener('agent:backgroundWork', listener)
   },
-  onTrace: (cb: (ev: TraceEvent) => void): (() => void) => {
-    // main 合批发数组（性能）→ 这里拆回逐条 cb，渲染侧契约不变（仍是「每事件一次 cb」）。
-    // 分发完成后回 ACK：main 用它做有界背压，绝不因此丢弃或重排事件。
+  onTrace: (cb: (events: TraceEvent[]) => void): (() => void) => {
+    // main 的整批事件只跨 contextBridge 一次；renderer 自己按帧合并 state，避免在 preload
+    // 拆成 N 次跨隔离上下文回调。分发完成后仍按原始批次回一次 ACK，保留有界背压语义。
     const l = (_: unknown, payload: TraceBatch): void => {
       try {
-        for (const ev of payload.events) cb(ev)
+        cb(payload.events)
       } finally {
         ipcRenderer.invoke('agent:traceAck', { bytes: payload.bytes }).catch(() => {
           // main 已退出或窗口正在销毁时 ACK 失败不影响证据；归档仍是权威来源。

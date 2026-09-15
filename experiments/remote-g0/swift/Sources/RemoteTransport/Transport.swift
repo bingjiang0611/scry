@@ -245,6 +245,17 @@ public enum G0Transport {
       self.efforts = efforts; self.permissions = permissions
     }
   }
+  public struct RunCommandRef: Sendable, Equatable, Codable, Identifiable {
+    public let name: String; public let description: String; public let argumentHint: String?; public let source: String?
+    public var id: String { name }
+    public init(name: String, description: String, argumentHint: String? = nil, source: String? = nil) {
+      self.name = name; self.description = description; self.argumentHint = argumentHint; self.source = source
+    }
+  }
+  public struct RunCommandCatalog: Sendable, Equatable, Codable {
+    public let commands: [RunCommandRef]; public let reason: String?
+    public init(commands: [RunCommandRef], reason: String? = nil) { self.commands = commands; self.reason = reason }
+  }
   // A session in the host catalog the device may browse. `externalSessionId` is
   // the Provider's resumable id (nil => pending/unresumable). Display metadata.
   public struct RunSessionRef: Sendable, Equatable, Codable {
@@ -280,6 +291,7 @@ public enum G0Transport {
   private struct RunProjectsRequest: Encodable { let op = "projects" }
   private struct RunDirectoriesRequest: Encodable { let op = "directories"; let path: String? }
   private struct RunProvidersRequest: Encodable { let op = "providers" }
+  private struct RunCommandsRequest: Encodable { let op = "commands"; let providerId: String; let cwd: String; let agentProfileId: String? }
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
@@ -291,6 +303,7 @@ public enum G0Transport {
     let projects: [RunProjectRef]?
     let directories: RunDirectoryListing?
     let providers: [RunProviderRef]?
+    let commands: RunCommandCatalog?
     let sessions: [RunSessionRef]?
     let history: [RunHistoryTurn]?
     let output: RunOutputBody?
@@ -359,6 +372,14 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let providers = response.providers else { throw ProbeError.unexpectedReply }
     return providers
+  }
+
+  // Provider-native slash commands for this exact provider/workspace context.
+  public static func relayRunCommands(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, agentProfileId: String? = nil) async throws -> RunCommandCatalog {
+    let request = try JSONEncoder().encode(RunCommandsRequest(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let commands = response.commands else { throw ProbeError.unexpectedReply }
+    return commands
   }
 
   // The host session catalog this device may browse. Authorized exactly like

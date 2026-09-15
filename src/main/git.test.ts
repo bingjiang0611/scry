@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, it, expect } from 'vitest'
-import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNameStatus, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNameStatus, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
 
 const pexecFile = promisify(execFile)
 
@@ -215,6 +215,72 @@ describe('每轮 Git 工作树快照', () => {
       expect((await pexecFile('git', ['diff', '--cached'], { cwd: root })).stdout).toBe(stagedBefore)
       if (tempDir) await expect(access(tempDir)).rejects.toThrow()
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('首轮 turn 与 session 复制同一基线，但拥有独立清理和跨轮生命周期', async () => {
+    const root = await initRepo()
+    let sessionCapture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    let turnCapture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'a.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      // 脏基线会在隔离 objectDir 中创建自定义 tree，证明复制的不只是 HEAD 元数据。
+      await writeFile(join(root, 'a.txt'), 'before-turn\n')
+      sessionCapture = await beginGitTurnDiff(root)
+      turnCapture = await cloneGitTurnDiffCapture(sessionCapture)
+      expect(turnCapture.beforeAt).toBe(sessionCapture.beforeAt)
+      expect(turnCapture.beforeTree).toBe(sessionCapture.beforeTree)
+      expect(turnCapture.tempDir).not.toBe(sessionCapture.tempDir)
+      expect(turnCapture.objectDir).not.toBe(sessionCapture.objectDir)
+      const turnTempDir = turnCapture.tempDir
+      const sessionTempDir = sessionCapture.tempDir
+
+      await writeFile(join(root, 'a.txt'), 'turn-one\n')
+      // 真正运行时 turn 终态与 session 预览可能并发；独立 scratch 不应产生 index.lock 冲突。
+      const [turn, sessionOne] = await Promise.all([
+        finishGitTurnDiff(turnCapture),
+        snapshotSessionNetDiff(sessionCapture)
+      ])
+      expect(turn.files[0]).toMatchObject({ added: 1, deleted: 1 })
+      expect(sessionOne.files[0]).toMatchObject({ added: 1, deleted: 1 })
+      if (turnTempDir) await expect(access(turnTempDir)).rejects.toThrow()
+      if (sessionTempDir) await expect(access(sessionTempDir)).resolves.toBeUndefined()
+
+      await writeFile(join(root, 'a.txt'), 'turn-two\n')
+      const sessionTwo = await snapshotSessionNetDiff(sessionCapture)
+      expect(sessionTwo.files[0]?.patch).toContain('+turn-two')
+    } finally {
+      if (turnCapture) await cancelGitTurnDiff(turnCapture).catch(() => undefined)
+      if (sessionCapture) await cancelGitTurnDiff(sessionCapture).catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('共享基线先释放时由存活 clone 持有 object store，最后一个引用负责清理', async () => {
+    const root = await initRepo()
+    let baseline: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    let clone: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'a.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      await writeFile(join(root, 'a.txt'), 'dirty-before\n')
+      baseline = await beginGitTurnDiff(root)
+      clone = await cloneGitTurnDiffCapture(baseline)
+      const sharedRoot = baseline.tempDir!
+
+      await cancelGitTurnDiff(baseline)
+      await expect(access(sharedRoot)).resolves.toBeUndefined()
+      await writeFile(join(root, 'a.txt'), 'after-baseline-release\n')
+      const result = await finishGitTurnDiff(clone)
+      expect(result.files[0]?.patch).toContain('+after-baseline-release')
+      await expect(access(sharedRoot)).rejects.toThrow()
+    } finally {
+      if (clone) await cancelGitTurnDiff(clone).catch(() => undefined)
+      if (baseline) await cancelGitTurnDiff(baseline).catch(() => undefined)
       await rm(root, { recursive: true, force: true })
     }
   }, 30_000)

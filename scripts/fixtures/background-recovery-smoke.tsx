@@ -38,7 +38,7 @@ export function installRecoveryBridge(): void {
     traceResynchronized: async () => {
       document.getElementById('recovery')!.dataset.acks = String(++acknowledgments)
     },
-    onTrace: (callback: (event: TraceEvent) => void) => listen('trace', callback),
+    onTrace: (callback: (events: TraceEvent[]) => void) => listen('trace', callback),
     onTraceHealth: (callback: (event: TraceBacklogState) => void) => listen('health', callback),
     onBackgroundWork: (callback: (event: { runId: string; work: BackgroundWork }) => void) => listen('background', callback),
     onTurnDone: (callback: (event: { runId: string; providerTurnId?: string }) => void) => listen('done', callback),
@@ -52,7 +52,12 @@ export function BackgroundRecoveryFixture() {
   const turn = session.turns.at(-1)
   return <div id="recovery" data-run={turn?.runId} data-done={String(turn?.done)} data-error={turn?.error ?? ''}
     data-phase={latestBackgroundWork(turn?.items ?? [])?.phase} data-restoring={String(session.restoring)} data-busy={String(session.busy)}
+    data-items={(turn?.items ?? []).map((event) => event.id).join(',')}
     data-sidebar-phase={background.recovery?.phase ?? 'none'}>
+    <button id="trace-batch" onClick={() => emit('trace', [
+      { id: 'batch-a', runId: 'recovery', ts: '', kind: 'model', stage: 'text', text: 'a' },
+      { id: 'batch-b', runId: 'recovery', ts: '', kind: 'tool', stage: 'tool_use', tool: 'Read' }
+    ] satisfies TraceEvent[])}>trace batch</button>
     <button id="begin-recovery" onClick={() => emit('health', {
       degraded: true, skippedEvents: 1, bufferedEvents: 0, bufferedBytes: 0, inFlightBytes: 0, resyncRequired: true
     })}>recover</button>

@@ -32,6 +32,8 @@ export interface EnsureSessionBaselineInput {
   cwd: string
   /** 本轮 resume 的原生 session id；缺省表示这是真正的新会话首轮。 */
   sessionId?: string
+  /** 新建基线时复用调用方已经启动的同一时刻快照；命中既有基线时不会消费。 */
+  initialCapture?: Promise<GitTurnDiffCapture>
 }
 
 export interface SessionLoadIdentity {
@@ -85,7 +87,7 @@ export class SessionDiffBaselineRegistry {
       sessionId: input.sessionId ?? '',
       // 带着 resume id 进来却没有可复用基线，说明会话首轮前的基线不在本进程里，只能重锚。
       origin: input.sessionId ? 'resumed' : 'session_start',
-      capture: this.begin(input.cwd)
+      capture: input.initialCapture ?? this.begin(input.cwd)
     }
     this.entries.set(input.key, entry)
     return entry

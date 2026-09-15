@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -34,14 +34,18 @@ async function deviceKeyAndCSR() {
   return { keyPEM, csrPEM: csr.toString('pem') }
 }
 
-async function harness(runProvider: (i: { runId: string; routing: RemoteIntentRouting; progress(d?: string): void }) => Promise<void>) {
+async function harness(
+  runProvider: (i: { runId: string; routing: RemoteIntentRouting; progress(d?: string): void }) => Promise<void>,
+  listCommands?: (query: { providerId: string; cwd: string; agentProfileId?: string }) => Promise<{ commands: { name: string; description: string }[] }>
+) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
   const binding = createHostController({
     stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd },
-    startRun: runProvider, gate: new ProviderOperationGate()
+    startRun: runProvider, gate: new ProviderOperationGate(),
+    ...(listCommands ? { listCommands } : {})
   })
   cleanups.push(() => binding.close())
   const controller: HostController = binding.controller
@@ -132,6 +136,17 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(reply.status).toBe('recorded')
     await controller.idle()
     expect(seen).toEqual([{ cwd: AUTHORIZED, providerId: 'claude' }])
+  })
+
+  it('serves Provider-native slash commands over the authorized channel', async () => {
+    const listCommands = vi.fn(async () => ({ commands: [{ name: 'review', description: 'Review changes' }] }))
+    const { identity, controller, caPEM, addr } = await harness(async () => {}, listCommands)
+    const device = await pairDevice(identity, controller)
+
+    const reply = await call(addr, caPEM, device.certPEM, device.keyPEM,
+      { op: 'commands', providerId: 'codex', cwd: AUTHORIZED })
+    expect(reply.commands.commands).toEqual([{ name: 'review', description: 'Review changes' }])
+    expect(listCommands).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED })
   })
 
   it('refuses the next request after the grant is revoked', async () => {

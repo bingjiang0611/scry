@@ -93,7 +93,11 @@ async function exerciseRecovery(scenario) {
   }
   const click = (selector) => document.querySelector(selector).click()
   await wait(() => state()?.restoring === 'false' && state().run === 'recovery')
-  if (scenario.startsWith('sidebar-')) {
+  if (scenario === 'batch') {
+    click('#trace-batch')
+    await wait(() => state().items === 'waiting,batch-a,batch-b')
+    check(state().items === 'waiting,batch-a,batch-b', 'Trace batch lost FIFO order or an event')
+  } else if (scenario.startsWith('sidebar-')) {
     click('#sidebar-event')
     await wait(() => state().sidebarPhase === 'working')
     if (scenario !== 'sidebar-delta') {
@@ -169,7 +173,7 @@ try {
         win.setSize(640, 700)
         const narrow = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
         const recovery = []
-        for (const scenario of ['done', 'error', 'reverse', 'focus', 'sidebar-done', 'sidebar-error', 'sidebar-delta']) {
+        for (const scenario of ['batch', 'done', 'error', 'reverse', 'focus', 'sidebar-done', 'sidebar-error', 'sidebar-delta']) {
           await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, { query: { mode: 'recovery' } })
           recovery.push(await win.webContents.executeJavaScript('(' + ${JSON.stringify(exerciseRecovery.toString())} + ')(' + JSON.stringify(scenario) + ')'))
         }

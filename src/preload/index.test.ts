@@ -181,17 +181,23 @@ describe('preload IPC boundary', () => {
     api.onTrace(traceCallback)
     const traceListener = electron.on.mock.calls.at(-1)?.[1]
     electron.invoke.mockClear()
-    traceListener?.(null, { events: [{ id: 'one' }, { id: 'two' }], bytes: 1024 })
-    expect(traceCallback.mock.calls.map(([event]) => event.id)).toEqual(['one', 'two'])
-    // 分发完成后必须回一次 ACK，否则 main 的有界背压会永久停在 high-water。
+    const traceEvents = [{ id: 'one' }, { id: 'two' }]
+    traceListener?.(null, { events: traceEvents, bytes: 1024 })
+    expect(traceCallback).toHaveBeenCalledTimes(1)
+    expect(traceCallback).toHaveBeenCalledWith(traceEvents)
+    // 整批只跨 contextBridge 回调一次；分发完成后必须回一次 ACK，否则 main 的有界背压会永久停在 high-water。
     expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', { bytes: 1024 })
 
     const throwingCallback = vi.fn(() => { throw new Error('renderer 处理失败') })
     api.onTrace(throwingCallback)
     const throwingListener = electron.on.mock.calls.at(-1)?.[1]
     electron.invoke.mockClear()
-    expect(() => throwingListener?.(null, { events: [{ id: 'boom' }], bytes: 8 })).toThrow('renderer 处理失败')
-    // renderer 回调抛错也要 ACK：否则一次渲染异常会让实时视图永久停更。
+    const throwingBatch = [{ id: 'boom-1' }, { id: 'boom-2' }]
+    expect(() => throwingListener?.(null, { events: throwingBatch, bytes: 8 })).toThrow('renderer 处理失败')
+    expect(throwingCallback).toHaveBeenCalledTimes(1)
+    expect(throwingCallback).toHaveBeenCalledWith(throwingBatch)
+    // renderer 整批回调抛错也要 ACK：否则一次渲染异常会让实时视图永久停更。
+    expect(electron.invoke).toHaveBeenCalledTimes(1)
     expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', { bytes: 8 })
 
     const terminalCallback = vi.fn()

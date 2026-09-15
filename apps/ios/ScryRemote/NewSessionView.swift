@@ -50,7 +50,14 @@ struct NewSessionView: View {
                       effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },
                       permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
-                      onPermission: { run.choosePermission($0) }) {
+                      onPermission: { run.choosePermission($0) },
+                      slashCommands: run.slashCommands, slashCommandsLoading: run.slashCommandsLoading,
+                      slashCommandsReason: run.slashCommandsReason,
+                      onRefreshSlashCommands: {
+                        if let providerId = run.chosenProvider?.id, let cwd = run.chosen?.path {
+                          run.loadCommands(providerId: providerId, cwd: cwd, force: true)
+                        }
+                      }) {
         guard let providerId = run.chosenProvider?.id else { return }
         let payload = attachments.map(\.wireValue)
         run.submit(prompt: draft, providerId: providerId, attachments: payload)
@@ -149,7 +156,7 @@ struct NewSessionView: View {
   }
 
   private var providerPicker: some View {
-    SelectionSheet(title: "选择 Provider", subtitle: "仅显示主机当前可用的服务", onRefresh: { run.loadProviders() }) {
+    SelectionSheet(title: "选择 Provider", subtitle: "仅显示主机当前可用的服务", onRefresh: { run.loadProviders(force: true) }) {
       switch run.providers {
       case .idle, .loading:
         ProgressView("读取主机可用的 Provider…").frame(maxWidth: .infinity).padding(.top, 40)

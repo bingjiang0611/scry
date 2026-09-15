@@ -81,6 +81,30 @@ export interface RemoteProviderSource {
   list(): RemoteProviderRef[]
 }
 
+export interface RemoteCommandRef {
+  name: string
+  description: string
+  argumentHint?: string
+  source?: 'builtin' | 'skill' | 'mcp' | 'custom'
+}
+
+export interface RemoteCommandQuery {
+  providerId: string
+  cwd: string
+  agentProfileId?: string
+}
+
+export interface RemoteCommandCatalog {
+  commands: RemoteCommandRef[]
+  reason?: string
+}
+
+export interface RemoteCommandSource {
+  // Commands are Provider- and cwd-specific (skills/custom commands included),
+  // so resolve them on demand instead of shipping a misleading static list.
+  list(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
+}
+
 // A session in the host's catalog the device may browse. `externalSessionId` is
 // the Provider's own resumable id (absent => still pending/unresumable). This is
 // display metadata only; it exposes nothing the device could not learn by
@@ -138,6 +162,8 @@ export interface RemoteGatewayDependencies {
   directories?: RemoteDirectorySource
   // Absent => the device sees an empty (honest) provider list.
   providers?: RemoteProviderSource
+  // Absent => slash completion is honestly unavailable.
+  commands?: RemoteCommandSource
   // Absent => the device sees an empty (honest) session catalog.
   sessions?: RemoteSessionSource
   // Absent => opening any session yields an empty (honest) transcript.
@@ -171,10 +197,15 @@ export class RemoteGatewayError extends Error {
 const MAX_PROJECTS = 200
 const MAX_PATH = 4_096
 const MAX_PROVIDERS = 32
+const MAX_COMMANDS = 256
 const MAX_SESSIONS = 300
 const MAX_HISTORY_TURNS = 400
 const MAX_HISTORY_ITEMS_PER_TURN = 500
 const MAX_HISTORY_TEXT = 20_000
+// The Swift transport rejects frames above 8 MiB. Reserve 2 MiB for the wire
+// response envelope and JSON framing so every accepted history result remains
+// deliverable instead of repeatedly failing as one oversized all-or-nothing page.
+const MAX_HISTORY_RESPONSE_BYTES = 6 * 1024 * 1024
 
 export class RemoteGateway {
   #authority: DeviceAuthorizer
@@ -182,6 +213,7 @@ export class RemoteGateway {
   #projects?: RemoteProjectSource
   #directories?: RemoteDirectorySource
   #providers?: RemoteProviderSource
+  #commands?: RemoteCommandSource
   #sessions?: RemoteSessionSource
   #history?: RemoteHistorySource
   #output?: RemoteOutputReader
@@ -192,6 +224,7 @@ export class RemoteGateway {
     this.#projects = deps.projects
     this.#directories = deps.directories
     this.#providers = deps.providers
+    this.#commands = deps.commands
     this.#sessions = deps.sessions
     this.#history = deps.history
     this.#output = deps.output
@@ -314,6 +347,35 @@ export class RemoteGateway {
     return out
   }
 
+  async listCommands(peerCertSHA256: string, query: RemoteCommandQuery): Promise<RemoteCommandCatalog> {
+    this.#authorize(peerCertSHA256)
+    if (!query || typeof query.providerId !== 'string' || query.providerId.length === 0 || query.providerId.length > 64 ||
+        typeof query.cwd !== 'string' || query.cwd.length === 0 || query.cwd.length > MAX_PATH) {
+      return { commands: [], reason: 'invalid_context' }
+    }
+    if (!this.#commands) return { commands: [], reason: 'unsupported' }
+    const raw = await this.#commands.list({
+      providerId: query.providerId,
+      cwd: query.cwd,
+      ...(typeof query.agentProfileId === 'string' && query.agentProfileId.length <= 128 ? { agentProfileId: query.agentProfileId } : {})
+    })
+    const seen = new Set<string>()
+    const commands: RemoteCommandRef[] = []
+    for (const entry of raw.commands ?? []) {
+      const name = typeof entry?.name === 'string' ? entry.name.replace(/^\/+/, '').trim() : ''
+      if (!name || name.length > 128 || /\s/.test(name) || seen.has(name)) continue
+      seen.add(name)
+      commands.push({
+        name,
+        description: typeof entry.description === 'string' ? entry.description.slice(0, 512) : '',
+        ...(typeof entry.argumentHint === 'string' && entry.argumentHint.length > 0 ? { argumentHint: entry.argumentHint.slice(0, 256) } : {}),
+        ...(['builtin', 'skill', 'mcp', 'custom'].includes(String(entry.source)) ? { source: entry.source } : {})
+      })
+      if (commands.length >= MAX_COMMANDS) break
+    }
+    return { commands, ...(typeof raw.reason === 'string' && raw.reason.length > 0 ? { reason: raw.reason.slice(0, 512) } : {}) }
+  }
+
   // The host's session catalog this device may browse, authorized by the same
   // owner-device check as every method. Display-only metadata, deduped and
   // bounded; opening a session's content is a separate re-authorized read.
@@ -354,15 +416,35 @@ export class RemoteGateway {
       externalSessionId: query.externalSessionId.slice(0, 128)
     })) ?? []
     const out: RemoteHistoryTurn[] = []
+    // Track the exact JSON byte contribution while preserving chronological
+    // order. The UI already labels history as possibly incomplete; returning a
+    // bounded prefix is truthful and usable, unlike a frame the device rejects.
+    let responseBytes = 2 // []
+    let budgetReached = false
     for (const turn of raw.slice(0, MAX_HISTORY_TURNS)) {
+      if (budgetReached) break
       if (!turn) continue
-      const items: RemoteHistoryTurn['items'] = []
+      const clean: RemoteHistoryTurn = {
+        userText: (typeof turn.userText === 'string' ? turn.userText : '').slice(0, MAX_HISTORY_TEXT),
+        items: []
+      }
+      const turnBaseBytes = Buffer.byteLength(JSON.stringify(clean), 'utf8')
+      const turnSeparator = out.length > 0 ? 1 : 0
+      if (responseBytes + turnSeparator + turnBaseBytes > MAX_HISTORY_RESPONSE_BYTES) break
+      responseBytes += turnSeparator + turnBaseBytes
+      out.push(clean)
       for (const item of (turn.items ?? []).slice(0, MAX_HISTORY_ITEMS_PER_TURN)) {
         if (!item || typeof item.text !== 'string') continue
         if (item.kind !== 'output' && item.kind !== 'reasoning' && item.kind !== 'tool' && item.kind !== 'tool_result') continue
-        items.push({ kind: item.kind, text: item.text.slice(0, MAX_HISTORY_TEXT) })
+        const normalized = { kind: item.kind, text: item.text.slice(0, MAX_HISTORY_TEXT) }
+        const itemBytes = Buffer.byteLength(JSON.stringify(normalized), 'utf8') + (clean.items.length > 0 ? 1 : 0)
+        if (responseBytes + itemBytes > MAX_HISTORY_RESPONSE_BYTES) {
+          budgetReached = true
+          break
+        }
+        clean.items.push(normalized)
+        responseBytes += itemBytes
       }
-      out.push({ userText: (typeof turn.userText === 'string' ? turn.userText : '').slice(0, MAX_HISTORY_TEXT), items })
     }
     return out
   }

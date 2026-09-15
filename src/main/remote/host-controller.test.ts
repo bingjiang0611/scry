@@ -103,10 +103,26 @@ describe('HostController (composition root)', () => {
     expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
     expect(seen[0].attachments).toEqual([image, text])
 
+    const fourKiB = Buffer.alloc(4 * 1024, 0x61)
+    const realSizedText = {
+      kind: 'text' as const,
+      name: 'context.txt',
+      mimeType: 'text/plain',
+      dataBase64: fourKiB.toString('base64'),
+      size: fourKiB.length
+    }
+    const realSized = controller.submitIntent(CERT, {
+      intentId: randomUUID(),
+      detail: routing({ prompt: 'inspect context', attachments: [realSizedText] })
+    })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: realSized.runId })).toBe('settled')
+    expect(seen[1].attachments).toEqual([realSizedText])
+
     const malformed = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ attachments: [{ ...image, size: 99 }] }) })
     await controller.idle()
     expect(controller.runState(CERT, { runId: malformed.runId })).toBe('failed')
-    expect(runProvider).toHaveBeenCalledTimes(1)
+    expect(runProvider).toHaveBeenCalledTimes(2)
   })
 
   it('records the intent but fails the run for an unauthorized workspace (never reaching the provider)', async () => {
