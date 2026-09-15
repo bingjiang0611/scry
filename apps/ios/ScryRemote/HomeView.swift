@@ -13,7 +13,7 @@ struct HomeView: View {
       RemoteHeader(title: "远程", subtitle: hostCaption, link: model.link,
                    menuAction: { model.route = .settings }) {
         Menu {
-          Button { run.loadSessions() } label: { Label("刷新会话", systemImage: "arrow.clockwise") }
+          Button { run.loadSessions(force: true) } label: { Label("刷新会话", systemImage: "arrow.clockwise") }
           Button { model.route = .pair } label: { Label("连接 Mac", systemImage: Symbol.link) }
           Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
         } label: {
@@ -56,7 +56,7 @@ struct HomeView: View {
       case let .failed(reason):
         VStack(spacing: 4) {
           EmptyState(title: "无法读取会话", detail: reason, symbol: "exclamationmark.triangle")
-          Button("重新读取") { run.loadSessions() }.font(.system(size: 14, weight: .medium))
+          Button("重新读取") { run.loadSessions(force: true) }.font(.system(size: 14, weight: .medium))
         }.padding(.top, 18)
       }
     }
@@ -237,13 +237,16 @@ struct SettingsView: View {
             }
           }
           settingsSection("远程体验") {
-            settingRow(Symbol.shield, "默认权限", "完全访问 · 仍受 Mac 项目授权限制") {}
-            settingRow(Symbol.bell, "运行通知", "仅在系统允许时送达") {}
+            settingRow(Symbol.shield, "默认权限", "由每次任务的 Provider 设置决定") {}
           }
           settingsSection("安全") {
             settingRow(Symbol.link, "重新配对", "替换此设备的远程授权") { model.route = .pair }
           }
-          Button(role: .destructive) { run.stop(); model.reset() } label: {
+          Button("退出登录（保留本机配对）") { model.signOut() }
+            .font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+            .foregroundStyle(Palette.muted)
+          if let error = model.destructiveActionError { Notice(text: error, warning: true) }
+          Button(role: .destructive) { model.destructiveUnpair(runStore: run) } label: {
             Text("退出并清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
           }
           .buttonStyle(.plain).foregroundStyle(Palette.negative)

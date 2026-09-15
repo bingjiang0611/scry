@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
-import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
+import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
@@ -43,6 +43,7 @@ export interface RemoteHostServiceDependencies {
   listProjects?(): RemoteProjectRef[]
   listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]
+  listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   listSessions?(): RemoteSessionRef[]
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
@@ -105,6 +106,7 @@ export class RemoteHostService {
       ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
       ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
+      ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
       ...(deps.readHistory ? { readHistory: deps.readHistory } : {})
     })

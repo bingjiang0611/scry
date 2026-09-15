@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import MarkdownImpl, { normalizeMarkdownForDisplay, WorkspaceFileLinkProvider } from './MarkdownImpl'
+import MarkdownImpl, {
+  normalizeMarkdownForDisplay,
+  streamingMarkdownInterval,
+  WorkspaceFileLinkProvider
+} from './MarkdownImpl'
+
+describe('streaming Markdown cadence', () => {
+  it('keeps short answers responsive and progressively protects long-turn rendering', () => {
+    expect(streamingMarkdownInterval(1_000)).toBe(48)
+    expect(streamingMarkdownInterval(12_000)).toBe(48)
+    expect(streamingMarkdownInterval(12_001)).toBe(80)
+    expect(streamingMarkdownInterval(48_001)).toBe(120)
+  })
+})
 
 describe('MarkdownImpl trust boundary', () => {
   it('does not emit remote image requests or dangerous links', () => {

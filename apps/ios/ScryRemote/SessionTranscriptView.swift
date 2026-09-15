@@ -16,35 +16,57 @@ struct SessionTranscriptView: View {
 
   private var session: OpenedSession? { model.openedSession }
   private var hasLiveTurn: Bool { run.prompt != nil }
-  private var runBusy: Bool { run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
+  private var sessionIdentity: RemoteRunStore.SessionIdentity? {
+    guard let s = session else { return nil }
+    return .opened(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
+  }
+  private var completedTurns: [RemoteRunStore.CompletedLiveTurn] {
+    guard let identity = sessionIdentity else { return [] }
+    return run.completedTurns(for: identity)
+  }
+  private var runBusy: Bool { run.lifecycle == .submitting || run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
 
   var body: some View {
     VStack(spacing: 0) {
       header
-      if let error = run.submitError { Notice(text: error, warning: true) }
+      if let error = run.submitError {
+        VStack(alignment: .leading, spacing: 7) {
+          Notice(text: error, warning: true)
+          if run.retryAvailable {
+            Button("重试核对（复用同一 intentId）") { run.retrySubmission() }
+              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
+          }
+          if run.observationInterrupted {
+            Button("重新连接并继续观察") { run.retryObservation() }
+              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
+          }
+        }
+      }
       ScrollViewReader { proxy in
         ScrollView {
-          VStack(alignment: .leading, spacing: 18) {
+          LazyVStack(alignment: .leading, spacing: 20) {
             historyBody
             if hasLiveTurn { liveTurn }
             Color.clear.frame(height: 1).id("bottom")
           }
-          .padding(.horizontal, 16)
-          .padding(.top, 12)
+          .padding(.horizontal, 18)
+          .padding(.top, 14)
+          .padding(.bottom, 10)
         }
         .scrollIndicators(.hidden)
-        .onChange(of: run.output.count) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-        .onChange(of: run.lifecycle) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+        .onChange(of: run.output.count) { proxy.scrollTo("bottom", anchor: .bottom) }
+        .onChange(of: run.lifecycle) { proxy.scrollTo("bottom", anchor: .bottom) }
       }
       footer
     }
     .background(Palette.surface)
     .onAppear {
       guard let s = session else { return }
-      // Fresh view of this session: drop any prior live turn, then replay history.
-      run.resetRun()
+      // Keep a live run when leaving and re-opening this same session. A
+      // different session identity invalidates old history/poll callbacks.
+      run.prepareForSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
       run.loadProviders(preferredId: s.providerId)
-      run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
+      run.loadCommands(providerId: s.providerId, cwd: s.cwd)
     }
   }
 
@@ -54,15 +76,18 @@ struct SessionTranscriptView: View {
       transcriptLoadingState
     case let .loaded(turns):
       ForEach(Array(turns.enumerated()), id: \.offset) { _, turn in turnView(turn) }
+      ForEach(completedTurns) { turn in completedTurnView(turn) }
       Text("以上为主机读取的历史记录，可能不完整；文件 diff 需在 Mac 上查看。")
         .font(.system(size: 10)).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading)
     case .empty:
+      ForEach(completedTurns) { turn in completedTurnView(turn) }
       Text("这条会话没有可读取的历史记录，你仍可以在下方继续对话。")
         .font(.system(size: 13)).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
     case let .failed(reason):
       EmptyState(title: "无法读取历史记录", detail: reason).padding(.top, 24)
+      ForEach(completedTurns) { turn in completedTurnView(turn) }
     }
   }
 
@@ -111,6 +136,11 @@ struct SessionTranscriptView: View {
                  subtitle: "\(projectName(session?.cwd)) · \(session?.providerId.uppercased() ?? "")",
                  link: model.link, backAction: { model.route = .home }) {
       Menu {
+        if let s = session {
+          Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) } label: {
+            Label("刷新会话", systemImage: "arrow.clockwise")
+          }
+        }
         Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
@@ -127,12 +157,26 @@ struct SessionTranscriptView: View {
   private func turnView(_ turn: G0Transport.RunHistoryTurn) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       if !turn.userText.isEmpty { userBubble(turn.userText) }
-      ForEach(Array(turn.items.enumerated()), id: \.offset) { _, item in chunkView(kind: item.kind, text: item.text) }
+      ForEach(Array(turn.items.enumerated()), id: \.offset) { _, item in ConversationChunk(kind: item.kind, text: item.text) }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   // The in-progress follow-up: user bubble + honest lifecycle + streamed output.
+  private func completedTurnView(_ turn: RemoteRunStore.CompletedLiveTurn) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      userBubble(turn.prompt, attachments: turn.attachments)
+      HStack(spacing: 8) {
+        Circle().fill(turn.lifecycle == .settled ? Palette.green : Palette.negative).frame(width: 7, height: 7)
+        Text(turn.lifecycle == .settled ? "已完成" : "运行结束：\(turn.lifecycle.rawValue)")
+          .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
+      }
+      ForEach(turn.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
+      if let result = turn.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
   private var liveTurn: some View {
     VStack(alignment: .leading, spacing: 10) {
       if let prompt = run.prompt { userBubble(prompt, attachments: run.sentAttachments) }
@@ -144,7 +188,7 @@ struct SessionTranscriptView: View {
       if run.output.isEmpty {
         Text(placeholderForState).font(.system(size: 15)).foregroundStyle(Palette.muted)
       } else {
-        ForEach(run.output) { line in chunkView(kind: line.kind, text: line.text) }
+        ForEach(run.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
       }
       if let result = run.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
     }
@@ -160,7 +204,12 @@ struct SessionTranscriptView: View {
                       effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },
                       permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
-                      onPermission: { run.choosePermission($0) }) {
+                      onPermission: { run.choosePermission($0) },
+                      slashCommands: run.slashCommands, slashCommandsLoading: run.slashCommandsLoading,
+                      slashCommandsReason: run.slashCommandsReason,
+                      onRefreshSlashCommands: {
+                        if let s = session { run.loadCommands(providerId: s.providerId, cwd: s.cwd, force: true) }
+                      }) {
         guard let s = session else { return }
         run.submitFollowUp(prompt: draft, providerId: s.providerId, cwd: s.cwd,
                            resume: s.externalSessionId, attachments: attachments.map(\.wireValue))
@@ -168,7 +217,9 @@ struct SessionTranscriptView: View {
       }
       if runBusy { Text("当前任务结束后才能继续发送。").font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5) }
     }
-    .padding(.horizontal, 13).padding(.top, 8).padding(.bottom, 12).background(Palette.surface)
+    .padding(.horizontal, 14).padding(.top, 7).padding(.bottom, 8)
+    .background(Palette.surface)
+    .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
   }
 
   private func userBubble(_ text: String, attachments: [RemoteRunStore.SentAttachment] = []) -> some View {
@@ -179,42 +230,18 @@ struct SessionTranscriptView: View {
           Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
             .font(.system(size: 11, weight: .medium)).lineLimit(1)
         }
-        Text(text).font(.system(size: 16))
+        Text(text).font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
       }
       .foregroundStyle(Palette.ink)
       .padding(.vertical, 10).padding(.horizontal, 14)
-      .background(Color(hex: 0xF0F0F2), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+      .frame(maxWidth: 320, alignment: .leading)
+      .background(Color(hex: 0xF0F1F3), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
     }
-  }
-
-  // Same rendering as the live ChatView output so replay + live look identical.
-  private func chunkView(kind: String, text: String) -> some View {
-    Group {
-      switch kind {
-      case "reasoning":
-        HStack(alignment: .top, spacing: 6) {
-          Image(systemName: "brain").font(.system(size: 11)).foregroundStyle(Palette.muted)
-          Text(text).font(.system(size: 14)).foregroundStyle(Palette.muted).italic()
-        }
-      case "tool":
-        Label(text, systemImage: Symbol.agent)
-          .font(.system(size: 13)).foregroundStyle(Color(hex: 0x67676A))
-          .padding(.vertical, 5).padding(.horizontal, 10).glass(cornerRadius: 12)
-      case "tool_result":
-        Text(text)
-          .font(.system(size: 12).monospaced()).foregroundStyle(Color(hex: 0x424244))
-          .padding(.vertical, 6).padding(.horizontal, 10)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color(hex: 0xF3F3F3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-      default:
-        Text(text).font(.system(size: 16)).foregroundStyle(Palette.ink)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var placeholderForState: String {
     switch run.lifecycle {
+    case .submitting: return "正在核对提交结果…结果未知时可安全重试"
     case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
     case .dispatched: return "主机已派发，准备执行…"
     case .running: return "运行中 · 尚无输出内容"
@@ -225,6 +252,7 @@ struct SessionTranscriptView: View {
   private var stateLabel: String {
     switch run.lifecycle {
     case .unknown: return "等待主机"
+    case .submitting: return "提交中 · 结果未知"
     case .recorded: return "意图已记录（未执行）"
     case .dispatched: return "主机已派发"
     case .running: return "运行中"
@@ -238,7 +266,7 @@ struct SessionTranscriptView: View {
     case .settled: return Palette.green
     case .running: return Palette.blue
     case .failed: return Color(hex: 0xB95D60)
-    case .cancelled, .recorded, .dispatched: return Palette.amber
+    case .cancelled, .submitting, .recorded, .dispatched: return Palette.amber
     case .unknown: return Palette.muted
     }
   }

@@ -29,7 +29,7 @@ if (!existsSync(bundle)) {
   process.stderr.write(`missing CLI bundle: ${bundle}\nrun: npm run build:cli\n`)
   process.exit(2)
 }
-const { beginGitTurnDiff } = await import(pathToFileURL(bundle).href)
+const { beginGitTurnDiff, cloneGitTurnDiffCapture } = await import(pathToFileURL(bundle).href)
 
 const ROUNDS = Number(process.env.BENCH_ROUNDS ?? 6)
 
@@ -50,6 +50,12 @@ function median(values) {
   return sorted[Math.floor(sorted.length / 2)]
 }
 
+async function cleanupCaptures(captures) {
+  await Promise.all(captures.map((capture) =>
+    capture.tempDir ? rm(capture.tempDir, { recursive: true, force: true }) : Promise.resolve()
+  ))
+}
+
 async function scenario(label, setup) {
   const root = await repo(setup)
   const captureRoot = join(root, '.scry', 'diff')
@@ -61,7 +67,7 @@ async function scenario(label, setup) {
       const capture = await beginGitTurnDiff(root, 5_000, captureRoot, [join(root, '.scry')])
       const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6
       if (round > 0) samples.push(elapsedMs)
-      if (capture.tempDir) await rm(capture.tempDir, { recursive: true, force: true })
+      await cleanupCaptures([capture])
       if (round === ROUNDS) {
         process.stdout.write(
           `${label.padEnd(30)} p50=${median(samples).toFixed(1).padStart(8)}ms  ` +
@@ -86,6 +92,65 @@ await scenario('one 50 MB untracked file', async (root) => {
   await writeFile(join(root, 'big.jsonl'), 'y'.repeat(50 * 1024 * 1024))
 })
 await scenario('300 small files', async (root) => {
+  for (let index = 0; index < 300; index += 1) {
+    await writeFile(join(root, `f${index}.ts`), `export const x${index} = ${index}\n`)
+  }
+})
+
+async function dualBaselineScenario(label, setup) {
+  const root = await repo(setup)
+  const captureRoot = join(root, '.scry', 'diff')
+  const separate = []
+  const reused = []
+  const measureSeparate = async () => {
+    const startedAt = process.hrtime.bigint()
+    const captures = await Promise.all([
+      beginGitTurnDiff(root, 5_000, captureRoot, [join(root, '.scry')]),
+      beginGitTurnDiff(root, 5_000, captureRoot, [join(root, '.scry')])
+    ])
+    const elapsed = Number(process.hrtime.bigint() - startedAt) / 1e6
+    await cleanupCaptures(captures)
+    return elapsed
+  }
+  const measureReused = async () => {
+    const startedAt = process.hrtime.bigint()
+    const baseline = await beginGitTurnDiff(root, 5_000, captureRoot, [join(root, '.scry')])
+    const turn = await cloneGitTurnDiffCapture(baseline)
+    const elapsed = Number(process.hrtime.bigint() - startedAt) / 1e6
+    await cleanupCaptures([baseline, turn])
+    return elapsed
+  }
+  try {
+    for (let round = 0; round <= ROUNDS; round += 1) {
+      // 交替顺序，避免文件系统 cache 总是偏向第二种实现。
+      let separateMs
+      let reusedMs
+      if (round % 2 === 0) {
+        separateMs = await measureSeparate()
+        reusedMs = await measureReused()
+      } else {
+        reusedMs = await measureReused()
+        separateMs = await measureSeparate()
+      }
+      if (round > 0) {
+        separate.push(separateMs)
+        reused.push(reusedMs)
+      }
+    }
+    const before = median(separate)
+    const after = median(reused)
+    process.stdout.write(
+      `${label.padEnd(30)} separate=${before.toFixed(1).padStart(8)}ms  ` +
+      `reuse=${after.toFixed(1).padStart(8)}ms  delta=${(((after - before) / before) * 100).toFixed(1)}%\n`
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+process.stdout.write('\nfirst-turn + session baseline wall time\n\n')
+await dualBaselineScenario('clean dual baseline', async () => {})
+await dualBaselineScenario('300-file dual baseline', async (root) => {
   for (let index = 0; index < 300; index += 1) {
     await writeFile(join(root, `f${index}.ts`), `export const x${index} = ${index}\n`)
   }

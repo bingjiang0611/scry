@@ -121,6 +121,24 @@ describe('useAgentSession state reducers', () => {
     expect(mergeActiveRun(prev, restored)[0].attachments).toEqual([image])
   })
 
+  it('does not let an older active snapshot undo coalesced local stream text', () => {
+    const stale: Turn = { runId: 'r1', userText: 'prompt', items: [{ ...ev('stream'), text: 'a', thinking: '想' }], done: false }
+    const local: Turn[] = [{
+      runId: 'r1', userText: 'prompt',
+      items: [{ ...ev('stream'), text: 'ab', thinking: '想法' }], done: false
+    }]
+    const merged = mergeActiveRun(local, stale)[0].items[0]
+    expect(merged.text).toBe('ab')
+    expect(merged.thinking).toBe('想法')
+
+    const newer = mergeActiveRun(local, {
+      ...stale,
+      items: [{ ...ev('stream'), text: 'abc', thinking: '想法完成' }]
+    })[0].items[0]
+    expect(newer.text).toBe('abc')
+    expect(newer.thinking).toBe('想法完成')
+  })
+
   it('flushes trace batches before turnDone and marks the turn complete', () => {
     const turns = applyTraceBatch([], [ev('a')], new Set<string>())
     expect(markTurnDone(turns, 'r1', 'provider-turn-1')[0]).toMatchObject({

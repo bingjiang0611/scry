@@ -124,6 +124,14 @@ const baseComponents: Components = {
   )
 }
 
+export function streamingMarkdownInterval(sourceLength: number): number {
+  // 短回答优先跟手；文本变长后逐步降频，避免 ReactMarkdown/GFM 反复解析整段内容
+  // 抢占输入、滚动和停止按钮的主线程时间。
+  if (sourceLength <= 12_000) return 48
+  if (sourceLength <= 48_000) return 80
+  return 120
+}
+
 function useSampledMarkdownSource(source: string, streaming: boolean): string {
   const latest = useRef(source)
   latest.current = source
@@ -134,19 +142,20 @@ function useSampledMarkdownSource(source: string, streaming: boolean): string {
     if (!streaming || !source.startsWith(sampled)) {
       if (timer.current != null) window.clearTimeout(timer.current)
       timer.current = null
-      sampledAt.current = Date.now()
+      sampledAt.current = performance.now()
       setSampled(source)
       return
     }
     if (sampled === source) return
-    const remaining = 120 - (Date.now() - sampledAt.current)
+    const interval = streamingMarkdownInterval(source.length)
+    const remaining = interval - (performance.now() - sampledAt.current)
     if (remaining <= 0) {
-      sampledAt.current = Date.now()
+      sampledAt.current = performance.now()
       setSampled(source)
     } else if (timer.current == null) {
       timer.current = window.setTimeout(() => {
         timer.current = null
-        sampledAt.current = Date.now()
+        sampledAt.current = performance.now()
         setSampled(latest.current)
       }, remaining)
     }

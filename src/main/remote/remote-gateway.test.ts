@@ -51,10 +51,11 @@ function gateway(
   output?: RunOutputLog,
   providers?: { list(): RemoteProviderRef[] },
   sessions?: { list(): { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number; pinnedAt?: number }[] },
-  directories?: { list(path?: string): RemoteDirectoryListing }
+  directories?: { list(path?: string): RemoteDirectoryListing },
+  commands?: { list(query: { providerId: string; cwd: string; agentProfileId?: string }): Promise<{ commands: { name: string; description: string; argumentHint?: string; source?: 'builtin' | 'skill' | 'mcp' | 'custom' }[]; reason?: string }> }
 ) {
   const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
-  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}), ...(output ? { output } : {}), ...(providers ? { providers } : {}), ...(sessions ? { sessions } : {}), ...(directories ? { directories } : {}) }), ledger }
+  return { gw: new RemoteGateway({ authority, ledger, ...(projects ? { projects } : {}), ...(output ? { output } : {}), ...(providers ? { providers } : {}), ...(sessions ? { sessions } : {}), ...(directories ? { directories } : {}), ...(commands ? { commands } : {}) }), ledger }
 }
 
 const expectCode = (fn: () => unknown, code: string) => {
@@ -221,6 +222,26 @@ describe('RemoteGateway', () => {
     expect(gw.listProviders(CERT)).toEqual([])
   })
 
+  it('authorizes, scopes, sanitizes and bounds native slash commands', async () => {
+    const { authority } = await grantedAuthority()
+    const list = vi.fn(async () => ({ commands: [
+      { name: '/review', description: 'Review changes', argumentHint: '[path]', source: 'builtin' as const },
+      { name: 'review', description: 'duplicate' },
+      { name: 'bad command', description: 'invalid whitespace' },
+      ...Array.from({ length: 300 }, (_, index) => ({ name: `cmd-${index}`, description: 'x'.repeat(700) }))
+    ] }))
+    const { gw } = gateway(authority, undefined, undefined, undefined, undefined, undefined, { list })
+
+    await expect(gw.listCommands('f'.repeat(64), { providerId: 'codex', cwd: '/repo' }))
+      .rejects.toMatchObject({ code: 'device_not_authorized' })
+    const catalog = await gw.listCommands(CERT, { providerId: 'codex', cwd: '/repo', agentProfileId: 'profile' })
+    expect(list).toHaveBeenCalledWith({ providerId: 'codex', cwd: '/repo', agentProfileId: 'profile' })
+    expect(catalog.commands).toHaveLength(256)
+    expect(catalog.commands[0]).toEqual({ name: 'review', description: 'Review changes', argumentHint: '[path]', source: 'builtin' })
+    expect(catalog.commands.some((command) => command.name === 'bad command')).toBe(false)
+    expect(catalog.commands.at(-1)?.description.length).toBe(512)
+  })
+
   it('lists the host session catalog only for an authorized device, deduped/bounded, resumable id preserved', async () => {
     const { authority } = await grantedAuthority()
     const list = vi.fn(() => [
@@ -261,6 +282,26 @@ describe('RemoteGateway', () => {
     const turns = await gw.readHistory(CERT, { providerId: 'qoder', cwd: '/w', externalSessionId: 'ext1' })
     expect(turns).toEqual([{ userText: 'hi', items: [{ kind: 'output', text: 'hello' }, { kind: 'tool', text: 'Read greet.js' }] }])
     expect(read).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', externalSessionId: 'ext1' })
+  })
+
+  it('bounds the serialized history below the device transport frame limit', async () => {
+    const { authority } = await grantedAuthority()
+    const read = vi.fn(async () => [{
+      userText: 'large history',
+      items: Array.from({ length: 450 }, (_, index) => ({
+        kind: 'output' as const,
+        // Include JSON-escaped content so the budget covers wire bytes, not just
+        // source character count.
+        text: `${index}: ${'"\\\n'.repeat(6_000)}`
+      }))
+    }])
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const gw = new RemoteGateway({ authority, ledger, history: { read } })
+    const turns = await gw.readHistory(CERT, { providerId: 'qoder', cwd: '/w', externalSessionId: 'large' })
+    expect(turns).toHaveLength(1)
+    expect(turns[0].items.length).toBeGreaterThan(0)
+    expect(turns[0].items.length).toBeLessThan(450)
+    expect(Buffer.byteLength(JSON.stringify(turns), 'utf8')).toBeLessThanOrEqual(6 * 1024 * 1024)
   })
 
   it('returns an honest empty transcript when no history source is configured', async () => {

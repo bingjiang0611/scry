@@ -105,6 +105,29 @@ describe('SessionDiffBaselineRegistry', () => {
     expect(entry.origin).toBe('resumed')
   })
 
+  it('新建基线复用调用方的首轮快照且不重复 begin，命中既有基线时不替换', () => {
+    const fallback = Promise.resolve(fakeCapture('fallback'))
+    let beginCalls = 0
+    const registry = new SessionDiffBaselineRegistry(() => {
+      beginCalls += 1
+      return fallback
+    }, async () => undefined)
+    const seeded = Promise.resolve(fakeCapture('seeded'))
+    const first = registry.ensure({
+      key: 'claude\0/repo', revision: 0, cwd: '/repo', initialCapture: seeded
+    })
+    expect(first.capture).toBe(seeded)
+    expect(beginCalls).toBe(0)
+
+    const unused = Promise.resolve(fakeCapture('unused'))
+    const second = registry.ensure({
+      key: 'claude\0/repo', revision: 0, cwd: '/repo', initialCapture: unused
+    })
+    expect(second.capture).toBe(seeded)
+    expect(second.capture).not.toBe(unused)
+    expect(beginCalls).toBe(0)
+  })
+
   it('revision 变化即失效重锚，绝不串会话', async () => {
     const cancelled: GitTurnDiffCapture[] = []
     let seq = 0

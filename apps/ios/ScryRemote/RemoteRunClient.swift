@@ -106,6 +106,12 @@ struct RemoteRunClient {
     try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity())
   }
 
+  // Provider-native slash commands for this exact project context. The host
+  // obtains the same capability catalog used by the desktop composer.
+  func commands(providerId: String, cwd: String, agentProfileId: String? = nil) async throws -> G0Transport.RunCommandCatalog {
+    try await G0Transport.relayRunCommands(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
+  }
+
   // The host session catalog (the SAME conversations the Mac lists) this device
   // may browse. Display metadata only; the host re-authorizes any content read.
   func sessions() async throws -> [G0Transport.RunSessionRef] {

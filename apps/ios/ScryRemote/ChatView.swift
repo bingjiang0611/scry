@@ -14,36 +14,59 @@ struct ChatView: View {
   @State private var attachments: [DraftAttachment] = []
 
   private var paired: Bool { run.hasConnection }
-  private var hasTurn: Bool { run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
-  private var runBusy: Bool { run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
+  private var completedTurns: [RemoteRunStore.CompletedLiveTurn] {
+    guard let identity = run.activeSessionIdentity else { return [] }
+    return run.completedTurns(for: identity)
+  }
+  private var hasTurn: Bool { !completedTurns.isEmpty || run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
+  private var runBusy: Bool { run.lifecycle == .submitting || run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
 
   var body: some View {
     VStack(spacing: 0) {
       header
       if !paired { Notice(text: "尚未连接 Mac · 发送已停用。") }
-      if let error = run.submitError { Notice(text: error, warning: true) }
+      if let error = run.submitError {
+        VStack(alignment: .leading, spacing: 7) {
+          Notice(text: error, warning: true)
+          if run.retryAvailable {
+            Button("重试核对（复用同一 intentId）") { run.retrySubmission() }
+              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
+          }
+          if run.observationInterrupted {
+            Button("重新连接并继续观察") { run.retryObservation() }
+              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
+          }
+        }
+      }
       ScrollViewReader { proxy in
         ScrollView {
-          VStack(alignment: .leading, spacing: 16) {
+          LazyVStack(alignment: .leading, spacing: 18) {
             if !hasTurn {
               EmptyState(title: "开始一段新会话",
                          detail: "你发送的消息会在这里显示；Agent 的执行状态与输出从主机实时读取，不沿用其他会话。")
             } else {
+              ForEach(completedTurns) { turn in completedTurn(turn) }
               if let prompt = run.prompt { userBubble(prompt) }
-              assistantTurn
+              if run.prompt != nil { assistantTurn }
             }
             Color.clear.frame(height: 1).id("bottom")
           }
-          .padding(.horizontal, 16)
-          .padding(.top, 10)
+          .padding(.horizontal, 18)
+          .padding(.top, 14)
+          .padding(.bottom, 10)
         }
         .scrollIndicators(.hidden)
-        .onChange(of: run.output.count) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-        .onChange(of: run.lifecycle) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+        .onChange(of: run.output.count) { proxy.scrollTo("bottom", anchor: .bottom) }
+        .onChange(of: run.lifecycle) { proxy.scrollTo("bottom", anchor: .bottom) }
       }
       footer
     }
     .background(Palette.surface)
+#if DEBUG
+    .onAppear {
+      if draft.isEmpty, ProcessInfo.processInfo.arguments.contains("-uiMockSlash") { draft = "/" }
+    }
+#endif
   }
 
   private var header: some View {
@@ -65,20 +88,35 @@ struct ChatView: View {
   }
 
   // The user's own message — right-aligned filled bubble, ChatGPT/Codex style.
-  private func userBubble(_ text: String) -> some View {
+  private func userBubble(_ text: String, attachments: [RemoteRunStore.SentAttachment]? = nil) -> some View {
     HStack {
       Spacer(minLength: 40)
       VStack(alignment: .leading, spacing: 8) {
-        ForEach(run.sentAttachments) { item in
+        ForEach(attachments ?? run.sentAttachments) { item in
           Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
             .font(.system(size: 11, weight: .medium)).lineLimit(1)
         }
-        Text(text).font(.system(size: 16))
+        Text(text).font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
       }
       .foregroundStyle(Palette.ink)
       .padding(.vertical, 10).padding(.horizontal, 14)
-      .background(Color(hex: 0xF0F0F2), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+      .frame(maxWidth: 320, alignment: .leading)
+      .background(Color(hex: 0xF0F1F3), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
     }
+  }
+
+  private func completedTurn(_ turn: RemoteRunStore.CompletedLiveTurn) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      userBubble(turn.prompt, attachments: turn.attachments)
+      HStack(spacing: 8) {
+        Circle().fill(turn.lifecycle == .settled ? Palette.green : Palette.negative).frame(width: 7, height: 7)
+        Text(turn.lifecycle == .settled ? "已完成" : "运行结束：\(turn.lifecycle.rawValue)")
+          .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
+      }
+      ForEach(turn.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
+      if let result = turn.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   // The assistant turn: a small state chip, the streamed content, and honest
@@ -97,7 +135,7 @@ struct ChatView: View {
         Text(placeholderForState)
           .font(.system(size: 15)).foregroundStyle(Palette.muted)
       } else {
-        ForEach(run.output) { line in outputLine(line) }
+        ForEach(run.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
       }
 
       if let result = run.resultSummary {
@@ -107,32 +145,6 @@ struct ChatView: View {
       if !run.output.isEmpty || run.lifecycle == .settled {
         Text("以上为主机实时输出的缓存" + (run.truncated ? " · 已达上限，内容被截断" : "，可能不完整；文件 diff 需在主机查看"))
           .font(.system(size: 10)).foregroundStyle(Palette.muted)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  private func outputLine(_ line: RemoteRunStore.OutputLine) -> some View {
-    Group {
-      switch line.kind {
-      case "reasoning":
-        HStack(alignment: .top, spacing: 6) {
-          Image(systemName: "brain").font(.system(size: 11)).foregroundStyle(Palette.muted)
-          Text(line.text).font(.system(size: 14)).foregroundStyle(Palette.muted).italic()
-        }
-      case "tool":
-        Label(line.text, systemImage: Symbol.agent)
-          .font(.system(size: 13)).foregroundStyle(Color(hex: 0x67676A))
-          .padding(.vertical, 5).padding(.horizontal, 10)
-          .glass(cornerRadius: 12)
-      case "tool_result":
-        Text(line.text)
-          .font(.system(size: 12).monospaced()).foregroundStyle(Color(hex: 0x424244))
-          .padding(.vertical, 6).padding(.horizontal, 10)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color(hex: 0xF3F3F3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-      default:
-        Text(line.text).font(.system(size: 16)).foregroundStyle(Palette.ink)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -148,7 +160,14 @@ struct ChatView: View {
                       effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },
                       permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
-                      onPermission: { run.choosePermission($0) }) {
+                      onPermission: { run.choosePermission($0) },
+                      slashCommands: run.slashCommands, slashCommandsLoading: run.slashCommandsLoading,
+                      slashCommandsReason: run.slashCommandsReason,
+                      onRefreshSlashCommands: {
+                        if let providerId = run.chosenProvider?.id, let cwd = run.chosen?.path {
+                          run.loadCommands(providerId: providerId, cwd: cwd, force: true)
+                        }
+                      }) {
         guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
         let payload = attachments.map(\.wireValue)
         if let resume = run.liveExternalSessionId {
@@ -166,12 +185,14 @@ struct ChatView: View {
           .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
       }
     }
-    .padding(.horizontal, 13).padding(.top, 8).padding(.bottom, 12)
+    .padding(.horizontal, 14).padding(.top, 7).padding(.bottom, 8)
     .background(Palette.surface)
+    .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
   }
 
   private var placeholderForState: String {
     switch run.lifecycle {
+    case .submitting: return "正在核对提交结果…结果未知时可安全重试"
     case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
     case .dispatched: return "主机已派发，准备执行…"
     case .running: return "运行中 · 尚无输出内容"
@@ -182,6 +203,7 @@ struct ChatView: View {
   private var stateLabel: String {
     switch run.lifecycle {
     case .unknown: return "等待主机"
+    case .submitting: return "提交中 · 结果未知"
     case .recorded: return "意图已记录（未执行）"
     case .dispatched: return "主机已派发"
     case .running: return "运行中"
@@ -195,7 +217,7 @@ struct ChatView: View {
     case .settled: return Palette.green
     case .running: return Palette.blue
     case .failed: return Color(hex: 0xB95D60)
-    case .cancelled, .recorded, .dispatched: return Palette.amber
+    case .cancelled, .submitting, .recorded, .dispatched: return Palette.amber
     case .unknown: return Palette.muted
     }
   }

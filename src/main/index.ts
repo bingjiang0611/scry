@@ -18,7 +18,7 @@ import { AgentRuntimeError } from './run-outcome'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
-import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import {
   deleteTranscriptCopies,
@@ -692,9 +692,14 @@ function withoutCommitHookCapability(env: NodeJS.ProcessEnv = process.env): Node
   return copy
 }
 
-async function resolveManagedCommitHookEnv(cwd: string): Promise<NodeJS.ProcessEnv> {
+async function resolveManagedCommitHookEnv(
+  cwd: string,
+  knownEnablement?: Awaited<ReturnType<typeof resolveRecorderEnablement>>
+): Promise<NodeJS.ProcessEnv> {
   const baseEnv = withoutCommitHookCapability()
-  const enablement = await resolveRecorderEnablement(cwd)
+  // managedRecorderMode 已在发送前验证过同一份配置时复用结果，避免热路径重复读取、
+  // 解析并遍历 .scry 配置。调用方没有快照（例如独立恢复路径）时仍在这里现查。
+  const enablement = knownEnablement ?? await resolveRecorderEnablement(cwd)
   if (!enablement.enabled || !enablement.config.commitHook) return baseEnv
   let inspection
   try {
@@ -2151,6 +2156,9 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
 // 就等 renderer ACK；过载时只停止镜像最新事件并如实上报缺口，权威证据仍在 runState 与归档。
 const traceOutput = new TraceOutputBridge({
   canSend: rendererCanReceive,
+  // 贴近一帧合批：仍把高频 token 合成数组，但把首字/工具状态额外等待从 50ms
+  // 降到约一帧。renderer 还会在 requestAnimationFrame 内统一提交 React state。
+  flushMs: 16,
   send: (payload) => win?.webContents.send('agent:trace', payload),
   publishHealth: (state) => {
     if (!rendererCanReceive()) return
@@ -2341,12 +2349,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
   }
   let managedRecorderEnabled = false
+  let managedRecorderEnablement: Awaited<ReturnType<typeof resolveRecorderEnablement>> | undefined
   let managedCommitHookEnv: NodeJS.ProcessEnv | undefined
   let recoveredManagedTurns = traceProgressRecovery.recovered
   if (isManagedRecorderProvider(providerId) && cwd) {
-    managedRecorderEnabled = (await managedRecorderMode(cwd)).status === 'enabled'
+    const recorderMode = await managedRecorderMode(cwd)
+    managedRecorderEnabled = recorderMode.status === 'enabled'
+    managedRecorderEnablement = recorderMode.status === 'enabled' ? recorderMode.enablement : undefined
     managedCommitHookEnv = managedRecorderEnabled
-      ? await resolveManagedCommitHookEnv(cwd)
+      ? await resolveManagedCommitHookEnv(cwd, managedRecorderEnablement)
       : undefined
     const journalRecovery = await recoverManagedTraceTurns(app.getPath('userData'), {
       cwd,
@@ -2677,14 +2688,19 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     deleteRunAttachments(app.getPath('userData'), runId)
     throw error
   }
+  // Git 快照与非 managed Provider 的 recorder 配置读取彼此独立；并行启动，避免把
+  // 两段本地预检串到 Provider 启动前。managed 路径直接复用上面已验证的配置快照。
+  const initialDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
+  let turnDiffCapture = initialDiffCapture
   let patchExcludeBasenames: string[] = []
   if (cwd) {
-    const recorderEnablement = await resolveRecorderEnablement(cwd)
-    if (recorderEnablement.enabled) {
+    const recorderEnablement = managedRecorderEnablement ?? (
+      isManagedRecorderProvider(providerId) ? undefined : await resolveRecorderEnablement(cwd)
+    )
+    if (recorderEnablement?.enabled) {
       patchExcludeBasenames = recorderEnablement.config.capture.patchExcludeBasenames ?? []
     }
   }
-  const turnDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
   // 会话级 baseline 必须在本轮任何文件改动前就位。ensure() 命中同 revision + 同 session 的既有基线时
   // 复用「会话第一轮开始前」的原始快照（resume/续接不重锚，否则会把前几轮误当成会话前脏改动）；
   // 恢复/选择会话/应用重启后进程内没有基线时当场重锚并标 origin=resumed，照实说明只覆盖「自重锚以来」。
@@ -2696,11 +2712,22 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       key: contextKey,
       revision: contextRevision,
       cwd,
-      ...(resume ? { sessionId: resume } : {})
+      ...(resume ? { sessionId: resume } : {}),
+      initialCapture: initialDiffCapture
     })
     sessionBaselineOrigin = baseline.origin
     sessionBaselineCapture = baseline.capture
     sessionBaselineReady = baseline.capture.catch(() => undefined)
+    if (baseline.capture === initialDiffCapture) {
+      // 新建/恢复重锚时，turn 与 session 需要同一时刻的基线，但必须有独立清理周期。
+      // 创建轻量 scratch 并只读共享 baseline objects；clone 失败则回退完整采集，不牺牲证据。
+      turnDiffCapture = initialDiffCapture
+        .then((capture) => cloneGitTurnDiffCapture(capture))
+        .catch((error) => {
+          console.warn('[scry] Git baseline clone failed; falling back to a second capture:', runId, error)
+          return beginGitTurnDiff(cwd)
+        })
+    }
   }
   // 运行中预览：用本轮 capture 与会话基线做非消费式重算，让长轮次里 Files / 会话改动行数 / Diff
   // 三处都有真实 Git 数据可看，并被明确标成临时快照。终态一发布即封口，预览不会覆盖或倒退终态。
@@ -3745,6 +3772,29 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // The Providers the device may pick for a new session. Snapshot mirrors the
       // real registry describe() (id/label/available); the run path re-validates.
       listProviders: () => remoteProviderSnapshot,
+      // Resolve the same native Provider command catalog used by the desktop
+      // composer. The cwd is re-authorized before project-local commands/skills
+      // are inspected; unsupported Providers return an honest reason.
+      listCommands: async ({ providerId, cwd, agentProfileId }) => {
+        if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(providerId)) {
+          return { commands: [], reason: 'unsupported_provider' }
+        }
+        const canonical = resolveKnownProjectDirectory(cwd)
+        const context: ProviderContext = {
+          providerId: providerId as ProviderId,
+          cwd: canonical,
+          ...(agentProfileId ? { agentProfileId } : {})
+        }
+        const result = await withProviderOperation(
+          context.providerId,
+          () => providerRegistry.listCommands(context),
+          context.agentProfileId
+        )
+        return {
+          commands: result.data ?? [],
+          ...(result.reason ? { reason: result.reason } : {})
+        }
+      },
       // The host session catalog the device may browse, so the phone shows the
       // SAME conversations the Mac lists. Filtered to device-visible authorized
       // projects (a session whose cwd is not an authorized project dir is not

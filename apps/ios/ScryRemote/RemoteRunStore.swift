@@ -41,10 +41,18 @@ final class RemoteRunStore: ObservableObject {
     case failed(String)
   }
 
+  enum CommandsState: Equatable {
+    case idle
+    case loading
+    case loaded([G0Transport.RunCommandRef])
+    case empty(String?)
+    case failed(String)
+  }
+
   // The device-observable lifecycle. `.unknown` = we have not learned a state
   // yet (e.g. before any poll), never shown as success.
   enum Lifecycle: String, Equatable {
-    case unknown, recorded, dispatched, running, settled, failed, cancelled
+    case unknown, submitting, recorded, dispatched, running, settled, failed, cancelled
   }
 
   struct OutputLine: Identifiable, Equatable {
@@ -59,10 +67,46 @@ final class RemoteRunStore: ObservableObject {
     let size: Int
   }
 
+  // A transport response is only allowed to mutate the session that initiated
+  // it. The local id keeps consecutive new sessions distinct until the host
+  // reports an external Provider session id.
+  struct SessionIdentity: Hashable, Equatable {
+    let providerId: String
+    let cwd: String
+    let externalSessionId: String?
+    let localId: String?
+
+    static func opened(providerId: String, cwd: String, externalSessionId: String) -> SessionIdentity {
+      SessionIdentity(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, localId: nil)
+    }
+
+    static func new(providerId: String, cwd: String) -> SessionIdentity {
+      SessionIdentity(providerId: providerId, cwd: cwd, externalSessionId: nil, localId: UUID().uuidString.lowercased())
+    }
+  }
+
+  struct CompletedLiveTurn: Identifiable, Equatable {
+    let id: String
+    let runId: String?
+    let prompt: String
+    let attachments: [SentAttachment]
+    let lifecycle: Lifecycle
+    let output: [OutputLine]
+    let resultSummary: String?
+    let externalSessionId: String?
+  }
+
+  private struct PendingSubmission {
+    let intentId: String
+    let routing: RemoteRunClient.Routing
+    let identity: SessionIdentity
+  }
+
   @Published private(set) var projects: ProjectsState = .idle
   @Published private(set) var directories: DirectoriesState = .idle
   @Published private(set) var chosen: G0Transport.RunProjectRef?
   @Published private(set) var providers: ProvidersState = .idle
+  @Published private(set) var commands: CommandsState = .idle
   @Published private(set) var chosenProvider: G0Transport.RunProviderRef?
   @Published private(set) var chosenEffort: String?
   @Published private(set) var permissionMode: String = "default"
@@ -76,6 +120,12 @@ final class RemoteRunStore: ObservableObject {
     case loaded([G0Transport.RunSessionRef])
     case empty
     case failed(String)
+
+    fileprivate var hasVisibleValue: Bool {
+      if case .loaded = self { return true }
+      if case .empty = self { return true }
+      return false
+    }
   }
   @Published private(set) var catalog: CatalogState = .idle
 
@@ -109,9 +159,34 @@ final class RemoteRunStore: ObservableObject {
   // The Provider session id the live run reported (from the ledger `session`
   // marker). Lets a follow-up into an opened session resume the LATEST id.
   @Published private(set) var liveExternalSessionId: String?
+  @Published private(set) var activeSessionIdentity: SessionIdentity?
+  @Published private(set) var observationInterrupted = false
+  @Published private(set) var retryAvailable = false
+  @Published private(set) var completedLiveTurns: [SessionIdentity: [CompletedLiveTurn]] = [:]
 
   private let connections = RemoteConnectionStore()
   private var pollTask: Task<Void, Never>?
+  private var submitTask: Task<Void, Never>?
+  private var catalogTask: Task<Void, Never>?
+  private var historyTask: Task<Void, Never>?
+  private var providersTask: Task<Void, Never>?
+  private var commandsTask: Task<Void, Never>?
+  private var projectsTask: Task<Void, Never>?
+  private var generation = 0
+  // Catalog/provider/project requests are independent of the currently opened
+  // run. `resetRun()` must not make their useful replies disappear.
+  private var dataGeneration = 0
+  private var catalogLoadedAt: Date?
+  private var providersLoadedAt: Date?
+  private var projectsLoadedAt: Date?
+  private var commandCache: [String: G0Transport.RunCommandCatalog] = [:]
+  private var historyCache: [SessionIdentity: HistoryState] = [:]
+  private var pendingSubmission: PendingSubmission?
+  private var seenOutputSequences = Set<Int>()
+  private var archivedActiveTurn = false
+
+  private static let catalogFreshness: TimeInterval = 60
+  private static let metadataFreshness: TimeInterval = 5 * 60
   #if DEBUG
   private var mockMode = false
   #endif
@@ -136,11 +211,20 @@ final class RemoteRunStore: ObservableObject {
     return RemoteRunClient(connection: connection)
   }
 
-  func chooseProject(_ ref: G0Transport.RunProjectRef) { chosen = ref }
+  private func isFresh(_ date: Date?, within interval: TimeInterval) -> Bool {
+    guard let date else { return false }
+    return Date().timeIntervalSince(date) < interval
+  }
+
+  func chooseProject(_ ref: G0Transport.RunProjectRef) {
+    chosen = ref
+    if let providerId = chosenProvider?.id { loadCommands(providerId: providerId, cwd: ref.path) }
+  }
   func chooseProvider(_ ref: G0Transport.RunProviderRef) {
     chosenProvider = ref
     chosenEffort = ref.efforts?.first(where: { $0.isDefault == true })?.id ?? ref.efforts?.first?.id
     permissionMode = ref.permissions?.first(where: { $0.id == "default" })?.id ?? ref.permissions?.first?.id ?? "default"
+    if let cwd = chosen?.path { loadCommands(providerId: ref.id, cwd: cwd) }
   }
   func chooseEffort(_ id: String) {
     guard chosenProvider?.efforts?.contains(where: { $0.id == id }) == true else { return }
@@ -152,45 +236,104 @@ final class RemoteRunStore: ObservableObject {
   }
 
   // Load the host session catalog so the phone's session list shows the SAME
-  // conversations the Mac has (fixes an always-empty list). Honest states only.
-  func loadSessions() {
+  // conversations the Mac has. Returning from a transcript uses the warm value
+  // immediately; a fresh cache performs no network request at all.
+  func loadSessions(force: Bool = false) {
     #if DEBUG
     if mockMode { return }
     #endif
-    guard let client = makeClient() else { catalog = .failed("尚未配对"); return }
-    catalog = .loading
-    Task { [weak self] in
+    let hasCachedValue = catalog.hasVisibleValue
+    if !force, hasCachedValue, isFresh(catalogLoadedAt, within: Self.catalogFreshness) { return }
+    guard catalogTask == nil else { return }
+    guard let client = makeClient() else {
+      if !hasCachedValue { catalog = .failed("尚未配对") }
+      return
+    }
+    if !hasCachedValue { catalog = .loading }
+    let requestDataGeneration = dataGeneration
+    catalogTask = Task { [weak self] in
       do {
         let list = try await client.sessions()
         await MainActor.run {
-          self?.reachable = true
-          self?.catalog = list.isEmpty ? .empty : .loaded(list)
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.catalogTask = nil
+          self.reachable = true
+          self.catalogLoadedAt = Date()
+          self.catalog = list.isEmpty ? .empty : .loaded(list)
         }
       } catch {
-        await MainActor.run { self?.reachable = false; self?.catalog = .failed(Self.describe(error)) }
+        await MainActor.run {
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.catalogTask = nil
+          self.reachable = false
+          if !hasCachedValue { self.catalog = .failed(Self.describe(error)) }
+        }
       }
     }
   }
 
-  // Load one session's real conversation content so the phone can OPEN it.
-  // Honest states only; never fabricates turns.
-  func loadHistory(providerId: String, cwd: String, externalSessionId: String) {
+  // Load one session's real conversation content. Successful transcripts are
+  // cached per identity for the app lifetime, so switching away and reopening a
+  // conversation does not download and parse the same history again.
+  func loadHistory(providerId: String, cwd: String, externalSessionId: String, force: Bool = false) {
     #if DEBUG
     if mockMode { return }
     #endif
-    guard let client = makeClient() else { history = .failed("尚未配对"); return }
-    history = .loading
-    Task { [weak self] in
+    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    if activeSessionIdentity != identity {
+      resetRun()
+      activeSessionIdentity = identity
+    }
+    if !force, let cached = historyCache[identity] {
+      history = cached
+      return
+    }
+    let cached = historyCache[identity]
+    guard let client = makeClient() else {
+      history = cached ?? .failed("尚未配对")
+      return
+    }
+    historyTask?.cancel()
+    let requestGeneration = generation
+    history = cached ?? .loading
+    historyTask = Task { [weak self] in
       do {
         let turns = try await client.history(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
         await MainActor.run {
-          self?.reachable = true
-          self?.history = turns.isEmpty ? .empty : .loaded(turns)
+          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
+          self.historyTask = nil
+          self.reachable = true
+          let state: HistoryState = turns.isEmpty ? .empty : .loaded(turns)
+          self.historyCache[identity] = state
+          self.history = state
         }
       } catch {
-        await MainActor.run { self?.reachable = false; self?.history = .failed(Self.describe(error)) }
+        await MainActor.run {
+          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
+          self.historyTask = nil
+          self.reachable = false
+          self.history = cached ?? .failed(Self.describe(error))
+        }
       }
     }
+  }
+
+  // Re-opening the same session does not discard its live observation. If the
+  // view was left while a run was active, resume its poll using the known run id.
+  func prepareForSession(providerId: String, cwd: String, externalSessionId: String) {
+    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    if activeSessionIdentity == identity {
+      if let runId, pollTask == nil, !isTerminal(generation: generation, identity: identity) {
+        resumeObservation(runId: runId)
+      }
+      if history == .idle { loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId) }
+      return
+    }
+    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  }
+
+  func completedTurns(for identity: SessionIdentity) -> [CompletedLiveTurn] {
+    completedLiveTurns[identity] ?? []
   }
 
   // Load the Providers the host offers. Only available ones are selectable (an
@@ -201,22 +344,32 @@ final class RemoteRunStore: ObservableObject {
   // Provider the user never chose - exactly the failure the owner hit. Requiring
   // an explicit pick (canSend gates on chosenProvider) keeps the choice honest.
   // If a previously-chosen Provider is no longer available, clear it.
-  func loadProviders(preferredId: String? = nil) {
+  func loadProviders(preferredId: String? = nil, force: Bool = false) {
     #if DEBUG
     if mockMode {
-      if let preferredId, case let .loaded(items) = providers,
-         let preferred = items.first(where: { $0.id == preferredId }) { chooseProvider(preferred) }
+      applyPreferredProvider(preferredId)
       return
     }
     #endif
-    guard let client = makeClient() else { providers = .failed("尚未配对"); return }
-    providers = .loading
-    Task { [weak self] in
+    let hasCachedValue: Bool
+    switch providers { case .loaded, .empty: hasCachedValue = true; default: hasCachedValue = false }
+    applyPreferredProvider(preferredId)
+    if !force, hasCachedValue, isFresh(providersLoadedAt, within: Self.metadataFreshness) { return }
+    guard providersTask == nil else { return }
+    guard let client = makeClient() else {
+      if !hasCachedValue { providers = .failed("尚未配对") }
+      return
+    }
+    if !hasCachedValue { providers = .loading }
+    let requestDataGeneration = dataGeneration
+    providersTask = Task { [weak self] in
       do {
         let list = try await client.providers()
         await MainActor.run {
-          guard let self else { return }
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.providersTask = nil
           self.reachable = true
+          self.providersLoadedAt = Date()
           let usable = list.filter { $0.available }
           self.providers = usable.isEmpty ? .empty : .loaded(usable)
           if let chosen = self.chosenProvider, !usable.contains(where: { $0.id == chosen.id }) {
@@ -224,33 +377,109 @@ final class RemoteRunStore: ObservableObject {
             self.chosenEffort = nil
             self.permissionMode = "default"
           }
-          if let preferredId, let preferred = usable.first(where: { $0.id == preferredId }), self.chosenProvider?.id != preferredId {
-            self.chooseProvider(preferred)
-          }
+          self.applyPreferredProvider(preferredId)
         }
       } catch {
-        await MainActor.run { self?.reachable = false; self?.providers = .failed(Self.describe(error)) }
+        await MainActor.run {
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.providersTask = nil
+          self.reachable = false
+          if !hasCachedValue { self.providers = .failed(Self.describe(error)) }
+        }
       }
+    }
+  }
+
+  private func applyPreferredProvider(_ preferredId: String?) {
+    guard let preferredId, case let .loaded(items) = providers,
+          let preferred = items.first(where: { $0.id == preferredId }), chosenProvider?.id != preferredId else { return }
+    chooseProvider(preferred)
+  }
+
+  func loadCommands(providerId: String, cwd: String, force: Bool = false) {
+    #if DEBUG
+    if mockMode { return }
+    #endif
+    let key = providerId + "\u{1f}" + cwd
+    if !force, let cached = commandCache[key] {
+      commands = cached.commands.isEmpty ? .empty(cached.reason) : .loaded(cached.commands)
+      return
+    }
+    commandsTask?.cancel()
+    guard let client = makeClient() else { commands = .failed("尚未配对"); return }
+    commands = .loading
+    let requestDataGeneration = dataGeneration
+    commandsTask = Task { [weak self] in
+      do {
+        let catalog = try await client.commands(providerId: providerId, cwd: cwd)
+        await MainActor.run {
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.commandsTask = nil
+          self.reachable = true
+          self.commandCache[key] = catalog
+          self.commands = catalog.commands.isEmpty ? .empty(catalog.reason) : .loaded(catalog.commands)
+        }
+      } catch {
+        await MainActor.run {
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.commandsTask = nil
+          self.commands = .failed(Self.describe(error))
+        }
+      }
+    }
+  }
+
+  var slashCommands: [G0Transport.RunCommandRef] {
+    if case let .loaded(items) = commands { return items }
+    return []
+  }
+
+  var slashCommandsLoading: Bool {
+    if case .loading = commands { return true }
+    return false
+  }
+
+  var slashCommandsReason: String? {
+    switch commands {
+    case let .empty(reason): return reason
+    case let .failed(reason): return reason
+    default: return nil
     }
   }
 
   // Load the host-authorized project directories. The phone can never authorize
   // a new one; it only chooses among these, and the host re-checks on submit.
-  func loadProjects() {
+  func loadProjects(force: Bool = false) {
     #if DEBUG
     if mockMode { return }
     #endif
-    guard let client = makeClient() else { projects = .failed("尚未配对，无法读取项目"); return }
-    projects = .loading
-    Task { [weak self] in
+    let hasCachedValue: Bool
+    switch projects { case .loaded, .empty: hasCachedValue = true; default: hasCachedValue = false }
+    if !force, hasCachedValue, isFresh(projectsLoadedAt, within: Self.metadataFreshness) { return }
+    guard projectsTask == nil else { return }
+    guard let client = makeClient() else {
+      if !hasCachedValue { projects = .failed("尚未配对，无法读取项目") }
+      return
+    }
+    if !hasCachedValue { projects = .loading }
+    let requestDataGeneration = dataGeneration
+    projectsTask = Task { [weak self] in
       do {
         let list = try await client.projects()
         await MainActor.run {
-          self?.reachable = true
-          self?.projects = list.isEmpty ? .empty : .loaded(list)
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.projectsTask = nil
+          self.reachable = true
+          self.projectsLoadedAt = Date()
+          self.projects = list.isEmpty ? .empty : .loaded(list)
         }
       } catch {
-        await MainActor.run { self?.reachable = false; self?.projects = .failed(Self.describe(error)) }
+        await MainActor.run {
+          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          self.projectsTask = nil
+          self.reachable = false
+          if !hasCachedValue { self.projects = .failed(Self.describe(error)) }
+        }
       }
     }
   }
@@ -263,21 +492,26 @@ final class RemoteRunStore: ObservableObject {
     #endif
     guard let client = makeClient() else { directories = .failed("尚未配对，无法读取文件夹"); return }
     directories = .loading
+    let requestGeneration = generation
     Task { [weak self] in
       do {
         let listing = try await client.directories(path: path)
         await MainActor.run {
-          self?.reachable = true
-          self?.directories = .loaded(listing)
+          guard let self, self.generation == requestGeneration else { return }
+          self.reachable = true; self.directories = .loaded(listing)
         }
       } catch {
-        await MainActor.run { self?.reachable = false; self?.directories = .failed(Self.describe(error)) }
+        await MainActor.run {
+          guard let self, self.generation == requestGeneration else { return }
+          self.reachable = false; self.directories = .failed(Self.describe(error))
+        }
       }
     }
   }
 
-  // Submit a durable intent and begin polling. Recorded != executed: the button
-  // records intent; the host drives the real lifecycle we then observe.
+  // Submit a durable intent. Until a receipt arrives the state is explicitly
+  // submitting; a transport-unknown result keeps the same intentId available
+  // for a user retry, rather than creating a second host run.
   func submit(prompt: String, providerId: String, attachments: [RemoteRunClient.Attachment] = []) {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
@@ -285,62 +519,100 @@ final class RemoteRunStore: ObservableObject {
     #if DEBUG
     if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); return }
     #endif
-    guard let client = makeClient() else { submitError = "尚未配对"; return }
-    let modelId = chosenProvider?.modelId
-    let effort = chosenEffort
-    let permission = permissionMode
-    submitError = nil
+    guard makeClient() != nil else { submitError = "尚未配对"; return }
+    let identity = SessionIdentity.new(providerId: providerId, cwd: cwd)
     resetRun()
+    activeSessionIdentity = identity
     self.prompt = trimmed
     sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
-    lifecycle = .recorded
-    Task { [weak self] in
+    let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
+                                          modelId: chosenProvider?.modelId, effort: chosenEffort,
+                                          permissionMode: permissionMode, attachments: attachments)
+    pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
+    lifecycle = .submitting
+    submitPending()
+  }
+
+  // Retry only the unresolved submission. The intent id and routing are kept
+  // byte-for-byte stable so a late first receipt is an idempotent duplicate.
+  func retrySubmission() {
+    guard pendingSubmission != nil, lifecycle == .submitting else { return }
+    submitError = "正在重新核对提交结果…"
+    submitPending()
+  }
+
+  private func submitPending() {
+    guard let pending = pendingSubmission, let client = makeClient() else { return }
+    submitTask?.cancel()
+    let requestGeneration = generation
+    submitTask = Task { [weak self] in
       do {
-        let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
-                                              modelId: modelId, effort: effort, permissionMode: permission,
-                                              attachments: attachments)
-        let outcome = try await client.submit(routing: routing)
+        let outcome = try await client.submit(routing: pending.routing, intentId: pending.intentId)
         await MainActor.run {
-          self?.reachable = true
-          self?.runId = outcome.runId
-          self?.startPolling(runId: outcome.runId, client: client)
+          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
+          self.reachable = true
+          self.runId = outcome.runId
+          self.pendingSubmission = nil
+          self.retryAvailable = false
+          self.submitError = nil
+          self.lifecycle = .recorded
+          self.startPolling(runId: outcome.runId, client: client, generation: requestGeneration, identity: pending.identity)
         }
       } catch {
         await MainActor.run {
-          self?.reachable = false
-          self?.lifecycle = .unknown
-          self?.submitError = "提交失败：\(Self.describe(error))"
+          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
+          self.reachable = false
+          self.lifecycle = .submitting
+          self.retryAvailable = true
+          self.submitError = "提交结果未知：\(Self.describe(error))。请重试核对，不会创建新的任务。"
         }
       }
     }
   }
 
-  private func startPolling(runId: String, client: RemoteRunClient) {
+  private func startPolling(runId: String, client: RemoteRunClient, generation: Int,
+                            identity: SessionIdentity) {
     pollTask?.cancel()
     pollTask = Task { [weak self] in
+      guard let self else { return }
       var ledgerCursor = 0
       var outputCursor = 0
-      // Poll both channels until a terminal lifecycle, then drain once more so a
-      // late final chunk is not lost. Bounded so a wedged host cannot spin.
-      for _ in 0..<600 {
-        if Task.isCancelled { return }
+      while !Task.isCancelled {
         do {
           let page = try await client.poll(cursor: ledgerCursor)
           ledgerCursor = page.cursor
-          for ev in page.events where ev.runId == runId { await self?.apply(event: ev) }
+          for ev in page.events where ev.runId == runId {
+            self.apply(event: ev, generation: generation, identity: identity)
+          }
           let out = try await client.output(runId: runId, cursor: outputCursor)
           outputCursor = out.cursor
-          for chunk in out.chunks { await self?.append(chunk: chunk) }
-          await MainActor.run { self?.reachable = true }
+          for chunk in out.chunks {
+            self.append(chunk: chunk, generation: generation, identity: identity)
+          }
+          await MainActor.run { [weak self] in
+            guard let self, self.isCurrent(generation, identity: identity) else { return }
+            self.reachable = true
+            self.observationInterrupted = false
+          }
         } catch {
-          // A transient transport error is not a run failure; surface it as a
-          // non-terminal note and keep polling. We never invent a settlement.
-          await MainActor.run { self?.reachable = false; self?.submitError = "连接主机时出错：\(Self.describe(error))" }
+          // An observation failure is not a Provider terminal state. Stop here
+          // and say exactly that, so a stale/unknown result cannot look settled.
+          await MainActor.run {
+            guard self.isCurrent(generation, identity: identity) else { return }
+            self.reachable = false
+            self.observationInterrupted = true
+            self.submitError = "观察中断：\(Self.describe(error))。运行结果未知。"
+            self.pollTask = nil
+          }
+          return
         }
-        if await self?.isTerminal() == true {
-          // Final output drain.
-          if let out = try? await client.output(runId: runId, cursor: outputCursor) {
-            for chunk in out.chunks { await self?.append(chunk: chunk) }
+        if self.isTerminal(generation: generation, identity: identity) {
+          await self.drainOutput(client: client, runId: runId, cursor: outputCursor,
+                                 generation: generation, identity: identity)
+          await MainActor.run {
+            guard self.isCurrent(generation, identity: identity) else { return }
+            self.archiveActiveTurnIfNeeded()
+            self.pollTask = nil
           }
           return
         }
@@ -349,11 +621,83 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  private func isTerminal() -> Bool {
-    lifecycle == .settled || lifecycle == .failed || lifecycle == .cancelled
+  private func resumeObservation(runId: String) {
+    guard let identity = activeSessionIdentity, let client = makeClient() else { return }
+    observationInterrupted = false
+    submitError = nil
+    startPolling(runId: runId, client: client, generation: generation, identity: identity)
   }
 
-  private func apply(event ev: G0Transport.RunLedgerEvent) {
+  func retryObservation() {
+    guard observationInterrupted, let runId else { return }
+    resumeObservation(runId: runId)
+  }
+
+  // Resume a known host run after a view rebuild. The caller supplies the
+  // session identity obtained from the host catalog, so a run id from another
+  // session cannot attach to the current transcript.
+  func resumeObservation(runId: String, providerId: String, cwd: String, externalSessionId: String) {
+    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    if activeSessionIdentity != identity {
+      resetRun()
+      activeSessionIdentity = identity
+    }
+    self.runId = runId
+    if lifecycle == .unknown { lifecycle = .recorded }
+    resumeObservation(runId: runId)
+  }
+
+  private func drainOutput(client: RemoteRunClient, runId: String, cursor: Int,
+                          generation: Int, identity: SessionIdentity) async {
+    var cursor = cursor
+    while !Task.isCancelled {
+      guard let page = try? await client.output(runId: runId, cursor: cursor) else {
+        await MainActor.run {
+          guard self.isCurrent(generation, identity: identity) else { return }
+          self.observationInterrupted = true
+          self.submitError = "观察中断：无法读取运行的最后输出，运行结果未知。"
+        }
+        return
+      }
+      let next = page.cursor
+      for chunk in page.chunks {
+        append(chunk: chunk, generation: generation, identity: identity)
+      }
+      // The host's cursor is authoritative. Stop only when the page is empty or
+      // did not advance; this drains arbitrarily many pages, including >400 chunks.
+      if !Self.shouldContinueDrain(cursor: cursor, next: next, chunkCount: page.chunks.count) { return }
+      cursor = next
+    }
+  }
+
+  nonisolated private static func responseMatches(currentGeneration: Int, requestGeneration: Int,
+                                                   currentIdentity: SessionIdentity?, requestIdentity: SessionIdentity) -> Bool {
+    currentGeneration == requestGeneration && currentIdentity == requestIdentity
+  }
+
+  nonisolated private static func shouldContinueDrain(cursor: Int, next: Int, chunkCount: Int) -> Bool {
+    chunkCount > 0 && next > cursor
+  }
+
+  nonisolated private static func followUpIdentity(current: SessionIdentity?, providerId: String,
+                                                    cwd: String, originalResume: String) -> SessionIdentity {
+    current.flatMap { identity in
+      identity.providerId == providerId && identity.cwd == cwd ? identity : nil
+    } ?? SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: originalResume)
+  }
+
+  private func isCurrent(_ requestGeneration: Int, identity: SessionIdentity) -> Bool {
+    Self.responseMatches(currentGeneration: generation, requestGeneration: requestGeneration,
+                         currentIdentity: activeSessionIdentity, requestIdentity: identity)
+  }
+
+  private func isTerminal(generation: Int, identity: SessionIdentity) -> Bool {
+    isCurrent(generation, identity: identity) &&
+      (lifecycle == .settled || lifecycle == .failed || lifecycle == .cancelled)
+  }
+
+  private func apply(event ev: G0Transport.RunLedgerEvent, generation: Int, identity: SessionIdentity) {
+    guard isCurrent(generation, identity: identity) else { return }
     switch ev.kind {
     case "intent_recorded": if lifecycle == .unknown { lifecycle = .recorded }
     case "run_dispatched": if lifecycle == .recorded || lifecycle == .unknown { lifecycle = .dispatched }
@@ -374,9 +718,14 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  private func append(chunk: G0Transport.RunOutputChunk) {
+  private func append(chunk: G0Transport.RunOutputChunk, generation: Int, identity: SessionIdentity) {
+    guard isCurrent(generation, identity: identity) else { return }
     if chunk.kind == "truncated" { truncated = true; return }
-    if output.contains(where: { $0.id == chunk.seq }) { return }
+    // Coalescing replaces the visible row id with the newest seq, so the array
+    // alone cannot remember every consumed chunk. Keep an explicit cursor set;
+    // observation recovery starts from cursor 0 and must not append old deltas
+    // a second time before reaching the live tail.
+    guard seenOutputSequences.insert(chunk.seq).inserted else { return }
     // Providers stream text/reasoning in small deltas. Keep those deltas as one
     // readable block instead of rendering one SwiftUI Text row per token.
     if let last = output.last, last.kind == chunk.kind,
@@ -388,9 +737,15 @@ final class RemoteRunStore: ObservableObject {
   }
 
   func resetRun() {
+    archiveActiveTurnIfNeeded()
+    generation += 1
     pollTask?.cancel(); pollTask = nil
+    submitTask?.cancel(); submitTask = nil
+    historyTask?.cancel(); historyTask = nil
+    pendingSubmission = nil
     lifecycle = .unknown
     output = []
+    seenOutputSequences = []
     prompt = nil
     sentAttachments = []
     runId = nil
@@ -398,6 +753,47 @@ final class RemoteRunStore: ObservableObject {
     resultSummary = nil
     submitError = nil
     liveExternalSessionId = nil
+    observationInterrupted = false
+    retryAvailable = false
+    archivedActiveTurn = false
+  }
+
+  private func archiveActiveTurnIfNeeded() {
+    guard !archivedActiveTurn, let identity = activeSessionIdentity,
+          let prompt, !prompt.isEmpty, isTerminal(generation: generation, identity: identity) else { return }
+    let turn = CompletedLiveTurn(id: runId ?? UUID().uuidString.lowercased(), runId: runId,
+      prompt: prompt, attachments: sentAttachments, lifecycle: lifecycle, output: output,
+      resultSummary: resultSummary, externalSessionId: liveExternalSessionId)
+    completedLiveTurns[identity, default: []].append(turn)
+    archivedActiveTurn = true
+  }
+
+  // Used by destructive unpair. It invalidates every outstanding request before
+  // releasing the visible state, so old history/poll callbacks cannot reappear.
+  func clearAllState() {
+    generation += 1
+    dataGeneration += 1
+    pollTask?.cancel(); pollTask = nil
+    submitTask?.cancel(); submitTask = nil
+    catalogTask?.cancel(); catalogTask = nil
+    historyTask?.cancel(); historyTask = nil
+    providersTask?.cancel(); providersTask = nil
+    commandsTask?.cancel(); commandsTask = nil
+    projectsTask?.cancel(); projectsTask = nil
+    pendingSubmission = nil
+    projects = .idle; directories = .idle; chosen = nil
+    providers = .idle; commands = .idle; chosenProvider = nil; chosenEffort = nil; permissionMode = "default"
+    catalog = .idle; history = .idle; reachable = nil
+    catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; historyCache = [:]
+    lifecycle = .unknown; output = []; seenOutputSequences = []; prompt = nil; sentAttachments = []
+    runId = nil; submitError = nil; truncated = false; resultSummary = nil
+    liveExternalSessionId = nil; activeSessionIdentity = nil
+    observationInterrupted = false; retryAvailable = false
+    completedLiveTurns = [:]
+    archivedActiveTurn = false
+    #if DEBUG
+    mockMode = false
+    #endif
   }
 
   // Send a follow-up that CONTINUES an opened session (same Provider + cwd +
@@ -410,39 +806,54 @@ final class RemoteRunStore: ObservableObject {
     #if DEBUG
     if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); liveExternalSessionId = resume; return }
     #endif
-    guard let client = makeClient() else { submitError = "尚未配对"; return }
+    guard makeClient() != nil else { submitError = "尚未配对"; return }
     let resumeId = liveExternalSessionId ?? resume
+    // The routing resume id may advance after each Provider turn, but the UI
+    // identity must remain the originally opened conversation. Otherwise every
+    // new native id moves completed turns to a key the current transcript view
+    // does not query, making the previous exchange disappear again.
+    let identity = Self.followUpIdentity(current: activeSessionIdentity, providerId: providerId,
+                                         cwd: cwd, originalResume: resume)
     let modelId = chosenProvider?.id == providerId ? chosenProvider?.modelId : nil
     let effort = chosenProvider?.id == providerId ? chosenEffort : nil
     let permission = chosenProvider?.id == providerId ? permissionMode : "default"
-    submitError = nil
     resetRun()
+    activeSessionIdentity = identity
     self.prompt = trimmed
     sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
-    lifecycle = .recorded
     liveExternalSessionId = resumeId
-    Task { [weak self] in
-      do {
-        let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
-                                              modelId: modelId, effort: effort, permissionMode: permission,
-                                              resume: resumeId, attachments: attachments)
-        let outcome = try await client.submit(routing: routing)
-        await MainActor.run {
-          self?.reachable = true
-          self?.runId = outcome.runId
-          self?.startPolling(runId: outcome.runId, client: client)
-        }
-      } catch {
-        await MainActor.run {
-          self?.reachable = false
-          self?.lifecycle = .unknown
-          self?.submitError = "发送失败：\(Self.describe(error))"
-        }
-      }
-    }
+    let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
+                                          modelId: modelId, effort: effort, permissionMode: permission,
+                                          resume: resumeId, attachments: attachments)
+    pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
+    lifecycle = .submitting
+    submitPending()
   }
 
   #if DEBUG
+  // Pure checks used by the launch self-test; they exercise the invariants that
+  // do not require a relay or Provider.
+  nonisolated static func selfTestGenerationIsolation() -> Bool {
+    let a = SessionIdentity.opened(providerId: "codex", cwd: "/a", externalSessionId: "one")
+    let b = SessionIdentity.opened(providerId: "codex", cwd: "/b", externalSessionId: "two")
+    return responseMatches(currentGeneration: 2, requestGeneration: 2, currentIdentity: b, requestIdentity: b) &&
+      !responseMatches(currentGeneration: 2, requestGeneration: 1, currentIdentity: b, requestIdentity: b) &&
+      !responseMatches(currentGeneration: 2, requestGeneration: 2, currentIdentity: b, requestIdentity: a)
+  }
+
+  nonisolated static func selfTestDrain(cursor: Int, next: Int, chunkCount: Int) -> Bool {
+    shouldContinueDrain(cursor: cursor, next: next, chunkCount: chunkCount) &&
+      !shouldContinueDrain(cursor: next, next: next, chunkCount: chunkCount) &&
+      !shouldContinueDrain(cursor: cursor, next: next, chunkCount: 0)
+  }
+
+  nonisolated static func selfTestFollowUpIdentity() -> Bool {
+    let opened = SessionIdentity.opened(providerId: "codex", cwd: "/repo", externalSessionId: "original")
+    let kept = followUpIdentity(current: opened, providerId: "codex", cwd: "/repo", originalResume: "latest")
+    let replaced = followUpIdentity(current: opened, providerId: "qoder", cwd: "/repo", originalResume: "qoder")
+    return kept == opened && replaced.externalSessionId == "qoder" && replaced != opened
+  }
+
   // Visual-only fixtures for `-uiPreview -uiMockData`. They deliberately never
   // touch Keychain, relay, Provider, ledger, or Release execution paths.
   func applyUIPreviewArguments() {
@@ -476,6 +887,11 @@ final class RemoteRunStore: ObservableObject {
     ]
     providers = .loaded(availableProviders)
     chooseProvider(availableProviders[0])
+    commands = .loaded([
+      .init(name: "review", description: "审查当前改动", argumentHint: "[范围]", source: "builtin"),
+      .init(name: "compact", description: "压缩当前会话上下文", source: "builtin"),
+      .init(name: "rate-workflow", description: "运行项目工作流", argumentHint: "<任务>", source: "custom")
+    ])
 
     let now = Date().timeIntervalSince1970 * 1_000
     catalog = .loaded([
@@ -499,8 +915,8 @@ final class RemoteRunStore: ObservableObject {
       G0Transport.RunHistoryTurn(userText: "请检查 iOS 远程首页的信息层级，并给出可以直接落地的修改。", items: [
         G0Transport.RunHistoryChunk(kind: "reasoning", text: "我会先检查会话分组、状态信息和底部操作区。"),
         G0Transport.RunHistoryChunk(kind: "tool", text: "读取 HomeView.swift"),
-        G0Transport.RunHistoryChunk(kind: "tool_result", text: "已读取 281 行 · 未修改文件"),
-        G0Transport.RunHistoryChunk(kind: "output", text: "发现三个主要问题：项目与会话的视觉层级接近、运行状态缺少时间语境、底部搜索和新建操作抢占了过多空间。建议先压缩标题区，再把 Provider 与时间放入会话元信息。")
+        G0Transport.RunHistoryChunk(kind: "tool_result", text: "1  # HomeView.swift\n2  会话列表与项目分组\n3  搜索、新建与运行状态\n4  Provider 元信息\n5  连接状态与时间语境\n6  底部 Composer 控制\n7  无文件修改\n8  共读取 281 行"),
+        G0Transport.RunHistoryChunk(kind: "output", text: "发现 **三个主要问题**：项目与会话的视觉层级接近、运行状态缺少时间语境、底部搜索和新建操作抢占了过多空间。建议先压缩标题区，再把 `Provider` 与时间放入会话元信息。")
       ]),
       G0Transport.RunHistoryTurn(userText: "按 Codex Refined 的方向继续，先不要加入底栏。", items: [
         G0Transport.RunHistoryChunk(kind: "output", text: "已保留无底栏结构，并将导航、内容与证据层分开。下一步可以重点比较列表密度和 Composer 的控制层级。")
@@ -518,7 +934,7 @@ final class RemoteRunStore: ObservableObject {
       OutputLine(id: 1, kind: "reasoning", text: "先对齐信息架构，再调整视觉密度。"),
       OutputLine(id: 2, kind: "tool", text: "编辑 HomeView.swift"),
       OutputLine(id: 3, kind: "tool_result", text: "3 个区块已更新 · 0 个错误"),
-      OutputLine(id: 4, kind: "output", text: "首页已按“置顶 + 项目”重新组织。会话标题成为主信息，Provider、更新时间和运行状态降为轻量元信息；底部仅保留搜索与新建入口。")
+      OutputLine(id: 4, kind: "output", text: "## 已完成\n\n首页已按 **置顶 + 项目** 重新组织，并保留 [运行证据](https://example.com/evidence)。\n\n- 会话标题成为主信息\n- `Provider`、更新时间和状态降为轻量元信息\n- 底部仅保留搜索与新建入口\n\n```swift\nLazyVStack(spacing: 12) {\n  sessionRows\n}\n```")
     ]
     resultSummary = "输入 18,420 · 输出 1,286 · $0.084"
     liveExternalSessionId = "codex-mock-session"
@@ -566,7 +982,8 @@ final class RemoteRunStore: ObservableObject {
   }
   #endif
 
-  func stop() { pollTask?.cancel(); pollTask = nil }
+  // Cancels only this phone's observation task; it cannot stop the Mac Provider.
+  func stopObservation() { pollTask?.cancel(); pollTask = nil }
 
   // Parse a lifecycle marker JSON object into a flat [String:String]; only the
   // string-valued fields we render are kept, numbers are stringified.

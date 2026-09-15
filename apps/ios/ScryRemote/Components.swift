@@ -150,7 +150,7 @@ struct RemoteHeader<Right: View>: View {
         if let backAction { backAction() } else { menuAction?() }
       }
       VStack(spacing: 2) {
-        Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+        Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.84)
         if let subtitle {
           HStack(spacing: 5) {
             if let link { StatusDot(link: link) }
@@ -165,7 +165,9 @@ struct RemoteHeader<Right: View>: View {
     }
     .padding(.horizontal, 14).padding(.vertical, 6)
     .frame(minHeight: 62)
-    .background(Palette.surface.opacity(0.97))
+    .background(Palette.surface)
+    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
+    .zIndex(2)
   }
 }
 
@@ -175,6 +177,324 @@ extension RemoteHeader where Right == EmptyView {
     self.title = title; self.subtitle = subtitle; self.link = link
     self.backAction = backAction; self.menuAction = menuAction
     self.right = { EmptyView() }
+  }
+}
+
+// MARK: - Conversation content
+
+private struct ConversationMarkdownBlock: Identifiable {
+  enum Kind {
+    case paragraph
+    case heading(Int)
+    case unordered
+    case ordered(String)
+    case quote
+    case code(String?)
+    case divider
+  }
+
+  let id: Int
+  let kind: Kind
+  let text: String
+}
+
+/// SwiftUI's single `Text(AttributedString(markdown:))` keeps inline emphasis,
+/// but flattens most block structure (notably lists and paragraph rhythm). Agent
+/// answers then become one dense wall of text. This small block parser preserves
+/// the Markdown structures that matter in a conversation without using WebKit.
+private enum ConversationMarkdownParser {
+  static func parse(_ source: String) -> [ConversationMarkdownBlock] {
+    let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+    var blocks: [ConversationMarkdownBlock] = []
+    var codeLines: [String] = []
+    var codeFence: String?
+    var codeLanguage: String?
+
+    func append(_ kind: ConversationMarkdownBlock.Kind, _ text: String) {
+      guard !text.isEmpty || { if case .divider = kind { return true }; return false }() else { return }
+      blocks.append(.init(id: blocks.count, kind: kind, text: text))
+    }
+
+    for rawLine in lines {
+      let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+
+      if let fence = codeFence {
+        if trimmed.hasPrefix(fence) {
+          append(.code(codeLanguage), codeLines.joined(separator: "\n"))
+          codeLines = []; codeFence = nil; codeLanguage = nil
+        } else {
+          codeLines.append(rawLine)
+        }
+        continue
+      }
+
+      if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+        let fence = String(trimmed.prefix(3))
+        codeFence = fence
+        let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
+        codeLanguage = language.isEmpty ? nil : language
+        continue
+      }
+      guard !trimmed.isEmpty else { continue }
+
+      let hashes = trimmed.prefix { $0 == "#" }.count
+      if hashes > 0, hashes <= 6, trimmed.dropFirst(hashes).first == " " {
+        append(.heading(hashes), String(trimmed.dropFirst(hashes + 1)))
+        continue
+      }
+
+      if isDivider(trimmed) { append(.divider, ""); continue }
+
+      if trimmed.hasPrefix(">") {
+        append(.quote, String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces))
+        continue
+      }
+
+      if let item = unorderedItem(trimmed) {
+        append(.unordered, item)
+        continue
+      }
+
+      if let ordered = orderedItem(trimmed) {
+        append(.ordered(ordered.marker), ordered.text)
+        continue
+      }
+
+      // Provider output is not column-wrapped, so a source newline is normally
+      // an intentional paragraph boundary. Keeping it as a block gives links,
+      // summaries and short result sections the same scan rhythm as desktop AC.
+      append(.paragraph, trimmed)
+    }
+
+    if codeFence != nil { append(.code(codeLanguage), codeLines.joined(separator: "\n")) }
+    if blocks.isEmpty, !source.isEmpty { append(.paragraph, source) }
+    return blocks
+  }
+
+  private static func unorderedItem(_ line: String) -> String? {
+    for prefix in ["- ", "* ", "+ "] where line.hasPrefix(prefix) {
+      let value = String(line.dropFirst(2))
+      if value.hasPrefix("[ ] ") { return "☐ " + value.dropFirst(4) }
+      if value.lowercased().hasPrefix("[x] ") { return "☑ " + value.dropFirst(4) }
+      return value
+    }
+    return nil
+  }
+
+  private static func orderedItem(_ line: String) -> (marker: String, text: String)? {
+    let digits = line.prefix { $0.isNumber }
+    guard !digits.isEmpty else { return nil }
+    let rest = line.dropFirst(digits.count)
+    guard rest.hasPrefix(". ") || rest.hasPrefix(") ") else { return nil }
+    return (String(digits) + ".", String(rest.dropFirst(2)))
+  }
+
+  private static func isDivider(_ line: String) -> Bool {
+    let compact = line.replacingOccurrences(of: " ", with: "")
+    guard compact.count >= 3, let first = compact.first, first == "-" || first == "*" || first == "_" else { return false }
+    return compact.allSatisfy { $0 == first }
+  }
+}
+
+private struct ConversationMarkdownInline: View {
+  let source: String
+  var muted = false
+  var size: CGFloat = 16
+  var weight: Font.Weight = .regular
+
+  private var rendered: AttributedString {
+    (try? AttributedString(
+      markdown: source,
+      options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                     failurePolicy: .returnPartiallyParsedIfPossible)
+    )) ?? AttributedString(source)
+  }
+
+  var body: some View {
+    Text(rendered)
+      .font(.system(size: size, weight: weight))
+      .foregroundStyle(muted ? Palette.muted : Palette.ink)
+      .lineSpacing(muted ? 3 : 5)
+      .textSelection(.enabled)
+      .tint(Palette.blue)
+      .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+struct ConversationMarkdownText: View {
+  let source: String
+  var muted = false
+
+  private var blocks: [ConversationMarkdownBlock] { ConversationMarkdownParser.parse(source) }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: muted ? 8 : 11) {
+      ForEach(blocks) { block in
+        blockView(block)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder private func blockView(_ block: ConversationMarkdownBlock) -> some View {
+    switch block.kind {
+    case .paragraph:
+      ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
+    case let .heading(level):
+      ConversationMarkdownInline(source: block.text, muted: muted,
+                                 size: headingSize(level), weight: level <= 2 ? .bold : .semibold)
+        .padding(.top, level <= 2 ? 4 : 1)
+    case .unordered:
+      HStack(alignment: .firstTextBaseline, spacing: 9) {
+        Text("•").font(.system(size: muted ? 14 : 16, weight: .bold)).foregroundStyle(Palette.blue)
+          .frame(width: 10, alignment: .center)
+        ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
+      }
+    case let .ordered(marker):
+      HStack(alignment: .firstTextBaseline, spacing: 9) {
+        Text(marker).font(.system(size: muted ? 13 : 15, weight: .semibold)).foregroundStyle(Palette.blue)
+          .frame(minWidth: 22, alignment: .trailing)
+        ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
+      }
+    case .quote:
+      HStack(alignment: .top, spacing: 10) {
+        RoundedRectangle(cornerRadius: 1.5).fill(Palette.blue.opacity(0.55)).frame(width: 3)
+        ConversationMarkdownInline(source: block.text, muted: true, size: muted ? 14 : 15)
+      }
+      .padding(.vertical, 2)
+    case let .code(language):
+      VStack(alignment: .leading, spacing: 0) {
+        if let language {
+          Text(language.uppercased()).font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(Palette.muted).padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 4)
+        }
+        ScrollView(.horizontal, showsIndicators: false) {
+          Text(verbatim: block.text)
+            .font(.system(size: 12.5, design: .monospaced))
+            .foregroundStyle(Color(hex: 0x333438))
+            .textSelection(.enabled)
+            .padding(.horizontal, 12).padding(.vertical, language == nil ? 11 : 7)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color(hex: 0xF3F4F6), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+      .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Palette.line.opacity(0.8)))
+    case .divider:
+      Rectangle().fill(Palette.line).frame(height: 0.5).padding(.vertical, 3)
+    }
+  }
+
+  private func headingSize(_ level: Int) -> CGFloat {
+    switch level {
+    case 1: return muted ? 18 : 22
+    case 2: return muted ? 17 : 20
+    case 3: return muted ? 16 : 18
+    default: return muted ? 14.5 : 16.5
+    }
+  }
+}
+
+/// A compact, progressive-disclosure renderer shared by live and archived turns.
+/// Long tool payloads and chain-of-thought-like reasoning stay available without
+/// overwhelming the answer; assistant Markdown is rendered instead of exposing syntax.
+struct ConversationChunk: View {
+  let kind: String
+  let text: String
+  @State private var expanded = false
+
+  private var lineCount: Int { max(1, text.split(separator: "\n", omittingEmptySubsequences: false).count) }
+  private var longToolResult: Bool { text.count > 220 || lineCount > 4 }
+  private var toolResultDetail: String {
+    longToolResult ? "\(lineCount) 行 · 点按展开" : "\(lineCount) 行"
+  }
+
+  @ViewBuilder var body: some View {
+    switch kind {
+    case "reasoning": reasoning
+    case "tool": toolCall
+    case "tool_result": toolResult
+    case "truncated": truncated
+    default: ConversationMarkdownText(source: text)
+    }
+  }
+
+  private var reasoning: some View {
+    DisclosureGroup(isExpanded: $expanded) {
+      ConversationMarkdownText(source: text, muted: true)
+        .padding(.top, 9)
+    } label: {
+      Label("思考过程", systemImage: "brain")
+        .font(.system(size: 12.5, weight: .medium))
+        .foregroundStyle(Palette.muted)
+    }
+    .tint(Palette.muted)
+    .padding(.vertical, 8).padding(.horizontal, 11)
+    .background(Palette.canvas.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  private var toolCall: some View {
+    HStack(alignment: .top, spacing: 9) {
+      Image(systemName: "hammer")
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(Palette.blue)
+        .frame(width: 25, height: 25)
+        .background(Palette.blue.opacity(0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+      Text(text)
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(Color(hex: 0x55565A))
+        .lineLimit(2)
+        .multilineTextAlignment(.leading)
+      Spacer(minLength: 0)
+    }
+    .padding(.vertical, 8).padding(.horizontal, 10)
+    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Palette.line))
+  }
+
+  @ViewBuilder private var toolResult: some View {
+    if longToolResult {
+      DisclosureGroup(isExpanded: $expanded) {
+        toolResultText.padding(.top, 9)
+      } label: {
+        resultHeader
+      }
+      .tint(Palette.muted)
+      .padding(.vertical, 9).padding(.horizontal, 11)
+      .background(Palette.canvas.opacity(0.82), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    } else {
+      VStack(alignment: .leading, spacing: 7) {
+        resultHeader
+        toolResultText
+      }
+      .padding(.vertical, 9).padding(.horizontal, 11)
+      .background(Palette.canvas.opacity(0.82), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+  }
+
+  private var resultHeader: some View {
+    HStack(spacing: 7) {
+      Image(systemName: "terminal")
+      Text("工具结果").fontWeight(.semibold)
+      Text(toolResultDetail).foregroundStyle(Palette.faint)
+    }
+    .font(.system(size: 11.5))
+    .foregroundStyle(Palette.muted)
+  }
+
+  private var toolResultText: some View {
+    Text(text)
+      .font(.system(size: 12, design: .monospaced))
+      .foregroundStyle(Color(hex: 0x424244))
+      .textSelection(.enabled)
+      .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var truncated: some View {
+    Label(text, systemImage: "exclamationmark.triangle")
+      .font(.system(size: 12))
+      .foregroundStyle(Palette.warnInk)
+      .padding(.vertical, 8).padding(.horizontal, 10)
+      .background(Palette.warnBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
   }
 }
 
@@ -213,6 +533,10 @@ struct MessageComposer: View {
   var permissionOptions: [G0Transport.RunControlOption] = []
   var selectedPermission = "default"
   var onPermission: ((String) -> Void)?
+  var slashCommands: [G0Transport.RunCommandRef] = []
+  var slashCommandsLoading = false
+  var slashCommandsReason: String?
+  var onRefreshSlashCommands: (() -> Void)?
   let onSend: () -> Void
 
   @State private var showAttachmentSource = false
@@ -225,15 +549,32 @@ struct MessageComposer: View {
   private let maxEachBytes = 512 * 1024
   private let maxTotalBytes = 700 * 1024
 
+  private var slashToken: String? {
+    guard text.hasPrefix("/") else { return nil }
+    let value = String(text.dropFirst())
+    guard !value.contains(where: { $0.isWhitespace }) else { return nil }
+    return value.lowercased()
+  }
+
+  private var slashMatches: [G0Transport.RunCommandRef] {
+    guard let token = slashToken else { return [] }
+    let matches = slashCommands.filter {
+      token.isEmpty || $0.name.lowercased().hasPrefix(token) || $0.description.localizedCaseInsensitiveContains(token)
+    }
+    return Array(matches.prefix(8))
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: 6) {
+      if slashToken != nil && !disabled { slashMenu }
       if !attachments.isEmpty {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 7) { ForEach(attachments) { attachmentChip($0) } }
         }
       }
       TextField(placeholder, text: $text, axis: .vertical)
-        .font(.system(size: 16)).lineLimit(1...6).disabled(disabled)
+        .font(.system(size: 15.5)).lineLimit(1...4).disabled(disabled)
+        .padding(.horizontal, 3).padding(.top, 1)
       HStack(spacing: 2) {
         PlainIcon(symbol: Symbol.plus, label: "添加图片或文件", disabled: disabled) { showAttachmentSource = true }
         Menu {
@@ -282,8 +623,13 @@ struct MessageComposer: View {
         Text(attachmentError).font(.system(size: 11)).foregroundStyle(Palette.negative)
       }
     }
-    .padding(.horizontal, 12).padding(.top, 11).padding(.bottom, 7)
-    .glass(cornerRadius: 25)
+    .padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 5)
+    .background(Palette.glass, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 22, style: .continuous)
+        .strokeBorder(text.isEmpty ? Color(hex: 0xDEDFE3) : Palette.blue.opacity(0.32), lineWidth: 1)
+    )
+    .shadow(color: Color.black.opacity(0.055), radius: 12, y: 4)
     .confirmationDialog("添加附件", isPresented: $showAttachmentSource, titleVisibility: .visible) {
       Button("照片图库") { showPhotos = true }
       Button("选择文本或代码文件") { showFiles = true }
@@ -302,6 +648,56 @@ struct MessageComposer: View {
       guard !items.isEmpty else { return }
       Task { await importPhotos(items); photoItems = [] }
     }
+  }
+
+  private var slashMenu: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack {
+        Text("斜杠命令").font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted)
+        Spacer()
+        if slashCommandsLoading { ProgressView().controlSize(.mini) }
+        if let onRefreshSlashCommands {
+          Button(action: onRefreshSlashCommands) {
+            Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
+          }
+          .buttonStyle(.plain).accessibilityLabel("刷新斜杠命令")
+        }
+      }
+      .padding(.horizontal, 11).padding(.vertical, 8)
+
+      if !slashMatches.isEmpty {
+        ForEach(slashMatches) { command in
+          Button {
+            text = "/\(command.name) "
+          } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+              Text("/\(command.name)")
+                .font(.system(size: 13.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Palette.blue)
+              VStack(alignment: .leading, spacing: 2) {
+                if !command.description.isEmpty {
+                  Text(command.description).font(.system(size: 12.5)).foregroundStyle(Palette.ink).lineLimit(2)
+                }
+                if let hint = command.argumentHint, !hint.isEmpty {
+                  Text(hint).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Palette.muted)
+                }
+              }
+              Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 11).padding(.vertical, 8)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          if command.id != slashMatches.last?.id { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
+        }
+      } else if !slashCommandsLoading {
+        Text(slashCommandsReason ?? (slashCommands.isEmpty ? "当前 Provider 未返回可用命令" : "没有匹配的命令"))
+          .font(.system(size: 12)).foregroundStyle(Palette.muted)
+          .padding(.horizontal, 11).padding(.bottom, 10)
+      }
+    }
+    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Palette.line))
   }
 
   private var permissionLabel: String {

@@ -87,7 +87,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; runId?: string; providerId?: string; cwd?: string; path?: string; externalSessionId?: string }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -116,6 +116,14 @@ export class InnerMtlsHost {
         // Same owner-device authorization; the run path still validates the
         // chosen providerId, so this is a display-only chooser snapshot.
         return { providers: controller.listProviders(fingerprint) }
+      }
+      if (request.op === 'commands') {
+        if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string') return { error: 'invalid_request' }
+        return { commands: await controller.listCommands(fingerprint, {
+          providerId: request.providerId,
+          cwd: request.cwd,
+          ...(typeof request.agentProfileId === 'string' ? { agentProfileId: request.agentProfileId } : {})
+        }) }
       }
       if (request.op === 'sessions') {
         // Same owner-device authorization; display-only catalog metadata.
