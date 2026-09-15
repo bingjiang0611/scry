@@ -39,7 +39,7 @@ import {
   takeNextQueuedPrompt
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
-import { AssistantTurn, UserMessage, attachmentSrc } from './ChatTurn'
+import { AssistantTurn, UserMessage, attachmentSrc, coalesceAdjacentThinking } from './ChatTurn'
 import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
@@ -1273,6 +1273,36 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('class="tg-pill">3</span>')
     expect(html).toContain('Bash · Write · Read')
     expect(html).not.toContain('class="tg-dur">0ms</span>')
+  })
+
+  it('Pi 的连续思考增量只渲染成一个卡片，历史事件也能防御性合并', () => {
+    const thinkingItems = [
+      ev({ id: 'p1', kind: 'model', stage: 'thinking', thinking: 'need' }),
+      ev({ id: 'p2', kind: 'model', stage: 'thinking', thinking: ' to' }),
+      ev({ id: 'p3', kind: 'model', stage: 'thinking', thinking: ' apologize' })
+    ]
+    expect(coalesceAdjacentThinking(thinkingItems)).toEqual([
+      expect.objectContaining({ id: 'p1', thinking: 'need to apologize' })
+    ])
+
+    const fragmentedHtml = renderToStaticMarkup(
+      <AssistantTurn
+        turn={{ runId: 'pi-fragments', userText: '继续', done: false, items: thinkingItems }}
+        selectedId={null}
+        onSelect={() => {}}
+      />
+    )
+    expect(fragmentedHtml.match(/<details class="thinking"/g)).toHaveLength(1)
+    expect(fragmentedHtml).toContain('<p>need to apologize</p>')
+  })
+
+  it('思考合并严格隔离 message 和父工具作用域', () => {
+    const items = coalesceAdjacentThinking([
+      ev({ id: 'a', kind: 'model', stage: 'thinking', thinking: 'root', messageId: 'm1' }),
+      ev({ id: 'b', kind: 'model', stage: 'thinking', thinking: 'next', messageId: 'm2' }),
+      ev({ id: 'c', kind: 'model', stage: 'thinking', thinking: 'child', messageId: 'm2', parentToolUseId: 'tool-1' })
+    ])
+    expect(items.map((item) => item.thinking)).toEqual(['root', 'next', 'child'])
   })
 
   it('工具脚注只在耗时数据完整时展示合计，并保留失败摘要', () => {

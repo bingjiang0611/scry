@@ -568,6 +568,16 @@ function piModelContextWindows(models: JsonRecord[]): Map<string, number> {
   return windows
 }
 
+function piHistoryNeedsModelCatalog(turns: ParsedTurn[]): boolean {
+  return turns.some((turn) => turn.items.some((event) => {
+    if (event.kind !== 'harness' || event.stage !== 'result' || event.contextTokens == null) return false
+    if (contextUsageEvidence(event)) return false
+    const model = event.contextModel ?? (event.modelUsage?.length === 1 ? event.modelUsage[0].model : undefined)
+    const provider = event.upstreamProvider ?? (typeof event.runtimeMetadata?.provider === 'string' ? event.runtimeMetadata.provider : undefined)
+    return Boolean(model && provider)
+  }))
+}
+
 function enrichPiHistory(turns: ParsedTurn[], windows: ReadonlyMap<string, number>): ParsedTurn[] {
   if (windows.size === 0) return turns
   return turns.map((turn) => ({
@@ -780,6 +790,16 @@ async function runPiAgent(
   const toolStarts = new Map<string, number>()
   let streamedText = false
   let streamedThinking = false
+  let assistantMessageSequence = 0
+  let assistantMessageId: string | undefined
+  const nextAssistantMessageId = (message: JsonRecord): string => {
+    const upstreamId = typeof message.id === 'string' && message.id.trim() ? message.id.trim() : undefined
+    return upstreamId ? `pi:${upstreamId}` : `pi:${request.runId}:assistant-${++assistantMessageSequence}`
+  }
+  const currentAssistantMessageId = (message: JsonRecord = {}): string => {
+    assistantMessageId ??= nextAssistantMessageId(message)
+    return assistantMessageId
+  }
   let settledResolve: (() => void) | undefined
   const settled = new Promise<void>((resolve) => { settledResolve = resolve })
   let rpcFailureReject: ((error: Error) => void) | undefined
@@ -796,35 +816,39 @@ async function runPiAgent(
       if (message.role === 'assistant') {
         streamedText = false
         streamedThinking = false
+        assistantMessageId = nextAssistantMessageId(message)
       }
       return
     }
     if (event.type === 'message_update') {
       const delta = record(event.assistantMessageEvent)
+      const messageId = currentAssistantMessageId()
       if (delta.type === 'text_delta' && typeof delta.delta === 'string') {
         streamedText = true
-        request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: delta.delta }))
+        request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: delta.delta, messageId }))
       } else if (delta.type === 'thinking_delta' && typeof delta.delta === 'string') {
         streamedThinking = true
-        request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: delta.delta }))
+        request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: delta.delta, messageId }))
       }
       return
     }
     if (event.type === 'message_end') {
       const message = record(event.message)
       if (message.role !== 'assistant') return
+      const messageId = currentAssistantMessageId(message)
       addAssistantUsage(usage, message, modelContextWindows)
       if (!streamedText || !streamedThinking) {
         const content = Array.isArray(message.content) ? message.content.map(record) : []
         for (const block of content) {
           if (!streamedText && block.type === 'text' && typeof block.text === 'string') {
-            request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: block.text }))
+            request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: block.text, messageId }))
           }
           if (!streamedThinking && block.type === 'thinking' && typeof block.thinking === 'string') {
-            request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: block.thinking }))
+            request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: block.thinking, messageId }))
           }
         }
       }
+      assistantMessageId = undefined
       return
     }
     if (event.type === 'tool_execution_start') {
@@ -1193,6 +1217,7 @@ export function createPiAdapter(options: {
     },
     sessionEvidence: {
       async enrich(context, turns) {
+        if (!piHistoryNeedsModelCatalog(turns)) return turns
         try {
           const probe = await probePiAgent(await profileForContext(context), context.cwd)
           return enrichPiHistory(turns, piModelContextWindows(probe.models))

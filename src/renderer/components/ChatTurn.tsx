@@ -286,6 +286,32 @@ function UserMessageImpl({
   )
 }
 
+/**
+ * Provider adapters may deliver reasoning token-by-token. Keep one disclosure per
+ * contiguous model stream, including old archived traces that predate reducer coalescing.
+ */
+export function coalesceAdjacentThinking(items: readonly TraceEvent[]): TraceEvent[] {
+  const out: TraceEvent[] = []
+  for (const event of items) {
+    const previous = out[out.length - 1]
+    const sameStream =
+      previous?.kind === 'model' && event.kind === 'model' &&
+      previous.stage === 'thinking' && event.stage === 'thinking' &&
+      previous.messageId === event.messageId &&
+      previous.agentId === event.agentId &&
+      previous.parentToolUseId === event.parentToolUseId
+    if (sameStream) {
+      out[out.length - 1] = {
+        ...previous,
+        thinking: `${previous.thinking ?? ''}${event.thinking ?? ''}`
+      }
+    } else {
+      out.push(event)
+    }
+  }
+  return out
+}
+
 function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(true)
   if (!text.trim()) return null
@@ -574,7 +600,10 @@ function SubagentBlock({
   liveText?: string
   liveKey?: string
 }) {
-  const visibleItems = useMemo(() => logicalCallEventsForTurn(items), [items])
+  const visibleItems = useMemo(
+    () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
+    [items]
+  )
   const hasPendingQuestion = visibleItems.some((event) =>
     pendingQuestions.some((request) => request.runId === event.runId && request.questionId === event.toolUseId)
   )
@@ -1304,7 +1333,10 @@ function AssistantTurnImpl({
         return r ? { ...e, output: r.text, isError: r.isError ?? e.isError, durationMs: r.durationMs ?? e.durationMs } : e
       })
   }, [structuralItems])
-  const visibleItems = useMemo(() => logicalCallEventsForTurn(items), [items])
+  const visibleItems = useMemo(
+    () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
+    [items]
+  )
   const result = resultOf({ items })
   const canFork = Boolean(
     onForkTurn && turn.done && !turn.error && turn.providerTurnId && (turn.forkTurnId ?? turn.providerTurnId)

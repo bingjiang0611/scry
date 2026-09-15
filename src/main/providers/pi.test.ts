@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
+import type { ParsedTurn } from '../normalize'
 import { piProfileForExecutable } from '../pi-agent-profiles'
 import { aggregateTurnEvidence } from '../../core/turn-recorder/aggregate'
 import {
@@ -109,6 +110,7 @@ process.stdin.on('data', (chunk) => {
       if (command.message === 'hang') continue
       send({ type: 'message_start', message: { role: 'assistant' } })
       send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'think' } })
+      send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'ing' } })
       send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' + String.fromCodePoint(0x2028) + 'world' } })
       send({ type: 'tool_execution_start', toolCallId: 'tool-read', toolName: 'read', args: { path: 'README.md' } })
       send({ type: 'tool_execution_end', toolCallId: 'tool-read', toolName: 'read', result: 'contents', isError: false })
@@ -301,6 +303,26 @@ describe('Pi RPC Provider', () => {
     })
   }, 10_000)
 
+  it('opens Rotom Qoder history without probing again when the archive already proves context usage', async () => {
+    const resolveProfile = vi.fn(async () => undefined)
+    const adapter = createPiAdapter({ listProfiles: async () => [], resolveProfile })
+    const turns: ParsedTurn[] = [{
+      userText: 'work',
+      items: [{
+        id: 'result-history', runId: 'run-history', ts: new Date().toISOString(),
+        kind: 'harness', stage: 'result', contextTokens: 5_060, contextModel: 'ultimate',
+        contextProvider: 'qoder', contextUsageSource: 'pi_rpc_assistant_usage', contextUsageQuality: 'exact',
+        modelUsage: [{ model: 'ultimate', upstreamProvider: 'qoder', contextWindow: 272_000 }]
+      }]
+    }]
+
+    await expect(adapter.sessionEvidence!.enrich(
+      { providerId: 'pi', agentProfileId: 'pi:rotom', cwd: '/repo', externalSessionId: 'pi-session-1' },
+      turns
+    )).resolves.toBe(turns)
+    expect(resolveProfile).not.toHaveBeenCalled()
+  })
+
   it('forks Pi before the edited user entry and returns the new native session', async () => {
     await withFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
@@ -357,8 +379,8 @@ describe('Pi RPC Provider', () => {
       expect(handle.getProviderTurnId?.()).toBe('pi-user-1')
       expect(onSession).toHaveBeenCalledWith('pi-session-1')
       expect(events).toEqual(expect.arrayContaining([
-        expect.objectContaining({ kind: 'model', stage: 'thinking', thinking: 'think' }),
-        expect.objectContaining({ kind: 'model', stage: 'text_delta', text: 'hello\u2028world' }),
+        expect.objectContaining({ kind: 'model', stage: 'thinking', thinking: 'think', messageId: expect.any(String) }),
+        expect.objectContaining({ kind: 'model', stage: 'text_delta', text: 'hello\u2028world', messageId: expect.any(String) }),
         expect.objectContaining({
           kind: 'tool', tool: 'read', toolUseId: 'tool-read', fileOp: 'read', filePath: 'README.md'
         }),
@@ -373,6 +395,14 @@ describe('Pi RPC Provider', () => {
           })]
         })
       ]))
+      const streamedModelEvents = events.filter((event) =>
+        event.kind === 'model' && (event.stage === 'thinking' || event.stage === 'text_delta')
+      )
+      expect(streamedModelEvents.filter((event) => event.stage === 'thinking').map((event) => event.thinking))
+        .toEqual(['think', 'ing'])
+      const messageIds = [...new Set(streamedModelEvents.map((event) => event.messageId))]
+      expect(messageIds).toHaveLength(1)
+      expect(messageIds[0]).toMatch(/^pi:run-1:assistant-\d+$/)
     })
   }, 15_000)
 
