@@ -188,6 +188,7 @@ describe('runtime CLI discovery constraints', () => {
   it('marks configured CLIs as detected without waiting for version subprocesses', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-fast-detect-'))
     const previous = {
+      PATH: process.env.PATH,
       SCRY_CLAUDE_PATH: process.env.SCRY_CLAUDE_PATH,
       SCRY_CODEX_PATH: process.env.SCRY_CODEX_PATH,
       SCRY_QODERCLI_PATH: process.env.SCRY_QODERCLI_PATH,
@@ -195,12 +196,14 @@ describe('runtime CLI discovery constraints', () => {
     }
     try {
       const configured = Object.fromEntries(
-        ['claude', 'codex', 'qodercli', 'opencode'].map((name) => {
+        ['claude', 'codex', 'qodercli', 'opencode', 'rotom'].map((name) => {
           const path = join(dir, name)
           writeFileSync(path, '')
           return [name, path]
         })
       )
+      chmodSync(configured.rotom, 0o755)
+      process.env.PATH = dir
       process.env.SCRY_CLAUDE_PATH = configured.claude
       process.env.SCRY_CODEX_PATH = configured.codex
       process.env.SCRY_QODERCLI_PATH = configured.qodercli
@@ -211,7 +214,8 @@ describe('runtime CLI discovery constraints', () => {
           expect.objectContaining({ id: 'claude', path: configured.claude }),
           expect.objectContaining({ id: 'codex', path: configured.codex }),
           expect.objectContaining({ id: 'qoder', name: 'Qoder', path: configured.qodercli }),
-          expect.objectContaining({ id: 'opencode', path: configured.opencode })
+          expect.objectContaining({ id: 'opencode', path: configured.opencode }),
+          expect.objectContaining({ id: 'pi:rotom', name: 'Pi · Rotom', path: configured.rotom })
         ])
       )
     } finally {
