@@ -73,7 +73,12 @@ export type IntentReceipt =
   | { status: 'duplicate'; event: LedgerEvent }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-const MAX_DETAIL = 4096
+// The durable intent carries the complete validated remote routing envelope,
+// including base64 attachments. Keep this aligned with host-controller's
+// 700 KiB decoded attachment budget plus base64/JSON overhead. The file store
+// still applies its independent 8 MiB record bound.
+const MAX_INTENT_DETAIL = 1_200_000
+const MAX_EVENT_DETAIL = 4_096
 const DEFAULT_MAX_RUNS = 512
 const DEFAULT_MAX_EVENTS = 8192
 const DEFAULT_PAGE = 256
@@ -155,7 +160,8 @@ export class SessionLedger {
     if (!Number.isFinite(candidate.at)) throw new SessionLedgerError('ledger_log_corrupt')
     if (typeof candidate.runId !== 'string' || !UUID.test(candidate.runId)) throw new SessionLedgerError('ledger_log_corrupt')
     if (typeof candidate.kind !== 'string') throw new SessionLedgerError('ledger_log_corrupt')
-    if (candidate.detail !== undefined && (typeof candidate.detail !== 'string' || candidate.detail.length > MAX_DETAIL)) throw new SessionLedgerError('ledger_log_corrupt')
+    const maxDetail = candidate.kind === 'intent_recorded' ? MAX_INTENT_DETAIL : MAX_EVENT_DETAIL
+    if (candidate.detail !== undefined && (typeof candidate.detail !== 'string' || candidate.detail.length > maxDetail)) throw new SessionLedgerError('ledger_log_corrupt')
     if (candidate.intentId !== undefined && (typeof candidate.intentId !== 'string' || !UUID.test(candidate.intentId))) throw new SessionLedgerError('ledger_log_corrupt')
   }
 
@@ -208,7 +214,7 @@ export class SessionLedger {
   recordIntent(input: RecordIntentInput): IntentReceipt {
     if (!UUID.test(input.intentId ?? '')) throw new SessionLedgerError('invalid_intent_id')
     if (!UUID.test(input.runId ?? '')) throw new SessionLedgerError('invalid_run_id')
-    if (input.detail !== undefined && (typeof input.detail !== 'string' || input.detail.length > MAX_DETAIL)) throw new SessionLedgerError('invalid_detail')
+    if (input.detail !== undefined && (typeof input.detail !== 'string' || input.detail.length > MAX_INTENT_DETAIL)) throw new SessionLedgerError('invalid_detail')
     // The intentId is the idempotency key: the first recording binds the runId,
     // and any retry returns that original binding. The candidate runId passed on
     // a retry is an artifact of a stateless caller and is intentionally ignored.
@@ -228,7 +234,7 @@ export class SessionLedger {
 
   #transition(runId: string, target: Exclude<RunLifecycle, 'recorded'> | 'progress', detail?: string): LedgerEvent {
     if (!UUID.test(runId ?? '')) throw new SessionLedgerError('invalid_run_id')
-    if (detail !== undefined && (typeof detail !== 'string' || detail.length > MAX_DETAIL)) throw new SessionLedgerError('invalid_detail')
+    if (detail !== undefined && (typeof detail !== 'string' || detail.length > MAX_EVENT_DETAIL)) throw new SessionLedgerError('invalid_detail')
     const entry = this.#runs.get(runId)
     if (!entry) throw new SessionLedgerError('unknown_run')
     if (target === 'progress') {

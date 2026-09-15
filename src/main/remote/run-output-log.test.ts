@@ -29,6 +29,32 @@ describe('RunOutputLog (live output content cache)', () => {
     expect(text).not.toContain('SECRETSECRETSECRETSECRET')
   })
 
+  it('splits an oversized UTF-8 chunk without silently losing its tail', () => {
+    const log = new RunOutputLog()
+    const text = `${'x'.repeat(16_383)}你好${'z'.repeat(4_000)}`
+    log.append('run-1', { kind: 'output', text })
+    const chunks = log.since('run-1', 0).chunks
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(text)
+    expect(chunks.some((chunk) => chunk.kind === 'truncated')).toBe(false)
+    expect(chunks.every((chunk) => Buffer.byteLength(chunk.text, 'utf8') <= 16 * 1024)).toBe(true)
+  })
+
+  it('marks truncation when split chunks exhaust the per-run byte budget', () => {
+    const log = new RunOutputLog()
+    for (let i = 0; i < 62; i++) log.append('run-1', { kind: 'output', text: 'x'.repeat(16 * 1024) })
+    log.append('run-1', { kind: 'output', text: 'y'.repeat(16 * 1024) })
+    const kinds: string[] = []
+    let cursor = 0
+    for (let guard = 0; guard < 100; guard++) {
+      const page = log.since('run-1', cursor)
+      if (page.chunks.length === 0) break
+      kinds.push(...page.chunks.map((chunk) => chunk.kind))
+      cursor = page.cursor
+    }
+    expect(kinds.at(-1)).toBe('truncated')
+  })
+
   it('drops empty non-truncated chunks but appends exactly one truthful truncated marker at the event bound', () => {
     const log = new RunOutputLog()
     log.append('run-1', { kind: 'output', text: '' })

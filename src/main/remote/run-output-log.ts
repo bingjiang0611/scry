@@ -54,11 +54,18 @@ interface RunBuffer {
 
 const byteLength = (text: string): number => Buffer.byteLength(text, 'utf8')
 
-function clampUtf8(text: string, maxBytes: number): string {
-  if (byteLength(text) <= maxBytes) return text
-  // Trim to a byte budget without splitting a multi-byte character.
-  const buf = Buffer.from(text, 'utf8').subarray(0, maxBytes)
-  return buf.toString('utf8').replace(/\uFFFD+$/, '')
+function splitUtf8(text: string, maxBytes: number): string[] {
+  if (byteLength(text) <= maxBytes) return [text]
+  const chunks: string[] = []
+  let remaining = text
+  while (remaining) {
+    const bytes = Buffer.from(remaining, 'utf8')
+    const chunk = bytes.subarray(0, maxBytes).toString('utf8').replace(/\uFFFD+$/, '')
+    if (!chunk) break
+    chunks.push(chunk)
+    remaining = remaining.slice(chunk.length)
+  }
+  return chunks
 }
 
 export class RunOutputLog {
@@ -81,16 +88,30 @@ export class RunOutputLog {
       this.#runs.set(runId, buffer)
     }
     if (buffer.truncated) return
-    if (buffer.chunks.length >= MAX_EVENTS_PER_RUN || buffer.bytes >= MAX_BYTES_PER_RUN) {
-      buffer.truncated = true
-      buffer.seq += 1
-      buffer.chunks.push({ seq: buffer.seq, at: Date.now(), runId, kind: 'truncated', text: 'output truncated (host live-cache limit reached)' })
+    const markTruncated = (reason: string): void => {
+      if (buffer!.truncated) return
+      buffer!.truncated = true
+      buffer!.seq += 1
+      buffer!.chunks.push({ seq: buffer!.seq, at: Date.now(), runId, kind: 'truncated', text: reason })
+    }
+    if (chunk.kind === 'truncated') {
+      markTruncated(text || 'output truncated upstream')
       return
     }
-    const clamped = clampUtf8(text, MAX_CHUNK_BYTES)
-    buffer.seq += 1
-    buffer.bytes += byteLength(clamped)
-    buffer.chunks.push({ seq: buffer.seq, at: Date.now(), runId, kind: chunk.kind, text: clamped })
+    // A transport chunk is a framing detail, not a content boundary. Split an
+    // oversized chunk into complete UTF-8 pieces so its tail is not silently
+    // discarded. Only the documented per-run cache bounds may lose content,
+    // and those always append a visible truncated marker.
+    for (const piece of splitUtf8(text, MAX_CHUNK_BYTES)) {
+      const bytes = byteLength(piece)
+      if (buffer.chunks.length >= MAX_EVENTS_PER_RUN || buffer.bytes + bytes > MAX_BYTES_PER_RUN) {
+        markTruncated('output truncated (host live-cache limit reached)')
+        return
+      }
+      buffer.seq += 1
+      buffer.bytes += bytes
+      buffer.chunks.push({ seq: buffer.seq, at: Date.now(), runId, kind: chunk.kind, text: piece })
+    }
   }
 
   // Return chunks strictly after `cursor` for a run (bounded page), plus the

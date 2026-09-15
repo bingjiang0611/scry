@@ -1,5 +1,5 @@
 // Composer 选择器：工作目录（含 recent）/ 本地 CLI（local·api 后端 + rescan）。
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { providerIdForAgentId } from '@shared/runtime'
 import { AGENT_ICON, basename } from '../format'
 import { Icon, type IconName } from './primitives/Icon'
@@ -24,13 +24,31 @@ export function piProfileName(agent: DetectedAgent): string {
   return agent.name.replace(/^Pi\s*·\s*/, '') || basename(agent.path)
 }
 
+interface PickerOpenProps {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+function usePickerOpen(controlledOpen?: boolean, onOpenChange?: (open: boolean) => void) {
+  const [localOpen, setLocalOpen] = useState(false)
+  const open = controlledOpen ?? localOpen
+  const setOpen = (next: boolean | ((current: boolean) => boolean)): void => {
+    const value = typeof next === 'function' ? next(open) : next
+    if (controlledOpen === undefined) setLocalOpen(value)
+    onOpenChange?.(value)
+  }
+  return [open, setOpen] as const
+}
+
 export function WorkdirPicker({
   cwd,
   recent,
   onChoose,
   onUnbind,
   onPick,
-  onRemove
+  onRemove,
+  open: controlledOpen,
+  onOpenChange
 }: {
   cwd: string | null
   recent: string[]
@@ -38,8 +56,8 @@ export function WorkdirPicker({
   onUnbind: () => void
   onPick: (d: string) => void
   onRemove: (d: string) => void
-}) {
-  const [open, setOpen] = useState(false)
+} & PickerOpenProps) {
+  const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
   const menuId = useId()
   const otherRecent = recent.filter((dir) => dir !== cwd)
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -178,7 +196,9 @@ export function CliPicker({
   onAddPi,
   onRemovePi,
   onRescan,
-  disabled = false
+  disabled = false,
+  open: controlledOpen,
+  onOpenChange
 }: {
   agents: DetectedAgent[]
   selectedId: string
@@ -187,8 +207,8 @@ export function CliPicker({
   onRemovePi: (id: string) => void
   onRescan: () => void
   disabled?: boolean
-}) {
-  const [open, setOpen] = useState(false)
+} & PickerOpenProps) {
+  const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
   const menuId = useId()
   const sel = agents.find((a) => a.id === selectedId)
   const piAgents = agents.filter((agent) => providerIdForAgentId(agent.id) === 'pi')
@@ -301,7 +321,9 @@ export function ModelEffortPicker({
   effortOptions,
   onModelChange,
   onEffortChange,
-  loading = false
+  loading = false,
+  open: controlledOpen,
+  onOpenChange
 }: {
   modelValue: string
   modelOptions: RunControlSelectOption[]
@@ -310,28 +332,31 @@ export function ModelEffortPicker({
   onModelChange: (value: string) => void
   onEffortChange: (value: string) => void
   loading?: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const [modelsOpen, setModelsOpen] = useState(false)
+} & PickerOpenProps) {
+  const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
+  const [listView, setListView] = useState<'models' | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const currentRef = useRef<HTMLButtonElement>(null)
-  const modelListRef = useRef<HTMLDivElement>(null)
+  const optionListRef = useRef<HTMLDivElement>(null)
   const popoverId = useId()
   const selectedModel = modelOptions.find((option) => option.value === modelValue) ?? modelOptions[0]
   const selectedEffort = effortOptions.find((option) => option.value === effortValue) ?? effortOptions[0]
+  const effortIndex = Math.max(0, effortOptions.findIndex((option) => option.value === effortValue))
+  const effortProgress = effortOptions.length > 1 ? `${effortIndex / (effortOptions.length - 1) * 100}%` : '100%'
+  const effortStyle = { '--effort-progress': effortProgress } as CSSProperties
 
   useEffect(() => {
     if (!loading) return
     setOpen(false)
-    setModelsOpen(false)
+    setListView(null)
   }, [loading])
 
   useEffect(() => {
     if (!open) return
     const focusTimer = window.setTimeout(() => {
-      if (modelsOpen) {
-        const options = Array.from(modelListRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+      if (listView) {
+        const options = Array.from(optionListRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
         const selectedOption = options.find((option) => option.getAttribute('aria-selected') === 'true') ?? options[0]
         selectedOption?.focus()
       } else currentRef.current?.focus()
@@ -339,14 +364,14 @@ export function ModelEffortPicker({
     const dismissOnOutsidePointer = (event: PointerEvent): void => {
       if (!(event.target instanceof Node) || pickerRef.current?.contains(event.target)) return
       setOpen(false)
-      setModelsOpen(false)
+      setListView(null)
     }
     const dismissOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
       event.preventDefault()
       event.stopPropagation()
       setOpen(false)
-      setModelsOpen(false)
+      setListView(null)
       triggerRef.current?.focus()
     }
     document.addEventListener('pointerdown', dismissOnOutsidePointer, true)
@@ -356,7 +381,7 @@ export function ModelEffortPicker({
       document.removeEventListener('pointerdown', dismissOnOutsidePointer, true)
       document.removeEventListener('keydown', dismissOnEscape)
     }
-  }, [modelsOpen, open])
+  }, [listView, open])
 
   return (
     <div className="model-effort-picker" ref={pickerRef}>
@@ -373,7 +398,7 @@ export function ModelEffortPicker({
         aria-haspopup="dialog"
         title={[selectedModel?.description, selectedEffort?.description].filter(Boolean).join(' · ')}
         onClick={() => setOpen((current) => {
-          if (current) setModelsOpen(false)
+          if (current) setListView(null)
           return !current
         })}
       >
@@ -383,50 +408,55 @@ export function ModelEffortPicker({
       </button>
       {open && (
         <div id={popoverId} className="model-effort-popover" role="dialog" aria-label="Model 与 Effort">
-          {!modelsOpen ? (
+          {!listView ? (
             <>
-              <button
-                ref={currentRef}
-                type="button"
-                className="model-effort-current"
-                aria-label={`选择 Model，当前 ${selectedModel?.label ?? '自动模型'}`}
-                aria-expanded={false}
-                onClick={() => setModelsOpen(true)}
-              >
-                <span>{selectedModel?.label ?? '自动模型'}</span>
-                <span className="model-effort-current-effort">{selectedEffort?.label ?? '默认'}</span>
-                <Icon name="chevronRight" className="chev" />
-              </button>
-              <div className="model-effort-scale" role="group" aria-label="推理强度">
-                {effortOptions.map((option) => (
-                  <button
-                    type="button"
-                    className={option.value === effortValue ? 'selected' : ''}
-                    aria-pressed={option.value === effortValue}
-                    disabled={option.disabled}
-                    title={option.description}
-                    key={option.value}
-                    onClick={() => {
-                      onEffortChange(option.value)
-                      setOpen(false)
-                      setModelsOpen(false)
-                      window.setTimeout(() => triggerRef.current?.focus(), 0)
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+              <div className="model-effort-summary">
+                <button
+                  ref={currentRef}
+                  type="button"
+                  className="model-effort-current"
+                  aria-label={`选择 Model，当前 ${selectedModel?.label ?? '自动模型'}`}
+                  aria-expanded={false}
+                  onClick={() => setListView('models')}
+                >
+                  <span className="model-effort-current-effort">
+                    <span>{selectedEffort?.label ?? '默认'}</span>
+                    <Icon name="chevronRight" className="chev" />
+                  </span>
+                  <span className="model-effort-current-model">{selectedModel?.label ?? '自动模型'}</span>
+                </button>
+              </div>
+              <div className="model-effort-slider" style={effortStyle}>
+                <input
+                  type="range"
+                  min="0"
+                  max={Math.max(0, effortOptions.length - 1)}
+                  step="1"
+                  value={effortIndex}
+                  aria-label="推理强度"
+                  aria-valuetext={selectedEffort?.label ?? '默认'}
+                  disabled={effortOptions.length <= 1}
+                  onChange={(event) => {
+                    const option = effortOptions[Number(event.target.value)]
+                    if (option && !option.disabled) onEffortChange(option.value)
+                  }}
+                />
+                <div className="model-effort-slider-dots" aria-hidden="true">
+                  {effortOptions.map((option, index) => (
+                    <i className={index <= effortIndex ? 'active' : ''} key={option.value} />
+                  ))}
+                </div>
               </div>
             </>
           ) : (
             <div
-              ref={modelListRef}
+              ref={optionListRef}
               className="model-effort-list"
               role="listbox"
               aria-label="选择 Model"
               onKeyDown={(event) => {
                 if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-                const options = Array.from(modelListRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+                const options = Array.from(optionListRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
                 if (options.length === 0) return
                 event.preventDefault()
                 const current = options.indexOf(document.activeElement as HTMLButtonElement)
@@ -440,23 +470,26 @@ export function ModelEffortPicker({
                 options[next]?.focus()
               }}
             >
-              {modelOptions.map((option) => (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={option.value === modelValue}
-                  disabled={option.disabled}
-                  title={option.description}
-                  key={option.value}
-                  onClick={() => {
-                    if (option.value !== modelValue) onModelChange(option.value)
-                    setModelsOpen(false)
-                  }}
-                >
-                  <span>{option.label}</span>
-                  {option.value === modelValue && <Icon name="check" />}
-                </button>
-              ))}
+              {modelOptions.map((option) => {
+                const selected = option.value === modelValue
+                return (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    disabled={option.disabled}
+                    title={option.description}
+                    key={option.value}
+                    onClick={() => {
+                      if (!selected) onModelChange(option.value)
+                      setListView(null)
+                    }}
+                  >
+                    <span>{option.label}</span>
+                    {selected && <Icon name="check" />}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>

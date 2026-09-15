@@ -1,5 +1,5 @@
 import {
-  closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync,
+  closeSync, constants, fstatSync, fsyncSync, ftruncateSync, lstatSync, openSync,
   readSync, realpathSync, unlinkSync, writeSync
 } from 'node:fs'
 import { join } from 'node:path'
@@ -58,26 +58,27 @@ export class SessionLedgerFileStore implements LedgerStore {
         if (!count) break
         length += count
       }
-      const text = bytes.toString('utf8', 0, length)
-      // Reconcile the exact persisted bytes after a possible lost receipt.
+      const complete = length === 0 || bytes[length - 1] === 0x0a
+      let committedLength = length
+      if (!complete) {
+        // Recovery is durable, not merely an in-memory omission. If the torn
+        // bytes remained on disk, the next O_APPEND would concatenate a valid
+        // event onto the fragment and turn a recoverable crash into permanent
+        // corruption. Keep only bytes through the last committed newline.
+        committedLength = bytes.lastIndexOf(0x0a, length - 1) + 1
+        ftruncateSync(fd, committedLength)
+      }
+      // Reconcile the exact persisted bytes after a possible lost receipt or
+      // tail repair before accepting another append.
       fsyncSync(fd)
       this.syncDirectory()
-      if (text.length === 0) return []
-      const complete = text.endsWith('\n')
-      const lines = text.split('\n')
+      if (committedLength === 0) return []
+      const lines = bytes.toString('utf8', 0, committedLength).split('\n')
       if (lines[lines.length - 1] === '') lines.pop()
-      // A file not ending in a newline has a torn final append: drop that one
-      // uncommitted line. It must be the ONLY tolerated incompleteness.
       const events: LedgerEvent[] = []
-      for (let i = 0; i < lines.length; i++) {
-        const isTornTail = !complete && i === lines.length - 1
-        try {
-          const parsed = JSON.parse(lines[i]) as LedgerEvent
-          events.push(parsed)
-        } catch (error) {
-          if (isTornTail) break // uncommitted trailing write, safe to drop
-          throw new Error('ledger_file_corrupt')
-        }
+      for (const line of lines) {
+        try { events.push(JSON.parse(line) as LedgerEvent) }
+        catch { throw new Error('ledger_file_corrupt') }
       }
       return events
     } finally { closeSync(fd) }

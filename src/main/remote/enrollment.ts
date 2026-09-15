@@ -76,11 +76,17 @@ export interface CertificateIssuerConfig {
 
 export type CertificateIssuer = (input: VerifiedPairingCSR & { deviceId: string }) => Promise<IssuedPairingCertificate>
 
+// A paired phone is a durable, explicitly revocable device identity. Keep its
+// certificate useful for a year: the previous one-hour lifetime made an idle
+// phone silently unusable because there is no unattended renewal channel yet.
+// Host-side grant revocation is still checked on every authenticated request.
+const DEVICE_CERTIFICATE_TTL_MS = 365 * 24 * 60 * 60 * 1000
+
 // Build a client-certificate issuer bound to the inner CA. Validates the CA
 // identity (EC/prime256v1, is a CA, holds the private key) up front, then
-// returns a closure that issues a short-lived clientAuth certificate for a
-// re-verified CSR. Requester-controlled subject, SAN, CA flag, extensions and
-// validity are never copied from the CSR.
+// returns a closure that issues a clientAuth certificate for a re-verified
+// CSR. Requester-controlled subject, SAN, CA flag, extensions and validity are
+// never copied from the CSR.
 export async function certificateIssuer(config: CertificateIssuerConfig): Promise<CertificateIssuer> {
   const clock = config.clock ?? Date.now
   const ca = new NodeCertificate(config.certificatePEM)
@@ -101,7 +107,7 @@ export async function certificateIssuer(config: CertificateIssuerConfig): Promis
       throw new Error('approval_identity_changed')
     }
     const now = clock()
-    const expiresAt = Math.min(now + 3_600_000, Date.parse(ca.validTo))
+    const expiresAt = Math.min(now + DEVICE_CERTIFICATE_TTL_MS, Date.parse(ca.validTo))
     if (!Number.isSafeInteger(now) || now < Date.parse(ca.validFrom) || expiresAt <= now) throw new Error('issuer_expired')
     const csr = new Pkcs10CertificateRequest(verified.csrPEM)
     const certificate = await X509CertificateGenerator.create({

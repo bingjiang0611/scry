@@ -32,7 +32,8 @@ function DeviceCodeQR({ code }: { code: string }): JSX.Element {
 // the narrow window.scry.remote* bridge and renders the honest projection: it
 // never shows a device as paired until the host confirms a grant, always shows
 // the fingerprint the operator must compare against the phone, and surfaces
-// disabled/dormant/revoked as real states. It holds no secret beyond the
+// disabled/dormant as real states and lists only currently paired devices. It
+// holds no secret beyond the
 // short-lived pairing code the host returns for display.
 export function RemotePairing(): JSX.Element {
   const [vm, setVm] = useState<RemotePairingViewModel | null>(null)
@@ -135,10 +136,10 @@ export function RemotePairing(): JSX.Element {
       {vm.devices.length === 0 ? <p className="remote-pairing__empty">暂无</p> : (
         <ul className="remote-pairing__devices">
           {vm.devices.map((d) => (
-            <li key={d.deviceId} className={d.revoked ? 'remote-pairing__device--revoked' : undefined}>
+            <li key={d.deviceId}>
               <span className="remote-pairing__label">{d.label}</span>
               <span className="remote-pairing__status">{d.statusText}</span>
-              {!d.revoked && <button type="button" onClick={() => revoke(d.deviceId)} disabled={busy}>吊销</button>}
+              <button type="button" onClick={() => revoke(d.deviceId)} disabled={busy}>吊销</button>
             </li>
           ))}
         </ul>

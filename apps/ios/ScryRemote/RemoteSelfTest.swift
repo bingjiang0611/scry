@@ -58,7 +58,14 @@ enum RemoteSelfTest {
       check("code.badTLS", (try? PairingCode.parse("scry1:" + PairingCode.base64urlEncode(badTLSData))) == nil)
     } catch { check("code", false); print("  error: \(error)") }
 
-    // 3. Keychain: insert-only device key + upsertable grant round-trip in an
+    // 3. Run state: stale generation/session callbacks are rejected, submitting
+    //    is distinct from recorded, and output drain is not capped at 600 polls.
+    check("run.generationSessionIsolation", RemoteRunStore.selfTestGenerationIsolation())
+    check("run.followUpIdentityStable", RemoteRunStore.selfTestFollowUpIdentity())
+    check("run.submittingIsNotRecorded", RemoteRunStore.Lifecycle.submitting != .recorded)
+    check("run.drainBeyond400", RemoteRunStore.selfTestDrain(cursor: 400, next: 401, chunkCount: 401))
+
+    // 4. Keychain: insert-only device key + upsertable grant round-trip in an
     //    isolated test service, then cleaned up. An UNSIGNED simulator build has
     //    no keychain-access-group entitlement (errSecMissingEntitlement -34018),
     //    so this is honestly SKIPPED there rather than faked; it is exercised on
@@ -86,7 +93,10 @@ enum RemoteSelfTest {
       try keychain.upsertGrantedCert(Data("cert-v2".utf8))
       let grant2 = try keychain.load(.grantedCert)
       check("keychain.grantRenew", grant2 == Data("cert-v2".utf8))
-      try keychain.remove(.deviceKey); try keychain.remove(.grantedCert)
+      try keychain.clearAll()
+      let clearedKey = try keychain.load(.deviceKey)
+      let clearedCert = try keychain.load(.grantedCert)
+      check("keychain.destructiveClear", clearedKey == nil && clearedCert == nil)
     } catch { check("keychain", false); print("  error: \(error)") }
 
     print("SELFTEST DONE failures=\(failures)")

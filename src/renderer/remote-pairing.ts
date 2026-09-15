@@ -11,7 +11,8 @@ import type { RemoteStatus, RemotePendingPairing, RemoteDevice } from '../shared
 //    device can reach it yet (dormant) — not shown as connected/ready.
 //  - A pending device is only actionable once it reached awaiting_local_confirmation
 //    AND exposes the key fingerprint the operator must compare.
-//  - A revoked grant is shown as revoked, never dropped or shown as active.
+//  - Revoked grants stay in the host's durable security state but are omitted
+//    from the operator-facing list of currently paired devices.
 //  - Confirming requires the operator-seen fingerprint to equal the pending
 //    device's proven publicKeySHA256 (fail closed on mismatch/absence), matching
 //    the main-process confirmPairing binding.
@@ -43,7 +44,6 @@ export interface PendingRow {
 export interface DeviceRow {
   deviceId: string
   label: string
-  revoked: boolean
   statusText: string
   confirmedAt: number
   expiresAt: number
@@ -76,8 +76,7 @@ function projectDevice(d: RemoteDevice): DeviceRow {
   return {
     deviceId: d.deviceId,
     label: d.deviceLabel && d.deviceLabel.trim().length > 0 ? d.deviceLabel : '未命名设备',
-    revoked: d.revoked,
-    statusText: d.revoked ? '已吊销' : '已配对',
+    statusText: '已配对',
     confirmedAt: d.confirmedAt,
     expiresAt: d.expiresAt
   }
@@ -95,7 +94,7 @@ export function projectRemote(status: RemoteStatus): RemotePairingViewModel {
       ? '设备可通过中继连接'
       : '中继未配置 · 仅本机可配对，手机暂时无法连接',
     pending,
-    devices: status.devices.map(projectDevice),
+    devices: status.devices.filter((device) => !device.revoked).map(projectDevice),
     hasActionablePending: pending.some((row) => row.confirmable)
   }
 }

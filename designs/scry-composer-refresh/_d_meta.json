@@ -42,7 +42,7 @@
           "path": "Scry Composer Options v4.html",
           "createdAt": "2026-09-08T14:35:32.826Z",
           "status": "needs-review",
-          "subtitle": "C4：6 项 Effort 单行等宽",
+          "subtitle": "C4：Effort 主行、Model 次行、紧凑六档滑杆；隐藏列表滚动条",
           "viewport": {
             "width": 1400,
             "height": 1200
@@ -53,5 +53,5 @@
     }
   },
   "createdAt": "2026-09-08T13:28:22.653Z",
-  "updatedAt": "2026-09-08T16:36:31.745Z"
+  "updatedAt": "2026-09-09T04:02:34.000Z"
 }

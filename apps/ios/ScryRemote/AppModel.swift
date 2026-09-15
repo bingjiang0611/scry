@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
   @Published var pairing: PairingUIState = .idle
   // The session currently opened for read-only transcript replay (nil = none).
   @Published var openedSession: OpenedSession?
+  @Published private(set) var destructiveActionError: String?
   private var pairingTask: Task<Void, Never>?
   private let connections = RemoteConnectionStore()
 
@@ -240,17 +241,37 @@ final class AppModel: ObservableObject {
     if case .pairing = link { link = .notPaired }
   }
 
-  func reset() {
+  // Ordinary sign out intentionally retains the paired grant. It only locks
+  // the local UI; destructive unpair is a separate, error-reporting operation.
+  func signOut() {
     pairingTask?.cancel()
     pairingTask = nil
     pairing = .idle
     auth = .signedOut
-    link = .notPaired
     route = .home
     query = ""
     sessions = []
-    connections.clear()
   }
+
+  // Delete credentials first, then the public descriptor and in-memory run
+  // state. On Keychain failure no state is claimed as cleared, allowing a safe
+  // retry instead of leaving a descriptor/key deadlock.
+  func destructiveUnpair(runStore: RemoteRunStore) {
+    destructiveActionError = nil
+    do {
+      try RemoteKeychain().clearAll()
+      connections.clear()
+      runStore.clearAllState()
+      pairingTask?.cancel(); pairingTask = nil
+      pairing = .idle; auth = .signedOut; link = .notPaired; route = .home
+      query = ""; sessions = []
+    } catch {
+      destructiveActionError = "无法清除本机配对凭据：\(error)。未报告为已清除，请重试。"
+    }
+  }
+
+  // Compatibility entry point for callers that only need to leave the UI.
+  func reset() { signOut() }
 }
 
 struct Session: Identifiable, Hashable {

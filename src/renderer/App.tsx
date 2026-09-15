@@ -5,6 +5,7 @@ import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/
 import {
   isSupportedImageMimeType,
   runtimeProviderForAgentId,
+  type AgentForkSessionRequest,
   type AgentInputAttachment,
   type AgentStartRequest,
   type RuntimeProvider
@@ -219,8 +220,23 @@ export function shouldQueuePrompt(busy: boolean, queuedCount: number, queuedStar
   return busy || queuedCount > 0 || queuedStartPending
 }
 
+export function resetQueuedPromptControl(generation: number): {
+  generation: number
+  pending: false
+  inFlight: false
+} {
+  return { generation: generation + 1, pending: false, inFlight: false }
+}
+
 export function dequeueStartedPrompt(queue: QueuedPrompt[], started: QueuedPrompt): QueuedPrompt[] {
   return queue[0] === started ? queue.slice(1) : queue
+}
+
+export function buildForkSessionRequest(
+  request: AgentForkSessionRequest,
+  agentProfileId?: string
+): AgentForkSessionRequest {
+  return { ...request, ...(agentProfileId ? { agentProfileId } : {}) }
 }
 
 export function inputAfterSuccessfulSubmit(current: string, submitted: string): string {
@@ -679,6 +695,17 @@ export function App() {
   const shouldStickToBottomRef = useRef(true)
   const queuedStartPendingRef = useRef(false)
   const queuedStartInFlightRef = useRef(false)
+  const queuedDrainGenerationRef = useRef(0)
+  const resetPromptQueue = useCallback((): void => {
+    // A paused/starting queue belongs to the session in which it was created.
+    // Invalidate late start callbacks as well as clearing the visible items so
+    // a failed head cannot keep a newly selected conversation paused forever.
+    const reset = resetQueuedPromptControl(queuedDrainGenerationRef.current)
+    queuedDrainGenerationRef.current = reset.generation
+    queuedStartPendingRef.current = reset.pending
+    queuedStartInFlightRef.current = reset.inFlight
+    setQueuedPrompts([])
+  }, [])
   const sessionSelectionSeqRef = useRef(0)
   const slashRequestSeqRef = useRef(0)
   const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
@@ -1045,13 +1072,16 @@ export function App() {
     if (!next) return
     queuedStartPendingRef.current = true
     queuedStartInFlightRef.current = true
+    const queueGeneration = queuedDrainGenerationRef.current
     void startPrompt(next.text, next.attachments, next.request)
       .then(() => {
+        if (queueGeneration !== queuedDrainGenerationRef.current) return
         queuedStartInFlightRef.current = false
         setQueuedPrompts((current) => dequeueStartedPrompt(current, next))
         queuedStartPendingRef.current = false
       })
       .catch((error) => {
+        if (queueGeneration !== queuedDrainGenerationRef.current) return
         // Keep the failed item at the head and pause automatic draining. Removing that
         // head is the explicit "skip" action, so later prompts can never overtake it.
         queuedStartInFlightRef.current = false
@@ -1188,7 +1218,7 @@ export function App() {
     setCwd(dir)
     if (cwdChanged) setWorkspaceDirty(false)
     session.clearTurns()
-    setQueuedPrompts([])
+    resetPromptQueue()
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
     selectSessionId(null)
@@ -1207,7 +1237,7 @@ export function App() {
     setCwd(null)
     setWorkspaceDirty(false)
     session.clearTurns()
-    setQueuedPrompts([])
+    resetPromptQueue()
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
     selectSessionId(null)
@@ -1219,7 +1249,7 @@ export function App() {
     const seq = ++sessionSelectionSeqRef.current
     setSessionLoading(false)
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
-    setQueuedPrompts([])
+    resetPromptQueue()
     clearDraftAttachments()
     shouldStickToBottomRef.current = true
     await window.scry.focusRun(null)
@@ -1298,7 +1328,7 @@ export function App() {
       await window.scry.setCwd(projectCwd || null)
       if (!isCurrent()) return
       if (switchingSession) session.clearTurns()
-      setQueuedPrompts([])
+      resetPromptQueue()
       clearDraftAttachments()
       shouldStickToBottomRef.current = true
       selectSessionId(sessionId)
@@ -1352,7 +1382,7 @@ export function App() {
     if (!sourceSessionId || !sourceProviderTurnId || !sourceForkTurnId) {
       throw new Error('当前轮次缺少可验证的 Provider 会话边界')
     }
-    const forked = await window.scry.forkSession({
+    const forked = await window.scry.forkSession(buildForkSessionRequest({
       providerId,
       cwd: cwd ?? undefined,
       sourceSessionId,
@@ -1361,7 +1391,7 @@ export function App() {
       sourceForkTurnId,
       model: integrations.runControls.model,
       permissionMode: integrations.runControls.permissionMode
-    })
+    }, integrations.providerContext.agentProfileId))
     loadProjects()
     await pickSession(
       cwd ?? '',
@@ -1557,7 +1587,7 @@ export function App() {
     window.setTimeout(() => taRef.current?.focus(), 0)
   }, [])
   const stopRun = async (): Promise<void> => {
-    setQueuedPrompts([])
+    resetPromptQueue()
     await session.stopRun()
   }
   const [historyOlderLoading, setHistoryOlderLoading] = useState(false)

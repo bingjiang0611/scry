@@ -244,6 +244,7 @@ export function ChatView({
         }
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
+  const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
   const modelValue = runControls.model
     ? JSON.stringify([runControls.model.providerId ?? null, runControls.model.id])
     : ''
@@ -653,6 +654,8 @@ export function ChatView({
             onUnbind={onUnbindProject}
             onPick={onPickRecent}
             onRemove={onRemoveRecent}
+            open={composerMenu === 'workdir'}
+            onOpenChange={(open) => setComposerMenu(open ? 'workdir' : null)}
           />
         </div>}
         {busy && (
@@ -768,6 +771,8 @@ export function ChatView({
               onRemovePi={onRemovePiAgent}
               onRescan={onRescan}
               disabled={agentLocked}
+              open={composerMenu === 'agent'}
+              onOpenChange={(open) => setComposerMenu(open ? 'agent' : null)}
             />
             <ModelEffortPicker
               modelValue={modelValue}
@@ -775,6 +780,8 @@ export function ChatView({
               effortValue={runControls.effort ?? ''}
               effortOptions={effortOptions}
               loading={runControlsLoading}
+              open={composerMenu === 'modelEffort'}
+              onOpenChange={(open) => setComposerMenu(open ? 'modelEffort' : null)}
               onModelChange={(value) => {
                 const option = runControlCatalog.models.find(
                   (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value
