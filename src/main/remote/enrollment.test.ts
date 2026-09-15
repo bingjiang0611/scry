@@ -32,7 +32,7 @@ async function makeCA() {
   const { keys, privateKeyPEM } = await keyPairPem()
   const cert = await X509CertificateGenerator.createSelfSigned({
     serialNumber: '01', name: 'CN=scry-inner-ca', notBefore: new Date(Date.now() - 60_000),
-    notAfter: new Date(Date.now() + 86_400_000), signingAlgorithm: SIGN, keys,
+    notAfter: new Date(Date.now() + 2 * 365 * 86_400_000), signingAlgorithm: SIGN, keys,
     extensions: [new BasicConstraintsExtension(true, undefined, true), new KeyUsagesExtension(KeyUsageFlags.keyCertSign | KeyUsageFlags.digitalSignature, true)]
   })
   return { certificatePEM: cert.toString('pem'), privateKeyPEM }
@@ -63,7 +63,7 @@ describe('enrollment (host X.509 adapters)', () => {
     await expect(verifyCSR(123 as unknown as string)).rejects.toThrow('invalid_csr')
   })
 
-  it('issues a short-lived clientAuth certificate that chains to the CA and is not a CA', async () => {
+  it('issues a durable revocable clientAuth certificate that chains to the CA and is not a CA', async () => {
     const csrPEM = await makeCSR()
     const verified = await verifyCSR(csrPEM)
     const issue = await certificateIssuer(ca)
@@ -79,8 +79,8 @@ describe('enrollment (host X.509 adapters)', () => {
     expect(cert.checkIssued(caCert)).toBe(true)
     expect(cert.ca).toBe(false)
     expect(cert.subject).toContain(`scry-device-${deviceId}`)
-    expect(issued.expiresAt).toBeGreaterThan(Date.now())
-    expect(issued.expiresAt).toBeLessThanOrEqual(Date.now() + 3_600_000 + 1000)
+    expect(issued.expiresAt).toBeGreaterThan(Date.now() + 364 * 86_400_000)
+    expect(issued.expiresAt).toBeLessThanOrEqual(Date.now() + 365 * 86_400_000 + 1000)
   })
 
   it('refuses to issue when the re-verified CSR identity does not match the approval', async () => {

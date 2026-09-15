@@ -1317,6 +1317,33 @@ describe('applyTraceBatch（性能：批量合并，语义不变）', () => {
     expect(out[0].items.map((item) => item.text)).toEqual(['A', 'B'])
   })
 
+  it('连续 thinking 增量合为一个事件，但不跨 message 或子 agent', () => {
+    const out = applyTraceBatch(
+      [],
+      [
+        e({ id: 'a', kind: 'model', stage: 'thinking', thinking: 'need', messageId: 'm1' }),
+        e({ id: 'b', kind: 'model', stage: 'thinking', thinking: ' to', messageId: 'm1' }),
+        e({ id: 'c', kind: 'model', stage: 'thinking', thinking: 'separate', messageId: 'm2' }),
+        e({ id: 'd', kind: 'model', stage: 'thinking', thinking: 'child', messageId: 'm2', parentToolUseId: 'tool-1' })
+      ],
+      new Set()
+    )
+
+    expect(out[0].items.map((item) => item.thinking)).toEqual(['need to', 'separate', 'child'])
+  })
+
+  it('跨 IPC 批次也持续合并 thinking 增量', () => {
+    const first = applyTraceBatch([], [
+      e({ id: 'a', kind: 'model', stage: 'thinking', thinking: 'need', messageId: 'm1' })
+    ], new Set())
+    const second = applyTraceBatch(first, [
+      e({ id: 'b', kind: 'model', stage: 'thinking', thinking: ' to apologize', messageId: 'm1' })
+    ], new Set())
+
+    expect(second[0].items).toHaveLength(1)
+    expect(second[0].items[0]).toMatchObject({ stage: 'thinking', thinking: 'need to apologize' })
+  })
+
   it('Provider 权威正文替换同 message 的流式前缀', () => {
     const out = applyTraceBatch(
       [],

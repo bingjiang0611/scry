@@ -56,4 +56,21 @@ struct RemoteKeychain {
     let status = SecItemDelete(query(item) as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure(status: status) }
   }
+
+  // Destructive unpair is transactional from the app's point of view: the
+  // public descriptor must remain while credentials are uncertain. If the
+  // second delete fails, restore the first item so pairing cannot be left in a
+  // descriptor/key mismatch that traps the next enrollment.
+  func clearAll() throws {
+    let key = try load(.deviceKey)
+    let certificate = try load(.grantedCert)
+    do {
+      try remove(.deviceKey)
+      try remove(.grantedCert)
+    } catch {
+      if let key { try? insertDeviceKey(key) }
+      if let certificate { try? upsertGrantedCert(certificate) }
+      throw error
+    }
+  }
 }

@@ -15,6 +15,7 @@ import {
   adoptLocalStartSessionId,
   attachmentsAfterSuccessfulSubmit,
   appendWorkspaceReference,
+  buildForkSessionRequest,
   applyNewConversationEffects,
   applyProviderCatalogRefresh,
   applySessionArchiveEffects,
@@ -31,6 +32,7 @@ import {
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
   providerContextCacheKey,
+  resetQueuedPromptControl,
   restoreActiveSessionSelection,
   restoreFocusedRunSelection,
   scrollChatToBottomIfNeeded,
@@ -44,7 +46,7 @@ import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboard
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
-import { CliPicker } from './Pickers'
+import { CliPicker, ModelEffortPicker } from './Pickers'
 import { pathContains, WorkspacePanel, workspaceReferenceToken } from './WorkspacePanel'
 import { parseUnifiedDiff, TurnDiffReviewPanel } from './TurnDiffReviewPanel'
 
@@ -455,6 +457,31 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('class="model-effort-model">自动模型')
     expect(html).toContain('class="model-effort-effort">默认')
     expect(html).toContain('rc-value" aria-hidden="true">默认审批')
+  })
+
+  it('Model/Effort 浮层显示 Effort/Model 与紧凑滑杆，不渲染两侧图标', () => {
+    const html = renderToStaticMarkup(
+      <ModelEffortPicker
+        modelValue="ultimate"
+        modelOptions={[{ value: 'ultimate', label: 'Ultimate' }]}
+        effortValue="high"
+        effortOptions={[{ value: 'default', label: '默认' }, { value: 'high', label: '高' }]}
+        onModelChange={() => {}}
+        onEffortChange={() => {}}
+        open
+      />
+    )
+
+    const effortIndex = html.indexOf('class="model-effort-current-effort"')
+    const modelIndex = html.indexOf('class="model-effort-current-model"')
+    expect(effortIndex).toBeGreaterThan(-1)
+    expect(modelIndex).toBeGreaterThan(effortIndex)
+    expect(html).toContain('<span>高</span><svg class="ico chev"')
+    expect(html).toContain('>Ultimate<')
+    expect(html).toContain('type="range"')
+    expect(html).toContain('aria-valuetext="高"')
+    expect(html).not.toContain('model-effort-summary-bolt')
+    expect(html).not.toContain('aria-label="重置 Effort"')
   })
 
   it('发送键保持图标按钮：文字只走 aria-label，不塞进圆形按钮里折行', () => {
@@ -2688,6 +2715,21 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     // 历史缩略图与草稿预览都按需解码：CSP 与远程图片阻断不变，只改解码时机。
     expect(chatHtml.match(/<img[^>]*loading="lazy"[^>]*decoding="async"/g)?.length).toBe(2)
     expect(chatHtml).toContain('排队')
+  })
+
+  it('切换会话会同时清除队列暂停和在途标记', () => {
+    expect(resetQueuedPromptControl(7)).toEqual({ generation: 8, pending: false, inFlight: false })
+  })
+
+  it('Pi 分支请求保留当前 profile', () => {
+    expect(buildForkSessionRequest({
+      providerId: 'pi',
+      sourceSessionId: 'session-1',
+      sourceRunId: 'run-1',
+      sourceProviderTurnId: 'turn-1',
+      sourceForkTurnId: 'fork-1',
+      permissionMode: 'default'
+    }, 'pi:rotom')).toMatchObject({ providerId: 'pi', agentProfileId: 'pi:rotom' })
   })
 
   it('运行中发送队列按 FIFO 取出，空消息不入队', () => {

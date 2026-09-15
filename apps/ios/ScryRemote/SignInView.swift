@@ -32,7 +32,8 @@ struct SignInView: View {
         case let .success(auth):
           if let credential = auth.credential as? ASAuthorizationAppleIDCredential {
             model.auth = .signedIn(name: credential.fullName?.givenName ?? "Apple 用户")
-            model.link = .notPaired
+            if let host = model.connectionHost { model.link = .offline(host: host) }
+            else { model.link = .notPaired }
           } else { model.auth = .failed("登录返回了意外的凭据类型") }
         case let .failure(error):
           model.auth = .failed("登录未完成：\(error.localizedDescription)。Sign in with Apple 需要有效 entitlement。")

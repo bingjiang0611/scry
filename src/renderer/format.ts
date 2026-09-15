@@ -1548,7 +1548,8 @@ export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts
 }
 
 // 性能：把一批 onTrace 事件一次性合并进 turns（替代每事件一次 setState）。FIFO 保序、按 id 去重、
-// 连续 text_delta 合并进上一条——语义与逐事件版完全一致，只是批量。clone-on-write 只复制变动的 turn。
+// 连续 text_delta / thinking 流片段合并进上一条——语义与逐事件版完全一致，只是批量。
+// clone-on-write 只复制变动的 turn。
 export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set<string>): Turn[] {
   let next = prev
   const turnIndices = new Map(prev.map((turn, index) => [turn.runId, index]))
@@ -1633,11 +1634,14 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
     state = mutableStateFor(index)
     const lastIndex = state.items.length - 1
     const last = state.items[lastIndex]
-    if (
-      ev.stage === 'text_delta' && last?.stage === 'text_delta' &&
-      ev.messageId === last.messageId && ev.agentId === last.agentId && ev.parentToolUseId === last.parentToolUseId
-    ) {
+    const sameModelStream =
+      last?.kind === 'model' && ev.kind === 'model' &&
+      ev.messageId === last.messageId && ev.agentId === last.agentId &&
+      ev.parentToolUseId === last.parentToolUseId
+    if (ev.stage === 'text_delta' && last?.stage === 'text_delta' && sameModelStream) {
       state.items[lastIndex] = { ...last, text: (last.text ?? '') + (ev.text ?? '') }
+    } else if (ev.stage === 'thinking' && last?.stage === 'thinking' && sameModelStream) {
+      state.items[lastIndex] = { ...last, thinking: (last.thinking ?? '') + (ev.thinking ?? '') }
     } else {
       state.indices.set(ev.id, state.items.length)
       state.items.push(ev)

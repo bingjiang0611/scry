@@ -172,7 +172,11 @@ describe('SessionLedger', () => {
     const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
     expectCode(() => ledger.recordIntent({ intentId: 'x', runId: randomUUID() }), 'invalid_intent_id')
     expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId: 'x' }), 'invalid_run_id')
-    expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId: randomUUID(), detail: 'z'.repeat(4097) }), 'invalid_detail')
+    const detailedRunId = randomUUID()
+    expect(() => ledger.recordIntent({ intentId: randomUUID(), runId: detailedRunId, detail: 'z'.repeat(6_000) })).not.toThrow()
+    ledger.markDispatched(detailedRunId)
+    expectCode(() => ledger.markProgress(detailedRunId, 'z'.repeat(4_097)), 'invalid_detail')
+    expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId: randomUUID(), detail: 'z'.repeat(1_200_001) }), 'invalid_detail')
   })
 })
 
@@ -200,8 +204,9 @@ describe('SessionLedgerFileStore', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
-  it('drops a torn trailing append but keeps committed records', () => {
+  it('durably truncates a torn tail before the next append', () => {
     const dir = privateDir()
+    let revivedStore: SessionLedgerFileStore | undefined
     try {
       const store = new SessionLedgerFileStore(dir)
       const runId = randomUUID()
@@ -209,10 +214,20 @@ describe('SessionLedgerFileStore', () => {
       store.close()
       // Simulate a crash mid-append: a partial line with no trailing newline.
       appendFileSync(join(dir, 'session-ledger.log'), '{"seq":2,"at":1,"ru')
-      const revived = new SessionLedger({ store: new SessionLedgerFileStore(dir) })
+      revivedStore = new SessionLedgerFileStore(dir)
+      const revived = new SessionLedger({ store: revivedStore })
       expect(revived.describe()).toEqual({ runs: 1, events: 1, lastSeq: 1 })
       expect(revived.runState(runId)).toBe('recorded')
-    } finally { rmSync(dir, { recursive: true, force: true }) }
+      // Recovery must repair the file itself. A later valid append and another
+      // restart must stay readable rather than concatenate onto the fragment.
+      revived.markDispatched(runId)
+      revivedStore.close()
+      revivedStore = undefined
+      revivedStore = new SessionLedgerFileStore(dir)
+      const restarted = new SessionLedger({ store: revivedStore })
+      expect(restarted.runState(runId)).toBe('dispatched')
+      expect(restarted.describe()).toEqual({ runs: 1, events: 2, lastSeq: 2 })
+    } finally { revivedStore?.close(); rmSync(dir, { recursive: true, force: true }) }
   })
 
   it('fails closed on a corrupt non-final line and on a non-private directory', () => {

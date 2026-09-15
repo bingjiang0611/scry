@@ -32,8 +32,8 @@ export interface RemotePendingPairing {
   publicKeySHA256?: string
 }
 
-// A granted (paired) device. `revoked` reflects a durable revocation; a revoked
-// grant is shown, never silently dropped.
+// A granted device. `revoked` reflects durable host security state; revoked
+// grants remain available to authorization logic even when the UI omits them.
 export interface RemoteDevice {
   deviceId: string
   deviceLabel: string

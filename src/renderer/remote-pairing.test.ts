@@ -39,7 +39,7 @@ describe('remote-pairing projection (honest states)', () => {
     expect(vm.hasActionablePending).toBe(true)
   })
 
-  it('shows a revoked grant as revoked, never drops it or shows it active', () => {
+  it('omits revoked grants from the currently paired device list', () => {
     const vm = projectRemote({
       enabled: true, hostId: 'h', anchorSHA256: HASH_A, relayConfigured: true, pending: [],
       devices: [
@@ -48,9 +48,8 @@ describe('remote-pairing projection (honest states)', () => {
       ]
     })
     if (vm.kind !== 'enabled') throw new Error('expected enabled')
-    expect(vm.devices.map((d) => [d.deviceId, d.revoked, d.statusText])).toEqual([
-      ['d1', false, '已配对'],
-      ['d2', true, '已吊销']
+    expect(vm.devices.map((d) => [d.deviceId, d.statusText])).toEqual([
+      ['d1', '已配对']
     ])
   })
 

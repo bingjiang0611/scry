@@ -8,7 +8,7 @@ import '../../src/renderer/codex-alignment.css'
 import { PinnedSummaryHost, usePinnedSummaryVisibility } from '../../src/renderer/components/PinnedSummary'
 import { OverviewPanel } from '../../src/renderer/components/OverviewPanel'
 import { AssistantTurn } from '../../src/renderer/components/ChatTurn'
-import { ModelEffortPicker } from '../../src/renderer/components/Pickers'
+import { CliPicker, ModelEffortPicker } from '../../src/renderer/components/Pickers'
 import { ViewChrome } from '../../src/renderer/components/ViewChrome'
 import { qoderSkillSessionFixture } from '../../src/renderer/__fixtures__/session-capabilities'
 import type { Turn } from '../../src/renderer/format'
@@ -46,6 +46,7 @@ function Fixture() {
   const [panelVisible, setPanelVisible] = useState(false)
   const [model, setModel] = useState('ultimate')
   const [effort, setEffort] = useState('default')
+  const [composerMenu, setComposerMenu] = useState<'agent' | 'modelEffort' | null>(null)
   const pinnedSummary = usePinnedSummaryVisibility(true, panelVisible)
   const select = (event: TraceEvent) => {
     setClicks((value) => value + 1)
@@ -91,6 +92,16 @@ function Fixture() {
     <section id="thinking"><AssistantTurn turn={thinkingTurn} selectedId={null} onSelect={() => undefined} /></section>
     <section id="model-effort" className="runtime-composer">
       <div className="composer-action-controls">
+        <CliPicker
+          agents={[{ id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/fixture/qodercli' }]}
+          selectedId="qoder"
+          onSelect={() => undefined}
+          onAddPi={() => undefined}
+          onRemovePi={() => undefined}
+          onRescan={() => undefined}
+          open={composerMenu === 'agent'}
+          onOpenChange={(open) => setComposerMenu(open ? 'agent' : null)}
+        />
         <ModelEffortPicker
           modelValue={model}
           modelOptions={[
@@ -99,6 +110,8 @@ function Fixture() {
             { value: 'performance', label: 'Performance' }
           ]}
           effortValue={effort}
+          open={composerMenu === 'modelEffort'}
+          onOpenChange={(open) => setComposerMenu(open ? 'modelEffort' : null)}
           effortOptions={[
             { value: 'default', label: '默认' },
             { value: 'xhigh', label: '极高' },
