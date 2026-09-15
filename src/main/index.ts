@@ -416,14 +416,19 @@ const listProjectCatalog = (): ProjectMeta[] => {
 }
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
 const detectInstalledAgents = () => detectAgents({
-  versionProbeEnv: (agent, executable) => agent.id === 'pi:default'
-    ? piVersionProbeEnvironment({ id: 'pi:default', label: 'Pi', executable })
+  versionProbeEnv: (agent, executable) => providerIdForAgentId(agent.id) === 'pi'
+    ? piVersionProbeEnvironment({ id: agent.id, label: agent.name, executable })
     : undefined
 })
-const defaultPiProfile = async (): Promise<PiAgentProfile | undefined> => {
-  const detected = (await detectInstalledAgents()).find((agent) => agent.id === 'pi:default')
-  return detected ? { id: 'pi:default', label: 'Pi', executable: detected.path } : undefined
-}
+const detectedPiProfiles = async (): Promise<PiAgentProfile[]> => (await detectInstalledAgents()).flatMap((agent) => {
+  if (providerIdForAgentId(agent.id) !== 'pi') return []
+  try {
+    const profile = piProfileForExecutable(agent.path)
+    return [{ ...profile, id: agent.id, label: agent.name }]
+  } catch {
+    return []
+  }
+})
 const storedPiProfiles = (): PiAgentProfile[] => {
   try {
     return piProfileStore().load().flatMap((stored) => {
@@ -438,12 +443,23 @@ const storedPiProfiles = (): PiAgentProfile[] => {
     return []
   }
 }
+const storedPiProfilesNotDetected = (detected: Array<{ id: string; path: string }>): PiAgentProfile[] => {
+  const detectedExecutables = new Set(detected.flatMap((agent) => {
+    if (providerIdForAgentId(agent.id) !== 'pi') return []
+    try {
+      return [piProfileForExecutable(agent.path).executable]
+    } catch {
+      return []
+    }
+  }))
+  return storedPiProfiles().filter((profile) => !detectedExecutables.has(profile.executable))
+}
 const listPiProfiles = async (): Promise<PiAgentProfile[]> => {
-  const builtin = await defaultPiProfile()
-  return [...(builtin ? [builtin] : []), ...storedPiProfiles().filter((profile) => profile.executable !== builtin?.executable)]
+  const detected = await detectedPiProfiles()
+  return [...detected, ...storedPiProfilesNotDetected(detected.map((profile) => ({ id: profile.id, path: profile.executable })))]
 }
 const resolvePiProfile = async (id: string): Promise<PiAgentProfile | undefined> => {
-  if (id === 'pi:default') return defaultPiProfile()
+  if (id === 'pi:default' || id === 'pi:rotom') return (await detectedPiProfiles()).find((profile) => profile.id === id)
   return storedPiProfiles().find((profile) => profile.id === id)
 }
 let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
@@ -1268,7 +1284,7 @@ handleTrusted('agent:detectFast', () => {
   const found = new Set(detected.map((agent) => agent.id))
   return [
     ...detected,
-    ...storedPiProfiles().filter((profile) => !found.has(profile.id)).map((profile) => ({
+    ...storedPiProfilesNotDetected(detected).filter((profile) => !found.has(profile.id)).map((profile) => ({
       id: profile.id,
       name: profile.label,
       bin: basename(profile.executable),
@@ -1287,7 +1303,7 @@ handleTrusted('agent:detect', async () => {
   return composeProviderDetectionResults({
     detected,
     descriptors,
-    storedPiProfiles: storedPiProfiles(),
+    storedPiProfiles: storedPiProfilesNotDetected(detected),
     probeStoredPiProfile: (profile) => probeCliVersion(profile.executable, ['--version'], {
       env: piRpcEnvironment(profile),
       timeout: PI_VERSION_PROBE_TIMEOUT_MS

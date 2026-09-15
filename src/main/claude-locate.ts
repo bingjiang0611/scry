@@ -412,7 +412,7 @@ async function agentVersionAsync(
   return probeCliVersion(
     path,
     id === 'qoder' ? ['-v'] : ['--version'],
-    id === 'pi:default' ? { env, timeout: PI_VERSION_PROBE_TIMEOUT_MS } : env ? { env } : {}
+    id.startsWith('pi:') ? { env, timeout: PI_VERSION_PROBE_TIMEOUT_MS } : env ? { env } : {}
   )
 }
 
@@ -432,7 +432,8 @@ const KNOWN_AGENTS: Array<{ id: string; name: string; bin: string }> = [
   { id: 'codex', name: 'Codex', bin: 'codex' },
   { id: 'qoder', name: 'Qoder', bin: 'qodercli' },
   { id: 'opencode', name: 'OpenCode', bin: 'opencode' },
-  { id: 'pi:default', name: 'Pi', bin: 'pi' }
+  { id: 'pi:default', name: 'Pi', bin: 'pi' },
+  { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom' }
 ]
 
 function qoderPathFromEnv(): string {
