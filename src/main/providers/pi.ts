@@ -308,7 +308,8 @@ class PiRpcProcess {
   }
 
   notify(message: JsonRecord): void {
-    if (!this.failed && !this.child.stdin.destroyed) this.child.stdin.write(`${JSON.stringify(message)}\n`)
+    if (this.failed || this.closing || this.child.stdin.destroyed || this.child.stdin.writableEnded) return
+    this.child.stdin.write(`${JSON.stringify(message)}\n`)
   }
 
   async close(): Promise<void> {
