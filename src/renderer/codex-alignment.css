@@ -1856,11 +1856,15 @@ button.pinned-summary-detail-row:hover {
 
 /* The active workspace should read as one quiet, layered instrument. */
 
-.topbar,
-.surface-topbar {
+.topbar {
   border-color: var(--border3);
   background: color-mix(in srgb, var(--main-surface) 94%, transparent);
   backdrop-filter: blur(18px) saturate(115%);
+}
+
+.surface-topbar {
+  border-color: var(--border3);
+  background: transparent;
 }
 
 .sb-new,
