@@ -18,15 +18,6 @@ export function logicalCallEventsForTurn(items: TraceEvent[], userText?: string)
 }
 export { bashReadFiles } from './file-evidence'
 
-// 视觉升级：值改成 Icon 名（蓝本 SVG 图标），消费处用 <Icon name={...}>。
-export const AGENT_ICON: Record<string, string> = {
-  claude: 'cube',
-  codex: 'square',
-  cursor: 'square',
-  gemini: 'square',
-  qoder: 'square'
-}
-
 export interface FileRow {
   path: string
   read: number

@@ -9,12 +9,14 @@ import type {
   AgentRunControls,
   AgentStopState
 } from '@shared/runtime'
+import { providerIdForAgentId } from '@shared/runtime'
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
 import { AssistantTurn, UserMessage, type UserMessageEditMode } from './ChatTurn'
 import { WorkdirPicker, CliPicker, ModelEffortPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
 import { Icon } from './primitives/Icon'
+import { ProviderGlyph } from './ProviderGlyph'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import type { WorkspaceFileTarget } from '../workspace-links'
 import { runStopStatus } from '../run-stop-status'
@@ -417,7 +419,7 @@ export function ChatView({
                           aria-label={`Pi，${group.agents.length} 个 Profile`}
                         >
                           <span className="welcome-provider-top welcome-provider-group-head">
-                            <i aria-hidden="true" />
+                            <ProviderGlyph provider="pi" />
                             <b>Pi</b>
                             <span className="welcome-profile-count">{group.agents.length} 个 Profile</span>
                           </span>
@@ -464,6 +466,7 @@ export function ChatView({
                     const agent = group.agents[0]
                     const selected = agent.id === selectedAgentId
                     const available = agent.health?.state !== 'unavailable'
+                    const providerId = providerIdForAgentId(agent.id)
                     return (
                       <button
                         type="button"
@@ -476,7 +479,7 @@ export function ChatView({
                         onClick={() => onSelectAgent(agent.id)}
                       >
                         <span className="welcome-provider-top">
-                          <i aria-hidden="true" />
+                          {providerId ? <ProviderGlyph provider={providerId} /> : <i aria-hidden="true" />}
                           <b>{agent.name}</b>
                           <em>{available ? '可用' : '不可用'}</em>
                           {selected && <Icon name="check" className="welcome-provider-check" />}

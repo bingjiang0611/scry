@@ -138,13 +138,23 @@ function completePiEnvironment(profile: PiAgentProfile, env: Record<string, stri
   return env
 }
 
+function pinPiLauncherNode(
+  profile: PiAgentProfile,
+  env: Record<string, string>,
+  compatibleNode: string | undefined
+): void {
+  if (!compatibleNode) return
+  if (!env.PI_AGENT_NODE) env.PI_AGENT_NODE = compatibleNode
+  if (basename(profile.executable) === 'rotom' && !env.ROTOM_NODE) env.ROTOM_NODE = compatibleNode
+}
+
 export function piRpcEnvironment(
   profile: PiAgentProfile,
   baseEnv: Record<string, string> = shellEnv()
 ): Record<string, string> {
   const env = sanitizeProviderEnv(baseEnv, 'pi')
-  const compatibleNode = env.PI_AGENT_NODE ? undefined : compatiblePiNode(env.PATH ?? '')
-  if (compatibleNode) env.PI_AGENT_NODE = compatibleNode
+  const compatibleNode = env.PI_AGENT_NODE ?? compatiblePiNode(env.PATH ?? '')
+  pinPiLauncherNode(profile, env, compatibleNode)
   return completePiEnvironment(profile, env)
 }
 
@@ -154,8 +164,8 @@ export async function piVersionProbeEnvironment(
 ): Promise<Record<string, string>> {
   const env = sanitizeProviderEnv(baseEnv, 'pi')
   // Finder 的 PATH 常先命中旧 Node；异步寻找兼容版本，避免扫描时阻塞 Electron 主线程。
-  const compatibleNode = env.PI_AGENT_NODE ? undefined : await compatiblePiNodeAsync(env.PATH ?? '')
-  if (compatibleNode) env.PI_AGENT_NODE = compatibleNode
+  const compatibleNode = env.PI_AGENT_NODE ?? await compatiblePiNodeAsync(env.PATH ?? '')
+  pinPiLauncherNode(profile, env, compatibleNode)
   return completePiEnvironment(profile, env)
 }
 

@@ -1,8 +1,9 @@
 // Composer 选择器：工作目录（含 recent）/ 本地 CLI（local·api 后端 + rescan）。
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { providerIdForAgentId } from '@shared/runtime'
-import { AGENT_ICON, basename } from '../format'
-import { Icon, type IconName } from './primitives/Icon'
+import { basename } from '../format'
+import { Icon } from './primitives/Icon'
+import { ProviderGlyph } from './ProviderGlyph'
 import type { DetectedAgent } from '../env'
 
 export interface AgentProviderGroup {
@@ -211,6 +212,7 @@ export function CliPicker({
   const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
   const menuId = useId()
   const sel = agents.find((a) => a.id === selectedId)
+  const selectedProvider = providerIdForAgentId(sel?.id ?? selectedId)
   const piAgents = agents.filter((agent) => providerIdForAgentId(agent.id) === 'pi')
   const codeAgents = agents.filter((agent) => providerIdForAgentId(agent.id) !== 'pi')
   useEffect(() => {
@@ -229,7 +231,7 @@ export function CliPicker({
         aria-haspopup="menu"
       >
         <span className="agicon">
-          <Icon name={(AGENT_ICON[selectedId] ?? 'cube') as IconName} />
+          {selectedProvider ? <ProviderGlyph provider={selectedProvider} /> : <Icon name="cube" />}
         </span>
         <span>{sel?.name ?? 'Agent'}</span>
         <Icon name={disabled ? 'lock' : 'chevronDown'} className="chev" />
@@ -255,7 +257,7 @@ export function CliPicker({
               }}
             >
               <span className="agicon">
-                <Icon name={(AGENT_ICON[a.id] ?? 'cube') as IconName} />
+                <ProviderGlyph provider={providerIdForAgentId(a.id) ?? 'claude'} />
               </span>{' '}
               <span className="agent-option-name">{a.name}</span>
               {a.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
@@ -274,7 +276,7 @@ export function CliPicker({
                   setOpen(false)
                 }}
               >
-                <span className="agicon"><Icon name="cube" /></span>
+                <span className="agicon"><ProviderGlyph provider="pi" /></span>
                 <span className="agent-option-copy">
                   <b>{piProfileName(agent)}</b>
                   <small>{agent.id === 'pi:default' ? '系统检测' : '自定义 Profile'} · {agent.version ?? '版本未知'}</small>
