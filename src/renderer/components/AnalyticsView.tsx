@@ -6,7 +6,9 @@ import type {
   UsageAnalyticsRangeDays
 } from '@shared/trace'
 import type { BillingProvider } from '@shared/billing'
+import type { ProviderId } from '@shared/provider'
 import { Icon } from './primitives/Icon'
+import { ProviderGlyph } from './ProviderGlyph'
 
 type ChartMetric = 'cost' | 'tokens'
 type BreakdownMode = 'model' | 'day'
@@ -159,7 +161,26 @@ function smoothPath(points: ChartPoint[]): string {
   }, `M ${points[0].x},${points[0].y}`)
 }
 
+const billingProviderGlyph: Partial<Record<BillingProvider, ProviderId>> = {
+  anthropic: 'claude',
+  'claude-code': 'claude',
+  openai: 'codex',
+  codex: 'codex',
+  qoder: 'qoder',
+  opencode: 'opencode'
+}
+
 function ProviderMark({ provider }: { provider: BillingProvider }) {
+  const glyph = billingProviderGlyph[provider]
+  if (glyph) {
+    return (
+      <ProviderGlyph
+        provider={glyph}
+        label={providerLabel(provider)}
+        className={`usage-provider-mark is-${provider}`}
+      />
+    )
+  }
   return (
     <span
       className={`usage-provider-mark is-${provider}`}

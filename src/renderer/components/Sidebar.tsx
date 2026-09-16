@@ -13,6 +13,7 @@ import type { McpLiveStatus } from '@shared/trace'
 import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
+import { ProviderGlyph } from './ProviderGlyph'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -506,12 +507,10 @@ function SessionRow({
           {session.providerId === 'legacy_unknown' ? (
             <span className="sb-provider" data-provider="legacy_unknown">历史?</span>
           ) : (
-            <span
+            <ProviderGlyph
               className="sb-provider"
-              data-provider={session.providerId}
-              role="img"
-              aria-label={providerDisplayName[session.providerId]}
-              title={providerDisplayName[session.providerId]}
+              provider={session.providerId}
+              label={providerDisplayName[session.providerId]}
             />
           )}
           <span className="sb-sesstext">{session.preview || '(无预览)'}</span>

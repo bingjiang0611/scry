@@ -167,21 +167,24 @@ describe('Pi RPC Provider', () => {
     }
   })
 
-  it('selects a compatible Node later on PATH for pi-agent', async () => {
+  it('selects a compatible Node later on PATH for Pi launchers', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-pi-node-'))
     try {
       const oldBin = join(dir, 'old', 'bin')
       const newBin = join(dir, 'new', 'bin')
       const launcher = join(dir, 'pi-agent')
       const nativeWrapper = join(dir, 'pi')
+      const rotomLauncher = join(dir, 'rotom')
       mkdirSync(oldBin, { recursive: true })
       mkdirSync(newBin, { recursive: true })
       writeFileSync(launcher, '#!/bin/sh\nexit 0\n')
       writeFileSync(nativeWrapper, '#!/bin/sh\nexit 0\n')
+      writeFileSync(rotomLauncher, '#!/bin/sh\nexit 0\n')
       writeFileSync(join(oldBin, 'node'), '#!/bin/sh\nprintf "22.22.1\\n"\n')
       writeFileSync(join(newBin, 'node'), '#!/bin/sh\nprintf "24.18.0\\n"\n')
       chmodSync(launcher, 0o755)
       chmodSync(nativeWrapper, 0o755)
+      chmodSync(rotomLauncher, 0o755)
       chmodSync(join(oldBin, 'node'), 0o755)
       chmodSync(join(newBin, 'node'), 0o755)
 
@@ -209,6 +212,22 @@ describe('Pi RPC Provider', () => {
         PATH: `${oldBin}${delimiter}${newBin}`,
         HOME: dir
       })).resolves.toMatchObject({ PI_AGENT_NODE: realpathSync(join(newBin, 'node')) })
+
+      const rotomProfile = piProfileForExecutable(rotomLauncher)
+      const compatibleNode = realpathSync(join(newBin, 'node'))
+      expect(piRpcEnvironment(rotomProfile, {
+        PATH: `${oldBin}${delimiter}${newBin}`,
+        HOME: dir
+      })).toMatchObject({ PI_AGENT_NODE: compatibleNode, ROTOM_NODE: compatibleNode })
+      await expect(piVersionProbeEnvironment(rotomProfile, {
+        PATH: `${oldBin}${delimiter}${newBin}`,
+        HOME: dir
+      })).resolves.toMatchObject({ PI_AGENT_NODE: compatibleNode, ROTOM_NODE: compatibleNode })
+      expect(piRpcEnvironment(rotomProfile, {
+        PATH: `${oldBin}${delimiter}${newBin}`,
+        HOME: dir,
+        ROTOM_NODE: '/configured/node'
+      }).ROTOM_NODE).toBe('/configured/node')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
