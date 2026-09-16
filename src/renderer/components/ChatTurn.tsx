@@ -1603,7 +1603,6 @@ function AssistantTurnImpl({
           </span>
         )}
       </div>
-      {hookSummary.groups.length > 0 && <HooksSummary summary={hookSummary} />}
       <div className="turn-flow">
         {turnFlowBody}
         {projection.liveParentToolUseId === null && projection.liveText && (
@@ -1668,6 +1667,7 @@ function AssistantTurnImpl({
           <div className="sk-line" style={{ width: '48%' }} />
         </div>
       )}
+      {hookSummary.groups.length > 0 && <HooksSummary summary={hookSummary} />}
       {hasFiles && (
         <FilesSummary
           structured={structured}
