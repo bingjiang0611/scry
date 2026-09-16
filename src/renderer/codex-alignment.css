@@ -2037,33 +2037,20 @@ button.pinned-summary-detail-row:hover {
 
 .chat-body .turn-assistant {
   margin-top: 22px;
-  padding: 22px 24px 20px;
-  border: 1px solid var(--border3);
-  border-radius: var(--r-lg);
-  background:
-    linear-gradient(145deg, var(--surface-subtle), transparent 56%),
-    color-mix(in srgb, var(--panel) 96%, transparent);
-  box-shadow: var(--shadow-card);
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+  padding: 20px 22px;
+  border: 0;
+  border-radius: 26px;
+  background: var(--surface-faint);
+  box-shadow: none;
+  transition: background-color 150ms ease;
 }
 
 .chat-body .transcript-turn:hover .turn-assistant,
 .chat-body .transcript-turn:focus-within .turn-assistant {
-  border-color: var(--border);
-  box-shadow:
-    0 1px 0 rgb(255 255 255 / 3%),
-    0 16px 38px rgb(0 0 0 / 20%);
-  transform: translateY(-1px);
-}
-
-:root[data-theme='light'] .chat-body .transcript-turn:hover .turn-assistant,
-:root[data-theme='light'] .chat-body .transcript-turn:focus-within .turn-assistant {
-  box-shadow:
-    0 1px 2px rgb(35 35 32 / 6%),
-    0 16px 38px rgb(35 35 32 / 9%);
+  border-color: transparent;
+  background: var(--surface-subtle);
+  box-shadow: none;
+  transform: none;
 }
 
 .chat-body .who {
@@ -2078,6 +2065,14 @@ button.pinned-summary-detail-row:hover {
   max-width: 76ch;
   font-size: 15px;
   line-height: 1.72;
+}
+
+.chat-body .turn-flow {
+  padding-left: 0;
+}
+
+.chat-body .turn-flow::before {
+  display: none;
 }
 
 .chat-body .tool-card {
@@ -2112,11 +2107,49 @@ button.pinned-summary-detail-row:hover {
   letter-spacing: 0.075em;
 }
 
+.chat-body .turn-hooks-summary,
+.chat-body .files-summary {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface-subtle);
+  box-shadow: none;
+}
+
+.chat-body .turn-hooks-summary > summary,
+.chat-body .files-summary > summary {
+  min-height: 44px;
+  padding: 10px 14px;
+  color: var(--dim);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.chat-body .turn-hooks-summary > summary:hover,
+.chat-body .files-summary > summary:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.chat-body .turn-hooks-body,
+.chat-body .files-body {
+  border-top: 0;
+}
+
+.chat-body .turn-hook-phase + .turn-hook-phase {
+  border-top: 0;
+}
+
 .chat-body .turn-footer {
   gap: 10px;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border3);
+  margin-top: 14px;
+  padding: 10px 2px 0;
+  border: 0;
+  background: transparent;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.015em;

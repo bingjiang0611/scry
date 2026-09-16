@@ -1740,7 +1740,14 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(timeoutHtml).toContain('probe.txt')
   })
 
-  it('本轮 Hook 复用逻辑调用聚合，不平铺 lifecycle 事件', () => {
+  it('本轮 Hook 位于输出之后、本轮文件之前，并复用逻辑调用聚合', () => {
+    const outputIndex = html.indexOf('class="model-text md"')
+    const hookIndex = html.indexOf('class="turn-hooks-summary"')
+    const filesIndex = html.indexOf('class="files-summary"')
+
+    expect(outputIndex).toBeGreaterThan(-1)
+    expect(hookIndex).toBeGreaterThan(outputIndex)
+    expect(filesIndex).toBeGreaterThan(hookIndex)
     expect(html).toContain('本轮 Hook')
     expect(html).not.toContain('<details class="turn-hooks-summary" open="">')
     expect(html).toContain('1 个处理器实例')
