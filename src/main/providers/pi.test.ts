@@ -108,6 +108,9 @@ process.stdin.on('data', (chunk) => {
       }
       response()
       if (command.message === 'hang') continue
+      if (command.message === 'pending-question') {
+        send({ type: 'extension_ui_request', id: 'question-late', method: 'select', title: 'Pick one', options: ['One'] })
+      }
       send({ type: 'message_start', message: { role: 'assistant' } })
       send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'think' } })
       send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'ing' } })
@@ -634,6 +637,26 @@ describe('Pi RPC Provider', () => {
         runId: 'run-1', prompt: 'hello', cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'default', emit: vi.fn()
       }).promise).rejects.toThrow('本机完全访问')
+    })
+  })
+
+  it('does not answer an extension question after the RPC stdin has closed', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      let questionAborted = false
+      const result = await adapter.run({
+        runId: 'run-pending-question', prompt: 'pending-question', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn(),
+        requestUserInput: (_question, signal) => new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            questionAborted = true
+            reject(new Error('question aborted'))
+          }, { once: true })
+        })
+      }).promise
+      expect(result).toMatchObject({ stopped: false, status: 'completed' })
+      expect(questionAborted).toBe(true)
+      await new Promise((resolve) => setImmediate(resolve))
     })
   })
 
