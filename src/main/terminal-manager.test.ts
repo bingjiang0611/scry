@@ -133,7 +133,7 @@ describe('TerminalManager', () => {
     expect((await manager.listRecordings({})).items[0].active).toBe(false)
   })
 
-  it('captures default raw output before live projection and replays only in the current workspace', () => {
+  it('captures default raw output before live projection and replays only in the current workspace', async () => {
     const cwd = workspace()
     const recordingDirectory = join(cwd, 'recordings')
     const { manager, pty, data } = fixture(cwd, cwd, recordingDirectory)
@@ -141,16 +141,16 @@ describe('TerminalManager', () => {
     expect(session.recording).toBe('available')
     pty.processes[0].emitData('token=SYNTHETIC_SECRET 中😀\u001b[31m')
     expect(data[0].data).toContain('SYNTHETIC_SECRET')
-    expect(() => manager.deleteRecording(session.id)).toThrow('still_active')
+    await expect(manager.deleteRecording(session.id)).rejects.toThrow('still_active')
     pty.processes[0].emitExit(0)
     const restarted = fixture(cwd, cwd, recordingDirectory).manager
-    expect(restarted.readRecording({ id: session.id, offset: 0 })).toMatchObject({ state: 'complete', data: data[0].data })
+    await expect(restarted.readRecording({ id: session.id, offset: 0 })).resolves.toMatchObject({ state: 'complete', data: data[0].data })
     const different = workspace()
     const foreign = fixture(different, different, recordingDirectory).manager
-    expect(() => foreign.readRecording({ id: session.id, offset: 0 })).toThrow('workspace_mismatch')
-    expect(() => foreign.deleteRecording(session.id)).toThrow('workspace_mismatch')
-    restarted.deleteRecording(session.id)
-    expect(() => restarted.readRecording({ id: session.id, offset: 0 })).toThrow()
+    await expect(foreign.readRecording({ id: session.id, offset: 0 })).rejects.toThrow('workspace_mismatch')
+    await expect(foreign.deleteRecording(session.id)).rejects.toThrow('workspace_mismatch')
+    await restarted.deleteRecording(session.id)
+    await expect(restarted.readRecording({ id: session.id, offset: 0 })).rejects.toThrow()
   })
 
   it('does not terminate or suppress live output when recording cannot start', () => {
@@ -175,8 +175,11 @@ describe('TerminalManager', () => {
     const { manager, pty } = fixture(cwd)
     const terminal = manager.start({ cwd, cols: 80, rows: 24 })
     manager.pauseOutput(terminal.id)
+    manager.pauseRecording(terminal.id)
     manager.resumeOutput(terminal.id)
     expect(pty.processes[0].pause).toHaveBeenCalledOnce()
+    expect(pty.processes[0].resume).not.toHaveBeenCalled()
+    manager.resumeRecording(terminal.id)
     expect(pty.processes[0].resume).toHaveBeenCalledOnce()
     expect(pty.processes[0].killCount).toBe(0)
     expect(pty.processes[0].destroyCount).toBe(0)
