@@ -1,8 +1,17 @@
 // Additive schema-v1 payload. Absence means a legacy writer, never proof of complete content.
 export type ToolContentReason = 'provider_missing' | 'source_truncated' | 'field_budget' | 'turn_budget' | 'redaction_failed' | 'not_collected'
 
+export interface ToolContentRef {
+  storage: 'recorder-content-v1'
+  sha256: string
+  bytes: number
+  encoding: 'utf8' | 'json'
+}
+
 export interface ToolContent {
   content?: string
+  /** Complete redacted content stored outside the bounded inline preview. */
+  contentRef?: ToolContentRef
   encoding: 'utf8' | 'json' | 'json-fragment'
   savedBytes: number
   source: string
@@ -12,10 +21,20 @@ export interface ToolContent {
   reasons: ToolContentReason[]
 }
 
+export function isToolContentRef(value: unknown): value is ToolContentRef {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return raw.storage === 'recorder-content-v1' &&
+    typeof raw.sha256 === 'string' && /^[a-f0-9]{64}$/.test(raw.sha256) &&
+    Number.isSafeInteger(raw.bytes) && Number(raw.bytes) >= 0 &&
+    (raw.encoding === 'utf8' || raw.encoding === 'json')
+}
+
 export function isToolContent(value: unknown): value is ToolContent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   if (raw.content !== undefined && typeof raw.content !== 'string') return false
+  if (raw.contentRef !== undefined && !isToolContentRef(raw.contentRef)) return false
   if (!['utf8', 'json', 'json-fragment'].includes(String(raw.encoding)) || typeof raw.source !== 'string') return false
   if (!['unknown', 'complete', 'partial', 'unavailable'].includes(String(raw.sourceCompleteness))) return false
   if (!['applied', 'unchanged', 'failed', 'not_run'].includes(String(raw.redaction))) return false

@@ -501,7 +501,7 @@ export function aggregateTurnEvidence(args: {
       const saved = limitToolContent(content, remainingContentBytes, 'turn_budget')
       candidate.call[key] = saved
       remainingContentBytes -= saved.savedBytes
-      if (saved.storage !== 'complete' || saved.sourceCompleteness === 'partial') omittedCallSections.add(candidate.section)
+      if ((saved.storage !== 'complete' && !saved.contentRef) || saved.sourceCompleteness === 'partial') omittedCallSections.add(candidate.section)
     }
     if (candidate.call.outputContent) {
       candidate.call.outputSummary = outputSummary(candidate.call.outputContent.content)

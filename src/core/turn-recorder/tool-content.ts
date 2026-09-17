@@ -1,6 +1,6 @@
 import { StringDecoder } from 'node:string_decoder'
 import type { TraceEvent } from '../../shared/trace.js'
-import { isToolContent, type ToolContent, type ToolContentReason } from '../../shared/tool-content.js'
+import { isToolContent, type ToolContent, type ToolContentReason, type ToolContentRef } from '../../shared/tool-content.js'
 import type { RecorderConfig } from './config.js'
 
 export type ToolContentPolicy = Pick<RecorderConfig['capture'], 'toolOutput' | 'toolContentFieldBytes' | 'toolContentTurnBytes'>
@@ -84,7 +84,7 @@ export function limitToolContent(field: ToolContent, bytes: number, reason: 'fie
 
 export function captureToolContent(value: unknown, options: {
   source: string
-  maxBytes?: number
+  maxBytes?: number | null
   sourceCompleteness?: ToolContent['sourceCompleteness']
   reasons?: ToolContentReason[]
 }): ToolContent {
@@ -99,16 +99,19 @@ export function captureToolContent(value: unknown, options: {
     const safe = redactValue(value, new Set(), 0, state)
     const content = typeof safe === 'string' ? safe : JSON.stringify(safe)
     // Only serialize the inspected clone, never invoke the original object's toJSON.
-    return limitToolContent({
+    const captured: ToolContent = {
       ...base, content, savedBytes: Buffer.byteLength(content),
       redaction: state.changed ? 'applied' : 'unchanged', storage: 'complete'
-    }, options.maxBytes ?? 8 * 1024, 'field_budget')
+    }
+    return options.maxBytes === null
+      ? captured
+      : limitToolContent(captured, options.maxBytes ?? 8 * 1024, 'field_budget')
   } catch {
     return { ...base, redaction: 'failed', reasons: [...new Set([...base.reasons, 'redaction_failed' as const])] }
   }
 }
 
-export function sanitizeCapturedContent(field: ToolContent, maxBytes?: number): ToolContent {
+export function sanitizeCapturedContent(field: ToolContent, maxBytes?: number | null): ToolContent {
   if (!isToolContent(field)) return { ...captureToolContent(undefined, { source: 'invalid_content' }), redaction: 'failed', reasons: ['redaction_failed'] }
   if (field.content === undefined) return field
   const checked = captureToolContent(field.content, { source: field.source, maxBytes })
@@ -131,6 +134,24 @@ function sourceState(event: TraceEvent, input: boolean): Pick<ToolContent, 'sour
   return limited ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : { sourceCompleteness: 'unknown', reasons: [] }
 }
 
+function protectedToolEvent(event: TraceEvent, content: ToolContent, result: boolean): TraceEvent {
+  const { input: _input, output: _output, text: _text, inputContent: _ic, outputContent: _oc, ...metadata } = event
+  // Task descriptions and MCP names can be derived from tool input, not just static labels.
+  metadata.stage = redactToolText(metadata.stage)
+  if (metadata.name) metadata.name = redactToolText(metadata.name)
+  if (metadata.tool) metadata.tool = redactToolText(metadata.tool)
+  if (metadata.danger) metadata.danger = { ...metadata.danger, reason: redactToolText(metadata.danger.reason) }
+  for (const key of ['mcpServer', 'mcpAction', 'mcpTool'] as const) {
+    if (metadata[key]) metadata[key] = redactToolText(metadata[key])
+  }
+  if (metadata.mcpCalls) metadata.mcpCalls = metadata.mcpCalls.map((call) => ({
+    server: redactToolText(call.server), action: redactToolText(call.action), tool: redactToolText(call.tool)
+  }))
+  return result
+    ? { ...metadata, outputContent: content, ...(content.content !== undefined ? { output: content.content, text: content.content } : {}) }
+    : { ...metadata, inputContent: content, ...(content.content !== undefined ? { input: content.encoding === 'json' ? JSON.parse(content.content) as unknown : content.content } : {}) }
+}
+
 export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPolicy, source: string): TraceEvent[] {
   if (policy.toolOutput !== 'full-redacted') return events
   return events.map((event) => {
@@ -142,20 +163,46 @@ export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPoli
     const content = existing ? sanitizeCapturedContent(existing, policy.toolContentFieldBytes) : captureToolContent(raw, {
       source, maxBytes: policy.toolContentFieldBytes, ...sourceState(event, !result)
     })
-    const { input: _input, output: _output, text: _text, inputContent: _ic, outputContent: _oc, ...metadata } = event
-    // Task descriptions and MCP names can be derived from tool input, not just static labels.
-    metadata.stage = redactToolText(metadata.stage)
-    if (metadata.name) metadata.name = redactToolText(metadata.name)
-    if (metadata.tool) metadata.tool = redactToolText(metadata.tool)
-    if (metadata.danger) metadata.danger = { ...metadata.danger, reason: redactToolText(metadata.danger.reason) }
-    for (const key of ['mcpServer', 'mcpAction', 'mcpTool'] as const) {
-      if (metadata[key]) metadata[key] = redactToolText(metadata[key])
-    }
-    if (metadata.mcpCalls) metadata.mcpCalls = metadata.mcpCalls.map((call) => ({
-      server: redactToolText(call.server), action: redactToolText(call.action), tool: redactToolText(call.tool)
-    }))
-    return result
-      ? { ...metadata, outputContent: content, ...(content.content !== undefined ? { output: content.content, text: content.content } : {}) }
-      : { ...metadata, inputContent: content, ...(content.content !== undefined ? { input: content.encoding === 'json' ? JSON.parse(content.content) as unknown : content.content } : {}) }
+    return protectedToolEvent(event, content, result)
   })
+}
+
+/** Persist complete redacted bodies before applying the bounded inline projection. */
+export async function persistToolEventContent(
+  events: TraceEvent[],
+  policy: ToolContentPolicy,
+  source: string,
+  persist: (content: string, encoding: ToolContentRef['encoding']) => Promise<ToolContentRef>
+): Promise<TraceEvent[]> {
+  if (policy.toolOutput !== 'full-redacted') return events
+  return Promise.all(events.map(async (event) => {
+    if (!['tool', 'skill', 'agent'].includes(event.kind)) return event
+    const result = event.stage === 'tool_result'
+    const existing = result ? event.outputContent : event.inputContent
+    const raw = result ? event.output ?? event.text : event.input
+    let content: ToolContent
+    if (existing?.contentRef) {
+      content = sanitizeCapturedContent(existing, policy.toolContentFieldBytes)
+    } else {
+      const full = raw !== undefined
+        ? captureToolContent(raw, { source, maxBytes: null, ...sourceState(event, !result) })
+        : existing
+          ? sanitizeCapturedContent(existing, null)
+          : captureToolContent(undefined, { source })
+      if (full.content !== undefined) {
+        // Every body needs a durable copy: even a field below its own limit can be clipped later
+        // when the shared turn budget is exhausted by earlier calls.
+        const contentRef = await persist(full.content, full.encoding === 'json' ? 'json' : 'utf8')
+        content = {
+          ...(full.savedBytes > (policy.toolContentFieldBytes ?? 8 * 1024)
+            ? limitToolContent(full, policy.toolContentFieldBytes ?? 8 * 1024, 'field_budget')
+            : full),
+          contentRef
+        }
+      } else {
+        content = full
+      }
+    }
+    return protectedToolEvent(event, content, result)
+  }))
 }

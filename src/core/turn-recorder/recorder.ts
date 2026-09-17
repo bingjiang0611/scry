@@ -21,7 +21,8 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
-import { captureToolContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
+import { captureToolContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
+import { writeRecorderContent } from './content-store.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
 import { recordProviderActivity } from './provider-activity.js'
@@ -464,7 +465,7 @@ export function lifecycleTraceEvents(args: {
         input,
         ...(args.toolContentPolicy?.toolOutput === 'full-redacted' ? {
           inputContent: captureToolContent(args.payload[['tool_input', 'toolInput', 'input'].find((key) => key in args.payload) ?? 'tool_input'], {
-            source: 'lifecycle_hook', maxBytes: args.toolContentPolicy.toolContentFieldBytes,
+            source: 'lifecycle_hook', maxBytes: null,
             ...(limitations.some((item) => item.field === 'tool_input') ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : {})
           })
         } : {}),
@@ -492,7 +493,7 @@ export function lifecycleTraceEvents(args: {
       ...(agentId ? { agentId } : {}),
       ...(args.toolContentPolicy?.toolOutput === 'full-redacted'
         ? { outputContent: captureToolContent(result, {
-            source: 'lifecycle_hook', maxBytes: args.toolContentPolicy.toolContentFieldBytes,
+            source: 'lifecycle_hook', maxBytes: null,
             ...(limitations.some((item) => item.field === 'tool_response') ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : {})
           }) }
         : args.captureOutput ? { text: summarize(result), output: summarize(result) } : {}),
@@ -2087,19 +2088,21 @@ async function storeLifecycleEvent(
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const id = stableHash({ event, sessionId: open.sessionId, generation: open.generation, payload })
   const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
+  const traceEvents = await persistToolEventContent(lifecycleTraceEvents({
+    provider: open.provider,
+    event,
+    payload,
+    runId: `${open.provider}:${open.sessionId}:${open.generation}`,
+    captureOutput: contentPolicy.toolOutput === 'summary',
+    toolContentPolicy: contentPolicy
+  }), contentPolicy, 'lifecycle_hook', (content, encoding) =>
+    writeRecorderContent(enablement.dataRoot, content, encoding))
   const stored: StoredLifecycleEvent = {
     schemaVersion: 1,
     id,
     event,
     observedAt: new Date().toISOString(),
-    traceEvents: sanitizeToolEvents(lifecycleTraceEvents({
-      provider: open.provider,
-      event,
-      payload,
-      runId: `${open.provider}:${open.sessionId}:${open.generation}`,
-      captureOutput: contentPolicy.toolOutput === 'summary',
-      toolContentPolicy: contentPolicy
-    }), contentPolicy, 'lifecycle_hook'),
+    traceEvents,
     ...(transcriptPathOf(payload) ? { transcriptPath: transcriptPathOf(payload) } : {})
   }
   await writeJsonAtomic(join(turnRoot(root, open.generation), 'events', `${id}.json`), stored, { sync: false })
@@ -2202,8 +2205,15 @@ async function finalizeOpenTurn(
       observable: { tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false }
     }
   }
+  const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
-  const mergedEvents = mergeTurnTraceEvents(storedEvents, transcript.events, transcript.toolStreamComplete === true)
+  const transcriptEvents = await persistToolEventContent(
+    transcript.events,
+    contentPolicy,
+    'provider_transcript',
+    (content, encoding) => writeRecorderContent(enablement.dataRoot, content, encoding)
+  )
+  const mergedEvents = mergeTurnTraceEvents(storedEvents, transcriptEvents, transcript.toolStreamComplete === true)
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
   // change — including other turns' work — to this one. Release the baseline instead of publishing
   // an attribution we cannot defend, and say why.
