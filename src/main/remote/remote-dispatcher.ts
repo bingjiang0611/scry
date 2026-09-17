@@ -21,6 +21,7 @@ import { SessionLedger } from './session-ledger'
 // never by an executor, so it is not part of the sink's input union.
 export interface RemoteOutputSink {
   append(runId: string, chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+  flush?(runId: string): void
 }
 
 export interface RemoteExecutorInput {
@@ -85,9 +86,19 @@ export class RemoteDispatcher {
       // be recorded, but never fabricate one either.
       try { this.#ledger.markProgress(runId, mark) } catch { /* run already terminal */ }
     }
+    let outputCaptureFailed = false
+    const markOutputCaptureFailed = (): void => {
+      if (outputCaptureFailed) return
+      outputCaptureFailed = true
+      try { this.#ledger.markProgress(runId, 'output_capture_failed') } catch { /* run already terminal */ }
+    }
     const output = (chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void => {
-      // Best-effort content streaming: caching output must never fail the run.
-      try { this.#outputSink?.append(runId, chunk) } catch { /* cache unavailable */ }
+      // Output persistence must never fail the Agent, but the durable lifecycle must expose
+      // the first evidence gap instead of letting consumers infer that a partial stream is complete.
+      try { this.#outputSink?.append(runId, chunk) } catch { markOutputCaptureFailed() }
+    }
+    const flushOutput = (): void => {
+      try { this.#outputSink?.flush?.(runId) } catch { markOutputCaptureFailed() }
     }
     // Invoke synchronously so the dispatch is observably in flight when pump()
     // returns; a synchronous throw is mapped to failure like a rejection.
@@ -95,12 +106,13 @@ export class RemoteDispatcher {
     try {
       pending = this.#executor.execute({ runId, detail, progress, output })
     } catch (error) {
+      flushOutput()
       this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096))
       return
     }
     void Promise.resolve(pending).then(
-      () => { this.#settle(runId, true) },
-      (error) => { this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096)) }
+      () => { flushOutput(); this.#settle(runId, true) },
+      (error) => { flushOutput(); this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096)) }
     )
   }
 

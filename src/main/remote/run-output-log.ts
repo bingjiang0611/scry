@@ -1,6 +1,6 @@
 import { maskSecrets } from '../../shared/trace'
 
-// Per-run, in-memory, cursor-based OUTPUT log: the assistant's real trace
+// Per-run, cursor-based OUTPUT log: the assistant's real trace
 // CONTENT (text, reasoning, tool activity), streamed to an authorized device so
 // the phone renders the actual run output rather than only the ledger lifecycle.
 //
@@ -11,12 +11,9 @@ import { maskSecrets } from '../../shared/trace'
 //     the ledger `result` marker remains the authority for exact usage.
 //   - Content is secret-masked before it is stored (same policy as the local DB
 //     persistence path) and every chunk is byte-bounded.
-//   - It is a LIVE cache, not a complete audit log: it is in-memory (empty after
-//     a host restart) and bounded per run and across runs. When a bound is hit
-//     it appends ONE truthful `truncated` marker instead of silently dropping
-//     content as if the output were complete. A device polling an evicted run
-//     gets an empty page, which the UI must present as "output not cached", not
-//     as "no output".
+//   - Production injects a durable store and retains every exposed masked chunk.
+//     The bounded in-memory mode remains an explicit fallback for isolated uses/tests;
+//     it appends ONE truthful `truncated` marker instead of silently dropping data.
 //   - Reads are authorized upstream by the verified owner-device peer cert (the
 //     same check as poll); this module holds no trust of its own.
 
@@ -35,6 +32,13 @@ export interface OutputChunk {
 export interface RunOutputPage {
   chunks: OutputChunk[]
   cursor: number
+}
+
+export interface RunOutputStore {
+  append(chunk: Omit<OutputChunk, 'seq'>): OutputChunk
+  appendBatch?(chunks: Array<Omit<OutputChunk, 'seq'>>): OutputChunk[]
+  since(runId: string, cursor: number, pageSize?: number): RunOutputPage
+  close(): void
 }
 
 // Bounds: a single pathological run cannot exhaust host memory, and a device
@@ -71,6 +75,16 @@ function splitUtf8(text: string, maxBytes: number): string[] {
 export class RunOutputLog {
   // Insertion-ordered so the oldest run is evicted first when MAX_RUNS is hit.
   #runs = new Map<string, RunBuffer>()
+  #store?: RunOutputStore
+  #failedPersistentRuns = new Set<string>()
+  #persistenceErrors = new Map<string, Error>()
+  #pending = new Map<string, Array<Omit<OutputChunk, 'seq'>>>()
+  #pendingBytes = 0
+  #flushScheduled = false
+
+  constructor(options: { store?: RunOutputStore } = {}) {
+    this.#store = options.store
+  }
 
   // Append one content chunk for a run. Best-effort and never throws to the
   // caller: a run's execution must not fail because output could not be cached.
@@ -78,6 +92,17 @@ export class RunOutputLog {
     if (typeof runId !== 'string' || runId.length === 0 || runId.length > 128) return
     const text = maskSecrets(typeof chunk.text === 'string' ? chunk.text : '') ?? ''
     if (text.length === 0 && chunk.kind !== 'truncated') return
+    if (this.#store) {
+      const pending = this.#pending.get(runId) ?? []
+      for (const piece of splitUtf8(text, MAX_CHUNK_BYTES)) {
+        pending.push({ runId, at: Date.now(), kind: chunk.kind, text: piece })
+        this.#pendingBytes += byteLength(piece)
+      }
+      this.#pending.set(runId, pending)
+      if (this.#pendingBytes >= 512 * 1024) this.#drainPersistent(runId)
+      else this.#scheduleFlush()
+      return
+    }
     let buffer = this.#runs.get(runId)
     if (!buffer) {
       if (this.#runs.size >= MAX_RUNS) {
@@ -116,13 +141,83 @@ export class RunOutputLog {
 
   // Return chunks strictly after `cursor` for a run (bounded page), plus the
   // next cursor. An unknown/evicted run yields an empty page at the same cursor.
+  flush(runId: string): void {
+    if (!this.#store) return
+    this.#drainPersistent(runId)
+    if (this.#failedPersistentRuns.has(runId)) {
+      try {
+        this.#persist([{ runId, at: Date.now(), kind: 'truncated', text: 'output incomplete (durable capture was temporarily unavailable)' }])
+        this.#failedPersistentRuns.delete(runId)
+      } catch (error) {
+        this.#rememberFailure(runId, error)
+      }
+    }
+    const failure = this.#persistenceErrors.get(runId)
+    if (failure) {
+      this.#persistenceErrors.delete(runId)
+      throw failure
+    }
+  }
+
   since(runId: string, cursor: number, pageSize = DEFAULT_PAGE): RunOutputPage {
     const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
+    if (this.#store) {
+      this.#drainPersistent(runId)
+      if (this.#persistenceErrors.has(runId)) throw this.#persistenceErrors.get(runId)
+      return this.#store.since(runId, start, pageSize)
+    }
     const buffer = this.#runs.get(runId)
     if (!buffer) return { chunks: [], cursor: start }
     const size = Number.isSafeInteger(pageSize) && pageSize > 0 ? Math.min(pageSize, DEFAULT_PAGE) : DEFAULT_PAGE
     const chunks = buffer.chunks.filter((c) => c.seq > start).slice(0, size)
     const next = chunks.length > 0 ? chunks[chunks.length - 1].seq : start
     return { chunks: chunks.map((c) => ({ ...c })), cursor: next }
+  }
+
+  #scheduleFlush(): void {
+    if (this.#flushScheduled) return
+    this.#flushScheduled = true
+    queueMicrotask(() => {
+      this.#flushScheduled = false
+      this.#drainPersistent()
+    })
+  }
+
+  #persist(chunks: Array<Omit<OutputChunk, 'seq'>>): void {
+    if (!this.#store || chunks.length === 0) return
+    if (this.#store.appendBatch) this.#store.appendBatch(chunks)
+    else for (const chunk of chunks) this.#store.append(chunk)
+  }
+
+  #drainPersistent(onlyRunId?: string): void {
+    const runIds = onlyRunId ? [onlyRunId] : [...this.#pending.keys()]
+    for (const runId of runIds) {
+      const chunks = this.#pending.get(runId)
+      if (!chunks?.length) continue
+      this.#pending.delete(runId)
+      this.#pendingBytes = Math.max(0, this.#pendingBytes - chunks.reduce((sum, chunk) => sum + byteLength(chunk.text), 0))
+      const batch = this.#failedPersistentRuns.has(runId)
+        ? [{ runId, at: Date.now(), kind: 'truncated' as const, text: 'output incomplete (durable capture was temporarily unavailable)' }, ...chunks]
+        : chunks
+      try {
+        this.#persist(batch)
+        this.#failedPersistentRuns.delete(runId)
+      } catch (error) {
+        // Never retry unknown body writes. A later batch starts with a durable gap marker.
+        this.#rememberFailure(runId, error)
+      }
+    }
+  }
+
+  #rememberFailure(runId: string, error: unknown): void {
+    this.#failedPersistentRuns.delete(runId)
+    this.#failedPersistentRuns.add(runId)
+    this.#persistenceErrors.set(runId, error instanceof Error ? error : new Error(String(error)))
+    while (this.#failedPersistentRuns.size > 512) {
+      const oldest = this.#failedPersistentRuns.values().next().value
+      if (typeof oldest !== 'string') break
+      this.#failedPersistentRuns.delete(oldest)
+      this.#persistenceErrors.delete(oldest)
+    }
   }
 }

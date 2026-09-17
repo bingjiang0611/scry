@@ -1,5 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { RunOutputLog } from './run-output-log'
+import { RunOutputLog, type OutputChunk, type RunOutputStore } from './run-output-log'
+
+class RecoveringStore implements RunOutputStore {
+  fail = true
+  chunks: OutputChunk[] = []
+  append(chunk: Omit<OutputChunk, 'seq'>): OutputChunk {
+    if (this.fail) throw new Error('unavailable')
+    const event = { ...chunk, seq: this.chunks.length + 1 }
+    this.chunks.push(event)
+    return event
+  }
+  since(runId: string, cursor: number): { chunks: OutputChunk[]; cursor: number } {
+    const chunks = this.chunks.filter((chunk) => chunk.runId === runId && chunk.seq > cursor)
+    return { chunks, cursor: chunks.at(-1)?.seq ?? cursor }
+  }
+  close(): void {}
+}
 
 describe('RunOutputLog (live output content cache)', () => {
   it('returns chunks strictly after the cursor with a monotonic per-run seq', () => {
@@ -13,6 +29,20 @@ describe('RunOutputLog (live output content cache)', () => {
     const after = log.since('run-1', first.cursor)
     expect(after.chunks).toEqual([])
     expect(after.cursor).toBe(3)
+  })
+
+  it('publishes a durable gap marker before resuming after a store failure', () => {
+    const store = new RecoveringStore()
+    const log = new RunOutputLog({ store })
+    log.append('run-gap', { kind: 'output', text: 'lost' })
+    expect(() => log.flush('run-gap')).toThrow('unavailable')
+    store.fail = false
+    log.append('run-gap', { kind: 'output', text: 'kept' })
+    log.flush('run-gap')
+    expect(log.since('run-gap', 0).chunks.map((chunk) => [chunk.kind, chunk.text])).toEqual([
+      ['truncated', 'output incomplete (durable capture was temporarily unavailable)'],
+      ['output', 'kept']
+    ])
   })
 
   it('keeps runs isolated and yields an honest empty page for an unknown/evicted run', () => {

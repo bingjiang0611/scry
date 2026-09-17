@@ -105,8 +105,8 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     let lastErrorText: string | undefined
     // Every REAL trace event, accumulated so the run can be written to the Scry
     // trace archive (same evidence a local run produces), making it openable on
-    // the Mac. Separate from the `output` forwarding above (which is a bounded
-    // live view); this is the full turn content for the durable archive.
+    // the Mac. Separate from the `output` forwarding above (which production
+    // persists as cursor pages); this is also retained in the local trace archive.
     const items: TraceEvent[] = []
     // Whether the Provider streamed any assistant TEXT during the run. Some
     // Providers (e.g. qoder for a short turn) deliver the final answer only on
@@ -120,9 +120,9 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       // Two distinct channels:
       //  - `progress`: opaque, non-secret lifecycle markers on the durable ledger.
       //  - `output`:   the assistant's REAL trace CONTENT (text/reasoning/tool),
-      //                secret-masked + byte-bounded by RunOutputLog, so the device
-      //                renders the actual run output. This is trace-derived content,
-      //                NOT canonical usage; token/cost stay on the ledger `result`.
+      //                secret-masked, chunk-bounded and durably paged by RunOutputLog
+      //                in production, so reconnect/restart can catch up. This is
+      //                trace-derived content; token/cost stay on ledger `result`.
       const chunk = traceEventToOutputChunk(ev)
       if (chunk) {
         if (chunk.kind === 'output') sawAssistantText = true

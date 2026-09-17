@@ -59,6 +59,26 @@ describe('RemoteDispatcher', () => {
     expect(failed?.detail).toContain('provider exploded')
   })
 
+  it('records one durable evidence-gap marker when output persistence fails without failing the run', async () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor, gates } = deferredExecutor()
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      executor,
+      outputSink: { append: () => { throw new Error('disk unavailable') } }
+    })
+    const runId = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    dispatcher.pump()
+    gates.get(runId)!.input.output({ kind: 'output', text: 'first' })
+    gates.get(runId)!.input.output({ kind: 'output', text: 'second' })
+    gates.get(runId)!.resolve()
+    await dispatcher.idle()
+
+    expect(ledger.runState(runId)).toBe('settled')
+    expect(ledger.since(0).events.filter((event) => event.detail === 'output_capture_failed')).toHaveLength(1)
+  })
+
   it('invokes the executor only once under concurrent pumps', async () => {
     const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
     const { executor, calls, gates } = deferredExecutor()

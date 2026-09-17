@@ -114,6 +114,42 @@ Verification for this batch on a snapshot reconstructed from the Git index:
   secret. Archive tests cover shared-blob deduplication, live-store independence, missing-source
   preflight, crash recovery from target content and legacy inline records.
 
+## Batch 2b: durable remote run output (2026-09-17)
+
+Implemented:
+
+- Production `HostController` now uses a private, leased per-run output store instead of the 1 MiB
+  in-memory live cache. Masked output is split on UTF-8 boundaries, batched within the event loop,
+  appended to fsynced JSONL data, and committed through a fixed-width end-offset index only after
+  the data is durable. The batch is flushed before the lifecycle can become terminal.
+- Device cursors page from the index with a 512 KiB memory bound. Output beyond the former limit
+  survives host/controller restart without a synthetic truncation marker.
+- Recovery drops only uncommitted data/index tails. Missing file pairs, invalid offsets and corrupt
+  records fail closed. A temporary persistence failure does not fail the Agent: the durable lifecycle
+  records one `output_capture_failed` evidence gap, and a recovered store writes a `truncated` marker
+  before later content.
+
+Boundaries:
+
+- This covers paired-device Agent output, not local terminal PTY output or renderer trace replay.
+- There is not yet an explicit retention/compaction policy, so output files grow with retained runs.
+  A slow durable flush can backpressure event projection, but batching prevents one fsync per streamed
+  token; storage delay does not infer Agent termination or replay writes.
+- Secret masking follows the existing remote-output policy; it is not a claim that arbitrary unknown
+  secrets can always be detected.
+
+Verification on a snapshot reconstructed from this batch's Git index:
+
+- `npm test`: 165 files passed, 3 skipped; 2085 tests passed, 3 skipped; shell tests passed.
+  An initial resource-contended run timed out in two unchanged tests; both passed alone and the
+  subsequent full rerun passed.
+- `npm run typecheck`, `npm run build`, `npm run build:cli` and `npm run check:cli-release` passed
+  (537 CLI tests plus package smoke).
+- `CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:artifact` passed packaged-app validation and
+  isolated Electron security/PTY/surface smoke; no installation or publication was performed.
+- Remote-output tests replay more than the former 1 MiB cap after restart, exercise torn-tail repair,
+  missing/corrupt file pairs, masking, bounded pages, recovered gap markers and durable failure notice.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity
@@ -136,10 +172,10 @@ Verification for this batch on a snapshot reconstructed from the Git index:
 - Tests: large outputs across current thresholds, interrupted writes/recovery, duplicates,
   redaction, disk errors and correct turn/session association. No raw-secret persistence by default.
 
-### 3. Durable replay and pagination (CLI tool bodies partially implemented)
+### 3. Durable replay and pagination (CLI tool bodies and remote output partially implemented)
 
 - Wire the existing Recorder byte-page reader into authorized App/mobile detail endpoints.
-- UI/mobile/terminal consume durable cursor pages, with bounded in-memory caches and complete
+- UI/local terminal consume durable cursor pages, with bounded in-memory caches and complete
   catch-up after lost ACK, disconnect or renderer restart. Retention/deletion must be explicit.
 - Tests: reconnect cursor continuity, no skipped/duplicated events, renderer overload, host restart.
 
