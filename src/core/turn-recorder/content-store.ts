@@ -40,3 +40,22 @@ export async function readRecorderContent(dataRoot: string, ref: ToolContentRef)
   }
   return content.toString('utf8')
 }
+
+/** Ensure an archive owns a verified copy; an already-published target can recover without source. */
+export async function copyRecorderContent(
+  sourceRoot: string,
+  targetRoot: string,
+  ref: ToolContentRef
+): Promise<void> {
+  try {
+    await readRecorderContent(targetRoot, ref)
+    return
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const content = await readRecorderContent(sourceRoot, ref)
+  const copied = await writeRecorderContent(targetRoot, content, ref.encoding)
+  if (copied.sha256 !== ref.sha256 || copied.bytes !== ref.bytes) {
+    throw new Error(`recorder content copy mismatch: ${ref.sha256}`)
+  }
+}
