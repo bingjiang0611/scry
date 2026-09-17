@@ -20,6 +20,8 @@ class FakePty implements TerminalPtyProcess {
   readonly pid: number
   readonly writes: string[] = []
   readonly resizes: Array<[number, number]> = []
+  readonly pause = vi.fn()
+  readonly resume = vi.fn()
   killError?: Error
   killCount = 0
   destroyError?: Error
@@ -112,6 +114,25 @@ afterEach(() => {
 })
 
 describe('TerminalManager', () => {
+  it('backpressures reads without killing the PTY and ignores flow control after close', () => {
+    vi.useFakeTimers()
+    const cwd = workspace()
+    const { manager, pty } = fixture(cwd)
+    const terminal = manager.start({ cwd, cols: 80, rows: 24 })
+    manager.pauseOutput(terminal.id)
+    manager.resumeOutput(terminal.id)
+    expect(pty.processes[0].pause).toHaveBeenCalledOnce()
+    expect(pty.processes[0].resume).toHaveBeenCalledOnce()
+    expect(pty.processes[0].killCount).toBe(0)
+    expect(pty.processes[0].destroyCount).toBe(0)
+    manager.close({ id: terminal.id })
+    manager.pauseOutput(terminal.id)
+    manager.resumeOutput(terminal.id)
+    expect(pty.processes[0].pause).toHaveBeenCalledOnce()
+    expect(pty.processes[0].resume).toHaveBeenCalledOnce()
+    vi.runAllTimers()
+  })
+
   it('在当前 cwd 的 realpath 启动 main 控制的 PTY，并转发 data/exit', () => {
     const cwd = workspace()
     const alias = `${cwd}-alias`

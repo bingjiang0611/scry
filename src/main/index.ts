@@ -305,9 +305,8 @@ const terminalOutput = new TerminalOutputBridge({
   canSend: rendererCanReceive,
   sendData: (events) => win?.webContents.send('terminal:data', events),
   sendExit: (event) => win?.webContents.send('terminal:exit', event),
-  closeTerminal: (id) => {
-    try { terminalManager?.close({ id }) } catch { /* terminal may already be closing */ }
-  },
+  pauseTerminal: (id) => terminalManager?.pauseOutput(id),
+  resumeTerminal: (id) => terminalManager?.resumeOutput(id),
   warn: (message, id) => console.warn(`[scry] ${message}:`, id)
 })
 

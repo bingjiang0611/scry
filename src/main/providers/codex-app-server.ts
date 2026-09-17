@@ -10,6 +10,11 @@ interface JsonRpcMessage {
   emittedAtMs?: number
 }
 
+// These requests establish native execution/session identity. Releasing their waiters on a
+// clock would lose ownership of a possibly accepted operation. Only a reply, transport failure
+// or explicit shutdown settles them; never retry an unconfirmed mutation.
+const NATIVE_LIFECYCLE_REQUESTS = new Set(['thread/start', 'thread/resume', 'thread/fork', 'turn/start'])
+
 export interface CodexAppServerOptions {
   command: string
   args?: string[]
@@ -120,7 +125,7 @@ export class CodexAppServerClient {
       await this.requestOnGeneration('initialize', {
         clientInfo: { name: 'scry', title: 'Scry', version: '0.1.0' },
         capabilities: { experimentalApi: true, requestAttestation: false }
-      }, child, generation)
+      }, generation)
       await this.writeOnGeneration({ method: 'initialized' }, child, generation)
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error))
@@ -158,7 +163,7 @@ export class CodexAppServerClient {
     await this.start()
     const child = this.process
     if (!child) throw new Error('Codex app-server failed to start')
-    return this.requestOnGeneration<T>(method, params, child, this.processGeneration)
+    return this.requestOnGeneration<T>(method, params, this.processGeneration)
   }
 
   failureForCurrentGeneration(): Promise<Error> {
@@ -172,24 +177,25 @@ export class CodexAppServerClient {
   private requestOnGeneration<T = unknown>(
     method: string,
     params: unknown,
-    child: ChildProcessWithoutNullStreams,
     generation: number
   ): Promise<T> {
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
       const onTimeout = (): void => {
-        const suffix = method === 'turn/start' ? ' (termination_unconfirmed)' : ''
-        const error = new Error(`Codex app-server request timed out: ${method}${suffix}`)
-        this.failGeneration(child, generation, error)
-        void this.stopGeneration(child, generation)
+        // A slow control/query response says nothing about other turns on this shared process.
+        // Forget only this request; late replies are ignored by id, notifications remain live.
+        this.pending.delete(id)
+        reject(new Error(`Codex app-server request timed out: ${method} (response_unconfirmed)`))
       }
-      const cancelTimeout = this.options.scheduleRequestTimeout
-        ? this.options.scheduleRequestTimeout(onTimeout, this.options.requestTimeoutMs ?? 30_000)
-        : (() => {
-            const timer = setTimeout(onTimeout, this.options.requestTimeoutMs ?? 30_000)
-            timer.unref()
-            return () => clearTimeout(timer)
-          })()
+      const cancelTimeout = NATIVE_LIFECYCLE_REQUESTS.has(method)
+        ? () => {}
+        : this.options.scheduleRequestTimeout
+          ? this.options.scheduleRequestTimeout(onTimeout, this.options.requestTimeoutMs ?? 30_000)
+          : (() => {
+              const timer = setTimeout(onTimeout, this.options.requestTimeoutMs ?? 30_000)
+              timer.unref()
+              return () => clearTimeout(timer)
+            })()
       this.pending.set(id, { generation, method, resolve: (value) => resolve(value as T), reject, cancelTimeout })
       try {
         this.write({ id, method, params }, generation)

@@ -952,11 +952,11 @@ describe('turn recorder state machine', () => {
     expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
   })
 
-  it('超过过期窗口且 transcript 停止增长的 open 轮次收敛为 interrupted，证据降级为 partial', async () => {
+  it('静默多天的 open 轮次保留身份直到真实终态到达', async () => {
     const root = await workspace()
     const transcript = join(root, 'transcript.jsonl')
     const startedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
-    // 只有用户消息、没有任何 assistant 终态：这一轮永远等不到 Stop。
+    // 只有用户消息并不能证明任务已经停止。
     await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '跑一个长任务' } }))
     await handleRecorderHook({
       provider: 'claude',
@@ -968,15 +968,24 @@ describe('turn recorder state machine', () => {
     const stoppedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000)
     await utimes(transcript, stoppedAt, stoppedAt)
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
+    const openState = join(root, '.scry', 'runtime', 'claude', safeKey('claude-expired'), 'open.json')
+    expect(JSON.parse(await readFile(openState, 'utf8')).status).toBe('open')
+    await appendFile(transcript, `\n${JSON.stringify({
+      type: 'assistant', timestamp: new Date().toISOString(),
+      message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '终于完成' }] }
+    })}\n`)
+    await handleRecorderHook({
+      provider: 'claude', event: 'Stop', workspace: root,
+      payload: payload('claude-expired', { transcript_path: transcript, timestamp: new Date().toISOString() })
+    })
     const [record] = await listRecords(join(root, '.scry'))
-    expect(record.status).toBe('interrupted')
-    // 没有观测到终态，就不能声称"这一轮没用工具"。
-    expect(record.tools.status).toBe('partial')
-    expect(record.tools.omissionReason).toContain('terminal event')
+    expect(record.status).toBe('completed')
+    expect(record.assistant.value?.text).toContain('终于完成')
   })
 
-  it('transcript 已被 Provider 轮转删除的过期轮次仍能收敛，只保留 lifecycle 证据', async () => {
+  it('transcript 缺失不能作为 open 轮次已经中断的证据', async () => {
     const root = await workspace()
     const transcript = join(root, 'rotated-away.jsonl')
     await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '别的轮次' } }))
@@ -994,17 +1003,13 @@ describe('turn recorder state machine', () => {
     // Provider 把 transcript 轮转掉了：身份再也无法在其中匹配。
     await unlink(transcript)
 
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
-    const [record] = await listRecords(join(root, '.scry'))
-    expect(record.status).toBe('interrupted')
-    // 绝不借用无法确认归属的 transcript 内容。
-    expect(record.assistant.status).toBe('unavailable')
-    expect(record.assistant.omissionReason).toContain('no longer contains this turn')
-    // hook 侧拿到的 prompt 仍然是这一轮自己的证据。
-    expect(record.user.value?.text).toBe('这一轮')
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
+    const openState = join(root, '.scry', 'runtime', 'claude', safeKey('claude-rotated'), 'open.json')
+    expect(JSON.parse(await readFile(openState, 'utf8'))).toMatchObject({ status: 'open', prompt: '这一轮' })
   })
 
-  it('过期轮次不发布 diff：基线跨越过期窗口，无法归因给这一轮', async () => {
+  it('静默轮次不会提前发布 diff 或丢掉开始时的基线', async () => {
     const root = await workspace()
     // 该 fixture 的 capture.diff 为 false，这里显式打开以覆盖真实默认配置。
     const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
@@ -1024,16 +1029,16 @@ describe('turn recorder state machine', () => {
         timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
       })
     })
+    const openState = join(root, '.scry', 'runtime', 'claude', safeKey('claude-diff-attr'), 'open.json')
+    const before = await readFile(openState, 'utf8')
     const stoppedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000)
     await utimes(transcript, stoppedAt, stoppedAt)
-    // 轮次开启之后发生的改动属于后来的工作，绝不能算进这一轮。
+    // 尚无终态，不能靠时间提前确定文件改动的归属边界。
     await writeFile(join(root, 'later-work.ts'), 'export const later = 1\n')
 
-    await expect(recoverRecorder(root)).resolves.toMatchObject({ expired: 1 })
-    const [record] = await listRecords(join(root, '.scry'))
-    expect(record.diff.status).toBe('unavailable')
-    expect(record.diff.value).toBeUndefined()
-    expect(record.diff.omissionReason).toContain('cannot be attributed')
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
+    expect(await readFile(openState, 'utf8')).toBe(before)
   })
 
   it('transcript 仍在增长的长任务不被误判为过期', async () => {
@@ -1054,7 +1059,7 @@ describe('turn recorder state machine', () => {
     await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
   })
 
-  it('无 transcript 的 open 轮次同样会过期，且窗口内不误杀', async () => {
+  it('无 transcript 的 open 轮次不论年龄都不伪造终态', async () => {
     const fresh = await workspace()
     await handleRecorderHook({
       provider: 'claude',
@@ -1074,13 +1079,12 @@ describe('turn recorder state machine', () => {
       workspace: root,
       payload: payload('claude-no-transcript', {
         prompt: '没有 transcript',
-        // 没有 transcript 就没有"还在增长"这个判据，只按年龄判定。
+        // 没有 transcript 也不允许仅按年龄判定中断。
         timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
       })
     })
-    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
-    const [record] = await listRecords(join(root, '.scry'))
-    expect(record.status).toBe('interrupted')
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
   })
 
   it('Claude 只有 promptHash 时未匹配 transcript 也保持 pending', async () => {

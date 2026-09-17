@@ -25,6 +25,8 @@ export interface TerminalPtyProcess {
   onData(listener: (data: string) => void): Disposable
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): Disposable
   write(data: string): void
+  pause(): void
+  resume(): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
   /** node-pty runtime exposes destroy even though its public IPty type omits it. */
@@ -224,6 +226,17 @@ export class TerminalManager {
       throw new Error(`单次终端输入不能超过 ${TERMINAL_MAX_INPUT_BYTES} 字节`)
     }
     this.active(request.id).pty.write(request.data)
+  }
+
+  // Main-owned flow control only; no new renderer operation or process signal is exposed.
+  pauseOutput(id: string): void {
+    const session = this.sessions.get(id)
+    if (session && !session.closing) session.pty.pause()
+  }
+
+  resumeOutput(id: string): void {
+    const session = this.sessions.get(id)
+    if (session && !session.closing) session.pty.resume()
   }
 
   resize(request: TerminalResizeRequest): void {

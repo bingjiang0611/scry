@@ -30,6 +30,8 @@ let buffer = ''
 let leafId = 'active-leaf'
 let sessionId = 'pi-session-1'
 let entrySeq = 0
+let promptMessage = ''
+let acknowledgePrompt
 const entries = [
   { type: 'message', id: 'active-user', parentId: null, timestamp: new Date().toISOString(), message: { role: 'user' } },
   { type: 'message', id: 'active-leaf', parentId: 'active-user', timestamp: new Date().toISOString(), message: { role: 'assistant' } },
@@ -46,7 +48,11 @@ process.stdin.on('data', (chunk) => {
     if (!raw) continue
     const command = JSON.parse(raw)
     const response = (data) => send({ type: 'response', id: command.id, command: command.type, success: true, ...(data ? { data } : {}) })
-    if (command.type === 'get_state') response({
+    if (command.type === 'get_state' && promptMessage === 'final-state-hang') {
+      send({ type: 'extension_ui_request', id: 'final-state-wait', method: 'select', title: 'Final state', options: ['Continue'] })
+    } else if (command.type === 'get_state' && require('node:fs').existsSync(process.cwd() + '/hold-startup')) {
+      send({ type: 'extension_ui_request', id: 'startup-wait', method: 'select', title: 'Loading', options: ['Wait'] })
+    } else if (command.type === 'get_state') response({
       model: { provider: 'test-provider', id: 'test-model' },
       thinkingLevel: 'high',
       sessionId,
@@ -88,12 +94,13 @@ process.stdin.on('data', (chunk) => {
       } else response({ entries: entries.slice(start), leafId })
     }
     else if (command.type === 'prompt') {
+      promptMessage = command.message
       if (command.message === 'transport-exit') process.exit(17)
       if (command.message === 'preflight-reject') {
         send({ type: 'response', id: command.id, command: command.type, success: false, error: 'preflight rejected' })
         continue
       }
-      if (command.message !== 'no-entry') {
+      if (command.message !== 'no-entry' && command.message !== 'late-entry') {
         if (command.message === 'with-compact') {
           const compact = { type: 'compaction', id: 'compact-' + (++entrySeq), parentId: leafId, timestamp: new Date().toISOString() }
           entries.push(compact)
@@ -105,6 +112,12 @@ process.stdin.on('data', (chunk) => {
         }
         entries.push(entry)
         leafId = entry.id
+      }
+      if (command.message === 'late-prompt-ack' || command.message === 'late-entry') {
+        acknowledgePrompt = response
+        if (command.message === 'late-entry') response()
+        send({ type: 'extension_ui_request', id: 'delayed-release', method: 'select', title: 'Release?', options: ['Continue'] })
+        continue
       }
       response()
       if (command.message === 'hang') continue
@@ -126,6 +139,13 @@ process.stdin.on('data', (chunk) => {
       } })
       send({ type: 'agent_end', willRetry: false })
       setTimeout(() => send({ type: 'agent_settled' }), 20)
+    } else if (command.type === 'extension_ui_response' && command.id === 'delayed-release') {
+      if (promptMessage === 'late-entry') {
+        const entry = { type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId, message: { role: 'user' } }
+        entries.push(entry)
+        leafId = entry.id
+      } else acknowledgePrompt()
+      send({ type: 'agent_settled' })
     } else response()
   }
 })
@@ -425,6 +445,106 @@ describe('Pi RPC Provider', () => {
       const messageIds = [...new Set(streamedModelEvents.map((event) => event.messageId))]
       expect(messageIds).toHaveLength(1)
       expect(messageIds[0]).toMatch(/^pi:run-1:assistant-\d+$/)
+    })
+  }, 15_000)
+
+  it('keeps slow native startup owned beyond 60 seconds and remains explicitly stoppable', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'hold-startup'), '')
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      let received!: () => void
+      const startupObserved = new Promise<void>((resolve) => { received = resolve })
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-startup-wait', prompt: 'must not execute', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn(),
+        requestUserInput: async (question, signal) => {
+          received()
+          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+          return { runId: question.runId, questionId: question.questionId, behavior: 'cancelled' }
+        }
+      })
+      const terminal = vi.fn()
+      void handle.promise.then(terminal, terminal)
+      try {
+        await startupObserved
+        await vi.advanceTimersByTimeAsync(61_000)
+        expect(terminal).not.toHaveBeenCalled()
+        vi.useRealTimers()
+        handle.forceKill?.()
+        await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
+        expect(handle.getProviderTurnId?.()).toBeUndefined()
+      } finally {
+        vi.useRealTimers()
+        handle.forceKill?.()
+        await handle.promise.catch(() => undefined)
+      }
+    })
+  }, 15_000)
+
+  it.each(['late-prompt-ack', 'late-entry'])('keeps %s owned across 31 minutes of silence', async (prompt) => {
+    await withFixture(async (profile, cwd) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      let release!: () => void
+      let received!: () => void
+      const questionReceived = new Promise<void>((resolve) => { received = resolve })
+      const answer = new Promise<void>((resolve) => { release = resolve })
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-delayed', prompt, cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn(),
+        requestUserInput: async (question) => {
+          received()
+          await answer
+          return { runId: question.runId, questionId: question.questionId, behavior: 'answered', answers: { 'Release?': 'Continue' } }
+        }
+      })
+      const terminal = vi.fn()
+      void handle.promise.then(terminal, terminal)
+      try {
+        await questionReceived
+        await vi.advanceTimersByTimeAsync(31 * 60_000)
+        expect(terminal).not.toHaveBeenCalled()
+        vi.useRealTimers()
+        release()
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
+      } finally {
+        vi.useRealTimers()
+        release()
+        handle.forceKill?.()
+        await handle.promise.catch(() => undefined)
+      }
+    })
+  }, 15_000)
+
+  it('does not turn a settled native run into failure when final metadata times out', async () => {
+    await withFixture(async (profile, cwd) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const events: TraceEvent[] = []
+      let observed!: () => void
+      const finalStateRequested = new Promise<void>((resolve) => { observed = resolve })
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-final-state', prompt: 'final-state-hang', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event),
+        requestUserInput: async (question) => {
+          observed()
+          return { runId: question.runId, questionId: question.questionId, behavior: 'answered', answers: { 'Final state': 'Continue' } }
+        }
+      })
+      try {
+        await finalStateRequested
+        await vi.advanceTimersByTimeAsync(16_000)
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
+        expect(events).toContainEqual(expect.objectContaining({
+          kind: 'harness', stage: 'runtime:telemetry_degraded',
+          runtimeMetadata: expect.objectContaining({ capability: 'final_state' })
+        }))
+      } finally {
+        vi.useRealTimers()
+        handle.forceKill?.()
+        await handle.promise.catch(() => undefined)
+      }
     })
   }, 15_000)
 

@@ -1496,12 +1496,8 @@ export function createCodexAdapter(
               runRequest.codexHookTrust,
               runRequest.mcpExecution
             ).catch(() => {})
-            return {
-              externalSessionId,
-              providerTurnId: turnId,
-              stopped: true,
-              status: 'interrupted'
-            }
+            // An interrupt request is not evidence of termination. Keep listeners and the
+            // client's activity lease until native completion or an actual transport failure.
           }
           return await Promise.race([
             done,

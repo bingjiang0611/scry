@@ -181,7 +181,7 @@ class PiRpcProcess {
   private readonly pending = new Map<string, {
     resolve: (response: JsonRecord) => void
     reject: (error: Error) => void
-    timer: ReturnType<typeof setTimeout>
+    timer: ReturnType<typeof setTimeout> | undefined
     command: string
   }>()
   private readonly listeners = new Set<(event: JsonRecord) => void>()
@@ -287,11 +287,11 @@ class PiRpcProcess {
     return () => this.failureListeners.delete(listener)
   }
 
-  send(command: JsonRecord, timeoutMs = 15_000): Promise<JsonRecord> {
+  send(command: JsonRecord, timeoutMs: number | null = 15_000): Promise<JsonRecord> {
     if (this.failed) return Promise.reject(this.failed)
     const id = `scry-${++this.requestSeq}`
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = timeoutMs === null ? undefined : setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`Pi RPC ${String(command.type ?? 'command')} 超时`))
       }, timeoutMs)
@@ -338,6 +338,7 @@ class PiRpcProcess {
   }
 
   forceTerminate(): void {
+    this.fail(new Error('Pi RPC 已被强制终止'))
     this.closing = true
     try {
       if (process.platform !== 'win32' && this.child.pid) process.kill(-this.child.pid, 'SIGKILL')
@@ -434,21 +435,34 @@ async function piEntryBaseline(rpc: PiRpcProcess): Promise<PiEntrySnapshot> {
 async function waitForPiUserEntryId(
   rpc: PiRpcProcess,
   baseline: PiEntrySnapshot,
-  timeoutMs = 5_000
+  isSettled: () => boolean
 ): Promise<string> {
-  const deadline = Date.now() + timeoutMs
   for (;;) {
-    const response = await rpc.send({
-      type: 'get_entries',
-      ...(baseline.appendCursor ? { since: baseline.appendCursor } : {})
-    })
-    const data = record(response.data)
-    const rows = data.entries
-    if (!Array.isArray(rows)) throw new Error('Pi RPC get_entries 返回了无效增量 entries')
-    const id = piUserEntryIdAfterBaseline(baseline.leafId, rows.map(record))
-    if (id) return id
-    if (Date.now() >= deadline) throw new Error('Pi RPC prompt 已接受，但未出现 authoritative user session entry')
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    let changed!: () => void
+    let failed!: (error: Error) => void
+    const activity = new Promise<void>((resolve, reject) => { changed = resolve; failed = reject })
+    void activity.catch(() => undefined)
+    // Subscribe before the snapshot so an event arriving during get_entries is not lost.
+    const off = rpc.onEvent(changed)
+    const offFailure = rpc.onFailure(failed)
+    const terminalSnapshot = isSettled()
+    try {
+      const response = await rpc.send({
+        type: 'get_entries',
+        ...(baseline.appendCursor ? { since: baseline.appendCursor } : {})
+      }, null)
+      const rows = record(response.data).entries
+      if (!Array.isArray(rows)) throw new Error('Pi RPC get_entries 返回了无效增量 entries')
+      const id = piUserEntryIdAfterBaseline(baseline.leafId, rows.map(record))
+      if (id) return id
+      // Only a post-settlement snapshot proves missing identity. Do not kill a running
+      // Provider because its prompt entry has not appeared within an arbitrary five seconds.
+      if (terminalSnapshot) throw new Error('Pi RPC prompt 已接受，但未出现 authoritative user session entry')
+      await activity
+    } finally {
+      off()
+      offFailure()
+    }
   }
 }
 
@@ -811,6 +825,7 @@ async function runPiAgent(
     assistantMessageId ??= nextAssistantMessageId(message)
     return assistantMessageId
   }
+  let agentSettled = false
   let settledResolve: (() => void) | undefined
   const settled = new Promise<void>((resolve) => { settledResolve = resolve })
   let rpcFailureReject: ((error: Error) => void) | undefined
@@ -819,6 +834,7 @@ async function runPiAgent(
   const offFailure = rpc.onFailure((error) => rpcFailureReject?.(error))
   const off = rpc.onEvent((event) => {
     if (event.type === 'agent_settled') {
+      agentSettled = true
       settledResolve?.()
       return
     }
@@ -943,7 +959,9 @@ async function runPiAgent(
   })
   const startedAt = Date.now()
   try {
-    const initialState = record((await rpc.send({ type: 'get_state' })).data)
+    // Capability probes remain bounded; an explicitly started run stays cancellable while
+    // large native history/extensions load, rather than being killed by a startup clock.
+    const initialState = record((await rpc.send({ type: 'get_state' }, null)).data)
     if (typeof initialState.sessionId === 'string' && initialState.sessionId) {
       state.sessionId = initialState.sessionId
       request.onExternalSessionId?.(initialState.sessionId)
@@ -1007,7 +1025,8 @@ async function runPiAgent(
       mimeType: attachment.mimeType
     }))
     try {
-      await rpc.send({ type: 'prompt', message: request.prompt, ...(images.length > 0 ? { images } : {}) })
+      // Accepted execution stays owned until Pi acknowledges it or the user stops this process.
+      await rpc.send({ type: 'prompt', message: request.prompt, ...(images.length > 0 ? { images } : {}) }, null)
     } catch (error) {
       const identity = request.managedRecorderIdentity
       if (
@@ -1032,23 +1051,25 @@ async function runPiAgent(
       }
       throw error
     }
-    state.providerTurnId = await waitForPiUserEntryId(rpc, entryBaseline)
-    let settlementTimer: ReturnType<typeof setTimeout> | undefined
-    try {
-      await Promise.race([
-        settled,
-        rpcFailure,
-        new Promise<never>((_, reject) => {
-          settlementTimer = setTimeout(
-            () => reject(new Error('Pi RPC 等待 agent_settled 超过 30 分钟')),
-            30 * 60 * 1000
-          )
-        })
-      ])
-    } finally {
-      if (settlementTimer) clearTimeout(settlementTimer)
+    state.providerTurnId = await waitForPiUserEntryId(rpc, entryBaseline, () => agentSettled)
+    // Pi workflows can intentionally run for hours. Do not impose a wall-clock or inactivity
+    // deadline here: transport/process failures reject rpcFailure, and users retain stop controls.
+    await Promise.race([settled, rpcFailure])
+    let finalState = initialState
+    if (!state.stopped) {
+      try {
+        finalState = record((await rpc.send({ type: 'get_state' })).data)
+      } catch (error) {
+        // The native turn has already settled. A metadata refresh timeout cannot rewrite that
+        // outcome as a failed Agent run; retain startup identity and expose the evidence gap.
+        request.emit(piEvent(request.runId, {
+          kind: 'harness',
+          stage: 'runtime:telemetry_degraded',
+          text: `Pi final state unavailable: ${String((error as Error).message)}`,
+          runtimeMetadata: { source: 'pi_rpc', capability: 'final_state' }
+        }))
+      }
     }
-    const finalState = record((await rpc.send({ type: 'get_state' })).data)
     if (typeof finalState.sessionId === 'string' && finalState.sessionId) {
       state.sessionId = finalState.sessionId
       request.onExternalSessionId?.(finalState.sessionId)
@@ -1163,7 +1184,7 @@ export function createPiAdapter(options: {
             if (!target || record(target.message).role !== 'user') {
               throw new Error('Pi 会话无法定位待替换的用户消息 entry')
             }
-            const forked = await rpc.send({ type: 'fork', entryId: request.replaceForkTurnId })
+            const forked = await rpc.send({ type: 'fork', entryId: request.replaceForkTurnId }, null)
             if (record(forked.data).cancelled === true) throw new Error('Pi extension 取消了会话分支')
             const state = record((await rpc.send({ type: 'get_state' })).data)
             if (typeof state.sessionId !== 'string' || !state.sessionId) throw new Error('Pi fork 未返回新 sessionId')
@@ -1194,8 +1215,8 @@ export function createPiAdapter(options: {
               role: typeof record(entry.message).role === 'string' ? String(record(entry.message).role) : undefined
             })), snapshot.leafId, request.sourceForkTurnId)
             const forked = target.operation === 'fork_before'
-              ? await rpc.send({ type: 'fork', entryId: target.entryId })
-              : await rpc.send({ type: 'clone' })
+              ? await rpc.send({ type: 'fork', entryId: target.entryId }, null)
+              : await rpc.send({ type: 'clone' }, null)
             if (record(forked.data).cancelled === true) throw new Error('Pi extension 取消了会话分支')
             const state = record((await rpc.send({ type: 'get_state' })).data)
             if (typeof state.sessionId !== 'string' || !state.sessionId) throw new Error('Pi fork 未返回新 sessionId')
@@ -1219,7 +1240,10 @@ export function createPiAdapter(options: {
           state.rpc?.notify({ type: 'abort' })
           setTimeout(() => state.rpc?.abort(), 2_000)
         },
-        forceKill: () => state.rpc?.forceTerminate(),
+        forceKill: () => {
+          state.stopped = true
+          state.rpc?.forceTerminate()
+        },
         // 每轮 run 自己 spawn 一个 Pi RPC 子进程：SIGKILL 不会波及其他 run。
         forceKillScope: 'run_scoped',
         getExternalSessionId: () => state.sessionId,

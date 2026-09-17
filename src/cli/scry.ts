@@ -605,8 +605,8 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     lastRecordVersion(enablement.dataRoot),
     providerHookScriptState(enablement.workspaceRoot)
   ])
-  // Stale open turns are real data loss until recovery closes them, so they degrade the report
-  // instead of hiding behind `pendingCount`, which only counts managed/closing/quarantined turns.
+  // Stale open turns need investigation, not a fabricated interruption. Warn separately from
+  // pendingCount (managed/closing/quarantined); elapsed time does not prove the Provider stopped.
   const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0
   const checks: Check[] = [
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
@@ -639,10 +639,10 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
       id: 'turns.stale',
       status: staleOpenTurns.length > 0 ? 'warn' : 'pass',
       detail: staleOpenTurns.length > 0
-        ? `${staleOpenTurns.length} open turn(s) past the expiry window; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h`
-        : 'no open turn past the expiry window',
+        ? `${staleOpenTurns.length} open turn(s) without recent activity; termination unconfirmed; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h`
+        : 'no stale open turn',
       ...(staleOpenTurns.length > 0
-        ? { remediation: 'run `scry recorder recover` to close them as interrupted' }
+        ? { remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence, never from silence alone' }
         : {})
     },
     {
