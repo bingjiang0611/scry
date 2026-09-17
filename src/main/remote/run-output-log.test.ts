@@ -45,6 +45,17 @@ describe('RunOutputLog (live output content cache)', () => {
     ])
   })
 
+  it('retains an empty upstream truncation marker in durable mode', () => {
+    const store = new RecoveringStore()
+    store.fail = false
+    const log = new RunOutputLog({ store })
+    log.append('partial', { kind: 'truncated', text: '' })
+    log.flush('partial')
+    expect(log.since('partial', 0).chunks).toEqual([
+      expect.objectContaining({ kind: 'truncated', text: '', seq: 1 })
+    ])
+  })
+
   it('keeps runs isolated and yields an honest empty page for an unknown/evicted run', () => {
     const log = new RunOutputLog()
     log.append('run-1', { kind: 'output', text: 'x' })
@@ -68,6 +79,38 @@ describe('RunOutputLog (live output content cache)', () => {
     expect(chunks.map((chunk) => chunk.text).join('')).toBe(text)
     expect(chunks.some((chunk) => chunk.kind === 'truncated')).toBe(false)
     expect(chunks.every((chunk) => Buffer.byteLength(chunk.text, 'utf8') <= 16 * 1024)).toBe(true)
+  })
+
+  it('preserves literal replacement characters at UTF-8 chunk boundaries', () => {
+    const log = new RunOutputLog()
+    const text = `${'�'.repeat(6_000)}😀tail`
+    log.append('unicode', { kind: 'output', text })
+    expect(log.since('unicode', 0).chunks.map((chunk) => chunk.text).join('')).toBe(text)
+  })
+
+  it('bounds batches within a single large append and across tiny concurrent runs', () => {
+    const batches: OutputChunk[][] = []
+    const store = new RecoveringStore()
+    store.fail = false
+    const log = new RunOutputLog({ store: {
+      append: (chunk) => store.append(chunk),
+      appendBatch: (chunks) => {
+        const events = chunks.map((chunk) => store.append(chunk))
+        batches.push(events)
+        return events
+      },
+      since: (runId, cursor) => store.since(runId, cursor),
+      close: () => {}
+    } })
+    const text = '中😀'.repeat(180_000)
+    log.append('large', { kind: 'output', text })
+    expect(batches.length).toBeGreaterThan(0)
+    log.flush('large')
+    expect(store.chunks.map((chunk) => chunk.text).join('')).toBe(text)
+    expect(batches.every((batch) => batch.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.text), 0) <= 512 * 1024)).toBe(true)
+    const before = store.chunks.length
+    for (let i = 0; i < 4_001; i++) log.append(`tiny-${i}`, { kind: 'output', text: 'x' })
+    expect(store.chunks.length).toBeGreaterThan(before)
   })
 
   it('marks truncation when split chunks exhaust the per-run byte budget', () => {

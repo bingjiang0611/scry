@@ -122,8 +122,9 @@ Implemented:
   in-memory live cache. Masked output is split on UTF-8 boundaries, batched within the event loop,
   appended to fsynced JSONL data, and committed through a fixed-width end-offset index only after
   the data is durable. The batch is flushed before the lifecycle can become terminal.
-- Device cursors page from the index with a 512 KiB memory bound. Output beyond the former limit
-  survives host/controller restart without a synthetic truncation marker.
+- Device cursors page from the index with a 512 KiB serialized-record budget (plus bounded read scratch
+  space and parsed object overhead). Output beyond the former limit survives a clean host/controller
+  close and reopen without a synthetic truncation marker.
 - Recovery drops only uncommitted data/index tails. Missing file pairs, invalid offsets and corrupt
   records fail closed. A temporary persistence failure does not fail the Agent: the durable lifecycle
   records one `output_capture_failed` evidence gap, and a recovered store writes a `truncated` marker
@@ -149,6 +150,34 @@ Verification on a snapshot reconstructed from this batch's Git index:
   isolated Electron security/PTY/surface smoke; no installation or publication was performed.
 - Remote-output tests replay more than the former 1 MiB cap after restart, exercise torn-tail repair,
   missing/corrupt file pairs, masking, bounded pages, recovered gap markers and durable failure notice.
+
+### Follow-up: bounded capture and fail-closed index reads
+
+Focused regressions exposed gaps in the initial implementation; this follow-up fixes them:
+
+- A missing index can no longer be recreated on append and cause surviving data to be truncated.
+  Invalid indexed lengths now throw rather than appearing as a caught-up/empty page. Before tail repair,
+  the final indexed record is validated; reads validate the final record even for a caught-up cursor.
+  This is local record/offset validation, not a full-file checksum or complete corruption audit.
+- UTF-8 splitting is lazy and linear, preserves literal replacement characters and bounds queued
+  output to 512 KiB of text and 4,000 events globally, including within a single large append.
+  These are queue limits, not a bound on the upstream input string or masking allocation.
+- The stored-line ceiling is 128 KiB to accommodate worst-case sixfold JSON escaping of a 16 KiB
+  text chunk plus metadata. The page budget remains 512 KiB; this is not a larger capture window.
+- Lease recovery after an unclean process death remains unimplemented: a surviving lock fails closed.
+  Tail-repair tests model torn data/index writes after lease release, not automatic crash-lock recovery.
+  The next restart work must reuse the repository's identity-checked lease recovery before claiming
+  unclean-process restart support. Synchronous durable writes, retention and local replay remain open.
+
+Verification on the final staged-only snapshot:
+
+- `npm test`: 165 files passed, 3 skipped; 2097 tests passed, 3 skipped; shell tests passed.
+- `npm run typecheck` and `npm run build` passed. An initial fault-injection test overload typing error
+  was corrected, then focused checks, typecheck/build and the full suite were rerun on the final snapshot.
+- The 24 output tests include real data/index fsync failures and a three-byte torn index write:
+  uncertain bodies are not replayed, repair keeps contiguous cursors, and recovery emits a gap marker.
+- No real paired-device or local-terminal replay was exercised, and no package/install/publish was
+  performed for this follow-up. Earlier Batch 2b packaging results apply only to its original revision.
 
 ## Remaining sequence
 
