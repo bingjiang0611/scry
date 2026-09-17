@@ -10,6 +10,7 @@ import { webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, X509CertificateGenerator, cryptoProvider } from '@peculiar/x509'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController } from './host-controller-factory'
+import { RunOutputFileStore } from './run-output-file'
 import { PairingTransport } from './pairing-transport'
 import { verifyCSR } from './enrollment'
 import { ProviderOperationGate } from '../provider-operation-gate'
@@ -41,10 +42,11 @@ async function deviceMaterials() {
 async function harness() {
   const dir = mkdtempSync(join(tmpdir(), 'scry-pair-tp-')); dirs.push(dir)
   const identity = await ensureHostIdentity(join(dir, 'identity'))
-  const binding = createHostController({
+  const binding = await createHostController({
     stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
-    authorizeWorkspace: (cwd) => cwd, startRun: async () => {}, gate: new ProviderOperationGate()
+    authorizeWorkspace: (cwd) => cwd, startRun: async () => {}, gate: new ProviderOperationGate(),
+    createOutputStore: (directory) => new RunOutputFileStore(directory)
   })
   cleanups.push(() => binding.close())
   const server = await identity.issueHostServer()

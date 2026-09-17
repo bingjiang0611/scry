@@ -9,6 +9,7 @@ import { once } from 'node:events'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { RemoteHostService } from './remote-host-service'
+import { RunOutputFileStore } from './run-output-file'
 import { ReverseTunnelTransport, type OutboundLeg } from './relay-client'
 import type { PairingAuthority } from './pairing'
 import { ProviderOperationGate } from '../provider-operation-gate'
@@ -17,6 +18,7 @@ type PeculiarCrypto = Parameters<typeof cryptoProvider.set>[0]
 cryptoProvider.set(webcrypto as unknown as PeculiarCrypto)
 
 const AUTHORIZED = '/authorized/project'
+const createOutputStore = (directory: string) => new RunOutputFileStore(directory)
 const dirs: string[] = []
 const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => {
@@ -105,6 +107,7 @@ describe('RemoteHostService (lifecycle facade)', () => {
       authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
       startRun: async ({ routing }) => { seen.push(routing.cwd) },
       gate: new ProviderOperationGate(),
+      createOutputStore,
       createTransport: (ctx) => new ReverseTunnelTransport({ connect: () => netConnect({ port: ctx.mode === 'run' ? relay.runHostPort : relay.pairHostPort, host: '127.0.0.1' }) as unknown as OutboundLeg, poolSize: 2 }),
       relayAdvertisement: { host: 'scry-relay.example.workers.dev', port: 443, tls: 'system' }
     })
@@ -135,7 +138,8 @@ describe('RemoteHostService (lifecycle facade)', () => {
       stateDirectory: dir,
       authorizeWorkspace: (cwd) => cwd,
       startRun: async () => {},
-      gate: new ProviderOperationGate()
+      gate: new ProviderOperationGate(),
+      createOutputStore
     })
     cleanups.push(() => service.dispose())
     expect(service.relayConfigured).toBe(false)
@@ -152,7 +156,7 @@ describe('RemoteHostService (lifecycle facade)', () => {
 
   it('exposes a sanitized pairing status + confirm/revoke without leaking secrets', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-svc-')); dirs.push(dir)
-    const service = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate() })
+    const service = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore })
     cleanups.push(() => service.dispose())
 
     // Empty host: honest enabled state, no pending, no devices.
@@ -204,11 +208,11 @@ describe('RemoteHostService (lifecycle facade)', () => {
 
   it('dispose releases the durable leases so a fresh service can be created in the same directory', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-svc-')); dirs.push(dir)
-    const first = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate() })
+    const first = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore })
     const hostId = first.hostId
     await first.dispose()
     await first.dispose() // idempotent
-    const second = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate() })
+    const second = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore })
     cleanups.push(() => second.dispose())
     // Same persisted identity across restarts.
     expect(second.hostId).toBe(hostId)

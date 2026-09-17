@@ -11,6 +11,7 @@ import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x50
 import { ensureHostIdentity, type HostIdentity } from './host-identity'
 import { HostController, type RemoteIntentRouting } from './host-controller'
 import { createHostController } from './host-controller-factory'
+import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { RelayClient, ReverseTunnelTransport, type OutboundLeg } from './relay-client'
 import { ProviderOperationGate } from '../provider-operation-gate'
@@ -92,11 +93,12 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     const dir = mkdtempSync(join(tmpdir(), 'scry-relay-')); dirs.push(dir)
     const identity = await ensureHostIdentity(join(dir, 'identity'))
     const seen: RemoteIntentRouting[] = []
-    const binding = createHostController({
+    const binding = await createHostController({
       stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
       verifyCSR: identity.verifyCSR, issue: identity.issue,
       authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
-      startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate()
+      startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate(),
+      createOutputStore: (directory) => new RunOutputFileStore(directory)
     })
     cleanups.push(() => binding.close())
     const controller = binding.controller
@@ -128,10 +130,11 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     const dir = mkdtempSync(join(tmpdir(), 'scry-relay-')); dirs.push(dir)
     const identity = await ensureHostIdentity(join(dir, 'identity'))
     let ran = 0
-    const binding = createHostController({
+    const binding = await createHostController({
       stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
       verifyCSR: identity.verifyCSR, issue: identity.issue,
-      authorizeWorkspace: (cwd) => cwd, startRun: async () => { ran++ }, gate: new ProviderOperationGate()
+      authorizeWorkspace: (cwd) => cwd, startRun: async () => { ran++ }, gate: new ProviderOperationGate(),
+      createOutputStore: (directory) => new RunOutputFileStore(directory)
     })
     cleanups.push(() => binding.close())
     const controller = binding.controller

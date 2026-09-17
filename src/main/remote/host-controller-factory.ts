@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
-import { RunOutputFileStore } from './run-output-file'
+import { RunOutputWorkerStore } from './run-output-worker'
+import type { RunOutputStore } from './run-output-log'
 import { recoverDeadRemoteLease } from './recover-dead-lease'
 import { ensureHostIdentity } from './host-identity'
 import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
@@ -30,7 +31,7 @@ export interface HostControllerBinding {
   controller: HostController
   // Release the durable leases. Call on app shutdown; a restart re-acquires and
   // the ledger replays any recorded-but-undispatched intents via recover().
-  close(): void
+  close(): Promise<void>
 }
 
 export interface HostControllerFactoryDependencies {
@@ -52,6 +53,9 @@ export interface HostControllerFactoryDependencies {
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
   }): Promise<void>
   gate: ProviderOperationGate
+  // Tests and embedded hosts may inject an equivalent store. Production omits this
+  // and always owns the file store inside the dedicated worker.
+  createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
   // Snapshot of host-authorized project directories offered to devices.
   listProjects?(): RemoteProjectRef[]
   listDirectories?(path?: string): RemoteDirectoryListing
@@ -85,7 +89,7 @@ export async function createHostControllerFromDisk(deps: {
   gate: ProviderOperationGate
 }): Promise<HostControllerBinding & { anchorSHA256: string; caCertificatePEM: string }> {
   const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))
-  const binding = createHostController({
+  const binding = await createHostController({
     stateDirectory: deps.stateDirectory,
     hostId: identity.hostId,
     anchorSHA256: identity.anchorSHA256,
@@ -98,13 +102,13 @@ export async function createHostControllerFromDisk(deps: {
   return Object.assign(binding, { anchorSHA256: identity.anchorSHA256, caCertificatePEM: identity.caCertificatePEM })
 }
 
-export function createHostController(deps: HostControllerFactoryDependencies): HostControllerBinding {
+export async function createHostController(deps: HostControllerFactoryDependencies): Promise<HostControllerBinding> {
   mkdirSync(deps.stateDirectory, { recursive: true })
   const pairingDirectory = privateDir(join(deps.stateDirectory, 'pairing'))
   recoverDeadRemoteLease(pairingDirectory, 'pairing-state.lock')
   const pairingStore = new PairingFileStore(pairingDirectory)
   let ledgerStore: SessionLedgerFileStore
-  let outputStore: RunOutputFileStore
+  let outputStore: RunOutputStore
   try {
     const ledgerDirectory = privateDir(join(deps.stateDirectory, 'ledger'))
     recoverDeadRemoteLease(ledgerDirectory, 'session-ledger.lock')
@@ -117,7 +121,7 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
   try {
     const outputDirectory = privateDir(join(deps.stateDirectory, 'output'))
     recoverDeadRemoteLease(outputDirectory, 'run-output.lock')
-    outputStore = new RunOutputFileStore(outputDirectory)
+    outputStore = await (deps.createOutputStore?.(outputDirectory) ?? RunOutputWorkerStore.create(outputDirectory))
   } catch (error) {
     ledgerStore.close()
     pairingStore.close()
@@ -152,7 +156,7 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
     // Only recorded-but-undispatched intents may start; dispatched outcomes stay unknown.
     controller.recover()
   } catch (error) {
-    try { outputStore.close() } finally {
+    try { await outputStore.close() } finally {
       try { ledgerStore.close() } finally { pairingStore.close() }
     }
     throw error
@@ -161,11 +165,11 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
   let closed = false
   return {
     controller,
-    close: () => {
+    close: async () => {
       if (closed) return
       closed = true
       // Release content and lifecycle leases before pairing authority state.
-      try { outputStore.close() } finally {
+      try { await outputStore.close() } finally {
         try { ledgerStore.close() } finally { pairingStore.close() }
       }
     }

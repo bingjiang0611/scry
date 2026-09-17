@@ -249,7 +249,7 @@ export class HostController {
 
   // Device-facing: the assistant's real streamed output CONTENT for one run,
   // strictly after the caller's cursor, authorized by the verified peer cert.
-  runOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): RunOutputPage {
+  runOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<RunOutputPage> {
     return this.#gateway.pollOutput(peerCertSHA256, input)
   }
 

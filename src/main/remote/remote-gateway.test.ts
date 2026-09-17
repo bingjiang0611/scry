@@ -74,7 +74,7 @@ describe('RemoteGateway', () => {
     expectCode(() => gw.submitIntent(stranger, { intentId: randomUUID() }), 'device_not_authorized')
     expectCode(() => gw.poll(stranger, { cursor: 0 }), 'device_not_authorized')
     expectCode(() => gw.runState(stranger, { runId: randomUUID() }), 'device_not_authorized')
-    expectCode(() => gw.pollOutput(stranger, { runId: randomUUID(), cursor: 0 }), 'device_not_authorized')
+    await expect(gw.pollOutput(stranger, { runId: randomUUID(), cursor: 0 })).rejects.toMatchObject({ code: 'device_not_authorized' })
     expectCode(() => gw.submitIntent('not-a-hash', { intentId: randomUUID() }), 'device_not_authorized')
     expect(ledger.describe().events).toBe(0)
   })
@@ -87,23 +87,23 @@ describe('RemoteGateway', () => {
     src.append(runId, { kind: 'tool', text: 'Edit /w/file.ts' })
     const { gw } = gateway(authority, undefined, src)
 
-    const page = gw.pollOutput(CERT, { runId, cursor: 0 })
+    const page = await gw.pollOutput(CERT, { runId, cursor: 0 })
     expect(page.chunks.map((c) => c.kind)).toEqual(['output', 'tool'])
     expect(page.chunks[0].text).toBe('Hello from the agent')
     // Strictly-after-cursor paging.
-    const after = gw.pollOutput(CERT, { runId, cursor: page.chunks[0].seq })
+    const after = await gw.pollOutput(CERT, { runId, cursor: page.chunks[0].seq })
     expect(after.chunks.map((c) => c.kind)).toEqual(['tool'])
     // Unknown run => honest empty page at the same cursor, never fabricated.
-    expect(gw.pollOutput(CERT, { runId: randomUUID(), cursor: 0 })).toEqual({ chunks: [], cursor: 0 })
+    await expect(gw.pollOutput(CERT, { runId: randomUUID(), cursor: 0 })).resolves.toEqual({ chunks: [], cursor: 0 })
     // Revoked device loses output access like every other op.
     await authority.revoke(deviceId)
-    expectCode(() => gw.pollOutput(CERT, { runId, cursor: 0 }), 'device_not_authorized')
+    await expect(gw.pollOutput(CERT, { runId, cursor: 0 })).rejects.toMatchObject({ code: 'device_not_authorized' })
   })
 
   it('returns an honest empty output page when no output source is configured', async () => {
     const { authority } = await grantedAuthority()
     const { gw } = gateway(authority)
-    expect(gw.pollOutput(CERT, { runId: randomUUID(), cursor: 0 })).toEqual({ chunks: [], cursor: 0 })
+    await expect(gw.pollOutput(CERT, { runId: randomUUID(), cursor: 0 })).resolves.toEqual({ chunks: [], cursor: 0 })
   })
 
   it('lets an authorized owner device submit a durable intent and poll it', async () => {

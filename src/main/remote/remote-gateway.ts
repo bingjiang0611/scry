@@ -150,7 +150,7 @@ export interface RemoteHistorySource {
 
 export interface RemoteOutputReader {
   // Chunks strictly after `cursor` for a run (bounded page) + the next cursor.
-  since(runId: string, cursor: number): RunOutputPage
+  since(runId: string, cursor: number): RunOutputPage | Promise<RunOutputPage>
 }
 
 export interface RemoteGatewayDependencies {
@@ -452,7 +452,7 @@ export class RemoteGateway {
   // The assistant's real streamed output CONTENT for one run, strictly after the
   // caller's cursor. Authorized by the same verified owner-device check as poll;
   // an unknown/evicted run yields an honest empty page (never fabricated).
-  pollOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): RunOutputPage {
+  async pollOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<RunOutputPage> {
     this.#authorize(peerCertSHA256)
     const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
     if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { chunks: [], cursor }

@@ -10,7 +10,8 @@ export default defineConfig({
     build: {
       rollupOptions: { input: {
         index: resolve('src/main/index.ts'),
-        'terminal-recording-worker': resolve('src/main/terminal-recording-worker.ts')
+        'terminal-recording-worker': resolve('src/main/terminal-recording-worker.ts'),
+        'run-output-file-worker': resolve('src/main/remote/run-output-file-worker.ts')
       } }
     }
   },
