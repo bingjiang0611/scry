@@ -58,6 +58,9 @@ import type { ScanReport } from '../cli/mcpguard-core'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import type {
   TerminalDataEvent,
+  TerminalRecordingErrorEvent,
+  TerminalRecordingRequest,
+  TerminalRecordingPage,
   TerminalExitEvent,
   TerminalSessionInfo,
   TerminalStartRequest
@@ -134,6 +137,8 @@ const api = {
   terminalReady: (id: string): Promise<true> => ipcRenderer.invoke('terminal:ready', { id }),
   terminalAck: (id: string, bytes: number): Promise<true> => ipcRenderer.invoke('terminal:ack', { id, bytes }),
   terminalClose: (id: string): Promise<true> => ipcRenderer.invoke('terminal:close', { id }),
+  terminalRecordingRead: (request: TerminalRecordingRequest): Promise<TerminalRecordingPage> => ipcRenderer.invoke('terminal:recordingRead', request),
+  terminalRecordingDelete: (id: string): Promise<true> => ipcRenderer.invoke('terminal:recordingDelete', { id }),
   setCwd: (dir: string | null): Promise<string | null> => ipcRenderer.invoke('agent:setCwd', dir),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   forkSession: (request: AgentForkSessionRequest): Promise<AgentForkSessionResult> => ipcRenderer.invoke('agent:forkSession', request),
@@ -227,6 +232,11 @@ const api = {
     }
     ipcRenderer.on('terminal:data', listener)
     return () => ipcRenderer.removeListener('terminal:data', listener)
+  },
+  onTerminalRecordingError: (cb: (event: TerminalRecordingErrorEvent) => void): (() => void) => {
+    const listener = (_: unknown, event: TerminalRecordingErrorEvent): void => cb(event)
+    ipcRenderer.on('terminal:recordingError', listener)
+    return () => ipcRenderer.removeListener('terminal:recordingError', listener)
   },
   onTerminalExit: (cb: (event: TerminalExitEvent) => void): (() => void) => {
     const listener = (_: unknown, event: TerminalExitEvent): void => cb(event)

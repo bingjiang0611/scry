@@ -11,9 +11,34 @@ export interface TerminalStartRequest {
 export interface TerminalSessionInfo {
   id: string
   pid: number
+  recording?: 'available' | 'unavailable'
   cwd: string
   cols: number
   rows: number
+}
+
+export interface TerminalRecordingRequest {
+  id: string
+  /** Byte offset in the UTF-16LE recording, not UTF-8 or a character index. */
+  offset: number
+  limit?: number
+}
+
+export interface TerminalRecordingPage {
+  id: string
+  encoding: 'utf16le'
+  data: string
+  offset: number
+  nextOffset: number
+  totalBytes: number
+  hasMore: boolean
+  state: 'recording' | 'complete' | 'interrupted' | 'failed'
+  exit?: TerminalExitEvent
+}
+
+export interface TerminalRecordingErrorEvent {
+  id: string
+  message: string
 }
 
 export interface TerminalWriteRequest {

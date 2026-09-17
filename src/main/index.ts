@@ -150,6 +150,7 @@ import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
 import type {
   TerminalCloseRequest,
+  TerminalRecordingRequest,
   TerminalResizeRequest,
   TerminalStartRequest,
   TerminalWriteRequest
@@ -320,6 +321,11 @@ async function getTerminalManager(): Promise<TerminalManager> {
           defaultCwd: homeDir,
           onData: (event) => terminalOutput.data(event),
           onExit: (event) => terminalOutput.exit(event),
+          recordingDirectory: join(app.getPath('userData'), 'terminal-recordings'),
+          onRecordingError: (event) => {
+            console.warn('[scry] terminal recording unavailable:', event.id)
+            if (rendererCanReceive()) win?.webContents.send('terminal:recordingError', event)
+          },
           shell: env.SHELL || process.env.SHELL || '/bin/zsh',
           env
         })
@@ -1465,6 +1471,17 @@ handleTrusted('terminal:resize', async (event, request: TerminalResizeRequest) =
   if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
   manager.resize(request)
+  return true as const
+})
+handleTrusted('terminal:recordingRead', async (event, request: TerminalRecordingRequest) => {
+  const manager = await getTerminalManager()
+  assertTrustedIpcEvent(event)
+  return manager.readRecording(request)
+})
+handleTrusted('terminal:recordingDelete', async (event, request: TerminalCloseRequest) => {
+  const manager = await getTerminalManager()
+  assertTrustedIpcEvent(event)
+  manager.deleteRecording(request?.id)
   return true as const
 })
 handleTrusted('terminal:ready', (_event, request: { id: string }) => {

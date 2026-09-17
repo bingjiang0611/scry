@@ -55,6 +55,8 @@ const invokeChannels = {
   terminalReady: 'terminal:ready',
   terminalAck: 'terminal:ack',
   terminalClose: 'terminal:close',
+  terminalRecordingRead: 'terminal:recordingRead',
+  terminalRecordingDelete: 'terminal:recordingDelete',
   setCwd: 'agent:setCwd',
   newSession: 'agent:newSession',
   forkSession: 'agent:forkSession',
@@ -111,6 +113,7 @@ const listenerChannels = {
   onTraceHealth: 'agent:traceHealth',
   onTerminalData: 'terminal:data',
   onTerminalExit: 'terminal:exit',
+  onTerminalRecordingError: 'terminal:recordingError',
   onTurnDone: 'agent:turnDone',
   onStopState: 'agent:stopState',
   onDataUpdated: 'agent:dataUpdated',
@@ -156,6 +159,11 @@ describe('preload IPC boundary', () => {
 
     await api.terminalResize('terminal-1', 120, 40)
     expect(electron.invoke).toHaveBeenLastCalledWith('terminal:resize', { id: 'terminal-1', cols: 120, rows: 40 })
+
+    await api.terminalRecordingRead({ id: 'terminal-1', offset: 4, limit: 65536 })
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingRead', { id: 'terminal-1', offset: 4, limit: 65536 })
+    await api.terminalRecordingDelete('terminal-1')
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingDelete', { id: 'terminal-1' })
 
     const context = { providerId: 'codex' as const, cwd: '/repo' }
     await api.mcpSnapshot(context, true)
