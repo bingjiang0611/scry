@@ -3,13 +3,17 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { ITheme } from '@xterm/xterm'
-import { TERMINAL_MAX_SESSIONS, type TerminalExitEvent } from '@shared/terminal'
+import { TERMINAL_MAX_SESSIONS, type TerminalExitEvent, type TerminalRecordingSummary } from '@shared/terminal'
 import { Icon } from './primitives/Icon'
+import { TerminalHistory } from './TerminalHistory'
 import { replayTerminalRecording } from '../terminal-recording-replay'
+
+type TerminalStatus = 'starting' | 'running' | 'exited' | 'error' | 'readonly'
 
 interface TerminalTab {
   key: string
   title: string
+  recordingId?: string
 }
 
 interface TerminalControls {
@@ -71,15 +75,17 @@ function TerminalPane({
   active,
   onControls,
   onStatus,
-  onRecordingMessage
+  onRecordingMessage,
+  recordingId
 }: {
   tabKey: string
   tabId: string
   panelId: string
   cwd: string | null
+  recordingId?: string
   active: boolean
   onControls: (key: string, controls: TerminalControls | null) => void
-  onStatus: (key: string, status: 'starting' | 'running' | 'exited' | 'error') => void
+  onStatus: (key: string, status: TerminalStatus) => void
   onRecordingMessage: (key: string, message: string | undefined) => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -111,7 +117,7 @@ function TerminalPane({
 
   const start = useCallback(async (): Promise<void> => {
     const terminal = terminalRef.current
-    if (!terminal) return
+    if (!terminal || recordingId) return
     const sequence = ++startSequenceRef.current
     await replayRef.current
     if (sequence !== startSequenceRef.current || terminalRef.current !== terminal) return
@@ -154,7 +160,7 @@ function TerminalPane({
       terminal.reset()
       terminal.writeln(`\x1b[31m终端启动失败：${message}\x1b[0m`)
     }
-  }, [cwd, onStatus, onRecordingMessage, resize, tabKey])
+  }, [cwd, onStatus, onRecordingMessage, resize, tabKey, recordingId])
 
   useEffect(() => {
     const host = hostRef.current
@@ -162,7 +168,8 @@ function TerminalPane({
     const terminal = new Terminal({
       allowProposedApi: false,
       convertEol: false,
-      cursorBlink: true,
+      cursorBlink: !recordingId,
+      disableStdin: Boolean(recordingId),
       cursorStyle: 'bar',
       fontFamily: '"SFMono-Regular", "SF Mono", Menlo, Consolas, monospace',
       fontSize: 12,
@@ -199,7 +206,7 @@ function TerminalPane({
     })
     const observer = new ResizeObserver(() => resize())
     observer.observe(host)
-    onControls(tabKey, {
+    const paneControls: TerminalControls = {
       clear: () => terminal.clear(),
       focus: () => terminal.focus(),
       restart: () => void start(),
@@ -237,8 +244,16 @@ function TerminalPane({
           if (sequence === startSequenceRef.current) onRecordingMessage(tabKey, `删除失败：${terminalStartErrorMessage(error)}`)
         }).finally(() => { deletingRecordingRef.current = false })
       }
-    })
-    void start()
+    }
+    onControls(tabKey, paneControls)
+    if (recordingId) {
+      recordingIdRef.current = recordingId
+      onStatus(tabKey, 'readonly')
+      resize()
+      paneControls.replay()
+    } else {
+      void start()
+    }
 
     return () => {
       startSequenceRef.current += 1
@@ -255,7 +270,7 @@ function TerminalPane({
       terminalRef.current = null
       fitRef.current = null
     }
-  }, [onControls, onStatus, onRecordingMessage, resize, start, tabKey])
+  }, [onControls, onStatus, onRecordingMessage, resize, start, tabKey, recordingId])
 
   useEffect(() => {
     if (!active) return
@@ -277,9 +292,9 @@ function TerminalPane({
       <div
         ref={hostRef}
         className="terminal-xterm"
-        aria-label={cwd ? `终端，工作目录 ${cwd}` : '终端，未绑定项目，初始目录为用户主目录'}
+        aria-label={recordingId ? `终端录制，只读 ${recordingId}` : cwd ? `终端，工作目录 ${cwd}` : '终端，未绑定项目，初始目录为用户主目录'}
       />
-      {(error || exit) && (
+      {!recordingId && (error || exit) && (
         <button type="button" className="terminal-restart" onClick={() => void start()}>
           <Icon name="refresh" /> 重新启动
         </button>
@@ -292,7 +307,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   const rootId = useId().replaceAll(':', '')
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [nextTerminalTab(1)])
   const [activeKey, setActiveKey] = useState(() => tabs[0].key)
-  const [statuses, setStatuses] = useState<Record<string, 'starting' | 'running' | 'exited' | 'error'>>({})
+  const [statuses, setStatuses] = useState<Record<string, TerminalStatus>>({})
   const [recordingMessages, setRecordingMessages] = useState<Record<string, string | undefined>>({})
   const onRecordingMessage = useCallback((key: string, message: string | undefined): void => {
     setRecordingMessages((current) => ({ ...current, [key]: message }))
@@ -302,12 +317,25 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const pendingCloseFocusRef = useRef<{ targetKey: string | null } | null>(null)
   const nextTitleNumber = useRef(2)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const openRecording = (item: TerminalRecordingSummary): void => {
+    if (item.active) return
+    const existing = tabs.find((tab) => tab.recordingId === item.id)
+    if (existing) setActiveKey(existing.key)
+    else {
+      if (tabs.length >= TERMINAL_MAX_SESSIONS) return
+      const tab = { key: `recording-${item.id}`, title: `录制 ${item.id.slice(9, 17)}`, recordingId: item.id }
+      setTabs((current) => [...current, tab])
+      setActiveKey(tab.key)
+    }
+    setHistoryOpen(false)
+  }
 
   const registerControls = useCallback((key: string, value: TerminalControls | null): void => {
     if (value) controls.current.set(key, value)
     else controls.current.delete(key)
   }, [])
-  const setStatus = useCallback((key: string, status: 'starting' | 'running' | 'exited' | 'error'): void => {
+  const setStatus = useCallback((key: string, status: TerminalStatus): void => {
     setStatuses((current) => ({ ...current, [key]: status }))
   }, [])
 
@@ -369,6 +397,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   }
 
   const activeControls = controls.current.get(activeKey)
+  const canReplay = statuses[activeKey] === 'exited' || statuses[activeKey] === 'readonly'
   return (
     <section className="terminal-surface" aria-label="本机终端">
       <div className="terminal-toolbar">
@@ -403,13 +432,14 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
           </button>
         </div>
         <div className="terminal-actions">
-          <button type="button" className="terminal-action" onClick={() => activeControls?.replay()} disabled={statuses[activeKey] !== 'exited'} title="Shell 退出后回放录制（只读）" aria-label="回放终端录制">
+          <button type="button" className="terminal-action" onClick={() => setHistoryOpen(true)} title="当前工作区的磁盘录制" aria-label="终端录制历史"><Icon name="archive" /></button>
+          <button type="button" className="terminal-action" onClick={() => activeControls?.replay()} disabled={!canReplay} title="Shell 退出后回放录制（只读）" aria-label="回放终端录制">
             <Icon name="undo" />
           </button>
-          <button type="button" className="terminal-action" onClick={() => activeControls?.deleteRecording()} disabled={statuses[activeKey] !== 'exited'} title="Shell 退出后删除磁盘录制（不清屏）" aria-label="删除终端录制">
+          <button type="button" className="terminal-action" onClick={() => activeControls?.deleteRecording()} disabled={!canReplay} title="Shell 退出后删除磁盘录制（不清屏）" aria-label="删除终端录制">
             <Icon name="trash" />
           </button>
-          <button type="button" className="terminal-action" onClick={() => activeControls?.restart()} disabled={!activeControls} title="重新启动终端" aria-label="重新启动终端">
+          <button type="button" className="terminal-action" onClick={() => activeControls?.restart()} disabled={!activeControls || !!tabs.find((tab) => tab.key === activeKey)?.recordingId} title="重新启动终端" aria-label="重新启动终端">
             <Icon name="refresh" />
           </button>
           <button type="button" className="terminal-action" onClick={() => activeControls?.clear()} disabled={!activeControls} title="清空显示（不影响 Shell 或磁盘录制）" aria-label="清空终端显示">
@@ -433,6 +463,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
             tabId={`${rootId}-${tab.key}-tab`}
             panelId={`${rootId}-${tab.key}-panel`}
             cwd={cwd}
+            recordingId={tab.recordingId}
             active={active && activeKey === tab.key}
             onControls={registerControls}
             onStatus={setStatus}
@@ -440,6 +471,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
           />
         ))}
       </div>
+      {historyOpen && <TerminalHistory key={cwd ?? '~'} cwd={cwd} canOpen={tabs.length < TERMINAL_MAX_SESSIONS} onOpen={openRecording} onClose={() => setHistoryOpen(false)} />}
       <footer className="terminal-foot" role="status">{recordingMessages[activeKey] ?? '本机 Shell · 当前用户权限 · 原文录制（可能含密钥）'}</footer>
     </section>
   )

@@ -18,7 +18,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 > **重要：Scry 不是安全沙箱。** 各 Provider 默认使用自身的审批或 workspace sandbox；只有用户显式选择“完全访问”时，Claude 和 Qoder 才使用 `bypassPermissions` / `dangerously-skip-permissions`，其他 Provider 采用各自等价的完全访问模式。Agent 仍可能在获批或完全访问时读取、修改文件并执行命令，不保证被限制在所选工作目录内。只在你信任的代码库和可恢复环境中使用。
 
 - **采集输出默认保留原文，不脱敏。** 工具入参/输出、对话、trace、用量原始 payload、远程输出及其归档可能包含密钥、令牌、Cookie 和私钥；本机备份、导出、已授权远程设备和 commit hook 也可能获得这些内容。分享或上传前请自行检查。
-- Scry 的会话索引、观测数据和 turn-recorder 记录保存在本机；turn-recorder 默认只写工作区的 `.scry/`，不实现上传。历史已脱敏记录不恢复；诊断包、认证错误和凭据配置展示仍保留防泄露处理。终端输出默认原文录制到 App `userData/terminal-recordings/`；Shell 退出后可在当前标签页回放或删除录制。清屏、关闭标签页不会删除磁盘记录；暂不自动清理，也暂无重启后的历史列表。录制失败会提示，磁盘未确认的尾部不会被标为完整。
+- Scry 的会话索引、观测数据和 turn-recorder 记录保存在本机；turn-recorder 默认只写工作区的 `.scry/`，不实现上传。历史已脱敏记录不恢复；诊断包、认证错误和凭据配置展示仍保留防泄露处理。终端输出默认原文录制到 App `userData/terminal-recordings/`；Shell 退出后可在当前标签页回放或删除录制；关闭标签页或重启 App 后，可从「终端录制历史」按当前工作区分页查找并只读打开。历史回放不会恢复旧 Shell 或执行命令。清屏、关闭标签页不会删除磁盘记录，暂不自动清理。录制失败会提示，磁盘未确认的尾部不会被标为完整。
 - Scry 本身没有项目数据上传后端，但 Provider CLI/SDK 会连接各自服务；其数据处理遵循对应 Provider 的配置、许可证和服务条款。
 - Bash、MCP 和第三方工具可能访问 Scry 无法完整统计的文件或网络资源，文件足迹不是安全沙箱或完整审计日志。
 - 项目级 MCP/Hook 首次执行和指纹变化会要求确认，并在 Provider 启动边界重新校验配置与 executable SHA-256；这用于防止仓库内容漂移，不承诺抵御已经能以同一 macOS 用户身份修改进程或文件的并发攻击者。

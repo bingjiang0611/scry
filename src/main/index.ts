@@ -151,6 +151,7 @@ import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveRemoteProjec
 import type {
   TerminalCloseRequest,
   TerminalRecordingRequest,
+  TerminalRecordingListRequest,
   TerminalResizeRequest,
   TerminalStartRequest,
   TerminalWriteRequest
@@ -1472,6 +1473,15 @@ handleTrusted('terminal:resize', async (event, request: TerminalResizeRequest) =
   assertTrustedIpcEvent(event)
   manager.resize(request)
   return true as const
+})
+handleTrusted('terminal:recordingList', async (event, request: TerminalRecordingListRequest) => {
+  const manager = await getTerminalManager()
+  assertTrustedIpcEvent(event)
+  const cwd = currentCwd
+  const page = await manager.listRecordings(request)
+  assertTrustedIpcEvent(event)
+  if (cwd !== currentCwd) throw new Error('terminal_recording_workspace_changed')
+  return page
 })
 handleTrusted('terminal:recordingRead', async (event, request: TerminalRecordingRequest) => {
   const manager = await getTerminalManager()

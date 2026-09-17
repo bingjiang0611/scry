@@ -9,6 +9,8 @@ import type {
   TerminalResizeRequest,
   TerminalRecordingRequest,
   TerminalRecordingPage,
+  TerminalRecordingListRequest,
+  TerminalRecordingListPage,
   TerminalRecordingErrorEvent,
   TerminalSessionInfo,
   TerminalStartRequest,
@@ -251,6 +253,16 @@ export class TerminalManager {
     if (!this.recordings) throw new Error('终端录制不可用')
     const cwd = resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')
     return this.recordings.read(request, cwd)
+  }
+
+  async listRecordings(request: TerminalRecordingListRequest): Promise<TerminalRecordingListPage> {
+    if (!this.recordings) throw new Error('终端录制不可用')
+    const cwd = resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')
+    const page = await this.recordings.list(request, cwd)
+    if (cwd !== resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')) {
+      throw new Error('terminal_recording_workspace_changed')
+    }
+    return { ...page, items: page.items.map((item) => ({ ...item, active: this.sessions.has(item.id) })) }
   }
 
   deleteRecording(id: string): void {
