@@ -26,7 +26,7 @@ async function workspace(): Promise<string> {
 }
 
 describe('recorder complete tool content', () => {
-  it('associates a complete redacted artifact with the committed turn across a cold read', async () => {
+  it('associates a complete raw artifact with the committed turn across a cold read', async () => {
     const root = await workspace()
     const sessionId = 'large-output-session'
     const now = new Date().toISOString()
@@ -55,8 +55,8 @@ describe('recorder complete tool content', () => {
     expect(field.contentRef).toBeDefined()
     const complete = await readRecorderContent(join(root, '.scry'), field.contentRef!)
     expect(complete).toContain('COMPLETE_TAIL')
-    expect(complete).toContain('[REDACTED]')
-    expect(complete).not.toContain(secret)
+    expect(complete).toBe(output)
+    expect(field.redaction).toBe('disabled')
 
     const recordFiles = await listRecords(join(root, '.scry'))
     expect(recordFiles[0].tools.value![0].outputContent?.contentRef).toEqual(field.contentRef)

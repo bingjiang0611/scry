@@ -67,7 +67,7 @@ try {
 
   const doctor = JSON.parse(run(bin, ['doctor', '--workspace', workspace], { cwd: installRoot }))
   assert.equal(doctor.healthy, true, 'fresh installed CLI should pass doctor')
-  assert.equal(doctor.capture.toolOutput, 'full-redacted', 'init must enable protected tool bodies without manual configuration')
+  assert.equal(doctor.capture.toolOutput, 'full', 'init must enable raw tool bodies without manual configuration')
 
   const hook = join(workspace, '.scry', 'provider-hook.sh')
   run(hook, ['claude', 'UserPromptSubmit'], {
@@ -116,10 +116,11 @@ try {
     )
     const record = JSON.parse(run(bin, ['turns', 'show', records[0].recordId, '--workspace', workspace], { cwd: installRoot }))
     const call = record.tools.value[0]
-    assert.equal(call.inputContent.redaction, 'applied')
+    assert.equal(call.inputContent.redaction, 'disabled')
     assert.ok(call.outputContent.savedBytes > 500, 'default recording must retain more than a summary')
     assert.match(call.outputContent.content, /finished$/)
-    assert.doesNotMatch(JSON.stringify(record), /SMOKE_(INPUT|OUTPUT)_SECRET/)
+    assert.match(call.inputContent.content, /SMOKE_INPUT_SECRET/)
+    assert.match(call.outputContent.content, /SMOKE_OUTPUT_SECRET/)
 
     // The installed tarball must record native Qoder metering without importing an SDK.
     const transcript = join(workspace, 'qoder-native.jsonl')

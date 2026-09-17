@@ -21,7 +21,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 describe('database turn outbox', () => {
-  it('full-redacted sanitizes before the SQLite failure outbox and retains the pinned policy', () => {
+  it('legacy full-redacted selects raw output before the SQLite failure outbox and pins budgets', () => {
     writeFileSync(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'safe', capture: { toolOutput: 'full-redacted' } }))
     const args = {
       runId: 'safe-run', cwd: root, userText: 'test',
@@ -32,8 +32,8 @@ describe('database turn outbox', () => {
     const files = readdirSync(dir)
     expect(files).toHaveLength(1)
     const text = readFileSync(join(dir, files[0]), 'utf8')
-    expect(text).not.toContain('DB_OUTBOX_SECRET')
-    expect(JSON.parse(text)).toMatchObject({ toolContentPolicy: { toolOutput: 'full-redacted' } })
+    expect(text).toContain('DB_OUTBOX_SECRET')
+    expect(JSON.parse(text)).toMatchObject({ toolContentPolicy: { toolOutput: 'full' } })
     writeFileSync(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'safe', capture: { toolOutput: 'summary' } }))
     expect(recordTurn(args)).toBe(false)
     expect(readFileSync(join(dir, files[0]), 'utf8')).toBe(text)

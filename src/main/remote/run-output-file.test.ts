@@ -53,7 +53,7 @@ describe('RunOutputFileStore', () => {
     secondStore.close()
   })
 
-  it('persists only secret-masked content', () => {
+  it('persists credential-like output verbatim', () => {
     const dir = directory()
     const store = new RunOutputFileStore(dir)
     const log = new RunOutputLog({ store })
@@ -62,7 +62,7 @@ describe('RunOutputFileStore', () => {
     store.close()
     const raw = readdirSync(dir).filter((name) => name.endsWith('.jsonl')).map((name) =>
       readFileSync(join(dir, name), 'utf8')).join('')
-    expect(raw).not.toContain('SECRETSECRETSECRETSECRET')
+    expect(raw).toContain('export TOKEN=sk-ant-api03-SECRETSECRETSECRETSECRET')
   })
 
   it('repairs uncommitted data/index tails before the next append', () => {

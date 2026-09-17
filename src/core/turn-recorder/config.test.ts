@@ -34,9 +34,9 @@ describe('discoverRepositories', () => {
 })
 
 describe('recorder storage location', () => {
-  it('defaults to full-redacted with byte budgets while retaining explicit legacy modes', () => {
+  it('defaults to full raw capture and migrates full-redacted while retaining byte budgets', () => {
     expect(parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted' } }).capture).toMatchObject({
-      toolOutput: 'full-redacted', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072
+      toolOutput: 'full', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072
     })
     for (const value of [0, -1, 1.5, 65537, '8192']) {
       expect(() => parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted', toolContentFieldBytes: value } })).toThrow('budget')
@@ -44,7 +44,7 @@ describe('recorder storage location', () => {
     expect(() => parseRecorderConfig({ ...config, capture: { toolOutput: 'full-redacted', toolContentTurnBytes: 1048577 } })).toThrow('budget')
     for (const capture of [undefined, {}, { diff: false }]) {
       expect(parseRecorderConfig({ ...config, capture }).capture).toMatchObject({
-        toolOutput: 'full-redacted', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072
+        toolOutput: 'full', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072
       })
     }
     expect(parseRecorderConfig({ ...config, capture: { toolContentFieldBytes: 1024 } }).capture.toolContentFieldBytes).toBe(1024)

@@ -38,7 +38,7 @@ describe('scry init', () => {
 
     expect(first.providers).toEqual(['claude', 'codex', 'qoder', 'opencode'])
     expect(second.changedFiles).toEqual([])
-    expect(JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')).capture.toolOutput).toBe('full-redacted')
+    expect(JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')).capture.toolOutput).toBe('full')
     expect(JSON.parse(await readFile(join(root, '.claude/settings.local.json'), 'utf8'))).toMatchObject({ env: { KEEP: 'yes' } })
     for (const [provider, path] of [
       ['claude', '.claude/settings.local.json'],

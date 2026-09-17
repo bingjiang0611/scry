@@ -3,49 +3,18 @@ import type { TraceEvent } from '../../shared/trace.js'
 import { isToolContent, type ToolContent, type ToolContentReason, type ToolContentRef } from '../../shared/tool-content.js'
 import type { RecorderConfig } from './config.js'
 
-export type ToolContentPolicy = Pick<RecorderConfig['capture'], 'toolOutput' | 'toolContentFieldBytes' | 'toolContentTurnBytes'>
-const MASK = '[REDACTED]'
-const sensitiveKey = /password|passwd|pwd|token|secret|authorization|cookie|api[-_]?key|private[-_]?key|credential/i
-const assignmentKey = '(?:[\\w.-]*(?:password|passwd|pwd|token|secret|authorization|cookie|api[_-]?key|credential)[\\w.-]*)'
-
-// Known-pattern redaction, not a guarantee that arbitrary free text contains no unknown secrets.
-// Inspect the whole value BEFORE taking a byte prefix, including secrets beyond the summary boundary.
-export function redactToolText(value: string): string {
-  // Decode form keys before matching; percent-encoded sensitive names are not a bypass.
-  if (/^[^\s=&]+=[^\r\n]*(?:&[^\s=&]+=[^\r\n]*)*$/.test(value)) {
-    const form = new URLSearchParams(value)
-    let changed = false
-    for (const key of [...form.keys()]) {
-      if (sensitiveKey.test(key)) { form.set(key, MASK); changed = true }
-    }
-    if (changed) value = form.toString()
-  }
-  return value
-    .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\r\n]*PRIVATE KEY-----|$)/g, MASK)
-    .replace(/\b([a-z][a-z\d+.-]*:\/\/)[^\s/@]+@/gi, `$1${MASK}@`)
-    .replace(/([?&][^\s=&#]+)=([^\s&#"'<>]*)/g, `$1=${MASK}`)
-    .replace(/\b(Authorization|Proxy-Authorization|Cookie|Set-Cookie)\s*:\s*[^\r\n]+/gi, `$1: ${MASK}`)
-    .replace(new RegExp(`(["']?${assignmentKey}["']?\\s*[:=]\\s*)("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|[^\\s,;&}]+)`, 'gi'), `$1"${MASK}"`)
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/_=.-]+/gi, `$1 ${MASK}`)
+export type ToolContentPolicy = Pick<RecorderConfig['capture'], 'toolContentFieldBytes' | 'toolContentTurnBytes'> & {
+  // The legacy name can still occur in persisted retry artifacts. It no longer enables redaction.
+  toolOutput: RecorderConfig['capture']['toolOutput'] | 'full-redacted'
 }
 
-function redactValue(value: unknown, seen: Set<object>, depth: number, state: { changed: boolean }): unknown {
+export function isFullToolContentPolicy(policy: ToolContentPolicy | undefined): policy is ToolContentPolicy {
+  return policy?.toolOutput === 'full' || policy?.toolOutput === 'full-redacted'
+}
+
+function serializableValue(value: unknown, seen: Set<object>, depth: number): unknown {
   if (depth > 64) throw new Error('depth')
-  if (typeof value === 'string') {
-    // Structured strings retain nested sensitive-key semantics, including form-like tool responses.
-    if (/^\s*[\[{]/.test(value)) {
-      let parsed: unknown
-      try { parsed = JSON.parse(value) } catch {
-        const safe = redactToolText(value)
-        state.changed ||= safe !== value
-        return safe
-      }
-      return JSON.stringify(redactValue(parsed, seen, depth + 1, state))
-    }
-    const safe = redactToolText(value)
-    state.changed ||= safe !== value
-    return safe
-  }
+  if (typeof value === 'string') return value
   if (value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return value
   if (!value || typeof value !== 'object' || seen.has(value)) throw new Error('serialization')
   const prototype = Object.getPrototypeOf(value)
@@ -57,9 +26,7 @@ function redactValue(value: unknown, seen: Set<object>, depth: number, state: { 
       if (!descriptor.enumerable) continue
       // Do not invoke getters or toJSON on an untrusted tool payload.
       if (!('value' in descriptor)) throw new Error('accessor')
-      const sensitive = sensitiveKey.test(key)
-      state.changed ||= sensitive && descriptor.value !== MASK
-      const safe = sensitive ? MASK : redactValue(descriptor.value, seen, depth + 1, state)
+      const safe = serializableValue(descriptor.value, seen, depth + 1)
       Object.defineProperty(out, key, { value: safe, enumerable: true, writable: true, configurable: true })
     }
     return out
@@ -91,28 +58,27 @@ export function captureToolContent(value: unknown, options: {
   const base: ToolContent = {
     encoding: typeof value === 'string' ? 'utf8' : 'json', savedBytes: 0,
     source: options.source, sourceCompleteness: value === undefined && options.sourceCompleteness !== 'partial' ? 'unavailable' : options.sourceCompleteness ?? 'unknown',
-    redaction: 'not_run', storage: 'omitted', reasons: options.reasons ?? []
+    redaction: 'disabled', storage: 'omitted', reasons: options.reasons ?? []
   }
   if (value === undefined) return { ...base, reasons: [...new Set([...base.reasons, 'provider_missing' as const])] }
   try {
-    const state = { changed: false }
-    const safe = redactValue(value, new Set(), 0, state)
+    const safe = serializableValue(value, new Set(), 0)
     const content = typeof safe === 'string' ? safe : JSON.stringify(safe)
     // Only serialize the inspected clone, never invoke the original object's toJSON.
     const captured: ToolContent = {
       ...base, content, savedBytes: Buffer.byteLength(content),
-      redaction: state.changed ? 'applied' : 'unchanged', storage: 'complete'
+      storage: 'complete'
     }
     return options.maxBytes === null
       ? captured
       : limitToolContent(captured, options.maxBytes ?? 8 * 1024, 'field_budget')
   } catch {
-    return { ...base, redaction: 'failed', reasons: [...new Set([...base.reasons, 'redaction_failed' as const])] }
+    return { ...base, reasons: [...new Set([...base.reasons, 'serialization_failed' as const])] }
   }
 }
 
 export function sanitizeCapturedContent(field: ToolContent, maxBytes?: number | null): ToolContent {
-  if (!isToolContent(field)) return { ...captureToolContent(undefined, { source: 'invalid_content' }), redaction: 'failed', reasons: ['redaction_failed'] }
+  if (!isToolContent(field)) return { ...captureToolContent(undefined, { source: 'invalid_content' }), reasons: ['serialization_failed'] }
   if (field.content === undefined) return field
   const checked = captureToolContent(field.content, { source: field.source, maxBytes })
   const { content: _content, ...metadata } = field
@@ -122,7 +88,8 @@ export function sanitizeCapturedContent(field: ToolContent, maxBytes?: number | 
     savedBytes: checked.savedBytes,
     encoding: field.encoding === 'json' && checked.storage !== 'complete' ? 'json-fragment' : field.encoding,
     storage: checked.storage === 'complete' ? field.storage : checked.storage,
-    redaction: checked.redaction === 'unchanged' ? field.redaction : checked.redaction,
+    // Preserve historical provenance: already-redacted bytes cannot be recovered by disabling redaction.
+    redaction: field.redaction,
     reasons: [...new Set([...field.reasons, ...checked.reasons])]
   }
 }
@@ -136,30 +103,19 @@ function sourceState(event: TraceEvent, input: boolean): Pick<ToolContent, 'sour
 
 function protectedToolEvent(event: TraceEvent, content: ToolContent, result: boolean): TraceEvent {
   const { input: _input, output: _output, text: _text, inputContent: _ic, outputContent: _oc, ...metadata } = event
-  // Task descriptions and MCP names can be derived from tool input, not just static labels.
-  metadata.stage = redactToolText(metadata.stage)
-  if (metadata.name) metadata.name = redactToolText(metadata.name)
-  if (metadata.tool) metadata.tool = redactToolText(metadata.tool)
-  if (metadata.danger) metadata.danger = { ...metadata.danger, reason: redactToolText(metadata.danger.reason) }
-  for (const key of ['mcpServer', 'mcpAction', 'mcpTool'] as const) {
-    if (metadata[key]) metadata[key] = redactToolText(metadata[key])
-  }
-  if (metadata.mcpCalls) metadata.mcpCalls = metadata.mcpCalls.map((call) => ({
-    server: redactToolText(call.server), action: redactToolText(call.action), tool: redactToolText(call.tool)
-  }))
   return result
     ? { ...metadata, outputContent: content, ...(content.content !== undefined ? { output: content.content, text: content.content } : {}) }
     : { ...metadata, inputContent: content, ...(content.content !== undefined ? { input: content.encoding === 'json' ? JSON.parse(content.content) as unknown : content.content } : {}) }
 }
 
 export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPolicy, source: string): TraceEvent[] {
-  if (policy.toolOutput !== 'full-redacted') return events
+  if (!isFullToolContentPolicy(policy)) return events
   return events.map((event) => {
     if (!['tool', 'skill', 'agent'].includes(event.kind)) return event
     const result = event.stage === 'tool_result'
     const existing = result ? event.outputContent : event.inputContent
     const raw = result ? event.output ?? event.text : event.input
-    // Internally persisted envelopes survive replay. Re-inspect content; never trust a redaction flag alone.
+    // Persisted envelopes keep their provenance and byte bounds across replay.
     const content = existing ? sanitizeCapturedContent(existing, policy.toolContentFieldBytes) : captureToolContent(raw, {
       source, maxBytes: policy.toolContentFieldBytes, ...sourceState(event, !result)
     })
@@ -167,14 +123,14 @@ export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPoli
   })
 }
 
-/** Persist complete redacted bodies before applying the bounded inline projection. */
+/** Persist complete raw bodies before applying the bounded inline projection. */
 export async function persistToolEventContent(
   events: TraceEvent[],
   policy: ToolContentPolicy,
   source: string,
   persist: (content: string, encoding: ToolContentRef['encoding']) => Promise<ToolContentRef>
 ): Promise<TraceEvent[]> {
-  if (policy.toolOutput !== 'full-redacted') return events
+  if (!isFullToolContentPolicy(policy)) return events
   return Promise.all(events.map(async (event) => {
     if (!['tool', 'skill', 'agent'].includes(event.kind)) return event
     const result = event.stage === 'tool_result'

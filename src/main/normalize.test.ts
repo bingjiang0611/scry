@@ -1267,7 +1267,7 @@ describe("normalizeSdkMessage P3 审计标记", () => {
   })
 })
 
-describe('maskSecrets（落库前脱敏，RFC §11）', () => {
+describe('maskSecrets（凭据配置展示，不用于采集正文）', () => {
   it('锚形状密钥被替换为占位符', () => {
     const fakeGithubPat = ['gh', 'p_', '0123456789abcdefghij0123456789abcdef'].join('')
     expect(maskSecrets('key=sk-ant-api03-abcdefGHIJKLmnop1234567890XYZ')).toBe('key=«REDACTED»')

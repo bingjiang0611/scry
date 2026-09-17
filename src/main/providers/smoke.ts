@@ -27,7 +27,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           stage: 'tool_use',
           tool: 'Read',
           toolUseId: `${request.runId}:tool`,
-          input: { file_path: 'README.md' },
+          input: { file_path: 'README.md', token: 'sk-ant-api03-scry-smoke-not-a-real-key-000000' },
           fileOp: 'read',
           filePath: 'README.md'
         })
@@ -39,7 +39,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           stage: 'tool_result',
           tool: 'Read',
           toolUseId: `${request.runId}:tool`,
-          text: 'smoke fixture result'
+          text: 'smoke fixture result Authorization: Bearer sk-ant-api03-scry-smoke-not-a-real-key-000000'
         })
         request.emit({
           id: `${request.runId}:result`,

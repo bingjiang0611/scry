@@ -1,5 +1,5 @@
 // Additive schema-v1 payload. Absence means a legacy writer, never proof of complete content.
-export type ToolContentReason = 'provider_missing' | 'source_truncated' | 'field_budget' | 'turn_budget' | 'redaction_failed' | 'not_collected'
+export type ToolContentReason = 'provider_missing' | 'source_truncated' | 'field_budget' | 'turn_budget' | 'redaction_failed' | 'serialization_failed' | 'not_collected'
 
 export interface ToolContentRef {
   storage: 'recorder-content-v1'
@@ -10,13 +10,13 @@ export interface ToolContentRef {
 
 export interface ToolContent {
   content?: string
-  /** Complete redacted content stored outside the bounded inline preview. */
+  /** Complete captured content stored outside the bounded inline preview; inspect redaction provenance. */
   contentRef?: ToolContentRef
   encoding: 'utf8' | 'json' | 'json-fragment'
   savedBytes: number
   source: string
   sourceCompleteness: 'unknown' | 'complete' | 'partial' | 'unavailable'
-  redaction: 'applied' | 'unchanged' | 'failed' | 'not_run'
+  redaction: 'applied' | 'unchanged' | 'failed' | 'not_run' | 'disabled'
   storage: 'complete' | 'truncated' | 'omitted'
   reasons: ToolContentReason[]
 }
@@ -37,9 +37,9 @@ export function isToolContent(value: unknown): value is ToolContent {
   if (raw.contentRef !== undefined && !isToolContentRef(raw.contentRef)) return false
   if (!['utf8', 'json', 'json-fragment'].includes(String(raw.encoding)) || typeof raw.source !== 'string') return false
   if (!['unknown', 'complete', 'partial', 'unavailable'].includes(String(raw.sourceCompleteness))) return false
-  if (!['applied', 'unchanged', 'failed', 'not_run'].includes(String(raw.redaction))) return false
+  if (!['applied', 'unchanged', 'failed', 'not_run', 'disabled'].includes(String(raw.redaction))) return false
   if (!['complete', 'truncated', 'omitted'].includes(String(raw.storage))) return false
-  if (!Array.isArray(raw.reasons) || !raw.reasons.every((reason) => ['provider_missing', 'source_truncated', 'field_budget', 'turn_budget', 'redaction_failed', 'not_collected'].includes(String(reason)))) return false
+  if (!Array.isArray(raw.reasons) || !raw.reasons.every((reason) => ['provider_missing', 'source_truncated', 'field_budget', 'turn_budget', 'redaction_failed', 'serialization_failed', 'not_collected'].includes(String(reason)))) return false
   if (!Number.isSafeInteger(raw.savedBytes) || Number(raw.savedBytes) < 0) return false
   if (raw.savedBytes !== new TextEncoder().encode(typeof raw.content === 'string' ? raw.content : '').byteLength) return false
   if (raw.encoding === 'json' && typeof raw.content === 'string') {

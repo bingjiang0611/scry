@@ -720,8 +720,8 @@ export function fileOpOf(
   return { fileOp: op, filePath: fp }
 }
 
-// 落库前脱敏（RFC §11）：本地 .db 会被 Time Machine 备份/被其他工具直接读，UI 折叠挡不住。
-// 锚 token 形状、不用裸前缀——裸前缀误伤正常串，而"只存 mask 后版本"过度匹配=真值永久丢。
+// Credential/config display helper only; captured output is now stored verbatim.
+// Do not use this helper in evidence sinks: masking there irreversibly changes Provider text.
 const SECRET_PATTERNS: RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{20,}/g, // Anthropic API key
   /\bsk-[A-Za-z0-9]{20,}/g, // OpenAI 等 sk- key

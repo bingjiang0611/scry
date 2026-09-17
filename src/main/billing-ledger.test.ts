@@ -577,7 +577,7 @@ describe('Billing Guardian P1 ledger normalizer', () => {
     })
   })
 
-  it('gateway raw payload 脱敏且稳定 id 支持重复导入覆盖', () => {
+  it('gateway raw payload 保留原文且稳定 id 支持重复导入覆盖', () => {
     const payload = {
       id: 'msg-stable',
       created_at: '2026-07-02T10:00:00.000Z',
@@ -590,8 +590,7 @@ describe('Billing Guardian P1 ledger normalizer', () => {
     const second = billingRowsFromAnthropicGatewayPayload({ fetchedAt: 2, payloads: [payload] })
     expect(asRaw(first.providerRawUsage[0]).id).toBe(asRaw(second.providerRawUsage[0]).id)
     const rawJson = String(asRaw(first.providerRawUsage[0]).payload_json)
-    expect(rawJson).toContain('«REDACTED»')
-    expect(rawJson).not.toContain('abcdefghijklmnopqrstuvwxyz012345')
+    expect(JSON.parse(rawJson)).toEqual(payload)
     expect(asRaw(first.providerRawUsage[0]).storage_mode).toBe('aggregate')
   })
 

@@ -7,7 +7,7 @@ import type {
   ProviderRawUsageObject,
   UsageLedgerObject
 } from '../shared/billing'
-import { maskSecrets, type TraceEvent } from '../shared/trace'
+import type { TraceEvent } from '../shared/trace'
 import { providerUsageResultEvents } from '../shared/result-timing'
 import { isCreditUsageEvidence } from '../shared/credit-usage'
 import type { RuntimeProvider } from '../shared/runtime'
@@ -32,13 +32,7 @@ export interface LocalModelPriceVersion {
   effectiveTo?: number | null
 }
 
-const redacted = (v: unknown): unknown => {
-  if (typeof v === 'string') return maskSecrets(v)
-  if (Array.isArray(v)) return v.map(redacted)
-  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, redacted(val)]))
-  return v
-}
-const toJson = (v: unknown): string => JSON.stringify(redacted(v ?? {}))
+const toJson = (v: unknown): string => JSON.stringify(v ?? {})
 const isoToMs = (value: string | null | undefined): number | null => {
   if (!value) return null
   const n = Date.parse(value)
@@ -369,7 +363,7 @@ function rawObject(args: {
     bucketStart: timeToMs(args.payload.start_time) ?? timeToMs(args.payload.starting_at) ?? timeToMs(args.payload.timestamp) ?? timeToMs(start),
     bucketEnd: timeToMs(args.payload.end_time) ?? timeToMs(args.payload.ending_at) ?? timeToMs(args.payload.timestamp) ?? timeToMs(end),
     providerRequestId: stringFromPath(args.payload, ['id']) ?? stringFromPath(args.payload, ['request_id']),
-    payload: redacted(args.payload) as Record<string, unknown>,
+    payload: args.payload,
     storageMode: 'aggregate'
   }
 }

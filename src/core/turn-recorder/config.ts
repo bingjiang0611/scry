@@ -15,7 +15,7 @@ export interface RecorderConfig {
   capture: {
     prompt: boolean
     assistant: boolean
-    toolOutput: 'none' | 'summary' | 'full-redacted'
+    toolOutput: 'none' | 'summary' | 'full'
     toolContentFieldBytes?: number
     toolContentTurnBytes?: number
     diff: boolean
@@ -93,7 +93,7 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
 }
 
 /**
- * Capture defaults to on with full-redacted tool bodies; explicit legacy modes remain supported.
+ * Capture defaults to on with raw tool bodies; explicit none/summary modes remain supported.
  * A disabled section is recorded as `disabled` with a reason, so the record itself explains what
  * was captured — no separate policy field is needed to reconstruct that later.
  */
@@ -101,15 +101,16 @@ function resolveCapture(
   raw: Record<string, unknown>,
   patchExcludeBasenames: string[]
 ): RecorderConfig['capture'] {
-  const toolOutput = raw.toolOutput === undefined ? 'full-redacted' : raw.toolOutput
-  if (toolOutput !== 'none' && toolOutput !== 'summary' && toolOutput !== 'full-redacted') {
-    throw new Error('capture.toolOutput must be none, summary or full-redacted')
+  // Existing workspaces used full-redacted; it now selects full raw capture, not redaction.
+  const toolOutput = raw.toolOutput === undefined || raw.toolOutput === 'full-redacted' ? 'full' : raw.toolOutput
+  if (toolOutput !== 'none' && toolOutput !== 'summary' && toolOutput !== 'full') {
+    throw new Error('capture.toolOutput must be none, summary or full')
   }
   return {
     prompt: raw.prompt !== false,
     assistant: raw.assistant !== false,
     toolOutput,
-    ...(toolOutput === 'full-redacted' ? {
+    ...(toolOutput === 'full' ? {
       toolContentFieldBytes: contentBudget(raw.toolContentFieldBytes, 8 * 1024, 64 * 1024),
       toolContentTurnBytes: contentBudget(raw.toolContentTurnBytes, 128 * 1024, 1024 * 1024)
     } : {}),

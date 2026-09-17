@@ -1,4 +1,4 @@
-import { maskSecrets, type TraceEvent } from '@shared/trace'
+import type { TraceEvent } from '@shared/trace'
 import type { Turn } from './format'
 
 export type AgentRowStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'unknown'
@@ -117,7 +117,7 @@ function targetIds(event: TraceEvent): string[] {
 }
 
 function meaningfulName(value: string | undefined): string | undefined {
-  const name = maskSecrets(value)?.replace(/\s+/g, ' ').trim().slice(0, 80)
+  const name = value?.replace(/\s+/g, ' ').trim().slice(0, 80)
   if (!name || /^(agent|task|subagent|子 agent)$/i.test(name)) return undefined
   return name
 }
@@ -192,13 +192,13 @@ function toolDetail(event: TraceEvent): string | undefined {
     const value = input[key]
     if (typeof value !== 'string' || !value.trim()) continue
     const firstLine = value.trim().split(/\r?\n/, 1)[0]
-    return maskSecrets(firstLine)?.slice(0, 88)
+    return firstLine.slice(0, 88)
   }
   return undefined
 }
 
 function textDetail(value: string | undefined): string | undefined {
-  const compact = maskSecrets(value)?.replace(/\s+/g, ' ').trim()
+  const compact = value?.replace(/\s+/g, ' ').trim()
   return compact ? compact.slice(0, 88) : undefined
 }
 

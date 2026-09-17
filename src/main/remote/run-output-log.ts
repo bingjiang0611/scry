@@ -1,5 +1,3 @@
-import { maskSecrets } from '../../shared/trace'
-
 // Per-run, cursor-based OUTPUT log: the assistant's real trace
 // CONTENT (text, reasoning, tool activity), streamed to an authorized device so
 // the phone renders the actual run output rather than only the ledger lifecycle.
@@ -9,9 +7,8 @@ import { maskSecrets } from '../../shared/trace'
 //     ledger (lifecycle-only, non-secret markers) and from canonical usage. It
 //     carries NO token/cost totals and must never be double-counted as usage;
 //     the ledger `result` marker remains the authority for exact usage.
-//   - Content is secret-masked before it is stored (same policy as the local DB
-//     persistence path) and every chunk is byte-bounded.
-//   - Production injects a durable store and retains every exposed masked chunk.
+//   - Content is stored verbatim and may include credentials; every chunk remains byte-bounded.
+//   - Production injects a durable store and retains every exposed chunk.
 //     The bounded in-memory mode remains an explicit fallback for isolated uses/tests;
 //     it appends ONE truthful `truncated` marker instead of silently dropping data.
 //   - Reads are authorized upstream by the verified owner-device peer cert (the
@@ -98,7 +95,7 @@ export class RunOutputLog {
   // caller: a run's execution must not fail because output could not be cached.
   append(runId: string, chunk: { kind: OutputChunkKind; text: string }): void {
     if (typeof runId !== 'string' || runId.length === 0 || runId.length > 128) return
-    const text = maskSecrets(typeof chunk.text === 'string' ? chunk.text : '') ?? ''
+    const text = typeof chunk.text === 'string' ? chunk.text : ''
     if (text.length === 0 && chunk.kind !== 'truncated') return
     if (this.#store) {
       for (const piece of splitUtf8(text, MAX_CHUNK_BYTES)) {

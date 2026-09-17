@@ -93,7 +93,7 @@ describe('Scry CLI health and lookup contracts', () => {
     expect(JSON.parse(stdout.text())).toEqual({ found: false, selector: '999' })
   })
 
-  it('按字节游标分页读取记录引用的完整脱敏正文', async () => {
+  it('按字节游标分页读取记录引用的完整原文', async () => {
     const root = await workspace()
     const configPath = join(root, 'scry.config.json')
     const config = JSON.parse(await readFile(configPath, 'utf8'))
@@ -124,8 +124,8 @@ describe('Scry CLI health and lookup contracts', () => {
     } while (true)
     const complete = Buffer.concat(bytes).toString('utf8')
     expect(complete).toContain('TAIL')
-    expect(complete).toContain('[REDACTED]')
-    expect(complete).not.toContain(secret)
+    expect(complete).toBe(output)
+    expect(complete).toContain(secret)
   })
 })
 
@@ -546,7 +546,7 @@ describe('capture 配置的生效值', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
     const report = JSON.parse(stdout.text()) as Record<string, any>
-    expect(report.capture).toMatchObject({ prompt: true, assistant: true, toolOutput: 'full-redacted', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072, diff: false, hooks: true })
+    expect(report.capture).toMatchObject({ prompt: true, assistant: true, toolOutput: 'full', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072, diff: false, hooks: true })
   })
 
   it('显式关闭正文后 record 以 disabled 解释缺失，而不是记成空', async () => {

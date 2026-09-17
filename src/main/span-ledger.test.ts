@@ -189,16 +189,15 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     expect(fileOps[0].slice(0, 6)).toEqual(['s1', 'sess', 'read', '/a/b.ts', 'tool-input', 'exact'])
   })
 
-  it('input/output 落库前 mask 密钥', () => {
+  it('input/output 按默认策略保留原文', () => {
     const fakeGithubPat = ['gh', 'p_', '0123456789abcdefghij0123456789abcdef'].join('')
     const items = [
       ev({ id: 's1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu1', input: { command: 'export K=sk-ant-api03-abcdefGHIJKLmnop1234567890' } }),
       ev({ id: 'r1', kind: 'tool', stage: 'tool_result', toolUseId: 'tu1', text: `token ${fakeGithubPat}` })
     ]
     const s = asSpan(spanRowsFromItems({ runId: 'run-1', items, nowMs: 1 }).spans[0])
-    expect(String(s.input_preview)).toContain('«REDACTED»')
-    expect(String(s.input_preview)).not.toContain('sk-ant-api03')
-    expect(String(s.output_preview)).toContain('«REDACTED»')
+    expect(String(s.input_preview)).toBe(JSON.stringify(items[0].input))
+    expect(String(s.output_preview)).toBe(`token ${fakeGithubPat}`)
   })
 
   it('model text/thinking、text_delta、tool_result 不落 span（P0 只存 tool/skill/agent + result）', () => {
@@ -220,7 +219,7 @@ describe('spanRowsFromItems（P0 行映射）', () => {
     expect(kinds).toEqual(['skill', 'agent'])
   })
 
-  it('人工选择完整落 human_interventions，并对 SQLite JSON 副本脱敏', () => {
+  it('人工选择按原文落 human_interventions 的 SQLite JSON 副本', () => {
     const items = [ev({
       id: 'human-1',
       kind: 'human',
@@ -267,7 +266,7 @@ describe('spanRowsFromItems（P0 行映射）', () => {
       question_count: 1,
       duration_ms: 1500
     })
-    expect(String(asIntervention(rows.interventions[0]).response_json)).toContain('«REDACTED»')
+    expect(JSON.parse(String(asIntervention(rows.interventions[0]).response_json))).toEqual(items[0].intervention?.response)
   })
 })
 
