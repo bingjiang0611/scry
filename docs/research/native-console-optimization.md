@@ -63,6 +63,43 @@ Verification on the working tree:
 - Existing unrelated working-tree changes remain outside this batch's commit. Passing these gates
   does not certify those changes or a separately installed Scry version.
 
+## Batch 2a: durable Recorder tool bodies (2026-09-17)
+
+Implemented for the canonical Recorder path:
+
+- Tool input/output exposed to lifecycle hooks or parsed transcripts is redacted in full before any
+  inline byte budget is applied. Each exposed body is written first to a content-addressed
+  `.scry/content/sha256/` artifact, and the turn record carries a SHA-256/byte-count reference so a
+  later shared turn budget cannot lose an otherwise-small field. Turn/field budgets still bound JSON
+  records and in-memory projections.
+- Artifact publication reuses the Recorder's durable exclusive-write primitive. Duplicate bodies
+  deduplicate by digest; existing bytes and later reads are integrity checked. A storage failure
+  rejects the evidence write instead of recording a false complete reference. Publishing before the
+  record can leave an unreferenced blob after a crash, but cannot leave a committed dangling reference.
+- Upstream partial/unavailable provenance is preserved. A complete artifact means all bytes Scry
+  received after configured redaction, not bytes the Provider never exposed.
+
+Current boundaries:
+
+- This closes large tool-body loss in standalone Recorder lifecycle/transcript aggregation only.
+  Provider adapter trace archives, terminal output, assistant text, diffs and App SQLite/outbox sinks
+  still need the same durable-reference contract.
+- The reader currently resolves artifacts from the original live Recorder data root. Archive/export
+  does not yet copy referenced blobs, and there is no retention/garbage-collection policy; do not
+  delete `.scry/content` or treat an exported record JSON as self-contained.
+- The App/CLI has no public content-detail endpoint or paged viewer yet. Inline previews remain the
+  only projected body until the durable replay batch wires authorized reference reads.
+
+Verification for this batch on a snapshot reconstructed from the Git index:
+
+- `npm test`: 163 files passed, 3 skipped; 2069 tests passed, 3 skipped; shell tests passed.
+- `npm run typecheck`, `npm run build` and `npm run build:cli` passed.
+- `npm run check:cli-release`: 531 tests plus package smoke passed.
+- A large-output integration committed a bounded record preview, reloaded the record, resolved the
+  complete redacted artifact byte-for-byte and verified a secret beyond the preview was never stored.
+- Content-store tests cover shared turn-budget exhaustion, digest deduplication, unavailable storage,
+  missing blobs and post-write corruption.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity
@@ -71,12 +108,14 @@ Verification on the working tree:
 - Audit remaining Pi metadata waits and Codex stop-before-identity/late-response behavior against
   real native contracts. Preserve unknown outcomes and safe process scope.
 
-### 2. Complete evidence capture (not implemented)
+### 2. Complete evidence capture (partially implemented)
 
-- Reuse existing trace progress/outbox/archive helpers before adding storage. Persist exposed
-  events and large redacted content with provenance and stable references before UI projection.
-- Replace adapter/body truncation and fixed transcript windows with streamed content and durable
-  cursors; retain explicit original/saved byte counts where the upstream itself is partial.
+- Extend the Recorder content-reference contract to Provider adapter trace progress/outbox/archive,
+  terminal output, assistant text and diffs before UI projection. Reuse existing sinks rather than
+  creating a parallel archive.
+- Make archive/export carry referenced blobs, then add explicit retention and orphan collection.
+- Replace remaining adapter/body truncation and fixed transcript windows with streamed content and
+  durable cursors; retain explicit original/saved byte counts where the upstream itself is partial.
 - Collect full diffs asynchronously without changing turn ownership or attributing later changes
   to an earlier turn. Pin the existing capture/redaction policy on retries.
 - Tests: large outputs across current thresholds, interrupted writes/recovery, duplicates,

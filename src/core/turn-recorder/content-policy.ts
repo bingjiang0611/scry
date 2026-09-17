@@ -78,7 +78,7 @@ export function protectToolContent<T extends ContentBearingTurn>(turn: T, worksp
       const saved = limitToolContent(checked, remaining, 'turn_budget')
       call[key] = saved
       remaining -= saved.savedBytes
-      if (saved.storage !== 'complete' || saved.sourceCompleteness === 'partial') {
+      if ((saved.storage !== 'complete' && !saved.contentRef) || saved.sourceCompleteness === 'partial') {
         section.status = 'partial'
         section.quality = 'inferred'
         section.omissionReason = [...new Set([...(section.omissionReason?.split('; ') ?? []), 'tool content missing or limited (inspect field provenance)'])].join('; ')
