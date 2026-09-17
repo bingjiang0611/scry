@@ -1261,7 +1261,7 @@ describe('buildSessionReport（Session Token 用量报告）', () => {
     expect(md).not.toContain('$0.5000')
   })
 
-  it('报告默认脱敏 userText / evidence name，且不包含工具完整 output', () => {
+  it('报告保留 userText / evidence name 原文，且不包含工具完整 output', () => {
     const secret = `sk-ant-${'abcdefghijklmnopqrstuvwxyz'}`
     const items: TraceEvent[] = [
       ev({ kind: 'agent', stage: 'agent:review', name: `review ${secret}`, tool: 'Task', toolUseId: 'agent-1' }),
@@ -1269,8 +1269,8 @@ describe('buildSessionReport（Session Token 用量报告）', () => {
       ev({ kind: 'harness', stage: 'result', costUsd: 0.1, tokensIn: 100, tokensOut: 20 })
     ]
     const md = buildSessionReport([{ runId: 'r', userText: `please inspect ${secret}`, items, done: true }])
-    expect(md).toContain('«REDACTED»')
-    expect(md).not.toContain(secret)
+    expect(md).not.toContain('«REDACTED»')
+    expect(md).toContain(secret)
     expect(md).not.toContain('tool output')
   })
 

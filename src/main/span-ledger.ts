@@ -5,8 +5,7 @@ import {
   type TraceEvent,
   type UsageAnalytics,
   type UsageAnalyticsAggregate,
-  type UsageAnalyticsRangeDays,
-  maskSecrets
+  type UsageAnalyticsRangeDays
 } from '../shared/trace'
 import { providerDangerCoverage, type ProviderId } from '../shared/provider'
 import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
@@ -790,7 +789,7 @@ export function buildUsageAnalytics(args: {
 const PREVIEW_MAX = 2000
 const preview = (s: string | null | undefined): string | null => {
   if (s == null) return null
-  return maskSecrets(s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX) : s) ?? null
+  return s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX) : s
 }
 const tsMs = (iso: string, fallback: number): number => {
   const t = Date.parse(iso)
@@ -833,8 +832,8 @@ export function spanRowsFromItems(args: {
         intervention.source,
         intervention.resolution,
         intervention.request.questions.length,
-        maskSecrets(JSON.stringify(intervention.request)) ?? '{}',
-        maskSecrets(JSON.stringify(intervention.response)) ?? '{}',
+        JSON.stringify(intervention.request) ?? '{}',
+        JSON.stringify(intervention.response) ?? '{}',
         tsMs(intervention.openedAt, nowMs),
         tsMs(intervention.closedAt, nowMs),
         intervention.durationMs

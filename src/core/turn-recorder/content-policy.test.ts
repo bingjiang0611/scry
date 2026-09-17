@@ -15,7 +15,8 @@ describe('tool content persistence policy', () => {
     expect(turn.turnEvidence.tools.value).toHaveLength(1)
     expect(turn.turnEvidence.tools.value![0]).toMatchObject({ id: 't', name: 'Bash', status: 'success' })
     expect(turn.turnEvidence.tools.value![0].outputContent).toMatchObject({ source: 'canonical_summary', sourceCompleteness: 'partial', reasons: ['source_truncated'] })
-    expect(JSON.stringify(turn)).not.toMatch(/INPUT_SECRET|OUTPUT_SECRET/)
+    expect(JSON.stringify(turn)).toContain('INPUT_SECRET')
+    expect(JSON.stringify(turn)).toContain('OUTPUT_SECRET')
     expect(protectToolContent(turn, '')).toEqual(turn)
   })
 

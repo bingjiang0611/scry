@@ -74,7 +74,7 @@ Agent、skill 与提示词不应主动调用这些命令。
   "capture": {
     "prompt": true,
     "assistant": true,
-    "toolOutput": "full-redacted",
+    "toolOutput": "full",
     "diff": true,
     "hooks": true,
     "patchExcludeBasenames": []
@@ -88,26 +88,30 @@ Agent、skill 与提示词不应主动调用这些命令。
 
 > ⚠️ **关闭正文不等于脱敏。** 即使 `prompt`、`assistant` 关闭且 `toolOutput: "none"`,以下内容仍会落盘:**工具入参**(Bash 命令原文、Edit 的 old/new 字符串)、**文件路径**、**diff patch**(除非 `diff: false`)。当前没有单独关闭工具入参的开关。要求本地不留代码与命令的场景,应设 `diff: false` 并评估工具入参是否可接受,或者干脆不在该仓库启用。
 
-## 工具正文：默认 `full-redacted`
+## 工具正文：默认 `full` 原文
 
-从 0.2.37 起，`scry init` 创建的配置和省略 `capture.toolOutput` 的已有配置都默认使用 `full-redacted`，无需手动配置即可记录脱敏后的工具 input/output。以下是默认生效值，不需要用户填写：
+当前源码中，`scry init` 和省略 `capture.toolOutput` 的配置默认使用 `full`，记录原始工具 input/output，不再脱敏。旧配置的 `full-redacted` 作为迁移别名解析为 `full`，**不再表示保密承诺**。历史已脱敏内容及标记保留，不尝试恢复。此变更需构建/安装当前源码后生效，不改变已发布的旧版 CLI。
+
+> ⚠️ 原文可能包含密钥、令牌、Cookie 和私钥，会进入 `.scry`、App archive/SQLite、备份及已配置的 uploader。分享/上传前必须自行检查。支持包和认证诊断的防泄露规则不因此移除。
+
+以下是默认生效值：
 
 ```json
 {
-  "toolOutput": "full-redacted",
+  "toolOutput": "full",
   "toolContentFieldBytes": 8192,
   "toolContentTurnBytes": 131072
 }
 ```
 
 - 已有配置中**显式**设置的 `none/summary` 继续生效，重复 `init` 不覆盖；旧版自动生成的 `summary` 与用户选择无法可靠区分，不根据猜测迁移。无 `scry.config.json` 的工作区仍不自动启用 recorder。
-- 同时保存 `inputContent` / `outputContent`，不再把 `outputSummary` 当作全文。摘要从脱敏后的保留正文生成。正文可能是字符串、JSON 或截断的 JSON 文本片段；只有 `encoding: "json"` 可按完整 JSON 解析。
-- 单字段默认 8 KiB、最大 64 KiB；最终轮次记录新增正文合计默认 128 KiB、最大 1 MiB。按 UTF-8 字节裁剪，不截坏字符。预算按稳定调用顺序分配，input 在 output 之前；这不是整个 `.scry` 的磁盘配额，事件暂存、archive、队列有各自副本。
-- 每个字段包含 `content`（省略时不存在）、`encoding`、`savedBytes`、`source`、`sourceCompleteness`、`redaction`、`storage`、`reasons`。`sourceCompleteness: "unknown"` 表示上游没有完整性承诺；`storage: "complete"` 只表示完整保存了当前收到并脱敏的值，**不证明 Provider 原始输出完整**。
-- 原因区分 `provider_missing`、`source_truncated`、`field_budget`、`turn_budget`、`redaction_failed`、`not_collected`。上游集成声明的裁剪保留为 source partial；不能从旧摘要恢复全文。旧记录没有这些字段时按 legacy/unknown 处理，不推断完整。
-- 工具正文先经过已知模式脱敏，再裁剪和写入事件、managed progress/journal/canonical、App archive 和 SQLite 失败队列；脱敏/序列化失败时只保存安全元数据。覆盖敏感 JSON/form 键、Authorization/Cookie、URL query/URI 用户信息和 PEM 私钥。规则可能过度遮盖，也无法识别任意自由文本中的所有未知秘密，不是绝对防泄漏保证。
-- 新模式禁用 App 原始 transcript 字节镜像，改用保护后的 trace archive。Provider 自有 transcript、历史记录/镜像，以及独立的 prompt、assistant、diff、文件路径、附件不在这项工具正文脱敏保证内；不要把它理解为全工作区脱敏或历史清理。
-- 普通轮次及 managed 恢复工件保留工具正文策略；已保护的重试不会因后续修改配置回退为 raw。不要在活跃轮次中移动/删除配置或更换 dataDir。
+- 同时保存 `inputContent` / `outputContent`，不再把 `outputSummary` 当作全文。摘要从保留的原文生成。正文可能是字符串、JSON 或截断的 JSON 文本片段；只有 `encoding: "json"` 可按完整 JSON 解析。
+- 单字段默认 8 KiB、最大 64 KiB；最终轮次记录新增正文合计默认 128 KiB、最大 1 MiB。按 UTF-8 字节裁剪，不截坏字符。预算按稳定调用顺序分配，input 在 output 之前；这只是 inline 预览预算，不是整个 `.scry` 的磁盘配额；完整正文另存 `.scry/content/sha256/` 并通过 `contentRef` 引用，事件暂存、archive、队列也有各自副本。
+- 每个字段包含 `content`（省略时不存在）、`encoding`、`savedBytes`、`source`、`sourceCompleteness`、`redaction`、`storage`、`reasons`。`sourceCompleteness: "unknown"` 表示上游没有完整性承诺；`storage: "complete"` 只表示完整保存了当前收到的值，**不证明 Provider 原始输出完整**。
+- 新采集的 `redaction` 为 `disabled`；历史 `applied/unchanged/failed/not_run` 仍可读取。旧版 reader 可能拒绝新增状态/原因，读取新记录时应同步升级 App、CLI 和下游消费方。原因区分 `provider_missing`、`source_truncated`、`field_budget`、`turn_budget`、`serialization_failed`、`not_collected`，历史 `redaction_failed` 保留。上游裁剪仍标 partial，不能从旧摘要恢复全文。
+- 原文保留不取消结构安全：循环引用、accessor、自定义对象等无法安全序列化的值记为 omitted + `serialization_failed`，不调用 payload 的 getter/toJSON。字符串不因看起来像 JSON、URL 或 form 而被重排或替换。
+- App 原始 transcript 镜像允许继续写入，但仍先校验 workspace/session 身份和受管路径。关闭脱敏不改变文件授权、trust gate 或 renderer 隔离。
+- 普通轮次及 managed 恢复工件保留字节预算；旧 `full-redacted` 重试也不再对新内容脱敏，但已有正文的历史 provenance 不变。不要在活跃轮次中移动/删除配置或更换 dataDir。
 - 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
@@ -246,7 +250,7 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 | 只有 prompt,无工具无 diff | 2.6 KB |
 | 5 次 Edit + 5 文件 diff | 6.6–9.9 KB |
 
-存储量取决于工具正文和 diff，不能再按“只存摘要”估算。默认 `full-redacted` 的最终单轮新增工具正文预算为 128 KiB（可配置到 1 MiB）；diff patch 单文件 32 KiB、单轮合计 128 KiB。若两项默认预算都用满，100 轮/天的正文与 patch 约 750 MiB/30 天，另有元数据及恢复副本。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
+存储量取决于实际采集的原文和 diff，不能按 inline 预算估算总磁盘占用。默认 `full` 的单轮工具正文 inline 预算为 128 KiB（可配置到 1 MiB），但 `contentRef` 指向的完整正文不受此预览预算限制；diff patch 单文件 32 KiB、单轮合计 128 KiB，另有元数据、归档和恢复副本。当前没有自动 retention/孤立 blob GC。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
 
 > ⚠️ **不要手动删除单个 record 文件。** 序号空洞会被 `turns verify` 与 `doctor` 判为 store 损坏(退出 4),而不是"已清理"。
 
@@ -274,7 +278,7 @@ scry commit-hook revoke --workspace "$PWD"
 
 授权记录写在仓库之外(默认 `~/.scry/grants/<workspace-hash>.json`,`0600`,可用 `SCRY_GRANT_DIR` 覆盖)。每次投递前重新校验 entry 与全部 `files` 的内容指纹:未授权、指纹不符或 bundle 非法一律 fail closed,不执行任何程序,record 照常保留待后续投递,原因写入 `.scry/logs/recorder.log`。改过 hook 后需重新 `trust`,并 `scry recorder restart` 让运行中的 daemon 生效。
 
-被授权的 entry 以你的权限运行,并能读取全部 record 正文 —— **授权是执行授权,不是脱敏机制**。默认工具正文脱敏不覆盖整份 record；团队汇总方案仍需负责 prompt、diff 等其余字段的脱敏或仅上报 `turns summary` 聚合，不能把工具正文保护当作完整上传脱敏策略。
+被授权的 entry 以你的权限运行,并能读取全部 record 正文 —— **授权是执行授权,不是脱敏机制**。采集正文默认不脱敏；团队汇总方案需要自行决定上报原文的范围、权限与脱敏，或仅上报 `turns summary` 聚合。
 
 **daemon 在响应 Provider 之后才投递**,所以回调耗时不占 hook 预算。没有 daemon 时(`SCRY_RECORDER_TRANSPORT=direct` 或冷启动)只能同步投递,此时每个事件最多 8 条、预算 1.5s(单条仍以 10s 熔断),剩余保持 pending。实测回调 350ms/条、积压 6 条时:同步 1688ms/事件,移出后 500ms/事件。
 

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { observedInterruptionRecordId, reserveObservedInterruption } from './managed-interruption.js'
 import { isToolContent } from '../../shared/tool-content.js'
-import { captureToolContent, redactToolText, type ToolContentPolicy } from './tool-content.js'
+import { captureToolContent, isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
@@ -215,7 +215,7 @@ function assertStrictCapture(enablement: EnabledRecorder): void {
   const missing = [
     !capture.prompt && 'prompt',
     !capture.assistant && 'assistant',
-    capture.toolOutput === 'none' && 'toolOutput=summary|full-redacted',
+    capture.toolOutput === 'none' && 'toolOutput=summary|full',
     !capture.diff && 'diff',
     !capture.hooks && 'hooks'
   ].filter((value): value is string => !!value)
@@ -223,12 +223,12 @@ function assertStrictCapture(enablement: EnabledRecorder): void {
 }
 
 function assertProtectedToolEvidence(evidence: TurnEvidence, policy: ToolContentPolicy): void {
-  if (policy.toolOutput !== 'full-redacted') return
+  if (!isFullToolContentPolicy(policy)) return
   let bytes = 0
   for (const call of [evidence.tools, evidence.skills, evidence.mcps].flatMap((section) => section.value ?? [])) {
-    if (call.input !== undefined) throw new Error('full-redacted managed input requires protected content envelopes')
+    if (call.input !== undefined) throw new Error('full managed input requires bounded content envelopes')
     for (const field of [call.inputContent, call.outputContent]) {
-      if (!isToolContent(field)) throw new Error('full-redacted managed evidence requires content provenance')
+      if (!isToolContent(field)) throw new Error('full managed evidence requires content provenance')
       if (field.content !== undefined) {
         const checked = captureToolContent(field.content, { source: field.source, maxBytes: policy.toolContentFieldBytes })
         if (checked.content !== field.content) throw new Error('managed content was not protected before canonical handoff')
@@ -239,10 +239,8 @@ function assertProtectedToolEvidence(evidence: TurnEvidence, policy: ToolContent
     const summary = output ? (output.length <= 500 ? output : `${output.slice(0, 500)}…`) : undefined
     if (call.outputSummary !== undefined && call.outputSummary !== summary) throw new Error('managed summary differs from protected output')
     if (call.error !== undefined && call.error !== summary && call.error !== 'tool failed') throw new Error('managed error differs from protected output')
-    if ([call.name, ...Object.values(call.mcp ?? {})].some((value) => value && redactToolText(value) !== value)) throw new Error('managed call label was not protected')
   }
   if (bytes > (policy.toolContentTurnBytes ?? 128 * 1024)) throw new Error('managed tool content exceeds turn budget')
-  if ((evidence.errors.value ?? []).some((error) => redactToolText(error.message) !== error.message)) throw new Error('managed error message was not protected')
 }
 
 function assertTiming(timing: ManagedTurnTiming): void {
@@ -478,7 +476,7 @@ function assertCommittedRecordMatchesHandoff(
 export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput): Promise<ManagedTurnResult> {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
-  assertProtectedToolEvidence(input.evidence, input.toolContentPolicy?.toolOutput === 'full-redacted' ? input.toolContentPolicy : mode.enablement.config.capture)
+  assertProtectedToolEvidence(input.evidence, isFullToolContentPolicy(input.toolContentPolicy) ? input.toolContentPolicy : mode.enablement.config.capture)
   assertExactText(input.evidence.user, input.userText, 'user')
   if (
     (input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode' || input.provider === 'pi') &&

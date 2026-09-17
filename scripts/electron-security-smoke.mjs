@@ -280,6 +280,8 @@ async function main() {
       externalSessionId,
       loadedTurns: loaded.length,
       hasTool: loaded.some((turn) => turn.items.some((item) => item.stage === 'tool_use')),
+      rawInput: loaded.some((turn) => turn.items.some((item) => JSON.stringify(item.input ?? item.inputContent ?? null).includes('sk-ant-api03-scry-smoke-not-a-real-key-000000'))),
+      rawOutput: loaded.some((turn) => turn.items.some((item) => item.stage === 'tool_result' && JSON.stringify(item.output ?? item.text ?? item.outputContent ?? null).includes('sk-ant-api03-scry-smoke-not-a-real-key-000000'))),
       statsStatus: stats.status,
       statsTurns: stats.totals.turns
     }
@@ -288,6 +290,8 @@ async function main() {
   assert.ok(lifecycleSmoke.externalSessionId)
   assert.ok(lifecycleSmoke.loadedTurns >= 1)
   assert.equal(lifecycleSmoke.hasTool, true)
+  assert.equal(lifecycleSmoke.rawInput, true, 'captured tool input must survive archive reload verbatim')
+  assert.equal(lifecycleSmoke.rawOutput, true, 'captured tool output must survive archive reload verbatim')
   assert.equal(lifecycleSmoke.statsStatus, 'ready')
   assert.ok(lifecycleSmoke.statsTurns >= 1)
 

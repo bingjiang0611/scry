@@ -43,14 +43,14 @@ afterEach(() => {
 })
 
 describe('transcript archive mirror', () => {
-  it('full-redacted disables new raw transcript mirrors without touching Provider originals', async () => {
+  it('legacy full-redacted config permits raw mirrors without touching Provider originals', async () => {
     const cwd = tempRoot()
     const home = tempRoot()
     const userDataDir = tempRoot()
     writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'safe', capture: { toolOutput: 'full-redacted' } }))
     const source = writeTranscript(home, cwd, 'safe-session', transcriptContent(cwd, 'safe-session'))
-    await expect(mirrorTranscript({ cwd, home, userDataDir, sessionId: 'safe-session' })).resolves.toBe(false)
-    expect(existsSync(archivedTranscriptPath(userDataDir, cwd, 'safe-session'))).toBe(false)
+    await expect(mirrorTranscript({ cwd, home, userDataDir, sessionId: 'safe-session' })).resolves.toBe(true)
+    expect(readFileSync(archivedTranscriptPath(userDataDir, cwd, 'safe-session'), 'utf8')).toBe(transcriptContent(cwd, 'safe-session'))
     expect(readFileSync(source, 'utf8')).toBe(transcriptContent(cwd, 'safe-session'))
   })
 

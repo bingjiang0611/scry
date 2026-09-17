@@ -5,8 +5,12 @@
 Scry observes and controls native Provider runs; elapsed time, a slow renderer or a delayed
 query is not proof that an Agent stopped. Keep Provider-specific permissions, execution trust,
 renderer isolation, session identity and explicit stop semantics. No automatic replay of an
-unconfirmed write. “Complete capture” means Provider-exposed evidence under the declared
-redaction policy, not inferred data or an implicit decision to persist secrets.
+unconfirmed write. “Complete capture” means Provider-exposed evidence, not inferred data.
+
+The maintainer explicitly selected **all captured output, raw by default** during this workflow.
+This supersedes the redaction policy described in the historical batches below. Newly captured
+content may persist credentials; access control and execution trust are unchanged. Diagnostic/support
+bundles, authentication errors and credential/config display retain their separate masking policies.
 
 ## Batch 1: avoid false termination (2026-09-17)
 
@@ -221,6 +225,36 @@ Verification on the final staged-only snapshot (local Node 24/macOS):
   isolated Electron security/PTY/surface smoke. No real paired-device or Provider restart was exercised;
   no installation, signing, publication or push was performed.
 
+## Current policy: raw captured output by default
+
+- Recorder defaults and `scry init` now use `capture.toolOutput: full`. Existing `full-redacted`
+  configuration and persisted retry policies are accepted as migration inputs but no longer redact
+  newly captured content. Explicit `none`/`summary` capture choices remain effective.
+- Tool bodies, labels, SQLite span/intervention/usage payloads, managed journals/outbox/archive,
+  transcript mirrors, remote output and Agent display/report text no longer replace credential-like
+  strings. New tool content has `redaction: disabled`; safe-serialization failures have their own
+  `serialization_failed` reason rather than claiming a redaction failure.
+- Historical content and references retain their provenance (including applied redaction); no data
+  migration pretends to recover lost bytes. Invalid objects, accessors, byte budgets, hash checks,
+  source partial/unknown markers, workspace/session checks and device authorization remain enforced.
+- README and CLI docs warn about credential persistence, backups, exports and upload callbacks.
+  No new external upload or credential discovery was added. This policy change does not itself finish
+  local PTY disk capture/replay: terminal data remains raw but memory-only in this revision.
+
+Verification on the final staged-only snapshot (Node 24/macOS; synthetic credentials only):
+
+- `npm test`: 166 files passed, 3 skipped; 2116 tests passed, 3 skipped; shell tests passed.
+- `npm run check:cli-release`: typecheck, 538 CLI tests, CLI build and clean-package smoke passed.
+  The first package smoke still asserted the obsolete full-redacted default; its assertions were
+  updated to verify exact synthetic raw input/output, then the release check was rerun successfully.
+- `CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:artifact`: App/CLI builds, package checks and
+  Electron security/PTY/surface smoke passed. The actual packaged App's smoke Provider emits
+  synthetic credential-like input/output; archive reload through typed IPC preserves both strings.
+- Renderer raw-name/report behavior is covered by focused render tests; no real Provider account,
+  paired mobile device, production user data or real credentials were used. No install/publish/push.
+- Code/tests/scripts in the staged index were hash-matched to the tested snapshot; existing unrelated
+  worktree changes were merged back but excluded from this commit.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity
@@ -239,9 +273,9 @@ Verification on the final staged-only snapshot (local Node 24/macOS):
 - Replace remaining adapter/body truncation and fixed transcript windows with streamed content and
   durable cursors; retain explicit original/saved byte counts where the upstream itself is partial.
 - Collect full diffs asynchronously without changing turn ownership or attributing later changes
-  to an earlier turn. Pin the existing capture/redaction policy on retries.
+  to an earlier turn. Pin capture budgets and preserve historical provenance on retries.
 - Tests: large outputs across current thresholds, interrupted writes/recovery, duplicates,
-  redaction, disk errors and correct turn/session association. No raw-secret persistence by default.
+  raw byte preservation, disk errors and correct turn/session association. Follow the explicit raw-capture policy above.
 
 ### 3. Durable replay and pagination (CLI tool bodies and remote output partially implemented)
 

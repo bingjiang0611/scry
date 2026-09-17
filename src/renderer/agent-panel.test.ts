@@ -320,7 +320,7 @@ describe('deriveAgentRows', () => {
     expect(html).not.toContain('100%')
   })
 
-  it('对 Agent 名称和最近活动先脱敏再截断', () => {
+  it('Agent 名称和最近活动保留原文但仍限制展示长度', () => {
     const secret = 'sk-ant-abcdefghijklmnopqrstuvwxyz1234567890'
     const [row] = deriveAgentRows([turn([
       event({
@@ -330,9 +330,9 @@ describe('deriveAgentRows', () => {
     ])], { busy: false })
     const html = renderToStaticMarkup(createElement(AgentsSurface, { turns: [turn([row.sourceEvent])], busy: false }))
 
-    expect(row.name).toContain('«REDACTED»')
+    expect(row.name).toContain(secret)
     expect(row.name.length).toBeLessThanOrEqual(80)
-    expect(row.recentActivity[0]?.label).not.toContain(secret)
-    expect(html).not.toContain(secret)
+    expect(row.recentActivity[0]?.label).toContain(secret)
+    expect(html).toContain(secret)
   })
 })

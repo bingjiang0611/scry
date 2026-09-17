@@ -21,7 +21,7 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
-import { captureToolContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
+import { captureToolContent, isFullToolContentPolicy, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
@@ -463,7 +463,7 @@ export function lifecycleTraceEvents(args: {
         toolUseId,
         ...(agentId ? { agentId } : {}),
         input,
-        ...(args.toolContentPolicy?.toolOutput === 'full-redacted' ? {
+        ...(isFullToolContentPolicy(args.toolContentPolicy) ? {
           inputContent: captureToolContent(args.payload[['tool_input', 'toolInput', 'input'].find((key) => key in args.payload) ?? 'tool_input'], {
             source: 'lifecycle_hook', maxBytes: null,
             ...(limitations.some((item) => item.field === 'tool_input') ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : {})
@@ -479,7 +479,7 @@ export function lifecycleTraceEvents(args: {
     }
   } else if (/^PostToolUse(?:Failure)?(?::|$)/.test(args.event) || args.event === 'tool.execute.after') {
     const failed = /Failure/.test(args.event) || args.payload.error != null || args.payload.is_error === true
-    const result = args.toolContentPolicy?.toolOutput === 'full-redacted'
+    const result = isFullToolContentPolicy(args.toolContentPolicy)
       ? args.payload[['tool_response', 'toolResponse', 'output', 'result', 'error'].find((key) => key in args.payload) ?? 'tool_response']
       : args.payload.tool_response ?? args.payload.toolResponse ?? args.payload.output ?? args.payload.result ?? args.payload.error
     out.push({
@@ -491,7 +491,7 @@ export function lifecycleTraceEvents(args: {
       tool: toolName,
       toolUseId,
       ...(agentId ? { agentId } : {}),
-      ...(args.toolContentPolicy?.toolOutput === 'full-redacted'
+      ...(isFullToolContentPolicy(args.toolContentPolicy)
         ? { outputContent: captureToolContent(result, {
             source: 'lifecycle_hook', maxBytes: null,
             ...(limitations.some((item) => item.field === 'tool_response') ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : {})
@@ -1956,8 +1956,8 @@ async function beginOpenTurn(
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
   const open: OpenTurnState = {
-    ...(enablement.config.capture.toolOutput === 'full-redacted' ? { toolContentPolicy: {
-      toolOutput: 'full-redacted' as const,
+    ...(isFullToolContentPolicy(enablement.config.capture) ? { toolContentPolicy: {
+      toolOutput: 'full' as const,
       toolContentFieldBytes: enablement.config.capture.toolContentFieldBytes,
       toolContentTurnBytes: enablement.config.capture.toolContentTurnBytes
     } } : {}),

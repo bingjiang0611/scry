@@ -63,11 +63,11 @@ describe('RunOutputLog (live output content cache)', () => {
     expect(log.since('run-1', 0).chunks).toHaveLength(1)
   })
 
-  it('masks secrets before storing content (never caches raw credentials)', () => {
+  it('preserves raw output including credential-like content', () => {
     const log = new RunOutputLog()
     log.append('run-1', { kind: 'tool_result', text: 'export TOKEN=sk-ant-api03-SECRETSECRETSECRETSECRET' })
     const text = log.since('run-1', 0).chunks[0].text
-    expect(text).not.toContain('SECRETSECRETSECRETSECRET')
+    expect(text).toBe('export TOKEN=sk-ant-api03-SECRETSECRETSECRETSECRET')
   })
 
   it('splits an oversized UTF-8 chunk without silently losing its tail', () => {

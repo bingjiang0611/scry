@@ -212,7 +212,7 @@ async function notificationLine(capture: string, workspace: string, timeoutMs = 
 }
 
 describe('managed trace turn coordinator', () => {
-  it('default full-redacted progress, journal recovery, archive and canonical records share safe bodies', async () => {
+  it('default full progress, journal recovery, archive and canonical records retain raw bodies', async () => {
     const { workspace, userDataDir } = await fixture()
     const path = join(workspace, 'scry.config.json')
     const config = JSON.parse(await readFile(path, 'utf8'))
@@ -230,14 +230,14 @@ describe('managed trace turn coordinator', () => {
       return (await Promise.all(entries.map((entry) => entry.isDirectory() ? scan(join(dir, entry.name)) : readFile(join(dir, entry.name), 'utf8')))).join('\n')
     }
     await persistManagedTraceProgress(request)
-    expect(await scan(userDataDir)).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    expect(await scan(userDataDir)).toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
     config.capture.toolOutput = 'summary'
     await writeFile(path, JSON.stringify(config))
     await persistManagedTraceProgress(request)
-    expect(await scan(userDataDir)).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    expect(await scan(userDataDir)).toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
     await expect(commitManagedTraceTurn(request, { waitMs: 0, removeArtifact: async () => { throw new Error('simulated interruption') } })).rejects.toThrow('simulated interruption')
-    expect(await scan(userDataDir)).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
-    expect(await scan(join(workspace, '.scry'))).not.toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    expect(await scan(userDataDir)).toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
+    expect(await scan(join(workspace, '.scry'))).toMatch(/MANAGED_(INPUT|OUTPUT)_SECRET/)
     config.capture.toolOutput = 'full-redacted'
     config.capture.toolContentFieldBytes = 10
     config.capture.toolContentTurnBytes = 20

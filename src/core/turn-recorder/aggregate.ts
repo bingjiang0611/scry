@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { captureToolContent, limitToolContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
+import { captureToolContent, isFullToolContentPolicy, limitToolContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
 import { isOverviewToolErrorEvent, logicalCallEventsForTurn } from '../../shared/logical-calls.js'
 import { deriveModelTiming } from '../../shared/model-timing.js'
 import { providerDangerCoverage } from '../../shared/provider.js'
@@ -432,7 +432,7 @@ export function aggregateTurnEvidence(args: {
   }
 }): TurnEvidence {
   const source = args.source ?? 'trace_events'
-  if (args.toolContentPolicy?.toolOutput === 'full-redacted') {
+  if (isFullToolContentPolicy(args.toolContentPolicy)) {
     args = { ...args, events: sanitizeToolEvents(args.events, args.toolContentPolicy, source) }
   }
   const providerEvent = args.events.find((event) => event.providerId || event.runtimeProvider)
@@ -589,7 +589,7 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('provider tool events were not observable', [source])
       : omittedCallSections.has('tools') || (!!callCaptureReason && tools.length > 0)
         ? partial(tools, [source], joinOmissionReasons([
-            omittedCallSections.has('tools') ? (args.toolContentPolicy?.toolOutput === 'full-redacted' ? 'one or more tool call contents are missing, partial or limited; inspect content provenance' : 'one or more tool call payloads were omitted by the record byte budget') : undefined,
+            omittedCallSections.has('tools') ? (isFullToolContentPolicy(args.toolContentPolicy) ? 'one or more tool call contents are missing, partial or limited; inspect content provenance' : 'one or more tool call payloads were omitted by the record byte budget') : undefined,
             callCaptureReason
           ])!, 'exact')
         : available(tools, [source]),
@@ -597,7 +597,7 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('provider skill events were not observable', [source])
       : omittedCallSections.has('skills') || (!!callCaptureReason && skills.length > 0)
         ? partial(skills, [source], joinOmissionReasons([
-            omittedCallSections.has('skills') ? (args.toolContentPolicy?.toolOutput === 'full-redacted' ? 'one or more skill call contents are missing, partial or limited; inspect content provenance' : 'one or more skill call payloads were omitted by the record byte budget') : undefined,
+            omittedCallSections.has('skills') ? (isFullToolContentPolicy(args.toolContentPolicy) ? 'one or more skill call contents are missing, partial or limited; inspect content provenance' : 'one or more skill call payloads were omitted by the record byte budget') : undefined,
             callCaptureReason
           ])!, 'exact')
         : available(skills, [source]),
@@ -605,7 +605,7 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('provider MCP events were not observable', [source])
       : omittedCallSections.has('mcps') || (!!callCaptureReason && mcps.length > 0)
         ? partial(mcps, [source], joinOmissionReasons([
-            omittedCallSections.has('mcps') ? (args.toolContentPolicy?.toolOutput === 'full-redacted' ? 'one or more MCP call contents are missing, partial or limited; inspect content provenance' : 'one or more MCP call payloads were omitted by the record byte budget') : undefined,
+            omittedCallSections.has('mcps') ? (isFullToolContentPolicy(args.toolContentPolicy) ? 'one or more MCP call contents are missing, partial or limited; inspect content provenance' : 'one or more MCP call payloads were omitted by the record byte budget') : undefined,
             callCaptureReason
           ])!, 'exact')
         : available(mcps, [source]),

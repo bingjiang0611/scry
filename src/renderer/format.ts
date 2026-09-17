@@ -1,7 +1,6 @@
 // renderer 共享的纯逻辑：常量 / 视图类型 / 格式化与投影 helper。无 React 依赖，给各组件复用。
 import {
   contextUsageEvidence,
-  maskSecrets,
   mcpCallsForEvent,
   type TraceEvent,
   type DiffFile,
@@ -1196,11 +1195,11 @@ export interface BillingAnalysis {
 function cleanTurnLabel(t: Turn, turnNo: number): string {
   const parsed = parseUserMessage(t.userText)
   const raw = parsed.command || parsed.body.split('\n').find((line) => line.trim()) || `turn ${turnNo}`
-  return (maskSecrets(raw.replace(/\s+/g, ' ').trim()) ?? raw).slice(0, 96)
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 96)
 }
 
 function safeReportLabel(name: string): string {
-  return (maskSecrets(name.replace(/\s+/g, ' ').trim()) ?? name).slice(0, 96)
+  return name.replace(/\s+/g, ' ').trim().slice(0, 96)
 }
 
 function hiddenSpendCommand(e: TraceEvent): boolean {

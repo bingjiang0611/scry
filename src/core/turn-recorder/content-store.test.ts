@@ -29,7 +29,7 @@ function events(output: string): TraceEvent[] {
 const policy = { toolOutput: 'full-redacted' as const, toolContentFieldBytes: 64, toolContentTurnBytes: 64 }
 
 describe('recorder content store', () => {
-  it('persists complete redacted content while keeping the inline record bounded', async () => {
+  it('persists complete raw content while keeping the inline record bounded', async () => {
     const dataRoot = await root()
     const secret = 'SECRET_AFTER_PREVIEW'
     const exposed = `${'正文😀'.repeat(200)}\nAuthorization: Bearer ${secret}\nTAIL`
@@ -44,8 +44,8 @@ describe('recorder content store', () => {
     const complete = await readRecorderContent(dataRoot, field.contentRef!)
     expect(complete).toBe(captureToolContent(exposed, { source: 'fixture', maxBytes: null }).content)
     expect(complete).toContain('TAIL')
-    expect(complete).toContain('[REDACTED]')
-    expect(complete).not.toContain(secret)
+    expect(complete).toBe(exposed)
+    expect(complete).toContain(secret)
     expect(Buffer.byteLength(complete)).toBe(field.contentRef!.bytes)
 
     const evidence = aggregateTurnEvidence({ events: persisted, toolContentPolicy: policy })
