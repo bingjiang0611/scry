@@ -96,19 +96,23 @@ Current boundaries:
 - Recorder archives now own their referenced blobs, but JSON-only `export` does not bundle them.
   Live blobs are retained because later records may share a digest; there is no retention/orphan
   collection policy yet. Do not treat an exported record JSON as self-contained.
-- The App/CLI has no public content-detail endpoint or paged viewer yet. Inline previews remain the
-  only projected body until the durable replay batch wires authorized reference reads.
+- `scry turns content <record> <section> <index> <input|output>` resolves only references from a
+  validated record and returns bounded base64 byte pages with stable offsets. A cold read verifies
+  the complete digest; a bounded inode/mtime cache avoids O(n²) re-hashing while file identity is
+  unchanged. The App/renderer still has no content-detail endpoint or paged viewer.
 
 Verification for this batch on a snapshot reconstructed from the Git index:
 
-- `npm test`: 164 files passed, 3 skipped; 2073 tests passed, 3 skipped; shell tests passed.
+- `npm test`: 164 files passed, 3 skipped; 2077 tests passed, 3 skipped; shell tests passed.
 - `npm run typecheck`, `npm run build` and `npm run build:cli` passed.
-- `npm run check:cli-release`: 535 tests plus package smoke passed.
+- `npm run check:cli-release`: 537 tests plus package smoke passed.
 - A large-output integration committed a bounded record preview, reloaded the record, resolved the
   complete redacted artifact byte-for-byte and verified a secret beyond the preview was never stored.
 - Content-store tests cover shared turn-budget exhaustion, digest deduplication, unavailable storage,
-  missing blobs and post-write corruption. Archive tests cover shared-blob deduplication, live-store
-  independence, missing-source preflight, crash recovery from target content and legacy inline records.
+  missing blobs, post-write corruption, exact byte pagination and cache invalidation. CLI integration
+  reassembles a large Unicode body across non-character-aligned pages without exposing a redacted
+  secret. Archive tests cover shared-blob deduplication, live-store independence, missing-source
+  preflight, crash recovery from target content and legacy inline records.
 
 ## Remaining sequence
 
@@ -132,8 +136,9 @@ Verification for this batch on a snapshot reconstructed from the Git index:
 - Tests: large outputs across current thresholds, interrupted writes/recovery, duplicates,
   redaction, disk errors and correct turn/session association. No raw-secret persistence by default.
 
-### 3. Durable replay and pagination (not implemented)
+### 3. Durable replay and pagination (CLI tool bodies partially implemented)
 
+- Wire the existing Recorder byte-page reader into authorized App/mobile detail endpoints.
 - UI/mobile/terminal consume durable cursor pages, with bounded in-memory caches and complete
   catch-up after lost ACK, disconnect or renderer restart. Retention/deletion must be explicit.
 - Tests: reconnect cursor continuity, no skipped/duplicated events, renderer overload, host restart.

@@ -15,6 +15,7 @@ import {
 } from '../core/turn-recorder/recorder.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, lastRecordVersion, listRecords, readArchiveState, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { readRecorderContentPage } from '../core/turn-recorder/content-store.js'
 import {
   commitHookEnv,
   inspectCommitHookBundle,
@@ -41,7 +42,7 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'snapshot', 'before', 'out'])
+const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'offset', 'snapshot', 'before', 'out'])
 const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -107,7 +108,7 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|content|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -535,6 +536,33 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     }))
     return 0
   }
+  if (action === 'content') {
+    const [selector, section, rawIndex, direction] = args.positionals.slice(2)
+    if (!selector || !['tools', 'skills', 'mcps'].includes(section ?? '') || !/^\d+$/.test(rawIndex ?? '') || !['input', 'output'].includes(direction ?? '')) {
+      throw new Error('usage: scry turns content <sequence|recordId> <tools|skills|mcps> <call-index> <input|output> [--offset <bytes>] [--limit <bytes>]')
+    }
+    const record = await showRecord(dataRoot, selector)
+    const call = record?.[section as 'tools' | 'skills' | 'mcps'].value?.[Number(rawIndex)]
+    const ref = direction === 'input' ? call?.inputContent?.contentRef : call?.outputContent?.contentRef
+    if (!record || !call || !ref) {
+      print({ found: false, selector, section, callIndex: Number(rawIndex), direction })
+      return 1
+    }
+    const page = await readRecorderContentPage(dataRoot, ref, {
+      offset: intFlag(args, 'offset'),
+      limit: intFlag(args, 'limit')
+    })
+    print({
+      found: true,
+      selector,
+      section,
+      callIndex: Number(rawIndex),
+      direction,
+      ref,
+      ...page
+    })
+    return 0
+  }
   if (action === 'verify') {
     const result = await verifyStore(dataRoot)
     // Integrity (sequence/dedup/readability) alone decides `ok` and the exit code — that contract
@@ -559,7 +587,7 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print({ ...result, openTurnsPending: health?.pendingCount ?? null, identity, advisories })
     return result.ok ? 0 : 4
   }
-  throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|verify ...')
+  throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|content|verify ...')
 }
 
 /**

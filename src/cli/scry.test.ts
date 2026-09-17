@@ -92,6 +92,41 @@ describe('Scry CLI health and lookup contracts', () => {
     await expect(runScryCli(['turns', 'show', '999', '--workspace', root])).resolves.toBe(1)
     expect(JSON.parse(stdout.text())).toEqual({ found: false, selector: '999' })
   })
+
+  it('按字节游标分页读取记录引用的完整脱敏正文', async () => {
+    const root = await workspace()
+    const configPath = join(root, 'scry.config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    delete config.capture.toolOutput
+    await writeFile(configPath, JSON.stringify(config))
+    const base = { provider: 'claude' as const, workspace: root }
+    const event = (extra: Record<string, unknown>) => ({ session_id: 'content-page', timestamp: new Date().toISOString(), ...extra })
+    const secret = 'CLI_PAGE_SECRET'
+    const output = `${'中😀'.repeat(5_000)}\nAuthorization: Bearer ${secret}\nTAIL`
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: event({ prompt: 'capture' }) })
+    await handleRecorderHook({ ...base, event: 'PreToolUse:Bash', payload: event({ tool_name: 'Bash', tool_use_id: 'call', tool_input: { command: 'generate' } }) })
+    await handleRecorderHook({ ...base, event: 'PostToolUse:Bash', payload: event({ tool_name: 'Bash', tool_use_id: 'call', tool_response: output }) })
+    await handleRecorderHook({ ...base, event: 'Stop', payload: event({}) })
+
+    const bytes: Buffer[] = []
+    let offset = 0
+    do {
+      const stdout = captureStdout()
+      await expect(runScryCli([
+        'turns', 'content', '1', 'tools', '0', 'output', '--workspace', root,
+        '--offset', String(offset), '--limit', '4097'
+      ])).resolves.toBe(0)
+      const page = JSON.parse(stdout.text()) as { dataBase64: string; nextOffset: number; hasMore: boolean }
+      bytes.push(Buffer.from(page.dataBase64, 'base64'))
+      offset = page.nextOffset
+      vi.restoreAllMocks()
+      if (!page.hasMore) break
+    } while (true)
+    const complete = Buffer.concat(bytes).toString('utf8')
+    expect(complete).toContain('TAIL')
+    expect(complete).toContain('[REDACTED]')
+    expect(complete).not.toContain(secret)
+  })
 })
 
 describe('scry commit-hook', () => {
