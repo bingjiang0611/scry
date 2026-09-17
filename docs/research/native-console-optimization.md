@@ -239,7 +239,7 @@ Verification on the final staged-only snapshot (local Node 24/macOS):
   source partial/unknown markers, workspace/session checks and device authorization remain enforced.
 - README and CLI docs warn about credential persistence, backups, exports and upload callbacks.
   No new external upload or credential discovery was added. This policy change does not itself finish
-  local PTY disk capture/replay: terminal data remains raw but memory-only in this revision.
+  local PTY disk capture/replay; that is implemented in the bounded follow-up below.
 
 Verification on the final staged-only snapshot (Node 24/macOS; synthetic credentials only):
 
@@ -254,6 +254,61 @@ Verification on the final staged-only snapshot (Node 24/macOS; synthetic credent
   paired mobile device, production user data or real credentials were used. No install/publish/push.
 - Code/tests/scripts in the staged index were hash-matched to the tested snapshot; existing unrelated
   worktree changes were merged back but excluded from this commit.
+
+## Local terminal recording and exited-session replay
+
+Scope and existing UI reuse:
+
+- Production terminals record raw node-pty text by default under private
+  `userData/terminal-recordings/<terminal UUID>.{bin,json}` files (0700 directory / 0600 files).
+  No shell input channel is recorded separately; echoed input may naturally occur in PTY output.
+- The existing terminal toolbar gains read-only replay and recording deletion, enabled only after
+  Shell exit. Clear-screen remains separate from deleting the file. Replay reads one bounded page,
+  awaits xterm's write callback, then requests the next; a restart/closed pane cancels further writes.
+  The footer reports recording failure/partial replay and warns that raw content may include secrets.
+- The typed preload exposes only recording ID + bounded byte cursor and exact-ID deletion. Main
+  revalidates the trusted frame and current canonical workspace before reading or deleting; there is
+  no renderer-supplied file path. Active recordings cannot be deleted, including failed captures.
+
+Storage/evidence contract:
+
+- UTF-16LE preserves the exact JS text emitted by node-pty, including surrogates split across native
+  callbacks. This is not a claim to capture the original undecoded PTY bytes. Page cursors are even
+  byte offsets in that encoding; default 64 KiB, maximum 256 KiB, with no split surrogate pairs at a
+  normal page boundary. IPC string serialization has separate bounded overhead.
+- Data is appended without retaining a growing body queue. Data fsync precedes atomic metadata
+  publication; checkpoints are scheduled after 50 ms and forced on read/exit. That scheduling interval
+  is not a durability deadline. A crash replays only the last published checkpoint, with an open record
+  marked interrupted, not complete. Invalid/missing file pairs fail rather than look empty. The store
+  validates private-file structure and lengths, not a full-content cryptographic checksum.
+- Storage failures notify the renderer but do not terminate the PTY or suppress live projection.
+  Uncertain body writes are not retried. Cold reads use the last visible checkpoint: an open prefix
+  remains interrupted. If an exit checkpoint was renamed before directory fsync failed, and the
+  failure marker also could not be saved, a surviving checkpoint can still prove complete received
+  content (native exit plus already-fsynced body); the original sync failure was separately notified.
+  Orphan startup/temp files are not silently deleted.
+
+Remaining limits (not claimed complete):
+
+- The existing renderer ACK backpressure and PTY cleanup on navigation/crash remain in place. This
+  batch does not implement live reattachment, old-ACK fencing, reload survival or App restart history UI.
+- No retention/GC or disk quota is added. Closing a tab preserves its recording but currently removes
+  the UI handle to it; only the current exited tab exposes deletion. A paginated history catalog and
+  explicit retention controls are the next storage-management step, not a reason for silent eviction.
+- Writes/checkpoints still use synchronous filesystem calls and slow storage can delay the main loop.
+  Move disk work behind a bounded async writer before claiming producer/UI/storage independence.
+- Replay restores received text at the current terminal geometry with the existing 5,000-line display
+  scrollback; it does not promise exact historic resize/cursor state or unlimited in-memory scrollback.
+
+Verification (staged-only source snapshot): 2,133 unit tests passed, 3 skipped; shell checks,
+node/web typecheck, App/CLI builds, 538 CLI release tests and clean-package smoke passed. Packaged
+App validation and isolated Electron security/PTY/surface checks passed. The native PTY/UI path
+verified disabled recording controls while running, natural exit, clear → visibly replayed marker →
+delete → restart. The replay smoke was corrected to await actual DOM painting after xterm parsing,
+not to treat a parsed-buffer callback as a painted-screen assertion; the final rerun passed.
+Synthetic sink tests cover >16 MiB, cold reads, Unicode/code-unit boundaries, uncertain body writes,
+fsync/metadata failure, authorization and deletion. This is not a sustained >16 MiB native PTY pressure
+test, visual screenshot review or real Provider acceptance. No installation or publication performed.
 
 ## Remaining sequence
 

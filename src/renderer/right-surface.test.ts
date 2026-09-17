@@ -181,6 +181,10 @@ describe('terminal surface tabs', () => {
     expect(html).toContain(`id="${panelId}"`)
     expect(html).toContain('role="tabpanel"')
     expect(html).toContain(`aria-labelledby="${tabId}"`)
+    expect(html).toContain('aria-label="回放终端录制"')
+    expect(html).toContain('aria-label="删除终端录制"')
+    expect(html).toContain('role="status"')
+    expect(html).toContain('本机 Shell · 当前用户权限 · 原文录制（可能含密钥）')
   })
 
   it('未绑定项目时渲染从用户主目录启动的真实终端', () => {

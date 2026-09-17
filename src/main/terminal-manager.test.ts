@@ -90,11 +90,14 @@ function workspace(): string {
   return realpathSync(root)
 }
 
-function fixture(cwd: string, defaultCwd = cwd) {
+function fixture(cwd: string, defaultCwd = cwd, recordingDirectory?: string) {
   const pty = new FakePtyFactory()
   const data: TerminalDataEvent[] = []
   const exits: TerminalExitEvent[] = []
+  const recordingErrors: string[] = []
   const manager = createTerminalManager({
+    recordingDirectory,
+    onRecordingError: (event) => recordingErrors.push(event.id),
     getCurrentCwd: () => cwd,
     defaultCwd,
     onData: (event) => data.push(event),
@@ -105,7 +108,7 @@ function fixture(cwd: string, defaultCwd = cwd) {
     env: { PATH: '/test/bin', SECRET: 'main-owned' },
     closeGraceMs: 25
   })
-  return { manager, pty, data, exits }
+  return { manager, pty, data, exits, recordingErrors }
 }
 
 afterEach(() => {
@@ -114,6 +117,42 @@ afterEach(() => {
 })
 
 describe('TerminalManager', () => {
+  it('captures default raw output before live projection and replays only in the current workspace', () => {
+    const cwd = workspace()
+    const recordingDirectory = join(cwd, 'recordings')
+    const { manager, pty, data } = fixture(cwd, cwd, recordingDirectory)
+    const session = manager.start({ cwd, cols: 80, rows: 24 })
+    expect(session.recording).toBe('available')
+    pty.processes[0].emitData('token=SYNTHETIC_SECRET 中😀\u001b[31m')
+    expect(data[0].data).toContain('SYNTHETIC_SECRET')
+    expect(() => manager.deleteRecording(session.id)).toThrow('still_active')
+    pty.processes[0].emitExit(0)
+    const restarted = fixture(cwd, cwd, recordingDirectory).manager
+    expect(restarted.readRecording({ id: session.id, offset: 0 })).toMatchObject({ state: 'complete', data: data[0].data })
+    const different = workspace()
+    const foreign = fixture(different, different, recordingDirectory).manager
+    expect(() => foreign.readRecording({ id: session.id, offset: 0 })).toThrow('workspace_mismatch')
+    expect(() => foreign.deleteRecording(session.id)).toThrow('workspace_mismatch')
+    restarted.deleteRecording(session.id)
+    expect(() => restarted.readRecording({ id: session.id, offset: 0 })).toThrow()
+  })
+
+  it('does not terminate or suppress live output when recording cannot start', () => {
+    const cwd = workspace()
+    const recordingDirectory = join(cwd, 'not-a-directory')
+    writeFileSync(recordingDirectory, 'occupied')
+    const { manager, pty, data, recordingErrors } = fixture(cwd, cwd, recordingDirectory)
+    const session = manager.start({ cwd, cols: 80, rows: 24 })
+    expect(session.recording).toBe('unavailable')
+    expect(recordingErrors).toEqual([session.id])
+    pty.processes[0].emitData('continues')
+    manager.write({ id: session.id, data: 'next command' })
+    expect(pty.processes[0].destroyCount).toBe(0)
+    expect(pty.processes[0].killCount).toBe(0)
+    expect(data).toEqual([{ id: session.id, data: 'continues' }])
+    pty.processes[0].emitExit(0)
+  })
+
   it('backpressures reads without killing the PTY and ignores flow control after close', () => {
     vi.useFakeTimers()
     const cwd = workspace()

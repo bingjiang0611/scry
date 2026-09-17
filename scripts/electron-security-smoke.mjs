@@ -631,6 +631,49 @@ async function main() {
   assert.equal(terminalSmoke.bound.cwd, canonicalWorkspace)
   assert.ok(terminalSmoke.bound.output.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`))
 
+  const recordingSmoke = await evaluate(`(async () => {
+    const waitFor = async (predicate) => {
+      const deadline = Date.now() + 8_000
+      while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 30))
+      if (!predicate()) throw new Error('terminal recording UI condition timed out')
+    }
+    const toggle = document.querySelector('button[title="右侧工作区"]')
+    if (toggle?.getAttribute('aria-pressed') !== 'true') toggle?.click()
+    ;[...document.querySelectorAll('.surface-tab-activate')].find((node) => node.textContent.includes('终端'))?.click()
+    const button = (label) => document.querySelector('button[aria-label="' + label + '"]')
+    button('重新启动终端').click()
+    await waitFor(() => !!document.querySelector('.terminal-state.running'))
+    const disabledWhileRunning = button('回放终端录制').disabled && button('删除终端录制').disabled
+    let offExit = () => {}
+    const exit = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { offExit(); reject(new Error('UI terminal did not exit')) }, 8_000)
+      offExit = window.scry.onTerminalExit((event) => { clearTimeout(timer); offExit(); resolve(event) })
+    })
+    const textarea = document.querySelector('.terminal-pane:not([hidden]) .xterm-helper-textarea')
+    const clipboardData = new DataTransfer()
+    clipboardData.setData('text/plain', "printf '__SCRY_RECORDING_SENTINEL__\\\\n'; exit")
+    textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }))
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
+    const ended = await exit
+    await waitFor(() => !button('回放终端录制').disabled)
+    const page = await window.scry.terminalRecordingRead({ id: ended.id, offset: 0, limit: 65536 })
+    button('清空终端显示').click()
+    button('回放终端录制').click()
+    await waitFor(() => document.querySelector('.terminal-foot')?.textContent.includes('录制回放完成'))
+    // xterm's write callback confirms parsing; DOM painting can follow in a later frame.
+    await waitFor(() => document.querySelector('.terminal-pane:not([hidden]) .xterm-rows')?.textContent.includes('__SCRY_RECORDING_SENTINEL__'))
+    const rendered = document.querySelector('.terminal-pane:not([hidden]) .xterm-rows')?.textContent || ''
+    button('删除终端录制').click()
+    await waitFor(() => document.querySelector('.terminal-foot')?.textContent.includes('磁盘录制已删除'))
+    let deleted = false
+    try { await window.scry.terminalRecordingRead({ id: ended.id, offset: 0 }) } catch { deleted = true }
+    button('重新启动终端').click()
+    await waitFor(() => !!document.querySelector('.terminal-state.running'))
+    return { disabledWhileRunning, state: page.state, captured: page.data.includes('__SCRY_RECORDING_SENTINEL__'),
+      replayed: rendered.includes('__SCRY_RECORDING_SENTINEL__'), deleted }
+  })()`)
+  assert.deepEqual(recordingSmoke, { disabledWhileRunning: true, state: 'complete', captured: true, replayed: true, deleted: true })
+
   const popupOpened = await evaluate(`window.open('file:///scry-smoke') !== null`)
   assert.equal(popupOpened, false)
   await new Promise((resolveWait) => setTimeout(resolveWait, 150))
@@ -648,6 +691,7 @@ async function main() {
     rendererUrl: page.url,
     preloadKeys: boundary.preloadKeys.length,
     terminal: true,
+    recording: recordingSmoke,
     surfaces: surfaceSmoke,
     modal,
     subframeIpc,

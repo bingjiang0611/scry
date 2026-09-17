@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { ITheme } from '@xterm/xterm'
 import { TERMINAL_MAX_SESSIONS, type TerminalExitEvent } from '@shared/terminal'
 import { Icon } from './primitives/Icon'
+import { replayTerminalRecording } from '../terminal-recording-replay'
 
 interface TerminalTab {
   key: string
@@ -15,6 +16,8 @@ interface TerminalControls {
   clear: () => void
   focus: () => void
   restart: () => void
+  replay: () => void
+  deleteRecording: () => void
 }
 
 let terminalTabSequence = 0
@@ -67,7 +70,8 @@ function TerminalPane({
   cwd,
   active,
   onControls,
-  onStatus
+  onStatus,
+  onRecordingMessage
 }: {
   tabKey: string
   tabId: string
@@ -76,11 +80,15 @@ function TerminalPane({
   active: boolean
   onControls: (key: string, controls: TerminalControls | null) => void
   onStatus: (key: string, status: 'starting' | 'running' | 'exited' | 'error') => void
+  onRecordingMessage: (key: string, message: string | undefined) => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const terminalIdRef = useRef<string | null>(null)
+  const recordingIdRef = useRef<string | null>(null)
+  const replayRef = useRef<Promise<void> | null>(null)
+  const deletingRecordingRef = useRef(false)
   const startSequenceRef = useRef(0)
   const activeRef = useRef(active)
   const [error, setError] = useState<string | null>(null)
@@ -105,6 +113,10 @@ function TerminalPane({
     const terminal = terminalRef.current
     if (!terminal) return
     const sequence = ++startSequenceRef.current
+    await replayRef.current
+    if (sequence !== startSequenceRef.current || terminalRef.current !== terminal) return
+    recordingIdRef.current = null
+    onRecordingMessage(tabKey, undefined)
     const previous = terminalIdRef.current
     terminalIdRef.current = null
     if (previous) await window.scry.terminalClose(previous).catch(() => false)
@@ -126,6 +138,8 @@ function TerminalPane({
       }
       terminal.reset()
       terminalIdRef.current = session.id
+      recordingIdRef.current = session.id
+      if (session.recording === 'unavailable') onRecordingMessage(tabKey, '原文录制不可用；Shell 继续运行。')
       await window.scry.terminalReady(session.id)
       onStatus(tabKey, 'running')
       requestAnimationFrame(() => {
@@ -140,7 +154,7 @@ function TerminalPane({
       terminal.reset()
       terminal.writeln(`\x1b[31m终端启动失败：${message}\x1b[0m`)
     }
-  }, [cwd, onStatus, resize, tabKey])
+  }, [cwd, onStatus, onRecordingMessage, resize, tabKey])
 
   useEffect(() => {
     const host = hostRef.current
@@ -173,6 +187,9 @@ function TerminalPane({
         void window.scry.terminalAck(event.id, bytes).catch(() => {})
       })
     })
+    const offRecordingError = window.scry.onTerminalRecordingError((event) => {
+      if (event.id === terminalIdRef.current) onRecordingMessage(tabKey, event.message)
+    })
     const offExit = window.scry.onTerminalExit((event) => {
       if (event.id !== terminalIdRef.current) return
       terminalIdRef.current = null
@@ -185,7 +202,41 @@ function TerminalPane({
     onControls(tabKey, {
       clear: () => terminal.clear(),
       focus: () => terminal.focus(),
-      restart: () => void start()
+      restart: () => void start(),
+      replay: () => {
+        const id = recordingIdRef.current
+        if (!id || terminalIdRef.current || replayRef.current || deletingRecordingRef.current) return
+        const sequence = ++startSequenceRef.current
+        terminal.reset()
+        onRecordingMessage(tabKey, '正在从磁盘回放原文…')
+        const current = () => sequence === startSequenceRef.current
+        replayRef.current = replayTerminalRecording(id, window.scry.terminalRecordingRead,
+          (text) => new Promise<void>((resolve) => terminal.write(text, resolve)), current)
+          .then((page) => {
+            if (!current() || !page) return
+            onRecordingMessage(tabKey, page.state === 'complete'
+              ? '录制回放完成 · 只读 · 显示保留最近 5000 行'
+              : '录制不完整，仅回放已确认落盘的内容。')
+          })
+          .catch((error) => { if (current()) onRecordingMessage(tabKey, `回放失败：${terminalStartErrorMessage(error)}`) })
+          .finally(() => { replayRef.current = null })
+      },
+      deleteRecording: () => {
+        const id = recordingIdRef.current
+        if (!id || terminalIdRef.current || deletingRecordingRef.current) return
+        deletingRecordingRef.current = true
+        const sequence = ++startSequenceRef.current
+        void (async () => {
+          await replayRef.current
+          if (sequence !== startSequenceRef.current) return
+          await window.scry.terminalRecordingDelete(id)
+          if (sequence !== startSequenceRef.current) return
+          recordingIdRef.current = null
+          onRecordingMessage(tabKey, '磁盘录制已删除；当前屏幕内容不受影响。')
+        })().catch((error) => {
+          if (sequence === startSequenceRef.current) onRecordingMessage(tabKey, `删除失败：${terminalStartErrorMessage(error)}`)
+        }).finally(() => { deletingRecordingRef.current = false })
+      }
     })
     void start()
 
@@ -194,6 +245,7 @@ function TerminalPane({
       observer.disconnect()
       offData()
       offExit()
+      offRecordingError()
       input.dispose()
       onControls(tabKey, null)
       const id = terminalIdRef.current
@@ -203,7 +255,7 @@ function TerminalPane({
       terminalRef.current = null
       fitRef.current = null
     }
-  }, [onControls, onStatus, resize, start, tabKey])
+  }, [onControls, onStatus, onRecordingMessage, resize, start, tabKey])
 
   useEffect(() => {
     if (!active) return
@@ -241,6 +293,10 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [nextTerminalTab(1)])
   const [activeKey, setActiveKey] = useState(() => tabs[0].key)
   const [statuses, setStatuses] = useState<Record<string, 'starting' | 'running' | 'exited' | 'error'>>({})
+  const [recordingMessages, setRecordingMessages] = useState<Record<string, string | undefined>>({})
+  const onRecordingMessage = useCallback((key: string, message: string | undefined): void => {
+    setRecordingMessages((current) => ({ ...current, [key]: message }))
+  }, [])
   const controls = useRef(new Map<string, TerminalControls>())
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const addButtonRef = useRef<HTMLButtonElement>(null)
@@ -270,6 +326,11 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
       : activeKey || null
     pendingCloseFocusRef.current = { targetKey }
     setTabs(next)
+    setRecordingMessages((current) => {
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
     if (key === activeKey) setActiveKey(targetKey ?? '')
     setStatuses((current) => {
       const next = { ...current }
@@ -342,11 +403,17 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
           </button>
         </div>
         <div className="terminal-actions">
+          <button type="button" className="terminal-action" onClick={() => activeControls?.replay()} disabled={statuses[activeKey] !== 'exited'} title="Shell 退出后回放录制（只读）" aria-label="回放终端录制">
+            <Icon name="undo" />
+          </button>
+          <button type="button" className="terminal-action" onClick={() => activeControls?.deleteRecording()} disabled={statuses[activeKey] !== 'exited'} title="Shell 退出后删除磁盘录制（不清屏）" aria-label="删除终端录制">
+            <Icon name="trash" />
+          </button>
           <button type="button" className="terminal-action" onClick={() => activeControls?.restart()} disabled={!activeControls} title="重新启动终端" aria-label="重新启动终端">
             <Icon name="refresh" />
           </button>
-          <button type="button" className="terminal-action" onClick={() => activeControls?.clear()} disabled={!activeControls} title="清空显示（不影响 Shell）" aria-label="清空终端显示">
-            <Icon name="trash" />
+          <button type="button" className="terminal-action" onClick={() => activeControls?.clear()} disabled={!activeControls} title="清空显示（不影响 Shell 或磁盘录制）" aria-label="清空终端显示">
+            <Icon name="x" />
           </button>
         </div>
       </div>
@@ -369,10 +436,11 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
             active={active && activeKey === tab.key}
             onControls={registerControls}
             onStatus={setStatus}
+            onRecordingMessage={onRecordingMessage}
           />
         ))}
       </div>
-      <footer className="terminal-foot">本机 Shell · 当前用户权限 · 输出仅驻留内存，不写入会话证据</footer>
+      <footer className="terminal-foot" role="status">{recordingMessages[activeKey] ?? '本机 Shell · 当前用户权限 · 原文录制（可能含密钥）'}</footer>
     </section>
   )
 }

@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { TerminalRecordingStore } from './terminal-recording'
 import type {
   TerminalCloseRequest,
   TerminalDataEvent,
   TerminalExitEvent,
   TerminalResizeRequest,
+  TerminalRecordingRequest,
+  TerminalRecordingPage,
+  TerminalRecordingErrorEvent,
   TerminalSessionInfo,
   TerminalStartRequest,
   TerminalWriteRequest
@@ -59,6 +63,8 @@ export interface TerminalManagerOptions {
   args?: string[]
   env?: Record<string, string | undefined>
   closeGraceMs?: number
+  recordingDirectory?: string
+  onRecordingError?(event: TerminalRecordingErrorEvent): void
 }
 
 interface ManagedTerminal {
@@ -140,8 +146,16 @@ export class TerminalManager {
   private readonly args: string[]
   private readonly env: Record<string, string | undefined>
   private readonly closeGraceMs: number
+  private readonly recordings?: TerminalRecordingStore
+  private readonly onRecordingError: (event: TerminalRecordingErrorEvent) => void
 
   constructor(options: TerminalManagerOptions) {
+    this.onRecordingError = options.onRecordingError ?? (() => {})
+    if (options.recordingDirectory) {
+      this.recordings = new TerminalRecordingStore(options.recordingDirectory, (id) => {
+        this.onRecordingError({ id, message: '终端录制失败，已保存内容可能不完整；Shell 继续运行。' })
+      })
+    }
     this.getCurrentCwd = options.getCurrentCwd
     this.defaultCwd = options.defaultCwd
     this.onData = options.onData
@@ -194,10 +208,23 @@ export class TerminalManager {
     })
     const session: ManagedTerminal = { id, pty, closing: false, destroyed: false }
     this.sessions.set(id, session)
+    const info: TerminalSessionInfo = { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows }
+    if (this.recordings) {
+      try {
+        this.recordings.start(info)
+        info.recording = 'available'
+      } catch {
+        info.recording = 'unavailable'
+        this.onRecordingError({ id, message: '终端录制不可用；Shell 继续运行。' })
+      }
+    }
 
     try {
       session.dataSubscription = pty.onData((data) => {
-        if (this.sessions.get(id) === session) this.onData({ id, data })
+        if (this.sessions.get(id) === session) {
+          this.recordings?.append(id, data)
+          this.onData({ id, data })
+        }
       })
       if (this.sessions.get(id) !== session) dispose(session.dataSubscription)
 
@@ -209,6 +236,7 @@ export class TerminalManager {
       if (this.sessions.get(id) === session) this.sessions.delete(id)
       dispose(session.dataSubscription)
       dispose(session.exitSubscription)
+      this.recordings?.finish({ id, code: null, signal: null })
       try {
         if (pty.destroy) pty.destroy()
         else pty.kill()
@@ -216,7 +244,20 @@ export class TerminalManager {
       throw error
     }
 
-    return { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows }
+    return info
+  }
+
+  readRecording(request: TerminalRecordingRequest): TerminalRecordingPage {
+    if (!this.recordings) throw new Error('终端录制不可用')
+    const cwd = resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')
+    return this.recordings.read(request, cwd)
+  }
+
+  deleteRecording(id: string): void {
+    if (this.sessions.has(id)) throw new Error('terminal_recording_still_active')
+    if (!this.recordings) throw new Error('终端录制不可用')
+    const cwd = resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')
+    this.recordings.delete(id, cwd)
   }
 
   write(request: TerminalWriteRequest): void {
@@ -292,7 +333,9 @@ export class TerminalManager {
     this.sessions.delete(session.id)
     dispose(session.dataSubscription)
     dispose(session.exitSubscription)
-    this.onExit({ id: session.id, code, signal })
+    const event = { id: session.id, code, signal }
+    this.recordings?.finish(event)
+    this.onExit(event)
   }
 
   private destroyPty(session: ManagedTerminal): void {
