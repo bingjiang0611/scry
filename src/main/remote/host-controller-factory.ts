@@ -4,6 +4,7 @@ import { HostController, type HostControllerDependencies, type RemoteIntentRouti
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
 import { RunOutputFileStore } from './run-output-file'
+import { recoverDeadRemoteLease } from './recover-dead-lease'
 import { ensureHostIdentity } from './host-identity'
 import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
@@ -99,18 +100,24 @@ export async function createHostControllerFromDisk(deps: {
 
 export function createHostController(deps: HostControllerFactoryDependencies): HostControllerBinding {
   mkdirSync(deps.stateDirectory, { recursive: true })
-  const pairingStore = new PairingFileStore(privateDir(join(deps.stateDirectory, 'pairing')))
+  const pairingDirectory = privateDir(join(deps.stateDirectory, 'pairing'))
+  recoverDeadRemoteLease(pairingDirectory, 'pairing-state.lock')
+  const pairingStore = new PairingFileStore(pairingDirectory)
   let ledgerStore: SessionLedgerFileStore
   let outputStore: RunOutputFileStore
   try {
-    ledgerStore = new SessionLedgerFileStore(privateDir(join(deps.stateDirectory, 'ledger')))
+    const ledgerDirectory = privateDir(join(deps.stateDirectory, 'ledger'))
+    recoverDeadRemoteLease(ledgerDirectory, 'session-ledger.lock')
+    ledgerStore = new SessionLedgerFileStore(ledgerDirectory)
   } catch (error) {
     // Never leak the pairing lease if the ledger lease cannot be taken.
     pairingStore.close()
     throw error
   }
   try {
-    outputStore = new RunOutputFileStore(privateDir(join(deps.stateDirectory, 'output')))
+    const outputDirectory = privateDir(join(deps.stateDirectory, 'output'))
+    recoverDeadRemoteLease(outputDirectory, 'run-output.lock')
+    outputStore = new RunOutputFileStore(outputDirectory)
   } catch (error) {
     ledgerStore.close()
     pairingStore.close()
@@ -139,9 +146,17 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
     ...(deps.readHistory ? { readHistory: deps.readHistory } : {})
   }
 
-  const controller = new HostController(controllerDeps)
-  // Crash recovery: dispatch any intent durably recorded before the last exit.
-  controller.recover()
+  let controller: HostController
+  try {
+    controller = new HostController(controllerDeps)
+    // Only recorded-but-undispatched intents may start; dispatched outcomes stay unknown.
+    controller.recover()
+  } catch (error) {
+    try { outputStore.close() } finally {
+      try { ledgerStore.close() } finally { pairingStore.close() }
+    }
+    throw error
+  }
 
   let closed = false
   return {

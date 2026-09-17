@@ -164,10 +164,10 @@ Focused regressions exposed gaps in the initial implementation; this follow-up f
   These are queue limits, not a bound on the upstream input string or masking allocation.
 - The stored-line ceiling is 128 KiB to accommodate worst-case sixfold JSON escaping of a 16 KiB
   text chunk plus metadata. The page budget remains 512 KiB; this is not a larger capture window.
-- Lease recovery after an unclean process death remains unimplemented: a surviving lock fails closed.
-  Tail-repair tests model torn data/index writes after lease release, not automatic crash-lock recovery.
-  The next restart work must reuse the repository's identity-checked lease recovery before claiming
-  unclean-process restart support. Synchronous durable writes, retention and local replay remain open.
+- At this revision, lease recovery after an unclean process death was still unimplemented; the
+  subsequent startup-reconciliation batch below adds a deliberately bounded recovery path.
+  These tail-repair tests only modeled torn writes after lease release, not automatic crash-lock recovery.
+  Synchronous durable writes, retention and local replay remain open.
 
 Verification on the final staged-only snapshot:
 
@@ -178,6 +178,48 @@ Verification on the final staged-only snapshot:
   uncertain bodies are not replayed, repair keeps contiguous cursors, and recovery emits a gap marker.
 - No real paired-device or local-terminal replay was exercised, and no package/install/publish was
   performed for this follow-up. Earlier Batch 2b packaging results apply only to its original revision.
+
+### Follow-up: trusted startup reconciliation after process death
+
+- The production controller factory reconciles private pairing, ledger and output leases before
+  opening each store. Only a valid bounded owner record plus `kill(pid, 0)` returning `ESRCH`
+  permits recovery. A live/reused PID, `EPERM`, malformed/partial owner or unsafe file stays blocked;
+  neither elapsed time nor lack of Agent activity is evidence of death. No process is terminated.
+- Existing Recorder directory-lock recovery was inspected but deliberately not reused: its live-owner
+  TTL is unsuitable for long-running remote sessions, and its async directory format differs from these
+  synchronous file leases. Direct store constructors retain their existing exclusive-lock policy.
+- Recovery takes one permanent, exclusive claim per old lease UUID, hard-links the exact owner as
+  evidence, rechecks inode/device/content metadata, and syncs that evidence before removing the active
+  name. The claim prevents competing recoverers from unlinking a successor's lease. Same-user hostile
+  filesystem mutation is outside the product trust model; this is not a sandbox or general OS lock.
+- Already-dispatched work stays `dispatched` (outcome unknown), never replayed or silently settled.
+  Existing pairing grants and output cursors are restored; device-certificate authorization is unchanged.
+  If controller construction rejects corrupt state, all newly acquired leases are released without
+  replacing or repairing that authority state.
+
+Deliberate limits:
+
+- A process death *during recovery itself* can leave a claim plus active lock; startup then fails closed.
+  Such cases need explicit local reconciliation after proving no owner/recoverer remains. Do not delete
+  claims on a timer. If this case needs automatic recovery, introduce an OS-owned interprocess lock with
+  crash-release semantics and migration tests, rather than adding another PID/TTL retry layer.
+- Completed recovery claims retain small owner records until explicit state cleanup; no automatic GC
+  is added. Process death before writing a complete lease record also remains blocked.
+- This does not reconnect surviving Provider processes or prove uncaptured output complete, and does
+  not implement renderer/local PTY replay.
+
+Verification on the final staged-only snapshot (local Node 24/macOS):
+
+- Remote suite: 22 files / 163 tests passed. A real-child test opens all three actual stores, rejects
+  a second live owner, kills only that test child with SIGKILL, then restores grants, durable output
+  and settled/dispatched states without executing the unknown run again. Synthetic tail writes and
+  unit fault injection are separate from real Provider/device acceptance.
+- `npm test`: 166 files passed, 3 skipped; 2115 tests passed, 3 skipped; shell tests passed.
+- `npm run typecheck`, `npm run build` and `npm run check:cli-release` passed (537 CLI tests plus
+  CLI build/package smoke).
+- `CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:artifact` passed packaged-app validation and
+  isolated Electron security/PTY/surface smoke. No real paired-device or Provider restart was exercised;
+  no installation, signing, publication or push was performed.
 
 ## Remaining sequence
 
