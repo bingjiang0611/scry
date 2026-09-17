@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
+import { RunOutputFileStore } from './run-output-file'
 import { ensureHostIdentity } from './host-identity'
 import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
@@ -32,7 +33,7 @@ export interface HostControllerBinding {
 }
 
 export interface HostControllerFactoryDependencies {
-  // Directory under Scry's userData; 'pairing' and 'ledger' subdirs are created.
+  // Directory under Scry's userData; pairing, ledger and output subdirs are created.
   stateDirectory: string
   // A STABLE host identity across restarts. The persisted pairing state fails
   // closed (host_identity_changed) if this differs from a previous launch, so
@@ -100,10 +101,18 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
   mkdirSync(deps.stateDirectory, { recursive: true })
   const pairingStore = new PairingFileStore(privateDir(join(deps.stateDirectory, 'pairing')))
   let ledgerStore: SessionLedgerFileStore
+  let outputStore: RunOutputFileStore
   try {
     ledgerStore = new SessionLedgerFileStore(privateDir(join(deps.stateDirectory, 'ledger')))
   } catch (error) {
     // Never leak the pairing lease if the ledger lease cannot be taken.
+    pairingStore.close()
+    throw error
+  }
+  try {
+    outputStore = new RunOutputFileStore(privateDir(join(deps.stateDirectory, 'output')))
+  } catch (error) {
+    ledgerStore.close()
     pairingStore.close()
     throw error
   }
@@ -118,6 +127,7 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
       issue: deps.issue
     },
     ledgerStore,
+    outputStore,
     workspace,
     gate: deps.gate,
     runProvider: deps.startRun,
@@ -139,9 +149,10 @@ export function createHostController(deps: HostControllerFactoryDependencies): H
     close: () => {
       if (closed) return
       closed = true
-      // Close the ledger first (the authority may still reference pairing state
-      // during teardown), then release the pairing lease.
-      try { ledgerStore.close() } finally { pairingStore.close() }
+      // Release content and lifecycle leases before pairing authority state.
+      try { outputStore.close() } finally {
+        try { ledgerStore.close() } finally { pairingStore.close() }
+      }
     }
   }
 }

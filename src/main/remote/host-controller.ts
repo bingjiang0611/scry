@@ -1,7 +1,7 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
 import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistorySource } from './remote-gateway'
-import { RunOutputLog, type RunOutputPage } from './run-output-log'
+import { RunOutputLog, type RunOutputPage, type RunOutputStore } from './run-output-log'
 export type { RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
@@ -56,6 +56,8 @@ export interface HostControllerDependencies {
   pairing: PairingDependencies
   // Durable ledger backing store (JSONL file store in production).
   ledgerStore: LedgerStore
+  // Production supplies a durable cursor store; omission keeps the explicit bounded fallback.
+  outputStore?: RunOutputStore
   // Resolves and authorizes a workspace against the known-project authority.
   workspace: WorkspaceAuthorizer
   // The only injected leaf: performs the real Provider run for a routed intent.
@@ -161,11 +163,12 @@ export class HostController {
   #ledger: SessionLedger
   #gateway: RemoteGateway
   #dispatcher: RemoteDispatcher
-  #output = new RunOutputLog()
+  #output: RunOutputLog
 
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
     this.#ledger = new SessionLedger({ store: deps.ledgerStore })
+    this.#output = new RunOutputLog({ store: deps.outputStore })
     this.#gateway = new RemoteGateway({
       authority: this.authority,
       ledger: this.#ledger,

@@ -22,7 +22,12 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-function factory(stateDirectory: string, startRun: (i: { runId: string; routing: RemoteIntentRouting; progress(d?: string): void }) => Promise<void>) {
+function factory(stateDirectory: string, startRun: (i: {
+  runId: string
+  routing: RemoteIntentRouting
+  progress(d?: string): void
+  output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+}) => Promise<void>) {
   const binding = createHostController({
     stateDirectory,
     hostId: HOST,
@@ -62,6 +67,26 @@ describe('createHostController (production persistence binding)', () => {
     expect(binding.controller.runState(CERT, { runId: submit.runId })).toBe('settled')
     expect(existsSync(join(dir, 'pairing'))).toBe(true)
     expect(existsSync(join(dir, 'ledger'))).toBe(true)
+    expect(existsSync(join(dir, 'output'))).toBe(true)
+  })
+
+  it('replays persisted output pages after a controller restart', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-host-'))
+    dirs.push(dir)
+    const first = factory(dir, async ({ output }) => {
+      output({ kind: 'output', text: 'before restart 中😀' })
+      output({ kind: 'tool_result', text: 'tool tail' })
+    })
+    await grant(first)
+    const submit = first.controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing() })
+    await first.controller.idle()
+    expect(first.controller.runOutput(CERT, { runId: submit.runId, cursor: 0 }).chunks).toHaveLength(2)
+    first.close()
+
+    const second = factory(dir, async () => {})
+    const page = second.controller.runOutput(CERT, { runId: submit.runId, cursor: 0 })
+    expect(page.chunks.map((chunk) => chunk.text)).toEqual(['before restart 中😀', 'tool tail'])
+    expect(page.cursor).toBe(2)
   })
 
   it('releases both leases on close so a restart re-acquires and keeps the grant', async () => {
