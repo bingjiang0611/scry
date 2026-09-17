@@ -138,6 +138,7 @@ import type {
 } from '../shared/workspace'
 import { HomeFileAccess } from './home-file-access'
 import { createTerminalManager, type TerminalManager } from './terminal-manager'
+import { TerminalRecordingWorkerClient } from './terminal-recording-backend'
 import { TerminalOutputBridge } from './terminal-output'
 import { TraceOutputBridge } from './trace-output'
 import { flattenTraceItems } from './remote/trace-output'
@@ -317,12 +318,28 @@ async function getTerminalManager(): Promise<TerminalManager> {
   if (!terminalManagerPromise) {
     terminalManagerPromise = warmShellEnv()
       .then((env) => {
-        const manager = createTerminalManager({
+        let manager: TerminalManager | undefined
+        const recordingBackend = TerminalRecordingWorkerClient.create(
+          join(app.getPath('userData'), 'terminal-recordings'),
+          {
+            onFailure: (id) => {
+              console.warn('[scry] terminal recording unavailable:', id)
+              if (rendererCanReceive()) win?.webContents.send('terminal:recordingError', {
+                id, message: '终端录制失败，已保存内容可能不完整；Shell 继续运行。'
+              })
+            },
+            onFlow: ({ id, paused }) => {
+              if (paused) manager?.pauseRecording(id)
+              else manager?.resumeRecording(id)
+            }
+          }
+        )
+        manager = createTerminalManager({
           getCurrentCwd: () => currentCwd,
           defaultCwd: homeDir,
           onData: (event) => terminalOutput.data(event),
           onExit: (event) => terminalOutput.exit(event),
-          recordingDirectory: join(app.getPath('userData'), 'terminal-recordings'),
+          recordingBackend,
           onRecordingError: (event) => {
             console.warn('[scry] terminal recording unavailable:', event.id)
             if (rendererCanReceive()) win?.webContents.send('terminal:recordingError', event)
@@ -1456,7 +1473,12 @@ handleTrusted('terminal:start', async (event, request: TerminalStartRequest) => 
   const manager = await getTerminalManager()
   if (isShuttingDown || !rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
-  const session = manager.start(request)
+  const session = await manager.start(request)
+  assertTrustedIpcEvent(event)
+  if (isShuttingDown || !rendererCanReceive()) {
+    manager.close({ id: session.id })
+    throw new Error('终端窗口已关闭')
+  }
   terminalOutput.started(session.id)
   return session
 })
@@ -1491,7 +1513,8 @@ handleTrusted('terminal:recordingRead', async (event, request: TerminalRecording
 handleTrusted('terminal:recordingDelete', async (event, request: TerminalCloseRequest) => {
   const manager = await getTerminalManager()
   assertTrustedIpcEvent(event)
-  manager.deleteRecording(request?.id)
+  await manager.deleteRecording(request?.id)
+  assertTrustedIpcEvent(event)
   return true as const
 })
 handleTrusted('terminal:ready', (_event, request: { id: string }) => {
@@ -3975,16 +3998,20 @@ app.on('before-quit', (event) => {
   // Release the remote subsystem's durable leases; a restart re-acquires and
   // replays any recorded-but-undispatched intents.
   void remoteHostService?.dispose()
-  closeAllTerminals(true)
+  terminalOutput.close()
+  const terminalCleanup = terminalManager?.shutdown().catch((error) => {
+    console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
+  }) ?? Promise.resolve()
   runStopLifecycle.close()
   traceOutput.close()
   sessionDiffBaselines.disposeAll()
   const controls = runs.unsettledControls()
-  const cleanup = settleRunsForShutdown(controls, {
+  const runCleanup = settleRunsForShutdown(controls, {
     cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
     disposeProviders: () => providerRegistry.dispose()
   })
+  const cleanup = Promise.all([runCleanup, terminalCleanup]).then(() => undefined)
   void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
     quitCleanupFinished = true
     app.quit()

@@ -296,8 +296,9 @@ Remaining limits (not claimed complete):
 - No retention/GC or disk quota is added. Closing a tab preserves its recording; the history follow-up
   below restores a UI handle for replay/deletion. Explicit retention controls remain a separate step,
   not a reason for silent eviction.
-- Writes/checkpoints still use synchronous filesystem calls and slow storage can delay the main loop.
-  Move disk work behind a bounded async writer before claiming producer/UI/storage independence.
+- Terminal writes/checkpoints now run in a dedicated worker behind a bounded main-thread queue (see
+  the follow-up below). The remote run-output file store and several other evidence sinks still use
+  synchronous filesystem calls; producer/UI/storage independence is therefore not yet a global claim.
 - Replay restores received text at the current terminal geometry with the existing 5,000-line display
   scrollback; it does not promise exact historic resize/cursor state or unlimited in-memory scrollback.
 
@@ -310,6 +311,36 @@ not to treat a parsed-buffer callback as a painted-screen assertion; the final r
 Synthetic sink tests cover >16 MiB, cold reads, Unicode/code-unit boundaries, uncertain body writes,
 fsync/metadata failure, authorization and deletion. This is not a sustained >16 MiB native PTY pressure
 test, visual screenshot review or real Provider acceptance. No installation or publication performed.
+
+## Terminal capture worker follow-up
+
+- Production terminal capture now owns the synchronous store in a dedicated Node worker bundled as a
+  separate Electron main entry. Main sends at most one operation at a time and retains at most a
+  4 MiB UTF-16LE queue plus one native callback chunk; batches are at most 512 KiB and do not split
+  surrogate pairs. The worker preserves the existing fsync-before-metadata and unknown-write rules.
+- Storage pressure and renderer ACK pressure are separate pause reasons. Releasing either cannot
+  resume node-pty while the other remains active. The queue resumes below 2 MiB. A worker/store
+  failure clears pressure, reports capture failure, refuses subsequent body writes for that recording
+  and never terminates the Shell or retries an unknown write.
+- Startup is ordered before body batches without blocking terminal creation on fsync. `available`
+  means capture was admitted to the worker queue; a later startup failure is reported explicitly and
+  the returned Shell keeps running. Read/list/delete operations share the same ordered queue, so a
+  replay cannot pass earlier writes or terminal exit finalization.
+- Graceful App shutdown initiates native terminal close, waits for exit or the existing bounded close
+  grace, drains/finalizes capture, then terminates the worker. The existing global six-second shutdown
+  deadline remains authoritative; exceeding it leaves the last published checkpoint partial rather
+  than claiming a complete recording.
+- This only removes terminal filesystem syscalls from Electron main. Buffer conversion and structured
+  clone remain bounded main-thread work, and PTY pause still deliberately backpressures the producer
+  instead of spilling unbounded memory. Remote output and other stores remain for later batches.
+
+Verification (staged-only source snapshot): focused worker/client/store/manager/output tests cover
+bounded batching, Unicode, independent pause reasons, worker failure, startup failure and no
+unknown-write retry. The full suite passed 2,150 tests with 3 skipped; shell checks, node/web
+typecheck, App/CLI builds, 538 CLI release tests and clean-package smoke passed. Packaged validation
+and Electron security/native PTY/history smoke passed, proving the worker entry loads from ASAR and
+retains exit/replay/delete plus crash-restart history. No install, publication, real Provider/device
+acceptance or sustained slow-disk pressure test was performed.
 
 ## Terminal disk history follow-up
 

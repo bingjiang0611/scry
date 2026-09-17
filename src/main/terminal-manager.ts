@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { TerminalRecordingStore } from './terminal-recording'
+import { DirectTerminalRecordingBackend, type TerminalRecordingBackend } from './terminal-recording-backend'
 import type {
   TerminalCloseRequest,
   TerminalDataEvent,
@@ -66,6 +66,7 @@ export interface TerminalManagerOptions {
   env?: Record<string, string | undefined>
   closeGraceMs?: number
   recordingDirectory?: string
+  recordingBackend?: TerminalRecordingBackend
   onRecordingError?(event: TerminalRecordingErrorEvent): void
 }
 
@@ -77,6 +78,7 @@ interface ManagedTerminal {
   closing: boolean
   destroyed: boolean
   closeTimer?: ReturnType<typeof setTimeout>
+  pauseReasons: Set<'renderer' | 'recording'>
 }
 
 const DEFAULT_CLOSE_GRACE_MS = 750
@@ -148,16 +150,18 @@ export class TerminalManager {
   private readonly args: string[]
   private readonly env: Record<string, string | undefined>
   private readonly closeGraceMs: number
-  private readonly recordings?: TerminalRecordingStore
+  private readonly recordings?: TerminalRecordingBackend
   private readonly onRecordingError: (event: TerminalRecordingErrorEvent) => void
+  private readonly emptyWaiters: Array<() => void> = []
 
   constructor(options: TerminalManagerOptions) {
     this.onRecordingError = options.onRecordingError ?? (() => {})
-    if (options.recordingDirectory) {
-      this.recordings = new TerminalRecordingStore(options.recordingDirectory, (id) => {
-        this.onRecordingError({ id, message: '终端录制失败，已保存内容可能不完整；Shell 继续运行。' })
-      })
-    }
+    if (options.recordingDirectory && options.recordingBackend) throw new Error('终端录制后端配置冲突')
+    this.recordings = options.recordingBackend ?? (options.recordingDirectory
+      ? new DirectTerminalRecordingBackend(options.recordingDirectory, (id) => {
+          this.onRecordingError({ id, message: '终端录制失败，已保存内容可能不完整；Shell 继续运行。' })
+        })
+      : undefined)
     this.getCurrentCwd = options.getCurrentCwd
     this.defaultCwd = options.defaultCwd
     this.onData = options.onData
@@ -208,13 +212,16 @@ export class TerminalManager {
       cwd,
       env: { ...this.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
     })
-    const session: ManagedTerminal = { id, pty, closing: false, destroyed: false }
+    const session: ManagedTerminal = { id, pty, closing: false, destroyed: false, pauseReasons: new Set() }
     this.sessions.set(id, session)
     const info: TerminalSessionInfo = { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows }
     if (this.recordings) {
       try {
-        this.recordings.start(info)
+        const startup = this.recordings.start(info)
         info.recording = 'available'
+        void startup.catch(() => {
+          this.onRecordingError({ id, message: '终端录制不可用；Shell 继续运行。' })
+        })
       } catch {
         info.recording = 'unavailable'
         this.onRecordingError({ id, message: '终端录制不可用；Shell 继续运行。' })
@@ -249,7 +256,7 @@ export class TerminalManager {
     return info
   }
 
-  readRecording(request: TerminalRecordingRequest): TerminalRecordingPage {
+  async readRecording(request: TerminalRecordingRequest): Promise<TerminalRecordingPage> {
     if (!this.recordings) throw new Error('终端录制不可用')
     const cwd = resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')
     return this.recordings.read(request, cwd)
@@ -265,11 +272,11 @@ export class TerminalManager {
     return { ...page, items: page.items.map((item) => ({ ...item, active: this.sessions.has(item.id) })) }
   }
 
-  deleteRecording(id: string): void {
+  async deleteRecording(id: string): Promise<void> {
     if (this.sessions.has(id)) throw new Error('terminal_recording_still_active')
     if (!this.recordings) throw new Error('终端录制不可用')
     const cwd = resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')
-    this.recordings.delete(id, cwd)
+    await this.recordings.delete(id, cwd)
   }
 
   write(request: TerminalWriteRequest): void {
@@ -281,16 +288,23 @@ export class TerminalManager {
     this.active(request.id).pty.write(request.data)
   }
 
-  // Main-owned flow control only; no new renderer operation or process signal is exposed.
-  pauseOutput(id: string): void {
-    const session = this.sessions.get(id)
-    if (session && !session.closing) session.pty.pause()
+  // Main-owned flow control only; renderer and recording pressure cannot resume each other early.
+  pauseOutput(id: string): void { this.setPause(id, 'renderer', true) }
+  resumeOutput(id: string): void { this.setPause(id, 'renderer', false) }
+  pauseRecording(id: string): void { this.setPause(id, 'recording', true) }
+  resumeRecording(id: string): void { this.setPause(id, 'recording', false) }
+
+  async settleRecordings(): Promise<void> { await this.recordings?.settle() }
+  async closeRecordings(): Promise<void> { await this.recordings?.close() }
+  async shutdown(): Promise<void> {
+    let closeError: unknown
+    try { this.closeAll() } catch (error) { closeError = error }
+    if (this.sessions.size > 0) await new Promise<void>((resolve) => this.emptyWaiters.push(resolve))
+    await this.recordings?.settle()
+    await this.recordings?.close()
+    if (closeError) throw closeError
   }
 
-  resumeOutput(id: string): void {
-    const session = this.sessions.get(id)
-    if (session && !session.closing) session.pty.resume()
-  }
 
   resize(request: TerminalResizeRequest): void {
     assertId(request?.id)
@@ -333,6 +347,17 @@ export class TerminalManager {
     if (firstError) throw firstError
   }
 
+  private setPause(id: string, reason: 'renderer' | 'recording', paused: boolean): void {
+    const session = this.sessions.get(id)
+    if (!session || session.closing) return
+    const wasPaused = session.pauseReasons.size > 0
+    if (paused) session.pauseReasons.add(reason)
+    else session.pauseReasons.delete(reason)
+    const isPaused = session.pauseReasons.size > 0
+    if (!wasPaused && isPaused) session.pty.pause()
+    else if (wasPaused && !isPaused) session.pty.resume()
+  }
+
   private active(id: string): ManagedTerminal {
     const session = this.sessions.get(id)
     if (!session || session.closing) throw new Error('终端不存在或已退出')
@@ -343,6 +368,7 @@ export class TerminalManager {
     if (this.sessions.get(session.id) !== session) return
     if (session.closeTimer) clearTimeout(session.closeTimer)
     this.sessions.delete(session.id)
+    if (this.sessions.size === 0) for (const resolve of this.emptyWaiters.splice(0)) resolve()
     dispose(session.dataSubscription)
     dispose(session.exitSubscription)
     const event = { id: session.id, code, signal }
