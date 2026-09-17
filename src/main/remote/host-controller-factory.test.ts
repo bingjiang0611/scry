@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
+import { RunOutputFileStore } from './run-output-file'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import type { IssuedPairingCertificate } from './pairing'
 import type { RemoteIntentRouting } from './host-controller'
@@ -20,18 +21,18 @@ const AUTHORIZED = '/authorized/project'
 
 const dirs: string[] = []
 const bindings: HostControllerBinding[] = []
-afterEach(() => {
-  for (const b of bindings.splice(0)) { try { b.close() } catch { /* already closed */ } }
+afterEach(async () => {
+  for (const b of bindings.splice(0)) { try { await b.close() } catch { /* already closed */ } }
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-function factory(stateDirectory: string, startRun: (i: {
+async function factory(stateDirectory: string, startRun: (i: {
   runId: string
   routing: RemoteIntentRouting
   progress(d?: string): void
   output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
 }) => Promise<void>) {
-  const binding = createHostController({
+  const binding = await createHostController({
     stateDirectory,
     hostId: HOST,
     anchorSHA256: ANCHOR,
@@ -41,7 +42,8 @@ function factory(stateDirectory: string, startRun: (i: {
     })),
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd },
     startRun,
-    gate: new ProviderOperationGate()
+    gate: new ProviderOperationGate(),
+    createOutputStore: (directory) => new RunOutputFileStore(directory)
   })
   bindings.push(binding)
   return binding
@@ -60,7 +62,7 @@ describe('createHostController (production persistence binding)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-host-'))
     dirs.push(dir)
     const seen: RemoteIntentRouting[] = []
-    const binding = factory(dir, async ({ routing }) => { seen.push(routing) })
+    const binding = await factory(dir, async ({ routing }) => { seen.push(routing) })
     await grant(binding)
 
     const submit = binding.controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
@@ -76,18 +78,18 @@ describe('createHostController (production persistence binding)', () => {
   it('replays persisted output pages after a controller restart', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-host-'))
     dirs.push(dir)
-    const first = factory(dir, async ({ output }) => {
+    const first = await factory(dir, async ({ output }) => {
       output({ kind: 'output', text: 'before restart 中😀' })
       output({ kind: 'tool_result', text: 'tool tail' })
     })
     await grant(first)
     const submit = first.controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing() })
     await first.controller.idle()
-    expect(first.controller.runOutput(CERT, { runId: submit.runId, cursor: 0 }).chunks).toHaveLength(2)
-    first.close()
+    expect((await first.controller.runOutput(CERT, { runId: submit.runId, cursor: 0 })).chunks).toHaveLength(2)
+    await first.close()
 
-    const second = factory(dir, async () => {})
-    const page = second.controller.runOutput(CERT, { runId: submit.runId, cursor: 0 })
+    const second = await factory(dir, async () => {})
+    const page = await second.controller.runOutput(CERT, { runId: submit.runId, cursor: 0 })
     expect(page.chunks.map((chunk) => chunk.text)).toEqual(['before restart 中😀', 'tool tail'])
     expect(page.cursor).toBe(2)
   })
@@ -95,7 +97,7 @@ describe('createHostController (production persistence binding)', () => {
   it('recovers real killed store owners without replaying dispatched work or losing durable output', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-host-crash-'))
     dirs.push(dir)
-    const first = factory(dir, async ({ routing: route, output }) => {
+    const first = await factory(dir, async ({ routing: route, output }) => {
       output({ kind: 'output', text: 'durable before crash' })
       if (route.prompt === 'pending') await new Promise<void>(() => {})
     })
@@ -103,8 +105,8 @@ describe('createHostController (production persistence binding)', () => {
     const settled = first.controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing() })
     await first.controller.idle()
     const pending = first.controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'pending' }) })
-    expect(first.controller.runOutput(CERT, { runId: pending.runId, cursor: 0 }).chunks).toHaveLength(1)
-    first.close()
+    expect((await first.controller.runOutput(CERT, { runId: pending.runId, cursor: 0 })).chunks).toHaveLength(1)
+    await first.close()
 
     // Execute the actual three file-store implementations in a child, compiled with the
     // project's TypeScript dependency rather than depending on Node's version-specific TS loader.
@@ -144,20 +146,20 @@ describe('createHostController (production persistence binding)', () => {
         exited.then(() => { throw new Error(`store owner exited before readiness: ${stderr}`) })
       ])
       expect(ready[0]).toBe('ready')
-      expect(() => factory(dir, async () => {})).toThrow('owner_alive')
+      await expect(factory(dir, async () => {})).rejects.toThrow('owner_alive')
       child.kill('SIGKILL')
       expect((await exited)[1]).toBe('SIGKILL')
       const startRun = vi.fn(async () => {})
-      const restored = factory(dir, startRun)
+      const restored = await factory(dir, startRun)
       expect(restored.controller.runState(CERT, { runId: settled.runId })).toBe('settled')
       expect(restored.controller.runState(CERT, { runId: pending.runId })).toBe('dispatched')
       expect(startRun).not.toHaveBeenCalled()
-      expect(restored.controller.runOutput(CERT, { runId: pending.runId, cursor: 0 }).chunks.map((chunk) => chunk.text))
+      expect((await restored.controller.runOutput(CERT, { runId: pending.runId, cursor: 0 })).chunks.map((chunk) => chunk.text))
         .toEqual(['durable before crash', 'child durable tail'])
       for (const subdir of ['pairing', 'ledger', 'output']) {
         expect(readdirSync(join(dir, subdir)).filter((name) => name.startsWith('.recovered-'))).toHaveLength(1)
       }
-      expect(() => restored.controller.runOutput('untrusted-certificate', { runId: pending.runId, cursor: 0 })).toThrow()
+      await expect(restored.controller.runOutput('untrusted-certificate', { runId: pending.runId, cursor: 0 })).rejects.toThrow()
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGKILL')
@@ -166,13 +168,13 @@ describe('createHostController (production persistence binding)', () => {
     }
   })
 
-  it('releases all leases when restored state is corrupt, without replacing that state', () => {
+  it('releases all leases when restored state is corrupt, without replacing that state', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-host-corrupt-'))
     dirs.push(dir)
-    factory(dir, async () => {}).close()
+    await (await factory(dir, async () => {})).close()
     const state = join(dir, 'pairing', 'pairing-state.json')
     writeFileSync(state, '{"corrupt":true}', { mode: 0o600 })
-    expect(() => factory(dir, async () => {})).toThrow()
+    await expect(factory(dir, async () => {})).rejects.toThrow()
     for (const [subdir, lock] of [['pairing', 'pairing-state.lock'], ['ledger', 'session-ledger.lock'], ['output', 'run-output.lock']]) {
       expect(existsSync(join(dir, subdir, lock))).toBe(false)
     }
@@ -182,30 +184,30 @@ describe('createHostController (production persistence binding)', () => {
   it('releases both leases on close so a restart re-acquires and keeps the grant', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-host-'))
     dirs.push(dir)
-    const first = factory(dir, async () => {})
+    const first = await factory(dir, async () => {})
     await grant(first)
     const submit = first.controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing() })
     await first.controller.idle()
-    first.close()
+    await first.close()
 
     // Restart against the same directory: leases re-acquired, grant survives,
     // and the prior settled run is still authoritatively readable.
-    const second = factory(dir, async () => {})
+    const second = await factory(dir, async () => {})
     expect(second.controller.runState(CERT, { runId: submit.runId })).toBe('settled')
     // The restored grant still authorizes the device.
     expect(() => second.controller.poll(CERT, { cursor: 0 })).not.toThrow()
   })
 
-  it('does not leak the pairing lease when the ledger lease cannot be taken', () => {
+  it('does not leak the pairing lease when the ledger lease cannot be taken', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-host-'))
     dirs.push(dir)
-    const holder = factory(dir, async () => {}) // holds both leases
+    const holder = await factory(dir, async () => {}) // holds both leases
     // A second binding on the same dir must fail (ledger lease busy) and must
     // not leave a dangling pairing lease; closing the holder proves the dir is
     // fully released afterwards.
-    expect(() => factory(dir, async () => {})).toThrow()
-    holder.close()
-    const reopened = factory(dir, async () => {})
+    await expect(factory(dir, async () => {})).rejects.toThrow()
+    await holder.close()
+    const reopened = await factory(dir, async () => {})
     expect(reopened.controller).toBeDefined()
   })
 })

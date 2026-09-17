@@ -24,11 +24,11 @@ function directory(): string {
   return root
 }
 
-function all(log: RunOutputLog, runId: string): string {
+async function all(log: RunOutputLog, runId: string): Promise<string> {
   const chunks: string[] = []
   let cursor = 0
   for (let guard = 0; guard < 10_000; guard++) {
-    const page = log.since(runId, cursor)
+    const page = await log.since(runId, cursor)
     if (page.chunks.length === 0) break
     chunks.push(...page.chunks.map((chunk) => chunk.text))
     cursor = page.cursor
@@ -37,35 +37,37 @@ function all(log: RunOutputLog, runId: string): string {
 }
 
 describe('RunOutputFileStore', () => {
-  it('replays output beyond the old live-cache limit after restart without truncation', () => {
+  it('replays output beyond the old live-cache limit after restart without truncation', async () => {
     const dir = directory()
     const firstStore = new RunOutputFileStore(dir)
     const first = new RunOutputLog({ store: firstStore })
     const pieces = Array.from({ length: 100 }, (_, index) => `${String(index).padStart(3, '0')}:${'中😀x'.repeat(1_500)}`)
-    for (const text of pieces) first.append('run-large', { kind: 'output', text })
-    first.flush('run-large')
+    for (const text of pieces) {
+      first.append('run-large', { kind: 'output', text })
+      await first.flush('run-large')
+    }
     firstStore.close()
 
     const secondStore = new RunOutputFileStore(dir)
     const second = new RunOutputLog({ store: secondStore })
-    expect(all(second, 'run-large')).toBe(pieces.join(''))
-    expect(second.since('run-large', 0).chunks.some((chunk) => chunk.kind === 'truncated')).toBe(false)
+    expect(await all(second, 'run-large')).toBe(pieces.join(''))
+    expect((await second.since('run-large', 0)).chunks.some((chunk) => chunk.kind === 'truncated')).toBe(false)
     secondStore.close()
   })
 
-  it('persists credential-like output verbatim', () => {
+  it('persists credential-like output verbatim', async () => {
     const dir = directory()
     const store = new RunOutputFileStore(dir)
     const log = new RunOutputLog({ store })
     log.append('run-secret', { kind: 'tool_result', text: 'export TOKEN=sk-ant-api03-SECRETSECRETSECRETSECRET' })
-    log.flush('run-secret')
+    await log.flush('run-secret')
     store.close()
     const raw = readdirSync(dir).filter((name) => name.endsWith('.jsonl')).map((name) =>
       readFileSync(join(dir, name), 'utf8')).join('')
     expect(raw).toContain('export TOKEN=sk-ant-api03-SECRETSECRETSECRETSECRET')
   })
 
-  it('repairs uncommitted data/index tails before the next append', () => {
+  it('repairs uncommitted data/index tails before the next append', async () => {
     const dir = directory()
     const firstStore = new RunOutputFileStore(dir)
     firstStore.append({ runId: 'run-tail', at: 1, kind: 'output', text: 'before' })
@@ -82,7 +84,7 @@ describe('RunOutputFileStore', () => {
     recovered.close()
   })
 
-  it('fails closed when only one half of a run file pair survives', () => {
+  it('fails closed when only one half of a run file pair survives', async () => {
     const dir = directory()
     const first = new RunOutputFileStore(dir)
     first.append({ runId: 'run-pair', at: 1, kind: 'output', text: 'kept' })
@@ -128,19 +130,19 @@ describe('RunOutputFileStore', () => {
     } finally { store.close() }
   })
 
-  it('round trips maximally JSON-escaped chunks without capture failure', () => {
+  it('round trips maximally JSON-escaped chunks without capture failure', async () => {
     const dir = directory()
     const store = new RunOutputFileStore(dir)
     try {
       const log = new RunOutputLog({ store })
       const text = '\u0000'.repeat(16 * 1024)
       log.append('escaped', { kind: 'output', text })
-      log.flush('escaped')
-      expect(all(log, 'escaped')).toBe(text)
+      await log.flush('escaped')
+      expect(await all(log, 'escaped')).toBe(text)
     } finally { store.close() }
   })
 
-  it.each(['data-fsync', 'index-fsync', 'partial-index'] as const)('does not retry uncertain bodies after %s failure and preserves a gap', (failure) => {
+  it.each(['data-fsync', 'index-fsync', 'partial-index'] as const)('does not retry uncertain bodies after %s failure and preserves a gap', async (failure) => {
     const dir = directory()
     const store = new RunOutputFileStore(dir)
     try {
@@ -157,10 +159,10 @@ describe('RunOutputFileStore', () => {
         vi.mocked(fsyncSync).mockImplementationOnce(() => { throw new Error('injected_storage_failure') })
       }
       log.append('failure', { kind: 'output', text: 'uncertain-body' })
-      expect(() => log.flush('failure')).toThrow('injected_storage_failure')
+      await expect(log.flush('failure')).rejects.toThrow('injected_storage_failure')
       log.append('failure', { kind: 'output', text: 'after-recovery' })
-      log.flush('failure')
-      const page = log.since('failure', 0)
+      await log.flush('failure')
+      const page = await log.since('failure', 0)
       // A failed index fsync may already have committed the body; never write it a second time.
       expect(page.chunks.filter((chunk) => chunk.text === 'uncertain-body')).toHaveLength(failure === 'index-fsync' ? 1 : 0)
       expect(page.chunks.slice(-2).map((chunk) => chunk.kind)).toEqual(['truncated', 'output'])
@@ -169,7 +171,7 @@ describe('RunOutputFileStore', () => {
     } finally { store.close() }
   })
 
-  it('fails closed on an index that points beyond durable data', () => {
+  it('fails closed on an index that points beyond durable data', async () => {
     const dir = directory()
     const first = new RunOutputFileStore(dir)
     first.append({ runId: 'run-corrupt', at: 1, kind: 'output', text: 'kept' })

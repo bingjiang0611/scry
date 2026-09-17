@@ -32,10 +32,10 @@ export interface RunOutputPage {
 }
 
 export interface RunOutputStore {
-  append(chunk: Omit<OutputChunk, 'seq'>): OutputChunk
-  appendBatch?(chunks: Array<Omit<OutputChunk, 'seq'>>): OutputChunk[]
-  since(runId: string, cursor: number, pageSize?: number): RunOutputPage
-  close(): void
+  append(chunk: Omit<OutputChunk, 'seq'>): OutputChunk | Promise<OutputChunk>
+  appendBatch?(chunks: Array<Omit<OutputChunk, 'seq'>>): OutputChunk[] | Promise<OutputChunk[]>
+  since(runId: string, cursor: number, pageSize?: number): RunOutputPage | Promise<RunOutputPage>
+  close(): void | Promise<void>
 }
 
 // Bounds: a single pathological run cannot exhaust host memory, and a device
@@ -81,11 +81,13 @@ export class RunOutputLog {
   #runs = new Map<string, RunBuffer>()
   #store?: RunOutputStore
   #failedPersistentRuns = new Set<string>()
+  #pendingGapAfter = new Set<string>()
   #persistenceErrors = new Map<string, Error>()
   #pending = new Map<string, Array<Omit<OutputChunk, 'seq'>>>()
   #pendingBytes = 0
   #pendingChunks = 0
   #flushScheduled = false
+  #draining?: Promise<void>
 
   constructor(options: { store?: RunOutputStore } = {}) {
     this.#store = options.store
@@ -102,7 +104,11 @@ export class RunOutputLog {
         const bytes = byteLength(piece)
         // Bound the whole pending queue, including tiny events across different runs.
         if (this.#pendingBytes + bytes > MAX_PENDING_BYTES || this.#pendingChunks >= MAX_PENDING_CHUNKS) {
-          this.#drainPersistent()
+          // This loss happened after already-queued content, so its marker must
+          // follow that content rather than being prepended like an unknown store write.
+          this.#pendingGapAfter.add(runId)
+          this.#persistenceErrors.set(runId, new Error('output_capture_queue_full'))
+          break
         }
         const pending = this.#pending.get(runId) ?? []
         pending.push({ runId, at: Date.now(), kind: chunk.kind, text: piece })
@@ -151,14 +157,16 @@ export class RunOutputLog {
 
   // Return chunks strictly after `cursor` for a run (bounded page), plus the
   // next cursor. An unknown/evicted run yields an empty page at the same cursor.
-  flush(runId: string): void {
+  async flush(runId: string): Promise<void> {
     if (!this.#store) return
-    this.#drainPersistent(runId)
-    if (this.#failedPersistentRuns.has(runId)) {
+    await this.#ensureDrain()
+    if (this.#failedPersistentRuns.has(runId) || this.#pendingGapAfter.has(runId)) {
       try {
-        this.#persist([{ runId, at: Date.now(), kind: 'truncated', text: 'output incomplete (durable capture was temporarily unavailable)' }])
+        await this.#persist([{ runId, at: Date.now(), kind: 'truncated', text: 'output incomplete (durable capture was temporarily unavailable)' }])
         this.#failedPersistentRuns.delete(runId)
+        this.#pendingGapAfter.delete(runId)
       } catch (error) {
+        this.#pendingGapAfter.delete(runId)
         this.#rememberFailure(runId, error)
       }
     }
@@ -169,10 +177,10 @@ export class RunOutputLog {
     }
   }
 
-  since(runId: string, cursor: number, pageSize = DEFAULT_PAGE): RunOutputPage {
+  async since(runId: string, cursor: number, pageSize = DEFAULT_PAGE): Promise<RunOutputPage> {
     const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
     if (this.#store) {
-      this.#drainPersistent(runId)
+      await this.#ensureDrain()
       if (this.#persistenceErrors.has(runId)) throw this.#persistenceErrors.get(runId)
       return this.#store.since(runId, start, pageSize)
     }
@@ -189,32 +197,44 @@ export class RunOutputLog {
     this.#flushScheduled = true
     queueMicrotask(() => {
       this.#flushScheduled = false
-      this.#drainPersistent()
+      void this.#ensureDrain()
     })
   }
 
-  #persist(chunks: Array<Omit<OutputChunk, 'seq'>>): void {
+  async #persist(chunks: Array<Omit<OutputChunk, 'seq'>>): Promise<void> {
     if (!this.#store || chunks.length === 0) return
-    if (this.#store.appendBatch) this.#store.appendBatch(chunks)
-    else for (const chunk of chunks) this.#store.append(chunk)
+    if (this.#store.appendBatch) await this.#store.appendBatch(chunks)
+    else for (const chunk of chunks) await this.#store.append(chunk)
   }
 
-  #drainPersistent(onlyRunId?: string): void {
-    const runIds = onlyRunId ? [onlyRunId] : [...this.#pending.keys()]
-    for (const runId of runIds) {
-      const chunks = this.#pending.get(runId)
-      if (!chunks?.length) continue
+  #ensureDrain(): Promise<void> {
+    if (!this.#draining) {
+      this.#draining = this.#drainPersistent().finally(() => { this.#draining = undefined })
+    }
+    return this.#draining
+  }
+
+  async #drainPersistent(): Promise<void> {
+    while (this.#pending.size > 0) {
+      const next = this.#pending.entries().next().value as [string, Array<Omit<OutputChunk, 'seq'>>] | undefined
+      if (!next) break
+      const [runId, chunks] = next
       this.#pending.delete(runId)
       this.#pendingChunks -= chunks.length
       this.#pendingBytes -= chunks.reduce((sum, chunk) => sum + byteLength(chunk.text), 0)
-      const batch = this.#failedPersistentRuns.has(runId)
-        ? [{ runId, at: Date.now(), kind: 'truncated' as const, text: 'output incomplete (durable capture was temporarily unavailable)' }, ...chunks]
-        : chunks
+      const before = this.#failedPersistentRuns.has(runId)
+        ? [{ runId, at: Date.now(), kind: 'truncated' as const, text: 'output incomplete (durable capture was temporarily unavailable)' }]
+        : []
+      const after = this.#pendingGapAfter.has(runId)
+        ? [{ runId, at: Date.now(), kind: 'truncated' as const, text: 'output incomplete (durable capture was temporarily unavailable)' }]
+        : []
       try {
-        this.#persist(batch)
+        await this.#persist([...before, ...chunks, ...after])
         this.#failedPersistentRuns.delete(runId)
+        this.#pendingGapAfter.delete(runId)
       } catch (error) {
         // Never retry unknown body writes. A later batch starts with a durable gap marker.
+        this.#pendingGapAfter.delete(runId)
         this.#rememberFailure(runId, error)
       }
     }

@@ -6,6 +6,7 @@ import { InnerMtlsHost } from './inner-mtls-host'
 import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
 import type { PairingAuthority } from './pairing'
+import type { RunOutputStore } from './run-output-log'
 import type { ProviderOperationGate } from '../provider-operation-gate'
 import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteStatus } from '../../shared/remote'
 
@@ -48,6 +49,7 @@ export interface RemoteHostServiceDependencies {
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
+  createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
   // How to reach the relay (deployed ws/net connector). Absent => dormant. Called
   // once per mode ('run' for the granted-device mTLS host, 'pair' for the pairing
   // prove endpoint), so the relay keeps a separate warm pool per mode. The
@@ -94,7 +96,7 @@ export class RemoteHostService {
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
     const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))
-    const binding = createHostController({
+    const binding = await createHostController({
       stateDirectory: deps.stateDirectory,
       hostId: identity.hostId,
       anchorSHA256: identity.anchorSHA256,
@@ -103,6 +105,7 @@ export class RemoteHostService {
       authorizeWorkspace: deps.authorizeWorkspace,
       startRun: deps.startRun,
       gate: deps.gate,
+      ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),
       ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
       ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
@@ -127,7 +130,7 @@ export class RemoteHostService {
       })
     } catch (error) {
       // Never leak the durable leases if host assembly fails.
-      binding.close()
+      await binding.close()
       throw error
     }
     const clients: RelayClient[] = []
@@ -230,7 +233,7 @@ export class RemoteHostService {
     this.#disposed = true
     try { for (const client of this.#clients) await client.close() } finally {
       try { await this.#host.close() } finally {
-        try { await this.#pairing.close() } finally { this.#binding.close() }
+        try { await this.#pairing.close() } finally { await this.#binding.close() }
       }
     }
   }

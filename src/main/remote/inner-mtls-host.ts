@@ -139,7 +139,7 @@ export class InnerMtlsHost {
       if (request.op === 'output') {
         // The assistant's real streamed output content for one run, after cursor.
         if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor)) return { error: 'invalid_request' }
-        return { output: controller.runOutput(fingerprint, { runId: request.runId, cursor: request.cursor as number }) }
+        return { output: await controller.runOutput(fingerprint, { runId: request.runId, cursor: request.cursor as number }) }
       }
       return { error: 'unknown_op' }
     } catch (error) {

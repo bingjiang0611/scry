@@ -15,13 +15,13 @@ import { SessionLedger } from './session-ledger'
 //     never silently re-run or marked settled — unknown is not success.
 //   - The executor's observed outcome, not the client, drives settled/failed.
 
-// The content channel: the assistant's REAL trace output (masked, bounded) is
+// The content channel: the assistant's REAL trace output (raw, bounded) is
 // streamed here for the device to render, distinct from the opaque lifecycle
 // `progress` markers on the ledger. 'truncated' is appended by the log itself,
 // never by an executor, so it is not part of the sink's input union.
 export interface RemoteOutputSink {
   append(runId: string, chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
-  flush?(runId: string): void
+  flush?(runId: string): void | Promise<void>
 }
 
 export interface RemoteExecutorInput {
@@ -97,8 +97,8 @@ export class RemoteDispatcher {
       // the first evidence gap instead of letting consumers infer that a partial stream is complete.
       try { this.#outputSink?.append(runId, chunk) } catch { markOutputCaptureFailed() }
     }
-    const flushOutput = (): void => {
-      try { this.#outputSink?.flush?.(runId) } catch { markOutputCaptureFailed() }
+    const flushOutput = async (): Promise<void> => {
+      try { await this.#outputSink?.flush?.(runId) } catch { markOutputCaptureFailed() }
     }
     // Invoke synchronously so the dispatch is observably in flight when pump()
     // returns; a synchronous throw is mapped to failure like a rejection.
@@ -106,13 +106,14 @@ export class RemoteDispatcher {
     try {
       pending = this.#executor.execute({ runId, detail, progress, output })
     } catch (error) {
-      flushOutput()
-      this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096))
+      void flushOutput().finally(() => {
+        this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096))
+      })
       return
     }
     void Promise.resolve(pending).then(
-      () => { flushOutput(); this.#settle(runId, true) },
-      (error) => { flushOutput(); this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096)) }
+      async () => { await flushOutput(); this.#settle(runId, true) },
+      async (error) => { await flushOutput(); this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096)) }
     )
   }
 

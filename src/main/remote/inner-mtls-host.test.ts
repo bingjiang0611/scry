@@ -11,6 +11,7 @@ import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x50
 import { ensureHostIdentity, type HostIdentity } from './host-identity'
 import { HostController, type RemoteIntentRouting } from './host-controller'
 import { createHostController } from './host-controller-factory'
+import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ProviderOperationGate } from '../provider-operation-gate'
 
@@ -40,11 +41,12 @@ async function harness(
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
-  const binding = createHostController({
+  const binding = await createHostController({
     stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd },
     startRun: runProvider, gate: new ProviderOperationGate(),
+    createOutputStore: (directory) => new RunOutputFileStore(directory),
     ...(listCommands ? { listCommands } : {})
   })
   cleanups.push(() => binding.close())
