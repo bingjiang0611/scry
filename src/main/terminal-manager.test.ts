@@ -90,7 +90,7 @@ function workspace(): string {
   return realpathSync(root)
 }
 
-function fixture(cwd: string, defaultCwd = cwd, recordingDirectory?: string) {
+function fixture(cwd: string, defaultCwd = cwd, recordingDirectory?: string, getCurrentCwd = () => cwd) {
   const pty = new FakePtyFactory()
   const data: TerminalDataEvent[] = []
   const exits: TerminalExitEvent[] = []
@@ -98,7 +98,7 @@ function fixture(cwd: string, defaultCwd = cwd, recordingDirectory?: string) {
   const manager = createTerminalManager({
     recordingDirectory,
     onRecordingError: (event) => recordingErrors.push(event.id),
-    getCurrentCwd: () => cwd,
+    getCurrentCwd,
     defaultCwd,
     onData: (event) => data.push(event),
     onExit: (event) => exits.push(event),
@@ -117,6 +117,22 @@ afterEach(() => {
 })
 
 describe('TerminalManager', () => {
+  it('rejects a history response if workspace authorization changes while scanning', async () => {
+    const cwd = workspace()
+    const foreign = workspace()
+    let current = cwd
+    const { manager, pty } = fixture(cwd, cwd, join(cwd, 'recordings'), () => current)
+    const session = manager.start({ cwd, cols: 80, rows: 24 })
+    const pending = manager.listRecordings({})
+    current = foreign
+    await expect(pending).rejects.toThrow('workspace_changed')
+    expect((await manager.listRecordings({})).items).toEqual([])
+    current = cwd
+    expect((await manager.listRecordings({})).items[0]).toMatchObject({ id: session.id, active: true })
+    pty.processes[0].emitExit(0)
+    expect((await manager.listRecordings({})).items[0].active).toBe(false)
+  })
+
   it('captures default raw output before live projection and replays only in the current workspace', () => {
     const cwd = workspace()
     const recordingDirectory = join(cwd, 'recordings')

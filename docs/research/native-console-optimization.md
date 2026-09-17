@@ -291,10 +291,11 @@ Storage/evidence contract:
 Remaining limits (not claimed complete):
 
 - The existing renderer ACK backpressure and PTY cleanup on navigation/crash remain in place. This
-  batch does not implement live reattachment, old-ACK fencing, reload survival or App restart history UI.
-- No retention/GC or disk quota is added. Closing a tab preserves its recording but currently removes
-  the UI handle to it; only the current exited tab exposes deletion. A paginated history catalog and
-  explicit retention controls are the next storage-management step, not a reason for silent eviction.
+  batch does not implement live reattachment, old-ACK fencing or reload survival. Disk history UI
+  is covered by the follow-up below; it does not restore a live Shell.
+- No retention/GC or disk quota is added. Closing a tab preserves its recording; the history follow-up
+  below restores a UI handle for replay/deletion. Explicit retention controls remain a separate step,
+  not a reason for silent eviction.
 - Writes/checkpoints still use synchronous filesystem calls and slow storage can delay the main loop.
   Move disk work behind a bounded async writer before claiming producer/UI/storage independence.
 - Replay restores received text at the current terminal geometry with the existing 5,000-line display
@@ -309,6 +310,48 @@ not to treat a parsed-buffer callback as a painted-screen assertion; the final r
 Synthetic sink tests cover >16 MiB, cold reads, Unicode/code-unit boundaries, uncertain body writes,
 fsync/metadata failure, authorization and deletion. This is not a sustained >16 MiB native PTY pressure
 test, visual screenshot review or real Provider acceptance. No installation or publication performed.
+
+## Terminal disk history follow-up
+
+- The terminal toolbar opens a workspace-scoped history dialog using the existing `ModalFrame`,
+  archive row styles and xterm panes. This is a same-pattern extension, not a visual redesign.
+  Design-library search had no matching live record (one unrelated stale Pi record); no new reusable
+  design asset or preference was created, so no design-library writes are needed.
+- The list scans private recording metadata asynchronously, returning 20 summaries by default (max
+  100). It retains only page-size + 1 summaries and the native directory iterator buffer, with one
+  concurrent scan per store. No body previews, foreign workspace paths or record IDs are returned.
+  Main rechecks canonical cwd after scanning and revalidates the trusted frame before responding.
+- Pagination is lexicographic recording-ID order, not time order or a frozen snapshot. Deleting the
+  cursor record is safe; newly inserted IDs before it appear on refresh. Each page rescans metadata,
+  so I/O is O(number of index files), not O(page size). If catalog latency becomes material, add an
+  indexed catalog rather than raising page/memory limits. No latency or million-record claim is made.
+- Unreadable, unsafe or malformed metadata marks the page partial without disclosing unknown
+  ownership. Missing bodies are detected during replay, not silently interpreted as empty output.
+  The list describes the metadata checkpoint; it is not a body-integrity audit. Orphan `.bin`/temp
+  files without readable metadata remain outside this catalog and cannot be authorized for deletion.
+- New recordings store their capture-start time; old records show unknown time without rewriting
+  their metadata. Active Shells are labelled and cannot be opened from history or deleted.
+- History opens a distinct read-only tab (under the existing eight-tab bound), with stdin disabled,
+  no start/restart call and no live terminal ID. It reuses bounded replay and explicit deletion;
+  closing that tab leaves the file intact. `readonly` is separate from confirmed native `exited`.
+  This does not resume detached processes or replay shell commands, even after an App crash.
+
+Acceptance scenario: exit a native Shell, close its tab, locate and replay its disk recording, delete
+it, then deliberately SIGKILL only the isolated test-owned App, wait for its actual exit, relaunch the
+same userData and replay another saved recording through the history UI. Check no new recording is
+created by opening history, old terminal-ID writes are rejected, and foreign workspace list/read
+access is denied. The crash test is not proof of graceful App shutdown: an initial SIGTERM fixture
+attempt did not confirm exit within its test deadline. The cold UI fixture also selects its workspace
+through the sidebar (not a main-only cwd mutation) to keep renderer and main context consistent.
+Final staged-only results: 2,144 unit tests passed, 3 skipped; shell checks, node/web typecheck,
+App/CLI builds, 538 CLI release tests and clean-package smoke passed. Packaged validation and the
+final isolated native PTY/history crash-restart smoke passed, including modal focus/visible bounds,
+rendered replay text, explicit deletion, no new recording on history-open, rejected old-ID input and
+cross-workspace denial. The smoke fences command injection and exit receipt on a newly observed
+terminal ID rather than a possibly stale `running` CSS state, and waits for visible xterm content.
+No screenshot visual review, real Provider/device acceptance, live reattachment or graceful-shutdown
+claim is made. No installation/publication; the existing ACK backpressure and synchronous capture
+writes remain unchanged.
 
 ## Remaining sequence
 

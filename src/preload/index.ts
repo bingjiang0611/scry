@@ -61,6 +61,8 @@ import type {
   TerminalRecordingErrorEvent,
   TerminalRecordingRequest,
   TerminalRecordingPage,
+  TerminalRecordingListRequest,
+  TerminalRecordingListPage,
   TerminalExitEvent,
   TerminalSessionInfo,
   TerminalStartRequest
@@ -137,6 +139,7 @@ const api = {
   terminalReady: (id: string): Promise<true> => ipcRenderer.invoke('terminal:ready', { id }),
   terminalAck: (id: string, bytes: number): Promise<true> => ipcRenderer.invoke('terminal:ack', { id, bytes }),
   terminalClose: (id: string): Promise<true> => ipcRenderer.invoke('terminal:close', { id }),
+  terminalRecordingList: (request: TerminalRecordingListRequest = {}): Promise<TerminalRecordingListPage> => ipcRenderer.invoke('terminal:recordingList', request),
   terminalRecordingRead: (request: TerminalRecordingRequest): Promise<TerminalRecordingPage> => ipcRenderer.invoke('terminal:recordingRead', request),
   terminalRecordingDelete: (id: string): Promise<true> => ipcRenderer.invoke('terminal:recordingDelete', { id }),
   setCwd: (dir: string | null): Promise<string | null> => ipcRenderer.invoke('agent:setCwd', dir),

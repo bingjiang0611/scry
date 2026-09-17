@@ -55,6 +55,7 @@ const invokeChannels = {
   terminalReady: 'terminal:ready',
   terminalAck: 'terminal:ack',
   terminalClose: 'terminal:close',
+  terminalRecordingList: 'terminal:recordingList',
   terminalRecordingRead: 'terminal:recordingRead',
   terminalRecordingDelete: 'terminal:recordingDelete',
   setCwd: 'agent:setCwd',
@@ -160,6 +161,8 @@ describe('preload IPC boundary', () => {
     await api.terminalResize('terminal-1', 120, 40)
     expect(electron.invoke).toHaveBeenLastCalledWith('terminal:resize', { id: 'terminal-1', cols: 120, rows: 40 })
 
+    await api.terminalRecordingList({ after: 'terminal-1', limit: 20 })
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingList', { after: 'terminal-1', limit: 20 })
     await api.terminalRecordingRead({ id: 'terminal-1', offset: 4, limit: 65536 })
     expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingRead', { id: 'terminal-1', offset: 4, limit: 65536 })
     await api.terminalRecordingDelete('terminal-1')

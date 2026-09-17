@@ -36,6 +36,26 @@ export interface TerminalRecordingPage {
   exit?: TerminalExitEvent
 }
 
+export interface TerminalRecordingListRequest {
+  after?: string
+  limit?: number
+}
+
+export interface TerminalRecordingSummary {
+  id: string
+  startedAt?: number
+  bytes: number
+  state: TerminalRecordingPage['state']
+  active: boolean
+}
+
+export interface TerminalRecordingListPage {
+  items: TerminalRecordingSummary[]
+  nextCursor: string | null
+  /** Some metadata could not be read; no foreign workspace identities are exposed. */
+  partial: boolean
+}
+
 export interface TerminalRecordingErrorEvent {
   id: string
   message: string

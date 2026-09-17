@@ -2,14 +2,17 @@ import {
   closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync,
   readFileSync, readSync, renameSync, unlinkSync, writeFileSync, writeSync
 } from 'node:fs'
+import { lstat, open, opendir } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import type { TerminalExitEvent, TerminalRecordingPage, TerminalRecordingRequest, TerminalSessionInfo } from '../shared/terminal'
+import type { TerminalExitEvent, TerminalRecordingPage, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalRecordingListPage, TerminalRecordingSummary, TerminalSessionInfo } from '../shared/terminal'
 
 interface Recording {
   version: 1
   id: string
   cwd: string
+  startedAt?: number
   bytes: number
   state: TerminalRecordingPage['state']
   exit?: TerminalExitEvent
@@ -25,8 +28,7 @@ const PAGE_BYTES = 64 * 1024
 const MAX_PAGE_BYTES = 256 * 1024
 const ID = /^terminal-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
-function privateFile(fd: number): void {
-  const info = fstatSync(fd)
+function privateFile(info: Stats): void {
   if (!info.isFile() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600) throw new Error('terminal_recording_unsafe_file')
 }
 
@@ -35,6 +37,7 @@ function privateFile(fd: number): void {
 // Only fsynced bytes published in metadata are replayable; an open checkpoint after restart is partial.
 export class TerminalRecordingStore {
   private readonly writers = new Map<string, Writer>()
+  private listing = false
   constructor(private readonly directory: string, private readonly onFailure: (id: string, error: unknown) => void) {}
 
   start(info: TerminalSessionInfo): void {
@@ -42,7 +45,7 @@ export class TerminalRecordingStore {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 })
     this.assertDirectory()
     const fd = openSync(this.path(info.id, 'bin'), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-    const record: Recording = { version: 1, id: info.id, cwd: info.cwd, bytes: 0, state: 'recording' }
+    const record: Recording = { version: 1, id: info.id, cwd: info.cwd, startedAt: Date.now(), bytes: 0, state: 'recording' }
     try {
       fsyncSync(fd)
       this.publish(record, true)
@@ -100,7 +103,7 @@ export class TerminalRecordingStore {
     if (request.offset > record.bytes) throw new Error('terminal_recording_invalid_cursor')
     const fd = openSync(this.path(request.id, 'bin'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     try {
-      privateFile(fd)
+      privateFile(fstatSync(fd))
       const size = fstatSync(fd).size
       if (size < record.bytes || (record.state === 'complete' && size !== record.bytes)) throw new Error('terminal_recording_incomplete_file')
       const data = Buffer.alloc(Math.min(limit, record.bytes - request.offset))
@@ -122,6 +125,56 @@ export class TerminalRecordingStore {
         ...(record.exit ? { exit: record.exit } : {})
       }
     } finally { closeSync(fd) }
+  }
+
+  async list(request: TerminalRecordingListRequest, cwd: string): Promise<TerminalRecordingListPage> {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('terminal_recording_invalid_cursor')
+    if (request.after !== undefined) this.assertId(request.after)
+    const limit = request.limit ?? 20
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('terminal_recording_invalid_cursor')
+    if (this.listing) throw new Error('terminal_recording_list_busy')
+    this.listing = true
+    try {
+      let info: Stats
+      try { info = await lstat(this.directory) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { items: [], nextCursor: null, partial: false }
+        throw error
+      }
+      if (!info.isDirectory() || (info.mode & 0o777) !== 0o700) throw new Error('terminal_recording_unsafe_directory')
+      const items: TerminalRecordingSummary[] = []
+      let partial = false
+      // Retain only limit+1 summaries, not every filename/body. UUID order is stable for
+      // existing records; concurrent additions before the cursor require a refresh.
+      for await (const entry of await opendir(this.directory)) {
+        if (!entry.name.endsWith('.json')) continue
+        const id = entry.name.slice(0, -5)
+        if (!ID.test(id) || (request.after !== undefined && id <= request.after)) continue
+        let record: Recording
+        try {
+          const file = await open(this.path(id, 'json'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+          try {
+            const stat = await file.stat()
+            privateFile(stat)
+            if (stat.size > 16 * 1024) throw new Error('terminal_recording_invalid_metadata')
+            record = this.parse(id, await file.readFile('utf8'))
+          } finally { await file.close() }
+        } catch {
+          // Ownership of unreadable metadata is unknown. Disclose incompleteness, not its ID/path.
+          partial = true
+          continue
+        }
+        if (record.cwd !== cwd) continue
+        const active = this.writers.has(id)
+        items.push({ id, bytes: record.bytes, active, startedAt: record.startedAt,
+          state: this.writers.get(id)?.failed ? 'failed' : record.state === 'recording' && !active ? 'interrupted' : record.state })
+        items.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+        if (items.length > limit + 1) items.pop()
+      }
+      const more = items.length > limit
+      if (more) items.pop()
+      return { items, nextCursor: more ? items[items.length - 1].id : null, partial }
+    } finally { this.listing = false }
   }
 
   delete(id: string, cwd: string): void {
@@ -165,18 +218,24 @@ export class TerminalRecordingStore {
     this.assertDirectory()
     const fd = openSync(this.path(id, 'json'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     try {
-      privateFile(fd)
+      privateFile(fstatSync(fd))
       if (fstatSync(fd).size > 16 * 1024) throw new Error('terminal_recording_invalid_metadata')
-      const record = JSON.parse(readFileSync(fd, 'utf8')) as Recording
-      if (!record || record.version !== 1 || record.id !== id || typeof record.cwd !== 'string' ||
-        !Number.isSafeInteger(record.bytes) || record.bytes < 0 || record.bytes % 2 ||
-        !['recording', 'complete', 'interrupted', 'failed'].includes(record.state)) throw new Error('terminal_recording_invalid_metadata')
-      if ((record.state === 'complete' && !record.exit) || (record.exit &&
-        (record.exit.id !== id || (record.exit.code !== null && !Number.isInteger(record.exit.code)) ||
-          (record.exit.signal !== null && !Number.isInteger(record.exit.signal))))) throw new Error('terminal_recording_invalid_metadata')
+      const record = this.parse(id, readFileSync(fd, 'utf8'))
       if (record.cwd !== cwd) throw new Error('terminal_recording_workspace_mismatch')
       return this.writers.get(id)?.failed ? { ...record, state: 'failed' } : record
     } finally { closeSync(fd) }
+  }
+
+  private parse(id: string, text: string): Recording {
+    const record = JSON.parse(text) as Recording
+    if (!record || record.version !== 1 || record.id !== id || typeof record.cwd !== 'string' ||
+      (record.startedAt !== undefined && (!Number.isFinite(record.startedAt) || record.startedAt < 0)) ||
+      !Number.isSafeInteger(record.bytes) || record.bytes < 0 || record.bytes % 2 ||
+      !['recording', 'complete', 'interrupted', 'failed'].includes(record.state)) throw new Error('terminal_recording_invalid_metadata')
+    if ((record.state === 'complete' && !record.exit) || (record.exit &&
+      (record.exit.id !== id || (record.exit.code !== null && !Number.isInteger(record.exit.code)) ||
+        (record.exit.signal !== null && !Number.isInteger(record.exit.signal))))) throw new Error('terminal_recording_invalid_metadata')
+    return record
   }
 
   private publish(record: Recording, exclusive = false): void {
