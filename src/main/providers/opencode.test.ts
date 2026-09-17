@@ -2312,6 +2312,62 @@ describe('OpenCode provider adapter', () => {
     }
   })
 
+  it.each([
+    { finish: 'abort', expected: { stopped: true, status: 'interrupted' } },
+    { finish: 'stop', expected: { stopped: false, status: 'completed' } }
+  ])('keeps an accepted stop owned until the native $finish outcome', async ({ finish, expected }) => {
+    let resolveCommand!: (value: unknown) => void
+    const command = vi.fn(() => new Promise((resolve) => { resolveCommand = resolve }))
+    const client = {
+      session: {
+        create: vi.fn(async () => ({ data: { id: 'session-stop-owned' } })),
+        command,
+        abort: vi.fn(async () => ({ data: true }))
+      },
+      event: {
+        subscribe: vi.fn(async () => ({ stream: (async function * () {})() }))
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 49, client
+    })
+    const adapter = createOpenCodeAdapter()
+
+    try {
+      const handle = adapter.run({
+        runId: `run-native-${finish}`, prompt: '/rate-workflow 1', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: () => {}
+      })
+      await vi.waitFor(() => expect(command).toHaveBeenCalledOnce())
+      let settled = false
+      void handle.promise.finally(() => { settled = true })
+      handle.interrupt()
+      await vi.waitFor(() => expect(client.session.abort).toHaveBeenCalledWith({
+        sessionID: 'session-stop-owned', directory: '/repo'
+      }))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(settled).toBe(false)
+
+      resolveCommand({
+        data: {
+          info: {
+            id: `assistant-${finish}`, parentID: `user-${finish}`, role: 'assistant', finish,
+            time: { created: 1_000, completed: 2_000 },
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            cost: 0, providerID: 'anthropic', modelID: 'model-1'
+          },
+          parts: []
+        }
+      })
+      await expect(handle.promise).resolves.toMatchObject({
+        externalSessionId: 'session-stop-owned', providerTurnId: `user-${finish}`, ...expected
+      })
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
   it('preserves the local transport cause and degrades provider health instead of reporting a generic network error', async () => {
     const cause = Object.assign(new Error('Headers Timeout Error'), { code: 'UND_ERR_HEADERS_TIMEOUT' })
     const client = {
