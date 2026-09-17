@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { link, lstat, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isToolContentRef, type ToolContentRef } from '../../shared/tool-content.js'
 import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
+import { copyRecorderContent, readRecorderContent } from './content-store.js'
 import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
 export const RECORDER_VERSION = '0.2.44'
@@ -551,6 +553,8 @@ interface ArchiveJournal {
   throughSequence: number
   archivedThroughBefore: number
   records: ArchiveJournalRecord[]
+  /** Optional only for journals created before Recorder content artifacts existed. */
+  contents?: ToolContentRef[]
 }
 
 const ARCHIVE_STATE = 'archive-state.json'
@@ -587,6 +591,7 @@ function validArchiveJournal(value: unknown): value is ArchiveJournal {
   if (raw.schemaVersion !== 1 || raw.operation !== 'archive' || typeof raw.transactionId !== 'string' || !/^[a-f0-9-]{36}$/.test(raw.transactionId)) return false
   if (typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt)) || typeof raw.target !== 'string' || !isAbsolute(raw.target)) return false
   if (!Number.isSafeInteger(raw.throughSequence) || !Number.isSafeInteger(raw.archivedThroughBefore) || !Array.isArray(raw.records)) return false
+  if (raw.contents !== undefined && (!Array.isArray(raw.contents) || !raw.contents.every(isToolContentRef) || new Set(raw.contents.map((item) => item.sha256)).size !== raw.contents.length)) return false
   let previous = Number(raw.archivedThroughBefore)
   for (const item of raw.records) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return false
@@ -619,6 +624,33 @@ async function existingFile(path: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
     throw error
   }
+}
+
+async function existingPath(path: string): Promise<boolean> {
+  try {
+    await lstat(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+function recordContentRefs(record: AgentTurnRecord): ToolContentRef[] {
+  return [record.tools, record.skills, record.mcps]
+    .flatMap((section) => section.value ?? [])
+    .flatMap((call) => [call.inputContent?.contentRef, call.outputContent?.contentRef])
+    .filter((ref): ref is ToolContentRef => !!ref)
+}
+
+function collectContentRefs(records: AgentTurnRecord[]): ToolContentRef[] {
+  const refs = new Map<string, ToolContentRef>()
+  for (const ref of records.flatMap(recordContentRefs)) {
+    const existing = refs.get(ref.sha256)
+    if (existing && existing.bytes !== ref.bytes) throw new Error(`conflicting recorder content reference: ${ref.sha256}`)
+    refs.set(ref.sha256, existing ?? ref)
+  }
+  return [...refs.values()].sort((left, right) => left.sha256.localeCompare(right.sha256))
 }
 
 async function verifiedArchiveContent(path: string, expected: ArchiveJournalRecord): Promise<Buffer> {
@@ -677,13 +709,18 @@ export async function archiveRecords(
       }
       const files = liveFiles.filter((file) => file.sequence <= options.throughSequence)
       if (files.length === 0) return { archived: [], archivedThrough: floor, target: options.target }
-      if ((await listFiles(canonicalRecordsTarget)).length > 0 || await existingFile(join(canonicalTarget, 'manifest.json'))) {
+      if (
+        (await listFiles(canonicalRecordsTarget)).length > 0 ||
+        await existingFile(join(canonicalTarget, 'manifest.json')) ||
+        await existingPath(join(canonicalTarget, 'content'))
+      ) {
         throw Object.assign(new Error('archive target must be empty'), { code: 'EEXIST' })
       }
       const records: ArchiveJournalRecord[] = []
+      const sourceRecords: AgentTurnRecord[] = []
       for (const file of files) {
         const source = join(canonicalLive, file.name)
-        await readRecordFile(source)
+        sourceRecords.push(await readRecordFile(source))
         const content = await readFile(source)
         records.push({
           ...file,
@@ -691,6 +728,9 @@ export async function archiveRecords(
           sha256: createHash('sha256').update(content).digest('hex')
         })
       }
+      const contents = collectContentRefs(sourceRecords)
+      // Fail before publishing a journal when a referenced source was already missing/corrupt.
+      await Promise.all(contents.map((ref) => readRecorderContent(dataRoot, ref)))
       journal = {
         schemaVersion: 1,
         operation: 'archive',
@@ -699,10 +739,29 @@ export async function archiveRecords(
         target: canonicalTarget,
         throughSequence: options.throughSequence,
         archivedThroughBefore: floor,
-        records
+        records,
+        contents
       }
       await writeJsonAtomic(join(dataRoot, ARCHIVE_JOURNAL), journal)
     }
+
+    if (!journal.contents) {
+      // Upgrade an interrupted pre-content journal from whichever verified record copy survived.
+      const sourceRecords: AgentTurnRecord[] = []
+      for (const record of journal.records) {
+        const livePath = join(canonicalLive, record.name)
+        const targetPath = join(canonicalRecordsTarget, record.name)
+        sourceRecords.push(await readRecordFile(await existingFile(livePath) ? livePath : targetPath))
+      }
+      journal = { ...journal, contents: collectContentRefs(sourceRecords) }
+      await writeJsonAtomic(join(dataRoot, ARCHIVE_JOURNAL), journal)
+    }
+    const contents = journal.contents ?? []
+    const contentTarget = join(canonicalTarget, 'content')
+    if (await existingPath(contentTarget) && (await lstat(contentTarget)).isSymbolicLink()) {
+      throw new Error('archive content target must not be a symbolic link')
+    }
+    await Promise.all(contents.map((ref) => copyRecorderContent(dataRoot, canonicalTarget, ref)))
 
     const expectedNames = new Set(journal.records.flatMap((record) => [
       record.name,
@@ -771,7 +830,8 @@ export async function archiveRecords(
       from: journal.records[0].sequence,
       to: archivedThrough,
       count: journal.records.length,
-      records: journal.records
+      records: journal.records,
+      contents
     })
     await rm(join(dataRoot, ARCHIVE_JOURNAL))
     await sync(dataRoot)

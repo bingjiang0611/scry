@@ -78,27 +78,31 @@ Implemented for the canonical Recorder path:
   record can leave an unreferenced blob after a crash, but cannot leave a committed dangling reference.
 - Upstream partial/unavailable provenance is preserved. A complete artifact means all bytes Scry
   received after configured redaction, not bytes the Provider never exposed.
+- Recorder archive journals enumerate and preflight referenced blobs, copy deduplicated content
+  before source record removal, and publish the references in the archive manifest. Recovery accepts
+  a verified target copy when the live blob is gone and upgrades older inline-only journals safely.
 
 Current boundaries:
 
 - This closes large tool-body loss in standalone Recorder lifecycle/transcript aggregation only.
   Provider adapter trace archives, terminal output, assistant text, diffs and App SQLite/outbox sinks
   still need the same durable-reference contract.
-- The reader currently resolves artifacts from the original live Recorder data root. Archive/export
-  does not yet copy referenced blobs, and there is no retention/garbage-collection policy; do not
-  delete `.scry/content` or treat an exported record JSON as self-contained.
+- Recorder archives now own their referenced blobs, but JSON-only `export` does not bundle them.
+  Live blobs are retained because later records may share a digest; there is no retention/orphan
+  collection policy yet. Do not treat an exported record JSON as self-contained.
 - The App/CLI has no public content-detail endpoint or paged viewer yet. Inline previews remain the
   only projected body until the durable replay batch wires authorized reference reads.
 
 Verification for this batch on a snapshot reconstructed from the Git index:
 
-- `npm test`: 163 files passed, 3 skipped; 2069 tests passed, 3 skipped; shell tests passed.
+- `npm test`: 164 files passed, 3 skipped; 2073 tests passed, 3 skipped; shell tests passed.
 - `npm run typecheck`, `npm run build` and `npm run build:cli` passed.
-- `npm run check:cli-release`: 531 tests plus package smoke passed.
+- `npm run check:cli-release`: 535 tests plus package smoke passed.
 - A large-output integration committed a bounded record preview, reloaded the record, resolved the
   complete redacted artifact byte-for-byte and verified a secret beyond the preview was never stored.
 - Content-store tests cover shared turn-budget exhaustion, digest deduplication, unavailable storage,
-  missing blobs and post-write corruption.
+  missing blobs and post-write corruption. Archive tests cover shared-blob deduplication, live-store
+  independence, missing-source preflight, crash recovery from target content and legacy inline records.
 
 ## Remaining sequence
 
@@ -113,7 +117,7 @@ Verification for this batch on a snapshot reconstructed from the Git index:
 - Extend the Recorder content-reference contract to Provider adapter trace progress/outbox/archive,
   terminal output, assistant text and diffs before UI projection. Reuse existing sinks rather than
   creating a parallel archive.
-- Make archive/export carry referenced blobs, then add explicit retention and orphan collection.
+- Make export carry referenced blobs, then add explicit retention and orphan collection.
 - Replace remaining adapter/body truncation and fixed transcript windows with streamed content and
   durable cursors; retain explicit original/saved byte counts where the upstream itself is partial.
 - Collect full diffs asynchronously without changing turn ownership or attributing later changes
