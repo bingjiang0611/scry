@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import type { OutputChunk, RunOutputPage, RunOutputStore } from './run-output-log'
 
 const INDEX_ENTRY_BYTES = 8
-const MAX_STORED_LINE_BYTES = 64 * 1024
+// 16 KiB of control characters can expand sixfold in JSON, plus bounded event metadata.
+const MAX_STORED_LINE_BYTES = 128 * 1024
 const MAX_PAGE_BYTES = 512 * 1024
 const DEFAULT_PAGE = 200
 
@@ -47,6 +48,36 @@ function indexEnd(fd: number, entry: number): number {
   const value = bytes.readBigUInt64BE()
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('output_store_offset_overflow')
   return Number(value)
+}
+
+function fileExists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+function readEvent(fd: number, start: number, end: number, dataSize: number, runId: string, seq: number): OutputChunk {
+  const length = end - start
+  if (length < 2 || length > MAX_STORED_LINE_BYTES || end > dataSize) {
+    throw new Error('output_store_invalid_offset')
+  }
+  const line = Buffer.allocUnsafe(length)
+  readAll(fd, line, start)
+  if (line[line.length - 1] !== 0x0a) throw new Error('output_store_record_incomplete')
+  let event: unknown
+  try { event = JSON.parse(line.toString('utf8', 0, line.length - 1)) }
+  catch { throw new Error('output_store_record_corrupt') }
+  const raw = event as Partial<OutputChunk> | null
+  if (!raw || raw.seq !== seq || raw.runId !== runId ||
+    typeof raw.kind !== 'string' || !['output', 'reasoning', 'tool', 'tool_result', 'truncated'].includes(raw.kind) ||
+    typeof raw.text !== 'string' || typeof raw.at !== 'number' || !Number.isFinite(raw.at)) {
+    throw new Error('output_store_record_corrupt')
+  }
+  return raw as OutputChunk
 }
 
 export class RunOutputFileStore implements RunOutputStore {
@@ -93,6 +124,8 @@ export class RunOutputFileStore implements RunOutputStore {
     const key = keyOf(runId)
     const dataPath = join(this.#directory, `${key}.jsonl`)
     const indexPath = join(this.#directory, `${key}.idx`)
+    // A missing committed index is not an empty log. Never recreate it and truncate surviving data.
+    if (fileExists(dataPath) !== fileExists(indexPath)) throw new Error('output_store_pair_incomplete')
     const dataFd = openSync(dataPath, constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW, 0o600)
     let indexFd: number
     try {
@@ -106,14 +139,16 @@ export class RunOutputFileStore implements RunOutputStore {
       assertPrivateFile(indexFd)
       const indexInfo = fstatSync(indexFd)
       const committedIndexBytes = Math.floor(indexInfo.size / INDEX_ENTRY_BYTES) * INDEX_ENTRY_BYTES
-      if (indexInfo.size !== committedIndexBytes) {
-        ftruncateSync(indexFd, committedIndexBytes)
-        fsyncSync(indexFd)
-      }
       const count = committedIndexBytes / INDEX_ENTRY_BYTES
       const committedEnd = indexEnd(indexFd, count)
       const dataInfo = fstatSync(dataFd)
       if (committedEnd > dataInfo.size) throw new Error('output_store_index_ahead_of_data')
+      // Validate the last indexed record before any tail repair can remove bytes.
+      if (count > 0) readEvent(dataFd, indexEnd(indexFd, count - 1), committedEnd, dataInfo.size, runId, count)
+      if (indexInfo.size !== committedIndexBytes) {
+        ftruncateSync(indexFd, committedIndexBytes)
+        fsyncSync(indexFd)
+      }
       if (dataInfo.size !== committedEnd) {
         ftruncateSync(dataFd, committedEnd)
         fsyncSync(dataFd)
@@ -170,6 +205,8 @@ export class RunOutputFileStore implements RunOutputStore {
       assertPrivateFile(dataFd)
       const indexInfo = fstatSync(indexFd)
       const count = Math.floor(indexInfo.size / INDEX_ENTRY_BYTES)
+      const dataSize = fstatSync(dataFd).size
+      if (count > 0) readEvent(dataFd, indexEnd(indexFd, count - 1), indexEnd(indexFd, count), dataSize, runId, count)
       if (start >= count) return { chunks: [], cursor: start }
       const chunks: OutputChunk[] = []
       let bytes = 0
@@ -177,16 +214,8 @@ export class RunOutputFileStore implements RunOutputStore {
       for (let seq = start + 1; seq <= count && chunks.length < size; seq++) {
         const end = indexEnd(indexFd, seq)
         const length = end - previousEnd
-        if (length < 2 || length > MAX_STORED_LINE_BYTES || bytes + length > MAX_PAGE_BYTES && chunks.length > 0) break
-        const line = Buffer.allocUnsafe(length)
-        readAll(dataFd, line, previousEnd)
-        if (line[line.length - 1] !== 0x0a) throw new Error('output_store_record_incomplete')
-        let event: OutputChunk
-        try { event = JSON.parse(line.toString('utf8', 0, line.length - 1)) as OutputChunk }
-        catch { throw new Error('output_store_record_corrupt') }
-        if (event.seq !== seq || event.runId !== runId || !['output', 'reasoning', 'tool', 'tool_result', 'truncated'].includes(event.kind) || typeof event.text !== 'string') {
-          throw new Error('output_store_record_corrupt')
-        }
+        const event = readEvent(dataFd, previousEnd, end, dataSize, runId, seq)
+        if (bytes + length > MAX_PAGE_BYTES && chunks.length > 0) break
         chunks.push(event)
         bytes += length
         previousEnd = end

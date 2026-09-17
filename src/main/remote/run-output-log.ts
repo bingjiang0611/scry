@@ -48,6 +48,8 @@ const MAX_BYTES_PER_RUN = 1_000_000
 const MAX_EVENTS_PER_RUN = 4_000
 const DEFAULT_PAGE = 200
 const MAX_RUNS = 256
+const MAX_PENDING_BYTES = 512 * 1024
+const MAX_PENDING_CHUNKS = 4_000
 
 interface RunBuffer {
   seq: number
@@ -58,18 +60,23 @@ interface RunBuffer {
 
 const byteLength = (text: string): number => Buffer.byteLength(text, 'utf8')
 
-function splitUtf8(text: string, maxBytes: number): string[] {
-  if (byteLength(text) <= maxBytes) return [text]
-  const chunks: string[] = []
-  let remaining = text
-  while (remaining) {
-    const bytes = Buffer.from(remaining, 'utf8')
-    const chunk = bytes.subarray(0, maxBytes).toString('utf8').replace(/\uFFFD+$/, '')
-    if (!chunk) break
-    chunks.push(chunk)
-    remaining = remaining.slice(chunk.length)
+function* splitUtf8(text: string, maxBytes: number): Generator<string> {
+  // Walk once, yielding slices lazily. Do not strip U+FFFD: it may be actual Provider text.
+  let start = 0
+  let bytes = 0
+  for (let index = 0; index < text.length;) {
+    const code = text.codePointAt(index)!
+    const width = code > 0xffff ? 2 : 1
+    const size = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4
+    if (bytes + size > maxBytes) {
+      yield text.slice(start, index)
+      start = index
+      bytes = 0
+    }
+    bytes += size
+    index += width
   }
-  return chunks
+  if (start < text.length || text.length === 0) yield text.slice(start)
 }
 
 export class RunOutputLog {
@@ -80,6 +87,7 @@ export class RunOutputLog {
   #persistenceErrors = new Map<string, Error>()
   #pending = new Map<string, Array<Omit<OutputChunk, 'seq'>>>()
   #pendingBytes = 0
+  #pendingChunks = 0
   #flushScheduled = false
 
   constructor(options: { store?: RunOutputStore } = {}) {
@@ -93,14 +101,19 @@ export class RunOutputLog {
     const text = maskSecrets(typeof chunk.text === 'string' ? chunk.text : '') ?? ''
     if (text.length === 0 && chunk.kind !== 'truncated') return
     if (this.#store) {
-      const pending = this.#pending.get(runId) ?? []
       for (const piece of splitUtf8(text, MAX_CHUNK_BYTES)) {
+        const bytes = byteLength(piece)
+        // Bound the whole pending queue, including tiny events across different runs.
+        if (this.#pendingBytes + bytes > MAX_PENDING_BYTES || this.#pendingChunks >= MAX_PENDING_CHUNKS) {
+          this.#drainPersistent()
+        }
+        const pending = this.#pending.get(runId) ?? []
         pending.push({ runId, at: Date.now(), kind: chunk.kind, text: piece })
-        this.#pendingBytes += byteLength(piece)
+        this.#pending.set(runId, pending)
+        this.#pendingBytes += bytes
+        this.#pendingChunks++
       }
-      this.#pending.set(runId, pending)
-      if (this.#pendingBytes >= 512 * 1024) this.#drainPersistent(runId)
-      else this.#scheduleFlush()
+      this.#scheduleFlush()
       return
     }
     let buffer = this.#runs.get(runId)
@@ -195,7 +208,8 @@ export class RunOutputLog {
       const chunks = this.#pending.get(runId)
       if (!chunks?.length) continue
       this.#pending.delete(runId)
-      this.#pendingBytes = Math.max(0, this.#pendingBytes - chunks.reduce((sum, chunk) => sum + byteLength(chunk.text), 0))
+      this.#pendingChunks -= chunks.length
+      this.#pendingBytes -= chunks.reduce((sum, chunk) => sum + byteLength(chunk.text), 0)
       const batch = this.#failedPersistentRuns.has(runId)
         ? [{ runId, at: Date.now(), kind: 'truncated' as const, text: 'output incomplete (durable capture was temporarily unavailable)' }, ...chunks]
         : chunks

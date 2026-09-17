@@ -1,12 +1,19 @@
-import { appendFileSync, chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, fsyncSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RunOutputFileStore } from './run-output-file'
 import { RunOutputLog } from './run-output-log'
 
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>()
+  return { ...fs, fsyncSync: vi.fn(fs.fsyncSync), writeSync: vi.fn(fs.writeSync) }
+})
+const realFs = await vi.importActual<typeof import('node:fs')>('node:fs')
 const roots: string[] = []
 afterEach(() => {
+  vi.mocked(fsyncSync).mockReset().mockImplementation(realFs.fsyncSync)
+  vi.mocked(writeSync).mockReset().mockImplementation(realFs.writeSync)
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
@@ -85,6 +92,81 @@ describe('RunOutputFileStore', () => {
     const reopened = new RunOutputFileStore(dir)
     expect(() => reopened.since('run-pair', 0)).toThrow('pair_incomplete')
     reopened.close()
+  })
+
+  it.each(['idx', 'jsonl'])('does not recreate a missing %s or mutate the surviving file on append', (extension) => {
+    const dir = directory()
+    const store = new RunOutputFileStore(dir)
+    try {
+      store.append({ runId: 'missing-index', at: 1, kind: 'output', text: 'irreplaceable' })
+      const survivor = join(dir, readdirSync(dir).find((name) => name.endsWith(extension === 'idx' ? '.jsonl' : '.idx'))!)
+      const original = readFileSync(survivor)
+      rmSync(join(dir, readdirSync(dir).find((name) => name.endsWith(`.${extension}`))!))
+      const files = readdirSync(dir)
+      expect(() => store.append({ runId: 'missing-index', at: 2, kind: 'output', text: 'new' })).toThrow('pair_incomplete')
+      expect(readFileSync(survivor)).toEqual(original)
+      expect(readdirSync(dir)).toEqual(files)
+    } finally { store.close() }
+  })
+
+  it.each([0, 1, 999_999])('rejects invalid indexed length %i instead of returning a caught-up page', (offset) => {
+    const dir = directory()
+    const store = new RunOutputFileStore(dir)
+    try {
+      store.append({ runId: 'bad-offset', at: 1, kind: 'output', text: 'kept' })
+      const index = join(dir, readdirSync(dir).find((name) => name.endsWith('.idx'))!)
+      const corrupt = Buffer.alloc(8)
+      corrupt.writeBigUInt64BE(BigInt(offset))
+      writeFileSync(index, corrupt)
+      const data = join(dir, readdirSync(dir).find((name) => name.endsWith('.jsonl'))!)
+      const original = readFileSync(data)
+      expect(() => store.since('bad-offset', 0)).toThrow()
+      expect(() => store.since('bad-offset', 1)).toThrow()
+      expect(() => store.append({ runId: 'bad-offset', at: 2, kind: 'output', text: 'new' })).toThrow()
+      expect(readFileSync(data)).toEqual(original)
+      expect(readFileSync(index)).toEqual(corrupt)
+    } finally { store.close() }
+  })
+
+  it('round trips maximally JSON-escaped chunks without capture failure', () => {
+    const dir = directory()
+    const store = new RunOutputFileStore(dir)
+    try {
+      const log = new RunOutputLog({ store })
+      const text = '\u0000'.repeat(16 * 1024)
+      log.append('escaped', { kind: 'output', text })
+      log.flush('escaped')
+      expect(all(log, 'escaped')).toBe(text)
+    } finally { store.close() }
+  })
+
+  it.each(['data-fsync', 'index-fsync', 'partial-index'] as const)('does not retry uncertain bodies after %s failure and preserves a gap', (failure) => {
+    const dir = directory()
+    const store = new RunOutputFileStore(dir)
+    try {
+      const log = new RunOutputLog({ store })
+      if (failure === 'partial-index') {
+        vi.mocked(writeSync).mockImplementationOnce(realFs.writeSync).mockImplementationOnce((fd, buffer) => {
+          // The first index commit tears after three bytes. The data was already fsynced.
+          if (typeof buffer === 'string') throw new Error('unexpected_string_write')
+          realFs.writeSync(fd, buffer, 0, 3, 0)
+          throw new Error('injected_storage_failure')
+        })
+      } else {
+        if (failure === 'index-fsync') vi.mocked(fsyncSync).mockImplementationOnce(realFs.fsyncSync)
+        vi.mocked(fsyncSync).mockImplementationOnce(() => { throw new Error('injected_storage_failure') })
+      }
+      log.append('failure', { kind: 'output', text: 'uncertain-body' })
+      expect(() => log.flush('failure')).toThrow('injected_storage_failure')
+      log.append('failure', { kind: 'output', text: 'after-recovery' })
+      log.flush('failure')
+      const page = log.since('failure', 0)
+      // A failed index fsync may already have committed the body; never write it a second time.
+      expect(page.chunks.filter((chunk) => chunk.text === 'uncertain-body')).toHaveLength(failure === 'index-fsync' ? 1 : 0)
+      expect(page.chunks.slice(-2).map((chunk) => chunk.kind)).toEqual(['truncated', 'output'])
+      expect(page.chunks.at(-1)?.text).toBe('after-recovery')
+      expect(page.chunks.map((chunk) => chunk.seq)).toEqual(page.chunks.map((_, index) => index + 1))
+    } finally { store.close() }
   })
 
   it('fails closed on an index that points beyond durable data', () => {
