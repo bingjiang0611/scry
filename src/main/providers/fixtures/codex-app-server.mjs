@@ -4,6 +4,7 @@ import { closeSync, existsSync, writeFileSync } from 'node:fs'
 const input = readline.createInterface({ input: process.stdin })
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`)
 let pendingServerRequest
+let pendingRequest
 const mode = process.argv[2]
 const marker = process.argv[3]
 
@@ -23,6 +24,14 @@ input.on('line', (line) => {
       return
     }
     send({ id: message.id, result: { userAgent: 'codex-test/1', codexHome: '/tmp/codex', platformFamily: 'unix', platformOs: 'macos' } })
+  } else if (message.params?.defer) {
+    pendingRequest = message
+    send({ method: 'test/requestReceived', params: { method: message.method } })
+  } else if (message.method === 'test/release') {
+    send({ id: pendingRequest.id, result: { turn: { id: 'turn-1' }, late: true } })
+    pendingRequest = undefined
+    send({ id: message.id, result: {} })
+    send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
   } else if (message.method === 'skills/list') {
     send({ id: message.id, result: { data: [{ cwd: '/repo', skills: [], errors: [] }] } })
   } else if (message.method === 'thread/start') {

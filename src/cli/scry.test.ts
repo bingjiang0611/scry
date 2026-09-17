@@ -432,9 +432,9 @@ describe('scry doctor schema and exit codes', () => {
     expect(report.status).toBe('healthy')
   })
 
-  it('过期未收敛的 open 轮次报 degraded 退出 5，并指向 recover', async () => {
+  it('静默 open 轮次报诊断警告，但不引导用户伪造中断', async () => {
     const root = await workspace()
-    // 三天前开始、没有 transcript：不可能再收敛。
+    // 三天前开始、没有 transcript：终态仍未知。
     await handleRecorderHook({
       provider: 'claude',
       event: 'UserPromptSubmit',
@@ -451,7 +451,8 @@ describe('scry doctor schema and exit codes', () => {
     expect(report).toMatchObject({ status: 'degraded', healthy: false })
     const stale = report.checks.find((check: any) => check.id === 'turns.stale')
     expect(stale.status).toBe('warn')
-    expect(stale.remediation).toContain('scry recorder recover')
+    expect(stale.remediation).toContain('terminal evidence')
+    expect(stale.detail).toContain('termination unconfirmed')
     expect(report.staleOpenTurns).toMatchObject([{ provider: 'claude', sessionId: 'stale-1' }])
     // pendingCount 只统计 managed/closing/quarantined，孤儿轮次不在其中，所以必须单独报。
     expect(report.health.pendingCount).toBe(0)

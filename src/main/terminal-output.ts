@@ -5,7 +5,8 @@ export interface TerminalOutputBridgeOptions {
   canSend(): boolean
   sendData(events: TerminalDataEvent[]): void
   sendExit(event: TerminalExitEvent): void
-  closeTerminal(id: string): void
+  pauseTerminal(id: string): void
+  resumeTerminal(id: string): void
   flushBytes?: number
   highWaterBytes?: number
   maxBufferBytes?: number
@@ -19,7 +20,7 @@ interface TerminalOutputState {
   bufferedBytes: number
   inFlightBytes: number
   trailingHighSurrogate: boolean
-  closedForOverflow: boolean
+  paused: boolean
   pendingExit?: TerminalExitEvent
   timer?: ReturnType<typeof setTimeout>
 }
@@ -80,20 +81,16 @@ export class TerminalOutputBridge {
 
   data(event: TerminalDataEvent): void {
     const state = this.state(event.id)
-    if (state.closedForOverflow) return
     state.bufferedBytes += appendedUtf8Bytes(state.trailingHighSurrogate, event.data)
     state.buffer += event.data
     if (event.data.length > 0) state.trailingHighSurrogate = isHighSurrogate(event.data.charCodeAt(event.data.length - 1))
-    if (state.bufferedBytes + state.inFlightBytes > this.maxBufferBytes) {
-      if (state.timer) clearTimeout(state.timer)
-      state.timer = undefined
-      state.buffer = ''
-      state.bufferedBytes = 0
-      state.trailingHighSurrogate = false
-      state.closedForOverflow = true
-      this.options.closeTerminal(event.id)
-      this.options.warn?.('terminal closed after output backlog exceeded safety limit', event.id)
-      return
+    if (!state.paused && state.bufferedBytes + state.inFlightBytes >= this.maxBufferBytes) {
+      // Pause PTY reads, not the process. The current native chunk is retained intact; the
+      // high-water threshold may be exceeded by that chunk. Kernel pipe backpressure bounds
+      // further output until the renderer catches up, without discarding output or killing work.
+      state.paused = true
+      this.options.pauseTerminal(event.id)
+      this.options.warn?.('terminal output paused pending renderer acknowledgement', event.id)
     }
     if (state.bufferedBytes >= this.flushBytes) this.flush(event.id)
     else if (!state.timer) state.timer = setTimeout(() => this.flush(event.id), this.flushMs)
@@ -115,6 +112,10 @@ export class TerminalOutputBridge {
     if (!state) return
     state.inFlightBytes = Math.max(0, state.inFlightBytes - bytes)
     this.flush(id)
+    if (state.paused && state.bufferedBytes + state.inFlightBytes <= this.maxBufferBytes / 2) {
+      state.paused = false
+      this.options.resumeTerminal(id)
+    }
     this.finishIfDrained(id, state)
   }
 
@@ -126,13 +127,14 @@ export class TerminalOutputBridge {
     for (const id of [...this.states.keys()]) this.closeState(id)
   }
 
-  snapshot(id: string): { bufferedBytes: number; inFlightBytes: number; ready: boolean; pendingExit: boolean } {
+  snapshot(id: string): { bufferedBytes: number; inFlightBytes: number; ready: boolean; pendingExit: boolean; paused: boolean } {
     const state = this.states.get(id)
     return {
       bufferedBytes: state?.bufferedBytes ?? 0,
       inFlightBytes: state?.inFlightBytes ?? 0,
       ready: state?.ready ?? false,
-      pendingExit: state?.pendingExit != null
+      pendingExit: state?.pendingExit != null,
+      paused: state?.paused ?? false
     }
   }
 
@@ -145,7 +147,7 @@ export class TerminalOutputBridge {
         bufferedBytes: 0,
         inFlightBytes: 0,
         trailingHighSurrogate: false,
-        closedForOverflow: false
+        paused: false
       }
       this.states.set(id, state)
     }
@@ -172,7 +174,7 @@ export class TerminalOutputBridge {
   private finishIfDrained(id: string, state: TerminalOutputState): void {
     if (
       !state.pendingExit || state.bufferedBytes > 0 ||
-      (state.inFlightBytes > 0 && !state.closedForOverflow) ||
+      state.inFlightBytes > 0 ||
       !state.ready || !this.options.canSend()
     ) return
     const event = state.pendingExit

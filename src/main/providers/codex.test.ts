@@ -996,6 +996,39 @@ describe('Codex provider adapter', () => {
     expect(appServer.request).not.toHaveBeenCalledWith('turn/start', expect.anything())
   })
 
+  it('keeps the run owned when stop arrives before a delayed turn/start acknowledgement', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    let acknowledge!: (value: unknown) => void
+    const started = new Promise((resolve) => { acknowledge = resolve })
+    const unsubscribe = vi.fn()
+    appServer.onNotification.mockImplementation((listener) => { notify = listener; return unsubscribe })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-delayed' } }
+      if (method === 'turn/start') return started
+      if (method === 'turn/interrupt') return {}
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({
+      runId: 'run-delayed', prompt: 'inspect', cwd: '/repo', attachments: [], emit: () => {}
+    })
+    const settled = vi.fn()
+    void handle.promise.then(settled)
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    handle.interrupt()
+    acknowledge({ turn: { id: 'turn-delayed' } })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/interrupt', {
+      threadId: 'thread-delayed', turnId: 'turn-delayed'
+    }))
+    expect(settled).not.toHaveBeenCalled()
+    expect(unsubscribe).not.toHaveBeenCalled()
+    notify?.('turn/completed', {
+      threadId: 'thread-delayed', turn: { id: 'turn-delayed', status: 'interrupted' }
+    })
+    await expect(handle.promise).resolves.toMatchObject({ status: 'interrupted', providerTurnId: 'turn-delayed' })
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
   it('uses the authoritative native completion when interrupt races with turn/completed', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     appServer.onNotification.mockImplementation((listener) => {

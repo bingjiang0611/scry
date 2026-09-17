@@ -35,7 +35,6 @@ import {
   recorderPendingHealth,
   recorderSessionLock as sessionLock,
   recorderSessionRoot as sessionRoot,
-  recorderStaleOpenTurns,
   recorderStatePath as statePath,
   recorderTurnRoot as turnRoot,
   type RecorderOpenTurnState as OpenTurnState,
@@ -124,8 +123,8 @@ const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'])
 const STALE_TERMINAL_WINDOW_MS = 30_000
 const DEFERRED_TERMINAL_GRACE_MS = 180_000
 /**
- * After this long with no terminal event and no transcript growth, an open turn is treated as
- * interrupted rather than left to block recovery, `doctor` and daemon shutdown forever.
+ * Staleness diagnostic for open turns, and finalization grace for already-terminal closing turns.
+ * Silence alone never proves an open Agent turn has ended; doctor warns without fabricating a stop.
  */
 export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000
 const TRANSCRIPT_REWIND_BYTES = 4 * 1024 * 1024
@@ -2748,9 +2747,6 @@ export async function recoverRecorder(
   const enablement = await resolveRecorderEnablement(workspace, env)
   if (!enablement.enabled) return { recovered: 0, pending: 0, expired: 0 }
   const expiryMs = OPEN_TURN_EXPIRY_MS
-  const stale = new Set(
-    (await recorderStaleOpenTurns(enablement.dataRoot, expiryMs)).map((turn) => `${turn.provider}:${turn.sessionId}`)
-  )
   let recovered = 0
   let pending = 0
   let expired = 0
@@ -2758,8 +2754,7 @@ export async function recoverRecorder(
   for (const item of await runtimeSessions(enablement.dataRoot)) {
     const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
     if (!initial) continue
-    // Membership in `stale` only means the turn was a candidate; a candidate can still converge
-    // through a real terminal status, and that must not be reported as a forced expiry.
+    // Expiry can degrade evidence only after a real terminal boundary, never create that boundary.
     let forcedExpiry = false
     const result = await withDirectoryLock(
       sessionLock(enablement.dataRoot, item.provider, initial.sessionId),
@@ -2775,17 +2770,7 @@ export async function recoverRecorder(
         // nothing has been failing to finalize, so it must not be reported as an expiry.
         const wasAlreadyClosing = open.status === 'closing'
         if (open.status === 'open') {
-          if (!open.transcriptPath) {
-            if (!stale.has(`${open.provider}:${open.sessionId}`)) return { status: 'idle' as const }
-            forcedExpiry = true
-            return finalizeOpenTurn(
-              enablement,
-              open,
-              { timestamp: new Date().toISOString() },
-              'interrupted',
-              { allowUnstableTranscript: true, forcedReason: OPEN_TURN_EXPIRED_REASON }
-            )
-          }
+          if (!open.transcriptPath) return { status: 'idle' as const }
           const transcript = await stableTranscript(
             open.transcriptPath,
             `${open.provider}:${open.sessionId}:${open.generation}`,
@@ -2795,17 +2780,9 @@ export async function recoverRecorder(
             open.transcriptStartOffset
           )
           if (!transcript.terminalStatus || !transcript.completedAt || transcript.identityMatched === false) {
-            // Nothing terminal will arrive for an expired turn; leaving it open loses the turn
-            // outright and keeps the daemon alive forever, so close it and say so in the record.
-            if (!stale.has(`${open.provider}:${open.sessionId}`)) return { status: 'idle' as const }
-            forcedExpiry = true
-            return finalizeOpenTurn(
-              enablement,
-              open,
-              { timestamp: new Date().toISOString() },
-              'interrupted',
-              { allowUnstableTranscript: true, forcedReason: OPEN_TURN_EXPIRED_REASON }
-            )
+            // A long tool, approval wait or silent Provider can still be running. Keep its
+            // identity and diff baseline until real terminal evidence arrives.
+            return { status: 'idle' as const }
           }
           open.status = 'closing'
           open.closingAt = transcript.completedAt
@@ -2897,9 +2874,6 @@ async function closingTurnStalled(path: string, expiryMs: number, now = Date.now
   if (!Number.isFinite(touchedAt)) return false
   return now - touchedAt >= expiryMs
 }
-
-export const OPEN_TURN_EXPIRED_REASON =
-  'turn never received a terminal event and its transcript stopped changing before the expiry window'
 
 export async function recorderEnablement(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<RecorderEnablement> {
   return resolveRecorderEnablement(workspace, env)

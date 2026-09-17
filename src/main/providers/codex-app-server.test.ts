@@ -2,15 +2,17 @@ import { fileURLToPath } from 'node:url'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CodexAppServerClient } from './codex-app-server'
 
 function manualRequestTimeouts(): {
   schedule: (run: () => void, delayMs: number) => () => void
+  activeCount: () => number
   fireNext: () => Promise<void>
 } {
   const tasks: Array<{ active: boolean; run: () => void }> = []
   return {
+    activeCount: () => tasks.filter((task) => task.active).length,
     schedule: (run) => {
       const task = { active: true, run }
       tasks.push(task)
@@ -77,56 +79,79 @@ describe('CodexAppServerClient', () => {
     }
   })
 
-  it('terminates a timed-out generation before starting a clean child', async () => {
+  it('times out one query without killing the shared process or its active turn', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
     const timeouts = manualRequestTimeouts()
     const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], scheduleRequestTimeout: timeouts.schedule })
     try {
       await client.start()
       const firstPid = client.pid
-      const hanging = client.request('test/hang')
+      const failure = vi.fn()
+      void client.failureForCurrentGeneration().then(failure)
+      await client.request('turn/start', { threadId: 'thread-1', hangCompletion: true })
+      const received = new Promise<void>((resolve) => client.onNotification((method) => {
+        if (method === 'test/requestReceived') resolve()
+      }))
+      const completed = new Promise<void>((resolve) => client.onNotification((method) => {
+        if (method === 'turn/completed') resolve()
+      }))
+      const hanging = client.request('account/read', { defer: true })
+      const rejected = expect(hanging).rejects.toThrow('response_unconfirmed')
+      await received
       await timeouts.fireNext()
-      await expect(hanging).rejects.toThrow('timed out')
+      await rejected
+      // A late response must not poison the next request or disconnect native notifications.
+      await client.request('test/release')
+      await completed
+      expect(failure).not.toHaveBeenCalled()
       await expect(client.request('skills/list', { cwds: ['/repo'] })).resolves.toMatchObject({
         data: [{ cwd: '/repo' }]
       })
       expect(client.pid).toBeTypeOf('number')
-      expect(client.pid).not.toBe(firstPid)
+      expect(client.pid).toBe(firstPid)
     } finally {
-      client.close()
+      await client.shutdown()
     }
   })
 
-  it('signals a completed turn waiter when another request kills its generation', async () => {
+  it.each(['thread/start', 'thread/resume', 'thread/fork', 'turn/start'])(
+    'retains ownership of delayed %s without an execution deadline', async (method) => {
+      const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
+      const timeouts = manualRequestTimeouts()
+      const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], scheduleRequestTimeout: timeouts.schedule })
+      try {
+        await client.start()
+        const received = new Promise<void>((resolve) => client.onNotification((name) => {
+          if (name === 'test/requestReceived') resolve()
+        }))
+        const request = client.request(method, { defer: true })
+        await received
+        expect(timeouts.activeCount()).toBe(0)
+        await client.request('test/release')
+        await expect(request).resolves.toMatchObject({ late: true })
+      } finally {
+        await client.shutdown()
+      }
+    }
+  )
+
+  it('rejects pending execution and generation waiters on explicit shutdown', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
-    const timeouts = manualRequestTimeouts()
-    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], scheduleRequestTimeout: timeouts.schedule })
+    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture] })
     try {
       await client.start()
       const failure = client.failureForCurrentGeneration()
-      await client.request('turn/start', { threadId: 'thread-1', input: [], hangCompletion: true })
-      const timeout = client.request('test/hang')
-      const timeoutExpectation = expect(timeout).rejects.toThrow('timed out')
-      await timeouts.fireNext()
-
-      await expect(failure).resolves.toMatchObject({ message: expect.stringContaining('timed out') })
-      await timeoutExpectation
+      const received = new Promise<void>((resolve) => client.onNotification((method) => {
+        if (method === 'test/requestReceived') resolve()
+      }))
+      const request = client.request('turn/start', { defer: true })
+      const rejected = expect(request).rejects.toThrow('closed')
+      await received
+      await client.shutdown()
+      await rejected
+      await expect(failure).resolves.toMatchObject({ message: expect.stringContaining('closed') })
     } finally {
-      client.close()
-    }
-  })
-
-  it('marks turn/start timeout termination as unconfirmed at the failure boundary', async () => {
-    const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
-    const timeouts = manualRequestTimeouts()
-    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], scheduleRequestTimeout: timeouts.schedule })
-    try {
-      await client.start()
-      const request = client.request('turn/start', { hang: true })
-      await timeouts.fireNext()
-      await expect(request).rejects.toThrow('termination_unconfirmed')
-    } finally {
-      client.close()
+      await client.shutdown()
     }
   })
 

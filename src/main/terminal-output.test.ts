@@ -8,7 +8,8 @@ describe('TerminalOutputBridge', () => {
       canSend: () => true,
       sendData: (events) => batches.push(events[0].data),
       sendExit: vi.fn(),
-      closeTerminal: vi.fn(),
+      pauseTerminal: vi.fn(),
+      resumeTerminal: vi.fn(),
       flushBytes: 10
     })
     bridge.data({ id: 't', data: 'prompt' })
@@ -25,7 +26,8 @@ describe('TerminalOutputBridge', () => {
       canSend: () => true,
       sendData: vi.fn(),
       sendExit: (event) => exits.push(event.id),
-      closeTerminal: vi.fn()
+      pauseTerminal: vi.fn(),
+      resumeTerminal: vi.fn()
     })
     bridge.started('t')
     bridge.exit({ id: 't', code: 1, signal: null })
@@ -40,7 +42,8 @@ describe('TerminalOutputBridge', () => {
       canSend: () => true,
       sendData: (events) => calls.push(`data:${events[0].data}`),
       sendExit: () => calls.push('exit'),
-      closeTerminal: vi.fn(),
+      pauseTerminal: vi.fn(),
+      resumeTerminal: vi.fn(),
       flushBytes: 3,
       highWaterBytes: 3,
       maxBufferBytes: 20
@@ -62,7 +65,8 @@ describe('TerminalOutputBridge', () => {
       canSend: () => true,
       sendData: (events) => bytes.push(Buffer.byteLength(events[0].data)),
       sendExit: vi.fn(),
-      closeTerminal: vi.fn(),
+      pauseTerminal: vi.fn(),
+      resumeTerminal: vi.fn(),
       flushBytes: 4,
       highWaterBytes: 5,
       maxBufferBytes: 20
@@ -83,7 +87,8 @@ describe('TerminalOutputBridge', () => {
       canSend: () => true,
       sendData: (events) => calls.push(events[0].data),
       sendExit: () => calls.push('exit'),
-      closeTerminal: vi.fn(),
+      pauseTerminal: vi.fn(),
+      resumeTerminal: vi.fn(),
       flushBytes: 8,
       highWaterBytes: 8
     })
@@ -103,7 +108,8 @@ describe('TerminalOutputBridge', () => {
       canSend: () => true,
       sendData: (events) => calls.push(events[0].data),
       sendExit: vi.fn(),
-      closeTerminal: vi.fn(),
+      pauseTerminal: vi.fn(),
+      resumeTerminal: vi.fn(),
       flushBytes: 5,
       highWaterBytes: 5
     })
@@ -122,7 +128,8 @@ describe('TerminalOutputBridge', () => {
       canSend: () => true,
       sendData: (events) => calls.push(events[0].data),
       sendExit: vi.fn(),
-      closeTerminal: vi.fn(),
+      pauseTerminal: vi.fn(),
+      resumeTerminal: vi.fn(),
       flushBytes: 4,
       highWaterBytes: 4,
       maxBufferBytes: 32
@@ -140,24 +147,34 @@ describe('TerminalOutputBridge', () => {
     bridge.close()
   })
 
-  it('closes only the noisy terminal without hiding its eventual exit', () => {
-    const closeTerminal = vi.fn()
+  it('pauses only the noisy PTY and delivers every byte before its natural exit', () => {
+    const pauseTerminal = vi.fn()
+    const resumeTerminal = vi.fn()
     const sendExit = vi.fn()
+    const output: string[] = []
     const bridge = new TerminalOutputBridge({
       canSend: () => true,
-      sendData: vi.fn(),
-      sendExit,
-      closeTerminal,
-      flushBytes: 100,
-      highWaterBytes: 3,
-      maxBufferBytes: 5
+      sendData: (events) => output.push(events[0].data),
+      sendExit, pauseTerminal, resumeTerminal,
+      flushBytes: 100, highWaterBytes: 3, maxBufferBytes: 5
     })
     bridge.data({ id: 'noisy', data: '123456' })
-    expect(closeTerminal).toHaveBeenCalledWith('noisy')
-    expect(bridge.snapshot('noisy').bufferedBytes).toBe(0)
+    expect(pauseTerminal).toHaveBeenCalledExactlyOnceWith('noisy')
+    expect(bridge.snapshot('noisy')).toMatchObject({ bufferedBytes: 6, paused: true })
+    bridge.ready('other')
+    bridge.data({ id: 'other', data: 'ok' })
+    bridge.exit({ id: 'other', code: 0, signal: null })
+    expect(output).toEqual(['ok'])
+    bridge.ack('other', 2)
     bridge.ready('noisy')
-    bridge.exit({ id: 'noisy', code: null, signal: 9 })
-    expect(sendExit).toHaveBeenCalledWith({ id: 'noisy', code: null, signal: 9 })
+    bridge.exit({ id: 'noisy', code: 0, signal: null })
+    bridge.ack('noisy', 3)
+    expect(resumeTerminal).not.toHaveBeenCalled()
+    expect(sendExit).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'noisy' }))
+    bridge.ack('noisy', 3)
+    expect(resumeTerminal).toHaveBeenCalledExactlyOnceWith('noisy')
+    expect(output).toEqual(['ok', '123', '456'])
+    expect(sendExit).toHaveBeenCalledWith({ id: 'noisy', code: 0, signal: null })
     expect(() => bridge.ack('other', -1)).toThrow('无效')
     bridge.close()
   })
