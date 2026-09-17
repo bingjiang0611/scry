@@ -24,6 +24,10 @@ Implemented:
   snapshot; malformed/conflicting identity still fails closed. Capability probes remain bounded.
   Explicit abort/force-stop and transport failures still release waiters. Fork/clone mutations
   also wait for the native response rather than automatically closing an uncertain operation.
+- OpenCode stop no longer aborts the local long-running fetch and immediately fabricates an
+  interrupted result. Accepted requests stay owned until the native prompt returns, native abort is
+  confirmed, explicit shared-transport force-kill occurs or the transport fails. A completion that
+  races with stop remains completed; a native abort remains interrupted.
 - Terminal output pressure pauses node-pty reads instead of closing the terminal or discarding
   the received buffer. Renderer ACK drains the queue and resumes reads below the low-water mark.
 - Recorder recovery no longer turns a silent open turn into an interrupted record after 24h,
@@ -41,9 +45,8 @@ Boundaries, not claims of complete native parity:
 - Native requests may remain pending indefinitely without a reply. Retain ownership and stop
   controls; do not auto-retry or silently admit a conflicting run. Codex shared-process hard kill
   is still not a safe per-run operation.
-- Pi metadata/control query deadlines and OpenCode health startup deadlines have not all been
-  removed. OpenCode cancellation/startup ownership must be addressed with its actual shared-server
-  lifecycle, not by deleting its health check.
+- Pi metadata/control query deadlines remain. OpenCode startup health checks are still bounded
+  before a run is accepted; deleting that probe would not improve native execution ownership.
 - Already-terminal Recorder `closing` states still have the existing evidence finalization grace.
   This batch removes fabricated open-turn endings, not every evidence truncation policy.
 
@@ -60,8 +63,11 @@ Verification on the working tree:
 - Pi silence/startup regressions use a real JSONL fixture subprocess and virtual parent timers;
   they are not a 31-minute external Provider acceptance test. Terminal overload is covered by
   deterministic bridge/manager tests; packaged smoke covers native PTY wiring, not sustained overload.
-- Existing unrelated working-tree changes remain outside this batch's commit. Passing these gates
-  does not certify those changes or a separately installed Scry version.
+- A later staged-only lifecycle snapshot including the OpenCode stop fix passed `npm test`
+  (164 files passed, 3 skipped; 2075 tests passed, 3 skipped), typecheck, Electron/CLI builds and
+  `check:cli-release` (535 tests plus package smoke).
+- Existing unrelated working-tree changes remain outside these commits. Passing these gates does
+  not certify those changes or a separately installed Scry version.
 
 ## Batch 2a: durable Recorder tool bodies (2026-09-17)
 
@@ -108,7 +114,8 @@ Verification for this batch on a snapshot reconstructed from the Git index:
 
 ### 1. Finish native lifecycle parity
 
-- Separate OpenCode startup waiting/cancellation from bounded capability health probes.
+- Audit OpenCode stop-before-session and native abort-failure behavior against real server versions;
+  keep bounded pre-acceptance health probes separate from accepted execution ownership.
 - Audit remaining Pi metadata waits and Codex stop-before-identity/late-response behavior against
   real native contracts. Preserve unknown outcomes and safe process scope.
 

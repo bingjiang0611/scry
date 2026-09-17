@@ -41,7 +41,7 @@ import {
   type OpenCodeServerState
 } from './opencode-server'
 import { effortOption, permissionOptions } from './run-controls'
-import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
+import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 import { completedOpenCodeTurnBoundary } from './session-fork-boundary'
@@ -1201,6 +1201,8 @@ export function createOpenCodeAdapter(
       let providerTurnId: string | undefined
       let recordingFailure: { message: string } | undefined
       let stopped = false
+      let forceKilled = false
+      let stopConfirmation: Promise<boolean> | undefined
       let client: OpencodeClient | undefined
       const permissionController = new AbortController()
       const requestController = new AbortController()
@@ -1208,7 +1210,7 @@ export function createOpenCodeAdapter(
       const context: ProviderContext = { providerId: 'opencode', cwd: request.cwd, externalSessionId }
       const manager = request.cwd ? managerFor(request.cwd) : undefined
       if (manager) managerActivity.set(manager, (managerActivity.get(manager) ?? 0) + 1)
-      const promise = (async () => {
+      const promise: Promise<ProviderRunResult> = (async () => {
         try {
           if (!request.cwd) throw new Error('OpenCode 需要工作目录')
           const server = await serverFor(context, request.mcpExecution, request.openCodePluginTrust)
@@ -1225,7 +1227,7 @@ export function createOpenCodeAdapter(
                 })
               ])
             : Promise.resolve(new Map<string, number>())
-          if (stopped) return { externalSessionId, providerTurnId, stopped }
+          if (stopped) return { externalSessionId, providerTurnId, stopped, status: 'interrupted' }
           const permission = openCodePermissionRules(request.permissionMode)
           const model = request.model
             ? {
@@ -1250,7 +1252,7 @@ export function createOpenCodeAdapter(
           }
           if (stopped) {
             await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
-            return { externalSessionId, providerTurnId, stopped }
+            return { externalSessionId, providerTurnId, stopped, status: 'interrupted' }
           }
           if (request.managedRecorder) {
             if (!request.cwd || !request.managedRecorderIdentity) {
@@ -1299,6 +1301,11 @@ export function createOpenCodeAdapter(
               if (!stopped && !eventController.signal.aborted) observationError = error
             }
           })()
+          if (stopped) {
+            eventController.abort()
+            await events
+            return { externalSessionId, providerTurnId, stopped, status: 'interrupted' }
+          }
           const slash = request.prompt.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
           let response: { info: Record<string, unknown>; parts: unknown[] }
           let responseError: unknown
@@ -1412,6 +1419,8 @@ export function createOpenCodeAdapter(
           const sourceProvider = billingProviderForUpstream(upstream)
           const cost = aggregateUnavailable ? undefined : aggregate.costUsd
           const providerStopReason = typeof info.finish === 'string' && info.finish.trim() ? info.finish.trim() : undefined
+          const nativeInterrupted = /^(?:abort|cancelled?|interrupted)$/.test((providerStopReason ?? '').toLowerCase())
+          const nativeStatus = nativeInterrupted ? 'interrupted' : info.error ? 'failed' : 'completed'
           const terminationReason = classifyRunTermination({
             rawReason: providerStopReason,
             message: info.error ? errorText(info.error) : undefined
@@ -1462,15 +1471,23 @@ export function createOpenCodeAdapter(
               })
             }
           }, timing?.ts))
-          if (info.error && !stopped) throw new Error(`OpenCode Provider 失败：${errorText(info.error)}`)
+          if (info.error && !nativeInterrupted) throw new Error(`OpenCode Provider 失败：${errorText(info.error)}`)
           lastOkAt = Date.now()
           lastError = undefined
-          return { externalSessionId, providerTurnId, stopped, recordingFailure }
+          return {
+            externalSessionId,
+            providerTurnId,
+            stopped: nativeInterrupted,
+            status: nativeStatus,
+            recordingFailure
+          }
         } catch (error) {
           permissionController.abort()
           requestController.abort()
           eventController.abort()
-          if (stopped) return { externalSessionId, providerTurnId, stopped }
+          if (stopped && (forceKilled || await stopConfirmation)) {
+            return { externalSessionId, providerTurnId, stopped, status: 'interrupted' }
+          }
           if (client && externalSessionId) {
             await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
           }
@@ -1489,14 +1506,27 @@ export function createOpenCodeAdapter(
       const interrupt = (): void => {
         stopped = true
         permissionController.abort()
-        requestController.abort()
-        eventController.abort()
-        if (client && externalSessionId) void client.session.abort({ sessionID: externalSessionId, directory: request.cwd })
+        // Keep the accepted request owned until OpenCode answers or its shared transport fails.
+        // Aborting only the local fetch erases the native outcome and can report interruption while
+        // the Agent is still running (or has already completed).
+        if (client && externalSessionId && !stopConfirmation) {
+          stopConfirmation = unwrap<boolean>(
+            client.session.abort({ sessionID: externalSessionId, directory: request.cwd }),
+            'session.abort'
+          ).then((confirmed) => confirmed === true, () => false)
+        }
       }
       return {
         promise,
         interrupt,
-        forceKill: () => manager?.forceClose(),
+        forceKill: () => {
+          forceKilled = true
+          stopped = true
+          permissionController.abort()
+          requestController.abort()
+          eventController.abort()
+          manager?.forceClose()
+        },
         // OpenCode server 按 cwd 复用（managerActivity 计数）：forceClose() 会终止整个
         // server 及其上其他并发 run。
         forceKillScope: 'shared_transport',
