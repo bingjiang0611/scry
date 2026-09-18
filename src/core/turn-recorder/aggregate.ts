@@ -221,14 +221,26 @@ export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
     const deltas = kind === 'text'
       ? run.filter((event) => event.stage === 'text_delta').map((event) => event.text ?? '').join('')
       : ''
-    const authoritativeText = kind === 'text'
+    const authoritativeEvent = kind === 'text'
       ? [...run].reverse().find((event) =>
           event.stage === 'text' && event.runtimeMetadata?.replacesStreamedText === true
-        )?.text
+        )
       : undefined
-    const text = kind === 'thinking'
-      ? run.map((event) => event.thinking ?? '').join('')
-      : authoritativeText ?? run.map((event) => event.stage === 'text' && deltas && event.text === deltas ? '' : event.text ?? '').join('')
+    const bodyEvents = kind === 'thinking'
+      ? run.filter((event) => !!event.thinking)
+      : authoritativeEvent
+        ? [authoritativeEvent]
+        : run.filter((event) => !(event.stage === 'text' && deltas && event.text === deltas) && !!event.text)
+    const fullText = kind === 'thinking'
+      ? bodyEvents.map((event) => event.thinking ?? '').join('')
+      : bodyEvents.map((event) => event.text ?? '').join('')
+    const contentRefs = bodyEvents
+      .map((event) => event.modelContent?.contentRef)
+      .filter((ref): ref is NonNullable<typeof ref> => !!ref)
+    const hasCompleteRefs = bodyEvents.length > 0 && contentRefs.length === bodyEvents.length
+    const text = hasCompleteRefs
+      ? captureToolContent(fullText, { source: 'model_segment_preview', maxBytes: 32 * 1024 }).content ?? ''
+      : fullText
     const providerItemId = typeof first.runtimeMetadata?.codexItemId === 'string'
       ? first.runtimeMetadata.codexItemId
       : undefined
@@ -237,6 +249,7 @@ export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
       at: first.ts,
       kind,
       text,
+      ...(hasCompleteRefs ? { contentRefs } : {}),
       ...(first.messageId ? { messageId: first.messageId } : {}),
       ...(providerItemId ? { providerItemId } : {}),
       ...(first.parentToolUseId ? { parentId: first.parentToolUseId } : {}),
@@ -524,7 +537,9 @@ export function aggregateTurnEvidence(args: {
     0
   )
   const modelSegments = modelSegmentsFrom(args.events)
-  const assistantText = modelSegments.filter((segment) => segment.kind === 'text').map((segment) => segment.text).join('')
+  const assistantSegments = modelSegments.filter((segment) => segment.kind === 'text')
+  const assistantText = assistantSegments.map((segment) => segment.text).join('')
+  const assistantContentRefs = assistantSegments.flatMap((segment) => segment.contentRefs ?? [])
   const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
   for (const event of args.events) {
     if (event.stage !== 'tool_result' && event.filePath && event.fileOp) fileMap.set(event.filePath, event.fileOp)
@@ -536,7 +551,7 @@ export function aggregateTurnEvidence(args: {
   })
   const capturedDiffs = diffs.filter((diff) => diff.status === 'captured')
   const incompletePatchReasons = new Set(diffs.flatMap((diff) => diff.files.flatMap((file) =>
-    file.patchStatus === 'truncated'
+    file.patchStatus === 'truncated' && !file.patchContent?.contentRef
       ? ['truncated']
       : file.patchStatus === 'unavailable'
         ? [file.patchReason ?? 'unknown']
@@ -577,8 +592,16 @@ export function aggregateTurnEvidence(args: {
       ? unavailable('provider does not expose assistant text to lifecycle hooks', [source])
       : assistantText
         ? assistantCaptureReason
-          ? partial({ text: assistantText, textHash: hash(assistantText) }, [source], assistantCaptureReason, 'exact')
-          : available({ text: assistantText, textHash: hash(assistantText) }, [source])
+          ? partial({
+              text: assistantText,
+              textHash: hash(assistantText),
+              ...(assistantContentRefs.length > 0 ? { contentRefs: assistantContentRefs } : {})
+            }, [source], assistantCaptureReason, 'exact')
+          : available({
+              text: assistantText,
+              textHash: hash(assistantText),
+              ...(assistantContentRefs.length > 0 ? { contentRefs: assistantContentRefs } : {})
+            }, [source])
         : partial({}, [source], assistantCaptureReason ?? 'assistant text was not present in captured events'),
     modelSegments: !observable.assistant
       ? unavailable('provider does not expose model output to lifecycle hooks', [source])

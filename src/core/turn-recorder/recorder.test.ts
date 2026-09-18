@@ -10,6 +10,7 @@ import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveStat
 import { inspectCommitHookBundle, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 import { syncDirectory } from './io'
+import { readRecorderContent } from './content-store'
 
 const roots: string[] = []
 const pexecFile = promisify(execFile)
@@ -182,6 +183,39 @@ describe('turn recorder state machine', () => {
     const afterCommit = await scan(join(root, '.scry'))
     expect(afterCommit).toContain('INPUT_SENTINEL')
     expect(afterCommit).toContain('OUTPUT_SENTINEL')
+  })
+
+  it('大 assistant 与 reasoning 保留有界预览和可分页完整正文引用', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'large-model-bodies.jsonl')
+    const assistant = `${'回答😀'.repeat(14_000)}ASSISTANT-END`
+    const reasoning = `${'思考🧠'.repeat(14_000)}REASONING-END`
+    const row = (type: string, value: Record<string, unknown>) => JSON.stringify({
+      timestamp: '2026-07-19T12:00:00.000Z', type, payload: value
+    })
+    await writeFile(rollout, `${[
+      row('event_msg', { type: 'task_started', turn_id: 'large-model-turn' }),
+      row('event_msg', { type: 'user_message', message: 'capture model bodies' }),
+      row('response_item', { type: 'reasoning', id: 'reasoning-1', summary: [{ type: 'summary_text', text: reasoning }] }),
+      row('response_item', { type: 'agent_message', id: 'assistant-1', message: assistant }),
+      row('event_msg', { type: 'task_complete', turn_id: 'large-model-turn' })
+    ].join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn.started', workspace: root,
+      payload: payload('large-model-session', { prompt: 'capture model bodies', turn_id: 'large-model-turn', rollout_path: rollout })
+    })
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn/completed', workspace: root,
+      payload: payload('large-model-session', { turn_id: 'large-model-turn', rollout_path: rollout })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    const segments = record.modelSegments?.value ?? []
+    expect(segments.map((segment) => segment.kind)).toEqual(['thinking', 'text'])
+    expect(segments.every((segment) => Buffer.byteLength(segment.text) <= 32 * 1024)).toBe(true)
+    expect(record.assistant.value?.contentRefs).toHaveLength(1)
+    await expect(readRecorderContent(join(root, '.scry'), segments[0].contentRefs![0])).resolves.toBe(reasoning)
+    await expect(readRecorderContent(join(root, '.scry'), segments[1].contentRefs![0])).resolves.toBe(assistant)
   })
 
   it.each(['0.2.27', '0.2.30', '0.2.34'])('reads legacy unavailable timing from %s without rewriting records or blocking a new session', async (recorderVersion) => {
@@ -392,6 +426,30 @@ describe('turn recorder state machine', () => {
       usage: { status: 'available', value: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 5 } },
       modelTiming: { status: 'available', value: { method: 'response_intervals', totalCalls: 1, timedCalls: 1 } }
     }])
+  })
+
+  it('不再丢弃 200 条之后的原生 model timing segments', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'pi', event: 'UserPromptSubmit', workspace: root,
+      payload: payload('pi-many-model-calls', { prompt: 'many calls', promptId: 'pi-many-turn' })
+    })
+    const modelSegments = Array.from({ length: 250 }, (_, index) => ({
+      response_id: `response-${index}`,
+      completed_at: new Date(Date.parse('2026-07-19T12:00:00.000Z') + index * 10).toISOString(),
+      duration_ms: 5
+    }))
+    await handleRecorderHook({
+      provider: 'pi', event: 'Stop', workspace: root,
+      payload: payload('pi-many-model-calls', {
+        promptId: 'pi-many-turn', assistant_response: 'done', model_segments: modelSegments,
+        timestamp: '2026-07-19T12:00:03.000Z'
+      })
+    })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.modelTiming?.value?.totalCalls).toBe(250)
+    expect(record.modelTiming?.value?.calls).toHaveLength(250)
+    expect(record.modelSegments?.status).toBe('available')
   })
 
   it('相同 prompt 的下一轮不会误去重，open 状态内的重复 prompt 会去重', async () => {
@@ -2949,6 +3007,41 @@ describe('nested Git turn diff', () => {
     expect(record.diff.value?.[0].files).toEqual([
       expect.objectContaining({ path: join(canonicalRepository, 'a.txt'), added: 1, deleted: 1, patchStatus: 'captured' })
     ])
+  }, 35_000)
+
+  it('大 Diff 只限制内联预览并以内容引用保留完整 Unicode patch', async () => {
+    const root = await workspace()
+    await pexecFile('git', ['init'], { cwd: root })
+    await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
+    await pexecFile('git', ['config', 'user.email', 'scry@example.invalid'], { cwd: root })
+    await writeFile(join(root, 'large.txt'), 'before\n')
+    await pexecFile('git', ['add', 'large.txt'], { cwd: root })
+    await pexecFile('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'baseline'], { cwd: root })
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
+    config.capture.diff = true
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+
+    await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: root, payload: payload('large-diff', { prompt: 'edit large diff' }) })
+    const completeBody = `${Array.from({ length: 12_000 }, (_, index) => `第${index}行😀`).join('\n')}\nEND-OF-FULL-PATCH\n`
+    await writeFile(join(root, 'large.txt'), completeBody)
+    await handleRecorderHook({ provider: 'codex', event: 'Stop', workspace: root, payload: payload('large-diff', { timestamp: '2026-07-19T12:00:01.000Z' }) })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    const file = record.diff.value?.[0].files[0]
+    expect(file).toMatchObject({ patchStatus: 'truncated', patchContent: { storage: 'truncated', sourceCompleteness: 'complete' } })
+    expect(Buffer.byteLength(file?.patch ?? '')).toBeLessThanOrEqual(32 * 1024)
+    expect(file?.patchContent?.contentRef?.bytes).toBeGreaterThan(32 * 1024)
+    const dataRoot = join(root, '.scry')
+    const fullPatch = await readRecorderContent(dataRoot, file!.patchContent!.contentRef!)
+    expect(fullPatch).toContain('第11999行😀')
+    expect(fullPatch).toContain('END-OF-FULL-PATCH')
+
+    const target = join(root, 'diff-archive')
+    await archiveRecords(dataRoot, { throughSequence: 1, target })
+    await rm(join(dataRoot, 'content'), { recursive: true, force: true })
+    const [archived] = await listRecords(target)
+    await expect(readRecorderContent(target, archived.diff.value![0].files[0].patchContent!.contentRef!))
+      .resolves.toBe(fullPatch)
   }, 35_000)
 
   it('接入方通过 Git exclude 忽略 .scry 时仍能采集业务 Diff', async () => {

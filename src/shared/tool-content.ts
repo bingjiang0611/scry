@@ -8,6 +8,9 @@ export interface ToolContentRef {
   encoding: 'utf8' | 'json'
 }
 
+/** Generic durable captured body reference; ToolContentRef remains the schema-v1 compatibility name. */
+export type ContentRef = ToolContentRef
+
 export interface ToolContent {
   content?: string
   /** Complete captured content stored outside the bounded inline preview; inspect redaction provenance. */
@@ -20,6 +23,9 @@ export interface ToolContent {
   storage: 'complete' | 'truncated' | 'omitted'
   reasons: ToolContentReason[]
 }
+
+/** Generic captured body envelope; usable for tools, model output, diffs and transcript ranges. */
+export type ContentEnvelope = ToolContent
 
 export function isToolContentRef(value: unknown): value is ToolContentRef {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false

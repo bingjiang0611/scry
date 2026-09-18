@@ -637,9 +637,14 @@ async function existingPath(path: string): Promise<boolean> {
 }
 
 function recordContentRefs(record: AgentTurnRecord): ToolContentRef[] {
-  return [record.tools, record.skills, record.mcps]
+  const callRefs = [record.tools, record.skills, record.mcps]
     .flatMap((section) => section.value ?? [])
     .flatMap((call) => [call.inputContent?.contentRef, call.outputContent?.contentRef])
+  const diffRefs = (record.diff.value ?? [])
+    .flatMap((snapshot) => snapshot.files.map((file) => file.patchContent?.contentRef))
+  const modelRefs = (record.modelSegments?.value ?? []).flatMap((segment) => segment.contentRefs ?? [])
+  const assistantRefs = record.assistant.value?.contentRefs ?? []
+  return [...callRefs, ...diffRefs, ...modelRefs, ...assistantRefs]
     .filter((ref): ref is ToolContentRef => !!ref)
 }
 

@@ -1,6 +1,6 @@
 import type { ProviderId } from './provider.js'
 import { isCreditUsageEvidence, type CreditUsageEvidence } from './credit-usage.js'
-import { isToolContent } from './tool-content.js'
+import { isToolContent, isToolContentRef } from './tool-content.js'
 import { normalizeTurnDiffSnapshot, type CompactionTrigger, type DangerLevel, type DiffFile, type TurnDiffCollection, type TurnDiffReason, type TurnDiffStatus } from './trace.js'
 import type { AgentIntervention } from './runtime.js'
 
@@ -117,7 +117,9 @@ export interface TurnModelSegment {
   order: number
   at: string
   kind: 'text' | 'thinking'
+  /** Bounded inline projection; reconstruct the complete segment from ordered contentRefs. */
   text: string
+  contentRefs?: import('./tool-content.js').ToolContentRef[]
   messageId?: string
   providerItemId?: string
   parentId?: string
@@ -167,7 +169,7 @@ export interface TurnCompaction {
 
 export interface TurnEvidence {
   user: Evidence<{ text?: string; textHash?: string }>
-  assistant: Evidence<{ text?: string; textHash?: string }>
+  assistant: Evidence<{ text?: string; textHash?: string; contentRefs?: import('./tool-content.js').ToolContentRef[] }>
   tools: Evidence<TurnCall[]>
   skills: Evidence<TurnCall[]>
   mcps: Evidence<TurnCall[]>
@@ -416,6 +418,7 @@ function isModelSegment(value: unknown): value is TurnModelSegment {
     (raw.kind === 'text' || raw.kind === 'thinking') &&
     typeof raw.text === 'string' &&
     raw.text.length > 0 &&
+    (raw.contentRefs === undefined || Array.isArray(raw.contentRefs) && raw.contentRefs.length > 0 && raw.contentRefs.every(isToolContentRef)) &&
     (raw.messageId === undefined || typeof raw.messageId === 'string') &&
     (raw.providerItemId === undefined || typeof raw.providerItemId === 'string') &&
     (raw.parentId === undefined || typeof raw.parentId === 'string') &&
@@ -470,7 +473,8 @@ function isEvidencePayload(value: unknown, validate: (payload: unknown) => boole
 function isTextPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
-  return isOptionalString(raw.text) && isOptionalString(raw.textHash)
+  return isOptionalString(raw.text) && isOptionalString(raw.textHash) &&
+    (raw.contentRefs === undefined || Array.isArray(raw.contentRefs) && raw.contentRefs.length > 0 && raw.contentRefs.every(isToolContentRef))
 }
 
 function isTurnCall(value: unknown): value is TurnCall {

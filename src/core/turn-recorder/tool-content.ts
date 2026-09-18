@@ -123,6 +123,79 @@ export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPoli
   })
 }
 
+/** Persist coalesced assistant/reasoning bodies before applying a bounded record projection. */
+export async function persistModelEventContent(
+  events: TraceEvent[],
+  source: string,
+  persist: (content: string, encoding: ToolContentRef['encoding']) => Promise<ToolContentRef>,
+  previewBytes = 32 * 1024
+): Promise<TraceEvent[]> {
+  const output: TraceEvent[] = []
+  let run: TraceEvent[] = []
+  let runKey: string | undefined
+
+  const flush = async (): Promise<void> => {
+    if (!run.length) return
+    if (run.some((event) => event.modelContent?.contentRef)) {
+      output.push(...run)
+      run = []
+      runKey = undefined
+      return
+    }
+    const first = run[0]
+    const thinking = first.stage === 'thinking'
+    const deltas = thinking ? '' : run.filter((event) => event.stage === 'text_delta').map((event) => event.text ?? '').join('')
+    const authoritative = thinking ? undefined : [...run].reverse().find((event) =>
+      event.stage === 'text' && event.runtimeMetadata?.replacesStreamedText === true
+    )
+    const raw = thinking
+      ? run.map((event) => event.thinking ?? '').join('')
+      : authoritative?.text ?? run.map((event) => event.stage === 'text' && deltas && event.text === deltas ? '' : event.text ?? '').join('')
+    if (!raw) {
+      output.push(...run)
+    } else {
+      const full = captureToolContent(raw, { source, maxBytes: null, sourceCompleteness: 'complete' })
+      if (full.content === undefined) {
+        output.push(...run)
+      } else {
+        const contentRef = await persist(full.content, 'utf8')
+        const modelContent = { ...limitToolContent(full, previewBytes, 'field_budget'), contentRef }
+        const { text: _text, thinking: _thinking, modelContent: _content, ...metadata } = first
+        output.push({
+          ...metadata,
+          stage: thinking ? 'thinking' : 'text',
+          ...(thinking ? { thinking: modelContent.content } : { text: modelContent.content }),
+          modelContent
+        })
+      }
+    }
+    run = []
+    runKey = undefined
+  }
+
+  for (const event of events) {
+    const bodyKind = event.kind === 'model' && event.stage === 'thinking' && event.thinking != null
+      ? 'thinking'
+      : event.kind === 'model' && ['text', 'text_delta'].includes(event.stage) && event.text != null
+        ? 'text'
+        : undefined
+    if (!bodyKind) {
+      await flush()
+      output.push(event)
+      continue
+    }
+    const key = JSON.stringify([
+      bodyKind, event.messageId ?? null, event.runtimeMetadata?.codexItemId ?? null,
+      event.agentId ?? null, event.parentToolUseId ?? null
+    ])
+    if (runKey !== undefined && runKey !== key) await flush()
+    runKey = key
+    run.push(event)
+  }
+  await flush()
+  return output
+}
+
 /** Persist complete raw bodies before applying the bounded inline projection. */
 export async function persistToolEventContent(
   events: TraceEvent[],

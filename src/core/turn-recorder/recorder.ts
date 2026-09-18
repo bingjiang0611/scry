@@ -21,7 +21,7 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
-import { captureToolContent, isFullToolContentPolicy, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
+import { captureToolContent, isFullToolContentPolicy, limitToolContent, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
@@ -562,10 +562,7 @@ export function lifecycleTraceEvents(args: {
   })
   const rawSegments = args.payload.model_segments ?? args.payload.modelSegments
   if (Array.isArray(rawSegments)) {
-    const segmentLimitations = [
-      ...limitations.filter((item) => item.field === 'model_segments'),
-      ...(rawSegments.length > 200 ? [{ field: 'model_segments', status: 'partial', reason: 'item_limit' } as CaptureLimitation] : [])
-    ]
+    const segmentLimitations = limitations.filter((item) => item.field === 'model_segments')
     if (segmentLimitations.length > 0) {
       out.push({
         id: `capture-limit-${stableHash([args.event, segmentLimitations]).slice(0, 16)}`,
@@ -576,7 +573,7 @@ export function lifecycleTraceEvents(args: {
         runtimeMetadata: limitationMetadata(segmentLimitations)
       })
     }
-    for (const raw of rawSegments.slice(0, 200)) {
+    for (const raw of rawSegments) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
       const segment = raw as Record<string, unknown>
       const completedAt = stringAt(segment, 'completed_at', 'completedAt', 'timestamp')
@@ -2188,15 +2185,14 @@ async function storeLifecycleEvent(
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const id = stableHash({ event, sessionId: open.sessionId, generation: open.generation, payload })
   const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
-  const traceEvents = await persistToolEventContent(lifecycleTraceEvents({
+  const traceEvents = await persistRecorderEventContent(lifecycleTraceEvents({
     provider: open.provider,
     event,
     payload,
     runId: `${open.provider}:${open.sessionId}:${open.generation}`,
     captureOutput: contentPolicy.toolOutput === 'summary',
     toolContentPolicy: contentPolicy
-  }), contentPolicy, 'lifecycle_hook', (content, encoding) =>
-    writeRecorderContent(enablement.dataRoot, content, encoding))
+  }), contentPolicy, 'lifecycle_hook', enablement.dataRoot)
   const stored: StoredLifecycleEvent = {
     schemaVersion: 1,
     id,
@@ -2245,6 +2241,49 @@ function degradeEvidenceSections(evidence: TurnEvidence, reason: string): void {
   if (evidence.modelTiming?.value && evidence.modelTiming.value.method !== 'provider_api') {
     evidence.modelTiming = partial(evidence.modelTiming.value, evidence.modelTiming.source, reason)
   }
+}
+
+async function persistRecorderEventContent(
+  events: TraceEvent[],
+  policy: ToolContentPolicy,
+  source: string,
+  dataRoot: string
+): Promise<TraceEvent[]> {
+  const tools = await persistToolEventContent(
+    events, policy, source,
+    (content, encoding) => writeRecorderContent(dataRoot, content, encoding)
+  )
+  return persistModelEventContent(
+    tools, source,
+    (content, encoding) => writeRecorderContent(dataRoot, content, encoding)
+  )
+}
+
+async function persistTurnDiffContent(
+  dataRoot: string,
+  snapshots: import('../../shared/trace.js').TurnDiffSnapshot[]
+): Promise<import('../../shared/trace.js').TurnDiffSnapshot[]> {
+  return Promise.all(snapshots.map(async (snapshot) => ({
+    ...snapshot,
+    files: await Promise.all(snapshot.files.map(async (file) => {
+      if (!file.patch) return file
+      const full = captureToolContent(file.patch, {
+        source: 'git_turn_diff', maxBytes: null, sourceCompleteness: 'complete'
+      })
+      if (full.content === undefined) return file
+      const contentRef = await writeRecorderContent(dataRoot, full.content, 'utf8')
+      const patchContent = {
+        ...limitToolContent(full, 32 * 1024, 'field_budget'),
+        contentRef
+      }
+      return {
+        ...file,
+        patch: patchContent.content,
+        patchContent,
+        patchStatus: patchContent.storage === 'complete' ? 'captured' as const : 'truncated' as const
+      }
+    }))
+  })))
 }
 
 async function finalizeOpenTurn(
@@ -2307,11 +2346,11 @@ async function finalizeOpenTurn(
   }
   const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
-  const transcriptEvents = await persistToolEventContent(
+  const transcriptEvents = await persistRecorderEventContent(
     transcript.events,
     contentPolicy,
     'provider_transcript',
-    (content, encoding) => writeRecorderContent(enablement.dataRoot, content, encoding)
+    enablement.dataRoot
   )
   const mergedEvents = mergeTurnTraceEvents(storedEvents, transcriptEvents, transcript.toolStreamComplete === true)
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
@@ -2322,12 +2361,16 @@ async function finalizeOpenTurn(
   }
   const diffs = options.forcedReason
     ? []
-    : limitTurnDiffPatchBytes(await Promise.all(open.captures.map(async ({ repository, capture }) =>
-        finishGitTurnDiff(capture, undefined, {
-          ...turnChangeHints(repository, mergedEvents),
-          patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames
-        })
-      )))
+    : limitTurnDiffPatchBytes(await persistTurnDiffContent(
+        enablement.dataRoot,
+        await Promise.all(open.captures.map(async ({ repository, capture }) =>
+          finishGitTurnDiff(capture, undefined, {
+            ...turnChangeHints(repository, mergedEvents),
+            patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
+            completePatches: true
+          })
+        ))
+      ))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,

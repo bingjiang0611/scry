@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
+import { readRecorderContent } from '../core/turn-recorder/content-store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
 import { listRecords, stableHash } from '../core/turn-recorder/store'
 import {
@@ -220,9 +221,10 @@ describe('managed trace turn coordinator', () => {
     await writeFile(path, JSON.stringify(config))
     await startManaged(workspace)
     const request = input(workspace, userDataDir)
+    const rawOutput = `${'正文😀'.repeat(4_000)}\npassword=MANAGED_OUTPUT_SECRET\nfinished`
     request.turn.items.push(
       { id: 'tool', runId: 'run-1', ts: '2026-07-29T12:00:01.000Z', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 't', input: { token: 'MANAGED_INPUT_SECRET', command: 'echo ok' } },
-      { id: 'output', runId: 'run-1', ts: '2026-07-29T12:00:02.000Z', kind: 'tool', stage: 'tool_result', toolUseId: 't', output: `${'正文'.repeat(400)}\npassword=MANAGED_OUTPUT_SECRET\nfinished` }
+      { id: 'output', runId: 'run-1', ts: '2026-07-29T12:00:02.000Z', kind: 'tool', stage: 'tool_result', toolUseId: 't', output: rawOutput }
     )
     request.turn.turnEvidence = aggregateTurnEvidence({ userText: request.turn.userText, events: request.turn.items })
     const scan = async (dir: string): Promise<string> => {
@@ -246,8 +248,11 @@ describe('managed trace turn coordinator', () => {
     await commitManagedTraceTurn(request, { waitMs: 0 })
     const records = await listRecords(join(workspace, '.scry'))
     expect(records).toHaveLength(1)
-    expect(records[0].tools.value![0].outputContent?.content).toContain('finished')
-    expect(records[0].tools.value![0].outputContent!.savedBytes).toBeGreaterThan(500)
+    expect(records[0].tools.value![0].outputContent?.content).not.toContain('finished')
+    expect(records[0].tools.value![0].outputContent!.savedBytes).toBeGreaterThan(0)
+    expect(records[0].tools.value![0].outputContent!.savedBytes).toBeLessThanOrEqual(8 * 1024)
+    const outputRef = records[0].tools.value![0].outputContent!.contentRef!
+    await expect(readRecorderContent(join(workspace, '.scry'), outputRef)).resolves.toBe(rawOutput)
   })
 
   it('managed 记录透出终止时间来源，并在缺 Provider result 时降级为观测边界', async () => {
