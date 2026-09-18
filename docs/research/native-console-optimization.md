@@ -509,11 +509,15 @@ claim is made.
 - Tests still needed outside the terminal path: mobile reconnect continuity, remote host restart,
   long-running renderer overload and retention/deletion policy.
 
-### 4. Native interactions (not implemented)
+### 4. Native interactions
 
-- Preserve Provider-specific approval, questions/editor, option lists and background task contracts.
-  Do not flatten them into an artificial common question limit or infer cancelled/successful state.
-- Tests: delayed answers, large option lists, cancellation, provider/profile switches, concurrent tasks.
+- Native Codex/OpenCode questions now preserve up to 100 bounded prompts/options. Pi input/editor
+  requests keep single-line versus multiline semantics and the renderer uses a dedicated textarea.
+  Codex secret prompts fail explicitly instead of silently sending empty answers.
+- Codex/OpenCode stop requests surface native interrupt/abort rejection, never replay an abort with an
+  unknown outcome, and still wait for authoritative completion after an accepted request.
+- Provider-native background task support remains capability-specific; Qoder is the only runtime that
+  currently exposes it, so Scry does not fabricate controls for the other Providers.
 
 ### 5. Long-lived console (not implemented)
 

@@ -22,7 +22,7 @@ export type QuestionDrafts = Record<string, QuestionDraft>
 
 export function initialQuestionDrafts(request: AgentQuestionRequest): QuestionDrafts {
   return Object.fromEntries(
-    request.questions.map((question) => [question.question, { selected: [], useOther: false, other: '' }])
+    request.questions.map((question) => [question.question, { selected: [], useOther: question.inputMode != null, other: '' }])
   )
 }
 
@@ -171,7 +171,34 @@ export function AskUserQuestionInline({
                   </span>
                 </legend>
                 <div className="question-options">
-                  {question.options.map((option, optionIndex) => {
+                  {question.inputMode === 'multiline' ? (
+                    <textarea
+                      autoFocus={questionIndex === 0}
+                      className="question-other-input question-editor-input"
+                      aria-label={`${question.header}的回答`}
+                      value={draft.other}
+                      maxLength={100_000}
+                      placeholder="请输入多行内容…"
+                      rows={8}
+                      onChange={(event) => setDrafts((current) => ({
+                        ...current,
+                        [question.question]: { ...current[question.question], other: event.target.value }
+                      }))}
+                    />
+                  ) : question.inputMode === 'singleline' ? (
+                    <input
+                      autoFocus={questionIndex === 0}
+                      className="question-other-input"
+                      aria-label={`${question.header}的回答`}
+                      value={draft.other}
+                      maxLength={4_000}
+                      placeholder="请输入回答…"
+                      onChange={(event) => setDrafts((current) => ({
+                        ...current,
+                        [question.question]: { ...current[question.question], other: event.target.value }
+                      }))}
+                    />
+                  ) : question.options.map((option, optionIndex) => {
                     const checked = draft.selected.includes(option.label)
                     return (
                       <label className={`question-option ${checked ? 'selected' : ''}`} key={option.label}>
@@ -189,7 +216,7 @@ export function AskUserQuestionInline({
                       </label>
                     )
                   })}
-                  <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
+                  {!question.inputMode && <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
                     <input
                       type={question.multiSelect ? 'checkbox' : 'radio'}
                       name={`question-${request.questionId}-${questionIndex}`}
@@ -200,8 +227,8 @@ export function AskUserQuestionInline({
                       <b>其他</b>
                       <small>输入一个不在上述选项中的回答</small>
                     </span>
-                  </label>
-                  {draft.useOther && (
+                  </label>}
+                  {!question.inputMode && draft.useOther && (
                     <input
                       autoFocus
                       className="question-other-input"

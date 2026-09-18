@@ -2312,6 +2312,34 @@ describe('OpenCode provider adapter', () => {
     }
   })
 
+  it('does not claim interruption when an early native abort fails', async () => {
+    let resolveCreate!: (value: unknown) => void
+    const client = {
+      session: {
+        create: vi.fn(() => new Promise((resolve) => { resolveCreate = resolve })),
+        abort: vi.fn(async () => { throw new Error('native abort rejected') })
+      }
+    } as unknown as OpencodeClient
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue({
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345', pid: 48, client
+    })
+    const adapter = createOpenCodeAdapter()
+    try {
+      const handle = adapter.run({
+        runId: 'run-early-abort-failure', prompt: 'hello', cwd: '/repo', attachments: [],
+        permissionMode: 'full_access', emit: () => {}
+      })
+      await vi.waitFor(() => expect(client.session.create).toHaveBeenCalledOnce())
+      handle.interrupt()
+      resolveCreate({ data: { id: 'session-early-abort' } })
+      await expect(handle.promise).rejects.toThrow('native abort rejected')
+      expect(client.session.abort).toHaveBeenCalledOnce()
+    } finally {
+      adapter.dispose?.()
+      ensure.mockRestore()
+    }
+  })
+
   it.each([
     { finish: 'abort', expected: { stopped: true, status: 'interrupted' } },
     { finish: 'stop', expected: { stopped: false, status: 'completed' } }

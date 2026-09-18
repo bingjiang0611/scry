@@ -1029,6 +1029,24 @@ describe('Codex provider adapter', () => {
     expect(unsubscribe).toHaveBeenCalledOnce()
   })
 
+  it('surfaces a rejected native interrupt instead of hanging or claiming interruption', async () => {
+    appServer.onNotification.mockReturnValue(() => {})
+    appServer.onRequest.mockReturnValue(() => {})
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-interrupt-failure' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-interrupt-failure' } }
+      if (method === 'turn/interrupt') throw new Error('native interrupt rejected')
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({
+      runId: 'run-interrupt-failure', prompt: 'inspect', cwd: '/repo', attachments: [], emit: () => {}
+    })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    handle.interrupt()
+    await expect(handle.promise).rejects.toThrow('native interrupt rejected')
+  })
+
   it('uses the authoritative native completion when interrupt races with turn/completed', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     appServer.onNotification.mockImplementation((listener) => {

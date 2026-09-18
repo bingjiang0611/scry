@@ -63,6 +63,19 @@ describe('AskUserQuestionInline', () => {
     expect(html).not.toContain('Claude 需要你的选择')
   })
 
+  it('renders native editor requests as multiline input without synthetic options', () => {
+    const editor: AgentQuestionRequest = {
+      runId: 'run-editor', questionId: 'editor-1', providerId: 'pi',
+      questions: [{ question: '请输入多行内容', header: 'Pi Editor', options: [], multiSelect: false, inputMode: 'multiline' }]
+    }
+    const drafts = initialQuestionDrafts(editor)
+    expect(drafts['请输入多行内容'].useOther).toBe(true)
+    const html = renderToStaticMarkup(<AskUserQuestionInline request={editor} queuedCount={1} onRespond={async () => {}} />)
+    expect(html).toContain('<textarea')
+    expect(html).toContain('rows="8"')
+    expect(html).not.toContain('输入一个不在上述选项中的回答')
+  })
+
   it('keeps completed answers visible and raw evidence available', () => {
     const html = renderToStaticMarkup(
       <AskUserQuestionResult

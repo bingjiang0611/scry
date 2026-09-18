@@ -915,6 +915,21 @@ export function createCodexAdapter(
       }
       const timingByThread = new Map<string, ResponseTimingState>()
       let finish: ((value: ProviderRunResult) => void) | undefined
+      let rejectInterruptFailure: ((error: Error) => void) | undefined
+      let interruptDispatched = false
+      const interruptFailure = new Promise<never>((_resolve, reject) => { rejectInterruptFailure = reject })
+      void interruptFailure.catch(() => undefined)
+      const dispatchInterrupt = (): void => {
+        if (interruptDispatched || !externalSessionId || !turnId) return
+        interruptDispatched = true
+        void request(
+          'turn/interrupt',
+          { threadId: externalSessionId, turnId },
+          runRequest.cwd,
+          runRequest.codexHookTrust,
+          runRequest.mcpExecution
+        ).catch((error) => rejectInterruptFailure?.(error instanceof Error ? error : new Error(String(error))))
+      }
 
       const handleServerRequest = async (method: string, value: unknown): Promise<unknown> => {
         const params = record(value)
@@ -926,7 +941,9 @@ export function createCodexAdapter(
           if (!runRequest.requestUserInput) return { answers: {} }
           const itemId = typeof params.itemId === 'string' && params.itemId ? params.itemId : `${Date.now()}`
           const rawQuestions = Array.isArray(params.questions) ? params.questions.map(record) : []
-          if (rawQuestions.some((question) => question.isSecret === true)) return { answers: {} }
+          if (rawQuestions.some((question) => question.isSecret === true)) {
+            throw new Error('Codex requested secret input, which Scry cannot safely render')
+          }
           const questionIds = rawQuestions.map((question) => String(question.id ?? ''))
           if (questionIds.some((id) => !id)) return { answers: {} }
           const question = normalizeAgentQuestionRequest(
@@ -1488,20 +1505,13 @@ export function createCodexAdapter(
             const state = timingState(externalSessionId)
             if (state.responses.size === 0 && state.boundaryMs == null) state.boundaryMs = startedAtMs
           }
-          if (stopped) {
-            void request(
-              'turn/interrupt',
-              { threadId: externalSessionId, turnId },
-              runRequest.cwd,
-              runRequest.codexHookTrust,
-              runRequest.mcpExecution
-            ).catch(() => {})
-            // An interrupt request is not evidence of termination. Keep listeners and the
-            // client's activity lease until native completion or an actual transport failure.
-          }
+          if (stopped) dispatchInterrupt()
+          // Dispatch is not termination evidence. A rejected native interrupt is a real
+          // failure, while success still waits for authoritative turn/completed.
           return await Promise.race([
             done,
-            generationFailure.then((error) => Promise.reject(error))
+            generationFailure.then((error) => Promise.reject(error)),
+            interruptFailure
           ])
         } finally {
           unsubscribe()
@@ -1520,15 +1530,7 @@ export function createCodexAdapter(
       const interrupt = (): void => {
         stopped = true
         for (const controller of approvalControllers) controller.abort()
-        if (externalSessionId && turnId) {
-          void request(
-            'turn/interrupt',
-            { threadId: externalSessionId, turnId },
-            runRequest.cwd,
-            runRequest.codexHookTrust,
-            runRequest.mcpExecution
-          ).catch(() => {})
-        }
+        dispatchInterrupt()
       }
 
       return {
