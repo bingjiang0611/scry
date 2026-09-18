@@ -125,12 +125,14 @@ import {
   moveWorkspaceEntry,
   openWorkspaceFileExternally,
   readWorkspaceFile,
+  readWorkspaceFilePage,
   renameWorkspaceEntry,
   trashWorkspaceEntry,
   writeWorkspaceFile
 } from './workspace-files'
 import type {
   WorkspaceCreateRequest,
+  WorkspaceFilePageRequest,
   WorkspaceListRequest,
   WorkspaceMoveRequest,
   WorkspacePathRequest,
@@ -1421,8 +1423,14 @@ handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
   listWorkspace(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
   readWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:readPage', (_event, request: WorkspaceFilePageRequest) =>
+  readWorkspaceFilePage(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:readKnown', async (_event, request: WorkspacePathRequest) =>
   readWorkspaceFile(request.cwd === '~'
+    ? await homeFileAccess.authorize(request)
+    : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
+handleTrusted('workspace:readPageKnown', async (_event, request: WorkspaceFilePageRequest) =>
+  readWorkspaceFilePage(request.cwd === '~'
     ? await homeFileAccess.authorize(request)
     : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
 handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>

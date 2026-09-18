@@ -46,6 +46,8 @@ import type { TraceBacklogState, TraceBatch } from '../main/trace-output'
 import type {
   WorkspaceCreateRequest,
   WorkspaceEntry,
+  WorkspaceFilePage,
+  WorkspaceFilePageRequest,
   WorkspaceFileSnapshot,
   WorkspaceListRequest,
   WorkspaceListResult,
@@ -128,7 +130,9 @@ const api = {
   clipboardImage: (): Promise<AgentInputAttachment | null> => ipcRenderer.invoke('agent:clipboardImage'),
   workspaceList: (request: WorkspaceListRequest): Promise<WorkspaceListResult> => ipcRenderer.invoke('workspace:list', request),
   workspaceRead: (request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:read', request),
+  workspaceReadPage: (request: WorkspaceFilePageRequest): Promise<WorkspaceFilePage> => ipcRenderer.invoke('workspace:readPage', request),
   workspaceReadKnown: (request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:readKnown', request),
+  workspaceReadPageKnown: (request: WorkspaceFilePageRequest): Promise<WorkspaceFilePage> => ipcRenderer.invoke('workspace:readPageKnown', request),
   workspaceOpenExternal: (request: WorkspacePathRequest): Promise<boolean> => ipcRenderer.invoke('workspace:openExternal', request),
   workspaceOpenKnownExternal: (request: WorkspacePathRequest): Promise<boolean> => ipcRenderer.invoke('workspace:openKnownExternal', request),
   workspaceWrite: (request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:write', request),

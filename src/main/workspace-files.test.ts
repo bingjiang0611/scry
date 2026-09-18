@@ -8,6 +8,7 @@ import {
   moveWorkspaceEntry,
   openWorkspaceFileExternally,
   readWorkspaceFile,
+  readWorkspaceFilePage,
   renameWorkspaceEntry,
   trashWorkspaceEntry,
   writeWorkspaceFile
@@ -44,6 +45,27 @@ describe('workspace files', () => {
     ])
   })
 
+  it('用快照游标分页列出大目录，目录变化后拒绝拼接', async () => {
+    const root = await fixture()
+    await Promise.all(Array.from({ length: 430 }, (_, index) => writeFile(join(root, `file-${index}.txt`), `${index}`)))
+    const first = await listWorkspace({ cwd: root, limit: 73 })
+    expect(first.entries).toHaveLength(73)
+    expect(first.nextCursor).toBeTruthy()
+    const paths = [...first.entries.map((entry) => entry.path)]
+    let cursor = first.nextCursor
+    while (cursor) {
+      const page = await listWorkspace({ cwd: root, cursor, limit: 73 })
+      paths.push(...page.entries.map((entry) => entry.path))
+      cursor = page.nextCursor
+    }
+    expect(paths).toHaveLength(432)
+    expect(new Set(paths).size).toBe(paths.length)
+
+    const stale = first.nextCursor!
+    await writeFile(join(root, 'new-file.txt'), 'new')
+    await expect(listWorkspace({ cwd: root, cursor: stale })).rejects.toThrow('目录内容已变化')
+  })
+
   it('拒绝绝对路径、路径穿越、受保护目录和 symlink 分段', async () => {
     const root = await fixture()
     const outside = await mkdtemp(join(tmpdir(), 'scry-workspace-outside-'))
@@ -67,6 +89,28 @@ describe('workspace files', () => {
       writeWorkspaceFile({ cwd: root, path: 'README.md', content: '# local\n', expectedRevision: first.revision })
     ).rejects.toThrow('磁盘上发生变化')
     expect(await readFile(join(root, 'README.md'), 'utf8')).toBe('# external\n')
+  })
+
+  it('分页只读大 UTF-8 文件并用快照阻止混合版本', async () => {
+    const root = await fixture()
+    const expected = '开🙂始\n' + '正文🙂'.repeat(400_000)
+    await writeFile(join(root, 'large.txt'), expected)
+    await expect(readWorkspaceFile({ cwd: root, path: 'large.txt' })).rejects.toThrow('分页只读')
+    let offset = 0
+    let snapshot: string | undefined
+    let content = ''
+    do {
+      const page = await readWorkspaceFilePage({ cwd: root, path: 'large.txt', offset, limit: 65_535, ...(snapshot ? { snapshot } : {}) })
+      snapshot ??= page.snapshot
+      expect(page.nextOffset).toBeGreaterThanOrEqual(offset)
+      content += page.content
+      offset = page.nextOffset
+      if (!page.hasMore) break
+    } while (true)
+    expect(content).toBe(expected)
+
+    await writeFile(join(root, 'large.txt'), expected + 'changed')
+    await expect(readWorkspaceFilePage({ cwd: root, path: 'large.txt', offset: 0, snapshot })).rejects.toThrow('文件已变化')
   })
 
   it('拒绝二进制和无效 UTF-8，避免保存时破坏原始字节', async () => {

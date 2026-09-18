@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { access, lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
+import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   canOpenWorkspaceFileExternally,
   type WorkspaceCreateRequest,
   type WorkspaceEntry,
+  type WorkspaceFilePage,
+  type WorkspaceFilePageRequest,
   type WorkspaceFileSnapshot,
   type WorkspaceListRequest,
   type WorkspaceListResult,
@@ -16,7 +18,8 @@ import {
 } from '../shared/workspace.js'
 
 export const WORKSPACE_FILE_LIMIT = 2 * 1024 * 1024
-export const WORKSPACE_DIRECTORY_LIMIT = 2_000
+export const WORKSPACE_FILE_PAGE_LIMIT = 64 * 1024
+export const WORKSPACE_DIRECTORY_LIMIT = 200
 
 const PROTECTED_NAMES = new Set(['.git', '.scry', 'node_modules', 'dist', 'build', 'out', 'target', '.next'])
 
@@ -110,6 +113,8 @@ export async function listWorkspace(request: WorkspaceListRequest): Promise<Work
   const target = await checkedPath(request.cwd, request.path)
   const info = await lstat(target.path)
   if (!info.isDirectory()) throw new Error('目标不是文件夹')
+  const limit = request.limit ?? WORKSPACE_DIRECTORY_LIMIT
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > WORKSPACE_DIRECTORY_LIMIT) throw new Error('目录分页大小无效')
   const all = await readdir(target.path, { withFileTypes: true })
   const visible = all
     .filter((entry) => !entry.isSymbolicLink() && !protectedName(entry.name) && (entry.isDirectory() || entry.isFile()))
@@ -117,8 +122,27 @@ export async function listWorkspace(request: WorkspaceListRequest): Promise<Work
       if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1
       return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
     })
+  const snapshot = createHash('sha256')
+    .update(visible.map((entry) => `${entry.isDirectory() ? 'd' : 'f'}\0${entry.name}`).join('\0'))
+    .digest('hex')
+  let offset = 0
+  if (request.cursor !== undefined) {
+    if (typeof request.cursor !== 'string' || request.cursor.length > 512) throw new Error('目录游标无效')
+    try {
+      const cursor = JSON.parse(Buffer.from(request.cursor, 'base64url').toString('utf8')) as { offset?: unknown; snapshot?: unknown }
+      if (!Number.isSafeInteger(cursor.offset) || (cursor.offset as number) < 0 || cursor.snapshot !== snapshot) {
+        throw new Error('目录内容已变化，请重新载入')
+      }
+      offset = cursor.offset as number
+    } catch (error) {
+      if ((error as Error).message === '目录内容已变化，请重新载入') throw error
+      throw new Error('目录游标无效')
+    }
+  }
+  if (offset > visible.length) throw new Error('目录游标无效')
+  const end = Math.min(visible.length, offset + limit)
   const entries = await Promise.all(
-    visible.slice(0, WORKSPACE_DIRECTORY_LIMIT).map(async (entry): Promise<WorkspaceEntry> => {
+    visible.slice(offset, end).map(async (entry): Promise<WorkspaceEntry> => {
       const path = join(target.path, entry.name)
       const stat = await lstat(path)
       return {
@@ -130,14 +154,19 @@ export async function listWorkspace(request: WorkspaceListRequest): Promise<Work
       }
     })
   )
-  return { entries, truncated: visible.length > WORKSPACE_DIRECTORY_LIMIT }
+  const truncated = end < visible.length
+  return {
+    entries,
+    truncated,
+    ...(truncated ? { nextCursor: Buffer.from(JSON.stringify({ offset: end, snapshot }), 'utf8').toString('base64url') } : {})
+  }
 }
 
 export async function readWorkspaceFile(request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot> {
   const target = await checkedPath(request.cwd, request.path)
   const info = await lstat(target.path)
   if (!info.isFile()) throw new Error('目标不是文件')
-  if (info.size > WORKSPACE_FILE_LIMIT) throw new Error('文件超过 2 MiB，不能在 Scry 中编辑')
+  if (info.size > WORKSPACE_FILE_LIMIT) throw new Error('文件超过 2 MiB，只能使用分页只读视图')
   const bytes = await readFile(target.path)
   if (binary(bytes)) throw new Error('二进制文件不能在文本编辑器中打开')
   return {
@@ -148,6 +177,59 @@ export async function readWorkspaceFile(request: WorkspacePathRequest): Promise<
     mtimeMs: info.mtimeMs,
     revision: revision(bytes),
     language: language(target.path)
+  }
+}
+
+function filePageSnapshot(info: { dev: number | bigint; ino: number | bigint; size: number; mtimeMs: number }): string {
+  return createHash('sha256').update(`${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`).digest('hex')
+}
+
+function decodeUtf8Page(bytes: Buffer, atEnd: boolean): { content: string; bytes: number } {
+  const maxTrim = atEnd ? 0 : Math.min(3, bytes.length)
+  for (let trim = 0; trim <= maxTrim; trim++) {
+    const end = bytes.length - trim
+    try {
+      return { content: new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end)), bytes: end }
+    } catch { /* a page may end inside one UTF-8 sequence */ }
+  }
+  throw new Error('文件不是有效的 UTF-8 文本，不能在 Scry 中查看')
+}
+
+export async function readWorkspaceFilePage(request: WorkspaceFilePageRequest): Promise<WorkspaceFilePage> {
+  const target = await checkedPath(request.cwd, request.path)
+  const offset = request.offset ?? 0
+  const limit = request.limit ?? WORKSPACE_FILE_PAGE_LIMIT
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('文件分页偏移无效')
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > WORKSPACE_FILE_PAGE_LIMIT) throw new Error('文件分页大小无效')
+  const handle = await open(target.path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) throw new Error('目标不是文件')
+    if (offset > info.size) throw new Error('文件分页偏移无效')
+    const snapshot = filePageSnapshot(info)
+    if (request.snapshot !== undefined && request.snapshot !== snapshot) throw new Error('文件已变化，请重新载入')
+    const probe = Buffer.alloc(Math.min(8_192, info.size))
+    const probeRead = probe.length ? await handle.read(probe, 0, probe.length, 0) : { bytesRead: 0 }
+    if (binary(probe.subarray(0, probeRead.bytesRead))) throw new Error('二进制文件不能在文本查看器中打开')
+    const length = Math.min(limit + 3, info.size - offset)
+    const bytes = Buffer.alloc(length)
+    const result = length ? await handle.read(bytes, 0, length, offset) : { bytesRead: 0 }
+    const available = bytes.subarray(0, result.bytesRead)
+    const decoded = decodeUtf8Page(available, offset + available.length >= info.size)
+    const nextOffset = offset + decoded.bytes
+    return {
+      name: basename(target.path),
+      path: target.portable,
+      content: decoded.content,
+      offset,
+      nextOffset,
+      totalBytes: info.size,
+      hasMore: nextOffset < info.size,
+      snapshot,
+      language: language(target.path)
+    }
+  } finally {
+    await handle.close()
   }
 }
 
