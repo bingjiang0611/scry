@@ -126,6 +126,15 @@ export interface TurnModelSegment {
   agentId?: string
 }
 
+export interface TurnTranscriptSource {
+  contentRef: import('./tool-content.js').ContentRef
+  sourcePath: string
+  startOffset: number
+  endOffset: number
+  identity: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }
+  sourceCompleteness: 'complete' | 'partial'
+}
+
 export interface TurnFile {
   path: string
   operation: 'read' | 'write' | 'edit'
@@ -178,6 +187,8 @@ export interface TurnEvidence {
   compactions?: Evidence<TurnCompaction[]>
   modelSegments?: Evidence<TurnModelSegment[]>
   modelTiming?: Evidence<TurnModelTiming>
+  /** Immutable bytes used by the per-turn parser, separate from mutable Provider files. */
+  transcript?: Evidence<TurnTranscriptSource>
   files: Evidence<TurnFile[]>
   diff: Evidence<TurnDiffSnapshotRecord[]>
   dangerousOperations: Evidence<TurnDanger[]>
@@ -297,7 +308,7 @@ export const REQUIRED_EVIDENCE_SECTIONS = [
   'dangerousOperations', 'errors'
 ] as const
 
-export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelSegments', 'modelTiming', 'termination'] as const
+export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelSegments', 'modelTiming', 'transcript', 'termination'] as const
 
 /** `status/quality` per section; a missing optional section reads as unavailable, never as empty. */
 export function evidenceStatusMap(record: AgentTurnRecord): Record<string, string> {
@@ -424,6 +435,19 @@ function isModelSegment(value: unknown): value is TurnModelSegment {
     (raw.parentId === undefined || typeof raw.parentId === 'string') &&
     (raw.agentId === undefined || typeof raw.agentId === 'string')
   )
+}
+
+function isTurnTranscriptSource(value: unknown): value is TurnTranscriptSource {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  const identity = raw.identity as Record<string, unknown> | undefined
+  return isToolContentRef(raw.contentRef) && typeof raw.sourcePath === 'string' && raw.sourcePath.length > 0 &&
+    Number.isSafeInteger(raw.startOffset) && Number(raw.startOffset) >= 0 &&
+    Number.isSafeInteger(raw.endOffset) && Number(raw.endOffset) >= Number(raw.startOffset) &&
+    !!identity && ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].every((key) =>
+      typeof identity[key] === 'number' && Number.isFinite(identity[key])) &&
+    Number(identity.size) >= Number(raw.endOffset) &&
+    (raw.sourceCompleteness === 'complete' || raw.sourceCompleteness === 'partial')
 }
 
 function isModelSegmentsEvidence(value: unknown): value is Evidence<TurnModelSegment[]> {
@@ -697,6 +721,7 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   if (raw.compactions !== undefined) require(isCompactionsEvidence(raw.compactions), '$.compactions', 'invalid compaction evidence')
   if (raw.modelSegments !== undefined) require(isModelSegmentsEvidence(raw.modelSegments), '$.modelSegments', 'invalid model segment evidence')
   if (raw.modelTiming !== undefined) require(isModelTimingEvidence(raw.modelTiming), '$.modelTiming', 'invalid model timing evidence')
+  if (raw.transcript !== undefined) require(isEvidencePayload(raw.transcript, isTurnTranscriptSource), '$.transcript', 'invalid transcript evidence')
   if (raw.interventions !== undefined) require(isEvidencePayload(raw.interventions, (payload) => isArrayOf(payload, isIntervention)), '$.interventions', 'invalid intervention evidence')
   if (raw.termination !== undefined) require(isEvidencePayload(raw.termination, isTurnTermination), '$.termination', 'invalid termination evidence')
   return issues.length > 0 ? { ok: false, issues } : { ok: true, record: raw as unknown as AgentTurnRecord }

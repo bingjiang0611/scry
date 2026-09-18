@@ -446,6 +446,12 @@ claim is made.
 - The lifecycle adapter no longer drops model timing entries after item 200. Focused regressions cover
   Unicode assistant/reasoning bodies, a Unicode patch larger than the inline budget plus archive copy,
   250 model timing calls, managed App recovery and a Pi tool result above the former limit.
+- A record now also carries immutable evidence for the exact stable JSONL byte range used by its
+  parser: canonical source path, inode identity, start/end offsets, completeness, and a verified
+  content reference. Rotation or deletion of the mutable Provider transcript cannot invalidate that
+  record, and recorder archive moves copy the referenced bytes before removing the live source.
+  Explicit prompt/assistant or full-body policy opt-outs keep this evidence `disabled` rather than
+  bypassing the user's capture policy.
 
 ## Remaining sequence
 
@@ -462,10 +468,11 @@ claim is made.
   terminal output, assistant text and diffs before UI projection. Reuse existing sinks rather than
   creating a parallel archive.
 - Make export carry referenced blobs, then add explicit retention and orphan collection.
-- Add immutable content references for mirrored transcript ranges and remaining generic harness /
-  runtime metadata bodies; retain explicit original/saved byte counts where the upstream itself is
-  partial. Transcript selection is now complete, but its full-session fallback parser should move to
-  a durable incremental line index when measured size/latency requires it.
+- Add content references for any remaining generic harness/runtime metadata body that becomes subject
+  to a storage bound; current canonical trace archives keep those fields inline without truncation.
+  Retain explicit original/saved byte counts where the upstream itself is partial. Transcript
+  selection and immutable range retention are complete, but the full-session fallback parser should
+  move to a durable incremental line index when measured size/latency requires it.
 - Collect full diffs asynchronously without changing turn ownership or attributing later changes
   to an earlier turn. Pin capture budgets and preserve historical provenance on retries.
 - Tests: large outputs across current thresholds, interrupted writes/recovery, duplicates,
