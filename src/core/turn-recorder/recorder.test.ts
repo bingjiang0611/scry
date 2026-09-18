@@ -901,6 +901,10 @@ describe('turn recorder state machine', () => {
 
   it('Claude 超过旧 rewind 大小的单行 prompt 仍按完整身份归档', async () => {
     const root = await workspace()
+    const configPath = join(root, 'scry.config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.capture.toolOutput = 'full'
+    await writeFile(configPath, JSON.stringify(config))
     const transcript = join(root, 'claude-large-prompt.jsonl')
     const prompt = `large:${'p'.repeat(4 * 1024 * 1024 + 128)}`
     await writeFile(transcript, JSON.stringify({
@@ -934,6 +938,26 @@ describe('turn recorder state machine', () => {
       assistant: { value: { text: 'complete answer' } }
     })
     expect(records[0].user.value?.text.length).toBe(prompt.length)
+    const source = await readFile(transcript, 'utf8')
+    const transcriptEvidence = records[0].transcript
+    expect(transcriptEvidence).toMatchObject({
+      status: 'available', quality: 'exact',
+      value: {
+        sourcePath: transcript,
+        startOffset: 0,
+        endOffset: Buffer.byteLength(source),
+        sourceCompleteness: 'complete'
+      }
+    })
+    const ref = transcriptEvidence!.value!.contentRef
+    expect(ref.bytes).toBe(Buffer.byteLength(source))
+    await writeFile(transcript, 'rotated-away\n')
+    await expect(readRecorderContent(join(root, '.scry'), ref)).resolves.toBe(source)
+
+    const target = join(root, 'transcript-archive')
+    await archiveRecords(join(root, '.scry'), { throughSequence: 1, target })
+    await rm(join(root, '.scry', 'content'), { recursive: true, force: true })
+    await expect(readRecorderContent(target, ref)).resolves.toBe(source)
   })
 
   it.each([

@@ -89,6 +89,14 @@ interface StoredLifecycleEvent {
 
 interface TranscriptRead {
   stable: boolean
+  source?: {
+    content: string
+    sourcePath: string
+    startOffset: number
+    endOffset: number
+    identity: TranscriptSnapshotIdentity
+    sourceCompleteness: 'complete' | 'partial'
+  }
   observed: boolean
   identityMatched?: boolean
   complete?: boolean
@@ -1506,7 +1514,14 @@ export async function readTranscriptWindow(
   endOffset: number,
   preferredStartOffset = 0,
   expectedIdentity?: TranscriptSnapshotIdentity
-): Promise<{ content: string; truncated: boolean; consistent: boolean }> {
+): Promise<{
+  content: string
+  startOffset: number
+  endOffset: number
+  identity?: TranscriptSnapshotIdentity
+  truncated: boolean
+  consistent: boolean
+}> {
   const boundedEnd = Math.max(0, endOffset)
   const preferredStart = Math.max(0, Math.min(preferredStartOffset, boundedEnd))
   // The start offset is captured when the user turn opens. A later byte cap would
@@ -1539,17 +1554,28 @@ export async function readTranscriptWindow(
   const consistent = bytesRead === length && !!before && !!after && !!pathIdentity &&
     (!expectedIdentity || sameTranscriptIdentity(before, expectedIdentity)) &&
     sameTranscriptIdentity(before, after) && sameTranscriptIdentity(after, pathIdentity)
-  let content = buffer.subarray(0, bytesRead).toString('utf8')
+  let contentStart = start
+  let contentBuffer = buffer.subarray(0, bytesRead)
   let truncated = start > preferredStart
   if (start > 0) {
-    const firstNewline = content.indexOf('\n')
-    if (firstNewline >= 0) content = content.slice(firstNewline + 1)
-    else {
-      content = ''
+    const firstNewline = contentBuffer.indexOf(0x0a)
+    if (firstNewline >= 0) {
+      contentStart += firstNewline + 1
+      contentBuffer = contentBuffer.subarray(firstNewline + 1)
+    } else {
+      contentStart += contentBuffer.length
+      contentBuffer = Buffer.alloc(0)
       truncated = true
     }
   }
-  return { content, truncated, consistent }
+  return {
+    content: contentBuffer.toString('utf8'),
+    startOffset: contentStart,
+    endOffset: start + bytesRead,
+    ...(consistent && after ? { identity: after } : {}),
+    truncated,
+    consistent
+  }
 }
 
 interface TranscriptSnapshotCacheEntry {
@@ -1603,6 +1629,14 @@ async function parseTranscriptSnapshot(args: {
 }): Promise<TranscriptRead> {
   const snapshot = await readTranscriptWindow(args.path, args.endOffset, args.startOffset, args.identity)
   const stable = args.stable && snapshot.consistent
+  const source = snapshot.consistent && snapshot.identity ? {
+    content: snapshot.content,
+    sourcePath: args.path,
+    startOffset: snapshot.startOffset,
+    endOffset: snapshot.endOffset,
+    identity: snapshot.identity,
+    sourceCompleteness: snapshot.truncated ? 'partial' as const : 'complete' as const
+  } : undefined
   if (args.provider === 'codex') {
     const parsed = parseCodexRollout(snapshot.content, args.runId)
     const direct = args.providerTurnId ? parsed.turns.find((turn) => turn.providerTurnId === args.providerTurnId) : undefined
@@ -1635,6 +1669,7 @@ async function parseTranscriptSnapshot(args: {
         }
     return {
       stable,
+      ...(source ? { source } : {}),
       observed: parsed.recognized,
       ...(identityMatched != null ? { identityMatched } : {}),
       complete: stable && !snapshot.truncated && enriched.complete,
@@ -1689,6 +1724,7 @@ async function parseTranscriptSnapshot(args: {
   }
   return {
     stable,
+    ...(source ? { source } : {}),
     observed: turns.length > 0,
     ...(identityMatched != null ? { identityMatched } : {}),
     complete: stable && !snapshot.truncated,
@@ -2448,6 +2484,29 @@ async function finalizeOpenTurn(
     evidence.modelSegments = disabled('assistant capture disabled by config')
   }
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
+  const transcriptEvidence: NonNullable<TurnEvidence['transcript']> = await (async (): Promise<NonNullable<TurnEvidence['transcript']>> => {
+    if (!open.transcriptPath) return unavailable('provider transcript path was not observable')
+    if (!enablement.config.capture.prompt || !enablement.config.capture.assistant || !isFullToolContentPolicy(contentPolicy)) {
+      return disabled('raw transcript capture disabled by content policy')
+    }
+    if (!transcript.source) return unavailable('stable transcript bytes were not available for this turn')
+    const source = transcript.source
+    if (Buffer.byteLength(source.content) !== source.endOffset - source.startOffset) {
+      return unavailable('transcript range was not valid UTF-8 and could not be stored exactly')
+    }
+    const contentRef = await writeRecorderContent(enablement.dataRoot, source.content, 'utf8')
+    const value = {
+      contentRef,
+      sourcePath: source.sourcePath,
+      startOffset: source.startOffset,
+      endOffset: source.endOffset,
+      identity: source.identity,
+      sourceCompleteness: source.sourceCompleteness
+    }
+    return source.sourceCompleteness === 'complete'
+      ? available(value, ['provider_transcript'])
+      : partial(value, ['provider_transcript'], 'transcript parser window started after an incomplete source line', 'exact')
+  })()
   const recordId = stableHash({
     workspace: enablement.config.workspaceId,
     provider: open.provider,
@@ -2523,6 +2582,7 @@ async function finalizeOpenTurn(
     ),
     status: transcript.terminalStatus ?? terminalStatus(payload, fallbackStatus),
     termination: end.termination,
+    transcript: transcriptEvidence,
     ...evidence
   }
   const committed = await commitRecord(enablement.dataRoot, draft)

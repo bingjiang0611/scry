@@ -644,7 +644,8 @@ function recordContentRefs(record: AgentTurnRecord): ToolContentRef[] {
     .flatMap((snapshot) => snapshot.files.map((file) => file.patchContent?.contentRef))
   const modelRefs = (record.modelSegments?.value ?? []).flatMap((segment) => segment.contentRefs ?? [])
   const assistantRefs = record.assistant.value?.contentRefs ?? []
-  return [...callRefs, ...diffRefs, ...modelRefs, ...assistantRefs]
+  const transcriptRefs = record.transcript?.value?.contentRef ? [record.transcript.value.contentRef] : []
+  return [...callRefs, ...diffRefs, ...modelRefs, ...assistantRefs, ...transcriptRefs]
     .filter((ref): ref is ToolContentRef => !!ref)
 }
 
