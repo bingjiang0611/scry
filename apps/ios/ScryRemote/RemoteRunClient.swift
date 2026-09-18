@@ -97,7 +97,29 @@ struct RemoteRunClient {
   // authorized roots; every non-nil path is canonicalized and re-authorized by
   // the host before any directory names are returned.
   func directories(path: String?) async throws -> G0Transport.RunDirectoryListing {
-    try await G0Transport.relayRunDirectories(endpoint: endpoint(), identity: try identity(), path: path)
+    var cursor = 0
+    var snapshot: String?
+    var total: Int?
+    var current: G0Transport.RunProjectRef?
+    var parent: G0Transport.RunProjectRef?
+    var directories: [G0Transport.RunProjectRef] = []
+    repeat {
+      let page = try await G0Transport.relayRunDirectoriesPage(
+        endpoint: endpoint(), identity: try identity(), path: path, cursor: cursor, snapshot: snapshot)
+      let previous = cursor
+      if snapshot == nil { snapshot = page.snapshot; total = page.total; current = page.current; parent = page.parent }
+      guard snapshot == page.snapshot, total == page.total, current == page.current, parent == page.parent,
+            page.total <= 100_000, page.cursor == previous + page.directories.count,
+            page.cursor <= page.total,
+            page.hasMore ? page.cursor > previous && page.cursor < page.total : page.cursor == page.total else {
+        throw NSError(domain: "ScryRemote.Directories", code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "Directory snapshot or cursor changed"])
+      }
+      directories.append(contentsOf: page.directories)
+      cursor = page.cursor
+      if !page.hasMore { break }
+    } while true
+    return G0Transport.RunDirectoryListing(current: current, parent: parent, directories: directories)
   }
 
   // The Providers the host currently offers for a new session (id/label/available).
@@ -116,7 +138,26 @@ struct RemoteRunClient {
   // The host session catalog (the SAME conversations the Mac lists) this device
   // may browse. Display metadata only; the host re-authorizes any content read.
   func sessions() async throws -> [G0Transport.RunSessionRef] {
-    try await G0Transport.relayRunSessions(endpoint: endpoint(), identity: try identity())
+    var cursor = 0
+    var snapshot: String?
+    var total: Int?
+    var sessions: [G0Transport.RunSessionRef] = []
+    repeat {
+      let page = try await G0Transport.relayRunSessionsPage(
+        endpoint: endpoint(), identity: try identity(), cursor: cursor, snapshot: snapshot)
+      let previous = cursor
+      if snapshot == nil { snapshot = page.snapshot; total = page.total }
+      guard snapshot == page.snapshot, total == page.total, page.total <= 100_000,
+            page.cursor == previous + page.sessions.count, page.cursor <= page.total,
+            page.hasMore ? page.cursor > previous && page.cursor < page.total : page.cursor == page.total else {
+        throw NSError(domain: "ScryRemote.Sessions", code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "Session snapshot or cursor changed"])
+      }
+      sessions.append(contentsOf: page.sessions)
+      cursor = page.cursor
+      if !page.hasMore { break }
+    } while true
+    return sessions
   }
 
   func historyPage(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> G0Transport.RunHistoryPage {
