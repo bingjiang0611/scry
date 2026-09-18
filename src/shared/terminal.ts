@@ -8,13 +8,24 @@ export interface TerminalStartRequest {
   rows: number
 }
 
-export interface TerminalSessionInfo {
+export interface TerminalSessionDescriptor {
   id: string
   pid: number
   recording?: 'available' | 'unavailable'
   cwd: string
   cols: number
   rows: number
+}
+
+export interface TerminalSessionInfo extends TerminalSessionDescriptor {
+  ownershipEpoch: number
+}
+
+export interface TerminalAttachInfo extends TerminalSessionInfo {
+  catchUp: {
+    endOffset: number
+    state: 'available' | 'partial' | 'unavailable'
+  }
 }
 
 export interface TerminalRecordingRequest {
@@ -61,23 +72,28 @@ export interface TerminalRecordingErrorEvent {
   message: string
 }
 
-export interface TerminalWriteRequest {
+export interface TerminalOwnershipRequest {
   id: string
+  ownershipEpoch: number
+}
+
+export interface TerminalWriteRequest extends TerminalOwnershipRequest {
   data: string
 }
 
-export interface TerminalResizeRequest {
-  id: string
+export interface TerminalResizeRequest extends TerminalOwnershipRequest {
   cols: number
   rows: number
 }
 
 export interface TerminalCloseRequest {
   id: string
+  ownershipEpoch?: number
 }
 
 export interface TerminalDataEvent {
   id: string
+  ownershipEpoch: number
   data: string
 }
 
@@ -85,4 +101,5 @@ export interface TerminalExitEvent {
   id: string
   code: number | null
   signal: number | null
+  ownershipEpoch?: number
 }

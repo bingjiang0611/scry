@@ -25,6 +25,16 @@ describe('terminal disk replay', () => {
     expect(read).toHaveBeenNthCalledWith(2, { id: 'test', offset: 4, limit: 65536 })
   })
 
+  it('stops at the attach checkpoint even when the live recording grows during replay', async () => {
+    const read = vi.fn(async ({ offset }: { offset: number }) => ({ ...page(offset, true), totalBytes: 20 }))
+    const write = vi.fn(async () => {})
+    await replayTerminalRecording('test', read, write, () => true, 8)
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(read).toHaveBeenNthCalledWith(1, { id: 'test', offset: 0, limit: 8 })
+    expect(read).toHaveBeenNthCalledWith(2, { id: 'test', offset: 4, limit: 4 })
+    expect(write).toHaveBeenCalledTimes(2)
+  })
+
   it('does not write an in-flight page into a restarted or disposed pane', async () => {
     let current = true
     let resolve!: (page: TerminalRecordingPage) => void

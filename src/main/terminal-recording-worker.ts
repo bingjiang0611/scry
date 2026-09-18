@@ -1,5 +1,5 @@
 import { parentPort, workerData } from 'node:worker_threads'
-import type { TerminalExitEvent, TerminalRecordingListRequest, TerminalRecordingRequest, TerminalSessionInfo } from '../shared/terminal'
+import type { TerminalExitEvent, TerminalRecordingListRequest, TerminalRecordingRequest, TerminalSessionDescriptor } from '../shared/terminal'
 import { TerminalRecordingStore } from './terminal-recording'
 
 interface Request { requestId: number; op: 'start' | 'append' | 'finish' | 'read' | 'list' | 'delete'; value: unknown }
@@ -16,7 +16,7 @@ parentPort.on('message', async (request: Request) => {
   const reply: Reply = { requestId: request.requestId, ok: true }
   try {
     switch (request.op) {
-      case 'start': store.start(request.value as TerminalSessionInfo); break
+      case 'start': store.start(request.value as TerminalSessionDescriptor); break
       case 'append':
         for (const entry of (request.value as { entries: Array<{ id: string; data: string }> }).entries) store.append(entry.id, entry.data)
         break

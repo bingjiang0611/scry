@@ -384,6 +384,32 @@ No screenshot visual review, real Provider/device acceptance, live reattachment 
 claim is made. No installation/publication; the existing ACK backpressure and synchronous capture
 writes remain unchanged.
 
+## Live terminal renderer adoption
+
+- Renderer navigation, crash and macOS window close now detach projection ownership without closing
+  node-pty. App quit and workspace change remain explicit process-ending boundaries.
+- Every start/attach issues a monotonically newer ownership epoch. Data and exit delivery carry that
+  epoch; write, resize, ready, ACK and close are fenced by it. Delayed calls from an old renderer are
+  rejected without changing the current owner's credit or process state.
+- While detached, main drops the redundant renderer projection queue and releases its pause reason;
+  the ordered terminal-recording worker remains the authority. Attach places a read checkpoint behind
+  prior appends, replays exactly through that UTF-16LE byte offset, then enables live delivery. Output
+  after the checkpoint stays buffered behind the new ready handshake, avoiding a replay/live gap.
+- Active session discovery exposes only typed process metadata through trusted IPC. The terminal UI
+  queries it before creating a new Shell, reconstructs live tabs, catches up each recording page and
+  never closes a process merely because React unmounted. Explicit tab close still closes the owned PTY.
+- If durable capture is unavailable or partial, adoption continues but labels the missing evidence;
+  it does not present an empty replay as complete. Large catch-up remains sequential and bounded per
+  page; a dedicated large-file view and retention/quota work remain later items.
+
+Verification covers manager checkpoints and active metadata, exact replay boundaries, detached queue
+release, stale ACK/write fencing, epoch-tagged delivery and preload payloads. The packaged Electron
+smoke starts a real PTY, reloads the renderer, confirms the same process is still active, advances the
+ownership epoch, replays the pre-reload marker from disk, rejects the stale owner and closes through
+its new epoch. The unsigned local package path is used because this machine's Apple Development
+signature is not a notarized distribution identity; no install, publication or real Provider/device
+claim is made.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity
@@ -409,9 +435,11 @@ writes remain unchanged.
 ### 3. Durable replay and pagination (CLI tool bodies and remote output partially implemented)
 
 - Wire the existing Recorder byte-page reader into authorized App/mobile detail endpoints.
-- UI/local terminal consume durable cursor pages, with bounded in-memory caches and complete
-  catch-up after lost ACK, disconnect or renderer restart. Retention/deletion must be explicit.
-- Tests: reconnect cursor continuity, no skipped/duplicated events, renderer overload, host restart.
+- Local terminal now consumes bounded recording pages and catches up across lost ACK, disconnect and
+  renderer reload with ownership fencing. App/mobile Recorder details and remote host-restart replay
+  still need the same authorized cursor contract.
+- Tests still needed outside the terminal path: mobile reconnect continuity, remote host restart,
+  long-running renderer overload and retention/deletion policy.
 
 ### 4. Native interactions (not implemented)
 

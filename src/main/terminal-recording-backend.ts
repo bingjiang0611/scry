@@ -1,12 +1,12 @@
 import { Worker } from 'node:worker_threads'
 import type {
   TerminalExitEvent, TerminalRecordingListPage, TerminalRecordingListRequest,
-  TerminalRecordingPage, TerminalRecordingRequest, TerminalSessionInfo
+  TerminalRecordingPage, TerminalRecordingRequest, TerminalSessionDescriptor
 } from '../shared/terminal'
 import { TerminalRecordingStore } from './terminal-recording'
 
 export interface TerminalRecordingBackend {
-  start(info: TerminalSessionInfo): Promise<void>
+  start(info: TerminalSessionDescriptor): Promise<void>
   append(id: string, data: string): void
   finish(event: TerminalExitEvent): void
   read(request: TerminalRecordingRequest, cwd: string): Promise<TerminalRecordingPage>
@@ -71,7 +71,7 @@ export class DirectTerminalRecordingBackend implements TerminalRecordingBackend 
   constructor(directory: string, onFailure: (id: string, error: unknown) => void) {
     this.store = new TerminalRecordingStore(directory, onFailure)
   }
-  start(info: TerminalSessionInfo): Promise<void> { this.store.start(info); return Promise.resolve() }
+  start(info: TerminalSessionDescriptor): Promise<void> { this.store.start(info); return Promise.resolve() }
   append(id: string, data: string): void { this.store.append(id, data) }
   finish(event: TerminalExitEvent): void { this.store.finish(event) }
   async read(request: TerminalRecordingRequest, cwd: string): Promise<TerminalRecordingPage> { return this.store.read(request, cwd) }
@@ -111,7 +111,7 @@ export class TerminalRecordingWorkerClient implements TerminalRecordingBackend {
     return new TerminalRecordingWorkerClient(worker, callbacks)
   }
 
-  start(info: TerminalSessionInfo): Promise<void> { return this.control('start', info).then(() => undefined) }
+  start(info: TerminalSessionDescriptor): Promise<void> { return this.control('start', info).then(() => undefined) }
 
   append(id: string, data: string): void {
     if (this.stoppedError || this.failedIds.has(id) || !data) return
@@ -220,7 +220,7 @@ export class TerminalRecordingWorkerClient implements TerminalRecordingBackend {
     this.release(operation)
     for (const failure of reply.failures ?? []) this.recordFailure(failure.id, failure.error)
     if (!reply.ok && operation.request.op === 'start') {
-      this.failedIds.add((operation.request.value as TerminalSessionInfo).id)
+      this.failedIds.add((operation.request.value as TerminalSessionDescriptor).id)
     }
     if (reply.ok && operation.request.op === 'finish') {
       this.failedIds.delete((operation.request.value as TerminalExitEvent).id)

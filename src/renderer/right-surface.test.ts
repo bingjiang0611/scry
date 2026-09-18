@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
-import { TerminalSurface, terminalStartErrorMessage } from './components/TerminalSurface'
+import { TerminalSurface, terminalStartErrorMessage, terminalTabsForActiveSessions } from './components/TerminalSurface'
 import {
   RIGHT_SURFACE_DEFINITIONS,
   createRightSurfaceState,
@@ -167,31 +167,26 @@ describe('terminal surface tabs', () => {
     ))).toBe('当前绑定的工作目录已不存在')
   })
 
-  it('用可关联的 tab / tabpanel 和 roving tabindex 渲染初始终端', () => {
+  it('在查询主进程持有的 Shell 前不抢先启动新终端', () => {
     const html = renderToStaticMarkup(createElement(TerminalSurface, { cwd: '/repo', active: true }))
-    const tabId = html.match(/id="([^"]+-terminal-\d+-tab)"/)?.[1]
 
-    expect(tabId).toBeTruthy()
-    const panelId = tabId?.replace(/-tab$/, '-panel')
     expect(html).toContain('role="tablist"')
-    expect(html).toContain('role="tab"')
-    expect(html).toContain('aria-selected="true"')
-    expect(html).toContain('tabindex="0"')
-    expect(html).toContain(`aria-controls="${panelId}"`)
-    expect(html).toContain(`id="${panelId}"`)
-    expect(html).toContain('role="tabpanel"')
-    expect(html).toContain(`aria-labelledby="${tabId}"`)
+    expect(html).toContain('正在恢复终端')
+    expect(html).toContain('正在检查仍由主进程持有的 Shell')
+    expect(html).not.toContain('role="tabpanel"')
     expect(html).toContain('aria-label="回放终端录制"')
     expect(html).toContain('aria-label="删除终端录制"')
     expect(html).toContain('role="status"')
-    expect(html).toContain('本机 Shell · 当前用户权限 · 原文录制（可能含密钥）')
   })
 
-  it('未绑定项目时渲染从用户主目录启动的真实终端', () => {
-    const html = renderToStaticMarkup(createElement(TerminalSurface, { cwd: null, active: true }))
-
-    expect(html).toContain('class="terminal-surface"')
-    expect(html).toContain('初始目录为用户主目录')
-    expect(html).not.toContain('工作目录 null')
+  it('把运行中的主进程会话稳定映射为待接管 tab', () => {
+    const sessions = [
+      { id: 'terminal-one', pid: 1, cwd: '/repo', cols: 80, rows: 24 },
+      { id: 'terminal-two', pid: 2, cwd: '/repo', cols: 120, rows: 40 }
+    ]
+    expect(terminalTabsForActiveSessions(sessions)).toEqual([
+      { key: 'active-terminal-one', title: '终端 1', sessionId: 'terminal-one' },
+      { key: 'active-terminal-two', title: '终端 2', sessionId: 'terminal-two' }
+    ])
   })
 })
