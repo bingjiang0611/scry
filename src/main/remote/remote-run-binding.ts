@@ -173,7 +173,34 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         // can open/resume the exact conversation on their Mac. Best-effort.
         try { deps.onRunSession?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId, agentProfileId: routing.agentProfileId }) } catch { /* never fail the run for a catalog write */ }
       },
-      requestUserInput: requestUserInput ?? (async () => { throw new Error('remote_interactive_input_unsupported') })
+      requestUserInput: async (request, signal) => {
+        if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')
+        const openedAtMs = Date.now()
+        const response = await requestUserInput(request, signal)
+        const closedAtMs = Date.now()
+        items.push({
+          id: `remote-intervention-${request.questionId}`,
+          ts: new Date(closedAtMs).toISOString(),
+          runId: scryRunId,
+          kind: 'human',
+          stage: 'intervention',
+          toolUseId: request.questionId,
+          providerId: request.providerId,
+          agentId: request.agentId,
+          durationMs: Math.max(0, closedAtMs - openedAtMs),
+          intervention: {
+            kind: request.questionKind ?? 'clarification',
+            source: request.source ?? 'unknown',
+            resolution: response.behavior === 'answered' ? 'answered' : signal.aborted ? 'provider_cancelled' : 'user_cancelled',
+            request,
+            response,
+            openedAt: new Date(openedAtMs).toISOString(),
+            closedAt: new Date(closedAtMs).toISOString(),
+            durationMs: Math.max(0, closedAtMs - openedAtMs)
+          }
+        })
+        return response
+      }
     })
     const result = await handle.promise
     const status = result.status ?? 'completed'
