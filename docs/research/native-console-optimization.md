@@ -453,6 +453,20 @@ claim is made.
   Explicit prompt/assistant or full-body policy opt-outs keep this evidence `disabled` rather than
   bypassing the user's capture policy.
 
+## Complete content access and export
+
+- `scry turns content` now resolves a typed record content path rather than only tool input/output.
+  Tool, assistant/model segment, diff patch and transcript references all use the same authorized
+  workspace store and byte/base64 cursor (`offset`, `nextOffset`, `hasMore`), so Unicode can be
+  reconstructed without relying on character boundaries.
+- `scry turns export-bundle <directory>` publishes an independent directory atomically. It validates
+  every record, deduplicates all referenced blobs by SHA-256, verifies/copies them, writes a manifest,
+  then renames the completed temporary directory. A missing/corrupt body or an existing target fails
+  before publication; ordinary paged `turns export` remains the lightweight record-only API.
+- The content inventory is derived from the validated record contract, covering tools/skills/MCP,
+  ordered assistant/reasoning references, diff patches and transcript ranges. This same inventory is
+  also the archive dependency authority, avoiding a second list that can silently omit new bodies.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity

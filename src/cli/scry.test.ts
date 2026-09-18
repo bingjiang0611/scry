@@ -3,7 +3,8 @@ import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, w
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RECORDER_VERSION } from '../core/turn-recorder/store'
+import { RECORDER_VERSION, listRecords } from '../core/turn-recorder/store'
+import { readRecorderContent } from '../core/turn-recorder/content-store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
 import { parseArgs, runScryCli } from './scry'
 import { initWorkspace, integrationsRepair } from './workspace-init'
@@ -103,10 +104,11 @@ describe('Scry CLI health and lookup contracts', () => {
     const event = (extra: Record<string, unknown>) => ({ session_id: 'content-page', timestamp: new Date().toISOString(), ...extra })
     const secret = 'CLI_PAGE_SECRET'
     const output = `${'中😀'.repeat(5_000)}\nAuthorization: Bearer ${secret}\nTAIL`
+    const assistant = `${'回答🧠'.repeat(5_000)}\nASSISTANT-TAIL`
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: event({ prompt: 'capture' }) })
     await handleRecorderHook({ ...base, event: 'PreToolUse:Bash', payload: event({ tool_name: 'Bash', tool_use_id: 'call', tool_input: { command: 'generate' } }) })
     await handleRecorderHook({ ...base, event: 'PostToolUse:Bash', payload: event({ tool_name: 'Bash', tool_use_id: 'call', tool_response: output }) })
-    await handleRecorderHook({ ...base, event: 'Stop', payload: event({}) })
+    await handleRecorderHook({ ...base, event: 'Stop', payload: event({ assistant_response: assistant }) })
 
     const bytes: Buffer[] = []
     let offset = 0
@@ -126,6 +128,26 @@ describe('Scry CLI health and lookup contracts', () => {
     expect(complete).toContain('TAIL')
     expect(complete).toBe(output)
     expect(complete).toContain(secret)
+
+    const modelStdout = captureStdout()
+    await expect(runScryCli([
+      'turns', 'content', '1', 'modelSegments', '0', '0', '--workspace', root, '--limit', '262144'
+    ])).resolves.toBe(0)
+    const modelPage = JSON.parse(modelStdout.text()) as { path: string; dataBase64: string; hasMore: boolean }
+    expect(modelPage.path).toBe('modelSegments.0.0')
+    expect(modelPage.hasMore).toBe(false)
+    expect(Buffer.from(modelPage.dataBase64, 'base64').toString('utf8')).toBe(assistant)
+    vi.restoreAllMocks()
+
+    const bundle = join(root, 'complete-export')
+    const exportStdout = captureStdout()
+    await expect(runScryCli(['turns', 'export-bundle', bundle, '--workspace', root])).resolves.toBe(0)
+    expect(JSON.parse(exportStdout.text())).toMatchObject({ target: bundle, records: 1 })
+    const manifest = JSON.parse(await readFile(join(bundle, 'manifest.json'), 'utf8'))
+    expect(manifest).toMatchObject({ schemaVersion: 1, kind: 'scry-recorder-export', records: [expect.objectContaining({ sequence: 1 })] })
+    const [bundledRecord] = await listRecords(bundle)
+    await expect(readRecorderContent(bundle, bundledRecord.tools.value![0].outputContent!.contentRef!)).resolves.toBe(output)
+    await expect(readRecorderContent(bundle, bundledRecord.modelSegments!.value![0].contentRefs![0])).resolves.toBe(assistant)
   })
 })
 
