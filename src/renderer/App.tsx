@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, Dispatch, SetStateAction } from 'react'
 import { useBackgroundWork } from './hooks/useBackgroundWork'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import {
@@ -41,6 +41,14 @@ import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
 import { selectedExternalSessionId, sessionMatchesSelection, sessionSelectionChanged } from './session-selection'
 import type { WorkspaceFileTarget } from './workspace-links'
+import {
+  composerDraftKey,
+  readComposerDrafts,
+  updateComposerDraft,
+  writeComposerDrafts,
+  type ComposerDraft,
+  type ComposerDraftAttachment
+} from './composer-drafts'
 
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
@@ -183,10 +191,7 @@ function latestSessionRuntimeProvider(turns: Array<{ items: TraceEvent[] }>): Ru
   return undefined
 }
 
-export interface DraftAttachment extends AgentInputAttachment {
-  id: string
-  previewUrl: string
-}
+export type DraftAttachment = ComposerDraftAttachment
 
 export interface QueuedPrompt {
   text: string
@@ -527,13 +532,14 @@ export function addRunningRunId(previous: ReadonlySet<string>, runId: string, te
 
 export function App() {
   const [theme, setTheme] = useState<AppTheme>(() => readStoredTheme(browserThemeStorage()))
-  const [input, setInput] = useState('')
+  const [composerDrafts, setComposerDrafts] = useState<ReadonlyMap<string, ComposerDraft>>(() => {
+    try { return readComposerDrafts(window.localStorage) } catch { return new Map() }
+  })
   const [composerError, setComposerError] = useState<string | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [sessionLoading, setSessionLoading] = useState(false)
   // 选中的历史会话读不到证据时保留原因；新会话、切会话与新轮次都会清空它。
   const [sessionEvidenceGap, setSessionEvidenceGap] = useState<SessionEvidenceGap | null>(null)
-  const [draftAttachments, setDraftAttachments] = useState<DraftAttachment[]>([])
   const draftStartPendingRef = useRef(false)
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([])
   const [activeRunHydrated, setActiveRunHydrated] = useState(false)
@@ -638,6 +644,57 @@ export function App() {
     integrations.selectedProviderId,
     projects
   ])
+  const draftKey = useMemo(() => composerDraftKey({
+    providerId: integrations.selectedProviderId,
+    agentProfileId: integrations.providerContext.agentProfileId,
+    cwd,
+    sessionId: selectedProviderSessionId ?? activeSessionId
+  }), [
+    activeSessionId,
+    cwd,
+    integrations.providerContext.agentProfileId,
+    integrations.selectedProviderId,
+    selectedProviderSessionId
+  ])
+  const draft = composerDrafts.get(draftKey)
+  const input = draft?.input ?? ''
+  const draftAttachments = draft?.attachments ?? []
+  const releaseDraft = useCallback((discarded: ComposerDraft): void => {
+    for (const attachment of discarded.attachments) {
+      if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
+    }
+  }, [])
+  const setInput: Dispatch<SetStateAction<string>> = useCallback((update) => {
+    setComposerDrafts((current) => {
+      const result = updateComposerDraft(current, draftKey, (existing) => ({
+        ...existing,
+        input: typeof update === 'function' ? update(existing.input) : update
+      }))
+      result.evicted.forEach(releaseDraft)
+      return result.drafts
+    })
+  }, [draftKey, releaseDraft])
+  const setDraftAttachments: Dispatch<SetStateAction<DraftAttachment[]>> = useCallback((update) => {
+    setComposerDrafts((current) => {
+      const result = updateComposerDraft(current, draftKey, (existing) => ({
+        ...existing,
+        attachments: typeof update === 'function' ? update(existing.attachments) : update
+      }))
+      result.evicted.forEach(releaseDraft)
+      return result.drafts
+    })
+  }, [draftKey, releaseDraft])
+
+  useEffect(() => {
+    try {
+      if (!writeComposerDrafts(window.localStorage, composerDrafts)) {
+        setComposerError((current) => current ?? '草稿无法完整持久化（存储不可用或空间不足）；当前内容仍在本窗口中')
+      }
+    } catch {
+      setComposerError((current) => current ?? '草稿无法持久化；当前内容仍在本窗口中')
+    }
+  }, [composerDrafts])
+
   const providerSendBlockedReason = !integrations.agentsHydrated
     ? '正在检测本机 Provider，暂不能发送'
     : !integrations.selectedAgent
@@ -711,7 +768,7 @@ export function App() {
   const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
   const integrationContextKeyRef = useRef('')
   integrationContextKeyRef.current = providerContextCacheKey(integrations.providerContext)
-  const draftAttachmentsRef = useRef<DraftAttachment[]>([])
+  const composerDraftsRef = useRef<ReadonlyMap<string, ComposerDraft>>(composerDrafts)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [focusedTurnRunId, setFocusedTurnRunId] = useState<string | null>(null)
   const [pendingChatEvent, setPendingChatEvent] = useState<{ eventId: string; runId: string } | null>(null)
@@ -741,8 +798,8 @@ export function App() {
   })
 
   useEffect(() => {
-    draftAttachmentsRef.current = draftAttachments
-  }, [draftAttachments])
+    composerDraftsRef.current = composerDrafts
+  }, [composerDrafts])
 
   useEffect(() => {
     if (!archiveUndo) return
@@ -754,11 +811,9 @@ export function App() {
 
   useEffect(
     () => () => {
-      for (const attachment of draftAttachmentsRef.current) {
-        if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
-      }
+      for (const draft of composerDraftsRef.current.values()) releaseDraft(draft)
     },
-    []
+    [releaseDraft]
   )
 
   const clearDraftAttachments = useCallback((): void => {
@@ -768,7 +823,7 @@ export function App() {
       }
       return []
     })
-  }, [])
+  }, [setDraftAttachments])
 
   useEffect(() => {
     let cancelled = false
@@ -1145,13 +1200,13 @@ export function App() {
       }
       return combined.slice(0, 8)
     })
-  }, [])
+  }, [setDraftAttachments])
 
   const addClipboardImage = useCallback(async (): Promise<void> => {
     const attachment = await window.scry.clipboardImage()
     if (!attachment) return
     setDraftAttachments((prev) => [...prev, clipboardAttachmentToDraft(attachment)].slice(0, 8))
-  }, [])
+  }, [setDraftAttachments])
 
   const send = async (): Promise<void> => {
     const text = input.trim()
@@ -1219,7 +1274,6 @@ export function App() {
     if (cwdChanged) setWorkspaceDirty(false)
     session.clearTurns()
     resetPromptQueue()
-    clearDraftAttachments()
     shouldStickToBottomRef.current = true
     selectSessionId(null)
     setView('chat')
@@ -1238,7 +1292,6 @@ export function App() {
     setWorkspaceDirty(false)
     session.clearTurns()
     resetPromptQueue()
-    clearDraftAttachments()
     shouldStickToBottomRef.current = true
     selectSessionId(null)
     setView('chat')
@@ -1250,7 +1303,10 @@ export function App() {
     setSessionLoading(false)
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     resetPromptQueue()
-    clearDraftAttachments()
+    if (activeSessionId == null) {
+      setInput('')
+      clearDraftAttachments()
+    }
     shouldStickToBottomRef.current = true
     await window.scry.focusRun(null)
     if (!isCurrent()) return
@@ -1329,7 +1385,6 @@ export function App() {
       if (!isCurrent()) return
       if (switchingSession) session.clearTurns()
       resetPromptQueue()
-      clearDraftAttachments()
       shouldStickToBottomRef.current = true
       selectSessionId(sessionId)
       setView('chat')
