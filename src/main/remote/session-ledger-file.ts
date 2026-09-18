@@ -1,23 +1,28 @@
 import {
-  closeSync, constants, fstatSync, fsyncSync, ftruncateSync, lstatSync, openSync,
-  readSync, realpathSync, unlinkSync, writeSync
+  closeSync, constants, existsSync, fstatSync, fsyncSync, ftruncateSync, lstatSync, openSync,
+  readFileSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
-import type { LedgerEvent, LedgerStore } from './session-ledger'
+import { createHash, randomUUID } from 'node:crypto'
+import type { LedgerEvent, LedgerRecovery, LedgerSnapshot, LedgerStore } from './session-ledger'
 
 const MAX_BYTES = 8 * 1024 * 1024
+const COMPACT_AT_BYTES = 6 * 1024 * 1024
+const MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024
 
-// Durable append-only log for the session ledger, one JSON event per line.
-// Same isolation contract as PairingFileStore: private 0700 dir, 0600 file, an
-// exclusive lock lease, and directory fsync treated as authoritative (its
-// failure is not best-effort). Append returns only after the record and its
-// newline are fsynced, so a torn trailing line is an append the caller was
-// never told succeeded and is dropped on load; any non-final unparseable line
-// means real corruption and fails closed.
+interface SnapshotEnvelope {
+  version: 1
+  checksum: string
+  snapshot: LedgerSnapshot
+}
+
+// Durable JSONL tail plus an atomic state checkpoint. The checkpoint is
+// committed and directory-fsynced before the old tail is replaced, so every
+// crash point recovers either the old log or checkpoint + filtered/new tail.
 export class SessionLedgerFileStore implements LedgerStore {
   private readonly directory: string
   private readonly file: string
+  private readonly snapshotFile: string
   private readonly lock: string
   private readonly leaseFd: number
   private closed = false
@@ -27,6 +32,7 @@ export class SessionLedgerFileStore implements LedgerStore {
     if (!info.isDirectory() || (info.mode & 0o777) !== 0o700) throw new Error('ledger_directory_not_private')
     this.directory = realpathSync(directory)
     this.file = join(this.directory, 'session-ledger.log')
+    this.snapshotFile = join(this.directory, 'session-ledger.snapshot.json')
     this.lock = join(this.directory, 'session-ledger.lock')
     this.leaseFd = openSync(this.lock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
     try {
@@ -41,6 +47,13 @@ export class SessionLedgerFileStore implements LedgerStore {
   }
 
   assertAvailable(): void { this.assertLease() }
+
+  loadRecovery(): LedgerRecovery {
+    this.assertLease()
+    const snapshot = this.loadSnapshot()
+    const events = this.loadAll().filter((event) => !snapshot || event.seq > snapshot.lastSeq)
+    return { ...(snapshot ? { snapshot } : {}), events }
+  }
 
   loadAll(): LedgerEvent[] {
     this.assertLease()
@@ -61,15 +74,9 @@ export class SessionLedgerFileStore implements LedgerStore {
       const complete = length === 0 || bytes[length - 1] === 0x0a
       let committedLength = length
       if (!complete) {
-        // Recovery is durable, not merely an in-memory omission. If the torn
-        // bytes remained on disk, the next O_APPEND would concatenate a valid
-        // event onto the fragment and turn a recoverable crash into permanent
-        // corruption. Keep only bytes through the last committed newline.
         committedLength = bytes.lastIndexOf(0x0a, length - 1) + 1
         ftruncateSync(fd, committedLength)
       }
-      // Reconcile the exact persisted bytes after a possible lost receipt or
-      // tail repair before accepting another append.
       fsyncSync(fd)
       this.syncDirectory()
       if (committedLength === 0) return []
@@ -82,6 +89,35 @@ export class SessionLedgerFileStore implements LedgerStore {
       }
       return events
     } finally { closeSync(fd) }
+  }
+
+  shouldCompact(nextEvent: LedgerEvent): boolean {
+    this.assertLease()
+    const nextBytes = Buffer.byteLength(JSON.stringify(nextEvent)) + 1
+    try {
+      const info = lstatSync(this.file)
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('invalid_ledger_file')
+      return info.size + nextBytes > COMPACT_AT_BYTES
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw error
+    }
+  }
+
+  compact(snapshot: LedgerSnapshot): void {
+    this.assertLease()
+    const snapshotContent = JSON.stringify(snapshot)
+    const envelope: SnapshotEnvelope = {
+      version: 1,
+      checksum: createHash('sha256').update(snapshotContent).digest('hex'),
+      snapshot
+    }
+    const content = `${JSON.stringify(envelope)}\n`
+    if (Buffer.byteLength(content) > MAX_SNAPSHOT_BYTES) throw new Error('ledger_snapshot_too_large')
+    // Commit the checkpoint first. If replacing the tail is interrupted, loadRecovery
+    // ignores its events through snapshot.lastSeq and applies only a newer suffix.
+    this.writeAtomic(this.snapshotFile, content)
+    this.writeAtomic(this.file, '')
   }
 
   append(event: LedgerEvent): void {
@@ -101,7 +137,6 @@ export class SessionLedgerFileStore implements LedgerStore {
       }
       fsyncSync(fd)
     } finally { closeSync(fd) }
-    // The appended record's containing directory metadata must also be durable.
     this.syncDirectory()
   }
 
@@ -112,6 +147,39 @@ export class SessionLedgerFileStore implements LedgerStore {
     closeSync(this.leaseFd)
     unlinkSync(this.lock)
     this.syncDirectory()
+  }
+
+  private loadSnapshot(): LedgerSnapshot | undefined {
+    if (!existsSync(this.snapshotFile)) return undefined
+    const info = lstatSync(this.snapshotFile)
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600) throw new Error('invalid_ledger_snapshot')
+    if (info.size <= 0 || info.size > MAX_SNAPSHOT_BYTES) throw new Error('ledger_snapshot_too_large')
+    let envelope: SnapshotEnvelope
+    try { envelope = JSON.parse(readFileSync(this.snapshotFile, 'utf8')) as SnapshotEnvelope }
+    catch { throw new Error('ledger_snapshot_corrupt') }
+    if (!envelope || envelope.version !== 1 || typeof envelope.checksum !== 'string' || !envelope.snapshot) throw new Error('ledger_snapshot_corrupt')
+    const checksum = createHash('sha256').update(JSON.stringify(envelope.snapshot)).digest('hex')
+    if (checksum !== envelope.checksum) throw new Error('ledger_snapshot_corrupt')
+    return envelope.snapshot
+  }
+
+  private writeAtomic(path: string, content: string): void {
+    const tmp = `${path}.tmp`
+    try { unlinkSync(tmp) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    let fd: number | undefined
+    try {
+      fd = openSync(tmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+      writeFileSync(fd, content)
+      fsyncSync(fd)
+      closeSync(fd)
+      fd = undefined
+      renameSync(tmp, path)
+      this.syncDirectory()
+    } catch (error) {
+      if (fd !== undefined) closeSync(fd)
+      try { unlinkSync(tmp) } catch { /* preserve the original failure */ }
+      throw error
+    }
   }
 
   private assertLease(): void {

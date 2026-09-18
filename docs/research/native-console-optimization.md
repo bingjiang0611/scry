@@ -560,6 +560,11 @@ claim is made.
 - Canonical per-turn archives now maintain a bounded atomic incremental catalog index. A dirty
   marker fences the segment-before-index commit window; missing, stale or corrupt index metadata is
   rebuilt from trusted committed segment files, which remain authoritative.
-- Still required: remote ledger compaction beyond the current fail-closed 8 MiB file.
-- Tests still required: cold restart, concurrent append and stale ledger cursors. Keep IPC/security
-  boundaries intact.
+- The remote ledger now compacts before the 8 MiB tail limit into a checksummed atomic checkpoint
+  plus a bounded recent event tail. Checkpoints retain lifecycle, monotonic sequence, durable intent
+  digests and undispatched routing details; crash recovery filters a pre-checkpoint log prefix.
+  Stale cursors receive an explicit reset boundary, while the mobile observer reconciles the
+  authoritative run projection before polling that tail. Unknown append receipts fence the live
+  instance until restart instead of replaying a possibly committed write.
+- Remaining validation: long-running real Provider/device pressure and forced process crashes at each
+  checkpoint rename/fsync boundary. Keep IPC/security boundaries intact.
