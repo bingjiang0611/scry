@@ -28,8 +28,8 @@ struct RemoteRunClient {
   // become native Provider image inputs on the Mac; UTF-8 text/code files are
   // appended to Provider context with their real filename. Unsupported binary
   // files never masquerade as uploaded content.
-  struct Attachment: Encodable, Equatable {
-    enum Kind: String, Encodable, Equatable { case image, text }
+  struct Attachment: Codable, Equatable {
+    enum Kind: String, Codable, Equatable { case image, text }
     let kind: Kind
     let name: String
     let mimeType: String
@@ -39,7 +39,7 @@ struct RemoteRunClient {
 
   // The routing an intent resolves to on the host. `cwd` must already be an
   // authorized Scry project directory; the host fails closed otherwise.
-  struct Routing: Encodable, Equatable {
+  struct Routing: Codable, Equatable {
     let cwd: String
     let providerId: String
     let agentProfileId: String?

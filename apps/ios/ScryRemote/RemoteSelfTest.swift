@@ -60,6 +60,7 @@ enum RemoteSelfTest {
 
     // 3. Run state: stale generation/session callbacks are rejected, submitting
     //    is distinct from recorded, and output drain is not capped at 600 polls.
+    check("run.recoveryCheckpointRoundTrip", RemoteRunStore.selfTestRecoveryCheckpointRoundTrip())
     check("run.generationSessionIsolation", RemoteRunStore.selfTestGenerationIsolation())
     check("run.followUpIdentityStable", RemoteRunStore.selfTestFollowUpIdentity())
     check("run.submittingIsNotRecorded", RemoteRunStore.Lifecycle.submitting != .recorded)
