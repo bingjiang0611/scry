@@ -100,6 +100,13 @@ EXPECTED_RECOVERY_CONTRACT = {
             "cleanupCompatibleWithSchemaVersion": 8,
         }
     ],
+    "legacyRetainedDraftCleanupContracts": [
+        {
+            "schemaVersion": 8,
+            "sha256": "sha256:05095bef930165e3c165ab4cf7e9ddaaffb36fa23f891a7435571bef1c19adf0",
+            "cleanupCompatibleWithSchemaVersion": 8,
+        }
+    ],
     "runtimeSnapshot": {"relativePath": "scry-runtime", "stateVersion": 3},
     "scryIgnoredUntrackedPrefixes": ["designs/"],
     "treehousePool": {

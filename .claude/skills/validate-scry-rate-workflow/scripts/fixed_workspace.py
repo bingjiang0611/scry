@@ -664,14 +664,14 @@ def frozen_contract_identity(run_root: Path) -> dict[str, Any] | None:
     return None
 
 
-def post_send_cleanup_contract_compatibility(run_root: Path) -> dict[str, Any] | None:
+def cleanup_contract_compatibility(run_root: Path, allowlist_key: str) -> dict[str, Any] | None:
     frozen = frozen_contract_identity(run_root)
     current = current_contract_identity()
     if not isinstance(frozen, dict):
         return None
     if frozen == current:
         return {"mode": "current", "frozen": frozen, "current": current}
-    allowlist = RECOVERY.get("legacyPostSendCleanupContracts", [])
+    allowlist = RECOVERY.get(allowlist_key, [])
     if not isinstance(allowlist, list):
         return None
     compatible = next((
@@ -689,6 +689,14 @@ def post_send_cleanup_contract_compatibility(run_root: Path) -> dict[str, Any] |
         "current": current,
         "allowlistEntry": compatible,
     }
+
+
+def post_send_cleanup_contract_compatibility(run_root: Path) -> dict[str, Any] | None:
+    return cleanup_contract_compatibility(run_root, "legacyPostSendCleanupContracts")
+
+
+def retained_draft_cleanup_contract_compatibility(run_root: Path) -> dict[str, Any] | None:
+    return cleanup_contract_compatibility(run_root, "legacyRetainedDraftCleanupContracts")
 
 
 def valid_final_status(status: Any, state: dict[str, Any]) -> bool:
@@ -976,7 +984,8 @@ def terminal_cleanup_authorization(provider: str, run_root: Path) -> dict[str, A
         draft_path = run_root / safe_relative(str(RETENTION["draftEvidence"]))
         draft = read_json(draft_path) if draft_path.is_file() and not draft_path.is_symlink() else None
         boundary = lifecycle.get("cleanupBoundary") if isinstance(lifecycle, dict) else None
-        frozen = frozen_contract_identity(run_root)
+        compatibility = retained_draft_cleanup_contract_compatibility(run_root)
+        frozen = compatibility.get("frozen") if isinstance(compatibility, dict) else None
         valid = bool(
             isinstance(lifecycle, dict)
             and lifecycle.get("schemaVersion") == 1
@@ -985,7 +994,7 @@ def terminal_cleanup_authorization(provider: str, run_root: Path) -> dict[str, A
             and lifecycle.get("runRoot") == str(run_root)
             and lifecycle.get("ok") is True
             and lifecycle.get("mutationPerformed") is False
-            and frozen == current_contract_identity()
+            and isinstance(frozen, dict)
             and isinstance(boundary, dict)
             and boundary.get("frozenSchemaVersion") == frozen.get("schemaVersion")
             and boundary.get("frozenSha256") == frozen.get("sha256")
