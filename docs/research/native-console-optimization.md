@@ -410,6 +410,23 @@ its new epoch. The unsigned local package path is used because this machine's Ap
 signature is not a notarized distribution identity; no install, publication or real Provider/device
 claim is made.
 
+## Complete transcript snapshot selection
+
+- Recorder transcript parsing no longer advances the start cursor to a fixed 32 MiB tail or persists a
+  4 MiB rewind heuristic. It scans JSONL backward to the exact Provider turn ID / prompt-hash anchor,
+  then reads through the stable end offset. If no trustworthy anchor is found it falls back to byte
+  zero, so a large prompt or early tool event cannot disappear while a later terminal event remains.
+- Legacy open-turn state may still contain `transcriptStartOffset`; recovery intentionally recomputes
+  the anchor rather than trusting that heuristic. Snapshot identity checks before/after the read and
+  path inode checks still prevent a rotated or concurrently changed file from being called stable.
+- Focused regression covers a 33 MiB snapshot and a Claude JSONL prompt line larger than the old
+  rewind budget, including exact Provider identity and assistant recovery.
+- This correctness-first path parses the selected turn window in recorder/CLI memory; a missing anchor
+  deliberately falls back to the full session. It is not an Electron renderer or IPC queue, but a
+  single very large turn can increase recovery latency and peak RSS. When measured size/latency becomes
+  material, replace it with a durable line index plus incremental parser state; do not restore a byte
+  tail that silently changes completeness.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity
@@ -425,8 +442,10 @@ claim is made.
   terminal output, assistant text and diffs before UI projection. Reuse existing sinks rather than
   creating a parallel archive.
 - Make export carry referenced blobs, then add explicit retention and orphan collection.
-- Replace remaining adapter/body truncation and fixed transcript windows with streamed content and
-  durable cursors; retain explicit original/saved byte counts where the upstream itself is partial.
+- Replace remaining adapter/body truncation with streamed content and durable cursors; retain
+  explicit original/saved byte counts where the upstream itself is partial. Transcript selection is
+  now complete, but its full-session parser should move to a durable incremental line index when
+  measured size/latency requires it.
 - Collect full diffs asynchronously without changing turn ownership or attributing later changes
   to an earlier turn. Pin capture budgets and preserve historical provenance on retries.
 - Tests: large outputs across current thresholds, interrupted writes/recovery, duplicates,
