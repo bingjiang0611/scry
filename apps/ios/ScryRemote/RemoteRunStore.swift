@@ -70,7 +70,7 @@ final class RemoteRunStore: ObservableObject {
   // A transport response is only allowed to mutate the session that initiated
   // it. The local id keeps consecutive new sessions distinct until the host
   // reports an external Provider session id.
-  struct SessionIdentity: Hashable, Equatable {
+  struct SessionIdentity: Codable, Hashable, Equatable {
     let providerId: String
     let cwd: String
     let externalSessionId: String?
@@ -100,6 +100,15 @@ final class RemoteRunStore: ObservableObject {
     let intentId: String
     let routing: RemoteRunClient.Routing
     let identity: SessionIdentity
+  }
+
+  private struct RecoveryCheckpoint: Codable {
+    let version: Int
+    let hostId: String
+    let intentId: String?
+    let routing: RemoteRunClient.Routing?
+    let identity: SessionIdentity
+    let runId: String?
   }
 
   @Published private(set) var projects: ProjectsState = .idle
@@ -182,6 +191,7 @@ final class RemoteRunStore: ObservableObject {
   private var commandCache: [String: G0Transport.RunCommandCatalog] = [:]
   private var historyCache: [SessionIdentity: HistoryState] = [:]
   private var pendingSubmission: PendingSubmission?
+  private var activeRouting: RemoteRunClient.Routing?
   private var seenOutputSequences = Set<Int>()
   private var archivedActiveTurn = false
 
@@ -190,6 +200,10 @@ final class RemoteRunStore: ObservableObject {
   #if DEBUG
   private var mockMode = false
   #endif
+
+  init() {
+    restoreRecoveryCheckpoint()
+  }
 
   // A persisted PUBLIC connection descriptor means this device is paired and may
   // attempt a run; reachability of the host is only known by trying.
@@ -206,9 +220,88 @@ final class RemoteRunStore: ObservableObject {
     return connections.load()?.relayHost
   }
 
+  var hasRecoverableRun: Bool {
+    pendingSubmission != nil || runId != nil
+  }
+
   private func makeClient() -> RemoteRunClient? {
     guard let connection = connections.load() else { return nil }
     return RemoteRunClient(connection: connection)
+  }
+
+  private var recoveryURL: URL? {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+      .appendingPathComponent("ScryRemote", isDirectory: true)
+      .appendingPathComponent("active-run.json", isDirectory: false)
+  }
+
+  private func saveRecoveryCheckpoint(intentId: String?, routing: RemoteRunClient.Routing?,
+                                      identity: SessionIdentity, runId: String?) -> Bool {
+    guard let connection = connections.load(), let url = recoveryURL else {
+      submitError = "无法保存恢复记录：尚未配对或存储目录不可用"
+      return false
+    }
+    let checkpoint = RecoveryCheckpoint(version: 1, hostId: connection.hostId, intentId: intentId,
+                                        routing: routing, identity: identity, runId: runId)
+    do {
+      let directory = url.deletingLastPathComponent()
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+        attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+      try JSONEncoder().encode(checkpoint).write(to: url, options: .atomic)
+      try FileManager.default.setAttributes(
+        [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: url.path)
+      return true
+    } catch {
+      submitError = "无法保存恢复记录：\(Self.describe(error))"
+      return false
+    }
+  }
+
+  private func clearRecoveryCheckpoint() {
+    guard let url = recoveryURL else { return }
+    do { try FileManager.default.removeItem(at: url) }
+    catch let error as CocoaError where error.code == .fileNoSuchFile { }
+    catch { submitError = "无法清除恢复记录：\(Self.describe(error))" }
+  }
+
+  private func restoreRecoveryCheckpoint() {
+    guard let url = recoveryURL, FileManager.default.fileExists(atPath: url.path) else { return }
+    do {
+      let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+      guard let size = attributes[.size] as? NSNumber, size.intValue <= 2 * 1024 * 1024 else {
+        throw CocoaError(.fileReadCorruptFile)
+      }
+      let checkpoint = try JSONDecoder().decode(RecoveryCheckpoint.self, from: Data(contentsOf: url))
+      guard checkpoint.version == 1, let connection = connections.load(), checkpoint.hostId == connection.hostId else {
+        submitError = "本地恢复记录不属于当前已配对主机"
+        return
+      }
+      activeSessionIdentity = checkpoint.identity
+      activeRouting = checkpoint.routing
+      prompt = checkpoint.routing?.prompt
+      sentAttachments = checkpoint.routing?.attachments.map {
+        SentAttachment(name: $0.name, kind: $0.kind, size: $0.size)
+      } ?? []
+      if let runId = checkpoint.runId {
+        self.runId = runId
+        lifecycle = .recorded
+        if let client = makeClient() {
+          startPolling(runId: runId, client: client, generation: generation, identity: checkpoint.identity)
+        } else {
+          observationInterrupted = true
+          submitError = "已恢复运行标识，但当前配对凭据不可用"
+        }
+      } else if let intentId = checkpoint.intentId, let routing = checkpoint.routing {
+        pendingSubmission = PendingSubmission(intentId: intentId, routing: routing, identity: checkpoint.identity)
+        lifecycle = .submitting
+        retryAvailable = true
+        submitError = "上次提交结果未知。可重试核对；将复用原 intent ID，不会创建重复任务。"
+      } else {
+        submitError = "本地恢复记录不完整，未自动执行任何操作"
+      }
+    } catch {
+      submitError = "本地恢复记录损坏，未自动执行任何操作：\(Self.describe(error))"
+    }
   }
 
   private func isFresh(_ date: Date?, within interval: TimeInterval) -> Bool {
@@ -528,6 +621,7 @@ final class RemoteRunStore: ObservableObject {
     let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
                                           modelId: chosenProvider?.modelId, effort: chosenEffort,
                                           permissionMode: permissionMode, attachments: attachments)
+    activeRouting = routing
     pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
     lifecycle = .submitting
     submitPending()
@@ -543,6 +637,11 @@ final class RemoteRunStore: ObservableObject {
 
   private func submitPending() {
     guard let pending = pendingSubmission, let client = makeClient() else { return }
+    guard saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
+                                 identity: pending.identity, runId: nil) else {
+      retryAvailable = true
+      return
+    }
     submitTask?.cancel()
     let requestGeneration = generation
     submitTask = Task { [weak self] in
@@ -552,9 +651,11 @@ final class RemoteRunStore: ObservableObject {
           guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
           self.reachable = true
           self.runId = outcome.runId
+          let saved = self.saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
+                                                   identity: pending.identity, runId: outcome.runId)
           self.pendingSubmission = nil
           self.retryAvailable = false
-          self.submitError = nil
+          if saved { self.submitError = nil }
           self.lifecycle = .recorded
           self.startPolling(runId: outcome.runId, client: client, generation: requestGeneration, identity: pending.identity)
         }
@@ -607,11 +708,14 @@ final class RemoteRunStore: ObservableObject {
           return
         }
         if self.isTerminal(generation: generation, identity: identity) {
-          await self.drainOutput(client: client, runId: runId, cursor: outputCursor,
-                                 generation: generation, identity: identity)
+          let drained = await self.drainOutput(client: client, runId: runId, cursor: outputCursor,
+                                               generation: generation, identity: identity)
           await MainActor.run {
             guard self.isCurrent(generation, identity: identity) else { return }
-            self.archiveActiveTurnIfNeeded()
+            if drained {
+              self.archiveActiveTurnIfNeeded()
+              self.clearRecoveryCheckpoint()
+            }
             self.pollTask = nil
           }
           return
@@ -644,11 +748,12 @@ final class RemoteRunStore: ObservableObject {
     }
     self.runId = runId
     if lifecycle == .unknown { lifecycle = .recorded }
+    _ = saveRecoveryCheckpoint(intentId: nil, routing: activeRouting, identity: identity, runId: runId)
     resumeObservation(runId: runId)
   }
 
   private func drainOutput(client: RemoteRunClient, runId: String, cursor: Int,
-                          generation: Int, identity: SessionIdentity) async {
+                          generation: Int, identity: SessionIdentity) async -> Bool {
     var cursor = cursor
     while !Task.isCancelled {
       guard let page = try? await client.output(runId: runId, cursor: cursor) else {
@@ -657,7 +762,7 @@ final class RemoteRunStore: ObservableObject {
           self.observationInterrupted = true
           self.submitError = "观察中断：无法读取运行的最后输出，运行结果未知。"
         }
-        return
+        return false
       }
       let next = page.cursor
       for chunk in page.chunks {
@@ -665,9 +770,10 @@ final class RemoteRunStore: ObservableObject {
       }
       // The host's cursor is authoritative. Stop only when the page is empty or
       // did not advance; this drains arbitrarily many pages, including >400 chunks.
-      if !Self.shouldContinueDrain(cursor: cursor, next: next, chunkCount: page.chunks.count) { return }
+      if !Self.shouldContinueDrain(cursor: cursor, next: next, chunkCount: page.chunks.count) { return true }
       cursor = next
     }
+    return false
   }
 
   nonisolated private static func responseMatches(currentGeneration: Int, requestGeneration: Int,
@@ -743,6 +849,8 @@ final class RemoteRunStore: ObservableObject {
     submitTask?.cancel(); submitTask = nil
     historyTask?.cancel(); historyTask = nil
     pendingSubmission = nil
+    activeRouting = nil
+    clearRecoveryCheckpoint()
     lifecycle = .unknown
     output = []
     seenOutputSequences = []
@@ -781,6 +889,8 @@ final class RemoteRunStore: ObservableObject {
     commandsTask?.cancel(); commandsTask = nil
     projectsTask?.cancel(); projectsTask = nil
     pendingSubmission = nil
+    activeRouting = nil
+    clearRecoveryCheckpoint()
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenEffort = nil; permissionMode = "default"
     catalog = .idle; history = .idle; reachable = nil
@@ -825,6 +935,7 @@ final class RemoteRunStore: ObservableObject {
     let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
                                           modelId: modelId, effort: effort, permissionMode: permission,
                                           resume: resumeId, attachments: attachments)
+    activeRouting = routing
     pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
     lifecycle = .submitting
     submitPending()
@@ -833,6 +944,20 @@ final class RemoteRunStore: ObservableObject {
   #if DEBUG
   // Pure checks used by the launch self-test; they exercise the invariants that
   // do not require a relay or Provider.
+  nonisolated static func selfTestRecoveryCheckpointRoundTrip() -> Bool {
+    let identity = SessionIdentity.new(providerId: "codex", cwd: "/repo")
+    let attachment = RemoteRunClient.Attachment(kind: .text, name: "note.txt", mimeType: "text/plain",
+                                                dataBase64: "cmF3", size: 3)
+    let routing = RemoteRunClient.Routing(cwd: "/repo", providerId: "codex", agentProfileId: nil,
+                                          prompt: "continue", attachments: [attachment])
+    let checkpoint = RecoveryCheckpoint(version: 1, hostId: "host", intentId: UUID().uuidString.lowercased(),
+                                        routing: routing, identity: identity, runId: nil)
+    guard let data = try? JSONEncoder().encode(checkpoint),
+          let decoded = try? JSONDecoder().decode(RecoveryCheckpoint.self, from: data) else { return false }
+    return decoded.version == 1 && decoded.hostId == "host" && decoded.intentId == checkpoint.intentId &&
+      decoded.routing == routing && decoded.identity == identity && decoded.runId == nil
+  }
+
   nonisolated static func selfTestGenerationIsolation() -> Bool {
     let a = SessionIdentity.opened(providerId: "codex", cwd: "/a", externalSessionId: "one")
     let b = SessionIdentity.opened(providerId: "codex", cwd: "/b", externalSessionId: "two")

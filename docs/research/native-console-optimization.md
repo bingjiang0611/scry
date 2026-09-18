@@ -486,6 +486,13 @@ claim is made.
 - The append-only ledger rejects an entry that would cross its 8 MiB restart-readable bound. This is
   deliberate fail-closed capacity behavior: an accepted append must remain readable after restart;
   compaction is still required before this becomes a long-lived unbounded ledger.
+- The iOS client atomically checkpoints a pending intent (including its exact routing/attachments)
+  before any network submit, then replaces it with the host run ID after receipt. A cold launch never
+  replays an unresolved write automatically: it offers an idempotent retry with the original intent
+  ID. A received active run resumes read-only ledger/output observation from cursor zero so visible
+  state is reconstructed without skipping unpersisted UI data. The file uses iOS data protection and
+  is retained across observation failures, then removed only after terminal output drains or the user
+  explicitly resets/unpairs.
 
 ## Remaining sequence
 
@@ -522,8 +529,8 @@ claim is made.
   renderer reload with ownership fencing. Mobile session history now uses snapshot-fenced byte pages
   and is sourced from durable host history after reconnect/restart. App/mobile Recorder detail views
   still need the same authorized cursor contract.
-- Tests still needed outside the terminal path: real-device reconnect continuity, long-running
-  renderer overload and retention/deletion policy.
+- Tests still needed outside the terminal path: real-device cold-launch/reconnect continuity,
+  long-running renderer overload and retention/deletion policy.
 
 ### 4. Native interactions
 

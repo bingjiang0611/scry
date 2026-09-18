@@ -49,11 +49,15 @@ struct RootView: View {
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
     .onChange(of: run.reachable) { if let ok = run.reachable { model.markReachable(ok) } }
+    .onChange(of: model.signedIn) { signedIn in
+      if signedIn, run.hasRecoverableRun { model.route = .chat }
+    }
     .onAppear {
       #if DEBUG
       model.applyUIPreviewArguments()
       run.applyUIPreviewArguments()
       #endif
+      if model.signedIn, run.hasRecoverableRun { model.route = .chat }
     }
   }
 }
