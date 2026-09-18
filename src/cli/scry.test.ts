@@ -595,7 +595,7 @@ describe('capture 配置的生效值', () => {
   })
 })
 
-describe('scry records archive', () => {
+describe('scry records archive and maintenance', () => {
   async function withTurns(count: number): Promise<string> {
     const root = await workspace()
     for (let index = 1; index <= count; index++) {
@@ -610,6 +610,18 @@ describe('scry records archive', () => {
     }
     return root
   }
+
+  it('maintenance 默认只输出计划，不执行删除', async () => {
+    const root = await withTurns(1)
+    const stdout = captureStdout()
+    await expect(runScryCli(['records', 'maintain', '--workspace', root])).resolves.toBe(0)
+    expect(JSON.parse(stdout.text())).toMatchObject({ action: 'maintain', status: 'planned', applied: false, blockedBy: [] })
+
+    vi.restoreAllMocks()
+    const applied = captureStdout()
+    await expect(runScryCli(['records', 'maintain', '--apply', '--workspace', root])).resolves.toBe(0)
+    expect(JSON.parse(applied.text())).toMatchObject({ action: 'maintain', status: 'applied', applied: true, blockedBy: [] })
+  })
 
   it('归档搬移前缀并记录 floor，store 仍然 ok', async () => {
     const root = await withTurns(3)

@@ -12,6 +12,12 @@ export interface RecorderConfig {
     maxDepth?: number
     exclude?: string[]
   }
+  storage?: {
+    /** Soft quota: maintenance reports pressure but never deletes referenced evidence. */
+    maxBytes?: number
+    retentionDays?: number
+    orphanGraceHours: number
+  }
   capture: {
     prompt: boolean
     assistant: boolean
@@ -77,6 +83,14 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
     ? Math.max(0, Math.min(5, repositories.maxDepth))
     : 2
   const captureRaw = record(root.capture) ?? {}
+  const storageRaw = record(root.storage)
+  const maxBytes = storageRaw ? boundedStorageInteger(storageRaw.maxBytes, 'storage.maxBytes', 1024 * 1024, 1024 ** 5) : undefined
+  const retentionDays = storageRaw ? boundedStorageInteger(storageRaw.retentionDays, 'storage.retentionDays', 1, 36_500) : undefined
+  const storage = storageRaw ? {
+    ...(maxBytes != null ? { maxBytes } : {}),
+    ...(retentionDays != null ? { retentionDays } : {}),
+    orphanGraceHours: boundedStorageInteger(storageRaw.orphanGraceHours, 'storage.orphanGraceHours', 1, 8_760) ?? 24
+  } : undefined
   const patchExcludeBasenames = [...new Set(stringArray(captureRaw.patchExcludeBasenames).map((item) => item.trim()))]
   if (patchExcludeBasenames.some((item) => item.includes('/') || item.includes('\\'))) {
     throw new Error('capture.patchExcludeBasenames entries must be basenames')
@@ -88,6 +102,7 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
     dataDir,
     ...(commitHook ? { commitHook } : {}),
     repositories: { mode, maxDepth, exclude: stringArray(repositories.exclude) },
+    ...(storage ? { storage } : {}),
     capture: resolveCapture(captureRaw, patchExcludeBasenames)
   }
 }
@@ -118,6 +133,14 @@ function resolveCapture(
     hooks: raw.hooks !== false,
     patchExcludeBasenames
   }
+}
+
+function boundedStorageInteger(value: unknown, name: string, minimum: number, maximum: number): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isSafeInteger(value) || Number(value) < minimum || Number(value) > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`)
+  }
+  return Number(value)
 }
 
 function contentBudget(value: unknown, fallback: number, maximum: number): number {

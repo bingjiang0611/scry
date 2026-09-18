@@ -54,6 +54,7 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 | `scry turns content <记录> <正文路径...> --offset 0 --limit 65536` | 按字节分页读取 tool/model/diff/transcript 正文 |
 | `scry turns verify` | 序号连续性与记录完整性 |
 | `scry records archive --before 30d` | 归档旧记录(见「容量与归档」) |
+| `scry records maintain [--apply]` | 检查 quota/retention，安全回收孤立正文与压缩轮转日志 |
 | `scry support-bundle create` | 脱敏排障包 |
 | `scry recorder status\|stop\|restart\|recover\|notify-drain` | daemon 与恢复 |
 | `scry integrations diff\|repair\|uninstall` | 托管 hook 的漂移检查与修复 |
@@ -252,12 +253,22 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 | 只有 prompt,无工具无 diff | 2.6 KB |
 | 5 次 Edit + 5 文件 diff | 6.6–9.9 KB |
 
-存储量取决于实际采集的原文和 diff，不能按 inline 预算估算总磁盘占用。默认 `full` 的单轮工具正文 inline 预算为 128 KiB（可配置到 1 MiB），但 `contentRef` 指向的完整正文不受此预览预算限制；diff patch 单文件 32 KiB、单轮合计 128 KiB，另有元数据、归档和恢复副本。当前没有自动 retention/孤立 blob GC。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
+存储量取决于实际采集的原文和 diff，不能按 inline 预算估算总磁盘占用。默认 `full` 的单轮工具正文 inline 预算为 128 KiB（可配置到 1 MiB），但 `contentRef` 指向的完整正文不受此预览预算限制；diff patch 单文件 32 KiB、单轮合计 128 KiB，另有元数据、归档和恢复副本。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
+
+可选的 `storage` 配置提供软 quota、retention 候选和孤立文件宽限期：
+
+```json
+{ "storage": { "maxBytes": 10737418240, "retentionDays": 90, "orphanGraceHours": 24 } }
+```
+
+`maxBytes` 不会通过丢弃引用中的证据强行达标；超过时 maintenance 退出 3 并报告 `overQuotaBytes`。`retentionDays` 只列出候选，仍由 `records archive` 执行可校验的连续前缀归档。孤立 blob/遗留 `.tmp` 必须超过宽限期才可回收。存在 open turn、未完成 archive journal、其他 recorder lock 或近期 temp 时 maintenance fail closed，`--apply` 也不删除。
 
 > ⚠️ **不要手动删除单个 record 文件。** 序号空洞会被 `turns verify` 与 `doctor` 判为 store 损坏(退出 4),而不是"已清理"。
 
 ```bash
-scry records archive --before 30d --workspace "$PWD"          # 只打印计划
+scry records maintain --workspace "$PWD"                     # 只打印 GC/quota/retention 计划
+scry records maintain --apply --workspace "$PWD"             # 回收确认孤立的正文/temp，gzip 轮转日志
+scry records archive --before 30d --workspace "$PWD"          # 只打印归档计划
 scry records archive --before 30d --yes --workspace "$PWD"    # 执行
 ```
 

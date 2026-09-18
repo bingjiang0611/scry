@@ -16,6 +16,7 @@ import {
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecordBundle, exportRecords, lastRecordVersion, listRecords, readArchiveState, readHealth, recordContentItem, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import { readRecorderContentPage } from '../core/turn-recorder/content-store.js'
+import { maintainRecorderStore } from '../core/turn-recorder/maintenance.js'
 import {
   commitHookEnv,
   inspectCommitHookBundle,
@@ -43,7 +44,7 @@ export interface ParsedArgs {
 }
 
 const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'offset', 'snapshot', 'before', 'out'])
-const BOOLEAN_FLAGS = new Set(['all', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
+const BOOLEAN_FLAGS = new Set(['all', 'apply', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
@@ -108,7 +109,8 @@ function print(value: unknown): void {
 }
 
 function helpText(): string {
-  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|content|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]
+  scry records maintain [--apply]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|content|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 async function readStdin(): Promise<string> {
@@ -346,12 +348,20 @@ async function supportBundleCommand(args: ParsedArgs): Promise<number> {
 }
 
 async function recordsCommand(args: ParsedArgs): Promise<number> {
-  if (args.positionals[1] !== 'archive') throw new Error('usage: scry records archive --before <30d|ISO> [--out <dir>] [--yes]')
+  const action = args.positionals[1]
+  if (action !== 'archive' && action !== 'maintain') {
+    throw new Error('usage: scry records archive --before <30d|ISO> [--out <dir>] [--yes] | scry records maintain [--apply]')
+  }
   const workspace = workspaceOf(args)
   const enablement = await recorderEnablement(workspace)
   if (!enablement.enabled) {
     print({ action: 'archive', workspace, status: 'unavailable', reason: enablement.reason })
     return 2
+  }
+  if (action === 'maintain') {
+    const report = await maintainRecorderStore(enablement.dataRoot, enablement.config, { apply: args.flags.has('apply') })
+    print({ action: 'maintain', workspace, status: report.blockedBy.length ? 'blocked' : report.applied ? 'applied' : 'planned', ...report })
+    return report.blockedBy.length ? 5 : report.overQuotaBytes > 0 || report.retentionEligible.length > 0 ? 3 : 0
   }
   const before = flag(args, 'before')
   if (!before) throw new Error('--before is required, e.g. --before 30d')
