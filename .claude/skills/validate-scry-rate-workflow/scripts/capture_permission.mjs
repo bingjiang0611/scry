@@ -242,7 +242,9 @@ async function permissionSnapshot(target, workspace, provider, launchId, setPerm
       ? providerButton.dataset.agentId ?? null
       : null
     const providerStatusLabel = providerStatus?.querySelector('.agent-name')?.textContent?.trim() ?? ''
-    const workspaceLabel = workspaceButton?.textContent?.trim() ?? ''
+    const workspaceLabel = workspaceButton?.textContent?.trim()
+      || activeProject?.querySelector('.pname')?.textContent?.trim()
+      || ''
     const workspacePath = activeProject?.dataset?.projectPath ?? null
     const workspaceExact = workspacePath === expectedWorkspace
     let providerDescriptor = null
