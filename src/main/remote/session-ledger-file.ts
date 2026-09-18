@@ -86,11 +86,19 @@ export class SessionLedgerFileStore implements LedgerStore {
 
   append(event: LedgerEvent): void {
     this.assertLease()
-    const line = JSON.stringify(event) + '\n'
-    if (Buffer.byteLength(line) > MAX_BYTES) throw new Error('ledger_file_too_large')
+    const line = Buffer.from(JSON.stringify(event) + '\n', 'utf8')
+    if (line.length > MAX_BYTES) throw new Error('ledger_file_too_large')
     const fd = openSync(this.file, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW, 0o600)
     try {
-      writeSync(fd, line)
+      const info = fstatSync(fd)
+      if (!info.isFile() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600) throw new Error('invalid_ledger_file')
+      if (info.size + line.length > MAX_BYTES) throw new Error('ledger_file_too_large')
+      let offset = 0
+      while (offset < line.length) {
+        const written = writeSync(fd, line, offset, line.length - offset)
+        if (written === 0) throw new Error('ledger_write_stalled')
+        offset += written
+      }
       fsyncSync(fd)
     } finally { closeSync(fd) }
     // The appended record's containing directory metadata must also be durable.

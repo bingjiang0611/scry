@@ -37,7 +37,8 @@ async function deviceKeyAndCSR() {
 
 async function harness(
   runProvider: (i: { runId: string; routing: RemoteIntentRouting; progress(d?: string): void }) => Promise<void>,
-  listCommands?: (query: { providerId: string; cwd: string; agentProfileId?: string }) => Promise<{ commands: { name: string; description: string }[] }>
+  listCommands?: (query: { providerId: string; cwd: string; agentProfileId?: string }) => Promise<{ commands: { name: string; description: string }[] }>,
+  readHistory?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<Array<{ userText: string; items: Array<{ kind: 'output'; text: string }> }>>
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
@@ -47,7 +48,8 @@ async function harness(
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd },
     startRun: runProvider, gate: new ProviderOperationGate(),
     createOutputStore: (directory) => new RunOutputFileStore(directory),
-    ...(listCommands ? { listCommands } : {})
+    ...(listCommands ? { listCommands } : {}),
+    ...(readHistory ? { readHistory } : {})
   })
   cleanups.push(() => binding.close())
   const controller: HostController = binding.controller
@@ -149,6 +151,21 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
       { op: 'commands', providerId: 'codex', cwd: AUTHORIZED })
     expect(reply.commands.commands).toEqual([{ name: 'review', description: 'Review changes' }])
     expect(listCommands).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED })
+  })
+
+  it('serves snapshot-fenced history pages over the authorized channel', async () => {
+    const readHistory = vi.fn(async () => [{ userText: 'hello', items: [{ kind: 'output' as const, text: 'world'.repeat(20) }] }])
+    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, readHistory)
+    const device = await pairDevice(identity, controller)
+
+    const first = await call(addr, caPEM, device.certPEM, device.keyPEM,
+      { op: 'historyPage', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: 0, limit: 8 })
+    expect(Buffer.from(first.historyPage.dataBase64, 'base64')).toHaveLength(8)
+    const second = await call(addr, caPEM, device.certPEM, device.keyPEM,
+      { op: 'historyPage', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: first.historyPage.cursor, limit: 8, snapshot: first.historyPage.snapshot })
+    expect(second.historyPage.cursor).toBe(16)
+    expect(second.historyPage.snapshot).toBe(first.historyPage.snapshot)
+    expect(readHistory).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
   })
 
   it('refuses the next request after the grant is revoked', async () => {

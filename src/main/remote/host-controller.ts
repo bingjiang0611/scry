@@ -1,6 +1,6 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistorySource } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage, type RunOutputStore } from './run-output-log'
 export type { RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
@@ -245,6 +245,10 @@ export class HostController {
   // same verified peer certificate. Async (reads the trace archive/transcript).
   readHistory(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]> {
     return this.#gateway.readHistory(peerCertSHA256, query)
+  }
+
+  readHistoryPage(peerCertSHA256: string, query: RemoteHistoryPageQuery): Promise<RemoteHistoryPage> {
+    return this.#gateway.readHistoryPage(peerCertSHA256, query)
   }
 
   // Device-facing: the assistant's real streamed output CONTENT for one run,

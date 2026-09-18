@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import RemoteTransport
 
@@ -118,9 +119,42 @@ struct RemoteRunClient {
     try await G0Transport.relayRunSessions(endpoint: endpoint(), identity: try identity())
   }
 
-  // The REAL conversation content of one listed session so the phone can OPEN it.
+  func historyPage(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> G0Transport.RunHistoryPage {
+    try await G0Transport.relayRunHistoryPage(
+      endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd,
+      externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot
+    )
+  }
+
+  // Complete, restart-stable history. No turn/item/text is clipped to a frame.
   func history(providerId: String, cwd: String, externalSessionId: String) async throws -> [G0Transport.RunHistoryTurn] {
-    try await G0Transport.relayRunHistory(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    var cursor = 0
+    var snapshot: String?
+    var totalBytes: Int?
+    var bytes = Data()
+    repeat {
+      let page = try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot)
+      guard let chunk = Data(base64Encoded: page.dataBase64), page.cursor == cursor + chunk.count else {
+        throw NSError(domain: "ScryRemote.History", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid history page"])
+      }
+      if snapshot == nil { snapshot = page.snapshot }
+      if totalBytes == nil { totalBytes = page.totalBytes }
+      guard snapshot == page.snapshot,
+            totalBytes == page.totalBytes,
+            page.totalBytes <= 256 * 1024 * 1024,
+            page.cursor <= page.totalBytes,
+            page.hasMore ? page.cursor > cursor && page.cursor < page.totalBytes : page.cursor == page.totalBytes else {
+        throw NSError(domain: "ScryRemote.History", code: 2, userInfo: [NSLocalizedDescriptionKey: "History snapshot or size changed"])
+      }
+      bytes.append(chunk)
+      cursor = page.cursor
+      if !page.hasMore { break }
+    } while true
+    let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    guard digest == snapshot else {
+      throw NSError(domain: "ScryRemote.History", code: 3, userInfo: [NSLocalizedDescriptionKey: "History snapshot verification failed"])
+    }
+    return try JSONDecoder().decode([G0Transport.RunHistoryTurn].self, from: bytes)
   }
 
   // The assistant's real streamed output content for one run, strictly after

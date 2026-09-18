@@ -284,6 +284,10 @@ public enum G0Transport {
     public let seq: Int; public let at: Int; public let runId: String; public let kind: String; public let text: String
   }
   public struct RunOutputPage: Sendable, Equatable { public let chunks: [RunOutputChunk]; public let cursor: Int }
+  public struct RunHistoryPage: Sendable, Equatable, Codable {
+    public let dataBase64: String; public let cursor: Int; public let totalBytes: Int
+    public let hasMore: Bool; public let snapshot: String
+  }
 
   private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
@@ -294,6 +298,10 @@ public enum G0Transport {
   private struct RunCommandsRequest: Encodable { let op = "commands"; let providerId: String; let cwd: String; let agentProfileId: String? }
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
+  private struct RunHistoryPageRequest: Encodable {
+    let op = "historyPage"; let providerId: String; let cwd: String; let externalSessionId: String
+    let cursor: Int; let limit: Int; let snapshot: String?
+  }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunResponse: Decodable {
     let runId: String?
@@ -306,6 +314,7 @@ public enum G0Transport {
     let commands: RunCommandCatalog?
     let sessions: [RunSessionRef]?
     let history: [RunHistoryTurn]?
+    let historyPage: RunHistoryPage?
     let output: RunOutputBody?
     let error: String?
   }
@@ -398,6 +407,16 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let history = response.history else { throw ProbeError.unexpectedReply }
     return history
+  }
+
+  // Complete history as stable byte pages. The caller may persist cursor,
+  // snapshot and accumulated bytes across disconnects; a changed source fails
+  // explicitly instead of combining two transcript versions.
+  public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int = 256 * 1024, snapshot: String? = nil) async throws -> RunHistoryPage {
+    let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: limit, snapshot: snapshot))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let page = response.historyPage else { throw ProbeError.unexpectedReply }
+    return page
   }
 
   // The assistant's real streamed output content for one run, strictly after

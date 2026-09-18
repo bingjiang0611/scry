@@ -126,6 +126,7 @@ export class SessionLedger {
   #pageSize: number
   #runs = new Map<string, RunEntry>()
   #byIntent = new Map<string, string>()
+  #intentEvents = new Map<string, LedgerEvent>()
   #lastSeq = 0
   #count = 0
 
@@ -177,6 +178,7 @@ export class SessionLedger {
       }
       this.#runs.set(event.runId, { runId: event.runId, intentId: event.intentId, lifecycle: 'recorded' })
       this.#byIntent.set(event.intentId, event.runId)
+      this.#intentEvents.set(event.intentId, event)
       return
     }
     const entry = this.#runs.get(event.runId)
@@ -219,7 +221,9 @@ export class SessionLedger {
     // and any retry returns that original binding. The candidate runId passed on
     // a retry is an artifact of a stateless caller and is intentionally ignored.
     if (this.#byIntent.has(input.intentId)) {
-      return { status: 'duplicate', event: this.#firstEventFor(input.intentId) }
+      const existing = this.#firstEventFor(input.intentId)
+      if (existing.detail !== input.detail) throw new SessionLedgerError('intent_payload_conflict')
+      return { status: 'duplicate', event: existing }
     }
     if (this.#runs.has(input.runId)) throw new SessionLedgerError('run_already_exists')
     if (this.#runs.size >= this.#maxRuns) throw new SessionLedgerError('ledger_capacity_exceeded')
@@ -228,7 +232,8 @@ export class SessionLedger {
   }
 
   #firstEventFor(intentId: string): LedgerEvent {
-    for (const event of this.#store.loadAll()) if (event.intentId === intentId) return event
+    const event = this.#intentEvents.get(intentId)
+    if (event) return event
     throw new SessionLedgerError('ledger_log_corrupt')
   }
 
