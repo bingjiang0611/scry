@@ -248,6 +248,7 @@ const MAX_PROVIDERS = 32
 const MAX_COMMANDS = 256
 const MAX_SESSIONS = 300
 const MAX_CATALOG_PAGE = 100
+const MAX_CATALOG_ITEMS = 100_000
 const MAX_HISTORY_TURNS = 400
 const MAX_HISTORY_ITEMS_PER_TURN = 500
 const MAX_HISTORY_TEXT = 20_000
@@ -363,7 +364,8 @@ export class RemoteGateway {
     const raw = this.#directories?.list(input.path) ?? { directories: [] }
     const current = raw.current ? this.projectRefs([raw.current])[0] : undefined
     const parent = raw.parent ? this.projectRefs([raw.parent])[0] : undefined
-    const directories = this.projectRefs(raw.directories, Number.MAX_SAFE_INTEGER)
+    const directories = this.projectRefs(raw.directories, MAX_CATALOG_ITEMS + 1)
+    if (directories.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('directory_capacity_exceeded')
     const snapshot = createHash('sha256').update(JSON.stringify({ current, parent, directories })).digest('hex')
     if (input.snapshot !== undefined && input.snapshot !== snapshot) throw new RemoteGatewayError('directory_snapshot_changed')
     if (cursor > directories.length) throw new RemoteGatewayError('invalid_directory_cursor')
@@ -491,7 +493,8 @@ export class RemoteGateway {
     const limit = input?.limit ?? MAX_CATALOG_PAGE
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_session_cursor')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_session_limit')
-    const sessions = this.sessionRefs(this.#sessions?.list() ?? [], Number.MAX_SAFE_INTEGER)
+    const sessions = this.sessionRefs(this.#sessions?.list() ?? [], MAX_CATALOG_ITEMS + 1)
+    if (sessions.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('session_capacity_exceeded')
     const snapshot = createHash('sha256').update(JSON.stringify(sessions)).digest('hex')
     if (input.snapshot !== undefined && input.snapshot !== snapshot) throw new RemoteGatewayError('session_snapshot_changed')
     if (cursor > sessions.length) throw new RemoteGatewayError('invalid_session_cursor')
