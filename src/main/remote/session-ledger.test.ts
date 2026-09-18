@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, rmSync, chmodSync, writeFileSync, appendFileSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, chmodSync, writeFileSync, appendFileSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -16,6 +16,7 @@ class MemoryLedgerStore implements LedgerStore {
   log: LedgerEvent[]
   available = true
   failNextAppend = false
+  failAfterAppend = false
   loadCalls = 0
   constructor(seed: LedgerEvent[] = []) { this.log = seed.map((e) => ({ ...e })) }
   assertAvailable(): void { if (!this.available) throw new Error('ledger_store_unavailable') }
@@ -26,6 +27,7 @@ class MemoryLedgerStore implements LedgerStore {
   append(event: LedgerEvent): void {
     if (this.failNextAppend) { this.failNextAppend = false; throw new Error('disk full') }
     this.log.push({ ...event })
+    if (this.failAfterAppend) { this.failAfterAppend = false; throw new Error('receipt lost') }
   }
 }
 
@@ -150,10 +152,27 @@ describe('SessionLedger', () => {
     expect(() => ledger.recordIntent({ intentId: randomUUID(), runId })).toThrow('disk full')
     expect(ledger.describe()).toEqual({ runs: 0, events: 0, lastSeq: 0 })
     expect(store.log).toHaveLength(0)
-    // After the transient failure, recording succeeds at seq 1 (no gap).
-    const ok = ledger.recordIntent({ intentId: randomUUID(), runId })
+    // The store API cannot prove whether the failed append reached disk. Fence
+    // this instance until a fresh recovery reconciles the durable bytes.
+    expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId }), 'ledger_write_indeterminate')
+    expectCode(() => ledger.runState(runId), 'ledger_write_indeterminate')
+    const recovered = new SessionLedger({ store })
+    const ok = recovered.recordIntent({ intentId: randomUUID(), runId })
     expect(ok.event.seq).toBe(1)
-    expect(ledger.runState(runId)).toBe('recorded')
+    expect(recovered.runState(runId)).toBe('recorded')
+  })
+
+  it('reconciles a lost append receipt only through fresh recovery', () => {
+    const store = new MemoryLedgerStore()
+    const runId = randomUUID()
+    const ledger = new SessionLedger({ store })
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    store.failAfterAppend = true
+    expect(() => ledger.markDispatched(runId)).toThrow('receipt lost')
+    expectCode(() => ledger.markDispatched(runId), 'ledger_write_indeterminate')
+    const recovered = new SessionLedger({ store })
+    expect(recovered.runState(runId)).toBe('dispatched')
+    expect(recovered.describe()).toEqual({ runs: 1, events: 2, lastSeq: 2 })
   })
 
   it('enforces capacity and store availability', () => {
@@ -206,6 +225,59 @@ describe('SessionLedgerFileStore', () => {
       expect(revived.runState(runId)).toBe('settled')
       // Fence survives real persistence: replaying the intent is a duplicate.
       expect(revived.recordIntent({ intentId, runId }).status).toBe('duplicate')
+      revivedStore.close()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('compacts to an atomic checkpoint, preserves dedup, and reports stale cursors', () => {
+    const dir = privateDir()
+    const intentId = randomUUID()
+    const runId = randomUUID()
+    try {
+      const store = new SessionLedgerFileStore(dir)
+      const ledger = new SessionLedger({ store, maxEvents: 4, pageSize: 1 })
+      ledger.recordIntent({ intentId, runId, detail: 'route' })
+      ledger.markDispatched(runId)
+      ledger.markProgress(runId, 'one')
+      ledger.markProgress(runId, 'two')
+      ledger.markProgress(runId, 'three')
+      expect(ledger.describe()).toEqual({ runs: 1, events: 5, lastSeq: 5 })
+      expect(ledger.since(0)).toMatchObject({ cursor: 3, reset: { requested: 0, availableFrom: 2 }, events: [{ seq: 3 }] })
+      expect(ledger.since(2).events[0]?.seq).toBe(3)
+      expect(statSync(join(dir, 'session-ledger.snapshot.json')).mode & 0o777).toBe(0o600)
+      store.close()
+
+      const revivedStore = new SessionLedgerFileStore(dir)
+      const revived = new SessionLedger({ store: revivedStore, maxEvents: 4, pageSize: 1 })
+      expect(revived.runState(runId)).toBe('dispatched')
+      expect(revived.recordIntent({ intentId, runId, detail: 'route' }).status).toBe('duplicate')
+      expectCode(() => revived.recordIntent({ intentId, runId, detail: 'changed' }), 'intent_payload_conflict')
+      revived.markSettled(runId)
+      revivedStore.close()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('ignores a pre-checkpoint log prefix left by a compaction crash window', () => {
+    const dir = privateDir()
+    const intentId = randomUUID()
+    const runId = randomUUID()
+    try {
+      const store = new SessionLedgerFileStore(dir)
+      const ledger = new SessionLedger({ store, maxEvents: 3, pageSize: 1 })
+      const original = [
+        ledger.recordIntent({ intentId, runId, detail: 'route' }).event,
+        ledger.markDispatched(runId),
+        ledger.markProgress(runId, 'one')
+      ]
+      ledger.markProgress(runId, 'after-checkpoint')
+      store.close()
+      const tail = readFileSync(join(dir, 'session-ledger.log'), 'utf8')
+      writeFileSync(join(dir, 'session-ledger.log'), original.map((event) => JSON.stringify(event)).join('\n') + '\n' + tail, { mode: 0o600 })
+
+      const revivedStore = new SessionLedgerFileStore(dir)
+      const revived = new SessionLedger({ store: revivedStore, maxEvents: 3, pageSize: 1 })
+      expect(revived.describe()).toEqual({ runs: 1, events: 4, lastSeq: 4 })
+      expect(revived.runState(runId)).toBe('dispatched')
       revivedStore.close()
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })

@@ -6,7 +6,7 @@ import RemoteTransport
 // never fabricates a lifecycle, an assistant reply, a token/cost number or a
 // file diff (CLAUDE.md 证据不能说谎):
 //
-//   - Lifecycle comes only from the durable ledger poll: recorded/dispatched/
+//   - Lifecycle comes only from the durable ledger poll/run projection: recorded/dispatched/
 //     started/settled/failed/cancelled. "recorded" is NOT "executed".
 //   - Output comes only from the separate output-content poll: the assistant's
 //     real streamed text/reasoning/tool activity, a LIVE cache that may be
@@ -678,6 +678,12 @@ final class RemoteRunStore: ObservableObject {
       guard let self else { return }
       var ledgerCursor = 0
       var outputCursor = 0
+      // Compacted ledgers may no longer retain the event that established an
+      // older recovered run's current lifecycle. Reconcile the authoritative
+      // run projection once, then continue from the server's resettable tail.
+      if let state = try? await client.runState(runId: runId) {
+        self.apply(runState: state, generation: generation, identity: identity)
+      }
       while !Task.isCancelled {
         do {
           let page = try await client.poll(cursor: ledgerCursor)
@@ -800,6 +806,18 @@ final class RemoteRunStore: ObservableObject {
   private func isTerminal(generation: Int, identity: SessionIdentity) -> Bool {
     isCurrent(generation, identity: identity) &&
       (lifecycle == .settled || lifecycle == .failed || lifecycle == .cancelled)
+  }
+
+  private func apply(runState state: String, generation: Int, identity: SessionIdentity) {
+    guard isCurrent(generation, identity: identity) else { return }
+    switch state {
+    case "recorded": if lifecycle == .unknown || lifecycle == .submitting { lifecycle = .recorded }
+    case "dispatched": if lifecycle != .running { lifecycle = .dispatched }
+    case "settled": lifecycle = .settled
+    case "failed": lifecycle = .failed
+    case "cancelled": lifecycle = .cancelled
+    default: break
+    }
   }
 
   private func apply(event ev: G0Transport.RunLedgerEvent, generation: Int, identity: SessionIdentity) {
