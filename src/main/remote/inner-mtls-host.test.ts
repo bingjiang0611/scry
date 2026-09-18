@@ -14,6 +14,7 @@ import { createHostController } from './host-controller-factory'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ProviderOperationGate } from '../provider-operation-gate'
+import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 
 type PeculiarCrypto = Parameters<typeof cryptoProvider.set>[0]
 cryptoProvider.set(webcrypto as unknown as PeculiarCrypto)
@@ -36,7 +37,12 @@ async function deviceKeyAndCSR() {
 }
 
 async function harness(
-  runProvider: (i: { runId: string; routing: RemoteIntentRouting; progress(d?: string): void }) => Promise<void>,
+  runProvider: (i: {
+    runId: string
+    routing: RemoteIntentRouting
+    progress(d?: string): void
+    requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
+  }) => Promise<void>,
   listCommands?: (query: { providerId: string; cwd: string; agentProfileId?: string }) => Promise<{ commands: { name: string; description: string }[] }>,
   readHistory?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<Array<{ userText: string; items: Array<{ kind: 'output'; text: string }> }>>,
   lists?: {
@@ -104,6 +110,49 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(feed.poll.events.map((e: { kind: string }) => e.kind)).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
     const state = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'runState', runId: submit.runId })
     expect(state.state).toBe('settled')
+  })
+
+  it('round-trips Provider permission and editor questions over the authorized device channel', async () => {
+    let providerResponse: AgentQuestionResponse | undefined
+    const { identity, controller, caPEM, addr } = await harness(async ({ runId, requestUserInput }) => {
+      providerResponse = await requestUserInput({
+        runId: `provider-${runId}`,
+        questionId: 'permission-1',
+        questionKind: 'permission',
+        source: 'codex',
+        questions: [{
+          question: 'Allow command?', header: 'Permission', multiSelect: false,
+          options: [{ label: 'Allow', description: 'Proceed' }, { label: 'Deny', description: 'Stop' }]
+        }, {
+          question: 'Edit note', header: 'Editor', multiSelect: false, inputMode: 'multiline', options: []
+        }]
+      }, new AbortController().signal)
+    })
+    const device = await pairDevice(identity, controller)
+    const submit = await call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'submit', intentId: randomUUID(), detail: routing({ prompt: 'needs permission' })
+    })
+    let questions: AgentQuestionRequest[] = []
+    for (let attempt = 0; attempt < 20 && questions.length === 0; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      questions = (await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'questions', runId: submit.runId })).questions ?? []
+    }
+    expect(questions).toEqual([expect.objectContaining({ runId: submit.runId, questionId: 'permission-1' })])
+    const response = {
+      runId: submit.runId,
+      questionId: 'permission-1',
+      behavior: 'answered' as const,
+      answers: { 'Allow command?': 'Allow', 'Edit note': 'line one\nline two' }
+    }
+    const answerId = randomUUID()
+    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'answerQuestion', runId: submit.runId, answerId, response
+    })).toEqual({ answer: { status: 'answered' } })
+    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'answerQuestion', runId: submit.runId, answerId, response
+    })).toEqual({ answer: { status: 'duplicate' } })
+    await controller.idle()
+    expect(providerResponse).toEqual({ ...response, runId: `provider-${submit.runId}` })
   })
 
   it('refuses a CA-trusted but ungranted certificate (fingerprint-based, not handshake-based)', async () => {

@@ -566,5 +566,10 @@ claim is made.
   Stale cursors receive an explicit reset boundary, while the mobile observer reconciles the
   authoritative run projection before polling that tail. Unknown append receipts fence the live
   instance until restart instead of replaying a possibly committed write.
+- Remote Provider clarification, permission and native editor requests now use the paired-device mTLS
+  channel. Questions remain bound to an active ledger run, answer payloads pass the same canonical
+  normalization as desktop, and a UUID answer fence makes a lost response retry idempotent; the
+  answer is durably marked before the Provider callback resumes. The phone preserves multiline text,
+  multiple selections, cancellation and unknown-answer retry state without synthesizing approval.
 - Remaining validation: long-running real Provider/device pressure and forced process crashes at each
   checkpoint rename/fsync boundary. Keep IPC/security boundaries intact.

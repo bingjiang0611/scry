@@ -215,6 +215,25 @@ public enum G0Transport {
     public let detail: String?
   }
   public struct RunPollOutcome: Sendable, Equatable { public let events: [RunLedgerEvent]; public let cursor: Int }
+  public struct RunQuestionOption: Sendable, Equatable, Codable {
+    public let label: String; public let description: String; public let preview: String?
+  }
+  public struct RunQuestionPrompt: Sendable, Equatable, Codable {
+    public let question: String; public let header: String; public let options: [RunQuestionOption]
+    public let multiSelect: Bool; public let inputMode: String?
+  }
+  public struct RunQuestionRequest: Sendable, Equatable, Codable, Identifiable {
+    public var id: String { questionId }
+    public let runId: String; public let questionId: String; public let providerId: String?; public let agentId: String?
+    public let questionKind: String?; public let source: String?; public let questions: [RunQuestionPrompt]
+  }
+  public struct RunQuestionResponse: Sendable, Equatable, Codable {
+    public let runId: String; public let questionId: String; public let behavior: String; public let answers: [String: String]?
+    public init(runId: String, questionId: String, behavior: String, answers: [String: String]? = nil) {
+      self.runId = runId; self.questionId = questionId; self.behavior = behavior; self.answers = answers
+    }
+  }
+  public struct RunQuestionAnswerOutcome: Sendable, Equatable, Codable { public let status: String }
   // One host-authorized project directory the device may target. The device can
   // never authorize a new one; it only chooses among these, and the host
   // re-checks the cwd on submit regardless.
@@ -300,6 +319,10 @@ public enum G0Transport {
   private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
+  private struct RunQuestionsRequest: Encodable { let op = "questions"; let runId: String }
+  private struct RunAnswerQuestionRequest: Encodable {
+    let op = "answerQuestion"; let runId: String; let answerId: String; let response: RunQuestionResponse
+  }
   private struct RunProjectsRequest: Encodable { let op = "projects" }
   private struct RunDirectoriesRequest: Encodable { let op = "directories"; let path: String? }
   private struct RunDirectoriesPageRequest: Encodable {
@@ -322,6 +345,8 @@ public enum G0Transport {
     let status: String?
     let poll: RunPollBody?
     let state: String?
+    let questions: [RunQuestionRequest]?
+    let answer: RunQuestionAnswerOutcome?
     let projects: [RunProjectRef]?
     let directories: RunDirectoryListing?
     let directoriesPage: RunDirectoryPage?
@@ -369,6 +394,21 @@ public enum G0Transport {
     let request = try JSONEncoder().encode(RunStateRequest(runId: runId))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     return response.state
+  }
+
+  public static func relayRunQuestions(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> [RunQuestionRequest] {
+    let request = try JSONEncoder().encode(RunQuestionsRequest(runId: runId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let questions = response.questions else { throw ProbeError.unexpectedReply }
+    return questions
+  }
+
+  public static func relayRunAnswerQuestion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String,
+                                            answerId: String, response answer: RunQuestionResponse) async throws -> RunQuestionAnswerOutcome {
+    let request = try JSONEncoder().encode(RunAnswerQuestionRequest(runId: runId, answerId: answerId, response: answer))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let outcome = response.answer else { throw ProbeError.unexpectedReply }
+    return outcome
   }
 
   // The host-authorized project directories this device may target. Authorized

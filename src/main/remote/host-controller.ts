@@ -8,7 +8,8 @@ import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from 
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
 import { ProviderOperationGate } from '../provider-operation-gate'
-import { decodedBase64ByteLength, isSupportedImageMimeType } from '../../shared/runtime'
+import { decodedBase64ByteLength, isSupportedImageMimeType, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
+import { RemoteInteractionBroker, RemoteInteractionError, type RemoteQuestionAnswerReceipt } from './remote-interaction-broker'
 
 // Trusted-local composition root for the remote subsystem. It wires the six
 // modules proven in isolation (PairingAuthority, SessionLedger, RemoteGateway,
@@ -68,6 +69,7 @@ export interface HostControllerDependencies {
     routing: RemoteIntentRouting
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+    requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
   }): Promise<void>
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
@@ -88,6 +90,7 @@ export interface HostControllerDependencies {
   gate?: ProviderOperationGate
 }
 
+const REMOTE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const MAX_REMOTE_DETAIL_CHARS = 1_200_000
 const MAX_REMOTE_PROMPT_CHARS = 128_000
 const MAX_REMOTE_ATTACHMENTS = 4
@@ -164,11 +167,15 @@ export class HostController {
   #gateway: RemoteGateway
   #dispatcher: RemoteDispatcher
   #output: RunOutputLog
+  #interactions: RemoteInteractionBroker
 
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
     this.#ledger = new SessionLedger({ store: deps.ledgerStore })
     this.#output = new RunOutputLog({ store: deps.outputStore })
+    this.#interactions = new RemoteInteractionBroker((runId, detail) => {
+      this.#ledger.markProgress(runId, detail)
+    })
     this.#gateway = new RemoteGateway({
       authority: this.authority,
       ledger: this.#ledger,
@@ -183,8 +190,19 @@ export class HostController {
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
     const base: RemoteExecutor = {
-      execute: (input: RemoteExecutorInput) =>
-        deps.runProvider({ runId: input.runId, routing: parseRouting(input.detail), progress: input.progress, output: input.output })
+      execute: async (input: RemoteExecutorInput) => {
+        try {
+          await deps.runProvider({
+            runId: input.runId,
+            routing: parseRouting(input.detail),
+            progress: input.progress,
+            output: input.output,
+            requestUserInput: (request, signal) => this.#interactions.request(input.runId, request, signal)
+          })
+        } finally {
+          this.#interactions.cancelRun(input.runId)
+        }
+      }
     }
     const gated = new GatedExecutor({ policy, resolveTarget: (input) => parseRouting(input.detail), base })
     this.#dispatcher = new RemoteDispatcher({ ledger: this.#ledger, executor: gated, outputSink: this.#output })
@@ -210,6 +228,28 @@ export class HostController {
 
   runState(peerCertSHA256: string, input: { runId: string }): RunLifecycle | undefined {
     return this.#gateway.runState(peerCertSHA256, input)
+  }
+
+  pendingQuestions(peerCertSHA256: string, input: { runId: string }): AgentQuestionRequest[] {
+    this.authorizeDevice(peerCertSHA256)
+    if (!REMOTE_RUN_ID.test(input.runId) || !this.#ledger.runState(input.runId)) throw new RemoteInteractionError('unknown_run')
+    return this.#interactions.list(input.runId)
+  }
+
+  answerQuestion(peerCertSHA256: string, input: {
+    runId: string
+    answerId: string
+    response: AgentQuestionResponse
+  }): RemoteQuestionAnswerReceipt {
+    this.authorizeDevice(peerCertSHA256)
+    if (!REMOTE_RUN_ID.test(input.runId) || !this.#ledger.runState(input.runId)) throw new RemoteInteractionError('unknown_run')
+    return this.#interactions.answer(input.runId, { answerId: input.answerId, response: input.response })
+  }
+
+  private authorizeDevice(peerCertSHA256: string): void {
+    if (!/^[a-f0-9]{64}$/.test(peerCertSHA256) || !this.authority.authorizesCertificate(peerCertSHA256)) {
+      throw new RemoteInteractionError('device_not_authorized')
+    }
   }
 
   // Device-facing: the host-authorized project directories this device may

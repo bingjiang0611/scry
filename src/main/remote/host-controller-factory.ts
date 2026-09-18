@@ -10,6 +10,7 @@ import { ensureHostIdentity } from './host-identity'
 import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import type { ProviderOperationGate } from '../provider-operation-gate'
+import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 
 // Production binding for the remote subsystem. It gives HostController the real
 // durable persistence (exclusive-lease JSONL ledger + fsynced pairing state) and
@@ -51,6 +52,7 @@ export interface HostControllerFactoryDependencies {
     routing: RemoteIntentRouting
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+    requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
   }): Promise<void>
   gate: ProviderOperationGate
   // Tests and embedded hosts may inject an equivalent store. Production omits this
@@ -85,6 +87,7 @@ export async function createHostControllerFromDisk(deps: {
     routing: RemoteIntentRouting
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+    requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
   }): Promise<void>
   gate: ProviderOperationGate
 }): Promise<HostControllerBinding & { anchorSHA256: string; caCertificatePEM: string }> {
