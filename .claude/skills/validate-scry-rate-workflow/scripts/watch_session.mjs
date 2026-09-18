@@ -513,10 +513,10 @@ function leaseHandoverQuestion(question, workitemId) {
   const body = legends.join('\n')
   const fullQuestion = `${body}\n${options.join('\n')}`
   const hasReq = new RegExp(`(?:\\bREQ-?|需求\\s*)${workitemId}\\b`, 'i').test(body)
-  const hasLease = /\bLEASE\b|租约|orphaned\s+lease/i.test(fullQuestion)
   const hasActiveGeneration = /活动\s*generation|active\s+generation|另一个会话占用|旧\s*generation|旧代/i.test(body)
-  const hasRestartImpact = /放弃旧代|放弃旧\s*generation|从\s*P0\s*重跑|重新开始摄入|重新摄入/i.test(fullQuestion)
-  const affirmative = options.some((value) => /^(?:是(?:[，,\s]|$)|在本会话继续|继续(?:[，,\s]|$)|放弃旧代并继续)/u.test(value.trim()))
+  const hasRestartImpact = /放弃旧代|放弃旧\s*generation|从\s*P0\s*(?:重跑|重新运行)|重新开始摄入|重新摄入/i.test(fullQuestion)
+  const hasLease = /\bLEASE\b|租约|orphaned\s+lease/i.test(fullQuestion) || (hasActiveGeneration && hasRestartImpact)
+  const affirmative = options.some((value) => /^(?:是(?:[，,\s]|$)|在本会话继续|继续(?:[，,\s]|$)|放弃旧代并(?:继续|重跑))/u.test(value.trim()))
   const negative = options.some((value) => /^(?:否(?:[，,\s]|$)|先不继续|暂不继续|不继续(?:[，,\s]|$)|保留旧)/u.test(value.trim()))
   return hasReq && hasLease && hasActiveGeneration && hasRestartImpact && affirmative && negative
 }
@@ -1169,6 +1169,25 @@ function selfTest() {
     )
     if (nativeQoderLease?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
       throw new Error('native Qoder lease question was misclassified as a document question')
+    }
+    const currentQoderLeaseQuestion = {
+      legends: ['01\n会话接管\n是否放弃旧 generation，并在当前会话从 P0 重新运行需求 85237895？'],
+      options: [
+        '放弃旧代并重跑（推荐）\n旧 generation 尚停在 P0 且无已完成阶段；当前会话从 P0 重新摄入。',
+        '保留旧代并停止\n当前会话不继续处理该需求。',
+        '其他\n输入其他回答',
+      ],
+      links: [],
+      runId: 'run-current-qoder-lease',
+      toolCallId: 'tool-current-qoder-lease',
+    }
+    const currentQoderLeaseRunRoot = join(root, 'lease-qoder-current')
+    mkdirSync(currentQoderLeaseRunRoot)
+    const currentQoderLease = questionState(
+      currentQoderLeaseRunRoot, state, 'qoder', 1, currentQoderLeaseQuestion, 'session-current-qoder-lease', '85237895'
+    )
+    if (currentQoderLease?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
+      throw new Error('current Qoder lease question was misclassified as a document question')
     }
     const linklessLeaseQuestion = {
       legends: ['01\n旧代处理\nREQ-85237895 已被另一个已失联会话占用（旧代停在 P0）。是否在当前会话继续该需求？这会放弃旧代、从 P0 重跑。'],
