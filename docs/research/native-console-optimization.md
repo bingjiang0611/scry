@@ -472,6 +472,21 @@ claim is made.
   with a streaming decoder. A stale view from another workspace therefore cannot turn a known digest
   into arbitrary recorder access.
 
+## Remote history and intent recovery
+
+- The authenticated mobile channel now exposes `historyPage` with a 64 KiB byte cursor instead of
+  truncating the newest 120 transcript entries. Each response carries a SHA-256 snapshot fence and
+  total byte count; stale, malformed and out-of-range cursors fail explicitly. The Swift transport
+  and iOS client drain all pages before decoding, so reconnect and host restart read the same durable
+  session history without treating a prefix as complete.
+- Remote intent identity is scoped to the authenticated device certificate fingerprint. Reusing a
+  client intent ID from another paired device no longer aliases the first device's ledger entry, and
+  reusing one scoped ID with different intent bytes fails with `intent_payload_conflict` instead of
+  returning an unrelated recorded result.
+- The append-only ledger rejects an entry that would cross its 8 MiB restart-readable bound. This is
+  deliberate fail-closed capacity behavior: an accepted append must remain readable after restart;
+  compaction is still required before this becomes a long-lived unbounded ledger.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity
@@ -503,11 +518,12 @@ claim is made.
 ### 3. Durable replay and pagination (CLI tool bodies and remote output partially implemented)
 
 - Wire the existing Recorder byte-page reader into authorized App/mobile detail endpoints.
-- Local terminal now consumes bounded recording pages and catches up across lost ACK, disconnect and
-  renderer reload with ownership fencing. App/mobile Recorder details and remote host-restart replay
+- Local terminal consumes bounded recording pages and catches up across lost ACK, disconnect and
+  renderer reload with ownership fencing. Mobile session history now uses snapshot-fenced byte pages
+  and is sourced from durable host history after reconnect/restart. App/mobile Recorder detail views
   still need the same authorized cursor contract.
-- Tests still needed outside the terminal path: mobile reconnect continuity, remote host restart,
-  long-running renderer overload and retention/deletion policy.
+- Tests still needed outside the terminal path: real-device reconnect continuity, long-running
+  renderer overload and retention/deletion policy.
 
 ### 4. Native interactions
 
@@ -521,7 +537,7 @@ claim is made.
 
 ### 5. Long-lived console (not implemented)
 
-- Incremental archive indexing and remote ledger compaction/pagination with durable deduplication,
-  persisted drafts, large-file read-only views and directory pagination.
+- Incremental archive indexing and remote ledger compaction/pagination beyond the current fail-closed
+  8 MiB file, persisted drafts, large-file read-only views and directory pagination.
 - Tests: beyond current count/byte thresholds, cold restart, concurrent append, stale cursor and
   user-authored draft recovery. Keep IPC/security boundaries intact.

@@ -130,6 +130,21 @@ describe('RemoteGateway', () => {
     expect(ledger.describe().events).toBe(1)
   })
 
+  it('scopes client intent ids to the authenticated device and rejects conflicting retries', () => {
+    const firstCert = '1'.repeat(64)
+    const secondCert = '2'.repeat(64)
+    const { gw, ledger } = gateway({ authorizesCertificate: (fingerprint) => fingerprint === firstCert || fingerprint === secondCert })
+    const intentId = randomUUID()
+    const first = gw.submitIntent(firstCert, { intentId, detail: 'first device' })
+    const second = gw.submitIntent(secondCert, { intentId, detail: 'second device' })
+    expect(first.status).toBe('recorded')
+    expect(second.status).toBe('recorded')
+    expect(second.runId).not.toBe(first.runId)
+    expect(ledger.describe().events).toBe(2)
+    expect(() => gw.submitIntent(firstCert, { intentId, detail: 'changed payload' })).toThrow('intent_payload_conflict')
+    expect(ledger.describe().events).toBe(2)
+  })
+
   it('reflects host-driven lifecycle to the device through poll (device cannot drive it)', async () => {
     const { authority } = await grantedAuthority()
     const { gw, ledger } = gateway(authority)
@@ -302,6 +317,42 @@ describe('RemoteGateway', () => {
     expect(turns[0].items.length).toBeGreaterThan(0)
     expect(turns[0].items.length).toBeLessThan(450)
     expect(Buffer.byteLength(JSON.stringify(turns), 'utf8')).toBeLessThanOrEqual(6 * 1024 * 1024)
+  })
+
+  it('pages complete history bytes with a restart-stable snapshot fence', async () => {
+    const { authority } = await grantedAuthority()
+    const expected = [{ userText: '问🙂'.repeat(30_000), items: [
+      { kind: 'output' as const, text: '答'.repeat(300_000) },
+      { kind: 'tool_result' as const, text: 'result'.repeat(50_000) }
+    ] }]
+    const read = vi.fn(async () => expected)
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const gw = new RemoteGateway({ authority, ledger, history: { read } })
+    const chunks: Buffer[] = []
+    let cursor = 0
+    let snapshot: string | undefined
+    do {
+      const page = await gw.readHistoryPage(CERT, {
+        providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor, limit: 65_535, ...(snapshot ? { snapshot } : {})
+      })
+      snapshot ??= page.snapshot
+      expect(page.snapshot).toBe(snapshot)
+      chunks.push(Buffer.from(page.dataBase64, 'base64'))
+      cursor = page.cursor
+      if (!page.hasMore) break
+    } while (true)
+    expect(JSON.parse(Buffer.concat(chunks).toString('utf8'))).toEqual(expected)
+    await expect(gw.readHistoryPage(CERT, {
+      providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: 0, limit: 65_537
+    })).rejects.toThrow('invalid_history_limit')
+    await expect(gw.readHistoryPage(CERT, {
+      providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: cursor + 1, snapshot
+    })).rejects.toThrow('invalid_history_cursor')
+
+    read.mockResolvedValueOnce([{ userText: 'changed', items: [] }])
+    await expect(gw.readHistoryPage(CERT, {
+      providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: 0, snapshot
+    })).rejects.toThrow('history_snapshot_changed')
   })
 
   it('returns an honest empty transcript when no history source is configured', async () => {

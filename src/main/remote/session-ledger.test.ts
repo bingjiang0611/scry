@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, rmSync, chmodSync, writeFileSync, appendFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, chmodSync, writeFileSync, appendFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -16,9 +16,13 @@ class MemoryLedgerStore implements LedgerStore {
   log: LedgerEvent[]
   available = true
   failNextAppend = false
+  loadCalls = 0
   constructor(seed: LedgerEvent[] = []) { this.log = seed.map((e) => ({ ...e })) }
   assertAvailable(): void { if (!this.available) throw new Error('ledger_store_unavailable') }
-  loadAll(): LedgerEvent[] { return this.log.map((e) => ({ ...e })) }
+  loadAll(): LedgerEvent[] {
+    this.loadCalls++
+    return this.log.map((e) => ({ ...e }))
+  }
   append(event: LedgerEvent): void {
     if (this.failNextAppend) { this.failNextAppend = false; throw new Error('disk full') }
     this.log.push({ ...event })
@@ -63,6 +67,8 @@ describe('SessionLedger', () => {
     expect(rebound.status).toBe('duplicate')
     expect(rebound.event.runId).toBe(runId)
     expect(ledger.describe().events).toBe(1)
+    expect(store.loadCalls).toBe(1) // recovery only; duplicate checks stay incremental
+    expectCode(() => ledger.recordIntent({ intentId, runId: randomUUID(), detail: 'different' }), 'intent_payload_conflict')
     // A fresh intent may not reuse an existing run id.
     expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId }), 'run_already_exists')
   })
@@ -251,6 +257,19 @@ describe('SessionLedgerFileStore', () => {
       first = new SessionLedgerFileStore(dir)
       expect(() => new SessionLedgerFileStore(dir)).toThrow()
     } finally { first?.close(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('rejects an append before it makes the ledger unreadable on restart', () => {
+    const dir = privateDir()
+    let store: SessionLedgerFileStore | undefined
+    try {
+      store = new SessionLedgerFileStore(dir)
+      const path = join(dir, 'session-ledger.log')
+      writeFileSync(path, Buffer.alloc(8 * 1024 * 1024 - 8), { mode: 0o600 })
+      const before = statSync(path).size
+      expect(() => store!.append({ seq: 1, at: 1, runId: randomUUID(), kind: 'intent_recorded', intentId: randomUUID() })).toThrow('ledger_file_too_large')
+      expect(statSync(path).size).toBe(before)
+    } finally { store?.close(); rmSync(dir, { recursive: true, force: true }) }
   })
 
   it('rejects use after close', () => {

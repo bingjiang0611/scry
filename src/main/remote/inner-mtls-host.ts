@@ -87,7 +87,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -130,11 +130,23 @@ export class InnerMtlsHost {
         return { sessions: controller.listSessions(fingerprint) }
       }
       if (request.op === 'history') {
-        // The REAL conversation content for one session, so the phone can OPEN it.
-        // Same owner-device authorization; the host re-authorizes the cwd and only
-        // reads sessions in device-visible authorized projects.
+        // Legacy bounded response retained for older clients.
         if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
         return { history: await controller.readHistory(fingerprint, { providerId: request.providerId, cwd: typeof request.cwd === 'string' ? request.cwd : '', externalSessionId: request.externalSessionId }) }
+      }
+      if (request.op === 'historyPage') {
+        if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string' ||
+            (request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
+            (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
+            (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
+        return { historyPage: await controller.readHistoryPage(fingerprint, {
+          providerId: request.providerId,
+          cwd: typeof request.cwd === 'string' ? request.cwd : '',
+          externalSessionId: request.externalSessionId,
+          ...(typeof request.cursor === 'number' ? { cursor: request.cursor } : {}),
+          ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
+          ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
+        }) }
       }
       if (request.op === 'output') {
         // The assistant's real streamed output content for one run, after cursor.

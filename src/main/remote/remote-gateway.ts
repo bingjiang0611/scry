@@ -1,4 +1,5 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
+import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 
 // G1 application service: the device-facing surface that a verified remote peer
@@ -141,6 +142,20 @@ export interface RemoteHistoryQuery {
   externalSessionId: string
 }
 
+export interface RemoteHistoryPageQuery extends RemoteHistoryQuery {
+  cursor?: number
+  limit?: number
+  snapshot?: string
+}
+
+export interface RemoteHistoryPage {
+  dataBase64: string
+  cursor: number
+  totalBytes: number
+  hasMore: boolean
+  snapshot: string
+}
+
 export interface RemoteHistorySource {
   // Read one session's turns. The host re-authorizes the cwd and only serves
   // sessions in device-visible authorized projects; an unknown/unauthorized/
@@ -183,6 +198,11 @@ export interface SubmitIntentResult {
 
 const HASH = /^[0-9a-f]{64}$/
 
+function scopedIntentId(peerCertSHA256: string, intentId: string): string {
+  const hex = createHash('sha256').update(`${peerCertSHA256}\0${intentId}`).digest('hex').slice(0, 32)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`
+}
+
 export class RemoteGatewayError extends Error {
   code: string
   constructor(code: string) {
@@ -206,6 +226,7 @@ const MAX_HISTORY_TEXT = 20_000
 // response envelope and JSON framing so every accepted history result remains
 // deliverable instead of repeatedly failing as one oversized all-or-nothing page.
 const MAX_HISTORY_RESPONSE_BYTES = 6 * 1024 * 1024
+const MAX_HISTORY_PAGE_BYTES = 64 * 1024
 
 export class RemoteGateway {
   #authority: DeviceAuthorizer
@@ -237,12 +258,16 @@ export class RemoteGateway {
   }
 
   // Durably record a device's task submission. The runId is assigned by the
-  // host, never by the device. Idempotent on intentId: a retry returns the same
-  // runId and creates no second run.
+  // host, never by the device. Idempotent on the authenticated device plus its
+  // intentId: a retry returns the same runId without aliasing another device.
   submitIntent(peerCertSHA256: string, input: SubmitIntentInput): SubmitIntentResult {
     this.#authorize(peerCertSHA256)
     const candidateRunId = SessionLedger.newRunId()
-    const receipt = this.#ledger.recordIntent({ intentId: input.intentId, runId: candidateRunId, detail: input.detail })
+    const receipt = this.#ledger.recordIntent({
+      intentId: scopedIntentId(peerCertSHA256, input.intentId),
+      runId: candidateRunId,
+      detail: input.detail
+    })
     return { runId: receipt.event.runId, status: receipt.status }
   }
 
@@ -447,6 +472,43 @@ export class RemoteGateway {
       }
     }
     return out
+  }
+
+  // Complete history bytes with a stable snapshot fence. Unlike the legacy
+  // compatibility endpoint, this never truncates turns/items/text to fit a frame.
+  async readHistoryPage(peerCertSHA256: string, query: RemoteHistoryPageQuery): Promise<RemoteHistoryPage> {
+    this.#authorize(peerCertSHA256)
+    const cursor = query?.cursor ?? 0
+    const limit = query?.limit ?? MAX_HISTORY_PAGE_BYTES
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_history_cursor')
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_HISTORY_PAGE_BYTES) throw new RemoteGatewayError('invalid_history_limit')
+    if (!query || typeof query.providerId !== 'string' || typeof query.externalSessionId !== 'string') {
+      throw new RemoteGatewayError('invalid_history_query')
+    }
+    const raw = (await this.#history?.read({
+      providerId: query.providerId.slice(0, 64),
+      cwd: typeof query.cwd === 'string' ? query.cwd.slice(0, MAX_PATH) : '',
+      externalSessionId: query.externalSessionId.slice(0, 128)
+    })) ?? []
+    const normalized: RemoteHistoryTurn[] = raw.map((turn) => ({
+      userText: typeof turn?.userText === 'string' ? turn.userText : '',
+      items: (turn?.items ?? []).flatMap((item) =>
+        item && typeof item.text === 'string' && ['output', 'reasoning', 'tool', 'tool_result'].includes(item.kind)
+          ? [{ kind: item.kind, text: item.text } as RemoteHistoryTurn['items'][number]]
+          : [])
+    }))
+    const bytes = Buffer.from(JSON.stringify(normalized), 'utf8')
+    const snapshot = createHash('sha256').update(bytes).digest('hex')
+    if (query.snapshot !== undefined && query.snapshot !== snapshot) throw new RemoteGatewayError('history_snapshot_changed')
+    if (cursor > bytes.length) throw new RemoteGatewayError('invalid_history_cursor')
+    const end = Math.min(bytes.length, cursor + limit)
+    return {
+      dataBase64: bytes.subarray(cursor, end).toString('base64'),
+      cursor: end,
+      totalBytes: bytes.length,
+      hasMore: end < bytes.length,
+      snapshot
+    }
   }
 
   // The assistant's real streamed output CONTENT for one run, strictly after the
