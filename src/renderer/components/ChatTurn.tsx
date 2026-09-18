@@ -7,6 +7,7 @@ import { BackgroundWorkPanel } from './BackgroundWorkPanel'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
+import type { ContentRef, RecorderContentPage } from '@shared/tool-content'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import {
   isIncompleteRunTermination,
@@ -355,6 +356,82 @@ function unsuccessfulHookStatus(event: TraceEvent): string {
   return exitCode == null ? '执行失败' : `执行失败 · exit ${exitCode}`
 }
 
+const CONTENT_PAGE_BYTES = 64 * 1024
+const CONTENT_PAGE_CACHE = 8
+
+type DisplayContentPage = RecorderContentPage & { text: string }
+
+function bytesFromBase64(value: string): Uint8Array {
+  const binary = atob(value)
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+}
+
+export function RecorderContentPager({ label, contentRef }: { label: string; contentRef: ContentRef }) {
+  const [pages, setPages] = useState<DisplayContentPage[]>([])
+  const [cursor, setCursor] = useState(-1)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string>()
+  const decoderRef = useRef(new TextDecoder())
+  const generationRef = useRef(0)
+
+  useEffect(() => {
+    generationRef.current += 1
+    setPages([])
+    setCursor(-1)
+    setLoading(false)
+    setError(undefined)
+    decoderRef.current = new TextDecoder()
+  }, [contentRef.sha256])
+
+  const load = useCallback(async (offset: number) => {
+    const generation = generationRef.current
+    setLoading(true)
+    setError(undefined)
+    try {
+      const page = await window.scry.recorderContentPage({ ref: contentRef, offset, limit: CONTENT_PAGE_BYTES })
+      if (generation !== generationRef.current) return
+      const text = decoderRef.current.decode(bytesFromBase64(page.dataBase64), { stream: page.hasMore })
+      setPages((current) => {
+        const next = [...current, { ...page, text }].slice(-CONTENT_PAGE_CACHE)
+        setCursor(next.length - 1)
+        return next
+      })
+    } catch (reason) {
+      if (generation === generationRef.current) setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      if (generation === generationRef.current) setLoading(false)
+    }
+  }, [contentRef])
+
+  const page = pages[cursor]
+  return (
+    <div className="recorder-content-page">
+      {!page ? (
+        <button type="button" onClick={() => void load(0)} disabled={loading}>
+          {loading ? '正在读取…' : `查看完整 ${label} · ${contentRef.bytes.toLocaleString()} bytes`}
+        </button>
+      ) : (
+        <>
+          <div className="lbl">完整 {label} · bytes {page.offset}–{page.nextOffset} / {page.totalBytes}</div>
+          <pre>{page.text}</pre>
+          <div className="recorder-content-page-actions">
+            <button type="button" disabled={cursor <= 0 || loading} onClick={() => setCursor((value) => value - 1)}>上一页</button>
+            <button
+              type="button"
+              disabled={loading || (cursor >= pages.length - 1 && !page.hasMore)}
+              onClick={() => {
+                if (cursor < pages.length - 1) setCursor((value) => value + 1)
+                else void load(page.nextOffset)
+              }}
+            >{loading ? '正在读取…' : '下一页'}</button>
+          </div>
+        </>
+      )}
+      {error && <div role="alert">完整正文读取失败：{error}</div>}
+    </div>
+  )
+}
+
 // 蓝本 .tool-card：状态(check/x) · 工具名 · op(R/W/E) · arg · meta(dur/tok/danger) · chev；点开内联展开 tool-detail。
 function ToolItem({
   ev,
@@ -404,7 +481,7 @@ function ToolItem({
   const missingQuestionResult =
     turnDone && isAskUserQuestion && !!questionRequest && !ev.output && !ev.isError && !submittedAnswers && !intervention
   const lockedOpen = waitingForAnswer || waitingForQuestionState
-  const hasDetail = ev.input != null || !!ev.output || !!questionRequest
+  const hasDetail = ev.input != null || !!ev.output || !!questionRequest || !!ev.inputContent?.contentRef || !!ev.outputContent?.contentRef
   const shownOpen = lockedOpen || open
   const kind = ev.isError ? 'err' : ev.isMcp ? 'mcp' : ev.kind
   const displayName = toolDisplayName(ev)
@@ -504,12 +581,14 @@ function ToolItem({
                 <pre>{JSON.stringify(ev.input, null, 2)}</pre>
               </>
             ) : null}
+            {ev.inputContent?.contentRef && <RecorderContentPager label="input" contentRef={ev.inputContent.contentRef} />}
             {ev.output && (
               <>
                 <div className="lbl">output{ev.isError ? ' · error' : ''}</div>
                 <pre>{ev.output.slice(0, 4000)}</pre>
               </>
             )}
+            {ev.outputContent?.contentRef && <RecorderContentPager label="output" contentRef={ev.outputContent.contentRef} />}
           </div>
         )}
         </div>

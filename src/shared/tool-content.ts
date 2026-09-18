@@ -11,6 +11,20 @@ export interface ToolContentRef {
 /** Generic durable captured body reference; ToolContentRef remains the schema-v1 compatibility name. */
 export type ContentRef = ToolContentRef
 
+export interface RecorderContentPageRequest {
+  ref: ContentRef
+  offset?: number
+  limit?: number
+}
+
+export interface RecorderContentPage {
+  offset: number
+  nextOffset: number
+  totalBytes: number
+  hasMore: boolean
+  dataBase64: string
+}
+
 export interface ToolContent {
   content?: string
   /** Complete captured content stored outside the bounded inline preview; inspect redaction provenance. */

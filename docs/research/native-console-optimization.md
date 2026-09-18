@@ -466,6 +466,11 @@ claim is made.
 - The content inventory is derived from the validated record contract, covering tools/skills/MCP,
   ordered assistant/reasoning references, diff patches and transcript ranges. This same inventory is
   also the archive dependency authority, avoiding a second list that can silently omit new bodies.
+- The App can page tool input/output bodies through a trusted IPC tied to the current canonical
+  workspace. Main revalidates the reference against that workspace's records on every page and caps
+  reads at 64 KiB; renderer keeps at most eight decoded pages and preserves split UTF-8 code points
+  with a streaming decoder. A stale view from another workspace therefore cannot turn a known digest
+  into arbitrary recorder access.
 
 ## Remaining sequence
 
