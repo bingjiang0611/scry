@@ -481,7 +481,10 @@ claim is made.
 - Extend the Recorder content-reference contract to Provider adapter trace progress/outbox/archive,
   terminal output, assistant text and diffs before UI projection. Reuse existing sinks rather than
   creating a parallel archive.
-- Make export carry referenced blobs, then add explicit retention and orphan collection.
+- Export now carries referenced blobs. Recorder maintenance exposes soft quota and retention pressure,
+  age-gated orphan/temp collection and rotated-log gzip. It refuses mutation while open turns,
+  archive recovery, another recorder lock or a recent temp can still own data; referenced evidence is
+  never deleted to force quota compliance.
 - Add content references for any remaining generic harness/runtime metadata body that becomes subject
   to a storage bound; current canonical trace archives keep those fields inline without truncation.
   Retain explicit original/saved byte counts where the upstream itself is partial. Transcript
@@ -509,7 +512,7 @@ claim is made.
 
 ### 5. Long-lived console (not implemented)
 
-- Incremental archive indexing, remote ledger compaction/pagination with durable deduplication,
+- Incremental archive indexing and remote ledger compaction/pagination with durable deduplication,
   persisted drafts, large-file read-only views and directory pagination.
 - Tests: beyond current count/byte thresholds, cold restart, concurrent append, stale cursor and
   user-authored draft recovery. Keep IPC/security boundaries intact.
