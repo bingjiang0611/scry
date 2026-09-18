@@ -11,6 +11,7 @@ import type { ProviderId } from './provider.js'
 import type { BillingProvider } from './billing.js'
 import type { CreditUsageEvidence } from './credit-usage.js'
 import type { BackgroundWork } from './background-work.js'
+import { isToolContent, type ToolContent } from './tool-content.js'
 
 // 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，
 // 让 SDK stream 和未来 codex adapter 都归一化到同一格式（一份数据多处用）。
@@ -99,6 +100,8 @@ export interface DiffFile {
   change?: DiffFileChange
   binary?: boolean
   patch?: string
+  /** Complete patch body plus a bounded inline preview. Absence is legacy or unavailable capture. */
+  patchContent?: ToolContent
   patchStatus?: TurnDiffPatchStatus
   patchReason?: TurnDiffPatchReason
 }
@@ -192,6 +195,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
       ? (file.change as DiffFileChange)
       : undefined
     const patch = typeof file.patch === 'string' && file.patch.length > 0 && file.patch.length <= 1_100_000 ? file.patch : undefined
+    const patchContent = isToolContent(file.patchContent) ? file.patchContent : undefined
     const patchStatus = ['captured', 'truncated', 'binary', 'unavailable'].includes(String(file.patchStatus))
       ? (file.patchStatus as TurnDiffPatchStatus)
       : undefined
@@ -199,8 +203,8 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
       ? (file.patchReason as TurnDiffPatchReason)
       : undefined
     const patchFields =
-      (patchStatus === 'captured' || patchStatus === 'truncated') && patch
-        ? { patch, patchStatus }
+      (patchStatus === 'captured' || patchStatus === 'truncated') && (patch || patchContent?.contentRef)
+        ? { ...(patch ? { patch } : {}), ...(patchContent ? { patchContent } : {}), patchStatus }
         : patchStatus === 'binary' && binary
           ? { patchStatus }
           : patchStatus === 'unavailable' && patchReason
@@ -437,6 +441,8 @@ export interface TraceEvent {
   creditUsage?: CreditUsageEvidence
   inputContent?: import('./tool-content.js').ToolContent
   outputContent?: import('./tool-content.js').ToolContent
+  /** Durable assistant/reasoning body with a bounded inline preview. */
+  modelContent?: import('./tool-content.js').ToolContent
   id: string
   ts: string
   runId: string // 一次 query() = 一个 run（模式 A 下 app 自造 baggage）

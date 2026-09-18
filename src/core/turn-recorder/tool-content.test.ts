@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseMcp, type TraceEvent } from '../../shared/trace.js'
 import { isToolContent } from '../../shared/tool-content.js'
 import { aggregateTurnEvidence } from './aggregate.js'
-import { captureToolContent, sanitizeToolEvents } from './tool-content.js'
+import { captureToolContent, persistModelEventContent, sanitizeToolEvents } from './tool-content.js'
 
 const policy = { toolOutput: 'full' as const }
 function events(output?: string, input: unknown = { command: 'echo hello' }): TraceEvent[] {
@@ -106,6 +106,20 @@ describe('full raw tool content', () => {
     expect(call.inputContent).toMatchObject({ storage: 'omitted', reasons: ['provider_missing'] })
     expect(call.outputContent).toMatchObject({ savedBytes: 20, sourceCompleteness: 'partial', reasons: ['source_truncated', 'field_budget', 'turn_budget'] })
     expect(call.outputSummary).toBe('y'.repeat(20))
+  })
+
+  it('coalesces streamed model deltas before publishing one durable body', async () => {
+    const bodies: string[] = []
+    const persisted = await persistModelEventContent([
+      { id: 'm1', runId: 'r', ts: '2026-01-01T00:00:00Z', kind: 'model', stage: 'text_delta', text: '前😀', messageId: 'm' },
+      { id: 'm2', runId: 'r', ts: '2026-01-01T00:00:01Z', kind: 'model', stage: 'text_delta', text: '后', messageId: 'm' }
+    ], 'fixture', async (content) => {
+      bodies.push(content)
+      return { storage: 'recorder-content-v1', sha256: 'a'.repeat(64), bytes: Buffer.byteLength(content), encoding: 'utf8' }
+    }, 4)
+    expect(bodies).toEqual(['前😀后'])
+    expect(persisted).toHaveLength(1)
+    expect(persisted[0]).toMatchObject({ stage: 'text', text: '前', modelContent: { storage: 'truncated', contentRef: { bytes: 10 } } })
   })
 
   it('preserves empty output as actual content and legacy modes unchanged', () => {

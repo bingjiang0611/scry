@@ -1,5 +1,7 @@
 import { rm } from 'node:fs/promises'
 import { protectToolContent } from '../core/turn-recorder/content-policy.js'
+import { persistModelEventContent, persistToolEventContent } from '../core/turn-recorder/tool-content.js'
+import { writeRecorderContent } from '../core/turn-recorder/content-store.js'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from '../core/turn-recorder/runtime-state.js'
 import { lstatSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -394,7 +396,22 @@ async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<
   const matchingOpen = open?.managedByScry && (open.managedRunId === input.turn.runId ||
     (!!input.providerTurnId && open.providerTurnId === input.providerTurnId)) ? open : undefined
   const toolContentPolicy = journal?.request.turn.toolContentPolicy ?? progress?.request.turn.toolContentPolicy ?? matchingArchiveTurn(input)?.toolContentPolicy ?? matchingOpen?.toolContentPolicy ?? input.turn.toolContentPolicy
-  return { ...input, turn: protectToolContent({ ...input.turn, ...(toolContentPolicy ? { toolContentPolicy } : {}) }, input.cwd) }
+  let turn = { ...input.turn, ...(toolContentPolicy ? { toolContentPolicy } : {}) }
+  if (toolContentPolicy && location.valid) {
+    const tools = await persistToolEventContent(
+      turn.items,
+      toolContentPolicy,
+      'scry_provider_adapter',
+      (content, encoding) => writeRecorderContent(location.dataRoot, content, encoding)
+    )
+    const items = await persistModelEventContent(
+      tools,
+      'scry_provider_adapter',
+      (content, encoding) => writeRecorderContent(location.dataRoot, content, encoding)
+    )
+    turn = { ...turn, items }
+  }
+  return { ...input, turn: protectToolContent(turn, input.cwd) }
 }
 
 function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void {

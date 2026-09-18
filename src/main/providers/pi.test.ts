@@ -129,7 +129,7 @@ process.stdin.on('data', (chunk) => {
       send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'ing' } })
       send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' + String.fromCodePoint(0x2028) + 'world' } })
       send({ type: 'tool_execution_start', toolCallId: 'tool-read', toolName: 'read', args: { path: 'README.md' } })
-      send({ type: 'tool_execution_end', toolCallId: 'tool-read', toolName: 'read', result: 'contents', isError: false })
+      send({ type: 'tool_execution_end', toolCallId: 'tool-read', toolName: 'read', result: command.message === 'large-tool' ? '原文😀'.repeat(60_000) + 'PI-TOOL-END' : 'contents', isError: false })
       send({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'subagent', args: { task: 'inspect' } })
       send({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'subagent', result: { content: [{ type: 'text', text: 'done' }] }, isError: false })
       send({ type: 'message_end', message: {
@@ -445,6 +445,23 @@ describe('Pi RPC Provider', () => {
       const messageIds = [...new Set(streamedModelEvents.map((event) => event.messageId))]
       expect(messageIds).toHaveLength(1)
       expect(messageIds[0]).toMatch(/^pi:run-1:assistant-\d+$/)
+    })
+  }, 15_000)
+
+  it('does not truncate native Pi tool results before canonical persistence', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-large-tool', prompt: 'large-tool', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+      await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+      const output = events.find((event) => event.toolUseId === 'tool-read' && event.stage === 'tool_result')?.output
+      expect(typeof output).toBe('string')
+      expect((output as string).length).toBeGreaterThan(200_000)
+      expect(output).toContain('PI-TOOL-END')
+      expect(output).not.toContain('truncated by Scry')
     })
   }, 15_000)
 

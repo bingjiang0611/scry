@@ -43,8 +43,9 @@ const record = (value: unknown): JsonRecord => value && typeof value === 'object
   : {}
 const number = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+const serialized = (value: unknown): string => typeof value === 'string' ? value : JSON.stringify(value ?? null)
 const bounded = (value: unknown, max = 200_000): string => {
-  const text = typeof value === 'string' ? value : JSON.stringify(value ?? null)
+  const text = serialized(value)
   return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated by Scry]`
 }
 
@@ -902,7 +903,7 @@ async function runPiAgent(
       const toolUseId = typeof event.toolCallId === 'string' ? event.toolCallId : undefined
       const rawName = typeof event.toolName === 'string' ? event.toolName : toolNames.get(toolUseId ?? '') ?? 'Tool'
       const toolName = rawName === 'subagent' ? 'Agent' : rawName
-      const output = bounded(event.result)
+      const output = serialized(event.result)
       const mcp = parseMcp(rawName, record(event.args))
       const startedAt = toolUseId ? toolStarts.get(toolUseId) : undefined
       request.emit(piEvent(request.runId, {

@@ -427,6 +427,26 @@ claim is made.
   material, replace it with a durable line index plus incremental parser state; do not restore a byte
   tail that silently changes completeness.
 
+## Durable model and diff bodies
+
+- `recorder-content-v1` is now the shared content-addressed body store, not a tool-only convention.
+  Tool input/output, assistant text, reasoning segments and Git patch bodies publish a verified
+  `sha256` reference before their JSON record is committed; the existing byte/base64 page reader
+  resolves every reference type.
+- Assistant/reasoning and patch fields retain bounded UTF-8 previews in the record. Ordered model
+  segment references reconstruct streamed bodies; `DiffFile.patchContent` retains the complete patch
+  even when the inline patch hits the per-file or per-record preview budget. Archive manifests collect,
+  verify and copy these references before deleting live records.
+- Recorder diff capture requests complete patches before projection. Binary files, explicit basename
+  policy exclusions, Git errors and the enclosing capture deadline remain honestly unavailable; they
+  are not relabeled as complete content.
+- Managed App turns now persist raw tool and model bodies before `protectToolContent` applies its
+  archive/SQLite projection. Pi no longer clips native tool results at 200,000 characters before that
+  canonical sink. Live trace IPC backpressure remains bounded and non-canonical.
+- The lifecycle adapter no longer drops model timing entries after item 200. Focused regressions cover
+  Unicode assistant/reasoning bodies, a Unicode patch larger than the inline budget plus archive copy,
+  250 model timing calls, managed App recovery and a Pi tool result above the former limit.
+
 ## Remaining sequence
 
 ### 1. Finish native lifecycle parity
@@ -442,10 +462,10 @@ claim is made.
   terminal output, assistant text and diffs before UI projection. Reuse existing sinks rather than
   creating a parallel archive.
 - Make export carry referenced blobs, then add explicit retention and orphan collection.
-- Replace remaining adapter/body truncation with streamed content and durable cursors; retain
-  explicit original/saved byte counts where the upstream itself is partial. Transcript selection is
-  now complete, but its full-session parser should move to a durable incremental line index when
-  measured size/latency requires it.
+- Add immutable content references for mirrored transcript ranges and remaining generic harness /
+  runtime metadata bodies; retain explicit original/saved byte counts where the upstream itself is
+  partial. Transcript selection is now complete, but its full-session fallback parser should move to
+  a durable incremental line index when measured size/latency requires it.
 - Collect full diffs asynchronously without changing turn ownership or attributing later changes
   to an earlier turn. Pin capture budgets and preserve historical provenance on retries.
 - Tests: large outputs across current thresholds, interrupted writes/recovery, duplicates,
