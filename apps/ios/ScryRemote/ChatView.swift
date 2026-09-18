@@ -1,4 +1,5 @@
 import SwiftUI
+import RemoteTransport
 
 // A conversation view aligned with ChatGPT / Codex mobile: the user's message
 // appears immediately as a right-aligned bubble, and the assistant's turn streams
@@ -62,6 +63,21 @@ struct ChatView: View {
       footer
     }
     .background(Palette.surface)
+    .sheet(isPresented: Binding(
+      get: { !run.pendingQuestions.isEmpty },
+      set: { _ in }
+    )) {
+      if let request = run.pendingQuestions.first {
+        RemoteQuestionSheet(
+          request: request,
+          submitting: run.questionAnswering,
+          error: run.questionError,
+          onAnswer: { run.answerPendingQuestion(answers: $0) },
+          onCancel: { run.answerPendingQuestion(answers: [:], cancel: true) }
+        )
+        .interactiveDismissDisabled()
+      }
+    }
 #if DEBUG
     .onAppear {
       if draft.isEmpty, ProcessInfo.processInfo.arguments.contains("-uiMockSlash") { draft = "/" }
@@ -220,5 +236,122 @@ struct ChatView: View {
     case .cancelled, .submitting, .recorded, .dispatched: return Palette.amber
     case .unknown: return Palette.muted
     }
+  }
+}
+
+private struct RemoteQuestionSheet: View {
+  let request: G0Transport.RunQuestionRequest
+  let submitting: Bool
+  let error: String?
+  let onAnswer: ([String: String]) -> Void
+  let onCancel: () -> Void
+
+  @State private var answers: [String: String]
+  @State private var selections: [String: Set<String>]
+
+  init(request: G0Transport.RunQuestionRequest, submitting: Bool, error: String?,
+       onAnswer: @escaping ([String: String]) -> Void, onCancel: @escaping () -> Void) {
+    self.request = request
+    self.submitting = submitting
+    self.error = error
+    self.onAnswer = onAnswer
+    self.onCancel = onCancel
+    _answers = State(initialValue: [:])
+    _selections = State(initialValue: [:])
+  }
+
+  private var complete: Bool {
+    request.questions.allSatisfy { question in
+      if question.multiSelect { return !(selections[question.question] ?? []).isEmpty }
+      return !(answers[question.question] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+  }
+
+  private var resolvedAnswers: [String: String] {
+    var resolved = answers
+    for question in request.questions where question.multiSelect {
+      let selected = selections[question.question] ?? []
+      resolved[question.question] = question.options.map(\.label).filter(selected.contains).joined(separator: ", ")
+    }
+    return resolved
+  }
+
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 20) {
+          Text(request.questionKind == "permission" ? "Provider 请求授权" : "Provider 需要输入")
+            .font(.headline)
+          ForEach(Array(request.questions.enumerated()), id: \.offset) { _, question in
+            VStack(alignment: .leading, spacing: 10) {
+              Text(question.header).font(.caption.weight(.semibold)).foregroundStyle(Palette.muted)
+              Text(question.question).font(.body.weight(.medium))
+              if question.inputMode != nil {
+                if question.inputMode == "multiline" {
+                  TextEditor(text: textBinding(question.question))
+                    .frame(minHeight: 120).padding(8)
+                    .background(Palette.canvas).clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                  TextField("请输入", text: textBinding(question.question))
+                    .textFieldStyle(.roundedBorder)
+                }
+              } else if question.multiSelect {
+                ForEach(question.options, id: \.label) { option in
+                  Button {
+                    var selected = selections[question.question] ?? []
+                    if selected.contains(option.label) { selected.remove(option.label) } else { selected.insert(option.label) }
+                    selections[question.question] = selected
+                  } label: {
+                    HStack(alignment: .top) {
+                      Image(systemName: (selections[question.question] ?? []).contains(option.label) ? "checkmark.square.fill" : "square")
+                      optionLabel(option)
+                    }
+                  }
+                  .buttonStyle(.plain)
+                }
+              } else {
+                Picker("请选择", selection: textBinding(question.question)) {
+                  Text("请选择").tag("")
+                  ForEach(question.options, id: \.label) { option in Text(option.label).tag(option.label) }
+                }
+                .pickerStyle(.menu)
+                if let selected = question.options.first(where: { $0.label == answers[question.question] }) {
+                  optionDetail(selected)
+                }
+              }
+            }
+          }
+          if let error { Text(error).font(.caption).foregroundStyle(Palette.negative) }
+        }
+        .padding(20)
+      }
+      .navigationTitle("需要你的决定")
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("取消运行", action: onCancel).disabled(submitting)
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button(submitting ? "提交中…" : "提交") { onAnswer(resolvedAnswers) }
+            .disabled(submitting || !complete)
+        }
+      }
+    }
+  }
+
+  private func textBinding(_ key: String) -> Binding<String> {
+    Binding(get: { answers[key] ?? "" }, set: { answers[key] = $0 })
+  }
+
+  private func optionLabel(_ option: G0Transport.RunQuestionOption) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text(option.label).foregroundStyle(Palette.ink)
+      Text(option.description).font(.caption).foregroundStyle(Palette.muted)
+      if let preview = option.preview { Text(preview).font(.caption.monospaced()).foregroundStyle(Palette.muted) }
+    }
+  }
+
+  @ViewBuilder private func optionDetail(_ option: G0Transport.RunQuestionOption) -> some View {
+    Text(option.description).font(.caption).foregroundStyle(Palette.muted)
+    if let preview = option.preview { Text(preview).font(.caption.monospaced()).foregroundStyle(Palette.muted) }
   }
 }

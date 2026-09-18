@@ -53,6 +53,34 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     expect(markers.at(-1)).toEqual({ event: 'settled', status: 'completed' })
   })
 
+  it('forwards native Provider questions to the authenticated interaction callback', async () => {
+    const requestUserInput = vi.fn(async (request) => ({
+      runId: request.runId,
+      questionId: request.questionId,
+      behavior: 'answered' as const,
+      answers: { Continue: 'Allow' }
+    }))
+    const { run } = fakeRun(async (req) => {
+      await req.requestUserInput?.({
+        runId: req.runId,
+        questionId: 'permission-1',
+        questionKind: 'permission',
+        questions: [{
+          question: 'Continue', header: 'Permission', multiSelect: false,
+          options: [{ label: 'Allow', description: 'Proceed' }, { label: 'Deny', description: 'Stop' }]
+        }]
+      }, new AbortController().signal)
+      return { status: 'completed' }
+    })
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-question' })
+    await start({
+      runId: 'ledger-question',
+      routing: { cwd: '/w', providerId: 'codex', prompt: 'go' },
+      progress: () => {}, output: () => {}, requestUserInput
+    })
+    expect(requestUserInput).toHaveBeenCalledWith(expect.objectContaining({ runId: 'scry-question', questionId: 'permission-1' }), expect.any(AbortSignal))
+  })
+
   it('forwards only explicitly selected model, effort and permission controls', async () => {
     const { run, calls } = fakeRun(async () => ({ status: 'completed' }))
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-controls' })

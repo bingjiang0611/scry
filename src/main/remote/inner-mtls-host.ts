@@ -87,7 +87,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -102,6 +102,20 @@ export class InnerMtlsHost {
       if (request.op === 'runState') {
         if (typeof request.runId !== 'string') return { error: 'invalid_request' }
         return { state: controller.runState(fingerprint, { runId: request.runId }) ?? null }
+      }
+      if (request.op === 'questions') {
+        if (typeof request.runId !== 'string') return { error: 'invalid_request' }
+        return { questions: controller.pendingQuestions(fingerprint, { runId: request.runId }) }
+      }
+      if (request.op === 'answerQuestion') {
+        if (typeof request.runId !== 'string' || typeof request.answerId !== 'string' || !request.response || typeof request.response !== 'object') {
+          return { error: 'invalid_request' }
+        }
+        return { answer: controller.answerQuestion(fingerprint, {
+          runId: request.runId,
+          answerId: request.answerId,
+          response: request.response as Parameters<HostController['answerQuestion']>[1]['response']
+        }) }
       }
       if (request.op === 'projects') {
         // Authorized by the verified peer cert inside the controller/gateway; a

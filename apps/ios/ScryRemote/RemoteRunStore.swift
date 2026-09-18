@@ -172,6 +172,9 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var observationInterrupted = false
   @Published private(set) var retryAvailable = false
   @Published private(set) var completedLiveTurns: [SessionIdentity: [CompletedLiveTurn]] = [:]
+  @Published private(set) var pendingQuestions: [G0Transport.RunQuestionRequest] = []
+  @Published private(set) var questionAnswering = false
+  @Published private(set) var questionError: String?
 
   private let connections = RemoteConnectionStore()
   private var pollTask: Task<Void, Never>?
@@ -194,6 +197,7 @@ final class RemoteRunStore: ObservableObject {
   private var activeRouting: RemoteRunClient.Routing?
   private var seenOutputSequences = Set<Int>()
   private var archivedActiveTurn = false
+  private var pendingQuestionAnswerId: String?
 
   private static let catalogFreshness: TimeInterval = 60
   private static let metadataFreshness: TimeInterval = 5 * 60
@@ -691,6 +695,12 @@ final class RemoteRunStore: ObservableObject {
           for ev in page.events where ev.runId == runId {
             self.apply(event: ev, generation: generation, identity: identity)
           }
+          let questions = try await client.questions(runId: runId)
+          if self.pendingQuestions.first?.questionId != questions.first?.questionId {
+            self.pendingQuestionAnswerId = nil
+            self.questionError = nil
+          }
+          self.pendingQuestions = questions
           let out = try await client.output(runId: runId, cursor: outputCursor)
           outputCursor = out.cursor
           for chunk in out.chunks {
@@ -736,6 +746,40 @@ final class RemoteRunStore: ObservableObject {
     observationInterrupted = false
     submitError = nil
     startPolling(runId: runId, client: client, generation: generation, identity: identity)
+  }
+
+  func answerPendingQuestion(answers: [String: String], cancel: Bool = false) {
+    guard !questionAnswering, let request = pendingQuestions.first, let runId,
+          let identity = activeSessionIdentity, let client = makeClient() else { return }
+    let answerId = pendingQuestionAnswerId ?? UUID().uuidString.lowercased()
+    pendingQuestionAnswerId = answerId
+    questionAnswering = true
+    questionError = nil
+    let requestGeneration = generation
+    Task { [weak self] in
+      do {
+        let response = G0Transport.RunQuestionResponse(
+          runId: runId, questionId: request.questionId,
+          behavior: cancel ? "cancelled" : "answered",
+          answers: cancel ? nil : answers
+        )
+        _ = try await client.answerQuestion(runId: runId, answerId: answerId, response: response)
+        await MainActor.run {
+          guard let self, self.isCurrent(requestGeneration, identity: identity),
+                self.pendingQuestions.first?.questionId == request.questionId else { return }
+          self.pendingQuestions.removeFirst()
+          self.pendingQuestionAnswerId = nil
+          self.questionAnswering = false
+          self.questionError = nil
+        }
+      } catch {
+        await MainActor.run {
+          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
+          self.questionAnswering = false
+          self.questionError = "回答结果未知：\(Self.describe(error))。再次提交会复用同一回答标识。"
+        }
+      }
+    }
   }
 
   func retryObservation() {
@@ -881,6 +925,10 @@ final class RemoteRunStore: ObservableObject {
     liveExternalSessionId = nil
     observationInterrupted = false
     retryAvailable = false
+    pendingQuestions = []
+    pendingQuestionAnswerId = nil
+    questionAnswering = false
+    questionError = nil
     archivedActiveTurn = false
   }
 
@@ -917,6 +965,7 @@ final class RemoteRunStore: ObservableObject {
     runId = nil; submitError = nil; truncated = false; resultSummary = nil
     liveExternalSessionId = nil; activeSessionIdentity = nil
     observationInterrupted = false; retryAvailable = false
+    pendingQuestions = []; pendingQuestionAnswerId = nil; questionAnswering = false; questionError = nil
     completedLiveTurns = [:]
     archivedActiveTurn = false
     #if DEBUG

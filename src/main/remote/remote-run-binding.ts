@@ -1,7 +1,7 @@
 import type { ProviderRunHandle, ProviderRunRequest } from '../providers/types'
 import type { RemoteIntentRouting } from './host-controller'
 import type { TraceEvent } from '../../shared/trace'
-import type { AgentInputAttachment } from '../../shared/runtime'
+import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 import { traceEventToOutputChunk } from './trace-output'
 
 // The LIVE binding for the remote run seam (previously a fail-closed stub). It
@@ -22,9 +22,9 @@ import { traceEventToOutputChunk } from './trace-output'
 //   - The injected `run` is invoked exactly once with a freshly minted scry
 //     runId. The ledgerRunId <-> scryRunId correlation is emitted as the FIRST
 //     progress marker so the device (and any turn record) can join the two ids.
-//   - Interactive approval is NOT wired yet: a provider question fails CLOSED
-//     (never auto-approve, never hang) and the run surfaces as failed with a
-//     clear reason. Routing approvals to the device is the next increment.
+//   - Native Provider clarification, editor, and permission prompts are routed
+//     through the authenticated remote interaction broker. The binding never
+//     synthesizes an approval or substitutes an empty answer.
 //   - The provider's own terminal status drives the ledger: a 'failed' result
 //     rejects (dispatcher -> markFailed), every other terminal resolves
 //     (dispatcher -> markSettled). Nothing is fabricated as success.
@@ -64,6 +64,7 @@ export interface RemoteRunInput {
   // The assistant's REAL trace CONTENT sink (masked + bounded by the log). This
   // is what lets the device render the actual output, not just the lifecycle.
   output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+  requestUserInput?(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
 }
 
 const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
@@ -71,7 +72,7 @@ const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
 export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (input: RemoteRunInput) => Promise<void> {
   let seq = 0
   const nextScryRunId = deps.nextScryRunId ?? (() => `remote-run-${Date.now().toString(36)}-${(seq++).toString(36)}`)
-  return async function startRemoteRun({ runId: ledgerRunId, routing, progress, output }: RemoteRunInput): Promise<void> {
+  return async function startRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput }: RemoteRunInput): Promise<void> {
     const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
     // A run with no prompt is not a Provider run; fail closed and truthfully
     // rather than launch an empty turn.
@@ -172,9 +173,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         // can open/resume the exact conversation on their Mac. Best-effort.
         try { deps.onRunSession?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId, agentProfileId: routing.agentProfileId }) } catch { /* never fail the run for a catalog write */ }
       },
-      // Fail closed: remote interactive approval is not wired. Throwing surfaces
-      // the run as failed with a clear reason instead of hanging or auto-approving.
-      requestUserInput: async () => { throw new Error('remote_interactive_input_unsupported') }
+      requestUserInput: requestUserInput ?? (async () => { throw new Error('remote_interactive_input_unsupported') })
     })
     const result = await handle.promise
     const status = result.status ?? 'completed'
