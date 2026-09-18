@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { link, lstat, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { link, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { isToolContentRef, type ToolContentRef } from '../../shared/tool-content.js'
 import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn-record.js'
@@ -516,6 +516,58 @@ export async function exportRecords(
   }
 }
 
+export interface RecordExportBundle {
+  target: string
+  records: number
+  contents: number
+  snapshotMaxSequence: number
+}
+
+export async function exportRecordBundle(dataRoot: string, target: string): Promise<RecordExportBundle> {
+  const canonicalRoot = resolve(dataRoot)
+  const canonicalTarget = resolve(target)
+  if (archivePathsOverlap(canonicalRoot, canonicalTarget)) {
+    throw new Error('export target must not overlap the recorder store')
+  }
+  const files = await recordFiles(dataRoot)
+  const snapshotMaxSequence = files.at(-1)?.sequence ?? 0
+  const parent = resolve(canonicalTarget, '..')
+  await mkdir(parent, { recursive: true })
+  const temp = await mkdtemp(join(parent, '.scry-export-'))
+  try {
+    const recordsDir = join(temp, 'records')
+    await mkdirDurable(recordsDir)
+    const refs = new Map<string, ToolContentRef>()
+    for (const file of files) {
+      const record = await readRecordFile(join(dataRoot, 'records', file.name))
+      await writeJsonAtomic(join(recordsDir, file.name), record)
+      for (const ref of recordContentRefs(record)) {
+        const existing = refs.get(ref.sha256)
+        if (existing && (existing.bytes !== ref.bytes || existing.encoding !== ref.encoding)) {
+          throw new Error(`conflicting recorder content reference: ${ref.sha256}`)
+        }
+        refs.set(ref.sha256, existing ?? ref)
+      }
+    }
+    for (const ref of refs.values()) await copyRecorderContent(dataRoot, temp, ref)
+    await writeJsonAtomic(join(temp, 'manifest.json'), {
+      schemaVersion: 1,
+      kind: 'scry-recorder-export',
+      createdAt: new Date().toISOString(),
+      snapshotMaxSequence,
+      records: files.map((file) => ({ name: file.name, sequence: file.sequence, recordId: file.recordId })),
+      contents: [...refs.values()].sort((left, right) => left.sha256.localeCompare(right.sha256))
+    })
+    await syncDirectory(temp)
+    await rename(temp, canonicalTarget)
+    await syncDirectory(parent)
+    return { target: canonicalTarget, records: files.length, contents: refs.size, snapshotMaxSequence }
+  } catch (error) {
+    await rm(temp, { recursive: true, force: true })
+    throw error
+  }
+}
+
 export async function listRecords(dataRoot: string): Promise<AgentTurnRecord[]> {
   const files = await recordFiles(dataRoot)
   const records: AgentTurnRecord[] = []
@@ -636,17 +688,42 @@ async function existingPath(path: string): Promise<boolean> {
   }
 }
 
+export interface RecordContentItem {
+  path: string
+  ref: ToolContentRef
+}
+
+export function recordContentItems(record: AgentTurnRecord): RecordContentItem[] {
+  const items: RecordContentItem[] = []
+  for (const section of ['tools', 'skills', 'mcps'] as const) {
+    for (const [index, call] of (record[section].value ?? []).entries()) {
+      if (call.inputContent?.contentRef) items.push({ path: `${section}.${index}.input`, ref: call.inputContent.contentRef })
+      if (call.outputContent?.contentRef) items.push({ path: `${section}.${index}.output`, ref: call.outputContent.contentRef })
+    }
+  }
+  for (const [segmentIndex, segment] of (record.modelSegments?.value ?? []).entries()) {
+    for (const [refIndex, ref] of (segment.contentRefs ?? []).entries()) {
+      items.push({ path: `modelSegments.${segmentIndex}.${refIndex}`, ref })
+    }
+  }
+  for (const [refIndex, ref] of (record.assistant.value?.contentRefs ?? []).entries()) {
+    items.push({ path: `assistant.${refIndex}`, ref })
+  }
+  for (const [snapshotIndex, snapshot] of (record.diff.value ?? []).entries()) {
+    for (const [fileIndex, file] of snapshot.files.entries()) {
+      if (file.patchContent?.contentRef) items.push({ path: `diff.${snapshotIndex}.${fileIndex}.patch`, ref: file.patchContent.contentRef })
+    }
+  }
+  if (record.transcript?.value?.contentRef) items.push({ path: 'transcript', ref: record.transcript.value.contentRef })
+  return items
+}
+
+export function recordContentItem(record: AgentTurnRecord, path: string): RecordContentItem | undefined {
+  return recordContentItems(record).find((item) => item.path === path)
+}
+
 function recordContentRefs(record: AgentTurnRecord): ToolContentRef[] {
-  const callRefs = [record.tools, record.skills, record.mcps]
-    .flatMap((section) => section.value ?? [])
-    .flatMap((call) => [call.inputContent?.contentRef, call.outputContent?.contentRef])
-  const diffRefs = (record.diff.value ?? [])
-    .flatMap((snapshot) => snapshot.files.map((file) => file.patchContent?.contentRef))
-  const modelRefs = (record.modelSegments?.value ?? []).flatMap((segment) => segment.contentRefs ?? [])
-  const assistantRefs = record.assistant.value?.contentRefs ?? []
-  const transcriptRefs = record.transcript?.value?.contentRef ? [record.transcript.value.contentRef] : []
-  return [...callRefs, ...diffRefs, ...modelRefs, ...assistantRefs, ...transcriptRefs]
-    .filter((ref): ref is ToolContentRef => !!ref)
+  return recordContentItems(record).map((item) => item.ref)
 }
 
 function collectContentRefs(records: AgentTurnRecord[]): ToolContentRef[] {

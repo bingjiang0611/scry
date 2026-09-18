@@ -49,7 +49,9 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 | `scry turns show <序号\|recordId>` | 单轮完整记录 |
 | `scry turns timeline <序号\|recordId>` | 模型文字与 Tool / Skill / MCP / 子 Agent 交错时间线 |
 | `scry turns summary [sessionId\|--all]` | 会话或整个 workspace 的聚合 |
-| `scry turns export --after 0 --limit 100` | 游标分页导出 |
+| `scry turns export --after 0 --limit 100` | 游标分页导出记录 JSON（正文保留引用） |
+| `scry turns export-bundle <目录>` | 原子导出全部记录与引用的正文 blob |
+| `scry turns content <记录> <正文路径...> --offset 0 --limit 65536` | 按字节分页读取 tool/model/diff/transcript 正文 |
 | `scry turns verify` | 序号连续性与记录完整性 |
 | `scry records archive --before 30d` | 归档旧记录(见「容量与归档」) |
 | `scry support-bundle create` | 脱敏排障包 |

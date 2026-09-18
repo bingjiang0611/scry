@@ -14,7 +14,7 @@ import {
   refreshRecorderPendingHealth
 } from '../core/turn-recorder/recorder.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
-import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecords, lastRecordVersion, listRecords, readArchiveState, readHealth, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, archiveRecords, commitNotificationStatus, drainCommitNotifications, exportRecordBundle, exportRecords, lastRecordVersion, listRecords, readArchiveState, readHealth, recordContentItem, recordError, showRecord, verifyStore } from '../core/turn-recorder/store.js'
 import { readRecorderContentPage } from '../core/turn-recorder/content-store.js'
 import {
   commitHookEnv,
@@ -536,29 +536,36 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     }))
     return 0
   }
+  if (action === 'export-bundle') {
+    const target = args.positionals[2]
+    if (!target) throw new Error('usage: scry turns export-bundle <directory> --workspace <root>')
+    print(await exportRecordBundle(dataRoot, target))
+    return 0
+  }
   if (action === 'content') {
-    const [selector, section, rawIndex, direction] = args.positionals.slice(2)
-    if (!selector || !['tools', 'skills', 'mcps'].includes(section ?? '') || !/^\d+$/.test(rawIndex ?? '') || !['input', 'output'].includes(direction ?? '')) {
-      throw new Error('usage: scry turns content <sequence|recordId> <tools|skills|mcps> <call-index> <input|output> [--offset <bytes>] [--limit <bytes>]')
+    const [selector, ...contentPath] = args.positionals.slice(2)
+    if (!selector || contentPath.length === 0) {
+      throw new Error('usage: scry turns content <sequence|recordId> <content-path...> [--offset <bytes>] [--limit <bytes>]')
     }
+    const legacy = ['tools', 'skills', 'mcps'].includes(contentPath[0] ?? '') && /^\d+$/.test(contentPath[1] ?? '') && ['input', 'output'].includes(contentPath[2] ?? '')
+    const path = legacy
+      ? `${contentPath[0]}.${Number(contentPath[1])}.${contentPath[2]}`
+      : contentPath.join('.')
     const record = await showRecord(dataRoot, selector)
-    const call = record?.[section as 'tools' | 'skills' | 'mcps'].value?.[Number(rawIndex)]
-    const ref = direction === 'input' ? call?.inputContent?.contentRef : call?.outputContent?.contentRef
-    if (!record || !call || !ref) {
-      print({ found: false, selector, section, callIndex: Number(rawIndex), direction })
+    const item = record ? recordContentItem(record, path) : undefined
+    if (!record || !item) {
+      print({ found: false, selector, path })
       return 1
     }
-    const page = await readRecorderContentPage(dataRoot, ref, {
+    const page = await readRecorderContentPage(dataRoot, item.ref, {
       offset: intFlag(args, 'offset'),
       limit: intFlag(args, 'limit')
     })
     print({
       found: true,
       selector,
-      section,
-      callIndex: Number(rawIndex),
-      direction,
-      ref,
+      path,
+      ref: item.ref,
       ...page
     })
     return 0
@@ -587,7 +594,7 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     print({ ...result, openTurnsPending: health?.pendingCount ?? null, identity, advisories })
     return result.ok ? 0 : 4
   }
-  throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|content|verify ...')
+  throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|export-bundle|content|verify ...')
 }
 
 /**
