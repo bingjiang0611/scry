@@ -5973,6 +5973,20 @@ button.toptool {
   word-break: break-word;
   margin: 0;
 }
+.recorder-content-page { margin-top: 8px; }
+.recorder-content-page > button,
+.recorder-content-page-actions button {
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--dim);
+  font: 11px/1.2 var(--font-mono);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.recorder-content-page button:disabled { cursor: default; opacity: 0.5; }
+.recorder-content-page-actions { display: flex; gap: 6px; margin-top: 6px; }
+.recorder-content-page [role='alert'] { color: var(--danger); font-size: 11px; margin-top: 6px; }
 
 /* PR#2：Sidebar chevron 展开/折叠 + 项目头可点 */
 

@@ -41,7 +41,7 @@ import {
   takeNextQueuedPrompt
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
-import { AssistantTurn, UserMessage, attachmentSrc, coalesceAdjacentThinking } from './ChatTurn'
+import { AssistantTurn, RecorderContentPager, UserMessage, attachmentSrc, coalesceAdjacentThinking } from './ChatTurn'
 import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
 import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
@@ -1574,6 +1574,18 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(diffHtml.match(/class="files-summary/g)).toHaveLength(1)
     const filesHtml = diffHtml.match(/<details class="files-summary diff"[\s\S]*?<\/details>/)?.[0] ?? ''
     expect(filesHtml).not.toContain('R ·')
+  })
+
+  it('完整正文引用显示按需分页入口，不把 blob 内联进初始 DOM', () => {
+    const html = renderToStaticMarkup(<RecorderContentPager label="output" contentRef={{
+      storage: 'recorder-content-v1',
+      sha256: 'a'.repeat(64),
+      bytes: 900_000,
+      encoding: 'utf8'
+    }} />)
+    expect(html).toContain('查看完整 output')
+    expect(html).toContain('900,000 bytes')
+    expect(html).not.toContain('完整 output · bytes')
   })
 
   it('Edit 卡展示本次工具输入的 action-level +/-，并明确不是 Git 净改动', () => {

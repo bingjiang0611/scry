@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { BackgroundTaskStopResult, BackgroundWork } from '../shared/background-work'
+import type { RecorderContentPage, RecorderContentPageRequest } from '../shared/tool-content'
 import type {
   TraceEvent,
   ActiveRun,
@@ -183,6 +184,8 @@ const api = {
   syncBillingAdmin: (): Promise<BillingSyncResult> => ipcRenderer.invoke('agent:syncBillingAdmin'),
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),
   gitDiff: (cwd: string): Promise<DiffFile[]> => ipcRenderer.invoke('agent:gitDiff', cwd),
+  recorderContentPage: (request: RecorderContentPageRequest): Promise<RecorderContentPage> =>
+    ipcRenderer.invoke('agent:recorderContentPage', request),
   // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。
   loadSession: (context: ProviderContext, request?: SessionHistoryPageRequest): Promise<SessionHistoryPage | null> =>
     ipcRenderer.invoke('agent:loadSession', context, request),

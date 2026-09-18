@@ -90,6 +90,7 @@ import {
   type ManagedTurnTiming
 } from '../core/turn-recorder/managed'
 import { resolveRecorderEnablement } from '../core/turn-recorder/config'
+import { readAuthorizedRecorderContentPage } from './recorder-content-access'
 import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
 import { UserQuestionBroker, type UserQuestionChange } from './user-question'
@@ -3599,6 +3600,12 @@ handleTrusted('agent:importBillingFixture', async () => {
 
 // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
 handleTrusted('agent:gitDiff', (_e, cwd: string) => gitNumstat(cwd))
+handleTrusted('agent:recorderContentPage', async (_event, request: unknown) => {
+  if (!currentCwd) throw new Error('recorder_workspace_unavailable')
+  const enablement = await resolveRecorderEnablement(currentCwd)
+  if (!enablement.enabled) throw new Error(`recorder_unavailable:${enablement.reason}`)
+  return readAuthorizedRecorderContentPage(enablement.dataRoot, request)
+})
 
 // trace live 镜像的消费确认：preload 把一批事件分发给 renderer 后回 ACK，main 才继续发下一批。
 handleTrusted('agent:traceAck', (_event, request: { bytes: number }) => {

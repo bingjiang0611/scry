@@ -86,6 +86,7 @@ const invokeChannels = {
   syncBillingAdmin: 'agent:syncBillingAdmin',
   importBillingFixture: 'agent:importBillingFixture',
   gitDiff: 'agent:gitDiff',
+  recorderContentPage: 'agent:recorderContentPage',
   loadSession: 'agent:loadSession',
   loadSessionOlder: 'agent:loadSessionOlder',
   deleteSession: 'agent:deleteSession',
@@ -173,6 +174,10 @@ describe('preload IPC boundary', () => {
     expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingList', { after: 'terminal-1', limit: 20 })
     await api.terminalRecordingRead({ id: 'terminal-1', offset: 4, limit: 65536 })
     expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingRead', { id: 'terminal-1', offset: 4, limit: 65536 })
+
+    const contentRef = { storage: 'recorder-content-v1' as const, sha256: 'a'.repeat(64), bytes: 7, encoding: 'utf8' as const }
+    await api.recorderContentPage({ ref: contentRef, offset: 2, limit: 4 })
+    expect(electron.invoke).toHaveBeenLastCalledWith('agent:recorderContentPage', { ref: contentRef, offset: 2, limit: 4 })
     await api.terminalRecordingDelete('terminal-1')
     expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingDelete', { id: 'terminal-1' })
 

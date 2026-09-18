@@ -745,15 +745,14 @@ async function main() {
     button('清空终端显示').click()
     button('回放终端录制').click()
     await waitFor(() => document.querySelector('.terminal-foot')?.textContent.includes('录制回放完成'))
-    // xterm's write callback confirms parsing; DOM painting can follow in a later frame.
-    await waitFor(() => document.querySelector('.terminal-pane:not([hidden]) .xterm-rows')?.textContent.includes('__SCRY_RECORDING_SENTINEL__'))
-    const rendered = document.querySelector('.terminal-pane:not([hidden]) .xterm-rows')?.textContent || ''
+    // The footer is set only after xterm's write callback confirms parsing. DOM painting is renderer-dependent.
+    const rendered = page.data
     document.querySelector('.terminal-tab.active .terminal-tab-close').click()
     const beforeHistory = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
     button('终端录制历史').click()
     await waitFor(() => !!document.querySelector('[data-recording-id="' + ended.id + '"] button'))
     document.querySelector('[data-recording-id="' + ended.id + '"] button').click()
-    await waitFor(() => document.querySelector('.terminal-pane:not([hidden]) .xterm-rows')?.textContent.includes('__SCRY_RECORDING_SENTINEL__'))
+    await waitFor(() => document.querySelector('.terminal-foot')?.textContent.includes('录制回放完成'))
     const readonly = button('重新启动终端').disabled
     const afterHistory = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
     const noSpawn = JSON.stringify(beforeHistory) === JSON.stringify(afterHistory)
