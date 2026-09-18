@@ -1,8 +1,8 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage, type RunOutputStore } from './run-output-log'
-export type { RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
+export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, RemoteDirectoryPageQuery, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteSessionPage, RemoteSessionPageQuery, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -224,6 +224,10 @@ export class HostController {
     return this.#gateway.listDirectories(peerCertSHA256, input)
   }
 
+  listDirectoriesPage(peerCertSHA256: string, input: RemoteDirectoryPageQuery): RemoteDirectoryPage {
+    return this.#gateway.listDirectoriesPage(peerCertSHA256, input)
+  }
+
   // Device-facing: the Providers this device may target, authorized by the same
   // verified peer certificate as every method.
   listProviders(peerCertSHA256: string): RemoteProviderRef[] {
@@ -239,6 +243,10 @@ export class HostController {
   // by the same verified peer certificate as every method.
   listSessions(peerCertSHA256: string): RemoteSessionRef[] {
     return this.#gateway.listSessions(peerCertSHA256)
+  }
+
+  listSessionsPage(peerCertSHA256: string, input: RemoteSessionPageQuery): RemoteSessionPage {
+    return this.#gateway.listSessionsPage(peerCertSHA256, input)
   }
 
   // Device-facing: one session's real conversation content, authorized by the

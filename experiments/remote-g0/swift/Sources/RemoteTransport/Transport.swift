@@ -228,6 +228,10 @@ public enum G0Transport {
       self.current = current; self.parent = parent; self.directories = directories
     }
   }
+  public struct RunDirectoryPage: Sendable, Equatable, Codable {
+    public let current: RunProjectRef?; public let parent: RunProjectRef?; public let directories: [RunProjectRef]
+    public let cursor: Int; public let total: Int; public let hasMore: Bool; public let snapshot: String
+  }
   public struct RunControlOption: Sendable, Equatable, Codable {
     public let id: String; public let label: String; public let description: String?; public let isDefault: Bool?
     public init(id: String, label: String, description: String? = nil, isDefault: Bool? = nil) {
@@ -266,6 +270,10 @@ public enum G0Transport {
       self.cwd = cwd; self.label = label; self.ts = ts; self.pinnedAt = pinnedAt
     }
   }
+  public struct RunSessionPage: Sendable, Equatable, Codable {
+    public let sessions: [RunSessionRef]
+    public let cursor: Int; public let total: Int; public let hasMore: Bool; public let snapshot: String
+  }
   // One content chunk of a replayed session turn (same kinds a live run streams).
   public struct RunHistoryChunk: Sendable, Equatable, Codable {
     public let kind: String; public let text: String
@@ -294,9 +302,15 @@ public enum G0Transport {
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
   private struct RunProjectsRequest: Encodable { let op = "projects" }
   private struct RunDirectoriesRequest: Encodable { let op = "directories"; let path: String? }
+  private struct RunDirectoriesPageRequest: Encodable {
+    let op = "directoriesPage"; let path: String?; let cursor: Int; let limit: Int; let snapshot: String?
+  }
   private struct RunProvidersRequest: Encodable { let op = "providers" }
   private struct RunCommandsRequest: Encodable { let op = "commands"; let providerId: String; let cwd: String; let agentProfileId: String? }
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
+  private struct RunSessionsPageRequest: Encodable {
+    let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
+  }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
   private struct RunHistoryPageRequest: Encodable {
     let op = "historyPage"; let providerId: String; let cwd: String; let externalSessionId: String
@@ -310,9 +324,11 @@ public enum G0Transport {
     let state: String?
     let projects: [RunProjectRef]?
     let directories: RunDirectoryListing?
+    let directoriesPage: RunDirectoryPage?
     let providers: [RunProviderRef]?
     let commands: RunCommandCatalog?
     let sessions: [RunSessionRef]?
+    let sessionsPage: RunSessionPage?
     let history: [RunHistoryTurn]?
     let historyPage: RunHistoryPage?
     let output: RunOutputBody?
@@ -374,6 +390,13 @@ public enum G0Transport {
     return directories
   }
 
+  public static func relayRunDirectoriesPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, path: String?, cursor: Int, limit: Int = 100, snapshot: String? = nil) async throws -> RunDirectoryPage {
+    let request = try JSONEncoder().encode(RunDirectoriesPageRequest(path: path, cursor: cursor, limit: limit, snapshot: snapshot))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let page = response.directoriesPage else { throw ProbeError.unexpectedReply }
+    return page
+  }
+
   // The Providers this device may target for a new session. Authorized exactly
   // like every run op; a revoked device gets device_not_authorized.
   public static func relayRunProviders(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunProviderRef] {
@@ -398,6 +421,13 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let sessions = response.sessions else { throw ProbeError.unexpectedReply }
     return sessions
+  }
+
+  public static func relayRunSessionsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, cursor: Int, limit: Int = 100, snapshot: String? = nil) async throws -> RunSessionPage {
+    let request = try JSONEncoder().encode(RunSessionsPageRequest(cursor: cursor, limit: limit, snapshot: snapshot))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let page = response.sessionsPage else { throw ProbeError.unexpectedReply }
+    return page
   }
 
   // The REAL conversation content of one session so the device can OPEN it.

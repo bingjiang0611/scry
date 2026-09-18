@@ -486,6 +486,10 @@ claim is made.
 - The append-only ledger rejects an entry that would cross its 8 MiB restart-readable bound. This is
   deliberate fail-closed capacity behavior: an accepted append must remain readable after restart;
   compaction is still required before this becomes a long-lived unbounded ledger.
+- Session catalogs and one-level directory listings now use 100-item, snapshot-fenced pages on the
+  authenticated mobile channel. The iOS client validates monotonic cursors, stable totals and stable
+  directory identity while draining all pages; the older capped endpoints remain compatibility-only.
+  Snapshot changes fail explicitly rather than mixing two catalog/directory states.
 - The iOS client atomically checkpoints a pending intent (including its exact routing/attachments)
   before any network submit, then replaces it with the host run ID after receipt. A cold launch never
   replays an unresolved write automatically: it offers an idempotent retry with the original intent
@@ -544,7 +548,7 @@ claim is made.
 
 ### 5. Long-lived console (not implemented)
 
-- Incremental archive indexing and remote ledger compaction/pagination beyond the current fail-closed
-  8 MiB file, persisted drafts, large-file read-only views and directory pagination.
+- Incremental archive indexing and remote ledger compaction beyond the current fail-closed 8 MiB
+  file, persisted desktop composer drafts and large-file read-only views.
 - Tests: beyond current count/byte thresholds, cold restart, concurrent append, stale cursor and
   user-authored draft recovery. Keep IPC/security boundaries intact.

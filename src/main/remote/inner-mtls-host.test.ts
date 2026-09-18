@@ -38,7 +38,11 @@ async function deviceKeyAndCSR() {
 async function harness(
   runProvider: (i: { runId: string; routing: RemoteIntentRouting; progress(d?: string): void }) => Promise<void>,
   listCommands?: (query: { providerId: string; cwd: string; agentProfileId?: string }) => Promise<{ commands: { name: string; description: string }[] }>,
-  readHistory?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<Array<{ userText: string; items: Array<{ kind: 'output'; text: string }> }>>
+  readHistory?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<Array<{ userText: string; items: Array<{ kind: 'output'; text: string }> }>>,
+  lists?: {
+    directories(path?: string): { current?: { path: string; label: string }; directories: { path: string; label: string }[] }
+    sessions(): { sessionId: string; providerId: string; cwd: string; label: string; ts: number }[]
+  }
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
@@ -49,7 +53,8 @@ async function harness(
     startRun: runProvider, gate: new ProviderOperationGate(),
     createOutputStore: (directory) => new RunOutputFileStore(directory),
     ...(listCommands ? { listCommands } : {}),
-    ...(readHistory ? { readHistory } : {})
+    ...(readHistory ? { readHistory } : {}),
+    ...(lists ? { listDirectories: lists.directories, listSessions: lists.sessions } : {})
   })
   cleanups.push(() => binding.close())
   const controller: HostController = binding.controller
@@ -166,6 +171,29 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(second.historyPage.cursor).toBe(16)
     expect(second.historyPage.snapshot).toBe(first.historyPage.snapshot)
     expect(readHistory).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+  })
+
+  it('routes paged session and directory catalogs over inner mTLS', async () => {
+    const lists = {
+      directories: (path?: string) => ({
+        ...(path ? { current: { path, label: 'repo' } } : {}),
+        directories: Array.from({ length: 3 }, (_, index) => ({ path: `/repo/d${index}`, label: `d${index}` }))
+      }),
+      sessions: () => Array.from({ length: 3 }, (_, index) => ({
+        sessionId: `s${index}`, providerId: 'codex', cwd: AUTHORIZED, label: `session ${index}`, ts: index
+      }))
+    }
+    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, lists)
+    const device = await pairDevice(identity, controller)
+
+    const directories = await call(addr, caPEM, device.certPEM, device.keyPEM,
+      { op: 'directoriesPage', path: '/repo', cursor: 0, limit: 2 })
+    expect(directories.directoriesPage.directories).toHaveLength(2)
+    expect(directories.directoriesPage.hasMore).toBe(true)
+    const sessions = await call(addr, caPEM, device.certPEM, device.keyPEM,
+      { op: 'sessionsPage', cursor: 0, limit: 2 })
+    expect(sessions.sessionsPage.sessions.map((entry: { sessionId: string }) => entry.sessionId)).toEqual(['s0', 's1'])
+    expect(sessions.sessionsPage.hasMore).toBe(true)
   })
 
   it('refuses the next request after the grant is revoked', async () => {

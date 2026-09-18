@@ -112,6 +112,18 @@ export class InnerMtlsHost {
         if (request.path !== undefined && typeof request.path !== 'string') return { error: 'invalid_request' }
         return { directories: controller.listDirectories(fingerprint, { ...(request.path !== undefined ? { path: request.path } : {}) }) }
       }
+      if (request.op === 'directoriesPage') {
+        if ((request.path !== undefined && typeof request.path !== 'string') ||
+            (request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
+            (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
+            (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
+        return { directoriesPage: controller.listDirectoriesPage(fingerprint, {
+          ...(typeof request.path === 'string' ? { path: request.path } : {}),
+          ...(typeof request.cursor === 'number' ? { cursor: request.cursor } : {}),
+          ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
+          ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
+        }) }
+      }
       if (request.op === 'providers') {
         // Same owner-device authorization; the run path still validates the
         // chosen providerId, so this is a display-only chooser snapshot.
@@ -128,6 +140,16 @@ export class InnerMtlsHost {
       if (request.op === 'sessions') {
         // Same owner-device authorization; display-only catalog metadata.
         return { sessions: controller.listSessions(fingerprint) }
+      }
+      if (request.op === 'sessionsPage') {
+        if ((request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
+            (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
+            (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
+        return { sessionsPage: controller.listSessionsPage(fingerprint, {
+          ...(typeof request.cursor === 'number' ? { cursor: request.cursor } : {}),
+          ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
+          ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
+        }) }
       }
       if (request.op === 'history') {
         // Legacy bounded response retained for older clients.

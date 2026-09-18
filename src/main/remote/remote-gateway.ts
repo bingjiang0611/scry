@@ -49,6 +49,20 @@ export interface RemoteDirectoryListing {
   directories: RemoteProjectRef[]
 }
 
+export interface RemoteDirectoryPageQuery {
+  path?: string
+  cursor?: number
+  limit?: number
+  snapshot?: string
+}
+
+export interface RemoteDirectoryPage extends RemoteDirectoryListing {
+  cursor: number
+  total: number
+  hasMore: boolean
+  snapshot: string
+}
+
 export interface RemoteDirectorySource {
   // `path` is absent for the authorized-root list. A supplied path must resolve
   // inside one of those roots; authorization belongs to the host source because
@@ -125,6 +139,20 @@ export interface RemoteSessionSource {
   // authorized projects host-side). Called per request so a new/removed session
   // is reflected immediately.
   list(): RemoteSessionRef[]
+}
+
+export interface RemoteSessionPageQuery {
+  cursor?: number
+  limit?: number
+  snapshot?: string
+}
+
+export interface RemoteSessionPage {
+  sessions: RemoteSessionRef[]
+  cursor: number
+  total: number
+  hasMore: boolean
+  snapshot: string
 }
 
 // One turn of a session's REAL conversation content, replayed for the device.
@@ -219,6 +247,7 @@ const MAX_PATH = 4_096
 const MAX_PROVIDERS = 32
 const MAX_COMMANDS = 256
 const MAX_SESSIONS = 300
+const MAX_CATALOG_PAGE = 100
 const MAX_HISTORY_TURNS = 400
 const MAX_HISTORY_ITEMS_PER_TURN = 500
 const MAX_HISTORY_TEXT = 20_000
@@ -282,7 +311,7 @@ export class RemoteGateway {
     return this.#ledger.runState(input.runId)
   }
 
-  private projectRefs(raw: RemoteProjectRef[]): RemoteProjectRef[] {
+  private projectRefs(raw: RemoteProjectRef[], limit = MAX_PROJECTS): RemoteProjectRef[] {
     const seen = new Set<string>()
     const out: RemoteProjectRef[] = []
     for (const entry of raw) {
@@ -290,7 +319,7 @@ export class RemoteGateway {
       if (entry.path.length === 0 || entry.path.length > MAX_PATH || seen.has(entry.path)) continue
       seen.add(entry.path)
       out.push({ path: entry.path, label: entry.label.slice(0, 256) })
-      if (out.length >= MAX_PROJECTS) break
+      if (out.length >= limit) break
     }
     return out
   }
@@ -319,6 +348,34 @@ export class RemoteGateway {
       ...(current ? { current } : {}),
       ...(parent ? { parent } : {}),
       directories: this.projectRefs(listing.directories)
+    }
+  }
+
+  listDirectoriesPage(peerCertSHA256: string, input: RemoteDirectoryPageQuery): RemoteDirectoryPage {
+    this.#authorize(peerCertSHA256)
+    const cursor = input?.cursor ?? 0
+    const limit = input?.limit ?? MAX_CATALOG_PAGE
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_directory_cursor')
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_directory_limit')
+    if (input.path !== undefined && (typeof input.path !== 'string' || input.path.length === 0 || input.path.length > MAX_PATH)) {
+      throw new RemoteGatewayError('invalid_target')
+    }
+    const raw = this.#directories?.list(input.path) ?? { directories: [] }
+    const current = raw.current ? this.projectRefs([raw.current])[0] : undefined
+    const parent = raw.parent ? this.projectRefs([raw.parent])[0] : undefined
+    const directories = this.projectRefs(raw.directories, Number.MAX_SAFE_INTEGER)
+    const snapshot = createHash('sha256').update(JSON.stringify({ current, parent, directories })).digest('hex')
+    if (input.snapshot !== undefined && input.snapshot !== snapshot) throw new RemoteGatewayError('directory_snapshot_changed')
+    if (cursor > directories.length) throw new RemoteGatewayError('invalid_directory_cursor')
+    const end = Math.min(directories.length, cursor + limit)
+    return {
+      ...(current ? { current } : {}),
+      ...(parent ? { parent } : {}),
+      directories: directories.slice(cursor, end),
+      cursor: end,
+      total: directories.length,
+      hasMore: end < directories.length,
+      snapshot
     }
   }
 
@@ -401,18 +458,12 @@ export class RemoteGateway {
     return { commands, ...(typeof raw.reason === 'string' && raw.reason.length > 0 ? { reason: raw.reason.slice(0, 512) } : {}) }
   }
 
-  // The host's session catalog this device may browse, authorized by the same
-  // owner-device check as every method. Display-only metadata, deduped and
-  // bounded; opening a session's content is a separate re-authorized read.
-  listSessions(peerCertSHA256: string): RemoteSessionRef[] {
-    this.#authorize(peerCertSHA256)
-    const raw = this.#sessions?.list() ?? []
+  private sessionRefs(raw: RemoteSessionRef[], limit = MAX_SESSIONS): RemoteSessionRef[] {
     const seen = new Set<string>()
     const out: RemoteSessionRef[] = []
     for (const entry of raw) {
       if (!entry || typeof entry.sessionId !== 'string' || typeof entry.providerId !== 'string') continue
-      if (entry.sessionId.length === 0 || entry.sessionId.length > 128) continue
-      if (seen.has(entry.sessionId)) continue
+      if (entry.sessionId.length === 0 || entry.sessionId.length > 128 || seen.has(entry.sessionId)) continue
       seen.add(entry.sessionId)
       out.push({
         sessionId: entry.sessionId,
@@ -423,9 +474,35 @@ export class RemoteGateway {
         ts: Number.isFinite(entry.ts) ? entry.ts : 0,
         ...(typeof entry.pinnedAt === 'number' && Number.isFinite(entry.pinnedAt) && entry.pinnedAt > 0 ? { pinnedAt: entry.pinnedAt } : {})
       })
-      if (out.length >= MAX_SESSIONS) break
+      if (out.length >= limit) break
     }
     return out
+  }
+
+  // Compatibility endpoint for older clients. New clients drain listSessionsPage.
+  listSessions(peerCertSHA256: string): RemoteSessionRef[] {
+    this.#authorize(peerCertSHA256)
+    return this.sessionRefs(this.#sessions?.list() ?? [])
+  }
+
+  listSessionsPage(peerCertSHA256: string, input: RemoteSessionPageQuery): RemoteSessionPage {
+    this.#authorize(peerCertSHA256)
+    const cursor = input?.cursor ?? 0
+    const limit = input?.limit ?? MAX_CATALOG_PAGE
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_session_cursor')
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_session_limit')
+    const sessions = this.sessionRefs(this.#sessions?.list() ?? [], Number.MAX_SAFE_INTEGER)
+    const snapshot = createHash('sha256').update(JSON.stringify(sessions)).digest('hex')
+    if (input.snapshot !== undefined && input.snapshot !== snapshot) throw new RemoteGatewayError('session_snapshot_changed')
+    if (cursor > sessions.length) throw new RemoteGatewayError('invalid_session_cursor')
+    const end = Math.min(sessions.length, cursor + limit)
+    return {
+      sessions: sessions.slice(cursor, end),
+      cursor: end,
+      total: sessions.length,
+      hasMore: end < sessions.length,
+      snapshot
+    }
   }
 
   // The REAL conversation content of one session so the device can OPEN it,

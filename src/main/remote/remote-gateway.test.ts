@@ -207,6 +207,28 @@ describe('RemoteGateway', () => {
     expectCode(() => gw.listDirectories(CERT, { path: '' }), 'invalid_target')
   })
 
+  it('pages every directory with a stable snapshot fence', async () => {
+    const { authority } = await grantedAuthority()
+    let entries = Array.from({ length: 245 }, (_, index) => ({ path: `/repo/d${index}`, label: `d${index}` }))
+    const { gw } = gateway(authority, undefined, undefined, undefined, undefined, {
+      list: () => ({ current: { path: '/repo', label: 'repo' }, directories: entries })
+    })
+    const collected: string[] = []
+    let cursor = 0
+    let snapshot: string | undefined
+    do {
+      const page = gw.listDirectoriesPage(CERT, { path: '/repo', cursor, limit: 37, ...(snapshot ? { snapshot } : {}) })
+      snapshot ??= page.snapshot
+      expect(page.directories.length).toBeLessThanOrEqual(37)
+      collected.push(...page.directories.map((entry) => entry.path))
+      cursor = page.cursor
+      if (!page.hasMore) break
+    } while (true)
+    expect(collected).toEqual(entries.map((entry) => entry.path))
+    entries = [...entries, { path: '/repo/new', label: 'new' }]
+    expectCode(() => gw.listDirectoriesPage(CERT, { path: '/repo', cursor: 0, snapshot }), 'directory_snapshot_changed')
+  })
+
   it('lists host Providers only for an authorized device, deduped/bounded, availability preserved', async () => {
     const { authority } = await grantedAuthority()
     const list = vi.fn(() => [
@@ -272,6 +294,28 @@ describe('RemoteGateway', () => {
       { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30 },
       { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }
     ])
+  })
+
+  it('pages the complete session catalog and rejects a changed snapshot', async () => {
+    const { authority } = await grantedAuthority()
+    let entries = Array.from({ length: 350 }, (_, index) => ({
+      sessionId: `s${index}`, providerId: 'codex', cwd: '/repo', label: `session ${index}`, ts: index
+    }))
+    const { gw } = gateway(authority, undefined, undefined, undefined, { list: () => entries })
+    const collected: string[] = []
+    let cursor = 0
+    let snapshot: string | undefined
+    do {
+      const page = gw.listSessionsPage(CERT, { cursor, limit: 41, ...(snapshot ? { snapshot } : {}) })
+      snapshot ??= page.snapshot
+      expect(page.sessions.length).toBeLessThanOrEqual(41)
+      collected.push(...page.sessions.map((entry) => entry.sessionId))
+      cursor = page.cursor
+      if (!page.hasMore) break
+    } while (true)
+    expect(collected).toEqual(entries.map((entry) => entry.sessionId))
+    entries = entries.slice(1)
+    expectCode(() => gw.listSessionsPage(CERT, { cursor: 0, snapshot }), 'session_snapshot_changed')
   })
 
   it('returns an honest empty session catalog when no source is configured', async () => {
