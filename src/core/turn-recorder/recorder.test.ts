@@ -272,6 +272,30 @@ describe('turn recorder state machine', () => {
     await expect(readTranscriptWindow(transcript, expected.size, 0, expected)).resolves.toMatchObject({ consistent: false })
   })
 
+  it('transcript snapshot 不因旧的 32 MiB 窗口永久丢失大轮次开头', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'large-transcript.jsonl')
+    const size = 33 * 1024 * 1024 + 17
+    const handle = await openFile(transcript, 'w+')
+    try {
+      await handle.truncate(size)
+      await handle.write(Buffer.from('turn-start\n'), 0, 11, 0)
+      const tail = Buffer.from('\nturn-end\n')
+      await handle.write(tail, 0, tail.length, size - tail.length)
+    } finally {
+      await handle.close()
+    }
+    const info = await stat(transcript)
+    const snapshot = await readTranscriptWindow(transcript, info.size, 0, {
+      dev: info.dev, ino: info.ino, size: info.size,
+      mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs
+    })
+    expect(snapshot).toMatchObject({ truncated: false, consistent: true })
+    expect(snapshot.content.startsWith('turn-start\n')).toBe(true)
+    expect(snapshot.content.endsWith('\nturn-end\n')).toBe(true)
+    expect(Buffer.byteLength(snapshot.content)).toBe(size)
+  })
+
   it('Pi/OpenCode capture metadata 将截断证据投影为 partial 而非 exact', async () => {
     const root = await workspace()
     await handleRecorderHook({ provider: 'pi', event: 'UserPromptSubmit', workspace: root, payload: payload('partial-1', { prompt: 'bounded evidence' }) })
@@ -815,6 +839,43 @@ describe('turn recorder state machine', () => {
         user: { value: { text: 'target prompt' } }
       }
     ])
+  })
+
+  it('Claude 超过旧 rewind 大小的单行 prompt 仍按完整身份归档', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'claude-large-prompt.jsonl')
+    const prompt = `large:${'p'.repeat(4 * 1024 * 1024 + 128)}`
+    await writeFile(transcript, JSON.stringify({
+      type: 'user',
+      promptId: 'large-prompt-turn',
+      message: { role: 'user', content: prompt }
+    }) + '\n')
+    await handleRecorderHook({
+      provider: 'claude', event: 'UserPromptSubmit', workspace: root,
+      payload: payload('claude-large-prompt', {
+        prompt, promptId: 'large-prompt-turn', transcript_path: transcript
+      })
+    })
+    await appendFile(transcript, JSON.stringify({
+      type: 'assistant',
+      promptId: 'large-prompt-turn',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'complete answer' }] }
+    }) + '\n')
+    await handleRecorderHook({
+      provider: 'claude', event: 'Stop', workspace: root,
+      payload: payload('claude-large-prompt', {
+        promptId: 'large-prompt-turn', transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:01.000Z'
+      })
+    })
+    await recoverRecorder(root)
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      providerTurnId: 'large-prompt-turn',
+      assistant: { value: { text: 'complete answer' } }
+    })
+    expect(records[0].user.value?.text.length).toBe(prompt.length)
   })
 
   it.each([

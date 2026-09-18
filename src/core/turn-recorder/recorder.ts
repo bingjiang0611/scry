@@ -128,8 +128,6 @@ const DEFERRED_TERMINAL_GRACE_MS = 180_000
  * Silence alone never proves an open Agent turn has ended; doctor warns without fabricating a stop.
  */
 export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000
-const TRANSCRIPT_REWIND_BYTES = 4 * 1024 * 1024
-const MAX_TRANSCRIPT_READ_BYTES = 32 * 1024 * 1024
 
 function stringAt(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -1489,14 +1487,6 @@ async function codexTurnWithChildren(
   return { events, complete, observable }
 }
 
-async function transcriptStartOffset(path: string): Promise<number | undefined> {
-  try {
-    return Math.max(0, (await stat(path)).size - TRANSCRIPT_REWIND_BYTES)
-  } catch {
-    return undefined
-  }
-}
-
 export interface TranscriptSnapshotIdentity {
   dev: number
   ino: number
@@ -1522,7 +1512,10 @@ export async function readTranscriptWindow(
 ): Promise<{ content: string; truncated: boolean; consistent: boolean }> {
   const boundedEnd = Math.max(0, endOffset)
   const preferredStart = Math.max(0, Math.min(preferredStartOffset, boundedEnd))
-  const start = Math.max(preferredStart, boundedEnd - MAX_TRANSCRIPT_READ_BYTES)
+  // The start offset is captured when the user turn opens. A later byte cap would
+  // permanently erase early events from a large turn, so read the complete bounded
+  // snapshot from that authority rather than silently advancing the start cursor.
+  const start = preferredStart
   const length = boundedEnd - start
   const handle = await openFile(path, 'r')
   const buffer = Buffer.allocUnsafe(length)
@@ -1740,6 +1733,108 @@ async function readableTranscriptPath(path: string, provider: ProviderId): Promi
   }
 }
 
+function transcriptLineAnchor(
+  line: string,
+  provider: ProviderId,
+  promptHash?: string,
+  providerTurnId?: string
+): 'turn' | 'user' | undefined {
+  let row: Record<string, unknown>
+  try {
+    row = JSON.parse(line) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  if (provider === 'codex') {
+    const payload = nestedRecord(row, 'payload') ?? {}
+    if (row.type === 'event_msg' && payload.type === 'task_started') {
+      const id = stringAt(payload, 'turn_id', 'turnId')
+      return providerTurnId ? id === providerTurnId ? 'turn' : undefined : !promptHash ? 'turn' : undefined
+    }
+    if (row.type !== 'event_msg' || payload.type !== 'user_message') return undefined
+    const text = stringAt(payload, 'message', 'text', 'prompt') ?? textContent(payload.content) ?? ''
+    const matchesHash = !!promptHash && [text, text.replace(/^\/[A-Za-z0-9_-]+\s*/, '')]
+      .some((candidate) => createHash('sha256').update(candidate).digest('hex') === promptHash)
+    return matchesHash || !promptHash && !providerTurnId ? 'user' : undefined
+  }
+  if (row.type !== 'user') return undefined
+  const id = stringAt(row, 'promptId', 'prompt_id', 'turnId', 'turn_id')
+  if (providerTurnId && id === providerTurnId) return 'turn'
+  const text = textContent((row.message as Record<string, unknown> | undefined)?.content) ?? ''
+  const command = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>[\s\S]*?<command-args>\s*([\s\S]*?)\s*<\/command-args>/i.exec(text)
+  const candidates = [
+    text,
+    ...(command ? [`${command[1]}${command[2].trim() ? ` ${command[2].trim()}` : ''}`] : [])
+  ]
+  const matchesHash = !!promptHash && candidates
+    .some((candidate) => createHash('sha256').update(candidate).digest('hex') === promptHash)
+  return matchesHash || !promptHash && !providerTurnId ? 'turn' : undefined
+}
+
+async function transcriptAnchorOffset(
+  path: string,
+  endOffset: number,
+  provider: ProviderId,
+  promptHash?: string,
+  providerTurnId?: string
+): Promise<number> {
+  if (endOffset <= 0 || !promptHash && !providerTurnId) return 0
+  const handle = await openFile(path, 'r')
+  const chunkBytes = 1024 * 1024
+  let cursor = endOffset
+  let suffix = Buffer.alloc(0)
+  let matchedUserOffset: number | undefined
+  let matchedTurnOffset: number | undefined
+  try {
+    while (cursor > 0) {
+      const start = Math.max(0, cursor - chunkBytes)
+      const chunk = Buffer.allocUnsafe(cursor - start)
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
+      if (bytesRead !== chunk.length) return 0
+      const combined = Buffer.concat([chunk, suffix])
+      let lineEnd = combined.length
+      for (let index = combined.length - 1; index >= 0; index--) {
+        if (combined[index] !== 0x0a) continue
+        const lineStart = index + 1
+        if (lineEnd > lineStart) {
+          const absoluteOffset = start + lineStart
+          const anchor = transcriptLineAnchor(combined.subarray(lineStart, lineEnd).toString('utf8'), provider, promptHash, providerTurnId)
+          const windowOffset = Math.max(0, absoluteOffset - 1)
+          if (provider !== 'codex') {
+            if (anchor === 'turn') return windowOffset
+          } else {
+            const anyAnchor = transcriptLineAnchor(
+              combined.subarray(lineStart, lineEnd).toString('utf8'), provider, undefined, undefined
+            )
+            if (matchedTurnOffset != null && anyAnchor === 'turn') return windowOffset
+            if (anchor === 'turn' || matchedUserOffset != null && anyAnchor === 'turn') {
+              matchedTurnOffset = windowOffset
+            } else if (anchor === 'user' && matchedUserOffset == null) {
+              matchedUserOffset = windowOffset
+            }
+          }
+        }
+        lineEnd = index
+      }
+      suffix = combined.subarray(0, lineEnd)
+      // NUL cannot occur in a valid JSONL record. Sparse/uninitialized prefixes are
+      // therefore a hard format boundary, not evidence that must be loaded to byte 0.
+      if (matchedTurnOffset != null && suffix.includes(0)) return matchedTurnOffset
+      cursor = start
+    }
+    if (suffix.length) {
+      const firstLine = suffix.toString('utf8')
+      const anchor = transcriptLineAnchor(firstLine, provider, promptHash, providerTurnId)
+      if (anchor === 'turn') return 0
+      if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return 0
+      if (anchor === 'user' && matchedUserOffset == null) matchedUserOffset = 0
+    }
+    return matchedTurnOffset ?? matchedUserOffset ?? 0
+  } finally {
+    await handle.close()
+  }
+}
+
 async function cachedTranscriptSnapshot(args: {
   path: string
   startOffset?: number
@@ -1780,6 +1875,9 @@ async function stableTranscript(
   startOffset?: number
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
+  // Recompute an exact JSONL turn anchor. Older persisted offsets were heuristic
+  // byte rewinds and may begin inside a large prompt, so they are never evidence.
+  startOffset = 0
   let previous = -1
   let latestIdentity: TranscriptSnapshotIdentity | undefined
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -1813,11 +1911,13 @@ async function stableTranscript(
     }
     latestIdentity = identity
     if (identity.size === previous) {
+      startOffset = await transcriptAnchorOffset(path, identity.size, provider, promptHash, providerTurnId)
       return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, identity })
     }
     previous = identity.size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
+  if (latestIdentity) startOffset = await transcriptAnchorOffset(path, latestIdentity.size, provider, promptHash, providerTurnId)
   return latestIdentity
     ? cachedTranscriptSnapshot({
         path,
@@ -1954,7 +2054,7 @@ async function beginOpenTurn(
     : undefined
   const providerTurnId = providerTurnIdOf(payload, provider)
   const transcriptPath = transcriptPathOf(payload)
-  const transcriptOffset = transcriptPath ? await transcriptStartOffset(transcriptPath) : undefined
+  const transcriptOffset = transcriptPath ? 0 : undefined
   const open: OpenTurnState = {
     ...(isFullToolContentPolicy(enablement.config.capture) ? { toolContentPolicy: {
       toolOutput: 'full' as const,
@@ -2110,10 +2210,10 @@ async function storeLifecycleEvent(
   const transcriptPath = subagentScopedPayload(payload) ? undefined : transcriptPathOf(payload)
   if (transcriptPath && transcriptPath !== open.transcriptPath) {
     open.transcriptPath = transcriptPath
-    open.transcriptStartOffset = await transcriptStartOffset(transcriptPath)
+    open.transcriptStartOffset = 0
     await writeJsonAtomic(openPath(root), open, { sync: false })
   } else if (transcriptPath && open.transcriptStartOffset == null) {
-    open.transcriptStartOffset = await transcriptStartOffset(transcriptPath)
+    open.transcriptStartOffset = 0
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   return id
