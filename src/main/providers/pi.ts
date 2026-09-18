@@ -690,6 +690,7 @@ function questionFromExtension(runId: string, event: JsonRecord): AgentQuestionR
       header: title,
       question: question.slice(0, 2_000),
       multiSelect: false,
+      ...((method === 'input' || method === 'editor') ? { inputMode: method === 'editor' ? 'multiline' as const : 'singleline' as const } : {}),
       options: labels.map((label) => ({ label, description: method === 'confirm' ? `${label}这次操作` : '选择此项' }))
     }]
   }

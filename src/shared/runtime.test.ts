@@ -390,6 +390,22 @@ describe('runtime frontdoor mapping', () => {
     ).toBeNull()
   })
 
+  it('preserves bounded native long-option and multiline editor requests', () => {
+    const options = Array.from({ length: 20 }, (_, index) => ({ label: `选项 ${index}`, description: `说明 ${index}` }))
+    const request = normalizeAgentQuestionRequest('run-native', 'native-1', {
+      questions: [{ question: '原生选择', header: '选择', options, multiSelect: false }]
+    }, undefined, 'native', true)
+    expect(request?.questions[0].options).toHaveLength(20)
+
+    const editor = normalizeAgentQuestionRequest('run-native', 'native-editor', {
+      questions: [{ question: '正文', header: '编辑器', options: [], multiSelect: false, inputMode: 'multiline' }]
+    }, undefined, 'native', true)!
+    expect(editor.questions[0].inputMode).toBe('multiline')
+    expect(normalizeAgentQuestionResponse(editor, {
+      runId: 'run-native', questionId: 'native-editor', behavior: 'answered', answers: { 正文: 'x'.repeat(50_000) }
+    })).not.toBeNull()
+  })
+
   it('accepts only complete answers for the matching run and tool call', () => {
     const request = normalizeAgentQuestionRequest('run-1', 'tool-1', {
       questions: [

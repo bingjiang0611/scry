@@ -218,6 +218,8 @@ export interface AgentQuestionPrompt {
   header: string
   options: AgentQuestionOption[]
   multiSelect: boolean
+  /** Native input/editor requests have no synthetic choice list. */
+  inputMode?: 'singleline' | 'multiline'
 }
 
 export type AgentQuestionKind = 'clarification' | 'permission'
@@ -655,7 +657,8 @@ export function normalizeAgentQuestionRequest(
 ): AgentQuestionRequest | null {
   if (!runId || !questionId || !input || typeof input !== 'object') return null
   const rawQuestions = (input as { questions?: unknown }).questions
-  if (!Array.isArray(rawQuestions) || rawQuestions.length < 1 || rawQuestions.length > 4) return null
+  const nativeLimit = allowFreeText ? 100 : 4
+  if (!Array.isArray(rawQuestions) || rawQuestions.length < 1 || rawQuestions.length > nativeLimit) return null
   const questions: AgentQuestionPrompt[] = []
   const seen = new Set<string>()
   for (const raw of rawQuestions) {
@@ -664,7 +667,7 @@ export function normalizeAgentQuestionRequest(
     const question = exactBoundedText(value.question, 2_000)
     const header = exactBoundedText(value.header, 120)
     if (!question || !header || seen.has(question) || !Array.isArray(value.options)) return null
-    if (value.options.length > 4 || (!allowFreeText && value.options.length < 2)) return null
+    if (value.options.length > nativeLimit || (!allowFreeText && value.options.length < 2)) return null
     const options: AgentQuestionOption[] = []
     for (const rawOption of value.options) {
       if (!rawOption || typeof rawOption !== 'object') return null
@@ -676,7 +679,8 @@ export function normalizeAgentQuestionRequest(
       options.push({ label, description, ...(preview ? { preview } : {}) })
     }
     seen.add(question)
-    questions.push({ question, header, options, multiSelect: value.multiSelect === true })
+    const inputMode = value.inputMode === 'multiline' ? 'multiline' : value.inputMode === 'singleline' ? 'singleline' : undefined
+    questions.push({ question, header, options, multiSelect: value.multiSelect === true, ...(inputMode ? { inputMode } : {}) })
   }
   return {
     runId,
@@ -702,7 +706,7 @@ export function normalizeAgentQuestionResponse(
   const rawAnswers = response.answers as Record<string, unknown>
   const answers: Record<string, string> = {}
   for (const question of request.questions) {
-    const answer = boundedAnswer(rawAnswers[question.question], 4_000)
+    const answer = boundedAnswer(rawAnswers[question.question], question.inputMode === 'multiline' ? 100_000 : 4_000)
     if (!answer) return null
     answers[question.question] = answer
   }

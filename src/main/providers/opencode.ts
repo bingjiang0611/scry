@@ -1203,6 +1203,7 @@ export function createOpenCodeAdapter(
       let stopped = false
       let forceKilled = false
       let stopConfirmation: Promise<boolean> | undefined
+      let abortDispatched = false
       let client: OpencodeClient | undefined
       const permissionController = new AbortController()
       const requestController = new AbortController()
@@ -1251,7 +1252,12 @@ export function createOpenCodeAdapter(
             )
           }
           if (stopped) {
-            await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
+            abortDispatched = true
+            const aborted = await unwrap<boolean>(
+              client.session.abort({ sessionID: externalSessionId, directory: request.cwd }),
+              'session.abort'
+            )
+            if (aborted !== true) throw new Error('OpenCode did not confirm session abort')
             return { externalSessionId, providerTurnId, stopped, status: 'interrupted' }
           }
           if (request.managedRecorder) {
@@ -1488,7 +1494,8 @@ export function createOpenCodeAdapter(
           if (stopped && (forceKilled || await stopConfirmation)) {
             return { externalSessionId, providerTurnId, stopped, status: 'interrupted' }
           }
-          if (client && externalSessionId) {
+          if (client && externalSessionId && !abortDispatched) {
+            abortDispatched = true
             await client.session.abort({ sessionID: externalSessionId, directory: request.cwd }).catch(() => {})
           }
           const normalized = normalizeOpenCodeRunError(error, request.cwd, manager)
@@ -1510,6 +1517,7 @@ export function createOpenCodeAdapter(
         // Aborting only the local fetch erases the native outcome and can report interruption while
         // the Agent is still running (or has already completed).
         if (client && externalSessionId && !stopConfirmation) {
+          abortDispatched = true
           stopConfirmation = unwrap<boolean>(
             client.session.abort({ sessionID: externalSessionId, directory: request.cwd }),
             'session.abort'
