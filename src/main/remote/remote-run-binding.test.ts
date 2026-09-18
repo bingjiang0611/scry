@@ -61,6 +61,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       answers: { Continue: 'Allow' }
     }))
     const { run } = fakeRun(async (req) => {
+      req.onExternalSessionId?.('provider-session')
       await req.requestUserInput?.({
         runId: req.runId,
         questionId: 'permission-1',
@@ -72,13 +73,19 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       }, new AbortController().signal)
       return { status: 'completed' }
     })
-    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-question' })
+    const onRunArchive = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-question', onRunArchive })
     await start({
       runId: 'ledger-question',
       routing: { cwd: '/w', providerId: 'codex', prompt: 'go' },
       progress: () => {}, output: () => {}, requestUserInput
     })
     expect(requestUserInput).toHaveBeenCalledWith(expect.objectContaining({ runId: 'scry-question', questionId: 'permission-1' }), expect.any(AbortSignal))
+    expect(onRunArchive.mock.calls[0]?.[0].items).toEqual([expect.objectContaining({
+      kind: 'human', stage: 'intervention', intervention: expect.objectContaining({
+        resolution: 'answered', response: expect.objectContaining({ answers: { Continue: 'Allow' } })
+      })
+    })])
   })
 
   it('forwards only explicitly selected model, effort and permission controls', async () => {
