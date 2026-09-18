@@ -553,7 +553,11 @@ claim is made.
 - Text files above the 2 MiB editable limit open through a dedicated 64 KiB read-only page API. Main
   re-authorizes cwd/path on every page, rejects symlinks/binary/invalid UTF-8, fences file identity,
   and renderer retains only the visible page plus byte offsets; editing remains unavailable.
-- Still required: incremental archive indexing, remote ledger compaction beyond the current
-  fail-closed 8 MiB file, and persisted desktop composer drafts.
-- Tests still required: cold restart, concurrent append, stale ledger cursors and user-authored draft
-  recovery. Keep IPC/security boundaries intact.
+- Desktop composer drafts are persisted per Provider/profile/workspace/session. Raw text and up to
+  eight original attachments survive renderer/App restart within a bounded 2 MiB local store. LRU
+  storage drops oldest drafts under count pressure; quota/storage failure leaves the live draft
+  untouched and is shown explicitly instead of claiming recovery.
+- Still required: incremental archive indexing and remote ledger compaction beyond the current
+  fail-closed 8 MiB file.
+- Tests still required: cold restart, concurrent append and stale ledger cursors. Keep IPC/security
+  boundaries intact.
