@@ -8481,6 +8481,19 @@ textarea:focus-visible,
   padding: 5px 12px;
 }
 
+.workspace-load-more {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-load-more:hover:not(:disabled) {
+  color: var(--fg);
+}
+
 .workspace-empty {
   margin: auto;
   padding: 24px;

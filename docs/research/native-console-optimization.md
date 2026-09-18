@@ -546,9 +546,14 @@ claim is made.
 - Provider-native background task support remains capability-specific; Qoder is the only runtime that
   currently exposes it, so Scry does not fabricate controls for the other Providers.
 
-### 5. Long-lived console (not implemented)
+### 5. Long-lived console (partially implemented)
 
-- Incremental archive indexing and remote ledger compaction beyond the current fail-closed 8 MiB
-  file, persisted desktop composer drafts and large-file read-only views.
-- Tests: beyond current count/byte thresholds, cold restart, concurrent append, stale cursor and
-  user-authored draft recovery. Keep IPC/security boundaries intact.
+- The desktop workspace tree now drains opaque, snapshot-fenced 200-entry pages instead of silently
+  stopping at 2,000 entries. A changed directory invalidates the cursor rather than mixing versions.
+- Text files above the 2 MiB editable limit open through a dedicated 64 KiB read-only page API. Main
+  re-authorizes cwd/path on every page, rejects symlinks/binary/invalid UTF-8, fences file identity,
+  and renderer retains only the visible page plus byte offsets; editing remains unavailable.
+- Still required: incremental archive indexing, remote ledger compaction beyond the current
+  fail-closed 8 MiB file, and persisted desktop composer drafts.
+- Tests still required: cold restart, concurrent append, stale ledger cursors and user-authored draft
+  recovery. Keep IPC/security boundaries intact.

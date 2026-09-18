@@ -23,6 +23,7 @@ export interface WorkspaceEntry {
 export interface WorkspaceListResult {
   entries: WorkspaceEntry[]
   truncated: boolean
+  nextCursor?: string
 }
 
 export interface WorkspaceFileSnapshot {
@@ -35,6 +36,24 @@ export interface WorkspaceFileSnapshot {
   language: string
 }
 
+export interface WorkspaceFilePage {
+  name: string
+  path: string
+  content: string
+  offset: number
+  nextOffset: number
+  totalBytes: number
+  hasMore: boolean
+  snapshot: string
+  language: string
+}
+
+export interface WorkspaceFilePageRequest extends WorkspacePathRequest {
+  offset?: number
+  limit?: number
+  snapshot?: string
+}
+
 export interface WorkspacePathRequest {
   cwd: string
   path: string
@@ -43,6 +62,8 @@ export interface WorkspacePathRequest {
 export interface WorkspaceListRequest {
   cwd: string
   path?: string
+  cursor?: string
+  limit?: number
 }
 
 export interface WorkspaceWriteRequest extends WorkspacePathRequest {

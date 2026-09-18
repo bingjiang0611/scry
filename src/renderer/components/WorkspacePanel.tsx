@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { canOpenWorkspaceFileExternally, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFileSnapshot } from '@shared/workspace'
+import { canOpenWorkspaceFileExternally, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFilePage, type WorkspaceFileSnapshot } from '@shared/workspace'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 
@@ -45,7 +45,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
-  const [truncated, setTruncated] = useState<Set<string>>(new Set())
+  const [nextCursors, setNextCursors] = useState<Record<string, string | undefined>>({})
   const [selected, setSelected] = useState<WorkspaceEntry | null>(null)
   const [dirty, setDirty] = useState(false)
   const [query, setQuery] = useState('')
@@ -59,20 +59,19 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
   const handledOpenRequestId = useRef<number | null>(null)
 
   const loadDirectory = useCallback(
-    async (path = ''): Promise<void> => {
+    async (path = '', cursor?: string): Promise<void> => {
       const sequence = (loadSequence.current.get(path) ?? 0) + 1
       loadSequence.current.set(path, sequence)
       setLoading((current) => new Set(current).add(path))
       setError(null)
       try {
-        const result = await window.scry.workspaceList({ cwd, path })
+        const result = await window.scry.workspaceList({ cwd, path, ...(cursor ? { cursor } : {}) })
         if (loadSequence.current.get(path) !== sequence) return
-        setChildren((current) => ({ ...current, [path]: result.entries }))
-        setTruncated((current) => {
-          const next = new Set(current)
-          result.truncated ? next.add(path) : next.delete(path)
-          return next
-        })
+        setChildren((current) => ({
+          ...current,
+          [path]: cursor ? [...(current[path] ?? []), ...result.entries] : result.entries
+        }))
+        setNextCursors((current) => ({ ...current, [path]: result.nextCursor }))
       } catch (loadError) {
         if (loadSequence.current.get(path) !== sequence) return
         setError(errorMessage(loadError))
@@ -92,7 +91,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
   const refresh = useCallback((): void => {
     setChildren({})
     setExpanded(new Set())
-    setTruncated(new Set())
+    setNextCursors({})
     void loadDirectory()
   }, [loadDirectory])
 
@@ -276,7 +275,17 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
             <div>
               {loading.has(entry.path) && <div className="workspace-node-note" style={{ paddingLeft: 28 + depth * 14 }}>读取中…</div>}
               {renderEntries(loadedChildren, depth + 1)}
-              {truncated.has(entry.path) && <div className="workspace-node-note">只显示前 2,000 项</div>}
+              {nextCursors[entry.path] && (
+                <button
+                  type="button"
+                  className="workspace-node-note workspace-load-more"
+                  style={{ paddingLeft: 28 + depth * 14 }}
+                  disabled={loading.has(entry.path)}
+                  onClick={() => void loadDirectory(entry.path, nextCursors[entry.path])}
+                >
+                  {loading.has(entry.path) ? '读取中…' : '加载更多'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -369,7 +378,16 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
           ) : (
             <div className="workspace-nodes">{renderEntries(entries)}</div>
           )}
-          {truncated.has('') && <div className="workspace-node-note">根目录只显示前 2,000 项</div>}
+          {nextCursors[''] && (
+            <button
+              type="button"
+              className="workspace-node-note workspace-load-more"
+              disabled={loading.has('')}
+              onClick={() => void loadDirectory('', nextCursors[''])}
+            >
+              {loading.has('') ? '读取中…' : '加载更多'}
+            </button>
+          )}
         </div>
       )}
 
@@ -557,6 +575,8 @@ function FileEditor({
   onError: (error: string | null) => void
 }) {
   const [snapshot, setSnapshot] = useState<WorkspaceFileSnapshot | null>(null)
+  const [page, setPage] = useState<WorkspaceFilePage | null>(null)
+  const [pageBack, setPageBack] = useState<number[]>([])
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -574,12 +594,33 @@ function FileEditor({
       const read = readOnly ? window.scry.workspaceReadKnown : window.scry.workspaceRead
       const next = await read({ cwd, path: entry.path })
       if (loadSequence.current !== sequence) return
+      setPage(null)
+      setPageBack([])
       setSnapshot(next)
       setContent(next.content)
     } catch (loadError) {
       if (loadSequence.current !== sequence) return
-      if (!dirtyRef.current) setSnapshot(null)
-      onError(errorMessage(loadError))
+      if (errorMessage(loadError).includes('分页只读视图')) {
+        try {
+          const readPage = readOnly ? window.scry.workspaceReadPageKnown : window.scry.workspaceReadPage
+          const first = await readPage({ cwd, path: entry.path, offset: 0 })
+          if (loadSequence.current !== sequence) return
+          setSnapshot(null)
+          setPage(first)
+          setPageBack([])
+          setContent(first.content)
+          return
+        } catch (pageError) {
+          if (loadSequence.current !== sequence) return
+          onError(errorMessage(pageError))
+        }
+      } else {
+        onError(errorMessage(loadError))
+      }
+      if (!dirtyRef.current) {
+        setSnapshot(null)
+        setPage(null)
+      }
     } finally {
       if (loadSequence.current === sequence) setLoading(false)
     }
@@ -627,14 +668,54 @@ function FileEditor({
     }
   }
 
+  const movePage = useCallback(async (offset: number, back: number[]): Promise<void> => {
+    if (!page || loading) return
+    setLoading(true)
+    onError(null)
+    try {
+      const readPage = readOnly ? window.scry.workspaceReadPageKnown : window.scry.workspaceReadPage
+      const next = await readPage({ cwd, path: entry.path, offset, snapshot: page.snapshot })
+      setPage(next)
+      setPageBack(back)
+      setContent(next.content)
+    } catch (pageError) {
+      onError(errorMessage(pageError))
+    } finally {
+      setLoading(false)
+    }
+  }, [cwd, entry.path, loading, onError, page, readOnly])
+
   const markdown = /\.(md|mdx)$/i.test(entry.name)
-  if (loading && !snapshot) return <div className="workspace-empty">读取文件…</div>
-  if (!snapshot) return <div className="workspace-empty">文件无法打开</div>
+  if (loading && !snapshot && !page) return <div className="workspace-empty">读取文件…</div>
+  if (!snapshot && !page) return <div className="workspace-empty">文件无法打开</div>
+  if (page) {
+    const start = page.totalBytes === 0 ? 0 : page.offset + 1
+    return (
+      <div className="workspace-editor">
+        <div className="workspace-editorbar">
+          <span>分页只读 · {start}–{page.nextOffset} / {page.totalBytes} bytes</span>
+          <button type="button" className="btn" disabled={loading || pageBack.length === 0} onClick={() => {
+            const offset = pageBack.at(-1)
+            if (offset !== undefined) void movePage(offset, pageBack.slice(0, -1))
+          }}>上一页</button>
+          <button type="button" className="btn" disabled={loading || !page.hasMore} onClick={() =>
+            void movePage(page.nextOffset, [...pageBack, page.offset])
+          }>下一页</button>
+          <button type="button" className="btn" disabled={loading} onClick={() => void load()}>重新载入</button>
+        </div>
+        <div className="workspace-editorbody">
+          <div className="workspace-source">
+            <textarea className="workspace-textarea" value={content} readOnly spellCheck={false} aria-label={`查看 ${entry.name}`} />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={`workspace-editor ${markdown ? 'markdown' : ''}`}>
       <div className="workspace-editorbar">
-        <span>{readOnly ? '只读预览' : dirty ? '未保存' : '已保存'} · {Math.round(snapshot.size / 1024 * 10) / 10} KiB</span>
+        <span>{readOnly ? '只读预览' : dirty ? '未保存' : '已保存'} · {Math.round(snapshot!.size / 1024 * 10) / 10} KiB</span>
         <button
           type="button"
           className="btn"
