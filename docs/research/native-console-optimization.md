@@ -557,7 +557,9 @@ claim is made.
   eight original attachments survive renderer/App restart within a bounded 2 MiB local store. LRU
   storage drops oldest drafts under count pressure; quota/storage failure leaves the live draft
   untouched and is shown explicitly instead of claiming recovery.
-- Still required: incremental archive indexing and remote ledger compaction beyond the current
-  fail-closed 8 MiB file.
+- Canonical per-turn archives now maintain a bounded atomic incremental catalog index. A dirty
+  marker fences the segment-before-index commit window; missing, stale or corrupt index metadata is
+  rebuilt from trusted committed segment files, which remain authoritative.
+- Still required: remote ledger compaction beyond the current fail-closed 8 MiB file.
 - Tests still required: cold restart, concurrent append and stale ledger cursors. Keep IPC/security
   boundaries intact.

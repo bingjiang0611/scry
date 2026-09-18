@@ -106,11 +106,110 @@ export interface TraceArchiveSessionSummary {
 const DISCOVERABLE_PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
 const TRACE_DISCOVERY_MAX_FILES = 10_000
 const TRACE_DISCOVERY_MAX_FILE_BYTES = 32 * 1024 * 1024
+const TRACE_INDEX_MAX_BYTES = 32 * 1024 * 1024
+const TRACE_INDEX_FILE = 'trace-archive-index-v1.json'
+const TRACE_INDEX_DIRTY_FILE = 'trace-archive-index-v1.dirty'
 
-/** Recover Scry-owned session catalog metadata from canonical per-turn archives. */
-export function discoverTraceArchiveSessions(userDataDir: string): TraceArchiveSessionSummary[] {
+interface TraceArchiveCatalogIndexEntry {
+  path: string
+  size: number
+  mtimeMs: number
+  cwd: string
+  sessionId: string
+  providerId: ProviderId
+  runtimeProvider: RuntimeProvider
+  firstPrompt: string
+  firstTs: number
+  latestRunId: string
+  latestTs: number
+}
+
+interface TraceArchiveCatalogIndex {
+  version: 1
+  entries: TraceArchiveCatalogIndexEntry[]
+}
+
+function traceArchiveCatalogIndexPath(userDataDir: string): string {
+  return join(userDataDir, TRACE_INDEX_FILE)
+}
+
+function traceArchiveCatalogIndexDirtyPath(userDataDir: string): string {
+  return join(userDataDir, TRACE_INDEX_DIRTY_FILE)
+}
+
+function validIndexRelativePath(path: string): boolean {
+  return /^(claude|codex|qoder|opencode|pi)\/(?:unbound|cwd-[a-f0-9]{64})\/sid-[a-f0-9]{64}\/turn-[a-f0-9]{64}\.json$/.test(path)
+}
+
+function indexSummaries(entries: TraceArchiveCatalogIndexEntry[]): TraceArchiveSessionSummary[] {
+  const summaries = new Map<string, TraceArchiveSessionSummary & { firstTs: number }>()
+  for (const entry of entries) {
+    const key = `${entry.providerId}\0${entry.cwd}\0${entry.sessionId}`
+    const current = summaries.get(key)
+    if (!current) {
+      summaries.set(key, {
+        cwd: entry.cwd,
+        sessionId: entry.sessionId,
+        providerId: entry.providerId,
+        runtimeProvider: entry.runtimeProvider,
+        runId: entry.latestRunId,
+        prompt: entry.firstPrompt,
+        ts: entry.latestTs,
+        firstTs: entry.firstTs
+      })
+      continue
+    }
+    if (entry.firstTs < current.firstTs) {
+      current.firstTs = entry.firstTs
+      current.prompt = entry.firstPrompt
+    }
+    if (entry.latestTs > current.ts) {
+      current.ts = entry.latestTs
+      current.runId = entry.latestRunId
+      current.runtimeProvider = entry.runtimeProvider
+    }
+  }
+  return [...summaries.values()].map(({ firstTs: _firstTs, ...summary }) => summary)
+}
+
+function parseTraceArchiveCatalogIndex(userDataDir: string, allowDirty: boolean): TraceArchiveCatalogIndexEntry[] | null {
+  const indexPath = traceArchiveCatalogIndexPath(userDataDir)
+  try {
+    if (!allowDirty && existsSync(traceArchiveCatalogIndexDirtyPath(userDataDir))) return null
+    trustedOwnedParent(userDataDir, indexPath, false)
+    const indexStat = lstatSync(indexPath)
+    if (!indexStat.isFile() || indexStat.isSymbolicLink() || indexStat.size <= 0 || indexStat.size > TRACE_INDEX_MAX_BYTES) return null
+    const parsed = JSON.parse(readFileSync(indexPath, 'utf8')) as Partial<TraceArchiveCatalogIndex>
+    if (parsed.version !== 1 || !Array.isArray(parsed.entries) || parsed.entries.length > TRACE_DISCOVERY_MAX_FILES) return null
+    const seen = new Set<string>()
+    const entries: TraceArchiveCatalogIndexEntry[] = []
+    const archiveRoot = join(userDataDir, 'trace-archive-turns-v1')
+    for (const value of parsed.entries) {
+      if (!value || typeof value !== 'object') return null
+      const entry = value as Partial<TraceArchiveCatalogIndexEntry>
+      if (typeof entry.path !== 'string' || !validIndexRelativePath(entry.path) || seen.has(entry.path) ||
+          typeof entry.size !== 'number' || !Number.isSafeInteger(entry.size) || entry.size <= 0 || entry.size > TRACE_DISCOVERY_MAX_FILE_BYTES ||
+          typeof entry.mtimeMs !== 'number' || !Number.isFinite(entry.mtimeMs) ||
+          typeof entry.cwd !== 'string' || typeof entry.sessionId !== 'string' || !entry.sessionId ||
+          !DISCOVERABLE_PROVIDER_IDS.has(entry.providerId as ProviderId) || typeof entry.runtimeProvider !== 'string' ||
+          typeof entry.firstPrompt !== 'string' || typeof entry.firstTs !== 'number' || !Number.isFinite(entry.firstTs) ||
+          typeof entry.latestRunId !== 'string' || !entry.latestRunId || typeof entry.latestTs !== 'number' || !Number.isFinite(entry.latestTs)) return null
+      const path = join(archiveRoot, entry.path)
+      if (!trustedOwnedFile(userDataDir, path)) return null
+      const stat = lstatSync(path)
+      if (stat.size !== entry.size || stat.mtimeMs !== entry.mtimeMs) return null
+      seen.add(entry.path)
+      entries.push(entry as TraceArchiveCatalogIndexEntry)
+    }
+    return entries
+  } catch {
+    return null
+  }
+}
+
+function scanTraceArchiveCatalogIndex(userDataDir: string): { entries: TraceArchiveCatalogIndexEntry[]; complete: boolean } {
   const root = join(userDataDir, 'trace-archive-turns-v1')
-  const summaries = new Map<string, TraceArchiveSessionSummary>()
+  const entries: TraceArchiveCatalogIndexEntry[] = []
   let inspectedFiles = 0
   try {
     for (const providerEntry of readdirSync(root, { withFileTypes: true })) {
@@ -125,8 +224,8 @@ export function discoverTraceArchiveSessions(userDataDir: string): TraceArchiveS
           if (!sessionEntry.isDirectory() || sessionEntry.isSymbolicLink()) continue
           const sessionDir = join(cwdDir, sessionEntry.name)
           for (const fileEntry of readdirSync(sessionDir, { withFileTypes: true })) {
-            if (++inspectedFiles > TRACE_DISCOVERY_MAX_FILES) return [...summaries.values()]
             if (!fileEntry.isFile() || fileEntry.isSymbolicLink() || !/^turn-[a-f0-9]{64}\.json$/.test(fileEntry.name)) continue
+            if (++inspectedFiles > TRACE_DISCOVERY_MAX_FILES) return { entries, complete: false }
             const path = join(sessionDir, fileEntry.name)
             const stat = lstatSync(path)
             if (stat.size <= 0 || stat.size > TRACE_DISCOVERY_MAX_FILE_BYTES) continue
@@ -140,35 +239,119 @@ export function discoverTraceArchiveSessions(userDataDir: string): TraceArchiveS
                 typeof archive.cwd !== 'string' || typeof archive.sessionId !== 'string' || !archive.sessionId ||
                 typeof archive.runtimeProvider !== 'string') continue
             const turns = archive.turns.filter((turn) =>
-              turn && typeof turn.runId === 'string' && typeof turn.userText === 'string' &&
+              turn && typeof turn.runId === 'string' && !!turn.runId && typeof turn.userText === 'string' &&
               typeof turn.ts === 'number' && Number.isFinite(turn.ts)
             )
             if (turns.length === 0) continue
             const first = turns.reduce((left, right) => left.ts <= right.ts ? left : right)
             const latest = turns.reduce((left, right) => left.ts >= right.ts ? left : right)
-            const key = `${providerId}\0${archive.cwd}\0${archive.sessionId}`
-            const current = summaries.get(key)
-            if (!current || latest.ts > current.ts) {
-              summaries.set(key, {
-                cwd: archive.cwd,
-                sessionId: archive.sessionId,
-                providerId,
-                runtimeProvider: archive.runtimeProvider,
-                runId: latest.runId,
-                prompt: first.userText,
-                ts: latest.ts
-              })
-            }
+            entries.push({
+              path: relative(root, path).split('\\').join('/'),
+              size: stat.size,
+              mtimeMs: stat.mtimeMs,
+              cwd: archive.cwd,
+              sessionId: archive.sessionId,
+              providerId,
+              runtimeProvider: archive.runtimeProvider,
+              firstPrompt: first.userText,
+              firstTs: first.ts,
+              latestRunId: latest.runId,
+              latestTs: latest.ts
+            })
           }
         }
       }
     }
+    return { entries, complete: true }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       console.warn('[scry] trace archive catalog recovery failed:', (error as Error).message)
+      return { entries, complete: false }
+    }
+    return { entries: [], complete: true }
+  }
+}
+
+function writeTraceArchiveCatalogIndex(userDataDir: string, entries: TraceArchiveCatalogIndexEntry[]): void {
+  const content = JSON.stringify({ version: 1, entries } satisfies TraceArchiveCatalogIndex)
+  if (Buffer.byteLength(content) > TRACE_INDEX_MAX_BYTES) throw new Error('trace archive index capacity exceeded')
+  writeOwnedFileAtomically(userDataDir, traceArchiveCatalogIndexPath(userDataDir), content)
+}
+
+function rebuildTraceArchiveCatalogIndex(userDataDir: string): TraceArchiveCatalogIndexEntry[] {
+  const scanned = scanTraceArchiveCatalogIndex(userDataDir)
+  if (scanned.complete) {
+    try {
+      writeTraceArchiveCatalogIndex(userDataDir, scanned.entries)
+      try { unlinkSync(traceArchiveCatalogIndexDirtyPath(userDataDir)) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    } catch (error) {
+      console.warn('[scry] trace archive index rebuild failed:', (error as Error).message)
     }
   }
-  return [...summaries.values()]
+  return scanned.entries
+}
+
+function markTraceArchiveCatalogIndexDirty(userDataDir: string): void {
+  try {
+    writeOwnedFileAtomically(userDataDir, traceArchiveCatalogIndexDirtyPath(userDataDir), 'dirty\n')
+  } catch {
+    // If the marker cannot be committed, remove the index so discovery cannot trust stale metadata.
+    try { unlinkSync(traceArchiveCatalogIndexPath(userDataDir)) } catch { /* discovery will scan */ }
+  }
+}
+
+function updateTraceArchiveCatalogIndex(userDataDir: string, archivePath: string, archive: TraceArchive): void {
+  try {
+    if (!archive.providerId || !archive.runtimeProvider) {
+      rebuildTraceArchiveCatalogIndex(userDataDir)
+      return
+    }
+    const turns = archive.turns.filter((turn) =>
+      turn && typeof turn.runId === 'string' && !!turn.runId && typeof turn.userText === 'string' &&
+      typeof turn.ts === 'number' && Number.isFinite(turn.ts)
+    )
+    if (turns.length === 0) throw new Error('trace archive index requires a valid turn')
+    const first = turns.reduce((left, right) => left.ts <= right.ts ? left : right)
+    const latest = turns.reduce((left, right) => left.ts >= right.ts ? left : right)
+    const stat = lstatSync(archivePath)
+    const archiveRoot = join(userDataDir, 'trace-archive-turns-v1')
+    const path = relative(archiveRoot, archivePath).split('\\').join('/')
+    if (!validIndexRelativePath(path)) throw new Error('trace archive index path is invalid')
+    const existing = parseTraceArchiveCatalogIndex(userDataDir, true)
+    if (!existing) {
+      rebuildTraceArchiveCatalogIndex(userDataDir)
+      return
+    }
+    const entry: TraceArchiveCatalogIndexEntry = {
+      path,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      cwd: archive.cwd,
+      sessionId: archive.sessionId,
+      providerId: archive.providerId,
+      runtimeProvider: archive.runtimeProvider,
+      firstPrompt: first.userText,
+      firstTs: first.ts,
+      latestRunId: latest.runId,
+      latestTs: latest.ts
+    }
+    const next = existing.filter((candidate) => candidate.path !== path)
+    next.push(entry)
+    writeTraceArchiveCatalogIndex(userDataDir, next)
+    try { unlinkSync(traceArchiveCatalogIndexDirtyPath(userDataDir)) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  } catch (error) {
+    // The per-turn file is canonical. Keep the dirty marker so the next read rebuilds from it.
+    console.warn('[scry] trace archive index update failed:', (error as Error).message)
+  }
+}
+
+/** Recover Scry-owned session catalog metadata from canonical per-turn archives. */
+export function discoverTraceArchiveSessions(userDataDir: string): TraceArchiveSessionSummary[] {
+  return indexSummaries(parseTraceArchiveCatalogIndex(userDataDir, false) ?? rebuildTraceArchiveCatalogIndex(userDataDir))
 }
 
 export function traceArchivePath(userDataDir: string, cwd: string, sessionId: string, providerId: ProviderId = 'claude'): string {
@@ -801,7 +984,9 @@ export function upsertTraceArchiveTurn(args: {
     turns: [turn]
   }
   try {
+    markTraceArchiveCatalogIndexDirty(args.userDataDir)
     writeOwnedFileAtomically(args.userDataDir, fp, `${JSON.stringify(archive)}\n`)
+    updateTraceArchiveCatalogIndex(args.userDataDir, fp, archive)
     return true
   } catch {
     return false
@@ -997,6 +1182,7 @@ export function deleteTranscriptCopies(args: {
     const path = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
     exactTargets.push(path, `${path}.tmp`)
   }
+  markTraceArchiveCatalogIndexDirty(args.userDataDir)
   for (const fp of [...new Set(exactTargets)]) {
     try {
       trustedOwnedParent(args.userDataDir, fp, false)
@@ -1010,5 +1196,6 @@ export function deleteTranscriptCopies(args: {
       }
     }
   }
+  rebuildTraceArchiveCatalogIndex(args.userDataDir)
   return { deleted, failed }
 }

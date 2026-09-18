@@ -99,6 +99,32 @@ describe('transcript archive mirror', () => {
     })])
   })
 
+  it('原子增量索引损坏或 segment 身份变化时从 canonical 文件重建', () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const cwd = '/repo'
+    const first = { runId: 'run-first', userText: 'first', items: [], done: true }
+    const second = { runId: 'run-second', userText: 'second', items: [], done: true }
+    expect(upsertTraceArchiveTurn({ cwd, sessionId: 'session-first', providerId: 'qoder', runtimeProvider: 'qoder_cli', userDataDir, turn: first })).toBe(true)
+    expect(upsertTraceArchiveTurn({ cwd, sessionId: 'session-second', providerId: 'qoder', runtimeProvider: 'qoder_cli', userDataDir, turn: second })).toBe(true)
+    const indexPath = join(userDataDir, 'trace-archive-index-v1.json')
+    expect(JSON.parse(readFileSync(indexPath, 'utf8')).entries).toHaveLength(2)
+
+    writeFileSync(indexPath, '{broken')
+    expect(discoverTraceArchiveSessions(userDataDir).map((session) => session.sessionId).sort())
+      .toEqual(['session-first', 'session-second'])
+    expect(JSON.parse(readFileSync(indexPath, 'utf8')).entries).toHaveLength(2)
+
+    const firstPath = traceArchiveTurnPath(userDataDir, cwd, 'session-first', 'qoder', first)
+    writeFileSync(firstPath, 'corrupt')
+    expect(discoverTraceArchiveSessions(userDataDir).map((session) => session.sessionId)).toEqual(['session-second'])
+    expect(JSON.parse(readFileSync(indexPath, 'utf8')).entries).toHaveLength(1)
+
+    writeFileSync(join(userDataDir, 'trace-archive-index-v1.dirty'), 'dirty\n')
+    expect(discoverTraceArchiveSessions(userDataDir).map((session) => session.sessionId)).toEqual(['session-second'])
+    expect(existsSync(join(userDataDir, 'trace-archive-index-v1.dirty'))).toBe(false)
+  })
+
   it('keeps opaque or traversal-like session ids inside every owned directory for read/write/delete', () => {
     const root = tempRoot()
     const home = join(root, 'home')
