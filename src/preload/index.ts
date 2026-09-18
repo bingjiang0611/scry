@@ -64,7 +64,9 @@ import type {
   TerminalRecordingListRequest,
   TerminalRecordingListPage,
   TerminalExitEvent,
+  TerminalSessionDescriptor,
   TerminalSessionInfo,
+  TerminalAttachInfo,
   TerminalStartRequest
 } from '../shared/terminal'
 
@@ -134,11 +136,13 @@ const api = {
   workspaceMove: (request: WorkspaceMoveRequest): Promise<WorkspaceEntry> => ipcRenderer.invoke('workspace:move', request),
   workspaceTrash: (request: WorkspacePathRequest): Promise<true> => ipcRenderer.invoke('workspace:trash', request),
   terminalStart: (request: TerminalStartRequest): Promise<TerminalSessionInfo> => ipcRenderer.invoke('terminal:start', request),
-  terminalWrite: (id: string, data: string): Promise<true> => ipcRenderer.invoke('terminal:write', { id, data }),
-  terminalResize: (id: string, cols: number, rows: number): Promise<true> => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
-  terminalReady: (id: string): Promise<true> => ipcRenderer.invoke('terminal:ready', { id }),
-  terminalAck: (id: string, bytes: number): Promise<true> => ipcRenderer.invoke('terminal:ack', { id, bytes }),
-  terminalClose: (id: string): Promise<true> => ipcRenderer.invoke('terminal:close', { id }),
+  terminalActive: (): Promise<TerminalSessionDescriptor[]> => ipcRenderer.invoke('terminal:active'),
+  terminalAttach: (id: string): Promise<TerminalAttachInfo> => ipcRenderer.invoke('terminal:attach', { id }),
+  terminalWrite: (id: string, ownershipEpoch: number, data: string): Promise<boolean> => ipcRenderer.invoke('terminal:write', { id, ownershipEpoch, data }),
+  terminalResize: (id: string, ownershipEpoch: number, cols: number, rows: number): Promise<boolean> => ipcRenderer.invoke('terminal:resize', { id, ownershipEpoch, cols, rows }),
+  terminalReady: (id: string, ownershipEpoch: number): Promise<boolean> => ipcRenderer.invoke('terminal:ready', { id, ownershipEpoch }),
+  terminalAck: (id: string, ownershipEpoch: number, bytes: number): Promise<boolean> => ipcRenderer.invoke('terminal:ack', { id, ownershipEpoch, bytes }),
+  terminalClose: (id: string, ownershipEpoch: number): Promise<boolean> => ipcRenderer.invoke('terminal:close', { id, ownershipEpoch }),
   terminalRecordingList: (request: TerminalRecordingListRequest = {}): Promise<TerminalRecordingListPage> => ipcRenderer.invoke('terminal:recordingList', request),
   terminalRecordingRead: (request: TerminalRecordingRequest): Promise<TerminalRecordingPage> => ipcRenderer.invoke('terminal:recordingRead', request),
   terminalRecordingDelete: (id: string): Promise<true> => ipcRenderer.invoke('terminal:recordingDelete', { id }),

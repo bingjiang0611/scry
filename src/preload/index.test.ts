@@ -50,6 +50,8 @@ const invokeChannels = {
   workspaceMove: 'workspace:move',
   workspaceTrash: 'workspace:trash',
   terminalStart: 'terminal:start',
+  terminalActive: 'terminal:active',
+  terminalAttach: 'terminal:attach',
   terminalWrite: 'terminal:write',
   terminalResize: 'terminal:resize',
   terminalReady: 'terminal:ready',
@@ -155,11 +157,17 @@ describe('preload IPC boundary', () => {
   })
 
   it('keeps structured arguments on the main-process side of the bridge', async () => {
-    await api.terminalWrite('terminal-1', 'pwd\n')
-    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:write', { id: 'terminal-1', data: 'pwd\n' })
+    await api.terminalWrite('terminal-1', 3, 'pwd\n')
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:write', { id: 'terminal-1', ownershipEpoch: 3, data: 'pwd\n' })
 
-    await api.terminalResize('terminal-1', 120, 40)
-    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:resize', { id: 'terminal-1', cols: 120, rows: 40 })
+    await api.terminalResize('terminal-1', 3, 120, 40)
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:resize', { id: 'terminal-1', ownershipEpoch: 3, cols: 120, rows: 40 })
+    await api.terminalReady('terminal-1', 3)
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:ready', { id: 'terminal-1', ownershipEpoch: 3 })
+    await api.terminalAck('terminal-1', 3, 42)
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:ack', { id: 'terminal-1', ownershipEpoch: 3, bytes: 42 })
+    await api.terminalClose('terminal-1', 3)
+    expect(electron.invoke).toHaveBeenLastCalledWith('terminal:close', { id: 'terminal-1', ownershipEpoch: 3 })
 
     await api.terminalRecordingList({ after: 'terminal-1', limit: 20 })
     expect(electron.invoke).toHaveBeenLastCalledWith('terminal:recordingList', { after: 'terminal-1', limit: 20 })

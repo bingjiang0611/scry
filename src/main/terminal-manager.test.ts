@@ -92,8 +92,8 @@ function workspace(): string {
 
 function fixture(cwd: string, defaultCwd = cwd, recordingDirectory?: string, getCurrentCwd = () => cwd) {
   const pty = new FakePtyFactory()
-  const data: TerminalDataEvent[] = []
-  const exits: TerminalExitEvent[] = []
+  const data: Array<Omit<TerminalDataEvent, 'ownershipEpoch'>> = []
+  const exits: Array<Omit<TerminalExitEvent, 'ownershipEpoch'>> = []
   const recordingErrors: string[] = []
   const manager = createTerminalManager({
     recordingDirectory,
@@ -141,6 +141,10 @@ describe('TerminalManager', () => {
     expect(session.recording).toBe('available')
     pty.processes[0].emitData('token=SYNTHETIC_SECRET 中😀\u001b[31m')
     expect(data[0].data).toContain('SYNTHETIC_SECRET')
+    await expect(manager.recordingCheckpoint(session.id)).resolves.toEqual({
+      endOffset: Buffer.byteLength(data[0].data, 'utf16le'),
+      state: 'available'
+    })
     await expect(manager.deleteRecording(session.id)).rejects.toThrow('still_active')
     pty.processes[0].emitExit(0)
     const restarted = fixture(cwd, cwd, recordingDirectory).manager
@@ -153,7 +157,7 @@ describe('TerminalManager', () => {
     await expect(restarted.readRecording({ id: session.id, offset: 0 })).rejects.toThrow()
   })
 
-  it('does not terminate or suppress live output when recording cannot start', () => {
+  it('does not terminate or suppress live output when recording cannot start', async () => {
     const cwd = workspace()
     const recordingDirectory = join(cwd, 'not-a-directory')
     writeFileSync(recordingDirectory, 'occupied')
@@ -161,6 +165,7 @@ describe('TerminalManager', () => {
     const session = manager.start({ cwd, cols: 80, rows: 24 })
     expect(session.recording).toBe('unavailable')
     expect(recordingErrors).toEqual([session.id])
+    await expect(manager.recordingCheckpoint(session.id)).resolves.toEqual({ endOffset: 0, state: 'unavailable' })
     pty.processes[0].emitData('continues')
     manager.write({ id: session.id, data: 'next command' })
     expect(pty.processes[0].destroyCount).toBe(0)
@@ -332,6 +337,18 @@ describe('TerminalManager', () => {
 
     pty.processes[0].emitExit(0)
     expect(() => manager.start({ cwd, cols: 80, rows: 24 })).not.toThrow()
+  })
+
+  it('lists active process metadata and keeps adopted dimensions current', () => {
+    const cwd = workspace()
+    const { manager, pty } = fixture(cwd)
+    const session = manager.start({ cwd, cols: 80, rows: 24 })
+    expect(manager.activeSessions()).toEqual([session])
+    manager.resize({ id: session.id, cols: 100, rows: 30 })
+    expect(manager.session(session.id)).toMatchObject({ cols: 100, rows: 30 })
+    pty.processes[0].emitExit(0)
+    expect(manager.activeSessions()).toEqual([])
+    expect(() => manager.session(session.id)).toThrow('不存在或已退出')
   })
 
   it('按 UTF-8 字节限制输入，并把 write/resize 交给对应 PTY', () => {

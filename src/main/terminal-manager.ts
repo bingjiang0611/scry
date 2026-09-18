@@ -12,7 +12,7 @@ import type {
   TerminalRecordingListRequest,
   TerminalRecordingListPage,
   TerminalRecordingErrorEvent,
-  TerminalSessionInfo,
+  TerminalSessionDescriptor,
   TerminalStartRequest,
   TerminalWriteRequest
 } from '../shared/terminal'
@@ -58,8 +58,8 @@ export interface TerminalPtyFactory {
 export interface TerminalManagerOptions {
   getCurrentCwd(): string | undefined
   defaultCwd: string
-  onData(event: TerminalDataEvent): void
-  onExit(event: TerminalExitEvent): void
+  onData(event: Omit<TerminalDataEvent, 'ownershipEpoch'>): void
+  onExit(event: Omit<TerminalExitEvent, 'ownershipEpoch'>): void
   pty?: TerminalPtyFactory
   shell?: string
   args?: string[]
@@ -79,6 +79,7 @@ interface ManagedTerminal {
   destroyed: boolean
   closeTimer?: ReturnType<typeof setTimeout>
   pauseReasons: Set<'renderer' | 'recording'>
+  info: TerminalSessionDescriptor
 }
 
 const DEFAULT_CLOSE_GRACE_MS = 750
@@ -143,8 +144,8 @@ export class TerminalManager {
   private readonly sessions = new Map<string, ManagedTerminal>()
   private readonly getCurrentCwd: () => string | undefined
   private readonly defaultCwd: string
-  private readonly onData: (event: TerminalDataEvent) => void
-  private readonly onExit: (event: TerminalExitEvent) => void
+  private readonly onData: (event: Omit<TerminalDataEvent, 'ownershipEpoch'>) => void
+  private readonly onExit: (event: Omit<TerminalExitEvent, 'ownershipEpoch'>) => void
   private readonly pty: TerminalPtyFactory
   private readonly shell: string
   private readonly args: string[]
@@ -175,7 +176,7 @@ export class TerminalManager {
     if (!Number.isSafeInteger(this.closeGraceMs) || this.closeGraceMs < 0) throw new Error('终端关闭等待时间无效')
   }
 
-  start(request: TerminalStartRequest): TerminalSessionInfo {
+  start(request: TerminalStartRequest): TerminalSessionDescriptor {
     if (!request || (request.cwd !== null && (typeof request.cwd !== 'string' || request.cwd.length === 0))) {
       throw new Error('终端 cwd 无效')
     }
@@ -212,9 +213,9 @@ export class TerminalManager {
       cwd,
       env: { ...this.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
     })
-    const session: ManagedTerminal = { id, pty, closing: false, destroyed: false, pauseReasons: new Set() }
+    const info: TerminalSessionDescriptor = { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows }
+    const session: ManagedTerminal = { id, pty, closing: false, destroyed: false, pauseReasons: new Set(), info }
     this.sessions.set(id, session)
-    const info: TerminalSessionInfo = { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows }
     if (this.recordings) {
       try {
         const startup = this.recordings.start(info)
@@ -256,6 +257,34 @@ export class TerminalManager {
     return info
   }
 
+  activeSessions(): TerminalSessionDescriptor[] {
+    return [...this.sessions.values()]
+      .filter((session) => !session.closing)
+      .map((session) => ({ ...session.info }))
+  }
+
+  session(id: string): TerminalSessionDescriptor {
+    return { ...this.active(id).info }
+  }
+
+  async recordingCheckpoint(id: string): Promise<{ endOffset: number; state: 'available' | 'partial' | 'unavailable' }> {
+    const session = this.active(id)
+    if (session.info.recording !== 'available' || !this.recordings) {
+      return { endOffset: 0, state: 'unavailable' }
+    }
+    try {
+      // read() is queued behind every append issued before this call. PTY data
+      // arriving after the call is therefore outside this exact catch-up boundary.
+      const page = await this.readRecording({ id, offset: 0, limit: 4 })
+      return {
+        endOffset: page.totalBytes,
+        state: page.state === 'recording' || page.state === 'complete' ? 'available' : 'partial'
+      }
+    } catch {
+      return { endOffset: 0, state: 'unavailable' }
+    }
+  }
+
   async readRecording(request: TerminalRecordingRequest): Promise<TerminalRecordingPage> {
     if (!this.recordings) throw new Error('终端录制不可用')
     const cwd = resolveTerminalDirectory(this.getCurrentCwd() ?? this.defaultCwd, '当前工作目录不可用')
@@ -279,7 +308,7 @@ export class TerminalManager {
     await this.recordings.delete(id, cwd)
   }
 
-  write(request: TerminalWriteRequest): void {
+  write(request: Pick<TerminalWriteRequest, 'id' | 'data'>): void {
     assertId(request?.id)
     if (typeof request.data !== 'string') throw new Error('终端输入必须是字符串')
     if (Buffer.byteLength(request.data, 'utf8') > TERMINAL_MAX_INPUT_BYTES) {
@@ -306,10 +335,13 @@ export class TerminalManager {
   }
 
 
-  resize(request: TerminalResizeRequest): void {
+  resize(request: Pick<TerminalResizeRequest, 'id' | 'cols' | 'rows'>): void {
     assertId(request?.id)
     assertDimensions(request.cols, request.rows)
-    this.active(request.id).pty.resize(request.cols, request.rows)
+    const session = this.active(request.id)
+    session.pty.resize(request.cols, request.rows)
+    session.info.cols = request.cols
+    session.info.rows = request.rows
   }
 
   close(request: TerminalCloseRequest): void {

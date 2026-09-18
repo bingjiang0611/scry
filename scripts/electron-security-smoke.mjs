@@ -137,7 +137,7 @@ async function main() {
   )
   for (const key of [
     'start', 'stop', 'activeRuns', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills', 'onFocusedRun', 'onDataUpdated',
-    'terminalStart', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'onTerminalData', 'onTerminalExit'
+    'terminalStart', 'terminalActive', 'terminalAttach', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'onTerminalData', 'onTerminalExit'
   ]) {
     assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
   }
@@ -559,7 +559,7 @@ async function main() {
           offData()
           offExit()
         }
-        if (close && session) await window.scry.terminalClose(session.id).catch(() => {})
+        if (close && session) await window.scry.terminalClose(session.id, session.ownershipEpoch).catch(() => {})
         resolve(result)
       }
       const timeout = setTimeout(() => void finish({ ok: false, error: 'timeout', output }, true), 12_000)
@@ -567,11 +567,11 @@ async function main() {
         try {
           offData = window.scry.onTerminalData((event) => {
             if (event.id !== session?.id) return
-            void window.scry.terminalAck(event.id, new TextEncoder().encode(event.data).byteLength)
+            void window.scry.terminalAck(event.id, event.ownershipEpoch, new TextEncoder().encode(event.data).byteLength)
             output += event.data
             const markerIndex = output.indexOf(marker + ':')
             if (markerIndex >= 0 && output.indexOf(String.fromCharCode(10), markerIndex) >= 0) {
-              void finish({ ok: true, id: session.id, cwd: session.cwd, output })
+              void finish({ ok: true, id: session.id, ownershipEpoch: session.ownershipEpoch, cwd: session.cwd, output })
             }
           })
           offExit = window.scry.onTerminalExit((event) => {
@@ -580,12 +580,13 @@ async function main() {
             }
           })
           session = await window.scry.terminalStart({ cwd, cols: 80, rows: 24 })
-          await window.scry.terminalReady(session.id)
-          await window.scry.terminalResize(session.id, 100, 30)
+          await window.scry.terminalReady(session.id, session.ownershipEpoch)
+          await window.scry.terminalResize(session.id, session.ownershipEpoch, 100, 30)
           const slash = String.fromCharCode(92)
           const encodedMarker = slash + '137' + slash + '137' + marker.slice(2)
           await window.scry.terminalWrite(
             session.id,
+            session.ownershipEpoch,
             "printf '" + encodedMarker + ":'; pwd -P" + String.fromCharCode(13)
           )
         } catch (error) {
@@ -615,15 +616,29 @@ async function main() {
     const unboundExit = waitForExit(unbound.id)
     await window.scry.setCwd(${JSON.stringify(workspace)})
     const unboundExited = await unboundExit
-    let oldWriteRejected = false
-    try {
-      await window.scry.terminalWrite(unbound.id, 'pwd' + String.fromCharCode(13))
-    } catch {
-      oldWriteRejected = true
-    }
+    const oldWriteRejected = await window.scry.terminalWrite(
+      unbound.id, unbound.ownershipEpoch, 'pwd' + String.fromCharCode(13)
+    ) === false
     const bound = await probe(${JSON.stringify(workspace)}, '__SCRY_TERMINAL_WORKSPACE_OK__')
-    if (bound.id) await window.scry.terminalClose(bound.id).catch(() => {})
-    return { unbound, unboundExited, oldWriteRejected, bound }
+    const activeBeforeAttach = (await window.scry.terminalActive()).some((session) => session.id === bound.id)
+    const adopted = await window.scry.terminalAttach(bound.id)
+    let replay = ''
+    let offset = 0
+    while (offset < adopted.catchUp.endOffset) {
+      const page = await window.scry.terminalRecordingRead({
+        id: bound.id,
+        offset,
+        limit: Math.max(4, Math.min(64 * 1024, adopted.catchUp.endOffset - offset))
+      })
+      replay += page.data
+      if (page.nextOffset <= offset) throw new Error('terminal catch-up cursor stalled')
+      offset = page.nextOffset
+    }
+    const staleWriteRejected = await window.scry.terminalWrite(
+      bound.id, bound.ownershipEpoch, 'stale-owner'
+    ) === false
+    const adoptedReady = await window.scry.terminalReady(bound.id, adopted.ownershipEpoch)
+    return { unbound, unboundExited, oldWriteRejected, bound, activeBeforeAttach, adopted, adoptedReady, staleWriteRejected, replay }
   })()`)
   assert.equal(terminalSmoke.unbound.ok, true, `packaged unbound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
   assert.equal(terminalSmoke.unbound.cwd, canonicalHome)
@@ -633,6 +648,51 @@ async function main() {
   assert.equal(terminalSmoke.bound.ok, true, `packaged bound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
   assert.equal(terminalSmoke.bound.cwd, canonicalWorkspace)
   assert.ok(terminalSmoke.bound.output.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`))
+  assert.equal(terminalSmoke.activeBeforeAttach, true)
+  assert.ok(terminalSmoke.adopted.ownershipEpoch > terminalSmoke.bound.ownershipEpoch)
+  assert.equal(terminalSmoke.adopted.catchUp.state, 'available')
+  assert.equal(terminalSmoke.adoptedReady, true)
+  assert.equal(terminalSmoke.staleWriteRejected, true)
+  assert.ok(terminalSmoke.replay.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`))
+
+  await cdp.send('Page.enable')
+  await cdp.send('Page.reload', { ignoreCache: true })
+  const reloadDeadline = Date.now() + 15_000
+  let activeAfterReload = false
+  while (Date.now() < reloadDeadline && !activeAfterReload) {
+    try {
+      activeAfterReload = await evaluate(`(async () => {
+        if (!window.scry?.terminalActive) return false
+        return (await window.scry.terminalActive()).some((session) => session.id === ${JSON.stringify(terminalSmoke.bound.id)})
+      })()`)
+    } catch {
+      // The old execution context is expected to disappear during reload.
+    }
+    if (!activeAfterReload) await new Promise((resolveWait) => setTimeout(resolveWait, 100))
+  }
+  assert.equal(activeAfterReload, true, 'renderer reload terminated the active PTY')
+  const reloadAdoption = await evaluate(`(async () => {
+    const id = ${JSON.stringify(terminalSmoke.bound.id)}
+    const staleEpoch = ${JSON.stringify(terminalSmoke.adopted.ownershipEpoch)}
+    const adopted = await window.scry.terminalAttach(id)
+    let replay = ''
+    let offset = 0
+    while (offset < adopted.catchUp.endOffset) {
+      const page = await window.scry.terminalRecordingRead({ id, offset, limit: Math.max(4, Math.min(64 * 1024, adopted.catchUp.endOffset - offset)) })
+      replay += page.data
+      if (page.nextOffset <= offset) throw new Error('renderer reload catch-up cursor stalled')
+      offset = page.nextOffset
+    }
+    const staleWriteRejected = await window.scry.terminalWrite(id, staleEpoch, 'stale-after-reload') === false
+    const ready = await window.scry.terminalReady(id, adopted.ownershipEpoch)
+    const closed = await window.scry.terminalClose(id, adopted.ownershipEpoch)
+    return { adopted, replay, staleWriteRejected, ready, closed }
+  })()`)
+  assert.ok(reloadAdoption.adopted.ownershipEpoch > terminalSmoke.adopted.ownershipEpoch)
+  assert.equal(reloadAdoption.staleWriteRejected, true)
+  assert.equal(reloadAdoption.ready, true)
+  assert.equal(reloadAdoption.closed, true)
+  assert.ok(reloadAdoption.replay.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`))
 
   const recordingSmoke = await evaluate(`(async () => {
     const waitFor = async (predicate) => {
@@ -643,9 +703,19 @@ async function main() {
         host: document.querySelector('.terminal-pane:not([hidden]) .terminal-xterm')?.getBoundingClientRect().toJSON()
       }))
     }
+    await waitFor(() => !!document.querySelector('button.sb-sess'))
+    document.querySelector('button.sb-sess')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitFor(() => !!document.querySelector('button[title="右侧工作区"]'))
     const toggle = document.querySelector('button[title="右侧工作区"]')
     if (toggle?.getAttribute('aria-pressed') !== 'true') toggle?.click()
-    ;[...document.querySelectorAll('.surface-tab-activate')].find((node) => node.textContent.includes('终端'))?.click()
+    await waitFor(() => !!document.querySelector('.right-surface-panel'))
+    let terminalTab = [...document.querySelectorAll('.surface-tab-activate')].find((node) => node.textContent.includes('终端'))
+    if (!terminalTab) {
+      document.querySelector('button[aria-label="添加 Surface"]')?.click()
+      await waitFor(() => [...document.querySelectorAll('[role="menuitem"]')].some((node) => node.textContent?.trim().startsWith('终端')))
+      ;[...document.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent?.trim().startsWith('终端'))?.click()
+    } else terminalTab.click()
     const button = (label) => document.querySelector('button[aria-label="' + label + '"]')
     await waitFor(() => document.querySelector('.terminal-pane:not([hidden]) .terminal-xterm')?.clientWidth > 0)
     const priorIds = new Set((await window.scry.terminalRecordingList()).items.map((item) => item.id))
@@ -757,8 +827,7 @@ async function main() {
     await waitFor(() => document.querySelector('.terminal-pane:not([hidden]) .xterm-rows')?.textContent.includes('__SCRY_TERMINAL_WORKSPACE_OK__'))
     const readonly = document.querySelector('button[aria-label="重新启动终端"]').disabled
     const after = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
-    let oldWriteRejected = false
-    try { await window.scry.terminalWrite(id, 'no-old-shell') } catch { oldWriteRejected = true }
+    const oldWriteRejected = await window.scry.terminalWrite(id, 1, 'no-old-shell') === false
     await window.scry.setCwd(null)
     const foreignHidden = !(await window.scry.terminalRecordingList()).items.some((item) => item.id === id)
     let foreignReadRejected = false
@@ -774,6 +843,12 @@ async function main() {
     rendererUrl: page.url,
     preloadKeys: boundary.preloadKeys.length,
     terminal: true,
+    rendererReloadTerminal: {
+      active: activeAfterReload,
+      epochAdvanced: reloadAdoption.adopted.ownershipEpoch > terminalSmoke.adopted.ownershipEpoch,
+      replayed: reloadAdoption.replay.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`),
+      staleOwnerFenced: reloadAdoption.staleWriteRejected
+    },
     recording: recordingSmoke,
     historyRestart: { ...historyRestart, mode: 'owned-app-crash' },
     surfaces: surfaceSmoke,

@@ -6,7 +6,7 @@ import { lstat, open, opendir } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import type { TerminalExitEvent, TerminalRecordingPage, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalRecordingListPage, TerminalRecordingSummary, TerminalSessionInfo } from '../shared/terminal'
+import type { TerminalExitEvent, TerminalRecordingPage, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalRecordingListPage, TerminalRecordingSummary, TerminalSessionDescriptor } from '../shared/terminal'
 
 interface Recording {
   version: 1
@@ -40,7 +40,7 @@ export class TerminalRecordingStore {
   private listing = false
   constructor(private readonly directory: string, private readonly onFailure: (id: string, error: unknown) => void) {}
 
-  start(info: TerminalSessionInfo): void {
+  start(info: TerminalSessionDescriptor): void {
     this.assertId(info.id)
     mkdirSync(this.directory, { recursive: true, mode: 0o700 })
     this.assertDirectory()

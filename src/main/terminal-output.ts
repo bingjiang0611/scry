@@ -15,6 +15,8 @@ export interface TerminalOutputBridgeOptions {
 }
 
 interface TerminalOutputState {
+  ownershipEpoch: number
+  attached: boolean
   ready: boolean
   buffer: string
   bufferedBytes: number
@@ -68,19 +70,57 @@ export class TerminalOutputBridge {
     this.flushMs = options.flushMs ?? 16
   }
 
-  started(id: string): void {
-    this.state(id)
+  started(id: string): number {
+    const state = this.state(id)
+    return this.claim(id, state, false)
   }
 
-  ready(id: string): void {
+  attach(id: string): number {
     const state = this.state(id)
+    return this.claim(id, state, true)
+  }
+
+  detachRenderer(): void {
+    for (const id of this.states.keys()) this.detach(id)
+  }
+
+  detach(id: string): void {
+    const state = this.states.get(id)
+    if (!state || state.ownershipEpoch === 0) return
+    state.attached = false
+    state.ready = false
+    state.buffer = ''
+    state.bufferedBytes = 0
+    state.inFlightBytes = 0
+    state.trailingHighSurrogate = false
+    if (state.timer) clearTimeout(state.timer)
+    state.timer = undefined
+    if (state.paused) {
+      state.paused = false
+      this.options.resumeTerminal(id)
+    }
+    if (state.pendingExit) this.closeState(id)
+  }
+
+  owns(id: string, ownershipEpoch: number): boolean {
+    const state = this.states.get(id)
+    return Boolean(state?.attached && state.ownershipEpoch === ownershipEpoch)
+  }
+
+  ready(id: string, ownershipEpoch: number): boolean {
+    const state = this.states.get(id)
+    if (!state || !this.owns(id, ownershipEpoch)) return false
     state.ready = true
     this.flush(id)
     this.finishIfDrained(id, state)
+    return true
   }
 
-  data(event: TerminalDataEvent): void {
+  data(event: Omit<TerminalDataEvent, 'ownershipEpoch'>): void {
     const state = this.state(event.id)
+    // Detached output is replayed from the ordered durable recording on the next attach.
+    // Do not let a dead renderer keep a PTY paused or grow a second memory transcript.
+    if (state.ownershipEpoch > 0 && !state.attached) return
     state.bufferedBytes += appendedUtf8Bytes(state.trailingHighSurrogate, event.data)
     state.buffer += event.data
     if (event.data.length > 0) state.trailingHighSurrogate = isHighSurrogate(event.data.charCodeAt(event.data.length - 1))
@@ -96,20 +136,24 @@ export class TerminalOutputBridge {
     else if (!state.timer) state.timer = setTimeout(() => this.flush(event.id), this.flushMs)
   }
 
-  exit(event: TerminalExitEvent): void {
+  exit(event: Omit<TerminalExitEvent, 'ownershipEpoch'>): void {
     const state = this.states.get(event.id)
     if (!state) return
+    if (state.ownershipEpoch > 0 && !state.attached) {
+      this.closeState(event.id)
+      return
+    }
     state.pendingExit = event
     this.flush(event.id)
     this.finishIfDrained(event.id, state)
   }
 
-  ack(id: string, bytes: number): void {
+  ack(id: string, ownershipEpoch: number, bytes: number): boolean {
     if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > this.maxBufferBytes) {
       throw new Error('终端输出确认无效')
     }
     const state = this.states.get(id)
-    if (!state) return
+    if (!state || !this.owns(id, ownershipEpoch)) return false
     state.inFlightBytes = Math.max(0, state.inFlightBytes - bytes)
     this.flush(id)
     if (state.paused && state.bufferedBytes + state.inFlightBytes <= this.maxBufferBytes / 2) {
@@ -117,6 +161,7 @@ export class TerminalOutputBridge {
       this.options.resumeTerminal(id)
     }
     this.finishIfDrained(id, state)
+    return true
   }
 
   terminalClosed(id: string): void {
@@ -127,9 +172,11 @@ export class TerminalOutputBridge {
     for (const id of [...this.states.keys()]) this.closeState(id)
   }
 
-  snapshot(id: string): { bufferedBytes: number; inFlightBytes: number; ready: boolean; pendingExit: boolean; paused: boolean } {
+  snapshot(id: string): { ownershipEpoch: number; attached: boolean; bufferedBytes: number; inFlightBytes: number; ready: boolean; pendingExit: boolean; paused: boolean } {
     const state = this.states.get(id)
     return {
+      ownershipEpoch: state?.ownershipEpoch ?? 0,
+      attached: state?.attached ?? false,
       bufferedBytes: state?.bufferedBytes ?? 0,
       inFlightBytes: state?.inFlightBytes ?? 0,
       ready: state?.ready ?? false,
@@ -142,6 +189,8 @@ export class TerminalOutputBridge {
     let state = this.states.get(id)
     if (!state) {
       state = {
+        ownershipEpoch: 0,
+        attached: false,
         ready: false,
         buffer: '',
         bufferedBytes: 0,
@@ -152,6 +201,25 @@ export class TerminalOutputBridge {
       this.states.set(id, state)
     }
     return state
+  }
+
+  private claim(id: string, state: TerminalOutputState, discardBuffered: boolean): number {
+    if (discardBuffered && state.paused) {
+      state.paused = false
+      this.options.resumeTerminal(id)
+    }
+    if (state.timer) clearTimeout(state.timer)
+    state.timer = undefined
+    state.ownershipEpoch += 1
+    state.attached = true
+    state.ready = false
+    state.inFlightBytes = 0
+    if (discardBuffered) {
+      state.buffer = ''
+      state.bufferedBytes = 0
+      state.trailingHighSurrogate = false
+    }
+    return state.ownershipEpoch
   }
 
   private flush(id: string): void {
@@ -168,7 +236,7 @@ export class TerminalOutputBridge {
     state.bufferedBytes = Math.max(0, state.bufferedBytes - chunk.bytes)
     if (!chunk.rest) state.trailingHighSurrogate = false
     state.inFlightBytes += chunk.bytes
-    this.options.sendData([{ id, data: chunk.prefix }])
+    this.options.sendData([{ id, ownershipEpoch: state.ownershipEpoch, data: chunk.prefix }])
   }
 
   private finishIfDrained(id: string, state: TerminalOutputState): void {
@@ -179,7 +247,7 @@ export class TerminalOutputBridge {
     ) return
     const event = state.pendingExit
     this.closeState(id)
-    this.options.sendExit(event)
+    this.options.sendExit({ ...event, ownershipEpoch: state.ownershipEpoch })
   }
 
   private closeState(id: string): void {

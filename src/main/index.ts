@@ -155,6 +155,7 @@ import type {
   TerminalRecordingListRequest,
   TerminalResizeRequest,
   TerminalStartRequest,
+  TerminalOwnershipRequest,
   TerminalWriteRequest
 } from '../shared/terminal'
 import { editContextMenuTemplate, shouldShowEditContextMenu } from './edit-context-menu'
@@ -1195,18 +1196,18 @@ function createWindow(): void {
   const createdWindow = win
   createdWindow.on('focus', () => dockBadge.focusWindow())
   createdWindow.on('closed', () => {
-    closeAllTerminals(true)
+    terminalOutput.detachRenderer()
     // renderer 消失后没人再 ACK 在途 trace 字节；不清零会让下一个窗口永久卡在 high-water。
     traceOutput.reset()
     if (win === createdWindow) win = null
   })
   createdWindow.webContents.on('did-start-navigation', (details) => {
     if (!details.isMainFrame || details.isSameDocument) return
-    closeAllTerminals(true)
+    terminalOutput.detachRenderer()
     traceOutput.reset()
   })
   createdWindow.webContents.on('render-process-gone', () => {
-    closeAllTerminals(true)
+    terminalOutput.detachRenderer()
     traceOutput.reset()
   })
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
@@ -1473,19 +1474,47 @@ handleTrusted('terminal:start', async (event, request: TerminalStartRequest) => 
   const manager = await getTerminalManager()
   if (isShuttingDown || !rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
-  const session = await manager.start(request)
-  assertTrustedIpcEvent(event)
-  if (isShuttingDown || !rendererCanReceive()) {
+  const session = manager.start(request)
+  const ownershipEpoch = terminalOutput.started(session.id)
+  try {
+    assertTrustedIpcEvent(event)
+    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
+  } catch (error) {
+    terminalOutput.detach(session.id)
+    throw error
+  }
+  if (isShuttingDown) {
+    terminalOutput.terminalClosed(session.id)
     manager.close({ id: session.id })
     throw new Error('终端窗口已关闭')
   }
-  terminalOutput.started(session.id)
-  return session
+  return { ...session, ownershipEpoch }
+})
+handleTrusted('terminal:active', async (event) => {
+  const manager = await getTerminalManager()
+  assertTrustedIpcEvent(event)
+  return manager.activeSessions()
+})
+handleTrusted('terminal:attach', async (event, request: { id: string }) => {
+  const manager = await getTerminalManager()
+  assertTrustedIpcEvent(event)
+  const session = manager.session(request?.id)
+  const ownershipEpoch = terminalOutput.attach(session.id)
+  const catchUp = await manager.recordingCheckpoint(session.id)
+  try {
+    assertTrustedIpcEvent(event)
+    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
+  } catch (error) {
+    terminalOutput.detach(session.id)
+    throw error
+  }
+  return { ...session, ownershipEpoch, catchUp }
 })
 handleTrusted('terminal:write', async (event, request: TerminalWriteRequest) => {
   const manager = await getTerminalManager()
   if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
+  if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
   manager.write(request)
   return true as const
 })
@@ -1493,6 +1522,7 @@ handleTrusted('terminal:resize', async (event, request: TerminalResizeRequest) =
   const manager = await getTerminalManager()
   if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
+  if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
   manager.resize(request)
   return true as const
 })
@@ -1517,20 +1547,19 @@ handleTrusted('terminal:recordingDelete', async (event, request: TerminalCloseRe
   assertTrustedIpcEvent(event)
   return true as const
 })
-handleTrusted('terminal:ready', (_event, request: { id: string }) => {
+handleTrusted('terminal:ready', (_event, request: TerminalOwnershipRequest) => {
   if (!request || typeof request.id !== 'string' || !request.id.startsWith('terminal-')) throw new Error('终端 ready 无效')
-  terminalOutput.ready(request.id)
-  return true as const
+  return terminalOutput.ready(request.id, request.ownershipEpoch)
 })
-handleTrusted('terminal:ack', (_event, request: { id: string; bytes: number }) => {
+handleTrusted('terminal:ack', (_event, request: TerminalOwnershipRequest & { bytes: number }) => {
   if (!request || typeof request.id !== 'string') throw new Error('终端输出确认无效')
-  terminalOutput.ack(request.id, request.bytes)
-  return true as const
+  return terminalOutput.ack(request.id, request.ownershipEpoch, request.bytes)
 })
-handleTrusted('terminal:close', async (event, request: TerminalCloseRequest) => {
+handleTrusted('terminal:close', async (event, request: TerminalOwnershipRequest) => {
   const manager = await getTerminalManager()
   if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
   assertTrustedIpcEvent(event)
+  if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
   terminalOutput.terminalClosed(request.id)
   manager.close(request)
   return true as const

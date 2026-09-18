@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { ITheme } from '@xterm/xterm'
-import { TERMINAL_MAX_SESSIONS, type TerminalExitEvent, type TerminalRecordingSummary } from '@shared/terminal'
+import { TERMINAL_MAX_SESSIONS, type TerminalExitEvent, type TerminalRecordingSummary, type TerminalSessionDescriptor } from '@shared/terminal'
 import { Icon } from './primitives/Icon'
 import { TerminalHistory } from './TerminalHistory'
 import { replayTerminalRecording } from '../terminal-recording-replay'
@@ -14,6 +14,7 @@ interface TerminalTab {
   key: string
   title: string
   recordingId?: string
+  sessionId?: string
 }
 
 interface TerminalControls {
@@ -22,6 +23,7 @@ interface TerminalControls {
   restart: () => void
   replay: () => void
   deleteRecording: () => void
+  close: () => void
 }
 
 let terminalTabSequence = 0
@@ -29,6 +31,14 @@ let terminalTabSequence = 0
 function nextTerminalTab(titleNumber: number): TerminalTab {
   terminalTabSequence += 1
   return { key: `terminal-${terminalTabSequence}`, title: `终端 ${titleNumber}` }
+}
+
+export function terminalTabsForActiveSessions(sessions: TerminalSessionDescriptor[]): TerminalTab[] {
+  return sessions.map((session, index) => ({
+    key: `active-${session.id}`,
+    title: `终端 ${index + 1}`,
+    sessionId: session.id
+  }))
 }
 
 function xtermTheme(): ITheme {
@@ -76,13 +86,15 @@ function TerminalPane({
   onControls,
   onStatus,
   onRecordingMessage,
-  recordingId
+  recordingId,
+  sessionId
 }: {
   tabKey: string
   tabId: string
   panelId: string
   cwd: string | null
   recordingId?: string
+  sessionId?: string
   active: boolean
   onControls: (key: string, controls: TerminalControls | null) => void
   onStatus: (key: string, status: TerminalStatus) => void
@@ -92,9 +104,11 @@ function TerminalPane({
   const terminalRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const terminalIdRef = useRef<string | null>(null)
+  const ownershipEpochRef = useRef<number | null>(null)
   const recordingIdRef = useRef<string | null>(null)
   const replayRef = useRef<Promise<void> | null>(null)
   const deletingRecordingRef = useRef(false)
+  const explicitCloseRef = useRef(false)
   const startSequenceRef = useRef(0)
   const activeRef = useRef(active)
   const [error, setError] = useState<string | null>(null)
@@ -109,7 +123,8 @@ function TerminalPane({
     try {
       fit.fit()
       const id = terminalIdRef.current
-      if (id) void window.scry.terminalResize(id, terminal.cols, terminal.rows).catch(() => {})
+      const ownershipEpoch = ownershipEpochRef.current
+      if (id && ownershipEpoch != null) void window.scry.terminalResize(id, ownershipEpoch, terminal.cols, terminal.rows).catch(() => {})
     } catch {
       // A hidden or detaching pane can report a transient zero-sized viewport.
     }
@@ -118,14 +133,17 @@ function TerminalPane({
   const start = useCallback(async (): Promise<void> => {
     const terminal = terminalRef.current
     if (!terminal || recordingId) return
+    explicitCloseRef.current = false
     const sequence = ++startSequenceRef.current
     await replayRef.current
     if (sequence !== startSequenceRef.current || terminalRef.current !== terminal) return
     recordingIdRef.current = null
     onRecordingMessage(tabKey, undefined)
     const previous = terminalIdRef.current
+    const previousEpoch = ownershipEpochRef.current
     terminalIdRef.current = null
-    if (previous) await window.scry.terminalClose(previous).catch(() => false)
+    ownershipEpochRef.current = null
+    if (previous && previousEpoch != null) await window.scry.terminalClose(previous, previousEpoch).catch(() => false)
     terminal.reset()
     setError(null)
     setExit(null)
@@ -139,14 +157,16 @@ function TerminalPane({
         rows: Math.max(1, terminal.rows)
       })
       if (sequence !== startSequenceRef.current) {
-        await window.scry.terminalClose(session.id).catch(() => false)
+        if (explicitCloseRef.current) await window.scry.terminalClose(session.id, session.ownershipEpoch).catch(() => false)
         return
       }
       terminal.reset()
       terminalIdRef.current = session.id
+      ownershipEpochRef.current = session.ownershipEpoch
       recordingIdRef.current = session.id
       if (session.recording === 'unavailable') onRecordingMessage(tabKey, '原文录制不可用；Shell 继续运行。')
-      await window.scry.terminalReady(session.id)
+      const owned = await window.scry.terminalReady(session.id, session.ownershipEpoch)
+      if (!owned || sequence !== startSequenceRef.current) return
       onStatus(tabKey, 'running')
       requestAnimationFrame(() => {
         resize()
@@ -161,6 +181,64 @@ function TerminalPane({
       terminal.writeln(`\x1b[31m终端启动失败：${message}\x1b[0m`)
     }
   }, [cwd, onStatus, onRecordingMessage, resize, tabKey, recordingId])
+
+  const adopt = useCallback(async (): Promise<void> => {
+    const terminal = terminalRef.current
+    if (!terminal || !sessionId) return
+    explicitCloseRef.current = false
+    const sequence = ++startSequenceRef.current
+    terminal.reset()
+    setError(null)
+    setExit(null)
+    onStatus(tabKey, 'starting')
+    terminal.writeln('\x1b[38;5;244m正在接管仍在运行的 Shell…\x1b[0m')
+    try {
+      const session = await window.scry.terminalAttach(sessionId)
+      if (sequence !== startSequenceRef.current || terminalRef.current !== terminal) {
+        if (explicitCloseRef.current) await window.scry.terminalClose(session.id, session.ownershipEpoch).catch(() => false)
+        return
+      }
+      terminal.reset()
+      terminalIdRef.current = session.id
+      ownershipEpochRef.current = session.ownershipEpoch
+      recordingIdRef.current = session.id
+      if (session.catchUp.state === 'unavailable') {
+        onRecordingMessage(tabKey, '接管成功；此前屏幕原文不可回放，后续输出仍会继续显示。')
+      } else if (session.catchUp.endOffset > 0) {
+        onRecordingMessage(tabKey, '正在追赶断连期间的磁盘原文…')
+        const current = () => sequence === startSequenceRef.current && terminalIdRef.current === session.id && ownershipEpochRef.current === session.ownershipEpoch
+        replayRef.current = replayTerminalRecording(
+          session.id,
+          window.scry.terminalRecordingRead,
+          (text) => new Promise<void>((resolve) => terminal.write(text, resolve)),
+          current,
+          session.catchUp.endOffset
+        ).then(() => undefined)
+        await replayRef.current
+        replayRef.current = null
+        if (!current()) return
+        onRecordingMessage(tabKey, session.catchUp.state === 'partial'
+          ? '已接管 Shell；仅追赶到可确认落盘的部分原文。'
+          : '已接管 Shell，并追赶到切换时的完整落盘原文。')
+      }
+      const owned = await window.scry.terminalReady(session.id, session.ownershipEpoch)
+      if (!owned || sequence !== startSequenceRef.current) return
+      onStatus(tabKey, 'running')
+      requestAnimationFrame(() => {
+        resize()
+        if (activeRef.current) terminal.focus()
+      })
+    } catch (adoptError) {
+      if (sequence !== startSequenceRef.current) return
+      const message = terminalStartErrorMessage(adoptError)
+      setError(message)
+      onStatus(tabKey, 'error')
+      terminal.reset()
+      terminal.writeln(`\x1b[31m终端接管失败：${message}\x1b[0m`)
+    } finally {
+      replayRef.current = null
+    }
+  }, [onStatus, onRecordingMessage, resize, sessionId, tabKey])
 
   useEffect(() => {
     const host = hostRef.current
@@ -185,21 +263,23 @@ function TerminalPane({
 
     const input = terminal.onData((data) => {
       const id = terminalIdRef.current
-      if (id) void window.scry.terminalWrite(id, data).catch(() => {})
+      const ownershipEpoch = ownershipEpochRef.current
+      if (id && ownershipEpoch != null) void window.scry.terminalWrite(id, ownershipEpoch, data).catch(() => {})
     })
     const offData = window.scry.onTerminalData((event) => {
-      if (event.id !== terminalIdRef.current) return
+      if (event.id !== terminalIdRef.current || event.ownershipEpoch !== ownershipEpochRef.current) return
       const bytes = new TextEncoder().encode(event.data).byteLength
       terminal.write(event.data, () => {
-        void window.scry.terminalAck(event.id, bytes).catch(() => {})
+        void window.scry.terminalAck(event.id, event.ownershipEpoch, bytes).catch(() => {})
       })
     })
     const offRecordingError = window.scry.onTerminalRecordingError((event) => {
       if (event.id === terminalIdRef.current) onRecordingMessage(tabKey, event.message)
     })
     const offExit = window.scry.onTerminalExit((event) => {
-      if (event.id !== terminalIdRef.current) return
+      if (event.id !== terminalIdRef.current || event.ownershipEpoch !== ownershipEpochRef.current) return
       terminalIdRef.current = null
+      ownershipEpochRef.current = null
       setExit(event)
       onStatus(tabKey, 'exited')
       terminal.writeln(`\r\n\x1b[38;5;244m${exitText(event)}\x1b[0m`)
@@ -243,6 +323,15 @@ function TerminalPane({
         })().catch((error) => {
           if (sequence === startSequenceRef.current) onRecordingMessage(tabKey, `删除失败：${terminalStartErrorMessage(error)}`)
         }).finally(() => { deletingRecordingRef.current = false })
+      },
+      close: () => {
+        explicitCloseRef.current = true
+        startSequenceRef.current += 1
+        const id = terminalIdRef.current
+        const ownershipEpoch = ownershipEpochRef.current
+        terminalIdRef.current = null
+        ownershipEpochRef.current = null
+        if (id && ownershipEpoch != null) void window.scry.terminalClose(id, ownershipEpoch).catch(() => false)
       }
     }
     onControls(tabKey, paneControls)
@@ -251,6 +340,8 @@ function TerminalPane({
       onStatus(tabKey, 'readonly')
       resize()
       paneControls.replay()
+    } else if (sessionId) {
+      void adopt()
     } else {
       void start()
     }
@@ -263,14 +354,13 @@ function TerminalPane({
       offRecordingError()
       input.dispose()
       onControls(tabKey, null)
-      const id = terminalIdRef.current
       terminalIdRef.current = null
-      if (id) void window.scry.terminalClose(id).catch(() => false)
+      ownershipEpochRef.current = null
       terminal.dispose()
       terminalRef.current = null
       fitRef.current = null
     }
-  }, [onControls, onStatus, onRecordingMessage, resize, start, tabKey, recordingId])
+  }, [adopt, onControls, onStatus, onRecordingMessage, resize, sessionId, start, tabKey, recordingId])
 
   useEffect(() => {
     if (!active) return
@@ -305,8 +395,9 @@ function TerminalPane({
 
 export function TerminalSurface({ cwd, active }: { cwd: string | null; active: boolean }) {
   const rootId = useId().replaceAll(':', '')
-  const [tabs, setTabs] = useState<TerminalTab[]>(() => [nextTerminalTab(1)])
-  const [activeKey, setActiveKey] = useState(() => tabs[0].key)
+  const [tabs, setTabs] = useState<TerminalTab[]>([])
+  const [activeKey, setActiveKey] = useState('')
+  const [hydrated, setHydrated] = useState(false)
   const [statuses, setStatuses] = useState<Record<string, TerminalStatus>>({})
   const [recordingMessages, setRecordingMessages] = useState<Record<string, string | undefined>>({})
   const onRecordingMessage = useCallback((key: string, message: string | undefined): void => {
@@ -317,7 +408,38 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const pendingCloseFocusRef = useRef<{ targetKey: string | null } | null>(null)
   const nextTitleNumber = useRef(2)
+  const previousCwdRef = useRef(cwd)
   const [historyOpen, setHistoryOpen] = useState(false)
+
+  useEffect(() => {
+    let current = true
+    void window.scry.terminalActive().then((sessions) => {
+      if (!current) return
+      const restored = terminalTabsForActiveSessions(sessions)
+      const initial = restored.length > 0 ? restored : [nextTerminalTab(1)]
+      nextTitleNumber.current = initial.length + 1
+      setTabs(initial)
+      setActiveKey(initial[0].key)
+      setHydrated(true)
+    }).catch((error) => {
+      if (!current) return
+      const initial = nextTerminalTab(1)
+      setTabs([initial])
+      setActiveKey(initial.key)
+      setRecordingMessages({ [initial.key]: `无法查询运行中的 Shell：${terminalStartErrorMessage(error)}` })
+      setHydrated(true)
+    })
+    return () => { current = false }
+  }, [])
+
+  useEffect(() => {
+    if (previousCwdRef.current === cwd) return
+    previousCwdRef.current = cwd
+    setTabs((current) => current
+      .filter((tab) => !tab.recordingId)
+      .map((tab) => ({ key: tab.key, title: tab.title })))
+  }, [cwd])
+
   const openRecording = (item: TerminalRecordingSummary): void => {
     if (item.active) return
     const existing = tabs.find((tab) => tab.recordingId === item.id)
@@ -347,6 +469,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   }
   const closeTab = (key: string): void => {
     const index = tabs.findIndex((tab) => tab.key === key)
+    controls.current.get(key)?.close()
     if (index < 0) return
     const next = tabs.filter((tab) => tab.key !== key)
     const targetKey = key === activeKey
@@ -427,7 +550,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
               </button>
             </div>
           ))}
-          <button ref={addButtonRef} type="button" className="terminal-action" onClick={addTab} disabled={tabs.length >= TERMINAL_MAX_SESSIONS} title="新建终端" aria-label="新建终端">
+          <button ref={addButtonRef} type="button" className="terminal-action" onClick={addTab} disabled={!hydrated || tabs.length >= TERMINAL_MAX_SESSIONS} title="新建终端" aria-label="新建终端">
             <Icon name="plus" />
           </button>
         </div>
@@ -449,7 +572,13 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
       </div>
 
       <div className="terminal-stage">
-        {tabs.length === 0 ? (
+        {!hydrated ? (
+          <div className="terminal-empty">
+            <Icon name="terminal" lg />
+            <strong>正在恢复终端…</strong>
+            <span>正在检查仍由主进程持有的 Shell。</span>
+          </div>
+        ) : tabs.length === 0 ? (
           <div className="terminal-empty">
             <Icon name="terminal" lg />
             <strong>没有打开的终端</strong>
@@ -464,6 +593,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
             panelId={`${rootId}-${tab.key}-panel`}
             cwd={cwd}
             recordingId={tab.recordingId}
+            sessionId={tab.sessionId}
             active={active && activeKey === tab.key}
             onControls={registerControls}
             onStatus={setStatus}
