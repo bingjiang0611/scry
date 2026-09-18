@@ -231,7 +231,9 @@ async function permissionSnapshot(target, workspace, provider, launchId, setPerm
       await new Promise((done) => setTimeout(done, 0))
       select = document.querySelector(selector)
     }
+    const selectedSession = document.querySelector('.sb-sess.active')
     const activeProject = document.querySelector('.sb-proj-head.on[data-project-path]')
+      ?? selectedSession?.closest('.sb-proj')?.querySelector('.sb-proj-head[data-project-path]')
     const providerButton = document.querySelector('.clibtn')
     const providerStatus = document.querySelector('.tb-agent-status')
     const workspaceButton = document.querySelector('.wdbtn')
