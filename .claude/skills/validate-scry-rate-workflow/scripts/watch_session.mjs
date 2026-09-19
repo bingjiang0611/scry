@@ -516,8 +516,8 @@ function leaseHandoverQuestion(question, workitemId) {
   const hasActiveGeneration = /活动\s*generation|active\s+generation|另一个会话占用|旧\s*generation|旧代/i.test(fullQuestion)
   const hasRestartImpact = /放弃旧代|放弃旧\s*generation|从\s*P0\s*(?:重跑|重新运行)|重新开始摄入|重新摄入/i.test(fullQuestion)
   const hasLease = /\bLEASE\b|租约|orphaned\s+lease/i.test(fullQuestion) || (hasActiveGeneration && hasRestartImpact)
-  const affirmative = options.some((value) => /^(?:是(?:[，,\s]|$)|(?:在本|当前)会话继续|继续(?:[，,\s]|$)|放弃旧代)/u.test(value.trim()))
-  const negative = options.some((value) => /^(?:否(?:[，,\s]|$)|先不继续|暂不继续|不继续(?:[，,\s]|$)|保留旧)/u.test(value.trim()))
+  const affirmative = options.some((value) => /^(?:是(?:[，,\s]|$)|(?:在本|当前)会话继续|继续|放弃旧代)/u.test(value.trim()))
+  const negative = options.some((value) => /^(?:否(?:[，,\s]|$)|先不|暂不|不继续(?:[，,\s]|$)|保留旧)/u.test(value.trim()))
   return hasReq && hasLease && hasActiveGeneration && hasRestartImpact && affirmative && negative
 }
 
@@ -1226,6 +1226,25 @@ function selfTest() {
     )
     if (milestoneQoderLease?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
       throw new Error('milestone Qoder lease question was misclassified as a document question')
+    }
+    const takeoverQoderLeaseQuestion = {
+      legends: ['01\n接管需求\n是否在当前会话继续 REQ-85237895，并放弃旧 generation、从 P0 重跑？'],
+      options: [
+        '继续并接管（推荐）\n放弃无人持有的旧 generation，在当前会话重新摄入并理解 PRD。',
+        '暂不接管\n保留旧 generation，本轮停止。',
+        '其他\n输入其他回答',
+      ],
+      links: [],
+      runId: 'run-takeover-qoder-lease',
+      toolCallId: 'tool-takeover-qoder-lease',
+    }
+    const takeoverQoderLeaseRunRoot = join(root, 'lease-qoder-takeover')
+    mkdirSync(takeoverQoderLeaseRunRoot)
+    const takeoverQoderLease = questionState(
+      takeoverQoderLeaseRunRoot, state, 'qoder', 1, takeoverQoderLeaseQuestion, 'session-takeover-qoder-lease', '85237895'
+    )
+    if (takeoverQoderLease?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
+      throw new Error('takeover Qoder lease question was misclassified as a document question')
     }
     const linklessLeaseQuestion = {
       legends: ['01\n旧代处理\nREQ-85237895 已被另一个已失联会话占用（旧代停在 P0）。是否在当前会话继续该需求？这会放弃旧代、从 P0 重跑。'],
