@@ -2,16 +2,43 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import MarkdownImpl, {
   normalizeMarkdownForDisplay,
+  shouldUseLightweightStreamingMarkdown,
+  splitMarkdownForProgressiveRender,
   streamingMarkdownInterval,
   WorkspaceFileLinkProvider
 } from './MarkdownImpl'
 
 describe('streaming Markdown cadence', () => {
   it('keeps short answers responsive and progressively protects long-turn rendering', () => {
-    expect(streamingMarkdownInterval(1_000)).toBe(48)
-    expect(streamingMarkdownInterval(12_000)).toBe(48)
-    expect(streamingMarkdownInterval(12_001)).toBe(80)
-    expect(streamingMarkdownInterval(48_001)).toBe(120)
+    expect(streamingMarkdownInterval(1_000)).toBe(80)
+    expect(streamingMarkdownInterval(12_000)).toBe(80)
+    expect(streamingMarkdownInterval(12_001)).toBe(120)
+    expect(streamingMarkdownInterval(48_001)).toBe(200)
+  })
+
+  it('splits large completed documents only at safe top-level heading boundaries', () => {
+    const source = Array.from({ length: 20 }, (_, index) => `## Section ${index}\n\n${'body '.repeat(600)}`).join('\n')
+    const chunks = splitMarkdownForProgressiveRender(source)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.join('\n')).toBe(source)
+    expect(chunks.every((chunk) => chunk.startsWith('## Section'))).toBe(true)
+
+    const referenceSource = `${source}\n\n[docs]: https://example.com`
+    expect(splitMarkdownForProgressiveRender(referenceSource)).toEqual([referenceSource])
+  })
+
+  it('uses a complete selectable text view only while very large Markdown is still streaming', () => {
+    expect(shouldUseLightweightStreamingMarkdown(48_000, true)).toBe(false)
+    expect(shouldUseLightweightStreamingMarkdown(48_001, true)).toBe(true)
+    expect(shouldUseLightweightStreamingMarkdown(100_000, false)).toBe(false)
+
+    const source = `# heading\n\n${'body '.repeat(10_000)}`
+    const streaming = renderToStaticMarkup(<MarkdownImpl streaming>{source}</MarkdownImpl>)
+    const completed = renderToStaticMarkup(<MarkdownImpl>{source}</MarkdownImpl>)
+    expect(streaming).toContain('class="md-streaming-plain"')
+    expect(streaming).toContain('# heading')
+    expect(completed).toContain('<h1>heading</h1>')
+    expect(completed).not.toContain('md-streaming-plain')
   })
 })
 
@@ -66,6 +93,18 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html.match(/class="md-file-ref"/g)).toHaveLength(2)
     expect(html).toContain('<code>Promise&lt;void&gt;</code>')
     expect(html).toContain('/repo/src/fenced.ts')
+  })
+
+  it('opens an HTTP URL code span in the browser instead of treating its extension as a workspace file', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'`http://localhost:8791/index.html`'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+
+    expect(html).toContain('<a href="http://localhost:8791/index.html" target="_blank" rel="noopener noreferrer">')
+    expect(html).toContain('<code>http://localhost:8791/index.html</code>')
+    expect(html).not.toContain('md-file-ref')
   })
 
   it('keeps shell home file paths clickable through the authorized home root', () => {

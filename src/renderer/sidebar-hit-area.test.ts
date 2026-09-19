@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 // 间隙就变成盲区——点上去既进不了会话，也不触发任何操作。jsdom 不做布局，
 // 所以这条不变式只能在样式源码上锁住。
 const css = readFileSync(join(__dirname, 'styles.css'), 'utf8')
+const alignmentCss = readFileSync(join(__dirname, 'codex-alignment.css'), 'utf8')
 
 function ruleBody(selector: string): string {
   const index = css.indexOf(`\n${selector} {`)
@@ -28,6 +29,21 @@ describe('侧边栏会话行命中区域', () => {
     }
     expect(css).toMatch(
       /\.sb-sess-row:hover \.sb-sess-acts > \.sb-act,\s*\.sb-sess-row:focus-within \.sb-sess-acts > \.sb-act \{\s*pointer-events: auto;/
+    )
+  })
+
+  it('列表只允许纵向滚动，且不展示滚动条', () => {
+    const listRule = ruleBody('.sb-list')
+    expect(listRule).toContain('overflow-x: hidden')
+    expect(listRule).toContain('overflow-y: auto')
+    expect(listRule).toContain('touch-action: pan-y')
+    expect(listRule).toContain('scrollbar-width: none')
+    expect(ruleBody('.sb-list::-webkit-scrollbar')).toContain('display: none')
+  })
+
+  it('hover 不会移动会话行', () => {
+    expect(alignmentCss).not.toMatch(
+      /\.sb-sess:hover,\s*\.sb-sess-row:focus-within \.sb-sess\s*\{[^}]*translateX/
     )
   })
 })

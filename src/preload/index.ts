@@ -11,6 +11,7 @@ import type {
   UsageStats
 } from '../shared/trace'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResult } from '../shared/billing'
+import type { RendererPerformanceSample } from '../shared/performance'
 import type {
   AgentForkSessionRequest,
   AgentForkSessionResult,
@@ -42,7 +43,7 @@ import type {
   SessionHistoryPage,
   SessionHistoryPageRequest
 } from '../main/session-history'
-import type { TraceBacklogState, TraceBatch } from '../main/trace-output'
+import type { TraceBacklogState, TraceBatch, TraceBatchReceipt } from '../main/trace-output'
 import type {
   WorkspaceCreateRequest,
   WorkspaceEntry,
@@ -57,6 +58,7 @@ import type {
   WorkspaceWriteRequest
 } from '../shared/workspace'
 import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
+import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ScanReport } from '../cli/mcpguard-core'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import type {
@@ -114,11 +116,14 @@ export type DetectedAgent = LocatedAgent & {
 
 export type ParsedTurn = LoadedSessionTurn
 export type { SessionHistoryPage, SessionHistoryPageRequest }
-export type { TraceBacklogState }
+export type { TraceBacklogState, TraceBatchReceipt }
 
 const api = {
   rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
   setTheme: (theme: 'dark' | 'light'): Promise<true> => ipcRenderer.invoke('app:setTheme', theme),
+  performanceDiagnosticsEnabled: (): Promise<boolean> => ipcRenderer.invoke('app:performanceDiagnosticsEnabled'),
+  reportRendererPerformance: (sample: RendererPerformanceSample): Promise<boolean> =>
+    ipcRenderer.invoke('app:reportRendererPerformance', sample),
   detectFast: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detectFast'),
   detect: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detect'),
   addPiProfile: (): Promise<DetectedAgent | null> => ipcRenderer.invoke('agent:addPiProfile'),
@@ -206,6 +211,7 @@ const api = {
   deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
   start: (request: AgentStartRequest): Promise<{ runId: string }> => ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
+  unreadSessions: (): Promise<SessionAttentionSnapshot> => ipcRenderer.invoke('agent:unreadSessions'),
   /** 权威事件快照（忽略 done）：live trace 降级后用它重新对齐，包含终态被跳过的事件。 */
   focusedRunSnapshot: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:focusedRunSnapshot'),
   activeRuns: (): Promise<ActiveRun[]> => ipcRenderer.invoke('agent:activeRuns'),
@@ -219,21 +225,25 @@ const api = {
     ipcRenderer.on('agent:backgroundWork', listener)
     return () => ipcRenderer.removeListener('agent:backgroundWork', listener)
   },
-  onTrace: (cb: (events: TraceEvent[]) => void): (() => void) => {
-    // main 的整批事件只跨 contextBridge 一次；renderer 自己按帧合并 state，避免在 preload
-    // 拆成 N 次跨隔离上下文回调。分发完成后仍按原始批次回一次 ACK，保留有界背压语义。
+  onTrace: (cb: (events: TraceEvent[], receipt: TraceBatchReceipt) => void): (() => void) => {
+    // The full batch crosses contextBridge once. Credit is returned by the renderer only after its
+    // batched React update commits; merely invoking this callback is not proof of consumption.
     const l = (_: unknown, payload: TraceBatch): void => {
+      const receipt = { generation: payload.generation, batchId: payload.batchId, bytes: payload.bytes }
       try {
-        cb(payload.events)
-      } finally {
-        ipcRenderer.invoke('agent:traceAck', { bytes: payload.bytes }).catch(() => {
-          // main 已退出或窗口正在销毁时 ACK 失败不影响证据；归档仍是权威来源。
-        })
+        cb(payload.events, receipt)
+      } catch (error) {
+        // An exception means the batch was explicitly rejected rather than queued for a React
+        // commit. Return only this fenced receipt so one bad consumer cannot deadlock all future
+        // live delivery; canonical run/archive evidence remains authoritative.
+        void ipcRenderer.invoke('agent:traceAck', receipt).catch(() => {})
+        throw error
       }
     }
     ipcRenderer.on('agent:trace', l)
     return () => ipcRenderer.removeListener('agent:trace', l)
   },
+  traceAck: (receipt: TraceBatchReceipt): Promise<boolean> => ipcRenderer.invoke('agent:traceAck', receipt),
   onTraceHealth: (cb: (state: TraceBacklogState) => void): (() => void) => {
     const l = (_: unknown, state: TraceBacklogState): void => cb(state)
     ipcRenderer.on('agent:traceHealth', l)
@@ -262,13 +272,18 @@ const api = {
     ipcRenderer.on('agent:turnDone', l)
     return () => ipcRenderer.removeListener('agent:turnDone', l)
   },
+  onUnreadSessions: (cb: (snapshot: SessionAttentionSnapshot) => void): (() => void) => {
+    const listener = (_: unknown, snapshot: SessionAttentionSnapshot): void => cb(snapshot)
+    ipcRenderer.on('agent:unreadSessions', listener)
+    return () => ipcRenderer.removeListener('agent:unreadSessions', listener)
+  },
   onStopState: (cb: (state: AgentStopState) => void): (() => void) => {
     const l = (_: unknown, state: AgentStopState): void => cb(state)
     ipcRenderer.on('agent:stopState', l)
     return () => ipcRenderer.removeListener('agent:stopState', l)
   },
-  onDataUpdated: (cb: (e: { runId: string }) => void): (() => void) => {
-    const l = (_: unknown, e: { runId: string }): void => cb(e)
+  onDataUpdated: (cb: (e: { runId: string; kind?: 'turn_recorded' | 'session_deleted' }) => void): (() => void) => {
+    const l = (_: unknown, e: { runId: string; kind?: 'turn_recorded' | 'session_deleted' }): void => cb(e)
     ipcRenderer.on('agent:dataUpdated', l)
     return () => ipcRenderer.removeListener('agent:dataUpdated', l)
   },
@@ -294,6 +309,11 @@ const api = {
     const l = (_: unknown, request: AgentQuestionRequest): void => cb(request)
     ipcRenderer.on('agent:userQuestion', l)
     return () => ipcRenderer.removeListener('agent:userQuestion', l)
+  },
+  onQuestionAttention: (cb: (event: { runId: string; pendingCount: number }) => void): (() => void) => {
+    const l = (_: unknown, event: { runId: string; pendingCount: number }): void => cb(event)
+    ipcRenderer.on('agent:questionAttention', l)
+    return () => ipcRenderer.removeListener('agent:questionAttention', l)
   },
   onQuestionClosed: (cb: (event: { runId: string; questionId: string }) => void): (() => void) => {
     const l = (_: unknown, event: { runId: string; questionId: string }): void => cb(event)

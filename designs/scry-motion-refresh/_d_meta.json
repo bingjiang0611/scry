@@ -1,0 +1,29 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry A Editorial": {
+      "versions": [
+        {
+          "path": "Scry A Editorial.html",
+          "createdAt": "2026-09-15T15:10:00.000Z",
+          "status": "review",
+          "subtitle": "方向 A 编辑级精修 · 对齐已上线分析页 · 工作台+欢迎（分析页不动）"
+        }
+      ]
+    },
+    "Scry Motion Refresh": {
+      "versions": [
+        {
+          "path": "Scry Motion Refresh.html",
+          "createdAt": "2026-09-15T14:40:00.000Z",
+          "status": "superseded",
+          "subtitle": "方向对照（历史）：A 精炼 / B 电影感 · 深浅双主题"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-15T14:40:00.000Z",
+  "updatedAt": "2026-09-15T14:40:00.000Z"
+}

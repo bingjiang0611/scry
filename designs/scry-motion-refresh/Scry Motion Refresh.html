@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="zh" data-theme="dark" data-dir="a">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scry · UI 精修设计稿（A 精炼 / B 电影感 · 深浅双主题）</title>
+<style>
+/* ============================================================
+   Scry Motion Refresh — 设计稿原型
+   两版方向 A(精炼专业) / B(电影感暗色)，深浅双主题，三类界面。
+   底座色板复用 src/renderer/styles.css 的真实语义 token。
+   ============================================================ */
+:root {
+  --bg: #07090d; --panel: #0b0f15; --panel2: #10151e; --panel3: #151b26; --panel-hi: #1b2330;
+  --border: #202633; --border2: #303949; --border3: #171c26;
+  --fg: #f4f6fa; --dim: #b7bfcc; --dim2: #7f899a; --dim3: #535d6e;
+  --accent: #6aa8ff; --accent-soft: rgba(106,168,255,.12); --accent-line: rgba(106,168,255,.4);
+  --selected: #50e3c2; --selected-soft: rgba(80,227,194,.1); --selected-line: rgba(80,227,194,.46);
+  --ok: #69cc93; --ok-soft: rgba(105,204,147,.13);
+  --warn: #efb958; --warn-soft: rgba(239,185,88,.14);
+  --bad: #f36c67; --bad-soft: rgba(243,108,103,.14);
+  --p-claude:#d37ec8; --p-codex:#6aa8ff; --p-qoder:#efa84f; --p-opencode:#70ca93;
+  --surface-strong: rgba(127,137,154,.14);
+  --sidebar-surface:#0d1118; --main-surface:#090c11; --overview-surface:#0b0f15;
+  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
+  --shadow-card: 0 1px 0 rgba(255,255,255,.02), 0 8px 24px rgba(0,0,0,.28);
+  --shadow-float: 0 24px 60px rgba(0,0,0,.5);
+  --ease: cubic-bezier(.23,1,.32,1);
+  --glow: transparent; --edge: var(--border); --hero-scale: 1;
+  --accent-grad: linear-gradient(135deg,#6aa8ff,#7ee7d2);
+}
+:root[data-theme='light'] {
+  --bg:#f3f5f7; --panel:#fff; --panel2:#f6f7f9; --panel3:#eceff3; --panel-hi:#e4e8ed;
+  --border:#d9dee5; --border2:#c5ccd6; --border3:#e7eaee;
+  --fg:#1d2229; --dim:#4d5662; --dim2:#6d7682; --dim3:#929aa4;
+  --accent:#3f72b7; --accent-soft:rgba(63,114,183,.1); --accent-line:rgba(63,114,183,.45);
+  --selected:#137b66; --selected-soft:rgba(19,123,102,.09); --selected-line:rgba(19,123,102,.4);
+  --ok:#18794e; --ok-soft:rgba(24,121,78,.1); --warn:#94620b; --warn-soft:rgba(148,98,11,.1);
+  --bad:#bf3f3a; --bad-soft:rgba(191,63,58,.1);
+  --p-claude:#a15397; --p-codex:#3f72b7; --p-qoder:#9b6206; --p-opencode:#28744a;
+  --surface-strong: rgba(29,34,41,.08);
+  --sidebar-surface:#f4f6f8; --main-surface:#fff; --overview-surface:#f8fafc;
+  --shadow-card: 0 1px 2px rgba(35,44,57,.06), 0 10px 26px rgba(35,44,57,.08);
+  --shadow-float: 0 24px 56px rgba(35,44,57,.18);
+  --accent-grad: linear-gradient(135deg,#3f72b7,#2aa79b);
+}
+:root[data-dir='b'] { --r-md: 12px; --r-lg: 16px; --r-xl: 22px; --hero-scale: 1.14; }
+:root[data-dir='b'][data-theme='dark'] {
+  --bg:#05060a; --sidebar-surface:#080a11; --main-surface:#06070c; --overview-surface:#080a11;
+  --panel:#0a0d15; --panel2:#0e1220; --panel3:#141a2a;
+  --border:#1b2131; --border2:#2a3348; --edge:rgba(120,150,220,.20);
+  --glow: radial-gradient(1200px 620px at 74% -8%, rgba(106,168,255,.16), transparent 60%),
+          radial-gradient(900px 520px at 10% 110%, rgba(126,231,210,.09), transparent 62%);
+  --shadow-card: 0 1px 0 rgba(255,255,255,.04), 0 18px 46px rgba(0,0,0,.55);
+}
+:root[data-dir='b'][data-theme='light'] {
+  --bg:#eef1f6; --sidebar-surface:#f5f7fb; --main-surface:#fff; --overview-surface:#f6f8fc;
+  --edge:rgba(63,114,183,.22);
+  --glow: radial-gradient(1200px 620px at 74% -8%, rgba(63,114,183,.10), transparent 60%),
+          radial-gradient(900px 520px at 10% 110%, rgba(42,167,155,.07), transparent 62%);
+  --shadow-card: 0 1px 2px rgba(35,44,57,.05), 0 20px 44px rgba(35,44,57,.12);
+}
+
+* { box-sizing: border-box; }
+html,body { margin:0; height:100%; }
+body {
+  font-family: var(--font-ui);
+  background: radial-gradient(1400px 700px at 50% -260px, rgba(120,140,200,.06), transparent 60%), #0a0c11;
+  color: var(--fg); -webkit-font-smoothing: antialiased;
+  display:flex; flex-direction:column; min-height:100%;
+}
+:root[data-theme='light'] body { background: radial-gradient(1400px 700px at 50% -260px, rgba(63,114,183,.08), transparent 60%), #e7eaef; }
+
+.controls {
+  position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+  padding:14px 22px; background: rgba(10,12,17,.72); backdrop-filter: blur(18px) saturate(1.2);
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+:root[data-theme='light'] .controls { background: rgba(255,255,255,.7); border-bottom-color: rgba(0,0,0,.08); }
+.controls .brand { font-weight:700; letter-spacing:.02em; margin-right:6px; opacity:.92; }
+.controls .brand small { font-weight:500; color:var(--dim2); margin-left:8px; font-size:12px; }
+.seg { display:inline-flex; background:rgba(127,137,154,.14); border:1px solid rgba(127,137,154,.18); border-radius:var(--r-pill); padding:3px; gap:2px; }
+.seg button { appearance:none; border:0; background:transparent; color:var(--dim); font:inherit; font-size:13px; font-weight:600; padding:6px 14px; border-radius:var(--r-pill); cursor:pointer; transition:all .18s var(--ease); }
+.seg button[aria-pressed='true'] { background:var(--fg); color:var(--bg); }
+:root[data-dir='b'] .seg button[aria-pressed='true'] { background:var(--accent-grad); color:#fff; }
+.seg-label { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--dim3); margin-right:4px; }
+.controls .grow { flex:1; }
+.controls .note { font-size:12px; color:var(--dim2); max-width:340px; line-height:1.4; }
+
+.stage { flex:1; display:flex; justify-content:center; align-items:flex-start; padding:30px 24px 60px; }
+.window {
+  width: min(1320px, 100%); height: 800px; border-radius: 16px; overflow:hidden;
+  background: var(--main-surface); border:1px solid var(--border); box-shadow: var(--shadow-float);
+  display:flex; flex-direction:column; position:relative;
+}
+.window::before { content:''; position:absolute; inset:0; background:var(--glow); pointer-events:none; z-index:0; }
+.titlebar {
+  height:44px; flex:0 0 44px; display:flex; align-items:center; gap:12px; padding:0 16px;
+  background: color-mix(in srgb, var(--sidebar-surface) 88%, transparent);
+  border-bottom:1px solid var(--border3); position:relative; z-index:2;
+}
+.lights { display:flex; gap:8px; }
+.lights i { width:12px; height:12px; border-radius:50%; display:block; }
+.lights i:nth-child(1){background:#ff5f57;} .lights i:nth-child(2){background:#febc2e;} .lights i:nth-child(3){background:#28c840;}
+.titlebar .tt { font-size:13px; font-weight:600; color:var(--dim); }
+
+.app { flex:1; display:grid; grid-template-columns: 236px 1fr 384px; min-height:0; position:relative; z-index:1; }
+.surface { display:none; min-height:0; }
+.surface.active { display:contents; }
+
+.mono { font-family:var(--font-mono); }
+.chip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:var(--r-pill); }
+.dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+.ico { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.6; flex:0 0 auto; }
+.sec-label { font-size:11px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--dim3); }
+
+.side { background:var(--sidebar-surface); border-right:1px solid var(--border3); display:flex; flex-direction:column; min-height:0; }
+.side-head { padding:16px 16px 10px; }
+.side-head .row { display:flex; align-items:center; justify-content:space-between; }
+.logo { font-weight:800; font-size:16px; letter-spacing:.01em; }
+:root[data-dir='b'] .logo { background:var(--accent-grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.ver { font-family:var(--font-mono); font-size:11px; color:var(--dim3); }
+.newbtn {
+  margin:12px 16px 6px; display:flex; align-items:center; justify-content:space-between;
+  padding:10px 12px; border-radius:var(--r-md); cursor:pointer;
+  background:var(--panel2); border:1px solid var(--border); color:var(--fg); font-weight:600; font-size:13.5px;
+  transition:all .18s var(--ease);
+}
+.newbtn:hover { border-color:var(--accent-line); background:var(--panel3); transform:translateY(-1px); }
+:root[data-dir='b'] .newbtn { background:linear-gradient(180deg,var(--panel2),var(--panel)); border-color:var(--edge); box-shadow:var(--shadow-card); }
+:root[data-dir='b'] .newbtn:hover { box-shadow:0 0 0 1px var(--accent-line), var(--shadow-card); }
+.newbtn .l { display:flex; align-items:center; gap:8px; }
+.kbd { font-family:var(--font-mono); font-size:11px; color:var(--dim2); border:1px solid var(--border); border-radius:5px; padding:1px 6px; }
+.search { margin:6px 16px 12px; display:flex; align-items:center; gap:8px; padding:8px 11px; border-radius:var(--r-md); background:var(--panel); border:1px solid var(--border); color:var(--dim2); font-size:13px; }
+.side-nav { padding:2px 10px; display:flex; flex-direction:column; gap:1px; }
+.navi { display:flex; align-items:center; gap:11px; padding:8px 11px; border-radius:var(--r-md); color:var(--dim); font-size:13.5px; cursor:pointer; transition:all .15s var(--ease); }
+.navi:hover { background:var(--panel2); color:var(--fg); }
+.navi .cnt { margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--dim3); }
+.navi .cnt.warn { color:var(--warn); }
+.side-scroll { flex:1; overflow:auto; padding:6px 10px 12px; }
+.grp-title { display:flex; align-items:center; justify-content:space-between; padding:12px 8px 6px; }
+.grp-title .t { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:var(--dim); }
+.grp-title .n { font-family:var(--font-mono); font-size:11px; color:var(--dim3); }
+.sess { padding:9px 11px; border-radius:var(--r-md); cursor:pointer; display:flex; flex-direction:column; gap:3px; transition:all .15s var(--ease); border:1px solid transparent; }
+.sess:hover { background:var(--panel2); }
+.sess .top { display:flex; align-items:center; gap:7px; }
+.sess .prov { font-family:var(--font-mono); font-size:10.5px; font-weight:600; padding:0 5px; border-radius:4px; }
+.prov.claude{color:var(--p-claude); background:color-mix(in srgb,var(--p-claude) 15%,transparent);}
+.prov.codex{color:var(--p-codex); background:color-mix(in srgb,var(--p-codex) 15%,transparent);}
+.prov.qoder{color:var(--p-qoder); background:color-mix(in srgb,var(--p-qoder) 15%,transparent);}
+.sess .ttl { font-size:13px; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sess .meta { font-size:11px; color:var(--dim3); margin-left:auto; white-space:nowrap; }
+.sess.on { background:var(--selected-soft); border-color:var(--selected-line); box-shadow:inset 3px 0 0 var(--selected); position:relative; }
+:root[data-dir='b'] .sess.on { background:linear-gradient(90deg,var(--selected-soft),transparent); box-shadow:inset 2px 0 0 var(--selected), 0 0 0 1px color-mix(in srgb,var(--selected) 30%,transparent); }
+:root[data-dir='b'] .sess.on::after { content:''; position:absolute; inset:0; border-radius:var(--r-md); background:linear-gradient(90deg,rgba(80,227,194,.10),transparent 55%); animation:sheen 3.4s var(--ease) infinite; }
+@keyframes sheen { 0%,100%{opacity:.5;} 50%{opacity:1;} }
+
+.main { display:flex; flex-direction:column; min-height:0; background:var(--main-surface); }
+.topbar { height:52px; flex:0 0 52px; display:flex; align-items:center; gap:6px; padding:0 16px; border-bottom:1px solid var(--border3); }
+.tabs { display:flex; gap:4px; }
+.tab { display:flex; align-items:center; gap:7px; padding:7px 13px; border-radius:var(--r-md); font-size:13.5px; font-weight:600; color:var(--dim2); cursor:pointer; transition:all .16s var(--ease); }
+.tab:hover { color:var(--fg); background:var(--panel2); }
+.tab.on { color:var(--fg); background:var(--panel3); }
+:root[data-dir='b'] .tab.on { position:relative; }
+:root[data-dir='b'] .tab.on::after { content:''; position:absolute; left:13px; right:13px; bottom:-1px; height:2px; border-radius:2px; background:var(--accent-grad); }
+.topbar .sp { flex:1; }
+.iconbtn { width:34px; height:34px; display:grid; place-items:center; border-radius:var(--r-md); color:var(--dim2); cursor:pointer; transition:all .15s var(--ease); }
+.iconbtn:hover { background:var(--panel2); color:var(--fg); }
+.iconbtn.on { background:var(--accent-soft); color:var(--accent); }
+
+.chat { flex:1; overflow:auto; padding:22px 40px 8px; }
+.chat-wrap { max-width:760px; margin:0 auto; }
+.turnbar { display:flex; align-items:center; gap:10px; margin:6px 0 18px; }
+.turnbar .idx { font-family:var(--font-mono); font-size:12px; color:var(--dim3); }
+.turnbar .st { display:flex; align-items:center; gap:6px; font-weight:700; font-size:13px; }
+.turnbar .rt { margin-left:auto; font-size:12px; color:var(--dim2); display:flex; align-items:center; gap:6px; }
+.msg { font-size:15px; line-height:1.85; color:var(--fg); }
+.msg p { margin:0 0 14px; }
+.msg ul { margin:0 0 14px; padding-left:6px; list-style:none; display:flex; flex-direction:column; gap:11px; }
+.msg li { padding-left:20px; position:relative; }
+.msg li::before { content:''; position:absolute; left:2px; top:11px; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+.msg code { font-family:var(--font-mono); font-size:12.5px; background:var(--panel2); border:1px solid var(--border); border-radius:5px; padding:1px 6px; color:var(--dim); }
+.msg strong { color:var(--fg); font-weight:700; }
+.msg .warn-w { color:var(--warn); font-weight:700; }
+
+.turn-foot { max-width:760px; margin:20px auto 0; border-top:1px solid var(--border3); padding-top:14px; display:flex; gap:30px; }
+.mstat { display:flex; flex-direction:column; gap:3px; }
+.mstat .k { font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim3); }
+.mstat .v { font-family:var(--font-mono); font-size:15px; font-weight:600; color:var(--fg); }
+.mstat .v.dim { color:var(--dim2); }
+
+.composer-wrap { padding:14px 40px 22px; }
+.composer { max-width:760px; margin:0 auto; border:1px solid var(--border); border-radius:var(--r-lg); background:var(--panel); overflow:hidden; box-shadow:var(--shadow-card); transition:all .2s var(--ease); }
+.composer:focus-within { border-color:var(--accent-line); box-shadow:0 0 0 3px var(--accent-soft), var(--shadow-card); }
+:root[data-dir='b'] .composer { background:linear-gradient(180deg,var(--panel2),var(--panel)); border-color:var(--edge); }
+.composer .ctx { display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:1px solid var(--border3); font-size:12.5px; color:var(--dim); }
+.composer .ta { padding:14px; font-size:14px; color:var(--dim2); min-height:44px; }
+.composer .foot { display:flex; align-items:center; padding:8px 12px 12px; }
+.composer .hint { font-size:11.5px; color:var(--dim3); }
+.send { margin-left:auto; display:flex; align-items:center; gap:7px; padding:8px 16px; border-radius:var(--r-md); font-weight:600; font-size:13px; color:#fff; background:var(--accent); cursor:pointer; transition:all .18s var(--ease); }
+:root[data-dir='b'] .send { background:var(--accent-grad); box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 40%,transparent); }
+.send:hover { transform:translateY(-1px); filter:brightness(1.06); }
+
+.over { background:var(--overview-surface); border-left:1px solid var(--border3); display:flex; flex-direction:column; min-height:0; }
+.over-tabs { display:flex; padding:8px 12px; gap:2px; border-bottom:1px solid var(--border3); }
+.over-tab { flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:9px 8px; border-radius:var(--r-md); font-size:12.5px; font-weight:600; color:var(--dim2); cursor:pointer; transition:all .16s var(--ease); }
+.over-tab:hover { color:var(--fg); }
+.over-tab.on { color:var(--fg); background:var(--panel3); }
+:root[data-dir='b'] .over-tab.on { background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--accent); }
+.over-scroll { flex:1; overflow:auto; padding:16px 16px 24px; display:flex; flex-direction:column; gap:14px; }
+
+.card { border:1px solid var(--border); border-radius:var(--r-lg); background:var(--panel); padding:15px; box-shadow:var(--shadow-card); }
+:root[data-dir='b'] .card { background:linear-gradient(180deg, color-mix(in srgb,var(--panel2) 92%,transparent), var(--panel)); border-color:var(--edge); position:relative; }
+:root[data-dir='b'] .card::before { content:''; position:absolute; inset:0; border-radius:var(--r-lg); padding:1px; background:linear-gradient(135deg,var(--edge),transparent 60%); -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; pointer-events:none; }
+
+.ctx-card { display:flex; align-items:center; gap:16px; }
+.ring { --p:4; width:64px; height:64px; flex:0 0 64px; border-radius:50%; display:grid; place-items:center; background: conic-gradient(var(--accent) calc(var(--p)*1%), var(--border) 0); position:relative; }
+:root[data-dir='b'] .ring { background: conic-gradient(from 180deg, #6aa8ff calc(var(--p)*1%), var(--border) 0); box-shadow:0 0 22px rgba(106,168,255,.25); }
+.ring::before { content:''; position:absolute; inset:6px; border-radius:50%; background:var(--panel); }
+.ring b { position:relative; font-family:var(--font-mono); font-size:14px; font-weight:700; }
+.ctx-info .m { font-size:11px; color:var(--dim2); font-family:var(--font-mono); }
+.ctx-info .big { font-size:22px; font-weight:700; font-family:var(--font-mono); letter-spacing:-.01em; margin:2px 0; }
+:root[data-dir='b'] .ctx-info .big { font-size:calc(22px * var(--hero-scale)); }
+.ctx-info .sub { font-size:11px; color:var(--dim3); }
+
+.verdict { display:flex; flex-direction:column; gap:8px; }
+.verdict .lead { font-size:11.5px; color:var(--dim2); }
+.verdict .state { display:flex; align-items:center; gap:9px; font-size:20px; font-weight:800; color:var(--ok); }
+:root[data-dir='b'] .verdict .state { font-size:calc(20px*var(--hero-scale)); }
+.verdict .foot { font-size:11.5px; color:var(--dim3); }
+
+.grid2 { display:grid; grid-template-columns:1fr 1fr; }
+.grid2 > div { padding:13px 15px; }
+.grid2 > div:nth-child(1),.grid2 > div:nth-child(2){ border-bottom:1px solid var(--border3); }
+.grid2 > div:nth-child(odd){ border-right:1px solid var(--border3); }
+.kpi .k { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim2); }
+.kpi .v { font-family:var(--font-mono); font-size:19px; font-weight:700; margin-top:5px; }
+.kpi .s { font-size:11px; color:var(--dim3); margin-top:2px; }
+.kpi .v.acc { color:var(--accent); } .kpi .v.ok { color:var(--ok); }
+.cache-row { display:flex; gap:20px; padding-top:12px; border-top:1px solid var(--border3); margin-top:2px; }
+.cache-row span { font-family:var(--font-mono); font-size:11.5px; color:var(--dim2); }
+.cache-row b { color:var(--fg); }
+
+.sid { font-family:var(--font-mono); font-size:12px; color:var(--dim); word-break:break-all; margin-top:6px; }
+.pillrow { display:flex; gap:2px; background:var(--panel2); border:1px solid var(--border); border-radius:var(--r-md); padding:3px; }
+.pillrow button { flex:1; border:0; background:transparent; color:var(--dim2); font:inherit; font-size:12.5px; font-weight:600; padding:8px; border-radius:6px; cursor:pointer; transition:all .16s var(--ease); }
+.pillrow button.on { background:var(--panel); color:var(--fg); box-shadow:var(--shadow-card); }
+
+.turnrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:11px 0; }
+.turnrow .t01 { font-family:var(--font-mono); font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent-line); border-radius:5px; padding:2px 7px; }
+.evi { display:flex; align-items:center; gap:6px; font-size:11.5px; padding:4px 9px; border-radius:var(--r-pill); border:1px solid var(--border); color:var(--dim); background:var(--panel2); }
+.evi b { font-family:var(--font-mono); }
+.evi.zero { color:var(--dim3); }
+.evi.unk { color:var(--warn); border-color:var(--warn-soft); background:var(--warn-soft); }
+.evi.has { color:var(--ok); border-color:var(--ok-soft); }
+
+.welcome { grid-column:1 / -1; overflow:auto; padding:0; position:relative; z-index:1; }
+.wel-inner { max-width:920px; margin:0 auto; padding:64px 40px 56px; }
+.wel-eyebrow { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim3); font-weight:700; }
+.wel-h { font-size:40px; font-weight:800; letter-spacing:-.02em; margin:14px 0 10px; line-height:1.12; }
+:root[data-dir='b'] .wel-h { font-size:52px; }
+.wel-h .grad { background:var(--accent-grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.wel-sub { font-size:16px; color:var(--dim); max-width:560px; line-height:1.6; }
+.wel-cta { display:flex; gap:12px; margin-top:26px; }
+.btn-primary { display:flex; align-items:center; gap:9px; padding:12px 20px; border-radius:var(--r-md); font-weight:700; font-size:14px; color:#fff; background:var(--accent); cursor:pointer; transition:all .18s var(--ease); }
+:root[data-dir='b'] .btn-primary { background:var(--accent-grad); box-shadow:0 10px 30px color-mix(in srgb,var(--accent) 40%,transparent); }
+.btn-primary:hover { transform:translateY(-2px); }
+.btn-ghost { display:flex; align-items:center; gap:9px; padding:12px 20px; border-radius:var(--r-md); font-weight:600; font-size:14px; color:var(--fg); border:1px solid var(--border); cursor:pointer; transition:all .18s var(--ease); }
+.btn-ghost:hover { border-color:var(--accent-line); background:var(--panel2); }
+
+.wel-section { margin-top:44px; }
+.wel-section .sh { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.wel-section .sh h3 { font-size:15px; font-weight:700; margin:0; }
+.proj-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+.proj { border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; background:var(--panel); cursor:pointer; transition:all .2s var(--ease); box-shadow:var(--shadow-card); }
+.proj:hover { transform:translateY(-3px); border-color:var(--accent-line); }
+:root[data-dir='b'] .proj { background:linear-gradient(180deg,var(--panel2),var(--panel)); border-color:var(--edge); }
+.proj .ph { display:flex; align-items:center; gap:9px; margin-bottom:12px; }
+.proj .pi { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); }
+.proj .pn { font-weight:700; font-size:14px; }
+.proj .pmeta { font-size:12px; color:var(--dim2); display:flex; gap:12px; margin-top:4px; }
+.proj .pmeta .mono { color:var(--dim); }
+.bind { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:2px 8px; border-radius:var(--r-pill); }
+.bind.on { color:var(--ok); background:var(--ok-soft); } .bind.off { color:var(--dim2); background:var(--surface-strong); }
+
+.analytics { grid-column:1 / -1; overflow:auto; padding:0; position:relative; z-index:1; }
+.an-inner { max-width:1040px; margin:0 auto; padding:36px 40px 56px; }
+.an-head { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:8px; }
+.an-head h2 { font-size:26px; font-weight:800; margin:0; letter-spacing:-.02em; }
+.an-head .rng { display:flex; gap:2px; background:var(--panel2); border:1px solid var(--border); border-radius:var(--r-md); padding:3px; }
+.an-head .rng button { border:0; background:transparent; color:var(--dim2); font:inherit; font-size:12.5px; font-weight:600; padding:6px 13px; border-radius:6px; cursor:pointer; }
+.an-head .rng button.on { background:var(--panel); color:var(--fg); box-shadow:var(--shadow-card); }
+.an-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:22px 0; }
+.an-kpi { border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; background:var(--panel); box-shadow:var(--shadow-card); }
+:root[data-dir='b'] .an-kpi { background:linear-gradient(180deg,var(--panel2),var(--panel)); border-color:var(--edge); }
+.an-kpi .k { display:flex; align-items:center; justify-content:space-between; font-size:11.5px; color:var(--dim2); }
+.an-kpi .v { font-family:var(--font-mono); font-size:28px; font-weight:700; margin:8px 0 4px; letter-spacing:-.02em; }
+:root[data-dir='b'] .an-kpi .v { font-size:32px; }
+.prov-badge { font-size:10px; font-weight:700; padding:1px 6px; border-radius:var(--r-pill); }
+.trend { font-size:11.5px; font-weight:600; }
+.trend.up { color:var(--ok); } .trend.down { color:var(--bad); }
+
+.chart-card { border:1px solid var(--border); border-radius:var(--r-lg); padding:20px; background:var(--panel); box-shadow:var(--shadow-card); margin-bottom:14px; }
+:root[data-dir='b'] .chart-card { background:linear-gradient(180deg,var(--panel2),var(--panel)); border-color:var(--edge); }
+.chart-card .ch-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+.chart-card h4 { margin:0; font-size:14px; font-weight:700; }
+.bars { display:flex; align-items:flex-end; gap:12px; height:180px; padding-top:10px; }
+.bar-col { flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; justify-content:flex-end; height:100%; }
+.bar { width:100%; max-width:46px; border-radius:6px 6px 3px 3px; background:var(--accent); position:relative; transition:all .3s var(--ease); }
+.bar:hover { filter:brightness(1.15); }
+:root[data-dir='b'] .bar { background:var(--accent-grad); box-shadow:0 -2px 20px color-mix(in srgb,var(--accent) 35%,transparent); }
+.bar-col .bl { font-size:11px; color:var(--dim3); font-family:var(--font-mono); }
+.legend { display:flex; gap:18px; }
+.legend span { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim2); }
+
+.split { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.prov-list { display:flex; flex-direction:column; gap:12px; }
+.prov-item { display:flex; align-items:center; gap:12px; }
+.prov-item .nm { width:88px; font-size:13px; font-weight:600; }
+.prov-item .track { flex:1; height:8px; border-radius:var(--r-pill); background:var(--panel3); overflow:hidden; }
+.prov-item .fill { height:100%; border-radius:var(--r-pill); }
+.prov-item .pct { width:52px; text-align:right; font-family:var(--font-mono); font-size:12px; color:var(--dim); }
+.diag-row { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border3); }
+.diag-row:last-child { border-bottom:0; }
+.diag-row .di { width:30px; height:30px; border-radius:8px; display:grid; place-items:center; }
+.diag-row .dt { flex:1; }
+.diag-row .dt .n { font-size:13px; font-weight:600; }
+.diag-row .dt .d { font-size:11.5px; color:var(--dim2); }
+
+.foot-note { max-width:1320px; margin:14px auto 0; font-size:12px; color:var(--dim3); text-align:center; line-height:1.6; }
+</style>
+</head>
+<body>
+
+<header class="controls">
+  <span class="brand">Scry<small>UI 精修设计稿</small></span>
+  <span class="seg-label">方向</span>
+  <div class="seg" id="dir">
+    <button data-dir="a" aria-pressed="true">A · 精炼专业</button>
+    <button data-dir="b" aria-pressed="false">B · 电影感</button>
+  </div>
+  <span class="seg-label">主题</span>
+  <div class="seg" id="theme">
+    <button data-theme="dark" aria-pressed="true">暗色</button>
+    <button data-theme="light" aria-pressed="false">浅色</button>
+  </div>
+  <span class="seg-label">界面</span>
+  <div class="seg" id="surface">
+    <button data-surface="workbench" aria-pressed="true">工作台</button>
+    <button data-surface="welcome" aria-pressed="false">欢迎</button>
+    <button data-surface="analytics" aria-pressed="false">分析</button>
+  </div>
+  <span class="grow"></span>
+  <span class="note">A 保留三栏密度做质感精修；B 借鉴 motionsites 的景深/发光边/大标题，密度略降。两版共用产品真实语义色板。</span>
+</header>
+
+<div class="stage">
+<div class="window">
+  <div class="titlebar">
+    <span class="lights"><i></i><i></i><i></i></span>
+    <span class="tt">Scry</span>
+  </div>
+  <div class="app">
+
+    <section class="surface active" data-surface="workbench" style="display:contents">
+      <aside class="side">
+        <div class="side-head"><div class="row"><span class="logo">Scry</span><span class="ver">0.1.0</span></div></div>
+        <div class="newbtn"><span class="l"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建会话</span><span class="kbd">⌘N</span></div>
+        <div class="search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>搜索会话 / 项目…</div>
+        <nav class="side-nav">
+          <div class="navi"><svg class="ico" viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-5 3 3 5-7"/></svg>分析</div>
+          <div class="navi"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>诊断</div>
+          <div class="navi"><svg class="ico" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg>技能<span class="cnt">31</span></div>
+          <div class="navi"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>MCP<span class="cnt warn">● 0/15</span></div>
+        </nav>
+        <div class="side-scroll">
+          <div class="grp-title"><span class="t">最近</span><span class="n">5</span></div>
+          <div class="grp-title"><span class="t"><svg class="ico" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>不绑定项目</span><span class="n">1</span></div>
+          <div class="sess"><div class="top"><span class="prov qoder">qoder</span><span class="ttl">https://code.alibab…</span><span class="meta">活跃 18h</span></div></div>
+          <div class="grp-title"><span class="t"><svg class="ico" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>rate-native</span><span class="n">3</span></div>
+          <div class="sess on"><div class="top"><span class="prov claude">claude</span><span class="ttl">hello</span><span class="meta">活跃 6d</span></div></div>
+          <div class="sess"><div class="top"><span class="prov qoder">qoder</span><span class="ttl">/rate-native-rate-wo…</span><span class="meta">活跃 1w</span></div></div>
+          <div class="sess"><div class="top"><span class="prov qoder">qoder</span><span class="ttl">不要读取或修改任何…</span><span class="meta">活跃 1w</span></div></div>
+          <div class="grp-title"><span class="t"><svg class="ico" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>rate-native</span><span class="n">5</span></div>
+          <div class="sess"><div class="top"><span class="prov codex">codex</span><span class="ttl">只回复 OK，不读文件…</span><span class="meta">活跃 7d</span></div></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div class="tabs">
+            <div class="tab on"><svg class="ico" viewBox="0 0 24 24"><path d="M21 15a4 4 0 01-4 4H7l-4 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>对话</div>
+            <div class="tab"><svg class="ico" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.5 7.5L11 16M16.5 7.5L13 16"/></svg>拓扑</div>
+            <div class="tab"><svg class="ico" viewBox="0 0 24 24"><path d="M3 3v18h18M7 14l3-3 3 2 5-6"/></svg>分段</div>
+          </div>
+          <span class="sp"></span>
+          <div class="iconbtn"><svg class="ico" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg></div>
+          <div class="iconbtn on"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg></div>
+        </div>
+        <div class="chat">
+          <div class="chat-wrap">
+            <div class="turnbar"><span class="idx mono">03</span><span class="st"><span class="dot" style="background:var(--ok)"></span>Stop</span><span class="rt">4 次调用 <svg class="ico" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></div>
+            <div class="msg">
+              <p>你好！有什么可以帮你的吗？</p>
+              <p>我看到你这是在 <code>rate-native</code> 聚合工作区里（treehouse worktree），可以做的事情很多，比如：</p>
+              <ul>
+                <li><strong>需求交付</strong>：从 Aone 工单/钉钉文档摄入到代码交付的端到端流程（<code>rate-workflow</code>）</li>
+                <li><strong>查业务知识</strong>：评价业务规则、链路、接口协议（<code>rate-doc</code>）</li>
+                <li><strong>代码 / 分支 / CR</strong>：切分支、建变更、发二方包、部署预发、代码评审</li>
+                <li><strong>前端</strong>：<code>rate-list</code> / <code>rate-detail</code> 等页面改动、真机自测、设计稿转代码</li>
+                <li><strong>配置查改</strong>：Switch / Diamond 线上值查询与发布（<code>ali-config</code>）</li>
+              </ul>
+              <p>直接告诉我你想做什么就行。如果只是打个招呼，那——你好 👋</p>
+              <p>需要注意一点：几个 MCP 服务（aone-app-center、aone-mix、coop、ding-doc、group-env、o2）当前<span class="warn-w">未授权</span>，本会话是非交互模式无法完成授权流程。</p>
+            </div>
+            <div class="turn-foot">
+              <div class="mstat"><span class="k">In</span><span class="v">2</span></div>
+              <div class="mstat"><span class="k">Out</span><span class="v">416</span></div>
+              <div class="mstat"><span class="k">Cache·W</span><span class="v dim">40.6k</span></div>
+              <div class="mstat"><span class="k">Dur</span><span class="v">37.5s</span></div>
+              <div class="mstat"><span class="k">Api</span><span class="v">10.8s</span></div>
+              <div class="mstat"><span class="k">Tools</span><span class="v dim">0</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="ctx"><svg class="ico" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg>rate-native <svg class="ico" style="width:13px;height:13px" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+            <div class="ta">给 Claude Code 一个任务… （/ 唤起命令，Enter 发送，Shift+Enter 换行）</div>
+            <div class="foot"><span class="hint">原型不会调用 Provider</span><span class="send">发送 <svg class="ico" style="width:14px;height:14px;stroke:#fff" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="over">
+        <div class="over-tabs">
+          <div class="over-tab on"><svg class="ico" style="width:15px;height:15px" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>纵览</div>
+          <div class="over-tab"><svg class="ico" style="width:15px;height:15px" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>账单卫士</div>
+          <div class="over-tab"><svg class="ico" style="width:15px;height:15px" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>MCP 信任</div>
+        </div>
+        <div class="over-scroll">
+          <div class="card ctx-card">
+            <div class="ring" style="--p:4"><b>4%</b></div>
+            <div class="ctx-info">
+              <div class="m">上下文 · claude-opus-4-8[1m]</div>
+              <div class="big">40.6k / 1000.0k</div>
+              <div class="sub">已占 4% · 残余 959.4k · 最近一轮完整</div>
+            </div>
+          </div>
+          <div class="card verdict">
+            <div class="lead">本会话 · 1 轮</div>
+            <div class="state"><span class="dot" style="background:var(--ok);width:9px;height:9px"></span>完成</div>
+            <div class="foot">1 轮完成 · 0 次调用</div>
+          </div>
+          <div class="card" style="padding:0">
+            <div class="grid2">
+              <div class="kpi"><div class="k"><span class="dot" style="background:var(--accent)"></span>总 Token</div><div class="v acc">41.1k</div><div class="s">1/1 轮已捕获</div></div>
+              <div class="kpi"><div class="k"><span class="dot" style="background:var(--ok)"></span>输入 / 输出</div><div class="v">418</div><div class="s">in 2 · out 416</div></div>
+              <div class="kpi"><div class="k"><span class="dot" style="background:var(--accent)"></span>调用</div><div class="v">0</div><div class="s">工具 0 · MCP 0 · Skill 0 · 子Agent 0</div></div>
+              <div class="kpi"><div class="k"><span class="dot" style="background:var(--ok)"></span>危险</div><div class="v ok">0</div><div class="s">无</div></div>
+            </div>
+            <div style="padding:0 15px 14px"><div class="cache-row"><span>CACHE·R <b>0</b></span><span>CACHE·W <b>40.6k</b></span><span>API <b>10.8s</b></span></div></div>
+          </div>
+          <div class="card">
+            <div class="sec-label">会话</div>
+            <div class="sid">sessionId 9b1c07fc-33ef-4b17-ba1e-8a02ce36d94a</div>
+          </div>
+          <div class="pillrow"><button class="on">轮次数据</button><button>会话数据</button></div>
+          <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between"><div class="sec-label">每轮调用</div><span class="mono" style="font-size:11px;color:var(--dim3)">1 turns</span></div>
+            <div class="turnrow">
+              <span class="t01">T01</span>
+              <span class="evi has"><b>37.5s</b> 耗时</span>
+              <span class="evi zero">MCP <b>0</b></span>
+              <span class="evi zero">Skill <b>0</b></span>
+              <span class="evi"><b>Hooks 7</b></span>
+              <span class="evi zero">文件 <b>0</b></span>
+              <span class="evi unk">风险 <b>未知</b></span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="surface" data-surface="welcome">
+      <div class="welcome">
+        <div class="wel-inner">
+          <div class="wel-eyebrow">Local-first · 观测与治理</div>
+          <h1 class="wel-h">你好，<span class="grad">开始一次可被检查的会话</span></h1>
+          <p class="wel-sub">在本机驱动 Provider CLI/SDK，把会话、工具调用、文件足迹、用量与风险呈现为可检查证据。Scry 不是沙箱——获批工具仍以本机权限运行。</p>
+          <div class="wel-cta">
+            <span class="btn-primary"><svg class="ico" style="stroke:#fff" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建会话</span>
+            <span class="btn-ghost"><svg class="ico" viewBox="0 0 24 24"><path d="M4 4h16v12H5.2L4 17.5z"/></svg>恢复上次会话</span>
+          </div>
+
+          <div class="wel-section">
+            <div class="sh"><h3>项目</h3><span class="sec-label">3 个 · 绑定状态</span></div>
+            <div class="proj-grid">
+              <div class="proj">
+                <div class="ph"><span class="pi"><svg class="ico" style="stroke:var(--accent)" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg></span><div><div class="pn">rate-native</div><span class="bind on"><span class="dot" style="background:var(--ok)"></span>已绑定 claude</span></div></div>
+                <div class="pmeta"><span>8 会话</span><span class="mono">活跃 6d</span></div>
+              </div>
+              <div class="proj">
+                <div class="ph"><span class="pi"><svg class="ico" style="stroke:var(--accent)" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg></span><div><div class="pn">scry</div><span class="bind on"><span class="dot" style="background:var(--ok)"></span>已绑定 codex</span></div></div>
+                <div class="pmeta"><span>12 会话</span><span class="mono">活跃 2d</span></div>
+              </div>
+              <div class="proj">
+                <div class="ph"><span class="pi"><svg class="ico" style="stroke:var(--dim2)" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg></span><div><div class="pn">不绑定项目</div><span class="bind off">未绑定</span></div></div>
+                <div class="pmeta"><span>1 会话</span><span class="mono">活跃 18h</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="wel-section">
+            <div class="sh"><h3>本机状态</h3></div>
+            <div class="proj-grid">
+              <div class="proj" style="cursor:default">
+                <div class="pmeta" style="margin:0"><span class="sec-label">Provider CLI</span></div>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+                  <span class="chip" style="color:var(--p-claude);background:color-mix(in srgb,var(--p-claude) 14%,transparent)"><span class="dot" style="background:var(--p-claude)"></span>claude</span>
+                  <span class="chip" style="color:var(--p-codex);background:color-mix(in srgb,var(--p-codex) 14%,transparent)"><span class="dot" style="background:var(--p-codex)"></span>codex</span>
+                  <span class="chip" style="color:var(--dim2);background:var(--surface-strong)">qoder 未探测</span>
+                </div>
+              </div>
+              <div class="proj" style="cursor:default">
+                <div class="pmeta" style="margin:0"><span class="sec-label">MCP 服务</span></div>
+                <div class="kpi" style="margin-top:10px"><div class="v" style="color:var(--warn)">0 / 15</div><div class="s">15 个已声明 · 0 个已授权</div></div>
+              </div>
+              <div class="proj" style="cursor:default">
+                <div class="pmeta" style="margin:0"><span class="sec-label">近 7 天用量</span></div>
+                <div class="kpi" style="margin-top:10px"><div class="v acc">2.4M<span style="font-size:13px;color:var(--dim3)"> tok</span></div><div class="s">exact · 来自 Provider result</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="surface" data-surface="analytics">
+      <div class="analytics">
+        <div class="an-inner">
+          <div class="an-head">
+            <h2>分析</h2>
+            <div class="rng"><button>今天</button><button class="on">7 天</button><button>30 天</button><button>全部</button></div>
+          </div>
+          <p style="color:var(--dim2);font-size:13px;margin:6px 0 0">聚合自 SQLite · <span style="color:var(--ok)">exact</span> 与 <span style="color:var(--warn)">estimated</span> 分别标注，缺失不计为 0。</p>
+
+          <div class="an-kpis">
+            <div class="an-kpi"><div class="k"><span>总 Token</span><span class="prov-badge" style="color:var(--ok);background:var(--ok-soft)">exact</span></div><div class="v acc">2.41M</div><div class="trend up">▲ 18% vs 上周</div></div>
+            <div class="an-kpi"><div class="k"><span>估算成本</span><span class="prov-badge" style="color:var(--warn);background:var(--warn-soft)">estimated</span></div><div class="v">$34.20</div><div class="trend up">▲ 12%</div></div>
+            <div class="an-kpi"><div class="k"><span>会话数</span></div><div class="v">42</div><div class="trend down">▼ 4%</div></div>
+            <div class="an-kpi"><div class="k"><span>风险事件</span></div><div class="v" style="color:var(--dim3)">—</div><div class="s" style="font-size:11px;color:var(--dim3)">unavailable · 该 Provider 无证据</div></div>
+          </div>
+
+          <div class="chart-card">
+            <div class="ch-head"><h4>每日 Token 用量</h4><div class="legend"><span><span class="dot" style="background:var(--accent)"></span>输入+输出</span></div></div>
+            <div class="bars">
+              <div class="bar-col"><div class="bar" style="height:42%"></div><span class="bl">周一</span></div>
+              <div class="bar-col"><div class="bar" style="height:66%"></div><span class="bl">周二</span></div>
+              <div class="bar-col"><div class="bar" style="height:51%"></div><span class="bl">周三</span></div>
+              <div class="bar-col"><div class="bar" style="height:88%"></div><span class="bl">周四</span></div>
+              <div class="bar-col"><div class="bar" style="height:73%"></div><span class="bl">周五</span></div>
+              <div class="bar-col"><div class="bar" style="height:34%"></div><span class="bl">周六</span></div>
+              <div class="bar-col"><div class="bar" style="height:58%"></div><span class="bl">周日</span></div>
+            </div>
+          </div>
+
+          <div class="split">
+            <div class="chart-card" style="margin:0">
+              <div class="ch-head"><h4>Provider 分布</h4></div>
+              <div class="prov-list">
+                <div class="prov-item"><span class="nm" style="color:var(--p-claude)">claude</span><span class="track"><span class="fill" style="width:62%;background:var(--p-claude)"></span></span><span class="pct">62%</span></div>
+                <div class="prov-item"><span class="nm" style="color:var(--p-codex)">codex</span><span class="track"><span class="fill" style="width:24%;background:var(--p-codex)"></span></span><span class="pct">24%</span></div>
+                <div class="prov-item"><span class="nm" style="color:var(--p-qoder)">qoder</span><span class="track"><span class="fill" style="width:11%;background:var(--p-qoder)"></span></span><span class="pct">11%</span></div>
+                <div class="prov-item"><span class="nm" style="color:var(--dim2)">pi</span><span class="track"><span class="fill" style="width:3%;background:var(--dim2)"></span></span><span class="pct">3%</span></div>
+              </div>
+            </div>
+            <div class="chart-card" style="margin:0">
+              <div class="ch-head"><h4>诊断</h4><span class="chip" style="color:var(--ok);background:var(--ok-soft)"><span class="dot" style="background:var(--ok)"></span>健康</span></div>
+              <div class="diag-row"><span class="di" style="background:var(--ok-soft);color:var(--ok)"><svg class="ico" style="width:16px" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span><div class="dt"><div class="n">Recorder Core</div><div class="d">2 阶段提交正常 · .scry/records 一致</div></div></div>
+              <div class="diag-row"><span class="di" style="background:var(--warn-soft);color:var(--warn)"><svg class="ico" style="width:16px" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9L2 18a2 2 0 001.7 3h16.6a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg></span><div class="dt"><div class="n">MCP 授权</div><div class="d">15 个已声明服务 0 个已授权</div></div></div>
+              <div class="diag-row"><span class="di" style="background:var(--surface-strong);color:var(--dim2)"><svg class="ico" style="width:16px" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span><div class="dt"><div class="n">Hook 指纹</div><div class="d">commit hook auto_grant · source: auto</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+</div>
+<p class="foot-note">设计稿 · 不连接 Provider、不写真实 .scry。切换上方「方向 / 主题 / 界面」对照。证据语义（exact / estimated / unavailable / 未知 / 真实 0）按产品约定表达，视觉精修不改变其含义。</p>
+
+<script>
+  const root = document.documentElement
+  function seg(id, attr){
+    const box = document.getElementById(id)
+    box.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return
+      var key = attr === 'data-theme' ? 'theme' : attr === 'data-dir' ? 'dir' : 'surface'
+      root.setAttribute(attr, b.dataset[key])
+      Array.prototype.forEach.call(box.children, function(x){ x.setAttribute('aria-pressed', x === b) })
+      if(attr === 'data-surface') switchSurface(b.dataset.surface)
+    })
+  }
+  function switchSurface(name){
+    document.querySelectorAll('.surface').forEach(function(s){
+      var on = s.dataset.surface === name
+      s.classList.toggle('active', on)
+      s.style.display = on ? 'contents' : 'none'
+    })
+  }
+  seg('dir','data-dir'); seg('theme','data-theme'); seg('surface','data-surface')
+  switchSurface('workbench')
+</script>
+</body>
+</html>

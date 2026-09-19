@@ -85,6 +85,18 @@ export function isProviderlessTerminalTurn(
   return turn.items.every((item) => item.kind === 'harness')
 }
 
+/**
+ * A managed Provider failure before its native turn boundary has no canonical turn to commit.
+ * Keep that diagnostic turn in Scry's local progress/archive path instead of rejecting it and
+ * leaving only an unreadable catalog entry.
+ */
+export function shouldUseManagedTerminalPersistence(
+  managedPolicy: boolean,
+  turn: Pick<TraceArchiveTurn, 'status' | 'items' | 'providerTurnId' | 'forkTurnId'>
+): boolean {
+  return managedPolicy && !isProviderlessTerminalTurn(turn)
+}
+
 function validUnresolvedProgress(value: UnresolvedTraceTurnProgress | null): value is UnresolvedTraceTurnProgress {
   const request = value?.request
   const turn = request?.turn

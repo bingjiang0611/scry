@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
-import { persistUnresolvedTraceTurnProgress, recoverTraceTurnProgress } from './trace-turn-progress'
+import {
+  persistUnresolvedTraceTurnProgress,
+  recoverTraceTurnProgress,
+  shouldUseManagedTerminalPersistence
+} from './trace-turn-progress'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
@@ -22,6 +26,22 @@ async function fixture(status: 'failed' | 'cancelled' | 'interrupted' | 'complet
 }
 
 describe('providerless terminal recovery regression matrix', () => {
+  it('routes a managed failure before the Provider turn boundary to the readable local archive path', () => {
+    expect(shouldUseManagedTerminalPersistence(true, {
+      status: 'failed',
+      items: [harness]
+    })).toBe(false)
+    expect(shouldUseManagedTerminalPersistence(true, {
+      status: 'failed',
+      providerTurnId: 'turn-1',
+      items: [harness]
+    })).toBe(true)
+    expect(shouldUseManagedTerminalPersistence(true, {
+      status: 'failed',
+      items: [{ ...harness, kind: 'model', stage: 'text_delta', text: 'partial' }]
+    })).toBe(true)
+  })
+
   it.each(['failed', 'cancelled', 'interrupted'] as const)('clears %s only in the matching scope, then remains idempotent', async (status) => {
     for (const items of [[], [harness]]) {
       const { root, path, bytes } = await fixture(status, items)

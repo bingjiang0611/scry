@@ -8,7 +8,7 @@ import { app } from 'electron'
 import { createRequire } from 'node:module'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
-import { readQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
+import { readQoderCreditRows, reconcileQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   chmodSync,
@@ -987,21 +987,30 @@ export async function usageAnalyticsWithCreditsQuery(rangeDays: UsageAnalyticsRa
   const analytics = usageAnalyticsQuery(rangeDays)
   if (!db || analytics.status !== 'ready') return analytics
   const revision = dataRevision
-  try {
-    const bounds = usageAnalyticsBounds(analytics.observedAt, rangeDays)
-    const scopes = db.prepare(`SELECT u.run_id runId, r.external_session_id sessionId, r.cwd,
+  const readScopes = (value: UsageAnalytics): QoderCreditScope[] => {
+    const bounds = usageAnalyticsBounds(value.observedAt, rangeDays)
+    return db!.prepare(`SELECT u.run_id runId, r.external_session_id sessionId, r.cwd,
       MIN(u.bucket_start) tsStart FROM usage_ledger u
       JOIN session_refs r ON r.scry_session_id=u.session_id
       WHERE u.provider='qoder' AND r.provider_id='qoder' AND u.run_id IS NOT NULL
         AND u.bucket_start>=? AND u.bucket_start<?
       GROUP BY u.run_id, r.external_session_id, r.cwd ORDER BY tsStart DESC`).all(bounds.from, bounds.to) as QoderCreditScope[]
+  }
+  try {
+    const scopes = readScopes(analytics)
     const credits = await readQoderCreditRows({
       scopes,
       userDataDir: app.getPath('userData'),
       projectsDir: join(process.env.QODER_CONFIG_DIR || join(process.env.QODER_CLI_HOME || homedir(), '.qoder'), 'projects')
     })
-    // A delete/new result during the read invalidates the captured scope, too.
-    return revision === dataRevision ? withQoderCredits(analytics, credits) : usageAnalyticsQuery(rangeDays)
+    if (revision === dataRevision) return withQoderCredits(analytics, credits)
+
+    // Credit projection scans native transcripts asynchronously. Keep evidence
+    // for unchanged turns when SQLite advances instead of dropping the entire
+    // projection; deleted/changed turns are removed and new turns stay unknown.
+    const latest = usageAnalyticsQuery(rangeDays)
+    if (latest.status !== 'ready') return latest
+    return withQoderCredits(latest, reconcileQoderCreditRows(readScopes(latest), credits))
   } catch {
     return analytics
   }

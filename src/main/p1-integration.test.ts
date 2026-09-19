@@ -8,6 +8,7 @@ import { runAgent } from './agent-runner'
 import { humanEvent } from './normalize'
 import { DDL_V1, DDL_V2, DDL_V3, SPAN_COLS, sqlInsert, spanRowsFromItems } from './span-ledger'
 import type { TraceEvent } from '../shared/trace'
+import { createClaudeProbeFixture } from './provider-probe-fixture'
 
 const RUN = process.env.P1_PROBE === '1'
 const CLAUDE = process.env.CLAUDE_BIN || `${process.env.HOME}/.nvm/versions/node/v22.22.1/bin/claude`
@@ -16,43 +17,53 @@ const CLAUDE = process.env.CLAUDE_BIN || `${process.env.HOME}/.nvm/versions/node
   it(
     '真实会话驱动 subagent，子步骤带 parent_tool_use_id 并落成挂父 span',
     async () => {
-      const items: TraceEvent[] = []
-      const runId = 'run-p1-probe'
-      const cwd = process.cwd()
-      items.push(humanEvent('P1 subagent 验证', { runId, newId: () => `h-${items.length}`, now: () => new Date().toISOString() }))
-      const handle = runAgent(
-        '用 Task 工具启动一个 general-purpose 子 agent，让它用 Bash 跑 `echo from-subagent` 并回报。完成后只回「done」。',
-        runId,
-        (ev) => items.push(ev),
-        { cwd, claudePath: CLAUDE, env: process.env as Record<string, string> }
-      )
-      const res = await handle.promise
-      expect(res.sessionId).toBeTruthy()
-
-      // 主流上应出现带 parentToolUseId 的 subagent 事件（forwardSubagentText 的效果）
-      const subItems = items.filter((e) => e.parentToolUseId)
-      // eslint-disable-next-line no-console
-      console.log(`\n===== P1 证据 =====\nsubagent 事件(带 parentToolUseId): ${subItems.length}`)
-      // eslint-disable-next-line no-console
-      console.log('parent tool_use_ids:', [...new Set(subItems.map((e) => e.parentToolUseId))])
-      expect(subItems.length).toBeGreaterThan(0)
-
-      // 落库后，spans 表应有 parent_tool_use_id 非空的行（挂父）
+      const fixture = await createClaudeProbeFixture()
+      let handle: ReturnType<typeof runAgent> | undefined
       type Stmt = { run: (...p: unknown[]) => unknown; all: (...p: unknown[]) => unknown[] }
       type Db = { prepare: (s: string) => Stmt; close: () => void }
-      const sqlite = (await import('node:sqlite')) as unknown as { DatabaseSync: new (p: string) => Db }
-      const db = new sqlite.DatabaseSync(':memory:')
-      for (const stmt of [...DDL_V1, ...DDL_V2, ...DDL_V3]) db.prepare(stmt).run()
-      const rows = spanRowsFromItems({ runId, sessionId: res.sessionId, cwd, items, nowMs: Date.now() })
-      const insSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
-      for (const r of rows.spans) insSpan.run(...(r as unknown[]))
-      const nested = db
-        .prepare(`SELECT kind, tool, parent_tool_use_id FROM spans WHERE parent_tool_use_id IS NOT NULL`)
-        .all() as Record<string, unknown>[]
-      // eslint-disable-next-line no-console
-      console.log('挂父 spans:', nested)
-      expect(nested.length).toBeGreaterThan(0)
-      db.close()
+      let db: Db | undefined
+      try {
+        const items: TraceEvent[] = []
+        const runId = 'run-p1-probe'
+        const cwd = fixture.cwd
+        items.push(humanEvent('P1 subagent 验证', { runId, newId: () => `h-${items.length}`, now: () => new Date().toISOString() }))
+        handle = runAgent(
+          '用 Task 工具启动一个 general-purpose 子 agent，让它用 Bash 跑 `echo from-subagent` 并回报。完成后只回「done」。',
+          runId,
+          (ev) => items.push(ev),
+          { cwd, claudePath: CLAUDE, env: fixture.env }
+        )
+        const res = await handle.promise
+        expect(res.sessionId).toBeTruthy()
+
+        // 主流上应出现带 parentToolUseId 的 subagent 事件（forwardSubagentText 的效果）
+        const subItems = items.filter((e) => e.parentToolUseId)
+        // eslint-disable-next-line no-console
+        console.log(`\n===== P1 证据 =====\nsubagent 事件(带 parentToolUseId): ${subItems.length}`)
+        // eslint-disable-next-line no-console
+        console.log('parent tool_use_ids:', [...new Set(subItems.map((e) => e.parentToolUseId))])
+        expect(subItems.length).toBeGreaterThan(0)
+
+        // 落库后，spans 表应有 parent_tool_use_id 非空的行（挂父）
+        const sqlite = (await import('node:sqlite')) as unknown as { DatabaseSync: new (p: string) => Db }
+        db = new sqlite.DatabaseSync(':memory:')
+        for (const stmt of [...DDL_V1, ...DDL_V2, ...DDL_V3]) db.prepare(stmt).run()
+        const rows = spanRowsFromItems({ runId, sessionId: res.sessionId, cwd, items, nowMs: Date.now() })
+        const insSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
+        for (const r of rows.spans) insSpan.run(...(r as unknown[]))
+        const nested = db
+          .prepare(`SELECT kind, tool, parent_tool_use_id FROM spans WHERE parent_tool_use_id IS NOT NULL`)
+          .all() as Record<string, unknown>[]
+        // eslint-disable-next-line no-console
+        console.log('挂父 spans:', nested)
+        expect(nested.length).toBeGreaterThan(0)
+      } finally {
+        handle?.interrupt()
+        handle?.forceKill()
+        if (handle) await handle.promise.catch(() => undefined)
+        db?.close()
+        await fixture.cleanup()
+      }
     },
     240000
   )

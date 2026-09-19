@@ -121,6 +121,18 @@ describe('useAgentSession state reducers', () => {
     expect(mergeActiveRun(prev, restored)[0].attachments).toEqual([image])
   })
 
+  it('流式更新只重建活跃 turn，保留其它 turn 的对象身份（AssistantTurn memo 跳过重渲染的前提）', () => {
+    const older: Turn = { runId: 'r1', userText: '早前', items: [ev('a', 'r1')], done: true }
+    const active: Turn = { runId: 'r2', userText: '进行中', items: [ev('b', 'r2')], done: false }
+    const prev: Turn[] = [older, active]
+    const next = mergeActiveRun(prev, { ...active, items: [ev('b', 'r2'), ev('c', 'r2')] })
+    // 数组本身是新引用，但已完成的历史 turn 必须保持同一对象引用，否则 memo 会在每个流式 tick 重渲染整条历史。
+    expect(next).not.toBe(prev)
+    expect(next[0]).toBe(older)
+    expect(next[1]).not.toBe(active)
+    expect(next[1].items.map((e) => e.id)).toEqual(['b', 'c'])
+  })
+
   it('does not let an older active snapshot undo coalesced local stream text', () => {
     const stale: Turn = { runId: 'r1', userText: 'prompt', items: [{ ...ev('stream'), text: 'a', thinking: '想' }], done: false }
     const local: Turn[] = [{

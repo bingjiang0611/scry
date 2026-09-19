@@ -33,6 +33,17 @@ const fullText = (id: string, text: string): TraceEvent => ({
   text
 })
 
+const thinking = (id: string, text: string, extra: Partial<TraceEvent> = {}): TraceEvent => ({
+  id,
+  runId: 'r1',
+  ts: '',
+  kind: 'model',
+  stage: 'thinking',
+  messageId: 'm1',
+  thinking: text,
+  ...extra
+})
+
 describe('turn stream fragment classification', () => {
   it('treats text_delta as streaming, and full text only for codex transports', () => {
     expect(isStreamTextFragment(delta('d1', 'a'))).toBe(true)
@@ -78,6 +89,33 @@ describe('TurnStreamProjectionCache bounded structural updates', () => {
       expect(projection.structuralItems).toBe(first)
     }
     expect(recomputes).toBe(0)
+  })
+
+  it('keeps an updating reasoning tail out of structural projections', () => {
+    const cache = new TurnStreamProjectionCache()
+    const base = [tool('t-1')]
+    const first = cache.project(base).structuralItems
+    let value = ''
+    for (let index = 0; index < 200; index++) {
+      value += `reason-${index} `
+      const projection = cache.project([...base, thinking('thinking-1', value)])
+      expect(projection.structuralItems).toBe(first)
+      expect(projection.structuralRecomputed).toBe(false)
+      expect(projection.liveThinking).toBe(value)
+      expect(projection.liveText).toBe('')
+      expect(projection.liveKey).toBe('thinking-1')
+    }
+  })
+
+  it('separates reasoning streams by message identity and preserves finalized reasoning', () => {
+    const cache = new TurnStreamProjectionCache()
+    const first = thinking('thinking-1', 'first', { messageId: 'message-1' })
+    cache.project([first])
+    const next = cache.project([first, thinking('thinking-2', 'second', { messageId: 'message-2' })])
+
+    expect(next.structuralRecomputed).toBe(true)
+    expect(next.structuralItems).toEqual([first])
+    expect(next.liveThinking).toBe('second')
   })
 
   it('recomputes exactly once per structural change and preserves ordering', () => {

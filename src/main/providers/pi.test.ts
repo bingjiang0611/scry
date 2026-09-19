@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import type { ParsedTurn } from '../normalize'
 import { piProfileForExecutable } from '../pi-agent-profiles'
+import * as shellEnvironment from '../claude-locate'
 import { aggregateTurnEvidence } from '../../core/turn-recorder/aggregate'
 import {
   commitManagedRecorderTurn,
@@ -15,13 +16,15 @@ import {
 import { listRecords, stableHash } from '../../core/turn-recorder/store'
 import {
   createPiAdapter,
+  PI_RPC_STARTUP_TIMEOUT_MS,
   piRpcEnvironment,
   piUserEntryIdAfterBaseline,
-  piVersionProbeEnvironment,
-  probePiAgent
+  probePiAgent,
+  questionFromExtension
 } from './pi'
 
 const fixtureSource = `#!/usr/bin/env node
+require('node:fs').appendFileSync(process.cwd() + '/fixture-starts', String(process.pid) + '\\n')
 if (process.argv.includes('--approve') || process.argv.includes('--no-approve')) {
   process.stderr.write('Scry must not override Pi project trust')
   process.exit(64)
@@ -48,17 +51,27 @@ process.stdin.on('data', (chunk) => {
     if (!raw) continue
     const command = JSON.parse(raw)
     const response = (data) => send({ type: 'response', id: command.id, command: command.type, success: true, ...(data ? { data } : {}) })
-    if (command.type === 'get_state' && promptMessage === 'final-state-hang') {
-      send({ type: 'extension_ui_request', id: 'final-state-wait', method: 'select', title: 'Final state', options: ['Continue'] })
-    } else if (command.type === 'get_state' && require('node:fs').existsSync(process.cwd() + '/hold-startup')) {
-      send({ type: 'extension_ui_request', id: 'startup-wait', method: 'select', title: 'Loading', options: ['Wait'] })
-    } else if (command.type === 'get_state') response({
-      model: { provider: 'test-provider', id: 'test-model' },
-      thinkingLevel: 'high',
-      sessionId,
-      sessionFile: '/tmp/pi-session-1.jsonl',
-      cwd: process.cwd()
-    })
+    if (command.type === 'get_state') {
+      if (promptMessage === 'final-state-hang') {
+        send({ type: 'extension_ui_request', id: 'final-state-wait', method: 'select', title: 'Final state', options: ['Continue'] })
+        continue
+      }
+      if (require('node:fs').existsSync(process.cwd() + '/hold-startup')) {
+        send({ type: 'extension_ui_request', id: 'startup-wait', method: 'select', title: 'Loading', options: ['Wait'] })
+        continue
+      }
+      const state = {
+        model: { provider: 'test-provider', id: 'test-model' },
+        thinkingLevel: 'high',
+        sessionId,
+        sessionFile: '/tmp/pi-session-1.jsonl',
+        cwd: process.cwd()
+      }
+      if (promptMessage === 'stop-before-final-state') {
+        require('node:fs').writeFileSync(process.cwd() + '/final-state-requested', '')
+      }
+      response(state)
+    }
     else if (command.type === 'get_available_models') response({ models: [{
       provider: 'openai-codex', id: 'test-model', name: 'Test Model', contextWindow: 200000,
       thinkingLevelMap: { off: null, high: 'high' }
@@ -120,7 +133,42 @@ process.stdin.on('data', (chunk) => {
         continue
       }
       response()
+      if (command.message === 'provider-fetch-failed' || command.message === 'provider-http-413') {
+        const payloadTooLarge = command.message === 'provider-http-413'
+        send({ type: 'message_start', message: { role: 'assistant' } })
+        send({ type: 'message_end', message: {
+          role: 'assistant', provider: 'openai-codex', model: 'test-model', stopReason: 'error',
+          errorMessage: payloadTooLarge ? 'Qoder: http_413' : 'fetch failed', content: [],
+          ...(payloadTooLarge ? {} : { diagnostics: [{ type: 'provider_transport_failure', error: { message: 'WebSocket error' } }] }),
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }
+        } })
+        send({ type: 'agent_end', willRetry: false })
+        send({ type: 'agent_settled' })
+        continue
+      }
       if (command.message === 'hang') continue
+      if (command.message === 'stop-before-final-state') {
+        send({ type: 'message_start', message: { role: 'assistant' } })
+        send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'started' } })
+        continue
+      }
+      if (command.message === 'long-active') {
+        let ticks = 0
+        const timer = setInterval(() => {
+          ticks += 1
+          send({ type: 'status_update', status: 'working', ticks })
+          if (ticks === 5) {
+            clearInterval(timer)
+            send({ type: 'agent_settled' })
+          }
+        }, 20)
+        continue
+      }
+      if (command.message === 'oversized-unframed') {
+        process.stdout.write('x'.repeat(2 * 1024 * 1024))
+        continue
+      }
+      if (command.message === 'large-event') send({ type: 'unknown_large', payload: 'x'.repeat(17 * 1024 * 1024) })
       if (command.message === 'pending-question') {
         send({ type: 'extension_ui_request', id: 'question-late', method: 'select', title: 'Pick one', options: ['One'] })
       }
@@ -132,9 +180,12 @@ process.stdin.on('data', (chunk) => {
       send({ type: 'tool_execution_end', toolCallId: 'tool-read', toolName: 'read', result: command.message === 'large-tool' ? '原文😀'.repeat(60_000) + 'PI-TOOL-END' : 'contents', isError: false })
       send({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'subagent', args: { task: 'inspect' } })
       send({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'subagent', result: { content: [{ type: 'text', text: 'done' }] }, isError: false })
+      const providerAborted = command.message === 'provider-aborted'
       send({ type: 'message_end', message: {
-        role: 'assistant', provider: 'openai-codex', model: 'test-model', stopReason: 'stop',
-        content: [{ type: 'text', text: 'hello world' }],
+        role: 'assistant', provider: 'openai-codex', model: 'test-model',
+        stopReason: providerAborted ? 'aborted' : 'stop',
+        ...(providerAborted ? { errorMessage: 'Qoder: aborted' } : {}),
+        content: providerAborted ? [] : [{ type: 'text', text: 'hello world' }],
         usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 1, cost: { total: 0.01 } }
       } })
       send({ type: 'agent_end', willRetry: false })
@@ -146,21 +197,73 @@ process.stdin.on('data', (chunk) => {
         leafId = entry.id
       } else acknowledgePrompt()
       send({ type: 'agent_settled' })
+    } else if (command.type === 'abort' && promptMessage === 'stop-before-final-state') {
+      send({ type: 'agent_settled' })
     } else response()
   }
 })
 `
 
-function withFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<T>): Promise<T> {
+function withFixture<T>(
+  run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<T>,
+  executableName = 'fixture-pi'
+): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'scry-pi-rpc-'))
-  const executable = join(dir, 'fixture-pi')
+  const executable = join(dir, executableName)
   writeFileSync(executable, fixtureSource)
   chmodSync(executable, 0o755)
   return run(piProfileForExecutable(executable), dir).finally(() => rmSync(dir, { recursive: true, force: true }))
 }
 
+function withRotomFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<T>): Promise<T> {
+  return withFixture(run, 'rotom')
+}
+
 describe('Pi RPC Provider', () => {
-  it('pins the packaged Pi runtime from supported PATH bootstrap forms', () => {
+  it('restores structured multi-select choices from an extension text-input prompt', () => {
+    const title = '[不满意点] 你最想改善什么？（可多选）\n\n1. 布局不均衡 — 卡片留白混乱\n2. 视觉风格不够精致 — 层级与质感不足'
+    const request = questionFromExtension('run-input', {
+      type: 'extension_ui_request',
+      id: 'input-1',
+      method: 'input',
+      title,
+      placeholder: '1,3'
+    })
+
+    expect(request?.questions[0]).toEqual({
+      header: '不满意点',
+      question: '你最想改善什么？',
+      multiSelect: true,
+      options: [
+        { label: '布局不均衡', description: '卡片留白混乱', answerValue: '1' },
+        { label: '视觉风格不够精致', description: '层级与质感不足', answerValue: '2' }
+      ]
+    })
+  })
+
+  it('keeps a plain extension input as a direct free-text question', () => {
+    const request = questionFromExtension('run-input', {
+      id: 'input-2',
+      method: 'input',
+      title: '请输入发布说明',
+      placeholder: '一句话概括'
+    })
+
+    expect(request?.questions[0]).toEqual({
+      header: '回答',
+      question: '请输入发布说明',
+      multiSelect: false,
+      options: [],
+      inputMode: 'singleline',
+      placeholder: '一句话概括'
+    })
+  })
+
+  it('allows cold session startup to exceed the ordinary 15 second command deadline', () => {
+    expect(PI_RPC_STARTUP_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000)
+  })
+
+  it('pins the packaged Pi runtime from supported PATH bootstrap forms', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-pi-bootstrap-'))
     try {
       const packageRoot = join(dir, 'node_modules', '@example', 'pi-coding-agent')
@@ -181,10 +284,10 @@ describe('Pi RPC Provider', () => {
       chmodSync(bootstrap, 0o755)
 
       const profile = piProfileForExecutable(launcher)
-      expect(piRpcEnvironment(profile, { PATH: dir, HOME: dir }).PI_AGENT_PI).toBe(realpathSync(runtime))
+      expect((await piRpcEnvironment(profile, { PATH: dir, HOME: dir })).PI_AGENT_PI).toBe(realpathSync(runtime))
 
       writeFileSync(bootstrap, `#!/bin/sh\nPI_AGENT_PI=${runtime} \\\n\texec ${launcher} "$@"\n`)
-      expect(piRpcEnvironment(profile, { PATH: dir, HOME: dir }).PI_AGENT_PI).toBe(realpathSync(runtime))
+      expect((await piRpcEnvironment(profile, { PATH: dir, HOME: dir })).PI_AGENT_PI).toBe(realpathSync(runtime))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -212,53 +315,55 @@ describe('Pi RPC Provider', () => {
       chmodSync(join(newBin, 'node'), 0o755)
 
       const profile = piProfileForExecutable(launcher)
-      expect(piRpcEnvironment(profile, {
+      expect((await piRpcEnvironment(profile, {
         PATH: `${oldBin}${delimiter}${newBin}`,
         HOME: dir,
         PI_AGENT_PI: '/already/pinned/pi'
-      }).PI_AGENT_NODE).toBe(realpathSync(join(newBin, 'node')))
-      expect(piRpcEnvironment(profile, {
+      })).PI_AGENT_NODE).toBe(realpathSync(join(newBin, 'node')))
+      expect((await piRpcEnvironment(profile, {
         PATH: `${oldBin}${delimiter}${newBin}`,
         HOME: dir,
         PI_AGENT_NODE: join(oldBin, 'node')
-      }).PI_AGENT_NODE).toBe(join(oldBin, 'node'))
+      })).PI_AGENT_NODE).toBe(join(oldBin, 'node'))
       const nativeProfile = {
         id: 'pi:default',
         label: 'Pi',
         executable: nativeWrapper
       }
-      expect(piRpcEnvironment(nativeProfile, {
-        PATH: `${oldBin}${delimiter}${newBin}`,
-        HOME: dir
-      }).PI_AGENT_NODE).toBe(realpathSync(join(newBin, 'node')))
-      await expect(piVersionProbeEnvironment(nativeProfile, {
+      await expect(piRpcEnvironment(nativeProfile, {
         PATH: `${oldBin}${delimiter}${newBin}`,
         HOME: dir
       })).resolves.toMatchObject({ PI_AGENT_NODE: realpathSync(join(newBin, 'node')) })
 
       const rotomProfile = piProfileForExecutable(rotomLauncher)
       const compatibleNode = realpathSync(join(newBin, 'node'))
-      expect(piRpcEnvironment(rotomProfile, {
+      const rotomEnv = await piRpcEnvironment(rotomProfile, {
         PATH: `${oldBin}${delimiter}${newBin}`,
         HOME: dir
-      })).toMatchObject({ PI_AGENT_NODE: compatibleNode, ROTOM_NODE: compatibleNode })
-      await expect(piVersionProbeEnvironment(rotomProfile, {
+      })
+      expect(rotomEnv).toMatchObject({ ROTOM_NODE: compatibleNode })
+      expect(rotomEnv.PI_AGENT_NODE).toBeUndefined()
+      await expect(piRpcEnvironment(rotomProfile, {
         PATH: `${oldBin}${delimiter}${newBin}`,
-        HOME: dir
-      })).resolves.toMatchObject({ PI_AGENT_NODE: compatibleNode, ROTOM_NODE: compatibleNode })
-      expect(piRpcEnvironment(rotomProfile, {
+        HOME: dir,
+        PI_AGENT_NODE: join(oldBin, 'node')
+      })).resolves.toMatchObject({
+        PI_AGENT_NODE: join(oldBin, 'node'),
+        ROTOM_NODE: compatibleNode
+      })
+      expect((await piRpcEnvironment(rotomProfile, {
         PATH: `${oldBin}${delimiter}${newBin}`,
         HOME: dir,
         ROTOM_NODE: '/configured/node'
-      }).ROTOM_NODE).toBe('/configured/node')
+      })).ROTOM_NODE).toBe('/configured/node')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('removes billing-admin credentials from the Pi subprocess environment', () => {
+  it('removes billing-admin credentials from the Pi subprocess environment', async () => {
     const profile = { id: 'pi:test', label: 'Pi', executable: '/usr/bin/pi' }
-    const env = piRpcEnvironment(profile, {
+    const env = await piRpcEnvironment(profile, {
       PATH: '/usr/bin',
       HOME: '/tmp',
       ANTHROPIC_ADMIN_API_KEY: 'anthropic-admin',
@@ -274,7 +379,7 @@ describe('Pi RPC Provider', () => {
     expect(env).not.toHaveProperty('QODER_MEMBER_ID')
   })
 
-  it('does not infer PI_AGENT_PI from an unverified shell assignment', () => {
+  it('does not infer PI_AGENT_PI from an unverified shell assignment', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-pi-bootstrap-'))
     try {
       const launcher = join(dir, 'pi-agent')
@@ -287,7 +392,7 @@ describe('Pi RPC Provider', () => {
       chmodSync(unrelated, 0o755)
       chmodSync(bootstrap, 0o755)
 
-      const env = piRpcEnvironment(piProfileForExecutable(launcher), { PATH: dir, HOME: dir })
+      const env = await piRpcEnvironment(piProfileForExecutable(launcher), { PATH: dir, HOME: dir })
       expect(env.PI_AGENT_PI).toBeUndefined()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -565,6 +670,179 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
+  it('does not impose a settlement duration deadline', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const startedAt = Date.now()
+      const handle = adapter.run({
+        runId: 'run-long-active', prompt: 'long-active', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      })
+
+      await expect(handle.promise).resolves.toMatchObject({
+        externalSessionId: 'pi-session-1', providerTurnId: 'pi-user-1', status: 'completed'
+      })
+      expect(Date.now() - startedAt).toBeGreaterThan(70)
+    })
+  }, 15_000)
+
+  it('reports an upstream aborted settlement as a failure instead of a completed turn', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-provider-aborted', prompt: 'provider-aborted', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+
+      await expect(handle.promise).rejects.toMatchObject({
+        message: 'Qoder: aborted',
+        brief: expect.objectContaining({ stage: 'runtime' })
+      })
+      expect(handle.getExternalSessionId()).toBe('pi-session-1')
+      expect(handle.getProviderTurnId?.()).toBe('pi-user-1')
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'harness',
+          stage: 'result',
+          isError: true,
+          text: 'Qoder: aborted',
+          providerStopReason: 'aborted'
+        })
+      ]))
+    })
+  }, 15_000)
+
+  it('classifies Qoder 413 and points to the failed-turn recovery branch', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-provider-http-413', prompt: 'provider-http-413', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+
+      await expect(handle.promise).rejects.toMatchObject({
+        message: 'Qoder: http_413',
+        brief: expect.objectContaining({ nextAction: expect.stringContaining('从失败处恢复') })
+      })
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'harness', stage: 'result', isError: true,
+          terminationReason: 'input_context_overflow'
+        })
+      ]))
+    })
+  }, 15_000)
+
+  it('reuses a settled Rotom RPC across turns and invalidates it with the session context', async () => {
+    await withRotomFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const request = (runId: string, prompt: string, resume?: string) => adapter.run({
+        runId, prompt, cwd, resume, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      }).promise
+      try {
+        const first = await request('run-rotom-first', 'first')
+        await expect(request('run-rotom-second', 'second', first.externalSessionId)).resolves.toMatchObject({
+          externalSessionId: 'pi-session-1', providerTurnId: 'pi-user-2', status: 'completed'
+        })
+        expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
+
+        await adapter.invalidateContext?.({
+          providerId: 'pi', agentProfileId: profile.id, cwd, externalSessionId: first.externalSessionId
+        })
+        await expect(request('run-rotom-third', 'third', first.externalSessionId)).resolves.toMatchObject({
+          externalSessionId: 'pi-session-1', status: 'completed'
+        })
+        expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(2)
+      } finally {
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it.each([undefined, '登录 shell 环境采集失败：超时（5s）；修复后重启 Scry'])('preserves transport/context evidence and reports shell failure: %s', async (envError) => {
+    await withRotomFixture(async (profile, cwd) => {
+      const envErrorSpy = vi.spyOn(shellEnvironment, 'shellEnvError').mockReturnValue(envError)
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const request = (runId: string, prompt: string, resume?: string) => adapter.run({
+        runId, prompt, cwd, resume, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      }).promise
+      try {
+        const first = await request('run-rotom-before-failure', 'first')
+        await expect(request('run-rotom-fetch-failure', 'provider-fetch-failed', first.externalSessionId)).rejects.toMatchObject({
+          message: 'fetch failed (WebSocket error)',
+          brief: expect.objectContaining({ nextAction: envError ?? expect.stringContaining('WebSocket 与 SSE') })
+        })
+        expect(events.find((event) => event.runId === 'run-rotom-fetch-failure' && event.stage === 'result')).toMatchObject({
+          isError: true,
+          text: 'fetch failed (WebSocket error)',
+          contextTokens: undefined,
+          runtimeMetadata: expect.objectContaining({ transportError: 'WebSocket error', shellEnvError: envError ?? null })
+        })
+        await expect(request('run-rotom-after-failure', 'after', first.externalSessionId)).resolves.toMatchObject({
+          externalSessionId: 'pi-session-1', status: 'completed'
+        })
+        expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
+      } finally {
+        envErrorSpy.mockRestore()
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it('starts a fresh Rotom RPC after the active transport process exits', async () => {
+    await withRotomFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      try {
+        await expect(adapter.run({
+          runId: 'run-rotom-exit', prompt: 'transport-exit', cwd, resume: 'pi-session-1', agentProfileId: profile.id,
+          attachments: [], permissionMode: 'full_access', emit: vi.fn()
+        }).promise).rejects.toThrow()
+        await expect(adapter.run({
+          runId: 'run-rotom-recovered', prompt: 'recovered', cwd, resume: 'pi-session-1', agentProfileId: profile.id,
+          attachments: [], permissionMode: 'full_access', emit: vi.fn()
+        }).promise).resolves.toMatchObject({ status: 'completed' })
+        expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(2)
+      } finally {
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it('accepts valid JSONL events larger than 16 MiB without terminating the Pi run', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-large-event', prompt: 'large-event', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      })
+
+      await expect(handle.promise).resolves.toMatchObject({
+        externalSessionId: 'pi-session-1', providerTurnId: 'pi-user-1', status: 'completed'
+      })
+    })
+  }, 30_000)
+
+  it('terminates an unframed JSONL message after the explicit 64 MiB residency boundary', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({
+        listProfiles: async () => [profile],
+        resolveProfile: async () => profile,
+        rpcMaxFrameBytes: 1024 * 1024
+      })
+      const handle = adapter.run({
+        runId: 'run-oversized-unframed', prompt: 'oversized-unframed', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      })
+
+      await expect(handle.promise).rejects.toThrow('未完成 JSONL 消息超过 64 MiB')
+    })
+  }, 30_000)
+
   it('proves an explicit skill through get_commands and emits a skill event', async () => {
     await withFixture(async (profile, cwd) => {
       const events: TraceEvent[] = []
@@ -796,6 +1074,25 @@ describe('Pi RPC Provider', () => {
       await new Promise((resolve) => setImmediate(resolve))
     })
   })
+
+  it('does not wait for a redundant final state snapshot after an acknowledged stop', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      let promptStarted!: () => void
+      const started = new Promise<void>((resolve) => { promptStarted = resolve })
+      const handle = adapter.run({
+        runId: 'run-stop-before-final-state', prompt: 'stop-before-final-state', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access',
+        emit: (event) => {
+          if (event.stage === 'text_delta') promptStarted()
+        }
+      })
+      await started
+      handle.interrupt()
+      await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
+      expect(existsSync(join(cwd, 'final-state-requested'))).toBe(false)
+    })
+  }, 10_000)
 
   it('settles as interrupted when abort has to terminate a stuck launcher', async () => {
     await withFixture(async (profile, cwd) => {

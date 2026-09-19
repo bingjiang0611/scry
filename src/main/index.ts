@@ -26,12 +26,15 @@ import {
   discoverTraceArchiveSessions,
   mirrorTranscript,
   readTraceArchiveAsync,
+  readTraceArchivePageAsync,
   resolveTranscriptPath,
   traceArchiveRunIds,
   upsertTraceArchiveTurn,
+  type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
 import {
+  hydrateSessionHistoryPage,
   mergeSessionTurns,
   restoreTraceArchiveTurn,
   sessionHistoryPage,
@@ -55,6 +58,7 @@ import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { stopObservedBackgroundTask } from './background-task-control'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
+import { isRendererPerformanceSample } from '../shared/performance'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot, type UsageAnalyticsRangeDays } from '../shared/trace'
 import {
   normalizeAgentForkSessionRequest,
@@ -73,7 +77,7 @@ import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
 import { createSmokeProviderAdapter } from './providers/smoke'
-import { piRpcEnvironment, piVersionProbeEnvironment, probePiAgent } from './providers/pi'
+import { piRpcEnvironment, probePiAgent } from './providers/pi'
 import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
 import { composeProviderDetectionResults } from './provider-detection'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
@@ -81,6 +85,8 @@ import { ProviderOperationGate, providerOperationKey } from './provider-operatio
 import { verifyForkArchiveBoundary } from './session-fork'
 import { appendCoalescedTrace, upsertTraceById } from './live-trace'
 import { createTurnWallTimer } from './turn-wall-timing'
+import { PerformanceTrace } from './performance-timing'
+import { startPerformanceResourceMonitor, type PerformanceResourceMonitor } from './performance-resource-monitor'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import {
   isManagedRecorderProvider,
@@ -106,6 +112,7 @@ import { ensureRelayCredential } from './remote/relay-credential'
 import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
+import { sessionAttentionKey } from '../shared/session-attention'
 import { archiveSessionId } from './session-id'
 import {
   codexHookFingerprint,
@@ -143,7 +150,7 @@ import { HomeFileAccess } from './home-file-access'
 import { createTerminalManager, type TerminalManager } from './terminal-manager'
 import { TerminalRecordingWorkerClient } from './terminal-recording-backend'
 import { TerminalOutputBridge } from './terminal-output'
-import { TraceOutputBridge } from './trace-output'
+import { TraceOutputBridge, type TraceBatchReceipt } from './trace-output'
 import { flattenTraceItems } from './remote/trace-output'
 import {
   authorizedWorkspaceRequest,
@@ -151,6 +158,7 @@ import {
   knownProjectDirectory
 } from './workspace-authorization'
 import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
+import { assertTrustedIpcEvent as assertTrustedIpcEventForWindow, registerTrustedIpcHandler } from './ipc-trust'
 import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
 import type {
   TerminalCloseRequest,
@@ -161,7 +169,12 @@ import type {
   TerminalOwnershipRequest,
   TerminalWriteRequest
 } from '../shared/terminal'
-import { editContextMenuTemplate, shouldShowEditContextMenu } from './edit-context-menu'
+import {
+  editContextMenuTemplate,
+  imageContextMenuTemplate,
+  shouldShowEditContextMenu,
+  shouldShowImageContextMenu
+} from './edit-context-menu'
 import {
   canonicalOrObservedTurnTiming,
   commitManagedTraceTurn,
@@ -202,6 +215,7 @@ import {
   attachmentSessionRunIds,
   deleteRunAttachments,
   prepareRunAttachments,
+  providerAttachmentPrompt,
   storeAttachmentReference,
   updateRunAttachmentOwner,
   type PreparedAttachment
@@ -224,6 +238,7 @@ import {
   persistTraceTurnProgress,
   persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
+  shouldUseManagedTerminalPersistence,
   traceProgressSessionRunIds
 } from './trace-turn-progress'
 
@@ -264,31 +279,32 @@ if (!primaryInstance) {
 }
 setBillingEnvProvider(shellEnv)
 
-function attachmentPrompt(prompt: string, attachments: PreparedAttachment[]): string {
-  const text = prompt.trim()
-  if (attachments.length === 0) return text
-  const lines = attachments.map((attachment, index) => {
-    const size = attachment.size ? `, ${Math.round(attachment.size / 1024)} KB` : ''
-    return `${index + 1}. ${attachment.name} (${attachment.mimeType}${size}) local copy: ${attachment.path}`
-  })
-  return [text, `Scry pasted image attachments:\n${lines.join('\n')}`].filter(Boolean).join('\n\n')
-}
-
 // 每个 Provider + cwd 维护各自的会话；空 cwd 是“不绑定项目”的持久会话作用域。
 const sessionByContext = new Map<string, string>()
 const sessionRevisionByContext = new Map<string, number>()
 const sessionAliasesByContext = new Map<string, Map<string, string>>()
 let loadSessionRevision = 0
-// 已加载会话的单条历史缓存：翻页取更早轮次时回放同一份已归一化历史，
-// 不重解析 transcript、不重读 archive，也不重新 hydrate 附件。revision 不匹配就作废。
-// 诚实边界：它保存的是**整个**会话的全部轮次，不是当前页。分页只收窄 IPC 与 renderer 挂载量，
-// main 侧的全量解析开销与这份常驻内存都还在（每次只保留一条，切会话即作废）。
+let loadSessionAbortController: AbortController | null = null
+// 已加载会话的单条历史缓存：翻页复用归一化事件，但附件只在页越过 IPC 前读取。
+// 这把图片 I/O/base64 与常驻内存限制在可见页；事件源仍完整解析，后续由源级索引继续收窄。
 let sessionHistoryCache: {
   revision: number
   key: string
   turns: LoadedSessionTurn[]
+  transcriptTurns: ParsedTurn[]
+  archive: TraceArchive | null
+  context: { userDataDir: string }
+  archiveSource?: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId }
+  archiveSnapshotTotalTurns?: number
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 } | null = null
+
+function invalidateSessionHistoryLoad(reason: string): void {
+  loadSessionRevision += 1
+  loadSessionAbortController?.abort(new Error(reason))
+  loadSessionAbortController = null
+  sessionHistoryCache = null
+}
 
 // 会话级净 diff 的持久 baseline registry：每个 (provider,cwd) 上下文一份贯穿会话的 Git 快照。
 // revision + 原生 session id 双重锚定，绝不串会话；找不到可复用基线时当场重锚并标 origin=resumed，
@@ -444,7 +460,7 @@ const listProjectCatalog = (): ProjectMeta[] => {
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
 const detectInstalledAgents = () => detectAgents({
   versionProbeEnv: (agent, executable) => providerIdForAgentId(agent.id) === 'pi'
-    ? piVersionProbeEnvironment({ id: agent.id, label: agent.name, executable })
+    ? piRpcEnvironment({ id: agent.id, label: agent.name, executable })
     : undefined
 })
 const detectedPiProfiles = async (): Promise<PiAgentProfile[]> => (await detectInstalledAgents()).flatMap((agent) => {
@@ -540,12 +556,18 @@ const canonicalProviderCwd = (cwd?: string): string => {
   }
 }
 const providerSessionKey = (providerId: ProviderId, cwd: string, sessionId: string, agentProfileId?: string): string =>
-  `${providerContextKey(providerId, cwd, agentProfileId)}\0${sessionId}`
+  sessionAttentionKey({ providerId, agentProfileId, cwd, sessionId })
 let badgePermissionWarningShown = false
 const dockBadge = new DockBadgeState((count) => {
   if (app.setBadgeCount(count) || process.platform !== 'darwin' || badgePermissionWarningShown) return
   badgePermissionWarningShown = true
   console.warn('[scry] macOS Dock badge permission is unavailable')
+}, (snapshot) => {
+  try {
+    win?.webContents.send('agent:unreadSessions', snapshot)
+  } catch (error) {
+    console.warn('[scry] unread session notification failed:', error)
+  }
 })
 const activeRunSessionKey = (run: ActiveRun): string | null => {
   if (!run.providerId) return null
@@ -1078,7 +1100,12 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
     }
     return
   }
-  if (managedPolicy) {
+  // managed Provider 可能在拿到原生 session id 后、真正建立 turn 边界前失败（例如
+  // Pi 的 prompt/recorder preflight）。这种轮次只有 Scry harness 证据，不能伪装成
+  // canonical `.scry` turn；但 session id 已足够作为 Scry 本地 archive key。若仍强制
+  // providerTurnId，会同时丢掉输入与真实启动错误，只在 catalog 留下一个空壳会话。
+  const useManagedPersistence = shouldUseManagedTerminalPersistence(Boolean(managedPolicy), turn)
+  if (useManagedPersistence) {
     const permitsMissingProviderTurnId = managedRecorderAllowsMissingProviderTurnId(args.providerId, args.status)
     if (!args.providerTurnId && !permitsMissingProviderTurnId) {
       throw new Error('managed recorder requires an authoritative Provider turn id')
@@ -1121,7 +1148,8 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
     return
   }
   const { turn, timing } = buildTraceArchiveTurn(args)
-  if (managedPolicy) {
+  const useManagedPersistence = shouldUseManagedTerminalPersistence(Boolean(managedPolicy), turn)
+  if (useManagedPersistence) {
     if (!timing) {
       throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     }
@@ -1197,7 +1225,12 @@ function createWindow(): void {
     }
   })
   const createdWindow = win
-  createdWindow.on('focus', () => dockBadge.focusWindow())
+  createdWindow.on('focus', () => {
+    // A completion received while the app was in the background is considered
+    // read once its already-selected conversation becomes visible again.
+    // DockBadgeState clears only that conversation and preserves other unread runs.
+    dockBadge.focusWindow()
+  })
   createdWindow.on('closed', () => {
     terminalOutput.detachRenderer()
     // renderer 消失后没人再 ACK 在途 trace 字节；不清零会让下一个窗口永久卡在 high-water。
@@ -1262,8 +1295,17 @@ function createWindow(): void {
   // Renderer 在关键快照稳定后主动发 app:rendererReady。保留超时兜底，避免 renderer 异常时窗口永久不可见。
   win.webContents.on('ipc-message', onIpcMessage)
   win.webContents.on('context-menu', (_event, params) => {
-    if (!shouldShowEditContextMenu(params) || !win) return
-    Menu.buildFromTemplate(editContextMenuTemplate(params)).popup({ window: win })
+    if (!win) return
+    if (shouldShowImageContextMenu(params)) {
+      const { x, y } = params
+      Menu.buildFromTemplate(imageContextMenuTemplate(() => {
+        if (!createdWindow.isDestroyed()) createdWindow.webContents.copyImageAt(x, y)
+      })).popup({ window: win })
+      return
+    }
+    if (shouldShowEditContextMenu(params)) {
+      Menu.buildFromTemplate(editContextMenuTemplate(params)).popup({ window: win })
+    }
   })
   setTimeout(showWindow, 2500)
   if (useDevelopmentRenderer) {
@@ -1274,25 +1316,14 @@ function createWindow(): void {
 }
 
 function assertTrustedIpcEvent(event: IpcMainInvokeEvent): void {
-  if (
-    !win ||
-    win.isDestroyed() ||
-    event.sender !== win.webContents ||
-    event.senderFrame !== win.webContents.mainFrame ||
-    !isTrustedRendererUrl(event.senderFrame.url, rendererEntryUrl)
-  ) {
-    throw new Error('拒绝来自非可信 renderer 的 IPC 调用')
-  }
+  assertTrustedIpcEventForWindow(event, win, rendererEntryUrl)
 }
 
 function handleTrusted<TArgs extends unknown[], TResult>(
   channel: string,
   listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult
 ): void {
-  ipcMain.handle(channel, (event, ...args) => {
-    assertTrustedIpcEvent(event)
-    return listener(event, ...(args as TArgs))
-  })
+  registerTrustedIpcHandler(ipcMain, channel, () => win, rendererEntryUrl, listener)
 }
 
 handleTrusted('app:setTheme', (_event, theme: unknown) => {
@@ -1300,6 +1331,18 @@ handleTrusted('app:setTheme', (_event, theme: unknown) => {
   nativeTheme.themeSource = theme
   win?.setBackgroundColor(windowBackgroundColor(theme))
   return true as const
+})
+
+handleTrusted('app:performanceDiagnosticsEnabled', () => process.env.SCRY_PERF_LOG === '1')
+handleTrusted('app:reportRendererPerformance', (_event, sample: unknown) => {
+  if (!isRendererPerformanceSample(sample)) throw new Error('无效的 renderer 性能样本')
+  if (process.env.SCRY_PERF_LOG !== '1') return false
+  console.info(`[scry:renderer-perf] ${JSON.stringify({
+    name: 'renderer.resources',
+    sampledAt: new Date().toISOString(),
+    ...sample
+  })}`)
+  return true
 })
 
 handleTrusted('agent:detectFast', () => {
@@ -1336,8 +1379,8 @@ handleTrusted('agent:detect', async () => {
     detected,
     descriptors,
     storedPiProfiles: storedPiProfilesNotDetected(detected),
-    probeStoredPiProfile: (profile) => probeCliVersion(profile.executable, ['--version'], {
-      env: piRpcEnvironment(profile),
+    probeStoredPiProfile: async (profile) => probeCliVersion(profile.executable, ['--version'], {
+      env: await piRpcEnvironment(profile),
       timeout: PI_VERSION_PROBE_TIMEOUT_MS
     })
   })
@@ -1349,7 +1392,7 @@ handleTrusted('agent:addPiProfile', async () => {
   try {
     const profile = piProfileForExecutable(result.filePaths[0])
     const versionProbe = await probeCliVersion(profile.executable, ['--version'], {
-      env: piRpcEnvironment(profile),
+      env: await piRpcEnvironment(profile),
       timeout: PI_VERSION_PROBE_TIMEOUT_MS
     })
     await probePiAgent(profile, currentCwd)
@@ -1396,8 +1439,7 @@ handleTrusted('agent:chooseFolder', async () => {
   const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
   if (r.canceled || r.filePaths.length === 0) return null
   const dir = canonicalExistingDirectory(r.filePaths[0])
-  loadSessionRevision++
-  sessionHistoryCache = null
+  invalidateSessionHistoryLoad('workspace selection changed')
   rememberProject(dir)
   setCurrentCwd(dir)
   return dir
@@ -1575,8 +1617,7 @@ handleTrusted('terminal:close', async (event, request: TerminalOwnershipRequest)
 })
 
 handleTrusted('agent:setCwd', (_e, dir: string | null) => {
-  loadSessionRevision++
-  sessionHistoryCache = null
+  invalidateSessionHistoryLoad('workspace changed')
   const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
   setCurrentCwd(cwd)
   return cwd ?? null
@@ -1641,8 +1682,7 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
       })
       resetSessionContext(contextKey)
       sessionByContext.set(contextKey, forked.externalSessionId)
-      loadSessionRevision++
-      sessionHistoryCache = null
+      invalidateSessionHistoryLoad('session forked')
       appSessionStore().record({
         providerId,
         agentProfileId,
@@ -1837,6 +1877,11 @@ function pageWithHookCommands(
 
 handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?: SessionHistoryPageRequest) => {
   if (!payload.externalSessionId) return null
+  const perf = new PerformanceTrace('session_history.load', { provider: payload.providerId })
+  loadSessionAbortController?.abort(new Error('session history request superseded'))
+  const requestController = new AbortController()
+  loadSessionAbortController = requestController
+  const { signal } = requestController
   const requestRevision = ++loadSessionRevision
   const catalogMatches = appSessionStore().load().filter((session) =>
     session.providerId === payload.providerId && session.agentProfileId === payload.agentProfileId &&
@@ -1849,32 +1894,55 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     ? catalogMatches[0]
     : catalogMatches.find((session) => session.cwd === requestedCwd)
   if (!catalogSession) throw new Error('会话不属于当前 Scry catalog 或身份不唯一')
+  perf.mark('catalog', { matches: catalogMatches.length })
   const cwd = catalogSession.cwd ? resolveKnownProjectDirectory(catalogSession.cwd) : ''
   if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
-  const archived = await readTraceArchiveAsync({
-    cwd,
-    sessionId: payload.externalSessionId,
-    providerId: payload.providerId,
-    userDataDir: app.getPath('userData')
-  })
+  const userDataDir = app.getPath('userData')
+  const archiveArgs = { cwd, sessionId: payload.externalSessionId, providerId: payload.providerId, userDataDir }
   const fp =
     payload.providerId === 'claude' && cwd
-      ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir: app.getPath('userData') })
+      ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
       : null
+  // Qoder/Pi add Provider-owned evidence during full-history enrichment. Other archive-only sessions
+  // can read exactly the requested per-turn files through the rebuildable archive index.
+  const archivePaged = !fp && payload.providerId !== 'qoder' && payload.providerId !== 'pi'
+  let archivePage: Awaited<ReturnType<typeof readTraceArchivePageAsync>> | null
+  let archived: TraceArchive | null
+  try {
+    archivePage = archivePaged
+      ? await readTraceArchivePageAsync(archiveArgs, { limit: request?.limit }, signal)
+      : null
+    archived = archivePage?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
+  } catch (error) {
+    if (signal.aborted) return null
+    throw error
+  }
+  perf.mark('archive', {
+    archiveTurns: archived?.turns.length ?? 0,
+    archiveTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0,
+    archiveTurnFilesRead: archivePage?.turnFilesRead ?? archived?.turns.length ?? 0
+  })
   let turns: ParsedTurn[] = []
+  let transcriptBytes = 0
   if (fp) {
     try {
-      const content = await readFile(fp, 'utf8')
+      const content = await readFile(fp, { encoding: 'utf8', signal })
+      transcriptBytes = Buffer.byteLength(content)
       turns = parseTranscriptToTurns(content, {
         runId: payload.externalSessionId,
         newId: () => mainEventId('history', payload.externalSessionId!),
         now: () => new Date().toISOString()
       })
-    } catch {
+    } catch (error) {
+      if (signal.aborted) return null
       if (!archived) return null
     }
   }
-  if (!fp && !archived) return null
+  perf.mark('transcript', { transcriptTurns: turns.length, transcriptBytes })
+  if (!fp && !archived) {
+    perf.finish({ returnedTurns: 0 })
+    return null
+  }
   if (requestRevision !== loadSessionRevision) return null
   dockBadge.view(
     providerSessionKey(payload.providerId, cwd, payload.externalSessionId, payload.agentProfileId),
@@ -1898,10 +1966,12 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
   else sessionByContext.delete(key)
   if (cwd) rememberProject(cwd)
+  const historyContext = { userDataDir }
   const merged = await providerRegistry.enrichSession(
     { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-    mergeSessionTurns(turns, archived, { userDataDir: app.getPath('userData') })
+    mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
   )
+  perf.mark('merge', { mergedTurns: merged.length })
   if (requestRevision !== loadSessionRevision) return null
   const hookConfig =
     cwd && payload.providerId === 'claude'
@@ -1913,21 +1983,78 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     revision: requestRevision,
     key: sessionHistoryCacheKey(payload, cwd),
     turns: merged,
+    transcriptTurns: turns,
+    archive: archived,
+    context: historyContext,
+    ...(archivePaged ? {
+      archiveSource: archiveArgs,
+      archiveSnapshotTotalTurns: archivePage?.totalTurns ?? 0
+    } : {}),
     hookConfig
   }
-  return pageWithHookCommands(sessionHistoryPage(merged, { before: undefined, limit: request?.limit }), hookConfig)
+  const unhydratedPage: SessionHistoryPage = archivePage
+    ? {
+        turns: merged,
+        offset: archivePage.offset,
+        totalTurns: archivePage.totalTurns,
+        hasOlder: archivePage.hasOlder,
+        completeness: archivePage.hasOlder ? 'partial' : 'complete'
+      }
+    : sessionHistoryPage(merged, { before: undefined, limit: request?.limit })
+  const page = hydrateSessionHistoryPage(
+    unhydratedPage,
+    turns,
+    archived,
+    historyContext
+  )
+  perf.mark('page_hydration', { returnedTurns: page.turns.length })
+  const result = pageWithHookCommands(page, hookConfig)
+  perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+  return result
 })
 
 // 更早轮次的纯读取：不重做任何会话切换副作用（cwd / baseline / dock badge / resume）。
 // revision 或 session 身份不匹配时返回 null：renderer 将它当作过期请求丢弃，而不是拼上错会话的轮次。
-handleTrusted('agent:loadSessionOlder', (_e, payload: ProviderContext, request: SessionHistoryPageRequest) => {
+handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, request: SessionHistoryPageRequest) => {
   if (!payload.externalSessionId) return null
+  const perf = new PerformanceTrace('session_history.load_older', { provider: payload.providerId })
   const cache = sessionHistoryCache
   if (!cache || cache.revision !== loadSessionRevision) return null
   const cwd = payload.cwd?.trim() ? resolveKnownProjectDirectory(payload.cwd) : ''
   if (cache.key !== sessionHistoryCacheKey(payload, cwd)) return null
   if (request?.before == null || !Number.isFinite(request.before) || request.before <= 0) return null
-  return pageWithHookCommands(sessionHistoryPage(cache.turns, request), cache.hookConfig)
+  if (cache.archiveSource) {
+    const sourcePage = await readTraceArchivePageAsync(cache.archiveSource, {
+      ...request,
+      snapshotTotalTurns: cache.archiveSnapshotTotalTurns
+    })
+    if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+    const turns = mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
+    const page = hydrateSessionHistoryPage({
+      turns,
+      offset: sourcePage.offset,
+      totalTurns: sourcePage.totalTurns,
+      hasOlder: sourcePage.hasOlder,
+      completeness: sourcePage.hasOlder ? 'partial' : 'complete'
+    }, [], sourcePage.archive, cache.context)
+    perf.mark('indexed_archive', {
+      returnedTurns: page.turns.length,
+      archiveTurnFilesRead: sourcePage.turnFilesRead
+    })
+    const result = pageWithHookCommands(page, cache.hookConfig)
+    perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+    return result
+  }
+  const page = hydrateSessionHistoryPage(
+    sessionHistoryPage(cache.turns, request),
+    cache.transcriptTurns,
+    cache.archive,
+    cache.context
+  )
+  perf.mark('cached_history', { returnedTurns: page.turns.length })
+  const result = pageWithHookCommands(page, cache.hookConfig)
+  perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+  return result
 })
 
 type SessionDeletionRequest = Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }
@@ -2069,7 +2196,13 @@ async function deleteOneSession(
       }
       recordingBlockedSessions.delete(deletionKey)
       dockBadge.remove(deletionKey)
-        return result
+      if (rendererCanReceive()) {
+        win?.webContents.send('agent:dataUpdated', {
+          runId: catalogRunId ?? externalSessionId,
+          kind: 'session_deleted'
+        })
+      }
+      return result
       })
     } finally {
       deletingSessions.delete(deletionKey)
@@ -2077,7 +2210,7 @@ async function deleteOneSession(
 }
 
 handleTrusted('agent:deleteSession', (_e, p: SessionDeletionRequest) =>
-  deleteOneSession(p, { confirm: true, notifyFailure: true }))
+  deleteOneSession(p, { confirm: !isOwnedTestApp, notifyFailure: true }))
 
 function sessionRefFromRequest(p: unknown): AppSessionRef | null {
   if (!p || typeof p !== 'object') return null
@@ -2214,6 +2347,10 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
         change.request
       ]
     }
+    win?.webContents.send('agent:questionAttention', {
+      runId: change.request.runId,
+      pendingCount: run?.pendingQuestions?.length ?? 1
+    })
     if (runs.isFocused(change.request.runId)) win?.webContents.send('agent:userQuestion', change.request)
     return
   }
@@ -2235,6 +2372,10 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
     appendCoalescedTrace(run.items, event)
     if (runs.isFocused(change.runId)) queueTrace(event)
   }
+  win?.webContents.send('agent:questionAttention', {
+    runId: change.runId,
+    pendingCount: run?.pendingQuestions?.length ?? 0
+  })
   if (runs.isFocused(change.runId)) win?.webContents.send('agent:userQuestionClosed', change)
 })
 // 性能：把 onTrace 逐条 IPC 合批——流式期每 token 一条 IPC（每秒上百）→ 缓冲一批数组发。
@@ -2264,6 +2405,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const request = normalizeAgentStartRequest(payload)
   const providerId = request.providerId
   const agentProfileId = request.agentProfileId
+  const startPerf = new PerformanceTrace('agent.start', { provider: providerId })
+  const firstTracePerf = new PerformanceTrace('agent.first_provider_trace', { provider: providerId })
   const adapter = providerRegistry.get(providerId)
   const runtimeProvider = adapter.runtimeProvider
   if (isShuttingDown) {
@@ -2464,7 +2607,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     // 不再把这个工作区永久卡在“仍有 N 轮待恢复”。真有证据的轮次仍然 fail closed。
     const abandonProvisionalOptions = {
       provider: providerId,
-      abandonProvisional: true,
+      // A pending canonical journal may still need its provisional lifecycle. Never discard that
+      // identity merely because the originating in-memory run ended; recovery must get first use.
+      abandonProvisional: journalRecovery.pending === 0 && progressRecovery.pending === 0,
       // 发送前的恢复检查不能同步排仓库回调积压，否则会卡在“正在启动”。
       commitNotifications: 'detach' as const,
       isLiveManagedRun: (candidate: string | undefined): boolean =>
@@ -2680,7 +2825,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       runtimeProvider,
       billingProvider: result?.billingProvider
     })) return
-    win?.webContents.send('agent:dataUpdated', { runId })
+    win?.webContents.send('agent:dataUpdated', { runId, kind: 'turn_recorded' })
   }
   const cleanupProvisional = (): void => {
     if (resume || runState.externalSessionId) return
@@ -2750,7 +2895,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       cwd ? { providerId, cwd, ...(resume ? { sessionId: resume } : {}) } : undefined
     )
     runState.attachments = attachments
-    runtimePrompt = attachmentPrompt(displayPrompt, attachments)
+    runtimePrompt = providerAttachmentPrompt(providerId, displayPrompt, attachments)
     if (resume) {
       win?.webContents.send('agent:session', {
         runId,
@@ -3057,6 +3202,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }> => {
     if (interrupted) return { stopped: true }
     observedProviderStartedAt = new Date().toISOString()
+    firstTracePerf.mark('provider_launch')
     // Re-hash executable bytes at the actual Provider launch boundary, after all
     // attachment/recorder/diff preparation that may have yielded to the event loop.
     const mcpExecution = authorizedMcpExecution(mcpExecutionSnapshot)
@@ -3080,7 +3226,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         }
       } : {}),
       mcpExecution,
-      emit,
+      emit: (event) => {
+        firstTracePerf.finish({ bufferedEvents: runState.items.length })
+        emit(event)
+      },
       onExternalSessionId: publishSessionId,
       requestUserInput: (question, signal) => userQuestionBroker.request({ ...question, providerId }, signal)
     })
@@ -3142,6 +3291,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     try { await cancelGitTurnDiff(await turnDiffCapture) } catch { /* preserve the original registration error */ }
     throw error
   }
+  startPerf.mark('run_registered')
   dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
   // `agent:start` can also be invoked through the preload bridge (for example by
   // the regression runner), so publish the authoritative focused snapshot after
@@ -3163,6 +3313,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const runtimePromise = Promise.all([turnDiffCapture, sessionBaselineReady]).then(runProvider)
   runtimePromise
     .then(async (r) => {
+      const terminalPerf = new PerformanceTrace('agent.terminal_finalize', { provider: providerId })
+      terminalPerf.mark('provider_terminal')
       emit(finishTurnWallTiming())
       const turnDiffDone = finalizeTurnDiff()
       const observedTiming = observedTurnTiming(observedProviderStartedAt, new Date().toISOString())
@@ -3233,7 +3385,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
         await turnDiffDone
+        terminalPerf.mark('diff_complete')
         persistRunData(storageSessionId)
+        terminalPerf.finish({ events: runState.items.length, committed: 0 })
         return
       }
       terminalArchiveArgs = completionArchiveArgs
@@ -3266,13 +3420,16 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           stopped: r.stopped
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
+        terminalPerf.mark('renderer_terminal')
       }
       await turnDiffDone
       await finalizeSessionDiff()
+      terminalPerf.mark('diff_complete')
       try {
         await archiveTraceTurn(completionArchiveArgs)
         terminalArchiveCommitted = true
         recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
+        terminalPerf.mark('archive_committed')
       } catch (error) {
         const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录提交失败：${String((error as Error).message)}`
         runState.error = message
@@ -3285,10 +3442,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           hint: runState.errorHint
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
+        terminalPerf.finish({ events: runState.items.length, committed: 0 })
         return
       }
       // B2：把这一轮的 turn + tool_calls 结构化落 sqlite（runState 已缓冲全部事件）
       persistRunData(storageSessionId)
+      terminalPerf.mark('database_projected')
       if (canonicalLifecycle && !alreadyDone) {
         win?.webContents.send('agent:turnDone', {
           runId,
@@ -3301,7 +3460,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           stopped: r.stopped
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
+        terminalPerf.mark('renderer_terminal')
       }
+      terminalPerf.finish({ events: runState.items.length, committed: 1 })
     }, async (err) => {
       emit(finishTurnWallTiming())
       const turnDiffDone = finalizeTurnDiff()
@@ -3553,6 +3714,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       runs.remove(runId)
       resolveSettled?.()
     })
+      startPerf.finish({ attachments: attachments.length })
       return { runId }
     })
   } finally {
@@ -3562,6 +3724,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
 
 // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
 handleTrusted('agent:activeRun', (): ActiveRun | null => runs.focusedState())
+handleTrusted('agent:unreadSessions', () => dockBadge.snapshot())
 // live trace 降级恢复专用：忽略 done，只要 registry 里还有这个 run 就给出权威事件序列。
 // activeRun 会因为 done=true 返回 null，那样终态被跳过的事件永远补不回来。
 handleTrusted('agent:focusedRunSnapshot', (): ActiveRun | null => runs.focusedSnapshot())
@@ -3615,12 +3778,9 @@ handleTrusted('agent:recorderContentPage', async (_event, request: unknown) => {
   return readAuthorizedRecorderContentPage(enablement.dataRoot, request)
 })
 
-// trace live 镜像的消费确认：preload 把一批事件分发给 renderer 后回 ACK，main 才继续发下一批。
-handleTrusted('agent:traceAck', (_event, request: { bytes: number }) => {
-  if (!request || typeof request.bytes !== 'number') throw new Error('trace 输出确认无效')
-  traceOutput.ack(request.bytes)
-  return true as const
-})
+// trace live 镜像的消费确认：renderer 完成批量 state commit 后归还精确批次额度。
+// generation + batchId 防止窗口重挂后的迟到/重复 ACK 释放新 renderer 的额度。
+handleTrusted('agent:traceAck', (_event, request: TraceBatchReceipt) => traceOutput.ack(request))
 // renderer 已经用权威快照（activeRun）对齐 live 视图，降级标记可以清除。
 handleTrusted('agent:traceResynchronized', () => {
   traceOutput.resynchronized()
@@ -3981,13 +4141,31 @@ handleTrusted('remote:device:revoke', (_event, deviceId: unknown) => {
   return requireRemoteHost().revokeDevice(deviceId)
 })
 
+let performanceResourceMonitor: PerformanceResourceMonitor | null = null
+
 app.whenReady().then(() => {
   if (!primaryInstance) return
+  const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform })
   void warmShellEnv()
   // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，
   // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
   initDb()
+  startupPerf.mark('database_ready')
   createWindow()
+  performanceResourceMonitor = startPerformanceResourceMonitor({
+    getAppMetrics: () => app.getAppMetrics(),
+    counters: () => {
+      const trace = traceOutput.snapshot()
+      return {
+        traceBufferedEvents: trace.bufferedEvents,
+        traceBufferedBytes: trace.bufferedBytes,
+        traceInFlightBytes: trace.inFlightBytes,
+        traceSkippedEvents: trace.skippedEvents,
+        activeRuns: runs.activeStates().length
+      }
+    }
+  })
+  startupPerf.mark('window_created')
   void startRemoteHostIfEnabled()
   startupManagedRecovery = (async () => {
     // Let the first window render before touching historical recovery trees.
@@ -4025,6 +4203,8 @@ app.whenReady().then(() => {
     } catch (error) {
       console.warn('[scry] recorder commit hook startup redelivery failed:', error)
     }
+    startupPerf.mark('recovery_complete')
+    startupPerf.finish()
   })()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -4048,6 +4228,8 @@ app.on('before-quit', (event) => {
   }) ?? Promise.resolve()
   runStopLifecycle.close()
   traceOutput.close()
+  performanceResourceMonitor?.stop()
+  performanceResourceMonitor = null
   sessionDiffBaselines.disposeAll()
   const controls = runs.unsettledControls()
   const runCleanup = settleRunsForShutdown(controls, {

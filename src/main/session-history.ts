@@ -1,7 +1,7 @@
 import { fileOpOf, mcpCallsForEvent, mcpPayloadFailed, type TraceEvent } from '../shared/trace'
 import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMimeType } from '../shared/runtime'
 import type { ParsedTurn as TranscriptTurn } from './normalize'
-import type { TraceArchive } from './transcript-archive'
+import type { TraceArchive, TraceArchiveTurn } from './transcript-archive'
 import {
   hydrateLegacyAttachmentPath,
   hydrateStoredAttachment,
@@ -136,34 +136,45 @@ function withAttachmentWarnings(errorHint: string | undefined, warnings: string[
   return [errorHint, `历史附件不可用：${warnings.join('；')}`].filter(Boolean).join('\n')
 }
 
-export function restoreTraceArchiveTurn(
-  turn: TraceArchive['turns'][number],
-  context?: SessionHistoryContext,
-  budget: AttachmentHydrationBudget = {
-    usedBytes: 0,
-    maxBytes: context?.attachmentBudgetBytes ?? MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES
-  }
-): LoadedSessionTurn {
+function hydrateArchiveAttachments(
+  turn: TraceArchiveTurn,
+  context: SessionHistoryContext | undefined,
+  budget: AttachmentHydrationBudget
+): { attachments: AgentInputAttachment[]; warnings: string[] } {
   const recovered = recoverAttachmentsFromPrompt(turn.userText, turn.runId, context, budget)
   const stored = (turn.attachments ?? []).map((attachment) =>
     hydrateStoredAttachment(context?.userDataDir ?? '', turn.runId, attachment, budget)
   )
-  const attachments = turn.attachments?.length
-    ? stored.map((result) => result.attachment).filter((attachment): attachment is AgentInputAttachment => attachment != null)
-    : recovered.attachments
-  const warnings = turn.attachments?.length
-    ? stored.map((result) => result.warning).filter((warning): warning is string => !!warning)
-    : recovered.warnings
+  return turn.attachments?.length
+    ? {
+        attachments: stored.map((result) => result.attachment).filter((attachment): attachment is AgentInputAttachment => attachment != null),
+        warnings: stored.map((result) => result.warning).filter((warning): warning is string => !!warning)
+      }
+    : recovered
+}
+
+export function restoreTraceArchiveTurn(
+  turn: TraceArchiveTurn,
+  context?: SessionHistoryContext,
+  budget: AttachmentHydrationBudget = {
+    usedBytes: 0,
+    maxBytes: context?.attachmentBudgetBytes ?? MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES
+  },
+  options: { hydrateAttachments?: boolean } = {}
+): LoadedSessionTurn {
+  const hydrated = options.hydrateAttachments === false
+    ? { attachments: [] as AgentInputAttachment[], warnings: [] as string[] }
+    : hydrateArchiveAttachments(turn, context, budget)
   return {
     runId: turn.runId,
     providerTurnId: turn.providerTurnId,
     forkTurnId: turn.forkTurnId ?? turn.providerTurnId,
     userText: cleanAttachmentPrompt(turn.userText),
-    attachments: attachments.length > 0 ? attachments : undefined,
+    attachments: hydrated.attachments.length > 0 ? hydrated.attachments : undefined,
     items: turn.items,
     done: turn.done,
     error: turn.error,
-    errorHint: withAttachmentWarnings(turn.errorHint, warnings)
+    errorHint: withAttachmentWarnings(turn.errorHint, hydrated.warnings)
   }
 }
 
@@ -395,24 +406,35 @@ function mergeTurnWithArchive(transcriptTurn: LoadedSessionTurn, archiveTurn: Lo
   }
 }
 
+export interface MergeSessionTurnsOptions {
+  /** Defer file reads/base64 hydration until after the visible history page is selected. */
+  hydrateAttachments?: boolean
+}
+
 export function mergeSessionTurns(
   transcriptTurns: TranscriptTurn[],
   archive: TraceArchive | null,
-  context?: SessionHistoryContext
+  context?: SessionHistoryContext,
+  options: MergeSessionTurnsOptions = {}
 ): LoadedSessionTurn[] {
+  const hydrateAttachments = options.hydrateAttachments !== false
   const budget: AttachmentHydrationBudget = {
     usedBytes: 0,
     maxBytes: context?.attachmentBudgetBytes ?? MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES
   }
-  const restoredArchive = (archive?.turns ?? []).map((turn) => restoreTraceArchiveTurn(turn, context, budget)).map((turn) => ({
-    ...turn,
-    items: normalizeHistoricalEvents(keepLastTurnDiff(turn.items))
-  }))
+  const restoredArchive = (archive?.turns ?? [])
+    .map((turn) => restoreTraceArchiveTurn(turn, context, budget, { hydrateAttachments }))
+    .map((turn) => ({
+      ...turn,
+      items: normalizeHistoricalEvents(keepLastTurnDiff(turn.items))
+    }))
   const merged: LoadedSessionTurn[] = transcriptTurns.map((turn) => ({
     providerTurnId: turn.providerTurnId,
     forkTurnId: turn.providerTurnId,
     userText: cleanAttachmentPrompt(turn.userText),
-    attachments: recoverAttachmentsFromPrompt(turn.userText, '', context, budget).attachments,
+    ...(hydrateAttachments
+      ? { attachments: recoverAttachmentsFromPrompt(turn.userText, '', context, budget).attachments }
+      : {}),
     items: normalizeHistoricalEvents(turn.items)
   }))
   for (const turn of merged) {
@@ -441,4 +463,59 @@ export function mergeSessionTurns(
     if (!usedArchive.has(index)) merged.push(restoredArchive[index])
   }
   return merged
+}
+
+/** Hydrate only the page that will cross IPC instead of every turn kept in the main cache. */
+export function hydrateSessionHistoryPage(
+  page: SessionHistoryPage,
+  transcriptTurns: readonly TranscriptTurn[],
+  archive: TraceArchive | null,
+  context: SessionHistoryContext
+): SessionHistoryPage {
+  const budget: AttachmentHydrationBudget = {
+    usedBytes: 0,
+    maxBytes: context.attachmentBudgetBytes ?? MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES
+  }
+  const archiveByRunId = new Map((archive?.turns ?? []).map((turn) => [turn.runId, turn]))
+  const transcriptByProviderTurnId = new Map(
+    transcriptTurns
+      .filter((turn): turn is TranscriptTurn & { providerTurnId: string } => Boolean(turn.providerTurnId))
+      .map((turn) => [turn.providerTurnId, turn])
+  )
+  const transcriptByText = new Map<string, TranscriptTurn[]>()
+  for (const turn of transcriptTurns) {
+    const key = canonicalUserText(cleanAttachmentPrompt(turn.userText))
+    const matches = transcriptByText.get(key)
+    if (matches) matches.push(turn)
+    else transcriptByText.set(key, [turn])
+  }
+
+  const turns = [...page.turns]
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const turn = turns[index]
+    const archived = turn.runId ? archiveByRunId.get(turn.runId) : undefined
+    if (archived) {
+      const result = hydrateArchiveAttachments(archived, context, budget)
+      turns[index] = {
+        ...turn,
+        attachments: result.attachments.length > 0 ? result.attachments : undefined,
+        errorHint: withAttachmentWarnings(turn.errorHint, result.warnings)
+      }
+      continue
+    }
+    const indexedTranscript = transcriptTurns[page.offset + index]
+    const transcript = (indexedTranscript && canonicalUserText(cleanAttachmentPrompt(indexedTranscript.userText)) === canonicalUserText(turn.userText)
+      ? indexedTranscript
+      : undefined) ??
+      (turn.providerTurnId ? transcriptByProviderTurnId.get(turn.providerTurnId) : undefined) ??
+      transcriptByText.get(canonicalUserText(turn.userText))?.pop()
+    if (!transcript) continue
+    const result = recoverAttachmentsFromPrompt(transcript.userText, turn.runId ?? '', context, budget)
+    turns[index] = {
+      ...turn,
+      attachments: result.attachments.length > 0 ? result.attachments : undefined,
+      errorHint: withAttachmentWarnings(turn.errorHint, result.warnings)
+    }
+  }
+  return { ...page, turns }
 }

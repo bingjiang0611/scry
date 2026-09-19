@@ -34,9 +34,16 @@ export function traceEventByteSize(event: TraceEvent): number {
 }
 
 /** 一次 trace IPC 的载荷：事件按到达顺序排列，bytes 是这一批的 JSON UTF-8 字节数。 */
-export interface TraceBatch {
-  events: TraceEvent[]
+export interface TraceBatchReceipt {
+  /** Changes whenever the renderer delivery state is reset, fencing stale acknowledgements. */
+  generation: number
+  /** Monotonic within one bridge instance; duplicate acknowledgements are ignored. */
+  batchId: number
   bytes: number
+}
+
+export interface TraceBatch extends TraceBatchReceipt {
+  events: TraceEvent[]
 }
 
 export interface TraceBacklogState {
@@ -88,6 +95,9 @@ export class TraceOutputBridge {
   private buffer: TraceEvent[] = []
   private bufferedBytes = 0
   private inFlightBytes = 0
+  private readonly inFlightBatches = new Map<number, { generation: number; bytes: number }>()
+  private generation = 0
+  private nextBatchId = 0
   private skippedEvents = 0
   private degraded = false
   private resyncRequired = false
@@ -158,17 +168,26 @@ export class TraceOutputBridge {
     this.flush()
   }
 
-  ack(bytes: number): void {
-    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > this.maxBufferBytes) {
-      throw new Error('trace 输出确认无效')
-    }
-    this.inFlightBytes = Math.max(0, this.inFlightBytes - bytes)
+  ack(receipt: TraceBatchReceipt): boolean {
+    if (
+      !receipt || !Number.isSafeInteger(receipt.generation) || receipt.generation < 0 ||
+      !Number.isSafeInteger(receipt.batchId) || receipt.batchId < 0 ||
+      !Number.isSafeInteger(receipt.bytes) || receipt.bytes < 0 || receipt.bytes > this.maxBufferBytes
+    ) throw new Error('trace 输出确认无效')
+    const expected = this.inFlightBatches.get(receipt.batchId)
+    // Renderer reloads reset the credit ledger. A late or duplicate acknowledgement must never
+    // release credit belonging to a newer window/batch that happens to be in flight.
+    if (!expected || expected.generation !== receipt.generation) return false
+    if (expected.bytes !== receipt.bytes) throw new Error('trace 输出确认字节不匹配')
+    this.inFlightBatches.delete(receipt.batchId)
+    this.inFlightBytes = Math.max(0, this.inFlightBytes - expected.bytes)
     this.flush()
     if (this.buffer.length === 0 && this.inFlightBytes === 0 && this.degraded && !this.resyncRequired) {
       // 积压排空：要求 renderer 用权威快照对齐，之后才允许清除降级标记。
       this.resyncRequired = true
       this.publishHealth()
     }
+    return true
   }
 
   /** renderer 已用权威快照对齐 live 视图。 */
@@ -190,6 +209,8 @@ export class TraceOutputBridge {
     this.buffer = []
     this.bufferedBytes = 0
     this.inFlightBytes = 0
+    this.inFlightBatches.clear()
+    this.generation += 1
     if (this.degraded || discarded) {
       this.resyncRequired = true
       this.publishHealth()
@@ -201,6 +222,8 @@ export class TraceOutputBridge {
     this.buffer = []
     this.bufferedBytes = 0
     this.inFlightBytes = 0
+    this.inFlightBatches.clear()
+    this.generation += 1
     this.degraded = false
     this.resyncRequired = false
     this.skippedEvents = 0
@@ -239,7 +262,9 @@ export class TraceOutputBridge {
     const events = this.buffer.splice(0, count)
     this.bufferedBytes = Math.max(0, this.bufferedBytes - bytes)
     this.inFlightBytes += bytes
-    this.options.send({ events, bytes })
+    const batchId = this.nextBatchId++
+    this.inFlightBatches.set(batchId, { generation: this.generation, bytes })
+    this.options.send({ events, bytes, generation: this.generation, batchId })
     return true
   }
 

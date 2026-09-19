@@ -1073,7 +1073,7 @@ export function McpModal({
 }
 
 type CapabilityView = 'skills' | 'mcp'
-type CapabilitySource = 'project' | 'user'
+type CapabilitySource = 'all' | 'project' | 'user'
 
 function CapabilitySourceTabs({
   source,
@@ -1086,7 +1086,7 @@ function CapabilitySourceTabs({
 }) {
   return (
     <div className="capability-source-tabs" role="tablist" aria-label={label}>
-      {(['project', 'user'] as const).map((value) => (
+      {(['all', 'project', 'user'] as const).map((value) => (
         <button
           key={value}
           type="button"
@@ -1095,7 +1095,7 @@ function CapabilitySourceTabs({
           className={source === value ? 'active' : ''}
           onClick={() => onChange(value)}
         >
-          {value === 'project' ? '项目' : '用户'}
+          {value === 'all' ? '全部' : value === 'project' ? '项目' : '用户'}
         </button>
       ))}
     </div>
@@ -1137,18 +1137,20 @@ export function CapabilitiesModal({
 }) {
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
-  const [source, setSource] = useState<CapabilitySource>('project')
+  const [source, setSource] = useState<CapabilitySource>('all')
   const [expandedMcp, setExpandedMcp] = useState<string | null>(null)
   const activeCapability = view === 'skills' ? skillCapability : mcpCapability
   const loadingMcpConfig = mcpConfigRefreshing && !mcpCapability
   const loadingMcp = loadingMcpConfig || mcpRefreshing
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const liveByName = new Map(live.map((item) => [item.name, item]))
-  const visibleSkills = skills.filter((skill) => skill.scope === source)
-  const visibleMcps = mcps.filter((mcp) => (mcp.scope === 'user' ? 'user' : 'project') === source)
+  const visibleSkills = source === 'all' ? skills : skills.filter((skill) => skill.scope === source)
+  const visibleMcps = source === 'all'
+    ? mcps
+    : mcps.filter((mcp) => (mcp.scope === 'user' ? 'user' : 'project') === source)
 
   const chooseView = (nextView: CapabilityView): void => {
-    setSource('project')
+    setSource('all')
     setExpandedMcp(null)
     onViewChange(nextView)
   }

@@ -1,0 +1,14 @@
+Workflow completed with 3 child run(s). Return: [
+  {
+    "key": "trace",
+    "output": ""
+  },
+  {
+    "key": "perf",
+    "output": ""
+  },
+  {
+    "key": "coverage",
+    "output": ""
+  }
+] Trace: 6 event(s).

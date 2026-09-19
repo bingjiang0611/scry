@@ -17,8 +17,13 @@ export function verifyForkArchiveBoundary(
 ): VerifiedForkBoundary {
   const sourceIndex = archive?.turns.findIndex((turn) => turn.runId === request.sourceRunId) ?? -1
   const source = sourceIndex >= 0 ? archive!.turns[sourceIndex] : undefined
-  if (!source || source.done !== true || source.status !== 'completed') {
-    throw new Error('找不到可分支的已完成轮次')
+  // A provider-settled failure is still a stable native boundary. Pi/Rotom users can
+  // navigate to that point in the terminal and continue on a new branch; Scry must not
+  // hide the equivalent recovery path merely because the assistant response failed.
+  // Interrupted/cancelled/running turns remain unsafe because their native boundary may
+  // still be incomplete or locally synthesized.
+  if (!source || source.done !== true || (source.status !== 'completed' && source.status !== 'failed')) {
+    throw new Error('找不到可分支的已结束轮次')
   }
   if (source.providerTurnId !== request.sourceProviderTurnId ||
     (source.forkTurnId ?? source.providerTurnId) !== request.sourceForkTurnId) {

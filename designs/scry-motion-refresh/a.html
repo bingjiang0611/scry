@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scry · 方向 A（编辑级）· 工作台 + 欢迎 · 对齐已上线分析页</title>
+<style>
+/* ============================================================
+   Scry 方向 A · 编辑级精修
+   设计语言直接对齐已上线的分析页（src/renderer/analytics-evidence.css）：
+   近单色暖中性、hairline 分隔而非重卡片、编辑级大字号 + tabular-nums、
+   eyebrow 标签、克制留白、证据语义写进排版（虚线=近似/下界，斜纹=未知，— =不可用）。
+   分析页保持现状，本稿只精修「工作台 / 欢迎」两个尚未跟上的界面。
+   ============================================================ */
+:root {
+  /* 暖中性文本（贴合分析页观感，非蓝白） */
+  --fg:#f3f3f0; --dim:#b4b4ad; --dim2:#8a8a82; --dim3:#5f5f58;
+  /* 表面 / 描边（复用分析页 --usage-*） */
+  --bg:#0d0d0c; --panel:#111110; --raise:rgba(255,255,255,.035); --raise2:rgba(255,255,255,.075);
+  --border:rgba(255,255,255,.09); --border-soft:rgba(255,255,255,.055);
+  /* provider 系列色（复用分析页 --usage-series-*） */
+  --s-codex:#ececea; --s-claude:#d27b5d; --s-qoder:#d6a15f; --s-opencode:#65b987; --s-local:#92928d; --s-pi:#ab9cf2;
+  --ok:#69cc93; --warn:#e0a44e; --bad:#e07a6f;
+  --font-ui:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ease:cubic-bezier(.23,1,.32,1);
+}
+:root[data-theme='light'] {
+  --fg:#232320; --dim:#4b4b45; --dim2:#737369; --dim3:#9c9c93;
+  --bg:#ffffff; --panel:#ffffff; --raise:rgba(34,34,32,.025); --raise2:rgba(34,34,32,.07);
+  --border:rgba(34,34,32,.12); --border-soft:rgba(34,34,32,.075);
+  --s-codex:#2e2e2b; --s-claude:#b75f43; --s-qoder:#9a681e; --s-opencode:#23794a; --s-local:#777771; --s-pi:#6a5fae;
+  --ok:#23794a; --warn:#9a681e; --bad:#b34a3f;
+}
+
+* { box-sizing:border-box; }
+html,body { margin:0; height:100%; }
+body {
+  font-family:var(--font-ui); color:var(--fg);
+  background:var(--theme-stage,#080807);
+  -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; min-height:100%;
+}
+:root[data-theme='light'] body { --theme-stage:#eceae6; }
+
+.controls {
+  position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  padding:13px 22px; background:color-mix(in srgb,var(--theme-stage,#080807) 78%,transparent);
+  backdrop-filter:blur(16px); border-bottom:1px solid var(--border);
+}
+.brand { font-weight:640; letter-spacing:-.02em; }
+.brand small { font-weight:500; color:var(--dim2); margin-left:8px; font-size:12px; letter-spacing:0; }
+.lbl { font-size:10px; letter-spacing:.11em; text-transform:uppercase; color:var(--dim3); font-weight:560; }
+.seg { display:inline-flex; padding:3px; border:1px solid var(--border); border-radius:10px; background:var(--raise); }
+.seg button { min-width:64px; height:32px; padding:0 14px; border:0; border-radius:7px; background:transparent; color:var(--dim2); font:inherit; font-size:12px; cursor:pointer; transition:all .14s ease; }
+.seg button[aria-pressed='true'] { background:var(--raise2); color:var(--fg); box-shadow:inset 0 0 0 1px var(--border-soft); }
+.grow { flex:1; }
+.note { font-size:12px; color:var(--dim2); max-width:360px; line-height:1.45; }
+
+.stage { flex:1; display:flex; justify-content:center; padding:28px 24px 56px; }
+.window { width:min(1320px,100%); height:812px; border-radius:14px; overflow:hidden; background:var(--bg); border:1px solid var(--border); box-shadow:0 30px 80px rgba(0,0,0,.4); display:flex; flex-direction:column; }
+:root[data-theme='light'] .window { box-shadow:0 30px 70px rgba(35,35,32,.16); }
+.titlebar { height:44px; flex:0 0 44px; display:flex; align-items:center; gap:12px; padding:0 16px; border-bottom:1px solid var(--border-soft); }
+.lights { display:flex; gap:8px; } .lights i { width:12px; height:12px; border-radius:50%; }
+.lights i:nth-child(1){background:#ff5f57;}.lights i:nth-child(2){background:#febc2e;}.lights i:nth-child(3){background:#28c840;}
+.titlebar .tt { font-size:13px; font-weight:560; color:var(--dim); }
+
+.app { flex:1; display:grid; grid-template-columns:242px 1fr 372px; min-height:0; }
+.surface { display:none; min-height:0; }
+.surface.active { display:contents; }
+
+.mono { font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
+.num { font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.eyebrow { font-size:11px; font-weight:560; letter-spacing:.09em; color:var(--dim2); text-transform:uppercase; }
+svg.ico { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; flex:0 0 auto; }
+
+/* provider marks —— 各 Provider 真实品牌字形（claude 星芒 / codex OpenAI 花簇 / qoder 环形 Q / opencode 门框 / pi π），
+   用 CSS mask 上色，复用 --s-* 系列色，与真实 app 的 provider 颜色一致 */
+.mark { --s:var(--s-local); --g:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'><circle cx='12' cy='12' r='6.5'/></svg>"); width:14px; height:14px; flex:none; display:inline-block; vertical-align:middle; background:var(--s); -webkit-mask:var(--g) center/contain no-repeat; mask:var(--g) center/contain no-repeat; }
+.mark.claude { --s:var(--s-claude); --g:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round'><path d='M12 3.6v5M12 15.4v5M3.6 12h5M15.4 12h5M6 6l3.6 3.6M14.4 14.4l3.6 3.6M18 6l-3.6 3.6M9.6 14.4L6 18'/></svg>"); }
+.mark.codex { --s:var(--s-codex); --g:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'><circle cx='17.4' cy='12' r='2.05'/><circle cx='14.7' cy='16.7' r='2.05'/><circle cx='9.3' cy='16.7' r='2.05'/><circle cx='6.6' cy='12' r='2.05'/><circle cx='9.3' cy='7.3' r='2.05'/><circle cx='14.7' cy='7.3' r='2.05'/></svg>"); }
+.mark.qoder { --s:var(--s-qoder); --g:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round'><circle cx='11' cy='11' r='6.6'/><path d='M12.9 13.1l4.9 4.9'/></svg>"); }
+.mark.opencode { --s:var(--s-opencode); --g:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'><rect x='4.5' y='4.5' width='15' height='15' rx='4'/><rect x='9.7' y='8.4' width='4.6' height='7.2' rx='1.4'/></svg>"); }
+.mark.pi { --s:var(--s-pi); --g:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.85' stroke-linecap='round'><path d='M5.5 8.6h13M9.2 8.6v8.2M15 8.6v8.2'/></svg>"); }
+.provchips .miss .mark { background:var(--dim3); }
+
+/* ---------- 侧栏 ---------- */
+.side { border-right:1px solid var(--border-soft); display:flex; flex-direction:column; min-height:0; }
+.side-head { padding:17px 18px 12px; display:flex; align-items:baseline; justify-content:space-between; }
+.side-head b { font-size:15px; font-weight:640; letter-spacing:-.02em; }
+.side-head span { font-family:var(--font-mono); font-size:11px; color:var(--dim3); }
+.newbtn { margin:6px 16px; display:flex; align-items:center; justify-content:space-between; height:40px; padding:0 13px; border:1px solid var(--border); border-radius:10px; background:var(--raise); color:var(--fg); font-size:13px; font-weight:540; cursor:pointer; transition:all .14s ease; }
+.newbtn:hover { background:var(--raise2); }
+.newbtn .l { display:flex; align-items:center; gap:9px; }
+.kbd { font-family:var(--font-mono); font-size:11px; color:var(--dim2); }
+.search { margin:2px 16px 10px; display:flex; align-items:center; gap:9px; height:36px; padding:0 12px; border:1px solid var(--border-soft); border-radius:9px; color:var(--dim2); font-size:12.5px; }
+.nav { padding:2px 12px 8px; }
+.nav a { display:flex; align-items:center; gap:11px; height:34px; padding:0 10px; border-radius:8px; color:var(--dim); font-size:13px; cursor:pointer; text-decoration:none; transition:all .13s ease; }
+.nav a:hover { background:var(--raise); color:var(--fg); }
+.nav a .c { margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--dim3); }
+.nav a .c.warn { color:var(--warn); }
+.side-scroll { flex:1; overflow:auto; padding:4px 12px 14px; }
+.ghead { display:flex; align-items:center; justify-content:space-between; padding:15px 10px 7px; }
+.ghead .e { display:flex; align-items:center; gap:7px; font-size:10.5px; font-weight:560; letter-spacing:.08em; text-transform:uppercase; color:var(--dim2); }
+.ghead .n { font-family:var(--font-mono); font-size:10.5px; color:var(--dim3); }
+.sess { display:flex; align-items:center; gap:10px; height:40px; padding:0 10px; border-radius:8px; cursor:pointer; position:relative; transition:background .13s ease; }
+.sess:hover { background:var(--raise); }
+.sess .tt { min-width:0; flex:1; font-size:13px; color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sess .m { font-family:var(--font-mono); font-size:10.5px; color:var(--dim3); white-space:nowrap; }
+.sess.on { background:var(--raise2); }
+.sess.on::before { content:''; position:absolute; left:0; top:9px; bottom:9px; width:2px; border-radius:2px; background:var(--fg); }
+
+/* ---------- 主区 ---------- */
+.main { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--border-soft); position:relative; }
+.topbar { height:53px; flex:0 0 53px; display:flex; align-items:center; gap:10px; padding:0 18px; border-bottom:1px solid var(--border-soft); }
+.tb-title { display:flex; align-items:center; gap:9px; font-size:14px; font-weight:560; letter-spacing:-.01em; color:var(--fg); }
+.tb-title .ico { color:var(--dim2); }
+.sp { flex:1; }
+.ib { width:36px; height:36px; display:grid; place-items:center; border:1px solid transparent; border-radius:9px; color:var(--dim2); cursor:pointer; transition:all .13s ease; }
+.ib:hover { color:var(--fg); background:var(--raise); }
+.ib.on { color:var(--fg); border-color:var(--border); background:var(--raise); }
+/* 固定摘要（PinnedSummary）：环境 + 上下文，证据以 —/虚线表达未知 */
+/* 位置对齐真实：主区右上角、顶栏下方的悬浮层（.pinned-summary-layer right:0; width:min(326px)） */
+.pin-summary { position:absolute; top:61px; right:14px; z-index:16; width:318px; background:color-mix(in srgb,var(--panel) 98%,transparent); border:1px solid var(--border); border-radius:20px; box-shadow:0 18px 45px rgba(0,0,0,.28); padding:15px 16px 9px; }
+:root[data-theme='light'] .pin-summary { box-shadow:0 18px 45px rgba(35,44,57,.12), 0 2px 10px rgba(35,44,57,.05); }
+.ps-sec { font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim3); font-weight:560; margin:2px 0 8px; }
+.ps-row,.ps-exp { display:flex; align-items:center; gap:11px; width:100%; padding:8px 0; border:0; background:none; font:inherit; color:var(--fg); text-align:left; }
+.ps-exp { cursor:pointer; }
+.ps-exp:hover .ps-k { color:var(--fg); }
+.ps-ic { color:var(--dim2); display:grid; place-items:center; flex:none; }
+.ps-ic .ico { width:15px; height:15px; }
+.ps-k { font-size:12.5px; color:var(--dim); }
+.ps-v { margin-left:auto; font-family:var(--font-mono); font-size:11.5px; letter-spacing:-.01em; }
+.ps-v .add { color:var(--ok); font-weight:500; } .ps-v .del { color:var(--bad); font-weight:500; }
+.ps-c { margin-left:auto; font-family:var(--font-mono); font-size:12px; color:var(--fg); }
+.ps-c.unk { color:var(--warn); text-decoration:underline dotted color-mix(in srgb,var(--warn) 62%,transparent); text-underline-offset:3px; }
+.ps-exp .chev { width:13px; height:13px; margin-left:9px; color:var(--dim3); flex:none; }
+.ps-div { height:1px; background:var(--border-soft); margin:7px 0; }
+
+.chat { flex:1; overflow:auto; padding:26px 44px 8px; }
+.wrap { max-width:720px; margin:0 auto; }
+.thead { display:flex; align-items:center; gap:11px; margin-bottom:20px; }
+.thead .i { font-family:var(--font-mono); font-size:12px; color:var(--dim3); }
+.thead .s { display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; letter-spacing:-.01em; }
+.thead .r { margin-left:auto; font-size:11.5px; color:var(--dim2); display:flex; align-items:center; gap:6px; }
+.dot { width:6px; height:6px; border-radius:50%; display:inline-block; }
+.msg { font-size:15px; line-height:1.9; }
+.msg p { margin:0 0 15px; }
+.msg ul { list-style:none; margin:0 0 15px; padding:0; display:flex; flex-direction:column; gap:12px; }
+.msg li { padding-left:19px; position:relative; }
+.msg li::before { content:''; position:absolute; left:1px; top:12px; width:5px; height:5px; border-radius:50%; background:var(--dim2); }
+.msg strong { font-weight:640; }
+.msg code { font-family:var(--font-mono); font-size:12.5px; padding:1px 6px; border:1px solid var(--border-soft); border-radius:5px; color:var(--dim); background:var(--raise); }
+.msg .warnw { color:var(--warn); font-weight:600; }
+
+.tfoot { max-width:720px; margin:22px auto 0; display:grid; grid-template-columns:repeat(6,1fr); border:1px solid var(--border); border-radius:2px; }
+.tfoot > div { padding:14px 15px; border-right:1px solid var(--border-soft); display:flex; flex-direction:column; gap:8px; }
+.tfoot > div:last-child { border-right:0; }
+.tfoot .k { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim2); }
+.tfoot .v { font-size:18px; font-weight:480; letter-spacing:-.025em; font-variant-numeric:tabular-nums; }
+.tfoot .v.d { color:var(--dim2); }
+
+.composer-wrap { padding:14px 44px 24px; }
+.composer { max-width:720px; margin:0 auto; border:1px solid var(--border); border-radius:12px; overflow:hidden; transition:border-color .15s ease; }
+.composer:focus-within { border-color:var(--dim3); }
+.composer .ctx { display:flex; align-items:center; gap:8px; height:40px; padding:0 14px; border-bottom:1px solid var(--border-soft); font-size:12.5px; color:var(--dim); }
+.composer .ta { padding:14px; font-size:14px; color:var(--dim2); min-height:42px; }
+.composer .fo { display:flex; align-items:center; gap:8px; padding:0 12px 12px; }
+.composer .hint { font-size:11px; color:var(--dim3); margin-left:auto; }
+.fchip { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--dim); padding:5px 9px; border-radius:8px; border:1px solid var(--border-soft); cursor:pointer; transition:border-color .13s ease; }
+.fchip:hover { border-color:var(--border); }
+.fchip .ico { color:var(--dim3); }
+.fchip .fa { color:var(--warn); font-weight:560; }
+.send { margin-left:auto; display:flex; align-items:center; gap:7px; height:34px; padding:0 16px; border-radius:8px; font-size:12.5px; font-weight:560; color:var(--bg); background:var(--fg); cursor:pointer; transition:opacity .14s ease; }
+.send:hover { opacity:.85; }
+/* 聊天详情：用户气泡 / run 头 / Hook 行 / 工具调用卡 / 分支动作 */
+.umsg { display:flex; justify-content:flex-end; margin:0 0 22px; }
+.umsg .bubble { max-width:78%; background:var(--raise2); border:1px solid var(--border-soft); border-radius:13px; padding:11px 15px; font-size:14.5px; line-height:1.6; color:var(--fg); }
+.rhead { display:flex; align-items:center; gap:9px; margin:0 0 14px; }
+.rhead .mark { width:15px; height:15px; }
+.rhead .rn { font-size:12.5px; font-weight:560; color:var(--fg); }
+.rhead .rid { font-family:var(--font-mono); font-size:11px; color:var(--dim3); }
+.rhead .rmeta { margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--dim2); display:flex; gap:13px; }
+.rhead .rmeta .err { color:var(--bad); }
+.hookrow { display:flex; align-items:center; gap:9px; padding:10px 0; font-size:12px; color:var(--dim2); border-top:1px solid var(--border-soft); border-bottom:1px solid var(--border-soft); margin:0 0 16px; }
+.hookrow .ico { width:14px; height:14px; color:var(--dim3); flex:none; }
+.hookrow b { color:var(--dim); font-weight:500; }
+.tcard { border:1px solid var(--border-soft); border-radius:9px; margin:0 0 8px; background:var(--raise); transition:border-color .13s ease; }
+.tcard:hover { border-color:var(--border); }
+.trow { display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; border:0; background:none; font:inherit; color:var(--fg); text-align:left; cursor:pointer; }
+.trow .st { width:16px; height:16px; display:grid; place-items:center; flex:none; }
+.trow .st.ok { color:var(--ok); } .trow .st.err { color:var(--bad); }
+.trow .st .ico { width:13px; height:13px; }
+.trow .nm { font-size:13px; font-weight:520; flex:none; }
+.trow .op { font-family:var(--font-mono); font-size:9px; letter-spacing:.05em; padding:2px 5px; border-radius:4px; background:var(--raise2); color:var(--dim2); flex:none; }
+.trow .arg { font-family:var(--font-mono); font-size:11.5px; color:var(--dim2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.trow .tmeta { margin-left:auto; display:flex; align-items:center; gap:10px; font-family:var(--font-mono); font-size:11px; color:var(--dim3); flex:none; }
+.trow .chev { width:13px; height:13px; color:var(--dim3); flex:none; }
+.branch { display:inline-flex; align-items:center; gap:7px; margin:14px 0 4px; font-size:12px; color:var(--dim2); cursor:pointer; }
+.branch:hover { color:var(--fg); }
+.branch .ico { width:13px; height:13px; }
+
+/* ---------- 纵览 ---------- */
+.over { display:flex; flex-direction:column; min-height:0; }
+/* 右侧 Surface 工作区 tab 栏（RightSurfacePanel）：已开 tab + 关闭× + 添加菜单 + 最大化/隐藏 */
+.otabbar { display:flex; align-items:center; gap:8px; margin:11px 14px 0; }
+.otabs-open { display:flex; align-items:center; gap:4px; }
+.otab { display:flex; align-items:center; gap:7px; height:32px; padding:0 6px 0 11px; border-radius:8px; border:1px solid transparent; color:var(--dim2); font-size:12.5px; font-weight:520; }
+.otab.on { color:var(--fg); background:var(--raise); border-color:var(--border-soft); }
+.otab .ico { width:14px; height:14px; }
+.otab-x { display:grid; place-items:center; width:18px; height:18px; border:0; background:none; color:var(--dim3); border-radius:5px; cursor:pointer; }
+.otab-x:hover { color:var(--fg); background:var(--raise2); }
+.otab-x .ico { width:11px; height:11px; }
+.otab-add { display:grid; place-items:center; width:30px; height:30px; border:0; background:none; color:var(--dim2); border-radius:8px; cursor:pointer; }
+.otab-add:hover { color:var(--fg); background:var(--raise); }
+.otab-add .ico { width:16px; height:16px; }
+.oib { display:grid; place-items:center; width:30px; height:30px; border:1px solid transparent; background:none; color:var(--dim2); border-radius:8px; cursor:pointer; }
+.oib:hover { color:var(--fg); background:var(--raise); }
+.oib .ico { width:16px; height:16px; }
+.oscroll { flex:1; overflow:auto; padding:22px 20px 26px; }
+.oblock { padding-bottom:24px; margin-bottom:24px; border-bottom:1px solid var(--border-soft); }
+.oblock:last-child { border-bottom:0; margin-bottom:0; padding-bottom:0; }
+.ctx-model { display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11px; color:var(--dim2); margin-top:11px; }
+.ctx-big { font-size:34px; font-weight:680; letter-spacing:-.045em; line-height:.96; margin:12px 0 14px; font-variant-numeric:tabular-nums; }
+.track { height:4px; background:var(--border-soft); overflow:hidden; }
+.track > i { display:block; height:100%; background:var(--s-local); }
+.ctx-sub { margin-top:11px; font-size:11px; color:var(--dim2); line-height:1.4; }
+.verdict-big { display:flex; align-items:center; gap:9px; font-size:26px; font-weight:680; letter-spacing:-.03em; margin:12px 0 8px; }
+.verdict-sub { font-size:11.5px; color:var(--dim2); }
+.ometrics { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--border); }
+.ometrics > div { padding:15px 16px; border-right:1px solid var(--border-soft); border-bottom:1px solid var(--border-soft); display:flex; flex-direction:column; gap:8px; }
+.ometrics > div:nth-child(2n){border-right:0;} .ometrics > div:nth-child(n+3){border-bottom:0;}
+.ometrics .k { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--dim2); }
+.ometrics .v { font-size:21px; font-weight:480; letter-spacing:-.025em; font-variant-numeric:tabular-nums; }
+.ometrics .s { font-size:10.5px; color:var(--dim3); line-height:1.3; }
+.cacherow { display:flex; gap:22px; margin-top:14px; font-family:var(--font-mono); font-size:11px; color:var(--dim2); }
+.cacherow b { color:var(--fg); font-weight:500; }
+.sid { font-family:var(--font-mono); font-size:11.5px; color:var(--dim); word-break:break-all; margin-top:11px; line-height:1.5; }
+.pillrow { display:inline-flex; padding:3px; border:1px solid var(--border); border-radius:10px; background:var(--raise); margin-top:2px; }
+.pillrow button { min-width:82px; height:31px; border:0; border-radius:7px; background:transparent; color:var(--dim2); font:inherit; font-size:12px; cursor:pointer; }
+.pillrow button.on { background:var(--raise2); color:var(--fg); box-shadow:inset 0 0 0 1px var(--border-soft); }
+.turnline { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-top:14px; }
+.tchip { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim); }
+.tchip b { font-family:var(--font-mono); color:var(--fg); font-weight:500; }
+.tchip.k { color:var(--dim3); } .tchip.k b { color:var(--dim2); }
+.tchip.tid b { color:var(--fg); }
+.unk { text-decoration:underline dotted color-mix(in srgb,var(--warn) 62%,transparent); text-underline-offset:4px; color:var(--fg); }
+
+/* ---------- 欢迎 ---------- */
+.welcome { grid-column:1 / -1; overflow:auto; }
+.win { max-width:900px; margin:0 auto; padding:74px 48px 60px; }
+.pgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:13px; margin-top:20px; }
+.pcard { border:1px solid var(--border); border-radius:12px; padding:17px; background:var(--raise); cursor:pointer; transition:transform .18s ease, border-color .18s ease, background .18s ease; }
+.pcard:hover { transform:translateY(-2px); border-color:var(--dim3); background:var(--raise2); }
+.pcard.static, .pcard.static:hover { cursor:default; transform:none; border-color:var(--border); background:var(--raise); }
+.pcard-h { display:flex; align-items:center; gap:9px; }
+.pcard-h .nm { font-size:14.5px; font-weight:560; letter-spacing:-.01em; }
+.pcard-h .bindchip { margin-left:auto; display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--dim); }
+.pcard-h .bindchip.off { color:var(--dim3); }
+.pcard .meta { display:flex; gap:26px; margin-top:16px; }
+.pcard .meta .col b { display:block; font-size:17px; font-weight:480; font-variant-numeric:tabular-nums; letter-spacing:-.03em; }
+.pcard .meta .col span { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim3); }
+.pcard .e { font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--dim2); font-weight:560; }
+.pcard .big { font-size:26px; font-weight:480; letter-spacing:-.03em; font-variant-numeric:tabular-nums; margin:13px 0 0; }
+.pcard .s { display:block; font-size:11px; color:var(--dim3); margin-top:7px; line-height:1.4; }
+.wh { font-size:44px; font-weight:680; letter-spacing:-.045em; line-height:1.02; margin:16px 0 0; }
+.wh .d { color:var(--dim3); }
+.wsub { margin:20px 0 0; font-size:15.5px; color:var(--dim); max-width:560px; line-height:1.6; }
+.wcta { display:flex; gap:12px; margin-top:30px; }
+.bp { display:flex; align-items:center; gap:9px; height:46px; padding:0 22px; border-radius:10px; font-size:14px; font-weight:560; color:var(--bg); background:var(--fg); cursor:pointer; transition:opacity .14s ease; }
+.bp:hover{opacity:.85;}
+.bg2 { display:flex; align-items:center; gap:9px; height:46px; padding:0 22px; border-radius:10px; font-size:14px; font-weight:520; color:var(--fg); border:1px solid var(--border); cursor:pointer; transition:background .14s ease; }
+.bg2:hover{background:var(--raise);}
+.wsec { margin-top:56px; }
+.wsec-h { display:flex; align-items:baseline; justify-content:space-between; padding-bottom:15px; border-bottom:1px solid var(--border); }
+.wsec-h h3 { margin:0; font-size:14px; font-weight:600; }
+.prow { display:flex; align-items:center; gap:13px; padding:17px 2px; border-bottom:1px solid var(--border-soft); cursor:pointer; transition:background .13s ease; border-radius:6px; }
+.prow:hover { background:var(--raise); }
+.prow .pn { font-size:15px; font-weight:540; letter-spacing:-.01em; }
+.prow .pmeta { margin-left:auto; display:flex; align-items:center; gap:22px; }
+.prow .pmeta .col { display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
+.prow .pmeta .col b { font-size:14px; font-weight:480; font-variant-numeric:tabular-nums; }
+.prow .pmeta .col span { font-size:10.5px; color:var(--dim3); text-transform:uppercase; letter-spacing:.06em; }
+.bind { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--dim); }
+.bind.off { color:var(--dim3); }
+.wgrid { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--border); margin-top:20px; }
+.wgrid > div { padding:20px 22px; border-right:1px solid var(--border-soft); display:flex; flex-direction:column; gap:12px; }
+.wgrid > div:last-child{border-right:0;}
+.wgrid .e { font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--dim2); font-weight:560; }
+.wgrid .big { font-size:26px; font-weight:480; letter-spacing:-.03em; font-variant-numeric:tabular-nums; }
+.wgrid .s { font-size:11px; color:var(--dim3); }
+.provchips { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+.provchips span { display:inline-flex; align-items:center; gap:7px; font-size:13px; }
+.provchips .miss { color:var(--dim3); }
+.hatch { display:inline-block; width:52px; height:4px; background:repeating-linear-gradient(135deg,var(--border) 0 2px,transparent 2px 5px); }
+
+/* ---------- 分析说明（不改动） ---------- */
+.anote { grid-column:1 / -1; overflow:auto; display:grid; place-items:center; }
+.anote-in { max-width:560px; padding:40px; text-align:center; }
+.anote-in .e { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--dim2); }
+.anote-in h2 { font-size:26px; font-weight:680; letter-spacing:-.03em; margin:14px 0 12px; }
+.anote-in p { font-size:14px; color:var(--dim); line-height:1.7; margin:0; }
+.anote-in .tag { display:inline-flex; margin-top:22px; padding:7px 14px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--dim2); }
+
+.foot-note { max-width:1320px; margin:14px auto 0; font-size:12px; color:var(--dim3); text-align:center; line-height:1.6; }
+</style>
+</head>
+<body>
+<header class="controls">
+  <span class="brand">Scry<small>方向 A · 编辑级精修</small></span>
+  <span class="lbl">主题</span>
+  <div class="seg" id="theme"><button data-theme="dark" aria-pressed="true">暗色</button><button data-theme="light" aria-pressed="false">浅色</button></div>
+  <span class="lbl">界面</span>
+  <div class="seg" id="surface"><button data-surface="workbench" aria-pressed="true">工作台</button><button data-surface="welcome" aria-pressed="false">欢迎</button><button data-surface="analytics" aria-pressed="false">分析</button></div>
+  <span class="grow"></span>
+  <span class="note">对齐已上线分析页的语言：近单色、hairline、编辑级大字号 + tabular-nums、eyebrow、证据写进排版。分析页保持现状。</span>
+</header>
+
+<div class="stage"><div class="window">
+  <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span><span class="tt">Scry</span></div>
+  <div class="app">
+
+    <!-- ===== 工作台 ===== -->
+    <section class="surface active" data-surface="workbench" style="display:contents">
+      <aside class="side">
+        <div class="side-head"><b>Scry</b><span>0.1.0</span></div>
+        <div class="newbtn"><span class="l"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建会话</span><span class="kbd">⌘N</span></div>
+        <div class="search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>搜索会话 / 项目…</div>
+        <nav class="nav">
+          <a><svg class="ico" viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-5 3 3 5-7"/></svg>分析</a>
+          <a><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>诊断</a>
+          <a><svg class="ico" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg>技能<span class="c">31</span></a>
+          <a><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>MCP<span class="c warn">0/15</span></a>
+        </nav>
+        <div class="side-scroll">
+          <div class="ghead"><span class="e">最近</span><span class="n">5</span></div>
+          <div class="ghead"><span class="e">不绑定项目</span><span class="n">1</span></div>
+          <div class="sess"><span class="mark qoder"></span><span class="tt">https://code.alibaba…</span><span class="m">18h</span></div>
+          <div class="ghead"><span class="e">rate-native</span><span class="n">3</span></div>
+          <div class="sess on"><span class="mark claude"></span><span class="tt">hello</span><span class="m">6d</span></div>
+          <div class="sess"><span class="mark qoder"></span><span class="tt">/rate-native-rate-wo…</span><span class="m">1w</span></div>
+          <div class="sess"><span class="mark qoder"></span><span class="tt">不要读取或修改任何…</span><span class="m">1w</span></div>
+          <div class="ghead"><span class="e">rate-native</span><span class="n">5</span></div>
+          <div class="sess"><span class="mark codex"></span><span class="tt">只回复 OK，不读文件…</span><span class="m">7d</span></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <span class="tb-title"><svg class="ico" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg>rate-native</span>
+          <span class="sp"></span>
+          <div class="ib on" title="固定摘要"><svg class="ico" viewBox="0 0 24 24"><path d="M9.5 3h5l-.6 5.5 2.6 2.6v1.8h-3.8V20l-.7 1.4-.7-1.4v-6.1H8.5v-1.8l2.6-2.6z"/></svg></div>
+          <div class="ib on" title="右侧工作区"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg></div>
+        </div>
+        <div class="pin-summary">
+          <div class="ps-sec">Environment</div>
+          <div class="ps-row"><span class="ps-ic"><svg class="ico" viewBox="0 0 24 24"><path d="M4 17V5l3-2 4 3 4-3 5 3v11l-5-3-4 3-4-3-3 2z"/></svg></span><span class="ps-k">Changes</span><span class="ps-v"><b class="add">+2,558</b> <b class="del">−2,114</b></span></div>
+          <div class="ps-row"><span class="ps-ic"><svg class="ico" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg></span><span class="ps-k">rate-native</span></div>
+          <div class="ps-div"></div>
+          <div class="ps-sec">Context</div>
+          <button class="ps-exp"><span class="ps-ic"><svg class="ico" viewBox="0 0 24 24"><path d="M12 2l2.4 5 5.6.8-4 4 1 5.6L12 20l-5 2.4 1-5.6-4-4 5.6-.8z"/></svg></span><span class="ps-k">Skills &amp; MCP · 本会话</span><span class="ps-c">1</span><svg class="ico chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="ps-exp"><span class="ps-ic"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg></span><span class="ps-k">Web 引用</span><span class="ps-c">1</span><svg class="ico chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="ps-exp"><span class="ps-ic"><svg class="ico" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.4"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M14 18c.3-2 1.6-3 3-3s2.7 1 3 3"/></svg></span><span class="ps-k">子 Agent</span><span class="ps-c unk">—</span><svg class="ico chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="chat"><div class="wrap">
+          <div class="umsg"><div class="bubble">你好，帮我了解下这个工作区（rate-native）现在能做什么。</div></div>
+          <div class="rhead"><span class="mark claude"></span><span class="rn">claude run</span><span class="rid">run-mu24nmu8-0</span><span class="rmeta"><span>tok 41.1k</span><span>tools 3</span></span></div>
+          <div class="hookrow"><svg class="ico" viewBox="0 0 24 24"><path d="M8 4v6a4 4 0 004 4 4 4 0 004-4V4M12 18v2"/></svg><span>本轮 Hook · <b>7</b> 个周期 · <b>11</b> 个处理器实例</span></div>
+          <div class="tcard"><button class="trow"><span class="st ok"><svg class="ico" viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"/></svg></span><span class="nm">Read</span><span class="arg">AGENTS.md · CLAUDE.md</span><span class="tmeta"><span>0.2s</span></span><svg class="ico chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
+          <div class="tcard"><button class="trow"><span class="st ok"><svg class="ico" viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"/></svg></span><span class="nm">Bash</span><span class="op">READ</span><span class="arg">git status · ls -la</span><span class="tmeta"><span>0.1s</span></span><svg class="ico chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
+          <div class="tcard"><button class="trow"><span class="st ok"><svg class="ico" viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"/></svg></span><span class="nm">Glob</span><span class="arg">**/*.md</span><span class="tmeta"><span>0.1s</span></span><svg class="ico chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
+          <div class="msg">
+            <p>你好！有什么可以帮你的吗？</p>
+            <p>我看到你这是在 <code>rate-native</code> 聚合工作区里（treehouse worktree），可以做的事情很多，比如：</p>
+            <ul>
+              <li><strong>需求交付</strong>：从 Aone 工单/钉钉文档摄入到代码交付的端到端流程（<code>rate-workflow</code>）</li>
+              <li><strong>查业务知识</strong>：评价业务规则、链路、接口协议（<code>rate-doc</code>）</li>
+              <li><strong>代码 / 分支 / CR</strong>：切分支、建变更、发二方包、部署预发、代码评审</li>
+              <li><strong>前端</strong>：<code>rate-list</code> / <code>rate-detail</code> 等页面改动、真机自测、设计稿转代码</li>
+              <li><strong>配置查改</strong>：Switch / Diamond 线上值查询与发布（<code>ali-config</code>）</li>
+            </ul>
+            <p>直接告诉我你想做什么就行。如果只是打个招呼，那——你好 👋</p>
+            <p>需要注意一点：几个 MCP 服务（aone-app-center、aone-mix、coop、ding-doc、group-env、o2）当前<span class="warnw">未授权</span>，本会话是非交互模式无法完成授权流程。</p>
+          </div>
+          <div class="tfoot">
+            <div><span class="k">In</span><span class="v">2</span></div>
+            <div><span class="k">Out</span><span class="v">416</span></div>
+            <div><span class="k">Cache·W</span><span class="v d">40.6k</span></div>
+            <div><span class="k">Dur</span><span class="v">37.5s</span></div>
+            <div><span class="k">Api</span><span class="v">10.8s</span></div>
+            <div><span class="k">Tools</span><span class="v">3</span></div>
+          </div>
+          <div class="branch"><svg class="ico" viewBox="0 0 24 24"><path d="M6 3v12a3 3 0 003 3h6M6 3a2 2 0 100 4 2 2 0 000-4zm12 12a2 2 0 100 4 2 2 0 000-4z"/></svg>在新会话中分支</div>
+        </div></div>
+        <div class="composer-wrap"><div class="composer">
+          <div class="ctx"><svg class="ico" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M3 7l2-3h5l2 3h7a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg>rate-native <svg class="ico" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+          <div class="ta">给 Claude Code 一个任务… （/ 唤起命令，Enter 发送，Shift+Enter 换行）</div>
+          <div class="fo">
+            <span class="fchip"><svg class="ico" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 018 0"/></svg><span class="fa">完全访问</span><svg class="ico" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="fchip"><span class="mark claude" style="width:12px;height:12px"></span>Claude</span>
+            <span class="fchip">claude-opus-4-8<svg class="ico" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="hint">原型不会调用 Provider</span>
+            <span class="send">发送 <svg class="ico" style="width:13px;height:13px;stroke:var(--bg)" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+          </div>
+        </div></div>
+      </main>
+
+      <aside class="over">
+        <div class="otabbar">
+          <div class="otabs-open">
+            <div class="otab on"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span>纵览</span><button class="otab-x" title="关闭纵览"><svg class="ico" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+            <button class="otab-add" title="添加 Surface（纵览 / 文件 / Diff / 终端 / Agents）"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+          </div>
+          <span class="sp"></span>
+          <button class="oib" title="最大化面板"><svg class="ico" viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M4 15v5h5M20 9V4h-5"/></svg></button>
+          <button class="oib" title="隐藏右侧工作区"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M14 3v18"/></svg></button>
+        </div>
+        <div class="oscroll">
+          <div class="oblock">
+            <span class="eyebrow">上下文</span>
+            <div class="ctx-model"><span class="mark claude"></span>claude-opus-4-8[1m]</div>
+            <div class="ctx-big">40.6k <span style="color:var(--dim3);font-weight:400">/ 1000.0k</span></div>
+            <div class="track"><i style="width:4%"></i></div>
+            <div class="ctx-sub">已占 4% · 残余 959.4k · 最近一轮完整 prompt÷窗口</div>
+          </div>
+          <div class="oblock">
+            <span class="eyebrow">本会话 · 1 轮</span>
+            <div class="verdict-big"><span class="dot" style="background:var(--ok);width:8px;height:8px"></span>完成</div>
+            <div class="verdict-sub">1 轮完成 · 3 次调用</div>
+          </div>
+          <div class="oblock">
+            <div class="ometrics">
+              <div><span class="k">总 Token</span><span class="v">41.1k</span><span class="s">1/1 轮已捕获</span></div>
+              <div><span class="k">输入 / 输出</span><span class="v">418</span><span class="s">in 2 · out 416</span></div>
+              <div><span class="k">调用</span><span class="v">3</span><span class="s">工具 3 · MCP 0 · Skill 0 · 子Agent 0</span></div>
+              <div><span class="k">危险</span><span class="v">0</span><span class="s">无</span></div>
+            </div>
+            <div class="cacherow"><span>CACHE·R <b>0</b></span><span>CACHE·W <b>40.6k</b></span><span>API <b>10.8s</b></span></div>
+          </div>
+          <div class="oblock">
+            <span class="eyebrow">会话</span>
+            <div class="sid">9b1c07fc-33ef-4b17-<br>ba1e-8a02ce36d94a</div>
+          </div>
+          <div class="oblock">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div class="pillrow"><button class="on">轮次数据</button><button>会话数据</button></div>
+              <span class="mono" style="font-size:10.5px;color:var(--dim3)">1 turns</span>
+            </div>
+            <span class="eyebrow">每轮调用</span>
+            <div class="turnline">
+              <span class="tchip tid"><b>T01</b></span>
+              <span class="tchip"><b>37.5s</b> 耗时</span>
+              <span class="tchip k">结构化介入 <b>0</b></span>
+              <span class="tchip k">MCP <b>0</b></span>
+              <span class="tchip k">Skill <b>0</b></span>
+              <span class="tchip k">子Agent <b>0</b></span>
+              <span class="tchip">Hooks <b>7</b></span>
+              <span class="tchip k">文件 <b>0</b></span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ===== 欢迎 ===== -->
+    <section class="surface" data-surface="welcome">
+      <div class="welcome"><div class="win">
+        <span class="eyebrow">Local-first · 观测与治理</span>
+        <h1 class="wh">你好，<span class="d">开始一次可被检查的会话</span></h1>
+        <p class="wsub">在本机驱动 Provider CLI/SDK，把会话、工具调用、文件足迹、用量与风险呈现为可检查证据。Scry 不是沙箱——获批工具仍以本机权限运行。</p>
+        <div class="wcta">
+          <span class="bp"><svg class="ico" style="stroke:var(--bg)" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建会话</span>
+          <span class="bg2"><svg class="ico" viewBox="0 0 24 24"><path d="M4 4h16v12H5.2L4 17.5z"/></svg>恢复上次会话</span>
+        </div>
+
+        <div class="wsec">
+          <div class="wsec-h"><h3>项目</h3><span class="eyebrow">3 个 · 绑定状态</span></div>
+          <div class="pgrid">
+            <div class="pcard">
+              <div class="pcard-h"><span class="mark claude"></span><span class="nm">rate-native</span><span class="bindchip"><span class="dot" style="background:var(--ok)"></span>已绑定 claude</span></div>
+              <div class="meta"><span class="col"><b>8</b><span>会话</span></span><span class="col"><b>6d</b><span>活跃</span></span></div>
+            </div>
+            <div class="pcard">
+              <div class="pcard-h"><span class="mark codex"></span><span class="nm">scry</span><span class="bindchip"><span class="dot" style="background:var(--ok)"></span>已绑定 codex</span></div>
+              <div class="meta"><span class="col"><b>12</b><span>会话</span></span><span class="col"><b>2d</b><span>活跃</span></span></div>
+            </div>
+            <div class="pcard">
+              <div class="pcard-h"><span class="mark"></span><span class="nm" style="color:var(--dim)">不绑定项目</span><span class="bindchip off">未绑定</span></div>
+              <div class="meta"><span class="col"><b>1</b><span>会话</span></span><span class="col"><b>18h</b><span>活跃</span></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wsec">
+          <div class="wsec-h"><h3>本机状态</h3></div>
+          <div class="pgrid">
+            <div class="pcard static">
+              <span class="e">Provider CLI</span>
+              <div class="provchips" style="margin-top:13px"><span><span class="mark claude"></span>claude</span><span><span class="mark codex"></span>codex</span><span class="miss"><span class="mark qoder"></span>qoder 未探测</span><span class="miss"><span class="mark opencode"></span>opencode 未探测</span><span class="miss"><span class="mark pi"></span>pi 未探测</span></div>
+            </div>
+            <div class="pcard static">
+              <span class="e">MCP 服务</span>
+              <div class="big" style="color:var(--warn)">0 / 15</div>
+              <span class="s">15 个已声明 · 0 个已授权</span>
+            </div>
+            <div class="pcard static">
+              <span class="e">近 7 天用量</span>
+              <div class="big">2.4M</div>
+              <span class="s">exact · 来自 Provider result</span>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ===== 分析：保持现状说明 ===== -->
+    <section class="surface" data-surface="analytics">
+      <div class="anote"><div class="anote-in">
+        <span class="e">分析 · 已上线</span>
+        <h2>分析页保持现状</h2>
+        <p>你已确认现有分析页「目前这样挺好」，本次精修不改动它。工作台与欢迎页的编辑级语言（近单色、hairline、编辑级大字号 + tabular-nums、eyebrow、证据写进排版）正是对齐这张分析页，以保证全局一致。</p>
+        <span class="tag">设计基准 · src/renderer/AnalyticsView.tsx</span>
+      </div></div>
+    </section>
+
+  </div>
+</div></div>
+<p class="foot-note">方向 A 编辑级精修 · 只涉及工作台 / 欢迎两个界面，分析页不动。不连接 Provider、不写真实 .scry。证据语义（exact / — 不可用 / 虚线=近似或下界 / 斜纹=未知 / 真实 0）按产品约定表达。</p>
+
+<script>
+  const root=document.documentElement
+  function seg(id,attr){const box=document.getElementById(id);box.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;var k=attr==='data-theme'?'theme':'surface';root.setAttribute(attr,b.dataset[k]);Array.prototype.forEach.call(box.children,function(x){x.setAttribute('aria-pressed',x===b)});if(attr==='data-surface')sw(b.dataset.surface)})}
+  function sw(n){document.querySelectorAll('.surface').forEach(function(s){var on=s.dataset.surface===n;s.classList.toggle('active',on);s.style.display=on?'contents':'none'})}
+  seg('theme','data-theme');seg('surface','data-surface');sw('workbench')
+</script>
+</body>
+</html>

@@ -26,7 +26,7 @@ describe('normalized historical session capability contract', () => {
     const overview = renderToStaticMarkup(<OverviewPanel turns={[reloaded]} selected={null} onSelect={() => undefined} usage={null} stats={null} />)
     expect(pinned.includes('<span>hsf-invoke</span><em>×1</em>')).toBe(outcome === 'success')
     expect(pinned).not.toContain('<em>×1 · 加载推断</em>')
-    expect(overview.includes('Skill 1（含加载推断）')).toBe(outcome === 'success')
+    expect(overview.includes('hsf-invoke（含加载推断）')).toBe(outcome === 'success')
     expect(pinned).toContain('browser / navigate')
     expect(JSON.stringify(reloaded)).toBe(before)
   })

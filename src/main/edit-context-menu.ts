@@ -1,6 +1,15 @@
 import type { ContextMenuParams, MenuItemConstructorOptions } from 'electron'
 
 type EditMenuParams = Pick<ContextMenuParams, 'isEditable' | 'formControlType' | 'editFlags'>
+type ImageMenuParams = Pick<ContextMenuParams, 'hasImageContents'>
+
+export function shouldShowImageContextMenu(params: ImageMenuParams): boolean {
+  return params.hasImageContents
+}
+
+export function imageContextMenuTemplate(onCopyImage: () => void): MenuItemConstructorOptions[] {
+  return [{ label: '复制图片', click: onCopyImage }]
+}
 
 export function shouldShowEditContextMenu(params: EditMenuParams): boolean {
   return params.isEditable && params.formControlType !== 'input-password'

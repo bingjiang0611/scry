@@ -23,6 +23,8 @@ describe('provider termination semantics', () => {
     expect(classifyRunTermination({ rawReason: 'model_context_window_exceeded' })).toBe('model_context_window_exceeded')
     expect(classifyRunTermination({ message: 'context_length_exceeded: prompt is too long' })).toBe('input_context_overflow')
     expect(classifyRunTermination({ message: 'input token limit exceeded' })).toBe('input_context_overflow')
+    expect(classifyRunTermination({ message: 'Qoder: http_413' })).toBe('input_context_overflow')
+    expect(classifyRunTermination({ message: 'request entity too large' })).toBe('input_context_overflow')
   })
 
   it('does not guess a direction from an ambiguous token-limit phrase', () => {

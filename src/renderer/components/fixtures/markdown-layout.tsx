@@ -7,7 +7,8 @@ import '../../styles.css'
 const opened: WorkspaceFileTarget[] = []
 const taskLabel = '[[generated/后端转全栈 — 前端学习路线|AI-Native 全栈转型 — 前端新人指南与研发流程摘要]] — 2026-05-25 入库'
 const workspaces = ['/Users/example/myNote', '/Users/example/a/much/longer/project/path']
-const source = `- [ ] ${taskLabel}\n\n- [ ] 第二条待读任务用于保持与真实清单相同的 loose list 结构\n\n\`待读清单.md\`\n\n\`~/Papers/reading/report.md\``
+const browserUrl = 'http://localhost:8791/index.html'
+const source = `- [ ] ${taskLabel}\n\n- [ ] 第二条待读任务用于保持与真实清单相同的 loose list 结构\n\n\`待读清单.md\`\n\n\`~/Papers/reading/report.md\`\n\n\`${browserUrl}\``
 
 const assert = (ok: unknown, message: string): void => { if (!ok) throw new Error(message) }
 const wait = async (check: () => boolean, label: string): Promise<void> => {
@@ -63,8 +64,11 @@ async function run(): Promise<void> {
     { cwd: '/Users/example/myNote', path: '待读清单.md' },
     { cwd: '~', path: 'Papers/reading/report.md' }
   ]), `file links must retain their authorization roots: ${JSON.stringify(opened)}`)
+
+  const browserLink = document.querySelector<HTMLAnchorElement>(`a[href="${browserUrl}"]`)
+  assert(browserLink?.target === '_blank', 'HTTP code span must be an external browser link')
+  console.log('SCRY_MARKDOWN_LAYOUT_TEST_READY')
+  browserLink?.click()
 }
 
-void run()
-  .then(() => console.log('SCRY_MARKDOWN_LAYOUT_TEST_OK'))
-  .catch((error) => console.error('SCRY_MARKDOWN_LAYOUT_TEST_FAILED', String(error)))
+void run().catch((error) => console.error('SCRY_MARKDOWN_LAYOUT_TEST_FAILED', String(error)))

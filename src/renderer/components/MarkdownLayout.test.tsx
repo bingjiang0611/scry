@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { build } from 'vite'
 import { expect, it } from 'vitest'
 
-it('keeps task text horizontal and routes current-workspace and home file links in real Chromium', async () => {
+it('keeps task text horizontal and routes file and browser links in real Chromium', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'scry-markdown-layout-'))
   try {
     await build({
@@ -36,7 +36,13 @@ it('keeps task text horizontal and routes current-workspace and home file links 
         win.webContents.on('console-message', (event) => {
           const message = event.message || ''
           console.log(message)
-          if (message.includes('SCRY_MARKDOWN_LAYOUT_TEST')) app.exit(message.includes('_OK') ? 0 : 1)
+          if (message.includes('SCRY_MARKDOWN_LAYOUT_TEST_FAILED')) app.exit(1)
+        })
+        win.webContents.setWindowOpenHandler(({ url }) => {
+          const ok = url === 'http://localhost:8791/index.html'
+          console.log(ok ? 'SCRY_MARKDOWN_LAYOUT_TEST_OK' : 'SCRY_MARKDOWN_LAYOUT_TEST_BAD_URL', url)
+          app.exit(ok ? 0 : 4)
+          return { action: 'deny' }
         })
         win.webContents.on('render-process-gone', () => app.exit(2))
         win.loadFile(${JSON.stringify(join(dir, 'index.html'))})

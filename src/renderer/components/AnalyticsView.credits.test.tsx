@@ -28,26 +28,29 @@ function render(credits: number | null | undefined) {
 }
 
 describe('AnalyticsView Qoder Credits', () => {
-  it('shows native credits in card and grouped details without changing the USD total/chart/share', () => {
+  it('Qoder-only 分析在概览与明细统一显示 Credit，不回退成美元成本', () => {
     const html = render(12.5)
-    expect(html).toContain('<strong>$1.25</strong>')
-    expect(html).toContain('另计 Qoder 12.5 Credits · 已知下界')
+    expect(html).toContain('QODER CREDIT')
+    expect(html).toContain('<strong>12.5 Credits</strong>')
+    expect(html).not.toContain('<strong>$1.25</strong>')
     expect(html).toContain('独立计量')
     expect(html).toContain('Credits 已知下界')
     expect(html).toContain('2/3 轮已关联，4 个请求有计量，1 个请求缺失')
     expect(html).toContain('不计入美元总额、占比或成本趋势')
+    expect(html).not.toContain('另计 Qoder')
     expect(html).toContain('该时间范围没有可绘制的成本数据')
     expect(html).not.toContain('usage-provider-track')
     expect(html).not.toContain('$12.50')
     const details = html.slice(html.indexOf('<section class="usage-breakdown">'))
+    expect(details).toContain('<th>Credit</th>')
     expect(details).toContain('>12.5 Credits</td><td>—</td>')
     expect(details).not.toContain('ultimate')
   })
 
   it('distinguishes unknown, measured zero and tiny positive credits', () => {
-    expect(render(null)).toContain('成本不可用')
+    expect(render(null)).toContain('Credit 不可用')
     expect(render(null)).not.toContain('>0 Credits<')
-    expect(render(undefined)).toContain('usage-provider-track is-unknown')
+    expect(render(undefined)).not.toContain('usage-provider-track is-unknown')
     expect(render(0)).toContain('>0 Credits</td>')
     expect(render(0)).toContain('Credits 已知下界')
     expect(render(0.0001)).toContain('&lt;0.01 Credits')

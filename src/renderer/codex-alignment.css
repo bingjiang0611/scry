@@ -111,10 +111,6 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
-.user-edit-input:focus-visible {
-  outline: none;
-}
-
 /* Shell and sidebar ---------------------------------------------------------- */
 
 .sidebar {
@@ -277,8 +273,7 @@ select:focus-visible,
 
 .sb-proj-acts {
   top: 3px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--panel3) 92%, transparent);
+  background: transparent;
 }
 
 .sb-sess {
@@ -570,17 +565,6 @@ select:focus-visible,
   line-height: 1.6;
 }
 
-.chat-body .turn-user.editing {
-  padding-left: 6%;
-}
-
-.chat-body .user-edit-bubble {
-  width: 100%;
-  min-height: 156px;
-  padding: 20px 22px;
-  border-radius: 24px;
-}
-
 .chat-body .turn-assistant {
   margin-top: 20px;
 }
@@ -751,22 +735,26 @@ select:focus-visible,
 
 .runtime-composer .composer-controls {
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .runtime-composer .run-control-select {
-  height: 32px;
-  min-height: 32px;
-  padding-inline: 8px 22px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
   color: var(--dim);
   font-size: 11.5px;
 }
 
-.runtime-composer .run-control-select:hover,
-.runtime-composer .run-control-select:focus-within {
+.runtime-composer .permission-mode-trigger {
+  height: 32px;
+  min-height: 32px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.runtime-composer .permission-mode-trigger:hover,
+.runtime-composer .permission-mode-trigger:focus-visible,
+.runtime-composer .run-control-select:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
   border-color: transparent;
   background: var(--surface-strong);
   color: var(--fg);
@@ -782,13 +770,17 @@ select:focus-visible,
 
 .runtime-composer .run-control-select.warning,
 .runtime-composer .run-control-select.danger {
-  border-color: transparent;
-  background: transparent;
   color: var(--warn);
 }
 
-.runtime-composer .run-control-select.danger:hover,
-.runtime-composer .run-control-select.danger:focus-within {
+.runtime-composer .run-control-select.danger .permission-mode-trigger {
+  border-color: transparent;
+  background: transparent;
+}
+
+.runtime-composer .run-control-select.danger .permission-mode-trigger:hover,
+.runtime-composer .run-control-select.danger .permission-mode-trigger:focus-visible,
+.runtime-composer .run-control-select.danger:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
   border-color: transparent;
   background: var(--warn-soft);
 }
@@ -889,15 +881,116 @@ select:focus-visible,
   color: var(--dim2);
 }
 
+.runtime-composer .permission-mode-popover {
+  position: absolute;
+  z-index: 32;
+  left: 0;
+  bottom: calc(100% + 9px);
+  width: min(400px, calc(100vw - 32px));
+  padding: 7px;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(18px);
+}
+
+.runtime-composer .permission-mode-popover.is-single-option {
+  width: min(360px, calc(100vw - 32px));
+}
+
+.runtime-composer .permission-mode-heading {
+  padding: 7px 10px 6px;
+  color: var(--dim2);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+}
+
+.runtime-composer .permission-mode-option {
+  width: 100%;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+}
+
+.runtime-composer .permission-mode-option:hover,
+.runtime-composer .permission-mode-option:focus-visible,
+.runtime-composer .permission-mode-option.is-selected {
+  background: var(--surface-strong);
+}
+
+.runtime-composer .permission-mode-option:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: -1px;
+}
+
+.runtime-composer .permission-mode-option:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.runtime-composer .permission-mode-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--dim2);
+}
+
+.runtime-composer .permission-mode-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.runtime-composer .permission-mode-copy strong {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 520;
+  line-height: 1.2;
+}
+
+.runtime-composer .permission-mode-copy > span {
+  color: var(--dim2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.runtime-composer .permission-mode-check {
+  width: 17px;
+  height: 17px;
+  justify-self: end;
+  color: var(--accent);
+}
+
+.runtime-composer .permission-mode-option.is-danger .permission-mode-icon,
+.runtime-composer .permission-mode-option.is-danger .permission-mode-check {
+  color: var(--warn);
+}
+
+.runtime-composer .permission-mode-option.is-danger:hover,
+.runtime-composer .permission-mode-option.is-danger:focus-visible,
+.runtime-composer .permission-mode-option.is-danger.is-selected {
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+}
+
 .runtime-composer .model-effort-popover {
   position: absolute;
   z-index: 30;
   right: 0;
   bottom: calc(100% + 7px);
-  width: min(250px, calc(100vw - 24px));
-  padding: 10px 12px 11px;
+  width: min(258px, calc(100vw - 24px));
+  padding: 8px;
   border: 1px solid var(--border2);
-  border-radius: 15px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--panel) 97%, transparent);
   box-shadow: var(--shadow-pop);
   backdrop-filter: blur(18px);
@@ -905,21 +998,25 @@ select:focus-visible,
 
 .runtime-composer .model-effort-summary {
   display: grid;
-  place-items: center;
+}
+
+.runtime-composer .model-effort-current,
+.runtime-composer .model-effort-strength {
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
 }
 
 .runtime-composer .model-effort-current {
-  min-width: 0;
-  min-height: 44px;
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 1px;
-  padding: 3px 9px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 7px;
   background: transparent;
   cursor: pointer;
+  text-align: left;
 }
 
 .runtime-composer .model-effort-current:hover,
@@ -927,45 +1024,49 @@ select:focus-visible,
   background: var(--surface-muted);
 }
 
+.runtime-composer .model-effort-field-label {
+  color: var(--dim3);
+  font-size: 11px;
+}
+
 .runtime-composer .model-effort-current-effort {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  grid-column: 2 / 4;
+  justify-self: end;
   color: var(--accent);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .runtime-composer .model-effort-current-model {
-  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
-  color: var(--dim);
-  font-size: 13px;
-  font-weight: 400;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .runtime-composer .model-effort-current .chev {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   flex: none;
-  color: currentColor;
+  color: var(--dim3);
 }
 
 .runtime-composer .model-effort-slider {
   position: relative;
-  min-height: 30px;
+  min-height: 24px;
   display: grid;
   align-items: center;
-  margin-top: 7px;
+  margin: 0 8px 3px;
 }
 
 .runtime-composer .model-effort-slider input[type='range'] {
   position: relative;
   z-index: 2;
   width: 100%;
-  height: 28px;
+  height: 20px;
   margin: 0;
   appearance: none;
   border-radius: 999px;
@@ -974,9 +1075,9 @@ select:focus-visible,
     to right,
     var(--accent) 0,
     var(--accent) var(--effort-progress),
-    var(--surface-muted) var(--effort-progress),
-    var(--surface-muted) 100%
-  );
+    var(--border2) var(--effort-progress),
+    var(--border2) 100%
+  ) center / calc(100% - 14px) 3px no-repeat;
   cursor: pointer;
 }
 
@@ -985,50 +1086,51 @@ select:focus-visible,
 }
 
 .runtime-composer .model-effort-slider input[type='range']::-webkit-slider-runnable-track {
-  height: 28px;
+  height: 20px;
   border-radius: 999px;
   background: transparent;
 }
 
 .runtime-composer .model-effort-slider input[type='range']::-webkit-slider-thumb {
-  width: 28px;
-  height: 28px;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
   appearance: none;
-  border: 1px solid var(--border2);
+  border: 1px solid var(--accent-line);
   border-radius: 50%;
   background: var(--panel);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
 }
 
 .runtime-composer .model-effort-slider input[type='range']::-moz-range-track {
-  height: 28px;
+  height: 20px;
   border: 0;
   border-radius: 999px;
   background: transparent;
 }
 
 .runtime-composer .model-effort-slider input[type='range']::-moz-range-thumb {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border2);
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--accent-line);
   border-radius: 50%;
   background: var(--panel);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
 }
 
 .runtime-composer .model-effort-slider-dots {
   position: absolute;
   z-index: 3;
-  right: 13px;
-  left: 13px;
+  right: 7px;
+  left: 7px;
   display: flex;
   justify-content: space-between;
   pointer-events: none;
 }
 
 .runtime-composer .model-effort-slider-dots i {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: var(--dim3);
 }
@@ -1498,8 +1600,12 @@ select:focus-visible,
     max-width: 40px;
   }
 
-  .run-control-select {
-    padding-inline: 6px 20px;
+  .permission-mode-trigger {
+    padding-inline: 7px;
+  }
+
+  .permission-mode-popover {
+    width: min(420px, calc(100cqi - 12px));
   }
 
   .model-effort-popover {
@@ -1881,8 +1987,8 @@ button.pinned-summary-detail-row:hover {
 
 .topbar {
   border-color: var(--border3);
-  background: color-mix(in srgb, var(--main-surface) 94%, transparent);
-  backdrop-filter: blur(18px) saturate(115%);
+  /* Nearly opaque blur kept a full-width offscreen surface alive during every trace repaint. */
+  background: var(--main-surface);
 }
 
 .surface-topbar {
@@ -1906,11 +2012,7 @@ button.pinned-summary-detail-row:hover {
     transform 150ms ease;
 }
 
-.sb-sess:hover,
-.sb-sess-row:focus-within .sb-sess {
-  transform: translateX(2px);
-}
-
+/* 会话行保持静止：横向位移会扩大滚动区域，并在列表底部反复触发/取消 hover。 */
 .sb-sess.active {
   border: 1px solid color-mix(in srgb, var(--selected-line) 58%, var(--border3));
   background:
@@ -1934,41 +2036,49 @@ button.pinned-summary-detail-row:hover {
     0 0 0 4px var(--accent-soft);
 }
 
-/* Welcome: editorial hero, project context cards and Provider field. */
+/* Welcome: a quiet Codex-like prompt. Provider discovery stays in the composer menu. */
 
 .chat-body:has(.welcome-field) {
-  background:
-    radial-gradient(circle at 50% 12%, var(--accent-soft), transparent 30%),
-    var(--main-surface);
+  background: var(--main-surface);
 }
 
 .chat-body .welcome-field {
-  gap: 20px;
+  gap: 0;
   padding-block: 24px 20px;
 }
 
-.welcome-heading {
-  gap: 14px;
+.welcome-heading-minimal {
+  justify-items: center;
+  gap: 28px;
 }
 
-.welcome-heading h1 {
-  max-width: 720px;
-  font-size: clamp(32px, 3.6cqi, 40px);
-  font-weight: 690;
-  line-height: 1.08;
-  letter-spacing: -0.055em;
+.welcome-hero-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  color: var(--dim2);
+}
+
+.welcome-hero-icon .ico {
+  width: 52px;
+  height: 52px;
+  stroke-width: 1.2;
+}
+
+.welcome-heading-minimal h1 {
+  max-width: 760px;
+  font-size: clamp(29px, 3.4cqi, 38px);
+  font-weight: 520;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
   text-wrap: balance;
 }
 
-.welcome-heading p {
-  max-width: 620px;
-  font-size: 15px;
-  line-height: 1.75;
-  text-wrap: balance;
-}
-
-.welcome-kicker {
-  color: var(--dim);
+.welcome-heading-minimal h1 span {
+  text-decoration: underline dotted var(--dim3);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 7px;
 }
 
 .welcome-provider-field {
@@ -2047,22 +2157,24 @@ button.pinned-summary-detail-row:hover {
 /* Conversation: turn cards, tool blocks and measured telemetry. */
 
 .chat-body .chat-transcript {
-  padding-block: 32px 56px;
+  padding-block: 24px 40px;
 }
 
+/* A turn already contains both the user prompt and assistant response. Keep the
+   boundary visible without stacking two oversized padding bands between turns. */
 .chat-body .transcript-turn {
-  padding-bottom: 40px;
+  padding-bottom: 18px;
 }
 
 .chat-body .transcript-turn + .transcript-turn {
-  padding-top: 48px;
+  padding-top: 22px;
 }
 
 .chat-body .turn-assistant {
-  margin-top: 22px;
-  padding: 20px 22px;
+  margin-top: 14px;
+  padding: 16px 18px;
   border: 0;
-  border-radius: 26px;
+  border-radius: 20px;
   background: var(--surface-faint);
   box-shadow: none;
   transition: background-color 150ms ease;
@@ -2077,8 +2189,9 @@ button.pinned-summary-detail-row:hover {
 }
 
 .chat-body .who {
-  min-height: 28px;
-  padding-bottom: 12px;
+  min-height: 22px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.015em;
@@ -2091,6 +2204,8 @@ button.pinned-summary-detail-row:hover {
 }
 
 .chat-body .turn-flow {
+  gap: 12px;
+  margin: 4px 0 0;
   padding-left: 0;
 }
 
@@ -2167,15 +2282,33 @@ button.pinned-summary-detail-row:hover {
   border-top: 0;
 }
 
+.chat-body .turn-tail {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border3);
+}
+
 .chat-body .turn-footer {
+  flex: 1 1 auto;
   gap: 10px;
-  margin-top: 14px;
-  padding: 10px 2px 0;
+  min-width: 0;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 2px;
   border: 0;
   background: transparent;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.015em;
+}
+
+.chat-body .turn-branch-row {
+  flex: 0 0 auto;
+  min-height: 28px;
+  margin: 0;
 }
 
 .chat-body .turn-footer .lbl {
@@ -2233,7 +2366,7 @@ button.pinned-summary-detail-row:hover {
   border-top: 1px solid var(--border3);
 }
 
-.runtime-composer .run-control-select,
+.runtime-composer .permission-mode-trigger,
 .runtime-composer .model-effort-trigger {
   min-height: 30px;
   padding-inline: 10px;
@@ -2247,7 +2380,7 @@ button.pinned-summary-detail-row:hover {
     transform 150ms ease;
 }
 
-.runtime-composer .run-control-select:hover,
+.runtime-composer .permission-mode-trigger:hover,
 .runtime-composer .model-effort-trigger:hover {
   border-color: var(--border3);
   background: var(--surface-hover);

@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { accessSync, constants, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
@@ -27,7 +27,7 @@ import {
   type TraceEvent
 } from '../../shared/trace'
 import { AgentRuntimeError } from '../run-outcome'
-import { execFileText, resolveCommandOnPath, sanitizeProviderEnv, shellEnv } from '../claude-locate'
+import { execFileText, resolveCommandOnPath, sanitizeProviderEnv, shellEnv, shellEnvError } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import type { ParsedTurn } from '../normalize'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
@@ -50,6 +50,17 @@ const bounded = (value: unknown, max = 200_000): string => {
 }
 
 const PI_BOOTSTRAP_MAX_BYTES = 64 * 1024
+const PI_NODE_PROBE_TIMEOUT_MS = 5_000
+const PI_RPC_COMMAND_TIMEOUT_MS = 15_000
+// Resuming a large Pi session includes loading its JSONL history and extensions before the first
+// response. That cold-start work can legitimately exceed an ordinary command's deadline (the
+// reported 8.3 MiB session took about 20 seconds), so startup has its own bounded allowance.
+export const PI_RPC_STARTUP_TIMEOUT_MS = 60_000
+// This is a per-JSONL-frame residency bound, not a cumulative session-output cap. Pi may emit more
+// than this over a long run, but one unframed/individual message must not grow the main heap forever.
+// 64 MiB preserves the observed >16 MiB get/event contract while matching Scry's explicit degraded
+// live-mirror safety scale. Frames above this are rejected, never truncated into false evidence.
+export const PI_RPC_MAX_FRAME_BYTES = 64 * 1024 * 1024
 
 function packagePiExecutable(executable: string): string | undefined {
   let canonical: string
@@ -95,34 +106,17 @@ function piRuntimeFromBootstrap(bootstrap: string): string | undefined {
   }
 }
 
-function compatibleNodeVersion(raw: string): boolean {
+function compatibleNodeVersion(raw: string, rotom: boolean): boolean {
   const [major, minor] = raw.trim().split('.').map(Number)
-  return major > 23 || (major === 23 && minor >= 6)
+  return major >= 24 || (!rotom && major === 23 && minor >= 6)
 }
 
-function compatiblePiNode(pathValue: string): string | undefined {
-  for (const directory of pathValue.split(delimiter)) {
+async function compatiblePiNode(env: Record<string, string>, rotom: boolean): Promise<string | undefined> {
+  for (const directory of (env.PATH ?? '').split(delimiter)) {
     const candidate = resolveCommandOnPath('node', directory)
     if (!candidate) continue
-    try {
-      const version = execFileSync(candidate, ['-p', 'process.versions.node'], {
-        encoding: 'utf8',
-        timeout: 1_500
-      })
-      if (compatibleNodeVersion(version)) return realpathSync(candidate)
-    } catch {
-      // Keep scanning: version-manager PATHs commonly contain an older Node before the active one.
-    }
-  }
-  return undefined
-}
-
-async function compatiblePiNodeAsync(pathValue: string): Promise<string | undefined> {
-  for (const directory of pathValue.split(delimiter)) {
-    const candidate = resolveCommandOnPath('node', directory)
-    if (!candidate) continue
-    const version = await execFileText(candidate, ['-p', 'process.versions.node'], { timeout: 1_500 })
-    if (compatibleNodeVersion(version)) return realpathSync(candidate)
+    const version = await execFileText(candidate, ['-p', 'process.versions.node'], { env, timeout: PI_NODE_PROBE_TIMEOUT_MS })
+    if (compatibleNodeVersion(version, rotom)) return realpathSync(candidate)
   }
   return undefined
 }
@@ -145,28 +139,37 @@ function pinPiLauncherNode(
   compatibleNode: string | undefined
 ): void {
   if (!compatibleNode) return
+  if (basename(profile.executable) === 'rotom') {
+    if (!env.ROTOM_NODE) env.ROTOM_NODE = compatibleNode
+    return
+  }
   if (!env.PI_AGENT_NODE) env.PI_AGENT_NODE = compatibleNode
-  if (basename(profile.executable) === 'rotom' && !env.ROTOM_NODE) env.ROTOM_NODE = compatibleNode
 }
 
-export function piRpcEnvironment(
-  profile: PiAgentProfile,
-  baseEnv: Record<string, string> = shellEnv()
-): Record<string, string> {
-  const env = sanitizeProviderEnv(baseEnv, 'pi')
-  const compatibleNode = env.PI_AGENT_NODE ?? compatiblePiNode(env.PATH ?? '')
-  pinPiLauncherNode(profile, env, compatibleNode)
-  return completePiEnvironment(profile, env)
+const PROXY_ENV_NAMES = [
+  'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'
+] as const
+
+function enableRotomNodeEnvProxy(profile: PiAgentProfile, env: Record<string, string>): void {
+  if (basename(profile.executable) !== 'rotom' || Object.hasOwn(env, 'NODE_USE_ENV_PROXY')) return
+  // Node's built-in fetch/WebSocket stack does not consume HTTP(S)_PROXY merely because the
+  // variables exist. Rotom's OpenAI Codex transport falls back from WebSocket to fetch/SSE, so
+  // opt its Node >=24 runtime into the env-proxy dispatcher whenever a usable proxy is present.
+  if (PROXY_ENV_NAMES.some((name) => Boolean(env[name]?.trim()))) env.NODE_USE_ENV_PROXY = '1'
 }
 
-export async function piVersionProbeEnvironment(
+export async function piRpcEnvironment(
   profile: PiAgentProfile,
   baseEnv: Record<string, string> = shellEnv()
 ): Promise<Record<string, string>> {
   const env = sanitizeProviderEnv(baseEnv, 'pi')
-  // Finder 的 PATH 常先命中旧 Node；异步寻找兼容版本，避免扫描时阻塞 Electron 主线程。
-  const compatibleNode = env.PI_AGENT_NODE ?? await compatiblePiNodeAsync(env.PATH ?? '')
+  // Discovery, profile validation and runs must use the same non-blocking launcher resolution.
+  // Rotom requires Node >=24 and owns ROTOM_NODE; PI_AGENT_NODE belongs to the legacy launcher.
+  const rotom = basename(profile.executable) === 'rotom'
+  const configuredNode = rotom ? env.ROTOM_NODE : env.PI_AGENT_NODE
+  const compatibleNode = configuredNode ?? await compatiblePiNode(env, rotom)
   pinPiLauncherNode(profile, env, compatibleNode)
+  enableRotomNodeEnvProxy(profile, env)
   return completePiEnvironment(profile, env)
 }
 
@@ -188,13 +191,24 @@ class PiRpcProcess {
   private readonly listeners = new Set<(event: JsonRecord) => void>()
   private readonly failureListeners = new Set<(error: Error) => void>()
   private buffer = ''
+  private bufferBytes = 0
   private stderr = ''
   private requestSeq = 0
   private failed: Error | null = null
   private closing = false
-  private stdoutBytes = 0
+  private closed = false
+  private readonly exited: Promise<void>
 
-  private constructor(readonly child: ChildProcessWithoutNullStreams, readonly profile: PiAgentProfile) {
+  private constructor(
+    readonly child: ChildProcessWithoutNullStreams,
+    readonly profile: PiAgentProfile,
+    private readonly maxFrameBytes = PI_RPC_MAX_FRAME_BYTES
+  ) {
+    this.exited = new Promise((resolve) => child.once('close', () => {
+      this.closed = true
+      resolve()
+    }))
+    child.stdin.on('error', (error) => this.fail(error))
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => this.feed(chunk))
@@ -208,33 +222,31 @@ class PiRpcProcess {
     })
   }
 
-  static start(profile: PiAgentProfile, args: string[], cwd?: string): PiRpcProcess {
+  static start(profile: PiAgentProfile, args: string[], env: Record<string, string>, cwd?: string, maxFrameBytes = PI_RPC_MAX_FRAME_BYTES): PiRpcProcess {
     const child = spawn(profile.executable, args, {
       cwd: cwd || homedir(),
-      env: piRpcEnvironment(profile),
+      env,
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe']
     })
-    return new PiRpcProcess(child, profile)
+    return new PiRpcProcess(child, profile, maxFrameBytes)
   }
 
   private feed(chunk: string): void {
-    this.stdoutBytes += Buffer.byteLength(chunk, 'utf8')
-    if (this.stdoutBytes > 64 * 1024 * 1024) {
-      this.fail(new Error('Pi RPC stdout 超过 64 MiB 安全上限'))
-      this.terminate()
-      return
-    }
     this.buffer += chunk
-    if (Buffer.byteLength(this.buffer, 'utf8') > 16 * 1024 * 1024) {
-      this.fail(new Error('Pi RPC 单行超过 16 MiB 安全上限'))
-      this.terminate()
-      return
-    }
+    this.bufferBytes += Buffer.byteLength(chunk, 'utf8')
     let newline: number
     while ((newline = this.buffer.indexOf('\n')) >= 0) {
-      const raw = this.buffer.slice(0, newline).replace(/\r$/, '')
+      const framed = this.buffer.slice(0, newline)
+      const consumed = this.buffer.slice(0, newline + 1)
       this.buffer = this.buffer.slice(newline + 1)
+      this.bufferBytes -= Buffer.byteLength(consumed, 'utf8')
+      if (Buffer.byteLength(framed, 'utf8') > this.maxFrameBytes) {
+        this.fail(new Error('Pi RPC 单条 JSONL 消息超过 64 MiB 支持上限'))
+        this.terminate()
+        return
+      }
+      const raw = framed.replace(/\r$/, '')
       if (!raw) continue
       let value: unknown
       try {
@@ -264,6 +276,10 @@ class PiRpcProcess {
       }
       for (const listener of this.listeners) listener(message)
     }
+    if (this.bufferBytes > this.maxFrameBytes) {
+      this.fail(new Error('Pi RPC 未完成 JSONL 消息超过 64 MiB 支持上限'))
+      this.terminate()
+    }
   }
 
   private fail(error: Error): void {
@@ -288,8 +304,11 @@ class PiRpcProcess {
     return () => this.failureListeners.delete(listener)
   }
 
-  send(command: JsonRecord, timeoutMs: number | null = 15_000): Promise<JsonRecord> {
+  send(command: JsonRecord, timeoutMs: number | null = PI_RPC_COMMAND_TIMEOUT_MS): Promise<JsonRecord> {
     if (this.failed) return Promise.reject(this.failed)
+    if (this.closing || this.child.stdin.destroyed || this.child.stdin.writableEnded) {
+      return Promise.reject(new Error('Pi RPC stdin 已关闭'))
+    }
     const id = `scry-${++this.requestSeq}`
     return new Promise((resolve, reject) => {
       const timer = timeoutMs === null ? undefined : setTimeout(() => {
@@ -313,14 +332,31 @@ class PiRpcProcess {
     this.child.stdin.write(`${JSON.stringify(message)}\n`)
   }
 
+  private async waitForClose(): Promise<boolean> {
+    if (this.closed) return true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        this.exited,
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, 750) })
+      ])
+      return this.closed
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
   async close(): Promise<void> {
     this.closing = true
-    this.child.stdin.end()
-    await Promise.race([
-      new Promise<void>((resolve) => this.child.once('close', () => resolve())),
-      new Promise<void>((resolve) => setTimeout(resolve, 750))
-    ])
-    if (this.child.exitCode == null && this.child.signalCode == null) this.terminate()
+    this.fail(new Error('Pi RPC 已关闭'))
+    if (!this.child.stdin.destroyed && !this.child.stdin.writableEnded) this.child.stdin.end()
+    if (await this.waitForClose()) return
+    this.terminate()
+    if (await this.waitForClose()) return
+    // The main stop lifecycle cancels its escalation when this run settles. Keep ownership until
+    // the child really closes, including launchers that ignore abort, stdin EOF and SIGTERM.
+    this.forceTerminate()
+    if (!await this.waitForClose()) throw new Error('Pi RPC SIGKILL 后仍未确认进程关闭')
   }
 
   terminate(): void {
@@ -349,8 +385,92 @@ class PiRpcProcess {
     }
   }
 
+  reusable(): boolean {
+    return !this.failed && !this.closing && !this.closed && !this.child.stdin.destroyed && !this.child.stdin.writableEnded
+  }
+
   stderrTail(): string {
     return this.stderr
+  }
+}
+
+const ROTOM_RPC_IDLE_MS = 60_000
+
+interface IdleRotomRpc {
+  rpc: PiRpcProcess
+  profileId: string
+  executable: string
+  cwd: string
+  sessionId: string
+  timer: ReturnType<typeof setTimeout>
+}
+
+class RotomRpcPool {
+  private readonly idle = new Map<string, IdleRotomRpc>()
+
+  private key(profile: PiAgentProfile, cwd: string | undefined, sessionId: string): string {
+    return `${profile.id}\0${profile.executable}\0${cwd ?? ''}\0${sessionId}`
+  }
+
+  take(profile: PiAgentProfile, cwd: string | undefined, sessionId: string | undefined): PiRpcProcess | undefined {
+    if (!sessionId) return undefined
+    const key = this.key(profile, cwd, sessionId)
+    const entry = this.idle.get(key)
+    if (!entry) return undefined
+    this.idle.delete(key)
+    clearTimeout(entry.timer)
+    if (entry.rpc.reusable()) return entry.rpc
+    void entry.rpc.close().catch(() => undefined)
+    return undefined
+  }
+
+  keep(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, rpc: PiRpcProcess): void {
+    if (!rpc.reusable()) {
+      void rpc.close().catch(() => undefined)
+      return
+    }
+    const key = this.key(profile, cwd, sessionId)
+    const previous = this.idle.get(key)
+    if (previous) {
+      clearTimeout(previous.timer)
+      void previous.rpc.close().catch(() => undefined)
+    }
+    const entry: IdleRotomRpc = {
+      rpc,
+      profileId: profile.id,
+      executable: profile.executable,
+      cwd: cwd ?? '',
+      sessionId,
+      timer: setTimeout(() => {
+        if (this.idle.get(key) !== entry) return
+        this.idle.delete(key)
+        void rpc.close().catch(() => undefined)
+      }, ROTOM_RPC_IDLE_MS)
+    }
+    entry.timer.unref()
+    this.idle.set(key, entry)
+  }
+
+  async invalidate(context: ProviderContext): Promise<void> {
+    const matches = [...this.idle.entries()].filter(([, entry]) =>
+      entry.cwd === (context.cwd ?? '') &&
+      (!context.agentProfileId || entry.profileId === context.agentProfileId) &&
+      (!context.externalSessionId || entry.sessionId === context.externalSessionId)
+    )
+    await Promise.all(matches.map(async ([key, entry]) => {
+      this.idle.delete(key)
+      clearTimeout(entry.timer)
+      await entry.rpc.close()
+    }))
+  }
+
+  async dispose(): Promise<void> {
+    const entries = [...this.idle.values()]
+    this.idle.clear()
+    await Promise.all(entries.map(async (entry) => {
+      clearTimeout(entry.timer)
+      await entry.rpc.close()
+    }))
   }
 }
 
@@ -358,6 +478,13 @@ class PiRpcCommandError extends Error {
   constructor(readonly command: string, message: string) {
     super(message)
     this.name = 'PiRpcCommandError'
+  }
+}
+
+class PiRecorderError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'PiRecorderError'
   }
 }
 
@@ -511,7 +638,7 @@ async function withPiRpc<T>(
   args: string[],
   operation: (rpc: PiRpcProcess) => Promise<T>
 ): Promise<T> {
-  const rpc = PiRpcProcess.start(profile, args, cwd)
+  const rpc = PiRpcProcess.start(profile, args, await piRpcEnvironment(profile), cwd)
   try {
     return await operation(rpc)
   } finally {
@@ -519,13 +646,21 @@ async function withPiRpc<T>(
   }
 }
 
-export async function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiProbe> {
-  return withPiRpc(profile, cwd, piRpcArgs({ noSession: true, offline: true }), async (rpc) => {
+// Share only overlapping reads, never a settled capability snapshot: a later refresh must see
+// changed models, extensions and project trust. Profile identity and workspace remain isolated.
+const piProbesInFlight = new Map<string, Promise<PiProbe>>()
+
+export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiProbe> {
+  const probeCwd = cwd || homedir()
+  const key = JSON.stringify([profile.id, profile.executable, probeCwd])
+  const pending = piProbesInFlight.get(key)
+  if (pending) return pending
+  const probe = withPiRpc(profile, probeCwd, piRpcArgs({ noSession: true, offline: true }), async (rpc) => {
     const [state, models, levels, commands] = await Promise.all([
-      rpc.send({ type: 'get_state' }),
-      rpc.send({ type: 'get_available_models' }),
-      rpc.send({ type: 'get_available_thinking_levels' }),
-      rpc.send({ type: 'get_commands' })
+      rpc.send({ type: 'get_state' }, PI_RPC_STARTUP_TIMEOUT_MS),
+      rpc.send({ type: 'get_available_models' }, PI_RPC_STARTUP_TIMEOUT_MS),
+      rpc.send({ type: 'get_available_thinking_levels' }, PI_RPC_STARTUP_TIMEOUT_MS),
+      rpc.send({ type: 'get_commands' }, PI_RPC_STARTUP_TIMEOUT_MS)
     ])
     const modelRows = record(models.data).models
     const thinkingLevels = record(levels.data).levels
@@ -538,7 +673,9 @@ export async function probePiAgent(profile: PiAgentProfile, cwd?: string): Promi
         : [],
       commands: Array.isArray(commandRows) ? commandRows.map(record) : []
     }
-  })
+  }).finally(() => { piProbesInFlight.delete(key) })
+  piProbesInFlight.set(key, probe)
+  return probe
 }
 
 function commandCatalog(probe: PiProbe): ProviderCommand[] {
@@ -663,23 +800,52 @@ function runControlCatalog(probe: PiProbe): AgentRunControlCatalog {
   }
 }
 
-function questionFromExtension(runId: string, event: JsonRecord): AgentQuestionRequest | null {
+export function questionFromExtension(runId: string, event: JsonRecord): AgentQuestionRequest | null {
   const id = typeof event.id === 'string' ? event.id : ''
   const method = String(event.method ?? '')
   if (!id || !['select', 'confirm', 'input', 'editor'].includes(method)) return null
-  const title = String(event.title ?? 'Pi Extension').slice(0, 120)
+  const title = String(event.title ?? 'Pi Extension').slice(0, 2_000)
+  const inputTitle = title.match(/^\[([^\]\n]{1,16})\]\s*([\s\S]+)$/)
+  const inputBody = inputTitle?.[2].trim() || title
+  const numberedOptions = method === 'input'
+    ? [...inputBody.matchAll(/^\s*(\d+)[.)、]\s+(.+)$/gm)]
+    : []
+  const firstOptionAt = numberedOptions[0]?.index
+  const parsedQuestion = firstOptionAt == null
+    ? inputBody
+    : inputBody.slice(0, firstOptionAt).trim()
+  const isMultiSelect = /[（(]\s*可多选\s*[）)]/.test(parsedQuestion)
+  const cleanQuestion = parsedQuestion.replace(/\s*[（(]\s*可多选\s*[）)]\s*$/, '').trim()
+  const parsedOptions = numberedOptions.map((match) => {
+    const copy = match[2].trim()
+    const split = copy.match(/^(.+?)\s+[—–]\s+(.+)$/)
+    return {
+      label: split?.[1].trim() || copy,
+      description: split?.[2].trim() || '选择此项',
+      answerValue: match[1]
+    }
+  })
+  const header = method === 'input'
+    ? inputTitle?.[1].trim() || '回答'
+    : title.slice(0, 120)
   const question = method === 'confirm'
     ? String(event.message ?? title)
     : method === 'editor'
       ? '请输入多行内容'
       : method === 'input'
-        ? String(event.placeholder ?? '请输入内容')
+        ? cleanQuestion
         : title
   const labels = method === 'confirm'
     ? ['确认', '取消']
     : Array.isArray(event.options)
       ? event.options.filter((item): item is string => typeof item === 'string').slice(0, 100)
       : []
+  const options = parsedOptions.length >= 2
+    ? parsedOptions
+    : labels.map((label) => ({ label, description: method === 'confirm' ? `${label}这次操作` : '选择此项' }))
+  const placeholder = method === 'input' && typeof event.placeholder === 'string'
+    ? event.placeholder.slice(0, 500)
+    : ''
   return {
     runId,
     questionId: id,
@@ -687,11 +853,14 @@ function questionFromExtension(runId: string, event: JsonRecord): AgentQuestionR
     questionKind: 'clarification',
     source: `pi_extension_ui:${method}`,
     questions: [{
-      header: title,
+      header,
       question: question.slice(0, 2_000),
-      multiSelect: false,
-      ...((method === 'input' || method === 'editor') ? { inputMode: method === 'editor' ? 'multiline' as const : 'singleline' as const } : {}),
-      options: labels.map((label) => ({ label, description: method === 'confirm' ? `${label}这次操作` : '选择此项' }))
+      multiSelect: parsedOptions.length >= 2 && isMultiSelect,
+      options,
+      ...((method === 'editor' || method === 'input' && options.length === 0)
+        ? { inputMode: method === 'editor' ? 'multiline' as const : 'singleline' as const }
+        : {}),
+      ...(placeholder && options.length === 0 ? { placeholder } : {})
     }]
   }
 }
@@ -724,6 +893,7 @@ interface UsageAggregate {
   contextUsageQuality?: 'exact' | 'inferred'
   lastStopReason?: string
   lastError?: string
+  lastTransportError?: string
   upstreamProvider?: string
   model?: string
 }
@@ -748,11 +918,14 @@ function addAssistantUsage(
   aggregate.cacheRead += cacheRead ?? 0
   aggregate.cacheWrite += cacheWrite ?? 0
   aggregate.reasoning += reasoning ?? 0
-  if ([input, cacheRead, cacheWrite].some((value) => value != null)) {
+  const contextEvidence = (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+  // Pi reports an all-zero usage object for transport failures. Treating that as an exact context
+  // sample replaces the last known session context with 0 in Scry's overview.
+  if (contextEvidence > 0) {
     const billingProvider = billingProviderForUpstream(provider)
     aggregate.lastContextTokens = billingProvider === 'codex' || billingProvider === 'openai'
       ? (input ?? 0)
-      : (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+      : contextEvidence
     aggregate.lastContextModel = model
     aggregate.lastContextProvider = provider
     aggregate.contextUsageSource = 'pi_rpc_assistant_usage'
@@ -783,12 +956,24 @@ function addAssistantUsage(
   aggregate.model = model
   aggregate.lastStopReason = typeof message.stopReason === 'string' ? message.stopReason : aggregate.lastStopReason
   aggregate.lastError = typeof message.errorMessage === 'string' ? message.errorMessage : aggregate.lastError
+  if (Array.isArray(message.diagnostics)) {
+    for (const rawDiagnostic of message.diagnostics) {
+      const diagnostic = record(rawDiagnostic)
+      if (diagnostic.type !== 'provider_transport_failure') continue
+      const diagnosticError = record(diagnostic.error)
+      if (typeof diagnosticError.message === 'string' && diagnosticError.message.trim()) {
+        aggregate.lastTransportError = diagnosticError.message.trim()
+      }
+    }
+  }
 }
 
 async function runPiAgent(
   profile: PiAgentProfile,
   request: ProviderRunRequest,
-  state: PiRunState
+  state: PiRunState,
+  maxFrameBytes = PI_RPC_MAX_FRAME_BYTES,
+  rotomPool?: RotomRpcPool
 ): Promise<ProviderRunResult> {
   if (request.permissionMode !== 'full_access') {
     throw new AgentRuntimeError('Pi 只支持显式选择“本机完全访问”后运行', {
@@ -798,9 +983,16 @@ async function runPiAgent(
       nextAction: '在权限选择器中选择“本机完全访问”；Pi 没有可映射的内置沙箱或审批模式'
     })
   }
+  if (state.stopped) return { stopped: true, status: 'interrupted' }
+  const env = await piRpcEnvironment(profile)
+  // Stop may arrive while resolving the profile or probing Node. Do not spawn after that stop.
+  if (state.stopped) return { stopped: true, status: 'interrupted' }
   const args = piRpcArgs({ session: request.resume })
-  const rpc = PiRpcProcess.start(profile, args, request.cwd)
+  const mayReuse = basename(profile.executable) === 'rotom'
+  const rpc = (mayReuse ? rotomPool?.take(profile, request.cwd, request.resume) : undefined) ??
+    PiRpcProcess.start(profile, args, env, request.cwd, maxFrameBytes)
   state.rpc = rpc
+  let retainRpc = false
   const usage: UsageAggregate = {
     input: 0,
     output: 0,
@@ -996,28 +1188,35 @@ async function runPiAgent(
     }
     const explicitSkillEvent = await proveExplicitPiSkill(rpc, request)
     const entryBaseline = await piEntryBaseline(rpc)
+    if (state.stopped) return { externalSessionId: state.sessionId, stopped: true, status: 'interrupted' }
     if (request.managedRecorder) {
       if (!request.cwd || !state.sessionId || !request.managedRecorderIdentity) {
-        throw new Error('Pi managed recorder 缺少 workspace、session 或受信任轮次身份')
+        throw new PiRecorderError('Pi managed recorder 缺少 workspace、session 或受信任轮次身份')
       }
-      const opened = await handleRecorderHook({
-        provider: 'pi',
-        event: 'UserPromptSubmit',
-        workspace: request.cwd,
-        managed: true,
-        env: {
-          ...sanitizeProviderEnv(process.env as Record<string, string>, 'pi'),
-          SCRY_MANAGED_RUN_ID: request.managedRecorderIdentity.runId,
-          SCRY_MANAGED_PROMPT_HASH: request.managedRecorderIdentity.promptHash
-        },
-        payload: {
-          session_id: state.sessionId,
-          prompt: request.prompt,
-          timestamp: new Date(startedAt).toISOString()
+      try {
+        const opened = await handleRecorderHook({
+          provider: 'pi',
+          event: 'UserPromptSubmit',
+          workspace: request.cwd,
+          managed: true,
+          env: {
+            ...sanitizeProviderEnv(process.env as Record<string, string>, 'pi'),
+            SCRY_MANAGED_RUN_ID: request.managedRecorderIdentity.runId,
+            SCRY_MANAGED_PROMPT_HASH: request.managedRecorderIdentity.promptHash
+          },
+          payload: {
+            session_id: state.sessionId,
+            prompt: request.prompt,
+            timestamp: new Date(startedAt).toISOString()
+          }
+        })
+        if (opened.status !== 'started' && opened.status !== 'duplicate') {
+          throw new Error(`无法建立轮次身份：${opened.reason ?? opened.status}`)
         }
-      })
-      if (opened.status !== 'started' && opened.status !== 'duplicate') {
-        throw new Error(`Pi managed recorder 无法建立轮次身份：${opened.reason ?? opened.status}`)
+      } catch (error) {
+        throw new PiRecorderError(`Pi managed recorder 启动失败：${String((error as Error).message)}`, {
+          cause: error
+        })
       }
     }
     if (explicitSkillEvent) request.emit(explicitSkillEvent)
@@ -1026,7 +1225,10 @@ async function runPiAgent(
       data: attachment.dataBase64,
       mimeType: attachment.mimeType
     }))
+    let promptDispatched = false
     try {
+      if (state.stopped) throw new Error('Pi prompt 发送前已停止')
+      promptDispatched = true
       // Accepted execution stays owned until Pi acknowledges it or the user stops this process.
       await rpc.send({ type: 'prompt', message: request.prompt, ...(images.length > 0 ? { images } : {}) }, null)
     } catch (error) {
@@ -1036,8 +1238,7 @@ async function runPiAgent(
         request.cwd &&
         state.sessionId &&
         identity &&
-        error instanceof PiRpcCommandError &&
-        error.command === 'prompt'
+        (!promptDispatched || (error instanceof PiRpcCommandError && error.command === 'prompt'))
       ) {
         try {
           await cancelManagedRecorderTurn({
@@ -1048,7 +1249,9 @@ async function runPiAgent(
             promptHash: identity.promptHash
           })
         } catch (cancelError) {
-          throw new AggregateError([error, cancelError], 'Pi prompt preflight 失败，且 provisional recorder lifecycle 撤销失败')
+          throw new PiRecorderError('Pi prompt 未执行，但 provisional recorder lifecycle 撤销失败', {
+            cause: new AggregateError([error, cancelError])
+          })
         }
       }
       throw error
@@ -1057,6 +1260,9 @@ async function runPiAgent(
     // Pi workflows can intentionally run for hours. Do not impose a wall-clock or inactivity
     // deadline here: transport/process failures reject rpcFailure, and users retain stop controls.
     await Promise.race([settled, rpcFailure])
+    // A user stop already has the authoritative session identity from startup. Asking Pi for one
+    // more state snapshot after abort only delays the queued next turn and can hit an avoidable
+    // timeout while the launcher is shutting down.
     let finalState = initialState
     if (!state.stopped) {
       try {
@@ -1077,12 +1283,22 @@ async function runPiAgent(
       request.onExternalSessionId?.(finalState.sessionId)
     }
     const stopReason = usage.lastError ?? usage.lastStopReason
-    const terminationReason = classifyRunTermination({ rawReason: usage.lastStopReason, message: usage.lastError })
-    const failed = !state.stopped && usage.lastStopReason === 'error'
+    const failureText = usage.lastError && usage.lastTransportError && usage.lastTransportError !== usage.lastError
+      ? `${usage.lastError} (${usage.lastTransportError})`
+      : stopReason
+    const terminationReason = classifyRunTermination({ rawReason: usage.lastStopReason, message: failureText })
+    // A settled Rotom RPC remains bound to this native session and retains its provider transport.
+    // Reusing it makes Scry match terminal Pi instead of paying a fresh WebSocket/proxy handshake
+    // and replaying the complete context on every user turn.
+    retainRpc = mayReuse && !state.stopped && Boolean(state.sessionId) && rpc.reusable()
+    // Pi may settle cleanly at the RPC layer while the upstream model reports `aborted` (for
+    // example Qoder aborting a long generation). Only an explicit Scry stop is an interruption;
+    // every non-`stop` Provider reason is an unsuccessful turn and must not render green.
+    const failed = !state.stopped && Boolean(usage.lastStopReason && usage.lastStopReason !== 'stop')
     request.emit(piEvent(request.runId, {
       kind: 'harness',
       stage: 'result',
-      text: stopReason,
+      text: failureText,
       tokensIn: usage.input,
       tokensOut: usage.output,
       cacheReadTokens: usage.cacheRead,
@@ -1110,33 +1326,55 @@ async function runPiAgent(
         sessionFile: finalState.sessionFile ?? null,
         model: usage.model ?? null,
         provider: usage.upstreamProvider ?? null,
-        stderrTail: rpc.stderrTail() || null
+        stderrTail: rpc.stderrTail() || null,
+        transportError: usage.lastTransportError ?? null,
+        shellEnvError: shellEnvError() ?? null
       }
     }))
+    if (failed) {
+      const transportFailure = Boolean(
+        usage.lastTransportError || usage.lastError?.toLowerCase().includes('fetch failed')
+      )
+      throw new AgentRuntimeError(failureText ?? 'Pi Provider 未正常完成本轮', {
+        provider: 'pi_rpc',
+        stage: 'runtime',
+        cwd: request.cwd,
+        nextAction: terminationReason === 'input_context_overflow'
+          ? '点击失败卡片的“从失败处恢复”，在新分支中移除或压缩大图后重试；也可以新建会话'
+          : transportFailure
+            ? shellEnvError() ?? '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试'
+            : '继续当前会话重试；若再次中止，请检查上游 Provider 状态与 Rotom 日志'
+      })
+    }
     return {
       externalSessionId: state.sessionId,
       providerTurnId: state.providerTurnId,
       stopped: state.stopped,
-      status: state.stopped ? 'interrupted' : failed ? 'failed' : 'completed'
+      status: state.stopped ? 'interrupted' : 'completed'
     }
   } catch (error) {
-    if (state.stopped) return {
+    if (state.stopped && !(error instanceof PiRecorderError)) return {
       externalSessionId: state.sessionId,
       providerTurnId: state.providerTurnId,
       stopped: true,
       status: 'interrupted'
     }
+    if (error instanceof AgentRuntimeError) throw error
+    const recorderFailure = error instanceof PiRecorderError
     throw new AgentRuntimeError(String((error as Error).message), {
       provider: 'pi_rpc',
-      stage: 'runtime',
+      stage: recorderFailure ? 'ledger' : 'runtime',
       cwd: request.cwd,
-      nextAction: '检查该 Pi Agent launcher、RPC 兼容性和 stderr 后重试'
+      nextAction: recorderFailure
+        ? '运行 scry doctor 检查工作区记录；升级 Recorder 后重试'
+        : '检查该轮 Pi Provider 结果、launcher 与 stderr 后重试'
     })
   } finally {
     off()
     offFailure()
     abortController.abort()
-    await rpc.close()
+    if (retainRpc && state.sessionId && rotomPool) rotomPool.keep(profile, request.cwd, state.sessionId, rpc)
+    else await rpc.close()
     if (state.rpc === rpc) state.rpc = undefined
   }
 }
@@ -1144,7 +1382,10 @@ async function runPiAgent(
 export function createPiAdapter(options: {
   listProfiles: () => Promise<PiAgentProfile[]>
   resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
+  /** Tests may lower the frame residency boundary without allocating tens of MiB. */
+  rpcMaxFrameBytes?: number
 }): ProviderAdapter {
+  const rotomPool = new RotomRpcPool()
   const profileForContext = async (context: ProviderContext): Promise<PiAgentProfile> => {
     if (!context.agentProfileId) throw new Error('Pi Provider 缺少 agentProfileId')
     const profile = await options.resolveProfile(context.agentProfileId)
@@ -1178,7 +1419,7 @@ export function createPiAdapter(options: {
           request.cwd,
           piRpcArgs({ session: request.sourceSessionId }),
           async (rpc) => {
-            const snapshot = await rpc.send({ type: 'get_entries' })
+            const snapshot = await rpc.send({ type: 'get_entries' }, PI_RPC_STARTUP_TIMEOUT_MS)
             const entries = record(snapshot.data).entries
             const target = Array.isArray(entries)
               ? entries.map(record).find((entry) => entry.id === request.replaceForkTurnId)
@@ -1205,7 +1446,7 @@ export function createPiAdapter(options: {
           request.cwd,
           piRpcArgs({ session: request.sourceSessionId }),
           async (rpc) => {
-            const snapshot = record((await rpc.send({ type: 'get_entries' })).data)
+            const snapshot = record((await rpc.send({ type: 'get_entries' }, PI_RPC_STARTUP_TIMEOUT_MS)).data)
             const rawEntries = Array.isArray(snapshot.entries) ? snapshot.entries.map(record) : []
             if (typeof snapshot.leafId !== 'string' || !snapshot.leafId) {
               throw new Error('Pi 会话缺少 active leaf，无法创建分支')
@@ -1233,7 +1474,7 @@ export function createPiAdapter(options: {
         if (!request.agentProfileId) throw new Error('Pi Provider run 缺少 agentProfileId')
         const profile = await options.resolveProfile(request.agentProfileId)
         if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
-        return runPiAgent(profile, request, state)
+        return runPiAgent(profile, request, state, options.rpcMaxFrameBytes, rotomPool)
       })()
       return {
         promise,
@@ -1251,6 +1492,12 @@ export function createPiAdapter(options: {
         getExternalSessionId: () => state.sessionId,
         getProviderTurnId: () => state.providerTurnId
       }
+    },
+    invalidateContext(context) {
+      return rotomPool.invalidate(context)
+    },
+    dispose() {
+      return rotomPool.dispose()
     },
     sessionEvidence: {
       async enrich(context, turns) {

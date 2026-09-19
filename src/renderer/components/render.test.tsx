@@ -6,11 +6,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createRef, type ComponentProps } from 'react'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentQuestionRequest } from '@shared/runtime'
+import { sessionAttentionKey } from '@shared/session-attention'
 import type { Turn } from '../format'
 import type { ParsedTurn, SessionHistoryPage } from '../env'
 import {
   App,
   EmptySessionOverview,
+  MAX_SESSION_COMPOSER_DRAFTS,
   activeRunForSession,
   adoptLocalStartSessionId,
   attachmentsAfterSuccessfulSubmit,
@@ -23,6 +25,7 @@ import {
   applySessionCapturedEffects,
   applyTurnDoneEffects,
   chatBottomDistance,
+  chatBottomStickinessAfterScroll,
   commitDraftAfterStart,
   dequeueStartedPrompt,
   enqueuePrompt,
@@ -31,22 +34,39 @@ import {
   hasSessionOverviewContext,
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
+  migrateSessionComposerDraft,
+  migrateSessionPromptQueue,
   providerContextCacheKey,
   resetQueuedPromptControl,
   restoreActiveSessionSelection,
   restoreFocusedRunSelection,
+  sessionComposerDraftKey,
+  updateSessionComposerDraft,
+  updateSessionPromptQueue,
+  dequeueStartedPromptFromSessions,
+  type SessionComposerDraft,
+  type SessionEvidenceGap,
   scrollChatToBottomIfNeeded,
   scrollChatTargetIntoView,
   shouldQueuePrompt,
+  shouldReloadProjectsForDataUpdate,
   takeNextQueuedPrompt
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, RecorderContentPager, UserMessage, attachmentSrc, coalesceAdjacentThinking } from './ChatTurn'
-import { ChatView, filterSlashCommands, formatElapsedMs, imageFilesFromClipboardData } from './ChatView'
-import { logicalCallEventsForTurn, OverviewPanel, TurnFileFootprint, turnCallRowsFromMap } from './OverviewPanel'
+import {
+  ChatView,
+  composerEnterConfirmsIme,
+  composerPromptHistory,
+  filterSlashCommands,
+  formatElapsedMs,
+  imageFilesFromClipboardData,
+  navigateComposerHistory
+} from './ChatView'
+import { logicalCallEventsForTurn, overviewToolErrors, OverviewPanel, TurnFileFootprint, TurnToolErrorDetails, turnCallRowsFromMap } from './OverviewPanel'
 import { Sidebar } from './Sidebar'
 import { ViewChrome } from './ViewChrome'
-import { CliPicker, ModelEffortPicker } from './Pickers'
+import { CliPicker, ModelEffortPicker, RunControlSelect } from './Pickers'
 import { pathContains, WorkspacePanel, workspaceReferenceToken } from './WorkspacePanel'
 import { parseUnifiedDiff, TurnDiffReviewPanel } from './TurnDiffReviewPanel'
 
@@ -54,6 +74,67 @@ const ev = (e: Partial<TraceEvent> & { id: string; kind: TraceEvent['kind']; sta
   ts: '',
   runId: 'r1',
   ...e
+})
+
+describe('catalog data update policy', () => {
+  it('reloads projects only after a session deletion', () => {
+    expect(shouldReloadProjectsForDataUpdate({ kind: 'session_deleted' })).toBe(true)
+    expect(shouldReloadProjectsForDataUpdate({ kind: 'turn_recorded' })).toBe(false)
+    expect(shouldReloadProjectsForDataUpdate({})).toBe(false)
+  })
+})
+
+describe('composer Enter safety', () => {
+  it('does not turn an IME confirmation into a prompt submission', () => {
+    expect(composerEnterConfirmsIme({
+      nativeIsComposing: true,
+      keyCode: 13,
+      compositionActive: false,
+      compositionEndedAt: Number.NEGATIVE_INFINITY,
+      now: 1_000
+    })).toBe(true)
+    expect(composerEnterConfirmsIme({
+      nativeIsComposing: false,
+      keyCode: 13,
+      compositionActive: false,
+      compositionEndedAt: 950,
+      now: 1_000
+    })).toBe(true)
+    expect(composerEnterConfirmsIme({
+      nativeIsComposing: false,
+      keyCode: 13,
+      compositionActive: false,
+      compositionEndedAt: 800,
+      now: 1_000
+    })).toBe(false)
+  })
+})
+
+describe('composer prompt history', () => {
+  const history = ['第一条输入', '第二条输入', '第三条输入']
+
+  it('starts from the newest prompt only when the composer is empty', () => {
+    expect(navigateComposerHistory(history, '', null, 'older')).toEqual({ position: 2, value: '第三条输入' })
+    expect(navigateComposerHistory(history, '正在编辑', null, 'older')).toBeNull()
+    expect(navigateComposerHistory(history, '', null, 'newer')).toBeNull()
+  })
+
+  it('moves backward and forward without wrapping, then restores the empty draft', () => {
+    expect(navigateComposerHistory(history, '第三条输入', 2, 'older')).toEqual({ position: 1, value: '第二条输入' })
+    expect(navigateComposerHistory(history, '第一条输入', 0, 'older')).toEqual({ position: 0, value: '第一条输入' })
+    expect(navigateComposerHistory(history, '第二条输入', 1, 'newer')).toEqual({ position: 2, value: '第三条输入' })
+    expect(navigateComposerHistory(history, '第三条输入', 2, 'newer')).toEqual({ position: null, value: '' })
+  })
+
+  it('includes queued inputs and removes only adjacent duplicate or empty entries', () => {
+    const turns: Turn[] = [
+      { runId: 'one', userText: '已发送', items: [], done: true },
+      { runId: 'two', userText: '已发送', items: [], done: true },
+      { runId: 'empty', userText: '  ', items: [], done: true }
+    ]
+    const queued = [{ text: '等待发送', attachments: [], request: {} }]
+    expect(composerPromptHistory(turns, queued)).toEqual(['已发送', '等待发送'])
+  })
 })
 
 describe('Pi Profile renderer identity', () => {
@@ -99,6 +180,77 @@ describe('Pi Profile renderer identity', () => {
     expect(focusedRunNeedsLoading('run-1', true, new Set())).toBe(false)
     expect(focusedRunNeedsLoading('run-1', false, new Set(['run-1']))).toBe(false)
     expect(focusedRunNeedsLoading('run-1', false, new Set())).toBe(true)
+  })
+
+  it('已建立的会话隔离草稿，但新会话切换模型或 Provider 时保留输入', () => {
+    const first = sessionComposerDraftKey({ providerId: 'claude', cwd: '/repo', sessionId: 'session-1' })
+    const second = sessionComposerDraftKey({ providerId: 'claude', cwd: '/repo', sessionId: 'session-2' })
+    let drafts: ReadonlyMap<string, SessionComposerDraft> = new Map()
+    drafts = updateSessionComposerDraft(drafts, first, (draft) => ({ ...draft, input: '第一条草稿' }))
+    drafts = updateSessionComposerDraft(drafts, second, (draft) => ({ ...draft, input: '第二条草稿' }))
+
+    // A → B → A restores A rather than showing B or an empty composer.
+    expect(drafts.get(first)?.input).toBe('第一条草稿')
+    expect(drafts.get(second)?.input).toBe('第二条草稿')
+    drafts = updateSessionComposerDraft(drafts, first, (draft) => ({ ...draft, input: '' }))
+    expect(drafts.has(first)).toBe(false)
+    expect(drafts.get(second)?.input).toBe('第二条草稿')
+    drafts = updateSessionComposerDraft(drafts, first, (draft) => ({ ...draft, input: '第一条新草稿' }))
+    expect(drafts.get(first)?.input).toBe('第一条新草稿')
+    expect(drafts.get(second)?.input).toBe('第二条草稿')
+    expect(sessionComposerDraftKey({ providerId: 'codex', cwd: '/repo', sessionId: 'session-1' })).not.toBe(first)
+    expect(sessionComposerDraftKey({ providerId: 'claude', cwd: '/other', sessionId: 'session-1' })).not.toBe(first)
+
+    const pendingClaude = sessionComposerDraftKey({ providerId: 'claude', cwd: '/repo', sessionId: null })
+    const pendingCodex = sessionComposerDraftKey({ providerId: 'codex', cwd: '/repo', sessionId: null })
+    const pendingPiProfile = sessionComposerDraftKey({
+      providerId: 'pi',
+      agentProfileId: 'pi:custom',
+      cwd: '/repo',
+      sessionId: null
+    })
+    expect(pendingCodex).toBe(pendingClaude)
+    expect(pendingPiProfile).toBe(pendingClaude)
+    expect(sessionComposerDraftKey({ providerId: 'claude', cwd: '/other', sessionId: null })).not.toBe(pendingClaude)
+  })
+
+  it('bounds session drafts with LRU eviction and releases evicted attachments', () => {
+    let drafts: ReadonlyMap<string, SessionComposerDraft> = new Map()
+    const evicted: string[] = []
+    for (let index = 0; index <= MAX_SESSION_COMPOSER_DRAFTS; index++) {
+      drafts = updateSessionComposerDraft(drafts, `session-${index}`, () => ({
+        input: `draft-${index}`,
+        attachments: [{ id: `attachment-${index}`, kind: 'image', name: 'image.png', mimeType: 'image/png', dataBase64: 'aQ==', previewUrl: `blob:${index}` }]
+      }), (draft) => evicted.push(draft.attachments[0].id))
+    }
+    expect(drafts.size).toBe(MAX_SESSION_COMPOSER_DRAFTS)
+    expect(drafts.has('session-0')).toBe(false)
+    expect(evicted).toEqual(['attachment-0'])
+  })
+
+  it('migrates a provisional draft after switching away without overwriting the visible session', () => {
+    const from = sessionComposerDraftKey({ providerId: 'claude', cwd: '/repo', sessionId: 'run-local' })
+    const to = sessionComposerDraftKey({ providerId: 'claude', cwd: '/repo', sessionId: 'session-native' })
+    const visible = sessionComposerDraftKey({ providerId: 'claude', cwd: '/repo', sessionId: 'session-visible' })
+    const attachment = { id: 'draft', kind: 'image' as const, name: 'draft.png', mimeType: 'image/png' as const, dataBase64: 'aQ==', previewUrl: 'blob:draft' }
+    const migrated = migrateSessionComposerDraft(new Map([
+      [from, { input: 'next prompt', attachments: [attachment] }],
+      [to, { input: 'older prompt', attachments: [] }],
+      [visible, { input: 'visible draft', attachments: [] }]
+    ]), from, to)
+    const queued = enqueuePrompt([], 'queued follow-up')
+    const visibleQueue = enqueuePrompt([], 'visible follow-up')
+    const migratedQueues = migrateSessionPromptQueue(new Map([
+      [from, queued],
+      [visible, visibleQueue]
+    ]), from, to)
+
+    expect(migrated.has(from)).toBe(false)
+    expect(migrated.get(to)).toEqual({ input: 'next prompt', attachments: [attachment] })
+    expect(migrated.get(visible)?.input).toBe('visible draft')
+    expect(migratedQueues.has(from)).toBe(false)
+    expect(migratedQueues.get(to)).toEqual(queued)
+    expect(migratedQueues.get(visible)).toEqual(visibleQueue)
   })
 
   it('removes rejected slash catalogs instead of leaving stale commands selectable', () => {
@@ -239,11 +391,16 @@ describe('ChatView 项目选择条', () => {
     expect(hasPicker({ cwd: null, agentLocked: true })).toBe(true)
   })
 
+  it('新建会话立即显示项目选择，不等待 Provider 上下文重置', () => {
+    expect(hasPicker({ sessionLoading: true, agentLocked: true, hasSelectedSession: false })).toBe(true)
+    expect(hasPicker({ sessionLoading: true, agentLocked: true, hasSelectedSession: true })).toBe(false)
+  })
+
   it.each([
     { submitting: true },
     { busy: true },
     { agentLocked: true },
-    { sessionLoading: true },
+    { sessionLoading: true, hasSelectedSession: true },
     { sessionEvidenceGap: { status: 'unavailable' as const, detail: '历史不可用' } },
     { turns: [{ runId: 'started', userText: '你好', done: false, items: [] }] },
     { turns: [{ runId: 'finished', userText: '你好', done: true, items: [] }] }
@@ -452,11 +609,59 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('rc-prefix" aria-hidden="true">权限')
   })
 
-  it('Model 与 Effort 组合入口显示当前值，权限继续使用原生选择合同', () => {
+  it('Model 与 Effort 组合入口显示当前值，权限使用自定义审批入口', () => {
     const html = renderWelcome({ turns: [runningTurn], busy: true })
     expect(html).toContain('class="model-effort-model">自动模型')
     expect(html).toContain('class="model-effort-effort">默认')
+    expect(html).toContain('class="permission-mode-trigger"')
     expect(html).toContain('rc-value" aria-hidden="true">默认审批')
+    expect(html).not.toContain('<select')
+  })
+
+  it('权限浮层同时说明审批方式、风险和当前选择', () => {
+    const html = renderToStaticMarkup(
+      <RunControlSelect
+        ariaLabel="权限"
+        value="full_access"
+        options={[
+          { value: 'default', label: '默认审批', description: '危险操作会暂停并请求你的确认' },
+          { value: 'auto_review', label: '自动审查', description: '由 Provider 的原生审查器判断是否放行' },
+          { value: 'full_access', label: '完全访问', description: '跳过审批并允许 Agent 直接执行操作' }
+        ]}
+        tone="danger"
+        onChange={() => {}}
+        open
+      />
+    )
+    expect(html).toContain('如何批准 Agent 操作？')
+    expect(html).toContain('role="listbox"')
+    expect(html).toContain('class="permission-mode-option is-selected is-danger"')
+    expect(html).toContain('跳过审批并允许 Agent 直接执行操作')
+    expect(html).toContain('aria-selected="true"')
+  })
+
+  it('只有一种权限模式时明确说明 Provider 限制，不暗示还有隐藏选项', () => {
+    const html = renderToStaticMarkup(
+      <RunControlSelect
+        ariaLabel="权限"
+        value="default"
+        options={[
+          { value: 'default', label: '请选择权限', disabled: true },
+          {
+            value: 'full_access',
+            label: '本机完全访问',
+            description: 'Pi 没有内置沙箱；launcher、Extension 与工具继承当前本机用户权限'
+          }
+        ]}
+        onChange={() => {}}
+        open
+      />
+    )
+    expect(html).toContain('permission-mode-popover is-single-option')
+    expect(html).toContain('当前 Agent 仅支持此权限模式')
+    expect(html).not.toContain('如何批准 Agent 操作？')
+    expect(html.match(/请选择权限/g)).toHaveLength(2)
+    expect(html).toContain('本机完全访问')
   })
 
   it('Model/Effort 浮层显示 Effort/Model 与紧凑滑杆，不渲染两侧图标', () => {
@@ -472,11 +677,13 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
       />
     )
 
-    const effortIndex = html.indexOf('class="model-effort-current-effort"')
     const modelIndex = html.indexOf('class="model-effort-current-model"')
-    expect(effortIndex).toBeGreaterThan(-1)
-    expect(modelIndex).toBeGreaterThan(effortIndex)
-    expect(html).toContain('<span>高</span><svg class="ico chev"')
+    const effortIndex = html.indexOf('class="model-effort-current-effort"')
+    expect(modelIndex).toBeGreaterThan(-1)
+    expect(effortIndex).toBeGreaterThan(modelIndex)
+    expect(html).toContain('class="model-effort-field-label">模型')
+    expect(html).toContain('class="model-effort-field-label">推理强度')
+    expect(html).toContain('class="model-effort-current-effort">高')
     expect(html).toContain('>Ultimate<')
     expect(html).toContain('type="range"')
     expect(html).toContain('aria-valuetext="高"')
@@ -532,10 +739,24 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     expect(html).not.toContain('开始一次可追溯执行')
   })
 
-  it('真正的新会话（无证据缺失）仍然渲染 hero', () => {
+  it('已选中的会话即使轮次尚未恢复，也不会退回新会话 hero', () => {
+    const html = renderWelcome({
+      cwd: '/tmp/project',
+      agentLocked: true,
+      hasSelectedSession: true
+    })
+
+    expect(html).toContain('这条会话暂时没有可显示的轮次')
+    expect(html).toContain('不会将它当作新会话')
+    expect(html).not.toContain('今天想在')
+    expect(html).not.toContain('welcome-hero-icon')
+  })
+
+  it('真正的新会话（无证据缺失）仍然渲染简洁 hero', () => {
     const html = renderWelcome({ cwd: '/tmp/project' })
 
-    expect(html).toContain('开始一次可追溯执行')
+    expect(html).toContain('今天想在 <span>project</span> 中构建什么？')
+    expect(html).toContain('welcome-hero-icon')
     expect(html).not.toContain('chat-session-evidence-gap')
   })
 })
@@ -563,7 +784,7 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).toContain('title="右侧工作区"')
     expect(html).toContain('aria-pressed="false"')
     expect(html).toContain('不绑定项目')
-    expect(html).toContain('可直接发起任务')
+    expect(html).toContain('今天想构建什么？')
     expect(html).toContain('aria-label="会话上下文"')
     expect(html).toContain('aria-label="权限配置"')
     expect(html).toContain('aria-label="Agent、Model 与 Effort"')
@@ -583,20 +804,18 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
 })
 
 describe('ViewChrome 顶栏', () => {
-  it('显示 Agent 状态和面板入口', () => {
+  it('隐藏 Provider 状态，只保留项目与面板入口', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
         cwd={null}
-        agent={undefined}
-        agentScanning
         showSummary
         showPanel
         onToggleSummary={() => {}}
         onTogglePanel={() => {}}
       />
     )
-    expect(html).toContain('正在检测 agent…')
-    expect(html).not.toContain('未检测到 agent')
+    expect(html).not.toContain('tb-agent-status')
+    expect(html).not.toContain('正在检测 agent')
     expect(html).toContain('class="tb-thread"')
     expect(html).toContain('不绑定项目')
     expect(html).toContain('aria-label="切换固定摘要"')
@@ -609,7 +828,6 @@ describe('ViewChrome 顶栏', () => {
     const html = renderToStaticMarkup(
       <ViewChrome
         cwd="/tmp/sample-workspace"
-        agent={undefined}
         showSummary
         showPanel
         onToggleSummary={() => {}}
@@ -707,6 +925,7 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
       done: false
     }
     let replacement: { sessionId: string; parsed: ParsedTurn[]; activeRun: ActiveRun } | undefined
+    let loadedPage: SessionHistoryPage | null | undefined
 
     const restored = await restoreActiveSessionSelection(
       {
@@ -728,13 +947,49 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
         },
         replaceWithParsedSession: (sessionId, parsed, options) => {
           replacement = { sessionId, parsed, activeRun: options.activeRun }
-        }
+        },
+        onHistoryLoaded: (page) => { loadedPage = page }
       }
     )
 
     expect(restored).toBe(true)
     expect(calls).toEqual(['prepare:run-2', 'adopt:run-2', 'load:session-1'])
     expect(replacement).toEqual({ sessionId: 'session-1', parsed: archived, activeRun })
+    expect(loadedPage).toBe(archivedPage)
+  })
+
+  it('live run 的历史读取为空时仍把缺失状态交给当前会话，不回退成新会话', async () => {
+    const activeRun: ActiveRun = {
+      runId: 'run-2',
+      providerId: 'pi',
+      agentProfileId: 'pi:default',
+      cwd: '/repo/a',
+      externalSessionId: 'session-1',
+      userText: '',
+      items: [],
+      done: false
+    }
+    let gap: SessionEvidenceGap | null = null
+
+    await restoreActiveSessionSelection(
+      {
+        runId: activeRun.runId,
+        sessionId: 'session-1',
+        externalSessionId: 'session-1',
+        cwd: '/repo/a',
+        providerId: 'pi',
+        agentProfileId: 'pi:default'
+      },
+      {
+        prepareRunFocus: () => {},
+        adoptActiveRun: async () => activeRun,
+        loadSession: async () => null,
+        replaceWithParsedSession: () => {},
+        onHistoryLoaded: (page) => { gap = sessionEvidenceGapAfterLoad('session-1', page) }
+      }
+    )
+
+    expect(gap).toMatchObject({ sessionId: 'session-1', status: 'unavailable' })
   })
 
   it('preload 直接启动的新 focused run 会先绑定焦点，再恢复历史和待回答问题', async () => {
@@ -1044,6 +1299,7 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('class="sb-proj-act sb-proj-new"')
     expect(html).toContain('class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"')
     expect(html).toContain('aria-label="管理项目 empty-project · /Users/example/empty-project"')
+    expect(html.indexOf('class="sb-proj-act sb-proj-new"')).toBeLessThan(html.indexOf('class="sb-proj-act sb-proj-more"'))
     expect(html).toContain('class="sb-proj-head on"')
     expect(html).toContain('class="ico sb-project-pin"')
   })
@@ -1110,6 +1366,63 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-label="正在运行"')
     expect(html.match(/class="sb-running"/g)).toHaveLength(1)
+  })
+
+  it('待回答会话用明确徽标替代运行转圈', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[{
+          cwd: '/Users/example/project',
+          name: 'project',
+          mtime: 2,
+          sessions: [
+            { sessionId: 's1', runId: 'run-question', providerId: 'pi', mtime: 2, preview: '继续', count: 1 }
+          ]
+        }]}
+        activeCwd="/Users/example/project"
+        activeSessionId="s1"
+        activeProviderId="pi"
+        runningRunIds={new Set(['run-question'])}
+        waitingQuestionRunIds={new Set(['run-question'])}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+      />
+    )
+
+    expect(html).toContain('class="sb-sess active running waiting-answer"')
+    expect(html).toContain('class="sb-question-pending" role="status" aria-label="等待你的回答"')
+    expect(html).toContain('待回答')
+    expect(html).not.toContain('class="sb-running"')
+  })
+
+  it('完成但未查看的会话显示蓝点，其他会话不显示', () => {
+    const cwd = '/Users/example/project'
+    const unreadKey = sessionAttentionKey({ providerId: 'claude', cwd, sessionId: 's2' })
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[{
+          cwd,
+          name: 'project',
+          mtime: 2,
+          sessions: [
+            { sessionId: 's1', externalSessionId: 's1', providerId: 'claude', mtime: 2, preview: '已查看', count: 1 },
+            { sessionId: 's2', externalSessionId: 's2', providerId: 'claude', mtime: 1, preview: '刚完成', count: 1 }
+          ]
+        }]}
+        activeCwd={cwd}
+        unreadSessionKeys={new Set([unreadKey])}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+      />
+    )
+
+    expect(html).toContain('class="sb-sess unread"')
+    expect(html).toContain('class="sb-unread" role="status" aria-label="有新结果，未查看"')
+    expect(html.match(/class="sb-unread"/g)).toHaveLength(1)
   })
 
   it('置顶会话进入独立分组并带项目名，不在原项目分组里重复出现', () => {
@@ -1274,7 +1587,34 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     )
     expect(branchHtml).toContain('aria-label="从此轮创建分支会话"')
     expect(branchHtml).toContain('在新会话中分支')
+    expect(branchHtml).toContain('class="turn-tail"')
+    expect(branchHtml.indexOf('class="turn-footer"')).toBeLessThan(branchHtml.indexOf('class="turn-branch-row"'))
     expect(html).not.toContain('从此轮创建分支会话')
+  })
+
+  it('已结束的 Provider 失败轮次提供恢复分支入口', () => {
+    const failedTurn: Turn = {
+      runId: 'run-failed-branch',
+      userText: '继续',
+      done: true,
+      error: 'Qoder: http_413',
+      providerTurnId: 'turn-failed',
+      forkTurnId: 'turn-failed',
+      items: [ev({
+        id: 'failed-branch-result',
+        kind: 'harness',
+        stage: 'result',
+        isError: true,
+        providerId: 'pi',
+        runtimeProvider: 'pi_rpc'
+      })]
+    }
+    const failedHtml = renderToStaticMarkup(
+      <AssistantTurn turn={failedTurn} selectedId={null} onSelect={() => {}} onForkTurn={async () => {}} />
+    )
+
+    expect(failedHtml).toContain('aria-label="从失败轮次创建恢复分支"')
+    expect(failedHtml).toContain('从失败处恢复')
   })
 
   it('trace 树渲染出工具节点', () => {
@@ -1400,6 +1740,27 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(footer).toContain('<span class="lbl">tools</span> <b>1</b>')
     expect(footer).toContain('<span class="lbl">files</span> <b>1 R · 0 W</b>')
     expect(footer).not.toContain('<span class="lbl">tools</span> <b>2</b>')
+  })
+
+  it('footer 的 files 按唯一路径计数，不把重复文件操作当成多个文件', () => {
+    const footerTurn: Turn = {
+      runId: 'footer-unique-files',
+      userText: 'touch the same files repeatedly',
+      done: true,
+      items: [
+        ev({ id: 'read-a-1', kind: 'tool', stage: 'tool:Read', tool: 'Read', toolUseId: 'read-a-1', fileOp: 'read', filePath: '/a.ts' }),
+        ev({ id: 'read-a-2', kind: 'tool', stage: 'tool:Read', tool: 'Read', toolUseId: 'read-a-2', fileOp: 'read', filePath: '/a.ts' }),
+        ev({ id: 'write-b', kind: 'tool', stage: 'tool:Write', tool: 'Write', toolUseId: 'write-b', fileOp: 'write', filePath: '/b.ts' }),
+        ev({ id: 'edit-b', kind: 'tool', stage: 'tool:Edit', tool: 'Edit', toolUseId: 'edit-b', fileOp: 'edit', filePath: '/b.ts' }),
+        ev({ id: 'edit-c', kind: 'tool', stage: 'tool:Edit', tool: 'Edit', toolUseId: 'edit-c', fileOp: 'edit', filePath: '/c.ts' }),
+        ev({ id: 'result', kind: 'harness', stage: 'result', tokensIn: 1, tokensOut: 1 })
+      ]
+    }
+    const footerHtml = renderToStaticMarkup(<AssistantTurn turn={footerTurn} selectedId={null} onSelect={() => {}} />)
+    const footer = footerHtml.match(/<div class="turn-footer">[\s\S]*?<\/div>/)?.[0] ?? ''
+
+    expect(footer).toContain('<span class="lbl">files</span> <b>1 R · 2 W</b>')
+    expect(footer).not.toContain('2 R · 3 W')
   })
 
   it('Header 错误数只统计失败 tool_result，不把结果复制到同 ID Hook', () => {
@@ -2262,49 +2623,18 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(userHtml).toContain('技术方案')
   })
 
-  it('最后一条已完成消息显示原生分支编辑入口', () => {
-    const userHtml = renderToStaticMarkup(<UserMessage text="原消息" editable onEdit={async () => {}} />)
-
-    expect(userHtml).toContain('aria-label="编辑最后一条消息"')
-    expect(userHtml).toContain('title="编辑最后一条消息并从这里建立新分支"')
-  })
-
-  it('首轮停止且尚无 Provider 边界时仍显示重新开始编辑入口', () => {
-    const stopped: Turn = { runId: 'run-stopped', userText: '好的', done: true, items: [] }
-    const html = renderWelcome({ turns: [stopped], onEditLastTurn: async () => {} })
-
-    expect(html).toContain('aria-label="编辑最后一条消息"')
-    expect(html).toContain('title="编辑最后一条消息并重新开始"')
-  })
-
-  it('非首轮只有完整的当前与上一轮边界才显示分支编辑入口', () => {
-    const previous: Turn = {
-      runId: 'run-previous', userText: '第一条', done: true, items: [],
-      providerTurnId: 'provider-previous', forkTurnId: 'fork-previous'
-    }
-    const current: Turn = {
-      runId: 'run-current', userText: '第二条', done: true, items: [],
-      providerTurnId: 'provider-current', forkTurnId: 'fork-current'
-    }
-    const branchHtml = renderWelcome({ turns: [previous, current], onEditLastTurn: async () => {} })
-    const missingBoundaryHtml = renderWelcome({
-      turns: [previous, { ...current, providerTurnId: undefined, forkTurnId: undefined }],
-      onEditLastTurn: async () => {}
+  it('用户消息不再提供重新编辑入口', () => {
+    const userHtml = renderToStaticMarkup(<UserMessage text="原消息" />)
+    const chatHtml = renderWelcome({
+      turns: [{
+        runId: 'run-current', userText: '原消息', done: true, items: [],
+        providerTurnId: 'provider-current', forkTurnId: 'fork-current'
+      }]
     })
 
-    expect(branchHtml).toContain('title="编辑最后一条消息并从这里建立新分支"')
-    expect(missingBoundaryHtml).not.toContain('aria-label="编辑最后一条消息"')
-  })
-
-  it('分页窗口中的第一条可见消息不能冒充会话首轮重新编辑', () => {
-    const stopped: Turn = { runId: 'run-visible', userText: '可见尾部', done: true, items: [] }
-    const html = renderWelcome({
-      turns: [stopped],
-      historyWindow: { sessionId: 'session', offset: 8, totalTurns: 9, hasOlder: true, completeness: 'partial' },
-      onEditLastTurn: async () => {}
-    })
-
-    expect(html).not.toContain('aria-label="编辑最后一条消息"')
+    expect(userHtml).not.toContain('编辑最后一条消息')
+    expect(chatHtml).not.toContain('编辑最后一条消息')
+    expect(chatHtml).not.toContain('将创建新对话分支')
   })
 
   it('长用户消息用紧凑的折叠控件展示行数与展开状态', () => {
@@ -2394,8 +2724,9 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       input: '准备发送'
     })
 
-    expect(chatHtml).toMatch(/<option value="default"[^>]*disabled=""[^>]*selected="">请选择权限<\/option>/)
-    expect(chatHtml).toMatch(/<option value="full_access"[^>]*>本机完全访问<\/option>/)
+    expect(chatHtml).toContain('class="rc-value" aria-hidden="true">请选择权限</span>')
+    expect(chatHtml).toContain('aria-description="请选择权限：当前 Provider 需要你明确选择一个受支持的权限模式"')
+    expect(chatHtml).not.toContain('class="rc-value" aria-hidden="true">本机完全访问</span>')
     expect(chatHtml).toContain(reason)
     expect(chatHtml).toContain('id="composer-status"')
     expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
@@ -2474,19 +2805,19 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).not.toContain('当前 Provider 不可发送；草稿会保留')
   })
 
-  it('切换会话时展示轻量加载态，不闪过新会话引导页或旧 transcript', () => {
+  it('切换会话时保持无提示加载态，不闪过新会话引导页或旧 transcript', () => {
     const chatHtml = renderWelcome({
       sessionLoading: true,
       turns: [{ ...turn, runId: 'old-run', userText: '旧会话内容' }],
-      input: '切换期间保留的草稿'
+      input: '目标会话自己的草稿'
     })
 
     expect(chatHtml).toContain('aria-busy="true"')
-    expect(chatHtml).toContain('正在打开对话…')
-    expect(chatHtml).toContain('正在打开对话，草稿已保留')
+    expect(chatHtml).not.toContain('正在打开对话')
+    expect(chatHtml).not.toContain('草稿已保留')
     expect(chatHtml).not.toContain('开始一次可追溯执行')
     expect(chatHtml).not.toContain('旧会话内容')
-    expect(chatHtml).toContain('切换期间保留的草稿')
+    expect(chatHtml).toContain('目标会话自己的草稿')
     expect(chatHtml).toMatch(/class="send"[^>]*disabled=""/)
   })
 
@@ -2517,32 +2848,14 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       slashCmds: commands
     })
     expect(chatHtml).toContain('<span>Commands</span>')
-    expect(chatHtml).toContain('开始一次可追溯执行')
-    expect(chatHtml).toContain('新会话 · 本机证据')
-    expect(chatHtml).not.toContain('NEW SESSION')
-    expect(chatHtml).toContain('class="welcome-provider-field"')
-    expect(chatHtml).toContain('class="welcome-provider-grid"')
-    expect(chatHtml).toContain('class="welcome-provider is-selected"')
+    expect(chatHtml).toContain('今天想在 <span>project</span> 中构建什么？')
+    expect(chatHtml).toContain('welcome-hero-icon')
+    expect(chatHtml).not.toContain('welcome-provider-field')
+    expect(chatHtml).not.toContain('Provider 可用')
+    expect(chatHtml).not.toContain('重新扫描 PATH')
+    // Provider 选择仍保留在 composer，项目选择也不在 welcome 正文重复出现。
+    expect(chatHtml).toContain('data-agent-id="claude"')
     expect(chatHtml).toContain('class="provider-glyph" data-provider="claude"')
-    expect(chatHtml).toContain('data-tone="ok"')
-    expect(chatHtml).not.toContain('welcome-section-head')
-    expect(chatHtml).not.toContain('welcome-boundary')
-    expect(chatHtml).not.toContain('welcome-provider-list')
-    // Provider 行不再带右侧 chevron（chevronRight 的 path）
-    expect(chatHtml).not.toContain('m9 6 6 6-6 6')
-    expect(chatHtml).toContain('1/1 个 Provider 可用')
-    expect(chatHtml).toContain('class="welcome-ready-meter"')
-    expect(chatHtml).toContain('data-health="available"')
-    expect(chatHtml).toContain('可用')
-    expect(chatHtml).not.toContain('健康')
-    expect(chatHtml).not.toContain('降级')
-    expect(chatHtml).not.toContain('状态未知')
-    expect(chatHtml).toContain('/usr/local/bin/claude')
-    // 重新扫描是就绪表头右端的动作，不再只藏在 composer 的 Provider 选择器里
-    expect(chatHtml).toContain('aria-label="重新扫描 PATH"')
-    expect(chatHtml).toContain('重新扫描')
-    expect(chatHtml).not.toContain('data-busy')
-    // 项目选择只保留在 composer 上下文栏，不在 welcome 正文重复出现。
     expect(chatHtml).not.toContain('class="welcome-context"')
     expect(chatHtml).toContain('/tmp/project')
     expect(chatHtml).not.toContain('运行上下文')
@@ -2557,88 +2870,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('nextcr-code-review')
   })
 
-  it('ChatView 在 0 agents 探测中与探测完成后使用不同的诚实状态', () => {
-    const scanningHtml = renderWelcome({ agentScanning: true })
-    expect(scanningHtml).toContain('data-tone="neutral"')
-    expect(scanningHtml).toContain('正在检测本机 Provider')
-    expect(scanningHtml).toContain('正在探测本机 agent CLI')
-    expect(scanningHtml).not.toContain('Provider 就绪')
-    expect(scanningHtml).not.toContain('未检测到可用 Provider')
-    expect(scanningHtml).not.toContain('已发现')
-
-    const detectedAgents = [{
-      id: 'claude',
-      name: 'Claude Code',
-      bin: 'claude',
-      path: '/usr/local/bin/claude'
-    }, {
-      id: 'pi:25f2d533d0a8b391',
-      name: 'Pi · pi-agent',
-      bin: 'pi-agent',
-      path: '/Users/example/dev-agent/pi-agent/bin/pi-agent'
-    }]
-    const fastHtml = renderWelcome({
-      agentScanning: true,
-      agents: detectedAgents
-    })
-    // 快速 PATH 探测可能已经返回，但完整版本/descriptor 探测完成前不展示中间结果。
-    expect(fastHtml).toContain('aria-busy="true"')
-    expect(fastHtml).toContain('data-tone="neutral"')
-    expect(fastHtml).toContain('正在检测本机 Provider')
-    expect(fastHtml).toContain('正在探测本机 agent CLI')
-    expect(fastHtml).toContain('data-busy="true"')
-    expect(fastHtml).toContain('扫描中…')
-    expect(fastHtml).not.toContain('2/2 个 Provider 可用')
-    expect(fastHtml).not.toContain('data-health="available"')
-    expect(fastHtml).not.toContain('/usr/local/bin/claude')
-    expect(fastHtml).not.toContain('/Users/example/dev-agent/pi-agent/bin/pi-agent')
-
-    const completeHtml = renderWelcome({ agentScanning: false })
-    expect(completeHtml).toContain('data-tone="warn"')
-    expect(completeHtml).toContain('未检测到可用 Provider')
-    expect(completeHtml).toContain('完整探测未返回可用 agent CLI')
-    expect(completeHtml).not.toContain('Provider 就绪')
-
-    const detectedHtml = renderWelcome({
-      agentScanning: false,
-      agents: detectedAgents
-    })
-    expect(detectedHtml).toContain('2/2 个 Provider 可用')
-    expect(detectedHtml).toContain('data-health="available"')
-    expect(detectedHtml).toContain('/usr/local/bin/claude')
-    expect(detectedHtml).toContain('/Users/example/dev-agent/pi-agent/bin/pi-agent')
-    expect(detectedHtml).not.toContain('aria-busy="true"')
-  })
-
-  it('ChatView 将运行期细节收敛为可用 / 不可用两种 executable 状态', () => {
-    const html = renderWelcome({
-      agents: [{
-        id: 'claude',
-        name: 'Claude Code',
-        bin: 'claude',
-        path: '/usr/local/bin/claude',
-        health: { state: 'unknown', transport: 'Agent SDK' }
-      }, {
-        id: 'codex',
-        name: 'Codex',
-        bin: 'codex',
-        path: '/usr/local/bin/codex',
-        health: { state: 'unavailable', transport: 'app-server' }
-      }]
-    })
-    expect(html).toContain('data-tone="warn"')
-    expect(html).toContain('1/2 个 Provider 可用')
-    expect(html).toContain('1 个 Provider 不可用；请检查 CLI 路径或重新扫描')
-    expect(html).toContain('data-health="available"')
-    expect(html).toContain('data-health="unavailable"')
-    expect(html).toContain('可用')
-    expect(html).toContain('不可用')
-    expect(html).not.toContain('健康')
-    expect(html).not.toContain('降级')
-    expect(html).not.toContain('状态未知')
-  })
-
-  it('ChatView 将多个 Pi launcher 收进同一个 Provider 下的 Profile 列表', () => {
+  it('ChatView 不在空态展示 Provider 探测和健康状态', () => {
     const html = renderWelcome({
       selectedAgentId: 'pi:25f2d533d0a8b391',
       agents: [{
@@ -2646,14 +2878,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         name: 'Claude Code',
         bin: 'claude',
         path: '/usr/local/bin/claude',
-        health: { state: 'ready', transport: 'Agent SDK' }
-      }, {
-        id: 'pi:default',
-        name: 'Pi',
-        bin: 'pi',
-        path: '/Users/example/.local/bin/pi',
-        version: '0.84.2',
-        health: { state: 'ready', transport: 'JSONL RPC subprocess' }
+        health: { state: 'unavailable', transport: 'Agent SDK' }
       }, {
         id: 'pi:25f2d533d0a8b391',
         name: 'Pi · pi-agent',
@@ -2663,15 +2888,14 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
       }]
     })
 
-    expect(html).toContain('2/2 个 Provider 可用')
-    expect(html).toContain('data-provider="pi"')
+    expect(html).toContain('今天想构建什么？')
+    expect(html).toContain('data-agent-id="pi:25f2d533d0a8b391"')
     expect(html).toContain('class="provider-glyph" data-provider="pi"')
-    expect(html).toContain('aria-label="Pi，2 个 Profile"')
-    expect(html).toContain('原生 Pi')
-    expect(html).toContain('系统检测 · 0.84.2')
-    expect(html).toContain('自定义 Profile · 版本未知')
-    expect(html).toContain('aria-label="移除 Pi Profile：pi-agent"')
-    expect(html).not.toContain('aria-label="移除 Pi Profile：原生 Pi"')
+    expect(html).not.toContain('Provider 可用')
+    expect(html).not.toContain('Provider 不可用')
+    expect(html).not.toContain('data-health=')
+    expect(html).not.toContain('重新扫描 PATH')
+    expect(html).not.toContain('/usr/local/bin/claude')
   })
 
   it('ChatView 渲染运行中输入队列和图片附件', () => {
@@ -2738,8 +2962,31 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('排队')
   })
 
-  it('切换会话会同时清除队列暂停和在途标记', () => {
+  it('切换会话只重置启动控制，不清除按会话隔离的队列', () => {
     expect(resetQueuedPromptControl(7)).toEqual({ generation: 8, pending: false, inFlight: false })
+
+    const aKey = sessionComposerDraftKey({ providerId: 'pi', cwd: '/repo', sessionId: 'a' })
+    const bKey = sessionComposerDraftKey({ providerId: 'pi', cwd: '/repo', sessionId: 'b' })
+    const aPrompt = enqueuePrompt([], 'A 会话后续任务', [], { providerId: 'pi' })[0]
+    const bPrompt = enqueuePrompt([], 'B 会话后续任务', [], { providerId: 'pi' })[0]
+    let queues = updateSessionPromptQueue(new Map(), aKey, () => [aPrompt])
+    queues = updateSessionPromptQueue(queues, bKey, () => [bPrompt])
+
+    expect(queues.get(aKey)?.map((prompt) => prompt.text)).toEqual(['A 会话后续任务'])
+    expect(queues.get(bKey)?.map((prompt) => prompt.text)).toEqual(['B 会话后续任务'])
+    expect(dequeueStartedPromptFromSessions(queues, aPrompt).get(bKey)?.[0]).toBe(bPrompt)
+  })
+
+  it('Provider 捕获真实 sessionId 时迁移队列且保持 FIFO', () => {
+    const provisionalKey = sessionComposerDraftKey({ providerId: 'pi', cwd: '/repo', sessionId: 'run-1' })
+    const capturedKey = sessionComposerDraftKey({ providerId: 'pi', cwd: '/repo', sessionId: 'session-1' })
+    const provisional = enqueuePrompt([], '先排入', [], { providerId: 'pi' })[0]
+    const existing = enqueuePrompt([], '目标会话已有', [], { providerId: 'pi' })[0]
+    const queues = new Map([[provisionalKey, [provisional]], [capturedKey, [existing]]])
+    const migrated = migrateSessionPromptQueue(queues, provisionalKey, capturedKey)
+
+    expect(migrated.has(provisionalKey)).toBe(false)
+    expect(migrated.get(capturedKey)?.map((prompt) => prompt.text)).toEqual(['先排入', '目标会话已有'])
   })
 
   it('Pi 分支请求保留当前 profile', () => {
@@ -2811,31 +3058,35 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(attachmentsAfterSuccessfulSubmit([submitted, newer], new Set(['sent']))).toEqual([newer])
   })
 
-  it('滚动只在接近底部时自动粘底', () => {
-    expect(chatBottomDistance({ scrollHeight: 1000, scrollTop: 760, clientHeight: 220 })).toBe(20)
-    expect(isChatNearBottom({ scrollHeight: 1000, scrollTop: 760, clientHeight: 220 })).toBe(true)
-    expect(isChatNearBottom({ scrollHeight: 1000, scrollTop: 600, clientHeight: 220 })).toBe(false)
+  it('打开会话时不会被历史内容替换产生的中间滚动事件取消粘底', () => {
+    const middle = { scrollHeight: 1000, scrollTop: 420, clientHeight: 220 }
+    expect(chatBottomDistance(middle)).toBe(360)
+    expect(isChatNearBottom(middle)).toBe(false)
+    expect(chatBottomStickinessAfterScroll(middle, true)).toBe(true)
+    expect(chatBottomStickinessAfterScroll(middle, false)).toBe(false)
+
     let top = 0
     const scrolled = scrollChatToBottomIfNeeded(
-      { scrollHeight: 1000, scrollTop: 600, clientHeight: 220, scrollTo: (options) => (top = options.top) },
-      true
+      { ...middle, scrollTo: (options) => (top = options.top) },
+      chatBottomStickinessAfterScroll(middle, true)
     )
     expect(scrolled).toBe(true)
     expect(top).toBe(1000)
   })
 
-  it('精确跳转按对话容器坐标定位到事件卡片', () => {
+  it('精确跳转把报错事件卡片定位到对话视口中间', () => {
     const calls: Array<{ top: number; behavior?: ScrollBehavior }> = []
     const chat = {
       scrollTop: 320,
+      clientHeight: 600,
       getBoundingClientRect: () => ({ top: 100 }),
       scrollTo: (options: { top: number; behavior?: ScrollBehavior }) => calls.push(options)
     }
-    const target = { getBoundingClientRect: () => ({ top: 460 }) }
+    const target = { getBoundingClientRect: () => ({ top: 460, height: 80 }) }
 
-    scrollChatTargetIntoView(chat, target)
+    scrollChatTargetIntoView(chat, target, 'smooth', 'center')
 
-    expect(calls).toEqual([{ top: 664, behavior: 'auto' }])
+    expect(calls).toEqual([{ top: 420, behavior: 'smooth' }])
   })
 
   it('手动刷新按 Provider 失效、Skill 回读、slash 重取的顺序执行', async () => {
@@ -3015,7 +3266,9 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
       />
     )
 
-    expect(html).toContain('等待回答')
+    expect(html).toContain('需要你的选择')
+    expect(html).toContain('2 个问题')
+    expect(html).not.toContain('等待回答')
     expect(html).toContain('type="radio"')
     expect(html).toContain('type="checkbox"')
     expect(html).toContain('提交并继续')
@@ -3112,7 +3365,8 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
     )
 
     expect(html.match(/question-inline-form/g)).toHaveLength(1)
-    expect(html).toContain('等待回答')
+    expect(html).toContain('需要你的选择')
+    expect(html).not.toContain('等待回答')
     expect(html).toContain('提交并继续')
   })
 
@@ -3171,7 +3425,7 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
     expect(turnHtml).toContain('MCP, Skill')
     expect(turnHtml).toContain('等待 2.0s')
     expect(turnHtml).toContain('human</span> <b>1 · 2Q</b>')
-    expect(overviewHtml).toContain('1 次结构化介入')
+    expect(overviewHtml).toContain('本会话 1 次 · 2 个问题')
     expect(overviewHtml).toContain('aria-label="结构化介入 1，展开明细"')
     expect(overviewHtml).toContain('T01')
   })
@@ -3223,17 +3477,14 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       }}
     />
   )
-  it('verdict 卡：聚合 token + 无报错无危险 → 只声明 Provider 轮次已结束', () => {
-    expect(html).toContain('3.0k tok') // 跨轮累计本会话 token（含 cache）
+  it('verdict 卡：聚合 token + 无报错无危险 → 极简展示 Provider 轮次终态', () => {
+    expect(html).toContain('<strong>3.0k</strong>') // 跨轮累计本会话 token（含 cache）
     expect(html).not.toContain('$0.1234')
-    expect(html).toContain('1 轮已结束')
     expect(html).toContain('overview-verdict ok') // 无 error/danger → ok
     expect(html).toContain('轮次已结束')
-    expect(html).toContain('Provider 终态不代表用户目标完成')
     expect(html).toContain('输入+输出+缓存')
-    expect(html).toContain('reasoning 单列')
-    expect(html).toMatch(/<b>reason<\/b>—/)
-    expect(html).toContain('overview-metric-foot') // cache·r/cache·w/reason/api foot
+    expect(html).not.toContain('reasoning 单列')
+    expect(html).not.toContain('overview-metric-foot')
   })
 
   it('百万级 token 总量、输入及缓存使用 M，小数值和缺失证据保持原样', () => {
@@ -3256,11 +3507,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       <OverviewPanel turns={[largeTokenTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(largeTokenHtml).toContain('<strong>19.7M tok</strong>')
+    expect(largeTokenHtml).toContain('<strong>19.7M</strong>')
+    expect(largeTokenHtml).not.toContain('<strong>19.7M tok</strong>')
     expect(largeTokenHtml).toContain('<strong>10.6M / 43.9k</strong>')
-    expect(largeTokenHtml).toContain('<b>cache·r</b>9.0M')
-    expect(largeTokenHtml).toContain('<b>cache·w</b>0')
-    expect(largeTokenHtml).toContain('<b>reason</b>—')
+    expect(largeTokenHtml).not.toContain('overview-metric-foot')
   })
 
   it('Codex 缓存已包含在 input 时展示真实 Token 加总口径', () => {
@@ -3320,10 +3570,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       <OverviewPanel turns={[mergedTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(mergedHtml).toContain('1 轮已结束')
-    expect(mergedHtml).toContain('1/1 轮已捕获')
-    expect(mergedHtml).toContain('35 tok')
-    expect(mergedHtml).not.toContain('47 tok')
+    expect(mergedHtml).toContain('轮次已结束')
+    expect(mergedHtml).not.toContain('轮已捕获')
+    expect(mergedHtml).toContain('<strong>35</strong>')
+    expect(mergedHtml).not.toContain('<strong>47</strong>')
   })
 
   it('上下文段：最近一轮占用 ÷ 窗口（诚实单条，不伪造三色分段）', () => {
@@ -4062,9 +4312,13 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('本会话无 MCP 调用')
   })
 
-  it('累计用量来自持久化', () => {
-    expect(html).toContain('累计 Token 用量')
-    expect(html).toContain('3.4k tok')
+  it('会话数据只聚合当前会话，不混入 usage.jsonl 与 SQLite 的跨会话累计', () => {
+    expect(html).toContain('本会话 Token 用量')
+    expect(html).toContain('1.7k tok')
+    expect(html).toContain('<span class="fchip">1 turns</span>')
+    expect(html).not.toContain('累计 Token 用量')
+    expect(html).not.toContain('3.4k tok')
+    expect(html).not.toContain('SQLite 历史累计')
     expect(html).not.toContain('$0.5000')
   })
 
@@ -4216,33 +4470,72 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     }
   }
 
-  it('有工具报错 → 判决 warn，绝不显示绿色 ok', () => {
+  it('工具报错归入对应轮次，并可展开查看输入、输出与提取后的错误信息', () => {
+    const output = JSON.stringify({ content: [{ type: 'text', text: 'role-only UI condition requires ref' }], isError: true })
     const t: Turn = {
       runId: 'er',
       userText: 'x',
       done: true,
       items: [
-        ev({ id: 'te1', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu1' }),
-        ev({ id: 'te2', kind: 'tool', stage: 'tool_result', toolUseId: 'tu1', isError: true, output: 'boom' }),
+        ev({ id: 'te1', kind: 'tool', stage: 'tool:act_ui', tool: 'act_ui', toolUseId: 'tu1', input: { action: 'click', role: 'button' } }),
+        ev({ id: 'te2', kind: 'tool', stage: 'tool_result', toolUseId: 'tu1', isError: true, output }),
         ev({ id: 'te3', kind: 'harness', stage: 'result', costUsd: 0.01, tokensIn: 10, tokensOut: 5 })
       ]
     }
+    const errors = overviewToolErrors(t.items)
     const html = panel(t)
+    const detailsHtml = renderToStaticMarkup(<TurnToolErrorDetails errors={errors} onOpen={() => {}} />)
+
     expect(html).toContain('overview-verdict warn')
     expect(html).toContain('处工具报错')
+    expect(html).toContain('class="turn-call-group error"')
+    expect(html).toContain('aria-label="本轮工具报错详情"')
+    expect(html).not.toContain('overview-tool-errors')
     expect(html).not.toContain('overview-verdict ok') // 失败会话顶绿色健康判决 = 假状态
+    expect(errors).toMatchObject([{
+      tool: 'act_ui',
+      input: { action: 'click', role: 'button' },
+      output,
+      message: 'role-only UI condition requires ref'
+    }])
+    expect(detailsHtml).toContain('<span>输入</span>')
+    expect(detailsHtml).toContain('&quot;action&quot;: &quot;click&quot;')
+    expect(detailsHtml).toContain('<span>输出</span>')
+    expect(detailsHtml).toContain('isError')
+    expect(detailsHtml).toContain('<span>报错信息</span>')
+    expect(detailsHtml).toContain('role-only UI condition requires ref')
+    expect(detailsHtml).toContain('定位到对话')
   })
 
-  it('高危操作 → 卡 bad + 判决 bad + 危险 pillar 标"审计·未拦截"（非 blocked）', () => {
+  it('部分轮次缺少 Token 时用不等号保留下界语义，但不再显示 tok+', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[
+          { runId: 'known', userText: 'one', done: true, items: [ev({ id: 'known-result', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5 })] },
+          { runId: 'missing', userText: 'two', done: true, items: [ev({ id: 'missing-result', kind: 'harness', stage: 'result' })] }
+        ]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+      />
+    )
+
+    expect(html).toContain('<strong>≥15</strong>')
+    expect(html).not.toContain('tok+')
+  })
+
+  it('高危操作 → 判决 bad，详细审计仍明确未拦截且不再占用指标栏', () => {
     const { t } = dangerTurn()
     const html = panel(t)
     expect(html).toContain('overview-verdict bad')
     expect(html).toContain('overview-verdict-line')
     expect(html).toContain('1 处高危操作')
     expect(html).toContain('rm -rf 强删')
-    expect(html).toContain('审计·未拦截') // P3 是观测不拦截，诚实标注
-    expect(html).toContain('class="overview-metric overview-metric-action bad"')
-    expect(html).toContain('aria-label="查看本会话 1 处危险操作"')
+    expect(html).not.toContain('审计·未拦截') // 四栏副文案已移除
+    expect(html).toContain('观测标记（不阻塞、默认放行）')
+    expect(html).not.toContain('class="overview-metric overview-metric-action bad"')
+    expect(html).not.toContain('<span>危险</span>')
     expect(html).toContain('class="panel-section danger-audit-section"')
     expect(html).toContain('class="callrow danger-audit-row"')
     expect(html).toContain('aria-label="跳到左侧对话中的这次 Bash 调用：rm -rf 强删"')
@@ -4267,13 +4560,12 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     }
     const html = panel(t, true)
     expect(html).toContain('运行中')
-    expect(html).toContain('正在等待 Provider 终态')
     expect(html).not.toContain('轮已结束')
     expect(html).not.toContain('Provider 终态不代表用户目标完成')
     expect(html).toContain('overview-verdict warn')
   })
 
-  it('输入输出、缓存与 API 缺失部分轮次时显示已捕获值但不加不等号', () => {
+  it('指标区展示 Token、输入/输出、缓存命中率与成本，并移除调用、危险及辅助脚注', () => {
     const html = renderToStaticMarkup(
       <OverviewPanel
         turns={[
@@ -4298,11 +4590,87 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     )
 
     expect(html).toContain('<strong>13 / 5</strong>')
-    expect(html).toContain('<b>cache·r</b>7')
-    expect(html).toContain('<b>cache·w</b>2')
-    expect(html).toContain('<b>reason</b>4')
-    expect(html).toContain('<b>api</b>1.0s')
-    expect(html).not.toContain('≥')
+    expect(html.match(/class="overview-metric(?: |")/g)).toHaveLength(4)
+    expect(html).toContain('<span>缓存命中率 · 部分</span><strong>36.8%</strong>')
+    expect(html).toContain('<span>成本</span><strong>—</strong>')
+    expect(html).not.toContain('<span>调用</span>')
+    expect(html).not.toContain('<span>危险</span>')
+    expect(html).not.toContain('cache·r')
+    expect(html).not.toContain('cache·w')
+    expect(html).not.toContain('<b>reason</b>')
+    expect(html).not.toContain('<b>api</b>')
+    expect(html).not.toContain('overview-metric-foot')
+  })
+
+  it('Qoder 会话的第四栏显示 Credit，不把它冒充美元成本', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[{
+          runId: 'qoder-credit',
+          userText: 'one',
+          done: true,
+          items: [
+            ev({ id: 'qoder-result', kind: 'harness', stage: 'result', providerId: 'qoder', runtimeProvider: 'qoder_cli', tokensIn: 100, tokensOut: 20, cacheReadTokens: 40, cacheCreationTokens: 10, costUsd: 9 }),
+            ev({
+              id: 'qoder-credit-result',
+              kind: 'harness',
+              stage: 'credit_usage',
+              providerId: 'qoder',
+              runtimeProvider: 'qoder_cli',
+              creditUsage: {
+                status: 'partial',
+                quality: 'exact',
+                source: ['qoder_sdk'],
+                value: { provider: 'qoder', unit: 'credits', scope: 'main', amount: 2.5, knownRequests: 1, missingRequests: 0 },
+                omissionReason: 'Only observed main-session requests are covered.'
+              }
+            })
+          ]
+        }]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+        runtimeProvider="qoder_cli"
+      />
+    )
+
+    expect(html).toContain('<span>Credit</span><strong>≥2.5</strong>')
+    expect(html).not.toContain('<span>成本</span><strong>$9.00</strong>')
+  })
+
+  it('通过上游模型识别 Rotom 的 Qoder 会话并隐藏美元成本', () => {
+    const html = renderToStaticMarkup(
+      <OverviewPanel
+        turns={[{
+          runId: 'rotom-qoder',
+          userText: 'one',
+          done: true,
+          items: [ev({
+            id: 'rotom-qoder-result',
+            kind: 'harness',
+            stage: 'result',
+            runtimeProvider: 'pi_rpc',
+            contextProvider: 'qoder',
+            upstreamProvider: 'qoder',
+            contextModel: 'ultimate',
+            tokensIn: 100,
+            tokensOut: 20,
+            costUsd: 9,
+            modelUsage: [{ model: 'ultimate', upstreamProvider: 'qoder' }]
+          })]
+        }]}
+        selected={null}
+        onSelect={() => {}}
+        usage={null}
+        stats={null}
+        runtimeProvider="pi_rpc"
+      />
+    )
+
+    expect(html).toContain('<span>Credit</span><strong>—</strong>')
+    expect(html).not.toContain('<span>成本</span>')
+    expect(html).not.toContain('$9.00')
   })
 })
 
@@ -4367,8 +4735,8 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
     expect(segmentHtml).not.toContain('R1')
   })
 
-  it('每轮调用展示介入、MCP、Skill、子 Agent、Hooks、文件计数，五项明细默认收起', () => {
-    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮展示结构化介入'))
+  it('每轮调用展示报错、介入、MCP、Skill、子 Agent、Hooks、文件计数，常规明细默认收起', () => {
+    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮展示工具报错'))
     expect(html).toContain('每轮调用')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle intervention')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle mcp')
@@ -4390,8 +4758,8 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
 
   it('会话总调用拆分为工具、MCP、Skill、子 Agent，四项之和等于总数', () => {
     expect(html).toContain('4 calls')
-    expect(html).toContain('<span>调用</span><strong>4</strong>')
-    expect(html).toContain('工具 1 · MCP 1 · Skill 1 · 子Agent 1')
+    expect(html).not.toContain('<span>调用</span><strong>4</strong>')
+    expect(html).not.toContain('工具 1 · MCP 1 · Skill 1 · 子Agent 1')
     expect(html).toContain('TOP TOOLS<span class="more">工具 1 · MCP 1</span>')
   })
 
@@ -4832,7 +5200,7 @@ describe('CapabilitiesModal 精简能力页', () => {
     onClose: () => {}
   }
 
-  it('Skills 只保留双来源、名称和描述', () => {
+  it('Skills 默认显示全部来源，只保留名称和描述', () => {
     const html = renderToStaticMarkup(
       <CapabilitiesModal
         {...sharedProps}
@@ -4845,9 +5213,10 @@ describe('CapabilitiesModal 精简能力页', () => {
 
     expect(html).toContain('role="tablist" aria-label="能力类型"')
     expect(html).toContain('role="tablist" aria-label="Skill 来源"')
+    expect(html).toContain('aria-selected="true" class="active">全部</button>')
     expect(html).toContain('项目能力说明')
+    expect(html).toContain('Provider 能力')
     expect(html).not.toContain('/repo/SKILL.md')
-    expect(html).not.toContain('Provider 能力')
     expect(html).not.toContain('搜索')
     expect(html).not.toContain('个结果')
     expect(html).not.toContain('刷新 MCP 运行状态')

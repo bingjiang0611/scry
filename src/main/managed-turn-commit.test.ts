@@ -1047,6 +1047,28 @@ describe('managed trace turn coordinator', () => {
     expect(await listRecords(join(workspace, '.scry'))).toHaveLength(1)
   })
 
+  it('terminal canonical journal 可重建已丢失的 provisional lifecycle', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = input(workspace, userDataDir)
+
+    await expect(commitManagedTraceTurn(request, { waitMs: 0 })).rejects.toThrow('open identity')
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: workspace, waitMs: 100 })).resolves.toEqual({
+      recovered: 1,
+      pending: 0,
+      errors: []
+    })
+
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: request.sessionId,
+      providerId: request.providerId,
+      userDataDir
+    })?.turns).toHaveLength(1)
+    await expect(listRecords(join(workspace, '.scry'))).resolves.toEqual([
+      expect.objectContaining({ providerTurnId: request.providerTurnId })
+    ])
+  })
+
   it('Claude prepared journal 可在 open identity 到达后恢复两端', async () => {
     const { workspace, userDataDir } = await fixture()
     const request = asClaude(input(workspace, userDataDir))

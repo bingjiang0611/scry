@@ -6,6 +6,7 @@ import {
   TraceOutputBridge,
   traceEventByteSize,
   type TraceBacklogState,
+  type TraceBatch,
   type TraceOutputBridgeOptions
 } from './trace-output'
 
@@ -22,7 +23,7 @@ const sizeOf = (candidate: TraceEvent): number => traceEventByteSize(candidate)
 
 interface Harness {
   bridge: TraceOutputBridge
-  sent: { events: TraceEvent[]; bytes: number }[]
+  sent: TraceBatch[]
   health: TraceBacklogState[]
   /** 只跑本轮开始时已经挂上的定时器；无界 drain 会掩盖重排 bug。 */
   runPendingTimers: (ticks?: number) => void
@@ -31,7 +32,7 @@ interface Harness {
 }
 
 function harness(overrides: Partial<TraceOutputBridgeOptions> = {}): Harness {
-  const sent: { events: TraceEvent[]; bytes: number }[] = []
+  const sent: TraceBatch[] = []
   const health: TraceBacklogState[] = []
   let timers: (() => void)[] = []
   const canSend = { value: true }
@@ -147,7 +148,7 @@ describe('TraceOutputBridge bounded delivery', () => {
     // 关键：被 high-water 挡住时不留任何定时器，否则就是 20Hz 空转。
     expect(pendingTimers()).toBe(0)
 
-    bridge.ack(sizeOf(first))
+    bridge.ack(sent[0])
     expect(sent.map((batch) => batch.events[0].id)).toEqual(['e0', 'e1'])
     expect(pendingTimers()).toBe(0)
     expect(bridge.snapshot().degraded).toBe(false)
@@ -212,12 +213,34 @@ describe('TraceOutputBridge bounded delivery', () => {
     expect(pendingTimers()).toBe(0)
   })
 
-  it('rejects invalid ACK values instead of silently unblocking the queue', () => {
-    const { bridge } = harness()
-    expect(() => bridge.ack(-1)).toThrow('trace 输出确认无效')
-    expect(() => bridge.ack(1.5)).toThrow('trace 输出确认无效')
-    expect(() => bridge.ack(Number.POSITIVE_INFINITY)).toThrow('trace 输出确认无效')
-    expect(() => bridge.ack(64 * 1024 * 1024)).toThrow('trace 输出确认无效')
+  it('rejects malformed or byte-mismatched ACK values instead of silently unblocking the queue', () => {
+    const { bridge, sent, runPendingTimers } = harness()
+    bridge.push(event('e0'))
+    runPendingTimers()
+    const receipt = sent[0]
+    expect(() => bridge.ack({ ...receipt, bytes: -1 })).toThrow('trace 输出确认无效')
+    expect(() => bridge.ack({ ...receipt, batchId: 1.5 })).toThrow('trace 输出确认无效')
+    expect(() => bridge.ack({ ...receipt, generation: Number.POSITIVE_INFINITY })).toThrow('trace 输出确认无效')
+    expect(() => bridge.ack({ ...receipt, bytes: 64 * 1024 * 1024 })).toThrow('trace 输出确认无效')
+    expect(() => bridge.ack({ ...receipt, bytes: receipt.bytes + 1 })).toThrow('trace 输出确认字节不匹配')
+  })
+
+  it('ignores duplicate and pre-reset ACKs without releasing newer renderer credit', () => {
+    const first = event('e0')
+    const { bridge, sent, runPendingTimers } = harness({ maxBatchEvents: 1, highWaterBytes: sizeOf(first) })
+    bridge.push(first)
+    runPendingTimers()
+    const oldReceipt = sent[0]
+    expect(bridge.ack(oldReceipt)).toBe(true)
+    expect(bridge.ack(oldReceipt)).toBe(false)
+
+    bridge.reset()
+    bridge.push(event('e1'))
+    bridge.push(event('e2'))
+    runPendingTimers()
+    expect(sent.at(-1)?.events[0].id).toBe('e1')
+    expect(bridge.ack(oldReceipt)).toBe(false)
+    expect(bridge.snapshot().bufferedEvents).toBe(1)
   })
 
   it('degrades the live mirror honestly under overload and keeps the delivered prefix contiguous', () => {
@@ -245,7 +268,7 @@ describe('TraceOutputBridge bounded delivery', () => {
 
   it('asks for an authoritative resync after the backlog drains, then clears degradation', () => {
     const unit = sizeOf(event('probe'))
-    const { bridge, health } = harness({
+    const { bridge, health, sent } = harness({
       maxBatchEvents: 1,
       maxBufferBytes: unit,
       highWaterBytes: 1
@@ -254,7 +277,7 @@ describe('TraceOutputBridge bounded delivery', () => {
     bridge.push(event('e1'))
     expect(bridge.snapshot()).toMatchObject({ degraded: true, skippedEvents: 1, resyncRequired: false })
 
-    bridge.ack(unit)
+    bridge.ack(sent[0])
     expect(bridge.snapshot()).toMatchObject({ degraded: true, resyncRequired: true })
     expect(health.at(-1)?.resyncRequired).toBe(true)
 

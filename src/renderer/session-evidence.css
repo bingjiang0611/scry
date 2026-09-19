@@ -906,14 +906,14 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   z-index: 10;
   gap: 0;
   padding: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
   background: var(--overview-surface);
 }
 
 .overview-dossier .overview-panel-title {
   min-height: 44px;
   padding: 0 10px 0 13px;
-  border-bottom: 1px solid var(--border3);
+  border-bottom: 0;
 }
 
 .overview-dossier .overview-panel-title strong { font-size: 14px; }
@@ -954,12 +954,13 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 .overview-dossier .ctx-gauge {
-  min-height: 88px;
+  min-height: 0;
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 13px;
-  padding: 12px 13px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
+  margin: 4px 12px 0;
+  padding: 8px 0;
+  border-bottom: 0;
+  background: transparent;
 }
 
 .overview-dossier .ctx-gauge .ring { width: 58px; height: 58px; font-size: 11px; }
@@ -968,74 +969,53 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .overview-dossier .ctx-copy .v { margin-top: 4px; font-size: 16px; }
 .overview-dossier .ctx-copy .sub { margin-top: 5px; font-size: 10.5px; line-height: 1.5; }
 
-.overview-dossier .overview-verdict {
+.overview-dossier .overview-verdict,
+.overview-dossier .overview-verdict.ok,
+.overview-dossier .overview-verdict.bad {
   border: 0;
-  border-bottom: 1px solid var(--border3);
-  background: color-mix(in srgb, var(--warn) 5%, var(--overview-surface));
+  background: transparent;
 }
 
-.overview-dossier .overview-verdict.ok { background: color-mix(in srgb, var(--ok) 5%, var(--overview-surface)); }
-.overview-dossier .overview-verdict.bad { background: color-mix(in srgb, var(--bad) 6%, var(--overview-surface)); }
-
 .overview-dossier .overview-verdict-line {
-  min-height: 48px;
-  padding: 7px 12px;
+  min-height: 0;
+  padding: 4px 12px;
   border-bottom: 0;
 }
 
-.overview-dossier .overview-verdict-line > div { grid-template-columns: auto max-content minmax(0, 1fr); gap: 7px; }
+.overview-dossier .overview-verdict-line > div { grid-template-columns: auto max-content; gap: 7px; }
 .overview-dossier .overview-verdict-line strong { font-size: 12px; }
-.overview-dossier .overview-verdict-line small { font-size: 10.5px; }
 .overview-dossier .overview-verdict-line em { font-size: 10px; }
 
 .overview-dossier .overview-metric-grid {
-  margin: 12px 12px 0;
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
+  margin: 4px 12px 0;
+  border: 0;
   background: transparent;
-  gap: 0;
+  gap: 6px;
 }
 
 .overview-dossier .overview-metric {
-  min-height: 88px;
+  min-height: 0;
   gap: 0;
   justify-content: flex-start;
-  padding: 10px;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  background: var(--overview-surface);
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--surface-faint);
 }
 
-.overview-dossier .overview-metric > span { margin-bottom: 9px; font-size: 10px; }
+.overview-dossier .overview-metric > span { margin-bottom: 4px; font-size: 10px; }
 .overview-dossier .overview-metric > strong {
   font-size: clamp(14px, 4.2cqi, 17px);
   letter-spacing: -0.025em;
 }
-.overview-dossier .overview-metric > small { margin-top: 8px; font-size: 10.5px; line-height: 1.4; }
 
-.overview-dossier .overview-metric-foot {
-  min-height: 41px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 0 12px 12px;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  border-left: 1px solid var(--border);
+.overview-dossier .overview-metric:hover {
+  border-color: transparent;
+  transform: none;
 }
-
-.overview-dossier .overview-metric-foot span {
-  min-height: 45px;
-  align-content: center;
-  display: grid;
-  gap: 4px;
-  padding: 6px 8px;
-  border-right-color: var(--border3);
-  font-size: 11px;
-}
-
-.overview-dossier .overview-metric-foot b { font-size: 10px; }
 
 .overview-dossier .panel-section {
-  margin: 16px 12px 0;
+  margin: 10px 12px 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1048,7 +1028,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   justify-content: space-between;
   gap: 8px;
   margin: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
   color: var(--dim2);
   font: 700 10px/1 var(--font-mono);
   letter-spacing: 0.1em;
@@ -1056,13 +1036,14 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 .overview-dossier .panel-section h4 .more { font-size: 10px; letter-spacing: 0; text-transform: none; }
-.overview-dossier .panel-section .filerow { min-height: 36px; padding: 6px 0; border-bottom: 1px solid var(--border3); font-size: 11.5px; }
+.overview-dossier .panel-section .filerow { min-height: 36px; padding: 6px 0; border-bottom: 0; font-size: 11.5px; }
 
 .overview-dossier .overview-data-tabs {
   height: 33px;
   margin: 16px 12px 0;
   padding: 0;
-  border-bottom: 1px solid var(--border);
+  border: 0;
+  background: transparent;
 }
 
 .overview-dossier .overview-data-tabs button { height: 33px; color: var(--dim3); font-size: 11.5px; }
@@ -1122,7 +1103,8 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .overview-dossier .turn-call-detail-slot { gap: 5px; }
 .overview-dossier .turn-call-detail,
 .overview-dossier .turn-intervention,
-.overview-dossier .turn-file-footprint { border-radius: 0; font-size: 11px; }
+.overview-dossier .turn-file-footprint,
+.overview-dossier .turn-tool-error { border-radius: 0; font-size: 11px; }
 
 .overview-dossier .hook-instance-index,
 .overview-dossier .hook-instance-source,
@@ -1591,10 +1573,10 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 
 @container (max-width: 400px) {
   .overview-dossier .ctx-gauge {
-    min-height: 80px;
+    min-height: 0;
     grid-template-columns: 48px minmax(0, 1fr);
     gap: 11px;
-    padding: 11px 12px;
+    padding: 8px 12px;
   }
 
   .overview-dossier .ctx-gauge .ring {
@@ -1602,11 +1584,11 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
     height: 48px;
   }
 
-  .overview-dossier .overview-metric-grid { margin: 10px 10px 0; }
+  .overview-dossier .overview-metric-grid { margin: 4px 10px 0; }
 
   .overview-dossier .overview-metric {
-    min-height: 96px;
-    padding: 9px;
+    min-height: 0;
+    padding: 8px 9px;
   }
 
   .overview-dossier .overview-metric > span { margin-bottom: 7px; }
