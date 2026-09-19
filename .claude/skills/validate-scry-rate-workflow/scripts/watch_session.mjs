@@ -513,6 +513,7 @@ function leaseHandoverQuestion(question, workitemId) {
   const body = legends.join('\n')
   const fullQuestion = `${body}\n${options.join('\n')}`
   const hasReq = new RegExp(`(?:\\bREQ-?|需求\\s*|工单\\s*)${workitemId}\\b`, 'i').test(body)
+    || /(?:该|当前|这个)需求/u.test(body)
   const hasActiveGeneration = /活动\s*generation|active\s+generation|另一个会话占用|旧\s*generation|旧代/i.test(fullQuestion)
   const hasRestartImpact = /放弃旧代|放弃旧\s*generation|从\s*P0\s*(?:重跑|重新运行)|重新开始摄入|重新摄入/i.test(fullQuestion)
   const hasLease = /\bLEASE\b|租约|orphaned\s+lease/i.test(fullQuestion) || (hasActiveGeneration && hasRestartImpact)
@@ -1245,6 +1246,25 @@ function selfTest() {
     )
     if (takeoverQoderLease?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
       throw new Error('takeover Qoder lease question was misclassified as a document question')
+    }
+    const pronounQoderLeaseQuestion = {
+      legends: ['01\n会话接管\n该需求旧 generation 仍停在 P0、没有完成任何里程碑；是否放弃旧代并在当前会话从 P0 重新摄入？'],
+      options: [
+        '放弃旧代并重跑（Recommended）\n释放旧会话占用，在当前会话创建全新 generation 并继续理解 PRD。',
+        '保留旧代\n停止当前流程，回到原会话继续该需求。',
+        '其他\n输入其他回答',
+      ],
+      links: [],
+      runId: 'run-pronoun-qoder-lease',
+      toolCallId: 'tool-pronoun-qoder-lease',
+    }
+    const pronounQoderLeaseRunRoot = join(root, 'lease-qoder-pronoun')
+    mkdirSync(pronounQoderLeaseRunRoot)
+    const pronounQoderLease = questionState(
+      pronounQoderLeaseRunRoot, state, 'qoder', 1, pronounQoderLeaseQuestion, 'session-pronoun-qoder-lease', '85237895'
+    )
+    if (pronounQoderLease?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
+      throw new Error('pronoun Qoder lease question was misclassified as a document question')
     }
     const linklessLeaseQuestion = {
       legends: ['01\n旧代处理\nREQ-85237895 已被另一个已失联会话占用（旧代停在 P0）。是否在当前会话继续该需求？这会放弃旧代、从 P0 重跑。'],
