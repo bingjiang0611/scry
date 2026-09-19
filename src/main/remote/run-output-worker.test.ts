@@ -85,6 +85,18 @@ describe('RunOutputWorkerStore', () => {
     expect(worker.messages).toHaveLength(1)
   })
 
+  it('rejects pending writes and close if the worker exits before acknowledgement', async () => {
+    const worker = new FakeWorker()
+    const store = connect(worker)
+    const write = store.appendBatch([chunk('unknown')])
+    const closing = store.close()
+    worker.emit('exit', 0)
+    await expect(write).rejects.toThrow('run_output_worker_exit_0')
+    await expect(closing).rejects.toThrow('run_output_worker_exit_0')
+    expect(worker.messages).toHaveLength(1)
+    expect(worker.terminations).toBe(1)
+  })
+
   it('waits for the close acknowledgement before terminating the worker', async () => {
     const worker = new FakeWorker()
     const store = connect(worker)

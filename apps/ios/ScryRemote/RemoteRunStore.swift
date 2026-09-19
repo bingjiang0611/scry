@@ -696,8 +696,10 @@ final class RemoteRunStore: ObservableObject {
             self.apply(event: ev, generation: generation, identity: identity)
           }
           let questions = try await client.questions(runId: runId)
+          guard self.isCurrent(generation, identity: identity) else { return }
           if self.pendingQuestions.first?.questionId != questions.first?.questionId {
             self.pendingQuestionAnswerId = nil
+            self.questionAnswering = false
             self.questionError = nil
           }
           self.pendingQuestions = questions
@@ -774,7 +776,8 @@ final class RemoteRunStore: ObservableObject {
         }
       } catch {
         await MainActor.run {
-          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
+          guard let self, self.isCurrent(requestGeneration, identity: identity),
+                self.pendingQuestions.first?.questionId == request.questionId else { return }
           self.questionAnswering = false
           self.questionError = "回答结果未知：\(Self.describe(error))。再次提交会复用同一回答标识。"
         }

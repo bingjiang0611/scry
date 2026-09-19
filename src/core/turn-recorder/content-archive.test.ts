@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readRecorderContent } from './content-store.js'
 import { handleRecorderHook } from './recorder.js'
-import { archiveRecords, listRecords } from './store.js'
+import { archiveRecords, exportRecordBundle, listRecords } from './store.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -59,6 +59,24 @@ describe('Recorder content archive', () => {
       .toBe(output)
     const manifest = JSON.parse(await readFile(join(target, 'manifest.json'), 'utf8'))
     expect(manifest.contents.filter((ref: { sha256: string }) => ref.sha256 === outputRefs[0].sha256)).toHaveLength(1)
+  })
+
+  it('exports identical JSON and text bytes as one blob without losing reference encoding', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    const target = join(root, 'export')
+    await complete(root, 'same-bytes', JSON.stringify({ command: 'generate' }))
+    const [record] = await listRecords(dataRoot)
+    const call = record.tools.value![0]
+    expect(call.inputContent!.contentRef!.sha256).toBe(call.outputContent!.contentRef!.sha256)
+    expect(call.inputContent!.contentRef!.encoding).toBe('json')
+    expect(call.outputContent!.contentRef!.encoding).toBe('utf8')
+    await exportRecordBundle(dataRoot, target)
+    await rm(join(dataRoot, 'content'), { recursive: true, force: true })
+    const [exported] = await listRecords(target)
+    for (const field of [exported.tools.value![0].inputContent!, exported.tools.value![0].outputContent!]) {
+      await expect(readRecorderContent(target, field.contentRef!)).resolves.toBe('{"command":"generate"}')
+    }
   })
 
   it('fails before journaling when a referenced source blob is missing', async () => {

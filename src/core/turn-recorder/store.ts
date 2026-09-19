@@ -541,13 +541,7 @@ export async function exportRecordBundle(dataRoot: string, target: string): Prom
     for (const file of files) {
       const record = await readRecordFile(join(dataRoot, 'records', file.name))
       await writeJsonAtomic(join(recordsDir, file.name), record)
-      for (const ref of recordContentRefs(record)) {
-        const existing = refs.get(ref.sha256)
-        if (existing && (existing.bytes !== ref.bytes || existing.encoding !== ref.encoding)) {
-          throw new Error(`conflicting recorder content reference: ${ref.sha256}`)
-        }
-        refs.set(ref.sha256, existing ?? ref)
-      }
+      addContentRefs(refs, record)
     }
     for (const ref of refs.values()) await copyRecorderContent(dataRoot, temp, ref)
     await writeJsonAtomic(join(temp, 'manifest.json'), {
@@ -722,17 +716,17 @@ export function recordContentItem(record: AgentTurnRecord, path: string): Record
   return recordContentItems(record).find((item) => item.path === path)
 }
 
-function recordContentRefs(record: AgentTurnRecord): ToolContentRef[] {
-  return recordContentItems(record).map((item) => item.ref)
-}
-
-function collectContentRefs(records: AgentTurnRecord[]): ToolContentRef[] {
-  const refs = new Map<string, ToolContentRef>()
-  for (const ref of records.flatMap(recordContentRefs)) {
+function addContentRefs(refs: Map<string, ToolContentRef>, record: AgentTurnRecord): void {
+  for (const { ref } of recordContentItems(record)) {
     const existing = refs.get(ref.sha256)
     if (existing && existing.bytes !== ref.bytes) throw new Error(`conflicting recorder content reference: ${ref.sha256}`)
     refs.set(ref.sha256, existing ?? ref)
   }
+}
+
+function collectContentRefs(records: AgentTurnRecord[]): ToolContentRef[] {
+  const refs = new Map<string, ToolContentRef>()
+  for (const record of records) addContentRefs(refs, record)
   return [...refs.values()].sort((left, right) => left.sha256.localeCompare(right.sha256))
 }
 
@@ -813,7 +807,7 @@ export async function archiveRecords(
       }
       const contents = collectContentRefs(sourceRecords)
       // Fail before publishing a journal when a referenced source was already missing/corrupt.
-      await Promise.all(contents.map((ref) => readRecorderContent(dataRoot, ref)))
+      for (const ref of contents) await readRecorderContent(dataRoot, ref)
       journal = {
         schemaVersion: 1,
         operation: 'archive',
@@ -844,7 +838,7 @@ export async function archiveRecords(
     if (await existingPath(contentTarget) && (await lstat(contentTarget)).isSymbolicLink()) {
       throw new Error('archive content target must not be a symbolic link')
     }
-    await Promise.all(contents.map((ref) => copyRecorderContent(dataRoot, canonicalTarget, ref)))
+    for (const ref of contents) await copyRecorderContent(dataRoot, canonicalTarget, ref)
 
     const expectedNames = new Set(journal.records.flatMap((record) => [
       record.name,

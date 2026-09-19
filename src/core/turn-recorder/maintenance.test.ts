@@ -1,12 +1,18 @@
+import * as fs from 'node:fs/promises'
 import { access, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseRecorderConfig } from './config.js'
 import { writeRecorderContent, readRecorderContent } from './content-store.js'
 import { maintainRecorderStore } from './maintenance.js'
 import { handleRecorderHook } from './recorder.js'
 import { listRecords } from './store.js'
+import { recorderSessionLock, withRecorderSessionLock } from './runtime-state.js'
+
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:fs/promises')>()
+}))
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
@@ -105,6 +111,39 @@ describe('recorder store maintenance', () => {
     const report = await maintainRecorderStore(dataRoot, config, { now, apply: true })
     expect(report.applied).toBe(false)
     expect(report.blockedBy).toEqual(expect.arrayContaining(['archive_journal', 'active_lock']))
+  })
+
+  it('gates a new content publisher that starts after the GC blocker scan', async () => {
+    const { dataRoot, config } = await fixture()
+    const now = Date.now()
+    const old = new Date(now - 2 * 60 * 60 * 1_000)
+    const ref = await writeRecorderContent(dataRoot, 'reused body', 'utf8')
+    const path = contentPath(dataRoot, ref.sha256)
+    await utimes(path, old, old)
+    let published = false
+    let writer: Promise<void> | undefined
+    const remove = fs.rm
+    const spy = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+      if (target === path) {
+        writer = withRecorderSessionLock(dataRoot, 'claude', 'new-writer', async () => {
+          await writeRecorderContent(dataRoot, 'reused body', 'utf8')
+          published = true
+        })
+        await vi.waitFor(async () => {
+          await access(join(recorderSessionLock(dataRoot, 'claude', 'new-writer'), 'owner.json'))
+        })
+        expect(published).toBe(false)
+      }
+      return remove(target, options)
+    })
+    try {
+      expect((await maintainRecorderStore(dataRoot, config, { now, apply: true })).applied).toBe(true)
+      await writer
+      expect(published).toBe(true)
+      await expect(readRecorderContent(dataRoot, ref)).resolves.toBe('reused body')
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('rejects invalid retention and quota configuration instead of guessing', () => {

@@ -161,12 +161,11 @@ export class RunOutputLog {
     if (!this.#store) return
     await this.#ensureDrain()
     if (this.#failedPersistentRuns.has(runId) || this.#pendingGapAfter.has(runId)) {
+      this.#failedPersistentRuns.delete(runId)
+      this.#pendingGapAfter.delete(runId)
       try {
         await this.#persist([{ runId, at: Date.now(), kind: 'truncated', text: 'output incomplete (durable capture was temporarily unavailable)' }])
-        this.#failedPersistentRuns.delete(runId)
-        this.#pendingGapAfter.delete(runId)
       } catch (error) {
-        this.#pendingGapAfter.delete(runId)
         this.#rememberFailure(runId, error)
       }
     }
@@ -181,7 +180,9 @@ export class RunOutputLog {
     const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
     if (this.#store) {
       await this.#ensureDrain()
-      if (this.#persistenceErrors.has(runId)) throw this.#persistenceErrors.get(runId)
+      if (this.#persistenceErrors.has(runId) || this.#failedPersistentRuns.has(runId) || this.#pendingGapAfter.has(runId)) {
+        throw this.#persistenceErrors.get(runId) ?? new Error('output_capture_gap_pending')
+      }
       return this.#store.since(runId, start, pageSize)
     }
     const buffer = this.#runs.get(runId)
@@ -228,13 +229,13 @@ export class RunOutputLog {
       const after = this.#pendingGapAfter.has(runId)
         ? [{ runId, at: Date.now(), kind: 'truncated' as const, text: 'output incomplete (durable capture was temporarily unavailable)' }]
         : []
+      // Consume only this batch's markers; output may overflow again while the write awaits.
+      this.#failedPersistentRuns.delete(runId)
+      this.#pendingGapAfter.delete(runId)
       try {
         await this.#persist([...before, ...chunks, ...after])
-        this.#failedPersistentRuns.delete(runId)
-        this.#pendingGapAfter.delete(runId)
       } catch (error) {
         // Never retry unknown body writes. A later batch starts with a durable gap marker.
-        this.#pendingGapAfter.delete(runId)
         this.#rememberFailure(runId, error)
       }
     }

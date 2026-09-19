@@ -6,7 +6,7 @@ import type { TraceEvent } from '../../shared/trace.js'
 import { isToolContent } from '../../shared/tool-content.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { readRecorderContent, readRecorderContentPage, writeRecorderContent } from './content-store.js'
-import { captureToolContent, persistToolEventContent } from './tool-content.js'
+import { captureToolContent, persistToolEventContent, sanitizeToolEvents } from './tool-content.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -67,6 +67,23 @@ describe('recorder content store', () => {
     }).tools.value![0]
     expect(call.outputContent).toMatchObject({ storage: 'omitted', savedBytes: 0, contentRef: { bytes: 19 } })
     expect(await readRecorderContent(dataRoot, call.outputContent!.contentRef!)).toBe('small complete body')
+  })
+
+  it('does not promote a saved preview to full content or erase historical redaction', async () => {
+    const dataRoot = await root()
+    const preview = sanitizeToolEvents(events('full body'.repeat(100)), policy, 'legacy')
+    const saved = await persistToolEventContent(preview, policy, 'new', (content, encoding) =>
+      writeRecorderContent(dataRoot, content, encoding))
+    expect(saved[1].outputContent).toMatchObject({ storage: 'truncated', source: 'legacy' })
+    expect(saved[1].outputContent?.contentRef).toBeUndefined()
+    expect(aggregateTurnEvidence({ events: saved, toolContentPolicy: policy }).tools.status).toBe('partial')
+
+    const historical = events('redacted body')
+    historical[1].outputContent = { ...captureToolContent('redacted body', { source: 'legacy' }), redaction: 'applied' }
+    const persisted = await persistToolEventContent(historical, policy, 'new', (content, encoding) =>
+      writeRecorderContent(dataRoot, content, encoding))
+    expect(persisted[1].outputContent).toMatchObject({ source: 'legacy', redaction: 'applied' })
+    await expect(readRecorderContent(dataRoot, persisted[1].outputContent!.contentRef!)).resolves.toBe('redacted body')
   })
 
   it('reads exact bounded byte pages while verifying the complete artifact', async () => {

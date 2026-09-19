@@ -34,9 +34,7 @@ export class RunOutputWorkerStore implements RunOutputStore {
       else this.replied(message)
     })
     worker.on('error', (error) => this.stop(error))
-    worker.on('exit', (code) => {
-      if (!this.closing) this.stop(new Error(`run_output_worker_exit_${code}`))
-    })
+    worker.on('exit', (code) => this.stop(new Error(`run_output_worker_exit_${code}`)))
   }
 
   static async create(directory: string): Promise<RunOutputWorkerStore> {

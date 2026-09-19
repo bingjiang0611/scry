@@ -78,18 +78,21 @@ export function writeComposerDrafts(
   drafts: ReadonlyMap<string, ComposerDraft>
 ): boolean {
   try {
-    const rows: Array<[string, StoredDraft]> = [...drafts.entries()]
-      .filter(([, draft]) => draft.input.length > 0 || draft.attachments.length > 0)
-      .slice(-MAX_DRAFTS)
-      .map(([key, draft]) => [key, {
+    const entries = [...drafts.entries()].filter(([, draft]) => draft.input.length > 0 || draft.attachments.length > 0)
+    let complete = entries.length <= MAX_DRAFTS
+    const rows: Array<[string, StoredDraft]> = entries.slice(-MAX_DRAFTS).map(([key, draft]) => {
+      const attachments = draft.attachments.filter(validAttachment).slice(0, 8)
+      if (draft.input.length > MAX_INPUT || attachments.length !== draft.attachments.length) complete = false
+      return [key, {
         input: draft.input.slice(0, MAX_INPUT),
-        attachments: draft.attachments.slice(0, 8).map(({ id: _id, previewUrl: _previewUrl, ...attachment }) => attachment)
-      }])
+        attachments: attachments.map(({ id: _id, previewUrl: _previewUrl, ...attachment }) => attachment)
+      }]
+    })
     const expectedRows = rows.length
     while (rows.length > 0 && JSON.stringify(rows).length > MAX_STORAGE_BYTES) rows.shift()
     if (rows.length === 0) storage.removeItem(STORAGE_KEY)
     else storage.setItem(STORAGE_KEY, JSON.stringify(rows))
-    return rows.length === expectedRows
+    return complete && rows.length === expectedRows
   } catch {
     // Draft persistence is additive; quota/storage failures keep the live draft.
     return false

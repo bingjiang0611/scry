@@ -14,13 +14,13 @@ import {
 } from '../../shared/turn-record.js'
 import {
   resolveRecorderEnablement, type RecorderEnablement } from './config.js'
-import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { listFiles, readJson, writeJsonAtomic } from './io.js'
 import {
   SESSION_LOCK_WAIT_MS,
   recorderOpenPath,
   recorderPendingHealth,
   recorderQuarantinedOpenTurns,
-  recorderSessionLock,
+  withRecorderSessionLock,
   recorderSessionRoot,
   recorderStatePath,
   recorderTurnRoot,
@@ -133,8 +133,8 @@ export async function cancelManagedRecorderTurn(input: {
   if (mode.status === 'disabled') return mode
   const { enablement } = mode
   const root = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
-  const result = await withDirectoryLock(
-    recorderSessionLock(enablement.dataRoot, input.provider, input.sessionId),
+  const result = await withRecorderSessionLock(
+    enablement.dataRoot, input.provider, input.sessionId,
     async (): Promise<ManagedTurnCancellationResult> => {
       const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
       if (!open) return { status: 'not_found' }
@@ -489,7 +489,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   assertTiming(input.timing)
   const { enablement } = mode
 
-  return withDirectoryLock(recorderSessionLock(enablement.dataRoot, input.provider, input.sessionId), async () => {
+  return withRecorderSessionLock(enablement.dataRoot, input.provider, input.sessionId, async () => {
     if (input.expectedRecordId) {
       const duplicate = await recordById(enablement.dataRoot, input.expectedRecordId)
       if (duplicate) {
@@ -691,7 +691,7 @@ export async function commitManagedRecorderTurn(input: {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
   const { enablement } = mode
-  const result = await withDirectoryLock(recorderSessionLock(enablement.dataRoot, input.provider, input.sessionId), async () => {
+  const result = await withRecorderSessionLock(enablement.dataRoot, input.provider, input.sessionId, async () => {
     const duplicate = await recordById(enablement.dataRoot, input.recordId)
     const root = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
     const existing = await handoffForRun(root, input.runId)
@@ -775,8 +775,8 @@ export async function recoverManagedRecorderTurns(
           pending++
           continue
         }
-        const result = await withDirectoryLock(
-          recorderSessionLock(enablement.dataRoot, provider, item.handoff.record.sessionId),
+        const result = await withRecorderSessionLock(
+          enablement.dataRoot, provider, item.handoff.record.sessionId,
           () => commitHandoff(enablement, root, item.handoff),
           { waitMs: SESSION_LOCK_WAIT_MS }
         )
@@ -791,8 +791,8 @@ export async function recoverManagedRecorderTurns(
         (!options.sessionId || open.sessionId === options.sessionId) &&
         !items.some((item) => item.handoff.record.generation === open.generation)
       ) {
-        const abandoned = await withDirectoryLock(
-          recorderSessionLock(enablement.dataRoot, provider, open.sessionId),
+        const abandoned = await withRecorderSessionLock(
+          enablement.dataRoot, provider, open.sessionId,
           () => abandonProvisionalOpenTurn(root, enablement.dataRoot, open, recorderOpenPath(root), isLiveManagedRun),
           { waitMs: SESSION_LOCK_WAIT_MS }
         ).catch(() => false)
@@ -804,8 +804,8 @@ export async function recoverManagedRecorderTurns(
           (!options.sessionId || pendingOpen.sessionId === options.sessionId) &&
           !items.some((item) => item.handoff.record.generation === pendingOpen.generation)
         ) {
-          const abandoned = await withDirectoryLock(
-            recorderSessionLock(enablement.dataRoot, provider, pendingOpen.sessionId),
+          const abandoned = await withRecorderSessionLock(
+            enablement.dataRoot, provider, pendingOpen.sessionId,
             () => abandonProvisionalOpenTurn(
               root,
               enablement.dataRoot,

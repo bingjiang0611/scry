@@ -14,7 +14,8 @@ export async function replayTerminalRecording(
     const remaining = endOffset === undefined ? 64 * 1024 : Math.max(4, Math.min(64 * 1024, endOffset - offset))
     const page = await read({ id, offset, limit: remaining })
     if (!isCurrent()) return undefined
-    if (page.data) await write(page.data)
+    const data = endOffset === undefined ? page.data : page.data.slice(0, (endOffset - offset) / 2)
+    if (data) await write(data)
     if (!isCurrent()) return undefined
     if (endOffset !== undefined && page.nextOffset >= endOffset) return page
     if (!page.hasMore) return page

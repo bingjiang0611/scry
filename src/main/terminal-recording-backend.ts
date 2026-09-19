@@ -85,6 +85,7 @@ export class DirectTerminalRecordingBackend implements TerminalRecordingBackend 
 // Disk syscalls and fsync run in the worker, never in Electron's main event loop.
 export class TerminalRecordingWorkerClient implements TerminalRecordingBackend {
   private readonly queue: PendingOperation[] = []
+  private readonly activeIds = new Set<string>()
   private readonly failedIds = new Set<string>()
   private readonly pausedIds = new Set<string>()
   private readonly bytesById = new Map<string, number>()
@@ -102,7 +103,7 @@ export class TerminalRecordingWorkerClient implements TerminalRecordingBackend {
     })
     worker.on('error', (error) => this.stop(error))
     worker.on('exit', (code) => {
-      if (!this.closing && code !== 0) this.stop(new Error(`terminal_recording_worker_exit_${code}`))
+      if (!this.closing || this.inFlight || this.queue.length) this.stop(new Error(`terminal_recording_worker_exit_${code}`))
     })
   }
 
@@ -222,8 +223,13 @@ export class TerminalRecordingWorkerClient implements TerminalRecordingBackend {
     if (!reply.ok && operation.request.op === 'start') {
       this.failedIds.add((operation.request.value as TerminalSessionDescriptor).id)
     }
+    if (reply.ok && operation.request.op === 'start') {
+      this.activeIds.add((operation.request.value as TerminalSessionDescriptor).id)
+    }
     if (reply.ok && operation.request.op === 'finish') {
-      this.failedIds.delete((operation.request.value as TerminalExitEvent).id)
+      const id = (operation.request.value as TerminalExitEvent).id
+      this.activeIds.delete(id)
+      this.failedIds.delete(id)
     }
     if (reply.ok) operation.resolve?.(reply.value)
     else operation.reject?.(new Error(reply.error ?? 'terminal_recording_worker_error'))
@@ -266,14 +272,11 @@ export class TerminalRecordingWorkerClient implements TerminalRecordingBackend {
     this.inFlight = undefined
     this.queue.length = 0
     for (const operation of operations) {
-      for (const id of operation.ids) {
-        if (!this.failedIds.has(id)) {
-          this.failedIds.add(id)
-          this.callbacks.onFailure(id, error)
-        }
-      }
+      for (const id of operation.ids) this.activeIds.add(id)
       operation.reject?.(error)
     }
+    for (const id of this.activeIds) this.recordFailure(id, error.message)
+    this.activeIds.clear()
     this.pendingBytes = 0
     this.bytesById.clear()
     this.resumePausedIds()

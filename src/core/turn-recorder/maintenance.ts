@@ -43,7 +43,7 @@ async function filesBelow(root: string): Promise<string[]> {
 async function blockers(dataRoot: string, graceCutoff: number): Promise<string[]> {
   const blocked = new Set<string>()
   for (const path of await filesBelow(join(dataRoot, 'runtime'))) {
-    if (path.endsWith('/open.json')) blocked.add('open_turn')
+    if (path.endsWith('/open.json') || path.endsWith('/pending-open.json')) blocked.add('open_turn')
   }
   try { await stat(join(dataRoot, 'archive-journal.json')); blocked.add('archive_journal') } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
