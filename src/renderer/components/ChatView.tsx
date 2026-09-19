@@ -9,14 +9,12 @@ import type {
   AgentRunControls,
   AgentStopState
 } from '@shared/runtime'
-import { providerIdForAgentId } from '@shared/runtime'
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { DraftAttachment, QueuedPrompt } from '../App'
-import { AssistantTurn, UserMessage, type UserMessageEditMode } from './ChatTurn'
-import { WorkdirPicker, CliPicker, ModelEffortPicker, RunControlSelect, groupAgentsByProvider, piProfileName } from './Pickers'
+import { AssistantTurn, UserMessage } from './ChatTurn'
+import { WorkdirPicker, CliPicker, ModelEffortPicker, RunControlSelect } from './Pickers'
 import { Icon } from './primitives/Icon'
-import { ProviderGlyph } from './ProviderGlyph'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import type { WorkspaceFileTarget } from '../workspace-links'
 import { runStopStatus } from '../run-stop-status'
@@ -34,8 +32,8 @@ interface ChatViewProps {
   recent: string[]
   agents: DetectedAgent[]
   selectedAgentId: string
-  agentScanning?: boolean
   agentLocked?: boolean
+  hasSelectedSession?: boolean
   runControls: AgentRunControls
   runControlCatalog: AgentRunControlCatalog
   runControlsLoading?: boolean
@@ -82,7 +80,6 @@ interface ChatViewProps {
   onPasteClipboardImage: () => void
   onRemoveDraftAttachment: (id: string) => void
   onRemoveQueuedPrompt: (index: number) => void
-  onEditLastTurn?: (turn: Turn, text: string) => Promise<void>
   onSelectAgent: (agentId: string) => void
   onAddPiAgent?: () => void
   onRemovePiAgent?: (id: string) => void
@@ -135,6 +132,61 @@ export function formatElapsedMs(ms: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+export type ComposerHistoryDirection = 'older' | 'newer'
+
+export interface ComposerHistoryNavigation {
+  position: number | null
+  value: string
+}
+
+export function composerPromptHistory(turns: Turn[], queuedPrompts: QueuedPrompt[]): string[] {
+  const history: string[] = []
+  for (const value of [...turns.map((turn) => turn.userText), ...queuedPrompts.map((prompt) => prompt.text)]) {
+    if (!value.trim() || history.at(-1) === value) continue
+    history.push(value)
+  }
+  return history
+}
+
+export function navigateComposerHistory(
+  history: readonly string[],
+  input: string,
+  position: number | null,
+  direction: ComposerHistoryDirection
+): ComposerHistoryNavigation | null {
+  if (history.length === 0) return null
+  if (position == null) {
+    if (input !== '' || direction === 'newer') return null
+    const nextPosition = history.length - 1
+    return { position: nextPosition, value: history[nextPosition] }
+  }
+  if (direction === 'older') {
+    const nextPosition = Math.max(0, Math.min(position - 1, history.length - 1))
+    return { position: nextPosition, value: history[nextPosition] }
+  }
+  if (position >= history.length - 1) return { position: null, value: '' }
+  const nextPosition = Math.min(position + 1, history.length - 1)
+  return { position: nextPosition, value: history[nextPosition] }
+}
+
+const IME_ENTER_GUARD_MS = 120
+
+/**
+ * Chromium/macOS can report isComposing=false on the Enter keydown immediately
+ * following compositionend. Treat that Enter as IME confirmation rather than a
+ * send action; a deliberate second Enter still sends normally.
+ */
+export function composerEnterConfirmsIme(input: {
+  nativeIsComposing: boolean
+  keyCode: number
+  compositionActive: boolean
+  compositionEndedAt: number
+  now: number
+}): boolean {
+  return input.nativeIsComposing || input.keyCode === 229 || input.compositionActive ||
+    input.now - input.compositionEndedAt < IME_ENTER_GUARD_MS
+}
+
 export function ChatView({
   turns,
   selectedId,
@@ -145,8 +197,8 @@ export function ChatView({
   recent,
   agents,
   selectedAgentId,
-  agentScanning = false,
   agentLocked = false,
+  hasSelectedSession = false,
   runControls,
   runControlCatalog,
   runControlsLoading = false,
@@ -193,7 +245,6 @@ export function ChatView({
   onPasteClipboardImage,
   onRemoveDraftAttachment,
   onRemoveQueuedPrompt,
-  onEditLastTurn,
   onSelectAgent,
   onAddPiAgent = () => {},
   onRemovePiAgent = () => {},
@@ -205,48 +256,29 @@ export function ChatView({
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
   const selectedAgentName = selectedAgent?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  // Keep project selection for new drafts; an established bound conversation already
-  // identifies its project in the shell. Include pre-turn submission and archive loading.
+  // New conversation clears the visible session synchronously, while main may still be
+  // invalidating Provider context. Do not make the project picker wait for that background
+  // work; historical-session loading remains hidden because it already has a session id.
+  const resettingNewConversation = sessionLoading && !hasSelectedSession
   const showWorkdirPicker = !cwd || (
-    turns.length === 0 && !agentLocked && !busy && !submitting && !sessionLoading && !sessionEvidenceGap
+    turns.length === 0
+      && (!agentLocked || resettingNewConversation)
+      && !busy
+      && !submitting
+      && (!sessionLoading || resettingNewConversation)
+      && !sessionEvidenceGap
   )
-  // PATH 快速探测与完整版本/descriptor 探测会先后返回。扫描期间不渲染中间结果，
-  // 避免 Provider 卡片在冷启动或重新扫描时先出现、随后整组刷新。
-  const providerAgents = agentScanning ? [] : agents
-  const agentGroups = groupAgentsByProvider(providerAgents)
-  const unavailableProviderCount = agentGroups.filter((group) =>
-    group.agents.every((agent) => agent.health?.state === 'unavailable')
-  ).length
-  const unavailableProfileCount = providerAgents.filter((agent) => agent.health?.state === 'unavailable').length
-  const availableProviderCount = agentGroups.length - unavailableProviderCount
-  const providerReadiness = agentGroups.length > 0
-    ? unavailableProviderCount === 0
-      ? {
-          tone: unavailableProfileCount > 0 ? 'warn' : 'ok',
-          summary: `${availableProviderCount}/${agentGroups.length} 个 Provider 可用`,
-          detail: unavailableProfileCount > 0
-            ? `${unavailableProfileCount} 个 Profile 不可用；其他 Profile 仍可使用`
-            : '本机可执行文件已确认；账号与用量状态在运行后采集'
-        }
-      : {
-          tone: 'warn',
-          summary: `${availableProviderCount}/${agentGroups.length} 个 Provider 可用`,
-          detail: `${unavailableProviderCount} 个 Provider 不可用；请检查 CLI 路径或重新扫描`
-        }
-    : agentScanning
-      ? {
-          tone: 'neutral',
-          summary: '正在检测本机 Provider',
-          detail: '正在读取 CLI 路径'
-        }
-      : {
-          tone: 'warn',
-          summary: '未检测到可用 Provider',
-          detail: '请检查 CLI 路径或重新扫描'
-        }
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
+  const compositionActiveRef = useRef(false)
+  const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
+  const promptHistory = composerPromptHistory(turns, queuedPrompts)
+  const promptHistoryKey = promptHistory.map((value) => `${value.length}:${value}`).join('|')
+  const promptHistoryRef = useRef<{ key: string; position: number | null }>({ key: promptHistoryKey, position: null })
+  const resetPromptHistory = (): void => {
+    promptHistoryRef.current = { key: promptHistoryKey, position: null }
+  }
   const modelValue = runControls.model
     ? JSON.stringify([runControls.model.providerId ?? null, runControls.model.id])
     : ''
@@ -296,9 +328,7 @@ export function ChatView({
   ]
   const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
-  const composerStatus = composerError ?? (
-    sessionLoading ? '正在打开对话，草稿已保留' : hasDraft ? sendBlockedReason : null
-  )
+  const composerStatus = composerError ?? (hasDraft ? sendBlockedReason : null)
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
@@ -310,8 +340,20 @@ export function ChatView({
   const [, setNowTick] = useState(0)
   useEffect(() => {
     if (!busy || Number.isNaN(runStartedAt)) return
-    const timer = window.setInterval(() => setNowTick((n) => n + 1), 1000)
-    return () => window.clearInterval(timer)
+    let timer: number | null = null
+    const syncTimer = (): void => {
+      if (timer != null) window.clearInterval(timer)
+      timer = null
+      if (document.visibilityState !== 'visible') return
+      setNowTick((n) => n + 1)
+      timer = window.setInterval(() => setNowTick((n) => n + 1), 1000)
+    }
+    syncTimer()
+    document.addEventListener('visibilitychange', syncTimer)
+    return () => {
+      document.removeEventListener('visibilitychange', syncTimer)
+      if (timer != null) window.clearInterval(timer)
+    }
   }, [busy, runStartedAt])
   const elapsedMs = Number.isNaN(runStartedAt) ? null : Math.max(0, Date.now() - runStartedAt)
 
@@ -326,11 +368,6 @@ export function ChatView({
     document.addEventListener('pointerdown', dismissOnOutsidePointer, true)
     return () => document.removeEventListener('pointerdown', dismissOnOutsidePointer, true)
   }, [onHideSlash, slashOpen, textareaRef])
-
-  const completeHistoryLoaded = (historyWindow?.offset ?? 0) === 0
-  const localOnlyStoppedSession = completeHistoryLoaded && turns.every((candidate) =>
-    candidate.done && !candidate.error && !candidate.providerTurnId && !candidate.forkTurnId
-  )
 
   return (
     <>
@@ -349,11 +386,6 @@ export function ChatView({
           aria-label="执行时间线"
           aria-busy={sessionLoading}
         >
-          {sessionLoading && (
-            <div className="chat-session-loading" role="status">
-              <span><Icon name="refresh" />正在打开对话…</span>
-            </div>
-          )}
           {/* 选中的历史会话读不到证据时必须说实话，不能假装成“新会话”。 */}
           {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
             <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
@@ -362,142 +394,22 @@ export function ChatView({
               <span>会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。</span>
             </div>
           )}
-          {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && (
+          {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && hasSelectedSession && (
+            <div className="chat-session-evidence-gap" role="status" data-status="empty">
+              <b>这条会话暂时没有可显示的轮次</b>
+              <span>会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。</span>
+            </div>
+          )}
+          {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && !hasSelectedSession && (
             <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
-              <header className="welcome-heading">
-                <div className="welcome-kicker"><span className="welcome-ready-dot" />新会话 · 本机证据</div>
-                <h1>开始一次可追溯执行。</h1>
-                <p>
-                  {cwd
-                    ? '核对 Provider、权限与模型后即可输入任务，执行证据默认保留在本机。'
-                    : '可直接发起任务；需要读写项目文件时再选择工作目录，执行证据默认保留在本机。'}
-                </p>
+              <header className="welcome-heading welcome-heading-minimal">
+                <span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span>
+                <h1>
+                  {workspaceName
+                    ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</>
+                    : '今天想构建什么？'}
+                </h1>
               </header>
-
-              <section className="welcome-provider-field" aria-label="Provider" aria-busy={agentScanning}>
-                <div className="welcome-provider-head" data-tone={providerReadiness.tone}>
-                  <div role="status">
-                    <span className="welcome-ready-title">
-                      <b>{providerReadiness.summary}</b>
-                      {agentGroups.length > 0 && (
-                        <span className="welcome-ready-meter" aria-hidden="true">
-                          {agentGroups.map((group) => (
-                            <i
-                              key={group.id}
-                              data-on={group.agents.some((agent) => agent.health?.state !== 'unavailable') ? 'true' : 'false'}
-                            />
-                          ))}
-                        </span>
-                      )}
-                    </span>
-                    <small>{providerReadiness.detail}</small>
-                  </div>
-                  <button
-                    type="button"
-                    className="welcome-rescan"
-                    data-busy={agentScanning ? 'true' : undefined}
-                    disabled={agentScanning}
-                    onClick={onRescan}
-                    aria-label="重新扫描 PATH"
-                    title="重新扫描 PATH，重新探测本机 agent CLI"
-                  >
-                    <Icon name="refresh" />
-                    <span>{agentScanning ? '扫描中…' : '重新扫描'}</span>
-                  </button>
-                </div>
-                <div className="welcome-provider-grid" aria-label="Provider 探测结果">
-                  {agentGroups.map((group) => {
-                    if (group.id === 'pi') {
-                      const selected = group.agents.some((agent) => agent.id === selectedAgentId)
-                      const availableProfiles = group.agents.filter((agent) => agent.health?.state !== 'unavailable').length
-                      return (
-                        <section
-                          className={`welcome-provider welcome-provider-group ${selected ? 'is-selected' : ''}`}
-                          data-provider="pi"
-                          data-health={availableProfiles > 0 ? 'available' : 'unavailable'}
-                          key={group.id}
-                          aria-label={`Pi，${group.agents.length} 个 Profile`}
-                        >
-                          <span className="welcome-provider-top welcome-provider-group-head">
-                            <ProviderGlyph provider="pi" />
-                            <b>Pi</b>
-                            <span className="welcome-profile-count">{group.agents.length} 个 Profile</span>
-                          </span>
-                          <div className="welcome-profile-list">
-                            {group.agents.map((agent) => {
-                              const profileSelected = agent.id === selectedAgentId
-                              const available = agent.health?.state !== 'unavailable'
-                              return (
-                                <div className="welcome-profile-row" data-health={available ? 'available' : 'unavailable'} key={agent.id}>
-                                  <button
-                                    type="button"
-                                    className={`welcome-profile-pick ${profileSelected ? 'is-selected' : ''}`}
-                                    aria-pressed={profileSelected}
-                                    disabled={agentLocked || !available}
-                                    onClick={() => onSelectAgent(agent.id)}
-                                  >
-                                    <span className="welcome-profile-title">
-                                      <b>{piProfileName(agent)}</b>
-                                      <em>{available ? '可用' : '不可用'}</em>
-                                      {profileSelected && <Icon name="check" className="welcome-provider-check" />}
-                                    </span>
-                                    <small>{agent.id === 'pi:default' ? '系统检测' : '自定义 Profile'} · {agent.version ?? '版本未知'}</small>
-                                    <code title={agent.path}>{agent.path}</code>
-                                  </button>
-                                  {agent.id !== 'pi:default' && (
-                                    <button
-                                      type="button"
-                                      className="welcome-profile-remove"
-                                      disabled={agentLocked}
-                                      title="从 Scry 移除；不会删除启动器文件"
-                                      aria-label={`移除 Pi Profile：${piProfileName(agent)}`}
-                                      onClick={() => onRemovePiAgent(agent.id)}
-                                    >
-                                      <Icon name="x" />
-                                    </button>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </section>
-                      )
-                    }
-                    const agent = group.agents[0]
-                    const selected = agent.id === selectedAgentId
-                    const available = agent.health?.state !== 'unavailable'
-                    const providerId = providerIdForAgentId(agent.id)
-                    return (
-                      <button
-                        type="button"
-                        className={`welcome-provider ${selected ? 'is-selected' : ''}`}
-                        data-provider={agent.id}
-                        data-health={available ? 'available' : 'unavailable'}
-                        key={agent.id}
-                        aria-pressed={selected}
-                        disabled={agentLocked || !available}
-                        onClick={() => onSelectAgent(agent.id)}
-                      >
-                        <span className="welcome-provider-top">
-                          {providerId ? <ProviderGlyph provider={providerId} /> : <i aria-hidden="true" />}
-                          <b>{agent.name}</b>
-                          <em>{available ? '可用' : '不可用'}</em>
-                          {selected && <Icon name="check" className="welcome-provider-check" />}
-                        </span>
-                        <small>{agent.version ?? '版本未知'} · {agent.transport ?? '本机 CLI'}</small>
-                        <code title={agent.path}>{agent.path}</code>
-                      </button>
-                    )
-                  })}
-                  {providerAgents.length === 0 && (
-                    <div className="welcome-list-empty" role="status">
-                      {agentScanning
-                        ? '正在探测本机 agent CLI…'
-                        : '完整探测未返回可用 agent CLI；可点「重新扫描」或在下方 Provider 选择器重试。'}
-                    </div>
-                  )}
-                </div>
-              </section>
             </div>
           )}
           {!sessionLoading && historyWindow?.hasOlder && (
@@ -516,21 +428,8 @@ export function ChatView({
               </button>
             </div>
           )}
-          {!sessionLoading && turns.map((turn, index) => {
+          {!sessionLoading && turns.map((turn) => {
             const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
-            const previous = turns[index - 1]
-            const currentBoundaryComplete = !!turn.providerTurnId && !!turn.forkTurnId
-            const currentBoundaryAbsent = !turn.providerTurnId && !turn.forkTurnId
-            const previousBoundaryComplete = !!previous?.providerTurnId && !!previous.forkTurnId
-            const isFirstSessionTurn = index === 0 && completeHistoryLoaded
-            const editMode: UserMessageEditMode | null =
-              (isFirstSessionTurn && currentBoundaryComplete) || (currentBoundaryAbsent && localOnlyStoppedSession)
-                ? 'restart'
-                : currentBoundaryComplete && previousBoundaryComplete
-                  ? 'branch'
-                  : null
-            const editable = index === turns.length - 1 && turn.done && !busy && queuedPrompts.length === 0 &&
-              pendingQuestions.length === 0 && editMode != null && !!onEditLastTurn
             return (
             <div
               key={turn.runId}
@@ -539,13 +438,7 @@ export function ChatView({
               data-selected={selectedTurn || undefined}
               ref={onTurnRef ? (el) => onTurnRef(turn.runId, el) : undefined}
             >
-              <UserMessage
-                text={turn.userText}
-                attachments={turn.attachments}
-                editable={editable}
-                editMode={editMode ?? undefined}
-                onEdit={editable ? (text) => onEditLastTurn!(turn, text) : undefined}
-              />
+              <UserMessage text={turn.userText} attachments={turn.attachments} />
               <AssistantTurn
                 turn={turn}
                 selectedId={selectedId}
@@ -694,7 +587,17 @@ export function ChatView({
           aria-label="描述任务"
           aria-describedby={composerStatus ? 'composer-status' : undefined}
           value={input}
-          onChange={(event) => onInput(event.target.value)}
+          onChange={(event) => {
+            resetPromptHistory()
+            onInput(event.target.value)
+          }}
+          onCompositionStart={() => {
+            compositionActiveRef.current = true
+          }}
+          onCompositionEnd={() => {
+            compositionActiveRef.current = false
+            compositionEndedAtRef.current = performance.now()
+          }}
           onPaste={(event) => {
             const files = imageFilesFromClipboardData(event.clipboardData)
             if (files.length > 0) {
@@ -708,6 +611,15 @@ export function ChatView({
             }
           }}
           onKeyDown={(event) => {
+            const nativeCompositionActive = event.nativeEvent.isComposing ||
+              event.nativeEvent.keyCode === 229 || compositionActiveRef.current
+            const imeEnter = event.key === 'Enter' && composerEnterConfirmsIme({
+              nativeIsComposing: event.nativeEvent.isComposing,
+              keyCode: event.nativeEvent.keyCode,
+              compositionActive: compositionActiveRef.current,
+              compositionEndedAt: compositionEndedAtRef.current,
+              now: performance.now()
+            })
             if (slashOpen) {
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
@@ -727,8 +639,8 @@ export function ChatView({
               if (
                 (event.key === 'Enter' || event.key === 'Tab') &&
                 !event.shiftKey &&
-                !event.nativeEvent.isComposing &&
-                event.nativeEvent.keyCode !== 229 &&
+                !nativeCompositionActive &&
+                !imeEnter &&
                 slashMatches[slashSel]
               ) {
                 event.preventDefault()
@@ -736,9 +648,35 @@ export function ChatView({
                 return
               }
             }
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+            if (
+              (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+              !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+              !nativeCompositionActive
+            ) {
+              const currentHistory = promptHistoryRef.current.key === promptHistoryKey
+                ? promptHistoryRef.current
+                : { key: promptHistoryKey, position: null }
+              const navigation = navigateComposerHistory(
+                promptHistory,
+                input,
+                currentHistory.position,
+                event.key === 'ArrowUp' ? 'older' : 'newer'
+              )
+              if (navigation) {
+                event.preventDefault()
+                promptHistoryRef.current = { key: promptHistoryKey, position: navigation.position }
+                onInput(navigation.value)
+                requestAnimationFrame(() => {
+                  textareaRef.current?.setSelectionRange(navigation.value.length, navigation.value.length)
+                })
+                return
+              }
+            }
+            if (event.key === 'Enter' && !event.shiftKey) {
+              if (imeEnter || event.repeat) return
               event.preventDefault()
               if (sessionLoading || sendBlockedReason) return
+              resetPromptHistory()
               onSend()
             }
           }}
@@ -760,7 +698,7 @@ export function ChatView({
               prefix="权限"
               value={runControls.permissionMode}
               options={permissionOptions}
-              tone={runControls.permissionMode === 'full_access' ? 'danger' : runControls.permissionMode === 'auto_review' ? 'warning' : undefined}
+              tone={runControls.permissionMode === 'full_access' ? 'danger' : undefined}
               onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
             />
           </div>
@@ -796,7 +734,10 @@ export function ChatView({
             <button
               type="button"
               className="send"
-              onClick={onSend}
+              onClick={() => {
+                resetPromptHistory()
+                onSend()
+              }}
               disabled={submitting || sessionLoading || !!sendBlockedReason || (!input.trim() && draftAttachments.length === 0)}
               aria-busy={submitting}
               aria-label={sendActionLabel}

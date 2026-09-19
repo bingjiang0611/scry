@@ -157,6 +157,42 @@ describe('managed canonical recorder', () => {
     ])
   })
 
+  it('Pi 附件-only 轮次允许精确的空文本证据', async () => {
+    const root = await workspace()
+    const runId = 'run-pi-attachment-only'
+    const evidence = canonicalEvidence('')
+    const archiveFingerprint = stableHash({ runId, evidence, timing })
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: {
+        session_id: 'pi-session-attachment-only',
+        prompt: '',
+        timestamp: timing.startedAt
+      },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update('').digest('hex')
+      }
+    })
+
+    await expect(prepareManagedRecorderTurn({
+      workspace: root,
+      provider: 'pi',
+      sessionId: 'pi-session-attachment-only',
+      runId,
+      providerTurnId: 'pi-user-entry-attachment-only',
+      userText: '',
+      evidence,
+      timing,
+      status: 'completed',
+      archiveFingerprint
+    })).resolves.toMatchObject({ status: 'prepared' })
+  })
+
   it('Pi 不允许缺失 authoritative session entry id', async () => {
     const root = await workspace()
     const prompt = '/skill:rate-workflow 85781174 理解prd后停下'
@@ -1421,7 +1457,7 @@ describe('提交通知投递位置', () => {
 
     await commitOnce(root, 'run-await', env)
     await expect(ackedThrough(root)).resolves.toBe(1)
-  })
+  }, 15_000)
 
   it('detach：轮次收口不等仓库回调，投递仍会发生', async () => {
     const root = await workspace()

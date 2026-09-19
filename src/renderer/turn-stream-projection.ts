@@ -10,15 +10,45 @@ export function isStreamTextFragment(event: TraceEvent): boolean {
   return event.stage === 'text' && (event.providerId === 'codex' || event.runtimeProvider === 'codex_cli')
 }
 
-function liveTailScope(event: TraceEvent): string | null | undefined {
-  return isStreamTextFragment(event) ? event.parentToolUseId ?? null : undefined
+type LiveTailKind = 'text' | 'thinking'
+
+interface LiveTailDescriptor {
+  kind: LiveTailKind
+  scope: string | null
+  messageId?: string
+  agentId?: string
+}
+
+function liveTailDescriptor(event: TraceEvent): LiveTailDescriptor | undefined {
+  const kind = isStreamTextFragment(event)
+    ? 'text'
+    : event.kind === 'model' && event.stage === 'thinking'
+      ? 'thinking'
+      : undefined
+  if (!kind) return undefined
+  return {
+    kind,
+    scope: event.parentToolUseId ?? null,
+    messageId: event.messageId,
+    agentId: event.agentId
+  }
+}
+
+function sameLiveTail(event: TraceEvent, tail: LiveTailDescriptor): boolean {
+  const candidate = liveTailDescriptor(event)
+  return candidate?.kind === tail.kind &&
+    candidate.scope === tail.scope &&
+    candidate.messageId === tail.messageId &&
+    candidate.agentId === tail.agentId
 }
 
 export interface TurnStreamProjection {
-  /** 去掉尾部 live 文本后的事件序列；只在真正发生结构变化时换引用。 */
+  /** 去掉尾部 live 文本/思考后的事件序列；只在真正发生结构变化时换引用。 */
   structuralItems: readonly TraceEvent[]
-  /** 尾部流式文本的拼接结果，随每批增量更新。 */
+  /** 尾部流式回复的拼接结果，随每批增量更新。 */
   liveText: string
+  /** 尾部流式思考的拼接结果，随每批增量更新。 */
+  liveThinking: string
   /** 尾部第一个流式片段的事件 id，用作稳定 React key。 */
   liveKey: string
   /** null 表示顶层 live tail；string 表示归属对应父工具的子 agent tail。 */
@@ -27,17 +57,17 @@ export interface TurnStreamProjection {
   structuralRecomputed: boolean
 }
 
-function liveTailStart(items: readonly TraceEvent[]): { index: number; scope?: string | null } {
-  const scope = items.length > 0 ? liveTailScope(items[items.length - 1]) : undefined
-  if (scope === undefined) return { index: items.length }
-  if (scope !== null && !items.some((event) =>
-    event.toolUseId === scope && event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind)
+function liveTailStart(items: readonly TraceEvent[]): { index: number; tail?: LiveTailDescriptor } {
+  const tail = items.length > 0 ? liveTailDescriptor(items[items.length - 1]) : undefined
+  if (!tail) return { index: items.length }
+  if (tail.scope !== null && !items.some((event) =>
+    event.toolUseId === tail.scope && event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind)
   )) {
     return { index: items.length }
   }
   let index = items.length
-  while (index > 0 && liveTailScope(items[index - 1]) === scope) index -= 1
-  return { index, scope }
+  while (index > 0 && sameLiveTail(items[index - 1], tail)) index -= 1
+  return { index, tail }
 }
 
 function samePrefix(previous: readonly TraceEvent[], next: readonly TraceEvent[], length: number): boolean {
@@ -60,23 +90,26 @@ export class TurnStreamProjectionCache {
   private initialized = false
 
   project(items: readonly TraceEvent[]): TurnStreamProjection {
-    const tail = liveTailStart(items)
+    const { index: tailIndex, tail } = liveTailStart(items)
     let liveText = ''
+    let liveThinking = ''
     let liveKey = ''
-    for (let index = tail.index; index < items.length; index++) {
+    for (let index = tailIndex; index < items.length; index++) {
       if (!liveKey) liveKey = items[index].id
-      liveText += items[index].text ?? ''
+      if (tail?.kind === 'thinking') liveThinking += items[index].thinking ?? ''
+      else liveText += items[index].text ?? ''
     }
-    const reusable = this.initialized && samePrefix(this.structuralItems, items, tail.index)
+    const reusable = this.initialized && samePrefix(this.structuralItems, items, tailIndex)
     if (!reusable) {
-      this.structuralItems = items.slice(0, tail.index)
+      this.structuralItems = items.slice(0, tailIndex)
       this.initialized = true
     }
     return {
       structuralItems: this.structuralItems,
       liveText,
+      liveThinking,
       liveKey,
-      ...(tail.scope !== undefined ? { liveParentToolUseId: tail.scope } : {}),
+      ...(tail ? { liveParentToolUseId: tail.scope } : {}),
       structuralRecomputed: !reusable
     }
   }

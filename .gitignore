@@ -1,4 +1,7 @@
 node_modules/
+coverage/
+__pycache__/
+*.pyc
 out/
 dist/
 dist-electron/
@@ -8,7 +11,6 @@ packages/turn-recorder-cli/dist/
 .claude/*
 !.claude/skills/
 .claude/skills/*
-!.claude/skills/baoyu-design/
 !.claude/skills/validate-scry-rate-workflow/
 .local/
 .pi/

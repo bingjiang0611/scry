@@ -464,7 +464,8 @@ function managedTermination(journal: ManagedTurnJournal): Evidence<TurnTerminati
 
 async function prepareJournalRecord(
   journal: ManagedTurnJournal,
-  waitMs: number
+  waitMs: number,
+  allowCanonicalJournalRecovery = false
 ): Promise<ManagedTurnJournal> {
   const deadline = Date.now() + waitMs
   for (;;) {
@@ -483,6 +484,7 @@ async function prepareJournalRecord(
       status: request.status,
       archiveFingerprint: journal.archiveFingerprint,
       expectedRecordId: journal.recordId,
+      ...(allowCanonicalJournalRecovery ? { allowCanonicalJournalRecovery: true } : {}),
       // A resumed Qoder run may stop before UserPromptSubmit. The previous session
       // ID is still known, but there is no native lifecycle to wait for. Preserve
       // the interrupted attempt in both stores using explicit host provenance.
@@ -519,40 +521,38 @@ async function replayJournal(
   if (archiveFingerprint(input) !== journal.archiveFingerprint) {
     throw new Error(`managed recorder journal fingerprint mismatch for ${journal.request.turn.runId}`)
   }
-  try {
-    const prepared = await prepareJournalRecord(journal, waitMs)
-    await writeJsonAtomic(path, prepared)
-    archiveJournal(prepared, userDataDir)
-    const archiveCommitted: ManagedTurnJournal = { ...prepared, phase: 'archive_committed' }
-    await writeJsonAtomic(path, archiveCommitted)
-    if (!archiveCommitted.recordId) throw new Error('managed recorder journal has no prepared record id')
-    const evidence = archiveCommitted.request.turn.turnEvidence
-    if (!evidence) throw new Error('managed recorder journal is missing TurnEvidence')
-    const committed = await commitManagedRecorderTurn({
-      workspace: archiveCommitted.request.cwd,
-      provider: archiveCommitted.request.providerId,
-      sessionId: archiveCommitted.request.sessionId,
-      runId: archiveCommitted.request.turn.runId,
-      recordId: archiveCommitted.recordId,
-      archiveFingerprint: archiveCommitted.archiveFingerprint,
-      providerTurnId: archiveCommitted.request.providerTurnId,
-      userText: archiveCommitted.request.turn.userText,
-      evidence,
-      timing: archiveCommitted.request.timing,
-      status: archiveCommitted.request.status,
-      env: commitHookEnv,
-      // record 已落盘；向仓库回调投递不能挡住轮次收口（App 常驻，剩余积压由后续投递补上）。
-      commitNotifications: 'detach'
-    })
-    if (committed.status === 'disabled' || committed.status === 'pending' || committed.status === 'prepared') {
-      throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')
-    }
-    await rm(progressPath(userDataDir, journal.request.turn.runId), { force: true })
-    await rm(path, { force: true })
-    return 'recovered'
-  } catch {
-    return 'pending'
+  // This path only runs for a fingerprint-validated, terminal journal. It may safely rebuild a
+  // lifecycle that an older recovery pass discarded before preparing the canonical handoff.
+  const prepared = await prepareJournalRecord(journal, waitMs, true)
+  await writeJsonAtomic(path, prepared)
+  archiveJournal(prepared, userDataDir)
+  const archiveCommitted: ManagedTurnJournal = { ...prepared, phase: 'archive_committed' }
+  await writeJsonAtomic(path, archiveCommitted)
+  if (!archiveCommitted.recordId) throw new Error('managed recorder journal has no prepared record id')
+  const evidence = archiveCommitted.request.turn.turnEvidence
+  if (!evidence) throw new Error('managed recorder journal is missing TurnEvidence')
+  const committed = await commitManagedRecorderTurn({
+    workspace: archiveCommitted.request.cwd,
+    provider: archiveCommitted.request.providerId,
+    sessionId: archiveCommitted.request.sessionId,
+    runId: archiveCommitted.request.turn.runId,
+    recordId: archiveCommitted.recordId,
+    archiveFingerprint: archiveCommitted.archiveFingerprint,
+    providerTurnId: archiveCommitted.request.providerTurnId,
+    userText: archiveCommitted.request.turn.userText,
+    evidence,
+    timing: archiveCommitted.request.timing,
+    status: archiveCommitted.request.status,
+    env: commitHookEnv,
+    // record 已落盘；向仓库回调投递不能挡住轮次收口（App 常驻，剩余积压由后续投递补上）。
+    commitNotifications: 'detach'
+  })
+  if (committed.status === 'disabled' || committed.status === 'pending' || committed.status === 'prepared') {
+    throw new Error('reason' in committed ? committed.reason : 'managed recorder canonical commit is still pending')
   }
+  await rm(progressPath(userDataDir, journal.request.turn.runId), { force: true })
+  await rm(path, { force: true })
+  return 'recovered'
 }
 
 export function canonicalTurnTiming(events: Array<{

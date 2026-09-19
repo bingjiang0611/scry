@@ -6,6 +6,7 @@ import type { TraceArchive } from './transcript-archive'
 import {
   DEFAULT_SESSION_HISTORY_PAGE_SIZE,
   MAX_SESSION_HISTORY_PAGE_SIZE,
+  hydrateSessionHistoryPage,
   mergeSessionTurns,
   sessionHistoryPage,
   type LoadedSessionTurn
@@ -331,6 +332,74 @@ describe('session history merge', () => {
       path: imagePath
     })
     expect(turns[1].attachments?.[0].dataBase64).toBe(imageBytes.toString('base64'))
+  })
+
+  it('先选历史页再 hydrate 附件，未显示轮次不进入 main 内存', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-history-page-'))
+    roots.push(root)
+    const userDataDir = join(root, 'userData')
+    const attachment = (runId: string, value: string) => {
+      const imageDir = join(userDataDir, 'attachments', runId)
+      mkdirSync(imageDir, { recursive: true })
+      const path = join(imageDir, '01-image.png')
+      const bytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(value)])
+      writeFileSync(path, bytes)
+      return { path, bytes }
+    }
+    const old = attachment('run-old', 'old')
+    const recent = attachment('run-recent', 'recent')
+    const archive: TraceArchive = {
+      version: 3,
+      cwd: '/repo',
+      sessionId: 'sess',
+      providerId: 'claude',
+      turns: [
+        { runId: 'run-old', userText: `old\n\nScry pasted image attachments:\n1. 01-image.png (image/png, 3 B) local copy: ${old.path}`, items: [], done: true, ts: 1 },
+        { runId: 'run-recent', userText: `recent\n\nScry pasted image attachments:\n1. 01-image.png (image/png, 6 B) local copy: ${recent.path}`, items: [], done: true, ts: 2 }
+      ]
+    }
+    const transcript = [
+      { userText: 'old', items: [] },
+      { userText: 'recent', items: [] }
+    ]
+    const merged = mergeSessionTurns(transcript, archive, { userDataDir }, { hydrateAttachments: false })
+    expect(merged.every((turn) => turn.attachments == null)).toBe(true)
+
+    const page = hydrateSessionHistoryPage(sessionHistoryPage(merged, { limit: 1 }), transcript, archive, { userDataDir })
+    expect(page.turns).toHaveLength(1)
+    expect(page.turns[0].runId).toBe('run-recent')
+    expect(page.turns[0].attachments?.[0].dataBase64).toBe(recent.bytes.toString('base64'))
+    expect(merged.every((turn) => turn.attachments == null)).toBe(true)
+  })
+
+  it('重复 prompt 的 transcript 分页按全局序号恢复对应附件', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-history-duplicate-'))
+    roots.push(root)
+    const userDataDir = join(root, 'userData')
+    const makePrompt = (runId: string, value: string): { prompt: string; bytes: Buffer } => {
+      const directory = join(userDataDir, 'attachments', runId)
+      mkdirSync(directory, { recursive: true })
+      const path = join(directory, 'image.png')
+      const bytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(value)])
+      writeFileSync(path, bytes)
+      return { prompt: `same\n\nScry pasted image attachments:\n1. image.png (image/png, 1 KB) local copy: ${path}`, bytes }
+    }
+    const old = makePrompt('old', 'old')
+    const recent = makePrompt('recent', 'recent')
+    const transcript = [
+      { userText: old.prompt, items: [] },
+      { userText: recent.prompt, items: [] }
+    ]
+    const merged = mergeSessionTurns(transcript, null, { userDataDir }, { hydrateAttachments: false })
+    const oldPage = hydrateSessionHistoryPage(
+      sessionHistoryPage(merged, { before: 1, limit: 1 }),
+      transcript,
+      null,
+      { userDataDir }
+    )
+    expect(oldPage.offset).toBe(0)
+    expect(oldPage.turns[0].attachments?.[0].dataBase64).toBe(old.bytes.toString('base64'))
+    expect(oldPage.turns[0].attachments?.[0].dataBase64).not.toBe(recent.bytes.toString('base64'))
   })
 
   it('archive 只有 runtime 能力清单时，不覆盖 transcript 里的最终回答', () => {

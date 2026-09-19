@@ -60,15 +60,21 @@ function creditEvidence(row: UsageAnalyticsAggregate): string {
   return `${source} · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量，不折算美元`
 }
 
-function displayCost(row: UsageAnalyticsAggregate): string {
+function displayCost(row: UsageAnalyticsAggregate, provider?: BillingProvider): string {
+  if (provider === 'qoder') {
+    const credits = row.qoderCredits?.credits
+    return credits == null ? '—' : formatCredits(credits)
+  }
+  const cost = formatCost(row.costUsd)
   const credits = row.qoderCredits?.credits
-  if (credits == null) return formatCost(row.costUsd)
-  return [row.costUsd == null ? '' : formatCost(row.costUsd), formatCredits(credits)].filter(Boolean).join(' + ')
+  if (provider == null && credits != null) return `${cost} + ${formatCredits(credits)}`
+  return cost
 }
 
-function displayCostEvidence(row: UsageAnalyticsAggregate): string {
-  if (row.qoderCredits?.credits == null) return [costEvidence(row), creditEvidence(row)].filter(Boolean).join('；')
-  return [row.costUsd == null ? '' : costEvidence(row), creditEvidence(row)].filter(Boolean).join('；')
+function displayCostEvidence(row: UsageAnalyticsAggregate, provider?: BillingProvider): string {
+  if (provider === 'qoder') return creditEvidence(row) || 'Credit 不可用'
+  const cost = costEvidence(row)
+  return provider == null && row.qoderCredits ? `${cost}；${creditEvidence(row)}` : cost
 }
 
 function formatChartCost(value: number | null): string {
@@ -137,7 +143,7 @@ function isApproximateCost(row: UsageAnalyticsAggregate): boolean {
 function modelBreakdownRows(analytics: UsageAnalytics): UsageAnalyticsBreakdownRow[] {
   const rows = analytics.byModel.filter((row) => row.provider !== 'qoder')
   const qoder = analytics.byProvider.find((row) => row.provider === 'qoder')
-  if (qoder && (qoder.usageRows > 0 || qoder.costKnownRows > 0)) rows.push(qoder)
+  if (qoder && (qoder.usageRows > 0 || qoder.costKnownRows > 0 || qoder.qoderCredits)) rows.push(qoder)
   return rows.sort((a, b) => {
     const rank = (row: UsageAnalyticsAggregate): number => row.costUsd || tokensOf(row) || 0
     return rank(b) - rank(a)
@@ -377,10 +383,15 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
 
   const totals = analytics.totals
   const totalTokens = tokensOf(totals)
-  const providers = analytics.byProvider.filter((row) => row.usageRows > 0 || row.costKnownRows > 0)
-  const providerScale = Math.max(0, ...providers.map((row) => row.costUsd ?? 0))
+  const providers = analytics.byProvider.filter((row) => row.usageRows > 0 || row.costKnownRows > 0 || row.qoderCredits)
+  const qoderOnly = providers.length > 0 && providers.every((row) => row.provider === 'qoder')
+  const providerScale = Math.max(0, ...providers.filter((row) => row.provider !== 'qoder').map((row) => row.costUsd ?? 0))
   const chartProviders = providers.filter((row) => metricValue(row, chartMetric) != null)
   const rows = breakdownMode === 'model' ? modelBreakdownRows(analytics) : [...analytics.byDay].reverse()
+  const modelRows = breakdownMode === 'model' ? rows as UsageAnalyticsBreakdownRow[] : []
+  const hasQoderRows = breakdownMode === 'model' ? modelRows.some((row) => row.provider === 'qoder') : qoderOnly
+  const hasDollarRows = breakdownMode === 'model' ? modelRows.some((row) => row.provider !== 'qoder') : !qoderOnly
+  const costColumnLabel = hasQoderRows ? (hasDollarRows ? '成本 / Credit' : 'Credit') : '成本'
   const activeDays = analytics.byDay.filter((row) => row.usageRows > 0 || row.costKnownRows > 0).length
 
   return (
@@ -414,24 +425,28 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
 
         <section className="usage-overview" aria-label="用量概览">
           <article className="usage-cost-card">
-            <span className="usage-eyebrow">RAW TOKEN COST</span>
-            <strong>{formatCost(totals.costUsd)}</strong>
-            <small>{costEvidence(totals)} · {totals.turns.toLocaleString()} 轮</small>
-            {totals.qoderCredits?.credits != null && <small title={creditEvidence(totals)}>另计 Qoder {formatCredits(totals.qoderCredits.credits)} · 已知下界</small>}
+            <span className="usage-eyebrow">{qoderOnly ? 'QODER CREDIT' : 'RAW TOKEN COST'}</span>
+            <strong>{qoderOnly
+              ? totals.qoderCredits?.credits == null ? '—' : formatCredits(totals.qoderCredits.credits)
+              : formatCost(totals.costUsd)}</strong>
+            <small title={qoderOnly ? creditEvidence(totals) : undefined}>{qoderOnly
+              ? `${totals.qoderCredits?.credits == null ? 'Credit 不可用' : 'Credits 已知下界'} · ${totals.turns.toLocaleString()} 轮`
+              : `${costEvidence(totals)} · ${totals.turns.toLocaleString()} 轮`}</small>
+            {!qoderOnly && totals.qoderCredits?.credits != null && <small title={creditEvidence(totals)}>另计 Qoder {formatCredits(totals.qoderCredits.credits)} · 已知下界</small>}
             <div className="usage-provider-list">
               {providers.length === 0 ? <div className="usage-empty-row">当前范围没有用量记录</div> : providers.map((row) => (
                 <div className="usage-provider-row" key={row.provider}>
                   <div className="usage-provider-main">
                     <ProviderMark provider={row.provider} />
                     <b>{providerLabel(row.provider)}</b>
-                    <span title={displayCostEvidence(row)}>{displayCost(row)}</span>
+                    <span title={displayCostEvidence(row, row.provider)}>{displayCost(row, row.provider)}</span>
                   </div>
-                  {row.qoderCredits?.credits == null && <span className={`usage-provider-track ${row.costUsd == null ? 'is-unknown' : ''}`}>
+                  {row.provider !== 'qoder' && <span className={`usage-provider-track ${row.costUsd == null ? 'is-unknown' : ''}`}>
                     <i className={`is-${row.provider}`} style={{ width: `${row.costUsd == null || row.costUsd === 0 || providerScale === 0 ? 0 : (row.costUsd / providerScale) * 100}%` }} />
                   </span>}
                   <small>
-                    <span>{row.qoderCredits?.credits != null ? '独立计量' : `${formatShare(row.costUsd, totals.costUsd)} 成本`} · {formatAggregateTokens(row)} Token</span>
-                    <em title={displayCostEvidence(row)}>{row.qoderCredits?.credits != null ? 'Credits 已知下界' : costEvidence(row)} · {tokenComplete(row) ? 'Token 完整' : 'Token 已知下界'}</em>
+                    <span>{row.provider === 'qoder' ? row.qoderCredits?.credits != null ? '独立计量' : 'Credit —' : `${formatShare(row.costUsd, totals.costUsd)} 成本`} · {formatAggregateTokens(row)} Token</span>
+                    <em title={displayCostEvidence(row, row.provider)}>{row.provider === 'qoder' ? (row.qoderCredits?.credits != null ? 'Credits 已知下界' : 'Credit 不可用') : costEvidence(row)} · {tokenComplete(row) ? 'Token 完整' : 'Token 已知下界'}</em>
                   </small>
                 </div>
               ))}
@@ -478,7 +493,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
           </div>
           <div className="usage-table-wrap">
             <table>
-              <thead><tr><th>{breakdownMode === 'model' ? '模型' : '日期'}</th><th>成本</th><th>占比</th><th>Token</th></tr></thead>
+              <thead><tr><th>{breakdownMode === 'model' ? '模型' : '日期'}</th><th>{costColumnLabel}</th><th>占比</th><th>Token</th></tr></thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr><td colSpan={4}>当前范围没有可展示的明细</td></tr>
@@ -488,6 +503,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                   const label = breakdownMode === 'model'
                     ? modelRow.provider === 'qoder' ? providerLabel('qoder') : modelRow.model ?? '未归因'
                     : (row as typeof analytics.byDay[number]).day
+                  const rowProvider = breakdownMode === 'model' ? modelRow.provider : qoderOnly ? 'qoder' : undefined
                   return (
                     <tr key={key}>
                       <th scope="row">
@@ -496,8 +512,8 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                           <b title={label}>{label}</b>
                         </span>
                       </th>
-                      <td title={displayCostEvidence(row)} className={isApproximateCost(row) ? 'is-approximate' : undefined}>{displayCost(row)}</td>
-                      <td>{formatShare(row.costUsd, totals.costUsd)}</td>
+                      <td title={displayCostEvidence(row, rowProvider)} className={rowProvider === 'qoder' ? undefined : isApproximateCost(row) ? 'is-approximate' : undefined}>{displayCost(row, rowProvider)}</td>
+                      <td>{rowProvider === 'qoder' ? '—' : formatShare(row.costUsd, totals.costUsd)}</td>
                       <td title={tokenEvidence(row)} className={!tokenComplete(row) && row.usageRows > 0 ? 'is-lower-bound' : undefined}>{formatAggregateTokens(row)}</td>
                     </tr>
                   )

@@ -72,6 +72,8 @@ export function isManagedProviderRuntimePair(provider: unknown, runtimeProvider:
 }
 
 export interface PrepareManagedTurnInput {
+  /** Main is replaying a validated, terminal canonical journal after its provisional lifecycle was lost. */
+  allowCanonicalJournalRecovery?: boolean
   /** Main proved the durable Qoder interruption trace contains only local launch/diff events. */
   allowObservedInterruption?: boolean
   /** How the App established this turn's end. Omitted by pre-0.2.38 callers. */
@@ -192,8 +194,14 @@ function assertExactText(
   label: 'user' | 'assistant'
 ): void {
   const text = evidence.value?.text
-  if (evidence.status !== 'available' || evidence.quality !== 'exact' || !text) {
-    throw new Error(`managed recorder requires non-empty exact ${label} evidence`)
+  // An attachment-only user turn has an exact empty textual component. Assistant output must
+  // remain non-empty, and an omitted user value must never be confused with an exact empty one.
+  const emptyTextAllowed = label === 'user' && expected === ''
+  if (
+    evidence.status !== 'available' || evidence.quality !== 'exact' ||
+    typeof text !== 'string' || (!emptyTextAllowed && text.length === 0)
+  ) {
+    throw new Error(`managed recorder requires ${emptyTextAllowed ? 'exact' : 'non-empty exact'} ${label} evidence`)
   }
   if (evidence.value?.textHash !== hashText(text)) {
     throw new Error(`managed recorder ${label} text hash mismatch`)
@@ -208,6 +216,67 @@ function assertOptionalAssistantText(evidence: Evidence<{ text?: string; textHas
   if (text && evidence.value?.textHash !== hashText(text)) {
     throw new Error('managed recorder assistant text hash mismatch')
   }
+}
+
+async function reserveCanonicalJournalRecovery(
+  dataRoot: string,
+  root: string,
+  input: PrepareManagedTurnInput
+): Promise<RecorderOpenTurnState | undefined> {
+  const end = input.termination
+  if (
+    !input.allowCanonicalJournalRecovery || !input.providerTurnId || !input.runId ||
+    (end?.status !== 'available' && end?.status !== 'partial') ||
+    !end.value || end.value.observedAt !== input.timing.completedAt ||
+    (end.value.completedAtSource !== 'provider_terminal_event' &&
+      end.value.completedAtSource !== 'recorder_observed_terminal')
+  ) return undefined
+
+  // The canonical journal is written only after the Provider has terminated and contains the
+  // authoritative provider turn id plus exact evidence. If a previous recovery removed the
+  // provisional open before preparing its handoff, reserve a fresh durable generation instead of
+  // leaving the journal in a permanent front-door deadlock.
+  const state = await readJson<RecorderSessionState>(recorderStatePath(root))
+  const records = (await listRecords(dataRoot)).filter((record) =>
+    record.provider.id === input.provider && record.sessionId === input.sessionId)
+  const reserved = (await listFiles(join(root, 'turns')))
+    .filter((name) => /^\d+$/.test(name)).map(Number)
+  const generation = Math.max(state?.lastGeneration ?? 0, ...records.map((record) => record.generation), ...reserved) + 1
+  const turnIndex = Math.max(state?.lastTurnIndex ?? 0, ...records.map((record) => record.turnIndex)) + 1
+  if (!Number.isSafeInteger(generation) || !Number.isSafeInteger(turnIndex)) {
+    throw new Error('managed recorder canonical journal recovery sequence is invalid')
+  }
+  const open: RecorderOpenTurnState = {
+    schemaVersion: 1,
+    provider: input.provider,
+    sessionId: input.sessionId,
+    generation,
+    turnIndex,
+    status: 'closing',
+    startedAt: input.timing.startedAt,
+    terminalAt: input.timing.completedAt,
+    terminalAtSource: end.value.completedAtSource,
+    terminalFallbackStatus: input.status,
+    endReason: end.value.reason,
+    prompt: input.userText,
+    promptHash: rawTextHash(input.userText),
+    providerTurnId: input.providerTurnId,
+    managedByScry: true,
+    managedRunId: input.runId,
+    managedPromptHash: rawTextHash(input.userText),
+    startFingerprint: stableHash({ source: 'canonical_journal_recovery', runId: input.runId, timing: input.timing }),
+    captures: []
+  }
+  // Publish the recoverable open before advancing the cache. A crash between these writes leaves
+  // an identity that the next replay can still finish; commitHandoff repairs both high-water marks.
+  await writeJsonAtomic(recorderOpenPath(root), open)
+  await writeJsonAtomic(recorderStatePath(root), {
+    ...state,
+    schemaVersion: 1,
+    lastGeneration: generation,
+    lastTurnIndex: turnIndex
+  })
+  return open
 }
 
 function assertStrictCapture(enablement: EnabledRecorder): void {
@@ -571,10 +640,15 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     }
     let observedInterruption = false
     if (matches.length === 0 && candidates.length === 0) {
-      const reserved = await reserveObservedInterruption(enablement.dataRoot, root, input)
-      if (reserved) {
-        matches = [reserved]
-        observedInterruption = true
+      const canonicalRecovery = await reserveCanonicalJournalRecovery(enablement.dataRoot, root, input)
+      if (canonicalRecovery) {
+        matches = [canonicalRecovery]
+      } else {
+        const reserved = await reserveObservedInterruption(enablement.dataRoot, root, input)
+        if (reserved) {
+          matches = [reserved]
+          observedInterruption = true
+        }
       }
     }
     if (matches.length === 0) {

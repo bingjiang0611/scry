@@ -29,6 +29,9 @@ async function exercise() {
   }
   await waitFor(() => document.querySelectorAll('.user-attachment').length === 2)
   const thumbs = [...document.querySelectorAll('.user-attachment')]
+  const thumbnailRows = new Set(thumbs.map((thumb) => Math.round(rect(thumb).top)))
+  if (innerWidth >= 900) check(thumbnailRows.size === 1, 'Image thumbnails wrapped before filling the row')
+  else check(thumbnailRows.size === 2, 'Image thumbnails did not wrap in the narrow layout')
   for (const thumb of thumbs) {
     thumb.focus()
     thumb.click()
@@ -85,9 +88,24 @@ async function exercise() {
   input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
   await waitFor(() => projectPicker() == null)
   check(document.querySelector('#composer-project textarea') === input, 'Hiding project selection remounted composer input')
+  await waitFor(() => input.value === '')
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+  await waitFor(() => input.value === '测试消息')
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+  await waitFor(() => input.value === '更早的消息')
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+  await waitFor(() => input.value === '测试消息')
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+  await waitFor(() => input.value === '')
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '手动输入')
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await waitFor(() => input.value === '手动输入')
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  check(input.value === '手动输入', 'History replaced a non-empty draft')
   document.querySelector('#new-draft').click()
   await waitFor(() => projectPicker() != null)
-  return { viewport: [innerWidth, innerHeight], portraitAndLandscape: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, projectPickerLifecycle: true }
+  return { viewport: [innerWidth, innerHeight], portraitAndLandscape: true, attachmentFlow: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, projectPickerLifecycle: true, promptHistoryNavigation: true }
 }
 
 try {

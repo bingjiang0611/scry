@@ -124,12 +124,66 @@ const baseComponents: Components = {
   )
 }
 
+const remarkPlugins = [remarkGfm]
+export const STREAMING_MARKDOWN_LIGHTWEIGHT_THRESHOLD = 48_000
+const PROGRESSIVE_MARKDOWN_CHUNK_TARGET = 8_000
+
 export function streamingMarkdownInterval(sourceLength: number): number {
-  // 短回答优先跟手；文本变长后逐步降频，避免 ReactMarkdown/GFM 反复解析整段内容
-  // 抢占输入、滚动和停止按钮的主线程时间。
-  if (sourceLength <= 12_000) return 48
-  if (sourceLength <= 48_000) return 80
-  return 120
+  // 人眼无法从逐帧 Markdown 重排中获益；把短回复限制在约 12fps，长回复继续降频，
+  // 为输入、滚动和停止按钮保留 renderer 主线程时间。
+  if (sourceLength <= 12_000) return 80
+  if (sourceLength <= STREAMING_MARKDOWN_LIGHTWEIGHT_THRESHOLD) return 120
+  return 200
+}
+
+export function shouldUseLightweightStreamingMarkdown(sourceLength: number, streaming: boolean): boolean {
+  return streaming && sourceLength > STREAMING_MARKDOWN_LIGHTWEIGHT_THRESHOLD
+}
+
+/**
+ * Split only at ATX headings outside fenced code. Reference definitions and footnotes may resolve
+ * across the whole document, so those sources deliberately keep the single authoritative parse.
+ */
+export function splitMarkdownForProgressiveRender(source: string): string[] {
+  if (source.length <= STREAMING_MARKDOWN_LIGHTWEIGHT_THRESHOLD) return [source]
+  if (/^\s*\[[^\]]+\]:\s+/m.test(source) || /\[\^[^\]]+\]/.test(source)) return [source]
+  const lines = source.split('\n')
+  const sections: string[] = []
+  let current: string[] = []
+  let fence: { marker: string; length: number } | null = null
+  const flush = (): void => {
+    if (current.length === 0) return
+    sections.push(current.join('\n'))
+    current = []
+  }
+  for (const line of lines) {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1]
+    if (fence) {
+      current.push(line)
+      if (marker && marker[0] === fence.marker && marker.length >= fence.length) fence = null
+      continue
+    }
+    if (marker) {
+      fence = { marker: marker[0], length: marker.length }
+      current.push(line)
+      continue
+    }
+    if (/^#{1,4}\s+\S/.test(line) && current.length > 0) flush()
+    current.push(line)
+  }
+  flush()
+  if (sections.length < 2) return [source]
+  const chunks: string[] = []
+  let pending = ''
+  for (const section of sections) {
+    const joined = pending ? `${pending}\n${section}` : section
+    if (pending && joined.length > PROGRESSIVE_MARKDOWN_CHUNK_TARGET) {
+      chunks.push(pending)
+      pending = section
+    } else pending = joined
+  }
+  if (pending) chunks.push(pending)
+  return chunks.length > 1 ? chunks : [source]
 }
 
 function useSampledMarkdownSource(source: string, streaming: boolean): string {
@@ -166,14 +220,65 @@ function useSampledMarkdownSource(source: string, streaming: boolean): string {
   return !streaming || !source.startsWith(sampled) ? source : sampled
 }
 
+const MarkdownChunk = memo(function MarkdownChunk({
+  source,
+  components
+}: {
+  source: string
+  components: Components
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      components={components}
+      urlTransform={(url, key) => key === 'src' ? (safeImageSrc(url) ?? '') : (safeExternalHref(url) ?? '')}
+    >
+      {source}
+    </ReactMarkdown>
+  )
+})
+
+function useProgressiveChunkCount(chunks: readonly string[]): number {
+  const [count, setCount] = useState(1)
+  useEffect(() => {
+    setCount(1)
+    if (chunks.length <= 1) return
+    let frame = 0
+    const advance = (): void => {
+      setCount((current) => {
+        if (current >= chunks.length) return current
+        frame = window.requestAnimationFrame(advance)
+        return current + 1
+      })
+    }
+    frame = window.requestAnimationFrame(advance)
+    return () => window.cancelAnimationFrame(frame)
+  }, [chunks])
+  return Math.min(count, chunks.length)
+}
+
 const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }: { children: string; streaming?: boolean }) {
   const sampledChildren = useSampledMarkdownSource(children, streaming)
-  const normalizedChildren = normalizeMarkdownForDisplay(sampledChildren)
+  const lightweight = shouldUseLightweightStreamingMarkdown(sampledChildren.length, streaming)
+  const normalizedChildren = lightweight ? sampledChildren : normalizeMarkdownForDisplay(sampledChildren)
+  const progressiveChunks = useMemo(
+    () => !streaming ? splitMarkdownForProgressiveRender(normalizedChildren) : [normalizedChildren],
+    [normalizedChildren, streaming]
+  )
+  const progressiveCount = useProgressiveChunkCount(progressiveChunks)
   const workspaceFileLink = useContext(WorkspaceFileLinkContext)
   const components = useMemo<Components>(() => ({
     ...baseComponents,
     code: ({ node: _node, children: codeChildren, className, ...props }) => {
       const reference = String(codeChildren)
+      const externalHref = safeExternalHref(reference)
+      if (externalHref && /^https?:\/\//i.test(externalHref)) {
+        return (
+          <a href={externalHref} target="_blank" rel="noopener noreferrer">
+            <code {...props} className={className}>{codeChildren}</code>
+          </a>
+        )
+      }
       const target = workspaceFileLink && !reference.includes('\n')
         ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces, reference)
         : null
@@ -196,15 +301,23 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
       )
     }
   }), [workspaceFileLink])
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={components}
-      urlTransform={(url, key) => key === 'src' ? (safeImageSrc(url) ?? '') : (safeExternalHref(url) ?? '')}
-    >
-      {normalizedChildren}
-    </ReactMarkdown>
-  )
+  if (lightweight) {
+    // Parsing an ever-growing large GFM document can monopolize the renderer for hundreds of
+    // milliseconds per sample. Preserve every character in a cheap, selectable live view.
+    return <pre className="md-streaming-plain" aria-label="大型回复流式文本">{sampledChildren}</pre>
+  }
+  if (progressiveChunks.length > 1) {
+    const remaining = progressiveChunks.slice(progressiveCount).join('\n')
+    return (
+      <>
+        {progressiveChunks.slice(0, progressiveCount).map((source, index) => (
+          <MarkdownChunk key={`${index}:${source.length}`} source={source} components={components} />
+        ))}
+        {remaining ? <pre className="md-streaming-plain" aria-label="等待格式化的完整文本">{remaining}</pre> : null}
+      </>
+    )
+  }
+  return <MarkdownChunk source={normalizedChildren} components={components} />
 })
 
 export default MarkdownImpl

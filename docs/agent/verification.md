@@ -20,6 +20,14 @@ npm run typecheck
 npm run build
 ```
 
+## 覆盖率与 fixture 隔离
+
+- `npm run test:coverage` 使用与 Vitest 匹配的 V8 插件，统计 `src/` 生产 TS/TSX；仅排除测试、benchmark 与类型声明。Node CI 用这一次运行替代普通 unit run，并上传 `coverage/`，不重复跑两遍套件。
+- 定向报告：`npm run test:coverage -- src/main/git.test.ts src/main/providers/pi-lifecycle.test.ts`。定向报告不是全仓覆盖率；对比必须固定源码、测试范围和工具版本，不能把其他并行 WIP 的变化归功于本次测试。
+- `--coverage.reportsDirectory=<独立目录>` 会清理原报告目录；禁止指向源码或基线备份。默认 `coverage/` 已忽略。
+- Git fixture 隔离宿主 config、hooks、模板和仓库定位环境，但保留临时仓库本地 config，以便真实验证恶意 filter/hook 的防护。Pi lifecycle fixture 固定测试 Node/HOME，只有专门的 Node 探测测试才控制探测边界；RPC 和进程退出仍走真实子进程。
+- 覆盖率只用于寻找缺口，不等于验收成功。尤其不得把 malformed wire、未确认退出、丢失快照或超时改成成功空结果来提分。
+
 ## 验证与交付
 
 默认选择能证明本次改动的最小验证，不把完整发布门禁作为每次小改动的前置条件。仅当用户要求预览、改动涉及 UI/交互或需要真实 App 验证时，启动包含当前改动的开发版本；CLI、脚本和非界面逻辑改动不默认启动。用户明确要求不启动时遵循请求。供用户检查时使用正常用户数据和工作区；自动化测试、破坏性验证或用户明确要求隔离时才使用临时数据。

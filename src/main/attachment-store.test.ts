@@ -10,6 +10,7 @@ import {
   hydrateStoredAttachment,
   MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES,
   prepareRunAttachments,
+  providerAttachmentPrompt,
   storeAttachmentReference,
   updateRunAttachmentOwner
 } from './attachment-store'
@@ -28,6 +29,19 @@ afterEach(() => {
 })
 
 describe('attachment store', () => {
+  it('does not expose native Pi image paths that would make the agent read the same attachment again', () => {
+    const attachment = {
+      kind: 'image' as const,
+      name: 'screen.png',
+      mimeType: 'image/png' as const,
+      dataBase64: png.toString('base64'),
+      size: png.byteLength,
+      path: '/user-data/attachments/run-1/01-screen.png'
+    }
+    expect(providerAttachmentPrompt('pi', ' inspect this ', [attachment])).toBe('inspect this')
+    expect(providerAttachmentPrompt('qoder', ' inspect this ', [attachment])).toContain('local copy: /user-data/attachments/run-1/01-screen.png')
+  })
+
   it('persists validated images and stores only a controlled blob id in archive metadata', () => {
     const userDataDir = root()
     const [prepared] = prepareRunAttachments(userDataDir, 'run-1', [{

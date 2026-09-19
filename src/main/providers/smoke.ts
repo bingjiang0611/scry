@@ -17,7 +17,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
     run: (request) => {
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       let stopped = false
-      const promise = Promise.resolve().then(() => {
+      const promise = Promise.resolve().then(async () => {
         request.onExternalSessionId?.(sessionId)
         request.emit({
           id: `${request.runId}:tool`,
@@ -41,6 +41,23 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           toolUseId: `${request.runId}:tool`,
           text: 'smoke fixture result Authorization: Bearer sk-ant-api03-scry-smoke-not-a-real-key-000000'
         })
+        if (request.prompt === 'performance long stream') {
+          // Packaged soak-only pressure path: exercise batching, renderer ACK and the large-stream
+          // lightweight Markdown transition without any external Provider or user content.
+          for (let index = 0; index < 80; index++) {
+            if (stopped) break
+            request.emit({
+              id: `${request.runId}:delta:${index}`,
+              runId: request.runId,
+              ts: new Date().toISOString(),
+              kind: 'model',
+              stage: 'text_delta',
+              messageId: `${request.runId}:message`,
+              text: `${index % 8 === 0 ? `\n\n## Section ${index}\n\n` : ''}${'stream '.repeat(160)}`
+            })
+            await new Promise((resolve) => setTimeout(resolve, 5))
+          }
+        }
         request.emit({
           id: `${request.runId}:result`,
           runId: request.runId,

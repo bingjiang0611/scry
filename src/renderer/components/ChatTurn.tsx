@@ -119,91 +119,18 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
   )
 }
 
-export type UserMessageEditMode = 'branch' | 'restart'
-
 function UserMessageImpl({
   text,
-  attachments = [],
-  editable = false,
-  editMode = 'branch',
-  onEdit
+  attachments = []
 }: {
   text: string
   attachments?: AgentInputAttachment[]
-  editable?: boolean
-  editMode?: UserMessageEditMode
-  onEdit?: (text: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
   const [preview, setPreview] = useState<AgentInputAttachment | null>(null)
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(text)
-  const [saving, setSaving] = useState(false)
-  const [editError, setEditError] = useState<string | null>(null)
   const skillDetailId = useId()
   if (!text && attachments.length === 0) return null
   const { command, body, injectedSkill } = parseUserMessage(text)
-
-  if (editing) {
-    const submit = async (): Promise<void> => {
-      const prompt = draft.trim()
-      if (!prompt || saving || !onEdit) return
-      setSaving(true)
-      setEditError(null)
-      try {
-        await onEdit(prompt)
-        setEditing(false)
-      } catch (error) {
-        setEditError(error instanceof Error ? error.message : String(error))
-      } finally {
-        setSaving(false)
-      }
-    }
-    return (
-      <div className="turn-user editing">
-        <div className="bubble-user user-edit-bubble">
-          <textarea
-            className="user-edit-input"
-            value={draft}
-            autoFocus
-            aria-label="编辑最后一条消息"
-            disabled={saving}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                setDraft(text)
-                setEditError(null)
-                setEditing(false)
-              } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                void submit()
-              }
-            }}
-          />
-          {editError && <div className="user-edit-error" role="alert">{editError}</div>}
-          <div className="user-edit-footer">
-            <span className="user-edit-note">
-              {editMode === 'branch'
-                ? '将创建新对话分支，不会回滚工作区文件'
-                : '当前会话尚未形成可分支边界；发送后将从此消息重新开始，不会回滚工作区文件'}
-            </span>
-            <div className="user-edit-actions">
-              <button type="button" disabled={saving} onClick={() => { setDraft(text); setEditError(null); setEditing(false) }}>取消</button>
-              <button
-                type="button"
-                className="primary"
-                title="发送修改后的消息并建立新分支"
-                disabled={saving || !draft.trim()}
-                onClick={() => void submit()}
-              >
-                {saving ? '发送中…' : '发送'}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   // skill 注入：不是用户发的，渲染成中性折叠注记（默认收起，点开看 SKILL.md）
   if (injectedSkill) {
@@ -269,19 +196,6 @@ function UserMessageImpl({
           </button>
         )}
       </div>
-      {editable && onEdit && (
-        <div className="user-message-actions">
-          <button
-            type="button"
-            className="user-message-edit"
-            aria-label="编辑最后一条消息"
-            title={editMode === 'branch' ? '编辑最后一条消息并从这里建立新分支' : '编辑最后一条消息并重新开始'}
-            onClick={() => { setDraft(text); setEditError(null); setEditing(true) }}
-          >
-            <Icon name="edit" />
-          </button>
-        </div>
-      )}
       {preview && <ImageLightbox attachment={preview} onClose={() => setPreview(null)} />}
     </div>
   )
@@ -313,7 +227,7 @@ export function coalesceAdjacentThinking(items: readonly TraceEvent[]): TraceEve
   return out
 }
 
-function ThinkingBlock({ text }: { text: string }) {
+function ThinkingBlock({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(true)
   if (!text.trim()) return null
   return (
@@ -323,7 +237,7 @@ function ThinkingBlock({ text }: { text: string }) {
         <span>思考过程</span>
         <Icon name="chevronDown" className="think-chevron" />
       </summary>
-      {open && <div className="think-text md"><Markdown>{text}</Markdown></div>}
+      {open && <div className="think-text md"><Markdown streaming={streaming}>{text}</Markdown></div>}
     </details>
   )
 }
@@ -485,6 +399,7 @@ function ToolItem({
   const shownOpen = lockedOpen || open
   const kind = ev.isError ? 'err' : ev.isMcp ? 'mcp' : ev.kind
   const displayName = toolDisplayName(ev)
+  const rowDisplayName = waitingForAnswer ? '需要你的选择' : displayName
   const durPct = ev.durationMs != null ? Math.max(3, Math.round((ev.durationMs / maxDur) * 100)) : 0
   return (
     <div
@@ -504,9 +419,9 @@ function ToolItem({
         }}
       >
         <span className={`st ${lockedOpen || missingQuestionResult ? 'pending' : ev.isError || interventionFailed ? 'err' : 'ok'}`}>
-          <Icon name={lockedOpen ? 'clock' : missingQuestionResult ? 'alert' : ev.isError || interventionFailed ? 'x' : 'check'} />
+          <Icon name={waitingForAnswer ? 'message' : lockedOpen ? 'clock' : missingQuestionResult ? 'alert' : ev.isError || interventionFailed ? 'x' : 'check'} />
         </span>
-        <span className="name" title={displayName}>{displayName}</span>
+        <span className="name" title={rowDisplayName}>{rowDisplayName}</span>
         {(kind === 'skill' || kind === 'mcp' || kind === 'agent') && <span className={`kindtag ${kind}`} />}
         {op && <span className={`op ${op}`}>{op.toUpperCase()}</span>}
         <span className="arg">{toolArg(ev)}</span>
@@ -528,7 +443,9 @@ function ToolItem({
           )}
           {meta && <span className="tok">{meta}</span>}
           {ev.isMcp && <span className="tok" title={ev.mcpServer}>mcp:{ev.mcpServer}</span>}
-          {waitingForAnswer && <span className="question-waiting">等待回答</span>}
+          {waitingForAnswer && questionRequest && (
+            <span className="question-count">{questionRequest.questions.length} 个问题</span>
+          )}
           {!waitingForAnswer && waitingForQuestionState && <span className="question-waiting">等待状态同步</span>}
           {missingQuestionResult && <span className="question-waiting">未获得返回</span>}
           {ev.danger && (
@@ -616,11 +533,13 @@ function toolGroupSummary(events: TraceEvent[]): { names: string[]; dur?: number
 function ToolGroup({
   events,
   forceOpen = false,
+  attention = false,
   reveal = false,
   children
 }: {
   events: TraceEvent[]
   forceOpen?: boolean
+  attention?: boolean
   reveal?: boolean
   children: ReactNode
 }) {
@@ -633,6 +552,9 @@ function ToolGroup({
   const { names, dur, failed, count } = toolGroupSummary(events)
   const single = count === 1 ? events[0] : null
   const label = single ? `${toolDisplayName(single)}  ${toolArg(single)}`.trim() : names.join(' · ')
+  if (attention && single?.tool === 'AskUserQuestion') {
+    return <div className="tool-group open question-tool-group"><div className="tool-group-body">{children}</div></div>
+  }
   return (
     <div className={shownOpen ? 'tool-group open' : 'tool-group'}>
       <button
@@ -667,6 +589,7 @@ function SubagentBlock({
   onAnswerQuestion,
   turnDone = false,
   liveText = '',
+  liveThinking = '',
   liveKey: liveTailKey = ''
 }: {
   items: TraceEvent[]
@@ -677,6 +600,7 @@ function SubagentBlock({
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   turnDone?: boolean
   liveText?: string
+  liveThinking?: string
   liveKey?: string
 }) {
   const visibleItems = useMemo(
@@ -757,7 +681,15 @@ function SubagentBlock({
               )
             }
             flushLive()
-            if (liveText) {
+            if (liveThinking) {
+              out.push(
+                <ThinkingBlock
+                  key={liveTailKey || 'subagent-live-thinking-tail'}
+                  text={liveThinking}
+                  streaming={!turnDone}
+                />
+              )
+            } else if (liveText) {
               out.push(
                 <div className="model-text md sub streaming" key={liveTailKey || 'subagent-live-tail'}>
                   <Markdown streaming={!turnDone}>{liveText}</Markdown>
@@ -1315,14 +1247,14 @@ export function HooksSummary({
 }
 
 // 蓝本 .turn-footer：in / out / cache·r / cache·w / dur / api / tools / files / err，分组用 .sep 隔。
-function TurnFooter({ items }: { items: TraceEvent[] }) {
+function TurnFooter({ items, files }: { items: TraceEvent[]; files: FileRow[] }) {
   const result = resultOf({ items })
   const calls = logicalCallEventsForTurn(items)
   const tools = aggregateCalls(calls).totalCalls
-  const reads = calls.filter((e) => e.stage !== 'tool_result' && e.fileOp === 'read').length
-  const writes = calls.filter(
-    (e) => e.stage !== 'tool_result' && (e.fileOp === 'write' || e.fileOp === 'edit')
-  ).length
+  // “files” 表示去重后的文件数，而不是同一路径被反复 Read/Edit 的调用次数。
+  // 已修改文件统一归入 W，避免同一路径同时出现在 R 与 W 中。
+  const reads = files.filter((file) => file.read > 0 && file.write === 0 && file.edit === 0).length
+  const writes = files.filter((file) => file.write > 0 || file.edit > 0).length
   const errs = items.filter((e) => e.stage === 'tool_result' && e.isError).length
   const interventions = items.flatMap((event) => event.intervention ? [event.intervention] : [])
     .filter((intervention) => intervention.resolution !== 'provider_cancelled')
@@ -1417,9 +1349,14 @@ function AssistantTurnImpl({
     [items]
   )
   const result = resultOf({ items })
+  // Failed provider turns can still have an authoritative native boundary. Exposing that
+  // boundary lets Pi/Rotom recover exactly as its terminal tree navigation does, instead
+  // of trapping the user on a repeatedly failing session leaf.
   const canFork = Boolean(
-    onForkTurn && turn.done && !turn.error && turn.providerTurnId && (turn.forkTurnId ?? turn.providerTurnId)
+    onForkTurn && turn.done && turn.providerTurnId && (turn.forkTurnId ?? turn.providerTurnId)
   )
+  const forkLabel = turn.error ? '从失败处恢复' : '在新会话中分支'
+  const forkTitle = turn.error ? '从失败轮次创建恢复分支' : '从此轮创建分支会话'
   const forkAtTurn = async (): Promise<void> => {
     if (!onForkTurn || forking) return
     setForking(true)
@@ -1554,6 +1491,9 @@ function AssistantTurnImpl({
             key={`tg-${buf[0].ev.id}`}
             events={buf.map((b) => b.ev)}
             forceOpen={forceOpen}
+            attention={buf.some(({ ev }) =>
+              pendingQuestions.some((request) => request.runId === ev.runId && request.questionId === ev.toolUseId)
+            )}
             reveal={buf.some(({ ev }) =>
               ev.id === selectedId ||
               (ev.toolUseId ? childrenByParent.get(ev.toolUseId)?.some((child) => child.id === selectedId) : false)
@@ -1600,7 +1540,9 @@ function AssistantTurnImpl({
         )
         // 若该 tool_use 催生了 subagent（其 toolUseId 是某些事件的 parentToolUseId），折叠渲染子步骤
         const kids = ev.toolUseId ? childrenByParent.get(ev.toolUseId) : undefined
-        const childLiveText = ev.toolUseId && projection.liveParentToolUseId === ev.toolUseId ? projection.liveText : ''
+        const childHasLiveTail = ev.toolUseId && projection.liveParentToolUseId === ev.toolUseId
+        const childLiveText = childHasLiveTail ? projection.liveText : ''
+        const childLiveThinking = childHasLiveTail ? projection.liveThinking : ''
         toolBuf.push({
           ev,
           node: (
@@ -1617,7 +1559,7 @@ function AssistantTurnImpl({
                 onOpenFileDiff={openFileDiffFor(ev)}
                 turnDone={turn.done}
               />
-              {kids?.length || childLiveText ? (
+              {kids?.length || childLiveText || childLiveThinking ? (
                 <SubagentBlock
                   items={kids ?? []}
                   selectedId={selectedId}
@@ -1627,6 +1569,7 @@ function AssistantTurnImpl({
                   onAnswerQuestion={onAnswerQuestion}
                   turnDone={turn.done}
                   liveText={childLiveText}
+                  liveThinking={childLiveThinking}
                   liveKey={projection.liveKey}
                 />
               ) : null}
@@ -1651,6 +1594,7 @@ function AssistantTurnImpl({
     projection.liveKey,
     projection.liveParentToolUseId,
     projection.liveText,
+    projection.liveThinking,
     selectedId,
     turn.done,
     terminal
@@ -1684,6 +1628,13 @@ function AssistantTurnImpl({
       </div>
       <div className="turn-flow">
         {turnFlowBody}
+        {projection.liveParentToolUseId === null && projection.liveThinking && (
+          <ThinkingBlock
+            key={projection.liveKey || 'live-thinking-tail'}
+            text={projection.liveThinking}
+            streaming={!terminal}
+          />
+        )}
         {projection.liveParentToolUseId === null && projection.liveText && (
           <div className={`model-text md${terminal ? '' : ' streaming'}`} key={projection.liveKey || 'live-tail'}>
             <Markdown streaming={!terminal}>{projection.liveText}</Markdown>
@@ -1693,9 +1644,9 @@ function AssistantTurnImpl({
       {unmatchedPendingQuestions.map((request) => (
         <div className="tool-card k-tool question-pending-fallback" key={`${request.runId}:${request.questionId}`}>
           <div className="tool-row">
-            <span className="st pending"><Icon name="clock" /></span>
-            <span className="name">AskUserQuestion</span>
-            <span className="meta"><span className="question-waiting">等待回答</span></span>
+            <span className="st pending"><Icon name="message" /></span>
+            <span className="name">需要你的选择</span>
+            <span className="meta"><span className="question-count">{request.questions.length} 个问题</span></span>
           </div>
           {onAnswerQuestion && (
             <AskUserQuestionInline
@@ -1707,7 +1658,9 @@ function AssistantTurnImpl({
         </div>
       ))}
       {interventions
-        .filter((intervention) => !knownToolUseIds.has(intervention.request.questionId))
+        // 会话结尾只保留权限确认这类信任边界证据；人工选择（clarification）不再在聊天流末尾堆卡片，
+        // 其原始记录仍保留在 .scry records 与纵览面板中。
+        .filter((intervention) => !knownToolUseIds.has(intervention.request.questionId) && intervention.kind === 'permission')
         .map((intervention) => (
           <div className="tool-card k-human intervention-card" key={`intervention:${intervention.request.questionId}`}>
             <div className="tool-row">
@@ -1755,21 +1708,25 @@ function AssistantTurnImpl({
           onOpenDiff={turnDiff && onOpenDiff ? (initialPath) => onOpenDiff(turn, turnDiff, initialPath) : undefined}
         />
       )}
-      {turn.done && <TurnFooter items={turn.items} />}
-      {canFork && (
-        <div className="turn-branch-row">
-          <button
-            type="button"
-            className="turn-branch-btn"
-            title="从此轮创建分支会话"
-            aria-label="从此轮创建分支会话"
-            disabled={forking}
-            onClick={() => { void forkAtTurn() }}
-          >
-            <Icon name="branch" />
-            <span>{forking ? '正在创建分支…' : '在新会话中分支'}</span>
-          </button>
-          {forkError && <span className="turn-branch-error" role="alert">{forkError}</span>}
+      {(turn.done || canFork) && (
+        <div className="turn-tail">
+          {turn.done && <TurnFooter items={turn.items} files={structured} />}
+          {canFork && (
+            <div className="turn-branch-row">
+              <button
+                type="button"
+                className="turn-branch-btn"
+                title={forkTitle}
+                aria-label={forkTitle}
+                disabled={forking}
+                onClick={() => { void forkAtTurn() }}
+              >
+                <Icon name="branch" />
+                <span>{forking ? '正在创建分支…' : forkLabel}</span>
+              </button>
+              {forkError && <span className="turn-branch-error" role="alert">{forkError}</span>}
+            </div>
+          )}
         </div>
       )}
     </div>

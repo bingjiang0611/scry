@@ -330,10 +330,13 @@ export function applyDataUpdatedEffects(effects: {
   loadStats: () => void
   loadBillingState: () => void
   loadAnalytics: () => void
+  analyticsActive: boolean
 }): void {
   effects.loadStats()
   effects.loadBillingState()
-  effects.loadAnalytics()
+  // Analytics is a comparatively expensive, optional SQLite projection. Keep it fresh once the
+  // user has opened the surface, but do not query it during every chat-only application launch.
+  if (effects.analyticsActive) effects.loadAnalytics()
 }
 
 export function mergeMcpLiveSnapshot(
@@ -480,6 +483,9 @@ export function useIntegrations(cwd: string | null) {
   const usageRequestSeq = useRef(0)
   const analyticsRequestSeq = useRef(0)
   const analyticsRangeRef = useRef<UsageAnalyticsRangeDays>(30)
+  const analyticsActiveRef = useRef(false)
+  const analyticsQueryInFlightRef = useRef(false)
+  const analyticsRefreshQueuedRef = useRef(false)
   const skillRefreshRequestSeq = useRef(0)
   const mcpConfigRequestSeq = useRef(0)
   const mcpLiveRequestSeq = useRef(0)
@@ -591,11 +597,23 @@ export function useIntegrations(cwd: string | null) {
   }, [])
 
   const loadAnalytics = useCallback((rangeDays = analyticsRangeRef.current): void => {
+    analyticsActiveRef.current = true
     const query = window.scry.usageAnalytics
     if (typeof query !== 'function') {
       setAnalyticsError('分析接口不可用，请重启 Scry')
       return
     }
+    // Serialize analytics refreshes. A burst of data-updated notifications while one query is
+    // running becomes one latest-range refresh instead of concurrent full-range SQLite work.
+    if (analyticsQueryInFlightRef.current) {
+      analyticsRefreshQueuedRef.current = true
+      // The in-flight snapshot may precede this refresh request (or belong to an older range).
+      // Invalidate its UI commit; finally will launch exactly one latest-range replacement.
+      analyticsRequestSeq.current += 1
+      return
+    }
+    analyticsQueryInFlightRef.current = true
+    analyticsRefreshQueuedRef.current = false
     const seq = ++analyticsRequestSeq.current
     setAnalyticsLoading(true)
     setAnalyticsError(null)
@@ -610,7 +628,12 @@ export function useIntegrations(cwd: string | null) {
         if (seq === analyticsRequestSeq.current) setAnalyticsError(error instanceof Error ? error.message : String(error))
       })
       .finally(() => {
+        analyticsQueryInFlightRef.current = false
         if (seq === analyticsRequestSeq.current) setAnalyticsLoading(false)
+        if (analyticsRefreshQueuedRef.current) {
+          analyticsRefreshQueuedRef.current = false
+          loadAnalytics(analyticsRangeRef.current)
+        }
       })
   }, [])
 
@@ -1053,11 +1076,29 @@ export function useIntegrations(cwd: string | null) {
   useEffect(() => {
     const subscribe = window.scry.onDataUpdated
     if (typeof subscribe !== 'function') return
-    return subscribe(() => applyDataUpdatedEffects({ loadStats, loadBillingState, loadAnalytics }))
+    let timer: number | null = null
+    const unsubscribe = subscribe(() => {
+      // Commit paths may publish several notifications back-to-back. Coalesce them without polling.
+      if (timer != null) return
+      timer = window.setTimeout(() => {
+        timer = null
+        applyDataUpdatedEffects({
+          loadStats,
+          loadBillingState,
+          loadAnalytics,
+          analyticsActive: analyticsActiveRef.current
+        })
+      }, 100)
+    })
+    return () => {
+      if (timer != null) window.clearTimeout(timer)
+      unsubscribe()
+    }
   }, [loadAnalytics, loadBillingState, loadStats])
 
   useEffect(() => {
     let cancelled = false
+    let rescanTimer: number | null = null
     const fast = typeof window.scry.detectFast === 'function' ? window.scry.detectFast() : Promise.resolve([])
     void fast
       .then((detected) => {
@@ -1069,10 +1110,12 @@ export function useIntegrations(cwd: string | null) {
       .finally(() => {
         if (cancelled) return
         setAgentsHydrated(true)
-        rescan()
+        // Full descriptor/version probing launches provider processes. Keep it off the critical first-paint path.
+        rescanTimer = window.setTimeout(rescan, 400)
       })
     return () => {
       cancelled = true
+      if (rescanTimer != null) window.clearTimeout(rescanTimer)
     }
   }, [rescan])
 
@@ -1080,7 +1123,6 @@ export function useIntegrations(cwd: string | null) {
     const timers = [
       window.setTimeout(loadUsage, 260),
       window.setTimeout(loadStats, 900),
-      window.setTimeout(loadAnalytics, 940),
       window.setTimeout(loadBillingState, 980)
     ]
     return () => timers.forEach((id) => window.clearTimeout(id))

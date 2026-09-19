@@ -1,12 +1,25 @@
 import { execFile } from 'node:child_process'
-import { access, chmod, mkdtemp, mkdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { describe, it, expect } from 'vitest'
+import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest'
 import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNameStatus, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
 
 const pexecFile = promisify(execFile)
+
+// Real Git, but no developer hooks, signing or repository-selection environment.
+// Repository-local config remains active for the filter/hook safety regressions.
+beforeAll(() => {
+  vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null')
+  vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+  vi.stubEnv('GIT_CONFIG_COUNT', '0')
+  vi.stubEnv('GIT_TEMPLATE_DIR', '')
+  for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) {
+    vi.stubEnv(key, undefined)
+  }
+})
+afterAll(() => vi.unstubAllEnvs())
 
 describe('parseNameStatus（P2 git diff）', () => {
   it('解析 A/M/D 的 NUL 分隔状态并忽略未知状态', () => {
@@ -646,6 +659,74 @@ describe('每轮 Git 工作树快照', () => {
       await rm(bare, { recursive: true, force: true })
     }
   }, 30_000)
+
+  it('隔离快照丢失时报告失败而非伪造空 diff，且不破坏真实 index', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'a.txt'), 'before\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      const indexBefore = await readFile(join(root, '.git/index'))
+      capture = await beginGitTurnDiff(root)
+      expect(capture.status).toBe('ready')
+      await writeFile(join(root, 'a.txt'), 'after\n')
+      await rm(capture.tempDir!, { recursive: true })
+      await expect(finishGitTurnDiff(capture)).resolves.toMatchObject({
+        status: 'failed', reason: 'git_error', files: [], cleanup: 'ok'
+      })
+      expect(await readFile(join(root, '.git/index'))).toEqual(indexBefore)
+      expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe('after\n')
+      const fresh = await beginGitTurnDiff(root)
+      try { expect(fresh.status).toBe('ready') } finally { await cancelGitTurnDiff(fresh) }
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('finish 预算耗尽时报告 timeout 并释放临时快照，不把未知显示成无改动', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'a.txt'), 'before\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      capture = await beginGitTurnDiff(root)
+      expect(capture.status).toBe('ready')
+      const tempDir = capture.tempDir!
+      await writeFile(join(root, 'a.txt'), 'after\n')
+      await expect(finishGitTurnDiff(capture, 0)).resolves.toMatchObject({
+        status: 'timeout', reason: 'deadline', files: [], cleanup: 'ok'
+      })
+      await expect(access(tempDir)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe('after\n')
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('二进制改动保留文件证据，但不伪造文本 patch', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'base.txt'), 'base\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      capture = await beginGitTurnDiff(root)
+      expect(capture.status).toBe('ready')
+      await writeFile(join(root, 'image.bin'), Buffer.from([0, 255, 0, 2]))
+      const result = await finishGitTurnDiff(capture)
+      expect(result.status).toBe('captured')
+      expect(result.files).toHaveLength(1)
+      expect(result.files[0]).toMatchObject({ binary: true, change: 'added', patchStatus: 'binary' })
+      expect(result.files[0].patch).toBeUndefined()
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 
   it('非 Git、无 HEAD 与 deadline 分别给出稳定降级原因', async () => {
     const plain = await mkdtemp(join(tmpdir(), 'scry-turn-diff-plain-'))

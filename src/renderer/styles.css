@@ -360,7 +360,17 @@ body.pane-resizing * {
 }
 .sb-list {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sb-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .sb-proj {
   margin-bottom: 2px;
@@ -453,8 +463,8 @@ body.pane-resizing * {
   width: 11px;
   height: 11px;
   box-sizing: border-box;
-  border: 2px solid currentColor;
-  border-top-color: transparent;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-right-color: currentColor;
   border-radius: 50%;
   color: var(--dim);
   animation: sb-running-spin 0.75s linear infinite;
@@ -861,6 +871,10 @@ body.pane-resizing * {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  /* Session replacement is positioned explicitly by App. Native scroll
+     anchoring can otherwise restore an arbitrary old turn after the new
+     transcript grows, making a freshly opened session land in the middle. */
+  overflow-anchor: none;
   padding: 22px 0 10px;
 }
 /* welcome 空态屏（蓝本 welcome.html，全宽 no-right hero） */
@@ -1167,6 +1181,18 @@ body.pane-resizing * {
   white-space: normal;
   overflow-wrap: anywhere;
   font-variant-ligatures: contextual;
+}
+.md > .md-streaming-plain {
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
@@ -2007,18 +2033,25 @@ body.pane-resizing * {
   gap: 7px;
 }
 .sk-line {
+  position: relative;
   height: 10px;
+  overflow: hidden;
   border-radius: 5px;
-  background: linear-gradient(90deg, var(--panel) 25%, var(--border2) 37%, var(--panel) 63%);
-  background-size: 400% 100%;
-  animation: shimmer 1.3s ease-in-out infinite;
+  background: var(--panel);
+  opacity: 0.72;
 }
-@keyframes shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
+.sk-line::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 -45%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--border2), transparent);
+  animation: skeleton-shimmer 1.3s ease-in-out infinite;
+  will-change: transform;
+}
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(360%);
   }
 }
 .errline {
@@ -3132,6 +3165,15 @@ button.turn-call-group:focus-visible {
 .turn-call-group.intervention {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--border3));
 }
+.turn-call-group.error {
+  border-color: color-mix(in srgb, var(--bad) 46%, var(--border3));
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.turn-call-group.error .turn-call-kind,
+.turn-call-group.error .turn-call-count {
+  color: var(--bad);
+}
 .turn-call-kind {
   flex: 0 0 auto;
   padding: 1px 5px;
@@ -3271,6 +3313,131 @@ button.turn-call-group:focus-visible {
 }
 .turn-call-detail-slot .turn-hooks-summary {
   margin-top: 0;
+}
+.turn-tool-errors {
+  display: grid;
+  gap: 6px;
+}
+.turn-tool-error {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--bad) 34%, var(--border3));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bad) 7%, var(--surface-inset));
+}
+.turn-tool-error > summary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) 14px;
+  align-items: start;
+  gap: 9px;
+  padding: 8px 9px;
+  color: var(--fg);
+  cursor: pointer;
+  list-style: none;
+}
+.turn-tool-error > summary::-webkit-details-marker {
+  display: none;
+}
+.turn-tool-error > summary:hover {
+  background: color-mix(in srgb, var(--bad) 7%, transparent);
+}
+.turn-tool-error > summary:focus-visible {
+  outline: 2px solid var(--bad);
+  outline-offset: -2px;
+}
+.turn-tool-error > summary strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--bad);
+  font: 650 10.5px/1.4 var(--font-mono);
+}
+.turn-tool-error > summary strong .ico {
+  width: 11px;
+  height: 11px;
+}
+.turn-tool-error > summary > span {
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--dim);
+  font: 10.5px/1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.turn-tool-error-chevron {
+  width: 12px;
+  height: 12px;
+  margin-top: 1px;
+  color: var(--dim3);
+  transition: transform 120ms ease;
+}
+.turn-tool-error[open] .turn-tool-error-chevron {
+  transform: rotate(180deg);
+}
+.turn-tool-error-evidence {
+  display: grid;
+  gap: 8px;
+  padding: 0 9px 9px;
+  border-top: 1px solid color-mix(in srgb, var(--bad) 18%, var(--border3));
+}
+.turn-tool-error-evidence-head {
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dim3);
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.turn-tool-error-evidence-head button {
+  padding: 4px 7px;
+  border: 1px solid var(--border3);
+  border-radius: 5px;
+  background: var(--surface-subtle);
+  color: var(--dim2);
+  font: 10px/1.2 var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+.turn-tool-error-evidence-head button:hover,
+.turn-tool-error-evidence-head button:focus-visible {
+  border-color: var(--bad);
+  color: var(--fg);
+}
+.turn-tool-error-field {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.turn-tool-error-field > span {
+  color: var(--dim3);
+  font: 10px/1.2 var(--font-mono);
+}
+.turn-tool-error-field.is-error > span {
+  color: var(--bad);
+}
+.turn-tool-error-field pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 7px 8px;
+  border: 1px solid var(--border3);
+  border-radius: 5px;
+  background: var(--surface-inset);
+  color: var(--dim);
+  font: 10.5px/1.5 var(--font-mono);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.turn-tool-error-field.is-error pre {
+  border-color: color-mix(in srgb, var(--bad) 24%, var(--border3));
+  color: var(--bad);
 }
 .turn-file-footprint {
   min-width: 0;
@@ -4289,119 +4456,6 @@ button.turn-call-group:focus-visible {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-.user-message-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 5px;
-}
-
-.user-message-edit {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--dim2);
-  cursor: pointer;
-}
-
-.user-message-edit:hover {
-  background: var(--panel2);
-  color: var(--fg);
-}
-
-.user-message-edit .ico {
-  width: 14px;
-  height: 14px;
-}
-
-.turn-user.editing,
-.user-edit-bubble {
-  width: 100%;
-}
-
-.user-edit-bubble {
-  min-height: 156px;
-  display: flex;
-  flex-direction: column;
-}
-
-.user-edit-input {
-  width: 100%;
-  min-height: 76px;
-  flex: 1;
-  resize: none;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  line-height: 1.65;
-}
-
-.user-edit-footer {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 14px;
-}
-
-.user-edit-note {
-  max-width: 360px;
-  color: var(--dim3);
-  font-size: 10.5px;
-  line-height: 1.45;
-}
-
-.user-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-left: auto;
-}
-
-.user-edit-actions button {
-  min-height: 38px;
-  padding: 7px 16px;
-  border: 1px solid var(--border2);
-  border-radius: 12px;
-  background: var(--panel);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
-  color: var(--fg);
-  font: 500 13px/1 var(--font-ui);
-  cursor: pointer;
-}
-
-.user-edit-actions button:hover {
-  background: var(--panel-hi);
-}
-
-.user-edit-actions button.primary {
-  border-color: var(--fg);
-  background: var(--fg);
-  color: var(--bg);
-}
-
-.user-edit-actions button.primary:hover {
-  opacity: 0.88;
-}
-
-.user-edit-actions button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.user-edit-error {
-  margin-top: 8px;
-  color: var(--bad);
-  font-size: 11.5px;
-}
-
 .user-md + .user-attachments,
 .bubble-user .slash + .user-attachments {
   margin-top: 8px;
@@ -4410,7 +4464,7 @@ button.turn-call-group:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  max-width: min(420px, 100%);
+  max-width: 100%;
 }
 .user-attachment {
   min-width: 0;
@@ -4575,14 +4629,8 @@ button.turn-call-group:focus-visible {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 1.5px solid var(--accent);
-  border-top-color: transparent;
-  animation: spin 0.7s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  border: 1.5px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-right-color: var(--accent);
 }
 .model-text {
   margin: 12px 0;
@@ -4594,7 +4642,7 @@ button.turn-call-group:focus-visible {
 .model-text.streaming::after {
   content: '▋';
   color: var(--accent);
-  animation: blink 1s infinite;
+  opacity: 0.8;
 }
 .files-summary {
   margin-top: 12px;
@@ -7984,20 +8032,7 @@ textarea:focus-visible,
   flex: none;
   border-radius: 50%;
   background: var(--selected);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--selected) 35%, transparent);
-  animation: run-status-pulse 1.6s var(--ease-out) infinite;
-}
-
-@keyframes run-status-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--selected) 35%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--selected) 0%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--selected) 0%, transparent);
-  }
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--selected) 14%, transparent);
 }
 
 .run-status-left b {
@@ -8159,87 +8194,82 @@ textarea:focus-visible,
   gap: 3px;
 }
 
-/* 值宽度必须跟「当前选中项」一致：原生 select 的内在宽度由最长选项决定，
-   选中短选项（如 GPT-5.6-Sol）时值和箭头之间会空出一大段。
-   所以可见文本交给 .rc-value，select 透明覆盖在上层只负责交互与 a11y。 */
 .run-control-select {
   position: relative;
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  height: 40px;
-  padding: 0 24px 0 9px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
   color: var(--dim);
   font: 12px/1 var(--font-ui);
+}
+
+.permission-mode-trigger {
+  min-width: 0;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
 }
 
-/* 前缀 label（模型 / 强度 / 权限）：说明这个值是什么，不与值本身混读 */
 .rc-prefix {
-  margin-right: 6px;
   color: var(--dim3);
   white-space: nowrap;
 }
 
 .run-control-select .rc-value {
-  min-width: 0; /* flex item 默认 min-width:auto 会拒绝收缩，宽度不足时直接顶穿容器 */
-  /* 模型名最长，用主区宽度（container）约束它：窄栏里先省略号让位，
-     免得它一个人占满一排、把 effort/权限挤到下一排 */
+  min-width: 0;
   max-width: min(210px, 34cqi);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.run-control-select select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  appearance: none;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  opacity: 0;
-  cursor: inherit;
+.run-control-select .rc-icon,
+.run-control-select .chev {
+  width: 12px;
+  height: 12px;
+  flex: none;
 }
 
 .run-control-select .chev {
-  position: absolute;
-  right: 7px;
-  width: 12px;
-  height: 12px;
-  pointer-events: none;
+  color: var(--dim2);
 }
 
-.run-control-select:hover,
-.run-control-select:focus-within {
+.permission-mode-trigger:hover,
+.permission-mode-trigger:focus-visible,
+.run-control-select:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
   border-color: var(--border2);
   background: var(--panel3);
   color: var(--fg);
 }
 
-.run-control-select.warning {
+.run-control-select.warning,
+.run-control-select.danger {
   color: var(--warn);
 }
 
-.run-control-select.danger {
-  color: var(--bad);
+.run-control-select.danger .permission-mode-trigger {
   border-color: color-mix(in srgb, var(--bad) 38%, transparent);
   background: color-mix(in srgb, var(--bad) 8%, transparent);
+  color: var(--bad);
 }
 
-.run-control-select.danger:hover,
-.run-control-select.danger:focus-within {
+.run-control-select.danger .permission-mode-trigger:hover,
+.run-control-select.danger .permission-mode-trigger:focus-visible,
+.run-control-select.danger:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
   border-color: color-mix(in srgb, var(--bad) 52%, transparent);
   background: color-mix(in srgb, var(--bad) 14%, transparent);
   color: var(--bad);
 }
 
-.run-control-select:has(select:disabled) {
+.permission-mode-trigger:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -9673,30 +9703,6 @@ select:focus-visible,
 /* Session transcript and fixed composer */
 .chat { padding-block: 18px 16px; }
 
-.chat-session-loading {
-  min-height: 100%;
-  display: grid;
-  place-items: center;
-  color: var(--dim2);
-}
-
-.chat-session-loading > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font: 12.5px/1.4 var(--font-ui);
-}
-
-.chat-session-loading .ico {
-  width: 15px;
-  height: 15px;
-  animation: welcome-rescan-spin 900ms linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chat-session-loading .ico { animation: none; }
-}
-
 /* 选中的历史会话读不到证据：这是一个明确的“证据不可用”状态，不是新会话空态。 */
 .chat-session-evidence-gap {
   min-height: 100%;
@@ -10135,10 +10141,9 @@ button.turn-id.turn-call-open:focus-visible {
   right: 3px;
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 2px;
   opacity: 0;
   pointer-events: none;
-  background: var(--panel2);
 }
 
 .sb-proj-row:hover .sb-proj-acts,
@@ -10149,26 +10154,33 @@ button.turn-id.turn-call-open:focus-visible {
 }
 
 .sb-proj-act {
-  width: 25px;
-  height: 25px;
+  width: 24px;
+  height: 24px;
   display: inline-grid;
   place-items: center;
   padding: 0;
-  border: 0;
-  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
   color: var(--dim2);
   cursor: pointer;
 }
 
-.sb-proj-act:hover {
-  background: var(--panel-hi);
+.sb-proj-act:hover,
+.sb-proj-act:focus-visible {
+  border-color: var(--border3);
+  background: var(--surface-muted);
   color: var(--fg);
 }
 
+.sb-proj-act .ico {
+  width: 13px;
+  height: 13px;
+}
+
 .sb-proj-more {
-  font: 700 13px/1 var(--font-mono);
-  letter-spacing: 0.04em;
+  font: 700 12px/1 var(--font-mono);
+  letter-spacing: 0.02em;
 }
 
 .sb-project-empty {
@@ -10398,6 +10410,20 @@ button.turn-id.turn-call-open:focus-visible {
 .sb-count,
 .sb-sesstime {
   font-size: 10px;
+}
+
+.sb-unread {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.sb-sess.unread .sb-sesstext {
+  color: var(--fg);
+  font-weight: 550;
 }
 
 .sb-running {
@@ -11409,6 +11435,13 @@ button.turn-id.turn-call-open:focus-visible {
   contain-intrinsic-size: auto 600px;
 }
 
+/* Chromium does not consistently throttle compositor animations in minimized Electron windows. */
+:root[data-page-visibility='hidden'] *,
+:root[data-page-visibility='hidden'] *::before,
+:root[data-page-visibility='hidden'] *::after {
+  animation-play-state: paused !important;
+}
+
 /* Remote-access pairing (trusted-LOCAL) tab inside Settings. Minimal, token-based
    layout; the honest disabled/dormant states carry their own emphasis. */
 .remote-pairing { display: flex; flex-direction: column; gap: 12px; }
@@ -11455,3 +11488,200 @@ button.turn-id.turn-call-open:focus-visible {
 .remote-pairing__label { font-weight: 600; }
 .remote-pairing__status, .remote-pairing__fp { color: var(--dim); font-size: 12px; }
 .remote-pairing__devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+/* Pending questions are actionable attention, not background progress. */
+.sb-question-pending {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font: 600 10px/1 var(--font-ui);
+  white-space: nowrap;
+}
+
+.sb-question-pending .ico {
+  width: 11px;
+  height: 11px;
+}
+
+.sb-sess.waiting-answer .sb-sesstext {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.sb-sess.waiting-answer .sb-session-meta {
+  padding-right: 0;
+}
+
+.question-count {
+  color: var(--dim2);
+  font-size: 11px;
+}
+
+.question-inline-form {
+  position: relative;
+  margin-top: 0;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, var(--bg));
+}
+
+.question-inline-form > .question-queue {
+  position: absolute;
+  z-index: 1;
+  top: 18px;
+  right: 22px;
+}
+
+.question-dialog-body {
+  padding: 22px;
+}
+
+.question-field legend {
+  margin-bottom: 16px;
+}
+
+.question-field legend > span:last-child {
+  gap: 7px;
+}
+
+.question-field legend b {
+  color: var(--accent);
+  font: 650 11px/1 var(--font-ui);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.question-field legend span span {
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 620;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.question-index {
+  padding-top: 3px;
+}
+
+.question-options {
+  gap: 8px;
+}
+
+.question-option {
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 11px;
+  min-height: 58px;
+  padding: 11px 13px;
+  border-color: var(--border2);
+  background: var(--panel2);
+}
+
+.question-option.selected {
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel2));
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+}
+
+.question-option b {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.question-option small {
+  font-size: 11.5px;
+}
+
+.question-recommended {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, white);
+  font: 650 9.5px/1.2 var(--font-ui);
+  font-style: normal;
+}
+
+.question-other-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  outline: none;
+  font: 12.5px/1.4 var(--font-ui);
+}
+
+.question-other-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.question-free-text-input {
+  min-height: 46px;
+}
+
+.question-preview {
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+}
+
+.question-preview > span {
+  color: var(--dim3);
+  font: 10px/1 var(--font-mono);
+}
+
+.question-dialog-foot {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 34%, transparent);
+}
+
+.question-status {
+  min-width: 0;
+  color: var(--dim3);
+  font-size: 11px;
+}
+
+.question-status.complete {
+  color: var(--dim2);
+}
+
+.question-status.error {
+  color: var(--bad);
+}
+
+.question-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.question-cancel,
+.question-submit {
+  min-height: 36px;
+}
+
+.question-shortcut {
+  margin-left: 6px;
+  color: inherit;
+  font: 10px/1 var(--font-mono);
+  opacity: 0.72;
+}

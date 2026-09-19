@@ -2,7 +2,6 @@ import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } 
 import type { AgentIntervention, AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import type { ProviderId } from '@shared/provider'
 import Markdown from './MarkdownImpl'
-import { Icon } from './primitives/Icon'
 
 const providerLabels = {
   claude: 'Claude',
@@ -11,6 +10,45 @@ const providerLabels = {
   opencode: 'OpenCode',
   pi: 'Pi'
 } satisfies Record<ProviderId, string>
+
+const GENERIC_OPTION_DESCRIPTIONS = new Set(['选择此项'])
+const GENERATED_FREE_TEXT_LABELS = new Set(['type something', 'type something.'])
+
+export function questionDisplayCopy(header: string, question: string): { header: string; question: string } {
+  const cleanHeader = header.trim()
+  const cleanQuestion = question.trim()
+  if (cleanHeader !== cleanQuestion) return { header: cleanHeader, question: cleanQuestion }
+  const bracketed = cleanQuestion.match(/^\[([^\]\n]{1,16})\]\s*(.+)$/)
+  return bracketed
+    ? { header: bracketed[1].trim(), question: bracketed[2].trim() }
+    : { header: '', question: cleanQuestion }
+}
+
+export function isGeneratedFreeTextOption(label: string): boolean {
+  return GENERATED_FREE_TEXT_LABELS.has(label.trim().toLowerCase())
+}
+
+export function optionDisplayCopy(label: string, description: string): {
+  label: string
+  description: string
+  recommended: boolean
+} {
+  let cleanLabel = label.trim().replace(/^\d+[.)、]\s*/, '')
+  const recommended = /[（(]推荐[）)]/.test(cleanLabel)
+  cleanLabel = cleanLabel.replace(/\s*[（(]推荐[）)]\s*/g, ' ').trim()
+  let cleanDescription = description.trim()
+  if (GENERIC_OPTION_DESCRIPTIONS.has(cleanDescription) || cleanDescription === `${label.trim()}这次操作`) {
+    cleanDescription = ''
+  }
+  if (!cleanDescription) {
+    const split = cleanLabel.match(/^(.+?)\s+[—–]\s+(.+)$/)
+    if (split) {
+      cleanLabel = split[1].trim()
+      cleanDescription = split[2].trim()
+    }
+  }
+  return { label: cleanLabel, description: cleanDescription, recommended }
+}
 
 export interface QuestionDraft {
   selected: string[]
@@ -22,7 +60,10 @@ export type QuestionDrafts = Record<string, QuestionDraft>
 
 export function initialQuestionDrafts(request: AgentQuestionRequest): QuestionDrafts {
   return Object.fromEntries(
-    request.questions.map((question) => [question.question, { selected: [], useOther: question.inputMode != null, other: '' }])
+    request.questions.map((question) => [
+      question.question,
+      { selected: [], useOther: question.options.length === 0, other: '' }
+    ])
   )
 }
 
@@ -32,19 +73,22 @@ export function buildQuestionAnswers(request: AgentQuestionRequest, drafts: Ques
     const draft = drafts[question.question]
     if (!draft) return null
     if (!question.multiSelect) {
-      const answer = draft.useOther ? draft.other.trim() : draft.selected[0]
+      const selectedOption = question.options.find((option) => option.label === draft.selected[0])
+      const answer = draft.useOther ? draft.other.trim() : selectedOption?.answerValue ?? selectedOption?.label
       if (!answer) return null
       answers[question.question] = answer
       continue
     }
-    const selected = question.options.filter((option) => draft.selected.includes(option.label)).map((option) => option.label)
+    const selectedOptions = question.options.filter((option) => draft.selected.includes(option.label))
+    const selected = selectedOptions.map((option) => option.answerValue ?? option.label)
     if (draft.useOther) {
       const other = draft.other.trim()
       if (!other) return null
       selected.push(other)
     }
     if (selected.length === 0) return null
-    answers[question.question] = selected.join(', ')
+    const separator = selectedOptions.some((option) => option.answerValue) ? ',' : ', '
+    answers[question.question] = selected.join(separator)
   }
   return answers
 }
@@ -147,104 +191,113 @@ export function AskUserQuestionInline({
       onSubmit={submit}
       onKeyDown={onFormKeyDown}
     >
-      <header className="question-dialog-head">
-        <div>
-          <h3 id={titleId}>{providerLabels[request.providerId ?? 'claude']} 需要你的选择</h3>
-          <p>{request.questions.length} 个问题 · 回答后继续当前任务</p>
-        </div>
-        {queuedCount > 1 && <span className="question-queue">还有 {queuedCount - 1} 组待回答</span>}
-      </header>
+      <h3 id={titleId} className="visually-hidden">
+        {providerLabels[request.providerId ?? 'claude']} 需要你的选择
+      </h3>
+      {queuedCount > 1 && <span className="question-queue">还有 {queuedCount - 1} 组待回答</span>}
 
       <div className="question-dialog-body">
         {request.questions.map((question, questionIndex) => {
           const draft = drafts[question.question]
-          const selectedPreviews = question.options.filter(
+          const display = questionDisplayCopy(question.header, question.question)
+          const options = question.options.filter((option) => !isGeneratedFreeTextOption(option.label))
+          const selectedPreviews = options.filter(
             (option) => draft.selected.includes(option.label) && option.preview
           )
           return (
               <fieldset className="question-field" key={question.question}>
                 <legend>
-                  <span className="question-index">{String(questionIndex + 1).padStart(2, '0')}</span>
+                  {request.questions.length > 1 && (
+                    <span className="question-index">{String(questionIndex + 1).padStart(2, '0')}</span>
+                  )}
                   <span>
-                    <b>{question.header}</b>
-                    <span>{question.question}</span>
+                    {display.header && <b>{display.header}</b>}
+                    <span>{display.question}</span>
                   </span>
                 </legend>
-                <div className="question-options">
-                  {question.inputMode === 'multiline' ? (
-                    <textarea
-                      autoFocus={questionIndex === 0}
-                      className="question-other-input question-editor-input"
-                      aria-label={`${question.header}的回答`}
-                      value={draft.other}
-                      maxLength={100_000}
-                      placeholder="请输入多行内容…"
-                      rows={8}
-                      onChange={(event) => setDrafts((current) => ({
+                {options.length === 0 ? question.inputMode === 'multiline' ? (
+                  <textarea
+                    autoFocus={questionIndex === 0}
+                    className="question-other-input question-free-text-input question-editor-input"
+                    aria-label={`${display.header || '问题'}的回答`}
+                    value={draft.other}
+                    maxLength={100_000}
+                    placeholder={question.placeholder || '请输入多行内容…'}
+                    rows={8}
+                    onChange={(event) => setDrafts((current) => ({
+                      ...current,
+                      [question.question]: { ...current[question.question], useOther: true, other: event.target.value }
+                    }))}
+                  />
+                ) : (
+                  <input
+                    autoFocus={questionIndex === 0}
+                    className="question-other-input question-free-text-input"
+                    aria-label={`${display.header || '问题'}的回答`}
+                    value={draft.other}
+                    maxLength={4_000}
+                    placeholder={question.placeholder || '请输入回答…'}
+                    onChange={(event) =>
+                      setDrafts((current) => ({
                         ...current,
-                        [question.question]: { ...current[question.question], other: event.target.value }
-                      }))}
-                    />
-                  ) : question.inputMode === 'singleline' ? (
-                    <input
-                      autoFocus={questionIndex === 0}
-                      className="question-other-input"
-                      aria-label={`${question.header}的回答`}
-                      value={draft.other}
-                      maxLength={4_000}
-                      placeholder="请输入回答…"
-                      onChange={(event) => setDrafts((current) => ({
-                        ...current,
-                        [question.question]: { ...current[question.question], other: event.target.value }
-                      }))}
-                    />
-                  ) : question.options.map((option, optionIndex) => {
-                    const checked = draft.selected.includes(option.label)
-                    return (
-                      <label className={`question-option ${checked ? 'selected' : ''}`} key={option.label}>
-                        <input
-                          autoFocus={questionIndex === 0 && optionIndex === 0}
-                          type={question.multiSelect ? 'checkbox' : 'radio'}
-                          name={`question-${request.questionId}-${questionIndex}`}
-                          checked={checked}
-                          onChange={() => toggleOption(question.question, option.label, question.multiSelect)}
-                        />
-                        <span>
-                          <b>{option.label}</b>
-                          <small>{option.description}</small>
-                        </span>
-                      </label>
-                    )
-                  })}
-                  {!question.inputMode && <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
-                    <input
-                      type={question.multiSelect ? 'checkbox' : 'radio'}
-                      name={`question-${request.questionId}-${questionIndex}`}
-                      checked={draft.useOther}
-                      onChange={() => toggleOther(question.question, question.multiSelect)}
-                    />
-                    <span>
-                      <b>其他</b>
-                      <small>输入一个不在上述选项中的回答</small>
-                    </span>
-                  </label>}
-                  {!question.inputMode && draft.useOther && (
-                    <input
-                      autoFocus
-                      className="question-other-input"
-                      aria-label={`${question.header}的其他回答`}
-                      value={draft.other}
-                      maxLength={4_000}
-                      placeholder="请输入回答…"
-                      onChange={(event) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [question.question]: { ...current[question.question], other: event.target.value }
-                        }))
-                      }
-                    />
-                  )}
-                </div>
+                        [question.question]: { ...current[question.question], useOther: true, other: event.target.value }
+                      }))
+                    }
+                  />
+                ) : (
+                  <div className="question-options">
+                    {options.map((option, optionIndex) => {
+                      const checked = draft.selected.includes(option.label)
+                      const copy = optionDisplayCopy(option.label, option.description)
+                      return (
+                        <label className={`question-option ${checked ? 'selected' : ''}`} key={option.label}>
+                          <input
+                            autoFocus={questionIndex === 0 && optionIndex === 0}
+                            type={question.multiSelect ? 'checkbox' : 'radio'}
+                            name={`question-${request.questionId}-${questionIndex}`}
+                            checked={checked}
+                            onChange={() => toggleOption(question.question, option.label, question.multiSelect)}
+                          />
+                          <span>
+                            <b>
+                              {copy.label}
+                              {copy.recommended && <em className="question-recommended">推荐</em>}
+                            </b>
+                            {copy.description && <small>{copy.description}</small>}
+                          </span>
+                        </label>
+                      )
+                    })}
+                    <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
+                      <input
+                        type={question.multiSelect ? 'checkbox' : 'radio'}
+                        name={`question-${request.questionId}-${questionIndex}`}
+                        checked={draft.useOther}
+                        onChange={() => toggleOther(question.question, question.multiSelect)}
+                      />
+                      <span>
+                        <b>其他</b>
+                        <small>输入一个不在上述选项中的回答</small>
+                      </span>
+                    </label>
+                    {draft.useOther && (
+                      <input
+                        autoFocus
+                        className="question-other-input"
+                        aria-label={`${question.header}的其他回答`}
+                        value={draft.other}
+                        maxLength={4_000}
+                        placeholder="请输入回答…"
+                        onChange={(event) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [question.question]: { ...current[question.question], other: event.target.value }
+                          }))
+                        }
+                      />
+                    )}
+                  </div>
+                )}
                 {selectedPreviews.map((option) => (
                   <div className="question-preview" key={option.label}>
                     <span>{option.label} · PREVIEW</span>
@@ -262,16 +315,15 @@ export function AskUserQuestionInline({
           className={`question-status ${error ? 'error' : missing > 0 ? 'incomplete' : 'complete'}`}
           aria-live="polite"
         >
-          {!error && <Icon name={missing > 0 ? 'alert' : 'check'} />}
-          {error ? <span className="question-error">{error}</span> : missing > 0 ? `还需回答 ${missing} 个问题` : '回答完整，可提交'}
+          {error ? <span className="question-error">{error}</span> : missing > 0 ? '选择后即可继续' : '已选择，可继续'}
         </div>
         <div className="question-actions">
           <button type="button" className="btn question-cancel" disabled={submitting} onClick={cancel}>
-            取消提问
+            取消
           </button>
           <button type="submit" className="btn primary question-submit" disabled={!answers || submitting}>
             {submitting ? '正在提交…' : '提交并继续'}
-            <span className="question-shortcut" aria-hidden="true">⌘ Enter</span>
+            <span className="question-shortcut" aria-hidden="true">⌘↵</span>
           </button>
         </div>
       </footer>

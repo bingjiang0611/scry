@@ -80,6 +80,7 @@ describe('runtime CLI discovery constraints', () => {
         PATH: '/shell/bin:/usr/bin',
         SSH_AUTH_SOCK: '/tmp/agent.sock',
         HTTPS_PROXY: 'http://proxy.example.test',
+        NODE_USE_ENV_PROXY: '0',
         OPENAI_API_KEY: 'provider-key',
         AWS_PROFILE: 'bedrock-profile',
         DATABASE_URL: 'must-not-import',
@@ -93,6 +94,7 @@ describe('runtime CLI discovery constraints', () => {
       PATH: '/shell/bin:/usr/bin',
       SSH_AUTH_SOCK: '/tmp/agent.sock',
       HTTPS_PROXY: 'http://proxy.example.test',
+      NODE_USE_ENV_PROXY: '0',
       OPENAI_API_KEY: 'provider-key',
       AWS_PROFILE: 'bedrock-profile'
     })

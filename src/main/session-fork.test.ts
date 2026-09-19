@@ -47,6 +47,21 @@ describe('selected-turn session fork boundary', () => {
     })).toThrow('轮次边界已变化')
   })
 
+  it('accepts a settled provider failure as a recoverable branch boundary', () => {
+    const failed = {
+      ...archive,
+      turns: [{ ...archive.turns[0], status: 'failed' as const }]
+    }
+    const verified = verifyForkArchiveBoundary(failed, {
+      sourceRunId: 'run-1',
+      sourceProviderTurnId: 'turn-1',
+      sourceForkTurnId: 'turn-1'
+    })
+
+    expect(verified.source.status).toBe('failed')
+    expect(verified.prefix).toHaveLength(1)
+  })
+
   it('rejects incomplete source turns', () => {
     const incomplete = {
       ...archive,
@@ -56,6 +71,6 @@ describe('selected-turn session fork boundary', () => {
       sourceRunId: 'run-1',
       sourceProviderTurnId: 'turn-1',
       sourceForkTurnId: 'turn-1'
-    })).toThrow('已完成轮次')
+    })).toThrow('已结束轮次')
   })
 })

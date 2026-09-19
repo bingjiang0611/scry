@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type {
   AgentInputAttachment,
@@ -8,8 +8,10 @@ import type {
   AgentStopState
 } from '@shared/runtime'
 import { applyTraceBatch } from '../format'
-import type { ParsedTurn, TraceBacklogState } from '../env'
+import type { ParsedTurn, TraceBacklogState, TraceBatchReceipt } from '../env'
 import type { Turn } from '../format'
+
+const useCommitEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 interface TurnDoneEvent {
   runId: string
@@ -419,6 +421,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const [stopStates, setStopStates] = useState<StopStateMap>({})
   const [traceHealth, setTraceHealth] = useState<TraceLiveHealth>(TRACE_LIVE_HEALTHY)
   const [historyWindow, setHistoryWindow] = useState<SessionHistoryWindow | null>(null)
+  const [traceCommitVersion, setTraceCommitVersion] = useState(0)
   // 窗口需要同步可读：拼接更早一页时必须在发起前就能判定响应是否过期。
   const historyWindowRef = useRef<SessionHistoryWindow | null>(null)
   const clearedRuns = useRef<Set<string>>(new Set())
@@ -428,6 +431,8 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const focusQuestionDeltasRef = useRef<{ runId: string; deltas: PendingQuestionDelta[] } | null>(null)
   const pendingStartLifecycleRef = useRef<RunLifecycleDelta[] | null>(null)
   const traceBuf = useRef<TraceEvent[]>([])
+  const pendingTraceReceipts = useRef<TraceBatchReceipt[]>([])
+  const committedTraceReceipts = useRef<TraceBatchReceipt[]>([])
   const rafId = useRef<number | null>(null)
   const flushTimeoutId = useRef<number | null>(null)
   const callbacksRef = useRef(callbacks)
@@ -443,10 +448,27 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     rafId.current = null
     flushTimeoutId.current = null
     const buf = traceBuf.current
-    if (buf.length === 0) return
+    const receipts = pendingTraceReceipts.current
+    if (buf.length === 0 && receipts.length === 0) return
     traceBuf.current = []
-    setTurns((prev) => applyTraceBatch(prev, buf, clearedRuns.current))
+    pendingTraceReceipts.current = []
+    if (buf.length > 0) setTurns((prev) => applyTraceBatch(prev, buf, clearedRuns.current))
+    committedTraceReceipts.current.push(...receipts)
+    // A separate commit marker guarantees an acknowledgement effect even when every event was a
+    // duplicate and React legitimately preserves the turns reference.
+    setTraceCommitVersion((value) => value + 1)
   }, [])
+
+  useCommitEffect(() => {
+    const receipts = committedTraceReceipts.current
+    if (receipts.length === 0) return
+    committedTraceReceipts.current = []
+    for (const receipt of receipts) {
+      void window.scry.traceAck?.(receipt).catch(() => {
+        // Main/window teardown resets the credit ledger; canonical evidence is independent.
+      })
+    }
+  }, [traceCommitVersion])
 
   const prepareRunFocus = useCallback((runId: string): void => {
     resyncGeneration.current++
@@ -634,7 +656,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       setRunning(false)
     }
 
-    const offTrace = window.scry.onTrace((events) => {
+    const offTrace = window.scry.onTrace((events, receipt) => {
       let accepted = 0
       for (const event of events) {
         if (clearedRuns.current.has(event.runId)) continue
@@ -643,7 +665,14 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
         traceBuf.current.push(event)
         accepted += 1
       }
-      if (accepted === 0) return
+      if (receipt) pendingTraceReceipts.current.push(receipt)
+      if (accepted === 0) {
+        // The batch was intentionally ignored (cleared or non-focused run), so it is already
+        // consumed and does not need a React commit barrier.
+        const ignoredReceipt = pendingTraceReceipts.current.pop()
+        if (ignoredReceipt) void window.scry.traceAck?.(ignoredReceipt).catch(() => {})
+        return
+      }
       // 一批 trace 最多安排一次帧提交和一个兜底定时器；FIFO 顺序沿用 main 批次。
       if (rafId.current == null) rafId.current = requestAnimationFrame(flushTrace)
       if (flushTimeoutId.current == null) flushTimeoutId.current = window.setTimeout(flushTrace, 250)

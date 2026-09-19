@@ -74,6 +74,17 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 | 修改对应领域/边界 | [检查清单](docs/agent/change-checklists.md)，只展开受影响领域 |
 | 普通代码、UI、跨边界或发布验证 | [验证与交付](docs/agent/verification.md)，按下述范围选择小节 |
 
+## 测试维护纪律
+
+- 先按业务/权限合同写验收场景；关键回归证明一次旧实现或故意破坏保护时失败。测试可以由 AI 维护，但删断言、改预期、skip、扩大超时必须说明依据；首次失败不能被重跑通过抹掉。
+- 本地 focused 使用 `npm run test:unit -- <test-files>`；`npm test` 是 unit 与 shell 的复合入口。合入沿用现有 CI，macOS gate 同时执行 `npm run test:renderer:ui`（含 Credits），避免有脚本却没有门禁。
+- DOM/事件问题走现有隔离 Electron fixture；CSS 源码、SSR 或程序化 `.click()` 不单独证明 cascade、坐标命中与焦点行为。main IPC 拒绝测试必须触发生产注册 wrapper 并证明特权 listener 未执行，不能只看 iframe 没有 preload API。
+- shell fixture 按参数记录并检查 argv 边界及退出码，不能用 `$*` 展平后 grep 证明含空格路径正确。持久化、SQLite 与 Provider transport 优先复用现有真实临时目录/本地进程测试，不绕过本次风险边界。
+- `P0_PROBE`、`P1_PROBE`、`BILLING_ADMIN_REAL` 默认关闭；真实探针仅在明确账号/费用授权后执行，使用临时 workspace/HOME/配置与凭据 allowlist，结束后确认进程收敛再清理。不得在当前开发仓库直接驱动真实 Agent。
+- 超时先调查 fixture、资源争用和子进程收敛，不先加 sleep/retry。报告具体环境、执行范围、skip、首轮失败及未验证项；组件 smoke 不等于完整 App 或真实 Provider 验收。
+
+- `npm run test:coverage` 是 Node CI 的 unit/contract 入口，同时保存覆盖率报告。对比固定源码与测试范围；并行 WIP、focused 与 full 的数字分别报告。报告目录不能复用源码/备份目录，细节见验证文档。
+
 ## 最小验证与完成条件
 
 - 纯文档/Agent 配置：`git diff --check`，核对引用路径、命令、合同与边界；不构建、不启动 App、不升版本。改可执行脚本则按代码处理。

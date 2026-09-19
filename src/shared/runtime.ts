@@ -50,6 +50,7 @@ export function classifyRunTermination(evidence: RunTerminationEvidence): RunTer
   }
   if (
     /context_length_exceeded|context[ _-]?overflow/.test(combined) ||
+    /\bhttp[_ -]?413\b|payload too large|request entity too large/.test(combined) ||
     /prompt[^\n]*(?:is )?too long/.test(combined) ||
     /input[^\n]*(?:too long|exceed)[^\n]*(?:context|token)/.test(combined) ||
     /(?:prompt|input)[^\n]*(?:context|token)[^\n]*(?:limit|maximum)[^\n]*(?:exceed|reached)/.test(combined) ||
@@ -211,6 +212,8 @@ export interface AgentQuestionOption {
   label: string
   description: string
   preview?: string
+  /** Provider-specific value returned when the visible option is selected. */
+  answerValue?: string
 }
 
 export interface AgentQuestionPrompt {
@@ -218,6 +221,8 @@ export interface AgentQuestionPrompt {
   header: string
   options: AgentQuestionOption[]
   multiSelect: boolean
+  /** Optional input hint for provider-native free-text prompts. */
+  placeholder?: string
   /** Native input/editor requests have no synthetic choice list. */
   inputMode?: 'singleline' | 'multiline'
 }
@@ -676,11 +681,27 @@ export function normalizeAgentQuestionRequest(
       const description = exactBoundedText(option.description, 4_000)
       if (!label || !description || options.some((candidate) => candidate.label === label)) return null
       const preview = exactBoundedText(option.preview, 20_000)
-      options.push({ label, description, ...(preview ? { preview } : {}) })
+      const answerValue = exactBoundedText(option.answerValue, 240)
+      options.push({
+        label,
+        description,
+        ...(preview ? { preview } : {}),
+        ...(answerValue ? { answerValue } : {})
+      })
     }
-    seen.add(question)
+    const placeholder = typeof value.placeholder === 'string' && value.placeholder.length <= 500
+      ? value.placeholder
+      : undefined
     const inputMode = value.inputMode === 'multiline' ? 'multiline' : value.inputMode === 'singleline' ? 'singleline' : undefined
-    questions.push({ question, header, options, multiSelect: value.multiSelect === true, ...(inputMode ? { inputMode } : {}) })
+    seen.add(question)
+    questions.push({
+      question,
+      header,
+      options,
+      multiSelect: value.multiSelect === true,
+      ...(placeholder ? { placeholder } : {}),
+      ...(inputMode ? { inputMode } : {})
+    })
   }
   return {
     runId,

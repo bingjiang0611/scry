@@ -30,6 +30,20 @@ export const MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES = 64 * 1024 * 1024
 
 export type PreparedAttachment = AgentInputAttachment & { path: string }
 
+export function providerAttachmentPrompt(
+  providerId: ProviderId,
+  prompt: string,
+  attachments: PreparedAttachment[]
+): string {
+  const text = prompt.trim()
+  if (attachments.length === 0 || providerId === 'pi') return text
+  const lines = attachments.map((attachment, index) => {
+    const size = attachment.size ? `, ${Math.round(attachment.size / 1024)} KB` : ''
+    return `${index + 1}. ${attachment.name} (${attachment.mimeType}${size}) local copy: ${attachment.path}`
+  })
+  return [text, `Scry pasted image attachments:\n${lines.join('\n')}`].filter(Boolean).join('\n\n')
+}
+
 export interface StoredAttachmentInline {
   storage: 'inline'
   kind: 'image'

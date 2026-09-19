@@ -38,20 +38,33 @@ async function exercise() {
   thinking.querySelector('summary').click()
   await waitFor(() => thinking.open === true && thinking.querySelector('.think-text')?.getBoundingClientRect().height > 0)
 
+  const permissionTrigger = document.querySelector('#model-effort [aria-label="权限"]')
   const agentTrigger = document.querySelector('#model-effort .clibtn')
   const modelEffortTrigger = document.querySelector('#model-effort [aria-label="选择 Model 与 Effort"]')
   check(modelEffortTrigger.textContent.includes('Ultimate') && modelEffortTrigger.textContent.includes('默认'), 'Combined Model/Effort trigger lost current values')
+  permissionTrigger.click()
+  await waitFor(() => document.querySelector('#model-effort [aria-label="Agent 操作审批方式"]') != null)
+  check(text('#model-effort').includes('如何批准 Agent 操作？'), 'Permission popover heading is missing')
+  check(document.querySelectorAll('#model-effort [role="option"]').length === 3, 'Permission popover lost Provider options')
+  check(document.querySelector('#model-effort [role="option"][aria-selected="true"]')?.textContent.includes('默认审批'), 'Permission popover lost current selection')
+  const autoReviewOption = [...document.querySelectorAll('#model-effort [role="option"]')].find((option) => option.textContent.includes('自动审查'))
+  autoReviewOption.click()
+  await waitFor(() => permissionTrigger.textContent.includes('自动审查'))
+  check(document.querySelector('#model-effort [aria-label="Agent 操作审批方式"]') == null, 'Permission selection did not close the popover')
+  permissionTrigger.click()
+  await waitFor(() => document.querySelector('#model-effort [aria-label="Agent 操作审批方式"]') != null)
   agentTrigger.click()
   await waitFor(() => document.querySelector('#model-effort .climenu') != null)
+  check(document.querySelector('#model-effort [aria-label="Agent 操作审批方式"]') == null, 'Permission and Agent menus overlapped')
   modelEffortTrigger.click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="Model 与 Effort"]') != null)
   check(document.querySelector('#model-effort .climenu') == null, 'Agent and Model/Effort menus overlapped')
   check(text('#model-effort').includes('Ultimate'), 'Initial Model row is missing')
   const effortPopover = document.querySelector('#model-effort .model-effort-popover')
   const currentModelButton = document.querySelector('#model-effort .model-effort-current')
-  const effortLabel = currentModelButton.querySelector('.model-effort-current-effort')
+  const effortLabel = effortPopover.querySelector('.model-effort-current-effort')
   const modelLabel = currentModelButton.querySelector('.model-effort-current-model')
-  const drillChevron = effortLabel.querySelector('.chev')
+  const drillChevron = currentModelButton.querySelector('.chev')
   const effortSlider = document.querySelector('#model-effort [aria-label="推理强度"]')
   const effortDots = [...document.querySelectorAll('#model-effort .model-effort-slider-dots i')]
   check(effortSlider?.type === 'range' && effortSlider.max === '5', 'Six-option Effort slider is incomplete')
@@ -62,11 +75,11 @@ async function exercise() {
   check(document.querySelector('#model-effort [aria-label="重置 Effort"]') == null, 'Removed Effort reset is still rendered')
   check(effortPopover.getBoundingClientRect().width <= 260, 'Model/Effort popover is wider than the compact reference')
   check(document.querySelector('#model-effort .model-effort-slider').getBoundingClientRect().height <= 32, 'Effort slider is taller than the compact design')
-  check(effortLabel.textContent.includes('默认'), 'Current Effort is not the primary summary line')
-  check(modelLabel.textContent.includes('Ultimate'), 'Current Model is not the secondary summary line')
-  check(effortLabel.getBoundingClientRect().bottom <= modelLabel.getBoundingClientRect().top + 2, 'Effort is not rendered above Model')
-  check(getComputedStyle(effortLabel).color !== getComputedStyle(modelLabel).color, 'Effort and Model lost their primary/secondary color hierarchy')
-  check(drillChevron.getBoundingClientRect().left - effortLabel.firstElementChild.getBoundingClientRect().right <= 8, 'Effort chevron drifted away from the text')
+  check(effortLabel.textContent.includes('默认'), 'Current Effort value is missing')
+  check(modelLabel.textContent.includes('Ultimate'), 'Current Model value is missing')
+  check(modelLabel.getBoundingClientRect().bottom <= effortLabel.getBoundingClientRect().top + 2, 'Model and Effort rows are out of order')
+  check(text('#model-effort').includes('模型') && text('#model-effort').includes('推理强度'), 'Model/Effort field labels are missing')
+  check(drillChevron.getBoundingClientRect().left > modelLabel.getBoundingClientRect().right, 'Model drill-in chevron is misplaced')
 
   const rangeValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
   check(rangeValueSetter, 'Range input value setter unavailable')
@@ -103,7 +116,7 @@ async function exercise() {
   await waitFor(() => document.querySelector('#pinned aside') != null)
   check(button('#pinned', 'hsf-invoke').textContent.includes('×1'), 'Pinned call count missing')
   check(!text('#pinned').includes('加载推断'), 'Pinned inference suffix should stay out of the compact row')
-  check(text('#overview').includes('Skill 1（含加载推断）'), 'Overview disagrees with pinned count')
+  check(document.querySelector('#overview [aria-label="Skill 1，展开明细"]') != null, 'Overview disagrees with pinned count')
 
   button('#pinned', 'hsf-invoke').click()
   await waitFor(() => document.querySelector('#selection').dataset.clicks === '1')
@@ -174,8 +187,8 @@ async function exercise() {
   await waitFor(() => text('#pinned').includes('browser / navigate'))
   check(!text('#pinned').includes('hsf-invoke'), 'Pending Read counted as successful loading')
   document.querySelector('#success').click()
-  await waitFor(() => text('#pinned').includes('hsf-invoke') && text('#overview').includes('Skill 1（含加载推断）'))
-  check(text('#overview').includes('Skill 1（含加载推断）'), 'Late result did not update Overview')
+  await waitFor(() => text('#pinned').includes('hsf-invoke') && document.querySelector('#overview [aria-label="Skill 1，展开明细"]') != null)
+  check(document.querySelector('#overview [aria-label="Skill 1，展开明细"]') != null, 'Late result did not update Overview')
   document.querySelector('#failed').click()
   await waitFor(() => !text('#pinned').includes('hsf-invoke'))
   check(document.querySelector('#overview [aria-label="Skill 0，无明细"]') != null, `Failed session retained successful Skill count: ${text('#overview').slice(0, 700)}`)
@@ -183,10 +196,35 @@ async function exercise() {
   await waitFor(() => text('#pinned').includes('×2'))
   check(button('#pinned', 'hsf-invoke').textContent.includes('×2'), 'Cross-turn Skill count lost')
   check(button('#pinned', 'browser / navigate').textContent.includes('×2'), 'Cross-turn MCP count lost')
-  check(text('#overview').includes('Skill 2（含加载推断）'), 'Multi-turn consumers disagree')
+  check(
+    [...document.querySelectorAll('#overview .turn-call-group.skill .turn-call-count')]
+      .reduce((sum, node) => sum + Number(node.textContent), 0) === 2,
+    'Multi-turn consumers disagree'
+  )
   const archiveButton = (name) => document.querySelector(`#archive-sidebar [aria-label="存档会话：${name}"]`)
   const sidebarRows = () => document.querySelectorAll('#archive-sidebar .sb-sess-row').length
   await waitFor(() => sidebarRows() === 2)
+  // This runs in the same isolated Electron DOM fixture as the Sidebar archive flow. Use a
+  // focused row to activate the real :focus-within cascade, then test viewport coordinates rather
+  // than only reading CSS source text: the action overlay must expose buttons without creating a
+  // pointer-events gap between the overlay and the session button.
+  const sidebarRow = document.querySelector('#archive-sidebar .sb-sess-row')
+  const sidebarSession = sidebarRow?.querySelector('.sb-sess')
+  const sidebarActions = sidebarRow?.querySelector('.sb-sess-acts')
+  const sidebarAction = sidebarActions?.querySelector('.sb-act')
+  check(sidebarRow && sidebarSession && sidebarActions && sidebarAction, 'Sidebar hit-area fixture is incomplete')
+  sidebarAction.focus()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  check(sidebarRow.matches(':focus-within'), 'Focused Sidebar row did not activate its focus cascade')
+  check(getComputedStyle(sidebarActions).pointerEvents === 'none', 'Sidebar action overlay became a hit-test surface')
+  check(getComputedStyle(sidebarAction).pointerEvents === 'auto', 'Focused Sidebar action did not receive pointer events')
+  const actionsRect = sidebarActions.getBoundingClientRect()
+  const sessionRect = sidebarSession.getBoundingClientRect()
+  const actionRect = sidebarAction.getBoundingClientRect()
+  const gapHit = document.elementFromPoint(actionsRect.left + Math.min(4, actionsRect.width / 3), sessionRect.top + sessionRect.height / 2)
+  check(sidebarSession.contains(gapHit), 'Sidebar overlay padding created a coordinate hit-test gap')
+  const actionHit = document.elementFromPoint(actionRect.left + actionRect.width / 2, actionRect.top + actionRect.height / 2)
+  check(sidebarAction.contains(actionHit), 'Sidebar action coordinate did not hit the action button')
   archiveButton('归档目标').click()
   await waitFor(() => document.querySelector('#archive-sidebar .sb-proj-row.active') != null)
   await waitFor(() => archiveButton('归档目标') == null)
@@ -215,7 +253,7 @@ async function exercise() {
   check(document.querySelector('#archive-sidebar .sb-sess[aria-current="true"]')?.textContent.includes('归档目标'), 'Archiving a background session changed the selected conversation')
   button('#archive-sidebar', '撤销').click()
   await waitFor(() => sidebarRows() === 2)
-  return { normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
+  return { normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
 }
 
 try {

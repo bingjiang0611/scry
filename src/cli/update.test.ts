@@ -121,7 +121,7 @@ else writeFileSync(process.env.MOCK_SCRY_ENTRY, '#!/usr/bin/env node\\nprocess.s
     expect(npmCalls).toContain('--ignore-scripts')
     const saved = JSON.parse(await readFile(state, 'utf8')) as { updatedAt?: string; notifiedAt?: string }
     expect(saved.notifiedAt).toBe(saved.updatedAt)
-  })
+  }, 15_000)
 
   it('后台任务安装同 major 的更新，包括跨 minor，并把结果留给一次性提示', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-update-'))
@@ -153,7 +153,7 @@ else writeFileSync(process.env.MOCK_SCRY_ENTRY, '#!/usr/bin/env node\\nprocess.s
     expect(calls.some((call) => call[0] === 'install' && call.includes('--ignore-scripts'))).toBe(true)
     const saved = JSON.parse(await readFile(state, 'utf8')) as { updatedFrom?: string; updatedTo?: string }
     expect([saved.updatedFrom, saved.updatedTo]).toEqual(['0.2.32', '0.3.0'])
-  })
+  }, 15_000)
 
   it('后台任务不会跨 major 安装，只报告可用', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-update-'))

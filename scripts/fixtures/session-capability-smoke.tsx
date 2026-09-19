@@ -8,7 +8,7 @@ import '../../src/renderer/codex-alignment.css'
 import { PinnedSummaryHost, usePinnedSummaryVisibility } from '../../src/renderer/components/PinnedSummary'
 import { OverviewPanel } from '../../src/renderer/components/OverviewPanel'
 import { AssistantTurn } from '../../src/renderer/components/ChatTurn'
-import { CliPicker, ModelEffortPicker } from '../../src/renderer/components/Pickers'
+import { CliPicker, ModelEffortPicker, RunControlSelect } from '../../src/renderer/components/Pickers'
 import { ViewChrome } from '../../src/renderer/components/ViewChrome'
 import { qoderSkillSessionFixture } from '../../src/renderer/__fixtures__/session-capabilities'
 import type { Turn } from '../../src/renderer/format'
@@ -46,7 +46,8 @@ function Fixture() {
   const [panelVisible, setPanelVisible] = useState(false)
   const [model, setModel] = useState('ultimate')
   const [effort, setEffort] = useState('default')
-  const [composerMenu, setComposerMenu] = useState<'agent' | 'modelEffort' | null>(null)
+  const [permission, setPermission] = useState('default')
+  const [composerMenu, setComposerMenu] = useState<'permission' | 'agent' | 'modelEffort' | null>(null)
   const pinnedSummary = usePinnedSummaryVisibility(true, panelVisible)
   const select = (event: TraceEvent) => {
     setClicks((value) => value + 1)
@@ -91,6 +92,21 @@ function Fixture() {
     </section>
     <section id="thinking"><AssistantTurn turn={thinkingTurn} selectedId={null} onSelect={() => undefined} /></section>
     <section id="model-effort" className="runtime-composer">
+      <div className="composer-controls">
+        <RunControlSelect
+          ariaLabel="权限"
+          value={permission}
+          options={[
+            { value: 'default', label: '默认审批', description: '危险操作会暂停并请求你的确认' },
+            { value: 'auto_review', label: '自动审查', description: '由 Provider 的原生审查器判断是否放行' },
+            { value: 'full_access', label: '完全访问', description: '跳过审批并允许 Agent 直接执行操作' }
+          ]}
+          tone={permission === 'full_access' ? 'danger' : undefined}
+          onChange={setPermission}
+          open={composerMenu === 'permission'}
+          onOpenChange={(open) => setComposerMenu(open ? 'permission' : null)}
+        />
+      </div>
       <div className="composer-action-controls">
         <CliPicker
           agents={[{ id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/fixture/qodercli' }]}

@@ -29,15 +29,18 @@ const result = (data: boolean | null, state: CapabilityEnvelope<boolean>['state'
 })
 
 describe('Skill/MCP 操作后的权威状态同步', () => {
-  it('SQLite 持久化完成后刷新统计、范围分析与账单状态', () => {
+  it('SQLite 持久化完成后只刷新已经打开过的范围分析', () => {
     const loadStats = vi.fn()
     const loadBillingState = vi.fn()
     const loadAnalytics = vi.fn()
 
-    applyDataUpdatedEffects({ loadStats, loadBillingState, loadAnalytics })
+    applyDataUpdatedEffects({ loadStats, loadBillingState, loadAnalytics, analyticsActive: false })
 
     expect(loadStats).toHaveBeenCalledOnce()
     expect(loadBillingState).toHaveBeenCalledOnce()
+    expect(loadAnalytics).not.toHaveBeenCalled()
+
+    applyDataUpdatedEffects({ loadStats, loadBillingState, loadAnalytics, analyticsActive: true })
     expect(loadAnalytics).toHaveBeenCalledOnce()
   })
 

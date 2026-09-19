@@ -114,6 +114,7 @@ const LOGIN_SHELL_ENV_NAMES = new Set([
   'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR', 'XDG_CURRENT_DESKTOP',
   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
   'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+  'NODE_USE_ENV_PROXY',
   'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS',
   'NPM_CONFIG_PREFIX', 'npm_config_prefix', 'PNPM_HOME',
   'CODEX_HOME'

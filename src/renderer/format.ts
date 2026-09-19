@@ -164,6 +164,36 @@ export function hasTokenUsage(e: TraceEvent | undefined): boolean {
   return !!e && (e.tokensIn != null || e.tokensOut != null || e.cacheReadTokens != null || e.cacheCreationTokens != null)
 }
 
+export interface CacheHitEvidence {
+  rate: number | null
+  knownResults: number
+  missingResults: number
+}
+
+export function cacheHitEvidence(results: TraceEvent[]): CacheHitEvidence {
+  let cacheRead = 0
+  let eligibleInput = 0
+  let knownResults = 0
+  for (const result of results) {
+    const accounting = tokenCacheAccounting(result)
+    const complete = result.tokensIn != null && result.cacheReadTokens != null &&
+      (accounting === 'input_includes_cache' || result.cacheCreationTokens != null)
+    if (!complete) continue
+    const denominator = accounting === 'input_includes_cache'
+      ? result.tokensIn!
+      : result.tokensIn! + result.cacheReadTokens! + result.cacheCreationTokens!
+    if (denominator <= 0) continue
+    cacheRead += result.cacheReadTokens!
+    eligibleInput += denominator
+    knownResults++
+  }
+  return {
+    rate: eligibleInput > 0 ? Math.min(100, (cacheRead / eligibleInput) * 100) : null,
+    knownResults,
+    missingResults: Math.max(0, results.length - knownResults)
+  }
+}
+
 export function relTime(ms: number): string {
   const d = Date.now() - ms
   if (d < 3600000) return `${Math.max(1, Math.round(d / 60000))}m`

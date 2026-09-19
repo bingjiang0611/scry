@@ -9,6 +9,7 @@ import {
   recoverTraceTurnProgress,
   traceProgressSessionRunIds
 } from './trace-turn-progress'
+import { mergeSessionTurns } from './session-history'
 import { readTraceArchive, upsertTraceArchiveTurn } from './transcript-archive'
 
 const roots: string[] = []
@@ -177,6 +178,54 @@ describe('trace turn progress', () => {
     await expect(recoverTraceTurnProgress(userDataDir, { cwd: '/repo', providerId: 'pi' }))
       .resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
     await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
+  it('keeps a session-bearing Pi pre-turn failure readable in the local archive', async () => {
+    const userDataDir = root()
+    await persistTraceTurnProgress({
+      userDataDir,
+      cwd: '/repo',
+      sessionId: 'pi-session-before-turn',
+      providerId: 'pi',
+      runtimeProvider: 'pi_rpc',
+      turn: {
+        runId: 'run-pi-preflight',
+        userText: '/skill:test diagnose this',
+        items: [{
+          id: 'result',
+          ts: '2026-08-01T00:00:01.000Z',
+          runId: 'run-pi-preflight',
+          kind: 'harness',
+          stage: 'result',
+          text: 'prompt preflight failed',
+          isError: true,
+          runtimeFailureStage: 'runtime'
+        }],
+        done: true,
+        status: 'failed',
+        error: 'prompt preflight failed',
+        ts: 1
+      }
+    })
+
+    await expect(recoverTraceTurnProgress(userDataDir, { cwd: '/repo', providerId: 'pi' }))
+      .resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+    const archive = readTraceArchive({
+      cwd: '/repo', sessionId: 'pi-session-before-turn', providerId: 'pi', userDataDir
+    })
+    expect(archive?.turns).toEqual([
+      expect.objectContaining({
+        runId: 'run-pi-preflight',
+        userText: '/skill:test diagnose this',
+        status: 'failed',
+        error: 'prompt preflight failed'
+      })
+    ])
+    expect(mergeSessionTurns([], archive)[0]).toMatchObject({
+      runId: 'run-pi-preflight',
+      userText: '/skill:test diagnose this',
+      error: 'prompt preflight failed'
+    })
   })
 
   it('never overwrites a richer committed archive with a stale pre-diff snapshot', async () => {

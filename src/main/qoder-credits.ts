@@ -23,6 +23,17 @@ const emptyEvidence = (): QoderCreditEvidence => ({
   source: 'qoder_native_transcript', completeness: 'partial'
 })
 
+const scopeKey = (scope: QoderCreditScope): string =>
+  `${scope.runId}\0${scope.sessionId}\0${scope.cwd}\0${scope.tsStart}`
+
+/** Reconcile an asynchronously read Credit snapshot with the latest SQLite scope.
+ * Stable rows keep their lower-bound evidence, deleted/changed rows are dropped,
+ * and newly arrived rows remain explicitly unavailable until the next refresh. */
+export function reconcileQoderCreditRows(scopes: QoderCreditScope[], rows: QoderCreditRow[]): QoderCreditRow[] {
+  const previous = new Map(rows.map((row) => [scopeKey(row), row.evidence]))
+  return scopes.map((scope) => ({ ...scope, evidence: previous.get(scopeKey(scope)) ?? emptyEvidence() }))
+}
+
 /** Prefer the same TurnUsage evidence persisted by managed recorder. Native reads
  * are only a legacy fallback, never added on top of a recorded turn's credits.
  * Neither path mutates transcripts, archives, records or SQLite. */
@@ -49,11 +60,20 @@ export async function readQoderCreditRows(args: {
       for (const item of scopes) {
         const turn = archive.turns.find((candidate) => candidate.runId === item.runId)
         const credits = turn?.turnEvidence?.usage.value?.credits
+        // The live Qoder SDK stream can omit metering on intermediate assistant
+        // blocks while the completed native transcript contains it. An
+        // unavailable recorder snapshot is therefore not authoritative: keep
+        // it eligible for the native transcript fallback. Known snapshots
+        // (including a real zero-credit request) remain authoritative so the
+        // same request is never added twice.
         if (isCreditUsageEvidence(credits)) {
           rows.get(item.runId)!.evidence = {
             credits: credits.value!.amount ?? null,
             knownRequests: credits.value!.knownRequests, missingRequests: credits.value!.missingRequests,
             matchedTurns: 1, totalTurns: 1, source: 'qoder_recorded_usage', completeness: 'partial'
+          }
+          if (credits.status === 'unavailable') {
+            turns.push({ ...item, providerTurnId: turn?.providerTurnId, forkTurnId: turn?.forkTurnId })
           }
         } else turns.push({ ...item, providerTurnId: turn?.providerTurnId, forkTurnId: turn?.forkTurnId })
       }
@@ -93,7 +113,14 @@ export async function readQoderCreditRows(args: {
       bytes += stat.size
       if (bytes > 64 * 1024 * 1024) break
       const parsed = qoderCreditRequests(await readFile(files[0], 'utf8'), scope.turns)
-      for (const runId of parsed.matched) rows.get(runId)!.evidence.matchedTurns = 1
+      const nativeRunIds = new Set(parsed.requests.map((request) => request.runId))
+      for (const runId of parsed.matched) {
+        // Replace an unavailable recorded snapshot instead of adding native
+        // evidence to its missing counters. If the transcript has no request
+        // evidence yet, retain the recorder's missing-request diagnosis.
+        if (nativeRunIds.has(runId)) rows.get(runId)!.evidence = { ...emptyEvidence(), matchedTurns: 1 }
+        else rows.get(runId)!.evidence.matchedTurns = 1
+      }
       requests.push(...parsed.requests)
     } catch { /* Observation failure must not break the existing USD/token view. */ }
   }

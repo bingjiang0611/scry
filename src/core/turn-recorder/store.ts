@@ -7,7 +7,7 @@ import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn
 import { copyRecorderContent, readRecorderContent } from './content-store.js'
 import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.44'
+export const RECORDER_VERSION = '0.2.45'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -194,6 +194,45 @@ export async function recordStoreStamp(dataRoot: string): Promise<{ count: numbe
   return { count: files.length, maxSequence: files.at(-1)?.sequence ?? 0 }
 }
 
+// Recorder 0.2.16–0.2.18 could serialize empty model events without a text field.
+// Drop only that known placeholder in the read view and mark the evidence partial;
+// canonical bytes and the strict commit validator stay untouched.
+function legacyModelSegmentsReadView(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+  const record = raw as Record<string, unknown>
+  const version = typeof record.recorderVersion === 'string' ? /^0\.2\.(\d+)$/.exec(record.recorderVersion) : null
+  if (record.schemaVersion !== 1 || !version || Number(version[1]) < 16 || Number(version[1]) > 18) return raw
+  const modelSegments = record.modelSegments
+  if (!modelSegments || typeof modelSegments !== 'object' || Array.isArray(modelSegments)) return raw
+  const evidence = modelSegments as Record<string, unknown>
+  if (!Array.isArray(evidence.value)) return raw
+  const keys = new Set(['order', 'at', 'kind', 'text', 'messageId', 'providerItemId', 'parentId', 'agentId'])
+  const isLegacyEmptySegment = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const segment = value as Record<string, unknown>
+    return Object.keys(segment).every((key) => keys.has(key)) &&
+      Number.isSafeInteger(segment.order) && Number(segment.order) >= 0 &&
+      typeof segment.at === 'string' && Number.isFinite(Date.parse(segment.at)) &&
+      (segment.kind === 'text' || segment.kind === 'thinking') &&
+      (segment.text === undefined || segment.text === '') &&
+      ['messageId', 'providerItemId', 'parentId', 'agentId'].every(
+        (key) => segment[key] === undefined || typeof segment[key] === 'string'
+      )
+  }
+  const omitted = evidence.value.filter(isLegacyEmptySegment)
+  if (omitted.length === 0) return raw
+  const value = evidence.value.filter((segment) => !isLegacyEmptySegment(segment))
+  return {
+    ...record,
+    modelSegments: {
+      ...evidence,
+      status: 'partial',
+      value,
+      omissionReason: 'legacy recorder omitted empty model segment text'
+    }
+  }
+}
+
 // Older aggregators wrapped an unavailable residual timing result as partial.
 // Normalize only that known writer defect in the read view; canonical bytes and
 // the strict commit validator stay untouched, and no timing value is invented.
@@ -217,7 +256,7 @@ function legacyModelTimingReadView(raw: unknown): unknown {
 
 export async function readRecordFile(path: string): Promise<AgentTurnRecord> {
   const raw = JSON.parse(await readFile(path, 'utf8')) as unknown
-  const validation = validateAgentTurnRecord(legacyModelTimingReadView(raw))
+  const validation = validateAgentTurnRecord(legacyModelTimingReadView(legacyModelSegmentsReadView(raw)))
   if (!validation.ok) {
     const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
     throw new Error(`invalid turn record: ${path}: ${detail}`)

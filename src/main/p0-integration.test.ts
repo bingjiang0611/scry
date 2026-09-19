@@ -24,6 +24,7 @@ import {
   spanRowsFromItems
 } from './span-ledger'
 import type { TraceEvent } from '../shared/trace'
+import { createClaudeProbeFixture } from './provider-probe-fixture'
 
 const RUN = process.env.P0_PROBE === '1'
 const CLAUDE = process.env.CLAUDE_BIN || `${process.env.HOME}/.nvm/versions/node/v22.22.1/bin/claude`
@@ -32,70 +33,80 @@ const CLAUDE = process.env.CLAUDE_BIN || `${process.env.HOME}/.nvm/versions/node
   it(
     '驱动真实 claude，spans/model_usage/file_ops 落库且跨会话查询返回真实数据',
     async () => {
-      const items: TraceEvent[] = []
-      const runId = 'run-p0-probe'
-      const cwd = process.cwd()
-      items.push(
-        humanEvent('真实集成验证任务', {
-          runId,
-          newId: () => `h-${items.length}`,
-          now: () => new Date().toISOString()
-        })
-      )
-      const handle = runAgent(
-        '用 Bash 跑 `echo p0-integration-ok`；再用 Read 读本仓库的 package.json 头几行。然后只回一句「done」。',
-        runId,
-        (ev) => items.push(ev),
-        { cwd, claudePath: CLAUDE, env: process.env as Record<string, string> }
-      )
-      const res = await handle.promise
-      expect(res.sessionId).toBeTruthy()
-
-      // 真实 SQLite（Node 内置 node:sqlite，临时内存库），走真实 schema + 真实行映射
+      const fixture = await createClaudeProbeFixture()
+      let handle: ReturnType<typeof runAgent> | undefined
       type Stmt = { run: (...p: unknown[]) => unknown; get: (...p: unknown[]) => unknown; all: (...p: unknown[]) => unknown[] }
       type Db = { prepare: (s: string) => Stmt; close: () => void }
-      const sqlite = (await import('node:sqlite')) as unknown as { DatabaseSync: new (p: string) => Db }
-      const db = new sqlite.DatabaseSync(':memory:')
-      for (const stmt of DDL_V1) db.prepare(stmt).run()
-      for (const stmt of DDL_V2) db.prepare(stmt).run()
-      for (const stmt of DDL_V3) db.prepare(stmt).run()
-      for (const stmt of DDL_V13) db.prepare(stmt).run()
-      for (const stmt of DDL_V14) db.prepare(stmt).run()
-      const rows = spanRowsFromItems({ runId, sessionId: res.sessionId, cwd, items, nowMs: Date.now() })
-      const insSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
-      const insMu = db.prepare(sqlInsert('model_usage', MODEL_USAGE_COLS))
-      const insFo = db.prepare(`INSERT INTO file_ops (${FILE_OP_COLS.join(', ')}) VALUES (${FILE_OP_COLS.map(() => '?').join(', ')})`)
-      for (const r of rows.spans) insSpan.run(...(r as unknown[]))
-      for (const r of rows.modelUsage) insMu.run(...(r as unknown[]))
-      for (const r of rows.fileOps) insFo.run(...(r as unknown[]))
+      let db: Db | undefined
+      try {
+        const items: TraceEvent[] = []
+        const runId = 'run-p0-probe'
+        const cwd = fixture.cwd
+        items.push(
+          humanEvent('真实集成验证任务', {
+            runId,
+            newId: () => `h-${items.length}`,
+            now: () => new Date().toISOString()
+          })
+        )
+        handle = runAgent(
+          '用 Bash 跑 `echo p0-integration-ok`；再用 Read 读当前工作区的 package.json 头几行。然后只回一句「done」。',
+          runId,
+          (ev) => items.push(ev),
+          { cwd, claudePath: CLAUDE, env: fixture.env }
+        )
+        const res = await handle.promise
+        expect(res.sessionId).toBeTruthy()
 
-      // §13 成功标准查询
-      const totals = db.prepare(TOTALS_SQL).get() as { cost: number; tin: number; tout: number; turns: number }
-      const topTools = db.prepare(TOP_TOOLS_SQL).all() as { tool: string; n: number; mcp: number }[]
-      const byModel = db.prepare(BY_MODEL_SQL).all() as { model: string; tin: number; tout: number; cost: number }[]
-      const files = db.prepare(`SELECT op, path, source, confidence FROM file_ops`).all() as Record<string, unknown>[]
+        // 真实 SQLite（Node 内置 node:sqlite，临时内存库），走真实 schema + 真实行映射
+        const sqlite = (await import('node:sqlite')) as unknown as { DatabaseSync: new (p: string) => Db }
+        db = new sqlite.DatabaseSync(':memory:')
+        for (const stmt of DDL_V1) db.prepare(stmt).run()
+        for (const stmt of DDL_V2) db.prepare(stmt).run()
+        for (const stmt of DDL_V3) db.prepare(stmt).run()
+        for (const stmt of DDL_V13) db.prepare(stmt).run()
+        for (const stmt of DDL_V14) db.prepare(stmt).run()
+        const rows = spanRowsFromItems({ runId, sessionId: res.sessionId, cwd, items, nowMs: Date.now() })
+        const insSpan = db.prepare(sqlInsert('spans', SPAN_COLS))
+        const insMu = db.prepare(sqlInsert('model_usage', MODEL_USAGE_COLS))
+        const insFo = db.prepare(`INSERT INTO file_ops (${FILE_OP_COLS.join(', ')}) VALUES (${FILE_OP_COLS.map(() => '?').join(', ')})`)
+        for (const r of rows.spans) insSpan.run(...(r as unknown[]))
+        for (const r of rows.modelUsage) insMu.run(...(r as unknown[]))
+        for (const r of rows.fileOps) insFo.run(...(r as unknown[]))
 
-      // eslint-disable-next-line no-console
-      console.log('\n===== P0 §13 真实数据证据 =====')
-      // eslint-disable-next-line no-console
-      console.log('totals:', totals)
-      // eslint-disable-next-line no-console
-      console.log('topTools:', topTools)
-      // eslint-disable-next-line no-console
-      console.log('byModel:', byModel)
-      // eslint-disable-next-line no-console
-      console.log('file_ops:', files)
+        // §13 成功标准查询
+        const totals = db.prepare(TOTALS_SQL).get() as { cost: number; tin: number; tout: number; turns: number }
+        const topTools = db.prepare(TOP_TOOLS_SQL).all() as { tool: string; n: number; mcp: number }[]
+        const byModel = db.prepare(BY_MODEL_SQL).all() as { model: string; tin: number; tout: number; cost: number }[]
+        const files = db.prepare(`SELECT op, path, source, confidence FROM file_ops`).all() as Record<string, unknown>[]
 
-      // 断言：真实花费/token、工具落库、按模型可分、文件足迹 exact
-      expect(totals.turns).toBeGreaterThanOrEqual(1)
-      expect(totals.cost).toBeGreaterThan(0)
-      expect(totals.tin).toBeGreaterThan(0)
-      expect(topTools.length).toBeGreaterThan(0)
-      expect(byModel.length).toBeGreaterThan(0)
-      expect(byModel[0].tin).toBeGreaterThan(0)
-      // 读了 package.json → file_ops 有 read/exact
-      expect(files.some((f) => f.op === 'read' && f.confidence === 'exact')).toBe(true)
-      db.close()
+        // eslint-disable-next-line no-console
+        console.log('\n===== P0 §13 真实数据证据 =====')
+        // eslint-disable-next-line no-console
+        console.log('totals:', totals)
+        // eslint-disable-next-line no-console
+        console.log('topTools:', topTools)
+        // eslint-disable-next-line no-console
+        console.log('byModel:', byModel)
+        // eslint-disable-next-line no-console
+        console.log('file_ops:', files)
+
+        // 断言：真实花费/token、工具落库、按模型可分、文件足迹 exact
+        expect(totals.turns).toBeGreaterThanOrEqual(1)
+        expect(totals.cost).toBeGreaterThan(0)
+        expect(totals.tin).toBeGreaterThan(0)
+        expect(topTools.length).toBeGreaterThan(0)
+        expect(byModel.length).toBeGreaterThan(0)
+        expect(byModel[0].tin).toBeGreaterThan(0)
+        // 读了 package.json → file_ops 有 read/exact
+        expect(files.some((f) => f.op === 'read' && f.confidence === 'exact')).toBe(true)
+      } finally {
+        handle?.interrupt()
+        handle?.forceKill()
+        if (handle) await handle.promise.catch(() => undefined)
+        db?.close()
+        await fixture.cleanup()
+      }
     },
     240000
   )

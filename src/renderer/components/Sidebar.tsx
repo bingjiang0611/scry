@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import type { BackgroundWork } from '@shared/background-work'
+import { sessionAttentionKey } from '@shared/session-attention'
 import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
 import { ModalFrame } from './Modals'
@@ -37,6 +38,8 @@ export function Sidebar({
   activeProviderId,
   activeAgentProfileId,
   runningRunIds = new Set<string>(),
+  waitingQuestionRunIds = new Set<string>(),
+  unreadSessionKeys = new Set<string>(),
   backgroundWorkByRun = {},
   version = '0.1.0',
   onNewChat,
@@ -68,10 +71,12 @@ export function Sidebar({
   activeProviderId?: SessionProviderId
   activeAgentProfileId?: string
   runningRunIds?: ReadonlySet<string>
+  waitingQuestionRunIds?: ReadonlySet<string>
+  unreadSessionKeys?: ReadonlySet<string>
   backgroundWorkByRun?: Readonly<Record<string, BackgroundWork>>
   version?: string
   onNewChat: () => void
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string, running?: boolean) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onRenameSession?: (cwd: string, session: SessionMeta, title: string) => Promise<void>
@@ -233,6 +238,13 @@ export function Sidebar({
                   showProjectName
                   active={isActive(cwd, session)}
                   running={Boolean(session.runId && runningRunIds.has(session.runId))}
+                  waitingForAnswer={Boolean(session.runId && waitingQuestionRunIds.has(session.runId))}
+                  unread={unreadSessionKeys.has(sessionAttentionKey({
+                    providerId: session.providerId,
+                    agentProfileId: session.agentProfileId,
+                    cwd,
+                    sessionId: session.externalSessionId ?? session.sessionId
+                  }))}
                   backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
                   onPick={onPick}
                   onTogglePin={onTogglePin}
@@ -272,21 +284,21 @@ export function Sidebar({
                   <span className="sb-proj-acts">
                     <button
                       type="button"
+                      className="sb-proj-act sb-proj-new"
+                      title={`在 ${p.name} 中新建会话`}
+                      aria-label={`在 ${p.name} 中新建会话 · ${p.cwd}`}
+                      onClick={() => onNewProjectChat(p.cwd)}
+                    >
+                      <Icon name="plus" />
+                    </button>
+                    <button
+                      type="button"
                       className="sb-proj-act sb-proj-more"
                       title={`管理项目 ${p.name}`}
                       aria-label={`管理项目 ${p.name} · ${p.cwd}`}
                       onClick={(event) => openProjectMenu(event, p)}
                     >
                       ···
-                    </button>
-                    <button
-                      type="button"
-                      className="sb-proj-act sb-proj-new"
-                      title={`在 ${p.name} 中新建会话`}
-                      aria-label={`在 ${p.name} 中新建会话 · ${p.cwd}`}
-                      onClick={() => onNewProjectChat(p.cwd)}
-                    >
-                      <Icon name="compose" />
                     </button>
                   </span>
                 )}
@@ -301,6 +313,13 @@ export function Sidebar({
                       projectName={p.name}
                       active={isActive(p.cwd, s)}
                       running={Boolean(s.runId && runningRunIds.has(s.runId))}
+                      waitingForAnswer={Boolean(s.runId && waitingQuestionRunIds.has(s.runId))}
+                      unread={unreadSessionKeys.has(sessionAttentionKey({
+                        providerId: s.providerId,
+                        agentProfileId: s.agentProfileId,
+                        cwd: p.cwd,
+                        sessionId: s.externalSessionId ?? s.sessionId
+                      }))}
                       backgroundWork={s.runId ? backgroundWorkByRun[s.runId] : undefined}
                       onPick={onPick}
                       onTogglePin={onTogglePin}
@@ -471,6 +490,8 @@ function SessionRow({
   showProjectName = false,
   active,
   running,
+  waitingForAnswer,
+  unread,
   backgroundWork,
   onPick,
   onTogglePin,
@@ -483,8 +504,10 @@ function SessionRow({
   showProjectName?: boolean
   active: boolean
   running: boolean
+  waitingForAnswer: boolean
+  unread: boolean
   backgroundWork?: BackgroundWork
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string, running?: boolean) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
@@ -496,12 +519,23 @@ function SessionRow({
     <div className="sb-sess-row">
       <button
         type="button"
-        className={['sb-sess', active && 'active', running && 'running'].filter(Boolean).join(' ')}
+        className={['sb-sess', active && 'active', running && 'running', waitingForAnswer && 'waiting-answer', unread && 'unread'].filter(Boolean).join(' ')}
         data-provider={session.providerId}
         {...hover.triggerProps}
         aria-current={active ? 'true' : undefined}
         onContextMenu={onMenu ? (event) => { hover.dismiss(); onMenu(event, cwd, session) } : undefined}
-        onClick={() => { hover.dismiss(); onPick(cwd, session.sessionId, session.providerId, session.externalSessionId, session.runId, session.agentProfileId) }}
+        onClick={() => {
+          hover.dismiss()
+          onPick(
+            cwd,
+            session.sessionId,
+            session.providerId,
+            session.externalSessionId,
+            running ? session.runId : undefined,
+            session.agentProfileId,
+            running
+          )
+        }}
       >
         <span className="sb-session-main">
           {session.providerId === 'legacy_unknown' ? (
@@ -516,12 +550,16 @@ function SessionRow({
           <span className="sb-sesstext">{session.preview || '(无预览)'}</span>
         </span>
         <span className="sb-session-meta">
-          <span className="sb-sesstime">
-            {relTime(session.mtime)}
-          </span>
+          {!waitingForAnswer && <span className="sb-sesstime">{relTime(session.mtime)}</span>}
+          {unread && !waitingForAnswer && <span className="sb-unread" role="status" aria-label="有新结果，未查看" title="有新结果，未查看" />}
+          {waitingForAnswer && (
+            <span className="sb-question-pending" role="status" aria-label="等待你的回答" title="等待你的回答">
+              <Icon name="message" /> 待回答
+            </span>
+          )}
           {showProjectName && projectName && <span className="sb-sess-proj">{projectName}</span>}
         </span>
-        {running && <span className="sb-running" role="status" data-background-waiting={status?.waiting || undefined} aria-label={status?.label ?? '正在运行'} title={status?.label ?? '正在运行'} />}
+        {running && !waitingForAnswer && <span className="sb-running" role="status" data-background-waiting={status?.waiting || undefined} aria-label={status?.label ?? '正在运行'} title={status?.label ?? '正在运行'} />}
       </button>
       {hover.tooltip}
       <span className="sb-sess-acts" onMouseEnter={hover.dismiss} onFocus={hover.dismiss}>

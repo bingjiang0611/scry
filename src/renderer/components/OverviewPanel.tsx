@@ -10,7 +10,6 @@ import {
   type TurnDiffSnapshot
 } from '@shared/trace'
 import type { AgentIntervention, RuntimeProvider } from '@shared/runtime'
-import { providerDangerCoverage } from '@shared/provider'
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import { isInferredSkillLoad } from '../skill-load-evidence'
 import { buildTurnTimingBreakdown, type TurnTimingBreakdown } from '../turn-timing'
@@ -18,11 +17,11 @@ import {
   aggregateHooks,
   aggregateCalls,
   aggregateFiles,
+  cacheHitEvidence,
   aggregateSegments,
   analyzeBilling,
   basename,
   fileBadge,
-  fmtKnownTokens,
   fileWriteCoverage,
   fmtTok,
   hookCancellationDetail,
@@ -43,6 +42,84 @@ function topToolColor(name: string): '' | 'read' | 'edit' | 'mcp' {
   if (name === 'Read') return 'read'
   if (name === 'Write' || name === 'Edit' || name === 'MultiEdit' || name === 'NotebookEdit') return 'edit'
   return ''
+}
+
+function formatOverviewCost(value: number): string {
+  if (value > 0 && value < 0.01) return '<$0.01'
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value)
+}
+
+function formatOverviewCredits(value: number): string {
+  if (value > 0 && value < 0.01) return '<0.01'
+  return value.toLocaleString('en-US', { maximumFractionDigits: 2 })
+}
+
+export interface OverviewToolError {
+  event: TraceEvent
+  result: TraceEvent
+  tool: string
+  input: unknown
+  output?: string
+  message: string
+}
+
+function nestedErrorMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  for (const key of ['error', 'message', 'detail']) {
+    if (typeof record[key] === 'string' && record[key].trim()) return record[key]
+  }
+  if (Array.isArray(record.content)) {
+    const text = record.content
+      .flatMap((item) => item && typeof item === 'object' && typeof (item as Record<string, unknown>).text === 'string'
+        ? [(item as Record<string, unknown>).text as string]
+        : [])
+      .join('\n')
+    if (text.trim()) return text
+  }
+  return undefined
+}
+
+function errorMessageFromOutput(output?: string): string {
+  if (!output) return '工具未返回错误详情'
+  let detail = output
+  try {
+    detail = nestedErrorMessage(JSON.parse(output)) ?? output
+  } catch {
+    // 非 JSON 输出直接作为 Provider 的原始错误证据展示。
+  }
+  const normalized = detail
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return normalized ? `${normalized.slice(0, 280)}${normalized.length > 280 ? '…' : ''}` : '工具未返回错误详情'
+}
+
+export function overviewToolErrors(events: TraceEvent[]): OverviewToolError[] {
+  const callsById = new Map<string, TraceEvent>()
+  for (const event of events) {
+    if (!event.toolUseId || event.stage === 'tool_result') continue
+    const key = `${event.runId}\0${event.toolUseId}`
+    const current = callsById.get(key)
+    if (!current || (current.input == null && event.input != null)) callsById.set(key, event)
+  }
+  return events.filter(isOverviewToolErrorEvent).map((result) => {
+    const call = result.toolUseId ? callsById.get(`${result.runId}\0${result.toolUseId}`) : undefined
+    const output = result.output ?? result.text
+    const tool = call?.isMcp
+      ? call.mcpAction
+        ? `${call.mcpServer ?? 'mcp'}.${call.mcpAction}`
+        : call.mcpTool ?? call.mcpServer ?? 'MCP'
+      : call?.tool ?? call?.name ?? result.tool ?? result.name ?? '工具'
+    return {
+      event: call ?? result,
+      result,
+      tool,
+      input: call?.input,
+      ...(output != null ? { output } : {}),
+      message: errorMessageFromOutput(output)
+    }
+  })
 }
 
 function hookTone(h: { errors: number; responses: number; cancelled: number }): 'ok' | 'warn' | 'bad' {
@@ -286,6 +363,7 @@ interface TurnCallRow {
   turnDiffPreview: boolean
   hooks: HookSummary
   interventions: AgentIntervention[]
+  errors: OverviewToolError[]
 }
 
 function fileOperationText(file: FileRow): string {
@@ -524,6 +602,61 @@ function renderTurnCallDetail(kind: 'mcp' | 'skill', items: TurnCallItem[]): Rea
   )
 }
 
+function errorEvidenceText(value: unknown): string {
+  if (value == null) return 'Provider 未上报'
+  let text: string
+  if (typeof value === 'string') text = value
+  else {
+    try {
+      text = JSON.stringify(value, null, 2) ?? String(value)
+    } catch {
+      text = String(value)
+    }
+  }
+  const limit = 8_000
+  return text.length > limit ? `${text.slice(0, limit)}\n\n… 已截断（原始 ${text.length} 字符）` : text
+}
+
+export function TurnToolErrorDetails({
+  errors,
+  onOpen
+}: {
+  errors: OverviewToolError[]
+  onOpen: (error: OverviewToolError) => void
+}): ReactNode {
+  return (
+    <div className="turn-tool-errors" aria-label="本轮工具报错详情">
+      {errors.map((error, index) => (
+        <details className="turn-tool-error" key={`${error.result.id}:${index}`}>
+          <summary title={error.message}>
+            <strong><Icon name="x" />{error.tool}</strong>
+            <span>{error.message}</span>
+            <Icon name="chevronDown" className="turn-tool-error-chevron" />
+          </summary>
+          <div className="turn-tool-error-evidence">
+            <div className="turn-tool-error-evidence-head">
+              <span>调用证据</span>
+              <button type="button" onClick={() => onOpen(error)}>定位到对话</button>
+            </div>
+            <div className="turn-tool-error-field">
+              <span>输入</span>
+              <pre>{errorEvidenceText(error.input)}</pre>
+            </div>
+            <div className="turn-tool-error-field">
+              <span>输出</span>
+              <pre>{errorEvidenceText(error.output)}</pre>
+            </div>
+            <div className="turn-tool-error-field is-error">
+              <span>报错信息</span>
+              <pre>{error.message}</pre>
+            </div>
+          </div>
+        </details>
+      ))}
+    </div>
+  )
+}
+
 export interface OverviewPanelProps {
   turns: Turn[]
   sessionId?: string | null
@@ -583,8 +716,6 @@ function OverviewPanelBody({
   turns,
   sessionId = null,
   selected,
-  usage,
-  stats,
   runtimeProvider,
   gitDiff = [],
   busy = false,
@@ -595,7 +726,6 @@ function OverviewPanelBody({
   const [filesFolded, setFilesFolded] = useState(false)
   const [overviewDataTab, setOverviewDataTab] = useState<'turns' | 'session'>('turns')
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
-  const dangerAuditRef = useRef<HTMLDivElement>(null)
   const all = useMemo(() => turns.flatMap((t) => t.items), [turns])
   const compactions = useMemo(
     () => all.filter((event) => event.kind === 'harness' && event.stage === 'context_compaction'),
@@ -621,11 +751,27 @@ function OverviewPanelBody({
     evidence.value == null ? '—' : format(evidence.value)
   const tin = sumObserved((e) => e.tokensIn)
   const tout = sumObserved((e) => e.tokensOut)
-  // verdict foot 用全会话累计（和 cost/tokens pillar 一致，不混最后一轮）。
-  const cacheR = sumObserved((e) => e.cacheReadTokens)
-  const cacheW = sumObserved((e) => e.cacheCreationTokens)
-  const reasoning = sumObserved((e) => e.reasoningTokens)
-  const apiMs = sumObserved((e) => e.durationApiMs)
+  const cost = sumObserved((e) => e.costUsd)
+  const cacheHit = useMemo(() => cacheHitEvidence(results), [results])
+  const isQoder = runtimeProvider === 'qoder_cli' || all.some((event) =>
+    event.providerId === 'qoder' ||
+    event.runtimeProvider === 'qoder_cli' ||
+    event.billingProvider === 'qoder' ||
+    event.upstreamProvider === 'qoder' ||
+    event.contextProvider === 'qoder' ||
+    event.creditUsage?.value?.provider === 'qoder' ||
+    event.modelUsage?.some((usage) => usage.billingProvider === 'qoder' || usage.upstreamProvider === 'qoder')
+  )
+  const qoderCreditEvidence = useMemo(() => turns.flatMap((turn) => {
+    const evidence = [...turn.items].reverse().find((event) => event.creditUsage?.value?.provider === 'qoder')?.creditUsage
+    return evidence?.value ? [evidence] : []
+  }), [turns])
+  const qoderCredits = qoderCreditEvidence
+    .map((evidence) => evidence.value?.amount)
+    .filter((amount): amount is number => amount != null)
+    .reduce((sum, amount) => sum + amount, 0)
+  const qoderCreditKnown = qoderCreditEvidence.some((evidence) => evidence.value?.amount != null)
+  const qoderCreditPartial = qoderCreditEvidence.some((evidence) => evidence.status === 'partial' || (evidence.value?.missingRequests ?? 0) > 0) || qoderCreditEvidence.length < turns.length
   // Context% = 最近一轮的当前上下文占用（顶层 usage 完整 prompt）÷ 模型窗口。诚实的"现在装了多满"。
   const ctx = useMemo(() => {
     for (let i = results.length - 1; i >= 0; i--) {
@@ -692,7 +838,8 @@ function OverviewPanelBody({
           ...(turnDiffView ? { turnDiff: turnDiffView.turnDiff } : {}),
           turnDiffPreview: turnDiffView?.preview === true,
           hooks: aggregateHooks(turn.items),
-          interventions: humanInterventions(turn.items)
+          interventions: humanInterventions(turn.items),
+          errors: overviewToolErrors(turn.items)
         }
       })
   }, [turns])
@@ -717,12 +864,12 @@ function OverviewPanelBody({
   const billingTokenText =
     billing.resultTurns === 0
       ? '等待 result'
-      : fmtKnownTokens(billing.totalTokens, billing.knownTokenResultCount, billing.missingTokenResultCount)
+      : `${billing.missingTokenResultCount > 0 ? '≥' : ''}${fmtTok(billing.totalTokens)}`
 
   // verdict 状态（诚实）：高危→bad；运行中/有报错/可疑→warn；否则 ok。error 绝不显绿。
   const dangerHi = dangers.filter((e) => e.danger!.level === 'danger').length
-  const dangerClassification = providerDangerCoverage(undefined, runtimeProvider) ?? 'unknown'
-  const toolErrors = all.filter(isOverviewToolErrorEvent).length
+  const toolErrorRows = useMemo(() => overviewToolErrors(all), [all])
+  const toolErrors = toolErrorRows.length
   const turnError = turns.some((t) => !!t.error)
   const hasError = toolErrors > 0 || turnError
   let vstate: 'ok' | 'warn' | 'bad' = 'ok'
@@ -740,12 +887,6 @@ function OverviewPanelBody({
     vstate = 'warn'
     judge = `轮次已结束 · ${dangers.length} 处可疑操作`
   }
-  const callSub = [
-    `工具 ${calls.ordinaryToolTotal}`,
-    `MCP ${calls.mcpTotal}`,
-    `Skill ${calls.skillTotal}${logicalCallEvents.some(isInferredSkillLoad) ? '（含加载推断）' : ''}`,
-    `子Agent ${calls.agentTotal}`
-  ].join(' · ')
   const diffAdd = gitDiff.reduce((s, d) => s + d.added, 0)
   const diffDel = gitDiff.reduce((s, d) => s + d.deleted, 0)
   const sessionNetDiff = useMemo(() => sessionNetDiffSummary(turns), [turns])
@@ -793,13 +934,6 @@ function OverviewPanelBody({
       if (next.has(key)) next.delete(key)
       else next.add(key)
       return next
-    })
-  }
-  const showDangerAudit = (): void => {
-    setOverviewDataTab('session')
-    requestAnimationFrame(() => {
-      dangerAuditRef.current?.scrollIntoView({ block: 'nearest' })
-      dangerAuditRef.current?.focus({ preventScroll: true })
     })
   }
   return (
@@ -854,13 +988,6 @@ function OverviewPanelBody({
             <div>
               <span className={`sdot ${vstate}`} />
               <strong>{judge}</strong>
-              <small>
-                {busy
-                  ? '正在等待 Provider 终态'
-                  : `${results.length} 轮已结束 · ${toolErrors} 处工具报错${
-                      sessionInterventions.length > 0 ? ` · ${sessionInterventions.length} 次结构化介入` : ''
-                    } · Provider 终态不代表用户目标完成`}
-              </small>
             </div>
             <em>{calls.totalCalls} calls</em>
           </header>
@@ -868,50 +995,32 @@ function OverviewPanelBody({
             <div className="overview-metric accent">
               <span>{billing.tokenFormulaLabel}</span>
               <strong>{billingTokenText}</strong>
-              <small>{billing.knownTokenResultCount}/{billing.resultTurns} 轮已捕获 · reasoning 单列</small>
             </div>
             <div className="overview-metric">
               <span>输入 / 输出</span>
               <strong>{formatObserved(tin)} / {formatObserved(tout)}</strong>
-              <small>input / output · 缺失轮次保留为下界</small>
             </div>
-            <div className="overview-metric">
-              <span>调用</span>
-              <strong>{calls.totalCalls}</strong>
-              <small>{callSub}</small>
+            <div
+              className={`overview-metric ${cacheHit.rate == null ? 'unsupported' : ''}`}
+              title={cacheHit.rate == null
+                ? '没有完整的输入与缓存 Token 证据，无法计算命中率'
+                : `缓存读取 Token ÷ 可缓存输入 Token；${cacheHit.knownResults}/${results.length} 轮可计算`}
+            >
+              <span>缓存命中率{cacheHit.missingResults > 0 ? ' · 部分' : ''}</span>
+              <strong>{cacheHit.rate == null ? '—' : `${cacheHit.rate.toFixed(1)}%`}</strong>
             </div>
-            {dangers.length > 0 ? (
-              <button
-                type="button"
-                className={`overview-metric overview-metric-action ${dangerHi > 0 ? 'bad' : 'warn'}`}
-                onClick={showDangerAudit}
-                title={`查看本会话 ${dangers.length} 处危险操作`}
-                aria-label={`查看本会话 ${dangers.length} 处危险操作`}
-              >
-                <span>危险</span>
-                <strong>{dangers.length}</strong>
-                <small>审计·未拦截 <Icon name="chevronRight" /></small>
-              </button>
-            ) : dangerClassification === 'classified' ? (
-              <div className="overview-metric true-zero">
-                <span>危险</span>
-                <strong>0</strong>
-                <small>完整分类范围内无事件</small>
-              </div>
-            ) : (
-              <div className="overview-metric unsupported">
-                <span>危险</span>
-                <strong>—</strong>
-                <small>{dangerClassification === 'unsupported' ? '当前 Provider 分类未支持' : '能力状态未知'}</small>
-              </div>
-            )}
+            <div
+              className={`overview-metric ${isQoder ? (qoderCreditKnown ? 'accent' : 'unsupported') : cost.value == null ? 'unsupported' : ''}`}
+              title={isQoder
+                ? qoderCreditKnown ? `仅统计已观测到的主会话请求 Credit${qoderCreditPartial ? '，存在未覆盖请求或轮次' : ''}` : '当前会话没有可用的 Qoder Credit 证据'
+                : cost.value == null ? '当前 Provider 未上报成本' : `${cost.known}/${results.length} 轮上报了成本`}
+            >
+              <span>{isQoder ? 'Credit' : '成本'}</span>
+              <strong>{isQoder
+                ? qoderCreditKnown ? `${qoderCreditPartial ? '≥' : ''}${formatOverviewCredits(qoderCredits)}` : '—'
+                : cost.value == null ? '—' : `${cost.known < results.length ? '≥' : ''}${formatOverviewCost(cost.value)}`}</strong>
+            </div>
           </div>
-          <footer className="overview-metric-foot">
-            <span><b>cache·r</b>{formatObserved(cacheR)}</span>
-            <span><b>cache·w</b>{formatObserved(cacheW)}</span>
-            <span><b>reason</b>{formatObserved(reasoning)}</span>
-            <span><b>api</b>{formatObserved(apiMs, (value) => `${(value / 1000).toFixed(1)}s`)}</span>
-          </footer>
         </section>
       )}
 
@@ -1026,6 +1135,12 @@ function OverviewPanelBody({
                       </div>
                     )}
                     <div className="turn-call-groups">
+                      {row.errors.length > 0 && (
+                        <span className="turn-call-group error" title={`本轮 ${row.errors.length} 处工具报错，详情见下方`}>
+                          <span className="turn-call-kind">报错</span>
+                          <span className="turn-call-count">{row.errors.length}</span>
+                        </span>
+                      )}
                       {timingAvailable && (
                         <button
                           type="button"
@@ -1078,8 +1193,17 @@ function OverviewPanelBody({
                       })}
                     </div>
                   </div>
-                  {(timingExpanded || interventionExpanded || mcpExpanded || skillExpanded || hooksExpanded || fileExpanded) && (
+                  {(row.errors.length > 0 || timingExpanded || interventionExpanded || mcpExpanded || skillExpanded || hooksExpanded || fileExpanded) && (
                     <div className="turn-call-detail-slot">
+                      {row.errors.length > 0 && (
+                        <TurnToolErrorDetails
+                          errors={row.errors}
+                          onOpen={(error) => {
+                            if (onOpenTurn) onOpenTurn(row.runId, error.event, 'event')
+                            else onSelect(error.event)
+                          }}
+                        />
+                      )}
                       {timingExpanded && (
                         <div id={`turn-timing-${row.turnNo}`}>
                           <TurnTimingDetails timing={row.timing} />
@@ -1114,7 +1238,7 @@ function OverviewPanelBody({
               )
             })}
           </div>
-          <div className="psrc">每轮展示结构化介入、MCP、Skill、子 Agent、Hook 与文件数量；Skill 含用户明确指定且成功读取技能文件的加载推断，不等于 Provider 原生 Skill 调用。介入仅统计结构化问答/权限请求。</div>
+          <div className="psrc">每轮展示工具报错及其输入、输出、错误信息，并汇总结构化介入、MCP、Skill、子 Agent、Hook 与文件数量；Skill 含用户明确指定且成功读取技能文件的加载推断，不等于 Provider 原生 Skill 调用。介入仅统计结构化问答/权限请求。</div>
         </div>
       )}
         </div>
@@ -1127,7 +1251,7 @@ function OverviewPanelBody({
           aria-labelledby="overview-session-tab"
           hidden={overviewDataTab !== 'session'}
         >
-      {(sessionInterventions.length > 0 || (stats?.interventions?.requested ?? 0) > 0) && (
+      {sessionInterventions.length > 0 && (
         <div className="panel-section intervention-summary-section">
           <h4>
             结构化介入
@@ -1138,14 +1262,6 @@ function OverviewPanelBody({
             <div><span>权限确认</span><b>{sessionPermissions}</b></div>
             <div><span>累计等待</span><b>{formatTurnDuration(sessionWaitMs) ?? '0.0s'}</b></div>
           </div>
-          {stats?.interventions && (
-            <div className="psrc">
-              SQLite 历史累计：结构化介入 {stats.interventions.total} 次 · 问题 {stats.interventions.questions} 个
-              {stats.interventions.requested > stats.interventions.total
-                ? ` · 另有 ${stats.interventions.requested - stats.interventions.total} 次由 Provider 取消，不计入结构化介入`
-                : ''}
-            </div>
-          )}
         </div>
       )}
       {topTools.rows.length > 0 && (
@@ -1358,7 +1474,7 @@ function OverviewPanelBody({
       )}
 
       {dangers.length > 0 && (
-        <div className="panel-section danger-audit-section" ref={dangerAuditRef} tabIndex={-1}>
+        <div className="panel-section danger-audit-section">
           <h4>
             <Icon name="alert" /> 危险操作审计（本会话）
           </h4>
@@ -1697,21 +1813,21 @@ function OverviewPanelBody({
           )
         })()}
 
-      {usage && usage.turns > 0 && (
+      {turns.length > 0 && (
         <div className="panel-section">
           <h4>
-            累计 Token 用量<span className="more">全部会话</span>
+            本会话 Token 用量<span className="more">当前会话</span>
           </h4>
           <div className="pstats">
             <span className="fchip cost">
-              {usage.tin == null || usage.tout == null ? '未提供 token' : `${fmtTok(usage.tin + usage.tout)} tok`}
+              {tin.value == null || tout.value == null ? '未提供 token' : `${fmtTok(tin.value + tout.value)} tok`}
             </span>
             <span className="fchip">
-              {usage.tin == null ? '—' : fmtTok(usage.tin)}→{usage.tout == null ? '—' : fmtTok(usage.tout)} tok
+              {formatObserved(tin)}→{formatObserved(tout)} tok
             </span>
-            <span className="fchip">{usage.turns} turns</span>
+            <span className="fchip">{turns.length} turns</span>
           </div>
-          <div className="psrc">来自 usage.jsonl 持久化（每轮 SDK result usage 落盘，仅看 token，不算金额）</div>
+          <div className="psrc">仅聚合当前会话已加载的轮次；不会混入其他会话</div>
         </div>
       )}
         </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -11,6 +11,7 @@ import {
   mirrorTranscript,
   readTraceArchive,
   readTraceArchiveAsync,
+  readTraceArchivePageAsync,
   resolveTranscriptPath,
   traceArchiveRunIds,
   traceArchivePath,
@@ -72,6 +73,15 @@ describe('transcript archive mirror', () => {
       .toMatchObject({ cwd: '', sessionId, providerId: 'qoder' })
     await expect(readTraceArchiveAsync({ cwd: '', sessionId, userDataDir, providerId: 'qoder' }))
       .resolves.toMatchObject({ cwd: '', sessionId, providerId: 'qoder' })
+  })
+
+  it('cancels superseded async archive reads before doing filesystem work', async () => {
+    const controller = new AbortController()
+    controller.abort(new Error('superseded'))
+    const args = { cwd: '/repo', sessionId: 'cancelled', userDataDir: tempRoot(), providerId: 'codex' as const }
+
+    await expect(readTraceArchiveAsync(args, controller.signal)).rejects.toThrow('superseded')
+    await expect(readTraceArchivePageAsync(args, { limit: 40 }, controller.signal)).rejects.toThrow('superseded')
   })
 
   it('可从孤立的逐轮 archive 恢复会话 catalog 元数据', () => {
@@ -334,6 +344,19 @@ describe('transcript archive mirror', () => {
     expect(readTraceArchive({ cwd: cwdB, sessionId, userDataDir, providerId: 'codex' })?.turns[0].runId).toBe('run-b')
   })
 
+  it('分页读取保留合法空 archive，不把空证据误报为不存在', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const cwd = '/repo/empty'
+    const sessionId = 'empty'
+    const path = traceArchivePath(userDataDir, cwd, sessionId, 'codex')
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify({ version: 3, cwd, sessionId, providerId: 'codex', turns: [] }))
+
+    await expect(readTraceArchivePageAsync({ cwd, sessionId, providerId: 'codex', userDataDir }))
+      .resolves.toMatchObject({ archive: { turns: [] }, offset: 0, totalTurns: 0, hasOlder: false })
+  })
+
   it('损坏或身份冲突的旧 monolith 不覆盖原字节，也不阻塞新的独立 segment', () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
@@ -357,6 +380,86 @@ describe('transcript archive mirror', () => {
       expect(readTraceArchive({ cwd, sessionId, userDataDir, providerId: 'codex' })?.turns)
         .toEqual([expect.objectContaining({ runId: 'new' })])
     }
+  })
+
+  it('通过可重建索引只返回请求的 archive 页', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const cwd = '/repo/paged'
+    const sessionId = 'paged'
+    for (let index = 0; index < 5; index++) {
+      expect(upsertTraceArchiveTurn({
+        cwd,
+        sessionId,
+        providerId: 'codex',
+        userDataDir,
+        turn: { runId: `run-${index}`, userText: `turn ${index}`, items: [], done: true, ts: index + 1 }
+      })).toBe(true)
+    }
+    const updatedPath = traceArchiveTurnPath(userDataDir, cwd, sessionId, 'codex', { runId: 'run-0' })
+    const indexPath = `${dirname(updatedPath)}.index-v1.json`
+    expect(existsSync(indexPath)).toBe(false)
+
+    await expect(readTraceArchivePageAsync(
+      { cwd, sessionId, providerId: 'codex', userDataDir },
+      { limit: 2 }
+    )).resolves.toMatchObject({
+      offset: 3,
+      totalTurns: 5,
+      hasOlder: true,
+      turnFilesRead: 5,
+      archive: { turns: [{ runId: 'run-3' }, { runId: 'run-4' }] }
+    })
+    expect(existsSync(indexPath)).toBe(true)
+    await expect(readTraceArchivePageAsync(
+      { cwd, sessionId, providerId: 'codex', userDataDir },
+      { before: 3, limit: 2 }
+    )).resolves.toMatchObject({
+      offset: 1,
+      totalTurns: 5,
+      hasOlder: true,
+      turnFilesRead: 2,
+      archive: { turns: [{ runId: 'run-1' }, { runId: 'run-2' }] }
+    })
+
+    expect(upsertTraceArchiveTurn({
+      cwd,
+      sessionId,
+      providerId: 'codex',
+      userDataDir,
+      turn: { runId: 'run-5', userText: 'appended', items: [], done: true, ts: 6 }
+    })).toBe(true)
+    expect(existsSync(indexPath)).toBe(false)
+    await expect(readTraceArchivePageAsync(
+      { cwd, sessionId, providerId: 'codex', userDataDir },
+      { before: 3, limit: 2, snapshotTotalTurns: 5 }
+    )).resolves.toMatchObject({
+      offset: 1,
+      totalTurns: 5,
+      archive: { turns: [{ runId: 'run-1' }, { runId: 'run-2' }] }
+    })
+
+    // Simulate a crash after the canonical segment rename but before its index update. The filename
+    // is unchanged, so freshness must use file metadata rather than directory membership alone.
+    const updatedTemp = `${updatedPath}.replacement`
+    writeFileSync(updatedTemp, JSON.stringify({
+      version: 3,
+      cwd,
+      sessionId,
+      providerId: 'codex',
+      turns: [{ runId: 'run-0', userText: 'updated', items: [], done: true, ts: 99 }]
+    }))
+    renameSync(updatedTemp, updatedPath)
+    await expect(readTraceArchivePageAsync(
+      { cwd, sessionId, providerId: 'codex', userDataDir },
+      { limit: 1 }
+    )).resolves.toMatchObject({ totalTurns: 6, turnFilesRead: 6, archive: { turns: [{ runId: 'run-0', ts: 99 }] } })
+
+    writeFileSync(indexPath, '{broken')
+    await expect(readTraceArchivePageAsync(
+      { cwd, sessionId, providerId: 'codex', userDataDir },
+      { limit: 1 }
+    )).resolves.toMatchObject({ totalTurns: 6, turnFilesRead: 6, archive: { turns: [{ runId: 'run-0' }] } })
   })
 
   it('逐段隔离 corrupt/schema-invalid sibling，保留合法历史并允许继续写入与删除', async () => {
@@ -400,15 +503,20 @@ describe('transcript archive mirror', () => {
     const cwd = '/repo/temp-only'
     const sessionId = 'temp-only'
     const temp = `${traceArchiveTurnPath(userDataDir, cwd, sessionId, 'codex', { runId: 'orphan' })}.tmp`
+    const indexTemp = `${dirname(temp)}.index-v1.json.tmp`
     mkdirSync(dirname(temp), { recursive: true })
     writeFileSync(temp, 'sensitive partial turn')
+    writeFileSync(indexTemp, 'partial index')
 
     expect(deleteTranscriptCopies({ cwd, sessionId, userDataDir, providerId: 'codex' }).failed).toEqual([])
     expect(existsSync(temp)).toBe(false)
+    expect(existsSync(indexTemp)).toBe(false)
 
     writeFileSync(temp, 'another partial turn')
+    writeFileSync(indexTemp, 'another partial index')
     await cleanupTraceArchiveTemps(userDataDir)
     expect(existsSync(temp)).toBe(false)
+    expect(existsSync(indexTemp)).toBe(false)
   })
 
   it('legacy monolith 到达 500 轮后用 per-turn segment 继续写入且不会重写旧文件', () => {

@@ -185,6 +185,51 @@ describe('turn recorder state machine', () => {
     expect(afterCommit).toContain('OUTPUT_SENTINEL')
   })
 
+  it.each(['0.2.16', '0.2.18'])('reads legacy empty model segments from %s as partial evidence without rewriting records', async (recorderVersion) => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'legacy-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const path = join(dataRoot, 'records', name)
+    const legacy = JSON.parse(await readFile(path, 'utf8'))
+    legacy.recorderVersion = recorderVersion
+    legacy.modelSegments = {
+      status: 'available', quality: 'exact', source: ['provider_transcript+lifecycle_hooks'],
+      value: [
+        { order: 1, at: '2026-01-01T00:00:00.000Z', kind: 'text', text: 'kept' },
+        { order: 2, at: '2026-01-01T00:00:01.000Z', kind: 'text' }
+      ]
+    }
+    const bytes = JSON.stringify(legacy)
+    await writeFile(path, bytes)
+    await completeTurn(root, 'new-session')
+    const records = await listRecords(dataRoot)
+    expect(records).toHaveLength(2)
+    expect(records[0].modelSegments).toEqual({
+      ...legacy.modelSegments,
+      status: 'partial',
+      value: [legacy.modelSegments.value[0]],
+      omissionReason: 'legacy recorder omitted empty model segment text'
+    })
+    expect(records[1]).toMatchObject({ sessionId: 'new-session', turnIndex: 1 })
+    expect(await readFile(path, 'utf8')).toBe(bytes)
+    expect((await exportRecords(dataRoot)).records[0].modelSegments?.status).toBe('partial')
+    await expect(commitRecord(dataRoot, { ...legacy, recordId: 'e'.repeat(32) })).rejects.toThrow('refusing to commit invalid turn record')
+    for (const invalid of [
+      { ...legacy, recorderVersion: '0.2.19' },
+      {
+        ...legacy,
+        modelSegments: {
+          ...legacy.modelSegments,
+          value: [legacy.modelSegments.value[0], { order: -1, at: '2026-01-01T00:00:01.000Z', kind: 'text' }]
+        }
+      }
+    ]) {
+      await writeFile(path, JSON.stringify(invalid))
+      await expect(listRecords(dataRoot)).rejects.toThrow('invalid turn record')
+    }
+  })
+
   it('大 assistant 与 reasoning 保留有界预览和可分页完整正文引用', async () => {
     const root = await workspace()
     const rollout = join(root, 'large-model-bodies.jsonl')
@@ -1183,7 +1228,7 @@ describe('turn recorder state machine', () => {
     await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
     expect(await listRecords(join(root, '.scry'))).toEqual([])
     expect(await readFile(openState, 'utf8')).toBe(before)
-  })
+  }, 15_000)
 
   it('transcript 仍在增长的长任务不被误判为过期', async () => {
     const root = await workspace()

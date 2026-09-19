@@ -1,3 +1,5 @@
+import type { SessionAttentionSnapshot } from '../shared/session-attention'
+
 export interface DockBadgeTerminalState {
   windowFocused: boolean
   sessionViewed: boolean
@@ -7,12 +9,20 @@ export interface DockBadgeTerminalState {
 export class DockBadgeState {
   private readonly unreadSessionKeys = new Set<string>()
   private viewedSessionKey: string | null = null
+  private revision = 0
 
-  constructor(private readonly setCount: (count: number) => void) {}
+  constructor(
+    private readonly setCount: (count: number) => void,
+    private readonly onChange?: (snapshot: SessionAttentionSnapshot) => void
+  ) {}
 
   view(sessionKey: string | null, windowFocused: boolean): void {
     this.viewedSessionKey = sessionKey
     if (sessionKey && windowFocused) this.clear(sessionKey)
+  }
+
+  focusWindow(): void {
+    if (this.viewedSessionKey) this.clear(this.viewedSessionKey)
   }
 
   markTerminal(sessionKey: string, state: DockBadgeTerminalState): void {
@@ -24,14 +34,11 @@ export class DockBadgeState {
     }
     if (this.unreadSessionKeys.has(sessionKey)) return
     this.unreadSessionKeys.add(sessionKey)
-    this.setCount(this.unreadSessionKeys.size)
-  }
-
-  focusWindow(): void {
-    if (this.viewedSessionKey) this.clear(this.viewedSessionKey)
+    this.publish()
   }
 
   remove(sessionKey: string): void {
+    if (this.viewedSessionKey === sessionKey) this.viewedSessionKey = null
     this.clear(sessionKey)
   }
 
@@ -39,8 +46,21 @@ export class DockBadgeState {
     return this.unreadSessionKeys.size
   }
 
+  snapshot(): SessionAttentionSnapshot {
+    return {
+      revision: this.revision,
+      unreadSessionKeys: [...this.unreadSessionKeys]
+    }
+  }
+
   private clear(sessionKey: string): void {
     if (!this.unreadSessionKeys.delete(sessionKey)) return
+    this.publish()
+  }
+
+  private publish(): void {
+    this.revision += 1
     this.setCount(this.unreadSessionKeys.size)
+    this.onChange?.(this.snapshot())
   }
 }

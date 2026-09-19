@@ -30,6 +30,8 @@ const callableApi = api as unknown as Record<string, (...args: unknown[]) => unk
 
 const invokeChannels = {
   setTheme: 'app:setTheme',
+  performanceDiagnosticsEnabled: 'app:performanceDiagnosticsEnabled',
+  reportRendererPerformance: 'app:reportRendererPerformance',
   detectFast: 'agent:detectFast',
   detect: 'agent:detect',
   addPiProfile: 'agent:addPiProfile',
@@ -98,6 +100,7 @@ const invokeChannels = {
   deleteArchivedSessions: 'agent:deleteArchivedSessions',
   start: 'agent:start',
   activeRun: 'agent:activeRun',
+  unreadSessions: 'agent:unreadSessions',
   activeRuns: 'agent:activeRuns',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',
@@ -105,6 +108,7 @@ const invokeChannels = {
   answerQuestion: 'agent:answerQuestion',
   stop: 'agent:stop',
   stopBackgroundTask: 'agent:stopBackgroundTask',
+  traceAck: 'agent:traceAck',
   traceResynchronized: 'agent:traceResynchronized',
   remoteStatus: 'remote:status',
   remoteBeginPairing: 'remote:pairing:begin',
@@ -121,12 +125,14 @@ const listenerChannels = {
   onTerminalExit: 'terminal:exit',
   onTerminalRecordingError: 'terminal:recordingError',
   onTurnDone: 'agent:turnDone',
+  onUnreadSessions: 'agent:unreadSessions',
   onStopState: 'agent:stopState',
   onDataUpdated: 'agent:dataUpdated',
   onSession: 'agent:session',
   onFocusedRun: 'agent:focusedRun',
   onRemoteSessionRecorded: 'remote:sessionRecorded',
   onQuestion: 'agent:userQuestion',
+  onQuestionAttention: 'agent:questionAttention',
   onQuestionClosed: 'agent:userQuestionClosed',
   onError: 'agent:error'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
@@ -208,23 +214,24 @@ describe('preload IPC boundary', () => {
     const traceListener = electron.on.mock.calls.at(-1)?.[1]
     electron.invoke.mockClear()
     const traceEvents = [{ id: 'one' }, { id: 'two' }]
-    traceListener?.(null, { events: traceEvents, bytes: 1024 })
+    const receipt = { generation: 3, batchId: 9, bytes: 1024 }
+    traceListener?.(null, { events: traceEvents, ...receipt })
     expect(traceCallback).toHaveBeenCalledTimes(1)
-    expect(traceCallback).toHaveBeenCalledWith(traceEvents)
-    // 整批只跨 contextBridge 回调一次；分发完成后必须回一次 ACK，否则 main 的有界背压会永久停在 high-water。
-    expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', { bytes: 1024 })
+    expect(traceCallback).toHaveBeenCalledWith(traceEvents, receipt)
+    // preload only delivers the receipt. Renderer returns it after the batched React commit.
+    expect(electron.invoke).not.toHaveBeenCalled()
+    void api.traceAck(receipt)
+    expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', receipt)
 
     const throwingCallback = vi.fn(() => { throw new Error('renderer 处理失败') })
     api.onTrace(throwingCallback)
     const throwingListener = electron.on.mock.calls.at(-1)?.[1]
     electron.invoke.mockClear()
     const throwingBatch = [{ id: 'boom-1' }, { id: 'boom-2' }]
-    expect(() => throwingListener?.(null, { events: throwingBatch, bytes: 8 })).toThrow('renderer 处理失败')
+    expect(() => throwingListener?.(null, { events: throwingBatch, generation: 3, batchId: 10, bytes: 8 }))
+      .toThrow('renderer 处理失败')
     expect(throwingCallback).toHaveBeenCalledTimes(1)
-    expect(throwingCallback).toHaveBeenCalledWith(throwingBatch)
-    // renderer 整批回调抛错也要 ACK：否则一次渲染异常会让实时视图永久停更。
-    expect(electron.invoke).toHaveBeenCalledTimes(1)
-    expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', { bytes: 8 })
+    expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', { generation: 3, batchId: 10, bytes: 8 })
 
     const terminalCallback = vi.fn()
     api.onTerminalData(terminalCallback)

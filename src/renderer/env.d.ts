@@ -7,7 +7,8 @@ import type {
   SessionHistoryPageRequest,
   SessionMeta,
   SessionRef,
-  TraceBacklogState
+  TraceBacklogState,
+  TraceBatchReceipt
 } from '../preload'
 
 export type {
@@ -18,24 +19,31 @@ export type {
   SessionHistoryPageRequest,
   SessionMeta,
   SessionRef,
-  TraceBacklogState
+  TraceBacklogState,
+  TraceBatchReceipt
 }
 export type { McpMeta, SkillMeta } from '@shared/provider'
 
 type OptionalBridgeMethod =
   | 'rendererReady'
   | 'setTheme'
+  | 'performanceDiagnosticsEnabled'
+  | 'reportRendererPerformance'
   | 'detectFast'
   | 'catalogHealth'
   | 'runControls'
   | 'onFocusedRun'
+  | 'onQuestionAttention'
   | 'onRemoteSessionRecorded'
   | 'onDataUpdated'
   | 'onStopState'
   | 'loadSessionOlder'
   | 'onTraceHealth'
+  | 'traceAck'
   | 'traceResynchronized'
   | 'focusedRunSnapshot'
+  | 'unreadSessions'
+  | 'onUnreadSessions'
 type RendererScryApi = Omit<ScryApi, OptionalBridgeMethod> & Partial<Pick<ScryApi, OptionalBridgeMethod>>
 
 declare global {

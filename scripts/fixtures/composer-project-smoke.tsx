@@ -5,20 +5,27 @@ const noop = () => {}
 
 export function ComposerProjectFixture() {
   const [started, setStarted] = useState(false)
+  const [input, setInput] = useState('测试消息')
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   return <section id="composer-project">
     <button id="new-draft" onClick={() => setStarted(false)}>新建草稿</button>
     <ChatView
-      turns={started ? [{ runId: 'synthetic-turn', userText: '已发送', done: true, items: [] }] : []}
+      turns={started ? [
+        { runId: 'synthetic-older-turn', userText: '更早的消息', done: true, items: [] },
+        { runId: 'synthetic-turn', userText: '测试消息', done: true, items: [] }
+      ] : []}
       selectedId={null} scrollRef={scrollRef} textareaRef={textareaRef}
       cwd="/synthetic/rate-native" recent={[]} agents={[]} selectedAgentId="claude"
       runControls={{ permissionMode: 'default' }} runControlCatalog={{ models: [], permissions: [] }}
-      input="测试消息" busy={false} draftAttachments={[]} queuedPrompts={[]}
+      input={input} busy={false} draftAttachments={[]} queuedPrompts={[]}
       slashOpen={false} slashLoading={false} slashCmds={[]} slashSel={0}
-      onSelect={noop} onInput={noop} onChooseFolder={noop} onPickRecent={noop} onRemoveRecent={noop}
+      onSelect={noop} onInput={setInput} onChooseFolder={noop} onPickRecent={noop} onRemoveRecent={noop}
       onRetrySlash={noop} onPickSlash={noop} onSlashSel={noop} onHideSlash={noop}
-      onSend={() => setStarted(true)} onStop={noop} onPasteImages={noop} onPasteClipboardImage={noop}
+      onSend={() => {
+        setStarted(true)
+        setInput('')
+      }} onStop={noop} onPasteImages={noop} onPasteClipboardImage={noop}
       onRemoveDraftAttachment={noop} onRemoveQueuedPrompt={noop} onSelectAgent={noop}
       onRunModel={noop} onRunEffort={noop} onPermissionMode={noop} onRescan={noop}
     />

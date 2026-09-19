@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { qoderCreditRequests, readQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
+import { qoderCreditRequests, readQoderCreditRows, reconcileQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
 import { upsertTraceArchiveTurn } from './transcript-archive'
 import { buildUsageAnalytics } from './span-ledger'
 import { creditUsageEvidence } from '../shared/credit-usage'
@@ -126,7 +126,7 @@ describe('Qoder native Credits projection', () => {
     expect((await readQoderCreditRows(args))[0].evidence.matchedTurns).toBe(0)
   })
 
-  it('prefers recorded credits without adding the native shadow, even if native files disappear', async () => {
+  it('prefers known recorded credits but falls back when the live SDK omitted metering', async () => {
     const args = fixture([user(), assistant('a1', 'u1', { credits: 99, billable: true })])
     const persist = (amount: number | null) => upsertTraceArchiveTurn({
       ...args.scopes[0], userDataDir: args.userDataDir, providerId: 'qoder',
@@ -136,10 +136,35 @@ describe('Qoder native Credits projection', () => {
     })
     expect(persist(3)).toBe(true)
     expect((await readQoderCreditRows(args))[0].evidence).toMatchObject({ credits: 3, source: 'qoder_recorded_usage', knownRequests: 1 })
-    rmSync(args.projectsDir, { recursive: true })
-    expect((await readQoderCreditRows(args))[0].evidence.credits).toBe(3)
+    expect(persist(0)).toBe(true)
+    expect((await readQoderCreditRows(args))[0].evidence).toMatchObject({ credits: 0, source: 'qoder_recorded_usage', knownRequests: 1 })
     expect(persist(null)).toBe(true)
+    expect((await readQoderCreditRows(args))[0].evidence).toMatchObject({ credits: 99, source: 'qoder_native_transcript', knownRequests: 1 })
+    rmSync(args.projectsDir, { recursive: true })
     expect((await readQoderCreditRows(args))[0].evidence).toMatchObject({ credits: null, source: 'qoder_recorded_usage' })
+  })
+
+  it('reconciles a stale async read without dropping stable Credits', () => {
+    const evidence = { ...creditUsageEvidence([{ id: 'r1', runId: scope.runId, credits: 7 }], 'qoder_sdk').value!,
+      credits: 7, matchedTurns: 1, totalTurns: 1, source: 'qoder_recorded_usage' as const, completeness: 'partial' as const }
+    const oldRows = [{ ...scope, evidence }]
+    const added = { ...scope, runId: 'run-2', tsStart: tsStart + 1 }
+
+    const reconciled = reconcileQoderCreditRows([scope, added], oldRows)
+    expect(reconciled).toMatchObject([
+      { runId: 'run-1', evidence: { credits: 7, knownRequests: 1 } },
+      { runId: 'run-2', evidence: { credits: null, knownRequests: 0, matchedTurns: 0 } }
+    ])
+    const analytics = buildUsageAnalytics({ nowMs: tsStart + 1, rangeDays: 7, tokens: [{
+      ...added, provider: 'qoder', model: 'ultimate', inputTokens: 100, outputTokens: 20,
+      cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null
+    }], costs: [] })
+    expect(withQoderCredits(analytics, reconciled).totals.qoderCredits).toMatchObject({ credits: 7, totalTurns: 2 })
+    expect(withQoderCredits(analytics, reconcileQoderCreditRows([scope, added], reconciled)).totals.qoderCredits?.credits).toBe(7)
+    expect(reconcileQoderCreditRows([added], oldRows)).toMatchObject([
+      { runId: 'run-2', evidence: { credits: null } }
+    ])
+    expect(reconcileQoderCreditRows([{ ...scope, tsStart: tsStart - 1 }], oldRows)[0].evidence.credits).toBeNull()
   })
 
   it('does not choose between duplicate transcript locations or traverse an unsafe session ID', async () => {

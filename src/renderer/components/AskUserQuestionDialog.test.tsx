@@ -5,7 +5,10 @@ import {
   AskUserQuestionInline,
   AskUserQuestionResult,
   buildQuestionAnswers,
-  initialQuestionDrafts
+  initialQuestionDrafts,
+  isGeneratedFreeTextOption,
+  optionDisplayCopy,
+  questionDisplayCopy
 } from './AskUserQuestionDialog'
 
 const request: AgentQuestionRequest = {
@@ -63,13 +66,78 @@ describe('AskUserQuestionInline', () => {
     expect(html).not.toContain('Claude 需要你的选择')
   })
 
-  it('renders native editor requests as multiline input without synthetic options', () => {
+  it('removes generated duplicate copy while preserving the raw answer value', () => {
+    expect(questionDisplayCopy(
+      '[下一步] 卡片改版已实现并通过验证，接下来要继续哪一步？',
+      '[下一步] 卡片改版已实现并通过验证，接下来要继续哪一步？'
+    )).toEqual({ header: '下一步', question: '卡片改版已实现并通过验证，接下来要继续哪一步？' })
+    expect(optionDisplayCopy(
+      '1. 安装到 Applications（推荐） — 打包并安装当前版本，方便直接体验',
+      '选择此项'
+    )).toEqual({
+      label: '安装到 Applications',
+      description: '打包并安装当前版本，方便直接体验',
+      recommended: true
+    })
+    expect(isGeneratedFreeTextOption('Type something.')).toBe(true)
+
+    const html = renderToStaticMarkup(
+      <AskUserQuestionInline
+        request={{
+          ...request,
+          questions: [{
+            question: '[下一步] 卡片改版已实现并通过验证，接下来要继续哪一步？',
+            header: '[下一步] 卡片改版已实现并通过验证，接下来要继续哪一步？',
+            multiSelect: false,
+            options: [
+              { label: '1. 安装到 Applications（推荐） — 打包并安装当前版本，方便直接体验', description: '选择此项' },
+              { label: 'Type something.', description: '选择此项' }
+            ]
+          }]
+        }}
+        queuedCount={1}
+        onRespond={async () => {}}
+      />
+    )
+
+    expect(html.match(/卡片改版已实现并通过验证/g)).toHaveLength(1)
+    expect(html).toContain('安装到 Applications')
+    expect(html).toContain('打包并安装当前版本，方便直接体验')
+    expect(html).not.toContain('选择此项')
+    expect(html).not.toContain('Type something.')
+    expect(html.match(/>其他</g)).toHaveLength(1)
+  })
+
+  it('renders provider-native free-text prompts as a direct input instead of an Other option', () => {
+    const freeTextRequest: AgentQuestionRequest = {
+      runId: 'run-1',
+      questionId: 'input-1',
+      providerId: 'pi',
+      questions: [{
+        header: '不满意点',
+        question: '你最想改善什么？\n\n1. 布局不均衡\n2. 视觉风格不够精致',
+        options: [],
+        multiSelect: false,
+        placeholder: '例如：1,3'
+      }]
+    }
+    const drafts = initialQuestionDrafts(freeTextRequest)
+    const html = renderToStaticMarkup(
+      <AskUserQuestionInline request={freeTextRequest} queuedCount={1} onRespond={async () => {}} />
+    )
+
+    expect(drafts[freeTextRequest.questions[0].question].useOther).toBe(true)
+    expect(html).toContain('question-free-text-input')
+    expect(html).toContain('placeholder="例如：1,3"')
+    expect(html).toContain('1. 布局不均衡\n2. 视觉风格不够精致')
+    expect(html).not.toContain('>其他<')
+  })
+
+  it('renders native editor requests as multiline input', () => {
     const editor: AgentQuestionRequest = {
       runId: 'run-editor', questionId: 'editor-1', providerId: 'pi',
       questions: [{ question: '请输入多行内容', header: 'Pi Editor', options: [], multiSelect: false, inputMode: 'multiline' }]
     }
-    const drafts = initialQuestionDrafts(editor)
-    expect(drafts['请输入多行内容'].useOther).toBe(true)
     const html = renderToStaticMarkup(<AskUserQuestionInline request={editor} queuedCount={1} onRespond={async () => {}} />)
     expect(html).toContain('<textarea')
     expect(html).toContain('rows="8"')
@@ -101,6 +169,26 @@ describe('AskUserQuestionInline', () => {
       '选择流程？': '全量',
       '启用哪些能力？': 'MCP, Skill, Hook'
     })
+  })
+
+  it('submits provider response values while keeping readable option labels', () => {
+    const valuedRequest: AgentQuestionRequest = {
+      runId: 'run-1',
+      questionId: 'input-1',
+      questions: [{
+        header: '重点',
+        question: '选择改进重点？',
+        multiSelect: true,
+        options: [
+          { label: '布局', description: '改善留白', answerValue: '1' },
+          { label: '视觉', description: '改善层级', answerValue: '2' }
+        ]
+      }]
+    }
+    const drafts = initialQuestionDrafts(valuedRequest)
+    drafts['选择改进重点？'] = { selected: ['布局', '视觉'], useOther: false, other: '' }
+
+    expect(buildQuestionAnswers(valuedRequest, drafts)).toEqual({ '选择改进重点？': '1,2' })
   })
 
   it('does not treat an empty Other field as a completed answer', () => {
