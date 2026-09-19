@@ -99,6 +99,12 @@ async function shellPathAsync(): Promise<string> {
 // 不能把用户 shell 里的任意 secret 全量注入每一家 Provider 子进程。进程原本继承的环境保持不变。
 let shellEnvCache: Record<string, string> | null = null
 let shellEnvPromise: Promise<Record<string, string>> | null = null
+let shellEnvFailure: string | undefined
+
+export function shellEnvError(): string | undefined {
+  return shellEnvFailure
+}
+
 const SHELL_ENV_TIMEOUT_MS = 5_000
 
 const LOGIN_SHELL_ENV_NAMES = new Set([
@@ -144,12 +150,24 @@ export function warmShellEnv(): Promise<Record<string, string>> {
   if (shellEnvCache) return Promise.resolve(shellEnvCache)
   if (shellEnvPromise) return shellEnvPromise
   const shell = process.env.SHELL || '/bin/zsh'
-  shellEnvPromise = execFileText(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: SHELL_ENV_TIMEOUT_MS }).then((raw) => {
+  shellEnvPromise = execFileOutcome(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: SHELL_ENV_TIMEOUT_MS }).then((outcome) => {
     const out = fallbackShellEnv()
     const captured: Record<string, string> = {}
+    const raw = outcome.stdout
     const s = raw.indexOf('__AS_ENV_S__')
     const e = raw.indexOf('__AS_ENV_E__')
-    const capturedLoginEnv = s >= 0 && e > s
+    const capturedLoginEnv = outcome.exitCode === 0 && s >= 0 && e > s
+    if (!capturedLoginEnv) {
+      const reason = outcome.timedOut ? '超时（5s）'
+        : outcome.error ? '无法启动'
+          : outcome.signal ? `被信号 ${outcome.signal} 终止`
+            : outcome.exitCode !== 0 ? `退出码 ${outcome.exitCode}`
+              : '未返回完整环境标记'
+      shellEnvFailure = `登录 shell 环境采集失败：${reason}；当前使用继承环境，代理和 PATH 可能缺失。请检查 shell 启动脚本，修复后重启 Scry`
+      // Keep the bounded fallback cached to avoid spawning a broken shell for every operation.
+      // Never log stdout/stderr: startup scripts and env output may contain credentials.
+      console.warn(`[scry] ${shellEnvFailure}`)
+    }
     if (capturedLoginEnv) {
       for (const line of raw.slice(s + '__AS_ENV_S__'.length, e).split('\n')) {
         const i = line.indexOf('=')
