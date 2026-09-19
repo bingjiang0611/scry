@@ -51,4 +51,3 @@ export async function createClaudeProbeFixture(): Promise<ClaudeProbeFixture> {
     cleanup: () => rm(root, { recursive: true, force: true })
   }
 }
-
