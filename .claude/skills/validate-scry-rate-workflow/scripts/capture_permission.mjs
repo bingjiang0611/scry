@@ -224,7 +224,7 @@ async function permissionSnapshot(target, workspace, provider, launchId, setPerm
     let select = document.querySelector(selector)
     if (!(select instanceof HTMLSelectElement)) return { found: false }
     const optionPresent = [...select.options].some((option) => option.value === ${JSON.stringify(permission.value)})
-    if (${setPermission ? 'true' : 'false'} && !select.disabled && optionPresent) {
+    if (${setPermission ? 'true' : 'false'} && !select.disabled && optionPresent && select.value !== ${JSON.stringify(permission.value)}) {
       select.value = ${JSON.stringify(permission.value)}
       select.dispatchEvent(new Event('input', { bubbles: true }))
       select.dispatchEvent(new Event('change', { bubbles: true }))
