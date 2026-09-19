@@ -517,7 +517,7 @@ function leaseHandoverQuestion(question, workitemId) {
   const hasActiveGeneration = /活动\s*generation|active\s+generation|另一个会话占用|旧\s*generation|旧代/i.test(fullQuestion)
   const hasRestartImpact = /放弃旧代|放弃旧\s*generation|从\s*P0\s*(?:重跑|重新运行)|重新开始摄入|重新摄入/i.test(fullQuestion)
   const hasLease = /\bLEASE\b|租约|orphaned\s+lease/i.test(fullQuestion) || (hasActiveGeneration && hasRestartImpact)
-  const affirmative = options.some((value) => /^(?:是(?:[，,\s]|$)|(?:在本|当前)会话继续|继续|放弃旧代)/u.test(value.trim()))
+  const affirmative = options.some((value) => /^(?:是(?:[，,\s]|$)|(?:在本|当前)会话继续|继续|放弃)/u.test(value.trim()))
   const negative = options.some((value) => /^(?:否(?:[，,\s]|$)|先不|暂不|不继续(?:[，,\s]|$)|保留旧)/u.test(value.trim()))
   return hasReq && hasLease && hasActiveGeneration && hasRestartImpact && affirmative && negative
 }
@@ -1265,6 +1265,25 @@ function selfTest() {
     )
     if (pronounQoderLease?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
       throw new Error('pronoun Qoder lease question was misclassified as a document question')
+    }
+    const compactTakeoverQuestion = {
+      legends: ['01\n会话接管\n是否放弃旧 generation，并在当前会话从 P0 重新执行需求 85237895？'],
+      options: [
+        '放弃并重跑（Recommended）\n旧代目前停在 P0，尚无已完成里程碑；旧代记录不继承，平台已有对象不会回滚。',
+        '保留旧会话\n当前会话停止，回到原会话继续该需求。',
+        '其他\n输入其他回答',
+      ],
+      links: [],
+      runId: 'run-compact-takeover',
+      toolCallId: 'tool-compact-takeover',
+    }
+    const compactTakeoverRunRoot = join(root, 'lease-qoder-compact-takeover')
+    mkdirSync(compactTakeoverRunRoot)
+    const compactTakeover = questionState(
+      compactTakeoverRunRoot, state, 'qoder', 1, compactTakeoverQuestion, 'session-compact-takeover', '85237895'
+    )
+    if (compactTakeover?.state !== 'WAITING_FOR_LEASE_HANDOVER') {
+      throw new Error('compact Qoder lease question was misclassified as a document question')
     }
     const linklessLeaseQuestion = {
       legends: ['01\n旧代处理\nREQ-85237895 已被另一个已失联会话占用（旧代停在 P0）。是否在当前会话继续该需求？这会放弃旧代、从 P0 重跑。'],
