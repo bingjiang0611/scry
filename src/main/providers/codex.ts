@@ -915,10 +915,7 @@ export function createCodexAdapter(
       }
       const timingByThread = new Map<string, ResponseTimingState>()
       let finish: ((value: ProviderRunResult) => void) | undefined
-      let rejectInterruptFailure: ((error: Error) => void) | undefined
       let interruptDispatched = false
-      const interruptFailure = new Promise<never>((_resolve, reject) => { rejectInterruptFailure = reject })
-      void interruptFailure.catch(() => undefined)
       const dispatchInterrupt = (): void => {
         if (interruptDispatched || !externalSessionId || !turnId) return
         interruptDispatched = true
@@ -928,7 +925,12 @@ export function createCodexAdapter(
           runRequest.cwd,
           runRequest.codexHookTrust,
           runRequest.mcpExecution
-        ).catch((error) => rejectInterruptFailure?.(error instanceof Error ? error : new Error(String(error))))
+        ).catch((error) => {
+          runRequest.emit(newEvent(runRequest.runId, {
+            kind: 'harness', stage: 'runtime:error', isError: true,
+            text: `Codex interrupt failed; waiting for native completion: ${error instanceof Error ? error.message : String(error)}`
+          }))
+        })
       }
 
       const handleServerRequest = async (method: string, value: unknown): Promise<unknown> => {
@@ -1506,12 +1508,11 @@ export function createCodexAdapter(
             if (state.responses.size === 0 && state.boundaryMs == null) state.boundaryMs = startedAtMs
           }
           if (stopped) dispatchInterrupt()
-          // Dispatch is not termination evidence. A rejected native interrupt is a real
-          // failure, while success still waits for authoritative turn/completed.
+          // A failed control request is not termination evidence either. Keep notifications
+          // and execution ownership until native completion or transport termination.
           return await Promise.race([
             done,
-            generationFailure.then((error) => Promise.reject(error)),
-            interruptFailure
+            generationFailure.then((error) => Promise.reject(error))
           ])
         } finally {
           unsubscribe()

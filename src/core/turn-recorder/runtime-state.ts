@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import type { GitTurnDiffCapture } from './git.js'
-import { listFiles, readJson } from './io.js'
+import { listFiles, readJson, withDirectoryLock } from './io.js'
 import { safeKey } from './store.js'
 
 export interface RecorderSessionState {
@@ -67,6 +67,18 @@ export function recorderStatePath(root: string): string {
 
 export function recorderSessionLock(dataRoot: string, provider: ProviderId, sessionId: string): string {
   return join(dataRoot, 'locks', 'sessions', provider, `${safeKey(sessionId)}.lock`)
+}
+
+export function withRecorderSessionLock<T>(
+  dataRoot: string, provider: ProviderId, sessionId: string,
+  action: () => Promise<T>, options: { waitMs?: number; ttlMs?: number } = {}
+): Promise<T> {
+  return withDirectoryLock(recorderSessionLock(dataRoot, provider, sessionId), async () => {
+    // Admission only: GC either observes our session lock, or finishes before we publish.
+    // Release the maintenance gate before work so independent sessions remain concurrent.
+    await withDirectoryLock(join(dataRoot, 'locks', 'maintenance.lock'), async () => {}, options)
+    return action()
+  }, options)
 }
 
 export async function recorderQuarantinedOpenTurns(

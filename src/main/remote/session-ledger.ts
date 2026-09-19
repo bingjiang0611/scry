@@ -124,7 +124,6 @@ export class SessionLedger {
   #pageSize: number
   #runs = new Map<string, RunEntry>()
   #byIntent = new Map<string, string>()
-  #intentEvents = new Map<string, LedgerEvent>()
   #events: LedgerEvent[] = []
   #lastSeq = 0
   #minCursor = 0
@@ -175,14 +174,6 @@ export class SessionLedger {
       const entry = { ...value }
       this.#runs.set(entry.runId, entry)
       this.#byIntent.set(entry.intentId, entry.runId)
-      this.#intentEvents.set(entry.intentId, {
-        seq: entry.intentSeq,
-        at: entry.intentAt,
-        runId: entry.runId,
-        kind: 'intent_recorded',
-        intentId: entry.intentId,
-        ...(entry.intentDetail !== undefined ? { detail: entry.intentDetail } : {})
-      })
     }
     this.#lastSeq = snapshot.lastSeq
     this.#events = snapshot.retainedEvents.map((event) => ({ ...event }))
@@ -218,7 +209,6 @@ export class SessionLedger {
       }
       this.#runs.set(event.runId, entry)
       this.#byIntent.set(event.intentId, event.runId)
-      this.#intentEvents.set(event.intentId, event)
       return
     }
     const entry = this.#runs.get(event.runId)
@@ -248,10 +238,7 @@ export class SessionLedger {
     return {
       version: 1,
       lastSeq: this.#lastSeq,
-      runs: [...this.#runs.values()].map((entry) => ({
-        ...entry,
-        ...(entry.lifecycle === 'recorded' && entry.intentDetail !== undefined ? { intentDetail: entry.intentDetail } : {})
-      })),
+      runs: [...this.#runs.values()].map((entry) => ({ ...entry })),
       retainedEvents
     }
   }
@@ -301,17 +288,18 @@ export class SessionLedger {
       const entry = this.#runs.get(runId)
       if (!entry) throw new SessionLedgerError('ledger_log_corrupt')
       if (entry.intentDigest !== detailDigest(input.detail)) throw new SessionLedgerError('intent_payload_conflict')
-      return { status: 'duplicate', event: this.#firstEventFor(input.intentId) }
+      return {
+        status: 'duplicate',
+        event: {
+          seq: entry.intentSeq, at: entry.intentAt, runId: entry.runId,
+          kind: 'intent_recorded', intentId: entry.intentId,
+          ...(entry.intentDetail !== undefined ? { detail: entry.intentDetail } : {})
+        }
+      }
     }
     if (this.#runs.has(input.runId)) throw new SessionLedgerError('run_already_exists')
     if (this.#runs.size >= this.#maxRuns) throw new SessionLedgerError('ledger_capacity_exceeded')
     return { status: 'recorded', event: this.#emit({ runId: input.runId, kind: 'intent_recorded', intentId: input.intentId, detail: input.detail }) }
-  }
-
-  #firstEventFor(intentId: string): LedgerEvent {
-    const event = this.#intentEvents.get(intentId)
-    if (event) return event
-    throw new SessionLedgerError('ledger_log_corrupt')
   }
 
   #transition(runId: string, target: Exclude<RunLifecycle, 'recorded'> | 'progress', detail?: string): LedgerEvent {

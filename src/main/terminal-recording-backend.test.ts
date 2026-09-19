@@ -115,6 +115,22 @@ describe('TerminalRecordingWorkerClient', () => {
     await expect(client.read({ id, offset: 0 }, '/repo')).rejects.toThrow('worker crashed')
   })
 
+  it('reports worker death for active recordings even when their queue is empty', async () => {
+    const worker = new FakeWorker()
+    const failure = vi.fn()
+    const client = new TerminalRecordingWorkerClient(worker, { onFailure: failure, onFlow: vi.fn() })
+    const id = 'terminal-00000000-0000-4000-8000-000000000001'
+    const started = client.start(info(id))
+    worker.reply(0)
+    await started
+    await client.settle()
+    worker.emit('exit', 0)
+    client.append(id, 'not retried')
+    client.finish({ id, code: 0, signal: null })
+    expect(failure).toHaveBeenCalledExactlyOnceWith(id, expect.objectContaining({ message: 'terminal_recording_worker_exit_0' }))
+    expect(worker.messages).toHaveLength(1)
+  })
+
   it('closes only after queued work settles', async () => {
     const worker = new FakeWorker()
     const client = new TerminalRecordingWorkerClient(worker as any, { onFailure: vi.fn(), onFlow: vi.fn() })

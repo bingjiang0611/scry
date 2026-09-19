@@ -213,12 +213,11 @@ export async function persistToolEventContent(
     if (existing?.contentRef) {
       content = sanitizeCapturedContent(existing, policy.toolContentFieldBytes)
     } else {
-      const full = raw !== undefined
-        ? captureToolContent(raw, { source, maxBytes: null, ...sourceState(event, !result) })
-        : existing
-          ? sanitizeCapturedContent(existing, null)
-          : captureToolContent(undefined, { source })
-      if (full.content !== undefined) {
+      // Aliases on an already captured event are previews, not a new raw source.
+      const full = existing
+        ? sanitizeCapturedContent(existing, null)
+        : captureToolContent(raw, { source, maxBytes: null, ...sourceState(event, !result) })
+      if (full.content !== undefined && full.storage === 'complete') {
         // Every body needs a durable copy: even a field below its own limit can be clipped later
         // when the shared turn budget is exhausted by earlier calls.
         const contentRef = await persist(full.content, full.encoding === 'json' ? 'json' : 'utf8')
@@ -229,7 +228,7 @@ export async function persistToolEventContent(
           contentRef
         }
       } else {
-        content = full
+        content = sanitizeCapturedContent(full, policy.toolContentFieldBytes)
       }
     }
     return protectedToolEvent(event, content, result)

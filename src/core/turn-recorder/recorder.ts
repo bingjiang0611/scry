@@ -28,13 +28,13 @@ import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.
 import { recordProviderActivity } from './provider-activity.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
-import { appendRotatingLog, listFiles, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { appendRotatingLog, listFiles, readJson, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
 import {
   SESSION_LOCK_WAIT_MS,
   recorderOpenPath as openPath,
   recorderPendingHealth,
-  recorderSessionLock as sessionLock,
+  withRecorderSessionLock,
   recorderSessionRoot as sessionRoot,
   recorderStatePath as statePath,
   recorderTurnRoot as turnRoot,
@@ -2680,7 +2680,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     isClaudeTaskNotification(input.payload)
   if (isSynthetic(input.payload) && !taskNotification) return { status: 'ignored', reason: 'synthetic/meta prompt' }
   try {
-    const result = await withDirectoryLock(sessionLock(enablement.dataRoot, input.provider, sessionId), async () => {
+    const result = await withRecorderSessionLock(enablement.dataRoot, input.provider, sessionId, async () => {
       const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
       let open = await readJson<OpenTurnState>(openPath(root))
       const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
@@ -2969,8 +2969,8 @@ export async function recoverRecorder(
     if (!initial) continue
     // Expiry can degrade evidence only after a real terminal boundary, never create that boundary.
     let forcedExpiry = false
-    const result = await withDirectoryLock(
-      sessionLock(enablement.dataRoot, item.provider, initial.sessionId),
+    const result = await withRecorderSessionLock(
+      enablement.dataRoot, item.provider, initial.sessionId,
       async () => {
         const open = await readJson<OpenTurnState>(openPath(item.sessionDir))
         if (!open) return { status: 'idle' as const }

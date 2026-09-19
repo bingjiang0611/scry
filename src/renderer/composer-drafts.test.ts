@@ -38,6 +38,21 @@ describe('composer drafts', () => {
     expect(restored?.attachments[0].previewUrl).toBe('data:image/png;base64,aGVsbG8=')
   })
 
+  it('reports incomplete persistence for oversized input or attachments without changing live drafts', () => {
+    for (const draft of [
+      { input: 'x'.repeat(256 * 1024 + 1), attachments: [] },
+      { input: 'keep text', attachments: [{ ...attachment('large.png'), dataBase64: 'a'.repeat(1_600_000) }] }
+    ]) {
+      const storage = new MemoryStorage()
+      const before = JSON.stringify(draft)
+      expect(writeComposerDrafts(storage, new Map([['key', draft]]))).toBe(false)
+      expect(JSON.stringify(draft)).toBe(before)
+      const restored = readComposerDrafts(storage).get('key')!
+      expect(restored.input.length).toBeLessThanOrEqual(256 * 1024)
+      expect(restored.attachments).toEqual([])
+    }
+  })
+
   it('drops malformed storage and evicts least-recently-updated drafts', () => {
     const storage = new MemoryStorage()
     storage.value = '{broken'

@@ -45,6 +45,34 @@ describe('RunOutputLog (live output content cache)', () => {
     ])
   })
 
+  it('preserves a new overflow marker raised while an earlier batch is in flight', async () => {
+    const store = new RecoveringStore()
+    store.fail = false
+    let release!: () => void
+    let entered!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    let first = true
+    const log = new RunOutputLog({ store: {
+      append: (chunk) => store.append(chunk),
+      appendBatch: async (chunks) => {
+        if (first) { first = false; entered(); await blocked }
+        return chunks.map((chunk) => store.append(chunk))
+      },
+      since: (runId, cursor) => store.since(runId, cursor),
+      close: () => {}
+    } })
+    log.append('run-gap', { kind: 'output', text: 'batch A' })
+    await started
+    log.append('run-gap', { kind: 'output', text: 'x'.repeat(2 * 1024 * 1024) })
+    release()
+    await expect(log.flush('run-gap')).rejects.toThrow('output_capture_queue_full')
+    const page = await log.since('run-gap', 0)
+    expect(page.chunks.at(-1)?.kind).toBe('truncated')
+    expect(page.chunks.filter((chunk) => chunk.kind === 'truncated')).toHaveLength(1)
+    expect(page.chunks[0].text).toBe('batch A')
+  })
+
   it('retains an empty upstream truncation marker in durable mode', async () => {
     const store = new RecoveringStore()
     store.fail = false

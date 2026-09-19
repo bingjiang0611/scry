@@ -1029,22 +1029,36 @@ describe('Codex provider adapter', () => {
     expect(unsubscribe).toHaveBeenCalledOnce()
   })
 
-  it('surfaces a rejected native interrupt instead of hanging or claiming interruption', async () => {
-    appServer.onNotification.mockReturnValue(() => {})
+  it.each(['native interrupt rejected', 'turn/interrupt timed out'])('retains native ownership after %s', async (message) => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    const unsubscribe = vi.fn()
+    const emit = vi.fn()
+    appServer.onNotification.mockImplementation((listener) => { notify = listener; return unsubscribe })
     appServer.onRequest.mockReturnValue(() => {})
     appServer.request.mockImplementation(async (method) => {
       if (method === 'account/read') return { account: { type: 'chatgpt' } }
       if (method === 'thread/start') return { thread: { id: 'thread-interrupt-failure' } }
       if (method === 'turn/start') return { turn: { id: 'turn-interrupt-failure' } }
-      if (method === 'turn/interrupt') throw new Error('native interrupt rejected')
+      if (method === 'turn/interrupt') throw new Error(message)
       throw new Error(`unexpected request: ${method}`)
     })
     const handle = createCodexAdapter().run({
-      runId: 'run-interrupt-failure', prompt: 'inspect', cwd: '/repo', attachments: [], emit: () => {}
+      runId: 'run-interrupt-failure', prompt: 'inspect', cwd: '/repo', attachments: [], emit
     })
+    const settled = vi.fn()
+    void handle.promise.then(settled)
     await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
     handle.interrupt()
-    await expect(handle.promise).rejects.toThrow('native interrupt rejected')
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      stage: 'runtime:error', text: expect.stringContaining(message)
+    })))
+    expect(settled).not.toHaveBeenCalled()
+    expect(unsubscribe).not.toHaveBeenCalled()
+    notify?.('turn/completed', {
+      threadId: 'thread-interrupt-failure', turn: { id: 'turn-interrupt-failure', status: 'completed' }
+    })
+    await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
 
   it('uses the authoritative native completion when interrupt races with turn/completed', async () => {

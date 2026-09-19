@@ -35,6 +35,15 @@ describe('terminal disk replay', () => {
     expect(write).toHaveBeenCalledTimes(2)
   })
 
+  it.each(['ab', '😀'])('clips a minimum-sized page at a two-byte checkpoint: %s', async (text) => {
+    const read = vi.fn(async () => ({ ...page(0, true), data: text }))
+    let replayed = ''
+    await replayTerminalRecording('test', read, async (chunk) => { replayed += chunk }, () => true, 2)
+    expect(read).toHaveBeenCalledWith({ id: 'test', offset: 0, limit: 4 })
+    expect(replayed).toBe(text.slice(0, 1))
+    expect(replayed + text.slice(1)).toBe(text)
+  })
+
   it('does not write an in-flight page into a restarted or disposed pane', async () => {
     let current = true
     let resolve!: (page: TerminalRecordingPage) => void
