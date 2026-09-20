@@ -486,12 +486,12 @@ export interface TraceEvent {
   cacheCreation5mTokens?: number
   cacheCreation1hTokens?: number
   reasoningTokens?: number
-  contextTokens?: number // 仅 result：Provider 当前上下文占用；不同 Provider 的 cache 记账口径由 adapter 吸收
-  contextModel?: string // 仅 result：contextTokens 所属模型；多模型会话不得按数组顺序猜窗口
-  contextProvider?: string // 仅 result：contextTokens 所属 upstream provider；与 contextModel 共同绑定窗口
-  contextUsageSource?: string // 仅 result：上下文证据来源，如 qoder_control / qoder_native_transcript
-  contextUsageQuality?: 'exact' | 'inferred' // 仅 result：推导窗口必须显式呈现，不能冒充精确证据
-  modelUsage?: ModelUsageRow[] // 仅 result：per-model 明细
+  contextTokens?: number // result / context_usage：Provider 当前上下文占用；cache 口径由 adapter 吸收
+  contextModel?: string // contextTokens 所属模型；多模型会话不得按数组顺序猜窗口
+  contextProvider?: string // contextTokens 所属 upstream provider；与 contextModel 共同绑定窗口
+  contextUsageSource?: string // 上下文证据来源，如 qoder_control / pi_rpc_assistant_usage
+  contextUsageQuality?: 'exact' | 'inferred' // 推导窗口必须显式呈现，不能冒充精确证据
+  modelUsage?: ModelUsageRow[] // result：per-model 明细；context_usage：仅模型身份与窗口，不参与累计
   isError?: boolean
   output?: string // 工具结果文本（tool_result），渲染时合并进对应 tool_use
   danger?: DangerVerdict // P3 审计：危险工具标记（normalize 时分类，观测不阻塞）
@@ -511,6 +511,23 @@ export interface TraceEvent {
   backgroundWork?: BackgroundWork
   intervention?: AgentIntervention
   compaction?: ContextCompaction
+}
+
+/** Also reads older Pi archives that retained the raw lifecycle instead of a canonical completion. */
+export function contextCompactionOf(event: TraceEvent): ContextCompaction | null {
+  if (event.kind !== 'harness') return null
+  if (event.stage === 'context_compaction') return event.compaction ?? {}
+  if (event.stage !== 'compaction_end') return null
+  const raw = event.runtimeMetadata
+  if (raw?.aborted !== false || raw.errorMessage || !raw.result || typeof raw.result !== 'object') return null
+  const result = raw.result as Record<string, unknown>
+  const trigger = raw.reason === 'manual' ? 'manual'
+    : raw.reason === 'threshold' || raw.reason === 'overflow' ? 'auto' : undefined
+  return {
+    ...(trigger ? { trigger } : {}),
+    ...(typeof result.tokensBefore === 'number' && Number.isFinite(result.tokensBefore) && result.tokensBefore >= 0
+      ? { preTokens: result.tokensBefore } : {})
+  }
 }
 
 export interface ContextUsageEvidence {

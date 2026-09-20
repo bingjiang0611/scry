@@ -39,6 +39,13 @@ const thinkingTurn: Turn = {
   ]
 }
 
+const contextSample: TraceEvent = {
+  id: 'context-1', runId: 'context-live', ts: '2026-09-10T00:00:00Z', kind: 'harness', stage: 'context_usage',
+  contextTokens: 100000, contextModel: 'ultimate', contextProvider: 'qoder', contextUsageQuality: 'exact',
+  contextUsageSource: 'pi_rpc_assistant_usage',
+  modelUsage: [{ model: 'ultimate', upstreamProvider: 'qoder', contextWindow: 272000 }]
+}
+
 function Fixture() {
   const [turns, setTurns] = useState<Turn[]>([qoderSkillSessionFixture()])
   const [selection, setSelection] = useState('none')
@@ -61,6 +68,21 @@ function Fixture() {
         { id: 'hook-end', runId: 'hook-run', ts: '2026-09-09T00:00:01.000Z', kind: 'hook', stage: 'hook_response', hookId: 'h1', hookEvent: 'Stop', hookCommand: 'test-hook', hookOutcome: 'success' }
       ]
     }])}>Hook 明细</button>
+    <button id="context-start" onClick={() => setTurns([{
+      runId: 'context-live', userText: 'context probe', done: false, items: [contextSample]
+    }])}>开始上下文采样</button>
+    <button id="context-update" onClick={() => setTurns((current) => current.map((turn) => ({
+      ...turn, items: [...turn.items, { ...contextSample, id: 'context-2', contextTokens: 201600 }]
+    })))}>收到下一请求用量</button>
+    <button id="context-compact" onClick={() => setTurns((current) => current.map((turn) => ({
+      ...turn, items: [...turn.items, {
+        id: 'context-compact', runId: turn.runId, ts: '2026-09-10T00:00:01Z', kind: 'harness',
+        stage: 'context_compaction', compaction: { trigger: 'auto', preTokens: 201600 }
+      }]
+    })))}>压缩完成</button>
+    <button id="context-after" onClick={() => setTurns((current) => current.map((turn) => ({
+      ...turn, items: [...turn.items, { ...contextSample, id: 'context-3', contextTokens: 20000 }]
+    })))}>收到压缩后用量</button>
     <button id="empty" onClick={() => setTurns([])}>新会话</button>
     <button id="pending" onClick={() => setTurns([qoderSkillSessionFixture('pending-run', 'pending')])}>读取中</button>
     <button id="success" onClick={() => setTurns([qoderSkillSessionFixture('pending-run', 'success')])}>收到成功结果</button>
