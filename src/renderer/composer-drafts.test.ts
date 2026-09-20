@@ -38,19 +38,36 @@ describe('composer drafts', () => {
     expect(restored?.attachments[0].previewUrl).toBe('data:image/png;base64,aGVsbG8=')
   })
 
-  it('reports incomplete persistence for oversized input or attachments without changing live drafts', () => {
-    for (const draft of [
-      { input: 'x'.repeat(256 * 1024 + 1), attachments: [] },
-      { input: 'keep text', attachments: [{ ...attachment('large.png'), dataBase64: 'a'.repeat(1_600_000) }] }
-    ]) {
-      const storage = new MemoryStorage()
-      const before = JSON.stringify(draft)
-      expect(writeComposerDrafts(storage, new Map([['key', draft]]))).toBe(false)
-      expect(JSON.stringify(draft)).toBe(before)
-      const restored = readComposerDrafts(storage).get('key')!
-      expect(restored.input.length).toBeLessThanOrEqual(256 * 1024)
-      expect(restored.attachments).toEqual([])
+  it('round-trips drafts beyond the former text, image and total size limits', () => {
+    const storage = new MemoryStorage()
+    const draft = {
+      input: 'x'.repeat(256 * 1024 + 1),
+      attachments: [{ ...attachment('large.png'), dataBase64: 'a'.repeat(2_100_000) }]
     }
+    const before = JSON.stringify(draft)
+    expect(writeComposerDrafts(storage, new Map([['key', draft]]))).toBe(true)
+    expect(JSON.stringify(draft)).toBe(before)
+    const restored = readComposerDrafts(storage).get('key')!
+    expect(restored.input).toBe(draft.input)
+    expect(restored.attachments[0]).toMatchObject({
+      name: 'large.png', dataBase64: draft.attachments[0].dataBase64
+    })
+  })
+
+  it('reports storage failures without changing live drafts and succeeds after recovery', () => {
+    const storage = new MemoryStorage()
+    const draft = { input: 'keep text', attachments: [attachment('a.png')] }
+    const drafts = new Map([['key', draft]])
+    const before = JSON.stringify(draft)
+    const unavailable = {
+      setItem(): void { throw new Error('quota exceeded') },
+      removeItem(): void { throw new Error('storage unavailable') }
+    }
+    expect(writeComposerDrafts(unavailable, drafts)).toBe(false)
+    expect(writeComposerDrafts(unavailable, new Map())).toBe(false)
+    expect(JSON.stringify(draft)).toBe(before)
+    expect(writeComposerDrafts(storage, drafts)).toBe(true)
+    expect(readComposerDrafts(storage).get('key')?.input).toBe('keep text')
   })
 
   it('drops malformed storage and evicts least-recently-updated drafts', () => {
