@@ -673,8 +673,9 @@ export function ChatView({
               }
             }
             if (event.key === 'Enter' && !event.shiftKey) {
-              if (imeEnter || event.repeat) return
+              // Ignoring an IME confirmation or held Enter must not insert a newline.
               event.preventDefault()
+              if (imeEnter || event.repeat) return
               if (sessionLoading || sendBlockedReason) return
               resetPromptHistory()
               onSend()
