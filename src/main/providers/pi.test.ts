@@ -762,14 +762,20 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it.each([undefined, '登录 shell 环境采集失败：超时（5s）；修复后重启 Scry'])('preserves transport/context evidence and reports shell failure: %s', async (envError) => {
+  it.each([undefined, '登录 shell 环境采集失败：超时（15s）；修复后重新发送将重试采集'])('preserves transport/context evidence and launch-time shell failure: %s', async (envError) => {
     await withRotomFixture(async (profile, cwd) => {
       const envErrorSpy = vi.spyOn(shellEnvironment, 'shellEnvError').mockReturnValue(envError)
       const events: TraceEvent[] = []
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const request = (runId: string, prompt: string, resume?: string) => adapter.run({
         runId, prompt, cwd, resume, agentProfileId: profile.id,
-        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+        attachments: [], permissionMode: 'full_access', emit: (event) => {
+          events.push(event)
+          if (event.runId === 'run-rotom-fetch-failure' && event.stage === 'runtime:init') {
+            // Another session may retry shell capture while this process is running.
+            envErrorSpy.mockReturnValue(envError ? undefined : 'later unrelated shell failure')
+          }
+        }
       }).promise
       try {
         const first = await request('run-rotom-before-failure', 'first')
@@ -789,6 +795,33 @@ describe('Pi RPC Provider', () => {
         expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
       } finally {
         envErrorSpy.mockRestore()
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it('starts a fresh Rotom RPC when the launch environment changes, but keeps the session', async () => {
+    await withRotomFixture(async (profile, cwd) => {
+      const base = { ...process.env } as Record<string, string>
+      const envSpy = vi.spyOn(shellEnvironment, 'shellEnv').mockReturnValue(base)
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const request = (runId: string, resume?: string) => adapter.run({
+        runId, prompt: 'first', cwd, resume, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      }).promise
+      try {
+        const first = await request('before-env-recovery')
+        envSpy.mockReturnValue({ ...base, HTTPS_PROXY: 'http://127.0.0.1:12345' })
+        await expect(request('after-env-recovery', first.externalSessionId)).resolves.toMatchObject({
+          externalSessionId: first.externalSessionId, status: 'completed'
+        })
+        const starts = readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')
+        expect(starts).toHaveLength(2)
+        expect(() => process.kill(Number(starts[0]), 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+        await request('same-env', first.externalSessionId)
+        expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(2)
+      } finally {
+        envSpy.mockRestore()
         await adapter.dispose?.()
       }
     })

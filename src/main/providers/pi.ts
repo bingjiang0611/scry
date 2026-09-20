@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { accessSync, constants, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
@@ -398,6 +399,7 @@ const ROTOM_RPC_IDLE_MS = 60_000
 
 interface IdleRotomRpc {
   rpc: PiRpcProcess
+  env: Record<string, string>
   profileId: string
   executable: string
   cwd: string
@@ -412,19 +414,22 @@ class RotomRpcPool {
     return `${profile.id}\0${profile.executable}\0${cwd ?? ''}\0${sessionId}`
   }
 
-  take(profile: PiAgentProfile, cwd: string | undefined, sessionId: string | undefined): PiRpcProcess | undefined {
+  async take(profile: PiAgentProfile, cwd: string | undefined, sessionId: string | undefined, env: Record<string, string>): Promise<PiRpcProcess | undefined> {
     if (!sessionId) return undefined
     const key = this.key(profile, cwd, sessionId)
     const entry = this.idle.get(key)
     if (!entry) return undefined
     this.idle.delete(key)
     clearTimeout(entry.timer)
-    if (entry.rpc.reusable()) return entry.rpc
-    void entry.rpc.close().catch(() => undefined)
+    // A live process cannot inherit a recovered proxy/PATH. Compare the sanitized
+    // launch environment in memory only; never persist or log credential values.
+    if (entry.rpc.reusable() && isDeepStrictEqual(entry.env, env)) return entry.rpc
+    // Confirm the previous writer has exited before reopening the same native session.
+    await entry.rpc.close()
     return undefined
   }
 
-  keep(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, rpc: PiRpcProcess): void {
+  keep(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, rpc: PiRpcProcess, env: Record<string, string>): void {
     if (!rpc.reusable()) {
       void rpc.close().catch(() => undefined)
       return
@@ -437,6 +442,7 @@ class RotomRpcPool {
     }
     const entry: IdleRotomRpc = {
       rpc,
+      env,
       profileId: profile.id,
       executable: profile.executable,
       cwd: cwd ?? '',
@@ -984,13 +990,19 @@ async function runPiAgent(
     })
   }
   if (state.stopped) return { stopped: true, status: 'interrupted' }
-  const env = await piRpcEnvironment(profile)
+  const baseEnv = shellEnv()
+  const launchShellEnvError = shellEnvError()
+  const env = await piRpcEnvironment(profile, baseEnv)
   // Stop may arrive while resolving the profile or probing Node. Do not spawn after that stop.
   if (state.stopped) return { stopped: true, status: 'interrupted' }
   const args = piRpcArgs({ session: request.resume })
   const mayReuse = basename(profile.executable) === 'rotom'
-  const rpc = (mayReuse ? rotomPool?.take(profile, request.cwd, request.resume) : undefined) ??
-    PiRpcProcess.start(profile, args, env, request.cwd, maxFrameBytes)
+  const pooledRpc = mayReuse ? await rotomPool?.take(profile, request.cwd, request.resume, env) : undefined
+  if (state.stopped) {
+    await pooledRpc?.close()
+    return { stopped: true, status: 'interrupted' }
+  }
+  const rpc = pooledRpc ?? PiRpcProcess.start(profile, args, env, request.cwd, maxFrameBytes)
   state.rpc = rpc
   let retainRpc = false
   const usage: UsageAggregate = {
@@ -1328,7 +1340,7 @@ async function runPiAgent(
         provider: usage.upstreamProvider ?? null,
         stderrTail: rpc.stderrTail() || null,
         transportError: usage.lastTransportError ?? null,
-        shellEnvError: shellEnvError() ?? null
+        shellEnvError: launchShellEnvError ?? null
       }
     }))
     if (failed) {
@@ -1342,7 +1354,7 @@ async function runPiAgent(
         nextAction: terminationReason === 'input_context_overflow'
           ? '点击失败卡片的“从失败处恢复”，在新分支中移除或压缩大图后重试；也可以新建会话'
           : transportFailure
-            ? shellEnvError() ?? '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试'
+            ? launchShellEnvError ?? '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试'
             : '继续当前会话重试；若再次中止，请检查上游 Provider 状态与 Rotom 日志'
       })
     }
@@ -1373,7 +1385,7 @@ async function runPiAgent(
     off()
     offFailure()
     abortController.abort()
-    if (retainRpc && state.sessionId && rotomPool) rotomPool.keep(profile, request.cwd, state.sessionId, rpc)
+    if (retainRpc && state.sessionId && rotomPool) rotomPool.keep(profile, request.cwd, state.sessionId, rpc, env)
     else await rpc.close()
     if (state.rpc === rpc) state.rpc = undefined
   }

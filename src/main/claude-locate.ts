@@ -105,7 +105,9 @@ export function shellEnvError(): string | undefined {
   return shellEnvFailure
 }
 
-const SHELL_ENV_TIMEOUT_MS = 5_000
+// nvm initialization can take >5s on a healthy login shell. Keep acquisition bounded;
+// after 15s report degradation and retry only on the next explicit send, not UI polling.
+const SHELL_ENV_TIMEOUT_MS = 15_000
 
 const LOGIN_SHELL_ENV_NAMES = new Set([
   'PATH', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'COLORTERM',
@@ -147,9 +149,9 @@ function fallbackShellEnv(): Record<string, string> {
   })
 }
 
-export function warmShellEnv(): Promise<Record<string, string>> {
-  if (shellEnvCache) return Promise.resolve(shellEnvCache)
+export function warmShellEnv(options: { retryFailed?: boolean } = {}): Promise<Record<string, string>> {
   if (shellEnvPromise) return shellEnvPromise
+  if (shellEnvCache && !(options.retryFailed && shellEnvFailure)) return Promise.resolve(shellEnvCache)
   const shell = process.env.SHELL || '/bin/zsh'
   shellEnvPromise = execFileOutcome(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: SHELL_ENV_TIMEOUT_MS }).then((outcome) => {
     const out = fallbackShellEnv()
@@ -159,17 +161,18 @@ export function warmShellEnv(): Promise<Record<string, string>> {
     const e = raw.indexOf('__AS_ENV_E__')
     const capturedLoginEnv = outcome.exitCode === 0 && s >= 0 && e > s
     if (!capturedLoginEnv) {
-      const reason = outcome.timedOut ? '超时（5s）'
+      const reason = outcome.timedOut ? `超时（${SHELL_ENV_TIMEOUT_MS / 1_000}s）`
         : outcome.error ? '无法启动'
           : outcome.signal ? `被信号 ${outcome.signal} 终止`
             : outcome.exitCode !== 0 ? `退出码 ${outcome.exitCode}`
               : '未返回完整环境标记'
-      shellEnvFailure = `登录 shell 环境采集失败：${reason}；当前使用继承环境，代理和 PATH 可能缺失。请检查 shell 启动脚本，修复后重启 Scry`
-      // Keep the bounded fallback cached to avoid spawning a broken shell for every operation.
+      shellEnvFailure = `登录 shell 环境采集失败：${reason}；当前使用继承环境，代理和 PATH 可能缺失（尚不能确认是本次网络错误的原因）。请检查 shell 启动脚本，修复后重新发送将重试采集`
+      // Discovery/polling keeps the fallback cached; only an explicit send retries failure.
       // Never log stdout/stderr: startup scripts and env output may contain credentials.
       console.warn(`[scry] ${shellEnvFailure}`)
     }
     if (capturedLoginEnv) {
+      shellEnvFailure = undefined
       for (const line of raw.slice(s + '__AS_ENV_S__'.length, e).split('\n')) {
         const i = line.indexOf('=')
         if (i > 0) captured[line.slice(0, i)] = line.slice(i + 1)
