@@ -983,12 +983,14 @@ export function App() {
 
   useEffect(() => {
     sessionDraftsRef.current = sessionDrafts
+    const storageError = '本地存储不可用，草稿未能保存；当前内容仍在本窗口中'
     try {
-      if (!writeComposerDrafts(window.localStorage, sessionDrafts)) {
-        setComposerError((current) => current ?? '草稿无法完整持久化（存储不可用或空间不足）；当前内容仍在本窗口中')
-      }
+      const saved = writeComposerDrafts(window.localStorage, sessionDrafts)
+      setComposerError((current) => saved
+        ? (current === storageError ? null : current)
+        : (current ?? storageError))
     } catch {
-      setComposerError((current) => current ?? '草稿无法持久化；当前内容仍在本窗口中')
+      setComposerError((current) => current ?? storageError)
     }
   }, [sessionDrafts])
 

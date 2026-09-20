@@ -17,8 +17,6 @@ interface StoredDraft {
 
 const STORAGE_KEY = 'scry.composer-drafts.v1'
 const MAX_DRAFTS = 32
-const MAX_INPUT = 256 * 1024
-const MAX_STORAGE_BYTES = 2 * 1024 * 1024
 
 function validAttachment(value: unknown): value is AgentInputAttachment {
   if (!value || typeof value !== 'object') return false
@@ -26,7 +24,7 @@ function validAttachment(value: unknown): value is AgentInputAttachment {
   return item.kind === 'image' &&
     typeof item.name === 'string' && item.name.length > 0 && item.name.length <= 512 &&
     typeof item.mimeType === 'string' && isSupportedImageMimeType(item.mimeType) &&
-    typeof item.dataBase64 === 'string' && item.dataBase64.length <= 1_500_000 &&
+    typeof item.dataBase64 === 'string' &&
     (item.size === undefined || (Number.isSafeInteger(item.size) && item.size >= 0))
 }
 
@@ -55,14 +53,14 @@ export function composerDraftKey(context: {
 export function readComposerDrafts(storage: Pick<Storage, 'getItem'>): ReadonlyMap<string, ComposerDraft> {
   try {
     const raw = storage.getItem(STORAGE_KEY)
-    if (!raw || raw.length > MAX_STORAGE_BYTES) return new Map()
+    if (!raw) return new Map()
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return new Map()
     const drafts = new Map<string, ComposerDraft>()
     for (const row of parsed.slice(-MAX_DRAFTS)) {
       if (!Array.isArray(row) || row.length !== 2 || typeof row[0] !== 'string' || !row[1] || typeof row[1] !== 'object') continue
       const value = row[1] as Partial<StoredDraft>
-      if (typeof value.input !== 'string' || value.input.length > MAX_INPUT || !Array.isArray(value.attachments)) continue
+      if (typeof value.input !== 'string' || !Array.isArray(value.attachments)) continue
       const attachments = value.attachments.filter(validAttachment).slice(0, 8).map(draftAttachment)
       if (!value.input && attachments.length === 0) continue
       drafts.set(row[0], { input: value.input, attachments })
@@ -79,20 +77,14 @@ export function writeComposerDrafts(
 ): boolean {
   try {
     const entries = [...drafts.entries()].filter(([, draft]) => draft.input.length > 0 || draft.attachments.length > 0)
-    let complete = entries.length <= MAX_DRAFTS
-    const rows: Array<[string, StoredDraft]> = entries.slice(-MAX_DRAFTS).map(([key, draft]) => {
-      const attachments = draft.attachments.filter(validAttachment).slice(0, 8)
-      if (draft.input.length > MAX_INPUT || attachments.length !== draft.attachments.length) complete = false
-      return [key, {
-        input: draft.input.slice(0, MAX_INPUT),
-        attachments: attachments.map(({ id: _id, previewUrl: _previewUrl, ...attachment }) => attachment)
-      }]
-    })
-    const expectedRows = rows.length
-    while (rows.length > 0 && JSON.stringify(rows).length > MAX_STORAGE_BYTES) rows.shift()
+    const rows: Array<[string, StoredDraft]> = entries.map(([key, draft]) => [key, {
+      input: draft.input,
+      attachments: draft.attachments.map(({ id: _id, previewUrl: _previewUrl, ...attachment }) => attachment)
+    }])
+    // Let storage enforce its actual quota rather than silently truncating live drafts.
     if (rows.length === 0) storage.removeItem(STORAGE_KEY)
     else storage.setItem(STORAGE_KEY, JSON.stringify(rows))
-    return complete && rows.length === expectedRows
+    return true
   } catch {
     // Draft persistence is additive; quota/storage failures keep the live draft.
     return false
