@@ -64,3 +64,16 @@ preload SHA-256  1ce0ef75071eae69480fdbe407b6e8f9805dda065f1f22949b05a200ceaa5f2
 ```
 
 前两次脚本运行保留在 `/private/tmp/scry-shell-live.fOvrDi/`、`/private/tmp/scry-shell-live.MCE7cn/`。这些是本机临时证据，不是 CI 依赖；清理临时目录后路径可能失效。
+
+## 后续本机安装：0.2.150
+
+用户随后明确要求安装。仅 App 从 `0.2.149` 升到 `0.2.150`，CLI 保持 `0.2.45`，上面的业务源码没有再改。
+
+- Node `v22.22.1` 下 `npm run check:cli-release`：557 tests passed，CLI package smoke passed。
+- `npm run test:renderer:ui`：会话、Credits、图片/焦点、后台任务与恢复 fixture 全部通过。
+- `npm run pack`：typecheck、2311 tests passed / 3 skipped、shell、App/CLI build、产物检查与 packaged Electron security smoke 全部通过。三项 skip 为默认关闭的 `P0_PROBE`、`P1_PROBE`、`BILLING_ADMIN_REAL`，没有用此次的两个上游测试冒充这些探针。
+- 为避免中断用户当时正在运行的 Qoder 任务，将 `install:mac:dev` 的 `pack && installer` 两阶段分开执行。任务结束后正常退出旧 App，再运行 `node scripts/install-macos.mjs` 安装同一产物；保留 `/Applications/.Scry.app.backup`。
+- 安装后重新执行产物检查与 `codesign --verify --deep --strict`，核对源产物和安装目录的 `app.asar`、plist、App executable、私有 CLI launcher SHA-256 一致。版本为 App `0.2.150` / CLI `0.2.45`，已正常打开 App 和 renderer。
+- 使用本机 Apple Development 签名，未公证；这不是正式 Developer ID 发布。没有另跑 Node 20/24 CLI 矩阵，也没有在真实用户工作区再次发送验收 prompt。
+
+安装日志与指纹：`/private/tmp/scry-install-0.2.150.RMEaR7/`。
