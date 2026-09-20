@@ -1617,8 +1617,8 @@ handleTrusted('terminal:close', async (event, request: TerminalOwnershipRequest)
 })
 
 handleTrusted('agent:setCwd', (_e, dir: string | null) => {
-  invalidateSessionHistoryLoad('workspace changed')
   const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
+  if (cwd !== currentCwd) invalidateSessionHistoryLoad('workspace changed')
   setCurrentCwd(cwd)
   return cwd ?? null
 })
@@ -1914,7 +1914,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
       : null
     archived = archivePage?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
   } catch (error) {
-    if (signal.aborted) return null
+    signal.throwIfAborted()
     throw error
   }
   perf.mark('archive', {
@@ -1934,16 +1934,18 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
         now: () => new Date().toISOString()
       })
     } catch (error) {
-      if (signal.aborted) return null
-      if (!archived) return null
+      signal.throwIfAborted()
+      if (!archived) throw error
     }
   }
   perf.mark('transcript', { transcriptTurns: turns.length, transcriptBytes })
+  // Cancellation is not evidence of an empty session. Reject it so the renderer
+  // cannot replace an existing timeline with an empty successful response.
+  signal.throwIfAborted()
   if (!fp && !archived) {
     perf.finish({ returnedTurns: 0 })
     return null
   }
-  if (requestRevision !== loadSessionRevision) return null
   dockBadge.view(
     providerSessionKey(payload.providerId, cwd, payload.externalSessionId, payload.agentProfileId),
     Boolean(win?.isFocused())
@@ -1972,7 +1974,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
   )
   perf.mark('merge', { mergedTurns: merged.length })
-  if (requestRevision !== loadSessionRevision) return null
+  signal.throwIfAborted()
   const hookConfig =
     cwd && payload.providerId === 'claude'
       ? loadClaudeHookConfig(cwd, homeDir)

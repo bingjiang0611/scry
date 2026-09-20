@@ -87,7 +87,7 @@ export function focusedRunNeedsLoading(
 
 export interface SessionEvidenceGap {
   sessionId: string
-  status: 'unavailable' | 'empty'
+  status: 'unavailable' | 'empty' | 'error'
   detail: string
 }
 
@@ -574,7 +574,7 @@ export async function restoreFocusedRunSelection(
     agentProfileId: run.agentProfileId,
     cwd,
     externalSessionId
-  }).catch(() => null)
+  })
   if (effects.isCurrent && !effects.isCurrent()) return false
   effects.replaceWithParsedSession(sessionId, page?.turns ?? [], { activeRun: run, page })
   return true
@@ -1729,7 +1729,11 @@ export function App() {
       setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
     } catch (error) {
       if (isCurrent()) {
-        setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, null))
+        setSessionEvidenceGap({
+          sessionId,
+          status: 'error',
+          detail: `无法加载会话历史：${error instanceof Error ? error.message : String(error)}`
+        })
         setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
       }
     } finally {
