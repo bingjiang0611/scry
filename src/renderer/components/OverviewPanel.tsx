@@ -740,7 +740,10 @@ function OverviewPanelBody({
   const sessionWaitMs = sessionInterventions.reduce((total, intervention) => total + intervention.durationMs, 0)
   const sessionClarifications = sessionInterventions.filter((intervention) => intervention.kind === 'clarification').length
   const sessionPermissions = sessionInterventions.filter((intervention) => intervention.kind === 'permission').length
-  const results = turns.map(resultOf).filter((event): event is TraceEvent => event != null)
+  const results = useMemo(
+    () => turns.map(resultOf).filter((event): event is TraceEvent => event != null),
+    [turns]
+  )
   const sumObserved = (pick: (event: TraceEvent) => number | undefined): { value: number | null; known: number } => {
     const values = results.map(pick).filter((value): value is number => value != null)
     return {

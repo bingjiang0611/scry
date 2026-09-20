@@ -91,6 +91,18 @@ async function exercise() {
   check(!pausedGoal.querySelector('.errline'), 'Tool termination still renders as a Provider error')
   check(!pausedGoal.textContent.includes('继续当前会话重试'), 'Goal pause still advises blind retry')
   pausedGoal.hidden = true
+  const performanceFixture = document.querySelector('#performance-fixture')
+  const formatWhole = performanceFixture.querySelector('.md-format-whole')
+  check(formatWhole != null, 'Long Markdown did not defer full formatting')
+  check(!performanceFixture.querySelector('h2'), 'Unsafe long Markdown formatted before user request')
+  formatWhole.click()
+  await waitFor(() => performanceFixture.querySelector('h2') != null)
+  const toolGroup = performanceFixture.querySelector('.tool-group-row')
+  check(performanceFixture.querySelectorAll('[data-trace-event-id]').length === 0, 'Collapsed tools mounted eagerly')
+  toolGroup.click()
+  await waitFor(() => performanceFixture.querySelectorAll('[data-trace-event-id]').length === 100)
+  toolGroup.click()
+  await waitFor(() => performanceFixture.querySelectorAll('[data-trace-event-id]').length === 0)
   const projectPicker = () => document.querySelector('#composer-project .composer-context')
   check(projectPicker() != null, 'New draft lost project selection')
   const input = document.querySelector('#composer-project textarea')
@@ -130,7 +142,7 @@ async function exercise() {
   check(input.value === '手动输入', 'History replaced a non-empty draft')
   document.querySelector('#new-draft').click()
   await waitFor(() => projectPicker() != null)
-  return { viewport: [innerWidth, innerHeight], portraitAndLandscape: true, attachmentFlow: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, projectPickerLifecycle: true, promptHistoryNavigation: true }
+  return { viewport: [innerWidth, innerHeight], portraitAndLandscape: true, attachmentFlow: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, markdownDeferred: true, toolsDeferred: true, projectPickerLifecycle: true, promptHistoryNavigation: true }
 }
 
 try {
@@ -166,6 +178,7 @@ try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         let result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
         win.setSize(560, 480)
+        await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         result = { wide: result, narrow: await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )}) }
         console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
         app.exit(0)

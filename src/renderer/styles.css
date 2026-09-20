@@ -1194,6 +1194,18 @@ body.pane-resizing * {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.md > .md-format-whole {
+  float: right;
+  margin: 0 0 8px 12px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg2);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.md > .md-format-whole:hover { color: var(--fg); border-color: var(--border2); }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md h1,

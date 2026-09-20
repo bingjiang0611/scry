@@ -1661,11 +1661,11 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(failedHtml).toContain('从失败处恢复')
   })
 
-  it('trace 树渲染出工具节点', () => {
+  it('trace 树默认只挂载工具组摘要，展开内容按需渲染', () => {
     expect(html).toContain('Write')
     expect(html).toContain('Read')
     expect(html).toContain('Bash')
-    expect(html).toContain('data-trace-event-id="e2"')
+    expect(html).not.toContain('data-trace-event-id="e2"')
   })
 
   it('思考默认展开并以独立 disclosure 区别于最终回复', () => {
@@ -1680,7 +1680,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).not.toContain('class="think-mark"')
     expect(html).toContain('class="tool-group"')
     expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('class="tool-group-body" hidden=""')
+    expect(html).not.toContain('class="tool-group-body"')
     expect(html).toContain('class="tg-pill">3</span>')
     expect(html).toContain('Bash · Write · Read')
     expect(html).not.toContain('class="tg-dur">0ms</span>')
@@ -2008,7 +2008,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         })
       ]
     }
-    const editHtml = renderToStaticMarkup(<AssistantTurn turn={editTurn} selectedId={null} onSelect={() => {}} />)
+    const editHtml = renderToStaticMarkup(<AssistantTurn turn={editTurn} selectedId="edit-1" onSelect={() => {}} />)
 
     expect(editHtml).toContain('edit-lines')
     expect(editHtml).toContain('>+3<')
@@ -2050,7 +2050,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     const linked = renderToStaticMarkup(
       <AssistantTurn
         turn={{ ...turn, items: [editEvent, diffEvent] }}
-        selectedId={null}
+        selectedId="edit-1"
         onSelect={() => {}}
         onOpenDiff={() => {}}
       />
@@ -2061,7 +2061,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     const running = renderToStaticMarkup(
       <AssistantTurn
         turn={{ ...turn, done: false, items: [editEvent, diffEvent] }}
-        selectedId={null}
+        selectedId="edit-1"
         onSelect={() => {}}
         onOpenDiff={() => {}}
       />
@@ -2072,7 +2072,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     const otherFile = renderToStaticMarkup(
       <AssistantTurn
         turn={{ ...turn, items: [editEvent, { ...diffEvent, turnDiff: { ...diffEvent.turnDiff!, files: [{ path: '/repo/src/b.ts', added: 1, deleted: 0 }] } }] }}
-        selectedId={null}
+        selectedId="edit-1"
         onSelect={() => {}}
         onOpenDiff={() => {}}
       />
@@ -2429,7 +2429,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     const html = renderToStaticMarkup(
       <AssistantTurn
         turn={childTurn}
-        selectedId={null}
+        selectedId="child-delta-2"
         onSelect={() => {}}
         pendingQuestions={[pendingQuestion]}
         onAnswerQuestion={async () => {}}
@@ -3319,7 +3319,7 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
     expect(html).not.toContain('<dialog')
   })
 
-  it('完成态默认展开并直接显示返回内容，普通工具仍默认收起', () => {
+  it('完成态问答默认收起并可按需展开，普通工具也保持收起', () => {
     const completed: Turn = {
       ...askTurn,
       done: true,
@@ -3336,13 +3336,17 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
         })
       ]
     }
-    const completedHtml = renderToStaticMarkup(
+    const collapsedHtml = renderToStaticMarkup(
       <AssistantTurn turn={completed} selectedId={null} onSelect={() => {}} />
+    )
+    const expandedHtml = renderToStaticMarkup(
+      <AssistantTurn turn={completed} selectedId="ask-use" onSelect={() => {}} />
     )
     const ordinaryHtml = renderToStaticMarkup(<AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} />)
 
-    expect(completedHtml).toContain('已回答')
-    expect(completedHtml).toContain('Your questions have been answered: 自动验证; MCP, Skill')
+    expect(collapsedHtml).not.toContain('Your questions have been answered: 自动验证; MCP, Skill')
+    expect(expandedHtml).toContain('已回答')
+    expect(expandedHtml).toContain('Your questions have been answered: 自动验证; MCP, Skill')
     expect(ordinaryHtml).not.toContain('class="tool-detail"')
   })
 
@@ -3416,7 +3420,7 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
 
   it('已结束但缺失 tool_result 时标记未获得返回，不伪报仍在同步或成功', () => {
     const html = renderToStaticMarkup(
-      <AssistantTurn turn={{ ...askTurn, done: true }} selectedId={null} onSelect={() => {}} />
+      <AssistantTurn turn={{ ...askTurn, done: true }} selectedId="ask-use" onSelect={() => {}} />
     )
 
     expect(html).toContain('未获得返回')
@@ -3459,7 +3463,7 @@ describe('AssistantTurn AskUserQuestion 内联问答', () => {
         })
       ]
     }
-    const turnHtml = renderToStaticMarkup(<AssistantTurn turn={completed} selectedId={null} onSelect={() => {}} />)
+    const turnHtml = renderToStaticMarkup(<AssistantTurn turn={completed} selectedId="ask-use" onSelect={() => {}} />)
     const overviewHtml = renderToStaticMarkup(
       <OverviewPanel turns={[completed]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )

@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { deleteTurnOutboxSessionRows, recordTurn, turnOutboxSessionRunIds } from './db'
+import { deleteTurnOutboxSessionRows, recordTurn, replayDatabaseTurnOutbox, turnOutboxSessionRunIds } from './db'
 
 let root = ''
 beforeEach(() => {
@@ -67,6 +67,39 @@ describe('database turn outbox', () => {
       sessionId: 'session-outbox',
       items: [expect.objectContaining({ stage: 'result', tokensIn: 10 })]
     })
+  })
+
+  it('replays a large startup outbox in bounded event-loop batches', async () => {
+    for (let index = 0; index < 7; index++) {
+      expect(recordTurn({
+        runId: `run-${index}`, sessionId: 'session-a', cwd: '/repo', providerId: 'qoder',
+        userText: 'x', items: [{
+          id: `result-${index}`, runId: `run-${index}`, ts: new Date().toISOString(),
+          kind: 'harness', stage: 'result'
+        }]
+      })).toBe(false)
+    }
+    let yields = 0
+    await replayDatabaseTurnOutbox({
+      batchSize: 3,
+      yieldControl: async () => { yields++ },
+      persist: () => false
+    })
+    expect(yields).toBe(2)
+    expect(readdirSync(join(root, 'db-turn-outbox')).filter((name) => name.endsWith('.json'))).toHaveLength(7)
+  })
+
+  it('removes only outbox rows acknowledged by the replay projection', async () => {
+    for (const runId of ['accepted', 'retained']) {
+      expect(recordTurn({
+        runId, sessionId: 'session-a', cwd: '/repo', providerId: 'qoder',
+        userText: 'x', items: [{ id: `result-${runId}`, runId, ts: new Date().toISOString(), kind: 'harness', stage: 'result' }]
+      })).toBe(false)
+    }
+    await replayDatabaseTurnOutbox({ persist: (args) => args.runId === 'accepted' })
+    expect(turnOutboxSessionRunIds(root, {
+      providerId: 'qoder', cwd: '/repo', externalSessionId: 'session-a'
+    })).toEqual(['retained'])
   })
 
   it('finds and deletes only the exact deleted session outbox rows', () => {

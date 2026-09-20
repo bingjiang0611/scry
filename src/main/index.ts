@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shel
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
 import {
@@ -16,14 +16,15 @@ import {
 } from './claude-locate'
 import { AgentRuntimeError } from './run-outcome'
 import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
+import { parseTranscriptFileInWorker, TRANSCRIPT_WORKER_THRESHOLD_BYTES } from './transcript-parser'
 import { classifyError } from './error-classify'
-import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
+import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, replayDatabaseTurnOutbox, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
-  discoverTraceArchiveSessions,
+  discoverTraceArchiveSessionsAsync,
   mirrorTranscript,
   readTraceArchiveAsync,
   readTraceArchivePageAsync,
@@ -415,37 +416,39 @@ const knownProjectDirectories = (): Set<string> => new Set([
 const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirectory(cwd, knownProjectDirectories())
 const remoteProjectRoots = (): string[] => canonicalRemoteProjectRoots(knownProjectDirectories())
 const resolveRemoteProjectDirectory = (cwd: string): string => resolveRemoteDescendant(cwd, knownProjectDirectories())
-let traceCatalogRecoveryDone = false
-const recoverTraceCatalogOnce = (): void => {
-  if (traceCatalogRecoveryDone) return
-  traceCatalogRecoveryDone = true
-  const store = appSessionStore()
-  const catalog = store.load()
-  const knownCwds = new Set(catalog.map((session) => session.cwd))
-  const known = new Set(catalog.flatMap((session) =>
-    session.externalSessionId
-      ? [`${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd}\0${session.externalSessionId}`]
-      : []
-  ))
-  for (const summary of discoverTraceArchiveSessions(app.getPath('userData'))) {
-    // Recovery targets the Qoder catalog gap that loses otherwise healthy native sessions.
-    // Never resurrect archived regression evidence as new projects.
-    if (summary.providerId !== 'qoder' || !knownCwds.has(summary.cwd)) continue
-    const key = `${summary.providerId}\0\0${summary.cwd}\0${summary.sessionId}`
-    if (known.has(key)) continue
-    store.record({
-      providerId: summary.providerId,
-      runtimeProvider: summary.runtimeProvider,
-      runId: summary.runId,
-      externalSessionId: summary.sessionId,
-      cwd: summary.cwd,
-      prompt: summary.prompt
-    })
-    known.add(key)
-  }
+let traceCatalogRecovery: Promise<void> | null = null
+const recoverTraceCatalogOnce = (): Promise<void> => {
+  if (traceCatalogRecovery) return traceCatalogRecovery
+  traceCatalogRecovery = (async () => {
+    const store = appSessionStore()
+    const catalog = store.load()
+    const knownCwds = new Set(catalog.map((session) => session.cwd))
+    const known = new Set(catalog.flatMap((session) =>
+      session.externalSessionId
+        ? [`${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd}\0${session.externalSessionId}`]
+        : []
+    ))
+    for (const summary of await discoverTraceArchiveSessionsAsync(app.getPath('userData'))) {
+      // Recovery targets the Qoder catalog gap that loses otherwise healthy native sessions.
+      // Never resurrect archived regression evidence as new projects.
+      if (summary.providerId !== 'qoder' || !knownCwds.has(summary.cwd)) continue
+      const key = `${summary.providerId}\0\0${summary.cwd}\0${summary.sessionId}`
+      if (known.has(key)) continue
+      store.record({
+        providerId: summary.providerId,
+        runtimeProvider: summary.runtimeProvider,
+        runId: summary.runId,
+        externalSessionId: summary.sessionId,
+        cwd: summary.cwd,
+        prompt: summary.prompt
+      })
+      known.add(key)
+    }
+  })()
+  return traceCatalogRecovery
 }
-const listProjectCatalog = (): ProjectMeta[] => {
-  recoverTraceCatalogOnce()
+const listProjectCatalog = async (): Promise<ProjectMeta[]> => {
+  await recoverTraceCatalogOnce()
   const sessionProjects = appSessionStore().listProjects()
   const now = Date.now()
   const observed = new Map<string, number>()
@@ -1926,13 +1929,24 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   let transcriptBytes = 0
   if (fp) {
     try {
-      const content = await readFile(fp, { encoding: 'utf8', signal })
-      transcriptBytes = Buffer.byteLength(content)
-      turns = parseTranscriptToTurns(content, {
-        runId: payload.externalSessionId,
-        newId: () => mainEventId('history', payload.externalSessionId!),
-        now: () => new Date().toISOString()
-      })
+      const transcriptStat = await stat(fp)
+      if (transcriptStat.size >= TRANSCRIPT_WORKER_THRESHOLD_BYTES) {
+        const parsed = await parseTranscriptFileInWorker({
+          path: fp,
+          runId: payload.externalSessionId,
+          signal
+        })
+        turns = parsed.turns
+        transcriptBytes = parsed.bytes
+      } else {
+        const content = await readFile(fp, { encoding: 'utf8', signal })
+        transcriptBytes = Buffer.byteLength(content)
+        turns = parseTranscriptToTurns(content, {
+          runId: payload.externalSessionId,
+          newId: () => mainEventId('history', payload.externalSessionId!),
+          now: () => new Date().toISOString()
+        })
+      }
     } catch (error) {
       signal.throwIfAborted()
       if (!archived) throw error
@@ -4180,6 +4194,7 @@ app.whenReady().then(() => {
   startupManagedRecovery = (async () => {
     // Let the first window render before touching historical recovery trees.
     await new Promise((resolve) => setTimeout(resolve, 250))
+    await replayDatabaseTurnOutbox()
     cleanupAppStoreAtomicTemps(app.getPath('userData'))
     cleanupUsageAtomicTemps(app.getPath('userData'))
     cleanupManagedTurnTemps(app.getPath('userData'))

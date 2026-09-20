@@ -315,7 +315,8 @@ describe('RunDiffPreviewer 发布策略', () => {
 
   // trailing refresh：在途 preview 读到的是它自己开始前的工作树，期间到达的写入它看不见。
   // 没有 trailing，最后一次写就再也不会出现在预览里（旧实现直接返回在途 promise 丢掉这次 change）。
-  it('在途期间到达的写入不被吞：本次算完自动补一次 trailing refresh，且穿过节流窗口', async () => {
+  it('在途期间到达的写入不被吞：节流窗口到期后补一次 trailing refresh', async () => {
+    const clock = fakeClock()
     const events: DiffPreviewEvent[] = []
     const gate = deferred<TurnDiffSnapshot>()
     let calls = 0
@@ -325,7 +326,8 @@ describe('RunDiffPreviewer 发布策略', () => {
       sessionCapture: null,
       hints: () => ({}),
       emit: (e) => events.push(e),
-      now: () => 0, // 时钟不动：普通节流窗口全程有效，trailing 必须不被它拦掉
+      now: clock.now,
+      schedule: clock.schedule,
       minIntervalMs: DIFF_PREVIEW_MIN_INTERVAL_MS,
       preview: () => {
         calls++
@@ -336,17 +338,21 @@ describe('RunDiffPreviewer 发布策略', () => {
     })
     const first = previewer.notifyChange()
     await Promise.resolve()
-    // 首个 preview 在途时又落盘一次：必须记 pending。
     const second = previewer.notifyChange()
     gate.resolve(snap())
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(calls).toBe(1)
+    expect(clock.pending()).toBe(1)
+    clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await Promise.all([first, second])
     expect(calls).toBe(2)
     expect(events).toHaveLength(2)
-    expect(events.at(-1)!.snapshot.files[0].path).toBe('/repo/late.ts') // 最后一次写的状态发出去了
-    expect(new Set(events.map((e) => e.id)).size).toBe(1) // 仍是固定 id 原地替换
+    expect(events.at(-1)!.snapshot.files[0].path).toBe('/repo/late.ts')
+    expect(new Set(events.map((e) => e.id)).size).toBe(1)
   })
 
   it('在途期间多次 notify 只合并成一次 trailing：不并发、不堆积', async () => {
+    const clock = fakeClock()
     const gate = deferred<TurnDiffSnapshot>()
     let calls = 0
     let concurrent = 0
@@ -357,7 +363,8 @@ describe('RunDiffPreviewer 发布策略', () => {
       sessionCapture: null,
       hints: () => ({}),
       emit: () => {},
-      now: () => 0,
+      now: clock.now,
+      schedule: clock.schedule,
       minIntervalMs: DIFF_PREVIEW_MIN_INTERVAL_MS,
       preview: async () => {
         calls++
@@ -374,6 +381,9 @@ describe('RunDiffPreviewer 发布策略', () => {
     await Promise.resolve()
     const rest = [previewer.notifyChange(), previewer.notifyChange(), previewer.notifyChange()]
     gate.resolve(snap())
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(clock.pending()).toBe(1)
+    clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await Promise.all([first, ...rest])
     expect(calls).toBe(2) // 首个 + 一次合并后的 trailing
     expect(maxConcurrent).toBe(1)
@@ -731,7 +741,9 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     const baseline = registry.ensure({ key, revision: 0, cwd: root })
     await baseline.capture
 
+    const clock = fakeClock()
     const gate = deferred<void>()
+    const firstCompleted = deferred<void>()
     let calls = 0
     const events: DiffPreviewEvent[] = []
     const previewer = new RunDiffPreviewer({
@@ -741,12 +753,15 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
       sessionBaselineOrigin: baseline.origin,
       hints: () => ({}),
       emit: (e) => events.push(e),
-      now: () => 0,
-      minIntervalMs: DIFF_PREVIEW_MIN_INTERVAL_MS, // 节流窗口全程有效，trailing 仍必须跑
+      now: clock.now,
+      schedule: clock.schedule,
+      minIntervalMs: DIFF_PREVIEW_MIN_INTERVAL_MS,
       preview: async (capture, deadlineMs, options) => {
-        calls++
-        if (calls === 1) await gate.promise // 挂住首个 preview
-        return previewGitTurnDiff(capture, deadlineMs, options)
+        const call = ++calls
+        if (call === 1) await gate.promise // 挂住首个 preview
+        const result = await previewGitTurnDiff(capture, deadlineMs, options)
+        if (call === 1) firstCompleted.resolve()
+        return result
       }
     })
 
@@ -757,6 +772,10 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     await writeFile(join(root, 'second.ts'), 'b\nc\n')
     const second = previewer.notifyChange()
     gate.resolve()
+    await firstCompleted.promise
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(clock.pending()).toBe(1)
+    clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await Promise.all([first, second])
 
     expect(calls).toBe(2)

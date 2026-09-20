@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { ComposerProjectFixture } from './composer-project-smoke'
 import { AssistantTurn, UserMessage } from '../../src/renderer/components/ChatTurn'
+import MarkdownImpl from '../../src/renderer/components/MarkdownImpl'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
@@ -18,6 +19,7 @@ const image = (width: number, height: number) => {
   return { kind: 'image' as const, name: `${width}x${height}.png`, mimeType: 'image/png' as const, dataBase64: canvas.toDataURL().split(',')[1] }
 }
 
+const longReferenceMarkdown = `## Large reference document\n\n${'Paragraph with [docs] reference. '.repeat(2_000)}\n\n[docs]: https://example.com`
 const goalPausedTurn = {
   runId: 'pi-goal-paused', userText: '/goal resume', done: true,
   items: [{
@@ -31,6 +33,22 @@ const goalPausedTurn = {
   }]
 }
 
+const toolTurn = {
+  runId: 'tool-lazy-smoke',
+  userText: 'inspect tools',
+  done: true,
+  items: Array.from({ length: 100 }, (_, index) => ({
+    id: `tool-${index}`,
+    runId: 'tool-lazy-smoke',
+    ts: new Date(index).toISOString(),
+    kind: 'tool' as const,
+    stage: 'tool:Read',
+    tool: 'Read',
+    toolUseId: `use-${index}`,
+    filePath: `/tmp/file-${index}.txt`
+  }))
+}
+
 createRoot(document.getElementById('root')!).render(
   <>
     <main style={{ width: '65vw', height: '60vh', overflow: 'auto', margin: '100px 0 0 20px' }}>
@@ -40,6 +58,10 @@ createRoot(document.getElementById('root')!).render(
     </main>
     <section id="goal-paused-fixture" hidden style={{ position: 'fixed', left: 20, top: 20, width: '65vw', zIndex: 30 }}>
       <AssistantTurn turn={goalPausedTurn} selectedId={null} onSelect={() => {}} />
+    </section>
+    <section id="performance-fixture" className="md" style={{ position: 'absolute', left: '-10000px', width: 800 }}>
+      <MarkdownImpl>{longReferenceMarkdown}</MarkdownImpl>
+      <AssistantTurn turn={toolTurn} selectedId={null} onSelect={() => {}} />
     </section>
     <ComposerProjectFixture />
     <aside id="summary" style={{ position: 'fixed', right: 0, top: 0, width: '25vw', height: '100vh', zIndex: 20 }}>Environment</aside>

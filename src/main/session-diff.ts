@@ -213,8 +213,8 @@ function defaultSchedule(run: () => void, delayMs: number): () => void {
 /**
  * 运行中 Diff 预览的发布策略。三条硬规则：
  *  1. 只发 `status === 'captured'` 的 Git 真实快照，采集失败就沉默——不发假降级、不拿工具足迹凑数。
- *  2. 同一 scope 严格串行且节流；在途期间到达的新改动记成 trailing，本次算完立刻补一次最新快照
- *     （trailing 不再受节流窗口拦截，否则「最后一次写」会被永久吞掉），但永不并发、不堆积队列。
+ *  2. 同一 scope 严格串行且节流；在途期间到达的新改动记成 trailing，本次算完等待节流窗口后
+ *     补一次最新快照，避免持续写入让 Git 采集保持高占空比，同时永不并发、不堆积队列。
  *  3. 上一次预览已经算完、新改动落在纯节流窗口里时，把这次改动排成一次「延迟 trailing」：
  *     窗口到期自动补发一次最新快照。少了它，只要之后没有第三次 notify，最后一次写就永久不发布。
  *     窗口内多次 notify 只合并成一次，且与在途链共用同一条串行调度。
@@ -292,9 +292,8 @@ export class RunDiffPreviewer {
     if (this.sealedScopes.has(scope)) return Promise.resolve()
     const cycle = this.cycles.get(scope)
     if (cycle) {
-      // 在途那次读到的是它自己开始前的工作树，这次改动它看不见 → 记 trailing，算完补一次。
-      // 链内 trailing 立刻就会读到最新状态，之前排的延迟 trailing 因此多余。
-      this.cancelDelay(scope)
+      // 在途采集或节流等待期间的新改动合并进同一个 trailing 标记；不要取消等待，
+      // 否则持续写入会反复绕过 minIntervalMs。
       this.trailing.add(scope)
       return cycle
     }
@@ -352,6 +351,17 @@ export class RunDiffPreviewer {
     this.delays.set(scope, { cancel, settled, settle })
   }
 
+  private waitForInterval(scope: DiffPreviewScope, delayMs: number): Promise<void> {
+    let settle!: () => void
+    const settled = new Promise<void>((resolve) => { settle = resolve })
+    const cancel = this.schedule(() => {
+      this.delays.delete(scope)
+      settle()
+    }, Math.max(0, delayMs))
+    this.delays.set(scope, { cancel, settled, settle })
+    return settled
+  }
+
   private cancelDelay(scope: DiffPreviewScope): void {
     const delay = this.delays.get(scope)
     if (!delay) return
@@ -368,8 +378,12 @@ export class RunDiffPreviewer {
         await this.run(scope, capture)
           .catch((error) => this.options.onError?.(scope, error))
           .finally(() => this.lastAt.set(scope, this.now()))
-        // trailing 走同一条链：拿最新状态、不受节流拦截，也永不并发。
         if (!this.trailing.delete(scope)) break
+        const last = this.lastAt.get(scope)
+        const remaining = last == null ? 0 : this.minIntervalMs - (this.now() - last)
+        if (remaining > 0) await this.waitForInterval(scope, remaining)
+        // Notifications accumulated during the wait are represented by the one capture about to run.
+        this.trailing.delete(scope)
       }
       // 同步收尾（不能放进 .finally）：链一结束就从 cycles 摘掉，
       // 否则后到的 notify 会把 trailing 记进一条已经跑完的链里，又把最后一次写吞掉。
