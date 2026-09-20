@@ -82,6 +82,15 @@ async function exercise() {
     await waitFor(() => !document.querySelector('.image-lightbox'))
     check(document.activeElement === thumb, 'Backdrop close did not restore focus')
   }
+  const pausedGoal = document.querySelector('#goal-paused-fixture')
+  pausedGoal.hidden = false
+  const termination = pausedGoal.querySelector('[role="status"]')
+  check(visible(termination), 'Tool termination explanation is not visible')
+  check(termination.textContent.includes('including after resume'), 'Lost the actual Goal recovery restriction')
+  check(termination.textContent.includes('执行结束不代表目标已验证完成'), 'Tool settlement claims Goal completion')
+  check(!pausedGoal.querySelector('.errline'), 'Tool termination still renders as a Provider error')
+  check(!pausedGoal.textContent.includes('继续当前会话重试'), 'Goal pause still advises blind retry')
+  pausedGoal.hidden = true
   const projectPicker = () => document.querySelector('#composer-project .composer-context')
   check(projectPicker() != null, 'New draft lost project selection')
   const input = document.querySelector('#composer-project textarea')
