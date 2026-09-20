@@ -129,7 +129,7 @@ describe('app-store', () => {
           providerId: 'claude',
           runtimeProvider: 'claude_sdk',
           mtime: expect.any(Number),
-          preview: 'resume prompt',
+          preview: 'first prompt',
           count: 1
         }
       ])
@@ -140,6 +140,27 @@ describe('app-store', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('首轮标题在 pending 晋升、多轮续聊及重新加载后保持不变，仍更新 run 身份与活跃时间', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      const prompt = '首轮任务'.repeat(30)
+      const request = { providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const, cwd: '/repo', runId: 'run-1', prompt }
+      store.recordPending(request)
+      store.recordPending({ ...request, prompt: '重复通知' })
+      store.record({ ...request, externalSessionId: 'native-1', prompt: '身份晋升' })
+      expect(store.listSessions('/repo')[0].preview).toBe(prompt.slice(0, 80))
+      store.save(store.load().map((session) => ({ ...session, ts: 1 })))
+      for (const runId of ['run-2', 'run-3']) {
+        store.record({ ...request, runId, externalSessionId: 'native-1', prompt: '继续' })
+      }
+      const sessions = createAppSessionStore(dir).listSessions('/repo')
+      expect(sessions).toHaveLength(1)
+      expect(sessions[0]).toMatchObject({ preview: prompt.slice(0, 80), runId: 'run-3', externalSessionId: 'native-1' })
+      expect(sessions[0].mtime).toBeGreaterThan(1)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
   it('不绑定项目的会话也进入 catalog，并以独立分组展示', () => {
@@ -230,7 +251,7 @@ describe('app-store', () => {
       expect(sessions).toEqual([
         expect.objectContaining({
           sessionId: 'session-1', externalSessionId: 'session-1', runId: 'remote-run-1',
-          preview: 'mobile follow-up'
+          preview: 'old prompt'
         })
       ])
       expect(sessions[0]).not.toHaveProperty('pending')
@@ -393,7 +414,7 @@ describe('app-store', () => {
       expect(createAppSessionStore(dir).listArchivedProjects()[0].sessions[0].preview).toBe('我的会话')
       store.setArchived(request, false)
       expect(createAppSessionStore(dir).listSessions('/repo')[0].preview).toBe('我的会话')
-      expect(store.load()[0].preview).toBe('next message')
+      expect(store.load()[0].preview).toBe('first')
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

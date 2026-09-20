@@ -441,7 +441,7 @@ export function createAppSessionStore(userDataDir: string) {
       ex.runId = args.runId ?? ex.runId
       ex.runtimeProvider = args.runtimeProvider
       ex.agentProfileId = args.agentProfileId
-      ex.preview = args.prompt.slice(0, 80)
+      // Keep the first input as the default title; later turns only refresh activity.
       ex.ts = now
     }
     else
