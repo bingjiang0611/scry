@@ -400,9 +400,13 @@ describe('runtime frontdoor mapping', () => {
     expect(request?.questions[0].options).toHaveLength(20)
 
     const editor = normalizeAgentQuestionRequest('run-native', 'native-editor', {
-      questions: [{ question: '正文', header: '编辑器', options: [], multiSelect: false, inputMode: 'multiline' }]
+      questions: [{ question: '正文', header: '编辑器', options: [], multiSelect: false, inputMode: 'multiline', initialValue: 'Existing\nobjective' }]
     }, undefined, 'native', true)!
     expect(editor.questions[0].inputMode).toBe('multiline')
+    expect(editor.questions[0].initialValue).toBe('Existing\nobjective')
+    expect(normalizeAgentQuestionRequest('run-native', 'oversized-editor', {
+      questions: [{ ...editor.questions[0], initialValue: 'x'.repeat(100_001) }]
+    }, undefined, 'native', true)).toBeNull()
     expect(normalizeAgentQuestionResponse(editor, {
       runId: 'run-native', questionId: 'native-editor', behavior: 'answered', answers: { 正文: 'x'.repeat(50_000) }
     })).not.toBeNull()

@@ -225,6 +225,8 @@ export interface AgentQuestionPrompt {
   placeholder?: string
   /** Native input/editor requests have no synthetic choice list. */
   inputMode?: 'singleline' | 'multiline'
+  /** Provider-native editor content, kept separate from its placeholder. */
+  initialValue?: string
 }
 
 export type AgentQuestionKind = 'clarification' | 'permission'
@@ -693,6 +695,7 @@ export function normalizeAgentQuestionRequest(
       ? value.placeholder
       : undefined
     const inputMode = value.inputMode === 'multiline' ? 'multiline' : value.inputMode === 'singleline' ? 'singleline' : undefined
+    if (allowFreeText && inputMode && typeof value.initialValue === 'string' && value.initialValue.length > 100_000) return null
     seen.add(question)
     questions.push({
       question,
@@ -700,7 +703,9 @@ export function normalizeAgentQuestionRequest(
       options,
       multiSelect: value.multiSelect === true,
       ...(placeholder ? { placeholder } : {}),
-      ...(inputMode ? { inputMode } : {})
+      ...(inputMode ? { inputMode } : {}),
+      ...(allowFreeText && inputMode && typeof value.initialValue === 'string'
+        ? { initialValue: value.initialValue } : {})
     })
   }
   return {

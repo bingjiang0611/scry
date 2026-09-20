@@ -507,6 +507,8 @@ export interface TraceEvent {
   providerStopReason?: string
   /** Pi RPC tool result explicitly ended execution; this is not proof of Goal completion. */
   toolTermination?: { tool: string; message: string }
+  /** Pi acknowledged its extension handler without an observed model turn; not an agent_settled result. */
+  providerCommand?: { name: string; source: 'extension'; modelTurn: 'unobserved' }
   runtimeMetadata?: Record<string, unknown>
   backgroundWork?: BackgroundWork
   intervention?: AgentIntervention

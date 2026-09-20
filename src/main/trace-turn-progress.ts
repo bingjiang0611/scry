@@ -87,14 +87,19 @@ export function isProviderlessTerminalTurn(
 
 /**
  * A managed Provider failure before its native turn boundary has no canonical turn to commit.
- * Keep that diagnostic turn in Scry's local progress/archive path instead of rejecting it and
- * leaving only an unreadable catalog entry.
+ * Keep that diagnostic turn, or an acknowledged Pi command without a model turn, in Scry's
+ * local progress/archive path. Neither is a canonical model turn in `.scry/records`.
  */
 export function shouldUseManagedTerminalPersistence(
   managedPolicy: boolean,
   turn: Pick<TraceArchiveTurn, 'status' | 'items' | 'providerTurnId' | 'forkTurnId'>
 ): boolean {
-  return managedPolicy && !isProviderlessTerminalTurn(turn)
+  const commandOnly = !turn.providerTurnId && !turn.forkTurnId &&
+    turn.items.some((item) => item.kind === 'harness' && item.stage === 'result' &&
+      item.providerId === 'pi' && item.runtimeProvider === 'pi_rpc' &&
+      item.providerCommand?.source === 'extension' && item.providerCommand.modelTurn === 'unobserved') &&
+    !turn.items.some((item) => item.kind === 'model' || item.kind === 'agent' || item.kind === 'tool')
+  return managedPolicy && !isProviderlessTerminalTurn(turn) && !commandOnly
 }
 
 function validUnresolvedProgress(value: UnresolvedTraceTurnProgress | null): value is UnresolvedTraceTurnProgress {
