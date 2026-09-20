@@ -37,7 +37,7 @@ describe(`segmented archive (${TURN_COUNT} turns, 40 visible)`, () => {
     await readTraceArchivePageAsync({ ...args, userDataDir }, { limit: 40 })
   })
 
-  bench('commit one turn, rebuild the invalidated index, then read 40', async () => {
+  bench('commit one turn, preserve the page index, then read 40', async () => {
     const index = TURN_COUNT - 1
     const ok = upsertTraceArchiveTurn({
       ...args,

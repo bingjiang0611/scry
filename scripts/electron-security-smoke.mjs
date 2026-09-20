@@ -479,7 +479,10 @@ async function main() {
       if (!unlockedAgent || unlockedAgent.disabled) await new Promise((resolve) => setTimeout(resolve, 50))
     }
     unlockedAgent?.click()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    const menuDeadline = Date.now() + 2_000
+    while (!document.querySelector('.climenu') && Date.now() < menuDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
     const button = [...document.querySelectorAll('button')].find((node) => node.title?.includes('API/BYOK'))
     return {
       recentFound: !!recent,

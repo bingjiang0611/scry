@@ -74,6 +74,29 @@ These paths were audited rather than rewritten: the existing implementation alre
 - Main-process scheduling is sampled, not guessed. `SCRY_PERF_LOG=1` emits ordered checkpoints for startup, run admission/registration, launch-to-first-trace, and terminal finalization (renderer notify / diff / archive commit / SQLite projection), so a slow phase can be located from evidence and compared across runs instead of inferred. Provider execution time stays separate from Scry overhead.
 - Resource release is bounded and tested. On any terminal outcome the run's `.finally` calls `runStopLifecycle.settle` (which cancels every pending upgrade timer), `userQuestionBroker.cancelRun`, and `runs.remove`; these paths are covered by `run-registry.test.ts`, `run-stop-lifecycle.test.ts`, and `user-question.test.ts`. Per-context session maps are deleted on session switch, terminal, and commit rather than only written. Composer drafts are LRU-bounded to a fixed number of session identities and revoke evicted blob preview URLs, with a `render.test.tsx` regression proving eviction and release. No unbounded growth surfaced in the audited paths, so no additional release logic was added.
 
+## 0.2.150 current-worktree follow-up
+
+The post-baseline fixes keep canonical evidence semantics unchanged while removing the remaining scaling cliffs:
+
+- Canonical turn commits no longer validate or rewrite the global recovery catalog. They leave one durable dirty marker for the next catalog discovery, while a healthy per-session page index is updated after the canonical rename instead of invalidated.
+- Catalog recovery used by project listing now scans canonical files with asynchronous filesystem operations, so a dirty recovery tree does not monopolize Electron main. A write-generation check retains the dirty marker if a turn is committed during discovery; publishing the catalog and clearing the marker do not yield between operations.
+- Per-session page indexes are limited to 32 MiB and 100,000 entries on both read and write. Beyond that, canonical files remain readable via full scans (including subsequent page requests); if real sessions approach this limit, replace the derived index with bounded pages before raising the synchronous parse budget.
+- In an isolated 500-turn write probe, mean milliseconds per write for successive 100-turn buckets were `1.79 / 1.39 / 2.20 / 1.53 / 1.56`; the previous path increased with total global archives. The 500-turn history benchmark setup now completes instead of timing out, and commit plus indexed 40-turn read measured 18.7 ms mean in the reference run.
+- Completed Markdown only splits at verified top-level heading boundaries. Heading-free prose, HTML-bearing documents, cross-document references/footnotes, a single large table, and a single long fence stay as complete selectable text until the user explicitly requests full formatting. Isolated server-render means were 0.4–1.1 ms for the benchmarked guarded shapes.
+- Collapsed tool groups no longer mount their tool bodies. Top-level text deltas no longer invalidate the stable tool timeline memo, and Overview/Diff derivation is skipped or memoized when there is no visible consumer.
+- Diff preview trailing captures now observe the same minimum interval as ordinary captures. Database outbox recovery runs after first-window creation in bounded event-loop batches.
+- Claude transcripts at least 4 MiB are read and normalized in a dedicated one-shot worker. A packaged-worker probe parsed and transferred a synthetic 11.5 MiB / 10,000-turn transcript in 101.5 ms wall time while the main-thread 1 ms timer saw a 3.8 ms maximum gap.
+
+These are isolated local measurements, not universal timing gates or real-Provider latency claims.
+
+### Delivery verification (2026-09-21)
+
+Verified an isolated source snapshot based on `106e0e7`, containing only this performance patch (macOS arm64, Node 24.18.0). `npm test` passed 188 files / 2,344 tests with three explicitly disabled external probes; typecheck, build and renderer UI fixtures passed. Wide and narrow fixtures now start fresh and require deferred Markdown/tool mounting, including collapsing again. Removing the catalog generation guard makes its concurrent-write regression fail; restoring it passes. A GFM regression compares split and whole-document HTML, including fence-like lines that are not valid closing fences.
+
+Current isolated benchmarks: indexed 40-turn archive reads average 7.87 ms versus 97.25 ms for all 500 files; commit plus page read averages 9.77 ms. The built worker parsed 12,297,779 bytes / 10,000 turns in 85.1 ms with a 2.2 ms main timer maximum gap; its entry bytes match the packaged ASAR. This is a Node worker probe, not proof of packaged Electron launch.
+
+Failures retained: the first snapshot's packaged smoke missed the Agent menu after a fixed 50 ms sleep; the fixture now waits for the observable menu within its existing 2 s UI deadline, and a diagnostic run passed. The final snapshot's package build succeeded, but private CLI `--version` was killed twice with SIGKILL. macOS logged `Unable to apply provenance sandbox` for that exact executable despite a successful deep/strict codesign verification. Therefore final packaged runtime acceptance remains **unverified**; no installation, policy bypass, real Provider run or release is claimed.
+
 ## Budgets and review rules
 
 Initial budgets, to be adjusted only with same-machine evidence:

@@ -235,18 +235,27 @@ export function deleteTurnOutboxSessionRows(
   return { failed, preservedInvalid: scan.invalid.length }
 }
 
-function replayDatabaseTurnOutbox(): void {
+export async function replayDatabaseTurnOutbox(options: {
+  batchSize?: number
+  yieldControl?: () => Promise<void>
+  persist?: (args: RecordTurnArgs) => boolean
+} = {}): Promise<void> {
+  const persist = options.persist ?? (db ? (args: RecordTurnArgs) => recordTurn(args, { queueOnFailure: false }) : null)
+  if (!persist) return
   let names: string[]
   try { names = readdirSync(turnOutboxDir()).filter((name) => /^[a-f0-9]{64}\.json$/.test(name)).sort() } catch { return }
-  for (const name of names) {
+  const batchSize = Math.max(1, Math.floor(options.batchSize ?? 25))
+  const yieldControl = options.yieldControl ?? (() => new Promise<void>((resolve) => setImmediate(resolve)))
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index]
     const path = join(turnOutboxDir(), name)
     try {
       const args = JSON.parse(readFileSync(path, 'utf8')) as RecordTurnArgs
-      if (!args.runId || !Array.isArray(args.items) || !recordTurn(args, { queueOnFailure: false })) continue
-      unlinkSync(path)
+      if (args.runId && Array.isArray(args.items) && persist(args)) unlinkSync(path)
     } catch (error) {
       console.warn('[scry] database turn outbox replay failed:', name, (error as Error)?.message)
     }
+    if ((index + 1) % batchSize === 0 && index + 1 < names.length) await yieldControl()
   }
 }
 
@@ -259,7 +268,6 @@ export function initDb(): void {
     db.pragma('journal_mode = WAL')
     db.pragma('secure_delete = ON')
     migrateDatabase(db)
-    replayDatabaseTurnOutbox()
     for (const file of [dbFilePath, `${dbFilePath}-wal`, `${dbFilePath}-shm`]) {
       if (existsSync(file)) chmodSync(file, 0o600)
     }

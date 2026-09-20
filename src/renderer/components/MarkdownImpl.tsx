@@ -141,12 +141,12 @@ export function shouldUseLightweightStreamingMarkdown(sourceLength: number, stre
 }
 
 /**
- * Split only at ATX headings outside fenced code. Reference definitions and footnotes may resolve
- * across the whole document, so those sources deliberately keep the single authoritative parse.
+ * Split only at ATX headings outside fenced code. References, footnotes and HTML block contexts
+ * keep a single authoritative parse; a leading '<' conservatively disables splitting.
  */
 export function splitMarkdownForProgressiveRender(source: string): string[] {
   if (source.length <= STREAMING_MARKDOWN_LIGHTWEIGHT_THRESHOLD) return [source]
-  if (/^\s*\[[^\]]+\]:\s+/m.test(source) || /\[\^[^\]]+\]/.test(source)) return [source]
+  if (/^[\t ]*\[[^\]]+\]:[\t ]*/m.test(source) || /\[\^[^\]]+\]/.test(source) || /^[\t ]*</m.test(source)) return [source]
   const lines = source.split('\n')
   const sections: string[] = []
   let current: string[] = []
@@ -157,13 +157,14 @@ export function splitMarkdownForProgressiveRender(source: string): string[] {
     current = []
   }
   for (const line of lines) {
-    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1]
+    const fenceLine = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    const marker = fenceLine?.[1]
     if (fence) {
       current.push(line)
-      if (marker && marker[0] === fence.marker && marker.length >= fence.length) fence = null
+      if (marker && marker[0] === fence.marker && marker.length >= fence.length && !fenceLine![2].trim()) fence = null
       continue
     }
-    if (marker) {
+    if (marker && (marker[0] === '~' || !fenceLine![2].includes('`'))) {
       fence = { marker: marker[0], length: marker.length }
       current.push(line)
       continue
@@ -265,6 +266,9 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
     () => !streaming ? splitMarkdownForProgressiveRender(normalizedChildren) : [normalizedChildren],
     [normalizedChildren, streaming]
   )
+  const [formatWholeDocument, setFormatWholeDocument] = useState(false)
+  useEffect(() => setFormatWholeDocument(false), [normalizedChildren])
+  const deferredWholeDocument = !streaming && normalizedChildren.length > STREAMING_MARKDOWN_LIGHTWEIGHT_THRESHOLD && progressiveChunks.length === 1
   const progressiveCount = useProgressiveChunkCount(progressiveChunks)
   const workspaceFileLink = useContext(WorkspaceFileLinkContext)
   const components = useMemo<Components>(() => ({
@@ -314,6 +318,14 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
           <MarkdownChunk key={`${index}:${source.length}`} source={source} components={components} />
         ))}
         {remaining ? <pre className="md-streaming-plain" aria-label="等待格式化的完整文本">{remaining}</pre> : null}
+      </>
+    )
+  }
+  if (deferredWholeDocument && !formatWholeDocument) {
+    return (
+      <>
+        <button type="button" className="md-format-whole" onClick={() => setFormatWholeDocument(true)}>格式化全文</button>
+        <pre className="md-streaming-plain" aria-label="大型回复完整文本">{normalizedChildren}</pre>
       </>
     )
   }

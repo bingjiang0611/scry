@@ -1876,9 +1876,17 @@ export function App() {
     },
     [surfacePane.restore]
   )
+  const sessionTurnsRef = useRef(session.turns)
+  sessionTurnsRef.current = session.turns
   // 顶栏 Diff 直接打开、结束摘要、Overview 会话改动共用：默认展示会话净 diff（第一轮前基线 → 当前）；
-  // 显式选中某轮/某文件时才回到单轮。依赖 session.turns，切会话/cwd 后随新会话重新派生，不留旧会话快照。
+  // 显式选中某轮/某文件时才回到单轮。隐藏且无摘要消费者时不扫描流式会话。
+  const needsDiffReview = Boolean(
+    turnDiffSelection ||
+    (panelVisible && rightSurface.activeId === 'diff') ||
+    (view === 'chat' && summaryVisible)
+  )
   const diffReview = useMemo(() => {
+    if (!needsDiffReview) return null
     if (turnDiffSelection?.session) {
       return sessionNetDiffReview(session.turns, turnDiffSelection.initialPath)
         ?? resolveTurnDiffReview(session.turns, turnDiffSelection.initialPath)
@@ -1887,16 +1895,17 @@ export function App() {
       ? resolveTurnDiffReview(session.turns, turnDiffSelection.initialPath, turnDiffSelection.runId)
       : null
     return selected ?? sessionNetDiffReview(session.turns) ?? resolveTurnDiffReview(session.turns)
-  }, [session.turns, turnDiffSelection])
+  }, [needsDiffReview, session.turns, turnDiffSelection])
   const openSessionNetDiff = useCallback(
     (path?: string): void => {
-      const review = sessionNetDiffReview(session.turns, path) ?? resolveTurnDiffReview(session.turns, path)
+      const turns = sessionTurnsRef.current
+      const review = sessionNetDiffReview(turns, path) ?? resolveTurnDiffReview(turns, path)
       if (!review) return
       surfacePane.restore()
       setTurnDiffSelection({ session: true, ...(path ? { initialPath: path } : {}) })
       dispatchRightSurface({ type: 'open', kind: 'diff' })
     },
-    [session.turns, surfacePane.restore]
+    [surfacePane.restore]
   )
   useEffect(() => {
     setTurnDiffSelection(null)

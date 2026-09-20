@@ -548,7 +548,7 @@ function ToolGroup({
   useEffect(() => {
     if (reveal) setOpen(true)
   }, [reveal])
-  const shownOpen = forceOpen || open
+  const shownOpen = forceOpen || reveal || open
   const { names, dur, failed, count } = toolGroupSummary(events)
   const single = count === 1 ? events[0] : null
   const label = single ? `${toolDisplayName(single)}  ${toolArg(single)}`.trim() : names.join(' · ')
@@ -571,9 +571,7 @@ function ToolGroup({
         {dur != null && <span className="tg-dur" title="工具调用耗时合计">{fmtDur(dur)}</span>}
         <Icon name={shownOpen ? 'chevronUp' : 'chevronDown'} className="chev" />
       </button>
-      <div id={bodyId} className="tool-group-body" hidden={!shownOpen}>
-        {children}
-      </div>
+      {shownOpen ? <div id={bodyId} className="tool-group-body">{children}</div> : null}
     </div>
   )
 }
@@ -1389,14 +1387,16 @@ function AssistantTurnImpl({
     () => new Set(turnDiff?.status === 'captured' ? turnDiff.files.map((file) => file.path) : []),
     [turnDiff]
   )
+  const turnRef = useRef(turn)
+  turnRef.current = turn
   // 轮次跑完且该文件真的出现在本轮 Git 快照里，才把工具卡接到同一个 Diff 面板；
-  // 运行中或该文件没有净改动时不给假入口。
+  // 运行中或该文件没有净改动时不给假入口。用 ref 读取最新 turn，避免每个 token 都重建工具树回调。
   const openFileDiffFor = useCallback((event: TraceEvent): (() => void) | undefined => {
     if (!onOpenDiff || !turnDiff || !turn.done) return undefined
     const path = event.filePath
     if (!path || !diffPaths.has(path)) return undefined
-    return () => onOpenDiff(turn, turnDiff, path)
-  }, [diffPaths, onOpenDiff, turn, turnDiff])
+    return () => onOpenDiff(turnRef.current, turnDiff, path)
+  }, [diffPaths, onOpenDiff, turn.done, turnDiff])
   const { structured } = useMemo(() => aggregateFiles(items), [items])
   const hookSummary = useMemo(() => aggregateHooks(items), [items])
   const hasFiles =
@@ -1469,6 +1469,9 @@ function AssistantTurnImpl({
       (request.runId === turn.runId || itemRunIds.has(request.runId)) &&
       !renderedPendingQuestionKeys.has(`${request.runId}\0${request.questionId}`)
   )
+  const nestedLiveText = projection.liveParentToolUseId === null ? '' : projection.liveText
+  const nestedLiveThinking = projection.liveParentToolUseId === null ? '' : projection.liveThinking
+  const nestedLiveKey = projection.liveParentToolUseId === null ? '' : projection.liveKey
   // C1：合并连续 text_delta；旧版 Codex 曾把每个流式增量误标成 text，这里兼容已在途的旧事件。
   // 遇到可见事件就落成独立段，保留模型说明与工具调用的真实顺序。
   // 完整 text 块只替换当前尚未落盘的流式片段，避免整轮进度被拼成一个超长段落。
@@ -1495,8 +1498,7 @@ function AssistantTurnImpl({
         const buf = toolBuf
         toolBuf = []
         const forceOpen = buf.some(({ ev }) =>
-          ev.tool === 'AskUserQuestion' ||
-          (ev.toolUseId ? interventionsByQuestionId.has(ev.toolUseId) : false) ||
+          (!turn.done && ev.tool === 'AskUserQuestion') ||
           pendingQuestions.some((request) => request.runId === ev.runId && request.questionId === ev.toolUseId)
         )
         out.push(
@@ -1554,8 +1556,8 @@ function AssistantTurnImpl({
         // 若该 tool_use 催生了 subagent（其 toolUseId 是某些事件的 parentToolUseId），折叠渲染子步骤
         const kids = ev.toolUseId ? childrenByParent.get(ev.toolUseId) : undefined
         const childHasLiveTail = ev.toolUseId && projection.liveParentToolUseId === ev.toolUseId
-        const childLiveText = childHasLiveTail ? projection.liveText : ''
-        const childLiveThinking = childHasLiveTail ? projection.liveThinking : ''
+        const childLiveText = childHasLiveTail ? nestedLiveText : ''
+        const childLiveThinking = childHasLiveTail ? nestedLiveThinking : ''
         toolBuf.push({
           ev,
           node: (
@@ -1583,7 +1585,7 @@ function AssistantTurnImpl({
                   turnDone={turn.done}
                   liveText={childLiveText}
                   liveThinking={childLiveThinking}
-                  liveKey={projection.liveKey}
+                  liveKey={nestedLiveKey}
                 />
               ) : null}
             </div>
@@ -1604,10 +1606,10 @@ function AssistantTurnImpl({
     onSelect,
     openFileDiffFor,
     pendingQuestions,
-    projection.liveKey,
+    nestedLiveKey,
+    nestedLiveText,
+    nestedLiveThinking,
     projection.liveParentToolUseId,
-    projection.liveText,
-    projection.liveThinking,
     selectedId,
     turn.done,
     terminal

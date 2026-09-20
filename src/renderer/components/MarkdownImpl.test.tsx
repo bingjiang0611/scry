@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import MarkdownImpl, {
   normalizeMarkdownForDisplay,
   shouldUseLightweightStreamingMarkdown,
@@ -23,11 +25,29 @@ describe('streaming Markdown cadence', () => {
     expect(chunks.join('\n')).toBe(source)
     expect(chunks.every((chunk) => chunk.startsWith('## Section'))).toBe(true)
 
-    const referenceSource = `${source}\n\n[docs]: https://example.com`
+    const prose = Array.from({ length: 30 }, (_, index) => `Paragraph ${index} ${'body '.repeat(400)}`).join('\n\n')
+    expect(splitMarkdownForProgressiveRender(prose)).toEqual([prose])
+
+    const referenceSource = `${source}\n\n[docs]:https://example.com`
     expect(splitMarkdownForProgressiveRender(referenceSource)).toEqual([referenceSource])
+
+    for (const opening of ['<div>', '<div\nclass="note">', '<?xml version="1.0"?>', '<!DOCTYPE html>', '<![CDATA[']) {
+      const htmlBlockSource = `${opening}\n# not a Markdown heading\n</div>\n\n${source}`
+      expect(splitMarkdownForProgressiveRender(htmlBlockSource)).toEqual([htmlBlockSource])
+    }
   })
 
-  it('uses a complete selectable text view only while very large Markdown is still streaming', () => {
+  it('preserves GFM output across real headings and does not close fences with trailing text', () => {
+    const body = 'body '.repeat(2_000)
+    const source = `# First\n\n${body}\n\n- first\n\n- second\n\n# Second\n\n\`\`\`js\n${body}\n\`\`\`not-a-close\n# still code\n\`\`\`\n\n# Third\n\n${body}\n\n# Fourth\n\n${body}\n\n# Fifth\n\n${body}`
+    const render = (text: string): string => renderToStaticMarkup(<ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>)
+    const chunks = splitMarkdownForProgressiveRender(source)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.map(render).join('\n')).toBe(render(source))
+    expect(chunks.some((chunk) => chunk.startsWith('# still code'))).toBe(false)
+  })
+
+  it('keeps unsafe whole-document parses selectable until the user explicitly formats them', () => {
     expect(shouldUseLightweightStreamingMarkdown(48_000, true)).toBe(false)
     expect(shouldUseLightweightStreamingMarkdown(48_001, true)).toBe(true)
     expect(shouldUseLightweightStreamingMarkdown(100_000, false)).toBe(false)
@@ -37,8 +57,12 @@ describe('streaming Markdown cadence', () => {
     const completed = renderToStaticMarkup(<MarkdownImpl>{source}</MarkdownImpl>)
     expect(streaming).toContain('class="md-streaming-plain"')
     expect(streaming).toContain('# heading')
-    expect(completed).toContain('<h1>heading</h1>')
-    expect(completed).not.toContain('md-streaming-plain')
+    expect(completed).toContain('格式化全文')
+    expect(completed).toContain('aria-label="大型回复完整文本"')
+    expect(completed).not.toContain('<h1>heading</h1>')
+
+    const safelyChunked = Array.from({ length: 20 }, (_, index) => `## Section ${index}\n\n${'body '.repeat(600)}`).join('\n')
+    expect(renderToStaticMarkup(<MarkdownImpl>{safelyChunked}</MarkdownImpl>)).toContain('<h2>Section 0</h2>')
   })
 })
 

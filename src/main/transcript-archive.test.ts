@@ -1,6 +1,6 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -8,6 +8,7 @@ import {
   cleanupTraceArchiveTemps,
   deleteTranscriptCopies,
   discoverTraceArchiveSessions,
+  discoverTraceArchiveSessionsAsync,
   mirrorTranscript,
   readTraceArchive,
   readTraceArchiveAsync,
@@ -84,7 +85,7 @@ describe('transcript archive mirror', () => {
     await expect(readTraceArchivePageAsync(args, { limit: 40 }, controller.signal)).rejects.toThrow('superseded')
   })
 
-  it('可从孤立的逐轮 archive 恢复会话 catalog 元数据', () => {
+  it('可从孤立的逐轮 archive 异步恢复会话 catalog 元数据', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
     const cwd = '/repo'
@@ -99,7 +100,7 @@ describe('transcript archive mirror', () => {
       turn: { runId: 'run-first', userText: '保留的历史问题', items: [], done: true }
     })).toBe(true)
 
-    expect(discoverTraceArchiveSessions(userDataDir)).toEqual([expect.objectContaining({
+    await expect(discoverTraceArchiveSessionsAsync(userDataDir)).resolves.toEqual([expect.objectContaining({
       cwd,
       sessionId,
       providerId: 'qoder',
@@ -107,6 +108,36 @@ describe('transcript archive mirror', () => {
       runId: 'run-first',
       prompt: '保留的历史问题'
     })])
+  })
+
+  it('keeps the catalog dirty when a new session is written during async discovery', async () => {
+    const userDataDir = tempRoot()
+    const args = { cwd: '/repo', providerId: 'qoder' as const, runtimeProvider: 'qoder_cli' as const, userDataDir }
+    expect(upsertTraceArchiveTurn({ ...args, sessionId: 'first-session',
+      turn: { runId: 'first-run', userText: 'first', items: [], done: true } })).toBe(true)
+    const parse = JSON.parse
+    let inserted = false
+    const spy = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+      const value = parse(text, reviver)
+      // The scanner has enumerated this provider's sessions before parsing the first turn.
+      if (!inserted && value?.sessionId === 'first-session') {
+        inserted = true
+        expect(upsertTraceArchiveTurn({ ...args, sessionId: 'second-session',
+          turn: { runId: 'second-run', userText: 'second', items: [], done: true } })).toBe(true)
+      }
+      return value
+    })
+    try {
+      await discoverTraceArchiveSessionsAsync(userDataDir)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(inserted).toBe(true)
+    const dirtyPath = join(userDataDir, 'trace-archive-index-v1.dirty')
+    expect(existsSync(dirtyPath)).toBe(true)
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir)).map((entry) => entry.sessionId).sort())
+      .toEqual(['first-session', 'second-session'])
+    expect(existsSync(dirtyPath)).toBe(false)
   })
 
   it('原子增量索引损坏或 segment 身份变化时从 canonical 文件重建', () => {
@@ -118,7 +149,12 @@ describe('transcript archive mirror', () => {
     expect(upsertTraceArchiveTurn({ cwd, sessionId: 'session-first', providerId: 'qoder', runtimeProvider: 'qoder_cli', userDataDir, turn: first })).toBe(true)
     expect(upsertTraceArchiveTurn({ cwd, sessionId: 'session-second', providerId: 'qoder', runtimeProvider: 'qoder_cli', userDataDir, turn: second })).toBe(true)
     const indexPath = join(userDataDir, 'trace-archive-index-v1.json')
+    const dirtyPath = join(userDataDir, 'trace-archive-index-v1.dirty')
+    expect(existsSync(indexPath)).toBe(false)
+    expect(existsSync(dirtyPath)).toBe(true)
+    expect(discoverTraceArchiveSessions(userDataDir)).toHaveLength(2)
     expect(JSON.parse(readFileSync(indexPath, 'utf8')).entries).toHaveLength(2)
+    expect(existsSync(dirtyPath)).toBe(false)
 
     writeFileSync(indexPath, '{broken')
     expect(discoverTraceArchiveSessions(userDataDir).map((session) => session.sessionId).sort())
@@ -429,13 +465,14 @@ describe('transcript archive mirror', () => {
       userDataDir,
       turn: { runId: 'run-5', userText: 'appended', items: [], done: true, ts: 6 }
     })).toBe(true)
-    expect(existsSync(indexPath)).toBe(false)
+    expect(existsSync(indexPath)).toBe(true)
     await expect(readTraceArchivePageAsync(
       { cwd, sessionId, providerId: 'codex', userDataDir },
       { before: 3, limit: 2, snapshotTotalTurns: 5 }
     )).resolves.toMatchObject({
       offset: 1,
       totalTurns: 5,
+      turnFilesRead: 2,
       archive: { turns: [{ runId: 'run-1' }, { runId: 'run-2' }] }
     })
 
@@ -460,6 +497,24 @@ describe('transcript archive mirror', () => {
       { cwd, sessionId, providerId: 'codex', userDataDir },
       { limit: 1 }
     )).resolves.toMatchObject({ totalTurns: 6, turnFilesRead: 6, archive: { turns: [{ runId: 'run-0' }] } })
+
+    truncateSync(indexPath, 32 * 1024 * 1024 + 1)
+    await expect(readTraceArchivePageAsync(
+      { cwd, sessionId, providerId: 'codex', userDataDir },
+      { limit: 1 }
+    )).resolves.toMatchObject({ totalTurns: 6, turnFilesRead: 6 })
+
+    const inflated = JSON.parse(readFileSync(indexPath, 'utf8'))
+    for (let i = inflated.entries.length; i <= 100_000; i++) {
+      inflated.entries.push({ file: `turn-${i.toString(16).padStart(64, '0')}.json`, runId: `extra-${i}`, ts: 1_000 + i })
+    }
+    const inflatedContent = JSON.stringify(inflated)
+    expect(Buffer.byteLength(inflatedContent)).toBeLessThan(32 * 1024 * 1024)
+    writeFileSync(indexPath, inflatedContent)
+    await expect(readTraceArchivePageAsync(
+      { cwd, sessionId, providerId: 'codex', userDataDir },
+      { limit: 1 }
+    )).resolves.toMatchObject({ totalTurns: 6, turnFilesRead: 6 })
   })
 
   it('逐段隔离 corrupt/schema-invalid sibling，保留合法历史并允许继续写入与删除', async () => {
