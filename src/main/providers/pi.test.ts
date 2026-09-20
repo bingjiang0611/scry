@@ -146,6 +146,36 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled' })
         continue
       }
+      if (command.message.startsWith('tool-boundary:')) {
+        const scenario = command.message.slice('tool-boundary:'.length)
+        send({ type: 'message_start', message: { role: 'assistant' } })
+        send({ type: 'message_end', message: {
+          role: 'assistant', provider: 'qoder', model: 'ultimate', stopReason: 'toolUse',
+          content: [{ type: 'toolCall', id: 'goal-1', name: 'goal_complete', arguments: {} }],
+          usage: { input: 10, output: 4, cost: { total: 0 } }
+        } })
+        send({ type: 'tool_execution_start', toolCallId: 'goal-1', toolName: 'goal_complete', args: {} })
+        if (scenario !== 'missing-result') send({
+          type: 'tool_execution_end', toolCallId: scenario === 'unrelated' ? 'child-goal' : 'goal-1',
+          toolName: 'goal_complete', isError: false,
+          result: {
+            content: [{ type: 'text', text: scenario === 'approved' ? 'Goal complete: inspected evidence approved.' :
+              scenario === 'resume' ? 'Previous completion review is unresolved. It will not be replayed, including after resume. Completion remains unverified.' :
+              'Completion review unresolved: Review tool-call limit reached. No automatic retry; completion remains unverified.' }],
+            terminate: scenario !== 'no-terminate'
+          }
+        })
+        if (scenario === 'later-stop' || scenario === 'later-error' || scenario === 'later-toolUse') {
+          send({ type: 'message_start', message: { role: 'assistant' } })
+          send({ type: 'message_end', message: {
+            role: 'assistant', stopReason: scenario.slice('later-'.length), content: [],
+            ...(scenario === 'later-error' ? { errorMessage: 'Qoder: request_failed' } : {})
+          } })
+        }
+        send({ type: 'agent_end' })
+        send({ type: 'agent_settled' })
+        continue
+      }
       if (command.message === 'hang') continue
       if (command.message === 'stop-before-final-state') {
         send({ type: 'message_start', message: { role: 'assistant' } })
@@ -712,6 +742,56 @@ describe('Pi RPC Provider', () => {
       ]))
     })
   }, 15_000)
+
+  it.each(['paused', 'resume', 'approved'])('preserves explicit tool termination without reporting a Provider failure: %s', async (scenario) => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-tool-boundary', prompt: `tool-boundary:${scenario}`, cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+      await expect(handle.promise).resolves.toMatchObject({ status: 'completed', stopped: false })
+      const result = events.find((event) => event.stage === 'result')
+      expect(result).toMatchObject({
+        isError: false, providerStopReason: 'toolUse',
+        toolTermination: { tool: 'goal_complete', message: expect.stringMatching(
+          scenario === 'approved' ? /Goal complete:/ : /completion remains unverified/i
+        ) }
+      })
+      expect(result?.text).not.toBe('toolUse')
+    })
+  })
+
+  it.each(['no-terminate', 'missing-result', 'unrelated', 'later-toolUse'])('does not promote unproven toolUse settlement to success: %s', async (scenario) => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-unproven-boundary', prompt: `tool-boundary:${scenario}`, cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+      await expect(handle.promise).rejects.toMatchObject({
+        message: expect.stringContaining('工具终止证据'),
+        brief: { nextAction: expect.not.stringContaining('继续当前会话重试') }
+      })
+      expect(events.find((event) => event.stage === 'result')).toMatchObject({ isError: true })
+    })
+  })
+
+  it.each(['later-stop', 'later-error'])('does not reuse stale tool termination across assistant messages: %s', async (scenario) => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-later-message', prompt: `tool-boundary:${scenario}`, cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+      if (scenario === 'later-stop') await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+      else await expect(handle.promise).rejects.toThrow('Qoder: request_failed')
+      expect(events.find((event) => event.stage === 'result')?.toolTermination).toBeUndefined()
+    })
+  })
 
   it('classifies Qoder 413 and points to the failed-turn recovery branch', async () => {
     await withFixture(async (profile, cwd) => {

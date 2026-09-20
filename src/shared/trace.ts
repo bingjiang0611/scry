@@ -505,6 +505,8 @@ export interface TraceEvent {
   runtimeFailureStage?: RuntimeFailureStage
   terminationReason?: RunTerminationReason
   providerStopReason?: string
+  /** Pi RPC tool result explicitly ended execution; this is not proof of Goal completion. */
+  toolTermination?: { tool: string; message: string }
   runtimeMetadata?: Record<string, unknown>
   backgroundWork?: BackgroundWork
   intervention?: AgentIntervention

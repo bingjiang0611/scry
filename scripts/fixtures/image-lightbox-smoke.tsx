@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { ComposerProjectFixture } from './composer-project-smoke'
-import { UserMessage } from '../../src/renderer/components/ChatTurn'
+import { AssistantTurn, UserMessage } from '../../src/renderer/components/ChatTurn'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
@@ -18,6 +18,19 @@ const image = (width: number, height: number) => {
   return { kind: 'image' as const, name: `${width}x${height}.png`, mimeType: 'image/png' as const, dataBase64: canvas.toDataURL().split(',')[1] }
 }
 
+const goalPausedTurn = {
+  runId: 'pi-goal-paused', userText: '/goal resume', done: true,
+  items: [{
+    id: 'pi-result', runId: 'pi-goal-paused', ts: '2026-09-20T15:49:38Z',
+    kind: 'harness' as const, stage: 'result', providerId: 'pi' as const,
+    isError: false, providerStopReason: 'toolUse',
+    toolTermination: {
+      tool: 'goal_complete',
+      message: 'Previous completion review is unresolved. It will not be replayed, including after resume. Completion remains unverified.'
+    }
+  }]
+}
+
 createRoot(document.getElementById('root')!).render(
   <>
     <main style={{ width: '65vw', height: '60vh', overflow: 'auto', margin: '100px 0 0 20px' }}>
@@ -25,6 +38,9 @@ createRoot(document.getElementById('root')!).render(
         <UserMessage text="点击图片查看完整内容" attachments={[image(1600, 2400), image(2400, 900)]} />
       </div>
     </main>
+    <section id="goal-paused-fixture" hidden style={{ position: 'fixed', left: 20, top: 20, width: '65vw', zIndex: 30 }}>
+      <AssistantTurn turn={goalPausedTurn} selectedId={null} onSelect={() => {}} />
+    </section>
     <ComposerProjectFixture />
     <aside id="summary" style={{ position: 'fixed', right: 0, top: 0, width: '25vw', height: '100vh', zIndex: 20 }}>Environment</aside>
   </>

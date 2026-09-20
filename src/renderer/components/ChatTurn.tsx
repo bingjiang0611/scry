@@ -1303,6 +1303,19 @@ export function TerminationNotice({ reason }: { reason: RunTerminationReason }) 
   )
 }
 
+export function ToolTerminationNotice({ evidence }: { evidence: NonNullable<TraceEvent['toolTermination']> }) {
+  return (
+    <div className="termination-notice" role="status">
+      <Icon name="alert" />
+      <div>
+        <b>工具已结束本次执行 · {evidence.tool}</b>
+        <span>{evidence.message || '工具未提供结束说明'}</span>
+        <span>执行结束不代表目标已验证完成；请先查看工具结果，不要盲目重试。</span>
+      </div>
+    </div>
+  )
+}
+
 function AssistantTurnImpl({
   turn,
   selectedId,
@@ -1680,6 +1693,9 @@ function AssistantTurnImpl({
             />
           </div>
         ))}
+      {turn.done && result?.toolTermination && (
+        <ToolTerminationNotice evidence={result.toolTermination} />
+      )}
       {turn.done && result?.terminationReason && (
         <TerminationNotice reason={result.terminationReason} />
       )}

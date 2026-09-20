@@ -1023,6 +1023,8 @@ async function runPiAgent(
   let streamedThinking = false
   let assistantMessageSequence = 0
   let assistantMessageId: string | undefined
+  let assistantToolCallIds = new Set<string>()
+  let toolTermination: TraceEvent['toolTermination']
   const nextAssistantMessageId = (message: JsonRecord): string => {
     const upstreamId = typeof message.id === 'string' && message.id.trim() ? message.id.trim() : undefined
     return upstreamId ? `pi:${upstreamId}` : `pi:${request.runId}:assistant-${++assistantMessageSequence}`
@@ -1049,6 +1051,8 @@ async function runPiAgent(
       if (message.role === 'assistant') {
         streamedText = false
         streamedThinking = false
+        assistantToolCallIds.clear()
+        toolTermination = undefined
         assistantMessageId = nextAssistantMessageId(message)
       }
       return
@@ -1070,6 +1074,11 @@ async function runPiAgent(
       if (message.role !== 'assistant') return
       const messageId = currentAssistantMessageId(message)
       addAssistantUsage(usage, message, modelContextWindows)
+      assistantToolCallIds = new Set(
+        (Array.isArray(message.content) ? message.content.map(record) : [])
+          .filter((block) => block.type === 'toolCall' && typeof block.id === 'string')
+          .map((block) => block.id as string)
+      )
       if (!streamedText || !streamedThinking) {
         const content = Array.isArray(message.content) ? message.content.map(record) : []
         for (const block of content) {
@@ -1109,6 +1118,18 @@ async function runPiAgent(
       const rawName = typeof event.toolName === 'string' ? event.toolName : toolNames.get(toolUseId ?? '') ?? 'Tool'
       const toolName = rawName === 'subagent' ? 'Agent' : rawName
       const output = serialized(event.result)
+      const result = record(event.result)
+      // The native loop may intentionally end after a tool (Goal pause/complete/continue).
+      // Only the current assistant's explicit termination receipt proves this boundary;
+      // tool names, human text, child events and an unexplained toolUse are not sufficient.
+      if (result.terminate === true && toolUseId && assistantToolCallIds.has(toolUseId)) {
+        const content = Array.isArray(result.content) ? result.content.map(record) : []
+        toolTermination = {
+          tool: toolName,
+          message: bounded(content.filter((block) => block.type === 'text' && typeof block.text === 'string')
+            .map((block) => block.text).join('\n'), 4_000)
+        }
+      }
       const mcp = parseMcp(rawName, record(event.args))
       const startedAt = toolUseId ? toolStarts.get(toolUseId) : undefined
       request.emit(piEvent(request.runId, {
@@ -1294,19 +1315,24 @@ async function runPiAgent(
       state.sessionId = finalState.sessionId
       request.onExternalSessionId?.(finalState.sessionId)
     }
-    const stopReason = usage.lastError ?? usage.lastStopReason
-    const failureText = usage.lastError && usage.lastTransportError && usage.lastTransportError !== usage.lastError
-      ? `${usage.lastError} (${usage.lastTransportError})`
-      : stopReason
-    const terminationReason = classifyRunTermination({ rawReason: usage.lastStopReason, message: failureText })
+    const endedByTool = !state.stopped && usage.lastStopReason === 'toolUse' &&
+      toolTermination !== undefined && toolNames.size === 0
+    const unprovenToolBoundary = usage.lastStopReason === 'toolUse' && !endedByTool
+    const stopReason = endedByTool ? toolTermination?.message : usage.lastError ?? usage.lastStopReason
+    const failureText = unprovenToolBoundary
+      ? 'Pi 在工具调用后结束，但缺少明确的工具终止证据；本轮结果未验证'
+      : usage.lastError && usage.lastTransportError && usage.lastTransportError !== usage.lastError && !endedByTool
+        ? `${usage.lastError} (${usage.lastTransportError})`
+        : stopReason
+    const terminationReason = endedByTool ? undefined : classifyRunTermination({ rawReason: usage.lastStopReason, message: failureText })
     // A settled Rotom RPC remains bound to this native session and retains its provider transport.
     // Reusing it makes Scry match terminal Pi instead of paying a fresh WebSocket/proxy handshake
     // and replaying the complete context on every user turn.
     retainRpc = mayReuse && !state.stopped && Boolean(state.sessionId) && rpc.reusable()
     // Pi may settle cleanly at the RPC layer while the upstream model reports `aborted` (for
     // example Qoder aborting a long generation). Only an explicit Scry stop is an interruption;
-    // every non-`stop` Provider reason is an unsuccessful turn and must not render green.
-    const failed = !state.stopped && Boolean(usage.lastStopReason && usage.lastStopReason !== 'stop')
+    // an explicit tool termination is a separate execution boundary, not Goal approval.
+    const failed = !state.stopped && !endedByTool && Boolean(usage.lastStopReason && usage.lastStopReason !== 'stop')
     request.emit(piEvent(request.runId, {
       kind: 'harness',
       stage: 'result',
@@ -1333,6 +1359,7 @@ async function runPiAgent(
       isError: failed,
       ...(terminationReason ? { terminationReason } : {}),
       ...(usage.lastStopReason ? { providerStopReason: usage.lastStopReason } : {}),
+      ...(endedByTool ? { toolTermination } : {}),
       runtimeMetadata: {
         agentProfileId: profile.id,
         sessionFile: finalState.sessionFile ?? null,
@@ -1351,11 +1378,13 @@ async function runPiAgent(
         provider: 'pi_rpc',
         stage: 'runtime',
         cwd: request.cwd,
-        nextAction: terminationReason === 'input_context_overflow'
-          ? '点击失败卡片的“从失败处恢复”，在新分支中移除或压缩大图后重试；也可以新建会话'
-          : transportFailure
-            ? launchShellEnvError ?? '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试'
-            : '继续当前会话重试；若再次中止，请检查上游 Provider 状态与 Rotom 日志'
+        nextAction: unprovenToolBoundary
+          ? '先检查最后一项工具结果与 Rotom 日志，确认执行状态；不要在结果未知时重复执行'
+          : terminationReason === 'input_context_overflow'
+            ? '点击失败卡片的“从失败处恢复”，在新分支中移除或压缩大图后重试；也可以新建会话'
+            : transportFailure
+              ? launchShellEnvError ?? '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试'
+              : '继续当前会话重试；若再次中止，请检查上游 Provider 状态与 Rotom 日志'
       })
     }
     return {
