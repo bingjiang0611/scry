@@ -95,7 +95,16 @@ Verified an isolated source snapshot based on `106e0e7`, containing only this pe
 
 Current isolated benchmarks: indexed 40-turn archive reads average 7.87 ms versus 97.25 ms for all 500 files; commit plus page read averages 9.77 ms. The built worker parsed 12,297,779 bytes / 10,000 turns in 85.1 ms with a 2.2 ms main timer maximum gap; its entry bytes match the packaged ASAR. This is a Node worker probe, not proof of packaged Electron launch.
 
-Failures retained: the first snapshot's packaged smoke missed the Agent menu after a fixed 50 ms sleep; the fixture now waits for the observable menu within its existing 2 s UI deadline, and a diagnostic run passed. The final snapshot's package build succeeded, but private CLI `--version` was killed twice with SIGKILL. macOS logged `Unable to apply provenance sandbox` for that exact executable despite a successful deep/strict codesign verification. Therefore final packaged runtime acceptance remains **unverified**; no installation, policy bypass, real Provider run or release is claimed.
+Failures retained: the first snapshot's packaged smoke missed the Agent menu after a fixed 50 ms sleep; the fixture now waits for the observable menu within its existing 2 s UI deadline, and a diagnostic run passed. The final snapshot's package build succeeded, but private CLI `--version` was killed twice with SIGKILL. macOS logged `Unable to apply provenance sandbox` for that exact executable despite a successful deep/strict codesign verification. At that point final packaged runtime acceptance was **unverified**; the failures are retained rather than replaced by later success.
+
+Acceptance follow-up on the same day: after a read-only comparison with the previously working artifact, the **unchanged final artifact** returned CLI version `0.2.45`. Both `npm run check:packaged-app` and `npm run smoke:electron` then passed against that exact bundle. The package was 284,353,305 bytes (within budget); sandbox preload, private CLI and native resources were present. Packaged smoke verified terminal lifecycle, renderer reload/replay and stale-owner fencing, recording/history restart with read-only replay, modal focus, subframe preload isolation, and blocked navigation/popups. No rebuild, re-signing, relocation or OS policy change was used. The system-policy error's underlying cause is not established.
+
+Source files were compared individually against performance commit `06be0c68a393c5ba258fb7d8dd6ee454ecd566ea`; only this delivery document differed. Before/after SHA-256 values were unchanged:
+
+- `Contents/MacOS/Scry`: `33ccaeb8a3c32eaf41a21da2ff4f9702e780e9bc18900589d23d9be338c35299`
+- `Contents/Resources/app.asar`: `4529dfc7a77a0394cdbc68fcff9117dad0bbd71e83b9cc4d1a05d28ea286e5f5`
+
+Local performance and packaged-fixture acceptance is complete for that commit. This does **not** claim installation, notarized release, real Provider/account verification, or acceptance of unrelated dirty worktree changes. The disabled billing/P0/P1 external probes remain unrun.
 
 ## Budgets and review rules
 
