@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const roots: string[] = []
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   vi.resetModules()
@@ -23,7 +24,7 @@ async function fixture(body: string) {
   vi.stubEnv('HTTPS_PROXY', 'http://inherited.invalid')
   vi.resetModules()
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-  return { env: await import('./claude-locate'), warn }
+  return { env: await import('./claude-locate'), warn, shell }
 }
 
 const complete = `printf '__AS_ENV_S__\\nPATH=/captured/bin\\nHTTPS_PROXY=http://captured.invalid\\nGITHUB_TOKEN=secret-must-not-leak\\n__AS_ENV_E__\\n'`
@@ -53,12 +54,36 @@ describe('login shell environment acquisition', () => {
     expect(fallback.HTTPS_PROXY).toBe('http://inherited.invalid')
     expect(fallback.PATH).not.toBe('/captured/bin')
     expect(env.shellEnvError()).toContain(reason)
-    expect(env.shellEnvError()).toContain('重启 Scry')
+    expect(env.shellEnvError()).toContain('重新发送将重试采集')
     expect(warn).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-must-not-leak')
     // A broken startup must not spawn another shell for each provider operation.
     expect(await env.warmShellEnv()).toBe(fallback)
     expect(env.shellEnv()).toBe(fallback)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts a slow but healthy login shell beyond the former five-second deadline', async () => {
+    const { env } = await fixture(`sleep 6\n${complete}`)
+    expect((await env.warmShellEnv()).HTTPS_PROXY).toBe('http://captured.invalid')
+    expect(env.shellEnvError()).toBeUndefined()
+  }, 10_000)
+
+  it('retries a failed capture on demand, shares the pending retry and clears stale diagnostics', async () => {
+    const { env, shell, warn } = await fixture('exit 7')
+    const fallback = await env.warmShellEnv()
+    writeFileSync(shell, `#!/bin/sh\n${complete}\n`)
+    expect(await env.warmShellEnv()).toBe(fallback)
+    const retry = env.warmShellEnv({ retryFailed: true })
+    expect(env.warmShellEnv({ retryFailed: true })).toBe(retry)
+    expect(env.warmShellEnv()).toBe(retry)
+    const recovered = await retry
+    expect(recovered.HTTPS_PROXY).toBe('http://captured.invalid')
+    expect(env.shellEnv()).toBe(recovered)
+    expect(env.shellEnvError()).toBeUndefined()
+    // A healthy cache is not refreshed on every send, even if the shell later breaks.
+    writeFileSync(shell, '#!/bin/sh\nexit 9\n')
+    expect(await env.warmShellEnv({ retryFailed: true })).toBe(recovered)
     expect(warn).toHaveBeenCalledTimes(1)
   })
 
@@ -72,8 +97,15 @@ describe('login shell environment acquisition', () => {
 
   it('reports the bounded timeout instead of disguising fallback as a successful shell capture', async () => {
     const { env, warn } = await fixture(`${complete}\nexec sleep 60`)
-    await env.warmShellEnv()
-    expect(env.shellEnvError()).toContain('超时（5s）')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const capture = env.warmShellEnv()
+    let settled = false
+    void capture.then(() => { settled = true })
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await capture
+    expect(env.shellEnvError()).toContain('超时（15s）')
     expect(env.shellEnv().HTTPS_PROXY).toBe('http://inherited.invalid')
     expect(warn).toHaveBeenCalledTimes(1)
   }, 10_000)

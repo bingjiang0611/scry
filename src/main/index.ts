@@ -2416,8 +2416,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '重新打开 Scry 后再启动'
     })
   }
-  // 登录 shell 可能被用户启动脚本卡住；发送不能等它。shellEnv() 会在未预热时使用安全 fallback。
-  void warmShellEnv()
+  // Start one bounded acquisition for this explicit send. Discovery does not retry a
+  // broken shell; the next send may recover without restarting Scry.
+  const shellEnvReady = warmShellEnv({ retryFailed: true })
   const cwd = request.cwd ? resolveKnownProjectDirectory(request.cwd) : currentCwd
   if (request.cwd && currentCwd && cwd !== canonicalExistingDirectory(currentCwd)) {
     throw new AgentRuntimeError('发送请求的工作目录与当前授权目录不一致', {
@@ -2457,7 +2458,14 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const admissionKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
   try {
     return await contextAdmission.run(admissionKey, async () => {
-    await startupManagedRecovery
+    // Wait before freezing trust/MCP environments as well as before spawning the
+    // Provider. Otherwise a cold send can retain fallback even after capture succeeds.
+    await Promise.all([startupManagedRecovery, shellEnvReady])
+    if (isShuttingDown) throw new AgentRuntimeError('Scry 正在退出，已取消待启动轮次', {
+      provider: runtimeProvider,
+      stage: 'frontdoor',
+      nextAction: '重新打开 Scry 后再启动'
+    })
     const contextKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
     const scopedSessionKey = (sessionId: string): string =>
       providerSessionKey(providerId, catalogCwd, sessionId, agentProfileId)
