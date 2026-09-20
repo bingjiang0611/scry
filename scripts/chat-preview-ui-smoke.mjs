@@ -85,7 +85,23 @@ async function exercise() {
   const projectPicker = () => document.querySelector('#composer-project .composer-context')
   check(projectPicker() != null, 'New draft lost project selection')
   const input = document.querySelector('#composer-project textarea')
-  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  const draft = input.value
+  const enter = (options = {}) => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...options })
+    input.dispatchEvent(event)
+    return event
+  }
+  check(!enter({ shiftKey: true }).defaultPrevented, 'Shift+Enter no longer allows a newline')
+  check(enter({ repeat: true }).defaultPrevented, 'Repeated Enter leaked a default newline')
+  input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+  check(enter({ isComposing: true }).defaultPrevented, 'IME Enter leaked a default newline')
+  input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '消息' }))
+  check(enter().defaultPrevented, 'Post-composition Enter leaked a default newline')
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  check(projectPicker() != null && input.value === draft, 'IME confirmation submitted or changed the draft')
+  const compositionEndedAt = performance.now()
+  await waitFor(() => performance.now() - compositionEndedAt >= 120)
+  check(enter().defaultPrevented, 'Send Enter leaked a default newline')
   await waitFor(() => projectPicker() == null)
   check(document.querySelector('#composer-project textarea') === input, 'Hiding project selection remounted composer input')
   await waitFor(() => input.value === '')
