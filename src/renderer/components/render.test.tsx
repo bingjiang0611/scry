@@ -728,6 +728,21 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     expect(html).not.toContain('新会话 · 本机证据')
   })
 
+  it('加载失败不声称历史为空，并告诉用户如何重新加载', () => {
+    const html = renderWelcome({
+      cwd: '/tmp/project',
+      hasSelectedSession: true,
+      sessionEvidenceGap: { status: 'error', detail: '无法加载会话历史：workspace changed' }
+    })
+
+    expect(html).toContain('会话历史加载失败')
+    expect(html).toContain('重新点击侧边栏中的会话加载')
+    expect(html).not.toContain('这条会话的归档里没有轮次')
+    expect(html).not.toContain('没有可读的本机证据')
+    expect(html).not.toContain('正在等待本机归档')
+    expect(html).not.toContain('welcome-hero-icon')
+  })
+
   it('归档命中但没有轮次时用另一句文案，仍不渲染 hero', () => {
     const html = renderWelcome({
       cwd: '/tmp/project',
@@ -956,6 +971,35 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
     expect(calls).toEqual(['prepare:run-2', 'adopt:run-2', 'load:session-1'])
     expect(replacement).toEqual({ sessionId: 'session-1', parsed: archived, activeRun })
     expect(loadedPage).toBe(archivedPage)
+  })
+
+  it('历史加载取消或失败时不发布空历史，也不覆盖已恢复的 live 快照', async () => {
+    const activeRun: ActiveRun = {
+      runId: 'run-2', providerId: 'pi', cwd: '/repo/a',
+      externalSessionId: 'session-1', userText: '正在执行', items: [], done: false
+    }
+    for (const message of ['session history request superseded', 'archive read failed']) {
+      const replacements: ParsedTurn[][] = []
+      const loaded: Array<SessionHistoryPage | null> = []
+      const effects = {
+        prepareRunFocus: () => {},
+        adoptActiveRun: async () => activeRun,
+        selectContext: () => {},
+        loadSession: async (): Promise<SessionHistoryPage | null> => { throw new Error(message) },
+        replaceWithParsedSession: (_id: string, turns: ParsedTurn[]) => { replacements.push(turns) },
+        onHistoryLoaded: (page: SessionHistoryPage | null) => { loaded.push(page) }
+      }
+      await expect(restoreActiveSessionSelection({
+        runId: activeRun.runId, sessionId: 'session-1', externalSessionId: 'session-1',
+        cwd: '/repo/a', providerId: 'pi'
+      }, effects)).rejects.toThrow(message)
+      expect(replacements).toEqual([])
+      expect(loaded).toEqual([])
+
+      await expect(restoreFocusedRunSelection(activeRun, effects)).rejects.toThrow(message)
+      // Only the initial live snapshot is applied; failure must not be coerced to a null page.
+      expect(replacements).toEqual([[]])
+    }
   })
 
   it('live run 的历史读取为空时仍把缺失状态交给当前会话，不回退成新会话', async () => {

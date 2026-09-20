@@ -43,7 +43,7 @@ interface ChatViewProps {
   composerError?: string | null
   submitting?: boolean
   sessionLoading?: boolean
-  sessionEvidenceGap?: { status: 'unavailable' | 'empty'; detail: string } | null
+  sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
   busy: boolean
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
@@ -389,9 +389,13 @@ export function ChatView({
           {/* 选中的历史会话读不到证据时必须说实话，不能假装成“新会话”。 */}
           {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
             <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
-              <b>{sessionEvidenceGap.status === 'unavailable' ? '这条会话没有可读的本机证据' : '这条会话的归档里没有轮次'}</b>
+              <b>{sessionEvidenceGap.status === 'error'
+                ? '会话历史加载失败'
+                : sessionEvidenceGap.status === 'unavailable' ? '这条会话没有可读的本机证据' : '这条会话的归档里没有轮次'}</b>
               <span>{sessionEvidenceGap.detail}</span>
-              <span>会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。</span>
+              <span>{sessionEvidenceGap.status === 'error'
+                ? '这不代表历史为空。请重新点击侧边栏中的会话加载。'
+                : '会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。'}</span>
             </div>
           )}
           {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && hasSelectedSession && (
