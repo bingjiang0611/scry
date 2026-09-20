@@ -136,11 +136,13 @@ describe('AskUserQuestionInline', () => {
   it('renders native editor requests as multiline input', () => {
     const editor: AgentQuestionRequest = {
       runId: 'run-editor', questionId: 'editor-1', providerId: 'pi',
-      questions: [{ question: '请输入多行内容', header: 'Pi Editor', options: [], multiSelect: false, inputMode: 'multiline' }]
+      questions: [{ question: '请输入多行内容', header: 'Pi Editor', options: [], multiSelect: false, inputMode: 'multiline', initialValue: 'Existing goal\nKeep this detail' }]
     }
     const html = renderToStaticMarkup(<AskUserQuestionInline request={editor} queuedCount={1} onRespond={async () => {}} />)
     expect(html).toContain('<textarea')
     expect(html).toContain('rows="8"')
+    expect(html).toContain('Existing goal\nKeep this detail')
+    expect(buildQuestionAnswers(editor, initialQuestionDrafts(editor))).toEqual({ '请输入多行内容': 'Existing goal\nKeep this detail' })
     expect(html).not.toContain('输入一个不在上述选项中的回答')
   })
 

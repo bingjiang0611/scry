@@ -62,7 +62,7 @@ export function initialQuestionDrafts(request: AgentQuestionRequest): QuestionDr
   return Object.fromEntries(
     request.questions.map((question) => [
       question.question,
-      { selected: [], useOther: question.options.length === 0, other: '' }
+      { selected: [], useOther: question.options.length === 0, other: question.initialValue ?? '' }
     ])
   )
 }

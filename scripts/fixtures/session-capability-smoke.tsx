@@ -14,6 +14,7 @@ import { qoderSkillSessionFixture } from '../../src/renderer/__fixtures__/sessio
 import type { Turn } from '../../src/renderer/format'
 import type { TraceEvent } from '../../src/shared/trace'
 import { SidebarArchiveFixture } from './sidebar-archive-smoke'
+import { PiCommandFixture } from './pi-command-smoke'
 
 const thinkingTurn: Turn = {
   runId: 'thinking-run',
@@ -113,6 +114,7 @@ function Fixture() {
       />
     </section>
     <section id="thinking"><AssistantTurn turn={thinkingTurn} selectedId={null} onSelect={() => undefined} /></section>
+    <PiCommandFixture />
     <section id="model-effort" className="runtime-composer">
       <div className="composer-controls">
         <RunControlSelect

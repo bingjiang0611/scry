@@ -42,6 +42,23 @@ describe('providerless terminal recovery regression matrix', () => {
     })).toBe(true)
   })
 
+  it('keeps acknowledged Pi command interactions local without weakening model-turn identity requirements', () => {
+    const command: TraceEvent = {
+      ...harness, providerId: 'pi', runtimeProvider: 'pi_rpc', isError: false,
+      providerCommand: { name: 'fixture-menu', source: 'extension', modelTurn: 'unobserved' }
+    }
+    const turn = { status: 'completed' as const, items: [command] }
+    expect(shouldUseManagedTerminalPersistence(true, turn)).toBe(false)
+    expect(shouldUseManagedTerminalPersistence(true, { ...turn, providerTurnId: 'native-turn' })).toBe(true)
+    expect(shouldUseManagedTerminalPersistence(true, { ...turn, forkTurnId: 'fork-turn' })).toBe(true)
+    expect(shouldUseManagedTerminalPersistence(true, { ...turn, items: [{ ...command, providerId: 'codex' }] })).toBe(true)
+    expect(shouldUseManagedTerminalPersistence(true, { ...turn, items: [{ ...command, providerCommand: undefined }] })).toBe(true)
+    for (const kind of ['model', 'agent', 'tool'] as const) {
+      expect(shouldUseManagedTerminalPersistence(true, { ...turn, items: [command, { ...harness, kind }] })).toBe(true)
+    }
+    expect(shouldUseManagedTerminalPersistence(true, { ...turn, items: [] })).toBe(true)
+  })
+
   it.each(['failed', 'cancelled', 'interrupted'] as const)('clears %s only in the matching scope, then remains idempotent', async (status) => {
     for (const items of [[], [harness]]) {
       const { root, path, bytes } = await fixture(status, items)

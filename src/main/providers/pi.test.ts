@@ -1,10 +1,11 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import type { ParsedTurn } from '../normalize'
+import { shouldUseManagedTerminalPersistence } from '../trace-turn-progress'
 import { piProfileForExecutable } from '../pi-agent-profiles'
 import * as shellEnvironment from '../claude-locate'
 import { aggregateTurnEvidence } from '../../core/turn-recorder/aggregate'
@@ -63,6 +64,9 @@ process.stdin.on('data', (chunk) => {
       const state = {
         model: { provider: 'test-provider', id: 'test-model' },
         thinkingLevel: 'high',
+        isStreaming: false,
+        isCompacting: false,
+        pendingMessageCount: 0,
         sessionId,
         sessionFile: '/tmp/pi-session-1.jsonl',
         cwd: process.cwd()
@@ -78,6 +82,7 @@ process.stdin.on('data', (chunk) => {
     }] })
     else if (command.type === 'get_available_thinking_levels') response({ levels: ['off', 'high'] })
     else if (command.type === 'get_commands') response({ commands: [
+      { name: 'fixture-menu', description: 'Open an extension menu', source: 'extension' },
       {
         name: 'skill:review', description: 'Review code', source: 'skill',
         sourceInfo: { scope: 'project', path: '/repo/.pi/agent/skills/review/SKILL.md' }
@@ -108,6 +113,25 @@ process.stdin.on('data', (chunk) => {
     }
     else if (command.type === 'prompt') {
       promptMessage = command.message
+      if (command.message === '/fixture-menu') {
+        acknowledgePrompt = response
+        send({ type: 'extension_ui_request', id: 'menu-select', method: 'select', title: 'Menu', options: ['Edit'] })
+        continue
+      }
+      if (command.message === '/fixture-menu status') {
+        const message = { role: 'custom', customType: 'fixture-status', display: true, content: 'Custom command status' }
+        send({ type: 'message_start', message })
+        send({ type: 'message_end', message })
+        entries.push({ type: 'custom_message', id: 'custom-' + (++entrySeq), parentId: leafId, ...message })
+        leafId = entries.at(-1).id
+        response()
+        continue
+      }
+      if (command.message === '/fixture-menu error') {
+        send({ type: 'extension_error', extensionPath: 'command:fixture-menu', event: 'command', error: 'menu failed' })
+        response()
+        continue
+      }
       if (command.message === 'transport-exit') process.exit(17)
       if (command.message === 'preflight-reject') {
         send({ type: 'response', id: command.id, command: command.type, success: false, error: 'preflight rejected' })
@@ -240,6 +264,16 @@ process.stdin.on('data', (chunk) => {
       } })
       send({ type: 'agent_end', willRetry: false })
       setTimeout(() => send({ type: 'agent_settled' }), 20)
+    } else if (command.type === 'extension_ui_response' && command.id.startsWith('menu-')) {
+      if (command.cancelled) acknowledgePrompt()
+      else if (command.id === 'menu-select') {
+        send({ type: 'extension_ui_request', id: 'menu-editor', method: 'editor', title: 'Objective', prefill: 'Existing objective' })
+      } else if (command.id === 'menu-editor') {
+        send({ type: 'extension_ui_request', id: 'menu-confirm', method: 'confirm', title: 'Save?', message: command.value })
+      } else {
+        send({ type: 'extension_ui_request', id: 'menu-notify', method: 'notify', message: 'Saved', notifyType: 'info' })
+        acknowledgePrompt()
+      }
     } else if (command.type === 'extension_ui_response' && command.id === 'delayed-release') {
       if (promptMessage === 'late-entry') {
         const entry = { type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId, message: { role: 'user' } }
@@ -267,6 +301,16 @@ function withFixture<T>(
 
 function withRotomFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<T>): Promise<T> {
   return withFixture(run, 'rotom')
+}
+
+function withCommandFixture(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<void>): Promise<void> {
+  return withRotomFixture(async (profile, cwd) => {
+    // Command tests exercise real RPC and recorder IO, not the developer's login shell.
+    const environment = vi.spyOn(shellEnvironment, 'shellEnv').mockReturnValue({
+      PATH: dirname(process.execPath), HOME: cwd, ROTOM_NODE: process.execPath
+    })
+    try { await run(profile, cwd) } finally { environment.mockRestore() }
+  })
 }
 
 describe('Pi RPC Provider', () => {
@@ -1027,6 +1071,116 @@ describe('Pi RPC Provider', () => {
           input: expect.objectContaining({ source: 'explicit_user_input' })
         })
       ]))
+    })
+  }, 15_000)
+
+  it.each([false, true])('finishes a menu-only command (cancelled=%s), clears its provisional record and accepts the next turn', async (cancelled) => {
+    await withCommandFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({
+        schemaVersion: 1, enabled: true, workspaceId: 'pi-menu-fixture', dataDir: '.scry',
+        repositories: { mode: 'workspace-only' },
+        capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+      }))
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const events: TraceEvent[] = []
+      const questions: string[] = []
+      const handle = adapter.run({
+        runId: 'menu-run', prompt: '/fixture-menu', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', managedRecorder: true,
+        managedRecorderIdentity: { runId: 'menu-run', promptHash: createHash('sha256').update('/fixture-menu').digest('hex') },
+        emit: (event) => events.push(event),
+        requestUserInput: async (request) => {
+          questions.push(request.questionId)
+          if (request.questionId === 'menu-editor') expect(request.questions[0].initialValue).toBe('Existing objective')
+          if (cancelled) return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
+          const answer = request.questionId === 'menu-select' ? 'Edit' : request.questionId === 'menu-confirm' ? '确认' : 'Updated objective'
+          return { runId: request.runId, questionId: request.questionId, behavior: 'answered', answers: { [request.questions[0].question]: answer } }
+        }
+      })
+      let terminal = false
+      void handle.promise.then(() => { terminal = true }, () => { terminal = true })
+      try {
+        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        const result = await handle.promise
+        expect(result).toMatchObject({ externalSessionId: 'pi-session-1', status: 'completed' })
+        expect(result.providerTurnId).toBeUndefined()
+        expect(questions).toEqual(cancelled ? ['menu-select'] : ['menu-select', 'menu-editor', 'menu-confirm'])
+        const end = events.find((event) => event.stage === 'result')
+        expect(end).toMatchObject({ providerCommand: { name: 'fixture-menu', source: 'extension', modelTurn: 'unobserved' } })
+        expect(end?.tokensIn).toBeUndefined()
+        expect(end?.costUsd).toBeUndefined()
+        expect(shouldUseManagedTerminalPersistence(true, { status: 'completed', items: events })).toBe(false)
+        expect(await listRecords(join(cwd, '.scry'))).toEqual([])
+        expect(await recoverManagedRecorderTurns(cwd, process.env, { provider: 'pi' })).toEqual({ recovered: 0, pending: 0 })
+        const next = await adapter.run({
+          runId: 'after-menu', prompt: 'next instruction', cwd, resume: result.externalSessionId,
+          agentProfileId: profile.id, attachments: [], permissionMode: 'full_access', emit: () => {}
+        }).promise
+        expect(next).toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
+        expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
+      } finally {
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it('preserves visible custom command messages without inventing a model turn', async () => {
+    await withCommandFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const events: TraceEvent[] = []
+      const handle = adapter.run({
+        runId: 'command-status', prompt: '/fixture-menu status', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+      let terminal = false
+      void handle.promise.then(() => { terminal = true }, () => { terminal = true })
+      try {
+        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        expect(await handle.promise).toMatchObject({ status: 'completed' })
+        expect(events.some((event) => event.kind === 'model')).toBe(false)
+        expect(events.find((event) => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
+      } finally {
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it('does not turn an extension handler error into a successful command acknowledgement', async () => {
+    await withCommandFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const events: TraceEvent[] = []
+      const handle = adapter.run({
+        runId: 'menu-error', prompt: '/fixture-menu error', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      })
+      let terminal = false
+      void handle.promise.then(() => { terminal = true }, () => { terminal = true })
+      try {
+        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        expect(await handle.promise).toMatchObject({ status: 'failed' })
+        expect(events.find((event) => event.stage === 'result')).toMatchObject({ isError: true, text: 'menu failed' })
+      } finally {
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it('keeps a command-triggered model run on the native turn and settlement path', async () => {
+    await withCommandFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const events: TraceEvent[] = []
+      expect(await adapter.run({
+        runId: 'menu-model', prompt: '/fixture-menu run', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+      }).promise).toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
+      expect(events.find((event) => event.stage === 'result')?.providerCommand).toBeUndefined()
+      await adapter.dispose?.()
     })
   }, 15_000)
 

@@ -272,6 +272,57 @@ async function exercise() {
   return { liveContext: true, compactionInvalidation: true, contextSessionReset: true, normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
 }
 
+async function exercisePiCommands(contents) {
+  const wait = (condition) => contents.executeJavaScript(`new Promise((resolve, reject) => {
+    const ready = () => (${condition});
+    if (ready()) return resolve();
+    const observer = new MutationObserver(() => { if (ready()) { clearTimeout(timer); observer.disconnect(); resolve() } });
+    const timer = setTimeout(() => { observer.disconnect(); reject(new Error('Pi command UI condition failed')) }, 5000);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+  })`)
+  const click = async (selector) => {
+    const point = await contents.executeJavaScript(`(() => {
+      const node = document.querySelector(${JSON.stringify(selector)});
+      if (!node) throw new Error('Missing Pi command control');
+      node.scrollIntoView({ block: 'center' });
+      const rect = node.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
+      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Pi command control is obscured');
+      return { x, y };
+    })()`)
+    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+  }
+  contents.focus()
+  await click('#pi-command .question-option')
+  await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
+  await click('#pi-command .question-submit')
+  await wait(`document.querySelector('#pi-command textarea')?.value === 'Existing objective'`)
+  await click('#pi-command textarea')
+  if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command textarea')`)) throw new Error('Pi editor did not receive focus')
+  contents.selectAll()
+  await contents.insertText('Updated objective')
+  await click('#pi-command .question-submit')
+  await wait(`document.querySelector('#pi-command').textContent.includes('Save changes?')`)
+  await click('#pi-command .question-option')
+  await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
+  await click('#pi-command .question-submit')
+  await wait(`document.querySelectorAll('#pi-command [aria-label="Pi 命令反馈"]').length === 3`)
+  const answers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
+  if (answers.length !== 3 || answers[1].answers['Edit objective'] !== 'Updated objective') throw new Error('Pi chained answers lost their identity or edited content')
+  await click('#pi-command-restart')
+  await wait(`document.querySelector('#pi-command .question-cancel') != null`)
+  await click('#pi-command .question-cancel')
+  await wait(`JSON.parse(document.querySelector('#pi-command-answers').textContent)[0]?.behavior === 'cancelled'`)
+  await click('#pi-command-restart')
+  await wait(`document.querySelector('#pi-command .question-option') != null`)
+  await click('#pi-command .question-option')
+  await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
+  await click('#pi-command .question-submit')
+  await wait(`document.querySelector('#pi-command textarea')?.value === 'Existing objective'`)
+  return { piMenuChain: true, piEditorPrefill: true, piNativeInput: true, piCancelAndReopen: true, piCommandFeedback: true }
+}
+
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
   await build({
@@ -304,7 +355,8 @@ try {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         const result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
-        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
+        const piCommands = await (${exercisePiCommands.toString()})(win.webContents)
+        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands }))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })

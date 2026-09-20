@@ -627,6 +627,16 @@ async function proveExplicitPiSkill(rpc: PiRpcProcess, request: ProviderRunReque
   })
 }
 
+async function piExtensionCommand(rpc: PiRpcProcess, prompt: string): Promise<string | undefined> {
+  // Match Pi's command parser, not arbitrary slash-looking text or skill/template expansions.
+  if (!prompt.startsWith('/') || explicitPiSkill(prompt)) return undefined
+  const name = prompt.slice(1).split(' ', 1)[0]
+  const rows = record((await rpc.send({ type: 'get_commands' })).data).commands
+  return Array.isArray(rows) && rows.some((row) => record(row).name === name && record(row).source === 'extension')
+    ? name
+    : undefined
+}
+
 function piRpcArgs(options: { noSession?: boolean; session?: string; offline?: boolean } = {}): string[] {
   // Pi project trust is independent from Scry's full-access run mode. Do not pass
   // --approve/--no-approve: RPC should honor Pi's saved/default project trust so
@@ -867,7 +877,9 @@ export function questionFromExtension(runId: string, event: JsonRecord): AgentQu
       ...((method === 'editor' || method === 'input' && options.length === 0)
         ? { inputMode: method === 'editor' ? 'multiline' as const : 'singleline' as const }
         : {}),
-      ...(placeholder && options.length === 0 ? { placeholder } : {})
+      ...(placeholder && options.length === 0 ? { placeholder } : {}),
+      ...(method === 'editor' && typeof event.prefill === 'string'
+        ? { initialValue: event.prefill } : {})
     }]
   }
 }
@@ -1035,6 +1047,9 @@ async function runPiAgent(
     assistantMessageId ??= nextAssistantMessageId(message)
     return assistantMessageId
   }
+  let agentStarted = false
+  let extensionCommand: string | undefined
+  let extensionCommandError: string | undefined
   let agentSettled = false
   let settledResolve: (() => void) | undefined
   const settled = new Promise<void>((resolve) => { settledResolve = resolve })
@@ -1043,6 +1058,11 @@ async function runPiAgent(
   void rpcFailure.catch(() => undefined)
   const offFailure = rpc.onFailure((error) => rpcFailureReject?.(error))
   const off = rpc.onEvent((event) => {
+    if (event.type === 'agent_start' || event.type === 'tool_execution_start' ||
+      (event.type === 'message_start' || event.type === 'message_end') &&
+      ['user', 'assistant', 'toolResult'].includes(String(record(event.message).role))) {
+      agentStarted = true
+    }
     if (event.type === 'agent_settled') {
       agentSettled = true
       settledResolve?.()
@@ -1073,6 +1093,15 @@ async function runPiAgent(
     }
     if (event.type === 'message_end') {
       const message = record(event.message)
+      if (message.role === 'custom' && message.display === true) {
+        request.emit(piEvent(request.runId, {
+          kind: 'harness', stage: 'runtime:extension_message', providerId: 'pi', runtimeProvider: 'pi_rpc',
+          text: typeof message.content === 'string' ? message.content :
+            (Array.isArray(message.content) ? message.content.map(record) : [])
+              .filter((block) => block.type === 'text' && typeof block.text === 'string').map((block) => block.text).join('\n'),
+          runtimeMetadata: { customType: message.customType }
+        }))
+      }
       if (message.role !== 'assistant') return
       const messageId = currentAssistantMessageId(message)
       if (addAssistantUsage(usage, message, modelContextWindows)) {
@@ -1189,6 +1218,9 @@ async function runPiAgent(
       return
     }
     if (event.type === 'extension_error') {
+      if (extensionCommand && event.event === 'command' && event.extensionPath === `command:${extensionCommand}`) {
+        extensionCommandError = bounded(event.error, 4_000)
+      }
       request.emit(piEvent(request.runId, {
         kind: 'harness',
         stage: 'runtime:extension_error',
@@ -1205,8 +1237,10 @@ async function runPiAgent(
       else request.emit(piEvent(request.runId, {
         kind: 'harness',
         stage: 'runtime:extension_ui',
-        text: bounded(event, 4_000),
-        runtimeMetadata: { method: event.method }
+        providerId: 'pi', runtimeProvider: 'pi_rpc',
+        isError: event.method === 'notify' && event.notifyType === 'error',
+        text: bounded(event.method === 'notify' ? event.message : event, 4_000),
+        runtimeMetadata: { method: event.method, notifyType: event.notifyType }
       }))
       return
     }
@@ -1250,6 +1284,7 @@ async function runPiAgent(
       // Model-window telemetry is optional; usage remains available without Context%.
     }
     const explicitSkillEvent = await proveExplicitPiSkill(rpc, request)
+    extensionCommand = await piExtensionCommand(rpc, request.prompt)
     const entryBaseline = await piEntryBaseline(rpc)
     if (state.stopped) return { externalSessionId: state.sessionId, stopped: true, status: 'interrupted' }
     if (request.managedRecorder) {
@@ -1318,6 +1353,49 @@ async function runPiAgent(
         }
       }
       throw error
+    }
+    if (extensionCommand && !agentStarted && !state.stopped) {
+      // Pi acknowledges an extension prompt only after its handler returns. A menu/settings
+      // command need not append a user message or emit agent_settled. Do not wait for a model
+      // boundary that has not been observed; this result proves the command handler only.
+      const commandState = record((await rpc.send({ type: 'get_state' })).data)
+      const response = await rpc.send({
+        type: 'get_entries',
+        ...(entryBaseline.appendCursor ? { since: entryBaseline.appendCursor } : {})
+      })
+      const entries = record(response.data).entries
+      if (!Array.isArray(entries)) throw new Error('Pi RPC get_entries 返回了无效增量 entries')
+      const hasModelEntry = entries.some((entry) => {
+        const message = record(record(entry).message)
+        return ['user', 'assistant', 'toolResult'].includes(String(message.role))
+      })
+      if (!agentStarted && !hasModelEntry && commandState.isStreaming === false &&
+        commandState.isCompacting === false && commandState.pendingMessageCount === 0 &&
+        commandState.sessionId === state.sessionId) {
+        if (request.managedRecorder && request.cwd && state.sessionId && request.managedRecorderIdentity) {
+          try {
+            await cancelManagedRecorderTurn({
+              workspace: request.cwd, provider: 'pi', sessionId: state.sessionId,
+              runId: request.managedRecorderIdentity.runId,
+              promptHash: request.managedRecorderIdentity.promptHash
+            })
+          } catch (error) {
+            throw new PiRecorderError('Pi 命令已返回，但 provisional recorder lifecycle 撤销失败', { cause: error })
+          }
+        }
+        request.emit(piEvent(request.runId, {
+          kind: 'harness', stage: 'result', providerId: 'pi', runtimeProvider: 'pi_rpc',
+          text: extensionCommandError ?? `/${extensionCommand} 命令交互已结束；未观测到模型轮次`,
+          isError: extensionCommandError !== undefined,
+          durationMs: Date.now() - startedAt,
+          providerCommand: { name: extensionCommand, source: 'extension', modelTurn: 'unobserved' }
+        }))
+        retainRpc = mayReuse && !state.stopped && Boolean(state.sessionId) && rpc.reusable()
+        return {
+          externalSessionId: state.sessionId, stopped: state.stopped,
+          status: state.stopped ? 'interrupted' : extensionCommandError === undefined ? 'completed' : 'failed'
+        }
+      }
     }
     state.providerTurnId = await waitForPiUserEntryId(rpc, entryBaseline, () => agentSettled)
     // Pi workflows can intentionally run for hours. Do not impose a wall-clock or inactivity

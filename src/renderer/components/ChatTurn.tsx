@@ -1519,7 +1519,20 @@ function AssistantTurnImpl({
         )
       }
       for (const ev of visibleItems) {
-        if (ev.kind === 'harness') continue
+        if (ev.kind === 'harness') {
+          if (ev.providerId === 'pi' && ev.runtimeProvider === 'pi_rpc' && ev.text &&
+            (ev.providerCommand || ev.stage === 'runtime:extension_message' ||
+              ev.stage === 'runtime:extension_ui' && ev.runtimeMetadata?.method === 'notify')) {
+            flushLive()
+            flushTools()
+            out.push(
+              <div className="tool-card k-human" role="note" aria-label="Pi 命令反馈" key={ev.id}>
+                <div className="tool-detail"><div className="lbl">Pi 命令{ev.isError ? ' · 错误' : ''}</div><pre>{ev.text}</pre></div>
+              </div>
+            )
+          }
+          continue
+        }
         // 只有父调用真实存在时才折叠。Provider 给出孤儿 parent id 时，仍按顶层事件渲染，
         // 避免一条坏归因把后续根 agent 内容整段吞掉。
         if (ev.parentToolUseId && knownToolUseIds.has(ev.parentToolUseId)) continue
