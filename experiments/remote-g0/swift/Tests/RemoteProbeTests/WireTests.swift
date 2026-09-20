@@ -32,6 +32,22 @@ final class WireTests: XCTestCase {
     }
   }
 
+  func testHistoryPageLimitUsesHostDefaultOrExplicitOverride() throws {
+    for limit: Int? in [nil, 1024] {
+      let request = G0Transport.RunHistoryPageRequest(
+        providerId: "pi", cwd: "/workspace", externalSessionId: "session",
+        cursor: 64 * 1024, limit: limit, snapshot: "snapshot"
+      )
+      let encoded = try JSONEncoder().encode(request)
+      let json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+      XCTAssertEqual(json["op"] as? String, "historyPage")
+      XCTAssertEqual(json["cursor"] as? Int, 64 * 1024)
+      XCTAssertEqual(json["snapshot"] as? String, "snapshot")
+      if let limit { XCTAssertEqual(json["limit"] as? Int, limit) }
+      else { XCTAssertNil(json["limit"]) }
+    }
+  }
+
   func testScalarBoundsAndConstruction() throws {
     XCTAssertNoThrow(try ProbeRequest(protocolMajor: 1, requestId: "request", operation: "probe.echo", payload: String(repeating: "🧭", count: 4096)))
     XCTAssertThrowsError(try ProbeRequest(protocolMajor: 1, requestId: "request", operation: "probe.echo", payload: String(repeating: "🧭", count: 4097)))

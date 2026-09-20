@@ -335,9 +335,9 @@ public enum G0Transport {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
   }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
-  private struct RunHistoryPageRequest: Encodable {
+  struct RunHistoryPageRequest: Encodable {
     let op = "historyPage"; let providerId: String; let cwd: String; let externalSessionId: String
-    let cursor: Int; let limit: Int; let snapshot: String?
+    let cursor: Int; let limit: Int?; let snapshot: String?
   }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunResponse: Decodable {
@@ -482,7 +482,8 @@ public enum G0Transport {
   // Complete history as stable byte pages. The caller may persist cursor,
   // snapshot and accumulated bytes across disconnects; a changed source fails
   // explicitly instead of combining two transcript versions.
-  public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int = 256 * 1024, snapshot: String? = nil) async throws -> RunHistoryPage {
+  // Omit the limit by default: the host owns the frame budget and page size.
+  public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int? = nil, snapshot: String? = nil) async throws -> RunHistoryPage {
     let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: limit, snapshot: snapshot))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let page = response.historyPage else { throw ProbeError.unexpectedReply }
