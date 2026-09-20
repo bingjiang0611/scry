@@ -20,6 +20,7 @@ import {
 } from '../../shared/runtime'
 import {
   classifyTool,
+  contextCompactionOf,
   contextUsageEvidence,
   fileOpOf,
   mcpPayloadFailed,
@@ -908,7 +909,7 @@ function addAssistantUsage(
   aggregate: UsageAggregate,
   message: JsonRecord,
   contextWindows: ReadonlyMap<string, number>
-): void {
+): boolean {
   const usage = record(message.usage)
   const input = number(usage.input)
   const output = number(usage.output)
@@ -972,6 +973,7 @@ function addAssistantUsage(
       }
     }
   }
+  return contextEvidence > 0
 }
 
 async function runPiAgent(
@@ -1073,7 +1075,24 @@ async function runPiAgent(
       const message = record(event.message)
       if (message.role !== 'assistant') return
       const messageId = currentAssistantMessageId(message)
-      addAssistantUsage(usage, message, modelContextWindows)
+      if (addAssistantUsage(usage, message, modelContextWindows)) {
+        // A request-level sample, not a turn result: never feed these snapshots into billing totals.
+        request.emit(piEvent(request.runId, {
+          kind: 'harness',
+          stage: 'context_usage',
+          messageId,
+          contextTokens: usage.lastContextTokens,
+          contextModel: usage.lastContextModel,
+          contextProvider: usage.lastContextProvider,
+          contextUsageSource: usage.contextUsageSource,
+          contextUsageQuality: usage.contextUsageQuality,
+          modelUsage: [{
+            model: usage.lastContextModel!,
+            upstreamProvider: usage.lastContextProvider,
+            contextWindow: modelContextWindows.get(`${usage.lastContextProvider ?? ''}\0${usage.lastContextModel}`)
+          }]
+        }))
+      }
       assistantToolCallIds = new Set(
         (Array.isArray(message.content) ? message.content.map(record) : [])
           .filter((block) => block.type === 'toolCall' && typeof block.id === 'string')
@@ -1150,12 +1169,23 @@ async function runPiAgent(
       return
     }
     if (event.type === 'compaction_start' || event.type === 'compaction_end') {
-      request.emit(piEvent(request.runId, {
+      const lifecycle = piEvent(request.runId, {
         kind: 'harness',
         stage: event.type,
-        compaction: { trigger: event.reason === 'manual' ? 'manual' : 'auto' },
         runtimeMetadata: event
-      }))
+      })
+      const compaction = contextCompactionOf(lifecycle)
+      if (compaction) {
+        lifecycle.stage = 'context_compaction'
+        lifecycle.compaction = compaction
+        // The pre-compaction request no longer describes the active context. Wait for new usage.
+        usage.lastContextTokens = undefined
+        usage.lastContextModel = undefined
+        usage.lastContextProvider = undefined
+        usage.contextUsageSource = undefined
+        usage.contextUsageQuality = undefined
+      }
+      request.emit(lifecycle)
       return
     }
     if (event.type === 'extension_error') {

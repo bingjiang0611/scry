@@ -176,6 +176,26 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled' })
         continue
       }
+      if (command.message.startsWith('context-telemetry:')) {
+        const scenario = command.message.slice('context-telemetry:'.length)
+        const sample = (input) => {
+          send({ type: 'message_start', message: { role: 'assistant' } })
+          send({ type: 'message_end', message: {
+            role: 'assistant', provider: 'openai-codex', model: 'test-model', stopReason: 'stop',
+            content: [], usage: { input, output: input ? 4 : 0, cacheRead: input ? 2 : 0, cacheWrite: input ? 1 : 0 }
+          } })
+        }
+        sample(50000)
+        send({ type: 'compaction_start', reason: 'threshold' })
+        send({ type: 'compaction_end', reason: 'threshold', aborted: scenario === 'aborted',
+          ...(scenario === 'missing' ? {} : { result: { tokensBefore: 50000, summary: 'summary' } }),
+          ...(scenario === 'error' ? { errorMessage: 'failed' } : {}), willRetry: false })
+        if (scenario === 'success') sample(8000)
+        // Native transport failures can end with an all-zero usage object; not a new context sample.
+        sample(0)
+        send({ type: 'agent_settled' })
+        continue
+      }
       if (command.message === 'hang') continue
       if (command.message === 'stop-before-final-state') {
         send({ type: 'message_start', message: { role: 'assistant' } })
@@ -582,6 +602,41 @@ describe('Pi RPC Provider', () => {
       expect(messageIds[0]).toMatch(/^pi:run-1:assistant-\d+$/)
     })
   }, 15_000)
+
+  it.each(['success', 'idle', 'aborted', 'missing', 'error'])(
+    'publishes request context before settlement and only counts completed compactions: %s', async (scenario) => {
+      await withFixture(async (profile, cwd) => {
+        const events: TraceEvent[] = []
+        const samplesBeforeResult: TraceEvent[] = []
+        const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+        const handle = adapter.run({
+          runId: 'run-context', prompt: `context-telemetry:${scenario}`, cwd, agentProfileId: profile.id,
+          attachments: [], permissionMode: 'full_access', emit: (event) => {
+            if (event.stage === 'context_usage' && !events.some((item) => item.stage === 'result')) {
+              samplesBeforeResult.push(event)
+            }
+            events.push(event)
+          }
+        })
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+        expect(samplesBeforeResult.map((event) => event.contextTokens)).toEqual(scenario === 'success' ? [50000, 8000] : [50000])
+        expect(samplesBeforeResult[0]).toMatchObject({
+          contextModel: 'test-model', contextProvider: 'openai-codex',
+          contextUsageSource: 'pi_rpc_assistant_usage', contextUsageQuality: 'exact',
+          modelUsage: [{ model: 'test-model', upstreamProvider: 'openai-codex', contextWindow: 200000 }]
+        })
+        expect(samplesBeforeResult[0].tokensIn).toBeUndefined()
+        expect(samplesBeforeResult[0].modelUsage?.[0].inputTokens).toBeUndefined()
+        const completed = scenario === 'success' || scenario === 'idle'
+        const compactions = events.filter((event) => event.stage === 'context_compaction')
+        expect(compactions).toHaveLength(completed ? 1 : 0)
+        if (completed) expect(compactions[0].compaction).toEqual({ trigger: 'auto', preTokens: 50000 })
+        const result = events.find((event) => event.stage === 'result')!
+        expect(result.contextTokens).toBe(scenario === 'success' ? 8000 : scenario === 'idle' ? undefined : 50000)
+        expect(result.tokensIn).toBe(scenario === 'success' ? 58000 : 50000)
+      })
+    }, 15_000
+  )
 
   it('does not truncate native Pi tool results before canonical persistence', async () => {
     await withFixture(async (profile, cwd) => {

@@ -1,6 +1,7 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import {
+  contextCompactionOf,
   contextUsageEvidence,
   mcpCallsForEvent,
   type TraceEvent,
@@ -728,7 +729,7 @@ function OverviewPanelBody({
   const [expandedTurnCallGroups, setExpandedTurnCallGroups] = useState<Set<string>>(() => new Set())
   const all = useMemo(() => turns.flatMap((t) => t.items), [turns])
   const compactions = useMemo(
-    () => all.filter((event) => event.kind === 'harness' && event.stage === 'context_compaction'),
+    () => all.filter((event) => contextCompactionOf(event) != null),
     [all]
   )
   const sessionInterventions = useMemo(() => humanInterventions(all), [all])
@@ -772,23 +773,31 @@ function OverviewPanelBody({
     .reduce((sum, amount) => sum + amount, 0)
   const qoderCreditKnown = qoderCreditEvidence.some((evidence) => evidence.value?.amount != null)
   const qoderCreditPartial = qoderCreditEvidence.some((evidence) => evidence.status === 'partial' || (evidence.value?.missingRequests ?? 0) > 0) || qoderCreditEvidence.length < turns.length
-  // Context% = 最近一轮的当前上下文占用（顶层 usage 完整 prompt）÷ 模型窗口。诚实的"现在装了多满"。
+  // Use request-level live samples as well as canonical turn results, without summing snapshots.
   const ctx = useMemo(() => {
-    for (let i = results.length - 1; i >= 0; i--) {
-      const evidence = contextUsageEvidence(results[i])
-      if (evidence) {
-        return {
-          used: evidence.used,
-          win: evidence.window,
-          pct: Math.round((evidence.used / evidence.window) * 100),
-          model: evidence.model,
-          quality: evidence.quality,
-          source: evidence.source
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const result = resultOf(turns[i])
+      for (let j = turns[i].items.length - 1; j >= 0; j--) {
+        const event = turns[i].items[j]
+        if (contextCompactionOf(event)) return null
+        if (event.id !== result?.id && event.stage !== 'context_usage') continue
+        const evidence = contextUsageEvidence(result && event.id === result.id ? result : event)
+        // A new model with no known window must not inherit the old model's percentage.
+        if (!evidence && event.stage === 'context_usage') return null
+        if (evidence) {
+          return {
+            used: evidence.used,
+            win: evidence.window,
+            pct: Math.round((evidence.used / evidence.window) * 100),
+            model: evidence.model,
+            quality: evidence.quality,
+            source: evidence.source
+          }
         }
       }
     }
     return null
-  }, [results])
+  }, [turns])
   const logicalCallEvents = useMemo(() => turns.flatMap((turn) => logicalCallEventsForTurn(turn.items, turn.userText)), [turns])
   const calls = useMemo(() => aggregateCalls(logicalCallEvents), [logicalCallEvents])
   const turnCallRows = useMemo<TurnCallRow[]>(() => {
@@ -967,9 +976,9 @@ function OverviewPanelBody({
                     ctx.quality === 'inferred'
                       ? '推断：Provider usage 比例换算'
                       : ctx.quality === 'exact'
-                        ? '精确：最近一轮 Provider 上下文用量'
+                        ? '精确：最近一次 Provider 请求用量'
                         : '旧记录：证据质量未标记'
-                  }
+                  }{busy ? ' · 随请求用量上报更新，非逐 token' : ''}
                 </div>
               </>
             ) : (
@@ -1033,9 +1042,9 @@ function OverviewPanelBody({
               {sessionId ?? '（尚未捕获）'}
             </span>
           </div>
-          <div className="filerow">
+          <div className="filerow" title="仅统计当前已加载记录中确认完成的压缩；不代表原生会话的全部历史">
             <span className="fname">Compact</span>
-            <span className="dim">{compactions.length} 次</span>
+            <span className="dim">{compactions.length > 0 ? `${compactions.length} 次` : '未观测到'}</span>
           </div>
         </div>
       )}

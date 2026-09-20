@@ -1,0 +1,89 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import type { TraceEvent } from '../../shared/trace'
+import { contextCompactionOf } from '../../shared/trace'
+import type { Turn } from '../format'
+import { OverviewPanel } from './OverviewPanel'
+
+function sample(id: string, contextTokens: number, patch: Partial<TraceEvent> = {}): TraceEvent {
+  return {
+    id, runId: 'live', ts: '2026-09-10T00:00:00Z', kind: 'harness', stage: 'context_usage',
+    contextTokens, contextModel: 'ultimate', contextProvider: 'qoder',
+    contextUsageSource: 'pi_rpc_assistant_usage', contextUsageQuality: 'exact',
+    modelUsage: [{ model: 'ultimate', upstreamProvider: 'qoder', contextWindow: 272000 }],
+    ...patch
+  }
+}
+
+const compact: TraceEvent = {
+  id: 'compact', runId: 'live', ts: '2026-09-10T00:00:01Z', kind: 'harness',
+  stage: 'context_compaction', compaction: { trigger: 'auto', preTokens: 201600 }
+}
+
+function render(items: TraceEvent[], previous: Turn[] = []): string {
+  return renderToStaticMarkup(<OverviewPanel
+    turns={[...previous, { runId: 'live', userText: 'probe', items, done: false }]}
+    busy sessionId="context-session" selected={null} usage={null} stats={null} onSelect={() => {}}
+  />)
+}
+
+describe('OverviewPanel request-level context', () => {
+  it('updates within the unfinished turn rather than retaining the previous result; does not bill samples', () => {
+    const previous: Turn = {
+      runId: 'old', userText: 'old', done: true,
+      items: [sample('result', 100000, { stage: 'result', runId: 'old', tokensIn: 10, tokensOut: 4 })]
+    }
+    expect(render([], [previous])).toContain('100.0k / 272.0k')
+    const first = render([sample('first', 150000)], [previous])
+    expect(first).toContain('150.0k / 272.0k')
+    const next = render([sample('first', 150000), sample('second', 201600)], [previous])
+    expect(next).toContain('201.6k / 272.0k')
+    expect(next).toContain('随请求用量上报更新，非逐 token')
+    expect(next).toContain('<strong>10 / 4</strong>')
+    expect(next).not.toContain('100.0k / 272.0k')
+  })
+
+  it('keeps canonical context when resultOf merges several results and ignores transcript shadows', () => {
+    const html = render([
+      sample('result-1', 100000, { stage: 'result', tokensIn: 10 }),
+      sample('result-2', 150000, { stage: 'result', tokensIn: 20 }),
+      sample('shadow', 90000, { stage: 'result', text: 'transcript assistant usage', tokensIn: 30 })
+    ])
+    expect(html).toContain('150.0k / 272.0k')
+    expect(html).not.toContain('90.0k / 272.0k')
+  })
+
+  it('invalidates pre-compaction usage until the next sample, then permits a decrease', () => {
+    const items = [sample('first', 201600), compact]
+    const afterCompact = render(items)
+    expect(afterCompact).toContain('暂无上下文数据')
+    expect(afterCompact).toContain('Compact</span><span class="dim">1 次')
+    expect(render([...items, sample('after', 20000)])).toContain('20.0k / 272.0k')
+  })
+
+  it('does not inherit a stale percentage when the latest model window is unknown', () => {
+    expect(render([
+      sample('first', 201600), sample('unknown-model', 12000, { contextModel: 'new', modelUsage: [{ model: 'new' }] })
+    ])).toContain('暂无上下文数据')
+  })
+
+  it('shows no observed evidence instead of asserting zero compactions', () => {
+    expect(render([])).toContain('Compact</span><span class="dim">未观测到')
+  })
+
+  it('reads successful raw Pi compaction lifecycle evidence from older archives', () => {
+    const legacy: TraceEvent = {
+      ...compact, stage: 'compaction_end',
+      runtimeMetadata: { type: 'compaction_end', reason: 'manual', aborted: false, result: { tokensBefore: 201600 } }
+    }
+    expect(contextCompactionOf(legacy)).toEqual({ trigger: 'manual', preTokens: 201600 })
+    expect(render([sample('first', 201600), legacy])).toContain('暂无上下文数据')
+    expect(render([legacy])).toContain('Compact</span><span class="dim">1 次')
+    for (const patch of [{ aborted: true }, { result: undefined }, { errorMessage: 'failed' }]) {
+      const failed = { ...legacy, runtimeMetadata: { ...legacy.runtimeMetadata, ...patch } }
+      expect(contextCompactionOf(failed)).toBeNull()
+      expect(render([sample('first', 201600), failed])).toContain('201.6k / 272.0k')
+    }
+    expect(contextCompactionOf({ ...legacy, stage: 'compaction_start' })).toBeNull()
+  })
+})
