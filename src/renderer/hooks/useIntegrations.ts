@@ -377,6 +377,7 @@ export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId
 }
 
 export function runControlSendBlockedReason(
+  providerId: ProviderId,
   capability: CapabilityEnvelope<AgentRunControlCatalog> | null,
   loading: boolean,
   controls: AgentRunControls
@@ -385,7 +386,9 @@ export function runControlSendBlockedReason(
     controls.permissionMode === 'default' &&
     controls.model == null &&
     controls.effort == null
-  if (usesProviderDefaults && capability === null && loading) return null
+  // Pi has no default approval mode. A cold catalog temporarily resets the selection to
+  // default, even when full_access is saved; never send that placeholder to the adapter.
+  if (providerId !== 'pi' && usesProviderDefaults && capability === null && loading) return null
 
   const selectedModel = controls.model && capability?.data
     ? capability.data.models.find((option) => modelKey(option.model) === modelKey(controls.model!))

@@ -863,6 +863,7 @@ export function App() {
       : integrations.selectedAgent.health?.state === 'unavailable'
         ? integrations.selectedAgent.health.lastError ?? `${integrations.selectedAgent.name} 当前不可用`
         : runControlSendBlockedReason(
+            integrations.selectedProviderId,
             integrations.runControlCapability,
             integrations.runControlsLoading,
             integrations.runControls
