@@ -7,14 +7,18 @@ import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Full production App with an isolated bridge: no Provider, filesystem or user data access.
+const sameProvider = new URLSearchParams(location.search).get('scenario') === 'same-provider'
+const oldIdentity = sameProvider
+  ? { providerId: 'pi' as const, agentProfileId: 'pi:rotom' }
+  : { providerId: 'claude' as const }
 const oldRun: ActiveRun = {
-  runId: 'old-run', providerId: 'claude', cwd: '/fixture/old', externalSessionId: 'old-session',
+  runId: 'old-run', ...oldIdentity, cwd: '/fixture/old', externalSessionId: 'old-session',
   userText: 'Old running conversation', done: false, items: []
 }
 const projects: ProjectMeta[] = [
   { cwd: '/fixture/old', name: 'Old project', mtime: 1, sessions: [{
     sessionId: 'old-session', externalSessionId: 'old-session', runId: 'old-run',
-    providerId: 'claude', mtime: 1, preview: 'Old running conversation', count: 1
+    ...oldIdentity, mtime: 1, preview: 'Old running conversation', count: 1
   }] },
   { cwd: '/fixture/new', name: 'New project', mtime: 2, sessions: [{
     sessionId: 'new-session', externalSessionId: 'new-session', providerId: 'pi', agentProfileId: 'pi:rotom',
