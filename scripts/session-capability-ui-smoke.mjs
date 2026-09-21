@@ -8,6 +8,8 @@ import electron from 'electron'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
+const selectionOnly = process.argv.includes('--selection-only')
+const fixtures = selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission']
 
 // Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
 // Scry's main process or preload, discover providers, touch user data, or start a CDP port.
@@ -353,7 +355,7 @@ async function exerciseSessionSelection(contents, scenario) {
   }
   const baseline = await read(`${state}.activeReads`)
   if (scenario === 'focused-event') await click('#focus-pi')
-  else await click('.sb-sess[data-provider="pi"]')
+  else await click('.sb-sess[data-provider="pi"]:not(.running)')
   await wait(`${state}.historyReads === 1`)
   if (scenario !== 'late-startup') await click('#resolve-snapshots')
   await click('#resolve-history')
@@ -371,13 +373,13 @@ async function exerciseSessionSelection(contents, scenario) {
     throw new Error(`${scenario}: stale startup recovery disturbed selection: ${JSON.stringify(result)}`)
   }
   if (await read(`document.body.innerText.includes('workspace changed')`)) throw new Error(`${scenario}: workspace error visible`)
-  // Switch back to the running Provider and restore its history too.
-  await click('.sb-sess[data-provider="claude"]')
+  // Switch back to the running session, including within the same Provider/profile.
+  await click('.sb-sess.running')
   await wait(`${state}.historyReads === 2`)
   await click('#resolve-history')
   await wait(`document.body.innerText.includes('History for old-session')`)
   if (await read(`${state}.activeReads`) !== baseline) throw new Error(`${scenario}: reverse switch restarted bootstrap`)
-  return { scenario, providerSwitch: true, reverseSwitch: true, startupReads: baseline }
+  return { scenario, providerSwitch: scenario !== 'same-provider', reverseSwitch: true, startupReads: baseline }
 }
 
 async function exercisePiPermission(contents, scenario) {
@@ -437,7 +439,7 @@ async function exercisePiPermission(contents, scenario) {
 
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
-  for (const fixture of ['session-capability', 'session-selection', 'pi-permission']) await build({
+  for (const fixture of fixtures) await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error',
     esbuild: { jsx: 'automatic' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } },
@@ -453,7 +455,7 @@ try {
       }
     }
   })
-  for (const fixture of ['session-capability', 'session-selection', 'pi-permission']) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
     if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
@@ -465,17 +467,20 @@ try {
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       try {
-        await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
-        const result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
-        const piCommands = await (${exercisePiCommands.toString()})(win.webContents)
+        let result = {}, piCommands = {}
+        if (!${selectionOnly}) {
+          await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
+          result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
+          piCommands = await (${exercisePiCommands.toString()})(win.webContents)
+        }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ['provider-switch', 'late-startup', 'focused-event']) {
-          await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))})
+        for (const scenario of ['provider-switch', 'same-provider', 'late-startup', 'focused-event']) {
+          await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }
         const piPermissions = []
-        for (const scenario of ['fresh', 'saved']) {
+        for (const scenario of ${JSON.stringify(selectionOnly ? [] : ['fresh', 'saved'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pi-permission.html'))}, { query: { scenario } })
           piPermissions.push(await (${exercisePiPermission.toString()})(win.webContents, scenario))
         }
