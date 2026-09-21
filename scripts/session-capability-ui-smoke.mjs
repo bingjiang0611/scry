@@ -9,7 +9,8 @@ import electron from 'electron'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 const selectionOnly = process.argv.includes('--selection-only')
-const fixtures = selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission']
+const piCommandsOnly = process.argv.includes('--pi-commands-only')
+const fixtures = piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission']
 
 // Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
 // Scry's main process or preload, discover providers, touch user data, or start a CDP port.
@@ -322,7 +323,29 @@ async function exercisePiCommands(contents) {
   await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
   await click('#pi-command .question-submit')
   await wait(`document.querySelector('#pi-command textarea')?.value === 'Existing objective'`)
-  return { piMenuChain: true, piEditorPrefill: true, piNativeInput: true, piCancelAndReopen: true, piCommandFeedback: true }
+  for (const cancelInput of [false, true]) {
+    await click('#pi-command-restart')
+    await wait(`document.querySelectorAll('#pi-command .question-option').length === 2`)
+    if (await contents.executeJavaScript(`document.querySelector('#pi-command .question-other') != null`)) throw new Error('Native select exposed an invalid free-text answer')
+    await click('#pi-command .question-option:nth-child(2)')
+    await wait(`document.querySelector('#pi-command .question-option:nth-child(2)').classList.contains('selected')`)
+    await click('#pi-command .question-submit')
+    await wait(`document.querySelector('#pi-command .question-free-text-input') != null`)
+    if (cancelInput) {
+      await click('#pi-command .question-cancel')
+      await wait(`JSON.parse(document.querySelector('#pi-command-answers').textContent)[1]?.behavior === 'cancelled'`)
+      continue
+    }
+    const customAnswer = '提交所有改动 保证工作区干净 然后构建并安装'
+    await click('#pi-command .question-free-text-input')
+    await contents.insertText(customAnswer)
+    await wait(`document.querySelector('#pi-command .question-free-text-input').value === ${JSON.stringify(customAnswer)}`)
+    await click('#pi-command .question-submit')
+    await wait(`document.querySelector('#pi-command').textContent.includes('Save changes?')`)
+    const customAnswers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
+    if (customAnswers[0].answers['Choose an action'] !== '2. Type something.' || customAnswers[1].answers['Type your answer:'] !== customAnswer) throw new Error('Native custom-answer chain lost sentinel or text')
+  }
+  return { piMenuChain: true, piEditorPrefill: true, piNativeInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true }
 }
 
 async function exerciseSessionSelection(contents, scenario) {
@@ -485,17 +508,17 @@ try {
         let result = {}, piCommands = {}
         if (!${selectionOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
-          result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
+          if (!${piCommandsOnly}) result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
           piCommands = await (${exercisePiCommands.toString()})(win.webContents)
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ['late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event']) {
+        for (const scenario of ${JSON.stringify(piCommandsOnly ? [] : ['late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }
         const piPermissions = []
-        for (const scenario of ${JSON.stringify(selectionOnly ? [] : ['fresh', 'saved'])}) {
+        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly ? [] : ['fresh', 'saved'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pi-permission.html'))}, { query: { scenario } })
           piPermissions.push(await (${exercisePiPermission.toString()})(win.webContents, scenario))
         }

@@ -71,7 +71,7 @@ export function buildQuestionAnswers(request: AgentQuestionRequest, drafts: Ques
   const answers: Record<string, string> = {}
   for (const question of request.questions) {
     const draft = drafts[question.question]
-    if (!draft) return null
+    if (!draft || (question.allowCustomAnswer === false && draft.useOther)) return null
     if (!question.multiSelect) {
       const selectedOption = question.options.find((option) => option.label === draft.selected[0])
       const answer = draft.useOther ? draft.other.trim() : selectedOption?.answerValue ?? selectedOption?.label
@@ -200,7 +200,8 @@ export function AskUserQuestionInline({
         {request.questions.map((question, questionIndex) => {
           const draft = drafts[question.question]
           const display = questionDisplayCopy(question.header, question.question)
-          const options = question.options.filter((option) => !isGeneratedFreeTextOption(option.label))
+          const closedChoice = question.allowCustomAnswer === false
+          const options = closedChoice ? question.options : question.options.filter((option) => !isGeneratedFreeTextOption(option.label))
           const selectedPreviews = options.filter(
             (option) => draft.selected.includes(option.label) && option.preview
           )
@@ -215,7 +216,7 @@ export function AskUserQuestionInline({
                     <span>{display.question}</span>
                   </span>
                 </legend>
-                {options.length === 0 ? question.inputMode === 'multiline' ? (
+                {options.length === 0 && !closedChoice ? question.inputMode === 'multiline' ? (
                   <textarea
                     autoFocus={questionIndex === 0}
                     className="question-other-input question-free-text-input question-editor-input"
@@ -268,7 +269,7 @@ export function AskUserQuestionInline({
                         </label>
                       )
                     })}
-                    <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
+                    {!closedChoice && <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
                       <input
                         type={question.multiSelect ? 'checkbox' : 'radio'}
                         name={`question-${request.questionId}-${questionIndex}`}
@@ -279,8 +280,8 @@ export function AskUserQuestionInline({
                         <b>其他</b>
                         <small>输入一个不在上述选项中的回答</small>
                       </span>
-                    </label>
-                    {draft.useOther && (
+                    </label>}
+                    {!closedChoice && draft.useOther && (
                       <input
                         autoFocus
                         className="question-other-input"

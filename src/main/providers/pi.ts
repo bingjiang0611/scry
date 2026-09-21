@@ -843,6 +843,9 @@ export function questionFromExtension(runId: string, event: JsonRecord): AgentQu
       question: question.slice(0, 2_000),
       multiSelect: parsedOptions.length >= 2 && isMultiSelect,
       options,
+      // select/confirm are closed-choice RPC primitives. Extensions request a separate
+      // input after their custom-answer option; returning free text here means cancel.
+      ...((method === 'select' || method === 'confirm') ? { allowCustomAnswer: false } : {}),
       ...((method === 'editor' || method === 'input' && options.length === 0)
         ? { inputMode: method === 'editor' ? 'multiline' as const : 'singleline' as const }
         : {}),
