@@ -233,9 +233,15 @@ describe('RemoteGateway', () => {
     const { authority } = await grantedAuthority()
     const list = vi.fn(() => [
       { id: 'qoder', label: 'Qoder', available: true, modelId: 'qoder-default',
+        models: [
+          { id: 'qoder-default', providerId: 'upstream-a', label: 'Qoder A', isDefault: true,
+            efforts: [{ id: 'high', label: '高', isDefault: true }] },
+          { id: 'qoder-default', providerId: 'upstream-b', label: 'Qoder B' }
+        ],
         efforts: [{ id: 'high', label: '高', isDefault: true }],
         permissions: [{ id: 'default', label: '默认审批', description: '由 Provider 决定' }] },
-      { id: 'qoder', label: 'Qoder dup', available: true }, // duplicate id dropped
+      { id: 'qoder', label: 'Qoder dup', available: true }, // duplicate default context dropped
+      { id: 'qoder', agentProfileId: 'profile-a', label: 'Qoder · Profile A', available: true },
       { id: 'claude', label: 'Claude', available: false },
       { id: '', label: 'empty-id-dropped', available: true },
       ...Array.from({ length: 60 }, (_, i) => ({ id: `p${i}`, label: `p${i}`, available: true }))
@@ -244,10 +250,16 @@ describe('RemoteGateway', () => {
     expectCode(() => gw.listProviders('f'.repeat(64)), 'device_not_authorized')
     const providers = gw.listProviders(CERT)
     expect(providers.length).toBe(32) // MAX_PROVIDERS bound
-    expect(providers.slice(0, 2)).toEqual([
+    expect(providers.slice(0, 3)).toEqual([
       { id: 'qoder', label: 'Qoder', available: true, modelId: 'qoder-default',
+        models: [
+          { id: 'qoder-default', providerId: 'upstream-a', label: 'Qoder A', isDefault: true,
+            efforts: [{ id: 'high', label: '高', isDefault: true }] },
+          { id: 'qoder-default', providerId: 'upstream-b', label: 'Qoder B' }
+        ],
         efforts: [{ id: 'high', label: '高', isDefault: true }],
         permissions: [{ id: 'default', label: '默认审批', description: '由 Provider 决定' }] },
+      { id: 'qoder', agentProfileId: 'profile-a', label: 'Qoder · Profile A', available: true },
       { id: 'claude', label: 'Claude', available: false }
     ])
     expect(providers.some((p) => p.id === '')).toBe(false)
@@ -282,7 +294,7 @@ describe('RemoteGateway', () => {
   it('lists the host session catalog only for an authorized device, deduped/bounded, resumable id preserved', async () => {
     const { authority } = await grantedAuthority()
     const list = vi.fn(() => [
-      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30 },
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30, isActive: true },
       { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'dup', ts: 21 }, // dup id dropped
       { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }, // no externalSessionId
       { sessionId: '', providerId: 'qoder', cwd: '/w', label: 'empty-id', ts: 5 }
@@ -291,7 +303,7 @@ describe('RemoteGateway', () => {
     expectCode(() => gw.listSessions('f'.repeat(64)), 'device_not_authorized')
     const sessions = gw.listSessions(CERT)
     expect(sessions).toEqual([
-      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30 },
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30, isActive: true },
       { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }
     ])
   })
@@ -393,9 +405,15 @@ describe('RemoteGateway', () => {
       providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: cursor + 1, snapshot
     })).rejects.toThrow('invalid_history_cursor')
 
+    // A supplied snapshot drains the immutable cached bytes even when the live
+    // source changes between pages. This is required for active Mac sessions.
     read.mockResolvedValueOnce([{ userText: 'changed', items: [] }])
-    await expect(gw.readHistoryPage(CERT, {
+    const replay = await gw.readHistoryPage(CERT, {
       providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: 0, snapshot
+    })
+    expect(replay.snapshot).toBe(snapshot)
+    await expect(gw.readHistoryPage(CERT, {
+      providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: 0, snapshot: '0'.repeat(64)
     })).rejects.toThrow('history_snapshot_changed')
   })
 

@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { ITheme } from '@xterm/xterm'
-import { TERMINAL_MAX_SESSIONS, type TerminalExitEvent, type TerminalRecordingSummary, type TerminalSessionDescriptor } from '@shared/terminal'
+import { type TerminalExitEvent, type TerminalRecordingSummary, type TerminalSessionDescriptor } from '@shared/terminal'
 import { Icon } from './primitives/Icon'
 import { TerminalHistory } from './TerminalHistory'
 import { replayTerminalRecording } from '../terminal-recording-replay'
@@ -445,7 +445,6 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
     const existing = tabs.find((tab) => tab.recordingId === item.id)
     if (existing) setActiveKey(existing.key)
     else {
-      if (tabs.length >= TERMINAL_MAX_SESSIONS) return
       const tab = { key: `recording-${item.id}`, title: `录制 ${item.id.slice(9, 17)}`, recordingId: item.id }
       setTabs((current) => [...current, tab])
       setActiveKey(tab.key)
@@ -462,7 +461,6 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   }, [])
 
   const addTab = (): void => {
-    if (tabs.length >= TERMINAL_MAX_SESSIONS) return
     const tab = nextTerminalTab(nextTitleNumber.current++)
     setTabs((current) => [...current, tab])
     setActiveKey(tab.key)
@@ -550,7 +548,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
               </button>
             </div>
           ))}
-          <button ref={addButtonRef} type="button" className="terminal-action" onClick={addTab} disabled={!hydrated || tabs.length >= TERMINAL_MAX_SESSIONS} title="新建终端" aria-label="新建终端">
+          <button ref={addButtonRef} type="button" className="terminal-action" onClick={addTab} disabled={!hydrated} title="新建终端" aria-label="新建终端">
             <Icon name="plus" />
           </button>
         </div>
@@ -601,7 +599,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
           />
         ))}
       </div>
-      {historyOpen && <TerminalHistory key={cwd ?? '~'} cwd={cwd} canOpen={tabs.length < TERMINAL_MAX_SESSIONS} onOpen={openRecording} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <TerminalHistory key={cwd ?? '~'} cwd={cwd} canOpen onOpen={openRecording} onClose={() => setHistoryOpen(false)} />}
       <footer className="terminal-foot" role="status">{recordingMessages[activeKey] ?? '本机 Shell · 当前用户权限 · 原文录制（可能含密钥）'}</footer>
     </section>
   )

@@ -159,7 +159,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       // omits it. This gives the resumed run the prior context/memory.
       ...(resume ? { resume } : {}),
       attachments,
-      ...(routing.modelId ? { model: { id: routing.modelId } } : {}),
+      ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
       ...(routing.effort ? { effort: routing.effort } : {}),
       // A paired owner device may make the same explicit run-control choice as
       // the trusted desktop UI. Missing means Provider default; full_access is

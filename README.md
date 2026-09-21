@@ -21,7 +21,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 - Scry 的会话索引、观测数据和 turn-recorder 记录保存在本机；turn-recorder 默认只写工作区的 `.scry/`，不实现上传。历史已脱敏记录不恢复；诊断包、认证错误和凭据配置展示仍保留防泄露处理。终端输出默认原文录制到 App `userData/terminal-recordings/`；Shell 退出后可在当前标签页回放或删除录制；关闭标签页或重启 App 后，可从「终端录制历史」按当前工作区分页查找并只读打开。历史回放不会恢复旧 Shell 或执行命令。清屏、关闭标签页不会删除磁盘记录，暂不自动清理。录制失败会提示，磁盘未确认的尾部不会被标为完整。
 - Scry 本身没有项目数据上传后端，但 Provider CLI/SDK 会连接各自服务；其数据处理遵循对应 Provider 的配置、许可证和服务条款。
 - Bash、MCP 和第三方工具可能访问 Scry 无法完整统计的文件或网络资源，文件足迹不是安全沙箱或完整审计日志。
-- 项目级 MCP/Hook 首次执行和指纹变化会要求确认，并在 Provider 启动边界重新校验配置与 executable SHA-256；这用于防止仓库内容漂移，不承诺抵御已经能以同一 macOS 用户身份修改进程或文件的并发攻击者。
+- 项目级 MCP、Hook、plugin 和 recorder commit callback 默认自动授权执行，不显示确认弹窗；Scry 仍在 Provider 启动边界重新校验配置、内容指纹与 executable SHA-256，并将 recorder 自动授权标为 `source=auto`。打开不可信仓库可能直接触发本机代码执行；该校验不承诺抵御已经能以同一 macOS 用户身份修改进程或文件的并发攻击者。
 - 逐工具审批的覆盖范围取决于 Provider 与 transport；即使界面出现审批，也不能把 Scry 当作统一的权限隔离层。
 
 ## Provider 状态
@@ -74,7 +74,7 @@ GitHub Actions 会在 Node 22 运行 App 的 typecheck、全量测试与构建�
 桌面 App 已自带同源 CLI，并固定通过 App Resources 内的绝对路径驱动 Provider/Hook；安装或更新 App 时会同步更新其私有 CLI，不依赖用户 `PATH` 中的全局版本。下面的 npm 安装仅用于没有桌面 App 的 headless/独立终端环境。
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.45 \
+npm install -g @ali/scry-turn-recorder@0.2.46 \
   --registry=https://registry.anpm.alibaba-inc.com
 scry doctor --workspace /path/to/workspace
 ```
@@ -89,7 +89,7 @@ CLI 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生
 若 npm 的系统全局目录不可写，可安装到用户目录，并确保 `~/.local/bin` 在 `PATH`：
 
 ```bash
-npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.45 \
+npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.46 \
   --registry=https://registry.anpm.alibaba-inc.com
 export PATH="$HOME/.local/bin:$PATH"
 ```

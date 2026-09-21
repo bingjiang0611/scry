@@ -32,6 +32,19 @@ final class WireTests: XCTestCase {
     }
   }
 
+  func testProviderContextPreservesProfileAndFullModelCatalog() throws {
+    let effort = G0Transport.RunControlOption(id: "high", label: "高")
+    let provider = G0Transport.RunProviderRef(
+      id: "pi", label: "Pi · Rotom", available: true, agentProfileId: "pi:rotom",
+      modelId: "gpt-6", models: [
+        G0Transport.RunModelOption(id: "gpt-6", providerId: "openai", label: "GPT-6", isDefault: true, efforts: [effort])
+      ], efforts: [effort], permissions: [G0Transport.RunControlOption(id: "default", label: "默认审批")]
+    )
+    let decoded = try JSONDecoder().decode(G0Transport.RunProviderRef.self, from: JSONEncoder().encode(provider))
+    XCTAssertEqual(decoded, provider)
+    XCTAssertEqual(decoded.models?.first?.providerId, "openai")
+  }
+
   func testHistoryPageLimitUsesHostDefaultOrExplicitOverride() throws {
     for limit: Int? in [nil, 1024] {
       let request = G0Transport.RunHistoryPageRequest(

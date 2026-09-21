@@ -45,6 +45,7 @@ struct RemoteRunClient {
     let agentProfileId: String?
     let prompt: String
     var modelId: String? = nil
+    var modelProviderId: String? = nil
     var effort: String? = nil
     var permissionMode: String? = nil
     // The Provider session id to CONTINUE (resume) instead of starting fresh.
@@ -177,7 +178,20 @@ struct RemoteRunClient {
   }
 
   // Complete, restart-stable history. No turn/item/text is clipped to a frame.
+  // A currently running Mac conversation can change between pages; restart the
+  // bounded read from cursor zero instead of surfacing a stale-snapshot error.
   func history(providerId: String, cwd: String, externalSessionId: String) async throws -> [G0Transport.RunHistoryTurn] {
+    for attempt in 0..<3 {
+      do { return try await historySnapshot(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId) }
+      catch G0Transport.RunError.host(let code) where code == "history_snapshot_changed" && attempt < 2 {
+        try await Task.sleep(nanoseconds: UInt64(120 + attempt * 180) * 1_000_000)
+      }
+    }
+    throw NSError(domain: "ScryRemote.History", code: 4,
+                  userInfo: [NSLocalizedDescriptionKey: "History kept changing while it was read"])
+  }
+
+  private func historySnapshot(providerId: String, cwd: String, externalSessionId: String) async throws -> [G0Transport.RunHistoryTurn] {
     var cursor = 0
     var snapshot: String?
     var totalBytes: Int?

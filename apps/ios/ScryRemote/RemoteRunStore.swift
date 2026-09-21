@@ -117,8 +117,32 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var providers: ProvidersState = .idle
   @Published private(set) var commands: CommandsState = .idle
   @Published private(set) var chosenProvider: G0Transport.RunProviderRef?
+  @Published private(set) var chosenModelId: String?
   @Published private(set) var chosenEffort: String?
   @Published private(set) var permissionMode: String = "default"
+
+  var modelOptions: [G0Transport.RunModelOption] { chosenProvider?.models ?? [] }
+  var effortOptions: [G0Transport.RunControlOption] {
+    if let chosenModelId, let model = modelOptions.first(where: { $0.selectionId == chosenModelId }) {
+      return model.efforts ?? []
+    }
+    return chosenProvider?.efforts ?? []
+  }
+  var chosenModel: G0Transport.RunModelOption? {
+    guard let chosenModelId else { return nil }
+    return modelOptions.first(where: { $0.selectionId == chosenModelId })
+  }
+  var controlsReady: Bool {
+    guard let provider = chosenProvider else { return false }
+    if let permissions = provider.permissions {
+      guard permissions.contains(where: { $0.id == permissionMode }) else { return false }
+    } else if permissionMode != "default" {
+      return false
+    }
+    if let chosenModelId, !(provider.models ?? []).contains(where: { $0.selectionId == chosenModelId }) { return false }
+    if let chosenEffort, !effortOptions.contains(where: { $0.id == chosenEffort }) { return false }
+    return true
+  }
 
   // The host's session catalog (the SAME conversations the Mac lists). Loaded
   // from the host over the granted-cert channel; never fabricated. Opening a
@@ -315,16 +339,24 @@ final class RemoteRunStore: ObservableObject {
 
   func chooseProject(_ ref: G0Transport.RunProjectRef) {
     chosen = ref
-    if let providerId = chosenProvider?.id { loadCommands(providerId: providerId, cwd: ref.path) }
+    if let provider = chosenProvider {
+      loadCommands(providerId: provider.id, cwd: ref.path, agentProfileId: provider.agentProfileId)
+    }
   }
   func chooseProvider(_ ref: G0Transport.RunProviderRef) {
     chosenProvider = ref
-    chosenEffort = ref.efforts?.first(where: { $0.isDefault == true })?.id ?? ref.efforts?.first?.id
+    chosenModelId = nil
+    chosenEffort = nil
     permissionMode = ref.permissions?.first(where: { $0.id == "default" })?.id ?? ref.permissions?.first?.id ?? "default"
-    if let cwd = chosen?.path { loadCommands(providerId: ref.id, cwd: cwd) }
+    if let cwd = chosen?.path { loadCommands(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId) }
   }
-  func chooseEffort(_ id: String) {
-    guard chosenProvider?.efforts?.contains(where: { $0.id == id }) == true else { return }
+  func chooseModel(_ id: String?) {
+    guard id == nil || modelOptions.contains(where: { $0.selectionId == id }) else { return }
+    chosenModelId = id
+    chosenEffort = nil
+  }
+  func chooseEffort(_ id: String?) {
+    guard id == nil || effortOptions.contains(where: { $0.id == id }) else { return }
     chosenEffort = id
   }
   func choosePermission(_ id: String) {
@@ -415,6 +447,33 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
+  // Refresh a Mac-originated active conversation. Those runs do not belong to
+  // the phone's remote-run ledger, so the transcript follows their authoritative
+  // in-memory trace through the history endpoint until the catalog marks them done.
+  func refreshMacSession(providerId: String, cwd: String, externalSessionId: String) async -> Bool {
+    #if DEBUG
+    if mockMode { return false }
+    #endif
+    guard historyTask == nil, let client = makeClient() else { return true }
+    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    do {
+      async let sessionsRequest = client.sessions()
+      async let historyRequest = client.history(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+      let (sessions, turns) = try await (sessionsRequest, historyRequest)
+      guard activeSessionIdentity == identity else { return false }
+      reachable = true
+      let state: HistoryState = turns.isEmpty ? .empty : .loaded(turns)
+      historyCache[identity] = state
+      history = state
+      return sessions.first(where: {
+        $0.providerId == providerId && $0.cwd == cwd && $0.externalSessionId == externalSessionId
+      })?.isActive == true
+    } catch {
+      reachable = false
+      return true
+    }
+  }
+
   // Re-opening the same session does not discard its live observation. If the
   // view was left while a run was active, resume its poll using the known run id.
   func prepareForSession(providerId: String, cwd: String, externalSessionId: String) {
@@ -441,16 +500,16 @@ final class RemoteRunStore: ObservableObject {
   // Provider the user never chose - exactly the failure the owner hit. Requiring
   // an explicit pick (canSend gates on chosenProvider) keeps the choice honest.
   // If a previously-chosen Provider is no longer available, clear it.
-  func loadProviders(preferredId: String? = nil, force: Bool = false) {
+  func loadProviders(preferredId: String? = nil, preferredAgentProfileId: String? = nil, force: Bool = false) {
     #if DEBUG
     if mockMode {
-      applyPreferredProvider(preferredId)
+      applyPreferredProvider(preferredId, agentProfileId: preferredAgentProfileId)
       return
     }
     #endif
     let hasCachedValue: Bool
     switch providers { case .loaded, .empty: hasCachedValue = true; default: hasCachedValue = false }
-    applyPreferredProvider(preferredId)
+    applyPreferredProvider(preferredId, agentProfileId: preferredAgentProfileId)
     if !force, hasCachedValue, isFresh(providersLoadedAt, within: Self.metadataFreshness) { return }
     guard providersTask == nil else { return }
     guard let client = makeClient() else {
@@ -469,12 +528,26 @@ final class RemoteRunStore: ObservableObject {
           self.providersLoadedAt = Date()
           let usable = list.filter { $0.available }
           self.providers = usable.isEmpty ? .empty : .loaded(usable)
-          if let chosen = self.chosenProvider, !usable.contains(where: { $0.id == chosen.id }) {
-            self.chosenProvider = nil
-            self.chosenEffort = nil
-            self.permissionMode = "default"
+          if let chosen = self.chosenProvider {
+            if let refreshed = usable.first(where: { Self.sameProviderContext($0, chosen) }) {
+              self.chosenProvider = refreshed
+              if let modelId = self.chosenModelId, !(refreshed.models ?? []).contains(where: { $0.selectionId == modelId }) {
+                self.chosenModelId = nil
+                self.chosenEffort = nil
+              } else if let effort = self.chosenEffort, !self.effortOptions.contains(where: { $0.id == effort }) {
+                self.chosenEffort = nil
+              }
+              if !(refreshed.permissions ?? []).contains(where: { $0.id == self.permissionMode }) {
+                self.permissionMode = refreshed.permissions?.first(where: { $0.id == "default" })?.id ?? refreshed.permissions?.first?.id ?? "default"
+              }
+            } else {
+              self.chosenProvider = nil
+              self.chosenModelId = nil
+              self.chosenEffort = nil
+              self.permissionMode = "default"
+            }
           }
-          self.applyPreferredProvider(preferredId)
+          self.applyPreferredProvider(preferredId, agentProfileId: preferredAgentProfileId)
         }
       } catch {
         await MainActor.run {
@@ -487,17 +560,28 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  private func applyPreferredProvider(_ preferredId: String?) {
-    guard let preferredId, case let .loaded(items) = providers,
-          let preferred = items.first(where: { $0.id == preferredId }), chosenProvider?.id != preferredId else { return }
+  private static func sameProviderContext(_ lhs: G0Transport.RunProviderRef, _ rhs: G0Transport.RunProviderRef) -> Bool {
+    lhs.id == rhs.id && lhs.agentProfileId == rhs.agentProfileId
+  }
+
+  private func applyPreferredProvider(_ preferredId: String?, agentProfileId: String?) {
+    guard let preferredId, case let .loaded(items) = providers else { return }
+    let exact = items.first(where: { $0.id == preferredId && $0.agentProfileId == agentProfileId })
+    let preferred = exact ?? (agentProfileId == nil ? items.first(where: { $0.id == preferredId }) : nil)
+    guard let preferred else {
+      // Never resume a profile-bound conversation under another Pi profile.
+      if agentProfileId != nil { chosenProvider = nil; chosenModelId = nil; chosenEffort = nil }
+      return
+    }
+    guard chosenProvider.map({ !Self.sameProviderContext($0, preferred) }) ?? true else { return }
     chooseProvider(preferred)
   }
 
-  func loadCommands(providerId: String, cwd: String, force: Bool = false) {
+  func loadCommands(providerId: String, cwd: String, agentProfileId: String? = nil, force: Bool = false) {
     #if DEBUG
     if mockMode { return }
     #endif
-    let key = providerId + "\u{1f}" + cwd
+    let key = providerId + "\u{1f}" + (agentProfileId ?? "") + "\u{1f}" + cwd
     if !force, let cached = commandCache[key] {
       commands = cached.commands.isEmpty ? .empty(cached.reason) : .loaded(cached.commands)
       return
@@ -508,7 +592,7 @@ final class RemoteRunStore: ObservableObject {
     let requestDataGeneration = dataGeneration
     commandsTask = Task { [weak self] in
       do {
-        let catalog = try await client.commands(providerId: providerId, cwd: cwd)
+        let catalog = try await client.commands(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.commandsTask = nil
@@ -622,9 +706,11 @@ final class RemoteRunStore: ObservableObject {
     activeSessionIdentity = identity
     self.prompt = trimmed
     sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
-    let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
-                                          modelId: chosenProvider?.modelId, effort: chosenEffort,
-                                          permissionMode: permissionMode, attachments: attachments)
+    let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId,
+                                          agentProfileId: chosenProvider?.agentProfileId, prompt: trimmed,
+                                          modelId: chosenModel?.id, modelProviderId: chosenModel?.providerId,
+                                          effort: chosenEffort, permissionMode: permissionMode,
+                                          attachments: attachments)
     activeRouting = routing
     pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
     lifecycle = .submitting
@@ -878,11 +964,15 @@ final class RemoteRunStore: ObservableObject {
       if let detail = ev.detail, let marker = Self.marker(detail) {
         if marker["event"] == "started", lifecycle == .dispatched || lifecycle == .recorded { lifecycle = .running }
         if marker["event"] == "result" { resultSummary = Self.resultLine(marker) }
+        if marker["event"] == "settled", let status = marker["status"],
+           status == "cancelled" || status == "interrupted" || status == "stopped" {
+          lifecycle = .cancelled
+        }
         // The Provider's own session id for THIS run. Captured so a chained
         // follow-up resumes the latest session (continuous memory), not a stale id.
         if marker["event"] == "session", let ext = marker["externalSessionId"], !ext.isEmpty { liveExternalSessionId = ext }
       }
-    case "run_settled": lifecycle = .settled
+    case "run_settled": if lifecycle != .cancelled { lifecycle = .settled }
     case "run_failed": lifecycle = .failed; if let d = ev.detail, submitError == nil { submitError = "主机报告失败：\(d)" }
     case "run_cancelled": lifecycle = .cancelled
     default: break
@@ -961,7 +1051,7 @@ final class RemoteRunStore: ObservableObject {
     activeRouting = nil
     clearRecoveryCheckpoint()
     projects = .idle; directories = .idle; chosen = nil
-    providers = .idle; commands = .idle; chosenProvider = nil; chosenEffort = nil; permissionMode = "default"
+    providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
     catalog = .idle; history = .idle; reachable = nil
     catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; historyCache = [:]
     lifecycle = .unknown; output = []; seenOutputSequences = []; prompt = nil; sentAttachments = []
@@ -980,7 +1070,7 @@ final class RemoteRunStore: ObservableObject {
   // session id) so the conversation keeps its context. Unlike submit(), the
   // target is explicit (from the opened session), not the new-session pickers.
   // Chained follow-ups resume the LATEST reported session id when available.
-  func submitFollowUp(prompt: String, providerId: String, cwd: String, resume: String, attachments: [RemoteRunClient.Attachment] = []) {
+  func submitFollowUp(prompt: String, providerId: String, agentProfileId: String? = nil, cwd: String, resume: String, attachments: [RemoteRunClient.Attachment] = []) {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
     #if DEBUG
@@ -994,16 +1084,24 @@ final class RemoteRunStore: ObservableObject {
     // does not query, making the previous exchange disappear again.
     let identity = Self.followUpIdentity(current: activeSessionIdentity, providerId: providerId,
                                          cwd: cwd, originalResume: resume)
-    let modelId = chosenProvider?.id == providerId ? chosenProvider?.modelId : nil
-    let effort = chosenProvider?.id == providerId ? chosenEffort : nil
-    let permission = chosenProvider?.id == providerId ? permissionMode : "default"
+    let matchingProvider = chosenProvider?.id == providerId && chosenProvider?.agentProfileId == agentProfileId ? chosenProvider : nil
+    guard let matchingProvider else {
+      submitError = agentProfileId == nil ? "当前 Provider 控件不可用" : "原 Agent Profile 当前不可用，已阻止切换身份继续会话"
+      return
+    }
+    let modelId = chosenModel?.id
+    let modelProviderId = chosenModel?.providerId
+    let effort = chosenEffort
+    let permission = permissionMode
     resetRun()
     activeSessionIdentity = identity
     self.prompt = trimmed
     sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
     liveExternalSessionId = resumeId
-    let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId, agentProfileId: nil, prompt: trimmed,
-                                          modelId: modelId, effort: effort, permissionMode: permission,
+    let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId,
+                                          agentProfileId: matchingProvider.agentProfileId, prompt: trimmed,
+                                          modelId: modelId, modelProviderId: modelProviderId,
+                                          effort: effort, permissionMode: permission,
                                           resume: resumeId, attachments: attachments)
     activeRouting = routing
     pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
@@ -1076,9 +1174,18 @@ final class RemoteRunStore: ObservableObject {
       G0Transport.RunControlOption(id: "full_access", label: "完全访问", description: "仅由设备所有者显式选择")
     ]
     let availableProviders = [
-      G0Transport.RunProviderRef(id: "codex", label: "Codex", available: true, modelId: "gpt-5.6-sol", efforts: efforts, permissions: permissions),
-      G0Transport.RunProviderRef(id: "qoder", label: "Qoder", available: true, modelId: "ultimate", efforts: nil, permissions: permissions),
-      G0Transport.RunProviderRef(id: "opencode", label: "OpenCode", available: true, modelId: nil, efforts: nil, permissions: [permissions[0], permissions[2]])
+      G0Transport.RunProviderRef(id: "codex", label: "Codex", available: true, modelId: "gpt-5.6-sol",
+        models: [G0Transport.RunModelOption(id: "gpt-5.6-sol", label: "GPT-5.6", isDefault: true, efforts: efforts)],
+        efforts: efforts, permissions: permissions),
+      G0Transport.RunProviderRef(id: "pi", label: "Pi · Rotom", available: true, agentProfileId: "pi:rotom",
+        modelId: "gpt-6-astra", models: [
+          G0Transport.RunModelOption(id: "gpt-6-astra", providerId: "openai", label: "GPT-6 Astra", isDefault: true, efforts: efforts),
+          G0Transport.RunModelOption(id: "claude-opus", providerId: "anthropic", label: "Claude Opus", efforts: efforts)
+        ], efforts: efforts, permissions: permissions),
+      G0Transport.RunProviderRef(id: "qoder", label: "Qoder", available: true, modelId: "ultimate",
+        models: [G0Transport.RunModelOption(id: "ultimate", label: "Ultimate", isDefault: true)], permissions: permissions),
+      G0Transport.RunProviderRef(id: "opencode", label: "OpenCode", available: true, modelId: nil,
+        models: [], permissions: [permissions[0], permissions[2]])
     ]
     providers = .loaded(availableProviders)
     chooseProvider(availableProviders[0])

@@ -1,7 +1,7 @@
 // P2 Files & Diff（RFC §8.4）：拿 cwd 在单轮开始/结束之间的净 diff，与工具足迹对照。
 // 用 execFile（非 exec，无 shell 注入）。非 git 仓 / 出错 → 返回空，不连累 UI。
 import { execFile } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp, open, readFile, realpath, rm, stat, utimes } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
@@ -23,10 +23,6 @@ const pexecFile = promisify(execFile)
 const TURN_DIFF_BEGIN_DEADLINE_MS = 5_000
 const TURN_DIFF_FINISH_DEADLINE_MS = 20_000
 const TURN_DIFF_PATCH_DEADLINE_MS = 2_000
-const TURN_DIFF_PATCH_MAX_BYTES = 1024 * 1024
-const TURN_DIFF_PATCH_MAX_FILE_BYTES = 32 * 1024
-const TURN_DIFF_PATCH_MAX_RECORD_BYTES = 128 * 1024
-const TURN_DIFF_PATCH_MAX_FILES = 80
 const TURN_DIFF_TARGETED_DEADLINE_MS = 5_000
 const TURN_DIFF_CANDIDATE_LIMIT = 1_000
 const GIT_MAX_BUFFER = 16 * 1024 * 1024
@@ -705,22 +701,6 @@ async function computeGitTurnDiff(
   return terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection)
 }
 
-async function readPatchPrefix(path: string, maxBytes: number): Promise<{ patch: string; truncated: boolean; bytes: number }> {
-  const handle = await open(path, 'r')
-  try {
-    const buffer = Buffer.alloc(Math.max(0, maxBytes) + 1)
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-    const bytes = Math.min(bytesRead, maxBytes)
-    return {
-      patch: new StringDecoder('utf8').write(buffer.subarray(0, bytes)),
-      truncated: bytesRead > maxBytes,
-      bytes
-    }
-  } finally {
-    await handle.close()
-  }
-}
-
 async function captureTurnPatches(
   capture: GitTurnDiffCapture,
   env: NodeJS.ProcessEnv,
@@ -733,7 +713,6 @@ async function captureTurnPatches(
   if (!capture.repoRoot || !capture.beforeTree || !capture.tempDir) return files
   const deadline = completePatches ? operationDeadline : Date.now() + TURN_DIFF_PATCH_DEADLINE_MS
   const filterOverrides = capture.filterOverrides ?? []
-  let remainingBytes = TURN_DIFF_PATCH_MAX_BYTES
   let deadlineReached = false
   const out: DiffFile[] = []
 
@@ -745,10 +724,6 @@ async function captureTurnPatches(
     }
     if (excludedBasenames.has(basename(file.path))) {
       out.push({ ...file, patchStatus: 'unavailable', patchReason: 'policy' })
-      continue
-    }
-    if (!completePatches && (index >= TURN_DIFF_PATCH_MAX_FILES || remainingBytes <= 0)) {
-      out.push({ ...file, patchStatus: 'unavailable', patchReason: 'budget' })
       continue
     }
     if (deadlineReached || Date.now() >= deadline) {
@@ -776,13 +751,10 @@ async function captureTurnPatches(
         ]),
         { cwd: capture.repoRoot, env, deadline }
       )
-      const captured = completePatches
-        ? await readFile(patchPath).then((bytes) => {
-            const patch = new StringDecoder('utf8').write(bytes)
-            return { patch, truncated: false, bytes: Buffer.byteLength(patch) }
-          })
-        : await readPatchPrefix(patchPath, Math.min(remainingBytes, TURN_DIFF_PATCH_MAX_FILE_BYTES))
-      if (!completePatches) remainingBytes -= captured.bytes
+      const captured = await readFile(patchPath).then((bytes) => {
+        const patch = new StringDecoder('utf8').write(bytes)
+        return { patch, truncated: false }
+      })
       if (!captured.patch) {
         out.push({ ...file, patchStatus: 'unavailable', patchReason: 'git_error' })
       } else {
@@ -809,7 +781,7 @@ function utf8Prefix(value: string, maxBytes: number): { value: string; bytes: nu
 
 export function limitTurnDiffPatchBytes(
   snapshots: TurnDiffSnapshot[],
-  maxBytes = TURN_DIFF_PATCH_MAX_RECORD_BYTES
+  maxBytes = Number.POSITIVE_INFINITY
 ): TurnDiffSnapshot[] {
   let remainingBytes = Math.max(0, maxBytes)
   return snapshots.map((snapshot) => ({

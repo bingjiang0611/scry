@@ -997,6 +997,9 @@ export class OpenCodeServerManager {
   private hookConfigDir: string | null = null
   private lastExit: OpenCodeServerExitDiagnostic | undefined
   private readonly expectedStops = new WeakSet<ChildProcessWithoutNullStreams>()
+  private readonly ownedChildren = new Set<ChildProcessWithoutNullStreams>()
+  private readonly stops = new Map<ChildProcessWithoutNullStreams, Promise<void>>()
+  private closing: Promise<void> | null = null
 
   constructor(
     private readonly executable: () => string | undefined,
@@ -1022,7 +1025,9 @@ export class OpenCodeServerManager {
     mcpExecution?: AuthorizedMcpExecution,
     pluginTrust?: OpenCodeProjectPluginAuthorization
   ): Promise<OpenCodeServerState> {
+    const requestedGeneration = this.startGeneration
     const projection = await readOpenCodeProjectProjection(cwd)
+    if (requestedGeneration !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
     if (pluginTrust && (
       pluginTrust.cwd !== projection.cwd || pluginTrust.fingerprint !== projection.pluginFingerprint
     )) throw pluginSecurityError('OpenCode 项目 plugin 授权已失效，拒绝启动')
@@ -1035,9 +1040,11 @@ export class OpenCodeServerManager {
       && this.active.projectContentFingerprint === projection.contentFingerprint
       && this.active.projectPluginFingerprint === pluginFingerprint
       && this.active.process.exitCode === null
+      && !this.expectedStops.has(this.active.process)
     ) return this.active
     if (this.starting) {
       const starting = await this.starting
+      if (requestedGeneration !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
       if (
         starting.cwd === projection.cwd
         && starting.mcpFingerprint === mcpFingerprint
@@ -1046,8 +1053,12 @@ export class OpenCodeServerManager {
         && starting.projectPluginFingerprint === pluginFingerprint
       ) return starting
     }
-    this.close()
-    const starting = this.start(projection, this.startGeneration, mcpExecution, pluginTrust)
+    const closing = this.drain()
+    const generation = this.startGeneration
+    const starting = closing.then(() => {
+      if (generation !== this.startGeneration) throw new Error('OpenCode server 启动已取消')
+      return this.start(projection, generation, mcpExecution, pluginTrust)
+    })
     this.starting = starting
     try {
       return await starting
@@ -1153,6 +1164,7 @@ export class OpenCodeServerManager {
       stdio: ['pipe', 'pipe', 'pipe']
     })
     this.pendingChild = child
+    this.ownedChildren.add(child)
     let output = ''
     const inspect = (chunk: Buffer | string): void => {
       output = (output + String(chunk)).slice(-12_000)
@@ -1163,8 +1175,10 @@ export class OpenCodeServerManager {
     let spawnError: Error | undefined
     child.once('error', (error) => {
       spawnError = error
+      if (child.pid === undefined) this.ownedChildren.delete(child)
     })
     child.once('exit', (code, signal) => {
+      this.ownedChildren.delete(child)
       this.lastExit = {
         at: Date.now(),
         code,
@@ -1183,8 +1197,7 @@ export class OpenCodeServerManager {
         throw new Error('OpenCode server 启动已取消')
       }
     } catch (error) {
-      this.expectedStops.add(child)
-      if (!child.killed && child.exitCode === null) child.kill('SIGTERM')
+      await this.stopChild(child)
       const dir = this.hookConfigDir
       this.hookConfigDir = null
       if (dir) await rm(dir, { recursive: true, force: true })
@@ -1235,11 +1248,10 @@ export class OpenCodeServerManager {
       this.pendingDispatcher = null
       return state
     } catch (error) {
+      await this.stopChild(child)
       if (this.active?.process === child) this.active = null
       if (this.pendingChild === child) this.pendingChild = null
       if (this.pendingDispatcher === dispatcher) this.pendingDispatcher = null
-      this.expectedStops.add(child)
-      if (!child.killed && child.exitCode === null) child.kill('SIGTERM')
       dispatcher?.destroy()
       const dir = this.hookConfigDir
       this.hookConfigDir = null
@@ -1248,43 +1260,65 @@ export class OpenCodeServerManager {
     }
   }
 
+  private stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+    const pending = this.stops.get(child)
+    if (pending) return pending
+    if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
+    this.expectedStops.add(child)
+    const stopping = new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>
+      const exited = (): void => {
+        clearTimeout(timer)
+        resolve()
+      }
+      child.once('exit', exited)
+      // ChildProcess retains the owned OS handle. Never rediscover or signal by executable name.
+      child.kill('SIGTERM')
+      timer = setTimeout(() => {
+        child.kill('SIGKILL')
+        timer = setTimeout(() => {
+          child.removeListener('exit', exited)
+          reject(new Error(`OpenCode server exit unconfirmed (pid ${child.pid})`))
+        }, 1_000)
+      }, 1_000)
+    }).finally(() => { this.stops.delete(child) })
+    this.stops.set(child, stopping)
+    return stopping
+  }
+
   forceClose(): void {
     this.startGeneration += 1
-    const children = [this.active?.process, this.pendingChild].filter(
-      (child): child is ChildProcessWithoutNullStreams => child != null
-    )
-    this.active = null
-    this.pendingChild = null
-    for (const child of children) {
+    // Graceful close retains these handles until observed exit, so escalation still owns them.
+    for (const child of this.ownedChildren) {
       this.expectedStops.add(child)
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
     }
-    this.pendingDispatcher?.destroy()
-    this.pendingDispatcher = null
-    const dir = this.hookConfigDir
-    this.hookConfigDir = null
-    if (dir) void rm(dir, { recursive: true, force: true })
   }
 
-  close(): void {
+  close(): Promise<void> {
     this.startGeneration += 1
-    const active = this.active
-    this.active = null
-    if (active) {
-      this.expectedStops.add(active.process)
-      if (!active.process.killed && active.process.exitCode === null) active.process.kill('SIGTERM')
-      active.dispatcher.destroy()
-    }
-    const pendingChild = this.pendingChild
-    this.pendingChild = null
-    if (pendingChild) {
-      this.expectedStops.add(pendingChild)
-      if (!pendingChild.killed && pendingChild.exitCode === null) pendingChild.kill('SIGTERM')
-    }
+    return this.drain()
+  }
+
+  private drain(): Promise<void> {
+    if (this.closing) return this.closing
+    const starting = this.starting
+    this.active?.dispatcher.destroy()
     this.pendingDispatcher?.destroy()
     this.pendingDispatcher = null
-    const dir = this.hookConfigDir
-    this.hookConfigDir = null
-    if (dir) void rm(dir, { recursive: true, force: true })
+    this.active = null
+    const closing = (async () => {
+      await Promise.all([...this.ownedChildren].map((child) => this.stopChild(child)))
+      // A launch cancelled during filesystem setup must finish unwinding before removing config.
+      await starting?.catch(() => undefined)
+      if (this.ownedChildren.size > 0) throw new Error('OpenCode server exit unconfirmed')
+      this.pendingChild = null
+      const dir = this.hookConfigDir
+      this.hookConfigDir = null
+      if (dir) await rm(dir, { recursive: true, force: true })
+    })()
+    this.closing = closing
+    void closing.finally(() => { if (this.closing === closing) this.closing = null }).catch(() => undefined)
+    return closing
   }
 }

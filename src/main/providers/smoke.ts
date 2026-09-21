@@ -39,7 +39,8 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           stage: 'tool_result',
           tool: 'Read',
           toolUseId: `${request.runId}:tool`,
-          text: 'smoke fixture result Authorization: Bearer sk-ant-api03-scry-smoke-not-a-real-key-000000'
+          text: 'smoke fixture result Authorization: Bearer sk-ant-api03-scry-smoke-not-a-real-key-000000' +
+            (request.prompt === 'packaged fake-provider smoke' ? `\n${'x'.repeat(12 * 1024 * 1024)}\nCOMPLETE_LARGE_TOOL_TAIL` : '')
         })
         if (request.prompt === 'performance long stream') {
           // Packaged soak-only pressure path: exercise batching, renderer ACK and the large-stream

@@ -14,14 +14,14 @@ struct NewSessionView: View {
 
   private var paired: Bool { run.hasConnection }
   private var canSend: Bool {
-    paired && run.chosen != nil && run.chosenProvider != nil &&
+    paired && run.chosen != nil && run.controlsReady &&
       !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   var body: some View {
     VStack(spacing: 0) {
       RemoteHeader(title: "新任务", subtitle: displayHost,
-                   link: model.link, backAction: { model.route = .home }) {
+                   link: model.link, backAction: { model.goBack() }) {
         Color.clear.frame(width: 44, height: 44)
       }
       if !paired { Notice(text: "尚未连接 Mac，无法创建会话。", warning: true) }
@@ -47,7 +47,10 @@ struct NewSessionView: View {
       MessageComposer(text: $draft, attachments: $attachments,
                       placeholder: paired ? "描述任务，或粘贴错误信息…" : "连接后可输入",
                       disabled: !paired, sendDisabled: !canSend,
-                      effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
+                      contextLabel: run.chosenProvider?.label, onContext: { showProviders = true },
+                      modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
+                      onModel: { run.chooseModel($0) },
+                      effortOptions: run.effortOptions, selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },
                       permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
                       onPermission: { run.choosePermission($0) },
@@ -55,7 +58,8 @@ struct NewSessionView: View {
                       slashCommandsReason: run.slashCommandsReason,
                       onRefreshSlashCommands: {
                         if let providerId = run.chosenProvider?.id, let cwd = run.chosen?.path {
-                          run.loadCommands(providerId: providerId, cwd: cwd, force: true)
+                          run.loadCommands(providerId: providerId, cwd: cwd,
+                                           agentProfileId: run.chosenProvider?.agentProfileId, force: true)
                         }
                       }) {
         guard let providerId = run.chosenProvider?.id else { return }
@@ -163,7 +167,8 @@ struct NewSessionView: View {
       case let .loaded(list):
         VStack(spacing: 0) {
           ForEach(list, id: \.id) { ref in
-            SelectionRow(title: ref.label, detail: ref.id.uppercased(), selected: run.chosenProvider?.id == ref.id) {
+            SelectionRow(title: ref.label, detail: ref.id.uppercased(),
+                         selected: run.chosenProvider?.id == ref.id && run.chosenProvider?.agentProfileId == ref.agentProfileId) {
               run.chooseProvider(ref); showProviders = false
             }
           }

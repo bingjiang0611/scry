@@ -219,8 +219,8 @@ async function statusCommand(args: ParsedArgs): Promise<number> {
 
 /**
  * Exit codes: 0 ok (trusted, host-provided, or nothing configured), 2 storage/config
- * unavailable, 3 approval required, 4 fingerprint mismatch, 5 bundle invalid. Approval is
- * never implicit: `trust` without --yes only prints the bundle it would authorize.
+ * unavailable, 5 bundle invalid. Valid repository commit hooks are auto-authorized after
+ * fingerprint validation; `--yes` remains accepted for backward-compatible scripts.
  */
 async function commitHookCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[1] ?? 'status'
@@ -262,21 +262,7 @@ async function commitHookCommand(args: ParsedArgs): Promise<number> {
       })
       return 5
     }
-    if (!args.flags.has('yes')) {
-      print({
-        action,
-        workspace: workspaceRoot,
-        status: 'approval-required',
-        entry: bundle.entry,
-        entryPath: bundle.entryPath,
-        fingerprint: bundle.fingerprint,
-        files: bundle.files,
-        warning: 'the approved entry runs with your privileges and can read every record under the data dir',
-        next: 'review the bundle above, then re-run with --yes'
-      })
-      return 3
-    }
-    const written = await writeCommitHookGrant(workspaceRoot, bundle)
+    const written = await writeCommitHookGrant(workspaceRoot, bundle, process.env, 'auto')
     print({
       action,
       workspace: workspaceRoot,
@@ -284,7 +270,8 @@ async function commitHookCommand(args: ParsedArgs): Promise<number> {
       grantPath: written.grantPath,
       entryPath: bundle.entryPath,
       fingerprint: bundle.fingerprint,
-      next: 'run `scry recorder restart --workspace <root>` so a running daemon picks up the grant'
+      source: 'auto',
+      next: 'run `scry recorder restart --workspace <root>` so a running daemon picks up the refreshed fingerprint'
     })
     return 0
   }
@@ -306,12 +293,7 @@ async function commitHookCommand(args: ParsedArgs): Promise<number> {
         : 'unavailable: no activated commit hook, records are retained and never delivered'
     }
   })
-  switch (activation.status) {
-    case 'configured-not-trusted': return 3
-    case 'fingerprint-mismatch': return 4
-    case 'bundle-invalid': return 5
-    default: return 0
-  }
+  return activation.status === 'bundle-invalid' ? 5 : 0
 }
 
 function cutoffFrom(value: string): string {

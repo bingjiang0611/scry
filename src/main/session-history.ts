@@ -2,6 +2,7 @@ import { fileOpOf, mcpCallsForEvent, mcpPayloadFailed, type TraceEvent } from '.
 import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMimeType } from '../shared/runtime'
 import type { ParsedTurn as TranscriptTurn } from './normalize'
 import type { TraceArchive, TraceArchiveTurn } from './transcript-archive'
+import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
 import {
   hydrateLegacyAttachmentPath,
   hydrateStoredAttachment,
@@ -235,8 +236,18 @@ function normalizeHistoricalMcpResults(items: TraceEvent[]): TraceEvent[] {
   })
 }
 
+const HISTORICAL_TOOL_CONTENT_POLICY = {
+  toolOutput: 'full' as const,
+  toolContentFieldBytes: 8 * 1024,
+  toolContentTurnBytes: 128 * 1024
+}
+
 function normalizeHistoricalEvents(items: TraceEvent[]): TraceEvent[] {
-  return normalizeHistoricalMcpResults(items.map((event) => {
+  // Provider transcripts and older trace archives predate content refs and may contain the
+  // complete tool body. Bound only the in-memory history projection; archive bytes are never
+  // rewritten, and a persisted contentRef remains available to the pager.
+  const bounded = sanitizeToolEvents(items, HISTORICAL_TOOL_CONTENT_POLICY, 'history_projection')
+  return normalizeHistoricalMcpResults(bounded.map((event) => {
     if ((event.fileOp && event.filePath) || !event.tool || event.stage === 'tool_result') return event
     const input = event.input && typeof event.input === 'object' && !Array.isArray(event.input)
       ? event.input as Record<string, unknown>

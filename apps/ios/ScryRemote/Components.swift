@@ -527,9 +527,13 @@ struct MessageComposer: View {
   var sendDisabled = false
   var contextLabel: String?
   var onContext: (() -> Void)?
+  var contextLocked = false
+  var modelOptions: [G0Transport.RunModelOption] = []
+  var selectedModelId: String?
+  var onModel: ((String?) -> Void)?
   var effortOptions: [G0Transport.RunControlOption] = []
   var selectedEffort: String?
-  var onEffort: ((String) -> Void)?
+  var onEffort: ((String?) -> Void)?
   var permissionOptions: [G0Transport.RunControlOption] = []
   var selectedPermission = "default"
   var onPermission: ((String) -> Void)?
@@ -539,7 +543,6 @@ struct MessageComposer: View {
   var onRefreshSlashCommands: (() -> Void)?
   let onSend: () -> Void
 
-  @State private var showAttachmentSource = false
   @State private var showPhotos = false
   @State private var showFiles = false
   @State private var photoItems: [PhotosPickerItem] = []
@@ -575,46 +578,13 @@ struct MessageComposer: View {
       TextField(placeholder, text: $text, axis: .vertical)
         .font(.system(size: 15.5)).lineLimit(1...4).disabled(disabled)
         .padding(.horizontal, 3).padding(.top, 1)
-      HStack(spacing: 2) {
-        PlainIcon(symbol: Symbol.plus, label: "添加图片或文件", disabled: disabled) { showAttachmentSource = true }
-        Menu {
-          ForEach(permissionOptions, id: \.id) { option in
-            Button { onPermission?(option.id) } label: {
-              Label(option.label, systemImage: selectedPermission == option.id ? Symbol.check : Symbol.shield)
-            }
+      HStack(spacing: 6) {
+        attachmentPermissionMenu
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 6) {
+            if let contextLabel { contextControl(contextLabel) }
+            if !modelOptions.isEmpty || !effortOptions.isEmpty { modelEffortControl }
           }
-        } label: {
-          Label(permissionLabel, systemImage: Symbol.shield)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(selectedPermission == "full_access" ? Palette.amber : Palette.muted)
-            .frame(minHeight: 40)
-        }
-        .buttonStyle(.plain).disabled(disabled || permissionOptions.isEmpty)
-        Spacer(minLength: 4)
-        if !effortOptions.isEmpty {
-          Menu {
-            ForEach(effortOptions, id: \.id) { option in
-              Button { onEffort?(option.id) } label: {
-                Label(option.label, systemImage: selectedEffort == option.id ? Symbol.check : "brain")
-              }
-            }
-          } label: {
-            HStack(spacing: 4) {
-              Image(systemName: "brain").font(.system(size: 11))
-              Text(effortLabel).font(.system(size: 11))
-            }
-            .foregroundStyle(Palette.muted).padding(.horizontal, 8).frame(height: 28)
-            .background(Palette.canvas, in: Capsule())
-          }
-          .buttonStyle(.plain).disabled(disabled)
-        }
-        if let contextLabel {
-          Button { onContext?() } label: {
-            Text(contextLabel).font(.system(size: 11)).foregroundStyle(Palette.muted)
-              .lineLimit(1).padding(.horizontal, 9).frame(height: 28)
-              .background(Palette.canvas, in: Capsule())
-          }
-          .buttonStyle(.plain)
         }
         CircleButton(symbol: Symbol.send, label: "发送", filled: true,
                      disabled: disabled || sendDisabled, action: onSend)
@@ -630,13 +600,6 @@ struct MessageComposer: View {
         .strokeBorder(text.isEmpty ? Color(hex: 0xDEDFE3) : Palette.blue.opacity(0.32), lineWidth: 1)
     )
     .shadow(color: Color.black.opacity(0.055), radius: 12, y: 4)
-    .confirmationDialog("添加附件", isPresented: $showAttachmentSource, titleVisibility: .visible) {
-      Button("照片图库") { showPhotos = true }
-      Button("选择文本或代码文件") { showFiles = true }
-      Button("取消", role: .cancel) {}
-    } message: {
-      Text("附件经端到端加密发送；最多 4 项，总计不超过 700 KB。")
-    }
     .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: maxCount, matching: .images)
     .fileImporter(isPresented: $showFiles,
                   allowedContentTypes: [.image, .text, .sourceCode, .json, .xml],
@@ -700,8 +663,100 @@ struct MessageComposer: View {
     .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Palette.line))
   }
 
+  private var attachmentPermissionMenu: some View {
+    Menu {
+      Section("附件") {
+        Button { showPhotos = true } label: { Label("照片图库", systemImage: Symbol.photo) }
+        Button { showFiles = true } label: { Label("文本或代码文件", systemImage: Symbol.file) }
+      }
+      if !permissionOptions.isEmpty {
+        Section("权限 · \(permissionLabel)") {
+          if permissionOptions.count == 1 {
+            Button {} label: { Label("已由 Mac 锁定为\(permissionLabel)", systemImage: "lock.fill") }
+              .disabled(true)
+          } else {
+            ForEach(permissionOptions, id: \.id) { option in
+              Button { onPermission?(option.id) } label: {
+                Label(option.label, systemImage: selectedPermission == option.id ? Symbol.check : Symbol.shield)
+              }
+            }
+          }
+        }
+      }
+    } label: {
+      Image(systemName: Symbol.plus)
+        .font(.system(size: 21, weight: .regular))
+        .foregroundStyle(Palette.ink)
+        .frame(width: 38, height: 38)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain).disabled(disabled)
+    .accessibilityLabel("添加附件与权限，当前\(permissionLabel)")
+  }
+
+  @ViewBuilder private func contextControl(_ label: String) -> some View {
+    if let onContext, !contextLocked {
+      Button(action: onContext) { controlCapsule(label, symbol: "cpu") }
+        .buttonStyle(.plain).disabled(disabled)
+        .accessibilityLabel("Agent：\(label)")
+    } else {
+      controlCapsule(label, symbol: contextLocked ? "lock.fill" : "cpu")
+        .accessibilityLabel("已锁定 Agent：\(label)")
+    }
+  }
+
+  private var modelEffortControl: some View {
+    Menu {
+      if !modelOptions.isEmpty {
+        Section("模型") {
+          Button { onModel?(nil) } label: {
+            Label("自动模型", systemImage: selectedModelId == nil ? Symbol.check : "wand.and.stars")
+          }
+          ForEach(modelOptions, id: \.selectionId) { option in
+            Button { onModel?(option.selectionId) } label: {
+              Label(option.label, systemImage: selectedModelId == option.selectionId ? Symbol.check : "cpu")
+            }
+          }
+        }
+      }
+      if !effortOptions.isEmpty {
+        Section("推理强度") {
+          Button { onEffort?(nil) } label: {
+            Label("默认", systemImage: selectedEffort == nil ? Symbol.check : "brain")
+          }
+          ForEach(effortOptions, id: \.id) { option in
+            Button { onEffort?(option.id) } label: {
+              Label(option.label, systemImage: selectedEffort == option.id ? Symbol.check : "brain")
+            }
+          }
+        }
+      }
+    } label: {
+      HStack(spacing: 4) {
+        Text(modelLabel).lineLimit(1)
+        if !effortOptions.isEmpty { Text(effortLabel).foregroundStyle(Palette.faint) }
+        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+      }
+      .font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.muted)
+      .padding(.horizontal, 8).frame(height: 28).background(Palette.canvas, in: Capsule())
+    }
+    .buttonStyle(.plain).disabled(disabled)
+    .accessibilityLabel("模型 \(modelLabel)，推理强度 \(effortLabel)")
+  }
+
+  private func controlCapsule(_ label: String, symbol: String) -> some View {
+    Label(label, systemImage: symbol).font(.system(size: 11, weight: .medium))
+      .foregroundStyle(Palette.muted).lineLimit(1)
+      .padding(.horizontal, 8).frame(height: 28).background(Palette.canvas, in: Capsule())
+  }
+
   private var permissionLabel: String {
     permissionOptions.first(where: { $0.id == selectedPermission })?.label ?? "默认审批"
+  }
+
+  private var modelLabel: String {
+    guard let selectedModelId else { return "自动模型" }
+    return modelOptions.first(where: { $0.selectionId == selectedModelId })?.label ?? selectedModelId
   }
 
   private var effortLabel: String {

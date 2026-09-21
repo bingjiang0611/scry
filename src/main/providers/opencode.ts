@@ -1004,6 +1004,16 @@ export function createOpenCodeAdapter(
 ): ProviderAdapter {
   const executable = (): string | undefined => process.env.SCRY_OPENCODE_PATH?.trim() || resolveRuntimeCliBin('opencode')
   const managers = new Map<string, OpenCodeServerManager>()
+  const ownedManagers = new Set<OpenCodeServerManager>()
+  let disposed = false
+  const closeManager = async (manager: OpenCodeServerManager): Promise<void> => {
+    await manager.close()
+    ownedManagers.delete(manager)
+  }
+  const retireManager = (manager: OpenCodeServerManager): void => {
+    // Failed cleanup retains ownership for shutdown/escalation; a sent signal is not exit.
+    void closeManager(manager).catch((error) => console.warn('[scry] OpenCode cleanup failed:', error))
+  }
   const managerActivity = new Map<OpenCodeServerManager, number>()
   const managerLastUsed = new Map<OpenCodeServerManager, number>()
   const managerIdleTimers = new Map<OpenCodeServerManager, ReturnType<typeof setTimeout>>()
@@ -1019,10 +1029,11 @@ export function createOpenCodeAdapter(
       const timer = managerIdleTimers.get(manager)
       if (timer) clearTimeout(timer)
       managerIdleTimers.delete(manager)
-      manager.close()
+      retireManager(manager)
     }
   }
   const scheduleManagerClose = (cwd: string, manager: OpenCodeServerManager): void => {
+    if (disposed) return
     const previous = managerIdleTimers.get(manager)
     if (previous) clearTimeout(previous)
     const timer = setTimeout(() => {
@@ -1034,16 +1045,18 @@ export function createOpenCodeAdapter(
       managers.delete(cwd)
       managerActivity.delete(manager)
       managerLastUsed.delete(manager)
-      manager.close()
+      retireManager(manager)
     }, SERVER_IDLE_MS)
     timer.unref()
     managerIdleTimers.set(manager, timer)
   }
   const managerFor = (cwd: string): OpenCodeServerManager => {
+    if (disposed) throw new Error('OpenCode adapter 已关闭')
     let manager = managers.get(cwd)
     if (!manager) {
       manager = new OpenCodeServerManager(executable, privateMcpAuthDirectory, {}, sessionStateRoot)
       managers.set(cwd, manager)
+      ownedManagers.add(manager)
     }
     const timer = managerIdleTimers.get(manager)
     if (timer) clearTimeout(timer)
@@ -1082,7 +1095,7 @@ export function createOpenCodeAdapter(
           provider: 'opencode_server',
           stage: 'capability',
           cwd: context.cwd,
-          nextAction: '项目 plugin 声明、内容或授权已变化；请重新发送任务并确认最新 OpenCode plugin 授权'
+          nextAction: '项目 plugin 声明、内容或授权已变化；请重新发送任务以重验并自动授权最新 OpenCode plugin'
         })
       }
       throw error
@@ -1591,9 +1604,11 @@ export function createOpenCodeAdapter(
           fingerprint: `${execution.fingerprint}:auth:${target.targetId}`,
           targets: [target]
         }
+        if (disposed) return failed('OpenCode adapter 已关闭')
         const authManager = new OpenCodeServerManager(executable, privateMcpAuthDirectory, {
           completeTargetInventory: false
         })
+        ownedManagers.add(authManager)
         let persisted = false
         try {
           const client = (await authManager.ensure(context.cwd, authExecution)).client
@@ -1648,7 +1663,7 @@ export function createOpenCodeAdapter(
         } catch (error) {
           return failed(error, persisted)
         } finally {
-          authManager.close()
+          await closeManager(authManager)
         }
       }
     },
@@ -1723,14 +1738,17 @@ export function createOpenCodeAdapter(
         }
       }
     },
-    dispose: () => {
+    dispose: async () => {
+      disposed = true
       for (const timer of managerIdleTimers.values()) clearTimeout(timer)
       managerIdleTimers.clear()
       managerActivity.clear()
       managerLastUsed.clear()
-      for (const manager of managers.values()) manager.close()
       managers.clear()
       modelCache.clear()
+      const results = await Promise.allSettled([...ownedManagers].map(closeManager))
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'OpenCode cleanup incomplete')
     }
   }
 }

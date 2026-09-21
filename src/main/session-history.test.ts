@@ -19,6 +19,39 @@ afterEach(() => {
 })
 
 describe('session history merge', () => {
+  it('bounds legacy oversized tool history without mutating the source archive', () => {
+    const output = `${'0123456789abcdef'.repeat(700_000)}LEGACY_TAIL`
+    const archive: TraceArchive = {
+      version: 3,
+      cwd: '/repo',
+      sessionId: 'legacy-large',
+      providerId: 'pi',
+      turns: [{
+        runId: 'legacy-large-run',
+        userText: 'inspect',
+        items: [{
+          id: 'legacy-large-result',
+          ts: '2026-08-23T00:00:00.000Z',
+          runId: 'legacy-large-run',
+          kind: 'tool',
+          stage: 'tool_result',
+          toolUseId: 'large-call',
+          output
+        }],
+        done: true,
+        ts: 1
+      }]
+    }
+    const original = archive.turns[0].items[0].output
+
+    const [turn] = mergeSessionTurns([], archive)
+    const item = turn.items[0]
+    expect(Buffer.byteLength(item.output ?? '')).toBeLessThanOrEqual(8 * 1024)
+    expect(item.outputContent).toMatchObject({ storage: 'truncated', reasons: ['field_budget'] })
+    expect(item.output).not.toContain('LEGACY_TAIL')
+    expect(archive.turns[0].items[0].output).toBe(original)
+  })
+
   it('回放旧 Pi 归档时补齐小写文件工具语义', () => {
     const archive: TraceArchive = {
       version: 3,

@@ -38,6 +38,7 @@ export interface RemoteIntentAttachment {
 export interface RemoteIntentRouting extends RemoteRunTarget {
   prompt?: string
   modelId?: string
+  modelProviderId?: string
   effort?: string
   permissionMode?: 'default' | 'auto_review' | 'full_access'
   // Bounded, encrypted attachment payloads from the paired device. Images are
@@ -140,6 +141,9 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
   if (routing.modelId !== undefined && (typeof routing.modelId !== 'string' || routing.modelId.length === 0 || routing.modelId.length > 128)) {
     throw new RemoteRunDenied('invalid_target')
   }
+  if (routing.modelProviderId !== undefined && (typeof routing.modelProviderId !== 'string' || routing.modelProviderId.length === 0 || routing.modelProviderId.length > 128)) {
+    throw new RemoteRunDenied('invalid_target')
+  }
   if (routing.effort !== undefined && (typeof routing.effort !== 'string' || routing.effort.length === 0 || routing.effort.length > 64)) {
     throw new RemoteRunDenied('invalid_target')
   }
@@ -153,6 +157,7 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
     ...(typeof routing.agentProfileId === 'string' ? { agentProfileId: routing.agentProfileId } : {}),
     ...(typeof routing.prompt === 'string' ? { prompt: routing.prompt } : {}),
     ...(typeof routing.modelId === 'string' ? { modelId: routing.modelId } : {}),
+    ...(typeof routing.modelProviderId === 'string' ? { modelProviderId: routing.modelProviderId } : {}),
     ...(typeof routing.effort === 'string' ? { effort: routing.effort } : {}),
     ...(routing.permissionMode === 'default' || routing.permissionMode === 'auto_review' || routing.permissionMode === 'full_access' ? { permissionMode: routing.permissionMode } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),

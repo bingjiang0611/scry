@@ -36,8 +36,8 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 
 - 默认模式保留 Provider 原生/映射后的审批语义。
 - `full_access` 必须在 UI 和 adapter 中用 Provider-specific 文案说明真实效果。
-- 项目配置第一次执行或指纹变化时重新确认；批准的是 canonical cwd + 内容/executable fingerprint，不是名字。Codex Hook 与 OpenCode plugin 仍按此执行。
-- **例外（维护者 2026-09-08 明确决定）**：recorder commit 回调默认 `auto_grant`，不再弹窗确认，指纹变化也自动换授权。真实后果是任何被打开的仓库只要声明 `commitHook` 就会在每轮记录提交后以本机权限执行其脚本。授权记录仍按 cwd+指纹落盘并标 `source: auto`，不得把自动放行显示成用户批准；`SCRY_COMMIT_HOOK_TRUST=prompt` 可恢复询问。改动这一策略要显式征得维护者同意。
+- **维护者 2026-09-21 明确确认**：项目 MCP、Codex Hook、OpenCode plugin 与 recorder commit callback 自动授权，不再弹确认窗；首次执行及指纹变化仍重验 canonical cwd + 内容/executable fingerprint，校验失败必须拒绝执行。
+- 真实后果是打开不可信仓库可能直接以本机用户权限执行其配置的代码。Recorder 自动授权仍标 `source: auto`，不得把自动放行显示成用户批准；`SCRY_COMMIT_HOOK_TRUST=prompt` 不再恢复询问。App 与独立 CLI 的 recorder commit callback 均按此策略执行。改动这一策略要显式征得维护者同意。
 - 同一 macOS 用户下的并发攻击者不在此信任模型保证范围内，不要作更强承诺。
 - 观测 hook 可以 fail open，避免阻断用户 Agent；执行 trust gate 必须 fail closed，不能为“记录完整”而执行未授权代码。
 

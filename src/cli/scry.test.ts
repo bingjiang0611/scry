@@ -179,23 +179,21 @@ describe('scry commit-hook', () => {
     expect(payload.notifications.backlogEvidence).toContain('unavailable')
   })
 
-  it('已配置未授权时 status 退出 3，trust 不带 --yes 只打印待授权 bundle', async () => {
+  it('status 和不带 --yes 的 trust 都会自动授权有效 bundle', async () => {
     const { root, grantDir } = await hookWorkspace()
     const statusOut = captureStdout()
-    await expect(runScryCli(['commit-hook', 'status', '--workspace', root])).resolves.toBe(3)
-    expect((JSON.parse(statusOut.text()) as Record<string, any>).activation.status).toBe('configured-not-trusted')
+    await expect(runScryCli(['commit-hook', 'status', '--workspace', root])).resolves.toBe(0)
+    expect((JSON.parse(statusOut.text()) as Record<string, any>).activation.status).toBe('trusted')
+    await expect(access(join(grantDir))).resolves.toBeUndefined()
 
     vi.restoreAllMocks()
     const trustOut = captureStdout()
-    await expect(runScryCli(['commit-hook', 'trust', '--workspace', root])).resolves.toBe(3)
+    await expect(runScryCli(['commit-hook', 'trust', '--workspace', root])).resolves.toBe(0)
     const payload = JSON.parse(trustOut.text()) as Record<string, any>
-    expect(payload.status).toBe('approval-required')
-    expect(payload.files).toHaveLength(1)
-    expect(payload.warning).toContain('read every record')
-    await expect(access(join(grantDir))).rejects.toThrow()
+    expect(payload).toMatchObject({ status: 'trusted', source: 'auto' })
   })
 
-  it('--yes 授权后 status 退出 0，篡改后退出 4', async () => {
+  it('兼容 --yes，且脚本变化后自动更新指纹', async () => {
     const { root } = await hookWorkspace()
     await expect(runScryCli(['commit-hook', 'trust', '--yes', '--workspace', root])).resolves.toBe(0)
     await expect(runScryCli(['commit-hook', 'status', '--workspace', root])).resolves.toBe(0)
@@ -203,11 +201,11 @@ describe('scry commit-hook', () => {
     await writeFile(join(root, 'uploader.sh'), '#!/bin/sh\necho tampered\nexit 0\n')
     await chmod(join(root, 'uploader.sh'), 0o700)
     const stdout = captureStdout()
-    await expect(runScryCli(['commit-hook', 'status', '--workspace', root])).resolves.toBe(4)
-    expect((JSON.parse(stdout.text()) as Record<string, any>).activation.status).toBe('fingerprint-mismatch')
+    await expect(runScryCli(['commit-hook', 'status', '--workspace', root])).resolves.toBe(0)
+    expect((JSON.parse(stdout.text()) as Record<string, any>).activation.status).toBe('trusted')
 
     await expect(runScryCli(['commit-hook', 'revoke', '--workspace', root])).resolves.toBe(0)
-    await expect(runScryCli(['commit-hook', 'status', '--workspace', root])).resolves.toBe(3)
+    await expect(runScryCli(['commit-hook', 'status', '--workspace', root])).resolves.toBe(0)
   })
 
   it('entry 缺少可执行位时退出 5', async () => {
@@ -283,7 +281,7 @@ describe('scry status', () => {
 })
 
 describe('scry recorder notify-drain', () => {
-  it('未激活 commit hook 时不投递，退出码区分未配置与待授权', async () => {
+  it('未配置时不投递，配置有效 hook 后自动激活', async () => {
     const root = await workspace()
     await expect(runScryCli(['recorder', 'notify-drain', '--workspace', root])).resolves.toBe(0)
 
@@ -295,8 +293,8 @@ describe('scry recorder notify-drain', () => {
     process.env.SCRY_GRANT_DIR = join(root, 'grants')
     try {
       const stdout = captureStdout()
-      await expect(runScryCli(['recorder', 'notify-drain', '--workspace', root])).resolves.toBe(3)
-      expect((JSON.parse(stdout.text()) as Record<string, any>).status).toBe('not-activated')
+      await expect(runScryCli(['recorder', 'notify-drain', '--workspace', root])).resolves.toBe(0)
+      expect((JSON.parse(stdout.text()) as Record<string, any>).activation).toBe('trusted')
     } finally {
       delete process.env.SCRY_GRANT_DIR
     }

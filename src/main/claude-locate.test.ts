@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RECORDER_VERSION } from '../core/turn-recorder/store'
 import {
   appBundleRootForExecutable,
@@ -225,6 +225,36 @@ describe('runtime CLI discovery constraints', () => {
         if (value === undefined) delete process.env[key]
         else process.env[key] = value
       }
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('finds Pi launchers from the login-shell PATH when Finder PATH is minimal', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-shell-detect-'))
+    const shell = join(dir, 'login-shell')
+    const rotom = join(dir, 'rotom')
+    const previousPath = process.env.PATH
+    const previousShell = process.env.SHELL
+    try {
+      writeFileSync(shell, `#!/bin/sh\nprintf '%s\\n' '__AS_ENV_S__' 'PATH=${dir}' '__AS_ENV_E__'\n`)
+      writeFileSync(rotom, '#!/bin/sh\nexit 0\n')
+      chmodSync(shell, 0o755)
+      chmodSync(rotom, 0o755)
+      process.env.PATH = '/usr/bin:/bin'
+      process.env.SHELL = shell
+
+      vi.resetModules()
+      const isolated = await import('./claude-locate')
+      await isolated.warmShellEnv()
+
+      expect(isolated.detectAgentsFast()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'pi:rotom', path: rotom })
+      ]))
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      if (previousShell === undefined) delete process.env.SHELL
+      else process.env.SHELL = previousShell
       rmSync(dir, { recursive: true, force: true })
     }
   })

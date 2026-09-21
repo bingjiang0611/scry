@@ -41,7 +41,7 @@
 ### MCP / Hook / plugin / Skill 改动
 
 - canonical cwd、配置内容、声明顺序、executable identity 和 hash 是否进入 fingerprint？
-- 首次/变化后是否重新确认？
+- 首次/变化后是否重新校验指纹并记录自动授权？仓库脚本不得弹确认窗。
 - auth 是否与运行 operation 互斥？
 - Hook 记录失败是否 fail open，而执行授权失败是否 fail closed？
 - Pi/OpenCode/Codex/Claude 的配置格式差异是否由 adapter 吸收？

@@ -21,7 +21,7 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
-import { captureToolContent, isFullToolContentPolicy, limitToolContent, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
+import { captureToolContent, isFullToolContentPolicy, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
@@ -2308,10 +2308,7 @@ async function persistTurnDiffContent(
       })
       if (full.content === undefined) return file
       const contentRef = await writeRecorderContent(dataRoot, full.content, 'utf8')
-      const patchContent = {
-        ...limitToolContent(full, 32 * 1024, 'field_budget'),
-        contentRef
-      }
+      const patchContent = { ...full, contentRef }
       return {
         ...file,
         patch: patchContent.content,
@@ -2904,9 +2901,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
 /**
  * Resolve the CLI-side commit hook grant before draining notifications. A managed host
  * injects the entry itself, so `host-provided` is passed through untouched. Every other
- * non-trusted state fails closed: the env is returned unchanged, no entry is executed, and
- * the reason is logged so `commit-hook status` can explain the stall instead of reporting
- * an empty backlog.
+ * invalid bundle fails closed: the env is returned unchanged, no entry is executed, and
+ * the reason is logged. Valid bundles are fingerprinted and auto-authorized.
  */
 async function activatedCommitHookEnv(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -2914,13 +2910,10 @@ async function activatedCommitHookEnv(
 ): Promise<NodeJS.ProcessEnv> {
   try {
     const activation = await resolveCommitHookActivation(enablement.workspaceRoot, enablement.config, env)
-    if (activation.status === 'bundle-invalid' || activation.status === 'fingerprint-mismatch') {
-      const detail = activation.status === 'bundle-invalid'
-        ? activation.detail
-        : `expected ${activation.expected}, found ${activation.actual}`
+    if (activation.status === 'bundle-invalid') {
       await appendRotatingLog(
         join(enablement.dataRoot, 'logs', 'recorder.log'),
-        `${new Date().toISOString()} ERROR commit hook not activated (${activation.status}): ${detail}`
+        `${new Date().toISOString()} ERROR commit hook not activated (${activation.status}): ${activation.detail}`
       ).catch(() => undefined)
     }
     return commitHookEnv(activation, env)

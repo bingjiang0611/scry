@@ -257,15 +257,27 @@ public enum G0Transport {
       self.id = id; self.label = label; self.description = description; self.isDefault = isDefault
     }
   }
-  // A Provider the device may target for a new session. Controls describe only
-  // what the host's real adapter advertises; absent means unsupported/unavailable.
+  public struct RunModelOption: Sendable, Equatable, Codable {
+    public let id: String; public let providerId: String?; public let label: String
+    public let description: String?; public let isDefault: Bool?; public let efforts: [RunControlOption]?
+    public init(id: String, providerId: String? = nil, label: String, description: String? = nil,
+                isDefault: Bool? = nil, efforts: [RunControlOption]? = nil) {
+      self.id = id; self.providerId = providerId; self.label = label
+      self.description = description; self.isDefault = isDefault; self.efforts = efforts
+    }
+    public var selectionId: String { (providerId ?? "") + "\u{1f}" + id }
+  }
+  // A selectable Provider context. Pi profiles share the canonical Provider id
+  // while agentProfileId keeps their runtime/model catalogs distinct.
   public struct RunProviderRef: Sendable, Equatable, Codable {
-    public let id: String; public let label: String; public let available: Bool
-    public let modelId: String?; public let efforts: [RunControlOption]?; public let permissions: [RunControlOption]?
-    public init(id: String, label: String, available: Bool, modelId: String? = nil,
-                efforts: [RunControlOption]? = nil, permissions: [RunControlOption]? = nil) {
-      self.id = id; self.label = label; self.available = available; self.modelId = modelId
-      self.efforts = efforts; self.permissions = permissions
+    public let id: String; public let label: String; public let available: Bool; public let agentProfileId: String?
+    public let modelId: String?; public let models: [RunModelOption]?
+    public let efforts: [RunControlOption]?; public let permissions: [RunControlOption]?
+    public init(id: String, label: String, available: Bool, agentProfileId: String? = nil, modelId: String? = nil,
+                models: [RunModelOption]? = nil, efforts: [RunControlOption]? = nil,
+                permissions: [RunControlOption]? = nil) {
+      self.id = id; self.label = label; self.available = available; self.agentProfileId = agentProfileId
+      self.modelId = modelId; self.models = models; self.efforts = efforts; self.permissions = permissions
     }
   }
   public struct RunCommandRef: Sendable, Equatable, Codable, Identifiable {
@@ -282,11 +294,13 @@ public enum G0Transport {
   // A session in the host catalog the device may browse. `externalSessionId` is
   // the Provider's resumable id (nil => pending/unresumable). Display metadata.
   public struct RunSessionRef: Sendable, Equatable, Codable {
-    public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let cwd: String; public let label: String; public let ts: Double; public let pinnedAt: Double?
-    public init(sessionId: String, externalSessionId: String? = nil, providerId: String, cwd: String,
-                label: String, ts: Double, pinnedAt: Double? = nil) {
+    public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let agentProfileId: String?
+    public let cwd: String; public let label: String; public let ts: Double; public let pinnedAt: Double?; public let isActive: Bool?
+    public init(sessionId: String, externalSessionId: String? = nil, providerId: String, agentProfileId: String? = nil,
+                cwd: String, label: String, ts: Double, pinnedAt: Double? = nil, isActive: Bool? = nil) {
       self.sessionId = sessionId; self.externalSessionId = externalSessionId; self.providerId = providerId
-      self.cwd = cwd; self.label = label; self.ts = ts; self.pinnedAt = pinnedAt
+      self.agentProfileId = agentProfileId; self.cwd = cwd; self.label = label; self.ts = ts; self.pinnedAt = pinnedAt
+      self.isActive = isActive
     }
   }
   public struct RunSessionPage: Sendable, Equatable, Codable {
@@ -592,10 +606,30 @@ public enum G0Transport {
     }
   }
 
+  // A relay leg is single-use. When a device issues several reads back-to-back,
+  // the host's replacement warm leg may not yet be registered and the relay
+  // closes the new socket. Retry only this pre-response transport condition;
+  // submit requests retain the same intent id and are idempotent host-side.
+  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data) async throws -> Data {
+    var lastError: Error = ProbeError.disconnected
+    for attempt in 0..<3 {
+      do { return try await exchangeRelayOnce(endpoint: endpoint, mode: mode, identity: identity, request: request) }
+      catch {
+        lastError = error
+        let description = String(describing: error).lowercased()
+        let retryable = error is NIOSSLError && description.contains("uncleanshutdown") ||
+          description.contains("disconnected") || description.contains("connection reset")
+        guard retryable, attempt < 2 else { throw error }
+        try await Task.sleep(nanoseconds: UInt64(180 + attempt * 220) * 1_000_000)
+      }
+    }
+    throw lastError
+  }
+
   // Relay variant of `exchange`. Mirrors the loopback security decisions but
   // dials a public relay and routes by hostId+mode instead of a fixed port, and
   // pins the inner server to the host anchor without leaf-hostname verification.
-  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data) async throws -> Data {
+  private static func exchangeRelayOnce(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data) async throws -> Data {
     guard (1...65535).contains(endpoint.port), request.count < 1_250_000, ["pair", "run"].contains(mode),
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)

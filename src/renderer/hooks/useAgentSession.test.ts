@@ -7,10 +7,13 @@ import { runStopStatus } from '../run-stop-status'
 import {
   TRACE_LIVE_HEALTHY,
   applyStopState,
+  beginOptimisticTurn,
   buildAgentStartRequest,
   clearSessionTurns,
+  confirmOptimisticTurn,
   clearStopState,
   currentVisibleRunId,
+  discardOptimisticTurn,
   markTurnDone,
   markTurnError,
   mergeActiveRun,
@@ -108,6 +111,40 @@ describe('useAgentSession state reducers', () => {
     expect(visibleTurnsBeforeReplacement(turns, 'r2')).toEqual([turns[0]])
     expect(visibleTurnsBeforeReplacement(turns, 'missing')).toBe(turns)
     expect(visibleTurnsBeforeReplacement(turns, undefined)).toBe(turns)
+  })
+
+  it('先渲染待发送消息，再用 main 的真实 runId 无缝替换', () => {
+    const request = { prompt: '立即显示', attachments: [image] }
+    const initial: Turn[] = [{ runId: 'old', userText: '上一轮', items: [], done: true }]
+    const optimistic = beginOptimisticTurn(initial, 'pending-1', request)
+
+    expect(optimistic.at(-1)).toMatchObject({
+      runId: 'pending-1',
+      pendingStart: true,
+      userText: '立即显示',
+      attachments: [image]
+    })
+    expect(currentVisibleRunId(optimistic)).toBeNull()
+
+    const confirmed = confirmOptimisticTurn(optimistic, 'pending-1', 'run-real', request)
+    expect(confirmed.map((turn) => turn.runId)).toEqual(['old', 'run-real'])
+    expect(confirmed.at(-1)?.pendingStart).toBeUndefined()
+    expect(currentVisibleRunId(confirmed)).toBe('run-real')
+    expect(discardOptimisticTurn(optimistic, 'pending-1')).toEqual(initial)
+  })
+
+  it('真实 trace 先到时合并待发送占位，不重复显示用户消息', () => {
+    const request = { prompt: '立即显示', attachments: [image] }
+    const optimistic = beginOptimisticTurn([], 'pending-1', request)
+    const withEarlyTrace: Turn[] = [
+      ...optimistic,
+      { runId: 'run-real', userText: '', items: [ev('early', 'run-real')], done: false }
+    ]
+
+    const confirmed = confirmOptimisticTurn(withEarlyTrace, 'pending-1', 'run-real', request)
+    expect(confirmed).toHaveLength(1)
+    expect(confirmed[0]).toMatchObject({ runId: 'run-real', userText: '立即显示' })
+    expect(confirmed[0].items).toEqual([ev('early', 'run-real')])
   })
 
   it('restores an active run and preserves locally buffered trace extras', () => {

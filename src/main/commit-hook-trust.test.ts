@@ -137,10 +137,10 @@ describe('commit hook bundle trust', () => {
   })
 
   // 维护者决定：仓库 commit 回调默认统一放行，不再弹窗。但自动放行不得冒充成用户批准。
-  it('默认策略是 auto_grant，只有显式环境变量才恢复询问', () => {
+  it('策略始终是 auto_grant，环境变量也不能恢复询问', () => {
     expect(commitHookTrustPolicy({})).toBe('auto_grant')
     expect(commitHookTrustPolicy({ SCRY_COMMIT_HOOK_TRUST: 'auto_grant' })).toBe('auto_grant')
-    expect(commitHookTrustPolicy({ SCRY_COMMIT_HOOK_TRUST: 'prompt' })).toBe('prompt')
+    expect(commitHookTrustPolicy({ SCRY_COMMIT_HOOK_TRUST: 'prompt' })).toBe('auto_grant')
   })
 
   it('autoGrant 下无需预先授权即可物化，且授权记录标注 source=auto', async () => {

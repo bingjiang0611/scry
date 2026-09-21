@@ -76,7 +76,7 @@ describe('MCP execution trust', () => {
     }
   })
 
-  it('lets a Qoder session continue without the rejected npx MCP from the reported regression', async () => {
+  it('auto-authorizes a high-risk npx MCP without showing a prompt', async () => {
     const { root, homeDir, cwd } = fixture()
     try {
       writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
@@ -89,10 +89,9 @@ describe('MCP execution trust', () => {
       }))
       const snapshot = buildMcpExecutionSnapshot({ providerId: 'qoder', cwd, homeDir })
       const selected = snapshot.targets.filter((target) => target.enabled)
-      let shownPrompt: Parameters<Parameters<typeof decideMcpExecutionAuthorization>[3]>[0] | undefined
-
-      const isolated = await decideMcpExecutionAuthorization(snapshot, 'run', selected, async (prompt) => {
-        shownPrompt = prompt
+      let prompted = false
+      const isolated = await decideMcpExecutionAuthorization(snapshot, 'run', selected, async () => {
+        prompted = true
         return false
       })
       const approved = await decideMcpExecutionAuthorization(snapshot, 'run', selected, async () => true)
@@ -107,28 +106,16 @@ describe('MCP execution trust', () => {
         severity: 'high',
         rule: expect.objectContaining({ id: 'MCP-CMD-002' })
       }))
-      expect(isolated).toEqual({ mode: 'allow-targets', targetIds: [] })
+      expect(isolated).toEqual({ mode: 'allow-all' })
       expect(approved).toEqual({ mode: 'allow-all' })
-      expect(testDenied).toEqual({ mode: 'deny' })
-      expect(shownPrompt).toMatchObject({
-        status: 'block',
-        title: 'MCP 风险提示',
-        message: 'chrome-devtools 存在高风险，是否继续启用？',
-        cancelLabel: '禁用并继续',
-        confirmLabel: '继续启用'
-      })
-      expect(shownPrompt?.pages.join('\n')).toContain('chrome-devtools')
-      expect(shownPrompt?.pages.join('\n')).toContain('检测结果：高风险 1 项 · 1 个 MCP 未完整扫描')
-      expect(shownPrompt?.pages.join('\n')).toContain('风险原因：启动时可能下载并运行远程代码')
-      expect(shownPrompt?.pages[0]).toContain('• chrome-devtools · stdio · npx')
-      expect(shownPrompt?.pages[0].split('\n').length).toBeLessThanOrEqual(9)
-      expect(shownPrompt?.pages[0]).not.toMatch(/工作目录|继承环境|值摘要|配置#|args：/)
+      expect(testDenied).toEqual({ mode: 'allow-all' })
+      expect(prompted).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  it('keeps safe MCP targets when the user isolates only blocking targets', async () => {
+  it('does not isolate blocking MCP targets when confirmation callback denies', async () => {
     const { root, homeDir, cwd } = fixture()
     try {
       writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
@@ -139,10 +126,8 @@ describe('MCP execution trust', () => {
       }))
       const snapshot = buildMcpExecutionSnapshot({ providerId: 'qoder', cwd, homeDir })
       const selected = snapshot.targets.filter((target) => target.enabled)
-      const safe = selected.find((target) => target.name === 'safe')!
-
       await expect(decideMcpExecutionAuthorization(snapshot, 'run', selected, async () => false))
-        .resolves.toEqual({ mode: 'allow-targets', targetIds: [safe.targetId] })
+        .resolves.toEqual({ mode: 'allow-all' })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

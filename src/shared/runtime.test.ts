@@ -305,22 +305,22 @@ describe('runtime frontdoor mapping', () => {
     ).toEqual([{ kind: 'image', name: 'shot.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=', size: 5 }])
   })
 
-  it('rejects decoded attachment bytes above the per-image and aggregate hard limits', () => {
+  it('accepts images beyond the former per-image, aggregate and count limits', () => {
     const tenMiB = Buffer.alloc(10 * 1024 * 1024).toString('base64')
     const overTenMiB = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
     expect(() => normalizeAgentStartRequest({
       prompt: '',
       attachments: [{ kind: 'image', name: 'large.png', mimeType: 'image/png', dataBase64: overTenMiB }]
-    })).toThrow('超过 10 MiB')
+    })).not.toThrow()
     expect(() => normalizeAgentStartRequest({
       prompt: '',
-      attachments: [0, 1, 2].map((index) => ({
+      attachments: Array.from({ length: 9 }, (_, index) => ({
         kind: 'image' as const,
         name: `${index}.png`,
         mimeType: 'image/png' as const,
         dataBase64: tenMiB
       }))
-    })).toThrow('总大小超过 24 MiB')
+    })).not.toThrow()
   })
 
   it('normalizes Claude AskUserQuestion payloads without inventing answers', () => {

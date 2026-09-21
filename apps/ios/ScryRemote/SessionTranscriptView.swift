@@ -25,6 +25,11 @@ struct SessionTranscriptView: View {
     return run.completedTurns(for: identity)
   }
   private var runBusy: Bool { run.lifecycle == .submitting || run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
+  private var historyReadyForDisplay: Bool {
+    if case .loaded = run.history { return true }
+    if case .empty = run.history { return true }
+    return false
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -54,6 +59,11 @@ struct SessionTranscriptView: View {
           .padding(.bottom, 10)
         }
         .scrollIndicators(.hidden)
+        .onAppear { scrollToLatest(proxy) }
+        .onChange(of: historyReadyForDisplay) { ready in
+          if ready { scrollToLatest(proxy) }
+        }
+        .onChange(of: completedTurns.count) { scrollToLatest(proxy) }
         .onChange(of: run.output.count) { proxy.scrollTo("bottom", anchor: .bottom) }
         .onChange(of: run.lifecycle) { proxy.scrollTo("bottom", anchor: .bottom) }
       }
@@ -65,9 +75,32 @@ struct SessionTranscriptView: View {
       // Keep a live run when leaving and re-opening this same session. A
       // different session identity invalidates old history/poll callbacks.
       run.prepareForSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
-      run.loadProviders(preferredId: s.providerId)
-      run.loadCommands(providerId: s.providerId, cwd: s.cwd)
+      run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId)
+      run.loadCommands(providerId: s.providerId, cwd: s.cwd, agentProfileId: s.agentProfileId)
     }
+    .task(id: session?.externalSessionId) {
+      guard let s = session, s.isActive else { return }
+      var active = true
+      while active && !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard !Task.isCancelled else { return }
+        active = await run.refreshMacSession(providerId: s.providerId, cwd: s.cwd,
+                                             externalSessionId: s.externalSessionId)
+        if !active {
+          // The catalog can flip to terminal just before the archive rename.
+          // Give that atomic commit one beat, then fetch the final durable turn.
+          try? await Task.sleep(nanoseconds: 1_000_000_000)
+          if !Task.isCancelled {
+            run.loadHistory(providerId: s.providerId, cwd: s.cwd,
+                            externalSessionId: s.externalSessionId, force: true)
+          }
+        }
+      }
+    }
+  }
+
+  private func scrollToLatest(_ proxy: ScrollViewProxy) {
+    DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
   }
 
   @ViewBuilder private var historyBody: some View {
@@ -134,7 +167,7 @@ struct SessionTranscriptView: View {
   private var header: some View {
     RemoteHeader(title: session?.label.isEmpty == false ? session!.label : "会话",
                  subtitle: "\(projectName(session?.cwd)) · \(session?.providerId.uppercased() ?? "")",
-                 link: model.link, backAction: { model.route = .home }) {
+                 link: model.link, backAction: { model.goBack() }) {
       Menu {
         if let s = session {
           Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) } label: {
@@ -199,20 +232,25 @@ struct SessionTranscriptView: View {
     VStack(alignment: .leading, spacing: 5) {
       MessageComposer(text: $draft, attachments: $attachments,
                       placeholder: "继续这段对话…", disabled: !run.hasConnection,
-                      sendDisabled: runBusy || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      contextLabel: session?.providerId.uppercased(),
-                      effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
+                      sendDisabled: runBusy || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      contextLabel: run.chosenProvider?.label ?? session?.providerId.uppercased(), contextLocked: true,
+                      modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
+                      onModel: { run.chooseModel($0) },
+                      effortOptions: run.effortOptions, selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },
                       permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
                       onPermission: { run.choosePermission($0) },
                       slashCommands: run.slashCommands, slashCommandsLoading: run.slashCommandsLoading,
                       slashCommandsReason: run.slashCommandsReason,
                       onRefreshSlashCommands: {
-                        if let s = session { run.loadCommands(providerId: s.providerId, cwd: s.cwd, force: true) }
+                        if let s = session {
+                          run.loadCommands(providerId: s.providerId, cwd: s.cwd,
+                                           agentProfileId: s.agentProfileId, force: true)
+                        }
                       }) {
         guard let s = session else { return }
-        run.submitFollowUp(prompt: draft, providerId: s.providerId, cwd: s.cwd,
-                           resume: s.externalSessionId, attachments: attachments.map(\.wireValue))
+        run.submitFollowUp(prompt: draft, providerId: s.providerId, agentProfileId: s.agentProfileId,
+                           cwd: s.cwd, resume: s.externalSessionId, attachments: attachments.map(\.wireValue))
         draft = ""; attachments = []
       }
       if runBusy { Text("当前任务结束后才能继续发送。").font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5) }

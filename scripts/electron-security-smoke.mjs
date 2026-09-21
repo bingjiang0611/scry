@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { stopOwnedApp } from './owned-app-processes.mjs'
 
 const appPath = resolve(process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', 'Scry')
@@ -100,7 +101,10 @@ async function main() {
         HOME: home,
         ELECTRON_ENABLE_LOGGING: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
-        SCRY_ELECTRON_SMOKE_PROVIDER: '1'
+        SCRY_ELECTRON_SMOKE_PROVIDER: '1',
+        // The smoke adapter replaces Codex only. Never discover/start real Provider services.
+        SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',
+        SCRY_REMOTE_HOST: '0'
       },
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -141,6 +145,12 @@ async function main() {
   ]) {
     assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
   }
+  const disabledCapabilities = await evaluate(`Promise.all(['claude', 'qoder', 'opencode', 'pi'].map(async (providerId) => {
+    const context = { providerId, cwd: ${JSON.stringify(workspace)} }
+    const results = await Promise.all([window.scry.runControls(context), window.scry.listSkills(context)])
+    return results.every((result) => result.state === 'unsupported' && result.reason.includes('SCRY_DISABLED_PROVIDERS'))
+  }))`)
+  assert.deepEqual(disabledCapabilities, [true, true, true, true], 'smoke must not start non-fixture providers')
   const csp = await evaluate(`new Promise((resolve) => {
     let violated = false
     const onViolation = () => { violated = true }
@@ -277,11 +287,23 @@ async function main() {
     const externalSessionId = outcome.event.externalSessionId || outcome.event.sessionId
     const loadedPage = await window.scry.loadSession({ providerId: 'codex', cwd, externalSessionId })
     const loaded = loadedPage?.turns || []
+    const toolResult = loaded.flatMap((turn) => turn.items).find((item) => item.stage === 'tool_result')
+    const ref = toolResult?.outputContent?.contentRef
+    if (!ref || ref.bytes < 12 * 1024 * 1024) throw new Error('large tool body was not persisted')
+    const tail = await window.scry.recorderContentPage({ source: 'app-trace', ref, offset: ref.bytes - 64, limit: 64 })
+    const fullTail = atob(tail.dataBase64).includes('COMPLETE_LARGE_TOOL_TAIL')
+    await window.scry.setCwd(null)
+    let foreignContentDenied = false
+    try { await window.scry.recorderContentPage({ source: 'app-trace', ref }) } catch { foreignContentDenied = true }
+    await window.scry.setCwd(cwd)
     const stats = await window.scry.stats()
     return {
       sameRun: outcome.event.runId === started.runId,
       externalSessionId,
       loadedTurns: loaded.length,
+      boundedHistory: JSON.stringify(loaded).length < 64 * 1024,
+      fullTail,
+      foreignContentDenied,
       hasTool: loaded.some((turn) => turn.items.some((item) => item.stage === 'tool_use')),
       rawInput: loaded.some((turn) => turn.items.some((item) => JSON.stringify(item.input ?? item.inputContent ?? null).includes('sk-ant-api03-scry-smoke-not-a-real-key-000000'))),
       rawOutput: loaded.some((turn) => turn.items.some((item) => item.stage === 'tool_result' && JSON.stringify(item.output ?? item.text ?? item.outputContent ?? null).includes('sk-ant-api03-scry-smoke-not-a-real-key-000000'))),
@@ -293,6 +315,9 @@ async function main() {
   assert.ok(lifecycleSmoke.externalSessionId)
   assert.ok(lifecycleSmoke.loadedTurns >= 1)
   assert.equal(lifecycleSmoke.hasTool, true)
+  assert.equal(lifecycleSmoke.boundedHistory, true, 'large tool body must not cross history IPC inline')
+  assert.equal(lifecycleSmoke.fullTail, true, 'the entire captured body must remain inspectable')
+  assert.equal(lifecycleSmoke.foreignContentDenied, true, 'content reference must not cross workspace scope')
   assert.equal(lifecycleSmoke.rawInput, true, 'captured tool input must survive archive reload verbatim')
   assert.equal(lifecycleSmoke.rawOutput, true, 'captured tool output must survive archive reload verbatim')
   assert.equal(lifecycleSmoke.statsStatus, 'ready')
@@ -783,13 +808,10 @@ async function main() {
   assert.equal(afterNavigation.page.url, page.url, 'will-navigate failed to keep renderer on its trusted URL')
 
   cdp.close()
-  // Crash only this test-owned App after capture checkpoints; preserve its isolated userData.
-  // Restart is fenced on the actual process exit, not an elapsed shutdown grace period.
-  await new Promise((resolveExit, reject) => {
-    const timer = setTimeout(() => reject(new Error('test App exit unconfirmed; refusing restart')), 8_000)
-    child.once('exit', () => { clearTimeout(timer); resolveExit() })
-    child.kill('SIGKILL')
-  })
+  // Ownership is captured outside Electron before the crash. Confirm the registered tree is
+  // gone before restarting, rather than treating only the parent's exit as cleanup success.
+  await stopOwnedApp(child, { crash: true })
+  child = undefined
   launchApp()
   const restarted = await waitForTarget(port)
   cdp = connectCdp(restarted.page.webSocketDebuggerUrl)
@@ -864,20 +886,8 @@ async function main() {
 try {
   await main()
 } finally {
-  if (child && child.exitCode == null) {
-    child.kill('SIGTERM')
-    await Promise.race([
-      new Promise((resolveExit) => child.once('exit', resolveExit)),
-      new Promise((resolveWait) => setTimeout(resolveWait, 2_000))
-    ])
-    if (child.exitCode == null) {
-      child.kill('SIGKILL')
-      await Promise.race([
-        new Promise((resolveExit) => child.once('exit', resolveExit)),
-        new Promise((resolveWait) => setTimeout(resolveWait, 2_000))
-      ])
-    }
-  }
+  // A failed cleanup throws before deleting the fixture, preserving evidence for diagnosis.
+  await stopOwnedApp(child)
   try {
     rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
   } catch (error) {

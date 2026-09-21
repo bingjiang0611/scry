@@ -61,7 +61,7 @@ export function readComposerDrafts(storage: Pick<Storage, 'getItem'>): ReadonlyM
       if (!Array.isArray(row) || row.length !== 2 || typeof row[0] !== 'string' || !row[1] || typeof row[1] !== 'object') continue
       const value = row[1] as Partial<StoredDraft>
       if (typeof value.input !== 'string' || !Array.isArray(value.attachments)) continue
-      const attachments = value.attachments.filter(validAttachment).slice(0, 8).map(draftAttachment)
+      const attachments = value.attachments.filter(validAttachment).map(draftAttachment)
       if (!value.input && attachments.length === 0) continue
       drafts.set(row[0], { input: value.input, attachments })
     }

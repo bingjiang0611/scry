@@ -66,14 +66,15 @@ describe('commit hook grant', () => {
     expect(commitHookEnv(activation, env).SCRY_RECORDER_COMMIT_HOOK).toBeUndefined()
   })
 
-  it('refuses to activate a configured but unapproved hook', async () => {
+  it('auto-authorizes a valid configured hook and records source=auto', async () => {
     const { workspace, env } = await fixture({ commitHook: bundleConfig })
     const activation = await resolveCommitHookActivation(workspace, await config(workspace), env)
-    expect(activation.status).toBe('configured-not-trusted')
-    expect(commitHookEnv(activation, env).SCRY_RECORDER_COMMIT_HOOK).toBeUndefined()
+    expect(activation.status).toBe('trusted')
+    expect(commitHookEnv(activation, env).SCRY_RECORDER_COMMIT_HOOK).toBe(join(resolve(workspace), 'tools/uploader.sh'))
+    expect((await readCommitHookGrant(workspace, env))?.source).toBe('auto')
   })
 
-  it('activates only after an explicit grant', async () => {
+  it('keeps explicit grants compatible', async () => {
     const { workspace, env } = await fixture({ commitHook: bundleConfig })
     const parsed = await config(workspace)
     await writeCommitHookGrant(workspace, await inspectCommitHookBundle(workspace, bundleConfig), env)
@@ -87,17 +88,18 @@ describe('commit hook grant', () => {
     )
   })
 
-  it('fails closed when any approved file changes', async () => {
+  it('revalidates changed files and replaces the grant automatically', async () => {
     const { workspace, env } = await fixture({ commitHook: bundleConfig })
     const parsed = await config(workspace)
-    await writeCommitHookGrant(workspace, await inspectCommitHookBundle(workspace, bundleConfig), env)
+    const original = await writeCommitHookGrant(workspace, await inspectCommitHookBundle(workspace, bundleConfig), env)
 
-    // A dependency edit must invalidate the grant, not just an entry edit.
     await writeFile(join(workspace, 'tools', 'lib.sh'), 'echo tampered\n')
 
     const activation = await resolveCommitHookActivation(workspace, parsed, env)
-    expect(activation.status).toBe('fingerprint-mismatch')
-    expect(commitHookEnv(activation, env).SCRY_RECORDER_COMMIT_HOOK).toBeUndefined()
+    expect(activation.status).toBe('trusted')
+    const refreshed = await readCommitHookGrant(workspace, env)
+    expect(refreshed?.fingerprint).not.toBe(original.grant.fingerprint)
+    expect(refreshed?.source).toBe('auto')
   })
 
   it('does not reuse a grant issued for another workspace path', async () => {
@@ -141,14 +143,15 @@ describe('commit hook grant', () => {
     ).rejects.toThrow(/escapes the workspace/)
   })
 
-  it('revoking a grant returns the recorder to a non-activating state', async () => {
+  it('revoking a grant removes it until the next automatic activation', async () => {
     const { workspace, env } = await fixture({ commitHook: bundleConfig })
     const parsed = await config(workspace)
     await writeCommitHookGrant(workspace, await inspectCommitHookBundle(workspace, bundleConfig), env)
 
     const revoked = await revokeCommitHookGrant(workspace, env)
     expect(revoked.removed).toBe(true)
-    expect((await resolveCommitHookActivation(workspace, parsed, env)).status).toBe('configured-not-trusted')
-    expect((await revokeCommitHookGrant(workspace, env)).removed).toBe(false)
+    expect((await resolveCommitHookActivation(workspace, parsed, env)).status).toBe('trusted')
+    expect((await readCommitHookGrant(workspace, env))?.source).toBe('auto')
+    expect((await revokeCommitHookGrant(workspace, env)).removed).toBe(true)
   })
 })

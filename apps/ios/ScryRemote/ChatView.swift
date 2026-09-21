@@ -57,6 +57,8 @@ struct ChatView: View {
           .padding(.bottom, 10)
         }
         .scrollIndicators(.hidden)
+        .onAppear { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
+        .onChange(of: completedTurns.count) { proxy.scrollTo("bottom", anchor: .bottom) }
         .onChange(of: run.output.count) { proxy.scrollTo("bottom", anchor: .bottom) }
         .onChange(of: run.lifecycle) { proxy.scrollTo("bottom", anchor: .bottom) }
       }
@@ -87,7 +89,7 @@ struct ChatView: View {
 
   private var header: some View {
     RemoteHeader(title: "会话", subtitle: sessionContext, link: model.link,
-                 backAction: { model.route = .home }) {
+                 backAction: { model.goBack() }) {
       Menu {
         Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
@@ -171,9 +173,11 @@ struct ChatView: View {
       MessageComposer(text: $draft, attachments: $attachments,
                       placeholder: paired ? "继续这段对话…" : "连接后可输入",
                       disabled: !paired,
-                      sendDisabled: runBusy || run.chosen == nil || run.chosenProvider == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      contextLabel: run.chosenProvider?.label,
-                      effortOptions: run.chosenProvider?.efforts ?? [], selectedEffort: run.chosenEffort,
+                      sendDisabled: runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      contextLabel: run.chosenProvider?.label, contextLocked: true,
+                      modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
+                      onModel: { run.chooseModel($0) },
+                      effortOptions: run.effortOptions, selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },
                       permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
                       onPermission: { run.choosePermission($0) },
@@ -181,13 +185,15 @@ struct ChatView: View {
                       slashCommandsReason: run.slashCommandsReason,
                       onRefreshSlashCommands: {
                         if let providerId = run.chosenProvider?.id, let cwd = run.chosen?.path {
-                          run.loadCommands(providerId: providerId, cwd: cwd, force: true)
+                          run.loadCommands(providerId: providerId, cwd: cwd,
+                                           agentProfileId: run.chosenProvider?.agentProfileId, force: true)
                         }
                       }) {
         guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
         let payload = attachments.map(\.wireValue)
         if let resume = run.liveExternalSessionId {
-          run.submitFollowUp(prompt: draft, providerId: providerId, cwd: project.path, resume: resume, attachments: payload)
+          run.submitFollowUp(prompt: draft, providerId: providerId, agentProfileId: run.chosenProvider?.agentProfileId,
+                             cwd: project.path, resume: resume, attachments: payload)
         } else {
           run.submit(prompt: draft, providerId: providerId, attachments: payload)
         }

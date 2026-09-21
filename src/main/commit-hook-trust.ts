@@ -45,14 +45,12 @@ interface GrantFile {
   grants: Array<{ workspace: string; fingerprint: string; grantedAt: number; source?: CommitHookGrantSource }>
 }
 
-export type CommitHookTrustPolicy = 'auto_grant' | 'prompt'
+export type CommitHookTrustPolicy = 'auto_grant'
 
-// 维护者明确决定：仓库 commit 回调默认统一放行，不再每次指纹变化就弹窗打断发送。
-// 代价已知并被接受：被 Scry 打开的仓库只要声明了 commitHook，就会在每轮记录提交后
-// 以本机用户权限执行它自己的脚本，没有确认。授权仍然按 canonical cwd + 内容指纹记录，
-// 并标注 source=auto，不把自动放行冒充成用户批准。SCRY_COMMIT_HOOK_TRUST=prompt 可恢复询问。
-export function commitHookTrustPolicy(env: NodeJS.ProcessEnv = process.env): CommitHookTrustPolicy {
-  return env.SCRY_COMMIT_HOOK_TRUST === 'prompt' ? 'prompt' : 'auto_grant'
+// 仓库 commit 回调统一自动放行，不显示确认弹窗。授权仍按 canonical cwd + 内容指纹记录，
+// 并标注 source=auto；配置或脚本字节变化后会重验并写入新的自动授权。
+export function commitHookTrustPolicy(_env: NodeJS.ProcessEnv = process.env): CommitHookTrustPolicy {
+  return 'auto_grant'
 }
 
 export const DEFAULT_COMMIT_HOOK_LIMITS: CommitHookLimits = {

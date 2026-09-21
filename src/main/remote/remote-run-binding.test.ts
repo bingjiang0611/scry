@@ -92,11 +92,11 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     const { run, calls } = fakeRun(async () => ({ status: 'completed' }))
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-controls' })
     await start({ runId: 'ledger-controls', routing: {
-      cwd: '/w', providerId: 'codex', prompt: 'go', modelId: 'gpt-5.4', effort: 'high', permissionMode: 'full_access'
+      cwd: '/w', providerId: 'opencode', prompt: 'go', modelId: 'gpt-5.4', modelProviderId: 'openai', effort: 'high', permissionMode: 'full_access'
     }, progress: () => {}, output: () => {} })
 
     expect(calls[0]).toMatchObject({
-      model: { id: 'gpt-5.4' }, effort: 'high', permissionMode: 'full_access'
+      model: { id: 'gpt-5.4', providerId: 'openai' }, effort: 'high', permissionMode: 'full_access'
     })
   })
 

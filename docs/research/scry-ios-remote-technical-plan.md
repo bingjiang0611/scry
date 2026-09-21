@@ -145,7 +145,7 @@ owner-device 是功能权限，不假设所有目录已授权。既有项目可�
 
 `trust.inspect` 返回主机生成的 challengeId、hostEpoch、canonical cwd、Provider/profile、配置与 executable fingerprint、授权作用域、有效期及可读差异。`trust.confirm` 只能引用该挑战，不能由手机自行提交“已批准的 fingerprint”。用户确认后主机在执行前重算/重验身份，并按现有策略冻结获批执行材料；任一变化使旧挑战失效。桌面与手机竞争回复仍由同一 trust 服务裁决。
 
-`full_access` 只改变该 Provider 明确支持的执行审批语义，不自动批准仓库控制的 MCP/Hook/plugin。**保留现有 recorder commitHook 的 auto_grant 例外**及 `source:auto`；`SCRY_COMMIT_HOOK_TRUST=prompt` 仍可恢复询问。本方案不改变此策略，也不把自动授权标记为手机人类批准。无法安全远程化的系统授权返回 requires_local_action。
+`full_access` 只改变该 Provider 明确支持的逐工具审批语义；仓库控制的 MCP/Hook/plugin 与 recorder commitHook 独立地默认自动授权，并继续校验配置、内容和可执行文件指纹。自动授权不标记为手机人类批准。无法安全远程化的系统授权返回 requires_local_action。
 
 ### 4.5 边界与流量预算
 

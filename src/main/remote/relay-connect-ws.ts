@@ -43,7 +43,15 @@ function wsLeg(opts: RelayWSOptions): OutboundLeg {
       try { ws.send(chunk as Uint8Array); cb() }
       catch (err) { cb(err as Error) }
     },
-    final(cb) { try { ws.close(1000) } catch { /* already closing */ } cb() },
+    // TLS `socket.end(response)` reaches this after queueing its close_notify.
+    // Do not close the outer WebSocket immediately: the relay may tear down the
+    // device peer before that final TLS record is delivered. The device normally
+    // closes after reading the newline; this timer bounds a broken peer.
+    final(cb) {
+      const timer = setTimeout(() => { try { ws.close(1000) } catch { /* already closing */ } }, 15_000)
+      timer.unref()
+      cb()
+    },
     destroy(err, cb) { try { ws.close() } catch { /* already closing */ } cb(err) }
   })
   ws.addEventListener('open', () => {
