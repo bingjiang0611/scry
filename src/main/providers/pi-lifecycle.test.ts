@@ -102,10 +102,10 @@ describe('Pi startup and probe lifecycle', () => {
   })
 
   it.each([
-    ['non-JSON output', 'not-json\n', /非 JSONL/],
+    ['non-JSON output', 'not-json\n', /JSONL 解码失败.*expected a value/],
     ['null response', 'null\n', /非对象/],
     ['array response', '[]\n', /非对象/],
-    ['unfinished frame', '{"type":', /不完整 JSONL/],
+    ['unfinished frame', '{"type":', /JSONL 解码失败.*expected a value/],
     ['exit without evidence', '', /提前退出/]
   ] as const)('rejects %s, confirms process exit and allows a fresh probe', async (_name, wire, error) => {
     await withProbeFixture(async (profile, cwd, starts) => {
