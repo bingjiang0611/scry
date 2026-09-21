@@ -43,6 +43,15 @@ struct RootView: View {
       }
     }
     .tint(Palette.blue)
+    .simultaneousGesture(
+      DragGesture(minimumDistance: 18)
+        .onEnded { value in
+          guard model.canGoBack, value.startLocation.x <= 24 else { return }
+          let horizontal = value.translation.width
+          let vertical = abs(value.translation.height)
+          if horizontal > 72 && horizontal > vertical * 1.35 { model.goBack() }
+        }
+    )
     .animation(.easeInOut(duration: 0.2), value: model.route)
     .animation(.easeInOut(duration: 0.2), value: model.signedIn)
     // The run channel is the honest source of reachability: reflect a real

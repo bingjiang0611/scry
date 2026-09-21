@@ -375,9 +375,23 @@ export function attachmentsAfterSuccessfulSubmit(
   return current.filter((attachment) => !submittedIds.has(attachment.id))
 }
 
-export async function commitDraftAfterStart(start: () => Promise<void>, commit: () => void): Promise<void> {
-  await start()
+export function inputAfterFailedSubmit(current: string, submitted: string): string {
+  if (!submitted || current === submitted || current.startsWith(`${submitted}\n`)) return current || submitted
+  return current ? `${submitted}\n${current}` : submitted
+}
+
+export function attachmentsAfterFailedSubmit(
+  current: DraftAttachment[],
+  submitted: DraftAttachment[]
+): DraftAttachment[] {
+  const currentIds = new Set(current.map((attachment) => attachment.id))
+  return [...submitted.filter((attachment) => !currentIds.has(attachment.id)), ...current]
+}
+
+export async function commitDraftOnDispatch(start: () => Promise<void>, commit: () => void): Promise<void> {
+  const pending = start()
   commit()
+  await pending
 }
 
 function inputAttachments(attachments: DraftAttachment[]): AgentInputAttachment[] {
@@ -1467,19 +1481,13 @@ export function App() {
       (attachment): attachment is DraftAttachment => attachment != null
     )
     if (next.length === 0) return
-    setDraftAttachments((prev) => {
-      const combined = [...prev, ...next]
-      for (const attachment of combined.slice(8)) {
-        if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
-      }
-      return combined.slice(0, 8)
-    })
+    setDraftAttachments((prev) => [...prev, ...next])
   }, [setDraftAttachments])
 
   const addClipboardImage = useCallback(async (): Promise<void> => {
     const attachment = await window.scry.clipboardImage()
     if (!attachment) return
-    setDraftAttachments((prev) => [...prev, clipboardAttachmentToDraft(attachment)].slice(0, 8))
+    setDraftAttachments((prev) => [...prev, clipboardAttachmentToDraft(attachment)])
   }, [setDraftAttachments])
 
   const send = async (): Promise<void> => {
@@ -1511,18 +1519,22 @@ export function App() {
     draftStartPendingRef.current = true
     setComposerSubmitting(true)
     try {
-      await commitDraftAfterStart(
+      await commitDraftOnDispatch(
         () => startPrompt(text, attachments),
         () => {
           setInput((current) => inputAfterSuccessfulSubmit(current, originalInput))
           setDraftAttachments((current) => attachmentsAfterSuccessfulSubmit(current, submittedIds))
-          for (const attachment of submittedAttachments) {
-            if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
-          }
           setSlashHidden(true)
         }
       )
+      for (const attachment of submittedAttachments) {
+        if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
+      }
     } catch (error) {
+      // Admission can still fail after the optimistic paint. Put the submitted draft back without
+      // overwriting anything the user typed or pasted while main was starting the Provider.
+      setInput((current) => inputAfterFailedSubmit(current, originalInput))
+      setDraftAttachments((current) => attachmentsAfterFailedSubmit(current, submittedAttachments))
       setComposerError(error instanceof Error ? error.message : String(error))
     } finally {
       draftStartPendingRef.current = false

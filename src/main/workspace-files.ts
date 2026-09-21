@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { constants } from 'node:fs'
-import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
+import { constants, type Stats } from 'node:fs'
+import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   canOpenWorkspaceFileExternally,
@@ -17,15 +17,8 @@ import {
   type WorkspaceWriteRequest
 } from '../shared/workspace.js'
 
-export const WORKSPACE_FILE_LIMIT = 2 * 1024 * 1024
 export const WORKSPACE_FILE_PAGE_LIMIT = 64 * 1024
 export const WORKSPACE_DIRECTORY_LIMIT = 200
-
-const PROTECTED_NAMES = new Set(['.git', '.scry', 'node_modules', 'dist', 'build', 'out', 'target', '.next'])
-
-function protectedName(name: string): boolean {
-  return PROTECTED_NAMES.has(name.toLowerCase())
-}
 
 function portablePath(parts: string[]): string {
   return parts.join('/')
@@ -39,7 +32,6 @@ function pathParts(path: string | undefined): string[] {
   }
   const parts = raw.split(/[\\/]+/).filter((part) => part && part !== '.')
   if (parts.some((part) => part === '..')) throw new Error('工作区路径不能越过根目录')
-  if (parts.some(protectedName)) throw new Error('该路径受保护，不能在 Scry 文件面板中操作')
   return parts
 }
 
@@ -48,7 +40,6 @@ function entryName(name: string): string {
   if (!value || value === '.' || value === '..' || value.includes('/') || value.includes('\\')) {
     throw new Error('名称不能为空，也不能包含路径分隔符')
   }
-  if (protectedName(value)) throw new Error('该名称属于受保护目录')
   return value
 }
 
@@ -64,19 +55,14 @@ async function canonicalRoot(cwd: string): Promise<string> {
   return root
 }
 
-async function checkedPath(cwd: string, path: string | undefined, existingParts = true): Promise<{ root: string; path: string; portable: string }> {
+async function checkedPath(cwd: string, path: string | undefined): Promise<{ root: string; path: string; realPath: string; portable: string }> {
   const root = await canonicalRoot(cwd)
   const parts = pathParts(path)
   const target = resolve(root, ...parts)
   if (!isInside(root, target)) throw new Error('工作区路径不能越过根目录')
-  let cursor = root
-  const limit = existingParts ? parts.length : Math.max(0, parts.length - 1)
-  for (const part of parts.slice(0, limit)) {
-    cursor = join(cursor, part)
-    const info = await lstat(cursor)
-    if (info.isSymbolicLink()) throw new Error('为防止越界，Scry 文件面板不跟随符号链接')
-  }
-  return { root, path: target, portable: portablePath(parts) }
+  const realTarget = await realpath(target)
+  if (!isInside(root, realTarget)) throw new Error('符号链接目标不能越过工作区')
+  return { root, path: target, realPath: realTarget, portable: portablePath(parts) }
 }
 
 function revision(content: Buffer | string): string {
@@ -111,19 +97,28 @@ async function exists(path: string): Promise<boolean> {
 
 export async function listWorkspace(request: WorkspaceListRequest): Promise<WorkspaceListResult> {
   const target = await checkedPath(request.cwd, request.path)
-  const info = await lstat(target.path)
+  const info = await stat(target.realPath)
   if (!info.isDirectory()) throw new Error('目标不是文件夹')
   const limit = request.limit ?? WORKSPACE_DIRECTORY_LIMIT
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > WORKSPACE_DIRECTORY_LIMIT) throw new Error('目录分页大小无效')
-  const all = await readdir(target.path, { withFileTypes: true })
-  const visible = all
-    .filter((entry) => !entry.isSymbolicLink() && !protectedName(entry.name) && (entry.isDirectory() || entry.isFile()))
+  const all = await readdir(target.realPath, { withFileTypes: true })
+  const visible = (await Promise.all(all.map(async (entry) => {
+    try {
+      const path = portablePath([...pathParts(target.portable), entry.name])
+      await checkedPath(request.cwd, path)
+      const info = await stat(join(target.realPath, entry.name))
+      return info.isDirectory() || info.isFile() ? { name: entry.name, info } : null
+    } catch {
+      return null
+    }
+  })))
+    .filter((entry): entry is { name: string; info: Stats } => entry !== null)
     .sort((a, b) => {
-      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1
+      if (a.info.isDirectory() !== b.info.isDirectory()) return a.info.isDirectory() ? -1 : 1
       return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
     })
   const snapshot = createHash('sha256')
-    .update(visible.map((entry) => `${entry.isDirectory() ? 'd' : 'f'}\0${entry.name}`).join('\0'))
+    .update(visible.map((entry) => `${entry.info.isDirectory() ? 'd' : 'f'}\0${entry.name}`).join('\0'))
     .digest('hex')
   let offset = 0
   if (request.cursor !== undefined) {
@@ -142,17 +137,13 @@ export async function listWorkspace(request: WorkspaceListRequest): Promise<Work
   if (offset > visible.length) throw new Error('目录游标无效')
   const end = Math.min(visible.length, offset + limit)
   const entries = await Promise.all(
-    visible.slice(offset, end).map(async (entry): Promise<WorkspaceEntry> => {
-      const path = join(target.path, entry.name)
-      const stat = await lstat(path)
-      return {
-        name: entry.name,
-        path: portablePath([...pathParts(target.portable), entry.name]),
-        kind: entry.isDirectory() ? 'directory' : 'file',
-        ...(entry.isFile() ? { size: stat.size } : {}),
-        mtimeMs: stat.mtimeMs
-      }
-    })
+    visible.slice(offset, end).map(async (entry): Promise<WorkspaceEntry> => ({
+      name: entry.name,
+      path: portablePath([...pathParts(target.portable), entry.name]),
+      kind: entry.info.isDirectory() ? 'directory' : 'file',
+      ...(entry.info.isFile() ? { size: entry.info.size } : {}),
+      mtimeMs: entry.info.mtimeMs
+    }))
   )
   const truncated = end < visible.length
   return {
@@ -164,10 +155,9 @@ export async function listWorkspace(request: WorkspaceListRequest): Promise<Work
 
 export async function readWorkspaceFile(request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot> {
   const target = await checkedPath(request.cwd, request.path)
-  const info = await lstat(target.path)
+  const info = await stat(target.realPath)
   if (!info.isFile()) throw new Error('目标不是文件')
-  if (info.size > WORKSPACE_FILE_LIMIT) throw new Error('文件超过 2 MiB，只能使用分页只读视图')
-  const bytes = await readFile(target.path)
+  const bytes = await readFile(target.realPath)
   if (binary(bytes)) throw new Error('二进制文件不能在文本编辑器中打开')
   return {
     name: basename(target.path),
@@ -201,7 +191,7 @@ export async function readWorkspaceFilePage(request: WorkspaceFilePageRequest): 
   const limit = request.limit ?? WORKSPACE_FILE_PAGE_LIMIT
   if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('文件分页偏移无效')
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > WORKSPACE_FILE_PAGE_LIMIT) throw new Error('文件分页大小无效')
-  const handle = await open(target.path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  const handle = await open(target.realPath, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const info = await handle.stat()
     if (!info.isFile()) throw new Error('目标不是文件')
@@ -235,7 +225,7 @@ export async function readWorkspaceFilePage(request: WorkspaceFilePageRequest): 
 
 async function externalFileTarget(request: WorkspacePathRequest) {
   const target = await checkedPath(request.cwd, request.path)
-  if (!(await lstat(target.path)).isFile()) throw new Error('目标不是文件')
+  if (!(await stat(target.realPath)).isFile()) throw new Error('目标不是文件')
   return target
 }
 
@@ -276,25 +266,24 @@ export async function openWorkspaceFileExternally(
     target = await externalFileTarget(selected)
   }
   // Dispatch errors may occur after an external app has received the request. Never retry them.
-  await open(target.path)
+  await open(target.realPath)
   return true
 }
 
 export async function writeWorkspaceFile(request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot> {
   const bytes = Buffer.from(request.content, 'utf8')
-  if (bytes.byteLength > WORKSPACE_FILE_LIMIT) throw new Error('文件超过 2 MiB，不能在 Scry 中保存')
   const current = await readWorkspaceFile(request)
   if (current.revision !== request.expectedRevision) throw new Error('文件已在磁盘上发生变化，请重新载入后再编辑')
   const target = await checkedPath(request.cwd, request.path)
-  await writeFile(target.path, bytes)
+  await writeFile(target.realPath, bytes)
   return readWorkspaceFile(request)
 }
 
 export async function createWorkspaceEntry(request: WorkspaceCreateRequest): Promise<WorkspaceEntry> {
   const parent = await checkedPath(request.cwd, request.parentPath)
-  if (!(await lstat(parent.path)).isDirectory()) throw new Error('目标父路径不是文件夹')
+  if (!(await stat(parent.realPath)).isDirectory()) throw new Error('目标父路径不是文件夹')
   const name = entryName(request.name)
-  const path = join(parent.path, name)
+  const path = join(parent.realPath, name)
   if (await exists(path)) throw new Error('同名文件或文件夹已存在')
   if (request.kind === 'directory') await mkdir(path)
   else await writeFile(path, '', { flag: 'wx' })
@@ -332,9 +321,9 @@ export async function moveWorkspaceEntry(request: WorkspaceMoveRequest): Promise
   if (!source.portable) throw new Error('不能移动工作区根目录')
   const sourceInfo = await lstat(source.path)
   const targetParent = await checkedPath(request.cwd, request.parentPath)
-  if (!(await lstat(targetParent.path)).isDirectory()) throw new Error('目标路径不是文件夹')
+  if (!(await stat(targetParent.realPath)).isDirectory()) throw new Error('目标路径不是文件夹')
   const name = basename(source.path)
-  const targetPath = join(targetParent.path, name)
+  const targetPath = join(targetParent.realPath, name)
   if (targetPath === source.path) throw new Error('文件或文件夹已在目标目录中')
   if (sourceInfo.isDirectory() && isInside(source.path, targetPath)) {
     throw new Error('文件夹不能移动到自身内部')

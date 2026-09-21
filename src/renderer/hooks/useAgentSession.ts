@@ -111,7 +111,7 @@ export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta
   )
 
 export const currentVisibleRunId = (turns: Turn[]): string | null =>
-  [...turns].reverse().find((turn) => !turn.done && !turn.error)?.runId ?? null
+  [...turns].reverse().find((turn) => !turn.pendingStart && !turn.done && !turn.error)?.runId ?? null
 
 /**
  * live trace 镜像的健康状态。degraded 表示实时视图落后于权威证据（归档/runState 仍完整），
@@ -412,6 +412,48 @@ export function visibleTurnsBeforeReplacement(
   return index >= 0 ? turns.slice(0, index) : turns
 }
 
+export function beginOptimisticTurn(prev: Turn[], pendingRunId: string, request: AgentStartRequest): Turn[] {
+  return [...prev, {
+    runId: pendingRunId,
+    pendingStart: true,
+    userText: request.prompt,
+    attachments: request.attachments,
+    items: [],
+    done: false
+  }]
+}
+
+export function discardOptimisticTurn(prev: Turn[], pendingRunId: string): Turn[] {
+  return prev.filter((turn) => turn.runId !== pendingRunId)
+}
+
+export function confirmOptimisticTurn(
+  prev: Turn[],
+  pendingRunId: string,
+  runId: string,
+  request: AgentStartRequest,
+  lifecycleDeltas: RunLifecycleDelta[] = []
+): Turn[] {
+  const withoutPending = discardOptimisticTurn(prev, pendingRunId)
+  const replaceRunId = request.forkLastTurn?.replaceRunId ?? request.restartLastTurn?.replaceRunId
+  const visible = visibleTurnsBeforeReplacement(withoutPending, replaceRunId, !!request.restartLastTurn)
+  const index = visible.findIndex((turn) => turn.runId === runId)
+  if (index === -1) {
+    return replayRunLifecycleDeltas(
+      [...visible, { runId, userText: request.prompt, attachments: request.attachments, items: [], done: false }],
+      lifecycleDeltas
+    )
+  }
+  const next = [...visible]
+  next[index] = {
+    ...next[index],
+    pendingStart: undefined,
+    userText: request.prompt,
+    attachments: request.attachments
+  }
+  return replayRunLifecycleDeltas(next, lifecycleDeltas)
+}
+
 export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [running, setRunning] = useState(false)
@@ -436,6 +478,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const rafId = useRef<number | null>(null)
   const flushTimeoutId = useRef<number | null>(null)
   const callbacksRef = useRef(callbacks)
+  const pendingStartSequenceRef = useRef(0)
 
   callbacksRef.current = callbacks
 
@@ -577,31 +620,23 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     focusedRunIdRef.current = null
     pendingStartLifecycleRef.current = []
     setRunning(true)
+    const pendingRunId = `pending-run-${Date.now().toString(36)}-${pendingStartSequenceRef.current++}`
+    // Main admission includes trust, session and Provider setup. Paint the submitted message before
+    // that work finishes so Enter has immediate feedback, then reconcile it with the authoritative ID.
+    setTurns((prev) => beginOptimisticTurn(prev, pendingRunId, request))
     let runId: string
     try {
       runId = (await window.scry.start(request)).runId
     } catch (error) {
       pendingStartLifecycleRef.current = null
+      setTurns((prev) => discardOptimisticTurn(prev, pendingRunId))
       setRunning(false)
       throw error
     }
     focusedRunIdRef.current = runId
     const lifecycleDeltas = (pendingStartLifecycleRef.current ?? []).filter((delta) => delta.event.runId === runId)
     pendingStartLifecycleRef.current = null
-    setTurns((prev) => {
-      const replaceRunId = request.forkLastTurn?.replaceRunId ?? request.restartLastTurn?.replaceRunId
-      const visible = visibleTurnsBeforeReplacement(prev, replaceRunId, !!request.restartLastTurn)
-      const index = visible.findIndex((turn) => turn.runId === runId)
-      if (index === -1) {
-        return replayRunLifecycleDeltas(
-          [...visible, { runId, userText: request.prompt, attachments: request.attachments, items: [], done: false }],
-          lifecycleDeltas
-        )
-      }
-      const next = [...visible]
-      next[index] = { ...next[index], userText: request.prompt, attachments: request.attachments }
-      return replayRunLifecycleDeltas(next, lifecycleDeltas)
-    })
+    setTurns((prev) => confirmOptimisticTurn(prev, pendingRunId, runId, request, lifecycleDeltas))
     if (lifecycleDeltas.length > 0) setRunning(false)
     return runId
   }, [])

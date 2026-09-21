@@ -1,4 +1,3 @@
-export const TERMINAL_MAX_SESSIONS = 8
 export const TERMINAL_MAX_INPUT_BYTES = 64 * 1024
 export const TERMINAL_MAX_DIMENSION = 1_000
 

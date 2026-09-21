@@ -1136,7 +1136,7 @@ describe('OpenCode provider adapter', () => {
       cwd: '/repo', mcpFingerprint: 'sha256:auth', url: 'http://127.0.0.1:12345', pid: 44, client
     })
     const persist = vi.spyOn(OpenCodeServerManager.prototype, 'persistMcpAuth').mockResolvedValue()
-    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockImplementation(() => {})
+    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockResolvedValue()
     const adapter = createOpenCodeAdapter(home)
     const execution = {
       cwd: '/repo', fingerprint: 'sha256:auth', env: {},
@@ -1186,7 +1186,7 @@ describe('OpenCode provider adapter', () => {
       cwd: '/repo', mcpFingerprint: 'sha256:auth', url: 'http://127.0.0.1:12345', pid: 44, client
     })
     const persist = vi.spyOn(OpenCodeServerManager.prototype, 'persistMcpAuth').mockResolvedValue()
-    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockImplementation(() => {})
+    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockResolvedValue()
     const adapter = createOpenCodeAdapter(home)
     vi.useFakeTimers()
     try {

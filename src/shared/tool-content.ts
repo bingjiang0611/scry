@@ -12,6 +12,8 @@ export interface ToolContentRef {
 export type ContentRef = ToolContentRef
 
 export interface RecorderContentPageRequest {
+  /** App-owned trace bodies are scoped to the selected catalog workspace. */
+  source?: 'app-trace'
   ref: ContentRef
   offset?: number
   limit?: number

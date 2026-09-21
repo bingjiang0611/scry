@@ -58,6 +58,23 @@ describe('attachment store', () => {
     expect(JSON.stringify(storeAttachmentReference(userDataDir, 'run-1', prepared))).not.toContain(userDataDir)
   })
 
+  it('persists images beyond the former count and per-image limits', () => {
+    const userDataDir = root()
+    const large = Buffer.alloc(10 * 1024 * 1024 + 1)
+    png.copy(large)
+    const prepared = prepareRunAttachments(userDataDir, 'run-large', [
+      { kind: 'image', name: 'large.png', mimeType: 'image/png', dataBase64: large.toString('base64') },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        kind: 'image' as const,
+        name: `${index}.png`,
+        mimeType: 'image/png' as const,
+        dataBase64: png.toString('base64')
+      }))
+    ])
+    expect(prepared).toHaveLength(9)
+    expect(prepared[0].size).toBe(large.byteLength)
+  })
+
   it('persists exact session ownership independently from archive and usage evidence', () => {
     const userDataDir = root()
     prepareRunAttachments(userDataDir, 'run-old', [{

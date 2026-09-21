@@ -81,11 +81,22 @@ export interface RemoteControlOption {
   isDefault?: boolean
 }
 
+export interface RemoteModelOption {
+  id: string
+  providerId?: string
+  label: string
+  description?: string
+  isDefault?: boolean
+  efforts?: RemoteControlOption[]
+}
+
 export interface RemoteProviderRef {
   id: string
   label: string
   available: boolean
+  agentProfileId?: string
   modelId?: string
+  models?: RemoteModelOption[]
   efforts?: RemoteControlOption[]
   permissions?: RemoteControlOption[]
 }
@@ -128,10 +139,12 @@ export interface RemoteSessionRef {
   sessionId: string
   externalSessionId?: string
   providerId: string
+  agentProfileId?: string
   cwd: string
   label: string
   ts: number
   pinnedAt?: number
+  isActive?: boolean
 }
 
 export interface RemoteSessionSource {
@@ -268,6 +281,7 @@ export class RemoteGateway {
   #sessions?: RemoteSessionSource
   #history?: RemoteHistorySource
   #output?: RemoteOutputReader
+  #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
 
   constructor(deps: RemoteGatewayDependencies) {
     this.#authority = deps.authority
@@ -402,10 +416,36 @@ export class RemoteGateway {
     return out
   }
 
-  // The Providers this device may target for a new session, authorized by the
-  // same owner-device check as every method. Display-only snapshot; the run path
-  // still validates the chosen providerId, so this leaks nothing a submit could
-  // not already discover. Deduped and bounded.
+  private modelOptions(value: unknown): RemoteModelOption[] {
+    if (!Array.isArray(value)) return []
+    const out: RemoteModelOption[] = []
+    const seen = new Set<string>()
+    for (const raw of value) {
+      if (!raw || typeof raw !== 'object') continue
+      const option = raw as Record<string, unknown>
+      if (typeof option.id !== 'string' || option.id.length === 0 || option.id.length > 128) continue
+      if (typeof option.label !== 'string' || option.label.length === 0) continue
+      const providerId = typeof option.providerId === 'string' && option.providerId.length > 0 && option.providerId.length <= 128
+        ? option.providerId : undefined
+      const modelKey = `${providerId ?? ''}\0${option.id}`
+      if (seen.has(modelKey)) continue
+      seen.add(modelKey)
+      const efforts = this.controlOptions(option.efforts)
+      out.push({
+        id: option.id,
+        ...(providerId ? { providerId } : {}),
+        label: option.label.slice(0, 128),
+        ...(typeof option.description === 'string' ? { description: option.description.slice(0, 256) } : {}),
+        ...(option.isDefault === true ? { isDefault: true } : {}),
+        ...(efforts.length > 0 ? { efforts } : {})
+      })
+      if (out.length >= 128) break
+    }
+    return out
+  }
+
+  // One entry is one selectable Provider context. Pi profiles deliberately
+  // share the canonical Provider id but carry distinct agentProfileId values.
   listProviders(peerCertSHA256: string): RemoteProviderRef[] {
     this.#authorize(peerCertSHA256)
     const raw = this.#providers?.list() ?? []
@@ -414,15 +454,21 @@ export class RemoteGateway {
     for (const entry of raw) {
       if (!entry || typeof entry.id !== 'string' || typeof entry.label !== 'string') continue
       if (entry.id.length === 0 || entry.id.length > 64) continue
-      if (seen.has(entry.id)) continue
-      seen.add(entry.id)
+      const agentProfileId = typeof entry.agentProfileId === 'string' && entry.agentProfileId.length > 0 && entry.agentProfileId.length <= 128
+        ? entry.agentProfileId : undefined
+      const contextKey = `${entry.id}\0${agentProfileId ?? ''}`
+      if (seen.has(contextKey)) continue
+      seen.add(contextKey)
+      const models = this.modelOptions(entry.models)
       const efforts = this.controlOptions(entry.efforts)
       const permissions = this.controlOptions(entry.permissions)
       out.push({
         id: entry.id,
         label: entry.label.slice(0, 128),
         available: entry.available === true,
+        ...(agentProfileId ? { agentProfileId } : {}),
         ...(typeof entry.modelId === 'string' && entry.modelId.length > 0 && entry.modelId.length <= 128 ? { modelId: entry.modelId } : {}),
+        ...(models.length > 0 ? { models } : {}),
         ...(efforts.length > 0 ? { efforts } : {}),
         ...(permissions.length > 0 ? { permissions } : {})
       })
@@ -471,10 +517,12 @@ export class RemoteGateway {
         sessionId: entry.sessionId,
         ...(typeof entry.externalSessionId === 'string' && entry.externalSessionId.length > 0 ? { externalSessionId: entry.externalSessionId } : {}),
         providerId: entry.providerId.slice(0, 64),
+        ...(typeof entry.agentProfileId === 'string' && entry.agentProfileId.length > 0 && entry.agentProfileId.length <= 128 ? { agentProfileId: entry.agentProfileId } : {}),
         cwd: typeof entry.cwd === 'string' ? entry.cwd.slice(0, MAX_PATH) : '',
         label: typeof entry.label === 'string' ? entry.label.slice(0, 256) : '',
         ts: Number.isFinite(entry.ts) ? entry.ts : 0,
-        ...(typeof entry.pinnedAt === 'number' && Number.isFinite(entry.pinnedAt) && entry.pinnedAt > 0 ? { pinnedAt: entry.pinnedAt } : {})
+        ...(typeof entry.pinnedAt === 'number' && Number.isFinite(entry.pinnedAt) && entry.pinnedAt > 0 ? { pinnedAt: entry.pinnedAt } : {}),
+        ...(entry.isActive === true ? { isActive: true } : {})
       })
       if (out.length >= limit) break
     }
@@ -565,21 +613,36 @@ export class RemoteGateway {
     if (!query || typeof query.providerId !== 'string' || typeof query.externalSessionId !== 'string') {
       throw new RemoteGatewayError('invalid_history_query')
     }
-    const raw = (await this.#history?.read({
-      providerId: query.providerId.slice(0, 64),
-      cwd: typeof query.cwd === 'string' ? query.cwd.slice(0, MAX_PATH) : '',
-      externalSessionId: query.externalSessionId.slice(0, 128)
-    })) ?? []
-    const normalized: RemoteHistoryTurn[] = raw.map((turn) => ({
-      userText: typeof turn?.userText === 'string' ? turn.userText : '',
-      items: (turn?.items ?? []).flatMap((item) =>
-        item && typeof item.text === 'string' && ['output', 'reasoning', 'tool', 'tool_result'].includes(item.kind)
-          ? [{ kind: item.kind, text: item.text } as RemoteHistoryTurn['items'][number]]
-          : [])
-    }))
-    const bytes = Buffer.from(JSON.stringify(normalized), 'utf8')
-    const snapshot = createHash('sha256').update(bytes).digest('hex')
-    if (query.snapshot !== undefined && query.snapshot !== snapshot) throw new RemoteGatewayError('history_snapshot_changed')
+    const providerId = query.providerId.slice(0, 64)
+    const cwd = typeof query.cwd === 'string' ? query.cwd.slice(0, MAX_PATH) : ''
+    const externalSessionId = query.externalSessionId.slice(0, 128)
+    const scope = `${providerId}\0${cwd}\0${externalSessionId}`
+    const now = Date.now()
+    for (const [key, value] of this.#historySnapshots) {
+      if (value.expiresAt <= now) this.#historySnapshots.delete(key)
+    }
+    let bytes: Buffer
+    let snapshot: string
+    const cacheKey = query.snapshot ? `${scope}\0${query.snapshot}` : undefined
+    const cached = cacheKey ? this.#historySnapshots.get(cacheKey) : undefined
+    if (cached && cached.expiresAt > now) {
+      bytes = cached.bytes
+      snapshot = query.snapshot!
+    } else {
+      const raw = (await this.#history?.read({ providerId, cwd, externalSessionId })) ?? []
+      const normalized: RemoteHistoryTurn[] = raw.map((turn) => ({
+        userText: typeof turn?.userText === 'string' ? turn.userText : '',
+        items: (turn?.items ?? []).flatMap((item) =>
+          item && typeof item.text === 'string' && ['output', 'reasoning', 'tool', 'tool_result'].includes(item.kind)
+            ? [{ kind: item.kind, text: item.text } as RemoteHistoryTurn['items'][number]]
+            : [])
+      }))
+      bytes = Buffer.from(JSON.stringify(normalized), 'utf8')
+      snapshot = createHash('sha256').update(bytes).digest('hex')
+      if (query.snapshot !== undefined && query.snapshot !== snapshot) throw new RemoteGatewayError('history_snapshot_changed')
+      this.#historySnapshots.set(`${scope}\0${snapshot}`, { bytes, expiresAt: now + 30_000 })
+      while (this.#historySnapshots.size > 4) this.#historySnapshots.delete(this.#historySnapshots.keys().next().value!)
+    }
     if (cursor > bytes.length) throw new RemoteGatewayError('invalid_history_cursor')
     const end = Math.min(bytes.length, cursor + limit)
     return {

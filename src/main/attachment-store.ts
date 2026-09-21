@@ -19,14 +19,11 @@ import type { ProviderId } from '../shared/provider'
 import {
   decodedBase64ByteLength,
   isSupportedImageMimeType,
-  MAX_AGENT_ATTACHMENT_BYTES,
-  MAX_AGENT_ATTACHMENTS,
-  MAX_AGENT_ATTACHMENTS_TOTAL_BYTES,
   type AgentImageMimeType,
   type AgentInputAttachment
 } from '../shared/runtime'
 
-export const MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES = 64 * 1024 * 1024
+export const MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES = Number.POSITIVE_INFINITY
 
 export type PreparedAttachment = AgentInputAttachment & { path: string }
 
@@ -177,26 +174,17 @@ export function prepareRunAttachments(
   owner?: { providerId: ProviderId; cwd: string; sessionId?: string }
 ): PreparedAttachment[] {
   if (attachments.length === 0) return []
-  if (attachments.length > MAX_AGENT_ATTACHMENTS) throw new Error(`图片附件最多 ${MAX_AGENT_ATTACHMENTS} 张`)
   const candidate = attachmentRunDir(userDataDir, runId)
   if (!candidate) throw new Error('附件 runId 非法')
-  let totalBytes = 0
-  const decoded = attachments.map((attachment) => {
-    const declaredLength = decodedBase64ByteLength(attachment.dataBase64)
-    if (declaredLength == null) throw new Error(`图片 ${attachment.name} 的 base64 数据无效`)
-    const bytes = Buffer.from(attachment.dataBase64.replace(/\s+/g, ''), 'base64')
-    if (bytes.byteLength !== declaredLength || bytes.byteLength > MAX_AGENT_ATTACHMENT_BYTES) {
-      throw new Error(`图片 ${attachment.name} 超过 10 MiB 上限或数据无效`)
-    }
-    if (!matchesImageMime(bytes, attachment.mimeType)) throw new Error(`图片 ${attachment.name} 与 ${attachment.mimeType} 不匹配`)
-    totalBytes += bytes.byteLength
-    return { attachment, bytes }
-  })
-  if (totalBytes > MAX_AGENT_ATTACHMENTS_TOTAL_BYTES) throw new Error('图片附件总大小超过 24 MiB 上限')
   const dir = createTrustedRunDir(userDataDir, runId)
   try {
     if (owner) writeOwnerAtomic(dir, { schemaVersion: 1, runId, ...owner })
-    return decoded.map(({ attachment, bytes }, index) => {
+    return attachments.map((attachment, index) => {
+      const declaredLength = decodedBase64ByteLength(attachment.dataBase64)
+      if (declaredLength == null) throw new Error(`图片 ${attachment.name} 的 base64 数据无效`)
+      const bytes = Buffer.from(attachment.dataBase64.replace(/\s+/g, ''), 'base64')
+      if (bytes.byteLength !== declaredLength) throw new Error(`图片 ${attachment.name} 的 base64 数据无效`)
+      if (!matchesImageMime(bytes, attachment.mimeType)) throw new Error(`图片 ${attachment.name} 与 ${attachment.mimeType} 不匹配`)
       const fileName = safeAttachmentName(attachment.name, attachment.mimeType, index)
       const path = join(dir, fileName)
       writeFileSync(path, bytes, { mode: 0o600, flag: 'wx' })
@@ -283,9 +271,7 @@ function hydrateInline(
   budget: AttachmentHydrationBudget
 ): { attachment: AgentInputAttachment | null; warning?: string } {
   const bytes = decodedBase64ByteLength(attachment.dataBase64)
-  if (bytes == null || bytes > MAX_AGENT_ATTACHMENT_BYTES) {
-    return { attachment: null, warning: `${attachment.name} 数据无效或超过 10 MiB` }
-  }
+  if (bytes == null) return { attachment: null, warning: `${attachment.name} 数据无效` }
   if (budget.usedBytes + bytes > budget.maxBytes) {
     return { attachment: null, warning: `${attachment.name} 超出历史附件 ${Math.round(budget.maxBytes / 1024 / 1024)} MiB 加载预算` }
   }
@@ -325,9 +311,7 @@ export function hydrateStoredAttachment(
     }
     const realRunDir = realpathSync(runDir)
     const realCandidate = realpathSync(candidate)
-    if (dirname(realCandidate) !== realRunDir || fileStat.size > MAX_AGENT_ATTACHMENT_BYTES) {
-      return { attachment: null, warning: `${stored.name} 越界或超过 10 MiB` }
-    }
+    if (dirname(realCandidate) !== realRunDir) return { attachment: null, warning: `${stored.name} 越界` }
     if (budget.usedBytes + fileStat.size > budget.maxBytes) {
       return { attachment: null, warning: `${stored.name} 超出历史附件 ${Math.round(budget.maxBytes / 1024 / 1024)} MiB 加载预算` }
     }

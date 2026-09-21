@@ -18,8 +18,7 @@ import type {
 } from '../shared/terminal'
 import {
   TERMINAL_MAX_DIMENSION,
-  TERMINAL_MAX_INPUT_BYTES,
-  TERMINAL_MAX_SESSIONS
+  TERMINAL_MAX_INPUT_BYTES
 } from '../shared/terminal'
 
 interface Disposable {
@@ -181,10 +180,6 @@ export class TerminalManager {
       throw new Error('终端 cwd 无效')
     }
     assertDimensions(request.cols, request.rows)
-    if (this.sessions.size >= TERMINAL_MAX_SESSIONS) {
-      throw new Error(`最多同时运行 ${TERMINAL_MAX_SESSIONS} 个终端`)
-    }
-
     const boundCwd = this.getCurrentCwd()
     if ((request.cwd === null) !== !boundCwd) throw new Error('终端工作上下文已变化，请重试')
     const currentCwd = boundCwd

@@ -764,7 +764,7 @@ describe('每轮 Git 工作树快照', () => {
     }
   }, 15_000)
 
-  it('大文件 patch 按单文件 32 KiB 预算截断，但 numstat 仍保持完整', async () => {
+  it('大文件 patch 不再按单文件预算截断，且 numstat 保持完整', async () => {
     const root = await initRepo()
     try {
       await writeFile(join(root, 'base.txt'), 'base\n')
@@ -779,9 +779,9 @@ describe('每轮 Git 工作树快照', () => {
       expect(result.files[0]).toMatchObject({
         added: 1,
         deleted: 0,
-        patchStatus: 'truncated'
+        patchStatus: 'captured'
       })
-      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeLessThanOrEqual(32 * 1024)
+      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeGreaterThan(32 * 1024)
       expect(result.files[0].patch).not.toContain('�')
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -811,7 +811,7 @@ describe('每轮 Git 工作树快照', () => {
     }
   }, 15_000)
 
-  it('跨仓库按 record 级 128 KiB 收敛 patch，并保持 UTF-8 完整', () => {
+  it('跨仓库默认保留完整 patch，并保持 UTF-8 完整', () => {
     const snapshot = (repoRoot: string, path: string, patch: string) => ({
       version: 1 as const,
       status: 'captured' as const,
@@ -828,9 +828,9 @@ describe('每轮 Git 工作树快照', () => {
     ])
     const total = result.flatMap(({ files }) => files).reduce((sum, file) => sum + Buffer.byteLength(file.patch ?? ''), 0)
 
-    expect(total).toBeLessThanOrEqual(128 * 1024)
+    expect(total).toBeGreaterThan(128 * 1024)
     expect(result[0].files[0].patchStatus).toBe('captured')
-    expect(result[1].files[0].patchStatus).toBe('truncated')
+    expect(result[1].files[0].patchStatus).toBe('captured')
     expect(result[1].files[0].patch).not.toContain('�')
   })
 })

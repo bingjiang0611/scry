@@ -7,7 +7,7 @@ import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn
 import { copyRecorderContent, readRecorderContent } from './content-store.js'
 import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.45'
+export const RECORDER_VERSION = '0.2.46'
 
 export interface RecorderHealth {
   schemaVersion: 1

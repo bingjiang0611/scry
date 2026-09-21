@@ -78,11 +78,11 @@ describe('HostController (composition root)', () => {
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })
     const { controller } = await grantedController(runProvider)
     const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({
-      prompt: 'go', modelId: 'gpt-5.4', effort: 'high', permissionMode: 'full_access'
+      prompt: 'go', modelId: 'gpt-5.4', modelProviderId: 'openai', effort: 'high', permissionMode: 'full_access'
     }) })
     await controller.idle()
     expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
-    expect(seen[0]).toMatchObject({ modelId: 'gpt-5.4', effort: 'high', permissionMode: 'full_access' })
+    expect(seen[0]).toMatchObject({ modelId: 'gpt-5.4', modelProviderId: 'openai', effort: 'high', permissionMode: 'full_access' })
 
     const rejected = controller.submitIntent(CERT, { intentId: randomUUID(), detail: JSON.stringify({
       cwd: AUTHORIZED, providerId: 'claude', prompt: 'go', permissionMode: 'invented'

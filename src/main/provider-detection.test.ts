@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ProviderDescriptor } from '../shared/provider'
-import { composeProviderDetectionResults } from './provider-detection'
+import { composeProviderDetectionResults, createCachedAsyncLoader } from './provider-detection'
 
 const descriptor = (
   id: ProviderDescriptor['id'],
@@ -16,6 +16,55 @@ const descriptor = (
   version: id === 'pi' ? '0.84.4' : '2.1.170',
   capabilities: { skills: 'read', mcp: 'read', commands: 'none', account: 'none' },
   health: { state: 'ready', transport }
+})
+
+describe('Provider 探测缓存', () => {
+  it('合并并发请求并在 TTL 内复用最后一次成功结果', async () => {
+    let now = 1_000
+    let resolveLoad: ((value: string) => void) | undefined
+    const loader = vi.fn(() => new Promise<string>((resolve) => { resolveLoad = resolve }))
+    const cached = createCachedAsyncLoader(loader, { ttlMs: 60_000, now: () => now })
+
+    const first = cached.load()
+    const concurrent = cached.load()
+    await Promise.resolve()
+    expect(loader).toHaveBeenCalledOnce()
+    resolveLoad?.('ready')
+    await expect(Promise.all([first, concurrent])).resolves.toEqual(['ready', 'ready'])
+
+    now += 59_999
+    await expect(cached.load()).resolves.toBe('ready')
+    expect(loader).toHaveBeenCalledOnce()
+  })
+
+  it('TTL 到期或显式失效后重新加载，且不缓存失败', async () => {
+    let now = 1_000
+    const loader = vi.fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce('second')
+      .mockResolvedValueOnce('third')
+      .mockResolvedValueOnce('fourth')
+    const cached = createCachedAsyncLoader(loader, { ttlMs: 100, now: () => now })
+
+    await expect(cached.load()).rejects.toThrow('temporary failure')
+    await expect(cached.load()).resolves.toBe('second')
+    expect(loader).toHaveBeenCalledTimes(2)
+
+    now += 100
+    await expect(cached.load()).resolves.toBe('third')
+    cached.invalidate()
+    await expect(cached.load()).resolves.toBe('fourth')
+    expect(loader).toHaveBeenCalledTimes(4)
+  })
+
+  it('零 TTL 只合并在途请求，不阻止下一次定时刷新', async () => {
+    const loader = vi.fn().mockResolvedValue('snapshot')
+    const refresh = createCachedAsyncLoader(loader, { ttlMs: 0 })
+
+    await Promise.all([refresh.load(), refresh.load()])
+    await refresh.load()
+    expect(loader).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('Provider 完整探测结果组装', () => {

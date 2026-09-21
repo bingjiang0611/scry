@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.45 \
+npm install -g scry-turn-recorder@0.2.46 \
   --registry=https://registry.npmjs.org
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -253,7 +253,7 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 | 只有 prompt,无工具无 diff | 2.6 KB |
 | 5 次 Edit + 5 文件 diff | 6.6–9.9 KB |
 
-存储量取决于实际采集的原文和 diff，不能按 inline 预算估算总磁盘占用。默认 `full` 的单轮工具正文 inline 预算为 128 KiB（可配置到 1 MiB），但 `contentRef` 指向的完整正文不受此预览预算限制；diff patch 单文件 32 KiB、单轮合计 128 KiB，另有元数据、归档和恢复副本。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
+存储量取决于实际采集的原文和 diff，不能按 inline 预算估算总磁盘占用。默认 `full` 的单轮工具正文 inline 预算为 128 KiB（可配置到 1 MiB），但 `contentRef` 指向的完整正文不受此预览预算限制；diff patch 不再设置单文件或单轮容量上限，另有元数据、归档和恢复副本。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
 
 可选的 `storage` 配置提供软 quota、retention 候选和孤立文件宽限期：
 
@@ -280,16 +280,15 @@ scry records archive --before 30d --yes --workspace "$PWD"    # 执行
 
 需要在 record 落盘后唤醒外部程序时,在 `scry.config.json` 声明 workspace 相对的 `entry` 与完整 `files` 清单。record 持久化且 runtime 清理后,recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON,**仅在回调 exit 0 后**推进 durable ACK;失败或超时会在下次 hook/recovery 重试。
 
-**仓库内配置不能自我授权**,必须显式批准一次:
+有效的仓库 commit hook bundle 默认自动授权，不显示确认提示；以下命令可查看、刷新或删除授权（`--yes` 为旧脚本兼容参数，不再是必需项）：
 
 ```bash
-scry commit-hook trust --workspace "$PWD"          # 只打印 entry、files 与指纹
-scry commit-hook trust --yes --workspace "$PWD"    # 确认授权
+scry commit-hook trust --workspace "$PWD"
 scry commit-hook status --workspace "$PWD"
 scry commit-hook revoke --workspace "$PWD"
 ```
 
-授权记录写在仓库之外(默认 `~/.scry/grants/<workspace-hash>.json`,`0600`,可用 `SCRY_GRANT_DIR` 覆盖)。每次投递前重新校验 entry 与全部 `files` 的内容指纹:未授权、指纹不符或 bundle 非法一律 fail closed,不执行任何程序,record 照常保留待后续投递,原因写入 `.scry/logs/recorder.log`。改过 hook 后需重新 `trust`,并 `scry recorder restart` 让运行中的 daemon 生效。
+授权记录写在仓库之外(默认 `~/.scry/grants/<workspace-hash>.json`,`0600`,可用 `SCRY_GRANT_DIR` 覆盖)，并标记 `source=auto`。每次投递前重新校验 entry 与全部 `files` 的内容指纹；有效 bundle 发生变化时自动更新授权，bundle 非法或路径越界仍 fail closed。`revoke` 只删除当前记录，下次解析有效配置时会重新自动授权。运行中的旧 daemon 需要 `scry recorder restart` 才能加载新代码。
 
 被授权的 entry 以你的权限运行,并能读取全部 record 正文 —— **授权是执行授权,不是脱敏机制**。采集正文默认不脱敏；团队汇总方案需要自行决定上报原文的范围、权限与脱敏，或仅上报 `turns summary` 聚合。
 
@@ -309,7 +308,7 @@ scry recorder notify-drain --workspace "$PWD"
 |---|---|---|---|---|---|
 | `status` | 在采集 | 未启用 / 无已配置 Provider | 已配置但未采到 | — | — |
 | `doctor` | healthy | recorder 未启用 | 配置缺失或非法 | store 损坏 | degraded |
-| `commit-hook status` | 已激活或未配置 | 不可用 | 待授权 | 指纹不符 | bundle 非法 |
+| `commit-hook status` | 已自动激活或未配置 | 不可用 | — | — | bundle 非法 |
 | `records archive` | 完成 | 不可用 | 待确认 / 无候选 | — | 拒绝(未投递) |
 | `turns show/timeline` | 找到 | — | — | store 损坏 | — |
 

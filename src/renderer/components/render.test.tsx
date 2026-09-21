@@ -15,6 +15,7 @@ import {
   MAX_SESSION_COMPOSER_DRAFTS,
   activeRunForSession,
   adoptLocalStartSessionId,
+  attachmentsAfterFailedSubmit,
   attachmentsAfterSuccessfulSubmit,
   appendWorkspaceReference,
   buildForkSessionRequest,
@@ -26,12 +27,13 @@ import {
   applyTurnDoneEffects,
   chatBottomDistance,
   chatBottomStickinessAfterScroll,
-  commitDraftAfterStart,
+  commitDraftOnDispatch,
   dequeueStartedPrompt,
   enqueuePrompt,
   failedSlashCatalog,
   focusedRunNeedsLoading,
   hasSessionOverviewContext,
+  inputAfterFailedSubmit,
   inputAfterSuccessfulSubmit,
   isChatNearBottom,
   migrateSessionComposerDraft,
@@ -1908,6 +1910,19 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('run · r1') // turn.runId
   })
 
+  it('main 尚未返回 runId 时展示即时发送反馈而不暴露临时 ID', () => {
+    const pendingHtml = renderToStaticMarkup(
+      <AssistantTurn
+        turn={{ runId: 'pending-run-1', pendingStart: true, userText: '立即发送', done: false, items: [] }}
+        selectedId={null}
+        onSelect={() => {}}
+      />
+    )
+    expect(pendingHtml).toContain('正在发送')
+    expect(pendingHtml).toContain('正在启动')
+    expect(pendingHtml).not.toContain('pending-run-1')
+  })
+
   it('who 头根据 runtimeProvider 展示 CLI agent 名称', () => {
     const qoderTurn: Turn = {
       runId: 'run-qoder',
@@ -3078,28 +3093,35 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(shouldQueuePrompt(false, 0, false)).toBe(false)
   })
 
-  it('启动成功才提交原草稿，失败时不清空，且保留等待期间新增内容', async () => {
+  it('发送一分派就提交草稿，失败时可恢复且不覆盖等待期间新增内容', async () => {
+    let settle!: () => void
+    const pending = new Promise<void>((resolve) => { settle = resolve })
     let commits = 0
+    const dispatched = commitDraftOnDispatch(
+      () => pending,
+      () => { commits += 1 }
+    )
+    expect(commits).toBe(1)
+    settle()
+    await dispatched
+
     await expect(
-      commitDraftAfterStart(
+      commitDraftOnDispatch(
         () => Promise.reject(new Error('start rejected')),
         () => { commits += 1 }
       )
     ).rejects.toThrow('start rejected')
-    expect(commits).toBe(0)
-
-    await commitDraftAfterStart(
-      () => Promise.resolve(),
-      () => { commits += 1 }
-    )
-    expect(commits).toBe(1)
+    expect(commits).toBe(2)
     expect(inputAfterSuccessfulSubmit('原始草稿', '原始草稿')).toBe('')
     expect(inputAfterSuccessfulSubmit('原始草稿\n等待期间新增', '原始草稿')).toBe('等待期间新增')
     expect(inputAfterSuccessfulSubmit('完全改写', '原始草稿')).toBe('完全改写')
+    expect(inputAfterFailedSubmit('', '原始草稿')).toBe('原始草稿')
+    expect(inputAfterFailedSubmit('等待期间新增', '原始草稿')).toBe('原始草稿\n等待期间新增')
 
     const submitted = { id: 'sent', kind: 'image' as const, name: 'sent.png', mimeType: 'image/png' as const, dataBase64: 'aQ==', previewUrl: 'blob:sent' }
     const newer = { ...submitted, id: 'new', name: 'new.png', previewUrl: 'blob:new' }
     expect(attachmentsAfterSuccessfulSubmit([submitted, newer], new Set(['sent']))).toEqual([newer])
+    expect(attachmentsAfterFailedSubmit([newer], [submitted])).toEqual([submitted, newer])
   })
 
   it('打开会话时不会被历史内容替换产生的中间滚动事件取消粘底', () => {

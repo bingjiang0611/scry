@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { drainRecorderDelivery, handleRecorderHook, mergeTurnTraceEvents, readTranscriptWindow, recoverRecorder, resetTranscriptSnapshotCache, transcriptSnapshotCacheStats } from './recorder'
 import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, recordStoreIndexStats, redeliverLatestCommitNotification, resetRecordStoreIndex, safeKey, verifyStore } from './store'
-import { inspectCommitHookBundle, writeCommitHookGrant } from './commit-hook-grant'
+import { inspectCommitHookBundle, readCommitHookGrant, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 import { syncDirectory } from './io'
 import { readRecorderContent } from './content-store'
@@ -3078,7 +3078,7 @@ describe('nested Git turn diff', () => {
     ])
   }, 35_000)
 
-  it('大 Diff 只限制内联预览并以内容引用保留完整 Unicode patch', async () => {
+  it('大 Diff 完整内联并以内容引用保留 Unicode patch', async () => {
     const root = await workspace()
     await pexecFile('git', ['init'], { cwd: root })
     await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
@@ -3097,8 +3097,8 @@ describe('nested Git turn diff', () => {
 
     const [record] = await listRecords(join(root, '.scry'))
     const file = record.diff.value?.[0].files[0]
-    expect(file).toMatchObject({ patchStatus: 'truncated', patchContent: { storage: 'truncated', sourceCompleteness: 'complete' } })
-    expect(Buffer.byteLength(file?.patch ?? '')).toBeLessThanOrEqual(32 * 1024)
+    expect(file).toMatchObject({ patchStatus: 'captured', patchContent: { storage: 'complete', sourceCompleteness: 'complete' } })
+    expect(Buffer.byteLength(file?.patch ?? '')).toBeGreaterThan(32 * 1024)
     expect(file?.patchContent?.contentRef?.bytes).toBeGreaterThan(32 * 1024)
     const dataRoot = join(root, '.scry')
     const fullPatch = await readRecorderContent(dataRoot, file!.patchContent!.contentRef!)
@@ -3156,19 +3156,20 @@ describe('CLI-side commit hook activation gate', () => {
     await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: payload(sessionId, { timestamp: '2026-07-19T12:00:01.000Z' }), env })
   }
 
-  it('配置了 commitHook 但未授权时，绝不执行 entry，记录仍完整保留', async () => {
+  it('配置了有效 commitHook 时自动授权、执行并推进 ACK', async () => {
     const { root, env, hook } = await gateWorkspace()
 
-    await completeTurnWithEnv(root, 'gate-untrusted', env)
+    await completeTurnWithEnv(root, 'gate-auto', env)
 
     expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
-    await expect(access(hook.capture)).rejects.toThrow()
-    await expect(access(join(root, '.scry', 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
-    const status = await commitNotificationStatus(join(root, '.scry'), env)
-    expect(status).toEqual({ ackedThrough: null, notifyBacklog: 1 })
+    const notification = JSON.parse((await readFile(hook.capture, 'utf8')).trim()) as Record<string, unknown>
+    expect(notification).toMatchObject({ event: 'record-committed', sessionId: 'gate-auto', sequence: 1 })
+    expect((await readCommitHookGrant(root, env))?.source).toBe('auto')
+    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+      .resolves.toContain('"ackedThrough":1')
   })
 
-  it('显式授权后才激活投递，并推进 durable ACK', async () => {
+  it('已有显式授权仍激活投递，并推进 durable ACK', async () => {
     const { root, env, hook } = await gateWorkspace()
     const location = await resolveRecorderLocation(root)
     if (!location.valid || !location.config.commitHook) throw new Error('fixture config invalid')
@@ -3182,7 +3183,7 @@ describe('CLI-side commit hook activation gate', () => {
       .resolves.toContain('"ackedThrough":1')
   })
 
-  it('授权后 entry 被篡改则 fail closed，并在 recorder 日志留下原因', async () => {
+  it('entry 变化后重验并自动更新授权，再执行新脚本', async () => {
     const { root, env, hook } = await gateWorkspace()
     const location = await resolveRecorderLocation(root)
     if (!location.valid || !location.config.commitHook) throw new Error('fixture config invalid')
@@ -3192,9 +3193,10 @@ describe('CLI-side commit hook activation gate', () => {
 
     await completeTurnWithEnv(root, 'gate-tampered', env)
 
-    await expect(access(hook.capture)).rejects.toThrow()
-    await expect(readFile(join(root, '.scry', 'logs', 'recorder.log'), 'utf8'))
-      .resolves.toContain('commit hook not activated (fingerprint-mismatch)')
+    const captured = await readFile(hook.capture, 'utf8')
+    expect(captured).toContain('"sessionId":"gate-tampered"')
+    expect(captured).toContain('tampered')
+    expect((await readCommitHookGrant(root, env))?.source).toBe('auto')
   })
 })
 

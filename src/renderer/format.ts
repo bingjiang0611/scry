@@ -89,6 +89,8 @@ export function fileWriteCoverage(items: TraceEvent[]): FileCoverage {
 
 export interface Turn {
   runId: string
+  /** Renderer-only placeholder shown while main is admitting a newly submitted run. */
+  pendingStart?: boolean
   providerTurnId?: string
   forkTurnId?: string
   userText: string

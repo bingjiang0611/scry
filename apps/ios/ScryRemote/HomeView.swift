@@ -155,8 +155,9 @@ struct HomeView: View {
     let openable = session.externalSessionId?.isEmpty == false
     Button {
       guard openable, let external = session.externalSessionId else { return }
-      model.openedSession = OpenedSession(providerId: session.providerId, cwd: session.cwd,
-                                          externalSessionId: external, label: session.label)
+      model.openedSession = OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId,
+                                          cwd: session.cwd, externalSessionId: external, label: session.label,
+                                          isActive: session.isActive == true)
       model.route = .transcript
     } label: {
       HStack(alignment: .top, spacing: 10) {
@@ -170,7 +171,11 @@ struct HomeView: View {
           }
         }
         Spacer(minLength: 8)
-        if !openable { Text("进行中").font(.system(size: 10)).foregroundStyle(Palette.amber) }
+        if session.isActive == true {
+          Text("运行中").font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.blue)
+        } else if !openable {
+          Text("准备中").font(.system(size: 10)).foregroundStyle(Palette.amber)
+        }
       }
       .padding(.leading, indent).padding(.vertical, showsMetadata ? 12 : 13)
       .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
@@ -226,7 +231,7 @@ struct SettingsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      RemoteHeader(title: "设置", backAction: { model.route = .home }) {
+      RemoteHeader(title: "设置", backAction: { model.goBack() }) {
         Color.clear.frame(width: 44, height: 44)
       }
       ScrollView {

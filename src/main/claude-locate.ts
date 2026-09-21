@@ -325,6 +325,10 @@ function fastAgentPath(id: string, bin: string): string | undefined {
       '/usr/local/bin/opencode'
     ])
   }
+  // Pi launchers are commonly installed by nvm or under ~/.local/bin. Finder/Dock apps
+  // inherit launchd's minimal PATH, so process PATH alone disagrees with the full async
+  // detector and can advertise pi:rotom in the UI but fail to resolve it when sending.
+  if (id === 'pi:default' || id === 'pi:rotom') return onProcessPath || which(bin)
   return onProcessPath
 }
 

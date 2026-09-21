@@ -286,10 +286,6 @@ export interface NormalizedAgentStartRequest {
 
 export type AgentImageMimeType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
 
-export const MAX_AGENT_ATTACHMENTS = 8
-export const MAX_AGENT_ATTACHMENT_BYTES = 10 * 1024 * 1024
-export const MAX_AGENT_ATTACHMENTS_TOTAL_BYTES = 24 * 1024 * 1024
-
 export interface AgentInputAttachment {
   kind: 'image'
   name: string
@@ -628,19 +624,6 @@ export function normalizeAgentAttachments(value: unknown): AgentInputAttachment[
       height: typeof a.height === 'number' ? a.height : undefined,
       path: typeof a.path === 'string' ? a.path : undefined
     }))
-  if (attachments.length > MAX_AGENT_ATTACHMENTS) {
-    throw new Error(`图片附件最多 ${MAX_AGENT_ATTACHMENTS} 张`)
-  }
-  let totalBytes = 0
-  for (const attachment of attachments) {
-    if ((attachment.size ?? 0) > MAX_AGENT_ATTACHMENT_BYTES) {
-      throw new Error(`图片 ${attachment.name} 超过 10 MiB 上限`)
-    }
-    totalBytes += attachment.size ?? 0
-  }
-  if (totalBytes > MAX_AGENT_ATTACHMENTS_TOTAL_BYTES) {
-    throw new Error('图片附件总大小超过 24 MiB 上限')
-  }
   return attachments
 }
 

@@ -40,9 +40,17 @@ enum Route: Hashable { case home, newSession, chat, pair, transcript, settings }
 // a session with none is not yet resumable/readable and is not opened.
 struct OpenedSession: Equatable {
   let providerId: String
+  let agentProfileId: String?
   let cwd: String
   let externalSessionId: String
   let label: String
+  let isActive: Bool
+
+  init(providerId: String, agentProfileId: String? = nil, cwd: String,
+       externalSessionId: String, label: String, isActive: Bool = false) {
+    self.providerId = providerId; self.agentProfileId = agentProfileId; self.cwd = cwd
+    self.externalSessionId = externalSessionId; self.label = label; self.isActive = isActive
+  }
 }
 
 // Honest pairing UI state. A fingerprint means the device PROVED possession and
@@ -239,6 +247,14 @@ final class AppModel: ObservableObject {
     pairingTask = nil
     pairing = .idle
     if case .pairing = link { link = .notPaired }
+  }
+
+  var canGoBack: Bool { signedIn && route != .home }
+
+  func goBack() {
+    guard canGoBack else { return }
+    if route == .pair { cancelPairing() }
+    route = .home
   }
 
   // Ordinary sign out intentionally retains the paired grant. It only locks

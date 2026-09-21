@@ -28,13 +28,14 @@ describe('composer drafts', () => {
 
   it('round-trips raw text and attachments without persisting blob URLs', () => {
     const storage = new MemoryStorage()
-    const drafts = new Map<string, ComposerDraft>([['key', { input: 'draft text', attachments: [attachment('a.png')] }]])
+    const drafts = new Map<string, ComposerDraft>([['key', { input: 'draft text', attachments: Array.from({ length: 9 }, (_, index) => attachment(`${index}.png`)) }]])
     writeComposerDrafts(storage, drafts)
     expect(storage.value).toContain('aGVsbG8=')
-    expect(storage.value).not.toContain('blob:a.png')
+    expect(storage.value).not.toContain('blob:0.png')
     const restored = readComposerDrafts(storage).get('key')
     expect(restored?.input).toBe('draft text')
-    expect(restored?.attachments[0]).toMatchObject({ name: 'a.png', dataBase64: 'aGVsbG8=' })
+    expect(restored?.attachments).toHaveLength(9)
+    expect(restored?.attachments[0]).toMatchObject({ name: '0.png', dataBase64: 'aGVsbG8=' })
     expect(restored?.attachments[0].previewUrl).toBe('data:image/png;base64,aGVsbG8=')
   })
 

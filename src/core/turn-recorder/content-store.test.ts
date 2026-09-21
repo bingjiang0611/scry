@@ -29,6 +29,19 @@ function events(output: string): TraceEvent[] {
 const policy = { toolOutput: 'full-redacted' as const, toolContentFieldBytes: 64, toolContentTurnBytes: 64 }
 
 describe('recorder content store', () => {
+  it('bounds a payload larger than 10 MiB while retaining complete durable evidence', async () => {
+    const dataRoot = await root()
+    const exposed = `${'0123456789abcdef'.repeat(700_000)}TAIL`
+    const persisted = await persistToolEventContent(events(exposed), policy, 'large_fixture', (content, encoding) =>
+      writeRecorderContent(dataRoot, content, encoding))
+    const field = persisted[1].outputContent!
+
+    expect(Buffer.byteLength(exposed)).toBeGreaterThan(10 * 1024 * 1024)
+    expect(field.savedBytes).toBeLessThanOrEqual(policy.toolContentFieldBytes)
+    expect(field.contentRef).toBeDefined()
+    expect(await readRecorderContent(dataRoot, field.contentRef!)).toBe(exposed)
+  })
+
   it('persists complete raw content while keeping the inline record bounded', async () => {
     const dataRoot = await root()
     const secret = 'SECRET_AFTER_PREVIEW'

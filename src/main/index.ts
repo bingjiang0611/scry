@@ -80,7 +80,7 @@ import { createBuiltInProviderAdapters } from './providers'
 import { createSmokeProviderAdapter } from './providers/smoke'
 import { piRpcEnvironment, probePiAgent } from './providers/pi'
 import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
-import { composeProviderDetectionResults } from './provider-detection'
+import { composeProviderDetectionResults, createCachedAsyncLoader } from './provider-detection'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
 import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
 import { verifyForkArchiveBoundary } from './session-fork'
@@ -89,6 +89,8 @@ import { createTurnWallTimer } from './turn-wall-timing'
 import { PerformanceTrace } from './performance-timing'
 import { startPerformanceResourceMonitor, type PerformanceResourceMonitor } from './performance-resource-monitor'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
+import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
+import { persistTraceToolEvents, readAppTraceContentPage } from './trace-tool-content'
 import {
   isManagedRecorderProvider,
   managedRecorderAllowsMissingProviderTurnId,
@@ -96,7 +98,7 @@ import {
   recoverManagedRecorderTurns,
   type ManagedTurnTiming
 } from '../core/turn-recorder/managed'
-import { resolveRecorderEnablement } from '../core/turn-recorder/config'
+import { resolveRecorderEnablement, resolveRecorderLocation } from '../core/turn-recorder/config'
 import { readAuthorizedRecorderContentPage } from './recorder-content-access'
 import { TurnChangeJournal } from '../core/turn-recorder/change-journal'
 import { attachConfiguredHookCommands, loadClaudeHookConfig, loadCodexHookConfig } from './hook-config'
@@ -188,7 +190,6 @@ import {
   managedSessionRunIds
 } from './managed-turn-commit'
 import {
-  commitHookTrustPolicy,
   createCommitHookTrustStore,
   inspectCommitHookBundle,
   resolveGrantedCommitHookCapability
@@ -206,8 +207,6 @@ import {
 } from './renderer-security'
 import {
   buildMcpExecutionSnapshot,
-  confirmMcpExecutionAuthorization,
-  decideMcpExecutionAuthorization,
   McpExecutionTrust,
   type McpExecutionOperation,
   type McpExecutionSnapshot
@@ -264,7 +263,6 @@ let win: BrowserWindow | null = null
 let runSeq = 0
 let isShuttingDown = false
 const isOwnedTestApp = process.env.SCRY_TEST_APP === '1'
-const autoApproveTestTrust = isOwnedTestApp
 const mainEventId = (prefix: string, runId: string): string => `${prefix}-${runId}-${randomUUID()}`
 let startupManagedRecovery: Promise<void> = Promise.resolve()
 const primaryInstance = isOwnedTestApp || app.requestSingleInstanceLock()
@@ -461,12 +459,15 @@ const listProjectCatalog = async (): Promise<ProjectMeta[]> => {
   return mergeProjectMetas(store.load(), sessionProjects)
 }
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
-const detectInstalledAgents = () => detectAgents({
+const fullAgentDetection = createCachedAsyncLoader(() => detectAgents({
   versionProbeEnv: (agent, executable) => providerIdForAgentId(agent.id) === 'pi'
     ? piRpcEnvironment({ id: agent.id, label: agent.name, executable })
     : undefined
-})
-const detectedPiProfiles = async (): Promise<PiAgentProfile[]> => (await detectInstalledAgents()).flatMap((agent) => {
+}), { ttlMs: 60_000 })
+const detectInstalledAgents = () => fullAgentDetection.load()
+// Provider descriptors and runtime profile resolution only need executable identity. Do not turn
+// their frequent availability reads into version subprocesses for every installed Provider.
+const detectedPiProfiles = async (): Promise<PiAgentProfile[]> => detectAgentsFast().flatMap((agent) => {
   if (providerIdForAgentId(agent.id) !== 'pi') return []
   try {
     const profile = piProfileForExecutable(agent.path)
@@ -591,15 +592,6 @@ function codexHookInspectionError(cwd: string, message: string, nextAction: stri
   })
 }
 
-function codexHookSourceSummary(inspection: CodexHookInspection): string {
-  const counts = new Map<string, number>()
-  for (const hook of inspection.hooks.filter((item) => item.enabled)) {
-    const source = hook.source === 'project' ? '项目级' : hook.source === 'user' ? '用户级' : hook.source
-    counts.set(source, (counts.get(source) ?? 0) + 1)
-  }
-  return [...counts.entries()].map(([source, count]) => `${source} ${count}`).join('，')
-}
-
 async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]> {
   let inspection: CodexHookInspection
   try {
@@ -627,34 +619,6 @@ async function resolveCodexHookTrust(cwd: string): Promise<CodexHookTrustGrant[]
   const store = codexHookGrantStore()
   if (!store.isGranted(cwd, fingerprint)) {
     const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
-    if (!autoApproveTestTrust) {
-      const detail = [
-        `仓库：${cwd}`,
-        `来源：${codexHookSourceSummary(inspection) || '未知'}`,
-        `指纹：${fingerprint}`,
-        '',
-        ...pending.map((hook, index) => `${index + 1}. ${hook.eventName} · ${hook.sourcePath}\n   ${hook.currentHash}`),
-        ...(inspection.warnings.length > 0 ? ['', `警告：${inspection.warnings.join('；')}`] : []),
-        '',
-        '只有上面列出的精确 Hook key/hash 会被放行；内容变化后将重新询问。'
-      ].join('\n')
-      const options = {
-        type: 'warning' as const,
-        title: '授权当前仓库的 Codex Hook',
-        message: `Codex 已发现 ${pending.length} 个尚未信任的项目 Hook`,
-        detail,
-        buttons: ['取消', '允许这些 Hook 并启动'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
-      }
-      const result = win && !win.isDestroyed()
-        ? await dialog.showMessageBox(win, options)
-        : await dialog.showMessageBox(options)
-      if (result.response !== 1) {
-        throw codexHookInspectionError(cwd, '用户未授权当前 Codex Hook', '检查 Hook 来源后重新发送，或禁用项目 Hook')
-      }
-    }
     try {
       store.grant(cwd, fingerprint, enabledCount)
     } catch (error) {
@@ -684,41 +648,6 @@ async function resolveOpenCodePluginTrust(cwd: string): Promise<OpenCodeProjectP
 
   const store = openCodePluginGrantStore()
   if (!store.isGranted(projection.cwd, projection.pluginFingerprint)) {
-    if (!autoApproveTestTrust) {
-      const list = projection.plugins.map((plugin, index) => [
-        `${index + 1}. ${plugin.path}`,
-        `   SHA-256 ${plugin.digest}（${plugin.size} bytes）`
-      ].join('\n'))
-      const options = {
-        type: 'warning' as const,
-        title: '授权当前仓库的 OpenCode plugin',
-        message: `OpenCode 已发现 ${projection.plugins.length} 个项目 plugin`,
-        detail: [
-          `仓库：${projection.cwd}`,
-          '',
-          ...list,
-          '',
-          '允许后，Scry 只执行上面列出的精确文件字节，并将其复制到 Scry 私有 0600 快照。',
-          '以后同一组路径和 SHA-256 自动放行；任一增删或内容变化都会重新询问。',
-          '这是 Scry 的本地授权，不会伪造或修改 OpenCode 自身的信任状态。'
-        ].join('\n'),
-        buttons: ['允许当前 plugin 并启动', '取消'],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true
-      }
-      const result = win && !win.isDestroyed()
-        ? await dialog.showMessageBox(win, options)
-        : await dialog.showMessageBox(options)
-      if (result.response !== 0) {
-        throw new AgentRuntimeError('已取消 OpenCode 项目 plugin 授权', {
-          provider: 'opencode_server',
-          stage: 'capability',
-          cwd,
-          nextAction: '如需执行当前项目 plugin，请再次发送任务并在授权对话框中选择允许'
-        })
-      }
-    }
     try {
       store.grant(projection.cwd, projection.pluginFingerprint, projection.plugins.length)
     } catch (error) {
@@ -780,35 +709,8 @@ async function resolveManagedCommitHookEnv(
     }
   }
   if (!granted) {
-    // 默认策略是 auto_grant：不弹窗、不阻断发送，直接按 cwd+指纹登记一条 source=auto 的授权。
-    // SCRY_COMMIT_HOOK_TRUST=prompt 才恢复原来的逐指纹确认弹窗。
-    const policy = commitHookTrustPolicy()
-    if (policy === 'prompt' && !autoApproveTestTrust) {
-      const options = {
-        type: 'warning' as const,
-        title: '授权 Recorder 提交回调',
-        message: '当前仓库请求在每轮记录提交后执行本地脚本',
-        detail: [
-          `仓库：${inspection.workspace}`,
-          `入口：${inspection.entry}`,
-          `文件：${inspection.files.length}`,
-          `指纹：${inspection.fingerprint}`,
-          '',
-          '未授权时仍会保存本地 recorder 数据，但不会执行回调。',
-          '允许后只执行冻结到 Scry 私有目录的精确文件字节；内容变化后将重新询问。'
-        ].join('\n'),
-        buttons: ['不执行回调', '允许当前回调'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
-      }
-      const result = win && !win.isDestroyed()
-        ? await dialog.showMessageBox(win, options)
-        : await dialog.showMessageBox(options)
-      if (result.response !== 1) return baseEnv
-    }
     try {
-      await store.grant(inspection.workspace, inspection.fingerprint, policy === 'auto_grant' ? 'auto' : 'user')
+      await store.grant(inspection.workspace, inspection.fingerprint, 'auto')
     } catch (error) {
       console.warn('[scry] recorder commit hook grant failed:', cwd, error)
       return baseEnv
@@ -840,7 +742,7 @@ async function resolveGrantedManagedCommitHookEnv(cwd: string): Promise<NodeJS.P
       enablement.config.commitHook,
       app.getPath('userData'),
       undefined,
-      { autoGrant: commitHookTrustPolicy() === 'auto_grant' }
+      { autoGrant: true }
     )
     if (!capability) return baseEnv
     const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
@@ -879,24 +781,9 @@ async function ensureMcpExecutionAuthorized(
   if (targetId && selected.length !== 1) throw new Error(`找不到精确 MCP 配置目标：${targetId}`)
   if (selected.length === 0) return operation === 'run' ? null : snapshot
 
-  const hasGrant = mcpExecutionTrust.isGranted(operation, snapshot)
-  let executionTargetIds = hasGrant
-    ? mcpExecutionTrust.grantedTargetIds(operation, snapshot)
-    : undefined
-  if (!hasGrant) {
-    const decision = await decideMcpExecutionAuthorization(snapshot, operation, selected, async (prompt) => {
-      if (autoApproveTestTrust) return true
-      return confirmMcpExecutionAuthorization(prompt, async (options) => {
-        const result = win && !win.isDestroyed()
-          ? await dialog.showMessageBox(win, options)
-          : await dialog.showMessageBox(options)
-        return { response: result.response }
-      })
-    })
-    if (decision.mode === 'deny') throw new Error('用户未授权执行当前 MCP 配置')
-    if (decision.mode === 'allow-targets') executionTargetIds = decision.targetIds
-    // 非阻断配置默认允许；高风险配置必须显式授权，拒绝时仅隔离风险 MCP，不阻断 Agent 会话。
-  }
+  // 仓库 MCP 默认自动授权全部选中目标；旧的部分授权不会继续限制当前配置。
+  // 配置、可执行文件或指纹变化仍会在启动边界重新校验。
+  const executionTargetIds = undefined
 
   const verified = build()
   if (verified.errors.length > 0 || verified.fingerprint !== snapshot.fingerprint) {
@@ -979,6 +866,7 @@ interface ArchiveTraceTurnArgs {
   observedTiming?: ManagedTurnTiming
   commitHookEnv?: NodeJS.ProcessEnv
   managedRecorderEnabled: boolean
+  beforePersist?: () => Promise<void>
 }
 
 function cloneForkArchiveTurns(args: {
@@ -1079,6 +967,7 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
 }
 
 async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void> {
+  await args.beforePersist?.()
   const { turn, timing } = buildTraceArchiveTurn(args)
   const archiveCwd = args.cwd ?? ''
   const managedPolicy = args.managedRecorderEnabled && archiveCwd && isManagedRecorderProvider(args.providerId)
@@ -1138,6 +1027,7 @@ async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promise<void
 }
 
 async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
+  await args.beforePersist?.()
   const archiveCwd = args.cwd ?? ''
   const managedPolicy = args.managedRecorderEnabled && archiveCwd && isManagedRecorderProvider(args.providerId)
   if (args.managedRecorderEnabled && !managedPolicy) {
@@ -1920,6 +1810,12 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     signal.throwIfAborted()
     throw error
   }
+  if (archived) {
+    for (const turn of archived.turns) {
+      turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
+      signal.throwIfAborted()
+    }
+  }
   perf.mark('archive', {
     archiveTurns: archived?.turns.length ?? 0,
     archiveTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0,
@@ -1951,6 +1847,10 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
       signal.throwIfAborted()
       if (!archived) throw error
     }
+  }
+  for (const turn of turns) {
+    turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
+    signal.throwIfAborted()
   }
   perf.mark('transcript', { transcriptTurns: turns.length, transcriptBytes })
   // Cancellation is not evidence of an empty session. Reject it so the renderer
@@ -2045,6 +1945,12 @@ handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, req
       snapshotTotalTurns: cache.archiveSnapshotTotalTurns
     })
     if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+    if (sourcePage.archive) {
+      for (const turn of sourcePage.archive.turns) {
+        turn.items = await persistTraceToolEvents(cache.context.userDataDir, cwd, turn.items)
+      }
+      if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+    }
     const turns = mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
     const page = hydrateSessionHistoryPage({
       turns,
@@ -2415,6 +2321,16 @@ function flushTraceSend(): void {
 }
 function queueTrace(ev: TraceEvent): void {
   traceOutput.push(ev)
+}
+
+const LIVE_TOOL_CONTENT_POLICY = {
+  toolOutput: 'full' as const,
+  toolContentFieldBytes: 8 * 1024,
+  toolContentTurnBytes: 128 * 1024
+}
+
+function boundedLiveRun(run: ActiveRun): ActiveRun {
+  return { ...run, items: sanitizeToolEvents(run.items, LIVE_TOOL_CONTENT_POLICY, 'live_renderer') }
 }
 
 handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
@@ -2857,6 +2773,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   // emit 早于 diffPreviewer 构造，这里留一个前向钩子；构造完成后接上真正的预览刷新。
   let notifyDiffChange: () => void = () => {}
+  // App trace capture does not require a workspace recorder. Keep raw evidence until its
+  // durable body exists; then release it from run state and send only the bounded projection.
+  const ingestionEnablement = managedRecorderEnablement?.enabled ? managedRecorderEnablement : undefined
+  const ingestionRecorderRoot = managedRecorderEnabled && ingestionEnablement?.config.capture.toolOutput === 'full'
+    ? ingestionEnablement.dataRoot : undefined
+  let ingestionTail: Promise<void> = Promise.resolve()
   // 结构化 write/edit 的 start → tool_result 关联器：预览只跟着「已落盘」的结果走。
   const writeCompletions = new WriteCompletionTracker()
   const emit = (rawEvent: TraceEvent): void => {
@@ -2869,9 +2791,27 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         ev
       )
     }
+    const liveEvent = sanitizeToolEvents([ev], LIVE_TOOL_CONTENT_POLICY, 'live_renderer')[0]
     appendCoalescedTrace(runState.items, ev)
+    if (['tool', 'skill', 'agent'].includes(ev.kind)) {
+      ingestionTail = ingestionTail.then(async () => {
+        let projected = liveEvent
+        try {
+          const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [ev], ingestionRecorderRoot)
+          const index = runState.items.findIndex((item) => item.id === ev.id)
+          if (index >= 0) runState.items[index] = persisted
+          projected = persisted
+        } catch (error) {
+          // Observation fails open, but never discard the raw archive evidence on a disk error.
+          console.warn('[scry] trace content persistence failed; retaining raw evidence:', error)
+        }
+        if (runs.isFocused(runId)) queueTrace(projected)
+      })
+    } else {
+      // Preserve Provider event order while earlier tool bodies are being persisted.
+      ingestionTail = ingestionTail.then(() => { if (runs.isFocused(runId)) queueTrace(liveEvent) })
+    }
     if (ev.backgroundWork && rendererCanReceive()) win?.webContents.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
-    if (runs.isFocused(runId)) queueTrace(ev) // 后台 run 继续归档，只把当前会话 trace 推给 UI。
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
     if (writeCompletions.observe(ev)) notifyDiffChange()
@@ -3259,6 +3199,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
     if (interrupted) h.interrupt()
     const result = await h.promise
+    await ingestionTail
     if (result.status === 'failed') {
       const providerMessage = [...runState.items].reverse().find(
         (event) => event.kind === 'harness' && event.stage === 'result' && event.isError
@@ -3321,7 +3262,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   // the regression runner), so publish the authoritative focused snapshot after
   // registration and before the Provider can emit trace or questions.
   try {
-    win?.webContents.send('agent:focusedRun', runState)
+    win?.webContents.send('agent:focusedRun', boundedLiveRun(runState))
   } catch (error) {
     console.warn('[scry] focused run renderer notification failed:', runId, error)
   }
@@ -3361,7 +3302,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         status: completionStatus,
         observedTiming,
         commitHookEnv: managedCommitHookEnv,
-        managedRecorderEnabled
+        managedRecorderEnabled,
+        beforePersist: () => ingestionTail
       }
       if (cwd) {
         try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
@@ -3545,6 +3487,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         observedTiming,
         commitHookEnv: managedCommitHookEnv,
         managedRecorderEnabled,
+        beforePersist: () => ingestionTail,
         ...(stopped ? {} : { error: message, errorHint: hint })
       }
       if (cwd) {
@@ -3747,12 +3690,18 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
 })
 
 // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
-handleTrusted('agent:activeRun', (): ActiveRun | null => runs.focusedState())
+handleTrusted('agent:activeRun', (): ActiveRun | null => {
+  const state = runs.focusedState()
+  return state ? boundedLiveRun(state) : null
+})
 handleTrusted('agent:unreadSessions', () => dockBadge.snapshot())
 // live trace 降级恢复专用：忽略 done，只要 registry 里还有这个 run 就给出权威事件序列。
 // activeRun 会因为 done=true 返回 null，那样终态被跳过的事件永远补不回来。
-handleTrusted('agent:focusedRunSnapshot', (): ActiveRun | null => runs.focusedSnapshot())
-handleTrusted('agent:activeRuns', (): ActiveRun[] => runs.activeStates())
+handleTrusted('agent:focusedRunSnapshot', (): ActiveRun | null => {
+  const state = runs.focusedSnapshot()
+  return state ? boundedLiveRun(state) : null
+})
+handleTrusted('agent:activeRuns', (): ActiveRun[] => runs.activeStates().map(boundedLiveRun))
 handleTrusted('agent:focusRun', (_event, runId: string | null): boolean => {
   const focused = runs.focus(runId)
   if (!focused || !runId) return focused
@@ -3767,7 +3716,7 @@ handleTrusted('agent:adoptActiveRun', (_event, runId: string): ActiveRun | null 
   runs.focus(runId)
   const sessionKey = activeRunSessionKey(entry.state)
   if (sessionKey) dockBadge.view(sessionKey, Boolean(win?.isFocused()))
-  return entry.state
+  return boundedLiveRun(entry.state)
 })
 handleTrusted('agent:answerQuestion', (event, response: unknown) => {
   if (!win || event.sender.id !== win.webContents.id) return false
@@ -3796,10 +3745,21 @@ handleTrusted('agent:importBillingFixture', async () => {
 // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
 handleTrusted('agent:gitDiff', (_e, cwd: string) => gitNumstat(cwd))
 handleTrusted('agent:recorderContentPage', async (_event, request: unknown) => {
-  if (!currentCwd) throw new Error('recorder_workspace_unavailable')
-  const enablement = await resolveRecorderEnablement(currentCwd)
-  if (!enablement.enabled) throw new Error(`recorder_unavailable:${enablement.reason}`)
-  return readAuthorizedRecorderContentPage(enablement.dataRoot, request)
+  const cwd = currentCwd ?? ''
+  if (request && typeof request === 'object' && 'source' in request) {
+    if (request.source !== 'app-trace') throw new Error('invalid_content_source')
+    const page = await readAppTraceContentPage(app.getPath('userData'), cwd, request)
+    if ((currentCwd ?? '') !== cwd) throw new Error('recorder_workspace_changed')
+    return page
+  }
+  if (!cwd) throw new Error('recorder_workspace_unavailable')
+  // Reading is authorized by the selected workspace's validated recorder location and record
+  // references, not by the current enablement flag. Existing evidence remains inspectable when
+  // capture is disabled or a sentinel is present; no path supplied by the renderer is opened.
+  const location = await resolveRecorderLocation(cwd)
+  if (currentCwd !== cwd) throw new Error('recorder_workspace_changed')
+  if (!location.valid) throw new Error(`recorder_unavailable:${location.reason}`)
+  return readAuthorizedRecorderContentPage(location.dataRoot, request)
 })
 
 // trace live 镜像的消费确认：renderer 完成批量 state commit 后归还精确批次额度。
@@ -3922,7 +3882,9 @@ let remoteProviderSnapshot: {
   id: string
   label: string
   available: boolean
+  agentProfileId?: string
   modelId?: string
+  models?: { id: string; providerId?: string; label: string; description?: string; isDefault?: boolean; efforts?: { id: string; label: string; description?: string; isDefault?: boolean }[] }[]
   efforts?: { id: string; label: string; description?: string; isDefault?: boolean }[]
   permissions?: { id: string; label: string; description?: string; isDefault?: boolean }[]
 }[] = []
@@ -3930,30 +3892,70 @@ let remoteProviderSnapshot: {
 // the Mac session catalog with the correct runtime (recordSession below).
 let remoteProviderRuntime = new Map<string, RuntimeProvider>()
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
-async function refreshRemoteProviderSnapshot(): Promise<void> {
+
+function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
+  const raw = process.env.SCRY_REMOTE_PERMISSION_MODE
+  return raw === 'full_access' || raw === 'auto_review' || raw === 'default' ? raw : undefined
+}
+
+async function loadRemoteProviderSnapshot(): Promise<void> {
   try {
     const descriptors = await providerRegistry.describe()
-    remoteProviderSnapshot = await Promise.all(descriptors.map(async (descriptor) => {
-      if (!descriptor.available) return { id: descriptor.id, label: descriptor.label, available: false }
-      const controls = await providerRegistry.runControls({ providerId: descriptor.id })
-      const model = controls.data?.models.find((option) => option.isDefault) ?? controls.data?.models[0]
-      return {
-        id: descriptor.id,
-        label: descriptor.label,
-        available: true,
-        ...(model?.model.id ? { modelId: model.model.id } : {}),
-        ...(model?.efforts.length ? { efforts: model.efforts } : {}),
-        ...(controls.data?.permissions.length ? {
-          permissions: controls.data.permissions.map((option) => ({
-            ...option,
-            ...(option.id === 'default' ? { isDefault: true } : {})
-          }))
-        } : {})
-      }
+    const contexts = await Promise.all(descriptors.map(async (descriptor) => {
+      if (!descriptor.available) return [{ id: descriptor.id, label: descriptor.label, available: false }]
+      const profiles = descriptor.id === 'pi' ? await listPiProfiles() : []
+      const targets = profiles.length > 0 ? profiles.map((profile) => ({ id: profile.id, label: profile.label })) : [undefined]
+      return Promise.all(targets.map(async (profile) => {
+        const controlsCwd = remoteProjectRoots()[0]
+        const controls = await providerRegistry.runControls({
+          providerId: descriptor.id,
+          ...(controlsCwd ? { cwd: controlsCwd } : {}),
+          ...(profile ? { agentProfileId: profile.id } : {})
+        })
+        const models = controls.data?.models.map((option) => ({
+          id: option.model.id,
+          ...(option.model.providerId ? { providerId: option.model.providerId } : {}),
+          label: option.label,
+          ...(option.description ? { description: option.description } : {}),
+          ...(option.isDefault ? { isDefault: true } : {}),
+          ...(option.efforts.length ? { efforts: option.efforts } : {})
+        })) ?? []
+        const model = controls.data?.models.find((option) => option.isDefault) ?? controls.data?.models[0]
+        const remotePermissionMode = configuredRemotePermissionMode()
+        const advertisedPermissions = remotePermissionMode
+          ? controls.data?.permissions.filter((option) => option.id === remotePermissionMode)
+          : controls.data?.permissions
+        return {
+          id: descriptor.id,
+          label: profile ? `${descriptor.label} · ${profile.label}` : descriptor.label,
+          available: true,
+          ...(profile ? { agentProfileId: profile.id } : {}),
+          ...(model?.model.id ? { modelId: model.model.id } : {}),
+          ...(models.length ? { models } : {}),
+          ...(model?.efforts.length ? { efforts: model.efforts } : {}),
+          ...(controls.data?.permissions.length || remotePermissionMode ? {
+            // An owner-set override is authoritative. Advertise only the mode
+            // that will really execute so the phone renders it as locked rather
+            // than offering choices that the Mac would silently ignore.
+            permissions: (advertisedPermissions?.length ? advertisedPermissions : [{
+              id: remotePermissionMode ?? 'default',
+              label: remotePermissionMode === 'full_access' ? '完全访问' : remotePermissionMode === 'auto_review' ? '自动审查' : '默认审批'
+            }]).map((option) => ({
+              ...option,
+              ...(remotePermissionMode ? { isDefault: true } : option.id === 'default' ? { isDefault: true } : {})
+            }))
+          } : {})
+        }
+      }))
     }))
+    remoteProviderSnapshot = contexts.flat()
     remoteProviderRuntime = new Map(descriptors.map((d) => [d.id, d.runtimeProvider]))
   } catch { /* keep the last good snapshot rather than fabricate */ }
 }
+// A slow Provider control probe may exceed the timer interval. Coalesce those ticks and keep the
+// last successful picker snapshot for one minute instead of probing every Provider every 15 seconds.
+const remoteProviderSnapshotRefresh = createCachedAsyncLoader(loadRemoteProviderSnapshot, { ttlMs: 60_000 })
+const refreshRemoteProviderSnapshot = (): Promise<void> => remoteProviderSnapshotRefresh.load()
 
 async function startRemoteHostIfEnabled(): Promise<void> {
   if (remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
@@ -3969,9 +3971,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     // Provider runs without blocking on an approval the remote path cannot route.
     // This is an explicit owner opt-in on their own machine, not a silent escalation.
     const remotePermissionRaw = process.env.SCRY_REMOTE_PERMISSION_MODE
-    const remotePermissionMode: AgentPermissionMode | undefined =
-      remotePermissionRaw === 'full_access' || remotePermissionRaw === 'auto_review' || remotePermissionRaw === 'default'
-        ? remotePermissionRaw : undefined
+    const remotePermissionMode = configuredRemotePermissionMode()
     if (remotePermissionRaw && !remotePermissionMode) console.warn(`[scry] ignoring invalid SCRY_REMOTE_PERMISSION_MODE=${remotePermissionRaw}`)
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
     remoteHostService = await RemoteHostService.create({
@@ -4056,7 +4056,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(providerId)) {
           return { commands: [], reason: 'unsupported_provider' }
         }
-        const canonical = resolveKnownProjectDirectory(cwd)
+        const canonical = resolveRemoteProjectDirectory(cwd)
         const context: ProviderContext = {
           providerId: providerId as ProviderId,
           cwd: canonical,
@@ -4078,25 +4078,26 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // offered), non-archived, most-recent-first. Display metadata only; opening
       // a session's content is re-authorized separately.
       listSessions: () => {
-        const authorized = new Set<string>()
-        for (const cwd of knownProjectDirectories()) {
-          try { authorized.add(resolveKnownProjectDirectory(cwd)) } catch { /* skip unresolved */ }
-        }
-        const out: { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number; pinnedAt?: number }[] = []
+        const activeRuns = runs.activeStates()
+        const out: { sessionId: string; externalSessionId?: string; providerId: string; agentProfileId?: string; cwd: string; label: string; ts: number; pinnedAt?: number; isActive?: boolean }[] = []
         for (const s of appSessionStore().load()) {
           if (s.archivedAt) continue
           if (!s.cwd) continue
           let canonical: string
-          try { canonical = resolveKnownProjectDirectory(s.cwd) } catch { continue }
-          if (!authorized.has(canonical)) continue
+          try { canonical = resolveRemoteProjectDirectory(s.cwd) } catch { continue }
+          const isActive = activeRuns.some((run) =>
+            run.providerId === s.providerId && run.cwd === canonical &&
+            (run.runId === s.runId || Boolean(s.externalSessionId && run.externalSessionId === s.externalSessionId)))
           out.push({
             sessionId: s.sessionId,
             ...(s.externalSessionId ? { externalSessionId: s.externalSessionId } : {}),
             providerId: s.providerId ?? 'legacy_unknown',
+            ...(s.agentProfileId ? { agentProfileId: s.agentProfileId } : {}),
             cwd: canonical,
             label: (s.title ?? s.preview ?? '').slice(0, 256),
             ts: s.ts,
-            ...(s.pinnedAt ? { pinnedAt: s.pinnedAt } : {})
+            ...(s.pinnedAt ? { pinnedAt: s.pinnedAt } : {}),
+            ...(isActive ? { isActive: true } : {})
           })
         }
         out.sort((a, b) => b.ts - a.ts)
@@ -4111,12 +4112,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       readHistory: async ({ providerId, cwd, externalSessionId }) => {
         if (!providerId || !externalSessionId) return []
         let canonical: string
-        try { canonical = cwd ? resolveKnownProjectDirectory(cwd) : '' } catch { return [] }
-        if (canonical) {
-          const authorized = new Set<string>()
-          for (const dir of knownProjectDirectories()) { try { authorized.add(resolveKnownProjectDirectory(dir)) } catch { /* skip */ } }
-          if (!authorized.has(canonical)) return []
-        }
+        try { canonical = cwd ? resolveRemoteProjectDirectory(cwd) : '' } catch { return [] }
         const userDataDir = app.getPath('userData')
         const archived = await readTraceArchiveAsync({ cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId, userDataDir })
         let turns: ParsedTurn[] = []
@@ -4129,9 +4125,20 @@ async function startRemoteHostIfEnabled(): Promise<void> {
             } catch { /* transcript unreadable; fall back to archive */ }
           }
         }
-        if (turns.length === 0 && !archived) return []
+        const activeRun = runs.activeStates().find((run) =>
+          run.providerId === providerId && run.cwd === canonical &&
+          (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId))
+        if (turns.length === 0 && !archived && !activeRun) return []
         const merged = mergeSessionTurns(turns, archived, { userDataDir })
-        return merged.map((turn) => ({ userText: turn.userText, items: flattenTraceItems(turn.items) }))
+        const history = merged.map((turn) => ({ userText: turn.userText, items: flattenTraceItems(turn.items) }))
+        // Terminal turns are read from the durable archive above. While the Mac
+        // is still executing, append the in-memory authoritative trace so the
+        // phone can follow the same reasoning/tool/output progress in real time.
+        if (activeRun) {
+          const bounded = boundedLiveRun(activeRun)
+          history.push({ userText: bounded.userText, items: flattenTraceItems(bounded.items) })
+        }
+        return history
       }
     })
     await remoteHostService.start()

@@ -26,7 +26,7 @@ async function fixture() {
   await handleRecorderHook({ provider: 'claude', event: 'PostToolUse', workspace: root, payload: payload({ tool_name: 'Bash', tool_use_id: 'call', tool_response: '前🙂后'.repeat(30_000) }) })
   await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, payload: payload({ assistant_response: 'done' }) })
   const [record] = await listRecords(join(root, '.scry'))
-  return { dataRoot: join(root, '.scry'), ref: record.tools.value![0].outputContent!.contentRef! }
+  return { root, dataRoot: join(root, '.scry'), ref: record.tools.value![0].outputContent!.contentRef! }
 }
 
 describe('authorized recorder content pages', () => {
@@ -49,5 +49,15 @@ describe('authorized recorder content pages', () => {
     const { dataRoot, ref } = await fixture()
     await expect(readAuthorizedRecorderContentPage(dataRoot, { ref: { ...ref, sha256: 'a'.repeat(64) } })).rejects.toThrow('not_authorized')
     await expect(readAuthorizedRecorderContentPage(dataRoot, { ref, limit: RECORDER_CONTENT_PAGE_MAX_BYTES + 1 })).rejects.toThrow('invalid_recorder_content_limit')
+  })
+
+  it('keeps existing evidence readable when recorder capture is disabled', async () => {
+    const { root, dataRoot, ref } = await fixture()
+    await writeFile(join(root, '.scry-disabled'), '')
+    await expect(readAuthorizedRecorderContentPage(dataRoot, { ref, limit: 32 })).resolves.toMatchObject({
+      offset: 0,
+      nextOffset: 32,
+      totalBytes: ref.bytes
+    })
   })
 })

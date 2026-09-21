@@ -448,7 +448,10 @@ async function exercisePiPermission(contents, scenario) {
   }
   const state = `JSON.parse(document.querySelector('#permission-state').textContent)`
   await wait(`${state}.pending === 1 && document.querySelector('.clibtn')?.textContent.includes('Rotom')`)
+  contents.focus()
   await click('textarea[aria-label="描述任务"]')
+  // Native mouse dispatch is asynchronous; insertion must wait for observable editable focus.
+  await wait(`document.activeElement === document.querySelector('textarea[aria-label="描述任务"]')`)
   await contents.insertText('Pi permission regression')
   await wait(`document.querySelector('textarea').value === 'Pi permission regression'`)
   if (!await read(`document.querySelector('.send').disabled`)) throw new Error(`Pi ${scenario}: loading catalog allowed send`)

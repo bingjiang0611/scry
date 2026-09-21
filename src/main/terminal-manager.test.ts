@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   TERMINAL_MAX_DIMENSION,
   TERMINAL_MAX_INPUT_BYTES,
-  TERMINAL_MAX_SESSIONS,
   type TerminalDataEvent,
   type TerminalExitEvent
 } from '../shared/terminal'
@@ -327,16 +326,15 @@ describe('TerminalManager', () => {
     expect(() => manager.start({ cwd, cols, rows })).toThrow('终端尺寸')
   })
 
-  it('限制为八个活跃会话，退出后释放名额', () => {
+  it('允许超过八个活跃会话，退出仍清理对应会话', () => {
     const cwd = workspace()
     const { manager, pty } = fixture(cwd)
-    for (let index = 0; index < TERMINAL_MAX_SESSIONS; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       manager.start({ cwd, cols: 80, rows: 24 })
     }
-    expect(() => manager.start({ cwd, cols: 80, rows: 24 })).toThrow('最多同时运行')
-
+    expect(manager.activeSessions()).toHaveLength(12)
     pty.processes[0].emitExit(0)
-    expect(() => manager.start({ cwd, cols: 80, rows: 24 })).not.toThrow()
+    expect(manager.activeSessions()).toHaveLength(11)
   })
 
   it('lists active process metadata and keeps adopted dimensions current', () => {

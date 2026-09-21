@@ -280,7 +280,7 @@ function bytesFromBase64(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
-export function RecorderContentPager({ label, contentRef }: { label: string; contentRef: ContentRef }) {
+export function RecorderContentPager({ label, contentRef, source }: { label: string; contentRef: ContentRef; source?: string }) {
   const [pages, setPages] = useState<DisplayContentPage[]>([])
   const [cursor, setCursor] = useState(-1)
   const [loading, setLoading] = useState(false)
@@ -295,14 +295,15 @@ export function RecorderContentPager({ label, contentRef }: { label: string; con
     setLoading(false)
     setError(undefined)
     decoderRef.current = new TextDecoder()
-  }, [contentRef.sha256])
+  }, [contentRef.sha256, source])
 
   const load = useCallback(async (offset: number) => {
     const generation = generationRef.current
     setLoading(true)
     setError(undefined)
     try {
-      const page = await window.scry.recorderContentPage({ ref: contentRef, offset, limit: CONTENT_PAGE_BYTES })
+      const page = await window.scry.recorderContentPage({ ref: contentRef, offset, limit: CONTENT_PAGE_BYTES,
+        ...(source === 'scry_app_trace' ? { source: 'app-trace' as const } : {}) })
       if (generation !== generationRef.current) return
       const text = decoderRef.current.decode(bytesFromBase64(page.dataBase64), { stream: page.hasMore })
       setPages((current) => {
@@ -315,7 +316,7 @@ export function RecorderContentPager({ label, contentRef }: { label: string; con
     } finally {
       if (generation === generationRef.current) setLoading(false)
     }
-  }, [contentRef])
+  }, [contentRef, source])
 
   const page = pages[cursor]
   return (
@@ -498,14 +499,14 @@ function ToolItem({
                 <pre>{JSON.stringify(ev.input, null, 2)}</pre>
               </>
             ) : null}
-            {ev.inputContent?.contentRef && <RecorderContentPager label="input" contentRef={ev.inputContent.contentRef} />}
+            {ev.inputContent?.contentRef && <RecorderContentPager label="input" contentRef={ev.inputContent.contentRef} source={ev.inputContent.source} />}
             {ev.output && (
               <>
-                <div className="lbl">output{ev.isError ? ' · error' : ''}</div>
+                <div className="lbl">output{ev.isError ? ' · error' : ''}{ev.outputContent?.storage === 'truncated' ? ' · preview' : ''}</div>
                 <pre>{ev.output.slice(0, 4000)}</pre>
               </>
             )}
-            {ev.outputContent?.contentRef && <RecorderContentPager label="output" contentRef={ev.outputContent.contentRef} />}
+            {ev.outputContent?.contentRef && <RecorderContentPager label="output" contentRef={ev.outputContent.contentRef} source={ev.outputContent.source} />}
           </div>
         )}
         </div>
@@ -1632,11 +1633,11 @@ function AssistantTurnImpl({
     <div className="turn-assistant">
       <div className="who">
         <span className="av">{runtime.avatar}</span> {runtime.label}
-        <span className="runid">run · {turn.runId}</span>
+        <span className="runid">{turn.pendingStart ? '正在发送' : `run · ${turn.runId}`}</span>
         {!turn.done && !turn.error ? (
           <span className="running">
             {backgroundStatus?.waiting ? <Icon name="clock" /> : <span className="spin" />}
-            {backgroundStatus?.label ?? '运行中'}
+            {turn.pendingStart ? '正在启动' : backgroundStatus?.label ?? '运行中'}
           </span>
         ) : (
           <span className="mini">

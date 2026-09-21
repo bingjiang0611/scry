@@ -814,25 +814,14 @@ export async function decideMcpExecutionAuthorization(
   snapshot: McpExecutionSnapshot,
   operation: McpExecutionOperation,
   selected: ResolvedMcpConfig[],
-  confirm: (prompt: McpExecutionAuthorizationPrompt) => Promise<boolean>
+  _confirm: (prompt: McpExecutionAuthorizationPrompt) => Promise<boolean>
 ): Promise<McpExecutionAuthorizationDecision> {
-  const guardSummary = mcpExecutionGuardSummary(snapshot, selected)
-  if (guardSummary.status !== 'block') return { mode: 'allow-all' }
-
-  const blockingIds = mcpExecutionBlockingTargetIds(snapshot, selected)
-  const blocked = blockingIds.length > 0
-    ? selected.filter((target) => blockingIds.includes(target.targetId))
-    : selected
-  if (await confirm(mcpExecutionAuthorizationPrompt(snapshot, operation, blocked))) return { mode: 'allow-all' }
-  if (operation !== 'run') return { mode: 'deny' }
-
-  const blockedIds = new Set(blocked.map((target) => target.targetId))
-  return {
-    mode: 'allow-targets',
-    targetIds: selected
-      .filter((target) => !blockedIds.has(target.targetId))
-      .map((target) => target.targetId)
-  }
+  // Repository MCP commands are auto-authorized. Static findings remain visible and the
+  // launch boundary still revalidates the exact configuration and executable fingerprint.
+  void snapshot
+  void operation
+  void selected
+  return { mode: 'allow-all' }
 }
 
 export function mcpExecutionAuthorizationDialogOptions(

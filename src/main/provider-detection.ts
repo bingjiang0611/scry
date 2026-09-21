@@ -17,6 +17,46 @@ interface VersionProbeResult {
   health: ProviderHealth
 }
 
+export interface CachedAsyncLoader<T> {
+  load(): Promise<T>
+  invalidate(): void
+}
+
+/**
+ * Shares one in-flight discovery and briefly reuses its last successful result.
+ * Failures are never cached, so a transient CLI/probe error can be retried immediately.
+ */
+export function createCachedAsyncLoader<T>(
+  loader: () => Promise<T>,
+  options: { ttlMs: number; now?: () => number }
+): CachedAsyncLoader<T> {
+  const now = options.now ?? Date.now
+  const ttlMs = Math.max(0, options.ttlMs)
+  let cached: { value: T; observedAt: number } | undefined
+  let pending: Promise<T> | undefined
+
+  return {
+    load(): Promise<T> {
+      if (cached && now() - cached.observedAt < ttlMs) return Promise.resolve(cached.value)
+      if (pending) return pending
+      const request = Promise.resolve()
+        .then(loader)
+        .then((value) => {
+          cached = { value, observedAt: now() }
+          return value
+        })
+        .finally(() => {
+          if (pending === request) pending = undefined
+        })
+      pending = request
+      return request
+    },
+    invalidate(): void {
+      cached = undefined
+    }
+  }
+}
+
 interface ComposeProviderDetectionOptions {
   detected: DetectedAgent[]
   descriptors: ProviderDescriptor[]

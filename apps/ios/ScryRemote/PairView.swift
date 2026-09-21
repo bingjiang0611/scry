@@ -8,7 +8,7 @@ struct PairView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      RemoteHeader(title: "连接 Mac", backAction: { model.cancelPairing(); model.route = .home }) {
+      RemoteHeader(title: "连接 Mac", backAction: { model.goBack() }) {
         Color.clear.frame(width: 44, height: 44)
       }
       ScrollView {
@@ -48,7 +48,7 @@ struct PairView: View {
             .foregroundStyle(.white).background(Palette.blue, in: Capsule())
         }
         .buttonStyle(.plain)
-        Button { model.cancelPairing(); model.route = .home } label: {
+        Button { model.goBack() } label: {
           Text("稍后连接").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.plain).foregroundStyle(Palette.muted)
