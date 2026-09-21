@@ -29,6 +29,20 @@ The history benchmark compares the previous eager behavior against two bounded p
 
 Benchmarks are informational, not timing gates. Run them on the same machine and otherwise idle checkout; compare medians and inspect variance.
 
+## 2026-09-21 repeated legacy-history load
+
+A Pi archive with 8 turns and 741 tool events was read without modifying the source; all content-store writes went to a temporary directory. On the local macOS / Node 24.18.0 checkout, one before/after sample of the same archive measured:
+
+| Stage | Before | Optimized |
+|---|---:|---:|
+| Archive read and parse | 64 ms | 67 ms |
+| Re-project raw events with their content blobs already on disk | 21,254 ms | 415 ms |
+| Merge after that repeated projection | 7 ms | 7 ms |
+
+The repeated projection previously attempted a durable exclusive write for every tool body before discovering `EEXIST`. `writeRecorderContent` now reads and verifies the existing size and SHA-256 first, then syncs the published link's directory. Missing blobs still use the original durable exclusive writer; concurrent publication, corruption and sync errors are not treated as success. This path needs no in-memory cache to survive restart.
+
+Scope: these are single-stage measurements, not an App restart/UI acceptance or a statistical benchmark. First materialization into an empty content store remains expensive (24.6 s before / 32.6 s after in these samples); the improvement is reuse, not faster initial migration. No archive bytes, evidence or full-content links are discarded. The focused regression in `src/core/turn-recorder/content-store.test.ts` proves reuse avoids the writer and preserves corruption/concurrent-publication/sync-failure behavior; it failed on the old implementation.
+
 ## 2026-09-16 reference run
 
 Environment: Apple silicon, macOS 27.0, Node 24.18.0, Scry 0.2.148. Vitest reports `hz`; mean values below are derived from that run and are not cross-machine thresholds.

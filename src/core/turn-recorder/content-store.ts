@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { open, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { isToolContentRef, type ToolContentRef } from '../../shared/tool-content.js'
-import { writeFileAtomicExclusive } from './io.js'
+import { syncDirectory, writeFileAtomicExclusive } from './io.js'
 
 function contentPath(dataRoot: string, sha256: string): string {
   return join(dataRoot, 'content', 'sha256', sha256.slice(0, 2), `${sha256}.bin`)
@@ -38,16 +38,29 @@ export async function writeRecorderContent(
   const bytes = Buffer.from(content, 'utf8')
   const sha256 = digest(bytes)
   const path = contentPath(dataRoot, sha256)
+  const ref: ToolContentRef = { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }
+  let existing: Buffer
   try {
-    await writeFileAtomicExclusive(path, bytes)
+    existing = await readFile(path)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const existing = await readFile(path)
-    if (existing.length !== bytes.length || digest(existing) !== sha256) {
-      throw new Error(`recorder content collision or corruption: ${sha256}`)
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    try {
+      await writeFileAtomicExclusive(path, bytes)
+      return ref
+    } catch (writeError) {
+      if ((writeError as NodeJS.ErrnoException).code !== 'EEXIST') throw writeError
+      // Another publisher won after our read. Verify its bytes just like an existing blob.
+      existing = await readFile(path)
     }
   }
-  return { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }
+  if (existing.length !== bytes.length || digest(existing) !== sha256) {
+    throw new Error(`recorder content collision or corruption: ${sha256}`)
+  }
+  // The exclusive writer syncs the bytes and ancestor directories before publishing the link.
+  // Reuse must still sync that link: a previous publisher may have failed its final directory sync.
+  // Do not rewrite a temporary copy and fsync every ancestor for each history event on restart.
+  await syncDirectory(dirname(path))
+  return ref
 }
 
 export async function readRecorderContent(dataRoot: string, ref: ToolContentRef): Promise<string> {

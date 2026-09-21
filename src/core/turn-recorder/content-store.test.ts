@@ -1,7 +1,8 @@
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as io from './io.js'
 import type { TraceEvent } from '../../shared/trace.js'
 import { isToolContent } from '../../shared/tool-content.js'
 import { aggregateTurnEvidence } from './aggregate.js'
@@ -10,6 +11,7 @@ import { captureToolContent, persistToolEventContent, sanitizeToolEvents } from 
 
 const roots: string[] = []
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -127,6 +129,46 @@ describe('recorder content store', () => {
     expect(second).toEqual(first)
     expect(await readRecorderContent(dataRoot, first)).toBe('same content')
     expect(await readdir(join(dataRoot, 'content', 'sha256', first.sha256.slice(0, 2)))).toEqual([`${first.sha256}.bin`])
+  })
+
+  it('reuses verified bytes without rewriting them, but still syncs the published link', async () => {
+    const dataRoot = await root()
+    const ref = await writeRecorderContent(dataRoot, 'already durable', 'utf8')
+    const write = vi.spyOn(io, 'writeFileAtomicExclusive')
+    const sync = vi.spyOn(io, 'syncDirectory')
+    const directory = join(dataRoot, 'content', 'sha256', ref.sha256.slice(0, 2))
+
+    expect(await writeRecorderContent(dataRoot, 'already durable', 'utf8')).toEqual(ref)
+    expect(write).not.toHaveBeenCalled()
+    expect(sync).toHaveBeenCalledWith(directory)
+
+    sync.mockRejectedValueOnce(new Error('directory sync failed'))
+    await expect(writeRecorderContent(dataRoot, 'already durable', 'utf8')).rejects.toThrow('directory sync failed')
+    await writeFile(join(directory, `${ref.sha256}.bin`), 'already durablE')
+    await expect(writeRecorderContent(dataRoot, 'already durable', 'utf8')).rejects.toThrow('collision or corruption')
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('recovers a published blob after its final directory sync failed without rewriting it', async () => {
+    const dataRoot = await root()
+    const originalWrite = io.writeFileAtomicExclusive
+    const write = vi.spyOn(io, 'writeFileAtomicExclusive').mockImplementationOnce((path, bytes) =>
+      originalWrite(path, bytes, { syncDirectory: async () => { throw new Error('publish sync failed') } }))
+    await expect(writeRecorderContent(dataRoot, 'recover publication', 'utf8')).rejects.toThrow('publish sync failed')
+    const sync = vi.spyOn(io, 'syncDirectory')
+
+    const ref = await writeRecorderContent(dataRoot, 'recover publication', 'utf8')
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(sync).toHaveBeenCalledWith(join(dataRoot, 'content', 'sha256', ref.sha256.slice(0, 2)))
+    expect(await readRecorderContent(dataRoot, ref)).toBe('recover publication')
+  })
+
+  it('converges concurrent publishers on the same verified content', async () => {
+    const dataRoot = await root()
+    const refs = await Promise.all(Array.from({ length: 4 }, () => writeRecorderContent(dataRoot, 'concurrent', 'utf8')))
+    expect(refs.every((ref) => ref.sha256 === refs[0].sha256)).toBe(true)
+    expect(await readRecorderContent(dataRoot, refs[0])).toBe('concurrent')
+    expect(await readdir(join(dataRoot, 'content', 'sha256', refs[0].sha256.slice(0, 2)))).toEqual([`${refs[0].sha256}.bin`])
   })
 
   it('fails explicitly on unavailable storage and corrupted referenced bytes', async () => {
