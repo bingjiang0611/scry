@@ -511,21 +511,17 @@ const resolvePiProfile = async (id: string): Promise<PiAgentProfile | undefined>
 }
 let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
 const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(app.getPath('userData'))
-const builtInProviderAdapters = createBuiltInProviderAdapters(
+const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
+  process.env.ELECTRON_ENABLE_LOGGING === '1' &&
+  process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
+const smokeDetectedAgents = [{ id: 'codex', name: 'Codex Smoke Fixture', bin: 'codex', path: process.execPath }]
+const builtInProviderAdapters = smokeProviderEnabled ? [createSmokeProviderAdapter()] : createBuiltInProviderAdapters(
   homeDir,
   join(app.getPath('userData'), 'codex-home-v1'),
   join(app.getPath('userData'), 'provider-auth', 'opencode'),
   join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
   { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile }
 )
-if (
-  process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
-  process.env.ELECTRON_ENABLE_LOGGING === '1' &&
-  process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
-) {
-  const codexIndex = builtInProviderAdapters.findIndex((adapter) => adapter.id === 'codex')
-  if (codexIndex >= 0) builtInProviderAdapters[codexIndex] = createSmokeProviderAdapter()
-}
 const providerRegistry = new ProviderRegistry(
   builtInProviderAdapters,
   {
@@ -1239,6 +1235,7 @@ handleTrusted('app:reportRendererPerformance', (_event, sample: unknown) => {
 })
 
 handleTrusted('agent:detectFast', () => {
+  if (smokeProviderEnabled) return smokeDetectedAgents
   const detected = detectAgentsFast().flatMap((agent) => {
     const providerId = providerIdForAgentId(agent.id)
     if (!providerId) return []
@@ -1266,12 +1263,13 @@ handleTrusted('agent:detectFast', () => {
 
 handleTrusted('agent:detect', async () => {
   // 先异步完成 PATH/版本探测，让 descriptor 的同步 fallback 命中已知路径，避免阻塞主进程。
-  const detected = await detectInstalledAgents()
+  // Capability disabling alone does not disable discovery's real --version subprocesses.
+  const detected = smokeProviderEnabled ? smokeDetectedAgents : await detectInstalledAgents()
   const descriptors = await providerRegistry.describe()
   return composeProviderDetectionResults({
     detected,
     descriptors,
-    storedPiProfiles: storedPiProfilesNotDetected(detected),
+    storedPiProfiles: smokeProviderEnabled ? [] : storedPiProfilesNotDetected(detected),
     probeStoredPiProfile: async (profile) => probeCliVersion(profile.executable, ['--version'], {
       env: await piRpcEnvironment(profile),
       timeout: PI_VERSION_PROBE_TIMEOUT_MS

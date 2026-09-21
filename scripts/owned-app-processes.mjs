@@ -33,7 +33,8 @@ function remaining(owned) {
   for (const identity of owned.values()) {
     const row = current.get(identity.pid)
     if (!row || row.started !== identity.started || row.status.startsWith('Z')) continue
-    if (row.command !== identity.command) throw new Error(`owned process identity changed: ${row.pid}; refusing signal`)
+    // Exit can race ps's command read. Read-only waiting tolerates that transient;
+    // any actual signal still requires the original command identity below.
     live.push(row)
   }
   return live
@@ -52,6 +53,7 @@ async function waitForGone(owned, timeoutMs) {
 function signalOwned(owned, signal) {
   // Revalidate registered identities immediately before each sweep. Never signal by name/cwd.
   for (const row of remaining(owned)) {
+    if (row.command !== owned.get(row.pid).command) throw new Error(`owned process identity changed; refusing signal: ${JSON.stringify({ pid: row.pid, expected: owned.get(row.pid).command, observed: row.command, status: row.status })}`)
     try { process.kill(row.pid, signal) } catch (error) { if (error.code !== 'ESRCH') throw error }
   }
 }

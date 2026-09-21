@@ -145,6 +145,8 @@ async function main() {
   ]) {
     assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
   }
+  const discovered = await evaluate(`Promise.all([window.scry.detectFast(), window.scry.detect(), window.scry.providerDescriptors()]).then((groups) => groups.map((group) => group.map((item) => item.id)))`)
+  assert.deepEqual(discovered, [['codex'], ['codex'], ['codex']], 'smoke discovery must use only the fixture adapter')
   const disabledCapabilities = await evaluate(`Promise.all(['claude', 'qoder', 'opencode', 'pi'].map(async (providerId) => {
     const context = { providerId, cwd: ${JSON.stringify(workspace)} }
     const results = await Promise.all([window.scry.runControls(context), window.scry.listSkills(context)])
@@ -866,6 +868,8 @@ async function main() {
     appPath,
     rendererUrl: page.url,
     preloadKeys: boundary.preloadKeys.length,
+    fixtureDiscovery: discovered,
+    toolContent: { boundedHistory: lifecycleSmoke.boundedHistory, fullTail: lifecycleSmoke.fullTail, foreignContentDenied: lifecycleSmoke.foreignContentDenied },
     terminal: true,
     rendererReloadTerminal: {
       active: activeAfterReload,
@@ -885,6 +889,10 @@ async function main() {
 
 try {
   await main()
+} catch (error) {
+  // Keep the primary assertion and App logs visible even if cleanup independently fails.
+  console.error('[scry] smoke failure:', error, stderr.slice(-8000))
+  throw error
 } finally {
   // A failed cleanup throws before deleting the fixture, preserving evidence for diagnosis.
   await stopOwnedApp(child)
