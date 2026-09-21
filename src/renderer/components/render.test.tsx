@@ -730,6 +730,22 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     expect(html).not.toContain('新会话 · 本机证据')
   })
 
+  it('正在加载选中的历史时显示进度，而不是空归档或上一次错误', () => {
+    const html = renderWelcome({
+      cwd: '/tmp/project',
+      hasSelectedSession: true,
+      sessionLoading: true,
+      sessionEvidenceGap: { status: 'error', detail: 'previous failure' }
+    })
+
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain('data-status="loading"')
+    expect(html).toContain('正在加载会话历史')
+    expect(html).not.toContain('这条会话暂时没有可显示的轮次')
+    expect(html).not.toContain('previous failure')
+    expect(html).not.toContain('welcome-hero-icon')
+  })
+
   it('加载失败不声称历史为空，并告诉用户如何重新加载', () => {
     const html = renderWelcome({
       cwd: '/tmp/project',

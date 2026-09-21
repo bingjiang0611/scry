@@ -386,6 +386,12 @@ export function ChatView({
           aria-label="执行时间线"
           aria-busy={sessionLoading}
         >
+          {sessionLoading && hasSelectedSession && (
+            <div className="chat-session-evidence-gap" role="status" data-status="loading">
+              <b>正在加载会话历史</b>
+              <span>正在读取本机归档，请稍候。</span>
+            </div>
+          )}
           {/* 选中的历史会话读不到证据时必须说实话，不能假装成“新会话”。 */}
           {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
             <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>

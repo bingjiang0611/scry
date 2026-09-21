@@ -1669,8 +1669,6 @@ export function App() {
     if (providerId === 'legacy_unknown') return
     const cwdChanged = projectCwd !== cwd
     if (cwdChanged && !confirmWorkspaceTransition()) return
-    const seq = ++sessionSelectionSeqRef.current
-    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     const switchingSession = sessionSelectionChanged(
       {
         cwd: cwdRef.current,
@@ -1687,9 +1685,14 @@ export function App() {
         agentProfileId
       }
     )
+    // Re-selecting an in-flight history must not invalidate its response or restart the main read.
+    // The catalog row is selected before its body arrives; that is not a completed selection.
+    if (!switchingSession && sessionLoading) return
+    const seq = ++sessionSelectionSeqRef.current
+    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     setComposerError(null)
     setSessionEvidenceGap(null)
-    setSessionLoading(switchingSession)
+    setSessionLoading(switchingSession || session.turns.length === 0)
     if (switchingSession) session.clearTurns()
     resetPromptQueueControl()
     requestChatBottom(true)

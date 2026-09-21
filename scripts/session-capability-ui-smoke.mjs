@@ -380,6 +380,15 @@ async function exerciseSessionSelection(contents, scenario) {
   if (scenario === 'focused-event') await click('#focus-pi')
   else await click('.sb-sess[data-provider="pi"]:not(.running)')
   await wait(`${state}.historyReads === 1`)
+  if (scenario === 'repeat-pending') {
+    await click('.sb-sess[data-provider="pi"]')
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    if (await read(`${state}.historyReads !== 1 || document.querySelector('.chat-transcript')?.getAttribute('aria-busy') !== 'true'`)) {
+      throw new Error('Repeated pending selection restarted history or cleared its loading state')
+    }
+    await wait(`document.querySelector('[data-status="loading"]')?.textContent.includes('正在加载会话历史')`)
+    if (await read(`document.body.innerText.includes('这条会话暂时没有可显示的轮次')`)) throw new Error('Pending history was reported as empty')
+  }
   if (scenario !== 'late-startup') await click('#resolve-snapshots')
   if (scenario === 'late-startup-loading') {
     await wait(`${state}.snapshots === 0`)
@@ -516,7 +525,7 @@ try {
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(piCommandsOnly ? [] : ['late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
+        for (const scenario of ${JSON.stringify(piCommandsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }

@@ -43,6 +43,16 @@ The repeated projection previously attempted a durable exclusive write for every
 
 Scope: these are single-stage measurements, not an App restart/UI acceptance or a statistical benchmark. First materialization into an empty content store remains expensive (24.6 s before / 32.6 s after in these samples); the improvement is reuse, not faster initial migration. No archive bytes, evidence or full-content links are discarded. The focused regression in `src/core/turn-recorder/content-store.test.ts` proves reuse avoids the writer and preserves corruption/concurrent-publication/sync-failure behavior; it failed on the old implementation.
 
+### Follow-up: selected-but-empty history
+
+Repeated native clicks on an already-selected, still-loading session restarted `agent:loadSession` (cancelling the previous request) and set renderer loading to false. The resulting placeholder incorrectly looked like an empty session. The selection guard now keeps the pending request/generation, and the timeline explicitly reports history loading. The `repeat-pending` Electron fixture failed before the fix and passed afterward, alongside late-startup, same/cross-provider, rapid-switch and focused-run scenarios:
+
+```bash
+node scripts/session-capability-ui-smoke.mjs --selection-only
+```
+
+A current production build (main/preload/renderer together) was also launched twice against an isolated copy of a 3-turn Pi archive, with temporary HOME/workspace/userData and all Providers disabled. Native repeated clicks issued one history request per launch; both launches displayed all 3 turns and cleared loading. Main history load took 6,395 ms on first materialization and 1,574 ms after process restart. Original user records were not changed. This verifies archive/display restoration, not real Provider execution. The installed App also displayed that history after a single selection during inspection, but the reported ten-minute continuous stall was not reproduced; these changes do not claim to explain every such stall. The installed App was not replaced by this verification.
+
 ## 2026-09-16 reference run
 
 Environment: Apple silicon, macOS 27.0, Node 24.18.0, Scry 0.2.148. Vitest reports `hz`; mean values below are derived from that run and are not cross-machine thresholds.
