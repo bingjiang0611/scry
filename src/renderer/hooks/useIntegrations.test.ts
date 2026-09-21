@@ -199,19 +199,25 @@ describe('Agent 切换时的运行控制门禁', () => {
     expect(request).not.toHaveBeenCalledWith(expect.objectContaining({ providerId: 'codex' }))
   })
 
-  it('目录读取期间仅允许 Provider 默认模型和默认审批立即发送', () => {
-    expect(runControlSendBlockedReason(null, true, { permissionMode: 'default' })).toBeNull()
-    expect(runControlSendBlockedReason(null, true, {
+  it.each(['claude', 'codex', 'qoder', 'opencode'] as const)('%s 目录读取期间仅允许默认模型和默认审批立即发送', (providerId) => {
+    expect(runControlSendBlockedReason(providerId, null, true, { permissionMode: 'default' })).toBeNull()
+    expect(runControlSendBlockedReason(providerId, null, true, {
       permissionMode: 'full_access'
     })).toBe('运行权限能力尚未确认，暂不能发送')
-    expect(runControlSendBlockedReason(null, true, {
+    expect(runControlSendBlockedReason(providerId, null, true, {
       model: { id: 'ultimate' },
       permissionMode: 'default'
     })).toBe('运行权限能力尚未确认，暂不能发送')
   })
 
+  it.each(['default', 'full_access'] as const)('Pi 目录读取期间不以 %s 权限抢先发送', (permissionMode) => {
+    expect(runControlSendBlockedReason('pi', null, true, { permissionMode })).toBe(
+      '运行权限能力尚未确认，暂不能发送'
+    )
+  })
+
   it('探测完成后的 unknown/unsupported 仍然 fail closed', () => {
-    expect(runControlSendBlockedReason({
+    expect(runControlSendBlockedReason('qoder', {
       providerId: 'qoder',
       mode: 'none',
       state: 'unknown',
@@ -231,10 +237,10 @@ describe('Agent 切换时的运行控制门禁', () => {
     }
 
     expect(controls.permissionMode).toBe('default')
-    expect(runControlSendBlockedReason(capability, false, controls)).toBe(
+    expect(runControlSendBlockedReason('pi', capability, false, controls)).toBe(
       '当前 Provider 不支持所选模型、推理强度或权限，请重新选择'
     )
-    expect(runControlSendBlockedReason(capability, false, { permissionMode: 'full_access' })).toBeNull()
+    expect(runControlSendBlockedReason('pi', capability, false, { permissionMode: 'full_access' })).toBeNull()
   })
 })
 
@@ -380,17 +386,18 @@ describe('模型目录跨进程缓存', () => {
 
     expect(restored.state).toBe('unknown')
     expect(restored.reason).toContain('最后已知模型目录')
-    expect(runControlSendBlockedReason(restored, false, { permissionMode: 'default' })).toBeNull()
-    expect(runControlSendBlockedReason(restored, false, {
+    expect(runControlSendBlockedReason('qoder', restored, false, { permissionMode: 'default' })).toBeNull()
+    expect(runControlSendBlockedReason('qoder', restored, false, {
       model: { id: 'ultimate' },
       effort: 'high',
       permissionMode: 'default'
     })).toBeNull()
-    expect(runControlSendBlockedReason(restored, false, {
+    expect(runControlSendBlockedReason('qoder', restored, false, {
       model: { id: 'not-in-cache' },
       permissionMode: 'default'
     })).toBe('最后已知模型目录不包含当前模型、推理强度或权限，请重新选择')
     expect(runControlSendBlockedReason(
+      'qoder',
       envelope('qoder', '/repo', catalog('ultimate'), now),
       false,
       { model: { id: 'ultimate' }, permissionMode: 'default' }
@@ -428,8 +435,8 @@ describe('模型目录跨进程缓存', () => {
       data: known,
       reason: expect.stringContaining('当前显示最后已知模型目录')
     })
-    expect(runControlSendBlockedReason(retained, false, { permissionMode: 'default' })).toBeNull()
-    expect(runControlSendBlockedReason(retained, false, {
+    expect(runControlSendBlockedReason('qoder', retained, false, { permissionMode: 'default' })).toBeNull()
+    expect(runControlSendBlockedReason('qoder', retained, false, {
       model: { id: 'ultimate' },
       permissionMode: 'default'
     })).toBeNull()
@@ -450,12 +457,12 @@ describe('模型目录跨进程缓存', () => {
       }
     )
 
-    expect(runControlSendBlockedReason(retained, false, {
+    expect(runControlSendBlockedReason('qoder', retained, false, {
       model: { id: 'ultimate' },
       effort: 'high',
       permissionMode: 'full_access'
     })).toBeNull()
-    expect(runControlSendBlockedReason(retained, false, {
+    expect(runControlSendBlockedReason('qoder', retained, false, {
       model: { id: 'ultimate' },
       permissionMode: 'auto_review'
     })).toBe('最后已知模型目录不包含当前模型、推理强度或权限，请重新选择')
