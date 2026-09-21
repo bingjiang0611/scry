@@ -349,7 +349,7 @@ async function exerciseSessionSelection(contents, scenario) {
   }
   const state = `JSON.parse(document.querySelector('#selection-state').textContent)`
   await wait(`${state}.snapshots === 2`)
-  if (scenario !== 'late-startup') {
+  if (scenario !== 'late-startup' && scenario !== 'late-startup-loading') {
     await click('#resolve-snapshots')
     await wait(`document.querySelector('.sb-sess.active')?.textContent.includes('Old running conversation')`)
   }
@@ -358,6 +358,21 @@ async function exerciseSessionSelection(contents, scenario) {
   else await click('.sb-sess[data-provider="pi"]:not(.running)')
   await wait(`${state}.historyReads === 1`)
   if (scenario !== 'late-startup') await click('#resolve-snapshots')
+  if (scenario === 'late-startup-loading') {
+    await wait(`${state}.snapshots === 0`)
+    // Let both bootstrap promises and React effects settle while history is still pending.
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    if (await read(`${state}.cancelledLoads !== 0 || ${state}.cwd !== '/fixture/new'`)) {
+      throw new Error(`${scenario}: late bootstrap cancelled the pending history: ${JSON.stringify(await read(state))}`)
+    }
+  }
+  const expectedCancellations = scenario === 'rapid-switch' ? 2 : 0
+  if (scenario === 'rapid-switch') {
+    await click('.sb-sess[data-provider="claude"]')
+    await wait(`${state}.historyReads === 2`)
+    await click('.sb-sess[data-provider="pi"]')
+    await wait(`${state}.historyReads === 3`)
+  }
   await click('#resolve-history')
   await wait(`document.body.innerText.includes('History for new-session')`)
   if (scenario === 'late-startup') {
@@ -369,17 +384,17 @@ async function exerciseSessionSelection(contents, scenario) {
   if (scenario !== 'focused-event' && await read(`document.querySelector('.run-status') != null`)) {
     throw new Error(`${scenario}: stale startup run leaked into history`)
   }
-  if (result.cancelledLoads || result.cwd !== '/fixture/new' || result.activeReads !== baseline) {
+  if (result.cancelledLoads !== expectedCancellations || result.cwd !== '/fixture/new' || result.activeReads !== baseline) {
     throw new Error(`${scenario}: stale startup recovery disturbed selection: ${JSON.stringify(result)}`)
   }
   if (await read(`document.body.innerText.includes('workspace changed')`)) throw new Error(`${scenario}: workspace error visible`)
   // Switch back to the running session, including within the same Provider/profile.
   await click('.sb-sess.running')
-  await wait(`${state}.historyReads === 2`)
+  await wait(`${state}.historyReads === ${expectedCancellations + 2}`)
   await click('#resolve-history')
   await wait(`document.body.innerText.includes('History for old-session')`)
   if (await read(`${state}.activeReads`) !== baseline) throw new Error(`${scenario}: reverse switch restarted bootstrap`)
-  return { scenario, providerSwitch: scenario !== 'same-provider', reverseSwitch: true, startupReads: baseline }
+  return { scenario, providerSwitch: scenario !== 'same-provider', reverseSwitch: true, startupReads: baseline, expectedCancellations }
 }
 
 async function exercisePiPermission(contents, scenario) {
@@ -475,7 +490,7 @@ try {
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ['provider-switch', 'same-provider', 'late-startup', 'focused-event']) {
+        for (const scenario of ['late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event']) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }
