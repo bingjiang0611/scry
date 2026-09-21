@@ -948,6 +948,10 @@ export function App() {
     }))
   }, [resetPromptQueueControl])
   const sessionSelectionSeqRef = useRef(0)
+  // Provider selection changes this callback's identity. Runtime subscriptions/bootstrap must
+  // not restart with it, or the previous focused run can overwrite an in-flight session choice.
+  const selectAgentRef = useRef(integrations.setSelectedId)
+  selectAgentRef.current = integrations.setSelectedId
   const slashRequestSeqRef = useRef(0)
   const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
   const integrationContextKeyRef = useRef('')
@@ -1024,6 +1028,9 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
+    const initialSelectionSeq = sessionSelectionSeqRef.current
+    const canRestoreInitialSelection = (): boolean =>
+      !cancelled && initialSelectionSeq === sessionSelectionSeqRef.current
     const offFocusedRun =
       typeof window.scry.onFocusedRun === 'function'
         ? window.scry.onFocusedRun((run) => {
@@ -1041,7 +1048,7 @@ export function App() {
             void restoreFocusedRunSelection(run, {
               prepareRunFocus: session.prepareRunFocus,
               selectContext: ({ providerId, agentProfileId, cwd: nextCwd, sessionId }) => {
-                integrations.setSelectedId(agentProfileId ?? providerId)
+                selectAgentRef.current(agentProfileId ?? providerId)
                 setCwd(nextCwd)
                 selectSessionId(sessionId)
                 setView('chat')
@@ -1131,17 +1138,17 @@ export function App() {
     window.scry
       .activeRun()
       .then((run) => {
-        if (cancelled || !run || run.done) return
+        if (!canRestoreInitialSelection() || !run || run.done) return
         selectSessionId(run.externalSessionId ?? run.sessionId ?? run.runId)
         loadProjects()
-        if (run.providerId) integrations.setSelectedId(run.agentProfileId ?? run.providerId)
+        if (run.providerId) selectAgentRef.current(run.agentProfileId ?? run.providerId)
         if (run.cwd && run.cwd !== cwdRef.current) {
           setCwd(run.cwd)
           void window.scry.setCwd(run.cwd)
         }
       })
       .catch((error) => {
-        if (!cancelled) setComposerError(`无法恢复当前运行：${error instanceof Error ? error.message : String(error)}`)
+        if (canRestoreInitialSelection()) setComposerError(`无法恢复当前运行：${error instanceof Error ? error.message : String(error)}`)
       })
       .finally(() => {
         if (!cancelled) setActiveRunHydrated(true)
@@ -1154,7 +1161,6 @@ export function App() {
       offQuestionAttention()
     }
   }, [
-    integrations.setSelectedId,
     loadProjects,
     markRunStarted,
     selectSessionId,
