@@ -3,6 +3,7 @@ import { accessSync, constants, readFileSync, realpathSync, statSync } from 'nod
 import { homedir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
+import { createPiRpcDecoder } from './pi-rpc-decoder'
 import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
@@ -58,10 +59,10 @@ const PI_RPC_COMMAND_TIMEOUT_MS = 15_000
 // response. That cold-start work can legitimately exceed an ordinary command's deadline (the
 // reported 8.3 MiB session took about 20 seconds), so startup has its own bounded allowance.
 export const PI_RPC_STARTUP_TIMEOUT_MS = 60_000
-// This is a per-JSONL-frame residency bound, not a cumulative session-output cap. Pi may emit more
-// than this over a long run, but one unframed/individual message must not grow the main heap forever.
-// 64 MiB preserves the observed >16 MiB get/event contract while matching Scry's explicit degraded
-// live-mirror safety scale. Frames above this are rejected, never truncated into false evidence.
+// Limit retained evidence per frame, not cumulative session output or redundant native snapshots.
+// The decoder streams past repeated lifecycle payloads and projects get_entries to identity only.
+// Larger live evidence still fails explicitly; supporting it requires a disk-backed evidence path,
+// not a larger main-process heap or silent truncation.
 export const PI_RPC_MAX_FRAME_BYTES = 64 * 1024 * 1024
 
 function packagePiExecutable(executable: string): string | undefined {
@@ -192,8 +193,6 @@ class PiRpcProcess {
   }>()
   private readonly listeners = new Set<(event: JsonRecord) => void>()
   private readonly failureListeners = new Set<(error: Error) => void>()
-  private buffer = ''
-  private bufferBytes = 0
   private stderr = ''
   private requestSeq = 0
   private failed: Error | null = null
@@ -211,13 +210,17 @@ class PiRpcProcess {
       resolve()
     }))
     child.stdin.on('error', (error) => this.fail(error))
-    child.stdout.setEncoding('utf8')
+    const decoder = createPiRpcDecoder(this.maxFrameBytes)
+    child.stdout.pipe(decoder)
+    decoder.on('data', (message: JsonRecord) => this.receive(message))
+    decoder.on('error', (error: Error) => {
+      this.fail(new Error(`Pi RPC stdout JSONL 解码失败：${error.message}`, { cause: error }))
+      this.terminate()
+    })
     child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => this.feed(chunk))
     child.stderr.on('data', (chunk: string) => { this.stderr = `${this.stderr}${chunk}`.slice(-16_384) })
     child.on('error', (error) => this.fail(error))
     child.on('close', (code, signal) => {
-      if (this.buffer.trim() && !this.failed) this.fail(new Error('Pi RPC stdout 以不完整 JSONL 结束'))
       if (!this.closing && !this.failed) {
         this.fail(new Error(`Pi RPC 进程提前退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）：${this.stderr.trim()}`))
       }
@@ -234,54 +237,20 @@ class PiRpcProcess {
     return new PiRpcProcess(child, profile, maxFrameBytes)
   }
 
-  private feed(chunk: string): void {
-    this.buffer += chunk
-    this.bufferBytes += Buffer.byteLength(chunk, 'utf8')
-    let newline: number
-    while ((newline = this.buffer.indexOf('\n')) >= 0) {
-      const framed = this.buffer.slice(0, newline)
-      const consumed = this.buffer.slice(0, newline + 1)
-      this.buffer = this.buffer.slice(newline + 1)
-      this.bufferBytes -= Buffer.byteLength(consumed, 'utf8')
-      if (Buffer.byteLength(framed, 'utf8') > this.maxFrameBytes) {
-        this.fail(new Error('Pi RPC 单条 JSONL 消息超过 64 MiB 支持上限'))
-        this.terminate()
+  private receive(message: JsonRecord): void {
+    if (this.failed) return
+    if (message.type === 'response' && typeof message.id === 'string') {
+      const pending = this.pending.get(message.id)
+      if (pending) {
+        clearTimeout(pending.timer)
+        this.pending.delete(message.id)
+        if (message.success === false) {
+          pending.reject(new PiRpcCommandError(pending.command, String(message.error ?? 'Pi RPC command failed')))
+        } else pending.resolve(message)
         return
       }
-      const raw = framed.replace(/\r$/, '')
-      if (!raw) continue
-      let value: unknown
-      try {
-        value = JSON.parse(raw)
-      } catch {
-        this.fail(new Error(`Pi RPC stdout 包含非 JSONL 内容：${raw.slice(0, 240)}`))
-        this.terminate()
-        return
-      }
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        this.fail(new Error('Pi RPC 返回了非对象 JSON 行'))
-        this.terminate()
-        return
-      }
-      const message = value as JsonRecord
-      if (message.type === 'response' && typeof message.id === 'string') {
-        const pending = this.pending.get(message.id)
-        if (pending) {
-          clearTimeout(pending.timer)
-          this.pending.delete(message.id)
-          if (message.success === false) {
-            pending.reject(new PiRpcCommandError(pending.command, String(message.error ?? 'Pi RPC command failed')))
-          }
-          else pending.resolve(message)
-          continue
-        }
-      }
-      for (const listener of this.listeners) listener(message)
     }
-    if (this.bufferBytes > this.maxFrameBytes) {
-      this.fail(new Error('Pi RPC 未完成 JSONL 消息超过 64 MiB 支持上限'))
-      this.terminate()
-    }
+    for (const listener of this.listeners) listener(message)
   }
 
   private fail(error: Error): void {

@@ -239,7 +239,7 @@ process.stdin.on('data', (chunk) => {
         continue
       }
       if (command.message === 'oversized-unframed') {
-        process.stdout.write('x'.repeat(2 * 1024 * 1024))
+        process.stdout.write('{"type":"unknown_large","payload":"' + 'x'.repeat(2 * 1024 * 1024))
         continue
       }
       if (command.message === 'large-event') send({ type: 'unknown_large', payload: 'x'.repeat(17 * 1024 * 1024) })
@@ -262,7 +262,13 @@ process.stdin.on('data', (chunk) => {
         content: providerAborted ? [] : [{ type: 'text', text: 'hello world' }],
         usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 1, cost: { total: 0.01 } }
       } })
-      send({ type: 'agent_end', willRetry: false })
+      if (command.message === 'large-snapshots') {
+        const message = { role: 'toolResult', content: [{ type: 'text', text: 'x'.repeat(2 * 1024 * 1024) }] }
+        entries.push({ type: 'message', id: 'large-result', parentId: leafId, message })
+        leafId = 'large-result'
+        send({ type: 'turn_end', toolResults: [message] })
+        send({ type: 'agent_end', willRetry: false, messages: [message] })
+      } else send({ type: 'agent_end', willRetry: false })
       setTimeout(() => send({ type: 'agent_settled' }), 20)
     } else if (command.type === 'extension_ui_response' && command.id.startsWith('menu-')) {
       if (command.cancelled) acknowledgePrompt()
@@ -1038,6 +1044,25 @@ describe('Pi RPC Provider', () => {
       })
     })
   }, 30_000)
+
+  it('settles through oversized lifecycle and entry snapshots without losing live evidence', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({
+        listProfiles: async () => [profile], resolveProfile: async () => profile, rpcMaxFrameBytes: 1024 * 1024
+      })
+      const handle = adapter.run({
+        runId: 'run-large-snapshots', prompt: 'large-snapshots', cwd, agentProfileId: profile.id,
+        permissionMode: 'full_access', attachments: [], emit: (event) => events.push(event)
+      })
+      expect((await handle.promise).status).toBe('completed')
+      expect(handle.getProviderTurnId?.()).toBe('pi-user-1')
+      expect(events.find((event) => event.stage === 'tool_result' && event.toolUseId === 'tool-read')?.output).toBe('contents')
+      expect(events.filter((event) => event.stage === 'result')).toEqual([
+        expect.objectContaining({ isError: false, tokensIn: 10, tokensOut: 4 })
+      ])
+    })
+  })
 
   it('terminates an unframed JSONL message after the explicit 64 MiB residency boundary', async () => {
     await withFixture(async (profile, cwd) => {
