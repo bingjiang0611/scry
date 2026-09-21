@@ -323,9 +323,66 @@ async function exercisePiCommands(contents) {
   return { piMenuChain: true, piEditorPrefill: true, piNativeInput: true, piCancelAndReopen: true, piCommandFeedback: true }
 }
 
+async function exerciseSessionSelection(contents, scenario) {
+  const read = (expression) => contents.executeJavaScript(expression)
+  const wait = async (expression) => {
+    const deadline = Date.now() + 5000
+    while (!await read(expression)) {
+      if (Date.now() > deadline) throw new Error(`${scenario}: timed out: ${expression}; ${await read('document.body.innerText')}`)
+      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+    }
+  }
+  const click = async (selector) => {
+    const point = await read(`(() => {
+      const node = document.querySelector(${JSON.stringify(selector)});
+      if (!node) throw new Error('Missing selection control');
+      node.scrollIntoView({ block: 'center' });
+      const rect = node.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
+      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Selection control obscured');
+      return { x, y };
+    })()`)
+    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+  }
+  const state = `JSON.parse(document.querySelector('#selection-state').textContent)`
+  await wait(`${state}.snapshots === 2`)
+  if (scenario !== 'late-startup') {
+    await click('#resolve-snapshots')
+    await wait(`document.querySelector('.sb-sess.active')?.textContent.includes('Old running conversation')`)
+  }
+  const baseline = await read(`${state}.activeReads`)
+  if (scenario === 'focused-event') await click('#focus-pi')
+  else await click('.sb-sess[data-provider="pi"]')
+  await wait(`${state}.historyReads === 1`)
+  if (scenario !== 'late-startup') await click('#resolve-snapshots')
+  await click('#resolve-history')
+  await wait(`document.body.innerText.includes('History for new-session')`)
+  if (scenario === 'late-startup') {
+    await click('#resolve-snapshots')
+    await wait(`${state}.snapshots === 0`)
+  }
+  const result = await read(state)
+  // Explicit focus restores a live Pi run; history-only selection must not retain the old live run.
+  if (scenario !== 'focused-event' && await read(`document.querySelector('.run-status') != null`)) {
+    throw new Error(`${scenario}: stale startup run leaked into history`)
+  }
+  if (result.cancelledLoads || result.cwd !== '/fixture/new' || result.activeReads !== baseline) {
+    throw new Error(`${scenario}: stale startup recovery disturbed selection: ${JSON.stringify(result)}`)
+  }
+  if (await read(`document.body.innerText.includes('workspace changed')`)) throw new Error(`${scenario}: workspace error visible`)
+  // Switch back to the running Provider and restore its history too.
+  await click('.sb-sess[data-provider="claude"]')
+  await wait(`${state}.historyReads === 2`)
+  await click('#resolve-history')
+  await wait(`document.body.innerText.includes('History for old-session')`)
+  if (await read(`${state}.activeReads`) !== baseline) throw new Error(`${scenario}: reverse switch restarted bootstrap`)
+  return { scenario, providerSwitch: true, reverseSwitch: true, startupReads: baseline }
+}
+
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
-  await build({
+  for (const fixture of ['session-capability', 'session-selection']) await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error',
     esbuild: { jsx: 'automatic' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } },
@@ -333,15 +390,15 @@ try {
     build: {
       outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
       lib: {
-        entry: join(root, 'scripts/fixtures/session-capability-smoke.tsx'),
+        entry: join(root, `scripts/fixtures/${fixture}-smoke.tsx`),
         formats: ['iife'],
         name: 'ScryRegression',
-        fileName: () => 'fixture.js',
-        cssFileName: 'fixture'
+        fileName: () => `${fixture}.js`,
+        cssFileName: fixture
       }
     }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
+  for (const fixture of ['session-capability', 'session-selection']) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
     if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
@@ -353,10 +410,16 @@ try {
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       try {
-        await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
+        await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
         const result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
         const piCommands = await (${exercisePiCommands.toString()})(win.webContents)
-        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands }))
+        const selection = []
+        win.setSize(1200, 900)
+        for (const scenario of ['provider-switch', 'late-startup', 'focused-event']) {
+          await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))})
+          selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
+        }
+        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands, selection }))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })

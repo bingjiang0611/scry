@@ -619,6 +619,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   }, [])
 
   useEffect(() => {
+    const initialFocusGeneration = resyncGeneration.current
     let questionSnapshot: AgentQuestionRequest[] | null = null
     let hydratingQuestions = true
     let hydratedRun: ActiveRun | null = null
@@ -715,6 +716,8 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     window.scry
       .activeRun()
       .then((run) => {
+        // A user selection/start or live resync supersedes this startup-only snapshot.
+        if (initialFocusGeneration !== resyncGeneration.current) return
         hydratedRun = !run || run.done ? null : run
         questionSnapshot = !run || run.done ? [] : run.pendingQuestions ?? []
         if (!run || run.done) return
@@ -727,6 +730,8 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       .finally(() => {
         hydratingLifecycle = false
         hydratingQuestions = false
+        setRestoring(false)
+        if (initialFocusGeneration !== resyncGeneration.current) return
         const runId = hydratedRun?.runId
         const currentLifecycle = runId ? lifecycleDeltas.filter((delta) => delta.event.runId === runId) : []
         const currentQuestions = runId
@@ -752,7 +757,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
           ).pendingQuestions
         )
         setRunning(runtimeState.running)
-        setRestoring(false)
       })
 
     const offDone = window.scry.onTurnDone((event) => {
