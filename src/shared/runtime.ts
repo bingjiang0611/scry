@@ -225,6 +225,8 @@ export interface AgentQuestionPrompt {
   placeholder?: string
   /** Native input/editor requests have no synthetic choice list. */
   inputMode?: 'singleline' | 'multiline'
+  /** False for native closed-choice dialogs that only accept one listed value. */
+  allowCustomAnswer?: boolean
   /** Provider-native editor content, kept separate from its placeholder. */
   initialValue?: string
 }
@@ -702,6 +704,7 @@ export function normalizeAgentQuestionRequest(
       header,
       options,
       multiSelect: value.multiSelect === true,
+      ...(value.allowCustomAnswer === false ? { allowCustomAnswer: false } : {}),
       ...(placeholder ? { placeholder } : {}),
       ...(inputMode ? { inputMode } : {}),
       ...(allowFreeText && inputMode && typeof value.initialValue === 'string'
@@ -734,6 +737,7 @@ export function normalizeAgentQuestionResponse(
   for (const question of request.questions) {
     const answer = boundedAnswer(rawAnswers[question.question], question.inputMode === 'multiline' ? 100_000 : 4_000)
     if (!answer) return null
+    if (question.allowCustomAnswer === false && !question.options.some((option) => (option.answerValue ?? option.label) === answer)) return null
     answers[question.question] = answer
   }
   return { runId: request.runId, questionId: request.questionId, behavior: 'answered', answers }

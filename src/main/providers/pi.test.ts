@@ -118,6 +118,11 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'extension_ui_request', id: 'menu-select', method: 'select', title: 'Menu', options: ['Edit'] })
         continue
       }
+      if (command.message === '/fixture-menu question') {
+        acknowledgePrompt = response
+        send({ type: 'extension_ui_request', id: 'question-select', method: 'select', title: 'Continue?', options: ['1. Continue', '2. Type something.'] })
+        continue
+      }
       if (command.message === '/fixture-menu status') {
         const message = { role: 'custom', customType: 'fixture-status', display: true, content: 'Custom command status' }
         send({ type: 'message_start', message })
@@ -270,6 +275,15 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_end', willRetry: false, messages: [message] })
       } else send({ type: 'agent_end', willRetry: false })
       setTimeout(() => send({ type: 'agent_settled' }), 20)
+    } else if (command.type === 'extension_ui_response' && command.id.startsWith('question-')) {
+      require('node:fs').appendFileSync(process.cwd() + '/question-responses', JSON.stringify(command) + '\\n')
+      if (command.cancelled) acknowledgePrompt()
+      else if (command.id === 'question-select' && command.value === '2. Type something.') {
+        send({ type: 'extension_ui_request', id: 'question-input', method: 'input', title: 'Type your answer:' })
+      } else if (command.id === 'question-select' && command.value !== '1. Continue') {
+        send({ type: 'extension_error', extensionPath: 'command:fixture-menu', event: 'command', error: 'User declined to answer questions' })
+        acknowledgePrompt()
+      } else acknowledgePrompt()
     } else if (command.type === 'extension_ui_response' && command.id.startsWith('menu-')) {
       if (command.cancelled) acknowledgePrompt()
       else if (command.id === 'menu-select') {
@@ -357,6 +371,13 @@ describe('Pi RPC Provider', () => {
       inputMode: 'singleline',
       placeholder: '一句话概括'
     })
+  })
+
+  it.each(['select', 'confirm'])('preserves the closed-choice contract for native %s dialogs', (method) => {
+    const request = questionFromExtension('run-select', {
+      id: 'select-1', method, title: '继续？', options: ['1. 继续', '2. Type something.']
+    })
+    expect(request?.questions[0]).toMatchObject({ allowCustomAnswer: false, multiSelect: false })
   })
 
   it('allows cold session startup to exceed the ordinary 15 second command deadline', () => {
@@ -1143,6 +1164,42 @@ describe('Pi RPC Provider', () => {
         }).promise
         expect(next).toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
         expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
+      } finally {
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it.each(['custom', 'option', 'cancel-select', 'cancel-input'])('round-trips the native questionnaire protocol: %s', async (scenario) => {
+    await withCommandFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const questions: string[] = []
+      const events: TraceEvent[] = []
+      const customAnswer = '提交所有改动 保证工作区干净 然后构建并安装'
+      const handle = adapter.run({
+        runId: 'question-run', prompt: '/fixture-menu question', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event),
+        requestUserInput: async (request) => {
+          questions.push(request.questionId)
+          if (scenario === `cancel-${request.questionId.split('-')[1]}`) {
+            return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
+          }
+          const question = request.questions[0]
+          const answer = question.allowCustomAnswer === false
+            ? question.options[scenario === 'option' ? 0 : 1].label : customAnswer
+          return { runId: request.runId, questionId: request.questionId, behavior: 'answered', answers: { [question.question]: answer } }
+        }
+      })
+      try {
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+        expect(events.some((event) => event.isError)).toBe(false)
+        expect(questions).toEqual(['custom', 'cancel-input'].includes(scenario) ? ['question-select', 'question-input'] : ['question-select'])
+        const responses = readFileSync(join(cwd, 'question-responses'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+        if (scenario === 'custom') expect(responses.map((response) => response.value)).toEqual(['2. Type something.', customAnswer])
+        if (scenario === 'option') expect(responses[0].value).toBe('1. Continue')
+        if (scenario.startsWith('cancel-')) expect(responses.at(-1)).toMatchObject({ cancelled: true })
       } finally {
         handle.forceKill()
         await handle.promise.catch(() => {})
