@@ -111,6 +111,9 @@ function TerminalPane({
   const explicitCloseRef = useRef(false)
   const startSequenceRef = useRef(0)
   const activeRef = useRef(active)
+  const cwdRef = useRef(cwd)
+  const [shellCwd, setShellCwd] = useState(cwd)
+  cwdRef.current = cwd
   const [error, setError] = useState<string | null>(null)
   const [exit, setExit] = useState<TerminalExitEvent | null>(null)
   activeRef.current = active
@@ -151,8 +154,10 @@ function TerminalPane({
     terminal.writeln('\x1b[38;5;244m正在启动本机 Shell…\x1b[0m')
     requestAnimationFrame(resize)
     try {
+      // Session navigation must not recreate xterm or restart this Shell. Only
+      // an explicit start/restart reads the latest bound workspace, which main validates.
       const session = await window.scry.terminalStart({
-        cwd,
+        cwd: cwdRef.current,
         cols: Math.max(2, terminal.cols),
         rows: Math.max(1, terminal.rows)
       })
@@ -164,6 +169,7 @@ function TerminalPane({
       terminalIdRef.current = session.id
       ownershipEpochRef.current = session.ownershipEpoch
       recordingIdRef.current = session.id
+      setShellCwd(session.cwd)
       if (session.recording === 'unavailable') onRecordingMessage(tabKey, '原文录制不可用；Shell 继续运行。')
       const owned = await window.scry.terminalReady(session.id, session.ownershipEpoch)
       if (!owned || sequence !== startSequenceRef.current) return
@@ -180,7 +186,7 @@ function TerminalPane({
       terminal.reset()
       terminal.writeln(`\x1b[31m终端启动失败：${message}\x1b[0m`)
     }
-  }, [cwd, onStatus, onRecordingMessage, resize, tabKey, recordingId])
+  }, [onStatus, onRecordingMessage, resize, tabKey, recordingId])
 
   const adopt = useCallback(async (): Promise<void> => {
     const terminal = terminalRef.current
@@ -202,6 +208,7 @@ function TerminalPane({
       terminalIdRef.current = session.id
       ownershipEpochRef.current = session.ownershipEpoch
       recordingIdRef.current = session.id
+      setShellCwd(session.cwd)
       if (session.catchUp.state === 'unavailable') {
         onRecordingMessage(tabKey, '接管成功；此前屏幕原文不可回放，后续输出仍会继续显示。')
       } else if (session.catchUp.endOffset > 0) {
@@ -382,7 +389,7 @@ function TerminalPane({
       <div
         ref={hostRef}
         className="terminal-xterm"
-        aria-label={recordingId ? `终端录制，只读 ${recordingId}` : cwd ? `终端，工作目录 ${cwd}` : '终端，未绑定项目，初始目录为用户主目录'}
+        aria-label={recordingId ? `终端录制，只读 ${recordingId}` : shellCwd ? `终端，启动目录 ${shellCwd}` : '终端，未绑定项目，初始目录为用户主目录'}
       />
       {!recordingId && (error || exit) && (
         <button type="button" className="terminal-restart" onClick={() => void start()}>
@@ -408,7 +415,6 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const pendingCloseFocusRef = useRef<{ targetKey: string | null } | null>(null)
   const nextTitleNumber = useRef(2)
-  const previousCwdRef = useRef(cwd)
   const [historyOpen, setHistoryOpen] = useState(false)
 
   useEffect(() => {
@@ -431,14 +437,6 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
     })
     return () => { current = false }
   }, [])
-
-  useEffect(() => {
-    if (previousCwdRef.current === cwd) return
-    previousCwdRef.current = cwd
-    setTabs((current) => current
-      .filter((tab) => !tab.recordingId)
-      .map((tab) => ({ key: tab.key, title: tab.title })))
-  }, [cwd])
 
   const openRecording = (item: TerminalRecordingSummary): void => {
     if (item.active) return
@@ -585,7 +583,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
           </div>
         ) : tabs.map((tab) => (
           <TerminalPane
-            key={`${cwd ?? '~'}:${tab.key}`}
+            key={tab.key}
             tabKey={tab.key}
             tabId={`${rootId}-${tab.key}-tab`}
             panelId={`${rootId}-${tab.key}-panel`}
