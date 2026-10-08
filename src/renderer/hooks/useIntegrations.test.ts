@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CapabilityEnvelope } from '@shared/provider'
 import type { AgentRunControlCatalog } from '@shared/runtime'
+import type { TraceEvent } from '@shared/trace'
 import {
   applyDataUpdatedEffects,
   authoritativeRefreshAfterToggle,
@@ -11,8 +12,10 @@ import {
   mcpAuthVerificationError,
   parseRunControlCatalogCache,
   parseRunControlPreferences,
+  parseSessionModels,
   reconcileMcpAuthStatus,
   reconcileSelectedAgentId,
+  recordedSessionModel,
   retainCachedRunControlCatalog,
   requestRunControlsForSelectedProvider,
   resolveRunControlSelection,
@@ -26,6 +29,40 @@ const result = (data: boolean | null, state: CapabilityEnvelope<boolean>['state'
   mode: data === null ? 'none' : 'manage',
   state,
   data
+})
+
+describe('会话模型选择持久化', () => {
+  it('保留显式自动模型与上游模型身份，仅恢复模型和 Effort', () => {
+    const stored = new Map([
+      ['auto', {}],
+      ['pi-session', { model: { id: 'model-1', providerId: 'upstream' }, effort: 'high', permissionMode: 'full_access' }]
+    ])
+    const parsed = parseSessionModels(JSON.stringify([...stored]))
+    expect(parsed.has('auto')).toBe(true)
+    expect(parsed.get('auto')).toEqual({ model: undefined, effort: undefined })
+    expect(parsed.get('pi-session')).toEqual({ model: { id: 'model-1', providerId: 'upstream' }, effort: 'high' })
+  })
+
+  it('旧会话只恢复最新记录的请求模型，不从实际 usage 猜测', () => {
+    const controls = (input: TraceEvent['input']): TraceEvent => ({
+      id: 'controls', ts: '', runId: 'run', kind: 'harness', stage: 'runtime:controls', input
+    })
+    const usage: TraceEvent = { id: 'usage', ts: '', runId: 'run', kind: 'model', stage: 'result', modelUsage: [{ model: 'observed-model' }] }
+    expect(recordedSessionModel([{ items: [usage] }])).toBeUndefined()
+    expect(recordedSessionModel([
+      { items: [controls({ model: { id: 'old-model' }, effort: 'high' })] },
+      { items: [controls({ model: { id: 'requested-model', providerId: 'upstream' } }), usage] }
+    ])).toEqual({ model: { id: 'requested-model', providerId: 'upstream' }, effort: undefined })
+    expect(recordedSessionModel([{ items: [controls({ model: { id: 'old-model' } }), controls({})] }]))
+      .toEqual({ model: undefined, effort: undefined })
+  })
+
+  it('损坏的本地偏好不冒充会话模型', () => {
+    expect(parseSessionModels('{')).toEqual(new Map())
+    expect(parseSessionModels('{}')).toEqual(new Map())
+    expect(parseSessionModels(JSON.stringify([[1, {}], ['bad', null], ['valid', { model: { id: 'model-2' } }]])))
+      .toEqual(new Map([['valid', { model: { id: 'model-2' }, effort: undefined }]]))
+  })
 })
 
 describe('Skill/MCP 操作后的权威状态同步', () => {

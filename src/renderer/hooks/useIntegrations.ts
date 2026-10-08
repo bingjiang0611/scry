@@ -7,7 +7,8 @@ import type {
   McpLiveStatus,
   UsageAnalytics,
   UsageAnalyticsRangeDays,
-  UsageStats
+  UsageStats,
+  TraceEvent
 } from '@shared/trace'
 import {
   providerIdForAgentId,
@@ -17,10 +18,12 @@ import {
   type AgentRunControlCatalog,
   type AgentRunControls
 } from '@shared/runtime'
-import type { DetectedAgent, McpMeta, SkillMeta } from '../env'
+import type { DetectedAgent, McpMeta, ProjectMeta, SkillMeta } from '../env'
 import type { McpStatus } from '../format'
 import type { McpGuardReport } from '../components/McpTrustPanel'
 import { getMcpGuardReportForCwd, setMcpGuardReportForCwd } from '../mcp-trust-state'
+import { composerDraftKey } from '../composer-drafts'
+import { selectedExternalSessionId } from '../session-selection'
 
 const contextKey = (context: ProviderContext): string =>
   `${context.providerId}\0${context.agentProfileId ?? ''}\0${context.cwd ?? ''}`
@@ -434,7 +437,67 @@ export function reconcileSelectedAgentId(current: string, detected: DetectedAgen
   return sameProviderFallback?.id ?? current
 }
 
-export function useIntegrations(cwd: string | null) {
+type SessionModelSelection = Pick<AgentRunControls, 'model' | 'effort'>
+
+export function recordedSessionModel(turns: { items: TraceEvent[] }[]): SessionModelSelection | undefined {
+  for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const items = turns[turnIndex].items
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const event = items[index]
+      if (event.kind !== 'harness' || event.stage !== 'runtime:controls') continue
+      const controls = parseStoredRunControls(event.input)
+      return controls ? { model: controls.model, effort: controls.effort } : undefined
+    }
+  }
+  return undefined
+}
+const SESSION_MODELS_KEY = 'scry:session-models:v1'
+
+export function parseSessionModels(raw: string | null): Map<string, SessionModelSelection> {
+  if (!raw) return new Map()
+  try {
+    const rows: unknown = JSON.parse(raw)
+    if (!Array.isArray(rows)) return new Map()
+    return new Map(rows.flatMap((row) => {
+      if (!Array.isArray(row) || typeof row[0] !== 'string') return []
+      const controls = parseStoredRunControls(row[1])
+      return controls ? [[row[0], { model: controls.model, effort: controls.effort }]] : []
+    }))
+  } catch {
+    return new Map()
+  }
+}
+
+export function useIntegrations(cwd: string | null, sessionId: string | null, projects: ProjectMeta[]) {
+  const [sessionModels, setSessionModels] = useState(() => {
+    try {
+      return parseSessionModels(window.localStorage.getItem(SESSION_MODELS_KEY))
+    } catch {
+      return new Map<string, SessionModelSelection>()
+    }
+  })
+  const rememberSessionModel = useCallback((key: string, selection: SessionModelSelection): void => {
+    setSessionModels((current) => new Map(current).set(key, { model: selection.model, effort: selection.effort }))
+  }, [])
+  const restoreSessionModel = useCallback((key: string, selection: SessionModelSelection): void => {
+    setSessionModels((current) => current.has(key) ? current : new Map(current).set(key, selection))
+  }, [])
+  const migrateSessionModel = useCallback((fromKey: string, toKey: string): void => {
+    setSessionModels((current) => {
+      if (fromKey === toKey || !current.has(fromKey)) return current
+      const next = new Map(current)
+      next.set(toKey, current.get(fromKey)!)
+      next.delete(fromKey)
+      return next
+    })
+  }, [])
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SESSION_MODELS_KEY, JSON.stringify([...sessionModels]))
+    } catch {
+      // Like run-control preferences, storage failure keeps the live window's selection.
+    }
+  }, [sessionModels])
   const storedRunControlPreferences = useMemo(readRunControlPreferences, [])
   const initialProviderId = providerIdForAgentId(storedRunControlPreferences.selectedAgentId) ?? 'claude'
   const initialAgentProfileId = initialProviderId === 'pi' ? storedRunControlPreferences.selectedAgentId : undefined
@@ -548,6 +611,12 @@ export function useIntegrations(cwd: string | null) {
     }),
     [cwd, selectedId, selectedProviderId]
   )
+  const externalSessionId = selectedExternalSessionId(projects, { ...providerContext, cwd, sessionId })
+  const sessionModelKey = composerDraftKey({ ...providerContext, sessionId: externalSessionId ?? sessionId })
+  // An unrecorded historical session resumes with Provider-native defaults, never
+  // with another conversation's latest explicit model. Missing evidence is not inferred.
+  const sessionModel = sessionId == null ? runControls : sessionModels.get(sessionModelKey) ?? {}
+  const currentRunControls = { ...runControls, model: sessionModel.model, effort: sessionModel.effort }
   const providerContextRef = useRef(providerContext)
   const trustKey = `${providerContext.providerId}:${providerContext.agentProfileId ?? ''}:${cwd ?? ''}`
   const mcpGuardReport = useMemo(
@@ -906,20 +975,22 @@ export function useIntegrations(cwd: string | null) {
   }, [loadGitDiff, loadUsage])
 
   const setRunModel = useCallback((model: AgentModelRef | undefined): void => {
+    if (sessionId != null) rememberSessionModel(sessionModelKey, { model, effort: undefined })
     setRunControls((current) => {
       const next = { ...current, model, effort: undefined }
       runControlsByProvider.current.set(selectedProviderId, next)
       return next
     })
-  }, [selectedProviderId])
+  }, [rememberSessionModel, selectedProviderId, sessionId, sessionModelKey])
 
   const setRunEffort = useCallback((effort: string | undefined): void => {
+    if (sessionId != null) rememberSessionModel(sessionModelKey, { model: currentRunControls.model, effort })
     setRunControls((current) => {
-      const next = { ...current, effort }
+      const next = { ...current, model: currentRunControls.model, effort }
       runControlsByProvider.current.set(selectedProviderId, next)
       return next
     })
-  }, [selectedProviderId])
+  }, [currentRunControls.model, rememberSessionModel, selectedProviderId, sessionId, sessionModelKey])
 
   const setPermissionMode = useCallback((permissionMode: AgentPermissionMode): void => {
     setRunControls((current) => {
@@ -1145,7 +1216,11 @@ export function useIntegrations(cwd: string | null) {
     selectedRuntimeProvider,
     providerContext,
     setSelectedId: selectAgent,
-    runControls,
+    runControls: currentRunControls,
+    hasSessionModel: sessionModels.has(sessionModelKey),
+    rememberSessionModel,
+    restoreSessionModel,
+    migrateSessionModel,
     runControlCatalog,
     runControlCapability,
     runControlsLoading,

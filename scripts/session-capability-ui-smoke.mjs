@@ -10,7 +10,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
-const fixtures = piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission']
+const modelsOnly = process.argv.includes('--models-only')
+const fixtures = modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model']
 
 // Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
 // Scry's main process or preload, discover providers, touch user data, or start a CDP port.
@@ -429,6 +430,110 @@ async function exerciseSessionSelection(contents, scenario) {
   return { scenario, providerSwitch: scenario !== 'same-provider', reverseSwitch: true, startupReads: baseline, expectedCancellations }
 }
 
+async function exerciseSessionModels(contents) {
+  const read = (expression) => contents.executeJavaScript(expression)
+  const wait = async (expression) => {
+    const deadline = Date.now() + 5000
+    while (!await read(expression)) {
+      if (Date.now() > deadline) throw new Error(`Session models: timed out: ${expression}; ${await read('document.body.innerText')}`)
+      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+    }
+  }
+  const click = async (selector) => {
+    const point = await read(`(() => {
+      const node = document.querySelector(${JSON.stringify(selector)});
+      if (!node) throw new Error('Missing model control: ' + ${JSON.stringify(selector)});
+      node.scrollIntoView({ block: 'center' });
+      const rect = node.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
+      return { x, y };
+    })()`)
+    contents.sendInputEvent({ type: 'mouseMove', ...point })
+    try {
+      await wait(`document.querySelector(${JSON.stringify(selector)}).contains(document.elementFromPoint(${point.x}, ${point.y}))`)
+    } catch (error) {
+      throw new Error(`${error.message}; hit=${await read(`document.elementFromPoint(${point.x}, ${point.y})?.outerHTML`)}`)
+    }
+    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+  }
+  const pickSession = async (text) => {
+    const index = await read(`[...document.querySelectorAll('.sb-sess')].findIndex(node => node.textContent.includes(${JSON.stringify(text)}))`)
+    if (index < 0) throw new Error(`Missing session ${text}`)
+    await click(`.sb-sess-row:nth-child(${index + 1}) .sb-sess`)
+  }
+  const modelIs = (id) => `document.querySelector('.model-effort-model')?.textContent === ${JSON.stringify(id)}`
+  const chooseModel = async (id) => {
+    await click('[aria-label="选择 Model 与 Effort"]')
+    await wait(`document.querySelector('.model-effort-current-model') != null`)
+    await click('[aria-label^="选择 Model，"]')
+    await wait(`document.querySelectorAll('.model-effort-list [role="option"]').length === 3`)
+    await click(`.model-effort-list [role="option"]:nth-child(${id === 'model-1' ? 2 : 3})`)
+    await wait(modelIs(id))
+    await click('[aria-label="选择 Model 与 Effort"]')
+    await wait(`document.querySelector('.model-effort-popover') == null`)
+  }
+  const send = async (text) => {
+    await click('textarea[aria-label="描述任务"]')
+    await wait(`document.activeElement === document.querySelector('textarea[aria-label="描述任务"]')`)
+    await contents.insertText(text)
+    await wait(`document.querySelector('textarea').value === ${JSON.stringify(text)} && !document.querySelector('.send').disabled`)
+    await click('.send')
+  }
+  const requests = `JSON.parse(document.querySelector('#model-state').textContent).requests`
+  contents.focus()
+  await wait(`document.querySelector('.sb-proj-new') != null`)
+  await click('.sb-proj-new')
+  await wait(`document.querySelector('[aria-label="选择 Model 与 Effort"]')?.disabled === false`)
+  await chooseModel('model-1')
+  await click('[aria-label="选择 Model 与 Effort"]')
+  await wait(`document.querySelector('[aria-label="推理强度"]') != null`)
+  await click('[aria-label="推理强度"]')
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' })
+  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' })
+  await wait(`document.querySelector('.model-effort-effort').textContent === 'High'`)
+  await click('[aria-label="选择 Model 与 Effort"]')
+  await send('Conversation one')
+  await wait(`${requests}.length === 1 && document.querySelector('.run-status') != null`)
+  await click('#capture-first')
+  await wait(`document.querySelector('.sb-sess') != null && ${modelIs('model-1')}`)
+  await click('.sb-new')
+  await wait(`document.querySelector('.run-status') == null && ${modelIs('model-1')}`)
+  await chooseModel('model-2')
+  await send('Conversation two')
+  await wait(`${requests}.length === 2 && document.querySelectorAll('.sb-sess').length === 2`)
+  await click('.sb-new')
+  await wait(`document.querySelector('.run-status') == null && ${modelIs('model-2')}`)
+  await pickSession('Conversation one')
+  await wait(`document.querySelector('.run-status') != null && ${modelIs('model-1')}`)
+  await click('#finish-second')
+  await wait(`document.querySelectorAll('.sb-sess.running').length === 1 && ${modelIs('model-1')}`)
+  await send('Queued continuation one')
+  await wait(`document.querySelector('textarea').value === ''`)
+  if (await read(`${requests}.length`) !== 2) throw new Error('Busy session did not queue its continuation')
+  await click('#finish-first')
+  await wait(`${requests}.length === 3`)
+  const actual = await read(requests)
+  if (actual.map((request) => request.model?.id).join(',') !== 'model-1,model-2,model-1' || actual[2].expectedExternalSessionId !== 'native-1' || actual[0].effort !== 'high' || actual[1].effort != null || actual[2].effort !== 'high') {
+    throw new Error('Wrong per-session request models: ' + JSON.stringify(actual))
+  }
+  await click('.sb-new')
+  await wait(`document.querySelector('.run-status') == null && ${modelIs('model-2')}`)
+  await click('#remount')
+  await wait(modelIs('model-2'))
+  await pickSession('Conversation two')
+  await wait(modelIs('model-2'))
+  await pickSession('Conversation one')
+  await wait(modelIs('model-1'))
+  await click('#legacy')
+  await wait(`document.querySelectorAll('.sb-sess').length === 3`)
+  await pickSession('Legacy conversation')
+  await wait(`${modelIs('model-1')} && document.querySelector('.model-effort-effort').textContent === 'High'`)
+  await click('.sb-new')
+  await wait(`document.querySelector('.run-status') == null && ${modelIs('model-2')}`)
+  return { models: actual.map((request) => request.model.id), newDefault: 'model-2', effortIsolated: true, nativeCapture: true, backgroundTerminalCapture: true, queuedContinuation: true, persisted: true, legacyArchiveRestored: true }
+}
+
 async function exercisePiPermission(contents, scenario) {
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression) => {
@@ -516,25 +621,31 @@ try {
       const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
       try {
         let result = {}, piCommands = {}
-        if (!${selectionOnly}) {
+        if (!${selectionOnly || modelsOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           if (!${piCommandsOnly}) result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
           piCommands = await (${exercisePiCommands.toString()})(win.webContents)
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(piCommandsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
+        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }
         const piPermissions = []
-        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly ? [] : ['fresh', 'saved'])}) {
+        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly || modelsOnly ? [] : ['fresh', 'saved'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pi-permission.html'))}, { query: { scenario } })
           piPermissions.push(await (${exercisePiPermission.toString()})(win.webContents, scenario))
         }
-        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands, selection, piPermissions }))
+        let sessionModels = null
+        if (${!selectionOnly && !piCommandsOnly}) {
+          await win.loadFile(${JSON.stringify(join(temp, 'session-model.html'))})
+          sessionModels = await (${exerciseSessionModels.toString()})(win.webContents)
+        }
+        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands, selection, piPermissions, sessionModels }))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })

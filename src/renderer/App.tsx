@@ -34,7 +34,7 @@ import { resolveTurnDiffReview, sessionNetDiffReview } from './turn-diff'
 import type { Turn } from './format'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
-import { runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
+import { recordedSessionModel, runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
 import { useAgentSession } from './hooks/useAgentSession'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 import packageJson from '../../package.json'
@@ -794,7 +794,7 @@ export function App() {
     },
     [setActiveSessionId]
   )
-  const integrations = useIntegrations(cwd)
+  const integrations = useIntegrations(cwd, activeSessionId, projects)
   useEffect(() => {
     const subscribe = window.scry.onDataUpdated
     if (typeof subscribe !== 'function') return
@@ -891,6 +891,7 @@ export function App() {
       // drafts (and queued follow-ups) even if the user switched away before then.
       if (event.sessionId && draftOwner) {
         const capturedKey = sessionComposerDraftKey({ ...draftOwner, sessionId: event.sessionId })
+        integrations.migrateSessionModel(draftOwner.key, capturedKey)
         setSessionDrafts((current) => migrateSessionComposerDraft(current, draftOwner.key, capturedKey))
         setSessionPromptQueues((current) => migrateSessionPromptQueue(current, draftOwner.key, capturedKey))
       }
@@ -910,6 +911,13 @@ export function App() {
       loadProjects()
     }
   })
+  useEffect(() => {
+    if (activeSessionId == null || sessionLoading || integrations.hasSessionModel) return
+    // Restore legacy/remote sessions from Scry's recorded request, not observed
+    // token usage or the latest global preference. Explicit local choices win.
+    const recorded = recordedSessionModel(session.turns)
+    if (recorded) integrations.restoreSessionModel(draftKey, recorded)
+  }, [activeSessionId, draftKey, integrations.hasSessionModel, integrations.restoreSessionModel, session.turns, sessionLoading])
   const sidebarPane = useResizablePane({
     // The evidence-system shell deliberately resets the old 256px default once;
     // subsequent user resizing is still persisted under this geometry version.
@@ -1093,6 +1101,7 @@ export function App() {
               const context = draftOwner ?? draftContextRef.current
               const previousKey = draftOwner?.key ?? sessionComposerDraftKey({ ...context, sessionId: previousSessionId })
               const capturedKey = sessionComposerDraftKey({ ...context, sessionId: capturedSessionId })
+              integrations.migrateSessionModel(previousKey, capturedKey)
               setSessionDrafts((current) => migrateSessionComposerDraft(current, previousKey, capturedKey))
               setSessionPromptQueues((current) => migrateSessionPromptQueue(current, previousKey, capturedKey))
               if (draftOwner) localDraftOwnersRef.current.set(event.runId, { ...draftOwner, key: capturedKey })
@@ -1358,6 +1367,9 @@ export function App() {
     ): Promise<void> => {
       shouldStickToBottomRef.current = true
       const expectedSessionId = activeSessionIdRef.current
+      // Capture the request before admission: native session capture may arrive
+      // before start resolves, or after the user has switched to another chat.
+      integrations.rememberSessionModel(sourceDraftKey, request)
       const runId = await session.send(text, {
         ...request,
         attachments
@@ -1376,6 +1388,7 @@ export function App() {
         agentProfileId: request.agentProfileId,
         cwd: request.cwd ?? null
       }
+      integrations.rememberSessionModel(draftOwner.key, request)
       localDraftOwnersRef.current.set(runId, draftOwner)
       localRunIdsRef.current.add(runId)
       while (localRunIdsRef.current.size > 64) {
@@ -1393,7 +1406,7 @@ export function App() {
         }
       }
     },
-    [currentRunRequest, draftKey, selectSessionId, session.send]
+    [currentRunRequest, draftKey, integrations.rememberSessionModel, selectSessionId, session.send]
   )
 
   useEffect(() => {
