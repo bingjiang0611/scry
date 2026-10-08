@@ -280,7 +280,7 @@ async function exercisePiCommands(contents) {
     const ready = () => (${condition});
     if (ready()) return resolve();
     const observer = new MutationObserver(() => { if (ready()) { clearTimeout(timer); observer.disconnect(); resolve() } });
-    const timer = setTimeout(() => { observer.disconnect(); reject(new Error('Pi command UI condition failed')) }, 5000);
+    const timer = setTimeout(() => { observer.disconnect(); reject(new Error('Pi command UI condition failed: ' + ${JSON.stringify(condition)} + '; answers=' + document.querySelector('#pi-command-answers').textContent)) }, 5000);
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
   })`)
   const click = async (selector) => {
@@ -304,7 +304,9 @@ async function exercisePiCommands(contents) {
   await click('#pi-command textarea')
   if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command textarea')`)) throw new Error('Pi editor did not receive focus')
   contents.selectAll()
+  await wait(`(() => { const input = document.querySelector('#pi-command textarea'); return input.selectionStart === 0 && input.selectionEnd === input.value.length })()`)
   await contents.insertText('Updated objective')
+  await wait(`document.querySelector('#pi-command textarea')?.value === 'Updated objective'`)
   await click('#pi-command .question-submit')
   await wait(`document.querySelector('#pi-command').textContent.includes('Save changes?')`)
   await click('#pi-command .question-option')
@@ -312,7 +314,7 @@ async function exercisePiCommands(contents) {
   await click('#pi-command .question-submit')
   await wait(`document.querySelectorAll('#pi-command [aria-label="Pi 命令反馈"]').length === 3`)
   const answers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
-  if (answers.length !== 3 || answers[1].answers['Edit objective'] !== 'Updated objective') throw new Error('Pi chained answers lost their identity or edited content')
+  if (answers.length !== 3 || answers[1].answers['Edit objective'] !== 'Updated objective') throw new Error(`Pi chained answers lost their identity or edited content: ${JSON.stringify(answers)}`)
   await click('#pi-command-restart')
   await wait(`document.querySelector('#pi-command .question-cancel') != null`)
   await click('#pi-command .question-cancel')
@@ -328,16 +330,14 @@ async function exercisePiCommands(contents) {
     await wait(`document.querySelectorAll('#pi-command .question-option').length === 2`)
     if (await contents.executeJavaScript(`document.querySelector('#pi-command .question-other') != null`)) throw new Error('Native select exposed an invalid free-text answer')
     await click('#pi-command .question-option:nth-child(2)')
-    await wait(`document.querySelector('#pi-command .question-option:nth-child(2)').classList.contains('selected')`)
-    await click('#pi-command .question-submit')
     await wait(`document.querySelector('#pi-command .question-free-text-input') != null`)
+    if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command .question-free-text-input')`)) throw new Error('Native custom-answer input did not receive focus')
     if (cancelInput) {
       await click('#pi-command .question-cancel')
       await wait(`JSON.parse(document.querySelector('#pi-command-answers').textContent)[1]?.behavior === 'cancelled'`)
       continue
     }
     const customAnswer = '提交所有改动 保证工作区干净 然后构建并安装'
-    await click('#pi-command .question-free-text-input')
     await contents.insertText(customAnswer)
     await wait(`document.querySelector('#pi-command .question-free-text-input').value === ${JSON.stringify(customAnswer)}`)
     await click('#pi-command .question-submit')

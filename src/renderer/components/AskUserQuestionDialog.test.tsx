@@ -117,6 +117,9 @@ describe('AskUserQuestionInline', () => {
     expect(html).not.toContain('question-option question-other')
     expect(html).not.toContain('输入一个不在上述选项中的回答')
     expect(html.match(/type="radio"/g)).toHaveLength(3)
+    expect(html).toContain('输入自定义回答')
+    expect(html).toContain('点击后直接输入文字')
+    expect(html).not.toContain('Type something.')
     const drafts = initialQuestionDrafts(native)
     drafts['继续？'] = { selected: [sentinel], useOther: false, other: '' }
     expect(buildQuestionAnswers(native, drafts)).toEqual({ '继续？': sentinel })
@@ -133,6 +136,20 @@ describe('AskUserQuestionInline', () => {
     expect(normalizeAgentQuestionResponse(native, {
       runId: native.runId, questionId: native.questionId, behavior: 'answered', answers: { '继续？': drafts['继续？'].other }
     })).toBeNull()
+  })
+
+  it('does not advertise the Pi input transition for unrelated closed-choice prompts', () => {
+    const native = questionFromExtension('run-select', {
+      id: 'select-1', method: 'select', title: '继续？', options: ['继续', 'Type something.']
+    })!
+    for (const unrelated of [
+      { ...native, providerId: 'claude' as const },
+      { ...native, source: 'pi_extension_ui:confirm' }
+    ]) {
+      const html = renderToStaticMarkup(<AskUserQuestionInline request={unrelated} queuedCount={1} onRespond={async () => {}} />)
+      expect(html).not.toContain('点击后直接输入文字')
+      expect(html).toContain('Type something.')
+    }
   })
 
   it('renders provider-native free-text prompts as a direct input instead of an Other option', () => {
