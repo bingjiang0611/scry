@@ -8,6 +8,7 @@ export function ComposerProjectFixture() {
   const [input, setInput] = useState('测试消息')
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const sendsRef = useRef(0)
   return <section id="composer-project">
     <button id="new-draft" onClick={() => setStarted(false)}>新建草稿</button>
     <ChatView
@@ -23,6 +24,7 @@ export function ComposerProjectFixture() {
       onSelect={noop} onInput={setInput} onChooseFolder={noop} onPickRecent={noop} onRemoveRecent={noop}
       onRetrySlash={noop} onPickSlash={noop} onSlashSel={noop} onHideSlash={noop}
       onSend={() => {
+        textareaRef.current!.dataset.sends = String(++sendsRef.current)
         setStarted(true)
         setInput('')
       }} onStop={noop} onPasteImages={noop} onPasteClipboardImage={noop}

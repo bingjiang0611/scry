@@ -118,11 +118,11 @@ async function exercise() {
   check(enter({ isComposing: true }).defaultPrevented, 'IME Enter leaked a default newline')
   input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '消息' }))
   check(enter().defaultPrevented, 'Post-composition Enter leaked a default newline')
-  await new Promise((resolve) => requestAnimationFrame(resolve))
-  check(projectPicker() != null && input.value === draft, 'IME confirmation submitted or changed the draft')
-  const compositionEndedAt = performance.now()
-  await waitFor(() => performance.now() - compositionEndedAt >= 120)
+  check(input.dataset.sends == null && input.value === draft, 'IME confirmation submitted or changed the draft')
+  // Both keydowns run in this same task: no timing sleep may hide a swallowed key.
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }))
   check(enter().defaultPrevented, 'Send Enter leaked a default newline')
+  check(input.dataset.sends === '1', 'A fresh Enter after IME confirmation was swallowed')
   await waitFor(() => projectPicker() == null)
   check(document.querySelector('#composer-project textarea') === input, 'Hiding project selection remounted composer input')
   await waitFor(() => input.value === '')
@@ -142,7 +142,49 @@ async function exercise() {
   check(input.value === '手动输入', 'History replaced a non-empty draft')
   document.querySelector('#new-draft').click()
   await waitFor(() => projectPicker() != null)
-  return { viewport: [innerWidth, innerHeight], portraitAndLandscape: true, attachmentFlow: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, markdownDeferred: true, toolsDeferred: true, projectPickerLifecycle: true, promptHistoryNavigation: true }
+  input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+  input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '输入' }))
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }))
+  enter()
+  check(input.dataset.sends === '2', 'Enter after Space confirmed the IME candidate was swallowed')
+  await waitFor(() => input.value === '')
+  return { imeConfirmationProtected: true, immediateEnterSends: true, spaceConfirmationSends: true, viewport: [innerWidth, innerHeight], portraitAndLandscape: true, attachmentFlow: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, markdownDeferred: true, toolsDeferred: true, projectPickerLifecycle: true, promptHistoryNavigation: true }
+}
+
+async function exerciseNativeComposerEnter(contents) {
+  const read = (expression) => contents.executeJavaScript(expression)
+  const point = await read(`(() => {
+    const input = document.querySelector('#composer-project textarea');
+    input.scrollIntoView({ block: 'center' });
+    const rect = input.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
+    if (document.elementFromPoint(x, y) !== input) throw new Error('Composer textarea obscured');
+    return { x, y };
+  })()`)
+  contents.focus()
+  contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+  contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+  const wait = async (expression) => {
+    const deadline = Date.now() + 5000
+    while (!await read(expression)) {
+      if (Date.now() > deadline) throw new Error(`Native composer Enter timed out: ${expression}`)
+      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+    }
+  }
+  await wait(`document.activeElement === document.querySelector('#composer-project textarea')`)
+  await contents.insertText('Native Enter regression')
+  await wait(`document.querySelector('#composer-project textarea').value === 'Native Enter regression'`)
+  // Composition is simulated; the following key release and send are native Chromium input.
+  await read(`(() => {
+    const input = document.querySelector('#composer-project textarea');
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '消息' }));
+  })()`)
+  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+  await wait(`document.querySelector('#composer-project textarea').dataset.sends === '3' && document.querySelector('#composer-project textarea').value === ''`)
+  return true
 }
 
 try {
@@ -177,9 +219,11 @@ try {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         let result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
+        result.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
         win.setSize(560, 480)
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         result = { wide: result, narrow: await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )}) }
+        result.narrow.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
         console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
