@@ -250,6 +250,11 @@ export function AskUserQuestionInline({
                     {options.map((option, optionIndex) => {
                       const checked = draft.selected.includes(option.label)
                       const copy = optionDisplayCopy(option.label, option.description)
+                      const nativeCustomInput = request.providerId === 'pi'
+                        && request.source === 'pi_extension_ui:select'
+                        && request.questions.length === 1
+                        && closedChoice && !question.multiSelect
+                        && isGeneratedFreeTextOption(copy.label)
                       return (
                         <label className={`question-option ${checked ? 'selected' : ''}`} key={option.label}>
                           <input
@@ -257,14 +262,25 @@ export function AskUserQuestionInline({
                             type={question.multiSelect ? 'checkbox' : 'radio'}
                             name={`question-${request.questionId}-${questionIndex}`}
                             checked={checked}
-                            onChange={() => toggleOption(question.question, option.label, question.multiSelect)}
+                            onChange={() => {
+                              toggleOption(question.question, option.label, question.multiSelect)
+                              // Pi needs the original select sentinel before it can request text input.
+                              if (nativeCustomInput) void respond({
+                                runId: request.runId,
+                                questionId: request.questionId,
+                                behavior: 'answered',
+                                answers: { [question.question]: option.answerValue ?? option.label }
+                              })
+                            }}
                           />
                           <span>
                             <b>
-                              {copy.label}
+                              {nativeCustomInput ? '输入自定义回答' : copy.label}
                               {copy.recommended && <em className="question-recommended">推荐</em>}
                             </b>
-                            {copy.description && <small>{copy.description}</small>}
+                            {nativeCustomInput
+                              ? <small>点击后直接输入文字</small>
+                              : copy.description && <small>{copy.description}</small>}
                           </span>
                         </label>
                       )

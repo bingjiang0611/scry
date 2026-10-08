@@ -4,7 +4,7 @@ import type { AgentQuestionRequest, AgentQuestionResponse } from '../../src/shar
 import type { TraceEvent } from '../../src/shared/trace'
 
 const questions: AgentQuestionRequest[] = [
-  { runId: 'pi-command-ui', questionId: 'select', providerId: 'pi', questions: [
+  { runId: 'pi-command-ui', questionId: 'select', providerId: 'pi', source: 'pi_extension_ui:select', questions: [
     { header: 'Menu', question: 'Choose an action', options: [{ label: 'Edit', description: 'Edit objective' }, { label: '2. Type something.', description: '选择此项' }], multiSelect: false, allowCustomAnswer: false }
   ] },
   { runId: 'pi-command-ui', questionId: 'editor', providerId: 'pi', questions: [
