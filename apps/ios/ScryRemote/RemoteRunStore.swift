@@ -167,6 +167,7 @@ final class RemoteRunStore: ObservableObject {
     case idle
     case loading
     case loaded([G0Transport.RunHistoryTurn])
+    case partial([G0Transport.RunHistoryTurn])
     case empty
     case baseUnavailable
     case failed(String)
@@ -236,6 +237,9 @@ final class RemoteRunStore: ObservableObject {
   private var projectsLoadedAt: Date?
   private var commandCache: [String: G0Transport.RunCommandCatalog] = [:]
   private let historyDisk: RemoteHistoryCache
+  private var prefetchTask: Task<Void, Never>?
+  private var prefetchGeneration = 0
+  private var warmedScreens: [String: [G0Transport.RunHistoryTurn]] = [:]
   private var cachedHistory: (key: String, snapshot: RemoteHistorySnapshot, persisted: Bool)?
   private var historyRequestGeneration = 0
   private var pendingSubmission: PendingSubmission?
@@ -436,6 +440,7 @@ final class RemoteRunStore: ObservableObject {
           self.reachable = true
           self.catalogLoadedAt = Date()
           self.catalog = list.isEmpty ? .empty : .loaded(list)
+          self.prefetchHistory(list)
         }
       } catch {
         await MainActor.run {
@@ -448,6 +453,52 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
+  // Warm local first screens for two recent conversations while browsing,
+  // without changing run identity or opening extra relay exchanges. Cold
+  // network prefetch would compete with the first foreground read: cancelling
+  // a Swift task does not close this transport's in-flight NIO exchange.
+  private func prefetchHistory(_ sessions: [G0Transport.RunSessionRef]) {
+    guard prefetchTask == nil, historyTask == nil, !historyCacheClearing, !hasUnresolvedRun,
+          let connection = connections.load() else { return }
+    let recent = Array(sessions.filter { $0.externalSessionId?.isEmpty == false }
+      .sorted { $0.ts > $1.ts }.prefix(2))
+    let keys = Set(recent.compactMap { session -> String? in
+      guard let external = session.externalSessionId else { return nil }
+      return RemoteHistoryCache.key(connection: connection, providerId: session.providerId, cwd: session.cwd, sessionId: external)
+    })
+    warmedScreens = warmedScreens.filter { keys.contains($0.key) }
+    let requestDataGeneration = dataGeneration
+    let warmingGeneration = prefetchGeneration
+    let disk = historyDisk
+    prefetchTask = Task { [weak self] in
+      guard let self else { return }
+      for session in recent {
+        guard !Task.isCancelled, self.dataGeneration == requestDataGeneration,
+              self.prefetchGeneration == warmingGeneration,
+              self.connections.load() == connection, let external = session.externalSessionId else { break }
+        let key = RemoteHistoryCache.key(connection: connection, providerId: session.providerId, cwd: session.cwd, sessionId: external)
+        do {
+          let cached = try await disk.read(key)
+          guard !Task.isCancelled, self.prefetchGeneration == warmingGeneration,
+                self.dataGeneration == requestDataGeneration, self.connections.load() == connection else { break }
+          if let cached { self.warmScreen(cached.turns, key: key) }
+        } catch {
+          // Prefetch is an optional read, never a connectivity/business receipt.
+          // Opening the session owns visible errors and its authoritative read.
+          if Task.isCancelled { break }
+        }
+      }
+      if self.prefetchGeneration == warmingGeneration { self.prefetchTask = nil }
+    }
+  }
+
+  private func warmScreen(_ turns: [G0Transport.RunHistoryTurn], key: String) {
+    let recent = Array(turns.suffix(2))
+    // Bound retained first-screen text as well as the number of conversations.
+    guard recent.reduce(0, { $0 + $1.userText.utf8.count + $1.items.reduce(0) { $0 + $1.text.utf8.count } }) <= 128 * 1024 else { return }
+    warmedScreens[key] = recent
+  }
+
   // Show protected local data before opening the relay. Only an authenticated
   // host response can mark it current/reachable. The single memory entry keeps
   // large transcripts bounded; other conversations reopen from disk off-main.
@@ -456,6 +507,7 @@ final class RemoteRunStore: ObservableObject {
     if mockMode { return }
     #endif
     guard !historyCacheClearing else { return }
+    prefetchTask?.cancel()
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     // The legacy history contract has no canonical turn ids. Keep the base of
     // a locally extended conversation stable rather than deduplicating by text
@@ -465,6 +517,8 @@ final class RemoteRunStore: ObservableObject {
     if activeSessionIdentity != identity {
       guard resetRun() else { return }
       activeSessionIdentity = identity
+      commandsRequestGeneration += 1
+      commandsTask?.cancel(); commandsTask = nil; commands = .idle
       history = .idle
     } else if historyTask != nil { return }
     guard let connection = connections.load() else { history = .failed("尚未配对"); return }
@@ -478,7 +532,9 @@ final class RemoteRunStore: ObservableObject {
     historyFromCache = false; historyFetchedAt = nil; historyProgress = nil
     historyRefreshError = nil; historyStorageNotice = nil
     if let memory { showHistory(memory, key: key, cached: true, persisted: cachedHistory?.persisted == true) }
-    else { history = .loading }
+    else if let screen = warmedScreens[key], !hasLocalTurns {
+      history = .partial(screen); historyRevision += 1; historyFromCache = true
+    } else { history = .loading }
     historySyncing = true
     historyTask = Task { [weak self] in
       guard let self else { return }
@@ -520,6 +576,7 @@ final class RemoteRunStore: ObservableObject {
           throw NSError(domain: "ScryHistoryFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "isolated offline fixture"])
         }
         #endif
+        let hasCachedSnapshot = cached != nil
         let snapshot = try await client.historySnapshot(providerId: providerId, cwd: cwd,
           externalSessionId: externalSessionId, cached: cached, progress: { [weak self] received, total in
             guard let self else { return }
@@ -527,6 +584,12 @@ final class RemoteRunStore: ObservableObject {
               guard self.historyRequestGeneration == request,
                     self.isCurrent(requestGeneration, identity: identity) else { return }
               self.historyProgress = "\(received / 1024) / \(max(1, (total + 1023) / 1024)) KB"
+            }
+          }, firstScreen: { [weak self] turns in
+            guard !hasCachedSnapshot, let self else { return }
+            await MainActor.run {
+              self.applyHistoryPreview(turns, request: request, generation: requestGeneration,
+                                       identity: identity, connection: connection)
             }
           })
         guard current() else { return }
@@ -556,6 +619,18 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
+  private func applyHistoryPreview(_ turns: [G0Transport.RunHistoryTurn], request: Int,
+                                   generation: Int, identity: SessionIdentity, connection: RemoteConnection) {
+    guard !Task.isCancelled, historyRequestGeneration == request,
+          isCurrent(generation, identity: identity), connections.load() == connection else { return }
+    // A snapshot retry withdraws unverified network content, not a previously
+    // verified warm screen. A nonempty new preview has no full digest receipt.
+    if turns.isEmpty && historyFromCache { return }
+    history = turns.isEmpty ? .loading : .partial(turns)
+    historyFromCache = false; historyFetchedAt = nil
+    historyRevision += 1
+  }
+
   private func showHistory(_ snapshot: RemoteHistorySnapshot, key: String, cached: Bool, persisted: Bool) {
     let rendered: Bool
     switch history { case .loaded, .empty: rendered = true; default: rendered = false }
@@ -575,6 +650,9 @@ final class RemoteRunStore: ObservableObject {
     historyCacheClearing = true
     defer { historyCacheClearing = false }
     historyRequestGeneration += 1
+    prefetchGeneration += 1
+    prefetchTask?.cancel(); prefetchTask = nil
+    warmedScreens.removeAll()
     historyTask?.cancel()
     historyTask = nil
     cachedHistory = nil
@@ -1280,6 +1358,7 @@ final class RemoteRunStore: ObservableObject {
       return false
     }
     archiveActiveTurnIfNeeded()
+    prefetchTask?.cancel()
     generation += 1
     pollTask?.cancel(); pollTask = nil
     submitTask?.cancel(); submitTask = nil
@@ -1328,6 +1407,8 @@ final class RemoteRunStore: ObservableObject {
     pollTask?.cancel(); pollTask = nil
     submitTask?.cancel(); submitTask = nil
     catalogTask?.cancel(); catalogTask = nil
+    prefetchGeneration += 1
+    prefetchTask?.cancel(); prefetchTask = nil; warmedScreens.removeAll()
     historyTask?.cancel(); historyTask = nil
     providersTask?.cancel(); providersTask = nil
     commandsTask?.cancel(); commandsTask = nil
@@ -1459,22 +1540,56 @@ final class RemoteRunStore: ObservableObject {
     _ = try await disk.write(snapshot, key: key, epoch: 0)
     let store = RemoteRunStore(connections: connections, historyDisk: disk)
     store.historyTestOffline = true
+    store.commands = .loaded([.init(name: "old-project", description: "fixture", source: "custom")])
     store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
     await store.historyTask?.value
+    let beforeIdentity = store.activeSessionIdentity
+    store.prefetchHistory([.init(sessionId: "fixture", externalSessionId: "session", providerId: "pi", cwd: "/fixture", label: "fixture", ts: 1)])
+    await store.prefetchTask?.value
     var checks: [(String, Bool)] = [
+      ("store.sessionSwitchDropsOldCommands", store.slashCommands.isEmpty),
+      ("store.warmingDoesNotSwitchSession", store.activeSessionIdentity == beforeIdentity && store.prompt == nil),
+      ("store.warmingBoundsLargeScreen", store.warmedScreens[key] == nil),
       ("store.offlineKeepsDiskHistory", store.history == .loaded(snapshot.turns) && store.historyFromCache && store.reachable == false),
       ("store.offlineUpdateErrorVisible", store.historyRefreshError != nil)
     ]
+    store.historyTask = Task {}
+    store.prefetchHistory([.init(sessionId: "fixture", externalSessionId: "session", providerId: "pi", cwd: "/fixture", label: "fixture", ts: 1)])
+    checks.append(("store.warmingYieldsToForeground", store.prefetchTask == nil))
+    await store.prefetchTask?.value
+    store.historyTask = nil
     let identity = SessionIdentity.opened(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    let request = store.historyRequestGeneration
+    let requestGeneration = store.generation
+    store.applyHistoryPreview([], request: request, generation: requestGeneration, identity: identity, connection: connection)
+    checks.append(("store.retryKeepsVerifiedWarmContent", store.history == .loaded(snapshot.turns)))
+    var foreignConnection = connection; foreignConnection.hostId = "different-host"
+    connections.save(foreignConnection)
+    store.applyHistoryPreview([.init(userText: "foreign host", items: [])], request: request, generation: requestGeneration, identity: identity, connection: connection)
+    checks.append(("store.previewRejectsChangedConnection", store.history == .loaded(snapshot.turns)))
+    connections.save(connection)
+    store.historyFromCache = false
+    store.applyHistoryPreview(Array(snapshot.turns.suffix(2)), request: request, generation: requestGeneration, identity: identity, connection: connection)
+    checks.append(("store.networkPreviewIsPartial", store.history == .partial(Array(snapshot.turns.suffix(2))) && store.historyFetchedAt == nil))
+    store.applyHistoryPreview([], request: request, generation: requestGeneration, identity: identity, connection: connection)
+    checks.append(("store.retryWithdrawsNetworkPreview", store.history == .loading))
+    store.showHistory(snapshot, key: key, cached: true, persisted: true)
     store.completedLiveTurns[identity] = [.init(id: "fixture-run", runId: "fixture-run", prompt: "local prompt",
       attachments: [], lifecycle: .settled, output: [], resultSummary: nil, externalSessionId: "session")]
     store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session", force: true)
     await store.historyTask?.value
     checks.append(("store.localOverlayKeepsBase", store.history == .loaded(snapshot.turns) && store.completedTurns(for: identity).count == 1 && store.historyRefreshError == nil))
     try await store.clearHistoryCache()
+    checks.append(("store.clearRemovesWarmScreens", store.warmedScreens.isEmpty))
+    store.applyHistoryPreview(snapshot.turns, request: request, generation: requestGeneration, identity: identity, connection: connection)
+    checks.append(("store.previewRejectsClearedGeneration", store.history == .idle))
     store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session", force: true)
     await store.historyTask?.value
     checks.append(("store.missingBaseIsNotEmpty", store.history == .baseUnavailable && store.completedTurns(for: identity).count == 1))
+    let pendingWarm = Task<Void, Never> {}
+    store.prefetchTask = pendingWarm
+    _ = store.resetRun()
+    checks.append(("store.runTransitionCancelsWarming", pendingWarm.isCancelled))
     return checks
   }
 
@@ -1630,7 +1745,23 @@ final class RemoteRunStore: ObservableObject {
     liveExternalSessionId = "codex-mock-session"
     loadMockDirectories(path: chosen?.path)
     activeSessionIdentity = .opened(providerId: "codex", cwd: roots[0].path, externalSessionId: "codex-pinned-1")
-    if ProcessInfo.processInfo.arguments.contains("-uiMockLoading") { history = .loading }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockFirstScreen") {
+      let turns = (1...40).map { index in
+        G0Transport.RunHistoryTurn(userText: "模拟历史消息 \(index)", items: [
+          .init(kind: "output", text: index == 40 ? String(repeating: "长消息保留完整内容，可按需展开。", count: 600) : "模拟回复 \(index)")])
+      }
+      history = ProcessInfo.processInfo.arguments.contains("-uiMockPartialHistory") ? .partial(Array(turns.suffix(2))) : .loaded(turns)
+      historyFromCache = true; historyFetchedAt = Date()
+      prompt = nil; output = []; runId = nil; resultSummary = nil
+      if ProcessInfo.processInfo.arguments.contains("-uiMockPartialHistory"), let identity = activeSessionIdentity {
+        completedLiveTurns[identity] = [.init(id: "preview-completed", runId: "preview-completed", prompt: "模拟本机已完成续聊",
+          attachments: [], lifecycle: .settled, output: [.init(id: 1, kind: "output", text: "模拟续聊结果必须保留")],
+          resultSummary: nil, externalSessionId: "codex-pinned-1")]
+      }
+    }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockLoading") {
+      history = .loading; prompt = nil; output = []; runId = nil; resultSummary = nil
+    }
     if ProcessInfo.processInfo.arguments.contains("-uiMockQuestion") {
       // Explicitly synthetic sheet fixture; it never reaches answerQuestion.
       let fixture = #"{"runId":"fixture-run","questionId":"fixture-question","questionKind":"input","questions":[{"header":"录屏验证 · 模拟请求","question":"输入一段多行说明","options":[],"multiSelect":false,"inputMode":"multiline"}]}"#
