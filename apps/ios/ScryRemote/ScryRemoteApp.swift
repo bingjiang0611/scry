@@ -26,6 +26,7 @@ struct ScryRemoteApp: App {
 struct RootView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @State private var showQuestion = false
 
   var body: some View {
     Group {
@@ -43,6 +44,26 @@ struct RootView: View {
       }
     }
     .tint(Palette.blue)
+    .safeAreaInset(edge: .top, spacing: 0) {
+      if model.signedIn, !run.pendingQuestions.isEmpty, !showQuestion {
+        Button { showQuestion = true } label: {
+          Label("任务正在等待你的决定 · 查看", systemImage: "hand.raised")
+            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
+            .background(Palette.warnBg)
+        }
+      }
+    }
+    // Questions belong to the run, not a particular route. Returning home or
+    // continuing an archived conversation must never hide a waiting request.
+    .onChange(of: run.pendingQuestions.first?.questionId) { _, id in showQuestion = model.signedIn && id != nil }
+    .sheet(isPresented: Binding(get: { model.signedIn && showQuestion }, set: { showQuestion = $0 })) {
+      if model.signedIn, let request = run.pendingQuestions.first {
+        RemoteQuestionSheet(request: request, submitting: run.questionAnswering, error: run.questionError,
+          onAnswer: { if model.signedIn { run.answerPendingQuestion(answers: $0) } },
+          onCancel: { if model.signedIn { run.answerPendingQuestion(answers: [:], cancel: true) } })
+          .id(request.questionId)
+      }
+    }
     .simultaneousGesture(
       DragGesture(minimumDistance: 18)
         .onEnded { value in
@@ -58,7 +79,13 @@ struct RootView: View {
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
     .onChange(of: run.reachable) { if let ok = run.reachable { model.markReachable(ok) } }
+    .onChange(of: run.liveExternalSessionId) {
+      if let external = run.liveExternalSessionId, let identity = run.activeSessionIdentity {
+        model.bindDraft(externalSessionId: external, to: identity)
+      }
+    }
     .onChange(of: model.signedIn) { signedIn in
+      showQuestion = signedIn && !run.pendingQuestions.isEmpty
       if signedIn, run.hasRecoverableRun { model.route = .chat }
     }
     .onAppear {

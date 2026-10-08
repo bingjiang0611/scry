@@ -11,8 +11,11 @@ import RemoteTransport
 struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
-  @State private var draft = ""
-  @State private var attachments: [DraftAttachment] = []
+  private var composer: Binding<AppModel.ComposerDraft> {
+    model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
+  }
+  private var draft: String { composer.wrappedValue.text }
+  private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
 
   private var session: OpenedSession? { model.openedSession }
   private var hasLiveTurn: Bool { run.prompt != nil }
@@ -24,7 +27,12 @@ struct SessionTranscriptView: View {
     guard let identity = sessionIdentity else { return [] }
     return run.completedTurns(for: identity)
   }
-  private var runBusy: Bool { run.lifecycle == .submitting || run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
+  private var runBusy: Bool { run.isBusy }
+  private var controlsMatch: Bool {
+    guard let session else { return false }
+    return run.controlsReady && run.chosenProvider?.id == session.providerId &&
+      run.chosenProvider?.agentProfileId == session.agentProfileId
+  }
   private var historyReadyForDisplay: Bool {
     if case .loaded = run.history { return true }
     if case .empty = run.history { return true }
@@ -47,25 +55,9 @@ struct SessionTranscriptView: View {
           }
         }
       }
-      ScrollViewReader { proxy in
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 20) {
-            historyBody
-            if hasLiveTurn { liveTurn }
-            Color.clear.frame(height: 1).id("bottom")
-          }
-          .padding(.horizontal, 18)
-          .padding(.top, 14)
-          .padding(.bottom, 10)
-        }
-        .scrollIndicators(.hidden)
-        .onAppear { scrollToLatest(proxy) }
-        .onChange(of: historyReadyForDisplay) { ready in
-          if ready { scrollToLatest(proxy) }
-        }
-        .onChange(of: completedTurns.count) { scrollToLatest(proxy) }
-        .onChange(of: run.output.count) { proxy.scrollTo("bottom", anchor: .bottom) }
-        .onChange(of: run.lifecycle) { proxy.scrollTo("bottom", anchor: .bottom) }
+      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
+        historyBody
+        if hasLiveTurn { liveTurn }
       }
       footer
     }
@@ -99,10 +91,6 @@ struct SessionTranscriptView: View {
     }
   }
 
-  private func scrollToLatest(_ proxy: ScrollViewProxy) {
-    DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
-  }
-
   @ViewBuilder private var historyBody: some View {
     switch run.history {
     case .idle, .loading:
@@ -119,7 +107,15 @@ struct SessionTranscriptView: View {
         .font(.system(size: 13)).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
     case let .failed(reason):
-      EmptyState(title: "无法读取历史记录", detail: reason).padding(.top, 24)
+      EmptyState(title: "暂时无法读取会话", detail: "请确认 Mac 的 Scry 正在运行且网络可用。已输入的草稿会保留。", symbol: "wifi.exclamationmark")
+      Button("重新读取") {
+        if let s = session {
+          run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true)
+        }
+      }
+      .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+      DisclosureGroup("错误详情") { Text(reason).font(.caption).textSelection(.enabled) }
+        .font(.caption).foregroundStyle(Palette.muted)
       ForEach(completedTurns) { turn in completedTurnView(turn) }
     }
   }
@@ -230,9 +226,9 @@ struct SessionTranscriptView: View {
 
   private var footer: some View {
     VStack(alignment: .leading, spacing: 5) {
-      MessageComposer(text: $draft, attachments: $attachments,
+      MessageComposer(text: composer.text, attachments: composer.attachments,
                       placeholder: "继续这段对话…", disabled: !run.hasConnection,
-                      sendDisabled: runBusy || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      sendDisabled: runBusy || !controlsMatch || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       contextLabel: run.chosenProvider?.label ?? session?.providerId.uppercased(), contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       onModel: { run.chooseModel($0) },
@@ -249,11 +245,19 @@ struct SessionTranscriptView: View {
                         }
                       }) {
         guard let s = session else { return }
-        run.submitFollowUp(prompt: draft, providerId: s.providerId, agentProfileId: s.agentProfileId,
-                           cwd: s.cwd, resume: s.externalSessionId, attachments: attachments.map(\.wireValue))
-        draft = ""; attachments = []
+        if run.submitFollowUp(prompt: draft, providerId: s.providerId, agentProfileId: s.agentProfileId,
+                             cwd: s.cwd, resume: s.externalSessionId, attachments: attachments.map(\.wireValue)) {
+          composer.wrappedValue = .init()
+        }
       }
-      if runBusy { Text("当前任务结束后才能继续发送。").font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5) }
+      if runBusy {
+        Text("可先写下一条消息；本轮结果同步完成后再发送。")
+          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
+      } else if !controlsMatch {
+        Button("重新读取原 Provider 设置") {
+          if let s = session { run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId, force: true) }
+        }.font(.system(size: 12)).padding(.horizontal, 5)
+      }
     }
     .padding(.horizontal, 14).padding(.top, 7).padding(.bottom, 8)
     .background(Palette.surface)

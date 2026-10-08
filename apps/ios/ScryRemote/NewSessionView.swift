@@ -7,14 +7,15 @@ import RemoteTransport
 struct NewSessionView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
-  @State private var draft = ""
-  @State private var attachments: [DraftAttachment] = []
+  private var composer: Binding<AppModel.ComposerDraft> { model.composerDraft(for: .newTask) }
+  private var draft: String { composer.wrappedValue.text }
+  private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
   @State private var showProjects = false
   @State private var showProviders = false
 
   private var paired: Bool { run.hasConnection }
   private var canSend: Bool {
-    paired && run.chosen != nil && run.controlsReady &&
+    paired && !run.isBusy && run.chosen != nil && run.controlsReady &&
       !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
@@ -43,8 +44,14 @@ struct NewSessionView: View {
         .padding(.horizontal, 19).padding(.top, 12).padding(.bottom, 18)
       }
       .scrollIndicators(.hidden)
+      .scrollDismissesKeyboard(.interactively)
 
-      MessageComposer(text: $draft, attachments: $attachments,
+      if run.chosen == nil || run.chosenProvider == nil {
+        Text(run.chosen == nil ? "先选择工作目录，再选择 Provider" : "选择 Provider 后即可发送")
+          .font(.system(size: 13)).foregroundStyle(Palette.muted).padding(.horizontal, 20)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      MessageComposer(text: composer.text, attachments: composer.attachments,
                       placeholder: paired ? "描述任务，或粘贴错误信息…" : "连接后可输入",
                       disabled: !paired, sendDisabled: !canSend,
                       contextLabel: run.chosenProvider?.label, onContext: { showProviders = true },
@@ -64,8 +71,10 @@ struct NewSessionView: View {
                       }) {
         guard let providerId = run.chosenProvider?.id else { return }
         let payload = attachments.map(\.wireValue)
-        run.submit(prompt: draft, providerId: providerId, attachments: payload)
-        draft = ""; attachments = []; model.route = .chat
+        if run.submit(prompt: draft, providerId: providerId, attachments: payload) {
+          composer.wrappedValue = .init()
+          model.route = .chat
+        }
       }
       .padding(.horizontal, 13).padding(.top, 8).padding(.bottom, 12)
       .background(Palette.surface)
@@ -166,8 +175,8 @@ struct NewSessionView: View {
         ProgressView("读取主机可用的 Provider…").frame(maxWidth: .infinity).padding(.top, 40)
       case let .loaded(list):
         VStack(spacing: 0) {
-          ForEach(list, id: \.id) { ref in
-            SelectionRow(title: ref.label, detail: ref.id.uppercased(),
+          ForEach(list, id: \.selectionId) { ref in
+            SelectionRow(title: ref.label, detail: [ref.id.uppercased(), ref.agentProfileId].compactMap { $0 }.joined(separator: " · "),
                          selected: run.chosenProvider?.id == ref.id && run.chosenProvider?.agentProfileId == ref.agentProfileId) {
               run.chooseProvider(ref); showProviders = false
             }
@@ -180,6 +189,11 @@ struct NewSessionView: View {
       }
     }
   }
+}
+
+extension G0Transport.RunProviderRef {
+  // Multiple profiles share a provider ID; SwiftUI row identity must not.
+  var selectionId: String { id + "\u{1f}" + (agentProfileId ?? "") }
 }
 
 private struct SelectionSheet<Content: View>: View {

@@ -133,7 +133,7 @@ final class RemoteRunStore: ObservableObject {
     return modelOptions.first(where: { $0.selectionId == chosenModelId })
   }
   var controlsReady: Bool {
-    guard let provider = chosenProvider else { return false }
+    guard restoredControlsError == nil, let provider = chosenProvider else { return false }
     if let permissions = provider.permissions {
       guard permissions.contains(where: { $0.id == permissionMode }) else { return false }
     } else if permissionMode != "default" {
@@ -200,6 +200,15 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var questionAnswering = false
   @Published private(set) var questionError: String?
 
+  // A run remains unresolved until its durable intent is acknowledged and a
+  // terminal run has had its output drained. This derived gate is the small
+  // parent-facing contract for navigation and composer admission.
+  var hasUnresolvedRun: Bool {
+    Self.unresolvedState(pending: pendingSubmission != nil, runId: runId,
+                         drained: terminalDrainCompleted, interrupted: observationInterrupted)
+  }
+  var isBusy: Bool { hasUnresolvedRun }
+
   private let connections = RemoteConnectionStore()
   private var pollTask: Task<Void, Never>?
   private var submitTask: Task<Void, Never>?
@@ -208,6 +217,7 @@ final class RemoteRunStore: ObservableObject {
   private var providersTask: Task<Void, Never>?
   private var commandsTask: Task<Void, Never>?
   private var projectsTask: Task<Void, Never>?
+  private var directoriesTask: Task<Void, Never>?
   private var generation = 0
   // Catalog/provider/project requests are independent of the currently opened
   // run. `resetRun()` must not make their useful replies disappear.
@@ -221,6 +231,14 @@ final class RemoteRunStore: ObservableObject {
   private var activeRouting: RemoteRunClient.Routing?
   private var seenOutputSequences = Set<Int>()
   private var archivedActiveTurn = false
+  @Published private(set) var terminalDrainCompleted = false
+  private var contextNeedsRestore = false
+  private var directoriesRequestGeneration = 0
+  private var commandsRequestGeneration = 0
+  private var latestProviderPreference: (id: String?, agentProfileId: String?) = (nil, nil)
+  private enum RestoredControl { case model, effort, permission }
+  private var restoredControlErrors: [RestoredControl: String] = [:]
+  private var restoredControlsError: String? { restoredControlErrors.values.first }
   private var pendingQuestionAnswerId: String?
 
   private static let catalogFreshness: TimeInterval = 60
@@ -230,6 +248,10 @@ final class RemoteRunStore: ObservableObject {
   #endif
 
   init() {
+    #if DEBUG
+    let args = ProcessInfo.processInfo.arguments
+    if args.contains("-uiPreview") || args.contains("-selfTest") { return }
+    #endif
     restoreRecoveryCheckpoint()
   }
 
@@ -286,6 +308,9 @@ final class RemoteRunStore: ObservableObject {
   }
 
   private func clearRecoveryCheckpoint() {
+    #if DEBUG
+    if mockMode { return }
+    #endif
     guard let url = recoveryURL else { return }
     do { try FileManager.default.removeItem(at: url) }
     catch let error as CocoaError where error.code == .fileNoSuchFile { }
@@ -306,12 +331,14 @@ final class RemoteRunStore: ObservableObject {
       }
       activeSessionIdentity = checkpoint.identity
       activeRouting = checkpoint.routing
+      contextNeedsRestore = true
       prompt = checkpoint.routing?.prompt
       sentAttachments = checkpoint.routing?.attachments.map {
         SentAttachment(name: $0.name, kind: $0.kind, size: $0.size)
       } ?? []
       if let runId = checkpoint.runId {
         self.runId = runId
+        terminalDrainCompleted = false
         lifecycle = .recorded
         if let client = makeClient() {
           startPolling(runId: runId, client: client, generation: generation, identity: checkpoint.identity)
@@ -321,6 +348,7 @@ final class RemoteRunStore: ObservableObject {
         }
       } else if let intentId = checkpoint.intentId, let routing = checkpoint.routing {
         pendingSubmission = PendingSubmission(intentId: intentId, routing: routing, identity: checkpoint.identity)
+        terminalDrainCompleted = false
         lifecycle = .submitting
         retryAvailable = true
         submitError = "上次提交结果未知。可重试核对；将复用原 intent ID，不会创建重复任务。"
@@ -344,6 +372,7 @@ final class RemoteRunStore: ObservableObject {
     }
   }
   func chooseProvider(_ ref: G0Transport.RunProviderRef) {
+    restoredControlErrors = [:]
     chosenProvider = ref
     chosenModelId = nil
     chosenEffort = nil
@@ -352,15 +381,19 @@ final class RemoteRunStore: ObservableObject {
   }
   func chooseModel(_ id: String?) {
     guard id == nil || modelOptions.contains(where: { $0.selectionId == id }) else { return }
+    restoredControlErrors[.model] = nil
+    restoredControlErrors[.effort] = nil
     chosenModelId = id
     chosenEffort = nil
   }
   func chooseEffort(_ id: String?) {
     guard id == nil || effortOptions.contains(where: { $0.id == id }) else { return }
+    restoredControlErrors[.effort] = nil
     chosenEffort = id
   }
   func choosePermission(_ id: String) {
     guard chosenProvider?.permissions?.contains(where: { $0.id == id }) == true else { return }
+    restoredControlErrors[.permission] = nil
     permissionMode = id
   }
 
@@ -410,7 +443,7 @@ final class RemoteRunStore: ObservableObject {
     #endif
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     if activeSessionIdentity != identity {
-      resetRun()
+      guard resetRun() else { return }
       activeSessionIdentity = identity
     }
     if !force, let cached = historyCache[identity] {
@@ -479,7 +512,8 @@ final class RemoteRunStore: ObservableObject {
   func prepareForSession(providerId: String, cwd: String, externalSessionId: String) {
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     if activeSessionIdentity == identity {
-      if let runId, pollTask == nil, !isTerminal(generation: generation, identity: identity) {
+      if let runId, pollTask == nil,
+         observationInterrupted || !isTerminal(generation: generation, identity: identity) {
         resumeObservation(runId: runId)
       }
       if history == .idle { loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId) }
@@ -489,7 +523,13 @@ final class RemoteRunStore: ObservableObject {
   }
 
   func completedTurns(for identity: SessionIdentity) -> [CompletedLiveTurn] {
-    completedLiveTurns[identity] ?? []
+    let turns = completedLiveTurns[identity] ?? []
+    // Only stable run identity can deduplicate evidence; repeated prompt text
+    // is not identity ("continue" may legitimately appear many times).
+    guard identity == activeSessionIdentity else { return turns }
+    return turns.filter {
+      Self.shouldIncludeCompletedTurn($0.id, currentRunId: runId, archived: archivedActiveTurn)
+    }
   }
 
   // Load the Providers the host offers. Only available ones are selectable (an
@@ -501,15 +541,20 @@ final class RemoteRunStore: ObservableObject {
   // an explicit pick (canSend gates on chosenProvider) keeps the choice honest.
   // If a previously-chosen Provider is no longer available, clear it.
   func loadProviders(preferredId: String? = nil, preferredAgentProfileId: String? = nil, force: Bool = false) {
+    // This is updated before any cache/single-flight decision. A late response
+    // therefore applies the latest screen preference, never its stale closure.
+    latestProviderPreference = (preferredId, preferredAgentProfileId)
     #if DEBUG
     if mockMode {
       applyPreferredProvider(preferredId, agentProfileId: preferredAgentProfileId)
+      _ = restoreActiveContext()
       return
     }
     #endif
     let hasCachedValue: Bool
     switch providers { case .loaded, .empty: hasCachedValue = true; default: hasCachedValue = false }
     applyPreferredProvider(preferredId, agentProfileId: preferredAgentProfileId)
+    _ = restoreActiveContext()
     if !force, hasCachedValue, isFresh(providersLoadedAt, within: Self.metadataFreshness) { return }
     guard providersTask == nil else { return }
     guard let client = makeClient() else {
@@ -547,7 +592,9 @@ final class RemoteRunStore: ObservableObject {
               self.permissionMode = "default"
             }
           }
-          self.applyPreferredProvider(preferredId, agentProfileId: preferredAgentProfileId)
+          self.applyPreferredProvider(self.latestProviderPreference.id,
+                                      agentProfileId: self.latestProviderPreference.agentProfileId)
+          self.restoreActiveContext()
         }
       } catch {
         await MainActor.run {
@@ -566,15 +613,96 @@ final class RemoteRunStore: ObservableObject {
 
   private func applyPreferredProvider(_ preferredId: String?, agentProfileId: String?) {
     guard let preferredId, case let .loaded(items) = providers else { return }
-    let exact = items.first(where: { $0.id == preferredId && $0.agentProfileId == agentProfileId })
-    let preferred = exact ?? (agentProfileId == nil ? items.first(where: { $0.id == preferredId }) : nil)
+    let preferred = items.first(where: { $0.id == preferredId && $0.agentProfileId == agentProfileId })
     guard let preferred else {
-      // Never resume a profile-bound conversation under another Pi profile.
-      if agentProfileId != nil { chosenProvider = nil; chosenModelId = nil; chosenEffort = nil }
+      // Never resume under another Provider or profile when the preferred
+      // identity is unavailable.
+      chosenProvider = nil
+      chosenModelId = nil
+      chosenEffort = nil
+      restoredControlErrors = [:]
+      permissionMode = "default"
       return
     }
     guard chosenProvider.map({ !Self.sameProviderContext($0, preferred) }) ?? true else { return }
     chooseProvider(preferred)
+  }
+
+  // Rehydrate a recovered run's original routing without selecting a nearby
+  // provider/profile or silently changing its controls. Metadata loaders call
+  // this after their authoritative lists arrive; unavailable values stay
+  // visibly unavailable and keep submission gated.
+  @discardableResult
+  func restoreActiveContext() -> Bool {
+    guard contextNeedsRestore, let routing = activeRouting else { return false }
+    // The host still authorizes the canonical path at submit. This only restores
+    // a previously granted descendant for presentation, not a new grant.
+    if case let .loaded(projects) = projects {
+      chosen = projects.contains(where: { routing.cwd == $0.path || routing.cwd.hasPrefix($0.path + "/") })
+        ? .init(path: routing.cwd, label: URL(fileURLWithPath: routing.cwd).lastPathComponent) : nil
+    } else if case .empty = projects { chosen = nil }
+    if case let .loaded(providers) = providers {
+      chosenProvider = providers.first(where: {
+        $0.id == routing.providerId && $0.agentProfileId == routing.agentProfileId
+      })
+      restoredControlErrors = [:]
+      guard let provider = chosenProvider else {
+        chosenModelId = nil
+        chosenEffort = nil
+        permissionMode = "default"
+        return false
+      }
+      if let modelId = routing.modelId {
+        if let model = (provider.models ?? []).first(where: { $0.id == modelId && $0.providerId == routing.modelProviderId }) {
+          chosenModelId = model.selectionId
+        } else {
+          chosenModelId = nil
+          restoredControlErrors[.model] = "恢复的 Model 当前不可用，已阻止静默替换"
+        }
+      } else {
+        chosenModelId = nil
+      }
+      if let effort = routing.effort {
+        if (provider.models?.first(where: { $0.selectionId == chosenModelId })?.efforts ?? provider.efforts ?? []).contains(where: { $0.id == effort }) {
+          chosenEffort = effort
+        } else {
+          chosenEffort = nil
+          restoredControlErrors[.effort] = "恢复的推理强度当前不可用，已阻止静默替换"
+        }
+      } else {
+        chosenEffort = nil
+      }
+      if let permission = routing.permissionMode {
+        if provider.permissions?.contains(where: { $0.id == permission }) == true || (provider.permissions == nil && permission == "default") {
+          permissionMode = permission
+        } else {
+          permissionMode = permission
+          restoredControlErrors[.permission] = "恢复的权限模式当前不可用，已阻止静默替换"
+        }
+      } else {
+        permissionMode = "default"
+      }
+      if chosen != nil, commands == .idle {
+        loadCommands(providerId: routing.providerId, cwd: routing.cwd,
+                     agentProfileId: routing.agentProfileId)
+      }
+      if chosen != nil && restoredControlsError == nil {
+        contextNeedsRestore = false
+        return true
+      }
+      return false
+    }
+    chosenProvider = nil
+    chosenModelId = nil
+    chosenEffort = nil
+    return false
+  }
+
+  func loadActiveContext() {
+    guard contextNeedsRestore, let routing = activeRouting else { return }
+    loadProjects()
+    loadProviders(preferredId: routing.providerId, preferredAgentProfileId: routing.agentProfileId)
+    restoreActiveContext()
   }
 
   func loadCommands(providerId: String, cwd: String, agentProfileId: String? = nil, force: Bool = false) {
@@ -582,11 +710,14 @@ final class RemoteRunStore: ObservableObject {
     if mockMode { return }
     #endif
     let key = providerId + "\u{1f}" + (agentProfileId ?? "") + "\u{1f}" + cwd
+    commandsRequestGeneration += 1
+    let requestGeneration = commandsRequestGeneration
+    commandsTask?.cancel()
+    commandsTask = nil
     if !force, let cached = commandCache[key] {
       commands = cached.commands.isEmpty ? .empty(cached.reason) : .loaded(cached.commands)
       return
     }
-    commandsTask?.cancel()
     guard let client = makeClient() else { commands = .failed("尚未配对"); return }
     commands = .loading
     let requestDataGeneration = dataGeneration
@@ -594,7 +725,8 @@ final class RemoteRunStore: ObservableObject {
       do {
         let catalog = try await client.commands(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
         await MainActor.run {
-          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          guard let self, self.dataGeneration == requestDataGeneration,
+                self.commandsRequestGeneration == requestGeneration else { return }
           self.commandsTask = nil
           self.reachable = true
           self.commandCache[key] = catalog
@@ -602,7 +734,8 @@ final class RemoteRunStore: ObservableObject {
         }
       } catch {
         await MainActor.run {
-          guard let self, self.dataGeneration == requestDataGeneration else { return }
+          guard let self, self.dataGeneration == requestDataGeneration,
+                self.commandsRequestGeneration == requestGeneration else { return }
           self.commandsTask = nil
           self.commands = .failed(Self.describe(error))
         }
@@ -653,6 +786,7 @@ final class RemoteRunStore: ObservableObject {
           self.reachable = true
           self.projectsLoadedAt = Date()
           self.projects = list.isEmpty ? .empty : .loaded(list)
+          _ = self.restoreActiveContext()
         }
       } catch {
         await MainActor.run {
@@ -672,18 +806,25 @@ final class RemoteRunStore: ObservableObject {
     if mockMode { loadMockDirectories(path: path); return }
     #endif
     guard let client = makeClient() else { directories = .failed("尚未配对，无法读取文件夹"); return }
+    directoriesRequestGeneration += 1
+    let directoriesRequest = directoriesRequestGeneration
+    directoriesTask?.cancel()
     directories = .loading
     let requestGeneration = generation
-    Task { [weak self] in
+    directoriesTask = Task { [weak self] in
       do {
         let listing = try await client.directories(path: path)
         await MainActor.run {
-          guard let self, self.generation == requestGeneration else { return }
+          guard let self, self.generation == requestGeneration,
+                self.directoriesRequestGeneration == directoriesRequest else { return }
+          self.directoriesTask = nil
           self.reachable = true; self.directories = .loaded(listing)
         }
       } catch {
         await MainActor.run {
-          guard let self, self.generation == requestGeneration else { return }
+          guard let self, self.generation == requestGeneration,
+                self.directoriesRequestGeneration == directoriesRequest else { return }
+          self.directoriesTask = nil
           self.reachable = false; self.directories = .failed(Self.describe(error))
         }
       }
@@ -693,16 +834,25 @@ final class RemoteRunStore: ObservableObject {
   // Submit a durable intent. Until a receipt arrives the state is explicitly
   // submitting; a transport-unknown result keeps the same intentId available
   // for a user retry, rather than creating a second host run.
-  func submit(prompt: String, providerId: String, attachments: [RemoteRunClient.Attachment] = []) {
+  @discardableResult
+  func submit(prompt: String, providerId: String, attachments: [RemoteRunClient.Attachment] = []) -> Bool {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    guard let cwd = chosen?.path else { submitError = "请先选择一个主机已授权的项目"; return }
+    guard !trimmed.isEmpty else { return false }
+    guard !hasUnresolvedRun else {
+      submitError = "当前任务仍在观察或提交核对中，请先返回并继续该任务"
+      return false
+    }
+    guard let cwd = chosen?.path else { submitError = "请先选择一个主机已授权的项目"; return false }
+    guard let provider = chosenProvider, provider.id == providerId, controlsReady else {
+      submitError = "当前 Provider 控件不可用，已阻止身份或权限切换"
+      return false
+    }
     #if DEBUG
-    if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); return }
+    if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); return true }
     #endif
-    guard makeClient() != nil else { submitError = "尚未配对"; return }
+    guard makeClient() != nil else { submitError = "尚未配对"; return false }
     let identity = SessionIdentity.new(providerId: providerId, cwd: cwd)
-    resetRun()
+    guard resetRun() else { return false }
     activeSessionIdentity = identity
     self.prompt = trimmed
     sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
@@ -713,8 +863,10 @@ final class RemoteRunStore: ObservableObject {
                                           attachments: attachments)
     activeRouting = routing
     pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
+    terminalDrainCompleted = false
     lifecycle = .submitting
     submitPending()
+    return true
   }
 
   // Retry only the unresolved submission. The intent id and routing are kept
@@ -741,6 +893,7 @@ final class RemoteRunStore: ObservableObject {
           guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
           self.reachable = true
           self.runId = outcome.runId
+          self.terminalDrainCompleted = false
           let saved = self.saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
                                                    identity: pending.identity, runId: outcome.runId)
           self.pendingSubmission = nil
@@ -819,6 +972,7 @@ final class RemoteRunStore: ObservableObject {
             if drained {
               self.archiveActiveTurnIfNeeded()
               self.clearRecoveryCheckpoint()
+              self.terminalDrainCompleted = true
             }
             self.pollTask = nil
           }
@@ -832,11 +986,18 @@ final class RemoteRunStore: ObservableObject {
   private func resumeObservation(runId: String) {
     guard let identity = activeSessionIdentity, let client = makeClient() else { return }
     observationInterrupted = false
+    terminalDrainCompleted = false
     submitError = nil
     startPolling(runId: runId, client: client, generation: generation, identity: identity)
   }
 
   func answerPendingQuestion(answers: [String: String], cancel: Bool = false) {
+    #if DEBUG
+    if mockMode {
+      pendingQuestions = []
+      return
+    }
+    #endif
     guard !questionAnswering, let request = pendingQuestions.first, let runId,
           let identity = activeSessionIdentity, let client = makeClient() else { return }
     let answerId = pendingQuestionAnswerId ?? UUID().uuidString.lowercased()
@@ -882,10 +1043,11 @@ final class RemoteRunStore: ObservableObject {
   func resumeObservation(runId: String, providerId: String, cwd: String, externalSessionId: String) {
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     if activeSessionIdentity != identity {
-      resetRun()
+      guard resetRun() else { return }
       activeSessionIdentity = identity
     }
     self.runId = runId
+    terminalDrainCompleted = false
     if lifecycle == .unknown { lifecycle = .recorded }
     _ = saveRecoveryCheckpoint(intentId: nil, routing: activeRouting, identity: identity, runId: runId)
     resumeObservation(runId: runId)
@@ -922,6 +1084,15 @@ final class RemoteRunStore: ObservableObject {
 
   nonisolated private static func shouldContinueDrain(cursor: Int, next: Int, chunkCount: Int) -> Bool {
     chunkCount > 0 && next > cursor
+  }
+
+  nonisolated private static func shouldIncludeCompletedTurn(_ turnId: String, currentRunId: String?, archived: Bool) -> Bool {
+    !(archived && currentRunId == turnId)
+  }
+
+  nonisolated private static func unresolvedState(pending: Bool, runId: String?, drained: Bool,
+                                                   interrupted: Bool) -> Bool {
+    pending || (runId != nil && (!drained || interrupted))
   }
 
   nonisolated private static func followUpIdentity(current: SessionIdentity?, providerId: String,
@@ -997,7 +1168,12 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  func resetRun() {
+  @discardableResult
+  func resetRun() -> Bool {
+    guard !hasUnresolvedRun else {
+      submitError = "当前任务仍未完成观察或提交核对，已保留原运行"
+      return false
+    }
     archiveActiveTurnIfNeeded()
     generation += 1
     pollTask?.cancel(); pollTask = nil
@@ -1017,12 +1193,16 @@ final class RemoteRunStore: ObservableObject {
     submitError = nil
     liveExternalSessionId = nil
     observationInterrupted = false
+    terminalDrainCompleted = false
     retryAvailable = false
     pendingQuestions = []
     pendingQuestionAnswerId = nil
     questionAnswering = false
     questionError = nil
     archivedActiveTurn = false
+    restoredControlErrors = [:]
+    contextNeedsRestore = false
+    return true
   }
 
   private func archiveActiveTurnIfNeeded() {
@@ -1047,6 +1227,7 @@ final class RemoteRunStore: ObservableObject {
     providersTask?.cancel(); providersTask = nil
     commandsTask?.cancel(); commandsTask = nil
     projectsTask?.cancel(); projectsTask = nil
+    directoriesTask?.cancel(); directoriesTask = nil
     pendingSubmission = nil
     activeRouting = nil
     clearRecoveryCheckpoint()
@@ -1057,10 +1238,12 @@ final class RemoteRunStore: ObservableObject {
     lifecycle = .unknown; output = []; seenOutputSequences = []; prompt = nil; sentAttachments = []
     runId = nil; submitError = nil; truncated = false; resultSummary = nil
     liveExternalSessionId = nil; activeSessionIdentity = nil
-    observationInterrupted = false; retryAvailable = false
+    observationInterrupted = false; terminalDrainCompleted = false; retryAvailable = false
     pendingQuestions = []; pendingQuestionAnswerId = nil; questionAnswering = false; questionError = nil
     completedLiveTurns = [:]
     archivedActiveTurn = false
+    restoredControlErrors = [:]
+    contextNeedsRestore = false
     #if DEBUG
     mockMode = false
     #endif
@@ -1070,13 +1253,22 @@ final class RemoteRunStore: ObservableObject {
   // session id) so the conversation keeps its context. Unlike submit(), the
   // target is explicit (from the opened session), not the new-session pickers.
   // Chained follow-ups resume the LATEST reported session id when available.
-  func submitFollowUp(prompt: String, providerId: String, agentProfileId: String? = nil, cwd: String, resume: String, attachments: [RemoteRunClient.Attachment] = []) {
+  @discardableResult
+  func submitFollowUp(prompt: String, providerId: String, agentProfileId: String? = nil, cwd: String, resume: String, attachments: [RemoteRunClient.Attachment] = []) -> Bool {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
+    guard !trimmed.isEmpty else { return false }
+    guard !hasUnresolvedRun else {
+      submitError = "当前任务仍在观察或提交核对中，请先返回并继续该任务"
+      return false
+    }
+    guard !resume.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      submitError = "缺少原会话标识，已阻止切换会话继续"
+      return false
+    }
     #if DEBUG
-    if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); liveExternalSessionId = resume; return }
+    if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); liveExternalSessionId = resume; return true }
     #endif
-    guard makeClient() != nil else { submitError = "尚未配对"; return }
+    guard makeClient() != nil else { submitError = "尚未配对"; return false }
     let resumeId = liveExternalSessionId ?? resume
     // The routing resume id may advance after each Provider turn, but the UI
     // identity must remain the originally opened conversation. Otherwise every
@@ -1085,15 +1277,19 @@ final class RemoteRunStore: ObservableObject {
     let identity = Self.followUpIdentity(current: activeSessionIdentity, providerId: providerId,
                                          cwd: cwd, originalResume: resume)
     let matchingProvider = chosenProvider?.id == providerId && chosenProvider?.agentProfileId == agentProfileId ? chosenProvider : nil
-    guard let matchingProvider else {
+    guard let matchingProvider, controlsReady else {
       submitError = agentProfileId == nil ? "当前 Provider 控件不可用" : "原 Agent Profile 当前不可用，已阻止切换身份继续会话"
-      return
+      return false
+    }
+    if let active = activeSessionIdentity, (active.providerId != providerId || active.cwd != cwd) {
+      submitError = "当前会话身份不匹配，已阻止切换会话继续"
+      return false
     }
     let modelId = chosenModel?.id
     let modelProviderId = chosenModel?.providerId
     let effort = chosenEffort
     let permission = permissionMode
-    resetRun()
+    guard resetRun() else { return false }
     activeSessionIdentity = identity
     self.prompt = trimmed
     sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
@@ -1105,8 +1301,10 @@ final class RemoteRunStore: ObservableObject {
                                           resume: resumeId, attachments: attachments)
     activeRouting = routing
     pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
+    terminalDrainCompleted = false
     lifecycle = .submitting
     submitPending()
+    return true
   }
 
   #if DEBUG
@@ -1140,6 +1338,54 @@ final class RemoteRunStore: ObservableObject {
       !shouldContinueDrain(cursor: cursor, next: next, chunkCount: 0)
   }
 
+  static func selfTestInteractionState() -> [(String, Bool)] {
+    // -selfTest skips restoring disk state; mockMode prevents any checkpoint
+    // deletion. Exercise the real admission and projection methods in memory.
+    let store = RemoteRunStore()
+    store.mockMode = true
+    var checks: [(String, Bool)] = []
+    let identity = SessionIdentity.new(providerId: "codex", cwd: "/fixture")
+    let routing = RemoteRunClient.Routing(cwd: "/fixture", providerId: "codex", agentProfileId: nil, prompt: "same prompt")
+    store.activeSessionIdentity = identity
+    store.pendingSubmission = PendingSubmission(intentId: "keep-this-intent", routing: routing, identity: identity)
+    store.lifecycle = .submitting
+    checks.append(("pending.resetRejected", !store.resetRun() && store.pendingSubmission?.intentId == "keep-this-intent"))
+    checks.append(("pending.submitRejected", !store.submit(prompt: "next", providerId: "codex") && store.pendingSubmission?.intentId == "keep-this-intent"))
+    store.pendingSubmission = nil
+    store.runId = "first"; store.prompt = "same prompt"; store.lifecycle = .settled
+    checks.append(("drain.blocksReset", !store.resetRun()))
+    store.terminalDrainCompleted = true
+    store.output = [.init(id: 1, kind: "output", text: "tail")]
+    store.archiveActiveTurnIfNeeded()
+    checks.append(("completed.noDuplicate", store.completedTurns(for: identity).isEmpty))
+    checks.append(("completed.resetAccepted", store.resetRun()))
+    checks.append(("completed.tailRetained", store.completedTurns(for: identity).first?.output.last?.text == "tail"))
+    store.runId = "second"; store.prompt = "same prompt"; store.lifecycle = .settled
+    store.terminalDrainCompleted = true; store.archiveActiveTurnIfNeeded(); _ = store.resetRun()
+    checks.append(("completed.repeatedPromptPreserved", store.completedTurns(for: identity).count == 2))
+    store.chosenProvider = .init(id: "codex", label: "Codex", available: true, modelId: nil,
+      permissions: [.init(id: "default", label: "Default", description: "Ask")])
+    store.restoredControlErrors[.model] = "missing"
+    store.choosePermission("default")
+    checks.append(("recovery.permissionCannotReplaceModel", !store.controlsReady))
+    store.chooseEffort(nil)
+    checks.append(("recovery.effortCannotReplaceModel", !store.controlsReady))
+    store.chooseModel(nil)
+    checks.append(("recovery.explicitModelChoice", store.controlsReady))
+    return checks
+  }
+
+  nonisolated static func selfTestStateGates() -> Bool {
+    !unresolvedState(pending: false, runId: nil, drained: false, interrupted: false) &&
+      unresolvedState(pending: true, runId: nil, drained: false, interrupted: false) &&
+      unresolvedState(pending: false, runId: "run", drained: false, interrupted: false) &&
+      unresolvedState(pending: false, runId: "run", drained: true, interrupted: true) &&
+      !unresolvedState(pending: false, runId: "run", drained: true, interrupted: false) &&
+      !shouldIncludeCompletedTurn("current", currentRunId: "current", archived: true) &&
+      shouldIncludeCompletedTurn("old", currentRunId: "current", archived: true) &&
+      shouldIncludeCompletedTurn("old", currentRunId: "old", archived: false)
+  }
+
   nonisolated static func selfTestFollowUpIdentity() -> Bool {
     let opened = SessionIdentity.opened(providerId: "codex", cwd: "/repo", externalSessionId: "original")
     let kept = followUpIdentity(current: opened, providerId: "codex", cwd: "/repo", originalResume: "latest")
@@ -1150,7 +1396,8 @@ final class RemoteRunStore: ObservableObject {
   // Visual-only fixtures for `-uiPreview -uiMockData`. They deliberately never
   // touch Keychain, relay, Provider, ledger, or Release execution paths.
   func applyUIPreviewArguments() {
-    guard ProcessInfo.processInfo.arguments.contains("-uiMockData") else { return }
+    guard ProcessInfo.processInfo.arguments.contains("-uiPreview"),
+          ProcessInfo.processInfo.arguments.contains("-uiMockData") else { return }
     mockMode = true
     reachable = true
 
@@ -1232,6 +1479,7 @@ final class RemoteRunStore: ObservableObject {
       SentAttachment(name: "notes.md", kind: .text, size: 4_812)
     ]
     lifecycle = .settled
+    terminalDrainCompleted = true
     output = [
       OutputLine(id: 1, kind: "reasoning", text: "先对齐信息架构，再调整视觉密度。"),
       OutputLine(id: 2, kind: "tool", text: "编辑 HomeView.swift"),
@@ -1241,7 +1489,13 @@ final class RemoteRunStore: ObservableObject {
     resultSummary = "输入 18,420 · 输出 1,286 · $0.084"
     liveExternalSessionId = "codex-mock-session"
     loadMockDirectories(path: chosen?.path)
+    activeSessionIdentity = .opened(providerId: "codex", cwd: roots[0].path, externalSessionId: "codex-pinned-1")
     if ProcessInfo.processInfo.arguments.contains("-uiMockLoading") { history = .loading }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockQuestion") {
+      // Explicitly synthetic sheet fixture; it never reaches answerQuestion.
+      let fixture = #"{"runId":"fixture-run","questionId":"fixture-question","questionKind":"input","questions":[{"header":"录屏验证 · 模拟请求","question":"输入一段多行说明","options":[],"multiSelect":false,"inputMode":"multiline"}]}"#
+      pendingQuestions = [try! JSONDecoder().decode(G0Transport.RunQuestionRequest.self, from: Data(fixture.utf8))]
+    }
   }
 
   private func loadMockDirectories(path: String?) {
@@ -1279,6 +1533,7 @@ final class RemoteRunStore: ObservableObject {
     sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
     runId = "mock-run-visual-only"
     lifecycle = .settled
+    terminalDrainCompleted = true
     output = [OutputLine(id: 1, kind: "output", text: "这是 DEBUG 视觉预览回复；没有连接 Provider，也没有写入真实 ledger。")]
     resultSummary = "Mock 数据 · 不代表真实用量"
   }

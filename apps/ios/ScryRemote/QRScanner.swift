@@ -1,72 +1,93 @@
 import SwiftUI
 import AVFoundation
 
-// Minimal QR scanner. It reads exactly one code and hands the raw string up; it
-// makes NO trust decision itself - PairingCode.parse validates the `scry1:`
-// payload and RemotePairingClient runs the real inner-mTLS possession proof.
+// The scanner only returns bytes. PairingCode and the mTLS possession proof
+// remain the trust boundary; camera denial must not strand the user on black.
 struct QRScanner: UIViewControllerRepresentable {
   let onCode: (String) -> Void
+  let onFailure: (String) -> Void
 
-  func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
   func makeUIViewController(context: Context) -> ScannerViewController {
-    let vc = ScannerViewController()
-    vc.onCode = { context.coordinator.deliver($0) }
-    return vc
+    let controller = ScannerViewController()
+    controller.onCode = onCode
+    controller.onFailure = onFailure
+    return controller
   }
-  func updateUIViewController(_ vc: ScannerViewController, context: Context) {}
-
-  final class Coordinator {
-    private let onCode: (String) -> Void
-    private var delivered = false
-    init(onCode: @escaping (String) -> Void) { self.onCode = onCode }
-    // Fire once: a QR stays in frame for many sample callbacks.
-    func deliver(_ code: String) {
-      guard !delivered else { return }
-      delivered = true
-      onCode(code)
-    }
-  }
+  func updateUIViewController(_ controller: ScannerViewController, context: Context) {}
 }
 
 final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
   var onCode: ((String) -> Void)?
+  var onFailure: ((String) -> Void)?
   private let session = AVCaptureSession()
+  private let captureQueue = DispatchQueue(label: "com.scry.remote.camera")
   private var preview: AVCaptureVideoPreviewLayer?
+  private var finished = false
 
   override func viewDidLoad() {
     super.viewDidLoad()
     view.backgroundColor = .black
-    guard let device = AVCaptureDevice.default(for: .video),
-          let input = try? AVCaptureDeviceInput(device: device),
-          session.canAddInput(input) else { return }
-    session.addInput(input)
-    let output = AVCaptureMetadataOutput()
-    guard session.canAddOutput(output) else { return }
-    session.addOutput(output)
-    output.setMetadataObjectsDelegate(self, queue: .main)
-    output.metadataObjectTypes = [.qr]
-    let layer = AVCaptureVideoPreviewLayer(session: session)
-    layer.videoGravity = .resizeAspectFill
-    layer.frame = view.layer.bounds
-    view.layer.addSublayer(layer)
-    preview = layer
-    DispatchQueue.global(qos: .userInitiated).async { [weak self] in self?.session.startRunning() }
+    switch AVCaptureDevice.authorizationStatus(for: .video) {
+    case .authorized: configureCamera()
+    case .notDetermined:
+      AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
+        DispatchQueue.main.async {
+          guard let self, !self.finished else { return }
+          if allowed { self.configureCamera() }
+          else { self.fail("未允许相机访问。可在系统设置中开启，或粘贴 Mac 上的配对码。") }
+        }
+      }
+    default: fail("相机访问已关闭。可在系统设置中开启，或粘贴 Mac 上的配对码。")
+    }
+  }
+
+  private func configureCamera() {
+    guard let device = AVCaptureDevice.default(for: .video) else {
+      fail("此设备没有可用相机，请粘贴配对码。"); return
+    }
+    do {
+      let input = try AVCaptureDeviceInput(device: device)
+      let output = AVCaptureMetadataOutput()
+      guard session.canAddInput(input), session.canAddOutput(output) else {
+        fail("无法启动相机，请粘贴配对码。"); return
+      }
+      session.addInput(input)
+      session.addOutput(output)
+      output.setMetadataObjectsDelegate(self, queue: .main)
+      output.metadataObjectTypes = [.qr]
+      let layer = AVCaptureVideoPreviewLayer(session: session)
+      layer.videoGravity = .resizeAspectFill
+      // Permission can arrive after the view's initial layout has finished.
+      layer.frame = view.bounds
+      view.layer.addSublayer(layer)
+      preview = layer
+      captureQueue.async { [session] in session.startRunning() }
+    } catch { fail("无法启动相机：\(error.localizedDescription)。可改用粘贴配对码。") }
+  }
+
+  private func fail(_ message: String) {
+    guard !finished else { return }
+    finished = true
+    // Presenting SwiftUI state must happen after the representable update.
+    DispatchQueue.main.async { [weak self] in self?.onFailure?(message) }
   }
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    preview?.frame = view.layer.bounds
+    preview?.frame = view.bounds
   }
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
-    if session.isRunning { session.stopRunning() }
+    finished = true
+    captureQueue.async { [session] in session.stopRunning() }
   }
 
-  func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
-    guard let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+  func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
+    guard !finished, let object = objects.first as? AVMetadataMachineReadableCodeObject,
           let value = object.stringValue else { return }
-    if session.isRunning { session.stopRunning() }
+    finished = true
+    captureQueue.async { [session] in session.stopRunning() }
     onCode?(value)
   }
 }

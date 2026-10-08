@@ -9,7 +9,7 @@ import RemoteTransport
 // lines and exits non-zero on the first failure so a simulator run can assert.
 #if DEBUG
 enum RemoteSelfTest {
-  static func runIfRequested() {
+  @MainActor static func runIfRequested() {
     guard ProcessInfo.processInfo.arguments.contains("-selfTest") else { return }
     var failures = 0
     func check(_ name: String, _ ok: Bool) {
@@ -64,6 +64,22 @@ enum RemoteSelfTest {
     check("run.generationSessionIsolation", RemoteRunStore.selfTestGenerationIsolation())
     check("run.followUpIdentityStable", RemoteRunStore.selfTestFollowUpIdentity())
     check("run.submittingIsNotRecorded", RemoteRunStore.Lifecycle.submitting != .recorded)
+    check("run.stateGates", RemoteRunStore.selfTestStateGates())
+    for (name, passed) in RemoteRunStore.selfTestInteractionState() { check("run.\(name)", passed) }
+    let model = AppModel()
+    let identity = RemoteRunStore.SessionIdentity.new(providerId: "codex", cwd: "/fixture")
+    let draft = model.composerDraft(for: .conversation(identity))
+    draft.wrappedValue.text = "unsent"
+    draft.wrappedValue.attachments = [.init(kind: .text, name: "fixture.txt", mimeType: "text/plain", data: Data("safe".utf8))]
+    model.route = .settings; model.route = .chat
+    check("draft.navigationKeepsTextAndAttachment", draft.wrappedValue.text == "unsent" && draft.wrappedValue.attachments.count == 1)
+    model.bindDraft(externalSessionId: "external", to: identity)
+    let reopened = model.composerDraft(for: .conversation(.opened(providerId: "codex", cwd: "/fixture", externalSessionId: "external")))
+    check("draft.localToCatalogIdentity", reopened.wrappedValue.text == "unsent" && reopened.wrappedValue.attachments.count == 1)
+    check("draft.newTaskIsolated", model.composerDraft(for: .newTask).wrappedValue.text.isEmpty)
+    let profileA = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true, agentProfileId: "pi:a")
+    let profileB = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true, agentProfileId: "pi:b")
+    check("provider.profileRowIdentity", profileA.selectionId != profileB.selectionId)
     check("run.drainBeyond400", RemoteRunStore.selfTestDrain(cursor: 400, next: 401, chunkCount: 401))
 
     // 4. Keychain: insert-only device key + upsertable grant round-trip in an

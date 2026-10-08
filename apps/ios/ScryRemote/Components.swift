@@ -49,6 +49,7 @@ struct CircleButton: View {
         .foregroundStyle(filled ? Color.white : Palette.ink)
         .background(filled ? AnyShapeStyle(Palette.blue) : AnyShapeStyle(Color.clear), in: Circle())
         .shadow(color: filled ? Palette.blue.opacity(0.22) : .clear, radius: 9, y: 5)
+        .contentShape(Circle())
     }
     .buttonStyle(.plain)
     .disabled(disabled)
@@ -178,6 +179,67 @@ extension RemoteHeader where Right == EmptyView {
     self.backAction = backAction; self.menuAction = menuAction
     self.right = { EmptyView() }
   }
+}
+
+// A shared reader policy: streamed output follows the bottom until the reader
+// scrolls up. New chunks must not steal their reading position.
+struct ConversationScrollView<Content: View>: View {
+  let revision: String
+  @ViewBuilder let content: () -> Content
+  @State private var following = true
+
+  var body: some View {
+    GeometryReader { viewport in
+      ScrollViewReader { proxy in
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 18) {
+            content()
+            Color.clear.frame(height: 1).id("bottom")
+              .background(GeometryReader { geometry in
+                Color.clear.preference(key: ConversationBottom.self,
+                  value: geometry.frame(in: .named("conversation-scroll")).maxY)
+              })
+          }
+          .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 10)
+        }
+        .coordinateSpace(name: "conversation-scroll")
+        .scrollIndicators(.hidden)
+        .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(DragGesture().onChanged { value in
+          if value.translation.height > 8 { following = false }
+        })
+        .onPreferenceChange(ConversationBottom.self) { bottom in
+          if bottom > 0 && bottom <= viewport.size.height + 30 { following = true }
+        }
+        .onAppear { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
+        .onChange(of: revision) {
+          if following { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+        .onChange(of: viewport.size.height) {
+          if following { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+        .overlay(alignment: .bottomTrailing) {
+          if !following {
+            Button {
+              following = true
+              withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo("bottom", anchor: .bottom) }
+            } label: {
+              Label("回到最新", systemImage: "arrow.down")
+                .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 14).frame(height: 44)
+                .background(Palette.surface, in: Capsule())
+                .overlay(Capsule().stroke(Palette.line))
+            }
+            .buttonStyle(.plain).padding(12)
+          }
+        }
+      }
+    }
+  }
+}
+
+private struct ConversationBottom: PreferenceKey {
+  static var defaultValue: CGFloat = .infinity
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Conversation content
@@ -547,6 +609,7 @@ struct MessageComposer: View {
   @State private var showFiles = false
   @State private var photoItems: [PhotosPickerItem] = []
   @State private var attachmentError: String?
+  @FocusState private var inputFocused: Bool
 
   private let maxCount = 4
   private let maxEachBytes = 512 * 1024
@@ -576,7 +639,9 @@ struct MessageComposer: View {
         }
       }
       TextField(placeholder, text: $text, axis: .vertical)
-        .font(.system(size: 15.5)).lineLimit(1...4).disabled(disabled)
+        .font(.system(size: 15.5)).lineLimit(1...6).disabled(disabled)
+        .focused($inputFocused)
+        .accessibilityIdentifier("message-input")
         .padding(.horizontal, 3).padding(.top, 1)
       HStack(spacing: 6) {
         attachmentPermissionMenu
@@ -585,6 +650,9 @@ struct MessageComposer: View {
             if let contextLabel { contextControl(contextLabel) }
             if !modelOptions.isEmpty || !effortOptions.isEmpty { modelEffortControl }
           }
+        }
+        if inputFocused {
+          PlainIcon(symbol: "keyboard.chevron.compact.down", label: "收起键盘") { inputFocused = false }
         }
         CircleButton(symbol: Symbol.send, label: "发送", filled: true,
                      disabled: disabled || sendDisabled, action: onSend)
@@ -687,7 +755,7 @@ struct MessageComposer: View {
       Image(systemName: Symbol.plus)
         .font(.system(size: 21, weight: .regular))
         .foregroundStyle(Palette.ink)
-        .frame(width: 38, height: 38)
+        .frame(width: 44, height: 44)
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain).disabled(disabled)
