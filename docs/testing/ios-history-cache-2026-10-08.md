@@ -40,8 +40,17 @@
 - 首次 Swift 编译发现局部函数 MainActor 隔离错误，显式标注隔离后通过。
 - 前两次缓存测试的 Data Protection 断言失败，后一次打印确认 Simulator 的 protection attribute 为 nil。只在 Simulator 明确跳过；未移除真机断言。
 - 复核修复了终态刷新被去重、自动刷新重复本机增量、缺失基底被当空历史、保存失败后丢失警告等问题。终态归档时序的真实网络重放仍未验证。
-- 当前手机 `00008150-001A29A926D8401C` unavailable。**本版未安装、未进行真机 UI 验收或真机 Data Protection 检查**；手机仍是前次安装的 0.1.1 (2)。无本次真机录像。
+- 初次手机 unavailable，重连后又因锁屏而无法挂载 developer disk image；用户解锁后已覆盖安装 **0.1.2 (3)**，未卸载。安装和自测结果见下节；真实界面验收仍受自动化启动失败阻塞，无本次真机录像。
 - 未测真实弱网注入、锁屏时缓存读取、首次下载/进程重启的真实耗时、真实 Provider 执行或付费操作。
+
+## 重连后的真机验证
+
+- iPhone 17 Pro / `00008150-001A29A926D8401C`：安装前源码和应用 SHA256 与构建 manifest 一致，安装回执成功，设备应用列表确认 **0.1.2 / 3**。
+- 真机 `-historyCacheTest`：**21 PASS、0 FAIL、0 SKIP**，包括 Complete Data Protection 文件属性、排除备份及临时目录/独立 defaults 中的缓存与 store 场景。合成历史读取约 0.217 ms，仅为 fixture 的磁盘读取/解码，不代表真实会话 UI 速度。
+- 真机 `-selfTest`：**36 PASS、0 FAIL、0 SKIP**，包括隔离 Keychain 场景；不把测试凭据成功说成真实主机连通成功。
+- 安装后读取应用公开连接描述，确认已有 host/anchor/device grant 描述仍存在；未重新配对、未清除真实缓存或真实凭据。
+- WDA 首次启动指向缺失的默认 DerivedData 产物；改为已存在的专用产物后，63 秒报 `Timed out while enabling automation mode`。停止继续排障，未将自动化失败归因于 App，也未宣称已验证历史重开/杀进程重开的真实耗时。
+- 已停止本次端口转发，两个 WDA xcodebuild 进程均已退出；最终无 mock/self-test 参数普通启动 Scry。未发送真实任务，没有新真机录像。
 
 ## 证据与下一步
 
@@ -49,4 +58,4 @@
 
 `/tmp/scry-ios-reinstall.uzxNTU/DerivedData/Build/Products/Debug-iphoneos/ScryRemote.app`
 
-手机连接后：覆盖安装（不卸载），运行 `-historyCacheTest` 和 `-selfTest`；普通启动后只读打开同一历史，分别验证首次下载、返回重开、结束进程重开及缓存状态提示。记录真实耗时与视频，并确认配对仍保留。真实发送/审批/执行不属于本次验证范围。
+安装和真机自测已完成。下一步由用户手动体验，或在界面自动化可用后，只读打开同一真实历史，验证首次下载、返回重开、结束进程重开及缓存状态提示，再记录实际耗时与视频。真实发送/审批/执行不属于本次验证范围。
