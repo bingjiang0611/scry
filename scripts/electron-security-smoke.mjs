@@ -94,6 +94,10 @@ async function main() {
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
+      // This isolated fixture may be occluded by the user's active apps. Keep its
+      // bounded UI waits independent of Chromium's background timer/priority throttling.
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
       '--no-first-run'
     ], {
       env: {
@@ -442,6 +446,7 @@ async function main() {
       .find((node) => node.textContent?.includes('分析'))
     analyticsButton?.click()
     const analytics = await waitFor(() => !!document.querySelector('.usage-page'))
+    const analyticsLoading = document.querySelector('.lazy-panel-loading')?.textContent
     const auxTopbar = document.querySelector('.aux-view-topbar')
     const auxRect = auxTopbar?.getBoundingClientRect()
     const auxDrag = auxTopbar ? getComputedStyle(auxTopbar).getPropertyValue('-webkit-app-region') : null
@@ -464,6 +469,7 @@ async function main() {
       mainLeft,
       mainActionLeft,
       analytics,
+      analyticsLoading,
       auxTop: Math.round(auxRect?.top ?? -1),
       auxHeight: Math.round(auxRect?.height ?? -1),
       auxDrag,
@@ -478,7 +484,7 @@ async function main() {
   assert.equal(collapsedChrome.collapsed, true)
   assert.ok(collapsedChrome.mainLeft < 16, `collapsed sidebar did not release its layout width: ${JSON.stringify(collapsedChrome)}`)
   assert.ok(collapsedChrome.mainActionLeft >= 80, `collapsed main chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
-  assert.equal(collapsedChrome.analytics, true)
+  assert.equal(collapsedChrome.analytics, true, `Analytics transition failed: ${JSON.stringify(collapsedChrome)}`)
   assert.deepEqual(
     [collapsedChrome.auxTop, collapsedChrome.auxHeight, collapsedChrome.auxDrag],
     [0, 52, 'drag'],
@@ -822,7 +828,7 @@ async function main() {
     const waitFor = async (predicate) => {
       const deadline = Date.now() + 8_000
       while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 30))
-      if (!predicate()) throw new Error('cold terminal history UI condition timed out: ' + document.querySelector('.terminal-surface')?.textContent?.slice(-1500))
+      if (!predicate()) throw new Error('cold terminal history UI condition timed out: ' + predicate.toString() + '; ' + document.querySelector('.terminal-surface')?.innerText?.slice(-1500))
     }
     await waitFor(() => !!document.querySelector('button.sb-sess'))
     document.querySelector('button.sb-sess').click()
