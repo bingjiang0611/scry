@@ -11,7 +11,8 @@ const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
 const modelsOnly = process.argv.includes('--models-only')
-const fixtures = modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model']
+const terminalsOnly = process.argv.includes('--terminals-only')
+const fixtures = terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal']
 
 // Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
 // Scry's main process or preload, discover providers, touch user data, or start a CDP port.
@@ -430,6 +431,99 @@ async function exerciseSessionSelection(contents, scenario) {
   return { scenario, providerSwitch: scenario !== 'same-provider', reverseSwitch: true, startupReads: baseline, expectedCancellations }
 }
 
+async function exerciseSessionTerminals(contents, scenario) {
+  const read = (expression) => contents.executeJavaScript(expression)
+  const wait = async (expression) => {
+    const deadline = Date.now() + 5000
+    while (!await read(expression)) {
+      if (Date.now() > deadline) throw new Error(`Terminal ${scenario}: timed out: ${expression}; ${await read('document.body.innerText')}`)
+      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+    }
+  }
+  const click = async (selector) => {
+    const point = await read(`(() => {
+      const node = document.querySelector(${JSON.stringify(selector)});
+      if (!node) throw new Error('Missing terminal control ' + ${JSON.stringify(selector)});
+      node.scrollIntoView({ block: 'center' });
+      const rect = node.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
+      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Terminal control obscured: ' + ${JSON.stringify(selector)} + ' by ' + document.elementFromPoint(x, y)?.outerHTML);
+      return { x, y };
+    })()`)
+    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+  }
+  const state = `JSON.parse(document.querySelector('#terminal-state').textContent)`
+  const originalStarts = scenario === 'restored' ? 0 : 1
+  const select = async (selector, id) => {
+    await click(selector)
+    await wait(`document.querySelector('.chat').textContent.includes('History for ${id}')`)
+  }
+  // Use data-project-path so Sidebar grouping/header layout cannot flatten identity.
+  const session = (project, index) => `.sb-proj:has([data-project-path="/fixture/${project}"]) .sb-sess-row:nth-child(${index}) .sb-sess`
+  await wait(`document.querySelectorAll('.sb-sess').length === 3`)
+  await select(session('old', 1), 'one')
+  await click('[aria-label="右侧工作区"]')
+  await wait(`document.querySelector('[aria-label="添加 Surface"]') != null`)
+  await click('[aria-label="添加 Surface"]')
+  await wait(`document.querySelector('.surface-menu') != null`)
+  await click('.surface-menu [role="menuitem"]:nth-child(4)')
+  await wait(`document.querySelector('.terminal-xterm .xterm') != null`)
+  await read(`globalThis.originalXterm = document.querySelector('.terminal-xterm .xterm')`)
+  if (scenario === 'pending') await wait(`${state}.pending`)
+  else {
+    await wait(`document.querySelector('.terminal-state.running') != null && document.querySelector('.terminal-xterm').textContent.includes('original-screen-marker')`)
+    contents.focus()
+    await click('.terminal-xterm')
+    await wait(`document.activeElement.classList.contains('xterm-helper-textarea')`)
+    await contents.insertText('preserved-input')
+    await wait(`${state}.writes.join('').includes('preserved-input') && document.querySelector('.terminal-xterm').textContent.includes('preserved-input')`)
+  }
+  await select(session('old', 2), 'two')
+  await select(session('new', 1), 'three')
+  if (scenario === 'pending') {
+    await click('#resolve-terminal')
+    await wait(`document.querySelector('.terminal-state.running') != null`)
+  }
+  if (!await read(`document.querySelector('.terminal-xterm .xterm') === globalThis.originalXterm && ${state}.starts.length === ${originalStarts} && ${state}.attaches.length === ${scenario === 'restored' ? 1 : 0} && ${state}.closes.length === 0`)) {
+    throw new Error(`Terminal ${scenario}: session switch reloaded the terminal: ${JSON.stringify(await read(state))}`)
+  }
+  if (!await read(`document.querySelector('.terminal-xterm').getAttribute('aria-label').includes('/fixture/old')`)) throw new Error('Terminal mislabeled its startup directory after navigation')
+  await click('[aria-label="右侧工作区"]')
+  await wait(`document.querySelector('.right-panel-hidden') != null`)
+  await click('[aria-label="右侧工作区"]')
+  await wait(`document.querySelector('.right-panel-hidden') == null && document.querySelector('.terminal-xterm .xterm') === globalThis.originalXterm`)
+  await select(session('old', 1), 'one')
+  await wait(`document.querySelector('.terminal-xterm .xterm') === globalThis.originalXterm && document.querySelector('.terminal-xterm').textContent.includes('original-screen-marker')`)
+  if (scenario !== 'pending' && !await read(`document.querySelector('.terminal-xterm').textContent.includes('preserved-input')`)) throw new Error('Terminal lost screen contents')
+  await click('.terminal-xterm')
+  await wait(`document.activeElement.classList.contains('xterm-helper-textarea')`)
+  await contents.insertText('continued-input')
+  await wait(`${state}.writes.join('').includes('continued-input') && document.querySelector('.terminal-xterm').textContent.includes('continued-input')`)
+  await click('[aria-label="终端录制历史"]')
+  await wait(`document.querySelector('[aria-label="只读打开 terminal-recorded"]') != null`)
+  await click('[aria-label="只读打开 terminal-recorded"]')
+  await wait(`document.querySelector('.terminal-state.readonly') != null && document.querySelectorAll('.terminal-xterm')[1].textContent.includes('recorded-marker')`)
+  await read(`globalThis.recordedXterm = document.querySelectorAll('.terminal-xterm .xterm')[1]`)
+  await select(session('new', 1), 'three')
+  if (!await read(`document.querySelectorAll('.terminal-xterm .xterm')[1] === globalThis.recordedXterm && document.querySelector('.terminal-state.readonly') != null && document.querySelectorAll('.terminal-xterm')[1].textContent.includes('recorded-marker')`)) throw new Error('Session switch discarded the read-only recording')
+  await click('.terminal-tab:nth-child(2) .terminal-tab-close')
+  await wait(`document.querySelectorAll('.terminal-tab').length === 1`)
+  await click('#terminal-exit')
+  await wait(`document.querySelector('.terminal-state.exited') != null`)
+  await select(session('old', 1), 'one')
+  await select(session('new', 1), 'three')
+  if (!await read(`document.querySelector('.terminal-state.exited') != null && ${state}.starts.length === ${originalStarts}`)) throw new Error('Session switch restarted an exited Shell')
+  await click('[aria-label="重新启动终端"]')
+  await wait(`${state}.starts.length === ${originalStarts + 1} && document.querySelector('.terminal-state.running') != null`)
+  await click('[aria-label="新建终端"]')
+  await wait(`${state}.starts.length === ${originalStarts + 2} && document.querySelectorAll('.terminal-state.running').length === 2`)
+  if (!await read(`${state}.starts.slice(-2).every(request => request.cwd === '/fixture/new')`)) throw new Error('Explicit terminal start used a stale workspace')
+  await click('.terminal-tab:first-child .terminal-tab-close')
+  await wait(`${state}.closes.length === 1 && document.querySelectorAll('.terminal-tab').length === 1`)
+  return { scenario, sameWorkspace: true, crossWorkspace: true, screenPreserved: true, recordingPreserved: true, hideShowPreserved: true, noImplicitRestart: true, explicitRestartAndNewUseCurrentCwd: true, explicitClose: true }
+}
+
 async function exerciseSessionModels(contents) {
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression) => {
@@ -624,28 +718,33 @@ try {
       win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
       try {
         let result = {}, piCommands = {}
-        if (!${selectionOnly || modelsOnly}) {
+        if (!${selectionOnly || modelsOnly || terminalsOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           if (!${piCommandsOnly}) result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
           piCommands = await (${exercisePiCommands.toString()})(win.webContents)
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
+        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }
         const piPermissions = []
-        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly || modelsOnly ? [] : ['fresh', 'saved'])}) {
+        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['fresh', 'saved'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pi-permission.html'))}, { query: { scenario } })
           piPermissions.push(await (${exercisePiPermission.toString()})(win.webContents, scenario))
         }
         let sessionModels = null
-        if (${!selectionOnly && !piCommandsOnly}) {
+        if (${!selectionOnly && !piCommandsOnly && !terminalsOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-model.html'))})
           sessionModels = await (${exerciseSessionModels.toString()})(win.webContents)
         }
-        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands, selection, piPermissions, sessionModels }))
+        const sessionTerminals = []
+        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly || modelsOnly ? [] : ['restored', 'pending'])}) {
+          await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
+          sessionTerminals.push(await (${exerciseSessionTerminals.toString()})(win.webContents, scenario))
+        }
+        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals }))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })
