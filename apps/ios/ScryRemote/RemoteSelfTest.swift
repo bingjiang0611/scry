@@ -143,6 +143,34 @@ enum RemoteSelfTest {
         check("completeOrderedDownload", snapshot.turns == turns)
         let order = await fixture.completed
         check("outOfOrderPages", order == [0, 131072, 65536])
+        let recent = [G0Transport.RunHistoryTurn(userText: "中🙂 { } [ ] \\\"", items: [
+          .init(kind: "output", text: "quoted \\\" } \\\\ tail🙂")]),
+          G0Transport.RunHistoryTurn(userText: "latest", items: [.init(kind: "output", text: "answer")])]
+        let a = try JSONEncoder().encode(recent[0])
+        let b = try JSONEncoder().encode(recent[1])
+        var suffixFixture = Data("[".utf8); suffixFixture.append(a); suffixFixture.append(Data(",".utf8)); suffixFixture.append(b); suffixFixture.append(Data("]".utf8))
+        var boundariesOK = true
+        for start in 0..<suffixFixture.count {
+          let expected = start <= 1 ? recent : start <= a.count + 2 ? [recent[1]] : []
+          let decoded = try RemoteRunClient.completeHistorySuffix(Data(suffixFixture.dropFirst(start)))
+          if decoded != expected { boundariesOK = false; break }
+        }
+        check("suffixQuotesUnicodeEveryBoundary", boundariesOK)
+        check("suffixLargeIncompleteTurnNotInvented", try RemoteRunClient.completeHistorySuffix(Data(bytes.suffix(128 * 1024))).isEmpty)
+        let older = [G0Transport.RunHistoryTurn(userText: "older", items: [.init(kind: "output", text: String(repeating: "o", count: 800_000))])]
+        let tailBytes = try JSONEncoder().encode(older + recent)
+        let tailFixture = HistoryPages(bytes: tailBytes)
+        let preview = HistoryPreviewReceipt()
+        let full = try await RemoteRunClient.downloadHistory(cached: nil, fetch: { cursor, hash in
+          try await tailFixture.page(cursor, hash: hash)
+        }, firstScreen: { visible in
+          await preview.record(visible)
+          await preview.recordPageCount(tailFixture.completed.count)
+        })
+        check("latestBeforeFullVerification", await preview.turns == recent && full.turns == older + recent)
+        check("firstScreenAfterThreePages", await preview.pageCount == 3)
+        let tailOrder = await tailFixture.completed
+        check("tailPagesNotDownloadedTwice", Set(tailOrder).count == tailOrder.count)
         let unchanged = HistoryPages(bytes: bytes)
         let same = try await RemoteRunClient.downloadHistory(cached: snapshot, fetch: { cursor, hash in
           try await unchanged.page(cursor, hash: hash)
@@ -208,6 +236,13 @@ enum RemoteSelfTest {
       print("HISTORYTEST DONE failures=\(failures)")
       exit(failures == 0 ? 0 : 1)
     }
+  }
+
+  private actor HistoryPreviewReceipt {
+    var turns: [G0Transport.RunHistoryTurn] = []
+    var pageCount = 0
+    func record(_ value: [G0Transport.RunHistoryTurn]) { turns = value }
+    func recordPageCount(_ value: Int) { pageCount = value }
   }
 
   private actor HistoryPages {

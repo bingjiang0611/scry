@@ -8,9 +8,63 @@ import RemoteTransport
 // turns are the host's read of real archived content, the live turn shows the
 // REAL lifecycle + streamed output (a possibly-incomplete cache), and nothing is
 // fabricated. File diffs still live on the Mac.
+// Large archived payloads must not parse every Markdown block during first
+// layout. Disclosure preserves the complete text; it never modifies the cache.
+private struct HistoryChunkView: View {
+  let kind: String
+  let text: String
+  @State private var expanded = false
+  private var excerpt: String { String(text.prefix(500)) }
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      ConversationChunk(kind: kind, text: expanded ? text : excerpt)
+      if excerpt != text && !expanded {
+        Button("展开完整内容") { expanded = true }
+          .font(.system(size: 13)).frame(minHeight: 44)
+      }
+    }
+    .onChange(of: text) { expanded = false }
+  }
+}
+
+private struct HistoryTurnView: View {
+  let turn: G0Transport.RunHistoryTurn
+  @State private var expanded = false
+  @State private var promptExpanded = false
+  private var promptExcerpt: String { String(turn.userText.prefix(500)) }
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      if !turn.userText.isEmpty {
+        HStack {
+          Spacer(minLength: 40)
+          VStack(alignment: .leading, spacing: 6) {
+            Text(promptExpanded ? turn.userText : promptExcerpt)
+              .font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
+            if promptExcerpt != turn.userText && !promptExpanded {
+              Button("展开完整消息") { promptExpanded = true }.font(.system(size: 13)).frame(minHeight: 44)
+            }
+          }
+          .foregroundStyle(Palette.ink).padding(.vertical, 10).padding(.horizontal, 14)
+          .frame(maxWidth: 320, alignment: .leading)
+          .background(Color(hex: 0xF0F1F3), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+        }
+      }
+      if turn.items.count > 16 && !expanded {
+        Button("展开本轮较早内容") { expanded = true }.font(.system(size: 13)).frame(minHeight: 44)
+      }
+      ForEach(Array(turn.items.indices.suffix(expanded ? turn.items.count : 16)), id: \.self) { index in
+        HistoryChunkView(kind: turn.items[index].kind, text: turn.items[index].text)
+      }
+    }.frame(maxWidth: .infinity, alignment: .leading)
+      .onChange(of: turn) { expanded = false; promptExpanded = false }
+  }
+}
+
 struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @State private var visibleTurnCount = 2
+  @State private var readingAnchor: String?
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -33,9 +87,14 @@ struct SessionTranscriptView: View {
     return run.controlsReady && run.chosenProvider?.id == session.providerId &&
       run.chosenProvider?.agentProfileId == session.agentProfileId
   }
+  private var historyAllowsControls: Bool {
+    guard run.activeSessionIdentity == sessionIdentity else { return false }
+    switch run.history { case .idle, .loading: return false; default: return true }
+  }
   private var historyReadyForDisplay: Bool {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
     if case .loaded = run.history { return true }
+    if case .partial = run.history { return true }
     if case .empty = run.history { return true }
     return false
   }
@@ -43,20 +102,9 @@ struct SessionTranscriptView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      if historyReadyForDisplay, let date = run.historyFetchedAt {
-        VStack(alignment: .leading, spacing: 3) {
-          HStack(spacing: 6) {
-            if run.historySyncing { ProgressView().controlSize(.mini) }
-            Text(run.historySyncing ? "本地历史 · 后台更新中" : run.historyFromCache ? "本地历史 · 尚未重新核对主机" : "历史已与主机同步")
-          }
-          Text("上次同步 \(date.formatted(date: .abbreviated, time: .shortened))")
-          if run.historyRefreshError != nil { Text("更新失败，仍可阅读本地历史；可在右上角重新刷新。") }
-          if let notice = run.historyStorageNotice { Text(notice) }
-        }
-        .font(.system(size: 11)).foregroundStyle(Palette.muted)
-        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18).padding(.vertical, 5)
+      if historyReadyForDisplay, run.historyRefreshError != nil {
+        Notice(text: "历史更新失败，当前显示已读取内容。详情见右上角菜单。", warning: true)
       }
-      if run.historyFetchedAt == nil, let notice = run.historyStorageNotice { Notice(text: notice) }
       if let error = run.submitError {
         VStack(alignment: .leading, spacing: 7) {
           Notice(text: error, warning: true)
@@ -70,20 +118,23 @@ struct SessionTranscriptView: View {
           }
         }
       }
-      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
+      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", readingAnchor: readingAnchor) {
         historyBody
         if hasLiveTurn { liveTurn }
       }
       footer
     }
     .background(Palette.surface)
+    .onChange(of: sessionIdentity) { visibleTurnCount = 2; readingAnchor = nil }
     .onAppear {
       guard let s = session else { return }
       // Keep a live run when leaving and re-opening this same session. A
       // different session identity invalidates old history/poll callbacks.
       run.prepareForSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
-      run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId)
-      run.loadCommands(providerId: s.providerId, cwd: s.cwd, agentProfileId: s.agentProfileId)
+      if historyAllowsControls { loadSessionControls() }
+    }
+    .onChange(of: historyAllowsControls) {
+      if historyAllowsControls { loadSessionControls() }
     }
     .task(id: session?.externalSessionId) {
       guard let s = session, s.isActive else { return }
@@ -110,12 +161,19 @@ struct SessionTranscriptView: View {
     switch run.activeSessionIdentity == sessionIdentity ? run.history : .loading {
     case .idle, .loading:
       transcriptLoadingState
-    case let .loaded(turns):
-      ForEach(Array(turns.enumerated()), id: \.offset) { _, turn in turnView(turn) }
+    case let .partial(turns), let .loaded(turns):
+      if turns.count > visibleTurnCount {
+        Button("查看更早的消息") {
+          readingAnchor = "history-turn-\(visibleTurnCount - 1)"
+          visibleTurnCount += 20
+        }.font(.system(size: 13)).frame(maxWidth: .infinity, minHeight: 44)
+      }
+      // Distance-from-end is presentation identity only, not a canonical turn
+      // id. It preserves disclosure/anchors when a tail preview becomes full.
+      ForEach(Array((0..<min(turns.count, visibleTurnCount)).reversed()), id: \.self) { distance in
+        turnView(turns[turns.count - 1 - distance]).id("history-turn-\(distance)")
+      }
       ForEach(completedTurns) { turn in completedTurnView(turn) }
-      Text("以上为主机读取的历史记录，可能不完整；文件 diff 需在 Mac 上查看。")
-        .font(.system(size: 10)).foregroundStyle(Palette.muted)
-        .frame(maxWidth: .infinity, alignment: .leading)
     case .empty:
       ForEach(completedTurns) { turn in completedTurnView(turn) }
       Text("这条会话没有可读取的历史记录，你仍可以在下方继续对话。")
@@ -144,15 +202,11 @@ struct SessionTranscriptView: View {
       HStack(spacing: 12) {
         ZStack {
           Circle().fill(Palette.blue.opacity(0.08)).frame(width: 34, height: 34)
-          ProgressView().controlSize(.small).tint(Palette.blue)
+          Circle().fill(Palette.line.opacity(0.5)).frame(width: 12, height: 12)
         }
         VStack(alignment: .leading, spacing: 3) {
-          Text(run.historyProgress.map { "首次同步 · \($0)" } ?? "正在读取会话")
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(Palette.ink)
-          Text("先查找手机缓存；首次下载完成后，重开会话无需等待整段下载。")
-            .font(.system(size: 11.5))
-            .foregroundStyle(Palette.muted)
+          RoundedRectangle(cornerRadius: 4).fill(Palette.line.opacity(0.6)).frame(width: 150, height: 12)
+          RoundedRectangle(cornerRadius: 4).fill(Palette.line.opacity(0.35)).frame(width: 105, height: 10)
         }
       }
       .padding(.vertical, 12).padding(.horizontal, 13)
@@ -184,6 +238,12 @@ struct SessionTranscriptView: View {
                  subtitle: "\(projectName(session?.cwd)) · \(session?.providerId.uppercased() ?? "")",
                  link: model.link, backAction: { model.goBack() }) {
       Menu {
+        Section("历史状态") {
+          Text(historyStatus)
+          if let date = run.historyFetchedAt { Text("上次核对 \(date.formatted(date: .abbreviated, time: .shortened))") }
+          if let reason = run.historyRefreshError { Text(reason) }
+          if let notice = run.historyStorageNotice { Text(notice) }
+        }
         if let s = session {
           Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) } label: {
             Label("刷新会话", systemImage: "arrow.clockwise")
@@ -192,9 +252,30 @@ struct SessionTranscriptView: View {
         Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
-        Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
+        Image(systemName: historyIsPartial ? "clock" : Symbol.more)
+          .font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
       }
+      .accessibilityLabel("更多选项，\(historyStatus)")
     }
+  }
+
+  private func loadSessionControls() {
+    guard let s = session else { return }
+    run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId)
+    run.loadCommands(providerId: s.providerId, cwd: s.cwd, agentProfileId: s.agentProfileId)
+  }
+
+  private var historyIsPartial: Bool {
+    if case .partial = run.history { return true }
+    return run.historyFromCache || run.historyRefreshError != nil
+  }
+
+  private var historyStatus: String {
+    if case .partial = run.history { return "部分历史 · 完整性尚未核对" }
+    if run.historyFromCache { return "本地历史 · 尚未重新核对主机" }
+    if run.historySyncing { return "正在读取历史" }
+    if run.historyFetchedAt != nil { return "历史快照已核对；文件 diff 需在 Mac 查看" }
+    return "历史状态不可用"
   }
 
   private func projectName(_ cwd: String?) -> String {
@@ -203,11 +284,7 @@ struct SessionTranscriptView: View {
   }
 
   private func turnView(_ turn: G0Transport.RunHistoryTurn) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if !turn.userText.isEmpty { userBubble(turn.userText) }
-      ForEach(Array(turn.items.enumerated()), id: \.offset) { _, item in ConversationChunk(kind: item.kind, text: item.text) }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    HistoryTurnView(turn: turn)
   }
 
   // The in-progress follow-up: user bubble + honest lifecycle + streamed output.
@@ -255,7 +332,8 @@ struct SessionTranscriptView: View {
                       onEffort: { run.chooseEffort($0) },
                       permissionOptions: run.chosenProvider?.permissions ?? [], selectedPermission: run.permissionMode,
                       onPermission: { run.choosePermission($0) },
-                      slashCommands: run.slashCommands, slashCommandsLoading: run.slashCommandsLoading,
+                      slashCommands: run.activeSessionIdentity == sessionIdentity && controlsMatch ? run.slashCommands : [],
+                      slashCommandsLoading: run.slashCommandsLoading,
                       slashCommandsReason: run.slashCommandsReason,
                       onRefreshSlashCommands: {
                         if let s = session {

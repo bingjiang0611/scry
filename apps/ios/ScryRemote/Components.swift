@@ -185,6 +185,7 @@ extension RemoteHeader where Right == EmptyView {
 // scrolls up. New chunks must not steal their reading position.
 struct ConversationScrollView<Content: View>: View {
   let revision: String
+  var readingAnchor: String? = nil
   @ViewBuilder let content: () -> Content
   @State private var following = true
 
@@ -214,6 +215,9 @@ struct ConversationScrollView<Content: View>: View {
         .onAppear { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
         .onChange(of: revision) {
           if following { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+        .onChange(of: readingAnchor) {
+          if let readingAnchor { following = false; proxy.scrollTo(readingAnchor, anchor: .top) }
         }
         .onChange(of: viewport.size.height) {
           if following { proxy.scrollTo("bottom", anchor: .bottom) }
