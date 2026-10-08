@@ -200,7 +200,7 @@ const IME_ENTER_GUARD_MS = 120
 /**
  * Chromium/macOS can report isComposing=false on the Enter keydown immediately
  * following compositionend. Treat that Enter as IME confirmation rather than a
- * send action; a deliberate second Enter still sends normally.
+ * send action. Keyup clears the fallback guard so a fresh Enter sends immediately.
  */
 export function composerEnterConfirmsIme(input: {
   nativeIsComposing: boolean
@@ -610,6 +610,12 @@ export function ChatView({
           onCompositionEnd={() => {
             compositionActiveRef.current = false
             compositionEndedAtRef.current = performance.now()
+          }}
+          onKeyUp={() => {
+            // The key that confirmed the IME candidate has been released (Enter,
+            // Space, or a selection key). The next Enter is a new send intent,
+            // not another confirmation merely because it arrived within 120 ms.
+            compositionEndedAtRef.current = Number.NEGATIVE_INFINITY
           }}
           onPaste={(event) => {
             const files = imageFilesFromClipboardData(event.clipboardData)
