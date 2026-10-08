@@ -34,6 +34,7 @@ struct SessionTranscriptView: View {
       run.chosenProvider?.agentProfileId == session.agentProfileId
   }
   private var historyReadyForDisplay: Bool {
+    guard run.activeSessionIdentity == sessionIdentity else { return false }
     if case .loaded = run.history { return true }
     if case .empty = run.history { return true }
     return false
@@ -42,6 +43,20 @@ struct SessionTranscriptView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
+      if historyReadyForDisplay, let date = run.historyFetchedAt {
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(spacing: 6) {
+            if run.historySyncing { ProgressView().controlSize(.mini) }
+            Text(run.historySyncing ? "本地历史 · 后台更新中" : run.historyFromCache ? "本地历史 · 尚未重新核对主机" : "历史已与主机同步")
+          }
+          Text("上次同步 \(date.formatted(date: .abbreviated, time: .shortened))")
+          if run.historyRefreshError != nil { Text("更新失败，仍可阅读本地历史；可在右上角重新刷新。") }
+          if let notice = run.historyStorageNotice { Text(notice) }
+        }
+        .font(.system(size: 11)).foregroundStyle(Palette.muted)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18).padding(.vertical, 5)
+      }
+      if run.historyFetchedAt == nil, let notice = run.historyStorageNotice { Notice(text: notice) }
       if let error = run.submitError {
         VStack(alignment: .leading, spacing: 7) {
           Notice(text: error, warning: true)
@@ -55,7 +70,7 @@ struct SessionTranscriptView: View {
           }
         }
       }
-      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
+      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
         historyBody
         if hasLiveTurn { liveTurn }
       }
@@ -74,7 +89,7 @@ struct SessionTranscriptView: View {
       guard let s = session, s.isActive else { return }
       var active = true
       while active && !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
         guard !Task.isCancelled else { return }
         active = await run.refreshMacSession(providerId: s.providerId, cwd: s.cwd,
                                              externalSessionId: s.externalSessionId)
@@ -83,8 +98,8 @@ struct SessionTranscriptView: View {
           // Give that atomic commit one beat, then fetch the final durable turn.
           try? await Task.sleep(nanoseconds: 1_000_000_000)
           if !Task.isCancelled {
-            run.loadHistory(providerId: s.providerId, cwd: s.cwd,
-                            externalSessionId: s.externalSessionId, force: true)
+            await run.refreshFinalHistory(providerId: s.providerId, cwd: s.cwd,
+                                          externalSessionId: s.externalSessionId)
           }
         }
       }
@@ -92,7 +107,7 @@ struct SessionTranscriptView: View {
   }
 
   @ViewBuilder private var historyBody: some View {
-    switch run.history {
+    switch run.activeSessionIdentity == sessionIdentity ? run.history : .loading {
     case .idle, .loading:
       transcriptLoadingState
     case let .loaded(turns):
@@ -106,6 +121,10 @@ struct SessionTranscriptView: View {
       Text("这条会话没有可读取的历史记录，你仍可以在下方继续对话。")
         .font(.system(size: 13)).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
+    case .baseUnavailable:
+      Text("历史基底当前不可用，并不表示会话没有历史。以下仅显示本机保留的运行记录。")
+        .font(.system(size: 13)).foregroundStyle(Palette.muted)
+      ForEach(completedTurns) { turn in completedTurnView(turn) }
     case let .failed(reason):
       EmptyState(title: "暂时无法读取会话", detail: "请确认 Mac 的 Scry 正在运行且网络可用。已输入的草稿会保留。", symbol: "wifi.exclamationmark")
       Button("重新读取") {
@@ -128,10 +147,10 @@ struct SessionTranscriptView: View {
           ProgressView().controlSize(.small).tint(Palette.blue)
         }
         VStack(alignment: .leading, spacing: 3) {
-          Text("正在同步会话")
+          Text(run.historyProgress.map { "首次同步 · \($0)" } ?? "正在读取会话")
             .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(Palette.ink)
-          Text("从已配对的 Mac 安全读取历史记录")
+          Text("先查找手机缓存；首次下载完成后，重开会话无需等待整段下载。")
             .font(.system(size: 11.5))
             .foregroundStyle(Palette.muted)
         }

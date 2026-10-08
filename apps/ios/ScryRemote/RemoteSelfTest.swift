@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import RemoteTransport
 
 // DEBUG-only, launch-argument driven (`-selfTest`) runtime verification of the
@@ -118,6 +119,117 @@ enum RemoteSelfTest {
 
     print("SELFTEST DONE failures=\(failures)")
     exit(failures == 0 ? 0 : 1)
+  }
+
+  // Disk/network-assembly fixture: isolated temporary directory, no relay,
+  // no real Keychain/grant and no Provider execution.
+  @MainActor static func runHistoryCacheTestIfRequested() {
+    guard ProcessInfo.processInfo.arguments.contains("-historyCacheTest") else { return }
+    Task {
+      var failures = 0
+      func check(_ name: String, _ ok: Bool) {
+        print("HISTORYTEST \(name) \(ok ? "PASS" : "FAIL")")
+        if !ok { failures += 1 }
+      }
+      let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      do {
+        let turns = [G0Transport.RunHistoryTurn(userText: "fixture", items: [
+          .init(kind: "output", text: String(repeating: "a", count: 150_000))])]
+        let bytes = try JSONEncoder().encode(turns)
+        let fixture = HistoryPages(bytes: bytes)
+        let snapshot = try await RemoteRunClient.downloadHistory(cached: nil, fetch: { cursor, hash in
+          try await fixture.page(cursor, hash: hash)
+        })
+        check("completeOrderedDownload", snapshot.turns == turns)
+        let order = await fixture.completed
+        check("outOfOrderPages", order == [0, 131072, 65536])
+        let unchanged = HistoryPages(bytes: bytes)
+        let same = try await RemoteRunClient.downloadHistory(cached: snapshot, fetch: { cursor, hash in
+          try await unchanged.page(cursor, hash: hash)
+        })
+        check("unchangedOnlyOneRequest", await unchanged.completed == [0] && same.turns == turns)
+        let damaged = HistoryPages(bytes: bytes, badHash: true)
+        do {
+          _ = try await RemoteRunClient.downloadHistory(cached: nil, fetch: { cursor, hash in
+            try await damaged.page(cursor, hash: hash)
+          }); check("rejectBadDigest", false)
+        } catch { check("rejectBadDigest", true) }
+        let wrongCursor = HistoryPages(bytes: Data("[]".utf8), badCursor: true)
+        do {
+          _ = try await RemoteRunClient.downloadHistory(cached: nil, fetch: { cursor, hash in
+            try await wrongCursor.page(cursor, hash: hash)
+          }); check("rejectBadCursor", false)
+        } catch { check("rejectBadCursor", true) }
+
+        var connection = RemoteConnection(relayHost: "fixture", relayPort: 443, relayTLS: "system",
+          hostId: "host-a", anchorPEM: "anchor-a", deviceId: "grant-a")
+        let key = RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "same")
+        connection.hostId = "host-b"
+        check("hostIsolation", key != RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "same"))
+        connection.hostId = "host-a"; connection.deviceId = "grant-b"
+        check("grantIsolation", key != RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "same"))
+        connection.deviceId = "grant-a"; connection.anchorPEM = "anchor-b"
+        check("anchorIsolation", key != RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "same"))
+        let cache = RemoteHistoryCache(directory: root, byteLimit: 1_000_000, entryLimit: 2)
+        let epoch = await cache.epoch
+        check("save", try await cache.write(snapshot, key: key, epoch: epoch))
+        let restarted = RemoteHistoryCache(directory: root, byteLimit: 1_000_000, entryLimit: 2)
+        let readStarted = Date()
+        let saved = try await restarted.read(key)
+        print("HISTORYTEST diskRead bytes=\(bytes.count) milliseconds=\(Date().timeIntervalSince(readStarted) * 1000)")
+        check("restartLoadsSameHistory", saved?.turns == turns && saved?.fetchedAt == snapshot.fetchedAt)
+        let file = await cache.fileURL(key)
+        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+        #if targetEnvironment(simulator)
+        // Simulator returned no protection attribute on both initial runs;
+        // only the physical device can verify the iOS Data Protection class.
+        print("HISTORYTEST completeDataProtection SKIP env=simulator attribute=\(String(describing: attrs[.protectionKey]))")
+        #else
+        check("completeDataProtection", attrs[.protectionKey] as? String == FileProtectionType.complete.rawValue)
+        #endif
+        check("excludedFromBackup", try root.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+        try Data("corrupt".utf8).write(to: file)
+        do { _ = try await cache.read(key); check("rejectCorruptCache", false) }
+        catch { check("rejectCorruptCache", true) }
+        try await cache.clear()
+        check("lateWriteRejected", try await !cache.write(snapshot, key: key, epoch: epoch))
+        check("clearPersists", try await restarted.read(key) == nil)
+        let newEpoch = await cache.epoch
+        for key in ["a", "b", "c"] { _ = try await cache.write(snapshot, key: key, epoch: newEpoch) }
+        check("boundedEntryCount", try FileManager.default.contentsOfDirectory(atPath: root.path).count == 2)
+        let small = RemoteHistoryCache(directory: root.appendingPathComponent("small"), byteLimit: 100)
+        check("oversizeNotClaimedSaved", try await !small.write(snapshot, key: "large", epoch: 0))
+        for (name, passed) in try await RemoteRunStore.selfTestHistoryStore(directory: root.appendingPathComponent("store"), snapshot: snapshot) {
+          check(name, passed)
+        }
+      } catch { check("unexpected", false); print(error) }
+      do { try FileManager.default.removeItem(at: root) }
+      catch { check("cleanup", false); print(error) }
+      print("HISTORYTEST DONE failures=\(failures)")
+      exit(failures == 0 ? 0 : 1)
+    }
+  }
+
+  private actor HistoryPages {
+    let bytes: Data
+    let hash: String
+    let badCursor: Bool
+    var waiting: CheckedContinuation<Void, Never>?
+    var completed: [Int] = []
+    init(bytes: Data, badHash: Bool = false, badCursor: Bool = false) {
+      self.bytes = bytes
+      hash = badHash ? String(repeating: "0", count: 64) : SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+      self.badCursor = badCursor
+    }
+    func page(_ cursor: Int, hash requested: String?) async throws -> G0Transport.RunHistoryPage {
+      if cursor == 65536 && !completed.contains(131072) { await withCheckedContinuation { waiting = $0 } }
+      if cursor == 131072 { waiting?.resume(); waiting = nil }
+      completed.append(cursor)
+      let end = min(bytes.count, cursor + 65536)
+      let wire: [String: Any] = ["dataBase64": bytes.subdata(in: cursor..<end).base64EncodedString(),
+        "cursor": badCursor ? end + 1 : end, "totalBytes": bytes.count, "hasMore": end < bytes.count, "snapshot": hash]
+      return try JSONDecoder().decode(G0Transport.RunHistoryPage.self, from: JSONSerialization.data(withJSONObject: wire))
+    }
   }
 
   // Opt-in NETWORK probe (`-relayTLSProbe <host>`): verifies that this device's
